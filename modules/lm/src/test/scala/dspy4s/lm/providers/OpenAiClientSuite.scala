@@ -259,24 +259,3 @@ class OpenAiClientSuite extends FunSuite:
     assertEquals(chunks(2).toolCalls.head.argumentsFragment, Some("ation\":\"Paris\"}"))
     assertEquals(chunks(2).finishReason, Some("tool_calls"))
   }
-
-  test("stream ignores malformed SSE JSON lines without failing") {
-    val transport = new ScriptedTransport(
-      streamingResponses = Vector(Right(HttpStreamResponse(
-        status = 200,
-        headers = Map.empty,
-        dataLines = new VectorClosableIterator(Vector(
-          "data: {not valid json",
-          """data: {"choices":[{"delta":{"content":"ok"}}]}""",
-          "data: [DONE]",
-          ""
-        ))
-      )))
-    )
-    val client = OpenAiClient(apiKey = "x", transport = transport)
-    val iter   = client.stream(DynamicValues.fromAny(Map("model" -> "m"))).toOption.get
-    val chunks = scala.collection.mutable.ArrayBuffer.empty[LmChunk]
-    while iter.hasNext do chunks += iter.next()
-    assertEquals(chunks.size, 1)
-    assertEquals(chunks(0).text, "ok")
-  }

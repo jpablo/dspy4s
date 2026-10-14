@@ -34,7 +34,7 @@ changing the domain types.
 | `LmMode` | `Chat` / `Text` / `Responses` — selects the wire shape. |
 | `LmUsage` / `TokenCategory` | Core-defined token counters (prompt/completion/total) plus a `TokenCategory`-keyed map of extras (cached, reasoning, audio, …). |
 | `Embedder` | `embed(texts): Either[DspyError, Vector[Vector[Float]]]`, with an `Embedder.cached` factory. |
-| `LmChunk` / `LmToolCallDelta` | One streaming chunk (text, finish reason, usage) and incremental tool-call fragments. |
+| `LmChunk` / `LmToolCallDelta` | One streaming chunk (text, finish reason, usage, a typed error, or the response of a cache hit) and incremental tool-call fragments. |
 | `LmCache` / `RetryPolicy` | The memoization and retry interfaces the runtime layer composes. |
 
 ### Providers
@@ -51,7 +51,7 @@ changing the domain types.
 
 | Type | Role |
 |------|------|
-| `ManagedLanguageModel` | Wraps a `LanguageModel` with caching + retry + usage logging: cache hit returns; miss invokes with retries, then caches and tracks usage. |
+| `ManagedLanguageModel` | Wraps a `LanguageModel` with caching + retry + history + usage logging, for a call and for a stream: cache hit returns; miss invokes with retries, then caches and tracks usage. |
 | `RetryPolicies` | Pre-built policies: `never`, `maxRetries`, `maxRetriesOnCodes`, `exponentialBackoff` (with jitter). By default they retry transient LM errors only, and they obey the `Retry-After` hint. |
 | `UsageTracker` / `UsageTracking` | Thread-local, nestable token accumulation by model name. |
 | `InMemoryLmCache` / `DiskLmCache` / `CompositeLmCache` / `LmCacheRegistry` | A bounded LRU cache, a file-backed cache, a memory-then-disk stack, and the global cache singleton. |
@@ -69,6 +69,16 @@ changing the domain types.
 - **Streaming closes cleanly.** `stream` returns a lazy `Iterator[LmChunk]`; a setup error is reified as a
   terminal error chunk rather than thrown, so consumers always see a closed stream. Tool-call deltas are
   reassembled by `ToolCallAssembler`, with a JSON-parse fallback that wraps an unparseable fragment.
+- **A stream must be complete.** A stream is complete when a chunk has a finish reason. On the OpenAI wire, a
+  chunk with usage and the `[DONE]` line also end the stream. A stream that stops before its end, and a
+  `data:` line that is not JSON, give an `LmStreamAssemblyError`. A mid-stream `{"error": ...}` event gives the
+  typed error of its code, so a `ContextWindowExceededError` keeps its class (upstream `checked_stream` and
+  `parse_stream_events`).
+- **One call path for streamed calls.** `ManagedLanguageModel.stream` applies the rules of `call`. A cache hit
+  gives one `LmChunk.cached` chunk, and the stream wrapper gives no token of it to a listener. The cache stores
+  a complete stream only. A failure before the first chunk with text or a tool call gets the retry policy;
+  after that chunk, there is no retry. Each streamed call has one history entry, and the usage of its chunks is
+  recorded (upstream `execute`).
 - **A tool call keeps its id.** The response parser and `ToolCallAssembler` copy the id of the provider into
   `ToolCall.id`: `call_id` when the entry has one, else `id`. `ProviderRequestNormalizer` sends the tool calls of
   an assistant message as `tool_calls`, and a tool message with `tool_call_id` and `name`, so a request can

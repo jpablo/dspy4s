@@ -42,7 +42,23 @@ final case class OpenAiClient(
           DynamicJson.decode(response.body)
       }
 
-  /** Open an SSE stream. A failure before the first chunk gives the same LM error as [[invoke]]. */
+  /** Open an SSE stream. A failure before the first chunk gives the same LM error as [[invoke]].
+    *
+    * The stream rules of upstream `parse_stream_events` and `checked_stream`:
+    *   - A chunk with a `finish_reason`, a chunk with `usage`, or the line `[DONE]` is an end event. `[DONE]` ends the
+    *     stream. When the lines end with no end event, the last chunk is an [[LmChunk.failure]] with an
+    *     [[dspy4s.core.contracts.LmStreamAssemblyError]].
+    *   - A `data:` line that is not valid JSON gives an [[LmChunk.failure]] with an `LmStreamAssemblyError`, and the
+    *     stream ends. A JSON value that is not an object is skipped. An object that the chunk codec cannot read is
+    *     skipped too, if it has no `error` object (upstream reads it leniently).
+    *   - An object with an `error` object gives an [[LmChunk.failure]] with the typed error of the error code (`code`,
+    *     else `type`), and the stream ends. The table is upstream `_stream_error_code_map`: for example
+    *     `context_length_exceeded` gives a [[dspy4s.core.contracts.ContextWindowExceededError]], and a code that is not
+    *     in the table gives an [[dspy4s.core.contracts.LmProviderResponseError]]. The message is the `message` of the
+    *     error, else the code. The details have the model, the provider, and the code.
+    *
+    * The connection closes when the stream ends.
+    */
   def stream(payload: DynamicValue): Either[DspyError, ClosableIterator[LmChunk]] =
     val url           = s"${baseUrl.stripSuffix("/")}$chatEndpoint"
     val model         = modelOf(payload)
@@ -64,39 +80,66 @@ final case class OpenAiClient(
           finally draining.close()
           Left(OpenAiErrors.fromResponse(response.status, response.headers, buffered.toString, model))
         else
-          Right(parseSse(response.dataLines))
+          Right(parseSse(response.dataLines, model))
       }
 
-  private def parseSse(lines: ClosableIterator[String]): ClosableIterator[LmChunk] =
+  /** The chunks of the `data:` lines, with the stream rules of [[stream]]. */
+  private def parseSse(lines: ClosableIterator[String], model: Option[String]): ClosableIterator[LmChunk] =
     new ClosableIterator[LmChunk]:
-      private var innerClosed             = false
+      private var finished                = false // No more lines are read, and the connection is closed.
+      private var ended                   = false // An end event came.
+      private var stopped                 = false // A chunk with a finish reason came.
       private var pending: LmChunk | Null = null
 
+      /** Give `last` as the last chunk (`null` for no chunk), and close the connection. */
+      private def finish(last: LmChunk | Null): Unit =
+        pending = last
+        finished = true
+        lines.close()
+
+      /** The end of the lines, or the `[DONE]` line. A complete stream with no chunk that has a finish reason gets a
+        * last chunk with the finish reason `stop`, because the completeness rule of [[LmChunk]] reads the finish reason
+        * (upstream: the end event has the default finish reason).
+        */
+      private def end(done: Boolean): Unit =
+        if stopped then finish(null)
+        else if ended || done then finish(LmChunk(finishReason = Some("stop")))
+        else finish(LmChunk.failure(OpenAiErrors.streamAssembly("The OpenAI stream ended with no end event", model)))
+
+      private def read(data: String): Unit =
+        OpenAiStreamChunk.decode(data) match
+          case Right(chunk) => chunk.errorObject match
+              case Some(error) => finish(LmChunk.failure(OpenAiErrors.fromStreamError(error, model)))
+              case None        =>
+                val out = chunk.toLmChunk
+                if out.finishReason.isDefined then stopped = true
+                // Upstream: a chunk with a finish reason, or with usage, is an end event.
+                if out.finishReason.isDefined || out.usage.isDefined then ended = true
+                pending = out
+          case Left(_) => DynamicJson.decode(data) match
+              case Left(_) =>
+                finish(LmChunk.failure(OpenAiErrors.streamAssembly("An OpenAI stream line is not valid JSON", model)))
+              case Right(record: DynamicValue.Record) =>
+                // Upstream reads an object that does not fit the chunk shape leniently, with no error. The codec
+                // cannot read it, so the parser skips it, except for its error object.
+                DynamicJson.field(record, "error").flatMap(DynamicJson.asRecord) match
+                  case Some(error) => finish(LmChunk.failure(OpenAiErrors.fromStreamError(error, model)))
+                  case None        => ()
+              // Upstream skips a JSON value that is not an object.
+              case Right(_) => ()
+
       private def advance(): Unit =
-        if innerClosed then ()
-        else
-          pending = null
-          while lines.hasNext do
-            val line    = lines.next()
-            val trimmed = line.trim
-            if trimmed.isEmpty then ()
-            else if trimmed.startsWith("data:") then
+        while (pending eq null) && !finished do
+          if lines.hasNext then
+            val trimmed = lines.next().trim
+            if trimmed.startsWith("data:") then
               val data = trimmed.stripPrefix("data:").trim
-              if data == "[DONE]" then
-                close()
-                return
-              else
-                OpenAiStreamChunk.decode(data) match
-                  case Right(chunk) =>
-                    pending = chunk.toLmChunk
-                    return
-                  case Left(_) => ()
-          // Lines exhausted without an explicit [DONE]: release the connection rather than leaving it for GC.
-          close()
+              if data == "[DONE]" then end(done = true)
+              else if data.nonEmpty then read(data)
+          else end(done = false)
 
       override def hasNext: Boolean =
-        if innerClosed then false
-        else if pending ne null then true
+        if pending ne null then true
         else
           advance()
           pending ne null
@@ -109,8 +152,9 @@ final case class OpenAiClient(
         out
 
       override def close(): Unit =
-        if !innerClosed then
-          innerClosed = true
+        pending = null
+        if !finished then
+          finished = true
           lines.close()
 
   private def modelOf(payload: DynamicValue): Option[String] =

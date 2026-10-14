@@ -54,8 +54,8 @@ object LmErrorDetails:
   * A retry policy reads [[isTransient]]. Only a rate limit, a timeout, a server failure, and a transport failure are
   * transient. The class tells that a retry is generally safe. It does not prove that the provider did no work.
   *
-  * Upstream classes that have no source in dspy4s are absent: the credential lock, the collection limit, the
-  * unsupported feature, and the stream assembly error.
+  * Upstream classes that have no source in dspy4s are absent: the credential lock, the collection limit, and the
+  * unsupported feature.
   */
 sealed trait LmError extends DspyError:
   def details: LmErrorDetails
@@ -92,6 +92,15 @@ final case class LmNotConfiguredError(message: String, details: LmErrorDetails =
 final case class LmUnexpectedError(message: String, details: LmErrorDetails = LmErrorDetails.empty) extends LmError:
   val code: String                                            = "unexpected"
   def withDetails(updated: LmErrorDetails): LmUnexpectedError = copy(details = updated)
+
+/** A stream that is not complete or not valid (upstream `LMStreamAssemblyError`, a subclass of `LMUnexpectedError`).
+  * The stream stopped before its end, or it had a chunk that does not decode. The error is not transient, so a retry
+  * policy does not retry it, and the cache does not store the call.
+  */
+final case class LmStreamAssemblyError(message: String, details: LmErrorDetails = LmErrorDetails.empty)
+    extends LmError:
+  val code: String                                                = "stream_assembly"
+  def withDetails(updated: LmErrorDetails): LmStreamAssemblyError = copy(details = updated)
 
 /** The provider returned an error response. */
 sealed trait LmProviderError extends LmError:

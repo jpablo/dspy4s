@@ -63,6 +63,9 @@ final class StreamingLanguageModelWrapper private (
   override def supportsReasoning: Boolean          = delegate.supportsReasoning
   override def defaultOptions: DynamicValue.Record = delegate.defaultOptions
 
+  /** Stream the call, give the tokens to the listeners, and assemble the response. A [[LmChunk.cached]] chunk gives its
+    * response as is, and no token goes to a listener (upstream: a cache hit sends no stream chunk).
+    */
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
     val ctx                        = activeContext()
     val text                       = new StringBuilder
@@ -75,18 +78,23 @@ final class StreamingLanguageModelWrapper private (
       // a Left instead of folding it into a successful empty response the adapter would then misreport as a
       // parse error.
       var streamError: Option[DspyError] = None
+      // The chunk of a cache hit carries the whole response. It is the only chunk, and it gives no token.
+      var cached: Option[LmResponse] = None
       chunks.foreach { chunk =>
-        failureOf(chunk) match
-          case Some(failure) => streamError = Some(failure)
-          case None          =>
-            emit(ctx, chunk)
-            text.append(chunk.text)
-            chunk.usage.foreach(usage => lastUsage = Some(usage))
-            if chunk.toolCalls.nonEmpty then toolDeltas ++= chunk.toolCalls
+        chunk.cachedResponse match
+          case Some(response) => cached = Some(response)
+          case None           => chunk.reportedFailure match
+              case Some(failure) => streamError = Some(failure)
+              case None          =>
+                emit(ctx, chunk)
+                text.append(chunk.text)
+                chunk.usage.foreach(usage => lastUsage = Some(usage))
+                if chunk.toolCalls.nonEmpty then toolDeltas ++= chunk.toolCalls
       }
-      streamError match
-        case Some(failure) => Left(failure)
-        case None          =>
+      (cached, streamError) match
+        case (Some(response), _) => Right(response)
+        case (_, Some(failure))  => Left(failure)
+        case (None, None)        =>
           flush(ctx)
           val toolCalls = ToolCallAssembler.assemble(toolDeltas.toVector)
           Right(
@@ -105,10 +113,11 @@ final class StreamingLanguageModelWrapper private (
         case closable: ClosableIterator[?] => closable.close()
         case _                             => ()
 
+  /** The chunks of the delegate. Each chunk goes to the listeners, except a [[LmChunk.cached]] chunk. */
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
     val ctx = activeContext()
     delegate.stream(request).map { chunk =>
-      emit(ctx, chunk)
+      if chunk.cachedResponse.isEmpty then emit(ctx, chunk)
       chunk
     }
 
@@ -119,25 +128,6 @@ final class StreamingLanguageModelWrapper private (
       predictName: String,
       state      : Option[AdapterStreamingState]
   )
-
-  /** The failure that a chunk reports, if any. The typed `error` of the chunk wins, so the caller gets the same
-    * `DspyError` that the provider produced (a `ContextWindowExceededError` stays one). A chunk that has only
-    * `finishReason = "error"` gives a `RuntimeError("streaming_lm", ...)` with the message from `raw`.
-    */
-  private def failureOf(chunk: LmChunk): Option[DspyError] =
-    chunk.error.orElse(
-      Option.when(chunk.finishReason.contains("error"))(RuntimeError("streaming_lm", errorMessage(chunk.raw)))
-    )
-
-  /** Extract the provider's error message from a reified error chunk's `raw` payload (`Map("error" -> message)` by
-    * convention).
-    */
-  private def errorMessage(raw: Option[Any]): String =
-    raw match
-      case Some(m: Map[?, ?]) =>
-        m.collectFirst { case (k, v) if String.valueOf(k) == "error" => String.valueOf(v) }.getOrElse(m.toString)
-      case Some(other) => other.toString
-      case None        => "LM stream terminated with an error"
 
   private def activeContext(): CallContext =
     ActivePredictContext.current match

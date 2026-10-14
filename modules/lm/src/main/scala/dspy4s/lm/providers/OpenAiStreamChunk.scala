@@ -4,6 +4,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ParseError
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmToolCallDelta
+import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.NameMapper
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodecDeriver
@@ -15,11 +16,22 @@ import zio.blocks.schema.json.JsonCodecDeriver
   * `object`, `role`, `type`, …) are ignored.
   *
   * The domain mapping to `LmChunk` lives on the DTO, reading fields only.
+  *
+  * @param error
+  *   the `error` value of an error event. It stays JSON, because the providers do not agree on its shape: a code can be
+  *   a number, and the value can be a string.
   */
 private[providers] final case class OpenAiStreamChunk(
     choices: Vector[OpenAiStreamChoice] = Vector.empty,
-    usage  : Option[OpenAiUsage]        = None
+    usage  : Option[OpenAiUsage]        = None,
+    error  : Option[DynamicValue]       = None
 ) derives Schema:
+
+  /** The `error` object of an error event. An `error` value that is not an object does not make an error event
+    * (upstream `parse_stream_events`).
+    */
+  def errorObject: Option[DynamicValue.Record] =
+    error.flatMap(DynamicJson.asRecord)
 
   /** Text, finish reason and tool-call deltas come from the first choice (OpenAI streams one choice per chunk); usage
     * rides the final, choice-less chunk.

@@ -1,11 +1,13 @@
 package dspy4s.lm.runtime
 
+import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.LmError
+import dspy4s.core.contracts.LmErrorDetails
+import dspy4s.core.contracts.LmStreamAssemblyError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.ToolCall
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -13,13 +15,13 @@ import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmCache
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmMode
+import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.core.contracts.LmUsage
 import dspy4s.lm.contracts.RetryPolicy
 import dspy4s.lm.contracts.StreamingLanguageModel
-import dspy4s.lm.providers.DynamicJson
 import zio.blocks.schema.DynamicValue
 
 import scala.annotation.tailrec
@@ -165,30 +167,37 @@ final case class ManagedLanguageModel(
   // The default options pass through too: the cache key below reads them, and an outer wrapper must see them.
   override def defaultOptions: DynamicValue.Record = delegate.defaultOptions
 
-  /** Streaming passthrough, so wrapping a streaming provider in ManagedLanguageModel does not silently disable token
-    * streaming (streamify only wraps `StreamingLanguageModel`s).
+  /** A streamed call with the rules of [[call]] (upstream `execute`: one call path for streamed calls).
     *
-    *   - Streaming delegate: tokens come straight from the delegate. The cache and retry policy do NOT apply to
-    *     streamed calls (same as calling the provider's `stream` directly).
-    *   - Non-streaming delegate: falls back to one terminal chunk assembled from the managed [[call]] (which keeps
-    *     cache / retries / history / usage), or a reified `finishReason = "error"` chunk on failure — the same error
-    *     convention providers use. The chunk carries the text and the tool calls of the first output. Each tool call is
-    *     one complete delta, so `ToolCallAssembler.assemble` gives the call back with its id.
+    *   - Cache: a hit gives one [[LmChunk.cached]] chunk, and the delegate gets no request. The cache stores the
+    *     response of a complete stream only: not a failure, and not a stream that is not complete (see [[LmChunk]]).
+    *     The key is the key of [[call]].
+    *   - Stream guard: a stream of the delegate that ends with no chunk that has a finish reason gets a last
+    *     [[LmChunk.failure]] chunk with an [[dspy4s.core.contracts.LmStreamAssemblyError]].
+    *   - Retry: when the stream fails before its first chunk with text or a tool call, the retry policy decides on a
+    *     new attempt, as for [[call]]. The caller gets no chunk of an attempt that failed. After the first chunk with
+    *     text or a tool call, a failure ends the stream, with no retry (upstream `_retryable`: no replay after visible
+    *     output).
+    *   - History: one entry for each streamed call, when the stream ends: the entry of [[call]] for a success or a
+    *     cache hit, and the failure entry of [[call]] for a failure.
+    *   - Usage: the usage of the chunks is recorded, also when the stream fails after the chunk that has the usage. A
+    *     cache hit records no usage.
+    *
+    * A delegate that cannot stream gives one terminal chunk assembled from [[call]], or a reified
+    * `finishReason = "error"` chunk on failure. The chunk carries the text and the tool calls of the first output. Each
+    * tool call is one complete delta, so `ToolCallAssembler.assemble` gives the call back with its id.
     */
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
     delegate match
-      case streaming: StreamingLanguageModel => streaming.stream(request)
-      case _                                 => call(request) match
-          case Right(response) =>
-            val output    = response.outputs.headOption
-            val toolCalls = output.map(_.toolCalls).getOrElse(Vector.empty)
-            Iterator.single(LmChunk(
-              text = output.map(_.text).getOrElse(""),
-              finishReason = Some("stop"),
-              usage = response.usage,
-              toolCalls = toolCalls.zipWithIndex.map(ManagedLanguageModel.toolCallDelta)
-            ))
-          case Left(error) => Iterator.single(LmChunk.failure(error))
+      case streaming: StreamingLanguageModel =>
+        lazy val key = cacheKey(request)
+        cacheHit(request, key) match
+          case Some(cached) => Iterator.single(LmChunk.cached(cached))
+          case None         => ManagedStream(streaming, request, () => key)
+      case _ => call(request) match
+          case Right(response) if response.cacheHit => Iterator.single(LmChunk.cached(response))
+          case Right(response)                      => Iterator.single(LmChunk.fromResponse(response).copy(usage = response.usage))
+          case Left(error)                          => Iterator.single(LmChunk.failure(error))
 
   /** The request that the cache keys on. The provider merges its default options into each request, so the key must
     * cover the merged options: two models with one id and different defaults get different entries. `rolloutId` and all
@@ -199,11 +208,9 @@ final case class ManagedLanguageModel(
 
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
     lazy val key = cacheKey(request)
-    cache.flatMap(_.get(key)) match
-      case Some(cached) =>
-        appendHistory(request, cached, cacheHit = true)
-        Right(cached.copy(cacheHit = true))
-      case None =>
+    cacheHit(request, key) match
+      case Some(cached) => Right(cached)
+      case None         =>
         // rolloutId is a field (not in `options`) and `normalize` only spreads `options` to the wire,
         // so there is nothing to strip before the provider call -- it cannot reach the request body.
         val result = executeWithRetry(request)
@@ -211,12 +218,24 @@ final case class ManagedLanguageModel(
           case Left(error) =>
             appendFailureHistory(request, error)
             Left(error)
-          case Right(response) =>
-            val uncached = response.copy(cacheHit = false)
-            cache.foreach(_.put(key, uncached))
-            appendHistory(request, uncached, cacheHit = false)
-            trackUsage(request, uncached)
-            Right(uncached)
+          case Right(response) => Right(acceptResponse(request, key, response))
+
+  /** The cached response of `request`, with `cacheHit = true`. A hit appends the history entry of a cache hit. */
+  private def cacheHit(request: LmRequest, key: => LmRequest)(using RuntimeContext): Option[LmResponse] =
+    cache.flatMap(_.get(key)).map { cached =>
+      appendHistory(request, cached, cacheHit = true)
+      cached.copy(cacheHit = true)
+    }
+
+  /** Store the response that the delegate gave, append its history entry, and record its usage. */
+  private def acceptResponse(request: LmRequest, key: => LmRequest, response: LmResponse)(using
+      RuntimeContext
+  ): LmResponse =
+    val uncached = response.copy(cacheHit = false)
+    cache.foreach(_.put(key, uncached))
+    appendHistory(request, uncached, cacheHit = false)
+    trackUsage(request, uncached.usage)
+    uncached
 
   private def executeWithRetry(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
     @tailrec def loop(attempt: Int): Either[DspyError, LmResponse] =
@@ -260,22 +279,119 @@ final case class ManagedLanguageModel(
   private def historyEnabled(using RuntimeContext): Boolean =
     !summon[RuntimeContext].disableHistory.getOrElse(false)
 
-  private def trackUsage(request: LmRequest, response: LmResponse)(using RuntimeContext): Unit =
+  /** Record the usage of a call that the delegate answered. A cache hit does not come here, so it records no usage. */
+  private def trackUsage(request: LmRequest, usage: Option[LmUsage])(using RuntimeContext): Unit =
     val usageEnabled = summon[RuntimeContext].trackUsage.getOrElse(true)
-    if usageEnabled && !response.cacheHit then
-      response.usage.foreach { usage =>
-        UsageTracking.record(request.model, usage)
+    if usageEnabled then
+      usage.foreach { value =>
+        UsageTracking.record(request.model, value)
       }
+
+  /** One streamed call to a streaming delegate, with the retry, the stream guard, the history, the usage, and the cache
+    * store of [[stream]].
+    *
+    * An attempt holds back its chunks until its first chunk with text or a tool call, or until its chunk with a finish
+    * reason. Then the attempt is visible: the held chunks and all later chunks go to the caller. A failure of an
+    * attempt that is not visible drops its chunks, and the retry policy decides on a new attempt. A failure of a
+    * visible attempt ends the stream.
+    *
+    * The history entry, the usage record, and the cache store occur at the end of the stream. A caller that closes the
+    * stream before its end gets none of them.
+    */
+  private final class ManagedStream(streaming: StreamingLanguageModel, request: LmRequest, key: () => LmRequest)(using
+      RuntimeContext
+  ) extends ClosableIterator[LmChunk]:
+    private val ready                  = mutable.Queue.empty[LmChunk]
+    private val held                   = mutable.ArrayBuffer.empty[LmChunk]
+    private val text                   = new StringBuilder
+    private val toolDeltas             = mutable.ArrayBuffer.empty[LmToolCallDelta]
+    private var usage: Option[LmUsage] = None
+    private var attempt                = 0
+    private var visible                = false
+    private var complete               = false
+    private var finished               = false
+    private var source                 = streaming.stream(request)
+
+    override def hasNext: Boolean =
+      while ready.isEmpty && !finished do step()
+      ready.nonEmpty
+
+    override def next(): LmChunk =
+      if !hasNext then throw new NoSuchElementException("The managed LM stream has no more chunks")
+      ready.dequeue()
+
+    override def close(): Unit =
+      finished = true
+      ready.clear()
+      held.clear()
+      release()
+
+    /** Read one chunk of the delegate, or end the attempt when the delegate has no more chunks. */
+    private def step(): Unit =
+      if source.hasNext then
+        val chunk = source.next()
+        chunk.reportedFailure match
+          case Some(error) => fail(error, chunk)
+          case None        => accept(chunk)
+      else if complete then succeed()
+      else
+        // The stream guard (upstream `checked_stream`): a stream with no completion chunk is not complete.
+        val error = LmStreamAssemblyError(
+          "The LM stream ended with no chunk that has a finish reason",
+          LmErrorDetails(model = Some(request.model))
+        )
+        fail(error, LmChunk.failure(error))
+
+    private def accept(chunk: LmChunk): Unit =
+      text.append(chunk.text)
+      toolDeltas ++= chunk.toolCalls
+      chunk.usage.foreach(value => usage = Some(value))
+      if chunk.isFinal then complete = true
+      if visible then ready += chunk
+      else
+        held += chunk
+        // Upstream `_retryable`: no retry after visible output, and no retry after the end of the stream.
+        if chunk.text.nonEmpty || chunk.toolCalls.nonEmpty || complete then show()
+
+    private def show(): Unit =
+      visible = true
+      ready ++= held
+      held.clear()
+
+    /** End the attempt with `error`. The caller gets `chunk`, the failure chunk, when no retry occurs. */
+    private def fail(error: DspyError, chunk: LmChunk): Unit =
+      release()
+      if !visible && retryPolicy.shouldRetry(attempt, error) then
+        val delay = retryPolicy.delayBeforeNextAttemptMillis(attempt, error)
+        if delay > 0L then sleep(delay)
+        attempt += 1
+        held.clear()
+        text.clear()
+        toolDeltas.clear()
+        usage = None
+        complete = false
+        source = streaming.stream(request)
+      else
+        // The caller gets no held chunk of the attempt. It gets only the failure chunk.
+        held.clear()
+        ready += chunk
+        finished = true
+        trackUsage(request, usage)
+        appendFailureHistory(request, error)
+
+    private def succeed(): Unit =
+      release()
+      finished = true
+      val output = LmOutput(text = text.toString, toolCalls = ToolCallAssembler.assemble(toolDeltas))
+      val _      = acceptResponse(request, key(), LmResponse(outputs = Vector(output), usage = usage))
+
+    /** Close the stream of the delegate, so that the connection does not stay open. */
+    private def release(): Unit =
+      source match
+        case closable: ClosableIterator[?] => closable.close()
+        case _                             => ()
+      source = Iterator.empty
 
 object ManagedLanguageModel:
   private def defaultSleep(millis: Long): Unit =
     Thread.sleep(millis)
-
-  /** One complete tool call as a stream delta: the id, the name, and the JSON text of the arguments. */
-  private def toolCallDelta(call: ToolCall, index: Int): LmToolCallDelta =
-    LmToolCallDelta(
-      index = index,
-      id = call.id,
-      name = Some(call.name),
-      argumentsFragment = Some(DynamicJson.encodeExact(call.args))
-    )

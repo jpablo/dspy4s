@@ -34,5 +34,11 @@ with `predictName`.
 - The language model must support streaming. The bundled OpenAI provider does.
 - Streaming is synchronous, so there is no async iteration to manage; the
   consumer is a plain `while` loop over the iterator.
+- A streamed call goes through the cache, the retry policy, the history, and
+  the usage tracker of `ManagedLanguageModel`, as a call does. When the cache
+  has the answer, the stream gives no token: you get the status messages and
+  the final prediction.
+- A stream that stops before its end is an error (`LmStreamAssemblyError`).
+  The retry policy can start a new attempt only before the first token.
 
 Next: [Coming from DSPy](../coming-from-dspy.md).

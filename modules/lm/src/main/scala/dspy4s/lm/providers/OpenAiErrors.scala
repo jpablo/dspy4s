@@ -13,6 +13,7 @@ import dspy4s.core.contracts.LmProviderError
 import dspy4s.core.contracts.LmProviderResponseError
 import dspy4s.core.contracts.LmRateLimitError
 import dspy4s.core.contracts.LmServerError
+import dspy4s.core.contracts.LmStreamAssemblyError
 import dspy4s.core.contracts.LmTimeoutError
 import dspy4s.core.contracts.LmUnsupportedModelError
 import zio.blocks.schema.DynamicValue
@@ -43,6 +44,52 @@ private[lm] object OpenAiErrors:
 
   private val modelErrorCodes: Set[String] =
     Set("model_not_found", "model_not_available", "unsupported_model", "DeploymentNotFound")
+
+  private type ErrorClass = (String, LmErrorDetails) => LmProviderError
+
+  /** The class of each code of an error event in a stream (upstream `_stream_error_code_map`, which extends
+    * `_response_error_code_map`). A code that is not in the table gives an [[LmProviderResponseError]].
+    */
+  private val streamErrorClasses: Map[String, ErrorClass] =
+    val server: ErrorClass      = LmServerError(_, _)
+    val rateLimit: ErrorClass   = LmRateLimitError(_, _)
+    val timeout: ErrorClass     = LmTimeoutError(_, _)
+    val invalid: ErrorClass     = LmInvalidRequestError(_, _)
+    val unsupported: ErrorClass = LmUnsupportedModelError(_, _)
+    val context: ErrorClass     = ContextWindowExceededError(_, _)
+    val auth: ErrorClass        = LmAuthError(_, _)
+    val billing: ErrorClass     = LmBillingError(_, _)
+    val invalidCodes            = Seq(
+      "invalid_prompt",
+      "invalid_image",
+      "invalid_image_format",
+      "invalid_base64_image",
+      "invalid_image_url",
+      "image_too_large",
+      "image_too_small",
+      "image_parse_error",
+      "image_content_policy_violation",
+      "invalid_image_mode",
+      "image_file_too_large",
+      "unsupported_image_media_type",
+      "empty_image_file",
+      "failed_to_download_image",
+      "image_file_not_found"
+    )
+    Map(
+      "server_error"                 -> server,
+      "rate_limit_exceeded"          -> rateLimit,
+      "no_capacity"                  -> rateLimit,
+      "too_many_requests"            -> rateLimit,
+      "rate_limit_error"             -> rateLimit,
+      "vector_store_timeout"         -> timeout,
+      "context_length_exceeded"      -> context,
+      "invalid_api_key"              -> auth,
+      "authentication_error"         -> auth,
+      "insufficient_quota"           -> billing,
+      "1113"                         -> billing, // Z.AI: insufficient balance
+      "exceeded_current_quota_error" -> billing  // Moonshot: balance or quota
+    ) ++ invalidCodes.map(_ -> invalid) ++ modelErrorCodes.map(_ -> unsupported)
 
   /** The headers that can hold the request id, in the order of preference. */
   private val requestIdHeaders: Seq[String] =
@@ -126,6 +173,22 @@ private[lm] object OpenAiErrors:
         case s if s >= 500 && s <= 599   => LmServerError(message, details)
         case _                           => LmProviderResponseError(message, details)
 
+  /** The error for an error event in a stream, `{"error": {"message": ..., "code": ..., "type": ...}}` (upstream
+    * `parse_stream_events` and `_error_detail`). The provider code is the code, else the type, else `provider`. The
+    * class comes from the provider code. The message is the message of the provider, else the provider code. The
+    * details hold the model, the provider, and the provider code.
+    */
+  def fromStreamError(error: DynamicValue.Record, model: Option[String]): LmProviderError =
+    val envelope     = envelopeOf(error)
+    val providerCode = envelope.code.orElse(envelope.kind).getOrElse("provider")
+    val details      = LmErrorDetails(model = model, provider = Some(provider), providerCode = Some(providerCode))
+    val errorClass   = streamErrorClasses.getOrElse(providerCode, LmProviderResponseError(_, _))
+    errorClass(envelope.message.getOrElse(providerCode), details)
+
+  /** The error for a stream that is not complete or not valid. */
+  def streamAssembly(message: String, model: Option[String]): LmStreamAssemblyError =
+    LmStreamAssemblyError(message, LmErrorDetails(model = model, provider = Some(provider)))
+
   /** Adds the model and the provider to an LM error that the transport returned. The transport is generic, so it does
     * not know them. A field that is already set stays. An error that is not an LM error passes unchanged.
     */
@@ -150,11 +213,14 @@ private[lm] object OpenAiErrors:
     */
   private def parseEnvelope(body: String): Envelope =
     DynamicJson.decode(body).toOption.flatMap(DynamicJson.field(_, "error")) match
-      case Some(error: DynamicValue.Record) =>
-        def text(name: String): Option[String] = DynamicValues.recordGet(error, name).flatMap(scalarText)
-        Envelope(message = text(WireKeys.message), code = text("code"), kind = text(WireKeys.`type`))
-      case Some(other) => Envelope(message = scalarText(other))
-      case None        => Envelope()
+      case Some(error: DynamicValue.Record) => envelopeOf(error)
+      case Some(other)                      => Envelope(message = scalarText(other))
+      case None                             => Envelope()
+
+  /** Reads the fields of an `error` object. */
+  private def envelopeOf(error: DynamicValue.Record): Envelope =
+    def text(name: String): Option[String] = DynamicValues.recordGet(error, name).flatMap(scalarText)
+    Envelope(message = text(WireKeys.message), code = text("code"), kind = text(WireKeys.`type`))
 
   /** The text of a JSON string, or of a JSON number (some OpenAI-compatible providers send an integer code). An empty
     * string, `null`, and each other value give `None`.
