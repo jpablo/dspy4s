@@ -502,6 +502,32 @@ Three open points of batch 18, closed with the upstream behavior (decided by Cla
 - The text `null` or `None` of an optional `tool_calls` field is a null, as for the other optional fields.
 - Tests: `TextValueRulesSuite`.
 
+### Batch 20 (2026-10-14): the Responses API request and output shapes
+
+The full suite passes: 1,655 tests, 0 failures, 6 live tests skipped.
+
+- **L7** (G-26, Responses). `OpenAiLanguageModel(mode = LmMode.Responses)` sends the request to `/responses` with the
+  body of upstream `chat_to_responses` (`ResponsesWire.request`), and reads one output with upstream
+  `responses_outputs` (`ResponsesWire.outputs`): the joined text, the tool calls with their `call_id`, the reasoning
+  under the metadata key `reasoning_content`, and the citations under `citations`.
+- **Decided by Claude, review.**
+  - The mode of the provider selects the endpoint, the body, and the parse, not the mode of the request.
+  - A `json_schema` response format is flattened into `text.format`, the form that the Responses API takes. Upstream
+    builds that form from a pydantic model; the port sends a record.
+  - A streamed call in the Responses mode gives one final chunk from a plain call: the port has no parser for the
+    Responses stream events yet.
+- **Changes in behavior.**
+  - A Responses reply gives one output. Before, each output item gave one output (a reasoning item, a message, and a
+    function call gave three outputs).
+  - A Responses body with no `output` array is a parse error. Before, the parser tried the chat shape.
+  - A Responses text is not trimmed, as upstream. The parts with no text type do not count, as upstream.
+  - `ProviderLanguageModelSuite` expects the upstream join of the text parts (no separator).
+- **Open points, for the owner.**
+  - No parser for the Responses stream events; `OpenAiClient.stream` always uses the chat endpoint.
+  - Function-call arguments that are not JSON decode as on the chat path (`{input: raw}`); upstream gives `{}`.
+  - A tool message with a list content joins only its text blocks; a `file` block stays as it is.
+  - `ProviderLanguageModel` (the generic runtime provider) parses with the mode of the request.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -563,7 +589,7 @@ Open points from batch 1, for the owner:
 - [x] **L4. Strict response schema** (40a6e1689): `strict: true` with a schema shaped for strict mode. → G-26 (C)
 - [ ] **L5. Capabilities as data**, declared for each server, with unknown treated as false. → G-26 (R)
 - [x] **L6. Timeouts** (7fd361214): separate connect and read limits, and an idle limit for streams. → G-26 (R)
-- [ ] **L7. Responses request and output shapes** (0312f0da6, 891958702, 24ec85de4). → G-26 (R)
+- [x] **L7. Responses request and output shapes** (0312f0da6, 891958702, 24ec85de4). → G-26 (R)
 - [ ] **L8. Connection lifecycle**: `close` on the client, and one HTTP client for each configuration. → G-26 (R)
 - [x] **L9. Versioned plain-data cache record** in place of Java serialization. → G-24 (R)
 - [ ] **L10. Advisory cost estimate** and nested cost roll-up (bb8ba59c0). → G-27 (R)

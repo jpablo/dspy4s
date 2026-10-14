@@ -1166,7 +1166,8 @@ No check rejects an event after the end event. The usage of a retried attempt is
 
 ## G-26 — LM request surface: strict schema, capabilities, Responses endpoint, reasoning models, timeouts
 
-**Status:** In progress. The strict schema (2026-10-14, batch 12) and the timeouts (batch 17) are resolved. · **Verification:** C (strict flag), R (others) · **Upgrade items:** L4 to L8
+**Status:** In progress. The strict schema (2026-10-14, batch 12), the timeouts (batch 17), and the Responses shapes
+(batch 20) are resolved. · **Verification:** C (strict flag), R (others) · **Upgrade items:** L4 to L8
 
 **Upstream.** `strict: true` with a schema shaped for strict mode (`dspy/clients/legacy_requests.py:13-48`,
 `execution.py:176-183`). Capabilities are data, declared for each server (`dspy/clients/capabilities.py:22-27`,
@@ -1199,8 +1200,13 @@ bounds the wait for the headers and for each line of a stream. A stream that sto
 connection that fails during a stream ends it with an `LmTransportError` (`HttpStreamResponse.failure`). Tests:
 `HttpTimeoutsSuite`. Open: the body of a plain call has no limit after the headers.
 
-**Direction (open).** Add a `capabilities` value to the OpenAI client for compatible servers. Treat the Responses
-endpoint as its own item.
+**Resolution (Responses, batch 20).** `OpenAiLanguageModel(mode = LmMode.Responses)` calls `/responses` with the
+body of upstream `chat_to_responses` and reads one output with `responses_outputs` (text, tool calls with `call_id`,
+`reasoning_content`, `citations`). Tests: `ResponsesWireSuite`, `ResponsesModeSuite`. Open: no parser for the
+Responses stream events (a stream is one final chunk from a plain call).
+
+**Direction (open).** Add a `capabilities` value to the OpenAI client for compatible servers (L5, needs a decision of
+the owner). Reasoning-model parameters, custom headers, and `close` (L8) remain.
 
 ---
 
