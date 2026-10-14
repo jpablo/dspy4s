@@ -486,9 +486,21 @@ Three open points of batch 10, closed with the upstream behavior (decided by Cla
   - An optional `tool_calls` field with the text `null` is now a parse error in the XML format too. Before, XML gave a
     null. Upstream gives `None` in each format; this is an open point.
 - **Open points, for the owner.**
-  - The text of an `int` field is not trimmed, and `"3.0"` is not an `int`. Upstream accepts both.
-  - An opaque type such as `list[str]` keeps a JSON string as a string. Upstream reads a list.
   - A union of more than one type and `None` gives an opaque type, for example `int | str`.
+  - The other three open points of this batch are closed in batch 19.
+
+### Batch 19 (2026-10-14): the text rules of `parse_value`
+
+The full suite passes: 1,642 tests, 0 failures, 6 live tests skipped.
+
+Three open points of batch 18, closed with the upstream behavior (decided by Claude, review). Upstream
+`parse_value` reads a text with `json_repair`, then pydantic validates it in lax mode.
+
+- The text of an `int` field may have spaces, and a float text with no fraction (`3.0`) is an `int`. The text of a
+  `float` field may have spaces.
+- A `list[T]` field reads the JSON list in its text. A text that is not a JSON list is a parse error.
+- The text `null` or `None` of an optional `tool_calls` field is a null, as for the other optional fields.
+- Tests: `TextValueRulesSuite`.
 
 Open points from batch 1, for the owner:
 
