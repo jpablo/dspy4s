@@ -122,15 +122,20 @@ private[adapters] object AdapterTextSupport:
     * The Chat, JSON, and XML adapters use this function, so a text value has the same rules in each format.
     */
   def outputTextValue(field: FieldSpec, raw: String): Either[DspyError, DynamicValue] =
-    if NativeFunctionCalling.isToolCallsField(field) then textToolCalls(raw)
+    if isNullText(field, raw) then Right(DynamicValue.Null)
+    else if NativeFunctionCalling.isToolCallsField(field) then textToolCalls(raw)
     else coerceOutputText(field, raw)
 
   /** Coerce the raw text of the output field `field` (upstream `parse_value`). The text `null` or `None` of an optional
     * field is a null, when the type of the field is not a string. Each other text goes to [[coerceText]].
     */
   def coerceOutputText(field: FieldSpec, raw: String): Either[DspyError, DynamicValue] =
-    if field.optional && field.typeRef != TypeRef.string && NullTexts.contains(raw.trim) then Right(DynamicValue.Null)
+    if isNullText(field, raw) then Right(DynamicValue.Null)
     else coerceText(field.typeRef, raw)
+
+  /** `true` when `raw` is a null text of the optional field `field` whose type is not a string. */
+  private def isNullText(field: FieldSpec, raw: String): Boolean =
+    field.optional && field.typeRef != TypeRef.string && NullTexts.contains(raw.trim)
 
   /** The texts that are a null for an optional field: JSON `null` and Python `None`. */
   private val NullTexts: Set[String] = Set("null", "None")
@@ -163,9 +168,10 @@ private[adapters] object AdapterTextSupport:
     */
   def coerceText(typeRef: TypeRef, raw: String): Either[DspyError, DynamicValue] =
     typeRef match
-      case TypeRef.int => raw.toIntOption.toRight(ValidationError(s"Cannot parse integer output from '$raw'"))
+      // Upstream `parse_value` reads the text as JSON, then pydantic lax mode accepts a whole float for an int.
+      case TypeRef.int => wholeNumber(raw.trim).toRight(ValidationError(s"Cannot parse integer output from '$raw'"))
           .map(i => DynamicValue.Primitive(PrimitiveValue.Int(i)))
-      case TypeRef.double => raw.toDoubleOption.toRight(ValidationError(s"Cannot parse double output from '$raw'"))
+      case TypeRef.double => raw.trim.toDoubleOption.toRight(ValidationError(s"Cannot parse double output from '$raw'"))
           .map(d => DynamicValue.Primitive(PrimitiveValue.Double(d)))
       case TypeRef.bool => raw.trim.toLowerCase match
           case "true"  => Right(DynamicValue.Primitive(PrimitiveValue.Boolean(true)))
@@ -174,7 +180,19 @@ private[adapters] object AdapterTextSupport:
       case TypeRef.json | TypeRef.list => JsonDynamic.parse(raw).left.map(_ =>
           ValidationError(s"Field could not be parsed as JSON from '$raw'")
         )
+      case other if other.repr.startsWith("list[") =>
+        JsonDynamic.parse(raw) match
+          case Right(list: DynamicValue.Sequence) => Right(list)
+          case _                                  => Left(ValidationError(s"Expected a JSON list for ${other.repr} from '$raw'"))
       case _ => Right(DynamicValue.Primitive(PrimitiveValue.String(raw)))
+
+  /** The `Int` of an integer text, or of a float text with no fraction (`3.0`). */
+  private def wholeNumber(text: String): Option[Int] =
+    text.toIntOption.orElse(
+      text.toDoubleOption.filter(d => d.isWhole && d >= Int.MinValue.toDouble && d <= Int.MaxValue.toDouble).map(
+        _.toInt
+      )
+    )
 
   /** Single-output plain-text fallback shared by the JSON and XML adapters: when structured parsing failed at the
     * DOCUMENT level and the signature has exactly one output field, treat the whole (trimmed, non-empty) reply as that
