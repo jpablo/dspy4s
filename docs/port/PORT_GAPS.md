@@ -1368,7 +1368,7 @@ is the same. The dspy4s tests use `contains`, so they do not detect a difference
 
 ## G-31 — Stream chunks can contain boundary whitespace
 
-**Status:** Open · **Verification:** R · **Upgrade item:** A5
+**Status:** Resolved (2026-10-14, batch 13) · **Verification:** R · **Upgrade item:** A5
 
 **Upstream.** The listener removes leading whitespace and holds trailing whitespace
 (`dspy/streaming/streaming_listener.py:309-321,376`).
@@ -1377,6 +1377,13 @@ is the same. The dspy4s tests use `contains`, so they do not detect a difference
 (`modules/adapters/.../ChatStreamingState.scala:66`), then emits the prefix unchanged (`:85-88`). A newline in the
 next delta is emitted. `XmlStreamingState.scala:57` does not trim.
 
+
+**Resolution (batch 13).** The chat and XML stream states drop the leading whitespace of a field, hold a run of
+whitespace until more text of the field arrives, and drop it at the end of the field. The chat parser now strips each
+value at both ends, as upstream `"\n".join(v).strip()`. Thus the joined chunks of a field equal the parsed value for
+each split of the response. Tests: `StreamWhitespaceSuite`. Open: with one output field and no marker, the stream and
+the parser can differ for rare whitespace characters; a repeated header streams each section, but the parser keeps
+the first.
 ---
 
 ## G-32 — Custom adapter types, JSON mode, and nested XML are absent
@@ -1581,7 +1588,8 @@ Only the Deno class implements `ReplCodeInterpreter`, so RLM needs Deno.
 
 ## G-38 — RLM differs from upstream
 
-**Status:** Open · **Verification:** R · **Upgrade items:** P5, P6, P8, I8
+**Status:** In progress. The namespace checks, the odd truncation limit, and the `max_iters` text are resolved
+(2026-10-14, batch 13). · **Verification:** R · **Upgrade items:** P5, P6, P8, I8
 
 - **Namespace checks.** Upstream rejects duplicate tools, names that are not identifiers, inputs that collide with
   built-ins or tools, and outputs named `trajectory` or `final_reasoning` (`dspy/predict/rlm.py:243-297`, 74194bfab).
@@ -1594,7 +1602,13 @@ Only the Deno class implements `ReplCodeInterpreter`, so RLM needs Deno.
 - **Sandbox `dspy` facade.** Generated code can build `Predict`, `ChainOfThought`, `ReActV2`, or `RLM` and run
   them on the host under one LM budget (`rlm.py:82-113,577-597`, `dspy/primitives/facade.py:132-261`; ba3f9198e).
   Large. It is a prerequisite for `dspy.Flex`.
-- Minor: the description text still says `max_iterations` (`RLM.scala:112`); upstream renamed it to `max_iters`.
+- Minor (resolved in batch 13): the description text said `max_iterations`; it now says `max_iters`, as upstream.
+
+**Resolution (batch 13).** `RLM.checkNames` rejects duplicate tools, tool names that are not Python identifiers or
+that are keywords (`PythonNames`), reserved sandbox names for tools and inputs (with the facade names `dspy`,
+`_dspy*`, `__dspy*`), inputs with the name of a tool, and outputs named `trajectory` or `final_reasoning`. The input
+name `interpreter_factory` has no meaning in the port and is not reserved. The truncation keeps `limit / 2` characters
+at the start and `limit - limit / 2` at the end. Tests: `RLMNamespaceSuite`.
 
 ---
 
@@ -1928,7 +1942,9 @@ trainset`) uses the trainset. GEPA with an empty validation set uses the trainse
 - **Version in saved state** (`dspy/primitives/base_module.py:200,278-280`). `ProgramPersistence` writes none.
 - **Custom rationale field** in `ChainOfThought` (`dspy/predict/chain_of_thought.py:39-48`). dspy4s fixes
   `reasoning: String`.
-- **`append_instructions`** (`dspy/signatures/signature.py:307-333`). dspy4s has `withInstructions` only.
+- **`append_instructions`** (`dspy/signatures/signature.py:307-333`). Resolved in batch 13:
+  `SignatureLayout.appendInstructions` and `Signature.appendInstructions` (tests: `AppendInstructionsSuite`,
+  `SignatureAppendInstructionsSuite`).
 - Low value: `Unbatchify`, LangChain tool conversion, the asyncify worker limit.
 
 ---

@@ -342,6 +342,34 @@ marked **decided by Claude, review**. Each such choice takes the upstream behavi
     (`children: List[Node]`). The L4 subagent saw this in a probe. This batch does not cause it.
   - Upstream logs a warning when it goes back to JSON mode. The port does not log.
 
+### Batch 13 (2026-10-14): stream whitespace, `appendInstructions`, and the RLM checks
+
+The full suite passes: 1,595 tests, 0 failures, 6 live tests skipped.
+
+- **A5** (G-31). The chat and XML stream chunks of a field have no boundary whitespace, as upstream
+  `_default_handle_stream_chunk`. The joined chunks of a field equal the parsed value for each split of the response.
+- **The chat parser strips each value at both ends** (decided by Claude, review). Upstream `ChatAdapter.parse` does
+  `"\n".join(v).strip()`. The port stripped only the end. The A5 test found this difference.
+- **A7** (G-48). `SignatureLayout.appendInstructions` and `Signature.appendInstructions`, as upstream
+  `append_instructions`. With no instructions, the text comes after the default instructions.
+- **P5** (G-38). The RLM constructor rejects the namespaces that upstream `_validate_namespace` rejects. The input
+  name `interpreter_factory` is not reserved, because it has no meaning in the port (decided by Claude, review).
+- **P6** (G-38). The RLM truncation keeps exactly the limit for an odd limit.
+- The RLM iteration input says `max_iters`, as upstream.
+- **API changes.** `appendInstructions` on `SignatureLayout` and `Signature`. `RLM.ReservedResultNames` and
+  `RLM.isReservedSandboxName`. `PythonNames` (the Python 3.12 keywords and the identifier rule) is new in
+  `dspy4s.core.runtime`; `DenoPyodideVariables` uses it.
+- **Changes in behavior.**
+  - A chat value loses its leading spaces. Before, only the trailing whitespace went away.
+  - A chat field whose last text is only whitespace gets an empty last chunk with `isLast = true`, as upstream.
+  - An RLM with a duplicate tool, a tool name that is not a Python identifier, or a reserved input or output name
+    now throws at construction.
+- **Open points, for the owner.**
+  - The identifier rule accepts letters, digits, and `_`. Python also accepts a few other Unicode characters.
+  - With one output field and no marker, the chat stream and the parser can differ for rare whitespace characters,
+    and the stream sends the text before a later marker as a chunk of the field.
+  - A repeated chat header streams each section, but the parser keeps the first.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -415,9 +443,9 @@ Open points from batch 1, for the owner:
       visible stream output. → G-29 (R)
 - [x] **A3. Tool call ids, `ToolCallResults`, and native tool history** (2ec31b3aa, a0fcc1e37). → G-28 (R)
 - [x] **A4. `dspy.History` with output-format reminders in replay** (f207d35cf). → G-28 (R)
-- [ ] **A5. Boundary whitespace in ChatAdapter stream chunks** (f4a428853). → G-31 (R)
+- [x] **A5. Boundary whitespace in ChatAdapter stream chunks** (f4a428853). → G-31 (R)
 - [ ] **A6. Nested XML output** (33aaa19e0). → G-32 (R)
-- [ ] **A7. `append_instructions` on signatures** (498760149). → G-48 (R)
+- [x] **A7. `append_instructions` on signatures** (498760149). → G-48 (R)
 - [ ] **A8. Decision types `Noul`, `Score`, `Choice`** (e83978c08, 4c6448e03). Experimental. → G-49 (I)
 
 ## Phase 3: programs
@@ -428,8 +456,8 @@ Open points from batch 1, for the owner:
 - [x] **P3. ReAct truncation with one tool call** (7eb5acce2). → G-37 (C)
 - [-] **P4. Echo for a single-line assignment in `_parse_code`** (fe75476cd). The parser belonged to
       `ProgramOfThought`, which is removed (D1). → G-39 (C)
-- [ ] **P5. RLM namespace checks** (74194bfab). → G-38 (R)
-- [ ] **P6. RLM truncation with an odd limit** (35ef21f16). → G-38 (R)
+- [x] **P5. RLM namespace checks** (74194bfab). → G-38 (R)
+- [x] **P6. RLM truncation with an odd limit** (35ef21f16). → G-38 (R)
 - [x] **P7. Deprecation of `CodeAct` and `ProgramOfThought`** (99bb44bf4). dspy4s removed them (D1). → G-39 (C)
 - [ ] **P8. Sandbox `dspy` facade and sub-agents in RLM** (ba3f9198e). Large. → G-38 (I)
 - [ ] **P9. `dspy.Flex`** (e4e97aae2, f70d08a5b, 573cfe707). Experimental. → G-49 (I)
