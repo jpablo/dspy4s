@@ -1,6 +1,7 @@
 package dspy4s.gepa
 
 import dspy4s.adapters.ChatAdapter
+import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
@@ -73,7 +74,11 @@ class GepaEngineSuite extends FunSuite:
     val engine  = new GepaEngine(
       adapter,
       new ReflectionLm,
-      GepaConfig(maxMetricCalls = MetricCallCount(40), reflectionMinibatchSize = MinibatchSize(2), seed = 1L)
+      GepaConfig(
+        budget = GepaBudget.MetricCalls(MetricCallCount(40)),
+        reflectionMinibatchSize = MinibatchSize(2),
+        seed = 1L
+      )
     )
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new TaskLm), adapter = Some(ChatAdapter()))) {
@@ -105,7 +110,7 @@ class GepaEngineSuite extends FunSuite:
         adapter,
         new ReflectionLm,
         GepaConfig(
-          maxMetricCalls = MetricCallCount(40),
+          budget = GepaBudget.MetricCalls(MetricCallCount(40)),
           reflectionMinibatchSize = MinibatchSize(2),
           stopOnPerfectScore = true,
           seed = 1L
@@ -121,7 +126,11 @@ class GepaEngineSuite extends FunSuite:
       val running = new GepaEngine(
         adapter,
         new ReflectionLm,
-        GepaConfig(maxMetricCalls = MetricCallCount(40), reflectionMinibatchSize = MinibatchSize(2), seed = 1L)
+        GepaConfig(
+          budget = GepaBudget.MetricCalls(MetricCallCount(40)),
+          reflectionMinibatchSize = MinibatchSize(2),
+          seed = 1L
+        )
       )
       val ranToBudget = running
         .optimize(seedCandidate, trainset = dataset, valset = dataset)
@@ -150,7 +159,7 @@ class GepaEngineSuite extends FunSuite:
     // Budget == valset size: the seed full-eval (one LM call per val example) exactly exhausts it, so each run does
     // its seed eval (or skips it on resume) and then zero iterations.
     val cfg = GepaConfig(
-      maxMetricCalls = MetricCallCount.applyUnsafe(dataset.size),
+      budget = GepaBudget.MetricCalls(MetricCallCount.applyUnsafe(dataset.size)),
       reflectionMinibatchSize = MinibatchSize(2),
       seed = 1L
     )
@@ -159,8 +168,8 @@ class GepaEngineSuite extends FunSuite:
     val lm1   = new CountingTaskLm
     val first = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm1), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      new GepaEngine(new GepaAdapter(program, metric), new ReflectionLm, cfg)
-        .optimize(seedCandidate, dataset, dataset, runDir = Some(dir))
+      new GepaEngine(new GepaAdapter(program, metric), new ReflectionLm, cfg.copy(runDir = Some(dir)))
+        .optimize(seedCandidate, dataset, dataset)
         .fold(error => fail(error.message), identity)
     }
     assertEquals(lm1.calls.get(), dataset.size) // seed evaluated once (one call per val example)
@@ -170,8 +179,8 @@ class GepaEngineSuite extends FunSuite:
     val lm2    = new CountingTaskLm
     val second = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm2), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      new GepaEngine(new GepaAdapter(program, metric), new ReflectionLm, cfg)
-        .optimize(seedCandidate, dataset, dataset, runDir = Some(dir))
+      new GepaEngine(new GepaAdapter(program, metric), new ReflectionLm, cfg.copy(runDir = Some(dir)))
+        .optimize(seedCandidate, dataset, dataset)
         .fold(error => fail(error.message), identity)
     }
     assertEquals(lm2.calls.get(), 0, "resumed run must not re-run the seed evaluation")
@@ -187,7 +196,7 @@ class GepaEngineSuite extends FunSuite:
         new GepaAdapter(program, metric),
         new ReflectionLm,
         GepaConfig(
-          maxMetricCalls = MetricCallCount.applyUnsafe(dataset.size + 1),
+          budget = GepaBudget.MetricCalls(MetricCallCount.applyUnsafe(dataset.size + 1)),
           reflectionMinibatchSize = MinibatchSize(2),
           seed = 1L
         )
@@ -200,23 +209,24 @@ class GepaEngineSuite extends FunSuite:
   }
 
   test("a fresh run rejects a budget too small for seed validation before calling the LM") {
-    val lm    = new CountingTaskLm
-    val error = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
+    val lm     = new CountingTaskLm
+    val result = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      intercept[IllegalArgumentException] {
-        new GepaEngine(
-          new GepaAdapter(program, metric),
-          new ReflectionLm,
-          GepaConfig(
-            maxMetricCalls = MetricCallCount.applyUnsafe(dataset.size - 1),
-            reflectionMinibatchSize = MinibatchSize(2),
-            seed = 1L
-          )
-        ).optimize(Candidate.seed(program), dataset, dataset)
-      }
+      new GepaEngine(
+        new GepaAdapter(program, metric),
+        new ReflectionLm,
+        GepaConfig(
+          budget = GepaBudget.MetricCalls(MetricCallCount.applyUnsafe(dataset.size - 1)),
+          reflectionMinibatchSize = MinibatchSize(2),
+          seed = 1L
+        )
+      ).optimize(Candidate.seed(program), dataset, dataset)
     }
 
-    assert(error.getMessage.contains("seed validation cost"))
+    // A configuration error is a `Left` (decision of the owner, 2026-10-13). Before, it was an exception.
+    result match
+      case Left(error: ConfigurationError) => assert(error.message.contains("seed validation cost"), error.message)
+      case other                           => fail(s"expected a ConfigurationError, got $other")
     assertEquals(lm.calls.get(), 0)
   }
 
@@ -227,22 +237,22 @@ class GepaEngineSuite extends FunSuite:
     val _       = java.nio.file.Files.write(file, corrupt)
     val lm      = new CountingTaskLm
     try
-      val error = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
+      val result = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
         given RuntimeContext = RuntimeEnvironment.current
-        intercept[IllegalStateException] {
-          new GepaEngine(
-            new GepaAdapter(program, metric),
-            new ReflectionLm,
-            GepaConfig(
-              maxMetricCalls = MetricCallCount.applyUnsafe(dataset.size),
-              reflectionMinibatchSize = MinibatchSize(2),
-              seed = 1L
-            )
-          ).optimize(Candidate.seed(program), dataset, dataset, runDir = Some(dir))
-        }
+        new GepaEngine(
+          new GepaAdapter(program, metric),
+          new ReflectionLm,
+          GepaConfig(
+            budget = GepaBudget.MetricCalls(MetricCallCount.applyUnsafe(dataset.size)),
+            reflectionMinibatchSize = MinibatchSize(2),
+            seed = 1L,
+            runDir = Some(dir)
+          )
+        ).optimize(Candidate.seed(program), dataset, dataset)
       }
 
-      assert(error.getMessage.contains("Invalid GEPA checkpoint"))
+      // A checkpoint error is a `Left` (decision of the owner, 2026-10-13). Before, it was an exception.
+      assert(result.left.exists(_.message.contains("Invalid GEPA checkpoint")), result.toString)
       assertEquals(java.nio.file.Files.readAllBytes(file).toVector, corrupt.toVector)
       assertEquals(lm.calls.get(), 0)
     finally
@@ -254,7 +264,11 @@ class GepaEngineSuite extends FunSuite:
     val gepa = new Gepa[DynamicPredict](
       metric,
       new ReflectionLm,
-      GepaConfig(maxMetricCalls = MetricCallCount(40), reflectionMinibatchSize = MinibatchSize(2), seed = 1L)
+      GepaConfig(
+        budget = GepaBudget.MetricCalls(MetricCallCount(40)),
+        reflectionMinibatchSize = MinibatchSize(2),
+        seed = 1L
+      )
     )
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new TaskLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current

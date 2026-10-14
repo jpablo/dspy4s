@@ -47,6 +47,12 @@ An iteration makes one proposal by default. `GepaConfig.proposalSampling`
 gives it more: for example `SameParent(4)` proposes four children of one
 parent, each from its own minibatch, and evaluates them in parallel.
 
+The budget of a run (`GepaConfig.budget`) is a number of metric calls, a
+number of full evaluations, or a level of effort: `GepaBudget.Auto(Light)`,
+`Medium`, or `Heavy`. With no validation set, GEPA uses the trainset for the
+Pareto scores. `GepaResult.stopReason` tells why a run stopped, and
+`GepaConfig.runDir` lets a stopped run continue.
+
 ## Choosing one
 
 | Optimizer | Strategy | Use when |

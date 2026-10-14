@@ -39,6 +39,11 @@ type InstructionCharLimit = InstructionCharLimit.T
 
 object InstructionCharLimit extends RefinedSubtype[Int, Positive]
 
+/** A strictly positive number of full evaluations of the trainset and the validation set ([[GepaBudget.FullEvals]]). */
+type FullEvalCount = FullEvalCount.T
+
+object FullEvalCount extends RefinedSubtype[Int, Positive]
+
 /** A strictly positive number of proposals, parents, or mutations of one reflective iteration. */
 type ProposalCount = ProposalCount.T
 

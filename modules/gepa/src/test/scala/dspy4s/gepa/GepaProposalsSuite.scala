@@ -160,7 +160,7 @@ class GepaProposalsSuite extends FunSuite:
       minibatch : Int                = 2
   ): GepaConfig =
     GepaConfig(
-      maxMetricCalls = MetricCallCount.applyUnsafe(budget),
+      budget = GepaBudget.MetricCalls(MetricCallCount.applyUnsafe(budget)),
       reflectionMinibatchSize = MinibatchSize.applyUnsafe(minibatch),
       proposalSampling = sampling,
       proposalSelection = selection,
@@ -199,7 +199,7 @@ class GepaProposalsSuite extends FunSuite:
   // ── The strategies ──────────────────────────────────────────────────────────────────────────────────────────
 
   test("the defaults are those of upstream: one task, strict acceptance, all improvements") {
-    val defaults = GepaConfig(maxMetricCalls = MetricCallCount(10))
+    val defaults = GepaConfig(budget = GepaBudget.MetricCalls(MetricCallCount(10)))
     assertEquals(defaults.proposalSampling, ProposalSampling.Single)
     assertEquals(defaults.proposalSelection, ProposalSelection.AllImprovements)
     assertEquals(defaults.acceptance, ProposalAcceptance.StrictImprovement)

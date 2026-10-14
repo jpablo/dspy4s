@@ -4,21 +4,27 @@ import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.optimization.OptimizableId
 
 import java.nio.file.Path
+import scala.annotation.tailrec
 import scala.util.Random
+import scala.util.Try
 
 /** Configuration for a GEPA run. Covers the reflective-mutation loop, merge crossover, the evaluation cache, the
   * objective-aware Pareto fronts ([[frontierType]]), and the proposals of one iteration ([[proposalSampling]],
   * [[proposalSelection]], [[acceptance]]; PORT_GAPS G-45).
   */
 final case class GepaConfig(
-    /** Budget: total metric (evaluation) calls before stopping. Reflection-LM calls do NOT count, matching gepa. */
-    maxMetricCalls         : MetricCallCount,
+    /** The budget in metric (evaluation) calls (gepa's `max_metric_calls`, `max_full_evals`, or `auto`). Reflection-LM
+      * calls do NOT count, matching gepa. [[Gepa.compile]] resolves it with [[GepaBudget.resolve]]; the engine resolves
+      * it with the validation set that it gets.
+      */
+    budget                 : GepaBudget,
     reflectionMinibatchSize: MinibatchSize     = MinibatchSize(3),
     candidateSelector      : CandidateSelector = CandidateSelector.Pareto,
     componentSelector      : ComponentSelector = ComponentSelector.RoundRobin,
@@ -70,15 +76,30 @@ final case class GepaConfig(
     /** Opt-in efficiency stop: halt once the best candidate is perfect (mean validation score >= `perfectScore`), since
       * nothing further can improve it. OFF by default to match upstream gepa, which has no perfect-score stopper and
       * runs to the metric-call budget (its `perfect_score` only drives the per-minibatch `skipPerfectScore` skip). The
-      * budget (`maxMetricCalls`) is always an upper bound regardless.
+      * budget is always an upper bound. A run that stops for this reason has the stop reason
+      * [[GepaStopReason.PerfectScore]].
       */
     stopOnPerfectScore: Boolean = false,
-    seed              : Long    = 0L
+    /** The seed of the random sources of the run: the candidate selector, the merge proposer, the minibatch sampler,
+      * and the selection of one call of a predictor for the reflective dataset. Each source derives from the seed and
+      * fixed coordinates, for example the iteration index, so a resumed run makes the same draws as a run with no stop.
+      */
+    seed: Long = 0L,
+    /** The directory of the checkpoint of the run (gepa's `run_dir`, dspy's `log_dir`). With a directory, the engine
+      * saves the state after the seed evaluation and after each iteration, and a run with a checkpoint in the directory
+      * continues it: the same iteration index, random draws, pointers, and merge schedule, so the resumed run makes the
+      * same draws as a run with no stop. `None` gives no checkpoint.
+      *
+      * A checkpoint that cannot be read, or that does not agree with the program, the validation set, or the
+      * configuration, gives a `Left` before any LM call, and the file stays unchanged.
+      */
+    runDir: Option[Path] = None
 )
 
 /** The outcome of a GEPA run: the best candidate (by mean validation score) and the program it yields. `state` is the
   * final search state: each candidate, its scores and objective scores for each validation example, its parents, and
-  * the Pareto fronts.
+  * the Pareto fronts. The state also holds the iteration index, the merge schedule, the metric calls before the
+  * validation of each candidate, and the number of failed proposals.
   */
 final case class GepaResult[P](
     bestCandidate   : Candidate,
@@ -86,17 +107,28 @@ final case class GepaResult[P](
     bestScore       : Double,
     numCandidates   : GepaCandidateCount,
     totalMetricCalls: MetricCallCount,
-    state           : GepaState
+    state           : GepaState,
+    /** The budget of the run in metric calls, after [[GepaBudget.resolve]]. */
+    maxMetricCalls: MetricCallCount,
+    /** The number of iterations of the run, a merge iteration included. A resumed run counts the iterations before the
+      * stop too ([[GepaState.iteration]]).
+      */
+    iterations: Int,
+    /** Why the run stopped. */
+    stopReason: GepaStopReason
 )
 
 /** The GEPA engine: genetic-Pareto reflective prompt evolution. Each iteration selects a parent candidate from the
   * Pareto frontier, reflects on its failures over a train minibatch to propose a better instruction, accepts the
   * mutation iff it improves the minibatch, then full-evaluates the accepted candidate on the validation set and folds
-  * it into the Pareto frontier — until no atomic step fits in the remaining metric-call budget. After an accepted
-  * mutation it schedules a [[MergeProposer]] crossover, attempted first the next iteration. A [[GepaEvalCache]]
-  * memoizes scores-only evals so repeated `(candidate, example)` pairs are free. A faithful port of the external `gepa`
-  * engine. Atomic seed/iteration steps never cross `maxMetricCalls`; a run stops when the remaining budget cannot cover
-  * the next step's worst-case cost. See PORT_GAPS G-12.
+  * it into the Pareto frontier. After an accepted mutation it schedules a [[MergeProposer]] crossover, attempted first
+  * the next iteration. A [[GepaEvalCache]] memoizes scores-only evals so repeated `(candidate, example)` pairs are
+  * free. A faithful port of the external `gepa` engine. See PORT_GAPS G-12.
+  *
+  * The budget is a hard limit ([[GepaConfig.budget]], resolved with [[GepaBudget.resolve]]). The seed evaluation and
+  * each iteration are atomic: an iteration starts only when its largest possible cost fits in the budget that remains.
+  * The run stops for one of the reasons of [[GepaStopReason]]: no metric call remains, the next reflective iteration
+  * does not fit, or the best candidate has the perfect score ([[GepaConfig.stopOnPerfectScore]]).
   *
   * The text above describes the default iteration, as upstream: one (parent, minibatch) task, and strict acceptance. An
   * iteration can have more than one task ([[GepaConfig.proposalSampling]], PORT_GAPS G-45), and each task can give one
@@ -110,6 +142,11 @@ final case class GepaResult[P](
   * that candidate selection and merge use. The default type has one front for each validation example. Each other type
   * uses the objective scores ([[FrontierType]]). The acceptance of a candidate and the best candidate of a run use the
   * score only.
+  *
+  * The state counts the iterations ([[GepaState.iteration]]). One pass of the loop is one iteration, a merge iteration
+  * included. Each random source of an iteration derives from [[GepaConfig.seed]] and the iteration index, and the state
+  * holds the merge schedule ([[GepaState.merge]]). With [[GepaConfig.runDir]], the engine saves the state after the
+  * seed evaluation and after each iteration. A resumed run thus makes the same draws as a run with no stop.
   *
   * The `proposer` writes the new instruction text of an iteration. The engine calls it in a context whose language
   * model is `reflectionLm`, so the engine itself makes no call to that model. See [[InstructionProposer]].
@@ -131,150 +168,66 @@ final class GepaEngine[P](
 ):
   import GepaEngine.*
 
+  /** The minibatch sampler. It has no state, so each run can use it. */
+  private val sampler = MinibatchSampler.of(config.batchSampler, config.reflectionMinibatchSize, config.seed)
+
   /** Run the search. A `Left` stops the search. It has one of these causes:
+    *   - The trainset is empty (`ConfigurationError`). The search stops before any LM call.
+    *   - The budget cannot hold the seed evaluation (`ConfigurationError`). The search stops before any LM call.
+    *   - The checkpoint in [[GepaConfig.runDir]] cannot be read, or it does not agree with the run: its frontier type
+    *     is not [[GepaConfig.frontierType]], its candidates have other component ids, its validation rows have another
+    *     size, or its scores conflict in the evaluation cache (`ConfigurationError`). The search stops before any LM
+    *     call, and the file stays unchanged.
+    *   - The engine cannot write the checkpoint (`RuntimeError`).
     *   - The adapter cannot find the trace entries of each leaf (UPGRADE-3.2.1-to-3.4.0, decision D2): two leaves have
     *     the same predictor key (found before any run), or a leaf ran but its module recorded no key (found when a
     *     reflective iteration reads the traces).
     *   - The proposer gives a text for a component that the candidate does not hold.
     *   - [[GepaConfig.frontierType]] is not `Instance`, and the seed candidate has no objective score. The search stops
     *     after the seed evaluation, before any iteration.
-    *   - The state in `runDir` has a frontier type that is not [[GepaConfig.frontierType]]. The search stops before any
-    *     LM call.
-    *
-    * Each other defect of the state in `runDir` is an `IllegalStateException`.
     */
   def optimize(
       seedCandidate: Candidate,
       trainset     : Vector[Example],
-      valset       : Vector[Example],
-      runDir       : Option[Path] = None
+      valset       : Vector[Example]
   )(using
       RuntimeContext
   ): Either[DspyError, GepaResult[P]] =
-    adapter.distinctKeys.flatMap(_ => search(seedCandidate, trainset, valset, runDir))
+    for
+      _      <- requireTrainset(trainset)
+      _      <- adapter.distinctKeys
+      result <- search(seedCandidate, trainset, valset)
+    yield result
 
   private def search(
       seedCandidate: Candidate,
       trainset     : Vector[Example],
-      valset       : Vector[Example],
-      runDir       : Option[Path]
+      valset       : Vector[Example]
   )(using
       RuntimeContext
   ): Either[DspyError, GepaResult[P]] =
-    val rng     = new Random(config.seed)
-    val sampler = MinibatchSampler.of(config.batchSampler, config.reflectionMinibatchSize, config.seed)
-    val cache   = new GepaEvalCache(adapter)
-    val merger  = Option.when(config.useMerge)(
-      new MergeProposer(
-        valset,
-        config.maxMergeInvocations,
-        rng,
-        cache,
-        valOverlapFloor = config.mergeValOverlapFloor
-      )
+    val maxMetricCalls = config.budget.resolve(seedCandidate.size, trainset.size, Some(valset.size))
+    val distinct       = valset.distinct.size.toLong
+    val taskCount      = config.proposalSampling.taskCount
+    val run            = Run(
+      trainset,
+      valset,
+      new GepaEvalCache(adapter),
+      maxMetricCalls,
+      // A reflective iteration evaluates the parent and the proposal of each task on one minibatch, then may validate
+      // every distinct example for each candidate that the selection can give. The loop reserves this atomic worst
+      // case, so the budget stays a hard bound. With one task, this is two minibatches and one validation.
+      reflectiveCost = 2L * taskCount * config.reflectionMinibatchSize +
+        config.proposalSelection.limit(taskCount).toLong * distinct,
+      // A merge's subsample is drawn from valset and shares the cache with its possible full eval, so at most one call
+      // per distinct validation example is needed for the merged candidate.
+      mergeCost = distinct
     )
-
-    // Resume from a saved run dir if present; otherwise seed by full-evaluating the starting candidate on the valset.
-    // Seed evaluation is atomic, so reject a budget that cannot hold it instead of violating the advertised bound.
-    val restored = runDir.flatMap { dir =>
-      GepaStatePersistence.load(dir) match
-        case Right(state) => state
-        case Left(error)  => throw IllegalStateException(s"Invalid GEPA checkpoint in '$dir': $error")
-    }
-    val initial: Either[DspyError, GepaState] = restored match
-      case Some(saved) if saved.frontierType != config.frontierType =>
-        Left(
-          ConfigurationError(
-            s"The GEPA checkpoint${runDir.fold("")(dir => s" in '$dir'")} has the frontier type " +
-              s"${saved.frontierType}, and the configuration has the frontier type ${config.frontierType}. " +
-              "Use the frontier type of the checkpoint, or a new run directory."
-          )
-        )
-      case Some(saved) =>
-        validateAndWarm(saved, seedCandidate, valset, cache)
-        Right(saved)
-      case None =>
-        val seedCost = cache.uncachedCount(seedCandidate, valset)
-        require(
-          seedCost <= config.maxMetricCalls,
-          s"maxMetricCalls=${config.maxMetricCalls} cannot cover the seed validation cost of $seedCost"
-        )
-        val seed = fullEval(seedCandidate, valset, cache)
-        Right(
-          GepaState.seed(
-            seedCandidate,
-            seed.scores,
-            metricCalls = seed.evaluated,
-            objectiveScores = seed.objectiveScores,
-            frontierType = config.frontierType
-          )
-        )
-    var state = initial.flatMap(requireObjectiveScores) match
-      case Right(ready) => ready
-      case Left(error)  => return Left(error)
-    runDir.foreach(GepaStatePersistence.save(_, state))
-    var i           = 0 // iteration index, drives the epoch-shuffled batch sampler
-    var canContinue = true
-    // The error of an iteration that the adapter rejected. It stops the loop and becomes the result.
-    var failure = Option.empty[DspyError]
-
-    // A reflective iteration evaluates the parent and the proposal of each task on one minibatch, then may validate
-    // every distinct example for each candidate that the selection can give. Reserving this atomic worst case keeps
-    // maxMetricCalls a hard bound. With one task, this is two minibatches and one validation.
-    val taskCount               = config.proposalSampling.taskCount
-    val reflectiveIterationCost = 2L * taskCount * config.reflectionMinibatchSize +
-      config.proposalSelection.limit(taskCount).toLong * valset.distinct.size
-    // A merge's subsample is drawn from valset and shares the cache with its possible full eval, so at most one call
-    // per distinct validation example is needed for the merged candidate.
-    val mergeIterationCost = valset.distinct.size.toLong
-
-    // Opt-in: stop once the best candidate is already perfect on validation — further iterations can only re-discover
-    // it (and the budget would be spent on `skipPerfectScore` minibatches). Off by default for gepa parity.
-    def converged(s: GepaState): Boolean =
-      config.stopOnPerfectScore && s.aggregateScore(s.bestIndex) >= config.perfectScore
-
-    while canContinue && state.totalMetricCalls < config.maxMetricCalls && !converged(state) do
-      val remaining = config.maxMetricCalls.toLong - state.totalMetricCalls
-      // 1) Merge first if one is scheduled and the last iteration produced a new program (gepa's ordering). A merge
-      //    proposal (accepted or rejected) consumes the iteration; only a "no triplet found" falls through.
-      val mergeConsumedIteration =
-        merger.filter(mp => mp.shouldAttempt && remaining >= mergeIterationCost).flatMap { mp =>
-          val proposalOpt = mp.propose(state)
-          mp.lastIterFoundNewProgram = false
-          proposalOpt.map { proposal =>
-            if proposal.accepted then
-              val validation = fullEval(proposal.candidate, valset, cache)
-              state = state.add(
-                proposal.candidate,
-                validation.scores,
-                proposal.parents,
-                proposal.metricCalls + validation.evaluated,
-                validation.objectiveScores
-              )
-              mp.onMergeAccepted()
-            else
-              state = state.copy(totalMetricCalls = MetricCallCount.add(state.totalMetricCalls, proposal.metricCalls))
-            true
-          }
-        }.getOrElse(false)
-
-      // 2) Otherwise, a reflective-mutation iteration; each candidate that it adds schedules a future merge.
-      if !mergeConsumedIteration then
-        if remaining < reflectiveIterationCost then canContinue = false
-        else
-          merger.foreach(_.lastIterFoundNewProgram = false)
-          iterate(state, trainset, valset, rng, sampler, cache, i) match
-            case Right((nextState, added)) =>
-              state = nextState
-              merger.foreach(mp => (0 until added).foreach(_ => mp.onReflectiveAccepted()))
-            case Left(error) =>
-              failure = Some(error)
-              canContinue = false
-      if canContinue then
-        i += 1
-        runDir.foreach(GepaStatePersistence.save(_, state)) // checkpoint after each iteration for resume
-
-    failure.toLeft {
+    for
+      start           <- startState(seedCandidate, run)
+      _               <- checkpoint(start)
+      (state, reason) <- loop(start, run)
+    yield
       val best = state.bestIndex
       GepaResult(
         bestCandidate = state.candidates(best),
@@ -282,14 +235,99 @@ final class GepaEngine[P](
         bestScore = state.aggregateScore(best),
         numCandidates = GepaCandidateCount.assume(state.candidates.size),
         totalMetricCalls = state.totalMetricCalls,
-        state = state
+        state = state,
+        maxMetricCalls = maxMetricCalls,
+        iterations = state.iteration,
+        stopReason = reason
       )
+
+  /** The iterations from `state` to the stop, with a checkpoint after each iteration. Gives the state after the last
+    * iteration, and the stop reason. A pass that stops changes nothing, so a resumed run makes that pass again.
+    */
+  @tailrec
+  private def loop(state: GepaState, run: Run[P])(using
+      RuntimeContext
+  ): Either[DspyError, (GepaState, GepaStopReason)] =
+    step(state, run).flatMap(saved) match
+      case Left(error)                => Left(error)
+      case Right(Step.Stop(reason))   => Right((state, reason))
+      case Right(Step.Continue(next)) => loop(next, run)
+
+  /** `pass` after the checkpoint of the state that it continues with. A stop writes no checkpoint. */
+  private def saved(pass: Step): Either[DspyError, Step] =
+    pass match
+      case Step.Continue(next) => checkpoint(next).map(_ => pass)
+      case Step.Stop(_)        => Right(pass)
+
+  /** One pass of the loop: the iteration `state.iteration`, or the reason to stop before it.
+    *
+    * A merge comes first if one is scheduled and the last iteration produced a new program (the order of gepa). A merge
+    * proposal (accepted or rejected) consumes the iteration; only a "no triplet found" falls through to a reflective
+    * iteration, with the same random source. Each candidate that a reflective iteration adds schedules a future merge.
+    */
+  private def step(state: GepaState, run: Run[P])(using RuntimeContext): Either[DspyError, Step] =
+    val remaining = run.maxMetricCalls.toLong - state.totalMetricCalls
+    if converged(state) then Right(Step.Stop(GepaStopReason.PerfectScore))
+    else if remaining <= 0 then Right(Step.Stop(GepaStopReason.BudgetExhausted))
+    else
+      val rng    = GepaRandom.source(config.seed, RandomStream.Engine, state.iteration.toLong)
+      val merger = Option.when(config.useMerge)(mergeProposer(run, rng, state.merge))
+      // The state after the iteration has the next iteration index and the merge schedule of the proposer.
+      def finish(next: GepaState): Step =
+        Step.Continue(next.copy(iteration = state.iteration + 1, merge = merger.fold(next.merge)(_.schedule)))
+      val merged =
+        merger.filter(mp => mp.shouldAttempt && remaining >= run.mergeCost).flatMap(mp => attemptMerge(state, mp, run))
+      merged match
+        case Some(next)                             => Right(finish(next))
+        case None if remaining < run.reflectiveCost =>
+          Right(Step.Stop(GepaStopReason.IterationDoesNotFit(run.reflectiveCost, remaining)))
+        case None =>
+          merger.foreach(_.clearNewProgram())
+          iterate(state, run, rng).map { (next, added) =>
+            merger.foreach(mp => (0 until added).foreach(_ => mp.onReflectiveAccepted()))
+            finish(next)
+          }
+
+  /** `true` when [[GepaConfig.stopOnPerfectScore]] is on and the best candidate has the perfect mean validation score.
+    * Later iterations can only find that candidate again, and they use the budget on `skipPerfectScore` minibatches.
+    * The option is off by default, as upstream.
+    */
+  private def converged(state: GepaState): Boolean =
+    config.stopOnPerfectScore && state.aggregateScore(state.bestIndex) >= config.perfectScore
+
+  /** The merge proposer of one iteration. It continues `schedule` with the random source of the iteration. */
+  private def mergeProposer(run: Run[P], rng: Random, schedule: MergeSchedule): MergeProposer[P] =
+    new MergeProposer(
+      run.valset,
+      config.maxMergeInvocations,
+      rng,
+      run.cache,
+      valOverlapFloor = config.mergeValOverlapFloor,
+      start = schedule
+    )
+
+  /** One merge attempt. `None` when the proposer finds no triplet. Otherwise the state with the subsample calls of the
+    * merge, and for an accepted merge, the merged candidate with its validation. The subsample calls come first, so the
+    * discovery count of the merged candidate includes them.
+    */
+  private def attemptMerge(state: GepaState, merger: MergeProposer[P], run: Run[P])(using
+      RuntimeContext
+  ): Option[GepaState] =
+    val proposal = merger.propose(state)
+    merger.clearNewProgram()
+    proposal.map { merge =>
+      val charged = charge(state, merge.metricCalls)
+      if merge.accepted then
+        val validation = fullEval(merge.candidate, run.valset, run.cache)
+        merger.onMergeAccepted()
+        charged.add(merge.candidate, validation.scores, merge.parents, validation.evaluated, validation.objectiveScores)
+      else charged
     }
 
   /** One reflective-mutation iteration: returns the new state (with the iteration's metric calls accrued, the
-    * round-robin pointers of the parents moved, and the selected candidates appended), and the number of candidates
-    * that the iteration added (each one schedules a merge). A `Left` is an error from the reflective dataset of the
-    * adapter, or a text of the proposer for a component that the parent does not hold.
+    * round-robin pointers of the parents moved, the failed proposals counted, and the selected candidates appended),
+    * and the number of candidates that the iteration added (each one schedules a merge). A `Left` is an error from the
+    * reflective dataset of the adapter, or a text of the proposer for a component that the parent does not hold.
     *
     * The iteration has these stages (gepa's `ReflectiveMutationProposer.propose` and `_run_reflective_batch`). Each
     * stage examines the tasks in task order:
@@ -308,32 +346,26 @@ final class GepaEngine[P](
     * The metric calls of the iteration are the minibatch of each parent evaluation, the minibatch of each child, and
     * the validation examples that are not in the cache. An iteration that adds no candidate still pays for its
     * minibatch evaluations (gepa counts the parent evaluation before it decides to skip). The sampler gives one example
-    * at least, so each iteration decreases the budget and the loop of `search` ends.
+    * at least, so each iteration decreases the budget and the loop of `search` ends. The state gets the minibatch calls
+    * before the first candidate, so the discovery count of a candidate is the total before its validation.
     *
     * With one task ([[ProposalSampling.Single]]), each batch holds one evaluation, and the thread of the engine runs
     * it.
     */
-  private def iterate(
-      state    : GepaState,
-      trainset : Vector[Example],
-      valset   : Vector[Example],
-      rng      : Random,
-      sampler  : MinibatchSampler,
-      cache    : GepaEvalCache[P],
-      iteration: Int
-  )(using RuntimeContext): Either[DspyError, (GepaState, Int)] =
-    val tasks                      = sampleTasks(state, trainset, rng, sampler, iteration)
+  private def iterate(state: GepaState, run: Run[P], rng: Random)(using
+      RuntimeContext
+  ): Either[DspyError, (GepaState, Int)] =
+    val tasks                      = sampleTasks(state, run.trainset, rng)
     val (parentEvals, parentCalls) = evaluateParents(tasks)
     for
       (moved, reflections) <- prepareReflections(state, tasks.zip(parentEvals))
-      children             <- proposeChildren(reflections)
+      (children, failed)   <- proposeChildren(reflections)
     yield
       val (proposals, childCalls) = evaluateChildren(children)
       // gepa removes the equal candidates after the selection, so no other proposal takes the place of a removed one.
       val selected    = config.proposalSelection.select(proposals, config.acceptance).distinctBy(_.candidate)
-      val validations = cache.scoredAll(selected.map(_.candidate), valset)
-      val minibatches = parentCalls + childCalls
-      val charged     = moved.copy(totalMetricCalls = MetricCallCount.add(moved.totalMetricCalls, minibatches))
+      val validations = run.cache.scoredAll(selected.map(_.candidate), run.valset)
+      val charged     = charge(moved, parentCalls + childCalls).copy(failedProposals = moved.failedProposals + failed)
       val next        = selected.zip(validations).foldLeft(charged) { case (pool, (proposal, validation)) =>
         pool.add(
           proposal.candidate,
@@ -347,21 +379,16 @@ final class GepaEngine[P](
 
   /** Stage 1: the tasks of one iteration, in task order. Each parent draw of [[GepaConfig.proposalSampling]] calls the
     * candidate selector one time. Each task of that draw then takes the next minibatch of the sampler (gepa's
-    * `sample_tasks`).
+    * `sample_tasks`). The index of a task is its position in the iteration, which is also its call of the sampler.
     */
-  private def sampleTasks(
-      state    : GepaState,
-      trainset : Vector[Example],
-      rng      : Random,
-      sampler  : MinibatchSampler,
-      iteration: Int
-  ): Vector[ProposalTask] =
+  private def sampleTasks(state: GepaState, trainset: Vector[Example], rng: Random): Vector[ProposalTask] =
     val (draws, tasksForEachDraw) = config.proposalSampling.shape
     (0 until draws).toVector.flatMap { draw =>
       val parentIdx = config.candidateSelector.select(state, rng)
       (0 until tasksForEachDraw).toVector.map { mutation =>
-        val ids = sampler.sample(trainset.size, iteration, callInIteration = draw * tasksForEachDraw + mutation)
-        ProposalTask(parentIdx, state.candidates(parentIdx), ids.map(trainset))
+        val index = draw * tasksForEachDraw + mutation
+        val ids   = sampler.sample(trainset.size, state.iteration, callInIteration = index)
+        ProposalTask(index, parentIdx, state.candidates(parentIdx), ids.map(trainset))
       }
     }
 
@@ -385,6 +412,9 @@ final class GepaEngine[P](
     * with the round-robin selector. Each task that the check does not skip moves the pointer, also when it makes no
     * proposal.
     *
+    * The reflective dataset of each task has a random source of its own ([[RandomStream.Reflection]]), from the seed,
+    * the iteration index, and the index of the task.
+    *
     * The other skip check of gepa (no trajectories) does not apply here, because an evaluation with traces gives one
     * trajectory for each example.
     */
@@ -397,7 +427,8 @@ final class GepaEngine[P](
         val allComponents             = task.parent.keys.toVector.sorted
         val (components, nextPointer) =
           config.componentSelector.select(allComponents, current.pointerOf(task.parentIdx))
-        adapter.makeReflectiveDataset(task.parent, parentEval, components).map { records =>
+        val random = GepaRandom.source(config.seed, RandomStream.Reflection, state.iteration.toLong, task.index.toLong)
+        adapter.makeReflectiveDataset(task.parent, parentEval, components, random).map { records =>
           val reflection = Reflection(task, parentEval.scores, components, records)
           (current.withPointer(task.parentIdx, nextPointer), reflections :+ reflection)
         }
@@ -408,15 +439,25 @@ final class GepaEngine[P](
   private def hasPerfectScores(parentEval: EvaluationBatch): Boolean =
     config.skipPerfectScore && parentEval.scores.nonEmpty && parentEval.scores.forall(_ >= config.perfectScore)
 
-  /** Stage 4: the child of each reflection that gives one, in task order. The proposer gets its calls on the thread of
-    * the engine, one task after the other. A `Left` stops the stage: the later tasks get no proposer call.
+  /** Stage 4: the child of each reflection that gives one, in task order, and the number of tasks for which the
+    * proposer failed two times. The proposer gets its calls on the thread of the engine, one task after the other. A
+    * `Left` stops the stage: the later tasks get no proposer call.
     */
-  private def proposeChildren(reflections: Vector[Reflection])(using RuntimeContext): Either[DspyError, Vector[Child]] =
-    reflections.foldLeft[Either[DspyError, Vector[Child]]](Right(Vector.empty)) { (done, reflection) =>
-      done.flatMap(children => proposeChild(reflection).map(children ++ _))
+  private def proposeChildren(reflections: Vector[Reflection])(using
+      RuntimeContext
+  ): Either[DspyError, (Vector[Child], Int)] =
+    reflections.foldLeft[Either[DspyError, (Vector[Child], Int)]](Right((Vector.empty, 0))) { (done, reflection) =>
+      for
+        (children, failed) <- done
+        outcome            <- proposeChild(reflection)
+      yield outcome match
+        case Outcome.Proposed(child) => (children :+ child, failed)
+        case Outcome.NoChange        => (children, failed)
+        case Outcome.Failed          => (children, failed + 1)
     }
 
-  /** The child of one reflection. A `Left` is a text of the proposer for a component that the parent does not hold.
+  /** The outcome of the proposer for one reflection. A `Left` is a text of the proposer for a component that the parent
+    * does not hold.
     *
     * The proposer gets one call, with the parent, the selected components, and the records of each selected component
     * that has one record at least. After a `Left`, the proposer gets one more call.
@@ -424,16 +465,17 @@ final class GepaEngine[P](
     * The task has no child in each of these cases, and it then costs the minibatch evaluation of its parent only:
     *   - The selected components have no reflective record. The proposer then gets no call.
     *   - The proposer gives no text.
-    *   - The proposer gives a `Left` two times.
+    *   - The proposer gives a `Left` two times. The outcome is then [[Outcome.Failed]].
     */
-  private def proposeChild(reflection: Reflection)(using RuntimeContext): Either[DspyError, Option[Child]] =
+  private def proposeChild(reflection: Reflection)(using RuntimeContext): Either[DspyError, Outcome] =
     val parent = reflection.task.parent
     // A component with no reflective record is not in the reflective dataset of the proposer (gepa leaves it out).
     // With no record at all, the proposer gets no call.
     val withRecords = reflection.records.filter((_, records) => records.nonEmpty)
-    val newTexts    =
-      if withRecords.isEmpty then Map.empty[OptimizableId, String]
-      else proposeTexts(parent, withRecords, reflection.components).getOrElse(Map.empty)
+    val proposed    =
+      if withRecords.isEmpty then Some(Map.empty[OptimizableId, String])
+      else proposeTexts(parent, withRecords, reflection.components)
+    val newTexts = proposed.getOrElse(Map.empty)
     // gepa: `assert name in new_candidate`.
     val unknown = newTexts.keySet.diff(parent.keySet).toVector.sorted
     if unknown.nonEmpty then
@@ -443,14 +485,15 @@ final class GepaEngine[P](
             unknown.map(_.render).mkString(", ")
         )
       )
+    else if proposed.isEmpty then Right(Outcome.Failed)
     // No new text: the candidate would be equal to its parent, so there is no proposal and no acceptance evaluation
     // (gepa: "Reflection returned no text updates; skipping proposal").
-    else if newTexts.isEmpty then Right(None)
+    else if newTexts.isEmpty then Right(Outcome.NoChange)
     else
       val candidate = newTexts.foldLeft(parent) { case (cand, (component, text)) =>
         cand.updated(component, Some(text))
       }
-      Right(Some(Child(reflection.task, reflection.scoresBefore, candidate)))
+      Right(Outcome.Proposed(Child(reflection.task, reflection.scoresBefore, candidate)))
 
   /** Stage 5: the proposal of each child, in task order, and the metric calls of the stage. The children are evaluated
     * in one batch with no traces, each one on the SAME minibatch as its parent. Equal children are not removed here, so
@@ -501,6 +544,70 @@ final class GepaEngine[P](
   ): ScoredBatch =
     cache.scored(candidate, valset)
 
+  /** The state at the start of the search: the state of the checkpoint in [[GepaConfig.runDir]], or else the seed
+    * candidate with its validation. A `Left` comes before any LM call, except the `Left` of [[requireObjectiveScores]]
+    * for a new state.
+    */
+  private def startState(seedCandidate: Candidate, run: Run[P])(using RuntimeContext): Either[DspyError, GepaState] =
+    config.runDir
+      .fold[Either[DspyError, Option[GepaState]]](Right(None))(loadCheckpoint)
+      .flatMap {
+        case Some(saved) => resume(saved, seedCandidate, run)
+        case None        => seedState(seedCandidate, run)
+      }
+      .flatMap(requireObjectiveScores)
+
+  /** The state in `dir`, or `None` when the directory has no checkpoint. */
+  private def loadCheckpoint(dir: Path): Either[DspyError, Option[GepaState]] =
+    GepaStatePersistence.load(dir).left.map(error => ConfigurationError(s"Invalid GEPA checkpoint in '$dir': $error"))
+
+  /** The state of a checkpoint, after the checks of [[validateAndWarm]] and of the frontier type. */
+  private def resume(saved: GepaState, seedCandidate: Candidate, run: Run[P]): Either[DspyError, GepaState] =
+    if saved.frontierType != config.frontierType then
+      Left(
+        ConfigurationError(
+          s"The GEPA checkpoint${config.runDir.fold("")(dir => s" in '$dir'")} has the frontier type " +
+            s"${saved.frontierType}, and the configuration has the frontier type ${config.frontierType}. " +
+            "Use the frontier type of the checkpoint, or a new run directory."
+        )
+      )
+    else validateAndWarm(saved, seedCandidate, run.valset, run.cache).map(_ => saved)
+
+  /** The seed candidate with its validation. The seed evaluation is atomic, so a budget that cannot hold it is a `Left`
+    * before any LM call, and the budget stays a hard bound.
+    */
+  private def seedState(seedCandidate: Candidate, run: Run[P])(using RuntimeContext): Either[DspyError, GepaState] =
+    val seedCost = run.cache.uncachedCount(seedCandidate, run.valset)
+    if seedCost > run.maxMetricCalls then
+      Left(
+        ConfigurationError(
+          s"The budget of ${run.maxMetricCalls} metric calls cannot cover the seed validation cost of $seedCost " +
+            "calls. Use a larger budget or a smaller validation set."
+        )
+      )
+    else
+      val seed = fullEval(seedCandidate, run.valset, run.cache)
+      Right(
+        GepaState.seed(
+          seedCandidate,
+          seed.scores,
+          metricCalls = seed.evaluated,
+          objectiveScores = seed.objectiveScores,
+          frontierType = config.frontierType
+        )
+      )
+
+  /** Write `state` to [[GepaConfig.runDir]], when the configuration has one. */
+  private def checkpoint(state: GepaState): Either[DspyError, Unit] =
+    config.runDir.fold[Either[DspyError, Unit]](Right(())) { dir =>
+      Try(GepaStatePersistence.save(dir, state)).toEither.left.map { error =>
+        RuntimeError(
+          "gepa_checkpoint",
+          s"Could not write the GEPA checkpoint in '$dir': ${Option(error.getMessage).getOrElse(error.toString)}"
+        )
+      }
+    }
+
   /** `Left` when the frontier type of `state` needs objective scores and the seed candidate has none (gepa raises a
     * `ValueError` for this state). The check applies to a new state and to a state from a checkpoint.
     */
@@ -515,40 +622,75 @@ final class GepaEngine[P](
       )
 
   /** Validate a checkpoint against the current program/data topology and restore its already-accounted validation
-    * scores and objective scores into the evaluation cache.
+    * scores and objective scores into the evaluation cache. A `Left` when the candidates have other component ids, when
+    * a validation row has another size than `valset`, or when two scores of the checkpoint conflict in the cache.
     */
   private def validateAndWarm(
       state        : GepaState,
       seedCandidate: Candidate,
       valset       : Vector[Example],
       cache        : GepaEvalCache[P]
-  ): Unit =
+  ): Either[DspyError, Unit] =
     val expectedIds = seedCandidate.keySet
-    val mismatched  = state.candidates.zipWithIndex.collect {
-      case (candidate, index) if candidate.keySet != expectedIds => index -> candidate.keySet
-    }
+    val mismatched  = state.candidates.indices.filter(index => state.candidates(index).keySet != expectedIds)
+    val wrongRows   = state.valSubscores.indices.filter(index => state.valSubscores(index).size != valset.size)
     if mismatched.nonEmpty then
-      throw IllegalStateException(
-        s"GEPA checkpoint optimizable ids do not match the current program at candidates ${mismatched.map(_._1).mkString(", ")}"
+      Left(
+        ConfigurationError(
+          s"GEPA checkpoint optimizable ids do not match the current program at candidates ${mismatched.mkString(", ")}"
+        )
       )
-    val wrongRows =
-      state.valSubscores.zipWithIndex.collect { case (scores, index) if scores.size != valset.size => index }
-    if wrongRows.nonEmpty then
-      throw IllegalStateException(
-        s"GEPA checkpoint validation rows do not match the current valset size ${valset.size}: ${wrongRows.mkString(", ")}"
+    else if wrongRows.nonEmpty then
+      Left(
+        ConfigurationError(
+          s"GEPA checkpoint validation rows do not match the current valset size ${valset.size}: " +
+            wrongRows.mkString(", ")
+        )
       )
-    state.candidates.indices.foreach { index =>
-      cache
-        .restore(state.candidates(index), valset, state.valSubscores(index), state.objectiveScoresOf(index))
-        .fold(error => throw IllegalStateException(error), identity)
-    }
+    else
+      state.candidates.indices.foldLeft[Either[DspyError, Unit]](Right(())) { (done, index) =>
+        done.flatMap { _ =>
+          cache
+            .restore(state.candidates(index), valset, state.valSubscores(index), state.objectiveScoresOf(index))
+            .left
+            .map(ConfigurationError(_))
+        }
+      }
 
 object GepaEngine:
 
-  /** One (parent, minibatch) task of a reflective iteration (gepa's `ProposalTask`): the pool index and the content of
-    * the parent, and the minibatch.
+  /** The data of one search: the two example sets, the evaluation cache, the budget, and the largest cost of a
+    * reflective iteration and of a merge iteration.
     */
-  private final case class ProposalTask(parentIdx: Int, parent: Candidate, minibatch: Vector[Example])
+  private final case class Run[P](
+      trainset      : Vector[Example],
+      valset        : Vector[Example],
+      cache         : GepaEvalCache[P],
+      maxMetricCalls: MetricCallCount,
+      reflectiveCost: Long,
+      mergeCost     : Long
+  )
+
+  /** The result of one pass of the loop: the state after the iteration, or the reason to stop before it. */
+  private enum Step derives CanEqual:
+    case Continue(next: GepaState)
+    case Stop(reason: GepaStopReason)
+
+  /** `Left` when the trainset is empty: the reflective minibatches come from it (dspy asserts a trainset that is not
+    * empty).
+    */
+  private def requireTrainset(trainset: Vector[Example]): Either[DspyError, Unit] =
+    if trainset.nonEmpty then Right(())
+    else Left(ConfigurationError("GEPA needs a trainset with one example at least: the minibatches come from it."))
+
+  /** `state` with `metricCalls` more metric calls. */
+  private def charge(state: GepaState, metricCalls: Int): GepaState =
+    state.copy(totalMetricCalls = MetricCallCount.add(state.totalMetricCalls, metricCalls))
+
+  /** One (parent, minibatch) task of a reflective iteration (gepa's `ProposalTask`): the position of the task in the
+    * iteration, the pool index and the content of the parent, and the minibatch.
+    */
+  private final case class ProposalTask(index: Int, parentIdx: Int, parent: Candidate, minibatch: Vector[Example])
 
   /** A task that passed the perfect-score check: the scores of the parent on the minibatch, the components to change,
     * and the reflective records of each of them.
@@ -562,3 +704,14 @@ object GepaEngine:
 
   /** The candidate that the proposer made for one task, with the scores of the parent on the minibatch of the task. */
   private final case class Child(task: ProposalTask, scoresBefore: Vector[Double], candidate: Candidate)
+
+  /** The outcome of the proposer for one task. */
+  private enum Outcome derives CanEqual:
+    /** The proposer gave new texts, so the task has a child. */
+    case Proposed(child: Child)
+
+    /** The task has no child: the selected components have no record, or the proposer gave no text. */
+    case NoChange
+
+    /** The proposer gave a `Left` two times ([[GepaState.failedProposals]]). */
+    case Failed

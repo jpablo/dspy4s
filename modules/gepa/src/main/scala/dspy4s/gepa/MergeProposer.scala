@@ -12,6 +12,33 @@ import scala.util.Random
   */
 final case class MergeProposal(candidate: Candidate, parents: Vector[Int], accepted: Boolean, metricCalls: Int)
 
+/** The merge schedule of a run (the state of gepa's `MergeProposer`). [[GepaState.merge]] holds it, so a saved state
+  * keeps it and a resumed run continues it. Upstream does not save it. A [[MergeProposer]] starts from a schedule, and
+  * [[MergeProposer.schedule]] gives the schedule after its changes.
+  *
+  * @param mergesDue
+  *   the number of merges that are scheduled and not done
+  * @param totalMergesTested
+  *   the number of accepted merges of the run
+  * @param lastIterFoundNewProgram
+  *   `true` when the last iteration added a candidate
+  * @param performedTriplets
+  *   the `(i, j, ancestor)` triplets that the run tried
+  * @param performedDescriptions
+  *   the descriptions of the merged candidates that the run tried
+  */
+final case class MergeSchedule(
+    mergesDue              : Int                          = 0,
+    totalMergesTested      : Int                          = 0,
+    lastIterFoundNewProgram: Boolean                      = false,
+    performedTriplets      : Set[(Int, Int, Int)]         = Set.empty,
+    performedDescriptions  : Set[(Int, Int, Vector[Int])] = Set.empty
+) derives CanEqual
+
+object MergeSchedule:
+  /** The schedule at the start of a run. */
+  val initial: MergeSchedule = MergeSchedule()
+
 /** GEPA's merge proposer — the crossover ("genetic") half of Genetic-Pareto. It combines two Pareto-frontier
   * descendants of a common ancestor: for each component, it takes the version from whichever descendant IMPROVED it
   * relative to the ancestor, yielding a child that stacks the two lineages' complementary gains. A faithful port of
@@ -23,7 +50,11 @@ final case class MergeProposal(candidate: Candidate, parents: Vector[Int], accep
   *
   * Stateful, mirroring gepa: the engine schedules merges after each accepted reflective mutation
   * ([[onReflectiveAccepted]]) and attempts one when [[shouldAttempt]]; accepted merges are consumed via
-  * [[onMergeAccepted]]. `performed*` track already-attempted triplets so the same merge is not retried.
+  * [[onMergeAccepted]]. The performed triplets and descriptions stop a retry of the same merge.
+  *
+  * The proposer starts from the schedule `start`, and [[schedule]] gives the schedule after its changes. The engine
+  * makes one proposer for each iteration, with the schedule of the state and the random source of that iteration, and
+  * then writes [[schedule]] back to the state ([[GepaState.merge]]).
   */
 final class MergeProposer[P](
     valset             : Vector[Example],
@@ -35,22 +66,33 @@ final class MergeProposer[P](
     /** The smallest number of validation examples that the two candidates of a merge must share (gepa's
       * `val_overlap_floor`). A pair with fewer shared examples gives no merge. The value must not be negative.
       */
-    valOverlapFloor: Int = MergeProposer.DefaultValOverlapFloor
+    valOverlapFloor: Int = MergeProposer.DefaultValOverlapFloor,
+    /** The schedule that the proposer continues. The default is the schedule at the start of a run. */
+    start: MergeSchedule = MergeSchedule.initial
 ):
   import MergeProposer.*
 
   require(valOverlapFloor >= 0, s"valOverlapFloor must not be negative: $valOverlapFloor")
 
-  var mergesDue: Int            = 0
-  var totalMergesTested: Int    = 0
-  var lastIterFoundNewProgram   = false
-  private val performedTriplets = mutable.Set.empty[(Int, Int, Int)]
-  private val performedDescs    = mutable.Set.empty[(Int, Int, Vector[Int])]
+  private var mergesDue               = start.mergesDue
+  private var totalMergesTested       = start.totalMergesTested
+  private var lastIterFoundNewProgram = start.lastIterFoundNewProgram
+  private val performedTriplets       = mutable.Set.from(start.performedTriplets)
+  private val performedDescs          = mutable.Set.from(start.performedDescriptions)
+
+  /** The schedule after the changes of this proposer. */
+  def schedule: MergeSchedule =
+    MergeSchedule(mergesDue, totalMergesTested, lastIterFoundNewProgram, performedTriplets.toSet, performedDescs.toSet)
 
   /** A merge is worth attempting this iteration iff one is scheduled AND the last iteration produced a new program (so
     * the frontier just changed).
     */
   def shouldAttempt: Boolean = mergesDue > 0 && lastIterFoundNewProgram
+
+  /** After a merge attempt, and before a reflective iteration: no candidate was added since this call (gepa sets
+    * `last_iter_found_new_program = False`). [[shouldAttempt]] is then `false` until [[onReflectiveAccepted]].
+    */
+  def clearNewProgram(): Unit = lastIterFoundNewProgram = false
 
   /** After an accepted reflective mutation: the frontier changed, so schedule a merge (capped at the budget). */
   def onReflectiveAccepted(): Unit =

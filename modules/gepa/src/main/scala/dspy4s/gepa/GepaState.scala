@@ -63,7 +63,22 @@ final case class GepaState(
       */
     valObjectiveScores: Vector[Vector[Map[String, Double]]] = Vector.empty,
     /** The fronts that [[frontier]] gives (gepa's `frontier_type`). */
-    frontierType: FrontierType = FrontierType.Instance
+    frontierType: FrontierType = FrontierType.Instance,
+    /** The number of iterations that the run finished (gepa's `i + 1`). It is the index of the next iteration, so a
+      * resumed run continues the walk of the minibatch sampler and the random draws. A merge iteration counts.
+      */
+    iteration: Int = 0,
+    /** The merge schedule of the run. */
+    merge: MergeSchedule = MergeSchedule.initial,
+    /** The total metric calls of the run before the validation of each candidate (gepa's
+      * `num_metric_calls_by_discovery`), aligned with `candidates`. The seed has 0. Empty for a state that an older
+      * version saved: [[add]] then keeps it empty.
+      */
+    discoveryCalls: Vector[Int] = Vector.empty,
+    /** The number of proposal tasks for which the proposer failed two times, and that thus gave no child. Upstream logs
+      * each of them; dspy4s counts them, so a run in which each reflection call fails is visible in the result.
+      */
+    failedProposals: Int = 0
 ):
   require(
     valSubscores.length == candidates.length && parents.length == candidates.length,
@@ -90,6 +105,12 @@ final case class GepaState(
       parentIds.forall(parent => parent >= 0 && parent < child)
     },
     "GepaState parent ids must refer to earlier candidates"
+  )
+  require(iteration >= 0, s"GepaState iteration must not be negative: $iteration")
+  require(failedProposals >= 0, s"GepaState failedProposals must not be negative: $failedProposals")
+  require(
+    discoveryCalls.isEmpty || discoveryCalls.length == candidates.length,
+    "GepaState discoveryCalls must be empty or aligned with candidates"
   )
 
   /** Mean validation score of candidate `i`. */
@@ -154,7 +175,9 @@ final case class GepaState(
       .groupMap(_._1)(_._2)
 
   /** Append a newly-accepted candidate with its full-validation subscores, parent lineage (one parent for a reflective
-    * mutation, two for a merge — empty only for the seed), and the metric calls its discovery consumed.
+    * mutation, two for a merge, and none only for the seed), and the metric calls of its validation. The caller adds
+    * each other metric call of the iteration to [[totalMetricCalls]] before this call, because [[discoveryCalls]]
+    * records the total before the validation (gepa's `num_metric_calls_by_discovery`).
     *
     * The new candidate takes the largest round-robin pointer of its parents (gepa `core/state.py`,
     * `update_state_with_new_program`). The pointer of a parent has already moved when its child is added, so the child
@@ -179,6 +202,7 @@ final case class GepaState(
       parents = this.parents :+ parents,
       totalMetricCalls = MetricCallCount.add(totalMetricCalls, metricCalls),
       nextComponent = allPointers :+ parents.map(pointerOf).maxOption.getOrElse(0),
+      discoveryCalls = if discoveryCalls.isEmpty then discoveryCalls else discoveryCalls :+ totalMetricCalls,
       valObjectiveScores =
         if valObjectiveScores.nonEmpty then valObjectiveScores :+ row
         // The first objective score in the pool: each earlier candidate gets a row of empty maps.
@@ -312,7 +336,8 @@ object GepaState:
       Vector(Vector.empty),
       MetricCallCount.applyUnsafe(metricCalls),
       valObjectiveScores = if row.exists(_.nonEmpty) then Vector(row) else Vector.empty,
-      frontierType = frontierType
+      frontierType = frontierType,
+      discoveryCalls = Vector(0)
     )
 
 /** Picks which existing candidate to mutate next (gepa's CandidateSelector). */

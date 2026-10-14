@@ -112,7 +112,7 @@ class GepaPointerMergeSuite extends FunSuite:
       metric,
       reflectionLm,
       GepaConfig(
-        maxMetricCalls = MetricCallCount.applyUnsafe(budget),
+        budget = GepaBudget.MetricCalls(MetricCallCount.applyUnsafe(budget)),
         reflectionMinibatchSize = MinibatchSize(2),
         candidateSelector = CandidateSelector.CurrentBest,
         componentSelector = ComponentSelector.RoundRobin,

@@ -105,8 +105,11 @@ class GepaPredictorKeySuite extends FunSuite:
     )
   )
 
-  private val config =
-    GepaConfig(maxMetricCalls = MetricCallCount(20), reflectionMinibatchSize = MinibatchSize(2), seed = 1L)
+  private val config = GepaConfig(
+    budget = GepaBudget.MetricCalls(MetricCallCount(20)),
+    reflectionMinibatchSize = MinibatchSize(2),
+    seed = 1L
+  )
 
   private def withTaskLm[A](lm: LanguageModel)(body: RuntimeContext ?=> A): A =
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {

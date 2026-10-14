@@ -201,12 +201,13 @@ class GepaObjectiveRulesSuite extends FunSuite:
       RuntimeContext
   ): Either[DspyError, GepaResult[DynamicPredict]] =
     val config = GepaConfig(
-      maxMetricCalls = MetricCallCount(2),
+      budget = GepaBudget.MetricCalls(MetricCallCount(2)),
       reflectionMinibatchSize = MinibatchSize(2),
-      frontierType = frontierType
+      frontierType = frontierType,
+      runDir = Some(dir)
     )
     new GepaEngine(new GepaAdapter(program, metric), new AnswerLm, config)
-      .optimize(seedCandidate, dataset, valset, runDir = Some(dir))
+      .optimize(seedCandidate, dataset, valset)
 
   test("a checkpoint with a frontier type that needs objective scores and with no objective data is an error") {
     withTempDir { dir =>
@@ -224,8 +225,9 @@ class GepaObjectiveRulesSuite extends FunSuite:
     withTempDir { dir =>
       val twice = Vector(dataset(0), dataset(0))
       GepaStatePersistence.save(dir, GepaState.seed(seedCandidate, Vector(1.0, 1.0), 2, Vector(quality, none)))
-      val error = intercept[IllegalStateException](withLm(new AnswerLm)(resume(dir, FrontierType.Instance, twice)))
-      assert(error.getMessage.contains("objective scores"), error.getMessage)
+      // A checkpoint error is a `Left` (decision of the owner, 2026-10-13). Before, it was an exception.
+      val result = withLm(new AnswerLm)(resume(dir, FrontierType.Instance, twice))
+      assert(result.left.exists(_.message.contains("objective scores")), result.toString)
     }
   }
 
@@ -291,7 +293,7 @@ class GepaObjectiveRulesSuite extends FunSuite:
     )
     // The budget holds the seed validation (4 calls), two reflective mutations (8 calls each), and one merge (4 calls).
     val config = GepaConfig(
-      maxMetricCalls = MetricCallCount(24),
+      budget = GepaBudget.MetricCalls(MetricCallCount(24)),
       reflectionMinibatchSize = MinibatchSize(2),
       candidateSelector = SeedOnly,
       mergeValOverlapFloor = MergeOverlapFloor(4),

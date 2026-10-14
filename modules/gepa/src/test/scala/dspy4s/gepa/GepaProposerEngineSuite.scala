@@ -116,8 +116,11 @@ class GepaProposerEngineSuite extends FunSuite:
   /** The seed validation costs 4 calls. One iteration costs 8 at most: 2 for the parent, 2 for the child, and 4 for the
     * validation of an accepted child. A budget of 12 thus holds one iteration exactly.
     */
-  private val oneIteration: GepaConfig =
-    GepaConfig(maxMetricCalls = MetricCallCount(12), reflectionMinibatchSize = MinibatchSize(2), seed = 1L)
+  private val oneIteration: GepaConfig = GepaConfig(
+    budget = GepaBudget.MetricCalls(MetricCallCount(12)),
+    reflectionMinibatchSize = MinibatchSize(2),
+    seed = 1L
+  )
 
   /** Run `body` in a context whose language model is the task LM. */
   private def withTaskLm[A](lm: LanguageModel)(body: RuntimeContext ?=> A): A =

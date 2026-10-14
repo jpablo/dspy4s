@@ -23,16 +23,34 @@ two extra things:
 val gepa = new Gepa[MyProgram](
   metric = myFeedbackMetric,      // FeedbackMetric: score + feedback
   reflectionLm = strongModel,     // rewrites instructions from feedback
-  config = GepaConfig(maxMetricCalls = 200)
+  config = GepaConfig(budget = GepaBudget.Auto(AutoBudget.Light))
 )
 
 gepa.compile(student, trainset, valset) match  // Either[DspyError, GepaResult[MyProgram]]
   case Right(result) =>
     result.bestProgram   // the evolved program
     result.bestScore     // its mean validation score
+    result.stopReason    // why the run stopped
   case Left(error) =>
     error.message        // GEPA cannot find the calls of each predictor (see "Reflective records")
 ```
+
+`compile(student, trainset)` with no validation set uses the trainset for the Pareto scores too, as upstream. An
+empty validation set also selects the trainset.
+
+### The budget
+
+The budget counts metric calls. `GepaConfig.budget` has one of three forms, as the three options of upstream:
+
+| `budget` | Metric calls |
+|----------|--------------|
+| `GepaBudget.MetricCalls(n)` | `n` |
+| `GepaBudget.FullEvals(n)` | `n` × (the trainset size + the size of the validation set that you give) |
+| `GepaBudget.Auto(level)` | the upstream formula, for `Light`, `Medium`, or `Heavy` |
+
+`Auto` gives a number from the number of components, the number of candidates of the level (6, 12, or 18), and
+the size of the validation set (`GepaBudget.auto`). For one component, `Light`, and 4 validation examples, it gives
+396. `GepaResult.maxMetricCalls` gives the number that the run used.
 
 GEPA evolves **instructions only** — one per predictor (component). The program's structure (fields, demos,
 wiring) is fixed. A `Candidate` is therefore a `Map[OptimizableId, Option[String]]` — the genome — and
@@ -132,7 +150,7 @@ selection in upstream `make_reflective_dataset`:
 ### The search loop (`GepaEngine`)
 
 `optimize` seeds the state by full-evaluating the starting candidate on the valset, then loops until the
-metric-call budget (`maxMetricCalls`) is exhausted. Each iteration is either:
+metric-call budget is exhausted. Each iteration is either:
 
 1. **A reflective mutation.** A `CandidateSelector` (Pareto by default) picks a parent from the pool; a
    minibatch is sampled from the trainset; the adapter evaluates the parent on it *with traces*; a
@@ -253,7 +271,7 @@ empty or still too long is a failure.
 val gepa = new Gepa[MyProgram](
   metric = myFeedbackMetric,
   reflectionLm = strongModel,
-  config = GepaConfig(maxMetricCalls = 200),
+  config = GepaConfig(budget = GepaBudget.MetricCalls(MetricCallCount(200))),
   instructionProposer = DefaultInstructionProposer(
     additionalInstructions = Some("Write instructions in imperative voice."),
     maxChars = Some(InstructionCharLimit(1500))
@@ -284,16 +302,37 @@ The upstream options `skills` and `truncate_history_outputs` are not ported.
   subsample eval is reused on its later full-eval, and re-scored pairs are free. Only actual (uncached) evals
   are charged against the budget.
 - **`GepaStatePersistence`** — JSON save/load of the search state (pool, subscores, objective scores, frontier
-  type, lineage, pointers, meter) for resuming an interrupted run. A resumed run with another `frontierType` is an
-  error. The eval cache, RNG position, and merge schedule are not persisted; a resumed
-  run keeps every discovered candidate (no budget re-spent) and continues from that pool. A state file that an
-  older version wrote has no pointers. It loads with the pointer 0 for each candidate.
+  type, lineage, pointers, iteration index, merge schedule, discovery counts, meter) for resuming an interrupted
+  run. A resumed run with another `frontierType` is an error. A state file that an older version wrote loads with
+  the pointer 0 for each candidate, the iteration index 0, and the initial merge schedule.
+
+### Stop and resume
+
+`GepaResult.stopReason` gives why a run stopped:
+
+| `stopReason` | Cause |
+|--------------|-------|
+| `BudgetExhausted` | the run used each metric call of its budget |
+| `IterationDoesNotFit(required, remaining)` | the next iteration needs more calls than remain, so it does not start |
+| `PerfectScore` | `stopOnPerfectScore` is on, and the best candidate is perfect |
+
+`GepaResult.iterations` gives the number of iterations, and `GepaResult.state.failedProposals` the number of
+proposal tasks for which the proposer failed two times. A run in which each reflection call fails is thus
+visible.
+
+With `GepaConfig.runDir`, the engine saves the state after the seed evaluation and after each iteration. A run
+with a checkpoint in that directory continues it. The random source of each iteration comes from the seed and the
+iteration index, and the state holds the iteration index, the pointers, and the merge schedule. A resumed run thus
+makes the same draws as a run with no stop. Upstream loses the merge schedule and the random state of the engine
+on a resume. A checkpoint that cannot be read, or that does not agree with the program, gives a `Left`, and the
+file stays unchanged.
 
 ## Config highlights (`GepaConfig`)
 
 | Field | Meaning |
 |-------|---------|
-| `maxMetricCalls` | budget — total metric (eval) calls before stopping (required) |
+| `budget` | the budget in metric calls: `MetricCalls(n)`, `FullEvals(n)`, or `Auto(level)` (required) |
+| `runDir` | the directory of the checkpoint, for a run that can continue after a stop |
 | `reflectionMinibatchSize` | examples per reflective minibatch (default 3) |
 | `candidateSelector` / `componentSelector` | parent selection (Pareto) and component selection (round-robin) |
 | `batchSampler` | `EpochShuffled` (default) or `RandomDraw` |
@@ -331,6 +370,6 @@ GEPA uses the shared `OptimizableStructure` / `ProgramRunner` introspection and 
 COPRO/MIPROv2, and depends on `evaluate` for scoring. It is *not* a `Teleprompter` — its `compile` takes a
 `FeedbackMetric` and a reflection LM and returns an `Either[DspyError, GepaResult[P]]` rather than an
 `OptimizationReport[P]`.
-Not ported from upstream: the full resume of a run, the stop reason of a run, and the `auto` budgets of the
-facade (PORT_GAPS G-44, G-45). Per the [module-purity principle](../../README.md), the program stays an
+Not ported from upstream: the `skills` and `truncate_history_outputs` options of the proposer, `track_best_outputs`,
+and the callbacks of the engine (PORT_GAPS G-45). Per the [module-purity principle](../../README.md), the program stays an
 immutable pure function — its instructions are the only thing the search rewrites, always into fresh copies.

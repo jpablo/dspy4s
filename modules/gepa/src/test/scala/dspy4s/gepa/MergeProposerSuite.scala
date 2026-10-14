@@ -423,7 +423,7 @@ class MergeProposerSuite extends FunSuite:
     */
   private def stageConfig: GepaConfig =
     GepaConfig(
-      maxMetricCalls = MetricCallCount(24),
+      budget = GepaBudget.MetricCalls(MetricCallCount(24)),
       reflectionMinibatchSize = MinibatchSize(2),
       candidateSelector = SeedOnly,
       seed = 1L
@@ -435,9 +435,13 @@ class MergeProposerSuite extends FunSuite:
     try
       RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new StageLm), adapter = Some(ChatAdapter()))) {
         given RuntimeContext = RuntimeEnvironment.current
-        val engine           = new GepaEngine(new GepaAdapter[TwoStage](twoStage, stageMetric), new StageReflectionLm, config)
-        val _                = engine
-          .optimize(Candidate.seed(twoStage), stageTrainset, stageValset, runDir = Some(dir))
+        val engine           = new GepaEngine(
+          new GepaAdapter[TwoStage](twoStage, stageMetric),
+          new StageReflectionLm,
+          config.copy(runDir = Some(dir))
+        )
+        val _ = engine
+          .optimize(Candidate.seed(twoStage), stageTrainset, stageValset)
           .fold(error => fail(error.message), identity)
       }
       GepaStatePersistence.load(dir).fold(error => fail(error), _.getOrElse(fail("the run saved no state")))
@@ -459,6 +463,35 @@ class MergeProposerSuite extends FunSuite:
     // The pointer of the seed moved two times. Each child took the pointer that the seed had at that time, and the
     // merged candidate took the largest pointer of its two parents.
     assertEquals(Vector.tabulate(4)(state.pointerOf), Vector(0, 1, 0, 1))
+  }
+
+  test("a resumed run continues the merge schedule of the checkpoint") {
+    val config                                   = stageConfig.copy(mergeValOverlapFloor = MergeOverlapFloor(4))
+    val full                                     = finalState(config)
+    val dir                                      = Files.createTempDirectory("gepa-merge-resume")
+    def runIn(budget: Int): GepaResult[TwoStage] =
+      RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new StageLm), adapter = Some(ChatAdapter()))) {
+        given RuntimeContext = RuntimeEnvironment.current
+        new GepaEngine(
+          new GepaAdapter[TwoStage](twoStage, stageMetric),
+          new StageReflectionLm,
+          config.copy(budget = GepaBudget.MetricCalls(MetricCallCount.applyUnsafe(budget)), runDir = Some(dir))
+        ).optimize(Candidate.seed(twoStage), stageTrainset, stageValset).fold(error => fail(error.message), identity)
+      }
+    try
+      // The budget of 20 holds the seed validation and the two reflective mutations. The merge is then due.
+      val partA = runIn(budget = 20)
+      assertEquals(partA.state.parents, Vector(Vector.empty, Vector(0), Vector(0)))
+      assertEquals(partA.stopReason, GepaStopReason.BudgetExhausted)
+      assert(partA.state.merge.mergesDue > 0 && partA.state.merge.lastIterFoundNewProgram, partA.state.merge.toString)
+      // The resumed run starts with the merge, as the run with no stop does.
+      val partB = runIn(budget = 24)
+      assertEquals(partB.state, full)
+      assertEquals(partB.state.parents.last, Vector(1, 2))
+      assertEquals(partB.iterations, partA.iterations + 1)
+    finally
+      val _ = Files.deleteIfExists(dir.resolve(GepaStatePersistence.fileName))
+      val _ = Files.deleteIfExists(dir)
   }
 
   test("the engine makes no merge on a validation set that is smaller than the default overlap floor") {

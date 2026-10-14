@@ -11,8 +11,10 @@ import scala.util.control.NonFatal
 
 /** JSON persistence for [[GepaState]] — the basis for resuming an interrupted run (gepa's `state.save`/`load` into a
   * run dir). The search state contains enough information to warm the evaluation cache on resume: every candidate's
-  * validation subscores and objective scores are aligned with the current validation set. RNG position and merge
-  * schedule are not persisted. The round-robin pointers, the objective scores, and the frontier type are persisted.
+  * validation subscores and objective scores are aligned with the current validation set. The round-robin pointers, the
+  * objective scores, the frontier type, the iteration index, the merge schedule, the discovery counts, and the number
+  * of failed proposals are persisted. The random sources derive from the seed and the iteration index, so the snapshot
+  * needs no random state. `fromJson(toJson(state))` gives `Right(state)`.
   */
 object GepaStatePersistence:
 
@@ -28,6 +30,12 @@ object GepaStatePersistence:
     * `frontierType` is the name of the [[FrontierType]]. The derived codec reads an `Option` field that is absent as
     * `None`, and does not write `None`. `None` is the instance type, so a state with the instance type and no objective
     * data has the fields of an older snapshot only.
+    *
+    * The fields of a later version follow the same rules, so a snapshot of an older version loads with their initial
+    * values. A field with its initial value is not written:
+    *   - `iteration` and `failedProposals` are `Option`s. `None` is 0.
+    *   - `discoveryCalls` is a collection. Empty is no discovery count.
+    *   - `merge` is an `Option` of [[MergeSnapshot]]. `None` is [[MergeSchedule.initial]].
     */
   private final case class Snapshot(
       candidates        : Vector[Map[String, Option[String]]],
@@ -36,8 +44,32 @@ object GepaStatePersistence:
       totalMetricCalls  : Int,
       nextComponent     : Vector[Int],
       valObjectiveScores: Vector[Vector[Map[String, Double]]],
-      frontierType      : Option[String]
+      frontierType      : Option[String],
+      iteration         : Option[Int],
+      merge             : Option[MergeSnapshot],
+      discoveryCalls    : Vector[Int],
+      failedProposals   : Option[Int]
   ) derives Schema
+
+  /** The JSON form of a [[MergeSchedule]]. A set has no order, so the two sets are sorted lists, from the smallest
+    * value to the largest value:
+    *   - `performedTriplets`: one array `[i, j, ancestor]` for each triplet, sorted by `i`, then `j`, then `ancestor`.
+    *   - `performedDescriptions`: one object `{"first": i, "second": j, "sources": [...]}` for each description, sorted
+    *     by `first`, then `second`, then `sources`.
+    *
+    * An example: `{"mergesDue":1,"totalMergesTested":2,"lastIterFoundNewProgram":true,"performedTriplets":[[1,2,0]],
+    * "performedDescriptions":[{"first":1,"second":2,"sources":[0,1]}]}`.
+    */
+  private final case class MergeSnapshot(
+      mergesDue              : Int,
+      totalMergesTested      : Int,
+      lastIterFoundNewProgram: Boolean,
+      performedTriplets      : Vector[Vector[Int]],
+      performedDescriptions  : Vector[DescriptionSnapshot]
+  ) derives Schema
+
+  /** One merge description of [[MergeSnapshot]]: the two candidates and the source of each component. */
+  private final case class DescriptionSnapshot(first: Int, second: Int, sources: Vector[Int]) derives Schema
 
   private val codec = Schema[Snapshot].derive(JsonCodecDeriver)
 
@@ -54,7 +86,11 @@ object GepaStatePersistence:
           state.totalMetricCalls,
           state.nextComponent,
           state.valObjectiveScores,
-          Option.when(state.frontierType != FrontierType.Instance)(state.frontierType.toString)
+          Option.when(state.frontierType != FrontierType.Instance)(state.frontierType.toString),
+          Option.when(state.iteration != 0)(state.iteration),
+          Option.when(state.merge != MergeSchedule.initial)(mergeSnapshot(state.merge)),
+          state.discoveryCalls,
+          Option.when(state.failedProposals != 0)(state.failedProposals)
         )
       ),
       StandardCharsets.UTF_8
@@ -87,6 +123,7 @@ object GepaStatePersistence:
                               .parse(name)
                               .toRight(s"invalid GEPA state snapshot: the frontier type '$name' does not exist")
                           }
+          merge <- s.merge.fold[Either[String, MergeSchedule]](Right(MergeSchedule.initial))(mergeSchedule)
           state <- scala.util
                      .Try(
                        GepaState(
@@ -96,7 +133,11 @@ object GepaStatePersistence:
                          calls,
                          s.nextComponent,
                          s.valObjectiveScores,
-                         frontierType
+                         frontierType,
+                         s.iteration.getOrElse(0),
+                         merge,
+                         s.discoveryCalls,
+                         s.failedProposals.getOrElse(0)
                        )
                      )
                      .toEither
@@ -104,6 +145,37 @@ object GepaStatePersistence:
                      .map(e => s"invalid GEPA state snapshot: ${Option(e.getMessage).getOrElse(e.toString)}")
         yield state
       }
+    }
+
+  /** The JSON form of `schedule`, with the two sets sorted. */
+  private def mergeSnapshot(schedule: MergeSchedule): MergeSnapshot =
+    import scala.math.Ordering.Implicits.seqOrdering
+    MergeSnapshot(
+      schedule.mergesDue,
+      schedule.totalMergesTested,
+      schedule.lastIterFoundNewProgram,
+      schedule.performedTriplets.toVector.sorted.map((i, j, ancestor) => Vector(i, j, ancestor)),
+      schedule.performedDescriptions.toVector.sorted.map((i, j, sources) => DescriptionSnapshot(i, j, sources))
+    )
+
+  /** The schedule of `snapshot`. `Left` when a triplet does not have three indices. */
+  private def mergeSchedule(snapshot: MergeSnapshot): Either[String, MergeSchedule] =
+    val triplets = snapshot.performedTriplets.foldLeft[Either[String, Set[(Int, Int, Int)]]](Right(Set.empty)) {
+      (done, triplet) =>
+        done.flatMap { found =>
+          triplet match
+            case Vector(i, j, ancestor) => Right(found + ((i, j, ancestor)))
+            case other                  => Left(s"invalid GEPA state snapshot: a merge triplet has ${other.size} indices")
+        }
+    }
+    triplets.map { performed =>
+      MergeSchedule(
+        snapshot.mergesDue,
+        snapshot.totalMergesTested,
+        snapshot.lastIterFoundNewProgram,
+        performed,
+        snapshot.performedDescriptions.iterator.map(d => (d.first, d.second, d.sources)).toSet
+      )
     }
 
   /** Write `state` to `<dir>/gepa_state.json`, creating `dir` if needed. */

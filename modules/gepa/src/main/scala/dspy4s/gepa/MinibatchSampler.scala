@@ -1,11 +1,10 @@
 package dspy4s.gepa
 
-import scala.annotation.unused
 import scala.collection.mutable
-import scala.util.Random
 
-/** Chooses the train-example indices for an iteration's reflection minibatch. Stateful: created once per `optimize` run
-  * and advanced by iteration index (gepa's `BatchSampler`).
+/** Chooses the train-example indices for an iteration's reflection minibatch (gepa's `BatchSampler`). A sampler has no
+  * state: each minibatch derives from the seed, the iteration index, and the call in the iteration. Thus a resumed run
+  * gets the same minibatches as a run with no stop.
   */
 trait MinibatchSampler:
   /** The train indices (each in `[0, trainsetSize)`) for one minibatch of `iteration` (0-based).
@@ -29,14 +28,16 @@ object MinibatchSampler:
 
   /** Independent random draw (without replacement within a draw) each iteration — GEPA v0's sampler. Simple, but a
     * given example can be starved or over-sampled across iterations since draws are independent.
+    *
+    * Each `(iteration, callInIteration)` pair has a random source of its own ([[RandomStream.RandomDraw]]), so the same
+    * pair gives the same draw, and two different pairs give independent draws.
     */
   final class RandomDraw(minibatchSize: MinibatchSize, seed: Long) extends MinibatchSampler:
-    private val rng = new Random(seed)
 
-    /** Each call gives a new draw, so `callInIteration` has no effect. */
-    def sample(trainsetSize: Int, iteration: Int, @unused callInIteration: Int): Vector[Int] =
+    def sample(trainsetSize: Int, iteration: Int, callInIteration: Int): Vector[Int] =
       require(trainsetSize > 0, "cannot sample from an empty trainset")
-      rng.shuffle((0 until trainsetSize).toVector).take(minibatchSize)
+      val random = GepaRandom.source(seed, RandomStream.RandomDraw, iteration.toLong, callInIteration.toLong)
+      random.shuffle((0 until trainsetSize).toVector).take(minibatchSize)
 
   /** gepa's default `EpochShuffledBatchSampler`: shuffle the trainset once per epoch and walk it in sequential
     * minibatch-sized windows, so every example is used once per epoch before any repeats (sampling WITHOUT replacement
@@ -46,20 +47,35 @@ object MinibatchSampler:
     *
     * The iteration index starts at 0, as in gepa (its `state.i` is -1 before the first iteration and 0 in it). Delta
     * from gepa: padding ties break by smallest id (gepa uses `Counter` insertion order). This changes only WHICH
-    * example fills a pad slot, not the coverage guarantee. Deterministic for a given `seed`.
+    * example fills a pad slot, not the coverage guarantee.
+    *
+    * The epoch of the iteration `i` is `i × minibatchSize` divided by the length of the shuffled list. The shuffle of
+    * each epoch has a random source of its own ([[RandomStream.EpochShuffle]]), so it depends on the seed and the epoch
+    * only. gepa draws each shuffle from one source for the run, so a resumed gepa run gets other shuffles.
     *
     * A call after the first one of an iteration takes the next window: the call `c` of the iteration `i` starts at
     * `(i + c) × minibatchSize`, modulo the length of the shuffled list. The epoch comes from the iteration only, so a
     * later call of an iteration makes no new shuffle, and the walk of the first calls does not change.
     */
   final class EpochShuffled(minibatchSize: MinibatchSize, seed: Long) extends MinibatchSampler:
-    private val rng                   = new Random(seed)
-    private var shuffled: Vector[Int] = Vector.empty
-    private var epoch                 = -1
-    private var lastSize              = 0
 
-    private def refresh(trainsetSize: Int): Unit =
-      val base   = rng.shuffle((0 until trainsetSize).toVector)
+    def sample(trainsetSize: Int, iteration: Int, callInIteration: Int): Vector[Int] =
+      require(trainsetSize > 0, "cannot sample from an empty trainset")
+      require(iteration >= 0, s"iteration must not be negative: $iteration")
+      require(callInIteration >= 0, s"callInIteration must not be negative: $callInIteration")
+      // The length of the shuffled list: the trainset size, rounded up to a multiple of the minibatch size.
+      val length = (trainsetSize.toLong + minibatchSize - 1) / minibatchSize * minibatchSize
+      // The epoch uses the index of the iteration only (gepa: the un-offset `base_idx`).
+      val baseIdx  = iteration.toLong * minibatchSize
+      val shuffled = epochList(trainsetSize, baseIdx / length)
+      // The length of the shuffled list is a multiple of the minibatch size, so each window is full.
+      val start = ((baseIdx + callInIteration.toLong * minibatchSize) % length).toInt
+      shuffled.slice(start, start + minibatchSize)
+
+    /** The shuffled list of `epoch`, padded to a multiple of the minibatch size. */
+    private def epochList(trainsetSize: Int, epoch: Long): Vector[Int] =
+      val random = GepaRandom.source(seed, RandomStream.EpochShuffle, epoch)
+      val base   = random.shuffle((0 until trainsetSize).toVector)
       val mod    = trainsetSize % minibatchSize
       val pad    = if mod != 0 then minibatchSize - mod else 0
       val counts = mutable.Map.from((0 until trainsetSize).map(_ -> 1))
@@ -70,18 +86,4 @@ object MinibatchSampler:
         padded += pick
         counts(pick) += 1
         k += 1
-      shuffled = padded.toVector
-      lastSize = trainsetSize
-
-    def sample(trainsetSize: Int, iteration: Int, callInIteration: Int): Vector[Int] =
-      require(trainsetSize > 0, "cannot sample from an empty trainset")
-      require(callInIteration >= 0, s"callInIteration must not be negative: $callInIteration")
-      // The epoch and the refresh use the index of the iteration only (gepa: the un-offset `base_idx`).
-      val baseIdx   = iteration * minibatchSize
-      val currEpoch = if epoch == -1 then 0 else baseIdx / math.max(shuffled.size, 1)
-      if shuffled.isEmpty || trainsetSize != lastSize || currEpoch > epoch then
-        epoch = currEpoch
-        refresh(trainsetSize)
-      // The length of the shuffled list is a multiple of the minibatch size, so each window is full.
-      val start = ((baseIdx + callInIteration.toLong * minibatchSize) % shuffled.size).toInt
-      shuffled.slice(start, start + minibatchSize)
+      padded.toVector

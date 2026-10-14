@@ -117,7 +117,9 @@ class GepaObjectiveFrontierSuite extends FunSuite:
         CandidatePool.applyUnsafe(Vector(candidate("c0"))),
         Vector(Vector(0.5, 0.5)),
         Vector(Vector.empty),
-        MetricCallCount(2)
+        MetricCallCount(2),
+        // The seed has the discovery count 0 (batch 9).
+        discoveryCalls = Vector(0)
       )
     )
 
@@ -283,7 +285,11 @@ class GepaObjectiveFrontierSuite extends FunSuite:
     val restored = GepaStatePersistence.fromJson(older)
     assertEquals(restored.map(_.frontierType), Right(FrontierType.Instance))
     assertEquals(restored.map(_.valObjectiveScores), Right(Vector.empty))
-    assertEquals(restored, Right(GepaState.seed(candidate("c0"), Vector(0.5, 0.5), metricCalls = 2)))
+    // An older snapshot has no discovery counts.
+    assertEquals(
+      restored,
+      Right(GepaState.seed(candidate("c0"), Vector(0.5, 0.5), metricCalls = 2).copy(discoveryCalls = Vector.empty))
+    )
   }
 
   test("a saved state with a frontier type that does not exist is rejected") {

@@ -122,7 +122,7 @@ class GepaObjectiveEngineSuite extends FunSuite:
     */
   private def oneIteration(frontierType: FrontierType = FrontierType.Instance): GepaConfig =
     GepaConfig(
-      maxMetricCalls = MetricCallCount(12),
+      budget = GepaBudget.MetricCalls(MetricCallCount(12)),
       reflectionMinibatchSize = MinibatchSize(2),
       frontierType = frontierType,
       seed = 1L
@@ -141,8 +141,8 @@ class GepaObjectiveEngineSuite extends FunSuite:
       valset      : Vector[Example] = dataset,
       runDir      : Option[Path]    = None
   )(using RuntimeContext): Either[DspyError, GepaResult[DynamicPredict]] =
-    new GepaEngine(new GepaAdapter(program, metric), reflectionLm, config)
-      .optimize(seedCandidate, trainset, valset, runDir)
+    new GepaEngine(new GepaAdapter(program, metric), reflectionLm, config.copy(runDir = runDir))
+      .optimize(seedCandidate, trainset, valset)
 
   private def withTempDir[A](body: Path => A): A =
     val dir = Files.createTempDirectory("gepa-objective")
@@ -279,7 +279,7 @@ class GepaObjectiveEngineSuite extends FunSuite:
   // ── The engine ──────────────────────────────────────────────────────────────────────────────────────────────
 
   test("a run keeps the objective scores of each candidate, with the default frontier type") {
-    assertEquals(GepaConfig(maxMetricCalls = MetricCallCount(12)).frontierType, FrontierType.Instance)
+    assertEquals(GepaConfig(budget = GepaBudget.MetricCalls(MetricCallCount(12))).frontierType, FrontierType.Instance)
     val result = withTaskLm(new TaskLm)(optimize(new GradedMetric, new ReflectionLm, oneIteration()))
       .fold(error => fail(error.message), identity)
 
@@ -337,7 +337,7 @@ class GepaObjectiveEngineSuite extends FunSuite:
     // the objective type, the seed stays on the front of `incorrectness`, so a later iteration can select it.
     def reflectionCalls(frontierType: FrontierType): Int =
       val reflection = new ReflectionLm
-      val config     = oneIteration(frontierType).copy(maxMetricCalls = MetricCallCount(60))
+      val config     = oneIteration(frontierType).copy(budget = GepaBudget.MetricCalls(MetricCallCount(60)))
       val result     = withTaskLm(new TaskLm)(optimize(new GradedMetric, reflection, config))
       assert(result.isRight, result.toString)
       reflection.requests.size

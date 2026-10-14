@@ -117,7 +117,7 @@ class GepaMultiPredictorSuite extends FunSuite:
       metric,
       new ReflectionLm,
       GepaConfig(
-        maxMetricCalls = MetricCallCount(30),
+        budget = GepaBudget.MetricCalls(MetricCallCount(30)),
         reflectionMinibatchSize = MinibatchSize(2),
         componentSelector = ComponentSelector.All,
         seed = 1L
@@ -173,7 +173,11 @@ class GepaMultiPredictorSuite extends FunSuite:
     val gepa = new Gepa[Pipeline](
       metric,
       reflection,
-      GepaConfig(maxMetricCalls = MetricCallCount(20), reflectionMinibatchSize = MinibatchSize(2), seed = 1L)
+      GepaConfig(
+        budget = GepaBudget.MetricCalls(MetricCallCount(20)),
+        reflectionMinibatchSize = MinibatchSize(2),
+        seed = 1L
+      )
     )
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {

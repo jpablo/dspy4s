@@ -45,7 +45,8 @@ import scala.util.Random
   *   when `true`, a predictor call that failed gives the reflection LM a record (dspy's
   *   `add_format_failure_as_feedback`); default `false`, as upstream
   * @param seed
-  *   seeds the random source that selects one call of a predictor that ran more than one time in a run (dspy's `rng`)
+  *   seeds the random source that selects one call of a predictor that ran more than one time in a run (dspy's `rng`).
+  *   The [[GepaEngine]] does not use this source: it gives each proposal task a source of its own.
   */
 final class GepaAdapter[P](
     val program               : P,
@@ -63,10 +64,11 @@ final class GepaAdapter[P](
   /** Stable optimizable ID → position of the leaf in [[leaves]]. Display names never participate in lookup. */
   private val leafIndexById: Map[OptimizableId, Int] = leaves.iterator.map(_.id).zipWithIndex.toMap
 
-  /** Selects one call of a predictor that ran more than one time in a run (gepa's `self.rng.choice`). The seed is mixed
-    * first, because `java.util.Random` gives the same first values for near seeds such as 0 to 15.
+  /** Selects one call of a predictor that ran more than one time in a run (gepa's `self.rng.choice`), for a call of
+    * [[makeReflectiveDataset]] with no source. The seed is mixed first, because `java.util.Random` gives the same first
+    * values for near seeds such as 0 to 15.
     */
-  private val rng = new Random(GepaAdapter.mixSeed(seed))
+  private val rng = new Random(GepaRandom.mix(seed))
 
   /** One trajectory with the calls of each leaf in it. The calls are aligned with [[leaves]]. */
   private type LeafCalls = (Trajectory, Vector[Vector[TraceEntry]])
@@ -193,6 +195,17 @@ final class GepaAdapter[P](
       evalBatch : EvaluationBatch,
       components: Vector[OptimizableId]
   )(using RuntimeContext): Either[DspyError, Map[OptimizableId, Vector[ReflectiveRecord]]] =
+    makeReflectiveDataset(candidate, evalBatch, components, rng)
+
+  /** [[makeReflectiveDataset]] with `random` as the source that selects one call of a leaf. The engine gives each
+    * proposal task a source of its own ([[RandomStream.Reflection]]), so a resumed run makes the same selections.
+    */
+  private[gepa] def makeReflectiveDataset(
+      candidate : Candidate,
+      evalBatch : EvaluationBatch,
+      components: Vector[OptimizableId],
+      random    : Random
+  )(using RuntimeContext): Either[DspyError, Map[OptimizableId, Vector[ReflectiveRecord]]] =
     for
       _    <- distinctKeys
       runs <- callsByLeaf(evalBatch.trajectories.getOrElse(Vector.empty))
@@ -202,7 +215,7 @@ final class GepaAdapter[P](
         // The layout that the candidate gives to this leaf (gepa's `build_program(candidate)`).
         val layout =
           leaf.metadata.structure.withInstructions(candidate.getOrElse(component, leaf.parameters.instructions))
-        runs.flatMap { case (traj, calls) => recordFor(leaf, layout, traj, calls(index)) }
+        runs.flatMap { case (traj, calls) => recordFor(leaf, layout, traj, calls(index), random) }
       }
     }.toMap
 
@@ -220,9 +233,10 @@ final class GepaAdapter[P](
       leaf   : IdentifiedOptimizable,
       layout : SignatureLayout,
       traj   : Trajectory,
-      entries: Vector[TraceEntry]
+      entries: Vector[TraceEntry],
+      random : Random
   )(using RuntimeContext): Option[ReflectiveRecord] =
-    selectEntry(entries, traj.failed).map { entry =>
+    selectEntry(entries, traj.failed, random).map { entry =>
       val inputs = reflectiveInputs(entry.inputs, layout)
       entry.failure match
         case Some(message) => failureRecord(inputs, entry, message, layout)
@@ -262,12 +276,12 @@ final class GepaAdapter[P](
   /** Select the call of one leaf that the reflection LM sees for one trajectory (gepa's `make_reflective_dataset`).
     * `entries` are the calls of the leaf in that trajectory, in trace order.
     */
-  private def selectEntry(entries: Vector[TraceEntry], runFailed: Boolean): Option[TraceEntry] =
+  private def selectEntry(entries: Vector[TraceEntry], runFailed: Boolean, random: Random): Option[TraceEntry] =
     val usable = if addFormatFailureAsFeedback then entries else entries.filter(_.failure.isEmpty)
     usable.find(_.failure.isDefined).orElse {
       // A run that failed gives no record from a call that passed.
       if runFailed || usable.isEmpty then None
-      else Some(usable(rng.nextInt(usable.size)))
+      else Some(usable(random.nextInt(usable.size)))
     }
 
   /** The record of a call that failed. The user metric gets no call, because the call has no prediction to score. The
@@ -345,12 +359,3 @@ object GepaAdapter:
     else
       val workers = math.min(items, total)
       Vector.tabulate(items)(index => total / workers + (if index < total % workers then 1 else 0))
-
-  /** The SplitMix64 output for `seed`. It changes about half of the 64 bits when one bit of `seed` changes, so near
-    * seeds give unrelated random sequences. The result is the same for the same seed.
-    */
-  private def mixSeed(seed: Long): Long =
-    val a = seed + 0x9e3779b97f4a7c15L
-    val b = (a ^ (a >>> 30)) * 0xbf58476d1ce4e5b9L
-    val c = (b ^ (b >>> 27)) * 0x94d049bb133111ebL
-    c ^ (c >>> 31)

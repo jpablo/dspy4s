@@ -134,7 +134,8 @@ class GepaFailureFeedbackSuite extends FunSuite:
 
   // The engine starts an iteration while its worst cost fits in the budget: 2 minibatch evaluations of 2 examples
   // and 1 validation of 2 examples. The seed validation costs 2 calls, and each program run calls the task LM 3 times.
-  private val roundRobin = GepaConfig(maxMetricCalls = MetricCallCount(20), reflectionMinibatchSize = MinibatchSize(2))
+  private val roundRobin =
+    GepaConfig(budget = GepaBudget.MetricCalls(MetricCallCount(20)), reflectionMinibatchSize = MinibatchSize(2))
 
   private def examples(size: Int): Vector[Example] =
     Vector.tabulate(size)(index =>
@@ -168,7 +169,7 @@ class GepaFailureFeedbackSuite extends FunSuite:
     }
 
   test("the option is off by default, as upstream") {
-    assertEquals(GepaConfig(maxMetricCalls = MetricCallCount(10)).addFormatFailureAsFeedback, false)
+    assertEquals(GepaConfig(budget = GepaBudget.MetricCalls(MetricCallCount(10))).addFormatFailureAsFeedback, false)
   }
 
   test("by default a run that failed gives no record, and the metric gets no call for a component") {
@@ -321,7 +322,7 @@ class GepaFailureFeedbackSuite extends FunSuite:
 
   private def config(addFailureAsFeedback: Boolean, seed: Long = 0L, budget: Int = 20, minibatch: Int = 2) =
     GepaConfig(
-      maxMetricCalls = MetricCallCount.applyUnsafe(budget),
+      budget = GepaBudget.MetricCalls(MetricCallCount.applyUnsafe(budget)),
       reflectionMinibatchSize = MinibatchSize.applyUnsafe(minibatch),
       componentSelector = ComponentSelector.All,
       addFormatFailureAsFeedback = addFailureAsFeedback,
