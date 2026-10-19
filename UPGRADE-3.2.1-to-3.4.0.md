@@ -571,6 +571,27 @@ The full suite passes: 1,671 tests, 0 failures, 6 live tests skipped.
     open stream. Closing the open streams of the transport first would avoid this, but it differs from upstream.
   - A request that starts just before `close` can fail with `LmTransportError`, as upstream.
 
+### Batch 23 (2026-10-18): capabilities as data
+
+The owner made five decisions on 2026-10-18: D3 (with the boundary rule), L5, L10, A6 (not mirrored), and I10 (in
+scope). Phase 0 to phase 4 below record them.
+
+- **L5** (G-26). `LmCapabilities` holds what a model can do: native tool calls, a JSON response schema, and
+  reasoning output (upstream `Capabilities`). A capability that nobody declares is `false`, as upstream.
+  `OpenAiLanguageModel` takes the OpenAI capabilities (tool calls and a response schema) for the official address
+  only (`LmCapabilities.forBaseUrl`, which compares the host with `api.openai.com`). An other server has no capability
+  until the user declares it with `withCapabilities`.
+- **Changes in behavior.**
+  - A model at an other address (Ollama, vLLM, LM Studio, OpenRouter, Azure OpenAI) has no capability by default.
+    The JSON adapter then sends no `response_format`, and an adapter with native function calling uses the text form
+    of the tool calls. Before, the port claimed both capabilities for each server, and a server without them failed
+    the request.
+  - A user of a server with these capabilities declares them, for example
+    `OpenAiLanguageModel.local(model, baseUrl).withCapabilities(LmCapabilities.openAi)`.
+- **API changes.** `LmCapabilities` (`none`, `openAi`, `forBaseUrl`) in `dspy4s.lm.contracts`;
+  `OpenAiLanguageModel.capabilities`, `effectiveCapabilities`, and `withCapabilities`.
+- **Test.** `LmCapabilitiesSuite`.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -612,8 +633,22 @@ Open points from batch 1, for the owner:
       - Each optimizer keeps its upstream policy for a leaf that ran more than one time in a run.
       An injected leaf id (the exact identity that upstream Bootstrap gets from object identity) was rejected for
       now: each leaf type must then carry a label. The metadata key stays valid if that id comes later.
-- [ ] **D3. Prompt parity policy.** The adapter prompts are not byte-equal to upstream (G-30, G-37). Decide: match
+- [x] **D3. Prompt parity policy.** The adapter prompts are not byte-equal to upstream (G-30, G-37). Decide: match
       upstream exactly, or record each difference as intended.
+      **Decided 2026-10-18: match upstream within a boundary rule.** A first design put a Python view of each type
+      (`FieldSpec.pythonType`, with a copy of the pydantic schema form) into the core contracts. The owner rejected
+      it: it couples the data model to Python. The rule:
+      - The prompt matches upstream exactly where the text is fixed, or where the adapters can compute it from the
+        data of the port: `TypeRef`, the enum values, the optional flag, the descriptions, and the constraints. This
+        covers the frame of each prompt, the type names `str`, `int`, `float`, and `bool`, the notes of these types
+        and of enums, the constraint lines, the demos, the history turns, and the output reminder.
+      - A structured type (a list with an item type, a map, a record, a union) shows the type name of the port and the
+        JSON schema of the port. The port does not write Python generic names or the pydantic schema form. Each such
+        place is an intended difference.
+      - No Python data goes into the core contracts. The type text stays in the adapters.
+      - A value in an input or a demo prints as upstream prints it: `True`, `False`, `None`, the Python form of a
+        float, and JSON with the separators `", "` and `": "`.
+      - `scripts/golden` writes the expected prompts from upstream. The golden tests cover the cases inside the rule.
 - [x] **D4. ReAct default iteration limit.** dspy4s used 5 and upstream uses 20 (G-37).
       **Decided 2026-10-11: 20, as upstream.** The default of `ReAct.maxIterations` is `IterationLimit(20)`.
 - [x] **D5. Optional output fields.** `FieldSpec` has no optional flag, so the adapters cannot apply the upstream
@@ -630,12 +665,16 @@ Open points from batch 1, for the owner:
       typed error survives. → G-25 (C)
 - [x] **L3. One call path for streamed calls**: cache, retry before the first token, usage, and history. → G-25 (C)
 - [x] **L4. Strict response schema** (40a6e1689): `strict: true` with a schema shaped for strict mode. → G-26 (C)
-- [ ] **L5. Capabilities as data**, declared for each server, with unknown treated as false. → G-26 (R)
+- [x] **L5. Capabilities as data**, declared for each server, with unknown treated as false. → G-26 (R)
+      **Decided 2026-10-18:** the OpenAI capabilities hold for the official address (`api.openai.com`) only. Each
+      other server has no capability until the user declares one. Done in batch 23.
 - [x] **L6. Timeouts** (7fd361214): separate connect and read limits, and an idle limit for streams. → G-26 (R)
 - [x] **L7. Responses request and output shapes** (0312f0da6, 891958702, 24ec85de4). → G-26 (R)
 - [x] **L8. Connection lifecycle**: `close` on the client, and one HTTP client for each configuration. → G-26 (R)
 - [x] **L9. Versioned plain-data cache record** in place of Java serialization. → G-24 (R)
 - [ ] **L10. Advisory cost estimate** and nested cost roll-up (bb8ba59c0). → G-27 (R)
+      **Decided 2026-10-18:** the user declares the prices of each model. An unknown price gives no cost, not zero,
+      as upstream.
 
 ## Phase 2: adapters / signatures / streaming
 
@@ -645,7 +684,9 @@ Open points from batch 1, for the owner:
 - [x] **A3. Tool call ids, `ToolCallResults`, and native tool history** (2ec31b3aa, a0fcc1e37). → G-28 (R)
 - [x] **A4. `dspy.History` with output-format reminders in replay** (f207d35cf). → G-28 (R)
 - [x] **A5. Boundary whitespace in ChatAdapter stream chunks** (f4a428853). → G-31 (R)
-- [ ] **A6. Nested XML output** (33aaa19e0). → G-32 (R)
+- [-] **A6. Nested XML output** (33aaa19e0). → G-32 (R)
+      **Decided 2026-10-18: not mirrored.** The XML adapter keeps a JSON value inside the tag of a list, dict, or
+      model output. The prompt asks for JSON text there. See "Deliberately not mirrored".
 - [x] **A7. `append_instructions` on signatures** (498760149). → G-48 (R)
 - [ ] **A8. Decision types `Noul`, `Score`, `Choice`** (e83978c08, 4c6448e03). Experimental. → G-49 (I)
 
@@ -679,6 +720,7 @@ Open points from batch 1, for the owner:
 - [x] **I9. Callback events**: interpreter lifecycle (b11cfe874), optimizer compile (80553206b), and the end event
       for base exceptions (970f72900). → G-40 (C for the end event, R for the others)
 - [ ] **I10. MCP**: SDK v2 (32bcd36ce) and structured results (ca0a088bd). → G-47 (R)
+      **Decided 2026-10-18:** MCP is in scope, and the port can take a new dependency for it.
 - [x] **I11. `inspect_history` renders tool calls** (571171227). → G-27 (R)
 
 ## Phase 5: optimize / gepa / evaluate
@@ -730,6 +772,9 @@ the behavior.
 - `restrict` validation in random search (965a39594) and optional `eval_kwargs` in COPRO (a1fd9261b): dspy4s has
   no such parameter.
 - Model metadata refresh commits and documentation commits.
+- Nested XML output (A6, 33aaa19e0): the XML adapter of dspy4s asks for a list, dict, or model output as JSON text
+  inside the tag, and parses it as JSON. Upstream asks for nested elements and parses them with the JSON schema of the
+  field. Decided 2026-10-18.
 
 ## Documents that were out of date before this analysis
 

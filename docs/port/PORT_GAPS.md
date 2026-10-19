@@ -1167,7 +1167,8 @@ No check rejects an event after the end event. The usage of a retried attempt is
 ## G-26 — LM request surface: strict schema, capabilities, Responses endpoint, reasoning models, timeouts
 
 **Status:** In progress. The strict schema (2026-10-14, batch 12), the timeouts (batch 17), the Responses shapes
-(batch 20), and `close` (batch 22) are resolved; the capabilities (L5) and the reasoning-model parameters are open. · **Verification:** C (strict flag), R (others) · **Upgrade items:** L4 to L8
+(batch 20), `close` (batch 22), and the capabilities (2026-10-18, batch 23) are resolved; the reasoning-model
+parameters are open. · **Verification:** C (strict flag), R (others) · **Upgrade items:** L4 to L8
 
 **Upstream.** `strict: true` with a schema shaped for strict mode (`dspy/clients/legacy_requests.py:13-48`,
 `execution.py:176-183`). Capabilities are data, declared for each server (`dspy/clients/capabilities.py:22-27`,
@@ -1205,8 +1206,12 @@ body of upstream `chat_to_responses` and reads one output with `responses_output
 `reasoning_content`, `citations`). Tests: `ResponsesWireSuite`, `ResponsesModeSuite`. Open: no parser for the
 Responses stream events (a stream is one final chunk from a plain call).
 
-**Direction (open).** Add a `capabilities` value to the OpenAI client for compatible servers (L5, needs a decision of
-the owner). Reasoning-model parameters and custom headers remain. `close` is resolved in batch 22
+**Resolution (capabilities, batch 23).** `LmCapabilities` is the data behind the capability flags (upstream
+`Capabilities`), and an undeclared capability is `false`. `OpenAiLanguageModel` has the OpenAI capabilities at the
+official address only (`LmCapabilities.forBaseUrl`); an other server has none until the user declares them with
+`withCapabilities` (decision L5, 2026-10-18). Test: `LmCapabilitiesSuite`.
+
+**Direction (open).** Reasoning-model parameters and custom headers remain. `close` is resolved in batch 22
 (`CloseLifecycleSuite`).
 
 ---
