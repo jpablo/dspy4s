@@ -168,6 +168,8 @@ final case class ManagedLanguageModel(
   override def supportsFunctionCalling: Boolean = delegate.supportsFunctionCalling
   override def supportsResponseSchema: Boolean  = delegate.supportsResponseSchema
   override def supportsReasoning: Boolean       = delegate.supportsReasoning
+  // `Predict` reads this flag to send a decision request to a System One model, so the wrapper must not hide it.
+  override def supportsDecisionRequests: Boolean = delegate.supportsDecisionRequests
   // The default options pass through too: the cache key below reads them, and an outer wrapper must see them.
   override def defaultOptions: DynamicValue.Record = delegate.defaultOptions
 

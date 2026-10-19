@@ -108,7 +108,8 @@ final class JdkHttpTransport(timeouts: HttpTimeouts) extends HttpTransport:
       .timeout(Duration.ofMillis(timeoutMillis))
       .header("Content-Type", "application/json")
       .POST(HttpRequest.BodyPublishers.ofString(body))
-    headers.foreach { (k, v) => builder.header(k, v) }
+    // A header of the caller replaces the default of the same name, so a request has one `Content-Type` header.
+    headers.foreach { (k, v) => builder.setHeader(k, v) }
     builder.build()
 
   private def flattenHeaders(response: JHttpResponse[?]): Map[String, String] =

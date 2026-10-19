@@ -91,8 +91,8 @@ private[lm] object OpenAiErrors:
       "exceeded_current_quota_error" -> billing  // Moonshot: balance or quota
     ) ++ invalidCodes.map(_ -> invalid) ++ modelErrorCodes.map(_ -> unsupported)
 
-  /** The headers that can hold the request id, in the order of preference. */
-  private val requestIdHeaders: Seq[String] =
+  /** The headers that can hold the request id, in the order of preference. The TypeSafe client reads them too. */
+  private[providers] val requestIdHeaders: Seq[String] =
     Seq("x-request-id", "request-id", "x-amzn-requestid", "x-amz-request-id", "x-ms-request-id", "apim-request-id")
 
   /** The headers that hold the retry hint in milliseconds. They apply when `Retry-After` gives no hint. */
@@ -231,12 +231,12 @@ private[lm] object OpenAiErrors:
   /** The delay that the response asked for. `Retry-After` holds decimal seconds or an HTTP date. A date gives the time
     * that remains, and a date in the past gives zero. When `Retry-After` gives no hint, `retry-after-ms` and
     * `x-ms-retry-after-ms` give it in decimal milliseconds. A value that is not a number, that is negative, or that is
-    * too large for a `FiniteDuration` gives no hint.
+    * too large for a `FiniteDuration` gives no hint. The TypeSafe client uses this rule too.
     *
     * @param lowered
     *   the response headers, with lower-case names
     */
-  private def retryAfter(lowered: Map[String, String], now: Instant): Option[FiniteDuration] =
+  private[providers] def retryAfter(lowered: Map[String, String], now: Instant): Option[FiniteDuration] =
     val seconds = lowered.get("retry-after")
       .flatMap(value => decimalDuration(value, nanosPerSecond).orElse(durationUntil(value, now)))
     def millis = retryAfterMillisHeaders.iterator.flatMap(lowered.get).flatMap(decimalDuration(_, nanosPerMilli))

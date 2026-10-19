@@ -24,6 +24,13 @@ trait LanguageModel extends LanguageModelRef:
   /** Whether this model exposes reasoning/thinking output (e.g. reasoning-token models). Defaults to `false`. */
   def supportsReasoning: Boolean = false
 
+  /** Experimental. Whether this model is a System One model: it answers decision requests ([[DecisionRequests]]) with
+    * probabilities, and generates no text (upstream `supports_decision_requests`, for example TypeSafe Jev). `Predict`
+    * then sends a decision request in place of a prompt. Defaults to `false`; a wrapper forwards the value of its
+    * delegate.
+    */
+  def supportsDecisionRequests: Boolean = false
+
   /** The provider options that this model merges into each request (e.g. `temperature`). The options of the request win
     * on a key collision. The cache key covers these options, so a wrapper must forward the value of its delegate.
     * Defaults to an empty record.

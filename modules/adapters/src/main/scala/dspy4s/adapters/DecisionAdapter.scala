@@ -1,7 +1,7 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, NativeFunctionCalling, ParsedOutput}
-import dspy4s.adapters.internal.{JsonDynamic, PythonText, StrictJsonSchema}
+import dspy4s.adapters.internal.{AdapterTextSupport, JsonDynamic, PromptText, PythonText, StrictJsonSchema}
 import dspy4s.core.contracts.{
   DspyError,
   DynamicValues,
@@ -13,6 +13,7 @@ import dspy4s.core.contracts.{
   ValidationError,
   updated
 }
+import dspy4s.core.data.Example
 import dspy4s.core.decisions.{DecisionEvidence, DecisionKind, DecisionPlan}
 import dspy4s.lm.contracts.LmOutput
 import zio.blocks.chunk.Chunk
@@ -20,7 +21,9 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** Experimental. The adapter that asks a generative model for the evidence of the decision outputs of `plan`, and
   * decodes it (upstream `DecisionAdapter` for a model that is not a System One model, in `dspy/adapters/decision.py`).
-  * Each other part of the request comes from `inner`, so the same rules hold for the Chat, JSON, and XML adapters.
+  * Each other part of the request comes from `inner`, so the same rules hold for the Chat, JSON, and XML adapters. A
+  * System One model gets no prompt: `Predict` sends it the state and the questions of the companion functions
+  * [[DecisionAdapter.systemOneState]] and [[DecisionAdapter.systemOneQuestions]].
   *
   * The request (upstream `DecisionAdapter._prepare`):
   *   - Each decision output of `plan` becomes an evidence field ([[DecisionAdapter.evidenceLayout]]): the same name,
@@ -205,6 +208,72 @@ object DecisionAdapter:
         )
       }
       .map(fields => layout.withOutputFields(layout.outputFields.map(field => fields.getOrElse(field.name, field))))
+
+  /** The questions of a System One request (upstream `DecisionAdapter._prepare` with `system_one`): the question of
+    * each decision output of `plan` ([[DecisionPlan.question]]), by output name, in the order of the layout. A question
+    * that the plan cannot give is a `Left`.
+    */
+  def systemOneQuestions(plan: DecisionPlan): Either[DspyError, DynamicValue.Record] =
+    plan.kinds
+      .foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) { case (acc, (name, _)) =>
+        for
+          questions <- acc
+          question  <- plan.question(name)
+        yield questions :+ (name -> question)
+      }
+      .map(entries => DynamicValue.Record(Chunk.from(entries)))
+
+  /** The state of a System One request (upstream `DecisionAdapter._prepare` with `system_one`). Its keys, in this
+    * order:
+    *   - `instructions`: the effective instructions of `layout`;
+    *   - `input_fields`: the numbered list of the input fields, as the adapters write it in the system message
+    *     (upstream `get_field_description_string`, which strips the text);
+    *   - `inputs`: the values of the input fields of `layout` in `inputs`, in the order of `inputs`, then the default
+    *     value of each input field that `inputs` does not have (upstream `Predict._forward_preprocess`);
+    *   - `demos`: only when `demos` is not empty. Each demo keeps only the fields of `layout`, in the order of the
+    *     demo.
+    */
+  def systemOneState(
+      layout: SignatureLayout,
+      demos : Vector[Example],
+      inputs: DynamicValue.Record
+  ): DynamicValue.Record =
+    val inputNames = layout.inputFields.map(_.name).toSet
+    val fieldNames = layout.fields.map(_.name).toSet
+    val declared   = DynamicValues.recordFilterKeys(
+      AdapterTextSupport.withInputDefaults(layout.inputFields, inputs),
+      inputNames.contains
+    )
+    val examples = Option.when(demos.nonEmpty)(
+      "demos" -> DynamicValue.Sequence(
+        Chunk.from(demos.map(demo => DynamicValues.recordFilterKeys(demo.values, fieldNames.contains)))
+      )
+    )
+    DynamicValue.Record(
+      Chunk.from(
+        Vector[(String, DynamicValue)](
+          "instructions" -> text(layout.effectiveInstructions),
+          "input_fields" -> text(PromptText.descriptions(layout.inputFields)),
+          "inputs"       -> declared
+        ) ++ examples
+      )
+    )
+
+  /** The output values of the answers of a System One model, by question name (upstream `DecisionAdapter._decode`): the
+    * evidence of each decision output of `plan` ([[DecisionPlan.evidence]]), then [[DecisionPlan.decode]]. A decision
+    * output with no answer is a `Left`.
+    */
+  def systemOneValues(plan: DecisionPlan, answers: DynamicValue.Record): Either[DspyError, DynamicValue.Record] =
+    plan.kinds
+      .foldLeft[Either[DspyError, Map[String, DecisionEvidence]]](Right(Map.empty)) { case (acc, (name, _)) =>
+        for
+          found  <- acc
+          answer <- DynamicValues.recordGet(answers, name)
+                      .toRight(ValidationError(s"The reply of the System One model has no answer for '$name'"))
+          evidence <- plan.evidence(name, answer)
+        yield found.updated(name, evidence)
+      }
+      .flatMap(plan.decode)
 
   private def evidenceType(kind: DecisionKind): TypeRef =
     kind match

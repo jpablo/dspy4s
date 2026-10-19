@@ -57,10 +57,12 @@ final class StreamingLanguageModelWrapper private (
   override val id: String   = delegate.id
   override val mode: LmMode = delegate.mode
   // This wrapper is the active LM during `streamify`, so it must not hide what the delegate supports (adapters
-  // consult the flags to decide e.g. whether to emit `response_format` or native tools) or its default options.
+  // consult the flags to decide e.g. whether to emit `response_format` or native tools, and `Predict` reads
+  // `supportsDecisionRequests` to choose a decision request) or its default options.
   override def supportsFunctionCalling: Boolean    = delegate.supportsFunctionCalling
   override def supportsResponseSchema: Boolean     = delegate.supportsResponseSchema
   override def supportsReasoning: Boolean          = delegate.supportsReasoning
+  override def supportsDecisionRequests: Boolean   = delegate.supportsDecisionRequests
   override def defaultOptions: DynamicValue.Record = delegate.defaultOptions
 
   /** Does nothing. The delegate is the model of the configuration, and this wrapper does not own it: the wrapper is the

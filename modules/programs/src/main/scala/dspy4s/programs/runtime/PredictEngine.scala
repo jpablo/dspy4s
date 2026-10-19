@@ -22,6 +22,7 @@ import dspy4s.core.runtime.ActivePredictContext
 import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.runtime.StreamProgress
+import dspy4s.lm.contracts.DecisionRequests
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
@@ -33,7 +34,9 @@ import dspy4s.programs.contracts.ProgramRuntime
 import zio.blocks.schema.DynamicValue
 
 /** Shared execution body for the predict module: pushes the `ActivePredict` scope, resolves the model + adapter, runs
-  * format → call → parse → prediction assembly, and dispatches the adapter / lm callback events along the way.
+  * format → call → parse → prediction assembly, and dispatches the adapter / lm callback events along the way. A System
+  * One model ([[LanguageModel.supportsDecisionRequests]]) gets a decision request with no adapter instead (see
+  * `decide`).
   *
   * This is the raw engine -- module-level lifecycle (the `withModule` callback scope and trace/history recording) is
   * added by `Module.apply`. Two sibling `Module`s call this engine in their `forward`: the record-valued
@@ -79,23 +82,68 @@ private[dspy4s] final case class PredictEngine(
   // The layout is immutable for the engine's lifetime, so the declared-input key set is computed once, not per call.
   private val inputKeys: Set[String] = layout.inputFields.map(_.name).toSet
 
-  // The layout and the settings are immutable for the engine's lifetime, so the plan is computed once.
-  private lazy val decisionPlan: Either[DspyError, DecisionPlan] = DecisionPlan.of(layout, decisions)
+  // The layout and the settings are immutable for the engine's lifetime, so the plans are computed once.
+  private lazy val decisionPlan: Either[DspyError, DecisionPlan]  = DecisionPlan.of(layout, decisions)
+  private lazy val systemOnePlan: Either[DspyError, DecisionPlan] = DecisionPlan.forSystemOne(layout, decisions)
 
   def execute(call: ProgramCall[DynamicValue.Record])(using RuntimeContext): Either[DspyError, RawPrediction] =
     ActivePredictContext.withActive(moduleName, layout) {
-      for
-        model      <- lm.fold(runtime.resolveModel)(Right(_))
-        resolved   <- runtime.resolveAdapter
-        adapter    <- resolveDecisions(resolved, model)
-        answer     <- answerWithFallback(adapter, model, buildInvocation(call, model))
-        prediction <- buildPrediction(
-                        answer.parsed,
-                        answer.response,
-                        answer.response.outputs.headOption.map(_.toolCalls).getOrElse(Vector.empty)
-                      )
-      yield prediction
+      lm.fold(runtime.resolveModel)(Right(_)).flatMap { model =>
+        if model.supportsDecisionRequests then decide(call, model)
+        else
+          for
+            resolved   <- runtime.resolveAdapter
+            adapter    <- resolveDecisions(resolved, model)
+            answer     <- answerWithFallback(adapter, model, buildInvocation(call, model))
+            prediction <- buildPrediction(
+                            answer.parsed.map(_.values),
+                            answer.response,
+                            answer.response.outputs.headOption.map(_.toolCalls).getOrElse(Vector.empty)
+                          )
+          yield prediction
+      }
     }
+
+  /** The call of a System One model (upstream `DecisionAdapter.__call__` with `system_one`, in
+    * `dspy/adapters/decision.py`): no adapter, and no prompt. These errors fail the call before the request:
+    *   - a layout that the System One plan rejects ([[DecisionPlan.forSystemOne]]): each output must be a decision
+    *     output;
+    *   - a call that streams to a listener ("Streaming decision evidence is not supported."): Jev has no stream;
+    *   - a decision output with no question ([[DecisionPlan.question]]);
+    *   - request options: the module config merged with the call config must be empty ("Unsupported TypeSafe generation
+    *     settings: [...]").
+    *
+    * The request is [[DecisionRequests.request]] with the state of [[DecisionAdapter.systemOneState]] and the questions
+    * of [[DecisionAdapter.systemOneQuestions]], and the `rolloutId` of the call (it changes only the cache key). The
+    * call dispatches the LM callback events. The answers of the reply give the output values
+    * ([[DecisionAdapter.systemOneValues]]), and the prediction keeps the usage of the reply. Each nested decision
+    * output fails the plan first, so a System One call gives no warning for it (upstream `resolve_adapter` makes the
+    * `DecisionState` before the warnings).
+    */
+  private def decide(call: ProgramCall[DynamicValue.Record], model: LanguageModel)(using
+      RuntimeContext
+  ): Either[DspyError, RawPrediction] =
+    warnOnExtraInputs(call)
+    val optionKeys  = DynamicValues.recordKeys(mergeConfig(config, call.config))
+    def unsupported = ConfigurationError(DecisionRequests.unsupportedSettings(optionKeys))
+    for
+      plan      <- systemOnePlan
+      _         <- Either.cond(!streams(model), (), ConfigurationError(PredictEngine.StreamingDecisionsError))
+      questions <- DecisionAdapter.systemOneQuestions(plan)
+      _         <- Either.cond(optionKeys.isEmpty, (), unsupported)
+      request    = DecisionRequests
+                  .request(model.id, DecisionAdapter.systemOneState(layout, demos, call.input), questions)
+                  .copy(rolloutId = call.rolloutId)
+      response <- CallbackDispatcher.withLm(
+                    modelId = model.id,
+                    request = DynamicValues.record("model" := model.id, "mode" := model.mode.toString)
+                  ) {
+                    model.call(request)
+                  }
+      answers    <- DecisionRequests.answers(response)
+      values     <- DecisionAdapter.systemOneValues(plan, answers)
+      prediction <- buildPrediction(Vector(values), response, Vector.empty)
+    yield prediction
 
   /** The adapter of a call with the decision outputs of the layout (upstream `resolve_adapter` in
     * `dspy/adapters/decision.py`): `adapter` itself when the layout has no decision output, else a [[DecisionAdapter]]
@@ -115,8 +163,6 @@ private[dspy4s] final case class PredictEngine(
     decisionPlan.flatMap { plan =>
       if plan.kinds.isEmpty then Right(adapter)
       else
-        // A System One model (TypeSafe Jev, a later batch) takes the questions and gives the evidence directly, with
-        // no adapter text: its branch comes here, before the request of a generative model below.
         for
           _ <- Either.cond(!streams(model), (), ConfigurationError(PredictEngine.StreamingDecisionsError))
           _ <- DecisionAdapter.evidenceLayout(layout, plan)
@@ -230,13 +276,14 @@ private[dspy4s] final case class PredictEngine(
       yield soFar :+ parsed
     }
 
+  /** The prediction of the output `rows` (one row for each completion), with the usage of `response`. */
   private def buildPrediction(
-      parsedOutputs: Vector[ParsedOutput],
-      response     : LmResponse,
-      toolCalls    : Vector[ToolCall]
+      rows     : Vector[DynamicValue.Record],
+      response : LmResponse,
+      toolCalls: Vector[ToolCall]
   ): Either[DspyError, RawPrediction] =
     for
-      completions <- Completions.fromRows(parsedOutputs.map(_.values))
+      completions <- Completions.fromRows(rows)
       first       <- RawPrediction.fromCompletions(completions)
       withUsage    = first.copy(lmUsage = response.usage)
       prediction   =

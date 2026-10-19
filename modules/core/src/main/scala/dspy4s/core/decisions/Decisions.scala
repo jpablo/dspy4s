@@ -498,6 +498,22 @@ final case class DecisionPlan private (
 
 object DecisionPlan:
 
+  /** The plan of `layout` for a System One model (upstream `DecisionState(..., system_one=True)`): each output must be
+    * a decision output, so each native `Boolean` or enum output is one with no settings entry. An output that cannot be
+    * a decision output is a `Left` ("Unsupported System One output '<name>'; use a decision type or native
+    * equivalent."). The other rules are the rules of [[of]].
+    */
+  def forSystemOne(
+      layout  : SignatureLayout,
+      settings: Map[String, DecisionSettings]
+  ): Either[DspyError, DecisionPlan] =
+    layout.outputFields.find(field => DecisionKind.of(field).isEmpty) match
+      case Some(field) => Left(ConfigurationError(
+          s"Unsupported System One output '${field.name}'; use a decision type or native equivalent."
+        ))
+      case None =>
+        planOf(layout, settings, layout.outputFields.flatMap(field => DecisionKind.of(field).map(field.name -> _)))
+
   /** The default threshold of a [[DecisionKind.Noul]] (upstream `DecisionState`). */
   private val defaultThreshold: Double = 0.5
 
@@ -520,6 +536,14 @@ object DecisionPlan:
       if DecisionKind.isRich(field) || settings.contains(field.name) then DecisionKind.of(field).map(field.name -> _)
       else None
     }
+    planOf(layout, settings, kinds)
+
+  /** The plan of `layout` with the decision outputs `kinds` and the explicit `settings`, with the checks of [[of]]. */
+  private def planOf(
+      layout  : SignatureLayout,
+      settings: Map[String, DecisionSettings],
+      kinds   : Vector[(String, DecisionKind)]
+  ): Either[DspyError, DecisionPlan] =
     val unsupported = settings.keySet.diff(kinds.map(_._1).toSet).toVector.sorted
     if unsupported.nonEmpty then
       Left(ConfigurationError(s"Decision settings refer to unsupported outputs: ${unsupported.mkString(", ")}"))
