@@ -669,6 +669,39 @@ The full suite passes: 1,743 tests, 0 failures, 6 live tests skipped (before the
     output field, with `None` for a missing one, and gives an assistant turn for a message with inputs only.
   - The two-step extraction prompt has no output schema, so a structured field gets the bare list or dict schema.
 
+### Batch 26 (2026-10-18): MCP tools
+
+- **I10** (G-47). The new module `dspy4s-mcp` converts the tools of an MCP server into dspy4s tools, on the MCP Java
+  SDK 2.1.0:
+  - `McpToolClient.fromSync(client)` wraps a `McpSyncClient`. The caller owns the client: it initializes the client
+    and closes it. An exception of the SDK becomes a `Left`.
+  - `McpTools.fromClient(client)` and `McpTools.convert(client, tool)` give a `ToolFunction` for ReAct and RLM, with
+    the name, the description, and the input schema of the MCP tool (upstream `convert_mcp_tool`).
+  - `McpTools.toolSpec(tool)` gives a `ToolSpec` for native function calling. The model gets the full input schema.
+  - The value of a result follows upstream `_convert_mcp_tool_result`: the text of one text part, the list of the
+    texts of more than one, else the list of the other parts. An error result is a `Left`.
+    `McpResultMode.Structured` gives the structured content when the server sends one (ca0a088bd).
+- **Contract changes.** `ToolFunction.inputSchema` and `ToolSpec.inputSchema`: the JSON schema of the arguments, both
+  optional. `ToolSchemaBridge` sends it as the `parameters` of the function when it is set.
+- **Examples.** `learn/programming/Mcp.scala` (5 of 5 snippets) and `tutorials/mcp/Mcp.scala` (10 of 10) are
+  translated. The agent pages use `ReAct`, because `ReActV2` is not ported (G-19).
+- **Dependencies.** The SDK brings 13 jars, approximately 6 MB: Jackson 3, reactor-core, the JSON schema validator,
+  and slf4j-api. The module has no SLF4J backend, so a JVM prints one "No SLF4J providers" warning.
+- **Decided by Claude, review.**
+  - `tools/list` reads each page and stops with a `Left` when a cursor comes back (the SDK loop would not end).
+  - An integer that does not fit a `Long` becomes a `BigInt`.
+  - A `$ref` to a definition that is not in `$defs` gives the type `Any`; upstream raises `KeyError`.
+  - The error text of a result with more than one text part is a JSON array; upstream writes the Python list.
+  - The input schema goes to the model with no change. Upstream expands each `$ref` and marks each argument with no
+    default as required.
+  - A `structuredContent` of `null` falls back to the text, because the Java SDK cannot tell `null` from an absent
+    value. Upstream gives `None`.
+- **Open points, for the owner.**
+  - Only `McpSyncClient` is supported. `McpAsyncClient` is not.
+  - The SSE and the streamable HTTP transports compile in the examples, but no test runs them.
+- **Tests.** `McpToolsSuite` (15), `McpSdkClientSuite` (7, a server of the SDK in a child JVM over stdio),
+  `McpSdkPagingSuite` (4, a fake transport), and one more test in `ToolSchemaBridgeSuite`.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -796,8 +829,8 @@ Open points from batch 1, for the owner:
 - [ ] **I8. `SandboxSerializable`** (ed4d479a1). → G-38 (R)
 - [x] **I9. Callback events**: interpreter lifecycle (b11cfe874), optimizer compile (80553206b), and the end event
       for base exceptions (970f72900). → G-40 (C for the end event, R for the others)
-- [ ] **I10. MCP**: SDK v2 (32bcd36ce) and structured results (ca0a088bd). → G-47 (R)
-      **Decided 2026-10-18:** MCP is in scope, and the port can take a new dependency for it.
+- [x] **I10. MCP**: SDK v2 (32bcd36ce) and structured results (ca0a088bd). → G-47 (R)
+      **Decided 2026-10-18:** MCP is in scope, and the port can take a new dependency for it. Done in batch 26.
 - [x] **I11. `inspect_history` renders tool calls** (571171227). → G-27 (R)
 
 ## Phase 5: optimize / gepa / evaluate

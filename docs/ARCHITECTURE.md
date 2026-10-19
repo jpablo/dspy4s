@@ -25,6 +25,7 @@ graph TD
   evaluate[dspy4s-evaluate]
   optimize[dspy4s-optimize]
   streaming[dspy4s-streaming]
+  mcp[dspy4s-mcp]
   examples[dspy4s-examples]
 
   core --> algebra
@@ -45,10 +46,14 @@ graph TD
   streaming --> lm
   streaming --> adapters
   streaming --> programs
+  mcp --> core
+  mcp --> adapters
+  mcp --> programs
   examples --> programs
   examples --> evaluate
   examples --> optimize
   examples --> streaming
+  examples --> mcp
 ```
 
 ## Modules

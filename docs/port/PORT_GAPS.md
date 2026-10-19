@@ -1973,12 +1973,22 @@ trainset`) uses the trainset. GEPA with an empty validation set uses the trainse
 
 ## G-47 — No MCP tool conversion
 
-**Status:** Open · **Verification:** R · **Upgrade item:** I10
+**Status:** Resolved (2026-10-18, batch 26) · **Verification:** C (tests with a real MCP server) · **Upgrade item:**
+I10
 
 **Upstream.** `dspy/utils/mcp.py:54-86`, with SDK v2 support and opt-in structured results.
 
 **dspy4s.** None; the MCP examples are blocked. `ToolFunction.argSchema` is a flat map
 (`modules/programs/.../contracts/ToolFunction.scala:23`), so a JSON Schema argument model is a prerequisite.
+
+**Resolution (batch 26).** The new module `dspy4s-mcp` holds the bridge, on the MCP Java SDK 2.1.0 (the one new
+dependency, approved on 2026-10-18). `McpTools.convert` and `fromClient` give a `ToolFunction` for each tool of a
+server (upstream `convert_mcp_tool`); `McpTools.toolSpec` gives a `ToolSpec` for native function calling.
+`McpResultMode.Structured` gives the structured content of a result (upstream `result_mode="structured"`).
+`McpToolClient.fromSync` wraps a `McpSyncClient` of the SDK and reads all pages of `tools/list`. `ToolFunction` and
+`ToolSpec` have a new optional `inputSchema` (the JSON schema of the arguments), which `ToolSchemaBridge` sends as
+the `parameters` of a function. The two MCP example pages are translated. Tests: `McpToolsSuite`,
+`McpSdkClientSuite` (a server of the SDK in a child JVM over stdio), `McpSdkPagingSuite`.
 
 ---
 

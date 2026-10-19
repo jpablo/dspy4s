@@ -66,6 +66,7 @@ dspy4s is split into focused modules so you can depend only on what you need.
 | `optimize`  | `dspy4s-optimize`  | Bootstrap few-shot, COPRO, MIPROv2, KNN, ensembles.         |
 | `gepa`      | `dspy4s-gepa`      | The reflective Genetic-Pareto prompt optimizer.             |
 | `streaming` | `dspy4s-streaming` | Synchronous streaming of predictions.                       |
+| `mcp`       | `dspy4s-mcp`       | Tools of an MCP server as dspy4s tools (MCP Java SDK).      |
 
 ## Requirements
 

@@ -126,7 +126,7 @@ val updated = example.withValue("input", "...")
 ## What is not ported yet
 
 Some DSPy features depend on machinery that dspy4s does not have yet, including
-dataset loaders (`dspy.datasets`), the MCP tool bridge, model serving /
+dataset loaders (`dspy.datasets`), model serving /
 deployment, and a few optimizers (BootstrapFinetune, Optuna, SIMBA). The
 [examples module README](https://github.com/jpablo/dspy4s/blob/main/modules/examples/README.md)
 tracks the current state, and each blocked example records exactly what it is
