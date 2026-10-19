@@ -2,6 +2,7 @@ package dspy4s.lm.providers
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.lm.contracts.LmCapabilities
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmRequest
@@ -33,21 +34,30 @@ import zio.blocks.schema.DynamicValue
   * @param defaultOptions
   *   provider parameters merged into every request (e.g. `temperature`, `max_tokens`). Per-request `LmRequest.options`
   *   take precedence -- see [[ProviderRequestNormalizer]].
+  * @param capabilities
+  *   what the model can do. `None` gives the capabilities that the port declares for the base URL of the client
+  *   ([[dspy4s.lm.contracts.LmCapabilities.forBaseUrl]]): the OpenAI capabilities for the official address, and no
+  *   capability for an other server (decision L5). Set it with [[withCapabilities]].
   */
 final case class OpenAiLanguageModel(
     model                      : String,
-    mode                       : LmMode              = LmMode.Chat,
+    mode                       : LmMode                 = LmMode.Chat,
     client                     : OpenAiClient,
-    override val defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
+    override val defaultOptions: DynamicValue.Record    = DynamicValue.Record.empty,
+    capabilities               : Option[LmCapabilities] = None
 ) extends StreamingLanguageModel:
 
   override val id: String = model
 
-  // OpenAI-compatible chat completions support the tool/function-calling protocol and structured
-  // `response_format` (JSON schema). Reasoning output is model-specific and not assumed here, so it is
-  // left at the trait default of `false`.
-  override val supportsFunctionCalling: Boolean = true
-  override val supportsResponseSchema: Boolean  = true
+  /** The capabilities of this model: [[capabilities]], else the capabilities of the base URL of the client. */
+  def effectiveCapabilities: LmCapabilities = capabilities.getOrElse(LmCapabilities.forBaseUrl(client.baseUrl))
+
+  override def supportsFunctionCalling: Boolean = effectiveCapabilities.functionCalling
+  override def supportsResponseSchema: Boolean  = effectiveCapabilities.responseSchema
+  override def supportsReasoning: Boolean       = effectiveCapabilities.reasoning
+
+  /** The same model with the declared `capabilities`. */
+  def withCapabilities(declared: LmCapabilities): OpenAiLanguageModel = copy(capabilities = Some(declared))
 
   /** Normalize, POST to the endpoint of [[mode]], and parse the JSON response into an `LmResponse`. HTTP and decode
     * failures arrive as a `Left[DspyError]` from the [[OpenAiClient]] (never an exception).
