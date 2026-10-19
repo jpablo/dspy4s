@@ -876,6 +876,45 @@ The full suite passes: 1,944 tests, 0 failures, 6 live tests skipped.
 - **Open point.** The cache check reads only the model of the runtime context. `OptimizableStructure` does not show
   a model that a predictor binds itself.
 
+### Batch 32 (2026-10-19): ReActV2 (P10)
+
+The full suite passes: 1,962 tests, 0 failures, 6 live tests skipped.
+
+- **`ReActV2[I, O]`** (package `dspy4s.programs.strategies`, experimental; upstream `dspy.ReActV2`). It follows the
+  six points of P10. Each turn runs the step predictor `react`, which gets the pending inputs, the `History` of the
+  run, and the tools, and gives `next_thought` and `tool_calls`. The tool calls run in order. An unknown tool and a
+  tool error are error results that go back to the model, and a `submit` call that succeeds ends the run. After
+  `maxIterations` turns, no tool calls, a parse error, or a full context window, the forced submit asks for the
+  `submit` tool. The result has `history` and `termination_reason` as raw values; `ReActV2.history` and
+  `ReActV2.terminationReason` read them. `ReAct` does not change.
+- **The adapters** (upstream `Adapter._call_preprocess`). With native function calling, the prompt shows neither the
+  tools input (the new `TypeRef.tools`) nor the tool calls output. Without it, `FormattedPrompt.removedOptions`
+  removes `tools`, `tool_choice`, and `parallel_tool_calls` from the request, also when the call config has them.
+  `ToolCall.fromDynamic` reads the other forms of `ToolCalls.validate_input`: the `{"tool_calls": [...]}` object and
+  one call with `args`, `arguments`, or `function`.
+- **Prompt parity.** The golden data has a ReActV2 run from upstream (`react_v2` in
+  `scripts/golden/program_prompts.py`), and the port sends the same messages. The port form of the data: the
+  arguments of a tool are JSON text, an optional input shows `str`, and `next_thought` has no type hint, because it
+  is a `str` field (point 4).
+- **Decided by Claude, review.**
+  - The `submit` argument of a plain `str`, `int`, `float`, or `bool` output is the JSON type of its `TypeRef` (for
+    example `{"type": "integer"}`, as the pydantic schema of upstream). Each other output uses its property in the
+    output schema of the signature.
+  - A failed run is a `RuntimeError("react_v2", ...)` with the upstream message, and the warnings use
+    `RuntimeEnvironment.warn`.
+  - The history keeps the results of the tool calls of a turn under `tool_call_results` (the form of G-28). Upstream
+    keeps them inside its `ToolCalls` value.
+  - The XML and the two-step adapters always remove the tool options, because they have no native mode.
+- **Tests.** `ReActV2Suite` (17) and one case of `ProgramPromptParitySuite`. Not ported: the tests of the async path
+  (point 6), the `reasoning_effort` checks (point 4), the per-call `max_iters` (point 5), and the history check of a
+  failed run (the port gives back no history with an error).
+- **Open points.**
+  - Upstream also sets `reasoning_effort` to `None` in the forced submit. The port does not send it, because a JSON
+    null could go to the provider.
+  - An exception that a tool throws ends the run, as in `ReAct`. Upstream turns each exception into an error result.
+    A port tool gives an error as a `Left`.
+  - The result has no total LM usage of the run, as `RLM`.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -892,8 +931,8 @@ Open points from batch 1, for the owner:
 - The review also found parity defects that are older than 3.2.1. The largest are in `BootstrapFewShot`, in the
   GEPA engine, and in the LM cache key.
 - Upstream marks four new features as experimental: decision types, ReAnchor, `dspy.Flex`, and ReActV2. Decision
-  D6 ports the decision types with a Jev client and ReAnchor (done in batches 28 to 31), then ReActV2. `dspy.Flex`
-  waits.
+  D6 ports the decision types with a Jev client and ReAnchor (batches 28 to 31), and ReActV2 (batch 32).
+  `dspy.Flex` waits.
 - Upstream deprecated `CodeAct` and `ProgramOfThought`. It removes them in 3.5 and names `RLM` as the replacement.
   dspy4s removed them in batch 3 (decision D1).
 
@@ -1012,7 +1051,7 @@ Open points from batch 1, for the owner:
       **Decided 2026-10-18: wait.**
 - [ ] **P9. `dspy.Flex`** (e4e97aae2, f70d08a5b, 573cfe707). Experimental. → G-49 (I)
       **Decided 2026-10-18: wait** (it needs P8).
-- [ ] **P10. ReActV2 changes** (b3897e271, ca54a855a, 05728f6ad): reserved outputs, an error when the forced
+- [x] **P10. ReActV2 changes** (b3897e271, ca54a855a, 05728f6ad): reserved outputs, an error when the forced
       submit gives no outputs, and an async path. It is still experimental. → G-19 (R)
       **Decided 2026-10-19: port ReActV2, with these six points.**
       1. `ReActV2[I, O]` is a new typed program, from a typed signature and a list of `ToolFunction` values (MCP tools
@@ -1029,6 +1068,7 @@ Open points from batch 1, for the owner:
       6. A failed forced submit is a `Left` with the upstream message. A tool error and an unknown tool are error
          results that go back to the model. A parse error or a full context window starts the forced submit. No
          separate async path: `applyAsync` covers it, and the upstream tests of the async path only are not ported.
+      Done in batch 32.
 
 ## Phase 4: interpreters / runtime
 

@@ -857,9 +857,11 @@ predictor) as the `DescribeProgram` analogue; add the summary-refinement rounds.
 
 ---
 
-## G-19 — `ReActV2` (experimental native-tool-calling ReAct) not ported
+## G-19 — `ReActV2` (experimental native-tool-calling ReAct)
 
-**Status:** Open
+**Status:** Resolved (batch 32, 2026-10-19). Decision P10 (six points) ported it as `ReActV2[I, O]` in
+`modules/programs/.../strategies/ReActV2.scala`, over the adapter seams of G-7b and G-28. `ReAct` does not change.
+The sections below are the analysis before the port.
 
 **Update (2026-10-11).** ReActV2 is still `@experimental` at upstream `f1260ff14`. New since the first version:
 the reserved outputs `history` and `termination_reason`, an error when the forced submit gives no outputs, and an
@@ -2030,7 +2032,7 @@ the `parameters` of a function. The two MCP example pages are translated. Tests:
 ## G-49 — Experimental upstream tracks that wait
 
 **Status:** Partly closed. Decision D6 (2026-10-18): the decision types, a TypeSafe Jev client, and ReAnchor are
-ported; `dspy.Flex` waits for P8, and ReActV2 comes next. Done: the types and the decoder (batch 28,
+ported; `dspy.Flex` waits for P8. ReActV2 is done (G-19, batch 32). Done: the types and the decoder (batch 28,
 `dspy4s.core.decisions`), the evidence path of a generative model with the settings on `Predict` (batch 29,
 `DecisionAdapter`), the Jev client with the System One path (batch 30, `TypeSafeModel`), and ReAnchor with the
 evidence log (batch 31, `dspy4s.optimize.ReAnchor`). ·
