@@ -36,8 +36,9 @@ import zio.blocks.schema.DynamicValue
   * runs internally over the data-bag layer (a `Streamable[ReAct[I, O]]` instance lets it stream).
   *
   * Tool selection is via output fields (the canonical DSPy mechanism) — not provider-native function-calling. Tool
-  * failures (unknown tool, invocation error) are recorded as trajectory observations rather than failing the program,
-  * mirroring Python; an LM-call failure in the react or extract step propagates as `Left`.
+  * failures (unknown tool, invocation error, non-fatal exception of a tool) are recorded as trajectory observations
+  * rather than failing the program, mirroring Python; an LM-call failure in the react or extract step propagates as
+  * `Left`.
   */
 final case class ReAct[I, O](
     baseSignature             : Signature[I, O],
@@ -85,7 +86,8 @@ final case class ReAct[I, O](
   /** Interpreter for ReAct's small action language: one named tool call with a record of arguments. Tool selection and
     * invocation failures are recoverable observations, so the LM can react to them on its next turn. The observation of
     * a result is its text in the trajectory, and an error of a tool gives `Execution error in <name>: <message>`
-    * (upstream `ReAct.forward`).
+    * (upstream `ReAct.forward`). An error of a tool is a `Left` of the tool or a non-fatal exception of the tool
+    * (upstream `except Exception`; see [[ToolExecutor.run]]). A fatal error of a tool goes up to the caller.
     */
   override protected val actionInterpreter: ActionInterpreter[ToolCallRequest, String] =
     new ActionInterpreter[ToolCallRequest, String]:

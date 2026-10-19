@@ -20,10 +20,11 @@ import dspy4s.core.contracts.{
   updated
 }
 import dspy4s.core.data.RawPrediction
-import dspy4s.core.runtime.{CallbackDispatcher, RuntimeEnvironment}
+import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.IterationLimit
 import dspy4s.programs.contracts.{ModuleLifecycle, Prediction, ProgramCall, ToolFunction}
 import dspy4s.programs.internal.ToolText
+import dspy4s.programs.runtime.ToolExecutor
 import dspy4s.signatures.Signature
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
@@ -47,7 +48,9 @@ import scala.annotation.tailrec
   *   - No tool calls end the loop with the reason `empty_tool_calls`.
   *   - Each tool call with no id gets the id `call_<turn>_<index>`.
   *   - The tool calls run in order. An unknown tool gives the error result `Unknown tool: <name>`. A tool error gives
-  *     the error result `Execution error in <name>: <message>`. A `submit` call that succeeds gives the final outputs.
+  *     the error result `Execution error in <name>: <message>`. A tool error is a `Left` of the tool or a non-fatal
+  *     exception of the tool (see [[dspy4s.programs.runtime.ToolExecutor.run]]). A fatal error of a tool goes up to the
+  *     caller. A `submit` call that succeeds gives the final outputs.
   *   - The event of the turn goes at the end of the history, when it is not empty: the pending inputs, `next_thought`,
   *     `tool_calls`, the results of the calls under [[History.ToolCallResultsKey]] (the port form; upstream keeps the
   *     results inside its `ToolCalls` value), and the final outputs when the turn has them. The pending inputs are the
@@ -291,7 +294,8 @@ final case class ReActV2[I, O](
     }
 
   /** Run the calls in order (upstream `_execute_tool_calls`). The result has one result for each call, and the final
-    * outputs of the last `submit` call that succeeds.
+    * outputs of the last `submit` call that succeeds. Each tool runs through [[ToolExecutor.run]], thus a non-fatal
+    * exception of a tool gives an error result (upstream `except Exception`), and a fatal error goes up to the caller.
     */
   private def execute(calls: Vector[ToolCall])(using
       RuntimeContext
@@ -300,7 +304,7 @@ final case class ReActV2[I, O](
       val (results, outputs) = state
       toolsByName.get(request.name) match
         case None       => (results :+ errorResult(request, s"Unknown tool: ${request.name}"), outputs)
-        case Some(tool) => CallbackDispatcher.withTool(request.name, request.args)(tool.invoke(request.args)) match
+        case Some(tool) => ToolExecutor.run(tool, request.args) match
             case Right(value) =>
               val submitted = value match
                 case record: DynamicValue.Record if request.name == SubmitToolName => Some(record)

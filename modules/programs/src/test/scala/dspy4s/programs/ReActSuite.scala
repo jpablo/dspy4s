@@ -185,6 +185,20 @@ class ReActSuite extends FunSuite:
     }
   }
 
+  test("a tool that throws gives an error observation, and the run goes on") {
+    val throwing = ToolFunction("broken", "Throws.")(_ => throw IllegalStateException("boom"))
+    val lm       = new ScriptedLm(Vector("try it||broken||", "I have what I need||finish||", "done"))
+    val react    = ReAct(baseSignature = qaSignature, tools = Vector(throwing), maxIterations = IterationLimit(5))
+
+    withReact(lm) {
+      val result = react((question = "q?"))
+      assertEquals(result.map(_.output.answer), Right("done"))
+      val traj = result.map(prediction => lookupString(prediction.raw.values, "trajectory")).getOrElse("")
+      // Upstream: `Execution error in <name>: <traceback>`. The port form is the class name and the message.
+      assert(traj.contains("[[ ## observation_0 ## ]]\nExecution error in broken: IllegalStateException: boom"), traj)
+    }
+  }
+
   test("react emits tool callback events parented to the react module call") {
     val events   = ArrayBuffer.empty[CallbackEvent]
     val callback = new CallbackHandler:

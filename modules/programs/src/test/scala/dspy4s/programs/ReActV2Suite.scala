@@ -409,3 +409,30 @@ class ReActV2Suite extends FunSuite:
     val result = run(lm)(runRecord(agent, rec("question" := "cats")))
     assertEquals(result.map(raw => field(raw.values, "answer")), Right(Some("yes")))
   }
+
+  test("a tool that throws gives an error result, and the run goes on") {
+    val throwing = ToolFunction("broken")(_ => throw IllegalStateException("boom"))
+    val lm       = Script(Vector(
+      chat("Try it.", calls("broken" -> "{}")),
+      chat("Recover.", calls("submit" -> """{"answer": "done"}"""))
+    ))
+    val result =
+      run(lm)(ReActV2(qa, Vector(throwing))((question = "cats"))).fold(error => fail(error.message), identity)
+    assertEquals(result.output.answer, "done")
+    val first = History.toolCallResults(messagesOf(result)(0)).headOption.getOrElse(fail("no result"))
+    assert(first.isError)
+    assertEquals(text(first.value), "Execution error in broken: IllegalStateException: boom")
+  }
+
+  test("a fatal error of a tool ends the run (upstream: a cancelled tool call goes up to the caller)") {
+    val fatal = ToolFunction("fatal")(_ => throw InterruptedException("stop"))
+    val lm    = Script(Vector(chat("Try it.", calls("fatal" -> "{}"))))
+    // `intercept` catches only non-fatal errors, so the test catches the fatal error itself.
+    val thrown =
+      try
+        val _ = run(lm)(ReActV2(qa, Vector(fatal))((question = "cats")))
+        None
+      catch case error: InterruptedException => Some(error.getMessage)
+    assertEquals(thrown, Some("stop"))
+    assertEquals(lm.requests.size, 1)
+  }

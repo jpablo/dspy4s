@@ -28,6 +28,15 @@ trait ToolFunction:
     */
   def inputSchema: Option[DynamicValue.Record] = None
 
+  /** Run the tool with the call arguments `args`. Return the result of the tool, or a `Left` for an error.
+    *
+    * An implementation can also throw. `ReAct` and `ReActV2` run each tool through
+    * [[dspy4s.programs.runtime.ToolExecutor.run]]: a non-fatal exception becomes a `Left` with the text
+    * `<ClassName>: <message>`, and the model gets it as an error (upstream: `except Exception` in `ReAct.forward` and
+    * in `ReActV2._execute_tool_calls`). A fatal error, for example an `InterruptedException`, goes up to the caller of
+    * the program. The sandbox interpreters (`RLM`) catch the exceptions of a tool themselves. Code that calls `invoke`
+    * directly gets the exception.
+    */
   def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue]
 
 /** Supplies a tool's description for [[ToolFunction.fromMethod]], co-located with the method definition:
