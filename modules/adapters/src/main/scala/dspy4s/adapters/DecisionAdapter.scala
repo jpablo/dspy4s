@@ -94,15 +94,18 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
       )
 
   /** The output JSON schema of the request: the output schema of `invocation` with the evidence schema as the property
-    * of each evidence field. With no output schema, the schema of the fields of `evidence`
-    * ([[StrictJsonSchema.fromFields]]), with the evidence schemas. When a field has a type with no schema there, the
-    * result has only the evidence properties and `"additionalProperties": true`: the JSON adapter then sends JSON mode,
-    * as it does for that field with no decision outputs.
+    * of each evidence field. When the root of the output schema is a `$ref` (a recursive output type), the schema that
+    * it names replaces it first ([[StrictJsonSchema.inlineRootRef]]), so that the other properties stay. With no output
+    * schema, the schema of the fields of `evidence` ([[StrictJsonSchema.fromFields]]), with the evidence schemas. When
+    * a field has a type with no schema there, the result has only the evidence properties and
+    * `"additionalProperties": true`: the JSON adapter then sends JSON mode, as it does for that field with no decision
+    * outputs.
     */
   private def outputSchema(invocation: AdapterInvocation, evidence: SignatureLayout): DynamicValue.Record =
     val schemas = plan.kinds.map((name, kind) => name -> DecisionAdapter.evidenceSchema(kind))
     invocation.outputJsonSchema.flatMap(PythonText.parseJson) match
-      case Some(typed: DynamicValue.Record) =>
+      case Some(parsed: DynamicValue.Record) =>
+        val typed      = StrictJsonSchema.inlineRootRef(parsed)
         val properties = DynamicValues.recordGet(typed, "properties") match
           case Some(record: DynamicValue.Record) => record
           case _                                 => DynamicValue.Record.empty

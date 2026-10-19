@@ -81,6 +81,19 @@ private[adapters] object StrictJsonSchema:
       DynamicValue.Record(Chunk("type" -> str("object"), "properties" -> DynamicValue.Record(Chunk.from(entries))))
     )
 
+  /** `schema` with the schema that its root `$ref` names in place of the `$ref`. The keys of the named schema come
+    * first, then each other key of `schema`. The root of the schema of a recursive type is a `$ref` (see
+    * `ZioSchemaCodec.jsonSchemaForModel`), thus a change to the root `properties` must come after this step. A schema
+    * with no root `$ref`, or with a `$ref` that does not resolve, stays as it is.
+    */
+  def inlineRootRef(schema: DynamicValue.Record): DynamicValue.Record =
+    DynamicValues.recordGet(schema, "$ref") match
+      case Some(DynamicValue.Primitive(PrimitiveValue.String(ref))) => lookup(schema, ref) match
+          case Right(target: DynamicValue.Record) =>
+            overlay(target, schema.fields.toVector.filterNot((key, _) => key == "$ref"))
+          case _ => schema
+      case _ => schema
+
   // ── Strict shape ──────────────────────────────────────────────────────────────────────────────────────────────
 
   /** The keys whose value is a record of named schemas. */
