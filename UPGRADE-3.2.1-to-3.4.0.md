@@ -777,6 +777,35 @@ The full suite passes: 1,839 tests, 0 failures, 6 live tests skipped.
 - **A defect found, for the next fix.** A field with a default value (for example `count: Int = 3`) gets the type
   `json`, so the prompt shows it as a `dict`. `DefaultFieldTypeRefSuite` reproduces it.
 
+### Batch 29 (2026-10-19): the evidence path of a generative model (A8, part 2)
+
+The full suite passes: 1,865 tests, 0 failures, 6 live tests skipped.
+
+- **`DecisionAdapter`** (upstream `DecisionAdapter` for a generative model). It wraps the Chat, JSON, or XML adapter
+  of the call. Each decision output becomes an evidence field (`NoulEvidence`, `ScoreEvidence`, or
+  `ChoiceEvidence`) with the question as indented JSON in its description, and the demos go into the instructions as
+  "Task examples (labels or evidence)" (`json.dumps` with ASCII escapes). The parse reads the evidence and decodes it
+  with the settings. The text follows the upstream snapshot, except the evidence schema, which has the port form
+  (decision 5; PORT_DIFFERENCES.md section 16). The JSON adapter sends the evidence schemas in its
+  `response_format`.
+- **The settings** (decision 3). `Predict`, `DynamicPredict`, and `ChainOfThought` have `decisions`, with
+  `withDecision`, `criteria`, and `withCriteria` (upstream `fields`, `get_criteria`, `set_criteria`). Each call
+  validates the settings and the questions before the request. The settings are a part of `OptimizableParameters`,
+  so the program state saves them, and an optimizer can write them.
+- **Scope limits** (decision 7). A call that streams to a listener and has decision outputs fails before the request.
+  A typed output with a decision value inside a list, a map, or an `Option` gives the upstream warning. `RLM` with
+  decision outputs gives a warning at construction, as upstream.
+- **Decided by Claude, review.**
+  - A typed signature has no field descriptions, so a typed decision output takes its question text from the
+    `instructions` of its settings. Upstream takes the `desc` of the `OutputField`.
+  - A malformed evidence value is a parse error, so the JSON fallback runs. A decode error (for example a total
+    probability of zero) is not a parse error and gets no fallback, as upstream decodes after the adapter call.
+  - Loading a state checks the JSON form of the settings; the check against the layout comes at the next call.
+    Upstream checks at load time.
+  - `StreamingLanguageModel.streamsToListener` tells the engine that a call streams to a listener of this predictor.
+- **Tests.** `DecisionAdapterSuite` (9), `PredictDecisionSuite` (6), `DecisionProgramSuite` (5),
+  `DecisionPersistenceSuite` (3), `StreamingDecisionSuite` (2).
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -894,8 +923,8 @@ Open points from batch 1, for the owner:
       model output. The prompt asks for JSON text there. See "Deliberately not mirrored".
 - [x] **A7. `append_instructions` on signatures** (498760149). → G-48 (R)
 - [ ] **A8. Decision types `Noul`, `Score`, `Choice`** (e83978c08, 4c6448e03). Experimental. → G-49 (I)
-      In progress: the types and the decoder are done (batch 28). The evidence path, the Jev client, and ReAnchor
-      follow.
+      In progress: the types and the decoder are done (batch 28), and the evidence path for a generative model and
+      the settings on `Predict` (batch 29). The Jev client and ReAnchor follow.
 
 ## Phase 3: programs
 

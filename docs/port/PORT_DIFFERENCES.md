@@ -406,6 +406,9 @@ constraints. The port has no model of Python types, so a few places of a prompt 
 - ReAct writes the arguments of a tool as JSON text. Upstream writes the Python text of a dict.
 - The RLM action prompt has no text about the sub-agents of the sandbox `dspy` facade, because the port has no facade
   (upgrade item P8).
+- The evidence request of a decision output (experimental) shows the evidence JSON schema in the form of the port.
+  Upstream shows the pydantic form, with title-cased labels. A decision value prints with the field order of the
+  port (`value`, `confidence`, ...); upstream prints `confidence` first.
 
 ## What this means in practice
 
