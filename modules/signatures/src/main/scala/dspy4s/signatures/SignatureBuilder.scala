@@ -10,9 +10,9 @@ import zio.blocks.schema.Schema
   * dynamic shapes assembled from config, tests).
   *
   * Each `.input[T]` / `.output[T]` call summons a `zio.blocks.schema.Schema[T]` and derives the field's wire `TypeRef`
-  * from it (via [[ZioSchemaCodec.typeRefForSchema]]) — the same mapping case-class derivation applies per record field.
-  * Any type with a `Schema` (primitives, Scala enums, collections, nested products) works here without writing a case
-  * class.
+  * and enum values from it (via [[ZioSchemaCodec.typeRefForSchema]] and [[ZioSchemaCodec.enumValuesForSchema]]) — the
+  * same mapping case-class derivation applies per record field. Any type with a `Schema` (primitives, Scala enums,
+  * collections, nested products) works here without writing a case class.
   *
   * Returns a plain `SignatureLayout` from `.build`; callers needing a `Signature[I, O]` should use
   * `Signature.derived[I, O]` instead.
@@ -64,6 +64,7 @@ final class SignatureBuilder private[signatures] (
     FieldSpec(
       name = name,
       typeRef = ZioSchemaCodec.typeRefForSchema[T],
+      enumValues = ZioSchemaCodec.enumValuesForSchema[T],
       optional = ZioSchemaCodec.isOptionSchema[T]
     )
 

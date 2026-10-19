@@ -1,19 +1,16 @@
 package dspy4s.adapters
 
-import dspy4s.adapters.contracts.{
-  AdapterConstraints,
-  AdapterInvocation,
-  FormattedPrompt,
-  NativeFunctionCalling,
-  ToolChoice
-}
-import dspy4s.adapters.internal.{AdapterTextSupport, ConversationHistory, JsonDynamic, StrictJsonSchema, TurnText}
+import dspy4s.adapters.contracts.{AdapterInvocation, FormattedPrompt, NativeFunctionCalling, ToolChoice}
+import dspy4s.adapters.internal.{ConversationHistory, JsonDynamic, PromptText, PythonText, StrictJsonSchema, TurnText}
+import dspy4s.adapters.internal.PromptText.OutputSchema
 import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout, updated}
 import dspy4s.lm.contracts.LanguageModel
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
-/** Builds JSONAdapter's JSON instructions, demonstrations, conversation history, and provider response-schema options.
+/** Builds JSONAdapter's system message, demonstrations, conversation history, and provider response-schema options
+  * (upstream `JSONAdapter` in `dspy/adapters/json_adapter.py`). The system message and the user turns have the form of
+  * the chat adapter, with a JSON object for the outputs.
   */
 private[adapters] object JSONAdapterPrompt:
   def format(
@@ -22,24 +19,10 @@ private[adapters] object JSONAdapterPrompt:
       parallelToolCalls       : Option[Boolean],
       toolChoice              : Option[ToolChoice]
   )(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-    val layout           = invocation.layout
-    val renderLayout     = NativeFunctionCalling.promptLayout(layout, useNativeFunctionCalling)
-    val textOutputFields = renderLayout.outputFields
-    val fieldList        = textOutputFields.map(_.name).mkString(", ")
-    val jsonInstruction  = invocation.outputJsonSchema match
-      case Some(schema) =>
-        s"""Return a valid JSON object that conforms to the following JSON Schema. Do not include markdown fences.
-           |
-           |$schema""".stripMargin
-      case None => s"Return a valid JSON object with exactly these keys: $fieldList. Do not include markdown fences." +
-          toolCallsNote(textOutputFields)
-    val baseSystemText = layout.instructions match
-      case Some(instructions) => s"$instructions\n\n$jsonInstruction"
-      case None               => jsonInstruction
-    val systemText = AdapterConstraints.appendTo(
-      ConversationHistory.appendNoteTo(baseSystemText, layout),
-      layout.outputFields
-    )
+    val layout       = invocation.layout
+    val renderLayout = NativeFunctionCalling.promptLayout(layout, useNativeFunctionCalling)
+    val schema       = OutputSchema(invocation.outputJsonSchema)
+    val systemText   = PromptText.systemMessage(layout, renderLayout, fieldStructure(renderLayout, schema))
 
     val messages = ConversationHistory.messages(
       invocation,
@@ -65,31 +48,44 @@ private[adapters] object JSONAdapterPrompt:
       )
     )
 
-  /** The text of a turn: `prefix value` lines for a user turn, and one JSON object for an assistant turn. A user turn
-    * has no output reminder.
+  /** The text of a turn: the marker form of the chat adapter for a user turn, with the JSON reminder in a current
+    * request, and one JSON object for an assistant turn (upstream `JSONAdapter.format_assistant_message_content`).
     */
   private object Turns extends TurnText:
     override def user(layout: SignatureLayout, values: DynamicValue.Record, mainRequest: Boolean): String =
-      AdapterTextSupport.renderFields(layout.inputFields, values)
+      ChatAdapterPrompt.userText(layout, values, Option.when(mainRequest)(outputRequirements(layout)))
 
     override def assistant(layout: SignatureLayout, values: DynamicValue.Record): String =
-      val assistantJson = ujson
-        .Obj
-        .from(
-          layout.outputFields.flatMap(field =>
-            DynamicValues.recordGet(values, field.name).map(value => field.name -> JsonDynamic.toUjson(value))
-          )
-        )
-      ujson.write(assistantJson)
+      outputObject(layout.outputFields.map { field =>
+        field -> PromptText.jsonable(field, DynamicValues.recordGet(values, field.name).getOrElse(DynamicValue.Null))
+      })
 
-    override val assistantWritesJson: Boolean = true
+  /** The structure of the system message (upstream `JSONAdapter.format_field_structure`). */
+  private def fieldStructure(layout: SignatureLayout, schema: OutputSchema): String =
+    val inputs = layout.inputFields.map(field =>
+      s"[[ ## ${field.name} ## ]]\n${PromptText.placeholder(field, output = false, schema)}"
+    )
+    val outputs = layout.outputFields.map { field =>
+      field -> DynamicValue.Primitive(PrimitiveValue.String(PromptText.placeholder(field, output = true, schema)))
+    }
+    PythonText.strip(
+      Vector(
+        PromptText.StructureHeader,
+        "Inputs will have the following structure:",
+        PythonText.strip(inputs.mkString("\n\n")),
+        "Outputs will be a JSON object with the following fields.",
+        outputObject(outputs)
+      ).mkString("\n\n")
+    )
 
-  /** The form of each text tool calls field, for the keys instruction. Empty when the layout has no such field. */
-  private def toolCallsNote(outputFields: Vector[FieldSpec]): String =
-    outputFields
-      .filter(NativeFunctionCalling.isToolCallsField)
-      .map(field => s" The value of `${field.name}` must be ${NativeFunctionCalling.TextFormat}.")
-      .mkString
+  /** The output fields as one JSON object, in the form of `json.dumps(..., indent=2)`. */
+  private def outputObject(fields: Vector[(FieldSpec, DynamicValue)]): String =
+    PythonText.json(DynamicValue.Record(Chunk.from(fields.map((field, value) => field.name -> value))), Some(2))
+
+  /** The output reminder of the user turn (upstream `JSONAdapter.user_message_output_requirements`). */
+  private def outputRequirements(layout: SignatureLayout): String =
+    "Respond with a JSON object in the following order of fields: " +
+      layout.outputFields.map(field => s"`${field.name}`${PromptText.reminderHint(field)}").mkString(", then ") + "."
 
   /** The `response_format` of the request (upstream `JSONAdapter._prepare_response_format`). Empty when the model of
     * the context does not support a response schema.

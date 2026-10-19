@@ -1,7 +1,6 @@
 package dspy4s.adapters.internal
 
 import dspy4s.adapters.contracts.AdapterErrors
-import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.NativeFunctionCalling
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.DspyError
@@ -14,8 +13,6 @@ import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.updated
 import dspy4s.lm.contracts.LmOutput
-import dspy4s.lm.contracts.Message
-import dspy4s.lm.contracts.MessageRole
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
@@ -24,27 +21,6 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   * adapter can no longer silently miss the others.
   */
 private[adapters] object AdapterTextSupport:
-
-  /** Standard system → demonstration pairs → live input message sequence. `TwoStepAdapter` uses it. The Chat, JSON, and
-    * XML adapters use [[ConversationHistory.messages]], which also replays a conversation history. Both use
-    * [[DemoMessages]] for the demos.
-    */
-  def fewShotMessages(
-      invocation: AdapterInvocation,
-      systemText: String
-  )(
-      renderDemoOutput: DynamicValue.Record => String
-  ): Vector[Message] =
-    val inputFields = invocation.layout.inputFields
-    val demos       = DemoMessages.messages(invocation.layout, invocation.demos)(
-      values => renderFields(inputFields, values),
-      renderDemoOutput
-    )
-    (Vector(Message(role = MessageRole.System, text = Some(systemText))) ++ demos) :+
-      Message(
-        role = MessageRole.User,
-        text = Some(renderFields(inputFields, withInputDefaults(inputFields, invocation.inputs.values)))
-      )
 
   /** `values` with the [[FieldSpec.defaultValue]] of each field of `inputFields` that `values` does not have. Only the
     * inputs of a live call take the defaults. A demo and a turn of a history do not.
@@ -104,19 +80,6 @@ private[adapters] object AdapterTextSupport:
       metadata = Map("adapter" -> adapterName) ++ metadata
     )
 
-  /** Render fields as `prefix value` lines (prefix falls back to `name:`). A field that `values` does not have is not
-    * rendered. Used for demo / input user messages by the JSON, XML, and TwoStep adapters.
-    */
-  def renderFields(fields: Vector[FieldSpec], values: DynamicValue.Record): String =
-    fields.flatMap { field =>
-      val rendered = DynamicValues.recordGet(values, field.name)
-        .map(DynamicValues.renderText)
-      rendered.map { value =>
-        val prefix = field.prefix.getOrElse(s"${field.name}:")
-        s"$prefix $value"
-      }
-    }.mkString("\n")
-
   /** The value of the output field `field` from its raw text (upstream `parse_value` with a string). A `tool_calls`
     * field takes the JSON list of calls in the text ([[textToolCalls]]). Each other field goes to [[coerceOutputText]].
     * The Chat, JSON, and XML adapters use this function, so a text value has the same rules in each format.
@@ -128,10 +91,55 @@ private[adapters] object AdapterTextSupport:
 
   /** Coerce the raw text of the output field `field` (upstream `parse_value`). The text `null` or `None` of an optional
     * field is a null, when the type of the field is not a string. Each other text goes to [[coerceText]].
+    *
+    * An optional field also takes the lenient forms of [[optionalFallback]].
     */
   def coerceOutputText(field: FieldSpec, raw: String): Either[DspyError, DynamicValue] =
     if isNullText(field, raw) then Right(DynamicValue.Null)
-    else coerceText(field.typeRef, raw)
+    else optionalFallback(field, raw, coerceText(field.typeRef, raw))
+
+  /** `result`, else, for an optional field, the value of the lenient forms of the typed decode
+    * (`ZioSchemaCodec.normalize`): the texts `""`, `null`, `none`, and `n/a` in any case are a null, and a number can
+    * have a currency symbol, a `+`, and thousands commas (`"$2,399.00"`). An integer can be out of the `Int` range.
+    *
+    * An `Option` field of a typed signature has the type of its element. Before, it was a text field, and the typed
+    * decode read these forms. This rule keeps them for an optional field. A text that does not fit the type, also in a
+    * lenient form, keeps the error of `result`.
+    *
+    * @param raw
+    *   the text of the value: the text of the response, or the JSON text of a JSON value
+    */
+  def optionalFallback(
+      field : FieldSpec,
+      raw   : String,
+      result: Either[DspyError, DynamicValue]
+  ): Either[DspyError, DynamicValue] =
+    result match
+      case Left(error) if field.optional => lenientOptional(field.typeRef, raw.trim).toRight(error)
+      case other                         => other
+
+  private def lenientOptional(typeRef: TypeRef, text: String): Option[DynamicValue] =
+    if LenientNullTexts.exists(_.equalsIgnoreCase(text)) then Some(DynamicValue.Null)
+    else
+      val number = cleanNumeric(text)
+      typeRef match
+        case TypeRef.int => number.toLongOption.map { whole =>
+            if whole.isValidInt then DynamicValue.Primitive(PrimitiveValue.Int(whole.toInt))
+            else DynamicValue.Primitive(PrimitiveValue.Long(whole))
+          }
+        case TypeRef.double => number.toDoubleOption.map(value => DynamicValue.Primitive(PrimitiveValue.Double(value)))
+        case _              => None
+
+  /** The texts that are a null for the typed decode of an `Option` field (`ZioSchemaCodec.normalizeOption`). */
+  private val LenientNullTexts: Vector[String] = Vector("", "null", "none", "n/a")
+
+  /** A number text with no leading currency symbol (`$ € £ ¥`), no leading `+`, and no comma
+    * (`ZioSchemaCodec.cleanNumeric`).
+    */
+  private def cleanNumeric(text: String): String =
+    val noSymbol = if text.nonEmpty && "$€£¥".contains(text.head) then text.tail.trim else text
+    val noSign   = if noSymbol.startsWith("+") then noSymbol.tail else noSymbol
+    noSign.filter(_ != ',')
 
   /** `true` when `raw` is a null text of the optional field `field` whose type is not a string. */
   private def isNullText(field: FieldSpec, raw: String): Boolean =

@@ -244,7 +244,9 @@ class InstructionProposerSuite extends FunSuite:
     val lm      = scripted(reply("New text."))
     val context = RuntimeContext(adapter = Some(ChatAdapter()))
     assertEquals(propose(DefaultInstructionProposer(), lm, context = context), Right(Map(first -> "New text.")))
-    assert(!lm.requests.head.contains("[[ ## current_instruction ## ]]"), lm.requests.head)
+    // The JSON adapter of the proposer has the input markers of the chat adapter (upstream), but no completed marker.
+    assert(lm.requests.head.contains("Outputs will be a JSON object with the following fields."), lm.requests.head)
+    assert(!lm.requests.head.contains("[[ ## completed ## ]]"), lm.requests.head)
   }
 
   test("the adapter option selects the adapter of the calls") {

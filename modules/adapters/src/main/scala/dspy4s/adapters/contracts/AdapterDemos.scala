@@ -7,9 +7,12 @@ package dspy4s.adapters.contracts
   * counts, as upstream. Each other demo is dropped. The adapters put the incomplete demos first, then the complete
   * demos, each group in the order of the demos.
   *
-  * The user turn of an incomplete demo starts with [[IncompletePrefix]] and has the input values of the demo that are
-  * not null. The assistant turn has each output field: a field with no value or a null value shows [[NotSupplied]]. A
-  * field default ([[dspy4s.core.contracts.FieldSpec.defaultValue]]) does not fill a demo.
+  * The user turn of an incomplete demo starts with [[IncompletePrefix]] and has each input value of the demo. The
+  * assistant turn of the Chat, JSON, and XML adapters has each output field: a field that the demo does not have shows
+  * [[NotSupplied]]. A null value shows as a null (`None` in text, `null` in JSON), as upstream. The assistant turn of
+  * the TwoStep adapter shows the output fields that the demo has only (upstream
+  * `TwoStepAdapter.format_assistant_message_content`). A field default
+  * ([[dspy4s.core.contracts.FieldSpec.defaultValue]]) does not fill a demo.
   */
 object AdapterDemos:
 

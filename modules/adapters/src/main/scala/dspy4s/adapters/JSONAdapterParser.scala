@@ -77,7 +77,7 @@ private[adapters] object JSONAdapterParser:
     * calls field takes a JSON list of calls, or the JSON text of such a list. A JSON string for a field whose type is
     * not a string goes through the text coercion of the chat format (`AdapterTextSupport.coerceOutputText`), as
     * upstream `parse_value` reads a string with `json_repair`: `"3"` for an `int` field is `3`, and `"[1, 2]"` for a
-    * `list` field is a list.
+    * `list` field is a list. An optional field also takes the lenient forms of `AdapterTextSupport.optionalFallback`.
     */
   private def decode(field: FieldSpec, value: Value): Either[DspyError, DynamicValue] =
     value match
@@ -85,7 +85,7 @@ private[adapters] object JSONAdapterParser:
       case ujson.Str(text)                                        => AdapterTextSupport.outputTextValue(field, text)
       case other if NativeFunctionCalling.isToolCallsField(field) =>
         AdapterTextSupport.toolCallsValue(JsonDynamic.fromUjson(other))
-      case other => coerce(field.typeRef, other)
+      case other => AdapterTextSupport.optionalFallback(field, renderJson(other), coerce(field.typeRef, other))
 
   private def extractJson(text: String): Either[DspyError, String] =
     val trimmed = text.trim

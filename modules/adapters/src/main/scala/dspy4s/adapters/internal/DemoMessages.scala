@@ -11,7 +11,8 @@ import dspy4s.lm.contracts.MessageRole
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** The messages of the demos of a request (upstream `Adapter.format_demos`). [[AdapterDemos]] gives the rule and its
-  * texts. The Chat, JSON, XML, and TwoStep adapters use this one implementation.
+  * texts. The Chat, JSON, XML, and TwoStep adapters use this one implementation. A demo shows each value that it has,
+  * also a null value.
   */
 private[adapters] object DemoMessages:
 
@@ -20,12 +21,15 @@ private[adapters] object DemoMessages:
     *
     * @param layout
     *   the layout that the demos show. A demo is complete when it has a value for each field of this layout.
+    * @param missingOutput
+    *   the value that an incomplete demo shows for an output field that it does not have (upstream
+    *   `missing_field_message`), or `None` when the assistant turn does not show such a field
     * @param user
     *   the text of a user turn for the values of a demo
     * @param assistant
     *   the text of an assistant turn for the values of a demo
     */
-  def messages(layout: SignatureLayout, demos: Vector[Example])(
+  def messages(layout: SignatureLayout, demos: Vector[Example], missingOutput: Option[String])(
       user     : DynamicValue.Record => String,
       assistant: DynamicValue.Record => String
   ): Vector[Message] =
@@ -35,8 +39,8 @@ private[adapters] object DemoMessages:
       layout.inputFields.exists(hasKey(_, values)) && layout.outputFields.exists(hasKey(_, values))
     }
     incomplete.flatMap { values =>
-      val shown = incompleteValues(layout, values)
-      turns(Vector(AdapterDemos.IncompletePrefix, user(shown)).filter(_.nonEmpty).mkString("\n\n"), assistant(shown))
+      val shown = incompleteValues(layout, values, missingOutput)
+      turns(Vector(AdapterDemos.IncompletePrefix, user(values)).filter(_.nonEmpty).mkString("\n\n"), assistant(shown))
     } ++ complete.flatMap(values => turns(user(values), assistant(values)))
 
   private def turns(userText: String, assistantText: String): Vector[Message] =
@@ -58,14 +62,16 @@ private[adapters] object DemoMessages:
       case None | Some(_: DynamicValue.Null.type) => false
       case Some(_)                                => true
 
-  /** The values that an incomplete demo shows: no null value, and [[AdapterDemos.NotSupplied]] for each output field
-    * that has no value.
+  /** The values that the assistant turn of an incomplete demo shows: `missingOutput` for each output field that the
+    * demo does not have. A null value stays, as upstream `outputs.get(k, missing_field_message)`.
     */
-  private def incompleteValues(layout: SignatureLayout, values: DynamicValue.Record): DynamicValue.Record =
-    val present = DynamicValue.Record(values.fields.filter {
-      case (_, _: DynamicValue.Null.type) => false
-      case _                              => true
-    })
-    layout.outputFields.filterNot(hasValue(_, present)).foldLeft(present) { (shown, field) =>
-      shown.updated(field.name, DynamicValue.Primitive(PrimitiveValue.String(AdapterDemos.NotSupplied)))
+  private def incompleteValues(
+      layout       : SignatureLayout,
+      values       : DynamicValue.Record,
+      missingOutput: Option[String]
+  ): DynamicValue.Record =
+    missingOutput.fold(values) { text =>
+      layout.outputFields.filterNot(hasKey(_, values)).foldLeft(values) { (shown, field) =>
+        shown.updated(field.name, DynamicValue.Primitive(PrimitiveValue.String(text)))
+      }
     }

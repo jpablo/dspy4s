@@ -28,14 +28,11 @@ object NativeFunctionCalling:
 
   /** True for the output field that receives the tool calls (`typeRef == TypeRef.toolCalls`). When native function
     * calling is active ([[isActive]]), the structured response fills such a field, and the prompt does not ask for it.
-    * Else the field is a text output field: the prompt asks for a JSON list of `{"name", "args"}` objects, and the
-    * parser reads that list from the text.
+    * Else the field is a text output field: the prompt asks for a JSON object like `{"tool_calls": [{"name", "args"}]}`
+    * (upstream `ToolCalls`), and the parser reads that object, or a JSON list of the calls, from the text.
     */
   def isToolCallsField(field: FieldSpec): Boolean =
     field.typeRef == TypeRef.toolCalls
-
-  /** The form of a text tool calls value, as a prompt names it. */
-  val TextFormat: String = """a JSON list of objects like {"name": "...", "args": {...}}"""
 
   /** Whether the ambient LM advertises function-calling support (narrows the opaque `RuntimeContext.lm` ref). */
   def lmSupportsFunctionCalling(using ctx: RuntimeContext): Boolean =

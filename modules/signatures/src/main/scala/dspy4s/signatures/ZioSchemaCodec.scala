@@ -159,7 +159,9 @@ private[signatures] object ZioSchemaCodec:
     val noSign   = if noSymbol.startsWith("+") then noSymbol.tail else noSymbol
     noSign.filter(_ != ',')
 
-  /** Walk a `Reflect.Record` and produce its role-free field metadata. An `Option` field is an optional field. */
+  /** Walk a `Reflect.Record` and produce its role-free field metadata. An `Option` field is an optional field, with the
+    * type and the enum values of its element.
+    */
   def fieldSpecsFromReflect(reflect: Reflect[?, ?]): Vector[FieldSpec] =
     reflect match
       case rec: Reflect.Record[?, ?] => rec.fields.toVector.map(term =>
@@ -174,9 +176,14 @@ private[signatures] object ZioSchemaCodec:
 
   /** Allowed case names for an enum field, i.e. a `Reflect.Variant`'s cases. Empty for any non-variant reflect. The
     * wire `typeRef` for a variant stays `TypeRef.string` (the LM sees a flat label); these values ride alongside so
-    * adapters can tell the LM which labels are valid.
+    * adapters can tell the LM which labels are valid. An `Option` has the enum values of its element.
     */
   private def enumValuesOf(reflect: Reflect[?, ?]): Vector[String] =
+    optionSomeValueReflect(reflect) match
+      case Some(element) => enumValuesOf(withoutDeferred(element))
+      case None          => caseNamesOf(reflect)
+
+  private def caseNamesOf(reflect: Reflect[?, ?]): Vector[String] =
     reflect match
       case variant: Reflect.Variant[?, ?] =>
         val cases            = variant.cases.toVector
@@ -224,7 +231,26 @@ private[signatures] object ZioSchemaCodec:
     */
   def isOptionSchema[A](using schema: Schema[A]): Boolean = optionSomeValueReflect(schema.reflect).isDefined
 
+  /** The enum values of a field of type `A`, as in [[fieldSpecsFromReflect]]: the case names of an enum, or of the
+    * element of an `Option` of an enum. Empty for each other type.
+    */
+  def enumValuesForSchema[A](using schema: Schema[A]): Vector[String] = enumValuesOf(schema.reflect)
+
+  /** The wire type of a reflect. An `Option` has the type of its element: an `Option[Int]` field is an optional int
+    * field.
+    */
   private def typeRefFor(reflect: Reflect[?, ?]): TypeRef =
+    optionSomeValueReflect(reflect) match
+      case Some(element) => typeRefFor(withoutDeferred(element))
+      case None          => typeRefOfValue(reflect)
+
+  /** The reflect behind a deferred reflect. zio-blocks defers the reflect of some nested types. */
+  private def withoutDeferred(reflect: Reflect[?, ?]): Reflect[?, ?] =
+    reflect match
+      case deferred: Reflect.Deferred[?, ?] => withoutDeferred(deferred.value)
+      case other                            => other
+
+  private def typeRefOfValue(reflect: Reflect[?, ?]): TypeRef =
     reflect match
       case prim: Reflect.Primitive[?, ?]                                  => primitiveTypeRef(prim.primitiveType)
       case _: Reflect.Variant[?, ?]                                       => TypeRef.string

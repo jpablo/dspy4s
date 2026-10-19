@@ -1,6 +1,5 @@
 package dspy4s.adapters
 
-import dspy4s.adapters.contracts.AdapterConstraints
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
@@ -38,27 +37,23 @@ class AdapterConstraintsSuite extends FunSuite:
   private def systemText(prompt: dspy4s.adapters.contracts.FormattedPrompt): String =
     prompt.messages.headOption.flatMap(_.text).getOrElse("")
 
-  test("AdapterConstraints.block lists constrained fields, and is None when none are constrained") {
-    assertEquals(AdapterConstraints.block(layout(constrained = false).outputFields), Option.empty[String])
-    val block = AdapterConstraints.block(layout(constrained = true).outputFields).getOrElse(fail("expected a block"))
-    assert(block.contains("Field constraints:"), block)
-    assert(block.contains("`age`: greater than: 0"), block)
+  private val adapters: Vector[(String, dspy4s.adapters.contracts.Adapter)] =
+    Vector("ChatAdapter" -> ChatAdapter(), "JSONAdapter" -> JSONAdapter(), "XMLAdapter" -> XMLAdapter())
+
+  // Upstream `get_field_description_string`: the constraints are on the line after the field, in each adapter.
+  test("each adapter shows the constraints of a field on the line after the field") {
+    given RuntimeContext = RuntimeContext()
+    adapters.foreach { (label, adapter) =>
+      val sys = systemText(adapter.format(invocation(constrained = true)).toOption.get)
+      assert(sys.contains("Your output fields are:\n1. `age` (int): \nConstraints: greater than: 0\n"), s"$label: $sys")
+      assert(!sys.contains("Field constraints:"), s"$label: $sys")
+    }
   }
 
-  test("XMLAdapter appends the field-constraints block to its system instruction") {
+  test("an unconstrained field has no constraints line") {
     given RuntimeContext = RuntimeContext()
-    val sys              = systemText(XMLAdapter().format(invocation(constrained = true)).toOption.get)
-    assert(sys.contains("Field constraints:") && sys.contains("greater than: 0"), sys)
-
-    val plain = systemText(XMLAdapter().format(invocation(constrained = false)).toOption.get)
-    assert(!plain.contains("Field constraints:"), plain)
-  }
-
-  test("JSONAdapter appends the field-constraints block to its system instruction") {
-    given RuntimeContext = RuntimeContext()
-    val sys              = systemText(JSONAdapter().format(invocation(constrained = true)).toOption.get)
-    assert(sys.contains("Field constraints:") && sys.contains("greater than: 0"), sys)
-
-    val plain = systemText(JSONAdapter().format(invocation(constrained = false)).toOption.get)
-    assert(!plain.contains("Field constraints:"), plain)
+    adapters.foreach { (label, adapter) =>
+      val plain = systemText(adapter.format(invocation(constrained = false)).toOption.get)
+      assert(!plain.contains("Constraints:"), s"$label: $plain")
+    }
   }

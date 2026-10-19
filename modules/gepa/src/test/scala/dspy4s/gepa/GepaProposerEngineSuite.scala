@@ -194,8 +194,10 @@ class GepaProposerEngineSuite extends FunSuite:
     assert(request.contains(""""Generated Outputs": {"answer": "WRONG"}"""), request)
     assert(request.contains(""""Feedback": "expected 'Paris', got 'WRONG'""""), request)
     assert(request.contains(""""Inputs": {"question": "Capital of France ("""), request)
-    // The proposer has its own adapter: the request does not have the form of the chat adapter of the context.
-    assert(!request.contains("[[ ## current_instruction ## ]]"), request)
+    // The proposer has its own adapter: the request does not have the form of the chat adapter of the context. The
+    // JSON adapter has the input markers of the chat adapter (upstream), but no completed marker.
+    assert(request.contains("Outputs will be a JSON object with the following fields."), request)
+    assert(!request.contains("[[ ## completed ## ]]"), request)
   }
 
   test("an option of the default proposer reaches the reflection LM") {

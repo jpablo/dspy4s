@@ -69,7 +69,8 @@ class JSONAdapterNativeToolsSuite extends FunSuite:
     assert(DynamicValues.recordGet(prompt.requestOptions, "tools").isDefined, "tools must be injected")
     val promptText = prompt.messages.flatMap(_.text).mkString("\n")
     assert(promptText.contains("answer"), "the real text key must still be requested")
-    assert(!promptText.contains("tool_calls"), s"tool_calls must not be a requested JSON key:\n$promptText")
+    assert(!promptText.contains("\"tool_calls\""), s"tool_calls must not be a requested JSON key:\n$promptText")
+    assert(promptText.contains("Respond with a JSON object in the following order of fields: `answer`."), promptText)
   }
 
   test("JSONAdapter parse fills the tool_calls field and defaults other fields on a tool turn") {

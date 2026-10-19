@@ -10,7 +10,6 @@ import dspy4s.adapters.contracts.ToolChoice
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.core.contracts.TypeRef
 import dspy4s.lm.contracts.LmOutput
 
 import scala.util.matching.Regex
@@ -85,32 +84,3 @@ object ChatAdapter:
   /** Reserved field name that closes the structured output. */
   val CompletedFieldName: String = "completed"
   val CompletedMarker: String    = s"[[ ## $CompletedFieldName ## ]]"
-
-  /** Canonical type name to surface in the system prompt's field description block. Maps dspy4s's internal
-    * `TypeRef.repr` to the names users will recognise (and that match Python DSPy).
-    */
-  def displayTypeName(t: TypeRef): String = t.pythonTypeName.getOrElse(t.repr)
-
-  /** Hint phrasing for the final-user-message reminder ("Respond with `[[ ## answer ## ]]` (must be …)"). Returns
-    * `None` for strings (no hint needed) and a "(must be formatted as a valid …)" string otherwise.
-    */
-  def reminderHint(t: TypeRef): Option[String] =
-    t match
-      case TypeRef.string    => None
-      case TypeRef.list      => Some("must be a valid JSON array")
-      case TypeRef.toolCalls => Some(s"must be ${NativeFunctionCalling.TextFormat}")
-      case _                 => Some(s"must be formatted as a valid ${displayTypeName(t)}")
-
-  /** Hint phrasing for the structure-example `# note: ...` comments. More specific than the reminder hint: enumerates
-    * booleans and gives a brief "single X value" form for scalars.
-    */
-  def structureHint(t: TypeRef): Option[String] =
-    t match
-      case TypeRef.string    => None
-      case TypeRef.int       => Some("must be a single int value")
-      case TypeRef.double    => Some("must be a single float value")
-      case TypeRef.bool      => Some("must be true or false")
-      case TypeRef.json      => Some("must be a valid JSON object")
-      case TypeRef.list      => Some("must be a valid JSON array")
-      case TypeRef.toolCalls => Some(s"must be ${NativeFunctionCalling.TextFormat}")
-      case other             => Some(s"must be a valid ${displayTypeName(other)}")

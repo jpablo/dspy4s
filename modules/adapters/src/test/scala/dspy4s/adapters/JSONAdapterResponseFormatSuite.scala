@@ -162,9 +162,9 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
         .flatMap(stringField(_, "type")),
       Some("json_object")
     )
-    // prose fallback: the malformed schema string is still inlined into the system message
+    // The system message has no block for the output schema, as upstream.
     assert(
-      formatted.toOption.get.messages.head.text.exists(_.contains("{not valid json")),
-      "expected the (malformed) schema still inlined as prose"
+      !formatted.toOption.get.messages.head.text.exists(_.contains("{not valid json")),
+      "expected no schema text in the system message"
     )
   }

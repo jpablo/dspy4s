@@ -91,8 +91,13 @@ class ChatAdapterSuite extends FunSuite:
     // `# note:` comment showing the typing constraint.
     assert(system.contains("# note: the value you produce must be a single int value"), system)
     assert(system.contains("# note: the value you produce must be a single float value"), system)
-    assert(system.contains("# note: the value you produce must be true or false"), system)
-    assert(system.contains("# note: the value you produce must be a valid JSON object"), system)
+    assert(system.contains("# note: the value you produce must be True or False"), system)
+    assert(
+      system.contains(
+        """# note: the value you produce must adhere to the JSON schema: {"type": "object", "additionalProperties": true}"""
+      ),
+      system
+    )
     // String fields get no note.
     val questionLine = system.linesIterator.find(_.contains("{question}")).getOrElse("")
     assert(!questionLine.contains("# note:"), s"string input should not carry a type note: '$questionLine'")
@@ -112,7 +117,7 @@ class ChatAdapterSuite extends FunSuite:
     // Output reminder names each output marker; non-string fields get a
     // parenthetical type hint, strings don't.
     assert(
-      mainUser.contains("`[[ ## answer ## ]]` (must be formatted as a valid int)"),
+      mainUser.contains("`[[ ## answer ## ]]` (must be formatted as a valid Python int)"),
       s"main user reminder missing int hint: $mainUser"
     )
     // The `summary` field is str and should not carry a parenthetical.

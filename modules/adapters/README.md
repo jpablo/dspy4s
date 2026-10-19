@@ -30,8 +30,8 @@ earlier turns, between the demos and the current request.
 |------|------|
 | `Adapter` | The trait: `format` (build the prompt), `parse` (extract outputs), `streamingState` (optional per-field streaming), `execute` (full round-trip). |
 | `ChatAdapter` | Marker-framed (`[[ ## name ## ]]`) formatting and parsing; mirrors Python dspy. Configurable native function-calling, parallel tool calls, tool choice. |
-| `JSONAdapter` | JSON instructions; inlines a JSON schema when one is available, merges a strict `response_format` (or JSON mode) into request options; falls back to text for single-output signatures. |
-| `XMLAdapter` | `<outputs><field>…</field></outputs>` framing with the same single-output fallback. |
+| `JSONAdapter` | The system message of the chat adapter with a JSON object for the outputs; merges a strict `response_format` (or JSON mode) into request options; falls back to text for single-output signatures. |
+| `XMLAdapter` | `<field>…</field>` framing for each field, with the same single-output fallback. |
 | `TwoStepAdapter` | A natural-language first call to the main LM, then a ChatAdapter second call to an `extractionModel` that structures the free-form reply. |
 | `AdapterInvocation` | Everything an adapter needs: layout, demos, inputs, the `LmRequest`, optional output JSON schema, and tool specs. |
 | `FormattedPrompt` | An adapter's output: messages + metadata + `requestOptions` (the seam where structured-output and native-tool options are injected). |
@@ -39,12 +39,16 @@ earlier turns, between the demos and the current request.
 | `FieldChunk` / `AdapterStreamingState` | A field-routed text fragment with an `isLast` boundary, and the per-call state machine (`receive(delta)`, `finish()`) that emits them. |
 | `NativeFunctionCalling` | Shared helpers that gate native tool-calling and inject `tools` / `parallel_tool_calls` / `tool_choice` into request options. `encodeToolCalls` writes the value of a `tool_calls` field: one `{name, args}` record for each `ToolCall`, with the provider `id` when the call has one. |
 | `ToolSpec` / `ToolParameterSpec` / `ToolChoice` / `ToolSchemaBridge` | Tool definitions and the bridge that renders them to OpenAI function schemas. |
-| `AdapterConstraints` | Renders field-constraint prose blocks (inline per-field for chat, consolidated for JSON/XML). |
 
 ## Design notes
 
-- **The field-prefix protocol.** JSON and XML adapters label each input value with the field's `prefix`
-  (default `field_name:`); ChatAdapter uses its marker framing instead.
+- **Prompt parity (decision D3).** The Chat, JSON, XML, and TwoStep prompts are equal to the upstream prompts,
+  character for character, where the text is fixed or the adapters can compute it from the data of the port
+  (`internal/PromptText`, `internal/PythonText`; golden tests in `AdapterPromptParitySuite`). A structured type
+  shows the type name of the port and the schema of its property in the output schema (`PortTypeTextSuite`). A
+  value prints as upstream prints it: `True`, `None`, the Python form of a float, and JSON with the separators
+  `", "` and `": "`. The JSON adapter labels each input with the chat markers, as upstream. The TwoStep adapter
+  labels each value with the field name (`name: value`).
 - **Single-output fallback.** JSON and XML adapters, when one output field exists, treat the whole reply as that
   field's value if structured parsing fails (default on). ChatAdapter extends this to streaming: before any
   marker is seen, raw tokens route to the single field.
@@ -53,15 +57,18 @@ earlier turns, between the demos and the current request.
   then excluded from the rendered text prompt and filled post-parse from the structured response; a missing text
   field on a tool turn takes its `defaultValue`, else a null, rather than an error (as dspy's lenient
   `_call_postprocess`). When native function-calling is off, or the LM does not support it, `tool_calls` is an
-  ordinary output field in the Chat and JSON adapters: the prompt asks for a JSON list of `{"name", "args"}` objects,
-  and the parser reads it from the text, as upstream. The XML adapter keeps the field as text (an open point). ReAct
+  ordinary output field in the Chat and JSON adapters: the prompt asks for a JSON object like
+  `{"tool_calls": [{"name", "args"}]}`, and the parser reads that object, or a JSON list of the calls, from the text,
+  as upstream. The XML adapter keeps the field as text (an open point). ReAct
   keeps its text protocol unchanged.
 - **Missing outputs.** An output that the response does not have takes the `defaultValue` of its field, else a null
   when the field is `optional` (an `Option[T]` field, or `Optional[T]` in a string signature), else it is a
   `ParseError`. An explicit JSON null for an optional field is a null. The rule is the same in the Chat, JSON, and
   XML adapters (dspy's `apply_output_field_defaults`).
 - **Parse errors.** A value that does not fit the type of its field is a `ParseError` with the field name and the
-  raw response. In the chat format, the first header of a field wins.
+  raw response. In the chat format, the first header of a field wins. An optional field also reads the lenient
+  forms of the typed decode (`AdapterTextSupport.optionalFallback`): `N/A` and `none` are a null, and a number can
+  have a currency symbol and thousands commas (`$2,399.00`).
 - **JSON fallback.** After a `ParseError` of a `ChatAdapter` response, the predictor formats, calls, and parses one
   more time with a `JSONAdapter` that has the native function-calling options of the chat adapter
   (`Adapter.fallback`, `ChatAdapter.useJsonAdapterFallback`, on by default). An LM error or a configuration error
@@ -70,13 +77,13 @@ earlier turns, between the demos and the current request.
   one input field and one output field at least, but not complete, is incomplete. A key with a null value counts, as
   upstream. An incomplete demo comes first, its user turn starts with "This is an example of the task, though some
   input or output fields are not supplied.", and a missing output shows "Not supplied for this particular example."
-  Each other demo is dropped. A field default does not fill a demo (`AdapterDemos`).
+  A null value shows as `None` (or `null` in JSON). Each other demo is dropped. A field default does not fill a demo
+  (`AdapterDemos`).
 - **Conversation history replay.** `internal/ConversationHistory` builds the message sequence for the Chat, JSON,
   and XML adapters: system, demos, history turns, current request. Each adapter supplies only its text for a user
   turn and for an assistant turn (`TurnText`).
-    - The system message is built from the full signature, so it names the history field. The JSON and XML
-      adapters do not list input fields, so they add one note that names the field. The current request and each
-      replayed turn use the signature without the history field.
+    - The system message is built from the full signature, so its field list names the history field. The current
+      request and each replayed turn use the signature without the history field.
     - The input fields of a message make a user turn, with the output reminder of a current request. The output
       fields make an assistant turn in the form of a demo. A turn shows only the fields that its message has. A
       message with no input field gets no user turn, and a message with no output field gets no assistant turn.
@@ -86,8 +93,9 @@ earlier turns, between the demos and the current request.
       supports it, the turn is one assistant message with `toolCalls`, then one `MessageRole.Tool` message for each
       result. This needs an `id` on each call and the same `callId`s on the results, in the same order. If they do
       not match, the results are dropped and only the assistant text stays. In each other case the calls stay text:
-      the assistant turn shows them as a field value with no ids, and one more user turn shows the results as the
-      field `tool_call_results`.
+      the assistant turn shows them as a field value with no ids (`{"tool_calls": [...]}`, as upstream `ToolCalls`),
+      and one more user turn shows the results as the field `tool_call_results`
+      (`{"tool_call_results": [...]}`).
     - A demo that has a history value shows it as a field. The history of a demo is not replayed.
       `TwoStepAdapter` does not replay a history. It shows the value as a field.
 - **Strict structured outputs.** When the model supports a response schema, JSONAdapter sends
@@ -118,12 +126,12 @@ earlier turns, between the demos and the current request.
 | `contracts/AdapterFailure.scala` | fallback policy and shared parse-error construction |
 | `contracts/NativeFunctionCalling.scala` | tool-call gating + option injection helpers |
 | `contracts/ToolContracts.scala` | `ToolSpec`, `ToolParameterSpec`, `ToolSchemaBridge` |
-| `contracts/AdapterConstraints.scala` | constraint-prose rendering |
 | `internal/JsonDynamic.scala` | shared `ujson.Value` ↔ `DynamicValue` conversion |
 | `internal/ConversationHistory.scala` | the message sequence of a request and the replay of a `History` input field (`TurnText`) |
+| `internal/PromptText.scala`, `internal/PythonText.scala` | the shared prompt texts (type slots, field list, notes, values) and the Python text forms (`repr`, `json.dumps`, `strip`, `dedent`) |
 
 ## Relation to dspy
 
-This ports `dspy.adapters`. The chat marker protocol, the JSON adapter's structured-output path, and the
+This ports `dspy.adapters`. The prompts of the four adapters, the JSON adapter's structured-output path, and the
 constraint rendering follow upstream; the native function-calling design — adapter-level, with ReAct staying on
 the text protocol — is recorded in the [function-calling design memory](../../README.md).

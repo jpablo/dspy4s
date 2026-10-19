@@ -85,8 +85,10 @@ class ConversationHistoryRulesSuite extends FunSuite:
     searchResult
   )
 
-  private val callsText: String   = """[{"name":"search","args":{"query":"cats"}}]"""
-  private val resultsText: String = """[{"call_id":"call_1","name":"search","value":"cat result","is_error":false}]"""
+  // The object forms of upstream `ToolCalls` and `ToolCallResults`, in the JSON text of `json.dumps`.
+  private val callsText: String   = """{"tool_calls": [{"name": "search", "args": {"query": "cats"}}]}"""
+  private val resultsText: String =
+    """{"tool_call_results": [{"call_id": "call_1", "name": "search", "value": "cat result", "is_error": false}]}"""
 
   private def historyValue(history: History): DynamicValue = summon[Schema[History]].toDynamicValue(history)
 
@@ -205,7 +207,8 @@ class ConversationHistoryRulesSuite extends FunSuite:
       val message  = DynamicValues.recordFilterKeys(toolTurn, _ != History.ToolCallResultsKey)
       val messages = messagesOf(adapter, agentWithHistory, withHistory("Q2", History.empty :+ message))
       assertEquals(roles(messages), Vector(System, User, Assistant, User))
-      assert(textOf(messages(2)).contains(callsText), textOf(messages(2)))
+      assert(textOf(messages(2)).contains("\"name\": \"search\""), textOf(messages(2)))
+      assert(textOf(messages(2)).contains("\"query\": \"cats\""), textOf(messages(2)))
     }
   }
 
@@ -223,8 +226,14 @@ class ConversationHistoryRulesSuite extends FunSuite:
   test("JSONAdapter (text): the exact text of a tool turn") {
     val messages = messagesOf(json, agentWithHistory, withHistory("Q2", History.empty :+ toolTurn))
     assertEquals(roles(messages), Vector(System, User, Assistant, User, User))
-    assertEquals(textOf(messages(2)), s"""{"next_thought":"I should search.","tool_calls":$callsText}""")
-    assertEquals(textOf(messages(3)), s"tool_call_results: $resultsText")
+    // Upstream `JSONAdapter.format_assistant_message_content`: `json.dumps(..., indent=2)`.
+    assertEquals(
+      textOf(messages(2)),
+      "{\n  \"next_thought\": \"I should search.\",\n  \"tool_calls\": {\n    \"tool_calls\": [\n      {\n" +
+        "        \"name\": \"search\",\n        \"args\": {\n          \"query\": \"cats\"\n        }\n      }\n" +
+        "    ]\n  }\n}"
+    )
+    assertEquals(textOf(messages(3)), s"[[ ## tool_call_results ## ]]\n$resultsText")
   }
 
   test("XMLAdapter (text): the exact text of a tool turn") {
@@ -232,9 +241,9 @@ class ConversationHistoryRulesSuite extends FunSuite:
     assertEquals(roles(messages), Vector(System, User, Assistant, User, User))
     assertEquals(
       textOf(messages(2)),
-      s"<outputs><next_thought>I should search.</next_thought><tool_calls>$callsText</tool_calls></outputs>"
+      s"<next_thought>\nI should search.\n</next_thought>\n\n<tool_calls>\n$callsText\n</tool_calls>"
     )
-    assertEquals(textOf(messages(3)), s"tool_call_results: $resultsText")
+    assertEquals(textOf(messages(3)), s"<tool_call_results>\n$resultsText\n</tool_call_results>")
     assert(messages.forall(m => m.toolCalls.isEmpty && m.toolCallId.isEmpty), messages.toString)
   }
 
@@ -258,7 +267,7 @@ class ConversationHistoryRulesSuite extends FunSuite:
       withHistory("Q2", History.empty :+ toolTurn)
     )
     assertEquals(roles(messages), Vector(System, User, Assistant, Tool, User))
-    assertEquals(messages(2).text, Some("""{"next_thought":"I should search."}"""))
+    assertEquals(messages(2).text, Some("{\n  \"next_thought\": \"I should search.\"\n}"))
     assertEquals(messages(2).toolCalls, Vector(search))
   }
 
@@ -323,13 +332,11 @@ class ConversationHistoryRulesSuite extends FunSuite:
 
   // ── The system message ──────────────────────────────────────────────────────────────────────────────────────
 
-  Vector("JSONAdapter" -> json, "XMLAdapter" -> xml).foreach { (name, adapter) =>
-    test(s"$name: the system message has the history note only when the signature has a history field") {
-      val note = "The input field `history` is the conversation history. " +
-        "Its messages come before the current request as earlier turns."
+  textAdapters.foreach { (name, adapter) =>
+    test(s"$name: the system message lists the history field and has no note for it, as upstream") {
       val withField = textOf(messagesOf(adapter, qaWithHistory, withHistory("What is 3+3?", oneTurn)).head)
-      val plain     = textOf(messagesOf(adapter, qaPlain, DynamicValues.record("question" := "What is 3+3?")).head)
-      assertEquals(withField, s"$plain\n\n$note")
+      assert(withField.contains("Your input fields are:\n1. `question` (str): \n2. `history` (History):\n"), withField)
+      assert(!withField.contains("is the conversation history"), withField)
     }
   }
 

@@ -1,0 +1,2837 @@
+{
+  "upstream": "f1260ff14",
+  "generator": "scripts/golden/adapter_prompts.py",
+  "cases": [
+    {
+      "id": "basic",
+      "adapter": "ChatAdapter",
+      "dsl": "question -> answer",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "What is 2+2?"
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str):\nYour output fields are:\n1. `answer` (str):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## question ## ]]\n{question}\n\n[[ ## answer ## ]]\n{answer}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `answer`."
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nWhat is 2+2?\n\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."
+        }
+      ]
+    },
+    {
+      "id": "basic",
+      "adapter": "JSONAdapter",
+      "dsl": "question -> answer",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "What is 2+2?"
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str):\nYour output fields are:\n1. `answer` (str):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\nInputs will have the following structure:\n\n[[ ## question ## ]]\n{question}\n\nOutputs will be a JSON object with the following fields.\n\n{\n  \"answer\": \"{answer}\"\n}\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `answer`."
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nWhat is 2+2?\n\nRespond with a JSON object in the following order of fields: `answer`."
+        }
+      ]
+    },
+    {
+      "id": "basic",
+      "adapter": "XMLAdapter",
+      "dsl": "question -> answer",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "What is 2+2?"
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str):\nYour output fields are:\n1. `answer` (str):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n<question>\n{question}\n</question>\n\n<answer>\n{answer}\n</answer>\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `answer`."
+        },
+        {
+          "role": "user",
+          "content": "<question>\nWhat is 2+2?\n</question>\n\nRespond with the corresponding output fields wrapped in XML tags `<answer>`."
+        }
+      ]
+    },
+    {
+      "id": "types",
+      "adapter": "ChatAdapter",
+      "dsl": "question: str, count: int, tags: list[str], flag: bool -> answer: str, score: float, ok: bool, n: int, items: list, meta: dict",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "Q?"
+            }
+          ],
+          [
+            "count",
+            {
+              "t": "int",
+              "v": 3
+            }
+          ],
+          [
+            "tags",
+            {
+              "t": "list",
+              "v": [
+                {
+                  "t": "str",
+                  "v": "a"
+                },
+                {
+                  "t": "str",
+                  "v": "b"
+                }
+              ]
+            }
+          ],
+          [
+            "flag",
+            {
+              "t": "bool",
+              "v": true
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str): \n2. `count` (int): \n3. `tags` (list[str]): \n4. `flag` (bool):\nYour output fields are:\n1. `answer` (str): \n2. `score` (float): \n3. `ok` (bool): \n4. `n` (int): \n5. `items` (list): \n6. `meta` (dict):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## question ## ]]\n{question}\n\n[[ ## count ## ]]\n{count}\n\n[[ ## tags ## ]]\n{tags}\n\n[[ ## flag ## ]]\n{flag}\n\n[[ ## answer ## ]]\n{answer}\n\n[[ ## score ## ]]\n{score}        # note: the value you produce must be a single float value\n\n[[ ## ok ## ]]\n{ok}        # note: the value you produce must be True or False\n\n[[ ## n ## ]]\n{n}        # note: the value you produce must be a single int value\n\n[[ ## items ## ]]\n{items}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"items\": {}}\n\n[[ ## meta ## ]]\n{meta}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"object\", \"additionalProperties\": true}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Given the fields `question`, `count`, `tags`, `flag`, produce the fields `answer`, `score`, `ok`, `n`, `items`, `meta`."
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nQ?\n\n[[ ## count ## ]]\n3\n\n[[ ## tags ## ]]\n[\"a\", \"b\"]\n\n[[ ## flag ## ]]\nTrue\n\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, then `[[ ## score ## ]]` (must be formatted as a valid Python float), then `[[ ## ok ## ]]` (must be formatted as a valid Python bool), then `[[ ## n ## ]]` (must be formatted as a valid Python int), then `[[ ## items ## ]]` (must be formatted as a valid Python list), then `[[ ## meta ## ]]` (must be formatted as a valid Python dict), and then ending with the marker for `[[ ## completed ## ]]`."
+        }
+      ]
+    },
+    {
+      "id": "types",
+      "adapter": "JSONAdapter",
+      "dsl": "question: str, count: int, tags: list[str], flag: bool -> answer: str, score: float, ok: bool, n: int, items: list, meta: dict",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "Q?"
+            }
+          ],
+          [
+            "count",
+            {
+              "t": "int",
+              "v": 3
+            }
+          ],
+          [
+            "tags",
+            {
+              "t": "list",
+              "v": [
+                {
+                  "t": "str",
+                  "v": "a"
+                },
+                {
+                  "t": "str",
+                  "v": "b"
+                }
+              ]
+            }
+          ],
+          [
+            "flag",
+            {
+              "t": "bool",
+              "v": true
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str): \n2. `count` (int): \n3. `tags` (list[str]): \n4. `flag` (bool):\nYour output fields are:\n1. `answer` (str): \n2. `score` (float): \n3. `ok` (bool): \n4. `n` (int): \n5. `items` (list): \n6. `meta` (dict):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\nInputs will have the following structure:\n\n[[ ## question ## ]]\n{question}\n\n[[ ## count ## ]]\n{count}\n\n[[ ## tags ## ]]\n{tags}\n\n[[ ## flag ## ]]\n{flag}\n\nOutputs will be a JSON object with the following fields.\n\n{\n  \"answer\": \"{answer}\",\n  \"score\": \"{score}        # note: the value you produce must be a single float value\",\n  \"ok\": \"{ok}        # note: the value you produce must be True or False\",\n  \"n\": \"{n}        # note: the value you produce must be a single int value\",\n  \"items\": \"{items}        # note: the value you produce must adhere to the JSON schema: {\\\"type\\\": \\\"array\\\", \\\"items\\\": {}}\",\n  \"meta\": \"{meta}        # note: the value you produce must adhere to the JSON schema: {\\\"type\\\": \\\"object\\\", \\\"additionalProperties\\\": true}\"\n}\nIn adhering to this structure, your objective is: \n        Given the fields `question`, `count`, `tags`, `flag`, produce the fields `answer`, `score`, `ok`, `n`, `items`, `meta`."
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nQ?\n\n[[ ## count ## ]]\n3\n\n[[ ## tags ## ]]\n[\"a\", \"b\"]\n\n[[ ## flag ## ]]\nTrue\n\nRespond with a JSON object in the following order of fields: `answer`, then `score` (must be formatted as a valid Python float), then `ok` (must be formatted as a valid Python bool), then `n` (must be formatted as a valid Python int), then `items` (must be formatted as a valid Python list), then `meta` (must be formatted as a valid Python dict)."
+        }
+      ]
+    },
+    {
+      "id": "types",
+      "adapter": "XMLAdapter",
+      "dsl": "question: str, count: int, tags: list[str], flag: bool -> answer: str, score: float, ok: bool, n: int, items: list, meta: dict",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "Q?"
+            }
+          ],
+          [
+            "count",
+            {
+              "t": "int",
+              "v": 3
+            }
+          ],
+          [
+            "tags",
+            {
+              "t": "list",
+              "v": [
+                {
+                  "t": "str",
+                  "v": "a"
+                },
+                {
+                  "t": "str",
+                  "v": "b"
+                }
+              ]
+            }
+          ],
+          [
+            "flag",
+            {
+              "t": "bool",
+              "v": true
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str): \n2. `count` (int): \n3. `tags` (list[str]): \n4. `flag` (bool):\nYour output fields are:\n1. `answer` (str): \n2. `score` (float): \n3. `ok` (bool): \n4. `n` (int): \n5. `items` (list): \n6. `meta` (dict):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n<question>\n{question}\n</question>\n\n<count>\n{count}\n</count>\n\n<tags>\n{tags}\n</tags>\n\n<flag>\n{flag}\n</flag>\n\n<answer>\n{answer}\n</answer>\n\n<score>\n{score}        # note: the value you produce must be a single float value\n</score>\n\n<ok>\n{ok}        # note: the value you produce must be True or False\n</ok>\n\n<n>\n{n}        # note: the value you produce must be a single int value\n</n>\n\n<items>\n{items}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"items\": {}}\n</items>\n\n<meta>\n{meta}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"object\", \"additionalProperties\": true}\n</meta>\nIn adhering to this structure, your objective is: \n        Given the fields `question`, `count`, `tags`, `flag`, produce the fields `answer`, `score`, `ok`, `n`, `items`, `meta`."
+        },
+        {
+          "role": "user",
+          "content": "<question>\nQ?\n</question>\n\n<count>\n3\n</count>\n\n<tags>\n[\"a\", \"b\"]\n</tags>\n\n<flag>\nTrue\n</flag>\n\nRespond with the corresponding output fields wrapped in XML tags `<answer>`, then `<score>`, then `<ok>`, then `<n>`, then `<items>`, then `<meta>`."
+        }
+      ]
+    },
+    {
+      "id": "instructions",
+      "adapter": "ChatAdapter",
+      "dsl": "question, context -> answer",
+      "instructions": "Answer the question.\nUse the context.",
+      "descriptions": {
+        "question": "the question",
+        "answer": "a short answer"
+      },
+      "constraints": {},
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "Who?"
+            }
+          ],
+          [
+            "context",
+            {
+              "t": "str",
+              "v": "Ana wrote it."
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str): the question\n2. `context` (str):\nYour output fields are:\n1. `answer` (str): a short answer\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## question ## ]]\n{question}\n\n[[ ## context ## ]]\n{context}\n\n[[ ## answer ## ]]\n{answer}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Answer the question.\n        Use the context."
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nWho?\n\n[[ ## context ## ]]\nAna wrote it.\n\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."
+        }
+      ]
+    },
+    {
+      "id": "instructions",
+      "adapter": "JSONAdapter",
+      "dsl": "question, context -> answer",
+      "instructions": "Answer the question.\nUse the context.",
+      "descriptions": {
+        "question": "the question",
+        "answer": "a short answer"
+      },
+      "constraints": {},
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "Who?"
+            }
+          ],
+          [
+            "context",
+            {
+              "t": "str",
+              "v": "Ana wrote it."
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str): the question\n2. `context` (str):\nYour output fields are:\n1. `answer` (str): a short answer\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\nInputs will have the following structure:\n\n[[ ## question ## ]]\n{question}\n\n[[ ## context ## ]]\n{context}\n\nOutputs will be a JSON object with the following fields.\n\n{\n  \"answer\": \"{answer}\"\n}\nIn adhering to this structure, your objective is: \n        Answer the question.\n        Use the context."
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nWho?\n\n[[ ## context ## ]]\nAna wrote it.\n\nRespond with a JSON object in the following order of fields: `answer`."
+        }
+      ]
+    },
+    {
+      "id": "instructions",
+      "adapter": "XMLAdapter",
+      "dsl": "question, context -> answer",
+      "instructions": "Answer the question.\nUse the context.",
+      "descriptions": {
+        "question": "the question",
+        "answer": "a short answer"
+      },
+      "constraints": {},
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "Who?"
+            }
+          ],
+          [
+            "context",
+            {
+              "t": "str",
+              "v": "Ana wrote it."
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str): the question\n2. `context` (str):\nYour output fields are:\n1. `answer` (str): a short answer\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n<question>\n{question}\n</question>\n\n<context>\n{context}\n</context>\n\n<answer>\n{answer}\n</answer>\nIn adhering to this structure, your objective is: \n        Answer the question.\n        Use the context."
+        },
+        {
+          "role": "user",
+          "content": "<question>\nWho?\n</question>\n\n<context>\nAna wrote it.\n</context>\n\nRespond with the corresponding output fields wrapped in XML tags `<answer>`."
+        }
+      ]
+    },
+    {
+      "id": "demos",
+      "adapter": "ChatAdapter",
+      "dsl": "question -> answer, n: int, score: float, ok: bool, tags: list",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d1"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a1"
+              }
+            ],
+            [
+              "n",
+              {
+                "t": "int",
+                "v": 1
+              }
+            ],
+            [
+              "score",
+              {
+                "t": "float",
+                "v": 0.5
+              }
+            ],
+            [
+              "ok",
+              {
+                "t": "bool",
+                "v": true
+              }
+            ],
+            [
+              "tags",
+              {
+                "t": "list",
+                "v": [
+                  {
+                    "t": "str",
+                    "v": "x"
+                  },
+                  {
+                    "t": "float",
+                    "v": 1.0
+                  },
+                  {
+                    "t": "none"
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d2"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a2"
+              }
+            ]
+          ]
+        },
+        {
+          "t": "dict",
+          "v": [
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a3"
+              }
+            ],
+            [
+              "n",
+              {
+                "t": "int",
+                "v": 3
+              }
+            ]
+          ]
+        },
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d4"
+              }
+            ],
+            [
+              "n",
+              {
+                "t": "none"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a4"
+              }
+            ],
+            [
+              "score",
+              {
+                "t": "float",
+                "v": 2.0
+              }
+            ],
+            [
+              "ok",
+              {
+                "t": "bool",
+                "v": false
+              }
+            ]
+          ]
+        },
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d5"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "x < y & z"
+              }
+            ],
+            [
+              "n",
+              {
+                "t": "int",
+                "v": 5
+              }
+            ],
+            [
+              "score",
+              {
+                "t": "float",
+                "v": 1e-05
+              }
+            ],
+            [
+              "ok",
+              {
+                "t": "bool",
+                "v": true
+              }
+            ],
+            [
+              "tags",
+              {
+                "t": "list",
+                "v": []
+              }
+            ]
+          ]
+        }
+      ],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "Q?"
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str):\nYour output fields are:\n1. `answer` (str): \n2. `n` (int): \n3. `score` (float): \n4. `ok` (bool): \n5. `tags` (list):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## question ## ]]\n{question}\n\n[[ ## answer ## ]]\n{answer}\n\n[[ ## n ## ]]\n{n}        # note: the value you produce must be a single int value\n\n[[ ## score ## ]]\n{score}        # note: the value you produce must be a single float value\n\n[[ ## ok ## ]]\n{ok}        # note: the value you produce must be True or False\n\n[[ ## tags ## ]]\n{tags}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"items\": {}}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `answer`, `n`, `score`, `ok`, `tags`."
+        },
+        {
+          "role": "user",
+          "content": "This is an example of the task, though some input or output fields are not supplied.\n\n[[ ## question ## ]]\nd2"
+        },
+        {
+          "role": "assistant",
+          "content": "[[ ## answer ## ]]\na2\n\n[[ ## n ## ]]\nNot supplied for this particular example. \n\n[[ ## score ## ]]\nNot supplied for this particular example. \n\n[[ ## ok ## ]]\nNot supplied for this particular example. \n\n[[ ## tags ## ]]\nNot supplied for this particular example.\n\n[[ ## completed ## ]]\n"
+        },
+        {
+          "role": "user",
+          "content": "This is an example of the task, though some input or output fields are not supplied.\n\n[[ ## question ## ]]\nd4"
+        },
+        {
+          "role": "assistant",
+          "content": "[[ ## answer ## ]]\na4\n\n[[ ## n ## ]]\nNone\n\n[[ ## score ## ]]\n2.0\n\n[[ ## ok ## ]]\nFalse\n\n[[ ## tags ## ]]\nNot supplied for this particular example.\n\n[[ ## completed ## ]]\n"
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nd1"
+        },
+        {
+          "role": "assistant",
+          "content": "[[ ## answer ## ]]\na1\n\n[[ ## n ## ]]\n1\n\n[[ ## score ## ]]\n0.5\n\n[[ ## ok ## ]]\nTrue\n\n[[ ## tags ## ]]\n[\"x\", 1.0, null]\n\n[[ ## completed ## ]]\n"
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nd5"
+        },
+        {
+          "role": "assistant",
+          "content": "[[ ## answer ## ]]\nx < y & z\n\n[[ ## n ## ]]\n5\n\n[[ ## score ## ]]\n1e-05\n\n[[ ## ok ## ]]\nTrue\n\n[[ ## tags ## ]]\n[]\n\n[[ ## completed ## ]]\n"
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nQ?\n\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, then `[[ ## n ## ]]` (must be formatted as a valid Python int), then `[[ ## score ## ]]` (must be formatted as a valid Python float), then `[[ ## ok ## ]]` (must be formatted as a valid Python bool), then `[[ ## tags ## ]]` (must be formatted as a valid Python list), and then ending with the marker for `[[ ## completed ## ]]`."
+        }
+      ]
+    },
+    {
+      "id": "demos",
+      "adapter": "JSONAdapter",
+      "dsl": "question -> answer, n: int, score: float, ok: bool, tags: list",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d1"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a1"
+              }
+            ],
+            [
+              "n",
+              {
+                "t": "int",
+                "v": 1
+              }
+            ],
+            [
+              "score",
+              {
+                "t": "float",
+                "v": 0.5
+              }
+            ],
+            [
+              "ok",
+              {
+                "t": "bool",
+                "v": true
+              }
+            ],
+            [
+              "tags",
+              {
+                "t": "list",
+                "v": [
+                  {
+                    "t": "str",
+                    "v": "x"
+                  },
+                  {
+                    "t": "float",
+                    "v": 1.0
+                  },
+                  {
+                    "t": "none"
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d2"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a2"
+              }
+            ]
+          ]
+        },
+        {
+          "t": "dict",
+          "v": [
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a3"
+              }
+            ],
+            [
+              "n",
+              {
+                "t": "int",
+                "v": 3
+              }
+            ]
+          ]
+        },
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d4"
+              }
+            ],
+            [
+              "n",
+              {
+                "t": "none"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a4"
+              }
+            ],
+            [
+              "score",
+              {
+                "t": "float",
+                "v": 2.0
+              }
+            ],
+            [
+              "ok",
+              {
+                "t": "bool",
+                "v": false
+              }
+            ]
+          ]
+        },
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d5"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "x < y & z"
+              }
+            ],
+            [
+              "n",
+              {
+                "t": "int",
+                "v": 5
+              }
+            ],
+            [
+              "score",
+              {
+                "t": "float",
+                "v": 1e-05
+              }
+            ],
+            [
+              "ok",
+              {
+                "t": "bool",
+                "v": true
+              }
+            ],
+            [
+              "tags",
+              {
+                "t": "list",
+                "v": []
+              }
+            ]
+          ]
+        }
+      ],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "Q?"
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str):\nYour output fields are:\n1. `answer` (str): \n2. `n` (int): \n3. `score` (float): \n4. `ok` (bool): \n5. `tags` (list):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\nInputs will have the following structure:\n\n[[ ## question ## ]]\n{question}\n\nOutputs will be a JSON object with the following fields.\n\n{\n  \"answer\": \"{answer}\",\n  \"n\": \"{n}        # note: the value you produce must be a single int value\",\n  \"score\": \"{score}        # note: the value you produce must be a single float value\",\n  \"ok\": \"{ok}        # note: the value you produce must be True or False\",\n  \"tags\": \"{tags}        # note: the value you produce must adhere to the JSON schema: {\\\"type\\\": \\\"array\\\", \\\"items\\\": {}}\"\n}\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `answer`, `n`, `score`, `ok`, `tags`."
+        },
+        {
+          "role": "user",
+          "content": "This is an example of the task, though some input or output fields are not supplied.\n\n[[ ## question ## ]]\nd2"
+        },
+        {
+          "role": "assistant",
+          "content": "{\n  \"answer\": \"a2\",\n  \"n\": \"Not supplied for this particular example. \",\n  \"score\": \"Not supplied for this particular example. \",\n  \"ok\": \"Not supplied for this particular example. \",\n  \"tags\": \"Not supplied for this particular example. \"\n}"
+        },
+        {
+          "role": "user",
+          "content": "This is an example of the task, though some input or output fields are not supplied.\n\n[[ ## question ## ]]\nd4"
+        },
+        {
+          "role": "assistant",
+          "content": "{\n  \"answer\": \"a4\",\n  \"n\": null,\n  \"score\": 2.0,\n  \"ok\": false,\n  \"tags\": \"Not supplied for this particular example. \"\n}"
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nd1"
+        },
+        {
+          "role": "assistant",
+          "content": "{\n  \"answer\": \"a1\",\n  \"n\": 1,\n  \"score\": 0.5,\n  \"ok\": true,\n  \"tags\": [\n    \"x\",\n    1.0,\n    null\n  ]\n}"
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nd5"
+        },
+        {
+          "role": "assistant",
+          "content": "{\n  \"answer\": \"x < y & z\",\n  \"n\": 5,\n  \"score\": 1e-05,\n  \"ok\": true,\n  \"tags\": []\n}"
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nQ?\n\nRespond with a JSON object in the following order of fields: `answer`, then `n` (must be formatted as a valid Python int), then `score` (must be formatted as a valid Python float), then `ok` (must be formatted as a valid Python bool), then `tags` (must be formatted as a valid Python list)."
+        }
+      ]
+    },
+    {
+      "id": "demos",
+      "adapter": "XMLAdapter",
+      "dsl": "question -> answer, n: int, score: float, ok: bool, tags: list",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d1"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a1"
+              }
+            ],
+            [
+              "n",
+              {
+                "t": "int",
+                "v": 1
+              }
+            ],
+            [
+              "score",
+              {
+                "t": "float",
+                "v": 0.5
+              }
+            ],
+            [
+              "ok",
+              {
+                "t": "bool",
+                "v": true
+              }
+            ],
+            [
+              "tags",
+              {
+                "t": "list",
+                "v": [
+                  {
+                    "t": "str",
+                    "v": "x"
+                  },
+                  {
+                    "t": "float",
+                    "v": 1.0
+                  },
+                  {
+                    "t": "none"
+                  }
+                ]
+              }
+            ]
+          ]
+        },
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d2"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a2"
+              }
+            ]
+          ]
+        },
+        {
+          "t": "dict",
+          "v": [
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a3"
+              }
+            ],
+            [
+              "n",
+              {
+                "t": "int",
+                "v": 3
+              }
+            ]
+          ]
+        },
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d4"
+              }
+            ],
+            [
+              "n",
+              {
+                "t": "none"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a4"
+              }
+            ],
+            [
+              "score",
+              {
+                "t": "float",
+                "v": 2.0
+              }
+            ],
+            [
+              "ok",
+              {
+                "t": "bool",
+                "v": false
+              }
+            ]
+          ]
+        },
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d5"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "x < y & z"
+              }
+            ],
+            [
+              "n",
+              {
+                "t": "int",
+                "v": 5
+              }
+            ],
+            [
+              "score",
+              {
+                "t": "float",
+                "v": 1e-05
+              }
+            ],
+            [
+              "ok",
+              {
+                "t": "bool",
+                "v": true
+              }
+            ],
+            [
+              "tags",
+              {
+                "t": "list",
+                "v": []
+              }
+            ]
+          ]
+        }
+      ],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "Q?"
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str):\nYour output fields are:\n1. `answer` (str): \n2. `n` (int): \n3. `score` (float): \n4. `ok` (bool): \n5. `tags` (list):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n<question>\n{question}\n</question>\n\n<answer>\n{answer}\n</answer>\n\n<n>\n{n}        # note: the value you produce must be a single int value\n</n>\n\n<score>\n{score}        # note: the value you produce must be a single float value\n</score>\n\n<ok>\n{ok}        # note: the value you produce must be True or False\n</ok>\n\n<tags>\n{tags}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"items\": {}}\n</tags>\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `answer`, `n`, `score`, `ok`, `tags`."
+        },
+        {
+          "role": "user",
+          "content": "This is an example of the task, though some input or output fields are not supplied.\n\n<question>\nd2\n</question>"
+        },
+        {
+          "role": "assistant",
+          "content": "<answer>\na2\n</answer>\n\n<n>\nNot supplied for this particular example. \n</n>\n\n<score>\nNot supplied for this particular example. \n</score>\n\n<ok>\nNot supplied for this particular example. \n</ok>\n\n<tags>\nNot supplied for this particular example. \n</tags>"
+        },
+        {
+          "role": "user",
+          "content": "This is an example of the task, though some input or output fields are not supplied.\n\n<question>\nd4\n</question>"
+        },
+        {
+          "role": "assistant",
+          "content": "<answer>\na4\n</answer>\n\n<n>\nNone\n</n>\n\n<score>\n2.0\n</score>\n\n<ok>\nFalse\n</ok>\n\n<tags>\nNot supplied for this particular example. \n</tags>"
+        },
+        {
+          "role": "user",
+          "content": "<question>\nd1\n</question>"
+        },
+        {
+          "role": "assistant",
+          "content": "<answer>\na1\n</answer>\n\n<n>\n1\n</n>\n\n<score>\n0.5\n</score>\n\n<ok>\nTrue\n</ok>\n\n<tags>\n[\"x\", 1.0, null]\n</tags>"
+        },
+        {
+          "role": "user",
+          "content": "<question>\nd5\n</question>"
+        },
+        {
+          "role": "assistant",
+          "content": "<answer>\nx &lt; y &amp; z\n</answer>\n\n<n>\n5\n</n>\n\n<score>\n1e-05\n</score>\n\n<ok>\nTrue\n</ok>\n\n<tags>\n[]\n</tags>"
+        },
+        {
+          "role": "user",
+          "content": "<question>\nQ?\n</question>\n\nRespond with the corresponding output fields wrapped in XML tags `<answer>`, then `<n>`, then `<score>`, then `<ok>`, then `<tags>`."
+        }
+      ]
+    },
+    {
+      "id": "values",
+      "adapter": "ChatAdapter",
+      "dsl": "text, items, single, empty, nums: list[int], floats: list[float], obj: dict, flag: bool, ratio: float, tenth: float, tiny: float, huge: float, count: int, missing -> answer",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "text",
+            {
+              "t": "str",
+              "v": "café\nline two"
+            }
+          ],
+          [
+            "items",
+            {
+              "t": "list",
+              "v": [
+                {
+                  "t": "str",
+                  "v": "x"
+                },
+                {
+                  "t": "str",
+                  "v": "y\nz"
+                }
+              ]
+            }
+          ],
+          [
+            "single",
+            {
+              "t": "list",
+              "v": [
+                {
+                  "t": "str",
+                  "v": "only"
+                }
+              ]
+            }
+          ],
+          [
+            "empty",
+            {
+              "t": "list",
+              "v": []
+            }
+          ],
+          [
+            "nums",
+            {
+              "t": "list",
+              "v": [
+                {
+                  "t": "int",
+                  "v": 1
+                },
+                {
+                  "t": "int",
+                  "v": 2
+                }
+              ]
+            }
+          ],
+          [
+            "floats",
+            {
+              "t": "list",
+              "v": [
+                {
+                  "t": "float",
+                  "v": 1.0
+                },
+                {
+                  "t": "float",
+                  "v": 0.5
+                },
+                {
+                  "t": "float",
+                  "v": 1e+16
+                }
+              ]
+            }
+          ],
+          [
+            "obj",
+            {
+              "t": "dict",
+              "v": [
+                [
+                  "a",
+                  {
+                    "t": "int",
+                    "v": 1
+                  }
+                ],
+                [
+                  "b",
+                  {
+                    "t": "list",
+                    "v": [
+                      {
+                        "t": "bool",
+                        "v": true
+                      },
+                      {
+                        "t": "none"
+                      }
+                    ]
+                  }
+                ],
+                [
+                  "c",
+                  {
+                    "t": "str",
+                    "v": "é"
+                  }
+                ],
+                [
+                  "d",
+                  {
+                    "t": "float",
+                    "v": 2.0
+                  }
+                ],
+                [
+                  "e",
+                  {
+                    "t": "str",
+                    "v": "line\nbreak"
+                  }
+                ]
+              ]
+            }
+          ],
+          [
+            "flag",
+            {
+              "t": "bool",
+              "v": false
+            }
+          ],
+          [
+            "ratio",
+            {
+              "t": "float",
+              "v": 3.0
+            }
+          ],
+          [
+            "tenth",
+            {
+              "t": "float",
+              "v": 0.1
+            }
+          ],
+          [
+            "tiny",
+            {
+              "t": "float",
+              "v": 1e-05
+            }
+          ],
+          [
+            "huge",
+            {
+              "t": "float",
+              "v": 1e+16
+            }
+          ],
+          [
+            "count",
+            {
+              "t": "int",
+              "v": 3
+            }
+          ],
+          [
+            "missing",
+            {
+              "t": "none"
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `text` (str): \n2. `items` (str): \n3. `single` (str): \n4. `empty` (str): \n5. `nums` (list[int]): \n6. `floats` (list[float]): \n7. `obj` (dict): \n8. `flag` (bool): \n9. `ratio` (float): \n10. `tenth` (float): \n11. `tiny` (float): \n12. `huge` (float): \n13. `count` (int): \n14. `missing` (str):\nYour output fields are:\n1. `answer` (str):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## text ## ]]\n{text}\n\n[[ ## items ## ]]\n{items}\n\n[[ ## single ## ]]\n{single}\n\n[[ ## empty ## ]]\n{empty}\n\n[[ ## nums ## ]]\n{nums}\n\n[[ ## floats ## ]]\n{floats}\n\n[[ ## obj ## ]]\n{obj}\n\n[[ ## flag ## ]]\n{flag}\n\n[[ ## ratio ## ]]\n{ratio}\n\n[[ ## tenth ## ]]\n{tenth}\n\n[[ ## tiny ## ]]\n{tiny}\n\n[[ ## huge ## ]]\n{huge}\n\n[[ ## count ## ]]\n{count}\n\n[[ ## missing ## ]]\n{missing}\n\n[[ ## answer ## ]]\n{answer}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Given the fields `text`, `items`, `single`, `empty`, `nums`, `floats`, `obj`, `flag`, `ratio`, `tenth`, `tiny`, `huge`, `count`, `missing`, produce the fields `answer`."
+        },
+        {
+          "role": "user",
+          "content": "[[ ## text ## ]]\ncafé\nline two\n\n[[ ## items ## ]]\n[1] «x»\n[2] «««\n    y\n    z\n»»»\n\n[[ ## single ## ]]\n«only»\n\n[[ ## empty ## ]]\nN/A\n\n[[ ## nums ## ]]\n[1, 2]\n\n[[ ## floats ## ]]\n[1.0, 0.5, 1e+16]\n\n[[ ## obj ## ]]\n{\"a\": 1, \"b\": [true, null], \"c\": \"é\", \"d\": 2.0, \"e\": \"line\\nbreak\"}\n\n[[ ## flag ## ]]\nFalse\n\n[[ ## ratio ## ]]\n3.0\n\n[[ ## tenth ## ]]\n0.1\n\n[[ ## tiny ## ]]\n1e-05\n\n[[ ## huge ## ]]\n1e+16\n\n[[ ## count ## ]]\n3\n\n[[ ## missing ## ]]\nNone\n\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."
+        }
+      ]
+    },
+    {
+      "id": "values",
+      "adapter": "JSONAdapter",
+      "dsl": "text, items, single, empty, nums: list[int], floats: list[float], obj: dict, flag: bool, ratio: float, tenth: float, tiny: float, huge: float, count: int, missing -> answer",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "text",
+            {
+              "t": "str",
+              "v": "café\nline two"
+            }
+          ],
+          [
+            "items",
+            {
+              "t": "list",
+              "v": [
+                {
+                  "t": "str",
+                  "v": "x"
+                },
+                {
+                  "t": "str",
+                  "v": "y\nz"
+                }
+              ]
+            }
+          ],
+          [
+            "single",
+            {
+              "t": "list",
+              "v": [
+                {
+                  "t": "str",
+                  "v": "only"
+                }
+              ]
+            }
+          ],
+          [
+            "empty",
+            {
+              "t": "list",
+              "v": []
+            }
+          ],
+          [
+            "nums",
+            {
+              "t": "list",
+              "v": [
+                {
+                  "t": "int",
+                  "v": 1
+                },
+                {
+                  "t": "int",
+                  "v": 2
+                }
+              ]
+            }
+          ],
+          [
+            "floats",
+            {
+              "t": "list",
+              "v": [
+                {
+                  "t": "float",
+                  "v": 1.0
+                },
+                {
+                  "t": "float",
+                  "v": 0.5
+                },
+                {
+                  "t": "float",
+                  "v": 1e+16
+                }
+              ]
+            }
+          ],
+          [
+            "obj",
+            {
+              "t": "dict",
+              "v": [
+                [
+                  "a",
+                  {
+                    "t": "int",
+                    "v": 1
+                  }
+                ],
+                [
+                  "b",
+                  {
+                    "t": "list",
+                    "v": [
+                      {
+                        "t": "bool",
+                        "v": true
+                      },
+                      {
+                        "t": "none"
+                      }
+                    ]
+                  }
+                ],
+                [
+                  "c",
+                  {
+                    "t": "str",
+                    "v": "é"
+                  }
+                ],
+                [
+                  "d",
+                  {
+                    "t": "float",
+                    "v": 2.0
+                  }
+                ],
+                [
+                  "e",
+                  {
+                    "t": "str",
+                    "v": "line\nbreak"
+                  }
+                ]
+              ]
+            }
+          ],
+          [
+            "flag",
+            {
+              "t": "bool",
+              "v": false
+            }
+          ],
+          [
+            "ratio",
+            {
+              "t": "float",
+              "v": 3.0
+            }
+          ],
+          [
+            "tenth",
+            {
+              "t": "float",
+              "v": 0.1
+            }
+          ],
+          [
+            "tiny",
+            {
+              "t": "float",
+              "v": 1e-05
+            }
+          ],
+          [
+            "huge",
+            {
+              "t": "float",
+              "v": 1e+16
+            }
+          ],
+          [
+            "count",
+            {
+              "t": "int",
+              "v": 3
+            }
+          ],
+          [
+            "missing",
+            {
+              "t": "none"
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `text` (str): \n2. `items` (str): \n3. `single` (str): \n4. `empty` (str): \n5. `nums` (list[int]): \n6. `floats` (list[float]): \n7. `obj` (dict): \n8. `flag` (bool): \n9. `ratio` (float): \n10. `tenth` (float): \n11. `tiny` (float): \n12. `huge` (float): \n13. `count` (int): \n14. `missing` (str):\nYour output fields are:\n1. `answer` (str):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\nInputs will have the following structure:\n\n[[ ## text ## ]]\n{text}\n\n[[ ## items ## ]]\n{items}\n\n[[ ## single ## ]]\n{single}\n\n[[ ## empty ## ]]\n{empty}\n\n[[ ## nums ## ]]\n{nums}\n\n[[ ## floats ## ]]\n{floats}\n\n[[ ## obj ## ]]\n{obj}\n\n[[ ## flag ## ]]\n{flag}\n\n[[ ## ratio ## ]]\n{ratio}\n\n[[ ## tenth ## ]]\n{tenth}\n\n[[ ## tiny ## ]]\n{tiny}\n\n[[ ## huge ## ]]\n{huge}\n\n[[ ## count ## ]]\n{count}\n\n[[ ## missing ## ]]\n{missing}\n\nOutputs will be a JSON object with the following fields.\n\n{\n  \"answer\": \"{answer}\"\n}\nIn adhering to this structure, your objective is: \n        Given the fields `text`, `items`, `single`, `empty`, `nums`, `floats`, `obj`, `flag`, `ratio`, `tenth`, `tiny`, `huge`, `count`, `missing`, produce the fields `answer`."
+        },
+        {
+          "role": "user",
+          "content": "[[ ## text ## ]]\ncafé\nline two\n\n[[ ## items ## ]]\n[1] «x»\n[2] «««\n    y\n    z\n»»»\n\n[[ ## single ## ]]\n«only»\n\n[[ ## empty ## ]]\nN/A\n\n[[ ## nums ## ]]\n[1, 2]\n\n[[ ## floats ## ]]\n[1.0, 0.5, 1e+16]\n\n[[ ## obj ## ]]\n{\"a\": 1, \"b\": [true, null], \"c\": \"é\", \"d\": 2.0, \"e\": \"line\\nbreak\"}\n\n[[ ## flag ## ]]\nFalse\n\n[[ ## ratio ## ]]\n3.0\n\n[[ ## tenth ## ]]\n0.1\n\n[[ ## tiny ## ]]\n1e-05\n\n[[ ## huge ## ]]\n1e+16\n\n[[ ## count ## ]]\n3\n\n[[ ## missing ## ]]\nNone\n\nRespond with a JSON object in the following order of fields: `answer`."
+        }
+      ]
+    },
+    {
+      "id": "values",
+      "adapter": "XMLAdapter",
+      "dsl": "text, items, single, empty, nums: list[int], floats: list[float], obj: dict, flag: bool, ratio: float, tenth: float, tiny: float, huge: float, count: int, missing -> answer",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "text",
+            {
+              "t": "str",
+              "v": "café\nline two"
+            }
+          ],
+          [
+            "items",
+            {
+              "t": "list",
+              "v": [
+                {
+                  "t": "str",
+                  "v": "x"
+                },
+                {
+                  "t": "str",
+                  "v": "y\nz"
+                }
+              ]
+            }
+          ],
+          [
+            "single",
+            {
+              "t": "list",
+              "v": [
+                {
+                  "t": "str",
+                  "v": "only"
+                }
+              ]
+            }
+          ],
+          [
+            "empty",
+            {
+              "t": "list",
+              "v": []
+            }
+          ],
+          [
+            "nums",
+            {
+              "t": "list",
+              "v": [
+                {
+                  "t": "int",
+                  "v": 1
+                },
+                {
+                  "t": "int",
+                  "v": 2
+                }
+              ]
+            }
+          ],
+          [
+            "floats",
+            {
+              "t": "list",
+              "v": [
+                {
+                  "t": "float",
+                  "v": 1.0
+                },
+                {
+                  "t": "float",
+                  "v": 0.5
+                },
+                {
+                  "t": "float",
+                  "v": 1e+16
+                }
+              ]
+            }
+          ],
+          [
+            "obj",
+            {
+              "t": "dict",
+              "v": [
+                [
+                  "a",
+                  {
+                    "t": "int",
+                    "v": 1
+                  }
+                ],
+                [
+                  "b",
+                  {
+                    "t": "list",
+                    "v": [
+                      {
+                        "t": "bool",
+                        "v": true
+                      },
+                      {
+                        "t": "none"
+                      }
+                    ]
+                  }
+                ],
+                [
+                  "c",
+                  {
+                    "t": "str",
+                    "v": "é"
+                  }
+                ],
+                [
+                  "d",
+                  {
+                    "t": "float",
+                    "v": 2.0
+                  }
+                ],
+                [
+                  "e",
+                  {
+                    "t": "str",
+                    "v": "line\nbreak"
+                  }
+                ]
+              ]
+            }
+          ],
+          [
+            "flag",
+            {
+              "t": "bool",
+              "v": false
+            }
+          ],
+          [
+            "ratio",
+            {
+              "t": "float",
+              "v": 3.0
+            }
+          ],
+          [
+            "tenth",
+            {
+              "t": "float",
+              "v": 0.1
+            }
+          ],
+          [
+            "tiny",
+            {
+              "t": "float",
+              "v": 1e-05
+            }
+          ],
+          [
+            "huge",
+            {
+              "t": "float",
+              "v": 1e+16
+            }
+          ],
+          [
+            "count",
+            {
+              "t": "int",
+              "v": 3
+            }
+          ],
+          [
+            "missing",
+            {
+              "t": "none"
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `text` (str): \n2. `items` (str): \n3. `single` (str): \n4. `empty` (str): \n5. `nums` (list[int]): \n6. `floats` (list[float]): \n7. `obj` (dict): \n8. `flag` (bool): \n9. `ratio` (float): \n10. `tenth` (float): \n11. `tiny` (float): \n12. `huge` (float): \n13. `count` (int): \n14. `missing` (str):\nYour output fields are:\n1. `answer` (str):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n<text>\n{text}\n</text>\n\n<items>\n{items}\n</items>\n\n<single>\n{single}\n</single>\n\n<empty>\n{empty}\n</empty>\n\n<nums>\n{nums}\n</nums>\n\n<floats>\n{floats}\n</floats>\n\n<obj>\n{obj}\n</obj>\n\n<flag>\n{flag}\n</flag>\n\n<ratio>\n{ratio}\n</ratio>\n\n<tenth>\n{tenth}\n</tenth>\n\n<tiny>\n{tiny}\n</tiny>\n\n<huge>\n{huge}\n</huge>\n\n<count>\n{count}\n</count>\n\n<missing>\n{missing}\n</missing>\n\n<answer>\n{answer}\n</answer>\nIn adhering to this structure, your objective is: \n        Given the fields `text`, `items`, `single`, `empty`, `nums`, `floats`, `obj`, `flag`, `ratio`, `tenth`, `tiny`, `huge`, `count`, `missing`, produce the fields `answer`."
+        },
+        {
+          "role": "user",
+          "content": "<text>\ncafé\nline two\n</text>\n\n<items>\n[1] «x»\n[2] «««\n    y\n    z\n»»»\n</items>\n\n<single>\n«only»\n</single>\n\n<empty>\nN/A\n</empty>\n\n<nums>\n[1, 2]\n</nums>\n\n<floats>\n[1.0, 0.5, 1e+16]\n</floats>\n\n<obj>\n{\"a\": 1, \"b\": [true, null], \"c\": \"é\", \"d\": 2.0, \"e\": \"line\\nbreak\"}\n</obj>\n\n<flag>\nFalse\n</flag>\n\n<ratio>\n3.0\n</ratio>\n\n<tenth>\n0.1\n</tenth>\n\n<tiny>\n1e-05\n</tiny>\n\n<huge>\n1e+16\n</huge>\n\n<count>\n3\n</count>\n\n<missing>\nNone\n</missing>\n\nRespond with the corresponding output fields wrapped in XML tags `<answer>`."
+        }
+      ]
+    },
+    {
+      "id": "constraints",
+      "adapter": "ChatAdapter",
+      "dsl": "question -> n: int, ratio: float, words: list, step: float",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {
+        "question": [
+          [
+            "min_length",
+            2
+          ]
+        ],
+        "n": [
+          [
+            "ge",
+            0
+          ],
+          [
+            "le",
+            10
+          ]
+        ],
+        "ratio": [
+          [
+            "gt",
+            0
+          ],
+          [
+            "lt",
+            1
+          ]
+        ],
+        "words": [
+          [
+            "min_length",
+            1
+          ],
+          [
+            "max_length",
+            5
+          ]
+        ],
+        "step": [
+          [
+            "multiple_of",
+            0.5
+          ]
+        ]
+      },
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "Q?"
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str): \nConstraints: minimum length: 2\nYour output fields are:\n1. `n` (int): \nConstraints: greater than or equal to: 0, less than or equal to: 10\n2. `ratio` (float): \nConstraints: greater than: 0, less than: 1\n3. `words` (list): \nConstraints: minimum length: 1, maximum length: 5\n4. `step` (float): \nConstraints: a multiple of the given number: 0.5\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## question ## ]]\n{question}\n\n[[ ## n ## ]]\n{n}        # note: the value you produce must be a single int value\n\n[[ ## ratio ## ]]\n{ratio}        # note: the value you produce must be a single float value\n\n[[ ## words ## ]]\n{words}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"items\": {}}\n\n[[ ## step ## ]]\n{step}        # note: the value you produce must be a single float value\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `n`, `ratio`, `words`, `step`."
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nQ?\n\nRespond with the corresponding output fields, starting with the field `[[ ## n ## ]]` (must be formatted as a valid Python int), then `[[ ## ratio ## ]]` (must be formatted as a valid Python float), then `[[ ## words ## ]]` (must be formatted as a valid Python list), then `[[ ## step ## ]]` (must be formatted as a valid Python float), and then ending with the marker for `[[ ## completed ## ]]`."
+        }
+      ]
+    },
+    {
+      "id": "constraints",
+      "adapter": "JSONAdapter",
+      "dsl": "question -> n: int, ratio: float, words: list, step: float",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {
+        "question": [
+          [
+            "min_length",
+            2
+          ]
+        ],
+        "n": [
+          [
+            "ge",
+            0
+          ],
+          [
+            "le",
+            10
+          ]
+        ],
+        "ratio": [
+          [
+            "gt",
+            0
+          ],
+          [
+            "lt",
+            1
+          ]
+        ],
+        "words": [
+          [
+            "min_length",
+            1
+          ],
+          [
+            "max_length",
+            5
+          ]
+        ],
+        "step": [
+          [
+            "multiple_of",
+            0.5
+          ]
+        ]
+      },
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "Q?"
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str): \nConstraints: minimum length: 2\nYour output fields are:\n1. `n` (int): \nConstraints: greater than or equal to: 0, less than or equal to: 10\n2. `ratio` (float): \nConstraints: greater than: 0, less than: 1\n3. `words` (list): \nConstraints: minimum length: 1, maximum length: 5\n4. `step` (float): \nConstraints: a multiple of the given number: 0.5\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\nInputs will have the following structure:\n\n[[ ## question ## ]]\n{question}\n\nOutputs will be a JSON object with the following fields.\n\n{\n  \"n\": \"{n}        # note: the value you produce must be a single int value\",\n  \"ratio\": \"{ratio}        # note: the value you produce must be a single float value\",\n  \"words\": \"{words}        # note: the value you produce must adhere to the JSON schema: {\\\"type\\\": \\\"array\\\", \\\"items\\\": {}}\",\n  \"step\": \"{step}        # note: the value you produce must be a single float value\"\n}\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `n`, `ratio`, `words`, `step`."
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nQ?\n\nRespond with a JSON object in the following order of fields: `n` (must be formatted as a valid Python int), then `ratio` (must be formatted as a valid Python float), then `words` (must be formatted as a valid Python list), then `step` (must be formatted as a valid Python float)."
+        }
+      ]
+    },
+    {
+      "id": "constraints",
+      "adapter": "XMLAdapter",
+      "dsl": "question -> n: int, ratio: float, words: list, step: float",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {
+        "question": [
+          [
+            "min_length",
+            2
+          ]
+        ],
+        "n": [
+          [
+            "ge",
+            0
+          ],
+          [
+            "le",
+            10
+          ]
+        ],
+        "ratio": [
+          [
+            "gt",
+            0
+          ],
+          [
+            "lt",
+            1
+          ]
+        ],
+        "words": [
+          [
+            "min_length",
+            1
+          ],
+          [
+            "max_length",
+            5
+          ]
+        ],
+        "step": [
+          [
+            "multiple_of",
+            0.5
+          ]
+        ]
+      },
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "Q?"
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str): \nConstraints: minimum length: 2\nYour output fields are:\n1. `n` (int): \nConstraints: greater than or equal to: 0, less than or equal to: 10\n2. `ratio` (float): \nConstraints: greater than: 0, less than: 1\n3. `words` (list): \nConstraints: minimum length: 1, maximum length: 5\n4. `step` (float): \nConstraints: a multiple of the given number: 0.5\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n<question>\n{question}\n</question>\n\n<n>\n{n}        # note: the value you produce must be a single int value\n</n>\n\n<ratio>\n{ratio}        # note: the value you produce must be a single float value\n</ratio>\n\n<words>\n{words}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"items\": {}}\n</words>\n\n<step>\n{step}        # note: the value you produce must be a single float value\n</step>\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `n`, `ratio`, `words`, `step`."
+        },
+        {
+          "role": "user",
+          "content": "<question>\nQ?\n</question>\n\nRespond with the corresponding output fields wrapped in XML tags `<n>`, then `<ratio>`, then `<words>`, then `<step>`."
+        }
+      ]
+    },
+    {
+      "id": "history",
+      "adapter": "ChatAdapter",
+      "dsl": "history: history, question -> answer",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d1"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a1"
+              }
+            ]
+          ]
+        }
+      ],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "history",
+            {
+              "t": "history",
+              "v": [
+                {
+                  "t": "dict",
+                  "v": [
+                    [
+                      "question",
+                      {
+                        "t": "str",
+                        "v": "What is 1+1?"
+                      }
+                    ],
+                    [
+                      "answer",
+                      {
+                        "t": "str",
+                        "v": "2"
+                      }
+                    ]
+                  ]
+                },
+                {
+                  "t": "dict",
+                  "v": [
+                    [
+                      "question",
+                      {
+                        "t": "str",
+                        "v": "What is 2+2?"
+                      }
+                    ],
+                    [
+                      "answer",
+                      {
+                        "t": "str",
+                        "v": "4"
+                      }
+                    ]
+                  ]
+                }
+              ]
+            }
+          ],
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "What is 3+3?"
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `history` (History): \n2. `question` (str):\nYour output fields are:\n1. `answer` (str):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## history ## ]]\n{history}\n\n[[ ## question ## ]]\n{question}\n\n[[ ## answer ## ]]\n{answer}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Given the fields `history`, `question`, produce the fields `answer`."
+        },
+        {
+          "role": "user",
+          "content": "This is an example of the task, though some input or output fields are not supplied.\n\n[[ ## question ## ]]\nd1"
+        },
+        {
+          "role": "assistant",
+          "content": "[[ ## answer ## ]]\na1\n\n[[ ## completed ## ]]\n"
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nWhat is 1+1?\n\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."
+        },
+        {
+          "role": "assistant",
+          "content": "[[ ## answer ## ]]\n2\n\n[[ ## completed ## ]]\n"
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nWhat is 2+2?\n\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."
+        },
+        {
+          "role": "assistant",
+          "content": "[[ ## answer ## ]]\n4\n\n[[ ## completed ## ]]\n"
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nWhat is 3+3?\n\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."
+        }
+      ]
+    },
+    {
+      "id": "history",
+      "adapter": "JSONAdapter",
+      "dsl": "history: history, question -> answer",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d1"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a1"
+              }
+            ]
+          ]
+        }
+      ],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "history",
+            {
+              "t": "history",
+              "v": [
+                {
+                  "t": "dict",
+                  "v": [
+                    [
+                      "question",
+                      {
+                        "t": "str",
+                        "v": "What is 1+1?"
+                      }
+                    ],
+                    [
+                      "answer",
+                      {
+                        "t": "str",
+                        "v": "2"
+                      }
+                    ]
+                  ]
+                },
+                {
+                  "t": "dict",
+                  "v": [
+                    [
+                      "question",
+                      {
+                        "t": "str",
+                        "v": "What is 2+2?"
+                      }
+                    ],
+                    [
+                      "answer",
+                      {
+                        "t": "str",
+                        "v": "4"
+                      }
+                    ]
+                  ]
+                }
+              ]
+            }
+          ],
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "What is 3+3?"
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `history` (History): \n2. `question` (str):\nYour output fields are:\n1. `answer` (str):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\nInputs will have the following structure:\n\n[[ ## history ## ]]\n{history}\n\n[[ ## question ## ]]\n{question}\n\nOutputs will be a JSON object with the following fields.\n\n{\n  \"answer\": \"{answer}\"\n}\nIn adhering to this structure, your objective is: \n        Given the fields `history`, `question`, produce the fields `answer`."
+        },
+        {
+          "role": "user",
+          "content": "This is an example of the task, though some input or output fields are not supplied.\n\n[[ ## question ## ]]\nd1"
+        },
+        {
+          "role": "assistant",
+          "content": "{\n  \"answer\": \"a1\"\n}"
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nWhat is 1+1?\n\nRespond with a JSON object in the following order of fields: `answer`."
+        },
+        {
+          "role": "assistant",
+          "content": "{\n  \"answer\": \"2\"\n}"
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nWhat is 2+2?\n\nRespond with a JSON object in the following order of fields: `answer`."
+        },
+        {
+          "role": "assistant",
+          "content": "{\n  \"answer\": \"4\"\n}"
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nWhat is 3+3?\n\nRespond with a JSON object in the following order of fields: `answer`."
+        }
+      ]
+    },
+    {
+      "id": "history",
+      "adapter": "XMLAdapter",
+      "dsl": "history: history, question -> answer",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d1"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a1"
+              }
+            ]
+          ]
+        }
+      ],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "history",
+            {
+              "t": "history",
+              "v": [
+                {
+                  "t": "dict",
+                  "v": [
+                    [
+                      "question",
+                      {
+                        "t": "str",
+                        "v": "What is 1+1?"
+                      }
+                    ],
+                    [
+                      "answer",
+                      {
+                        "t": "str",
+                        "v": "2"
+                      }
+                    ]
+                  ]
+                },
+                {
+                  "t": "dict",
+                  "v": [
+                    [
+                      "question",
+                      {
+                        "t": "str",
+                        "v": "What is 2+2?"
+                      }
+                    ],
+                    [
+                      "answer",
+                      {
+                        "t": "str",
+                        "v": "4"
+                      }
+                    ]
+                  ]
+                }
+              ]
+            }
+          ],
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "What is 3+3?"
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `history` (History): \n2. `question` (str):\nYour output fields are:\n1. `answer` (str):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n<history>\n{history}\n</history>\n\n<question>\n{question}\n</question>\n\n<answer>\n{answer}\n</answer>\nIn adhering to this structure, your objective is: \n        Given the fields `history`, `question`, produce the fields `answer`."
+        },
+        {
+          "role": "user",
+          "content": "This is an example of the task, though some input or output fields are not supplied.\n\n<question>\nd1\n</question>"
+        },
+        {
+          "role": "assistant",
+          "content": "<answer>\na1\n</answer>"
+        },
+        {
+          "role": "user",
+          "content": "<question>\nWhat is 1+1?\n</question>\n\nRespond with the corresponding output fields wrapped in XML tags `<answer>`."
+        },
+        {
+          "role": "assistant",
+          "content": "<answer>\n2\n</answer>"
+        },
+        {
+          "role": "user",
+          "content": "<question>\nWhat is 2+2?\n</question>\n\nRespond with the corresponding output fields wrapped in XML tags `<answer>`."
+        },
+        {
+          "role": "assistant",
+          "content": "<answer>\n4\n</answer>"
+        },
+        {
+          "role": "user",
+          "content": "<question>\nWhat is 3+3?\n</question>\n\nRespond with the corresponding output fields wrapped in XML tags `<answer>`."
+        }
+      ]
+    },
+    {
+      "id": "tool_calls",
+      "adapter": "ChatAdapter",
+      "dsl": "question -> answer, tool_calls: tool_calls",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "Find cats."
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str):\nYour output fields are:\n1. `answer` (str): \n2. `tool_calls` (ToolCalls): \n    Type description of ToolCalls: Tool calls must be a JSON object with `tool_calls`, a list of calls. Each call must include `name` and `args`. Example: {\"tool_calls\": [{\"name\": \"search\", \"args\": {\"query\": \"cats\"}}]}\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## question ## ]]\n{question}\n\n[[ ## answer ## ]]\n{answer}\n\n[[ ## tool_calls ## ]]\n{tool_calls}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"object\", \"$defs\": {\"ToolCall\": {\"type\": \"object\", \"properties\": {\"args\": {\"type\": \"object\", \"additionalProperties\": true, \"title\": \"Args\"}, \"name\": {\"type\": \"string\", \"title\": \"Name\"}}, \"required\": [\"name\", \"args\"], \"title\": \"ToolCall\"}}, \"properties\": {\"tool_calls\": {\"type\": \"array\", \"items\": {\"$ref\": \"#/$defs/ToolCall\"}, \"title\": \"Tool Calls\"}}, \"required\": [\"tool_calls\"], \"title\": \"ToolCalls\"}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `answer`, `tool_calls`."
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nFind cats.\n\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, then `[[ ## tool_calls ## ]]` (must be a JSON object like {\"tool_calls\": [{\"name\": \"...\", \"args\": {...}}]}), and then ending with the marker for `[[ ## completed ## ]]`."
+        }
+      ]
+    },
+    {
+      "id": "tool_calls",
+      "adapter": "JSONAdapter",
+      "dsl": "question -> answer, tool_calls: tool_calls",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "Find cats."
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str):\nYour output fields are:\n1. `answer` (str): \n2. `tool_calls` (ToolCalls): \n    Type description of ToolCalls: Tool calls must be a JSON object with `tool_calls`, a list of calls. Each call must include `name` and `args`. Example: {\"tool_calls\": [{\"name\": \"search\", \"args\": {\"query\": \"cats\"}}]}\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\nInputs will have the following structure:\n\n[[ ## question ## ]]\n{question}\n\nOutputs will be a JSON object with the following fields.\n\n{\n  \"answer\": \"{answer}\",\n  \"tool_calls\": \"{tool_calls}        # note: the value you produce must adhere to the JSON schema: {\\\"type\\\": \\\"object\\\", \\\"$defs\\\": {\\\"ToolCall\\\": {\\\"type\\\": \\\"object\\\", \\\"properties\\\": {\\\"args\\\": {\\\"type\\\": \\\"object\\\", \\\"additionalProperties\\\": true, \\\"title\\\": \\\"Args\\\"}, \\\"name\\\": {\\\"type\\\": \\\"string\\\", \\\"title\\\": \\\"Name\\\"}}, \\\"required\\\": [\\\"name\\\", \\\"args\\\"], \\\"title\\\": \\\"ToolCall\\\"}}, \\\"properties\\\": {\\\"tool_calls\\\": {\\\"type\\\": \\\"array\\\", \\\"items\\\": {\\\"$ref\\\": \\\"#/$defs/ToolCall\\\"}, \\\"title\\\": \\\"Tool Calls\\\"}}, \\\"required\\\": [\\\"tool_calls\\\"], \\\"title\\\": \\\"ToolCalls\\\"}\"\n}\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `answer`, `tool_calls`."
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nFind cats.\n\nRespond with a JSON object in the following order of fields: `answer`, then `tool_calls` (must be a JSON object like {\"tool_calls\": [{\"name\": \"...\", \"args\": {...}}]})."
+        }
+      ]
+    },
+    {
+      "id": "tool_calls",
+      "adapter": "XMLAdapter",
+      "dsl": "question -> answer, tool_calls: tool_calls",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "Find cats."
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str):\nYour output fields are:\n1. `answer` (str): \n2. `tool_calls` (ToolCalls): \n    Type description of ToolCalls: Tool calls must be a JSON object with `tool_calls`, a list of calls. Each call must include `name` and `args`. Example: {\"tool_calls\": [{\"name\": \"search\", \"args\": {\"query\": \"cats\"}}]}\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n<question>\n{question}\n</question>\n\n<answer>\n{answer}\n</answer>\n\n<tool_calls>\n{tool_calls}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"object\", \"$defs\": {\"ToolCall\": {\"type\": \"object\", \"properties\": {\"args\": {\"type\": \"object\", \"additionalProperties\": true, \"title\": \"Args\"}, \"name\": {\"type\": \"string\", \"title\": \"Name\"}}, \"required\": [\"name\", \"args\"], \"title\": \"ToolCall\"}}, \"properties\": {\"tool_calls\": {\"type\": \"array\", \"items\": {\"$ref\": \"#/$defs/ToolCall\"}, \"title\": \"Tool Calls\"}}, \"required\": [\"tool_calls\"], \"title\": \"ToolCalls\"}\n</tool_calls>\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `answer`, `tool_calls`."
+        },
+        {
+          "role": "user",
+          "content": "<question>\nFind cats.\n</question>\n\nRespond with the corresponding output fields wrapped in XML tags `<answer>`, then `<tool_calls>`."
+        }
+      ]
+    },
+    {
+      "id": "basic",
+      "adapter": "TwoStepAdapter",
+      "dsl": "question -> answer",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "What is 2+2?"
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a helpful assistant that can solve tasks based on user input.\nAs input, you will be provided with:\n1. `question` (str):\nYour outputs must contain:\n1. `answer` (str):\nYou should lay out your outputs in detail so that your answer can be understood by another agent\nSpecific instructions: Given the fields `question`, produce the fields `answer`."
+        },
+        {
+          "role": "user",
+          "content": "question: What is 2+2?"
+        }
+      ],
+      "completion": "The answer is 4.",
+      "extraction_messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `text` (str):\nYour output fields are:\n1. `answer` (str):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## text ## ]]\n{text}\n\n[[ ## answer ## ]]\n{answer}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        The input is a text that should contain all the necessary information to produce the fields `answer`.             Your job is to extract the fields from the text verbatim. Extract precisely the appropriate value (content) for each field."
+        },
+        {
+          "role": "user",
+          "content": "[[ ## text ## ]]\nThe answer is 4.\n\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."
+        }
+      ]
+    },
+    {
+      "id": "instructions",
+      "adapter": "TwoStepAdapter",
+      "dsl": "question, context -> answer",
+      "instructions": "Answer the question.\nUse the context.",
+      "descriptions": {
+        "question": "the question",
+        "answer": "a short answer"
+      },
+      "constraints": {},
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "Who?"
+            }
+          ],
+          [
+            "context",
+            {
+              "t": "str",
+              "v": "Ana wrote it."
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a helpful assistant that can solve tasks based on user input.\nAs input, you will be provided with:\n1. `question` (str): the question\n2. `context` (str):\nYour outputs must contain:\n1. `answer` (str): a short answer\nYou should lay out your outputs in detail so that your answer can be understood by another agent\nSpecific instructions: Answer the question.\nUse the context."
+        },
+        {
+          "role": "user",
+          "content": "question: Who?\n\ncontext: Ana wrote it."
+        }
+      ],
+      "completion": "The answer is 4.",
+      "extraction_messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `text` (str):\nYour output fields are:\n1. `answer` (str): a short answer\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## text ## ]]\n{text}\n\n[[ ## answer ## ]]\n{answer}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        The input is a text that should contain all the necessary information to produce the fields `answer`.             Your job is to extract the fields from the text verbatim. Extract precisely the appropriate value (content) for each field."
+        },
+        {
+          "role": "user",
+          "content": "[[ ## text ## ]]\nThe answer is 4.\n\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."
+        }
+      ]
+    },
+    {
+      "id": "types_scalar",
+      "adapter": "TwoStepAdapter",
+      "dsl": "question: str, count: int, flag: bool -> answer: str, score: float, ok: bool, n: int, items: list, meta: dict",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "Q?"
+            }
+          ],
+          [
+            "count",
+            {
+              "t": "int",
+              "v": 3
+            }
+          ],
+          [
+            "flag",
+            {
+              "t": "bool",
+              "v": true
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a helpful assistant that can solve tasks based on user input.\nAs input, you will be provided with:\n1. `question` (str): \n2. `count` (int): \n3. `flag` (bool):\nYour outputs must contain:\n1. `answer` (str): \n2. `score` (float): \n3. `ok` (bool): \n4. `n` (int): \n5. `items` (list): \n6. `meta` (dict):\nYou should lay out your outputs in detail so that your answer can be understood by another agent\nSpecific instructions: Given the fields `question`, `count`, `flag`, produce the fields `answer`, `score`, `ok`, `n`, `items`, `meta`."
+        },
+        {
+          "role": "user",
+          "content": "question: Q?\n\ncount: 3\n\nflag: True"
+        }
+      ],
+      "completion": "The answer is 4.",
+      "extraction_messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `text` (str):\nYour output fields are:\n1. `answer` (str): \n2. `score` (float): \n3. `ok` (bool): \n4. `n` (int): \n5. `items` (list): \n6. `meta` (dict):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## text ## ]]\n{text}\n\n[[ ## answer ## ]]\n{answer}\n\n[[ ## score ## ]]\n{score}        # note: the value you produce must be a single float value\n\n[[ ## ok ## ]]\n{ok}        # note: the value you produce must be True or False\n\n[[ ## n ## ]]\n{n}        # note: the value you produce must be a single int value\n\n[[ ## items ## ]]\n{items}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"array\", \"items\": {}}\n\n[[ ## meta ## ]]\n{meta}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"object\", \"additionalProperties\": true}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        The input is a text that should contain all the necessary information to produce the fields `answer`, `score`, `ok`, `n`, `items`, `meta`.             Your job is to extract the fields from the text verbatim. Extract precisely the appropriate value (content) for each field."
+        },
+        {
+          "role": "user",
+          "content": "[[ ## text ## ]]\nThe answer is 4.\n\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, then `[[ ## score ## ]]` (must be formatted as a valid Python float), then `[[ ## ok ## ]]` (must be formatted as a valid Python bool), then `[[ ## n ## ]]` (must be formatted as a valid Python int), then `[[ ## items ## ]]` (must be formatted as a valid Python list), then `[[ ## meta ## ]]` (must be formatted as a valid Python dict), and then ending with the marker for `[[ ## completed ## ]]`."
+        }
+      ]
+    },
+    {
+      "id": "demos_scalar",
+      "adapter": "TwoStepAdapter",
+      "dsl": "question -> answer, n: int, score: float, ok: bool",
+      "instructions": null,
+      "descriptions": {},
+      "constraints": {},
+      "demos": [
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d1"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a1"
+              }
+            ],
+            [
+              "n",
+              {
+                "t": "int",
+                "v": 1
+              }
+            ],
+            [
+              "score",
+              {
+                "t": "float",
+                "v": 0.5
+              }
+            ],
+            [
+              "ok",
+              {
+                "t": "bool",
+                "v": true
+              }
+            ]
+          ]
+        },
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d2"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a2"
+              }
+            ]
+          ]
+        },
+        {
+          "t": "dict",
+          "v": [
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a3"
+              }
+            ],
+            [
+              "n",
+              {
+                "t": "int",
+                "v": 3
+              }
+            ]
+          ]
+        },
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d4"
+              }
+            ],
+            [
+              "n",
+              {
+                "t": "none"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "a4"
+              }
+            ],
+            [
+              "score",
+              {
+                "t": "float",
+                "v": 2.0
+              }
+            ],
+            [
+              "ok",
+              {
+                "t": "bool",
+                "v": false
+              }
+            ]
+          ]
+        },
+        {
+          "t": "dict",
+          "v": [
+            [
+              "question",
+              {
+                "t": "str",
+                "v": "d5"
+              }
+            ],
+            [
+              "answer",
+              {
+                "t": "str",
+                "v": "x < y & z"
+              }
+            ],
+            [
+              "n",
+              {
+                "t": "int",
+                "v": 5
+              }
+            ],
+            [
+              "score",
+              {
+                "t": "float",
+                "v": 1e-05
+              }
+            ],
+            [
+              "ok",
+              {
+                "t": "bool",
+                "v": true
+              }
+            ]
+          ]
+        }
+      ],
+      "inputs": {
+        "t": "dict",
+        "v": [
+          [
+            "question",
+            {
+              "t": "str",
+              "v": "Q?"
+            }
+          ]
+        ]
+      },
+      "differs_from_upstream_by_a6": false,
+      "messages": [
+        {
+          "role": "system",
+          "content": "You are a helpful assistant that can solve tasks based on user input.\nAs input, you will be provided with:\n1. `question` (str):\nYour outputs must contain:\n1. `answer` (str): \n2. `n` (int): \n3. `score` (float): \n4. `ok` (bool):\nYou should lay out your outputs in detail so that your answer can be understood by another agent\nSpecific instructions: Given the fields `question`, produce the fields `answer`, `n`, `score`, `ok`."
+        },
+        {
+          "role": "user",
+          "content": "This is an example of the task, though some input or output fields are not supplied.\n\nquestion: d2"
+        },
+        {
+          "role": "assistant",
+          "content": "answer: a2"
+        },
+        {
+          "role": "user",
+          "content": "This is an example of the task, though some input or output fields are not supplied.\n\nquestion: d4"
+        },
+        {
+          "role": "assistant",
+          "content": "answer: a4\n\nn: None\n\nscore: 2.0\n\nok: False"
+        },
+        {
+          "role": "user",
+          "content": "question: d1"
+        },
+        {
+          "role": "assistant",
+          "content": "answer: a1\n\nn: 1\n\nscore: 0.5\n\nok: True"
+        },
+        {
+          "role": "user",
+          "content": "question: d5"
+        },
+        {
+          "role": "assistant",
+          "content": "answer: x < y & z\n\nn: 5\n\nscore: 1e-05\n\nok: True"
+        },
+        {
+          "role": "user",
+          "content": "question: Q?"
+        }
+      ],
+      "completion": "The answer is 4.",
+      "extraction_messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `text` (str):\nYour output fields are:\n1. `answer` (str): \n2. `n` (int): \n3. `score` (float): \n4. `ok` (bool):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## text ## ]]\n{text}\n\n[[ ## answer ## ]]\n{answer}\n\n[[ ## n ## ]]\n{n}        # note: the value you produce must be a single int value\n\n[[ ## score ## ]]\n{score}        # note: the value you produce must be a single float value\n\n[[ ## ok ## ]]\n{ok}        # note: the value you produce must be True or False\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        The input is a text that should contain all the necessary information to produce the fields `answer`, `n`, `score`, `ok`.             Your job is to extract the fields from the text verbatim. Extract precisely the appropriate value (content) for each field."
+        },
+        {
+          "role": "user",
+          "content": "[[ ## text ## ]]\nThe answer is 4.\n\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, then `[[ ## n ## ]]` (must be formatted as a valid Python int), then `[[ ## score ## ]]` (must be formatted as a valid Python float), then `[[ ## ok ## ]]` (must be formatted as a valid Python bool), and then ending with the marker for `[[ ## completed ## ]]`."
+        }
+      ]
+    }
+  ]
+}

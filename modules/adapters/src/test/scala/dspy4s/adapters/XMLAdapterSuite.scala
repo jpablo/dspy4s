@@ -27,7 +27,7 @@ class XMLAdapterSuite extends FunSuite:
   override def afterEach(context: AfterEach): Unit =
     RuntimeEnvironment.resetForTests()
 
-  test("format injects xml schema instructions and demo xml") {
+  test("format shows the field tags, the demo tags, and the input tags") {
     val signature  = SignatureDsl.parse("question -> answer, score: float").toOption.get
     val invocation = AdapterInvocation(
       layout = signature,
@@ -47,9 +47,9 @@ class XMLAdapterSuite extends FunSuite:
     assert(formatted.isRight)
     val messages = formatted.toOption.get.messages
     assertEquals(messages.head.role, MessageRole.System)
-    assert(messages.head.text.get.contains("<outputs>"))
-    assert(messages(2).text.get.contains("<answer>Paris</answer>"))
-    assert(messages.last.text.get.contains("Question: Capital of Belgium?"))
+    assert(messages.head.text.get.contains("<answer>\n{answer}\n</answer>"), messages.head.text.get)
+    assertEquals(messages(2).text.get, "<answer>\nParis\n</answer>\n\n<score>\n0.95\n</score>")
+    assert(messages.last.text.get.startsWith("<question>\nCapital of Belgium?\n</question>"), messages.last.text.get)
   }
 
   test("parse reads xml fields and coerces scalar types") {
@@ -64,6 +64,19 @@ class XMLAdapterSuite extends FunSuite:
     assertEquals(lookup(values, "answer"), Some("Brussels": Any))
     assertEquals(lookup(values, "score"), Some(0.91: Any))
     assertEquals(lookup(values, "ok"), Some(true: Any))
+  }
+
+  // Upstream `XMLAdapter.parse` reads `<dspy_root>completion</dspy_root>`: the prompt asks for one tag per field.
+  test("parse reads the field tags at the top level, with no root element") {
+    val signature = SignatureDsl.parse("question -> answer, score: float").toOption.get
+    val xml       = "<answer>\nBrussels\n</answer>\n\n<score>\n0.91\n</score>"
+
+    given RuntimeContext = RuntimeEnvironment.current
+    val parsed           = XMLAdapter().parse(signature, LmOutput(text = xml))
+
+    assert(parsed.isRight, parsed.toString)
+    assertEquals(lookup(parsed.toOption.get.values, "answer"), Some("Brussels": Any))
+    assertEquals(lookup(parsed.toOption.get.values, "score"), Some(0.91: Any))
   }
 
   test("parse supports fenced xml payloads") {

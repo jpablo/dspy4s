@@ -6,6 +6,8 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
 
+import scala.util.matching.Regex
+
 final class SignatureParser:
   def parse(signatureDsl: String, name: String = "StringSignature"): Either[DspyError, SignatureLayout] =
     val trimmed = signatureDsl.trim
@@ -39,29 +41,58 @@ final class SignatureParser:
     if !FieldSpec.validateName(fieldName) then
       Left(ValidationError(s"Invalid field name '$fieldName' in signature token '$token'"))
     else
-      val (typeRef, optional) =
-        if parts.length == 1 || parts(1).isEmpty then (TypeRef.string, false)
+      val (typeRef, enumValues, optional) =
+        if parts.length == 1 || parts(1).isEmpty then (TypeRef.string, Vector.empty, false)
         else typeOf(parts(1))
-      Right(FieldSpec(name = fieldName, typeRef = typeRef, optional = optional))
+      Right(FieldSpec(name = fieldName, typeRef = typeRef, enumValues = enumValues, optional = optional))
 
-  /** The type of a type token, and `true` when the token permits no value (upstream `annotation_allows_none`).
-    * `Optional[T]`, `Union[T, None]`, `Union[None, T]`, `T | None`, and `None | T` give the type `T` and `true`.
+  /** The type of a type token, its enum values, and `true` when the token permits no value (upstream
+    * `annotation_allows_none`). `Optional[T]`, `Union[T, None]`, `Union[None, T]`, `T | None`, and `None | T` give the
+    * type `T` and `true`.
     *
     * A segment of the signature splits into fields at each comma outside brackets, so a type can have commas, for
     * example `scores: dict[str, int]` or `note: Optional[dict[str, int]]`.
     */
-  private def typeOf(token: String): (TypeRef, Boolean) =
+  private def typeOf(token: String): (TypeRef, Vector[String], Boolean) =
     import SignatureParser.{NoneToken, bracketArgs, splitOutsideBrackets}
     val members = bracketArgs(token, "Optional").map(inner => Vector(inner, NoneToken))
       .orElse(bracketArgs(token, "Union").map(splitOutsideBrackets(_, ',')))
       .getOrElse(splitOutsideBrackets(token, '|'))
       .map(_.trim)
     val others = members.filterNot(_ == NoneToken)
-    if others.nonEmpty && others.size < members.size then (TypeRef.fromToken(others.mkString(" | ")), true)
-    else (TypeRef.fromToken(token), false)
+    if others.nonEmpty && others.size < members.size then
+      val (typeRef, enumValues) = valueType(others.mkString(" | "))
+      (typeRef, enumValues, true)
+    else
+      val (typeRef, enumValues) = valueType(token)
+      (typeRef, enumValues, false)
+
+  /** The type and the enum values of a type token with no `None`. A `Literal` with string members, for example
+    * `Literal['a', "b"]`, is a string type with the members as enum values: a Python string signature gives such a
+    * field the `Literal` annotation, and the port keeps the members as the enum values of a string field. A `Literal`
+    * with other members is an opaque type, as each other unknown token.
+    */
+  private def valueType(token: String): (TypeRef, Vector[String]) =
+    SignatureParser.stringLiteralMembers(token.trim).fold((TypeRef.fromToken(token), Vector.empty[String])) { members =>
+      (TypeRef.string, members)
+    }
 
 object SignatureParser:
   private val NoneToken: String = "None"
+
+  /** One string member of a `Literal`: a text in single quotes or in double quotes, with no quote and no backslash in
+    * it.
+    */
+  private val StringMember: String = """'([^'\\]*)'|"([^"\\]*)""""
+
+  /** The members of a `Literal`: string members, separated by commas, with an optional comma at the end. */
+  private val StringMembers: Regex = s"""\\s*(?:$StringMember)\\s*(?:,\\s*(?:$StringMember)\\s*)*,?\\s*""".r
+
+  /** The members of `token` when it is `Literal[...]` with string members only. */
+  private def stringLiteralMembers(token: String): Option[Vector[String]] =
+    bracketArgs(token, "Literal").filter(StringMembers.matches).map { inner =>
+      StringMember.r.findAllMatchIn(inner).map(found => Option(found.group(1)).getOrElse(found.group(2))).toVector
+    }
 
   /** The parts of `text` between the `separator` characters that are outside brackets (`[]`, `()`, or `{}`). */
   private def splitOutsideBrackets(text: String, separator: Char): Vector[String] =

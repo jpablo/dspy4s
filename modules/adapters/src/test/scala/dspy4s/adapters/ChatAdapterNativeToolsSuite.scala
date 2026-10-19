@@ -76,9 +76,11 @@ class ChatAdapterNativeToolsSuite extends FunSuite:
     val promptText = prompt.messages.flatMap(_.text).mkString("\n")
     assert(promptText.contains("answer"), "the real text output field must still be requested")
     assert(
-      !promptText.contains("tool_calls"),
+      !promptText.contains("[[ ## tool_calls ## ]]") && !promptText.contains("(ToolCalls)"),
       s"the tool_calls field must not be rendered as a text field:\n$promptText"
     )
+    // Upstream computes the default instructions before it deletes the field, so the objective still names it.
+    assert(promptText.contains("produce the fields `answer`, `tool_calls`."), promptText)
   }
 
   test("native function-calling injects a string tool_choice when configured, and omits it otherwise") {

@@ -1,5 +1,6 @@
 package dspy4s.adapters.internal
 
+import dspy4s.adapters.contracts.AdapterDemos
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.NativeFunctionCalling
 import dspy4s.core.contracts.DynamicValues
@@ -10,11 +11,10 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ToolCall
 import dspy4s.core.contracts.ToolCallResult
 import dspy4s.core.contracts.TypeRef
-import dspy4s.core.contracts.updated
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
 import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+import zio.blocks.schema.DynamicValue
 
 /** The text that one adapter gives for the turns of a conversation. [[ConversationHistory]] uses the same text for a
   * demo, for a replayed turn of the history, and for the current request.
@@ -29,11 +29,6 @@ private[adapters] trait TurnText:
   /** The text of an assistant turn: the values of the output fields of `layout`, in the form of a demo. */
   def assistant(layout: SignatureLayout, values: DynamicValue.Record): String
 
-  /** `true` when [[assistant]] writes each value as JSON, so a structured value stays structured. `false` when it
-    * writes each value as text: a structured value must then be JSON text before the call.
-    */
-  def assistantWritesJson: Boolean
-
 /** The message sequence of a request, with the replay of a [[History]] input field as earlier turns (PORT_GAPS G-28;
   * upstream `Adapter.format` and `Adapter.format_conversation_history`). The Chat, JSON, and XML adapters share this
   * logic. Each adapter supplies only its [[TurnText]].
@@ -43,15 +38,6 @@ private[adapters] object ConversationHistory:
   /** The input field that holds the conversation history: the first input field with [[TypeRef.history]]. */
   def historyField(layout: SignatureLayout): Option[FieldSpec] =
     layout.inputFields.find(_.typeRef == TypeRef.history)
-
-  /** `systemText` with a note that names the history field, for an adapter whose system message does not list the input
-    * fields. The text does not change when the signature has no history field.
-    */
-  def appendNoteTo(systemText: String, layout: SignatureLayout): String =
-    historyField(layout) match
-      case Some(field) => s"$systemText\n\nThe input field `${field.name}` is the conversation history. " +
-          "Its messages come before the current request as earlier turns."
-      case None => systemText
 
   /** The messages of one request, in this order: system, demos, history turns, current request.
     *
@@ -80,7 +66,7 @@ private[adapters] object ConversationHistory:
     val requestLayout = historyName.fold(renderLayout) { name =>
       renderLayout.withInputFields(renderLayout.inputFields.filterNot(_.name == name))
     }
-    val demos = DemoMessages.messages(renderLayout, invocation.demos)(
+    val demos = DemoMessages.messages(renderLayout, invocation.demos, Some(AdapterDemos.NotSupplied))(
       turns.user(renderLayout, _, mainRequest = false),
       turns.assistant(renderLayout, _)
     )
@@ -147,14 +133,12 @@ private[adapters] object ConversationHistory:
           }
         else content.map(text => Message(role = MessageRole.Assistant, text = Some(text))).toVector
       case _ =>
-        // The calls go as a field value with no ids and no results. The results go in one more user turn.
-        val values = toolCallsField.zip(calls).fold(message) { (field, toolCalls) =>
-          message.updated(field.name, structured(toolCallsValue(toolCalls), turns.assistantWritesJson))
-        }
-        val assistantTurn = assistantText(layout.outputFields.filter(has), values)
+        // The calls go as a field value with no ids and no results (`PromptText.jsonable`). The results go in one more
+        // user turn, as the object of upstream `ToolCallResults`.
+        val assistantTurn = assistantText(layout.outputFields.filter(has), message)
           .map(text => Message(role = MessageRole.Assistant, text = Some(text)))
         val resultsTurn = Option.when(results.nonEmpty) {
-          val shown = DynamicValues.record(History.ToolCallResultsKey -> jsonText(toolCallResultsValue(results)))
+          val shown = DynamicValues.record(History.ToolCallResultsKey -> toolCallResultsValue(results))
           Message(role = MessageRole.User, text = Some(turns.user(ToolCallResultsLayout, shown, mainRequest = false)))
         }
         assistantTurn.toVector ++ resultsTurn.toVector
@@ -171,21 +155,11 @@ private[adapters] object ConversationHistory:
     instructions = None
   )
 
-  /** The calls as a model writes them in text: `{name, args}` records with no id. */
-  private def toolCallsValue(calls: Vector[ToolCall]): DynamicValue =
-    DynamicValue.Sequence(Chunk.from(calls.map(_.copy(id = None).toRecord)))
-
+  /** The results in the object form of upstream `ToolCallResults`: `{"tool_call_results": [...]}`. */
   private def toolCallResultsValue(results: Vector[ToolCallResult]): DynamicValue =
-    DynamicValue.Sequence(Chunk.from(results.map(_.toRecord)))
-
-  /** `value` in the form that an assistant turn needs: the value itself for JSON, else its JSON text. */
-  private def structured(value: DynamicValue, writesJson: Boolean): DynamicValue =
-    if writesJson then value else jsonText(value)
-
-  private def jsonText(value: DynamicValue): DynamicValue =
-    DynamicValue.Primitive(PrimitiveValue.String(ujson.write(JsonDynamic.toUjson(value))))
+    DynamicValues.record(History.ToolCallResultsKey -> DynamicValue.Sequence(Chunk.from(results.map(_.toRecord))))
 
   /** The text of a tool message (upstream `_tool_result_content`): the string itself, else the JSON text of the value.
     */
   private def toolResultText(value: DynamicValue): String =
-    DynamicValues.asString(value).getOrElse(ujson.write(JsonDynamic.toUjson(value)))
+    DynamicValues.asString(value).getOrElse(PythonText.json(value))

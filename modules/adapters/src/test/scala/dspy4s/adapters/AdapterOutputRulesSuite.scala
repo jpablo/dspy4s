@@ -240,6 +240,8 @@ class AdapterOutputRulesSuite extends FunSuite:
 
   test("an incomplete demo comes first, with the upstream prefix and the upstream text for a missing output") {
     demoAdapters.foreach { (label, adapter) =>
+      // Upstream `TwoStepAdapter.format_assistant_message_content` shows the outputs that the demo has only.
+      val twoStep  = label == "TwoStepAdapter"
       val messages = demoMessages(adapter, Vector(complete, incomplete))
       // System, two turns for each demo, and the live request.
       assertEquals(messages.map(_.role).count(_ == MessageRole.Assistant), 2, label)
@@ -251,7 +253,7 @@ class AdapterOutputRulesSuite extends FunSuite:
       assert(!texts(last).contains(AdapterDemos.IncompletePrefix), s"$label: ${texts(last)}")
       val reply = texts(first + 1)
       assert(reply.contains("A-incomplete"), s"$label: $reply")
-      assert(reply.contains(AdapterDemos.NotSupplied.trim), s"$label: $reply")
+      assertEquals(reply.contains(AdapterDemos.NotSupplied.trim), !twoStep, s"$label: $reply")
     }
   }
 
