@@ -468,7 +468,7 @@ analog; unconstrained fields render byte-identically), and constraints round-tri
 programmatically only (deriving them from the `zio-blocks Schema` surface needs a
 constraint-annotation mechanism that doesn't exist yet). **Follow-ups now done:** constraints are a
 structured `Constraint` ADT (`.render` for prose + `.schemaKeyword`/`.schemaValue` for JSON Schema);
-`XMLAdapter`/`JSONAdapter` render the prose block (shared `AdapterConstraints`), and `JSONAdapter`
+each adapter renders a `Constraints:` line under the field (batch 25, as upstream), and `JSONAdapter`
 also embeds them *structurally* into the emitted `response_format` JSON Schema (`exclusiveMinimum`,
 `maxLength`, …) — advisory under `strict:false`, but real structured signal.
 
@@ -1375,7 +1375,8 @@ null output shows the "Not supplied" text, where upstream shows `None`. The UPGR
 
 ## G-30 — Adapter prompts are not byte-equal to upstream
 
-**Status:** Open (needs decision D3) · **Verification:** C (ChatAdapter), R (JSON, XML)
+**Status:** Resolved for the adapters (2026-10-18, batch 25, decision D3 with the boundary rule). The prompts of
+ChainOfThought, ReAct, and RLM are open (G-37, G-38). · **Verification:** C (golden tests)
 
 **ChatAdapter differences.**
 
@@ -1398,6 +1399,16 @@ is the same. The dspy4s tests use `contains`, so they do not detect a difference
 
 **Direction.** Decide D3. If parity is the goal, add golden prompt tests from upstream's exact format tests
 (52efe7781, 6fb3f96cb).
+
+**Resolution (batch 25).** Decision D3 (2026-10-18): the prompts match upstream within a boundary rule (see
+UPGRADE-3.2.1-to-3.4.0.md, phase 0). The Chat, JSON, XML, and two-step adapters now build each prompt as upstream
+does: the field list, the structure, the objective, the demos, the history turns, and the reminder. The type text
+comes from the data of the port only (`internal/PromptText.scala`); a value prints in the Python form
+(`internal/PythonText.scala`). A structured type shows the type name and the JSON schema of the port. The port-only
+texts are gone: the output schema block, the JSON key instructions, and the history note. `scripts/golden` writes
+the expected prompts from upstream. Tests: `AdapterPromptParitySuite` (28 golden cases and the two-step extraction
+prompts), `PortTypeTextSuite`, `TypedPromptParitySuite`, `StructuredTypeTextSuite`, `PythonTextSuite`. The
+intended differences are in PORT_DIFFERENCES.md section 16.
 
 ---
 
@@ -1423,7 +1434,8 @@ the first.
 
 ## G-32 — Custom adapter types, JSON mode, and nested XML are absent
 
-**Status:** Open · **Verification:** R · **Upgrade item:** A6
+**Status:** Open. Nested XML is not mirrored (decision A6, 2026-10-18). · **Verification:** R · **Upgrade item:**
+A6
 
 - **Custom types.** `Image`, `Audio`, `File`, `Document`, `Citations`, `Code`, and `Reasoning` have no port.
   `ContentPart` encodes `type` and `text` only (`modules/lm/.../runtime/ProviderLanguageModel.scala:62-71`), and no

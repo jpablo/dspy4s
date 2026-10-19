@@ -384,6 +384,26 @@ dspy4s removed `CodeAct` and `ProgramOfThought` at the 3.4.0 target, so
 that no more work goes into them. Use `RLM` for a program that
 generates code and runs it.
 
+## 16. Prompt text: the boundary rule of decision D3
+
+**Convention.**
+
+The adapters write the upstream prompt text, character for character, where the text is fixed or where the port can
+compute it from its own field data: `TypeRef`, the enum values, the optional flag, the descriptions, and the
+constraints. The port has no model of Python types, so a few places of a prompt differ by design:
+
+- A structured type shows the type name of the port (`list`, `dict`, or the token of a string signature, such as
+  `list[str]`) and the JSON schema of the port (the property of the field in the output schema of a typed
+  signature). Upstream shows the Python annotation (`list[str]`, `Union[str, NoneType]`, the name of a model) and the
+  pydantic schema.
+- A field with enum values shows `str` and the note of a `Literal`. Upstream shows the `Literal` or the `Enum` type.
+- An optional field shows the text of its element type. Upstream shows `Union[T, NoneType]`.
+- The XML adapter asks for a list, dict, or model output as JSON text inside the tag (decision A6). Upstream asks
+  for nested elements.
+- The two-step adapter prints a list or dict value as JSON. Upstream prints the Python `repr`.
+- A value of an input or a demo prints as upstream prints it: `True`, `False`, `None`, the Python form of a float,
+  and JSON with the separators `", "` and `": "`.
+
 ## What this means in practice
 
 If you're porting a Python DSPy script to dspy4s, the friction will

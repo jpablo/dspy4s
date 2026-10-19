@@ -622,6 +622,53 @@ scope). Phase 0 to phase 4 below record them.
 - **Tests.** `LmCostSuite`; `LmHistoryEntrySuite`, `LmCacheSuite`, and `DiskCacheRecordSuite` changed for the new
   keys and the new `get` rule.
 
+### Batch 25 (2026-10-18): the adapter prompts (decision D3)
+
+The full suite passes: 1,743 tests, 0 failures, 6 live tests skipped (before the I10 and batch 26 tests).
+
+- **D3, the adapters** (G-30). The Chat, JSON, XML, and two-step adapters build each prompt as upstream does, inside
+  the boundary rule of phase 0. Two new internal objects of the adapters hold the rules:
+  - `PromptText`: the type name, the structure note, the reminder hint, the field list (upstream
+    `get_field_description_string`), the system message, the objective, and `format_field_value`;
+  - `PythonText`: the Python form of a value (`str`, the `repr` of a float, `json.dumps` with and without
+    `indent=2`), and the text helpers that upstream uses (`strip`, `splitlines`, `textwrap.dedent`).
+- **Golden tests.** `scripts/golden/adapter_prompts.py` writes 28 cases from upstream (four adapters, with demos,
+  the history, constraints, values, and tool calls), and the extraction prompts of the two-step adapter.
+  `TypedPromptParitySuite` checks a typed signature. `PortTypeTextSuite` and `StructuredTypeTextSuite` check the type
+  text of the port for the structured types.
+- **Two fixes from the new tests.**
+  - An `Option` field of a typed signature had the type `string`, so an `Option[Int]` output showed as a text field.
+    It now has the type and the enum values of its element (`OptionTypeRefSuite`).
+  - A `Literal['a', "b"]` type of a string signature gives a `str` field with the enum values, also inside
+    `Optional[...]`.
+- **Upstream rules that the golden data showed.**
+  - Each line of the field list except the last ends with `: ` and a space; a `Constraints:` line follows the field.
+  - The objective comes from the default instructions of the full signature.
+  - An incomplete demo prints a null value as `None` (`null` in JSON); only a missing key gets "Not supplied for this
+    particular example."
+  - XML escapes `&` and `<` in a plain `str` output only.
+  - The two-step extractor text keeps 13 spaces from a line continuation of the upstream source.
+- **Changes in behavior.**
+  - The prompts change for each program. The port-only texts are gone: the output schema block of the chat adapter,
+    the JSON key instructions, and the history note.
+  - The XML parser reads a reply with more than one top-level tag inside a root element, as upstream (the new prompt
+    asks for one tag for each field).
+  - When the strict parse of an optional field fails, the parse tries the lenient forms of the typed decode: an empty
+    text, `null`, `none`, or `n/a` gives a null, and a number can have a currency symbol and commas. A string
+    signature `Optional[int]` now reads `N/A` as null.
+- **API changes.** Removed: `ChatAdapter.displayTypeName`, `reminderHint`, and `structureHint`;
+  `NativeFunctionCalling.TextFormat`; `contracts.AdapterConstraints`; `AdapterTextSupport.renderFields` and
+  `fewShotMessages`.
+- **Decided by Claude, review.**
+  - A field with enum values shows the note of a `Literal` ("must exactly match (no extra characters) one of"), also
+    for a Scala enum, because the parse needs an exact label.
+  - The two-step cases of the golden data have scalar values only, because upstream prints a list there with Python
+    `repr`.
+- **Open points, for the owner.**
+  - History replay of a partial message: the port shows only the fields that a message has. Upstream shows each
+    output field, with `None` for a missing one, and gives an assistant turn for a message with inputs only.
+  - The two-step extraction prompt has no output schema, so a structured field gets the bare list or dict schema.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
