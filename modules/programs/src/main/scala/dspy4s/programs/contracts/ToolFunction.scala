@@ -22,6 +22,12 @@ trait ToolFunction:
     */
   def argSchema: Vector[(String, dspy4s.core.contracts.TypeRef)] = Vector.empty
 
+  /** The JSON schema of the arguments, when the tool has one: an object schema with `properties` and `required`, for
+    * example the `inputSchema` of an MCP tool (upgrade item I10; upstream `Tool.args` holds the schema of each
+    * argument). [[argSchema]] stays the flat view of the same arguments. `None` for a tool that has only [[argSchema]].
+    */
+  def inputSchema: Option[DynamicValue.Record] = None
+
   def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue]
 
 /** Supplies a tool's description for [[ToolFunction.fromMethod]], co-located with the method definition:

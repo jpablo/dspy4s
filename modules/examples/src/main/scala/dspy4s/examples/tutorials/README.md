@@ -29,8 +29,11 @@ dspy4s ports the *code-bearing* DSPy tutorials. The status legend and full inven
 - [Streaming](./streaming/Streaming.scala) — ✅ synchronous `streamify`.
 - [Async](./async/Async.scala) — ✅ `applyAsync`.
 - [Debugging & Observability](./observability/Observability.scala) — ✅ callback handler.
-- [Use MCP in DSPy](./mcp/README.md), [Saving and Loading](./saving/), [Deployment](./deployment/),
-  [Tracking Optimizers](./optimizer_tracking/) — 🚫 blocked (no MCP / save-load / serving / MLflow).
+- [Use MCP in DSPy](./mcp/Mcp.scala) ✅ MCP tools as `ToolFunction`s (`McpTools.fromClient`), with an airline MCP
+  server on the MCP Java SDK.
+- [Saving and Loading](./saving/Saving.scala) ✅ `ProgramPersistence`.
+- [Tracking Optimizers](./optimizer_tracking/OptimizerTracking.scala) ✅ a `CallbackHandler` (no MLflow).
+- [Deployment](./deployment/) 🚫 blocked (no model serving).
 
 ### Real-world examples
 - [Overview](./real_world_examples/README.md), and: [llms.txt](./llms_txt_generation/LlmsTxtGeneration.scala) ✅,

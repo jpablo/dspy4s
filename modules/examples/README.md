@@ -54,6 +54,7 @@ Examples marked _offline_ below make no LM calls and need no key.
 | **Modules** | `…learn.programming.modulesMain` 🔑 | Portable snippets; multi-completion `n=5` access noted unsupported. |
 | **Tools** | `…learn.programming.toolsMain` 🔑 | ReAct + `ToolFunction.fromMethod`; native function-calling toggle (`ChatAdapter(useNativeFunctionCalling=true)`, G-7b). Manual tool-call path / async tools out of scope. |
 | **Adapters** | `…learn.programming.adaptersMain` 🔑 | 1–6: Predict, `adapter.format(...)`, ChatAdapter/JSONAdapter selection, `inspect_history` (`RuntimeEnvironment.inspectHistory`, via a `ManagedLanguageModel`). |
+| **Mcp** | `…learn.programming.mcpMain <class path>` 🔑 | 5/5. The tools of an MCP server as `ToolFunction`s (`McpTools.fromClient` of `dspy4s-mcp`, I10) over the streamable HTTP and stdio clients of the MCP Java SDK; an arithmetic server (`mcpArithmeticServer`); `ReAct` over the tools; structured results; `McpTools.toolSpec`. ReActV2 is not ported (G-19). |
 
 ### `learn/evaluation`
 
@@ -92,6 +93,7 @@ Examples marked _offline_ below make no LM calls and need no key.
 | **llms_txt_generation** | `llms_txt_generation.llmsTxtMain` 🔑 | Signatures + composed pipeline. GitHub HTTP fetching out of scope. |
 | **saving** | `saving.savingMain` _(offline)_ | Program state `save`/`load` round-trip via `ProgramPersistence` (G-4). GSM8K swapped for a hand-built trainset; `save_program=True` code-pickling out of scope. |
 | **optimizer_tracking** | `optimizer_tracking.optimizerTrackingMain` 🔑 | MIPROv2 + a `CallbackHandler` tracking LM calls (the dspy4s observability seam). MLflow autolog out of scope; GSM8K swapped. |
+| **mcp** | `mcp.mcpTutorialMain <class path>` 🔑 | 10/10. The airline MCP server on the server API of the MCP Java SDK (`airlineMcpServer`; each input schema is the JSON schema of a case class); a `ReAct` agent over the converted tools. The agent starts the server in a child JVM. The per-field `desc` is not in the signature. |
 
 ### Top-level
 
@@ -145,7 +147,6 @@ alternative where one exists.
 |---|---|---|
 | `deep_dive/data_handling/BuiltInDatasets` | built-in dataset loaders (`dspy.datasets`, HotPotQA/GSM8K) | `LoadingCustomData` (build `Example`s yourself) |
 | `learn/programming/Assertions7` | `dspy.Assert` / `dspy.Suggest` backtracking | `output_refinement` (`Refine` / `BestOfN`) |
-| `learn/programming/Mcp` & `tutorials/mcp` | MCP client/tool bridge | plain `ToolFunction`s (`learn/programming/Tools`) |
 | `tutorials/deployment` | model serving (FastAPI app / MLflow serving) | wrap a program in your own HTTP layer |
 | `tutorials/mem0_react_agent` | mem0 long-term memory store | ReAct itself is portable (`Tools`) |
 
@@ -153,12 +154,14 @@ alternative where one exists.
 
 ## At a glance
 
-- **24** ported doc examples (✅) + **4** signature demos (🔧) = **29** runnable `@main`s (the Metrics
-  example carries two: `metricsMain` + `metricsJudgeMain`).
+- **26** ported doc examples (✅) + **4** signature demos (🔧) = **33** runnable `@main`s (the Metrics
+  example carries two: `metricsMain` + `metricsJudgeMain`; each MCP page carries two: an agent and the MCP server
+  that the agent starts).
 - **7** run offline (no key): `dataMain`, `metricsMain`, `builderMain`, `examplesMain`, `cheatsheetMain`,
-  `loadingCustomDataMain`, `savingMain`. The other 22 need `OPENAI_API_KEY` (🔑).
-- **14** adapted prose docs (📄, now `README.md` per section) and **6** blocked files (🚫) — shown as 5 rows above (the two MCP pages share one).
-- **35** Scala source files (27 runnable + 7 blocked + the shared `Demo` runner) plus **14** section `README.md`s.
+  `loadingCustomDataMain`, `savingMain`. The two MCP servers (`mcpArithmeticServer`, `airlineMcpServer`) need no key;
+  the MCP agents start them. The other 24 need `OPENAI_API_KEY` (🔑).
+- **14** adapted prose docs (📄, now `README.md` per section) and **4** blocked files (🚫), one row each above.
+- **35** Scala source files (29 runnable + 5 blocked + the shared `Demo` runner) plus **14** section `README.md`s.
 
-When a feature lands in dspy4s (datasets, MCP, the `dspy.History` input type, …), the corresponding 🚫 file is
+When a feature lands in dspy4s (datasets, the `dspy.History` input type, …), the corresponding 🚫 file is
 the next thing to port — its header already records exactly what's missing.

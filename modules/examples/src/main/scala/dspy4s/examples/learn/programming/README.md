@@ -29,6 +29,7 @@ How to start:
 | [`Tools.scala`](./Tools.scala) | `ReAct` agents over `ToolFunction`s (incl. `ToolFunction.fromMethod`). |
 | [`Adapters.scala`](./Adapters.scala) | `ChatAdapter` / `JSONAdapter`, and inspecting the formatted prompt. |
 | [`LanguageModels.scala`](./LanguageModels.scala) | Configuring the LM, direct calls, generation params, usage, errors. |
+| [`Mcp.scala`](./Mcp.scala) | The tools of an MCP server as `ToolFunction`s (`McpTools.fromClient`), with `ReAct`. |
 
-Not yet portable here: `Assertions7.scala` (no `Assert`/`Suggest` — use `Refine`/`BestOfN`) and `Mcp.scala`
-(no MCP bridge). See the [module README](../../../../../../../../README.md) for the full status table.
+Not yet portable here: `Assertions7.scala` (no `Assert`/`Suggest` — use `Refine`/`BestOfN`). See the
+[module README](../../../../../../../../README.md) for the full status table.
