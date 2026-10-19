@@ -911,8 +911,9 @@ The full suite passes: 1,962 tests, 0 failures, 6 live tests skipped.
 - **Open points.**
   - Upstream also sets `reasoning_effort` to `None` in the forced submit. The port does not send it, because a JSON
     null could go to the provider.
-  - An exception that a tool throws ends the run, as in `ReAct`. Upstream turns each exception into an error result.
-    A port tool gives an error as a `Left`.
+  - Fixed in `08732202`: an exception that a tool throws ended the run, also in `ReAct`. Now `ToolExecutor.run`
+    turns a non-fatal exception into an error result with the text `<ClassName>: <message>`, as upstream turns each
+    exception into an error result. A fatal error still goes up to the caller.
   - The result has no total LM usage of the run, as `RLM`.
 
 Open points from batch 1, for the owner:
