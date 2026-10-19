@@ -101,6 +101,9 @@ final case class RLM[I, O](
 
   override val moduleName: String = "rlm"
   RLM.checkNames(tools.map(_.name), baseSignature.layout)
+  // Experimental decision outputs: `SUBMIT` gets no evidence decoding. Upstream `RLM.__init__` warns, and the program
+  // runs.
+  if RLM.hasDecisionOutputs(baseSignature) then RuntimeEnvironment.warn("RLM", RLM.DecisionOutputsWarning)
 
   private val baseLayout: SignatureLayout      = baseSignature.layout
   private val outputFieldNames: Vector[String] = baseLayout.outputFields.map(_.name)
@@ -284,6 +287,20 @@ object RLM:
     */
   def isReservedSandboxName(name: String): Boolean =
     ReservedToolNames.contains(name) || name == "dspy" || name.startsWith("_dspy") || name.startsWith("__dspy")
+
+  /** The warning of an RLM with decision outputs (upstream `RLM.__init__`). */
+  private val DecisionOutputsWarning: String =
+    "RLM support for Noul, Choice, and Score outputs is not implemented consistently: decision evidence decoding is " +
+      "not guaranteed, including for nested output types. Use Predict with top-level decision outputs instead."
+
+  /** `true` when an output of `signature` is a `Noul`, a `Score`, or a `Choice` (experimental), also inside an
+    * `Option`, a collection, or a map (upstream `RLM.__init__`).
+    */
+  private def hasDecisionOutputs(signature: Signature[?, ?]): Boolean =
+    signature.layout.outputFields.exists(field => DecisionTypes.contains(field.typeRef)) ||
+      signature.outputShape.nestedDecisionFields.nonEmpty
+
+  private val DecisionTypes: Set[TypeRef] = Set(TypeRef.noul, TypeRef.score, TypeRef.choice)
 
   /** The name checks of the constructor (upstream `_normalize_tools` and `_validate_namespace`). See the "Name checks"
     * section of [[RLM]]. Throws an `IllegalArgumentException` for the first problem.

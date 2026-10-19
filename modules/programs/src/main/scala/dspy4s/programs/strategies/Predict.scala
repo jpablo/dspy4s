@@ -3,6 +3,7 @@ package dspy4s.programs.strategies
 import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.{DspyError, DynamicValues, NotFoundError, PredictorKey, RuntimeContext}
 import dspy4s.core.data.Example
+import dspy4s.core.decisions.DecisionSettings
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.contracts.{Module, ModuleLifecycle, ProgramCall, ProgramRuntime}
 import dspy4s.programs.runtime.{PredictEngine, SettingsProgramRuntime}
@@ -46,7 +47,13 @@ final case class Predict[I, O](
       * function-calling enabled and a `tool_calls` output field in the signature. Pure [[ToolSpec]] data; not
       * serialized state. See PORT_GAPS G-7b.
       */
-    tools: Vector[ToolSpec] = Vector.empty
+    tools: Vector[ToolSpec] = Vector.empty,
+    /** Experimental. The explicit settings of the decision outputs, by output name (upstream `Predict.fields`). Each
+      * rich decision output (`Noul`, `Score`, `Choice`) uses evidence decoding with its defaults; a native `Boolean` or
+      * enum output uses it only with an entry here. The call validates the settings before the request. See
+      * [[dspy4s.core.decisions]].
+      */
+    decisions: Map[String, DecisionSettings] = Map.empty
 ) extends Module[I, O]:
 
   override val moduleName: String = name.getOrElse("predict")
@@ -63,7 +70,9 @@ final case class Predict[I, O](
     outputJsonSchema = signature.outputShape.jsonSchemaString,
     config = config,
     lm = lm,
-    tools = tools
+    tools = tools,
+    decisions = decisions,
+    nestedDecisionFields = signature.outputShape.nestedDecisionFields
   )
 
   /** Pin a bound LM to this predictor (immutable `set_lm`): returns a copy that resolves to `model` instead of the
@@ -73,6 +82,25 @@ final case class Predict[I, O](
 
   /** The bound LM, if any (`get_lm`); `None` means the predictor uses the ambient `RuntimeContext` LM. */
   def boundLm: Option[LanguageModel] = lm
+
+  /** Experimental. This predictor with the explicit `settings` of the decision output `field` (upstream
+    * `Predict.fields[field]`). The settings replace the earlier settings of the field. A `Left` comes when the plan of
+    * the layout rejects the settings ([[dspy4s.core.decisions.DecisionPlan.of]]).
+    */
+  def withDecision(field: String, settings: DecisionSettings): Either[DspyError, Predict[I, O]] =
+    PredictEngine.withDecision(signature.layout, decisions, field, settings).map(updated => copy(decisions = updated))
+
+  /** Experimental. The effective criteria of the decision output `field` (upstream `get_criteria`): the explicit
+    * criteria, else the default of its kind. A `Left` comes when `field` is not a decision output.
+    */
+  def criteria(field: String): Either[DspyError, Option[DynamicValue]] =
+    PredictEngine.criteria(signature.layout, decisions, field)
+
+  /** Experimental. This predictor with the criteria of the decision output `field` set to `criteria` (upstream
+    * `set_criteria`). The other settings of the field stay. A `Left` comes when the plan rejects the criteria.
+    */
+  def withCriteria(field: String, criteria: DynamicValue): Either[DspyError, Predict[I, O]] =
+    PredictEngine.withCriteria(signature.layout, decisions, field, criteria).map(updated => copy(decisions = updated))
 
   /** Forget the static input/output shapes and expose this predictor as a record-valued program.
     *
@@ -90,7 +118,8 @@ final case class Predict[I, O](
       outputJsonSchema = signature.outputShape.jsonSchemaString,
       config = config,
       lm = lm,
-      tools = tools
+      tools = tools,
+      decisions = decisions
     )
 
   // The key is the data of this leaf's `OptimizableMetadata`, so an optimizer finds the trace entries of the leaf.

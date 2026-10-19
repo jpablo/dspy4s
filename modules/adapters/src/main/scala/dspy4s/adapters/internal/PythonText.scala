@@ -9,8 +9,8 @@ import scala.util.Try
 import scala.util.matching.Regex
 
 /** The text forms of Python that the prompts of upstream use: `str()` and `repr()` of a value, `json.dumps` with
-  * `ensure_ascii=False`, `str.strip`, `str.splitlines`, and `textwrap.dedent`. The adapters use these forms so that a
-  * prompt is equal to the upstream prompt, character for character (decision D3).
+  * `ensure_ascii=False` and with ASCII escapes, `str.strip`, `str.splitlines`, and `textwrap.dedent`. The adapters use
+  * these forms so that a prompt is equal to the upstream prompt, character for character (decision D3).
   *
   * A value is a `DynamicValue`. An `Option` value of a typed record (the `Some` and `None` variants) prints as its
   * element or as `None`. An enum case with no fields prints as its case name.
@@ -89,40 +89,53 @@ private[adapters] object PythonText:
     */
   def json(value: DynamicValue, indent: Option[Int] = None): String =
     val out = new StringBuilder
-    writeJson(value, indent, 0, out)
+    writeJson(value, JsonStyle(indent, ascii = false), 0, out)
     out.toString
 
-  private def writeJson(value: DynamicValue, indent: Option[Int], level: Int, out: StringBuilder): Unit =
-    def writeFields(fields: Vector[(String, DynamicValue)]): Unit = writeObject(fields, indent, level, out)
+  /** Python `json.dumps(value)` with the default `ensure_ascii=True`: as [[json]], but each character that is not a
+    * printable ASCII character is an escape (a backslash, `u`, and four hexadecimal digits). A character above U+FFFF
+    * is two escapes (a surrogate pair).
+    */
+  def jsonAscii(value: DynamicValue): String =
+    val out = new StringBuilder
+    writeJson(value, JsonStyle(indent = None, ascii = true), 0, out)
+    out.toString
+
+  /** The options of `json.dumps`: `indent`, and `ascii` for `ensure_ascii=True`. */
+  private final case class JsonStyle(indent: Option[Int], ascii: Boolean)
+
+  private def writeJson(value: DynamicValue, style: JsonStyle, level: Int, out: StringBuilder): Unit =
+    def writeFields(fields: Vector[(String, DynamicValue)]): Unit = writeObject(fields, style, level, out)
+    def writeText(text    : String): Unit                         = quote(text, style.ascii, out)
     unwrap(value) match
       case _: DynamicValue.Null.type                             => out ++= "null"
-      case DynamicValue.Primitive(PrimitiveValue.String(text))   => quote(text, out)
-      case DynamicValue.Primitive(PrimitiveValue.Char(char))     => quote(char.toString, out)
+      case DynamicValue.Primitive(PrimitiveValue.String(text))   => writeText(text)
+      case DynamicValue.Primitive(PrimitiveValue.Char(char))     => writeText(char.toString)
       case DynamicValue.Primitive(PrimitiveValue.Boolean(flag))  => out ++= (if flag then "true" else "false")
       case DynamicValue.Primitive(_: PrimitiveValue.Unit.type)   => out ++= "null"
       case DynamicValue.Primitive(PrimitiveValue.Double(number)) => out ++= jsonFloat(number, float(number))
       case DynamicValue.Primitive(PrimitiveValue.Float(number))  => out ++= jsonFloat(number.toDouble, float32(number))
       case NumberText(text)                                      => out ++= text
-      case primitive: DynamicValue.Primitive                     => quote(DynamicValues.renderText(primitive), out)
-      case EnumCase(name)                                        => quote(name, out)
+      case primitive: DynamicValue.Primitive                     => writeText(DynamicValues.renderText(primitive))
+      case EnumCase(name)                                        => writeText(name)
       case DynamicValue.Variant(caseName, inner)                 => writeFields(Vector(caseName -> inner))
       case record: DynamicValue.Record                           => writeFields(record.fields.toVector)
       case map: DynamicValue.Map                                 => writeFields(entriesOf(map))
       case sequence: DynamicValue.Sequence                       =>
-        writeContainer(sequence.elements.toVector, "[", "]", indent, level, out)((item, nested) =>
-          writeJson(item, indent, nested, out)
+        writeContainer(sequence.elements.toVector, "[", "]", style.indent, level, out)((item, nested) =>
+          writeJson(item, style, nested, out)
         )
 
   private def writeObject(
       fields: Vector[(String, DynamicValue)],
-      indent: Option[Int],
+      style : JsonStyle,
       level : Int,
       out   : StringBuilder
   ): Unit =
-    writeContainer(fields, "{", "}", indent, level, out) { (field, nested) =>
-      quote(field._1, out)
+    writeContainer(fields, "{", "}", style.indent, level, out) { (field, nested) =>
+      quote(field._1, style.ascii, out)
       out ++= ": "
-      writeJson(field._2, indent, nested, out)
+      writeJson(field._2, style, nested, out)
     }
 
   /** The items between `open` and `close`. With no indent, the separator is `", "`. With an indent, each item is on a
@@ -166,20 +179,21 @@ private[adapters] object PythonText:
       case other                                                => DynamicValues.renderText(other)
 
   /** The JSON string of `text` (Python `encode_basestring`): `"` and `\` escaped, a control character escaped, and each
-    * other character as it is.
+    * other character as it is. With `ascii` (Python `encode_basestring_ascii`), each character that is not in the range
+    * from a space to `~` is also an escape.
     */
-  private def quote(text: String, out: StringBuilder): Unit =
+  private def quote(text: String, ascii: Boolean, out: StringBuilder): Unit =
     out += '"'
     text.foreach {
-      case '"'                => out ++= "\\\""
-      case '\\'               => out ++= "\\\\"
-      case '\n'               => out ++= "\\n"
-      case '\r'               => out ++= "\\r"
-      case '\t'               => out ++= "\\t"
-      case '\b'               => out ++= "\\b"
-      case '\f'               => out ++= "\\f"
-      case char if char < ' ' => out ++= f"\\u${char.toInt}%04x"
-      case char               => out += char
+      case '"'                                         => out ++= "\\\""
+      case '\\'                                        => out ++= "\\\\"
+      case '\n'                                        => out ++= "\\n"
+      case '\r'                                        => out ++= "\\r"
+      case '\t'                                        => out ++= "\\t"
+      case '\b'                                        => out ++= "\\b"
+      case '\f'                                        => out ++= "\\f"
+      case char if char < ' ' || (ascii && char > '~') => out ++= f"\\u${char.toInt}%04x"
+      case char                                        => out += char
     }
     out += '"'
 

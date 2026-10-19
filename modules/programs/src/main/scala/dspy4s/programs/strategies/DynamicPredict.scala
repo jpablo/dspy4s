@@ -4,6 +4,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.PredictorKey
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.data.Example
+import dspy4s.core.decisions.DecisionSettings
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.adapters.contracts.ToolSpec
@@ -76,7 +77,11 @@ final case class DynamicPredict(
       * function-calling enabled and a `tool_calls` output field acts on them. Pure [[ToolSpec]] data (no invoke
       * closures) — the executable bodies stay on the calling program. Not serialized state. See G-7b.
       */
-    tools: Vector[ToolSpec] = Vector.empty
+    tools: Vector[ToolSpec] = Vector.empty,
+    /** Experimental. The explicit settings of the decision outputs, by output name (upstream `Predict.fields`). See
+      * [[Predict.decisions]].
+      */
+    decisions: Map[String, DecisionSettings] = Map.empty
 ) extends DynamicModule:
 
   override val moduleName: String = name.getOrElse("predict")
@@ -85,7 +90,27 @@ final case class DynamicPredict(
   override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] =
     ModuleLifecycle.dynamicPredictor(PredictorKey.from(moduleName, layout))
 
-  private val engine = PredictEngine(layout, demos, moduleName, runtime, outputJsonSchema, config, lm, tools)
+  private val engine =
+    PredictEngine(layout, demos, moduleName, runtime, outputJsonSchema, config, lm, tools, decisions = decisions)
+
+  /** Experimental. This predictor with the explicit `settings` of the decision output `field` (upstream
+    * `Predict.fields[field]`). The settings replace the earlier settings of the field. A `Left` comes when the plan of
+    * the layout rejects the settings ([[dspy4s.core.decisions.DecisionPlan.of]]).
+    */
+  def withDecision(field: String, settings: DecisionSettings): Either[DspyError, DynamicPredict] =
+    PredictEngine.withDecision(layout, decisions, field, settings).map(updated => copy(decisions = updated))
+
+  /** Experimental. The effective criteria of the decision output `field` (upstream `get_criteria`): the explicit
+    * criteria, else the default of its kind. A `Left` comes when `field` is not a decision output.
+    */
+  def criteria(field: String): Either[DspyError, Option[DynamicValue]] =
+    PredictEngine.criteria(layout, decisions, field)
+
+  /** Experimental. This predictor with the criteria of the decision output `field` set to `criteria` (upstream
+    * `set_criteria`). The other settings of the field stay. A `Left` comes when the plan rejects the criteria.
+    */
+  def withCriteria(field: String, criteria: DynamicValue): Either[DspyError, DynamicPredict] =
+    PredictEngine.withCriteria(layout, decisions, field, criteria).map(updated => copy(decisions = updated))
 
   override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
       RuntimeContext

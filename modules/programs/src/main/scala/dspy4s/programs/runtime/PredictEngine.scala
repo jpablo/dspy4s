@@ -1,5 +1,6 @@
 package dspy4s.programs.runtime
 
+import dspy4s.adapters.DecisionAdapter
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt
@@ -15,6 +16,8 @@ import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.ConfigurationError
+import dspy4s.core.decisions.{DecisionPlan, DecisionSettings}
 import dspy4s.core.runtime.ActivePredictContext
 import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -23,6 +26,7 @@ import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
+import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.core.contracts.ToolCall
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ProgramRuntime
@@ -62,16 +66,28 @@ private[dspy4s] final case class PredictEngine(
       * function-calling enabled (and a `tool_calls` output field in the layout) acts on them; others ignore them. Empty
       * by default. See PORT_GAPS G-7b.
       */
-    tools: Vector[ToolSpec] = Vector.empty
+    tools: Vector[ToolSpec] = Vector.empty,
+    /** Experimental. The explicit settings of the decision outputs, by output name (upstream `Predict.fields`). The
+      * engine builds the [[DecisionPlan]] of the layout with them. See [[resolveDecisions]].
+      */
+    decisions: Map[String, DecisionSettings] = Map.empty,
+    /** Experimental. The output fields whose type holds a decision type inside an `Option`, a collection, or a map
+      * ([[dspy4s.signatures.Shape.nestedDecisionFields]]). Each call warns that they get no evidence decoding.
+      */
+    nestedDecisionFields: Vector[String] = Vector.empty
 ):
   // The layout is immutable for the engine's lifetime, so the declared-input key set is computed once, not per call.
   private val inputKeys: Set[String] = layout.inputFields.map(_.name).toSet
+
+  // The layout and the settings are immutable for the engine's lifetime, so the plan is computed once.
+  private lazy val decisionPlan: Either[DspyError, DecisionPlan] = DecisionPlan.of(layout, decisions)
 
   def execute(call: ProgramCall[DynamicValue.Record])(using RuntimeContext): Either[DspyError, RawPrediction] =
     ActivePredictContext.withActive(moduleName, layout) {
       for
         model      <- lm.fold(runtime.resolveModel)(Right(_))
-        adapter    <- runtime.resolveAdapter
+        resolved   <- runtime.resolveAdapter
+        adapter    <- resolveDecisions(resolved, model)
         answer     <- answerWithFallback(adapter, model, buildInvocation(call, model))
         prediction <- buildPrediction(
                         answer.parsed,
@@ -80,6 +96,38 @@ private[dspy4s] final case class PredictEngine(
                       )
       yield prediction
     }
+
+  /** The adapter of a call with the decision outputs of the layout (upstream `resolve_adapter` in
+    * `dspy/adapters/decision.py`): `adapter` itself when the layout has no decision output, else a [[DecisionAdapter]]
+    * around `adapter`. Its fallback is the fallback of `adapter`, in a [[DecisionAdapter]] too. These errors fail the
+    * call before the request:
+    *   - settings that the plan rejects ([[DecisionPlan.of]]);
+    *   - a call that streams to a listener (upstream `DecisionAdapter._prepare`: "Streaming decision evidence is not
+    *     supported.");
+    *   - a decision output with no question: no description and no instructions ([[DecisionPlan.question]]).
+    *
+    * The call warns about each output with a nested decision type, with the text of upstream `resolve_adapter`.
+    */
+  private def resolveDecisions(adapter: Adapter, model: LanguageModel): Either[DspyError, Adapter] =
+    nestedDecisionFields.foreach(name =>
+      RuntimeEnvironment.warn(s"Predict '${layout.name}'", PredictEngine.nestedDecisionWarning(name))
+    )
+    decisionPlan.flatMap { plan =>
+      if plan.kinds.isEmpty then Right(adapter)
+      else
+        // A System One model (TypeSafe Jev, a later batch) takes the questions and gives the evidence directly, with
+        // no adapter text: its branch comes here, before the request of a generative model below.
+        for
+          _ <- Either.cond(!streams(model), (), ConfigurationError(PredictEngine.StreamingDecisionsError))
+          _ <- DecisionAdapter.evidenceLayout(layout, plan)
+        yield DecisionAdapter(adapter, plan)
+    }
+
+  /** `true` when `model` gives the stream output of this predictor to a listener ([[StreamingLanguageModel]]). */
+  private def streams(model: LanguageModel): Boolean =
+    model match
+      case streaming: StreamingLanguageModel => streaming.streamsToListener(moduleName, layout.outputFields.map(_.name))
+      case _                                 => false
 
   /** Format, call the model, and parse with `adapter`. After a [[ParseError]] of the parse step, do the three steps one
     * more time with [[Adapter.fallback]] (upstream `ChatAdapter.__call__`). A call that streamed output to a listener
@@ -204,6 +252,55 @@ private[dspy4s] object PredictEngine:
   /** The response of the model and the result of the parse step. */
   private final case class Attempt(response: LmResponse, parsed: Either[DspyError, Vector[ParsedOutput]]):
     def answer: Either[DspyError, Answer] = parsed.map(Answer(response, _))
+
+  /** `decisions` with `settings` as the settings of the output `field` of `layout` (upstream `Predict.fields[field]`).
+    * A `Left` comes when the plan of `layout` rejects the result ([[DecisionPlan.of]]). Upstream checks the settings at
+    * the call only; the port checks them here too, so that an error comes early.
+    */
+  private[programs] def withDecision(
+      layout   : SignatureLayout,
+      decisions: Map[String, DecisionSettings],
+      field    : String,
+      settings : DecisionSettings
+  ): Either[DspyError, Map[String, DecisionSettings]] =
+    val updated = decisions.updated(field, settings)
+    DecisionPlan.of(layout, updated).map(_ => updated)
+
+  /** The effective criteria of the output `field` of `layout` (upstream `Predict.get_criteria`). A field with no
+    * settings gets empty settings for the check, so a native output that can be a decision output has criteria too. A
+    * `Left` comes when `field` cannot be a decision output, or when the plan rejects `decisions`.
+    */
+  private[programs] def criteria(
+      layout   : SignatureLayout,
+      decisions: Map[String, DecisionSettings],
+      field    : String
+  ): Either[DspyError, Option[DynamicValue]] =
+    DecisionPlan.of(layout, decisions.updatedWith(field)(_.orElse(Some(DecisionSettings())))).map(_.criteria(field))
+
+  /** `decisions` with `criteria` as the criteria of the output `field` of `layout` (upstream `Predict.set_criteria`).
+    * The other settings of the field stay. A `Left` comes when the plan rejects the result.
+    */
+  private[programs] def withCriteria(
+      layout   : SignatureLayout,
+      decisions: Map[String, DecisionSettings],
+      field    : String,
+      criteria : DynamicValue
+  ): Either[DspyError, Map[String, DecisionSettings]] =
+    withDecision(
+      layout,
+      decisions,
+      field,
+      decisions.getOrElse(field, DecisionSettings()).copy(criteria = Some(criteria))
+    )
+
+  /** The error of a streamed call with decision outputs (upstream `DecisionAdapter._prepare`). */
+  private val StreamingDecisionsError: String = "Streaming decision evidence is not supported."
+
+  /** The warning for an output with a nested decision type (upstream `resolve_adapter`). */
+  private def nestedDecisionWarning(name: String): String =
+    s"Decision evidence decoding is not implemented for nested output '$name'. The LM generates values and " +
+      "confidence directly; thresholds, cuts, and weights are not applied. Use top-level decision output fields " +
+      "instead."
 
   /** Name of the synthetic prediction value the engine appends when the LM returned native tool calls (upstream parity:
     * a `tool_calls` value exists only on tool turns). Consumers that iterate a prediction's values positionally — e.g.

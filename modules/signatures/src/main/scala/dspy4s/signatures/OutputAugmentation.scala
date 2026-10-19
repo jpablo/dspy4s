@@ -158,6 +158,8 @@ object OutputAugmentation:
 
       override lazy val jsonSchemaString: Option[String] = base.jsonSchemaString
 
+      override def nestedDecisionFields: Vector[String] = base.nestedDecisionFields
+
       def encode(value: Out): DynamicValue.Record =
         val product: Product = value match
           case p: Product => p

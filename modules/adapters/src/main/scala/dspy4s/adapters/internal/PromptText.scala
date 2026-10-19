@@ -14,7 +14,8 @@ import zio.blocks.schema.DynamicValue
   *     shows the name of its type.
   *   - The note of an output field: `True or False` for a bool, `a single int value` or `a single float value` for a
   *     number, the `Literal` note for a field with enum values, and a JSON schema for a structured field and for a tool
-  *     calls field. Each other field has no note.
+  *     calls field. A field of an other type (an opaque [[TypeRef]], for example the evidence type of a decision
+  *     output) has the JSON schema note when the output schema has a property for it. Each other field has no note.
   */
 private[adapters] object PromptText:
 
@@ -127,7 +128,9 @@ private[adapters] object PromptText:
         case TypeRef.double               => Some("must be a single float value")
         case TypeRef.toolCalls            => Some(s"must adhere to the JSON schema: $ToolCallsSchema")
         case other if isStructured(other) => Some(s"must adhere to the JSON schema: ${schema.textOf(field)}")
-        case _                            => None
+        // Upstream `translate_field_type` gives each other type its JSON schema. The port has that schema only when
+        // the output schema has a property for the field.
+        case _ => schema.propertyText(field).map(text => s"must adhere to the JSON schema: $text")
 
   /** `true` for a dict, a list, and a list with an item type (`list[str]`). */
   private def isStructured(typeRef: TypeRef): Boolean =
@@ -200,9 +203,13 @@ private[adapters] object PromptText:
       * property uses at the end. With no such property, the schema of a list or of a dict.
       */
     def textOf(field: FieldSpec): String =
-      property(field.name).fold(if field.typeRef == TypeRef.json then DictSchema else ListSchema) { found =>
-        PythonText.json(withDefinitions(found))
-      }
+      propertyText(field).getOrElse(if field.typeRef == TypeRef.json then DictSchema else ListSchema)
+
+    /** The JSON text of the property of `field` in the output schema, with the `$defs` entries that the property uses
+      * at the end. `None` when the output schema has no property for `field`.
+      */
+    def propertyText(field: FieldSpec): Option[String] =
+      property(field.name).map(found => PythonText.json(withDefinitions(found)))
 
     private def property(name: String): Option[DynamicValue] =
       root.flatMap(recordAt(_, "properties")).flatMap(DynamicValues.recordGet(_, name))

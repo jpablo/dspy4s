@@ -94,3 +94,12 @@ object LmChunk:
 
 trait StreamingLanguageModel extends LanguageModel:
   def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk]
+
+  /** `true` when this model gives the stream output of a call of the predictor `predictName` to a listener (upstream
+    * `Predict._should_stream`). `outputFields` are the names of the output fields of the predictor. A predictor that
+    * cannot stream its output, for example a predictor with decision outputs, fails such a call before the request.
+    *
+    * The default is `false`: a model gives its output to a listener only in a `streamify` call, where the wrapper of
+    * the streaming module is the model.
+    */
+  def streamsToListener(predictName: String, outputFields: Vector[String]): Boolean = false

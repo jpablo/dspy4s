@@ -68,6 +68,12 @@ final class StreamingLanguageModelWrapper private (
     */
   override def close(): Unit = ()
 
+  /** `true` when no listener narrows the stream, or when a listener matches the predictor `predictName` and one of its
+    * `outputFields` (upstream `Predict._should_stream`: each predictor streams when there is no listener).
+    */
+  override def streamsToListener(predictName: String, outputFields: Vector[String]): Boolean =
+    listeners.isEmpty || listeners.exists(listener => outputFields.exists(listener.matches(predictName, _)))
+
   /** Stream the call, give the tokens to the listeners, and assemble the response. A [[LmChunk.cached]] chunk gives its
     * response as is, and no token goes to a listener (upstream: a cache hit sends no stream chunk).
     */

@@ -61,15 +61,20 @@ private[adapters] object StrictJsonSchema:
     *   - `list` gives `{"type": "array", "items": {}}`. `list[T]` gives `{"type": "array", "items": <schema of T>}` for
     *     each `T` in these rules.
     *   - A field with a [[FieldSpec.defaultValue]] has the JSON of that value under `default`.
+    *   - A field that `known` has takes its schema from `known`, as it is. The decision adapter gives the evidence
+    *     schemas this way.
     *
     * The result is `None` when a field has a type with no schema in these rules: `json` (an open map, upstream `dict`),
     * `tool_calls`, `history`, and each opaque type. Upstream sends JSON mode in these cases.
     */
-  def fromFields(fields: Vector[FieldSpec]): Option[DynamicValue.Record] =
+  def fromFields(
+      fields: Vector[FieldSpec],
+      known : Map[String, DynamicValue.Record] = Map.empty
+  ): Option[DynamicValue.Record] =
     val properties = fields.foldLeft(Option(Vector.empty[(String, DynamicValue)])) { (acc, field) =>
       for
         done     <- acc
-        property <- fieldSchema(field)
+        property <- known.get(field.name).orElse(fieldSchema(field))
       yield done :+ (field.name -> property)
     }
     properties.map(entries =>

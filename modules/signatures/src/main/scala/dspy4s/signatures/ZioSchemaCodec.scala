@@ -254,6 +254,28 @@ private[signatures] object ZioSchemaCodec:
       case Some(element) => typeRefFor(element)
       case None          => decisionField(reflect).fold(typeRefOfValue(reflect))(_._1)
 
+  /** The names of the fields of a `Reflect.Record` whose type holds a decision type inside an `Option`, a collection,
+    * or a map (experimental, upstream `resolve_adapter` and `extract_custom_type_from_annotation`). A field of a
+    * decision type is a decision output, thus it is not in the result. The walk does not go into the fields of a
+    * record, as upstream does not go into the fields of a model.
+    */
+  def nestedDecisionFieldsOf(reflect: Reflect[?, ?]): Vector[String] =
+    withoutDeferred(reflect) match
+      case rec: Reflect.Record[?, ?] => rec.fields.toVector.collect {
+          case term if decisionField(term.value).isEmpty && holdsDecision(term.value) => term.name
+        }
+      case _ => Vector.empty
+
+  /** `true` when `reflect` is a decision type, or an `Option`, a collection, or a map that holds one. */
+  private def holdsDecision(reflect: Reflect[?, ?]): Boolean =
+    optionSomeValueReflect(reflect) match
+      case Some(element) => holdsDecision(element)
+      case None          => withoutDeferred(reflect) match
+          case found if decisionField(found).isDefined => true
+          case seq: Reflect.Sequence[?, ?, ?]          => holdsDecision(seq.element)
+          case map: Reflect.Map[?, ?, ?, ?]            => holdsDecision(map.key) || holdsDecision(map.value)
+          case _                                       => false
+
   /** The type and the enum values of a decision field (experimental, upstream `dspy.experimental`): a [[Noul]] has no
     * enum values, a [[Score]] has its levels (the cases of `L`, which the schema of `Score[L]` holds), and a [[Choice]]
     * has its option labels (the cases of the reflect of its `value` field). `None` for each other reflect. The
@@ -499,6 +521,8 @@ private[signatures] object ZioSchemaCodec:
       override val fieldSpecs: Vector[FieldSpec] = specs
 
       override lazy val jsonSchemaString: Option[String] = Some(jsonSchemaForModel(schema))
+
+      override lazy val nestedDecisionFields: Vector[String] = nestedDecisionFieldsOf(rootReflect)
 
       override def encode(value: A): DynamicValue.Record =
         schema.toDynamicValue(value) match

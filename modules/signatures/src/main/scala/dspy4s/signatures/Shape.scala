@@ -28,6 +28,13 @@ trait Shape[A]:
     */
   def jsonSchemaString: Option[String] = None
 
+  /** Experimental. The names of the fields whose type holds a `Noul`, a `Score`, or a `Choice` inside an `Option`, a
+    * collection, or a map, for example `List[Noul]` (upstream `extract_custom_type_from_annotation`). Such a field is
+    * not a decision output, thus it gets no evidence decoding. The default is empty: a shape with no schema cannot
+    * tell.
+    */
+  def nestedDecisionFields: Vector[String] = Vector.empty
+
 /** A [[Shape]] whose carrier contains only values accepted by its decoder. Schema-backed product shapes have this
   * property; [[Shape.MapShape]] deliberately does not, because a plain `DynamicValue.Record` can omit fields that its
   * runtime layout requires.
@@ -197,6 +204,7 @@ object Shape:
     def encode(value: A): DynamicValue.Record                    = delegate.encode(value)
     def decode(raw  : DynamicValue.Record): Either[DspyError, A] = delegate.decode(raw)
     override def jsonSchemaString: Option[String]                = delegate.jsonSchemaString
+    override def nestedDecisionFields: Vector[String]            = delegate.nestedDecisionFields
 
   /** Derives a `Shape[A]` from any case class / product type with a `zio.blocks.schema.Schema[A]` in scope. zio-blocks
     * owns product encode/decode; dspy4s derives the DSPy-facing field metadata from the same structural Reflect
