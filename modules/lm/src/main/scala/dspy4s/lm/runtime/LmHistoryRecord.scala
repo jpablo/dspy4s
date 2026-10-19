@@ -6,6 +6,7 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.LmUsage
 import dspy4s.core.contracts.ToolCall
 import dspy4s.lm.contracts.ContentPart
+import dspy4s.lm.contracts.LmCost
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
@@ -30,6 +31,9 @@ import java.util.UUID
   *   - `kwargs`: the options of the request;
   *   - `outputs`: one object for each output, with `text` and `tool_calls`;
   *   - `usage`: `prompt_tokens`, `completion_tokens`, `total_tokens`, then each extra under its wire name, or `null`;
+  *   - `cost`: the estimated cost in US dollars, or `null` when the estimate is unknown (decision L10);
+  *   - `cost_details`: `{"kind": "estimate", "currency": "USD", "model", "source": "declared"}` for an estimate, else
+  *     `{"kind": "unknown", "reason"}` (upstream `cost_details`);
   *   - `response_model`: the model name of the response, or `null`;
   *   - `uuid`: a new random UUID.
   *
@@ -40,16 +44,29 @@ import java.util.UUID
   */
 object LmHistoryRecord:
 
-  /** The payload for `response` to `request`. */
-  def success(request: LmRequest, response: LmResponse, cacheHit: Boolean): DynamicValue.Record =
+  /** The payload for `response` to `request`, with the cost estimate `cost`. */
+  def success(request: LmRequest, response: LmResponse, cacheHit: Boolean, cost: LmCost): DynamicValue.Record =
     DynamicValues.recordFromEntries(
       head(request, cacheHit) ++ Vector[(String, DynamicValue)](
         "outputs"        -> sequence(response.outputs.map(output)),
         "usage"          -> response.usage.fold[DynamicValue](DynamicValue.Null)(usage),
+        "cost"           -> costValue(cost),
+        "cost_details"   -> costDetails(cost),
         "response_model" -> response.modelName.fold[DynamicValue](DynamicValue.Null)(text),
         "uuid"           := newUuid()
       )
     )
+
+  private def costValue(cost: LmCost): DynamicValue =
+    cost match
+      case LmCost.Estimate(usd, _) => DynamicValue.Primitive(PrimitiveValue.Double(usd))
+      case LmCost.Unknown(_)       => DynamicValue.Null
+
+  private def costDetails(cost: LmCost): DynamicValue =
+    cost match
+      case LmCost.Estimate(_, model) =>
+        DynamicValues.record("kind" := "estimate", "currency" := "USD", "model" := model, "source" := "declared")
+      case LmCost.Unknown(reason) => DynamicValues.record("kind" := "unknown", "reason" := reason)
 
   /** The payload for a call of `request` that failed with `error`. */
   def failure(request: LmRequest, error: DspyError): DynamicValue.Record =

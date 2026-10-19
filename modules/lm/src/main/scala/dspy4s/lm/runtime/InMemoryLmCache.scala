@@ -13,7 +13,7 @@ final class InMemoryLmCache(maxEntries: CacheCapacity = CacheCapacity(1024)) ext
   override def get(request: LmRequest): Option[LmResponse] =
     val key = RequestHash.forRequest(request)
     this.synchronized {
-      Option(store.get(key)).map(_.copy(cacheHit = true, usage = None))
+      Option(store.get(key)).map(_.copy(cacheHit = true))
     }
 
   override def put(request: LmRequest, response: LmResponse): Unit =

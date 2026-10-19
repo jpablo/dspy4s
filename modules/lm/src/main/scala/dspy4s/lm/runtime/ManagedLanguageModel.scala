@@ -12,8 +12,10 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmCache
 import dspy4s.lm.contracts.LmChunk
+import dspy4s.lm.contracts.LmCost
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
+import dspy4s.lm.contracts.LmPrice
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmToolCallDelta
@@ -153,7 +155,11 @@ final case class ManagedLanguageModel(
     delegate   : LanguageModel,
     cache      : Option[LmCache] = None,
     retryPolicy: RetryPolicy     = RetryPolicies.never,
-    sleep      : Long => Unit    = ManagedLanguageModel.defaultSleep
+    sleep      : Long => Unit    = ManagedLanguageModel.defaultSleep,
+    /** The price of the tokens of the delegate. The history entry of each call then has the cost estimate
+      * ([[dspy4s.lm.contracts.LmCost]]). With `None`, the cost is unknown (decision L10).
+      */
+    price: Option[LmPrice] = None
 ) extends StreamingLanguageModel:
   override val id: String   = delegate.id
   override val mode: LmMode = delegate.mode
@@ -221,11 +227,15 @@ final case class ManagedLanguageModel(
             Left(error)
           case Right(response) => Right(acceptResponse(request, key, response))
 
-  /** The cached response of `request`, with `cacheHit = true`. A hit appends the history entry of a cache hit. */
+  /** The cached response of `request`, with `cacheHit = true` and no usage: a hit bills no tokens, as upstream. A hit
+    * appends the history entry of a cache hit. The cost of that entry comes from the usage that the cache keeps
+    * (upstream keeps the cost of the cached result), at the current [[price]].
+    */
   private def cacheHit(request: LmRequest, key: => LmRequest)(using RuntimeContext): Option[LmResponse] =
-    cache.flatMap(_.get(key)).map { cached =>
-      appendHistory(request, cached, cacheHit = true)
-      cached.copy(cacheHit = true)
+    cache.flatMap(_.get(key)).map { stored =>
+      val hit = stored.copy(cacheHit = true, usage = None)
+      appendHistory(request, hit, cacheHit = true, LmCost.of(request.model, price, stored.usage))
+      hit
     }
 
   /** Store the response that the delegate gave, append its history entry, and record its usage. */
@@ -234,7 +244,7 @@ final case class ManagedLanguageModel(
   ): LmResponse =
     val uncached = response.copy(cacheHit = false)
     cache.foreach(_.put(key, uncached))
-    appendHistory(request, uncached, cacheHit = false)
+    appendHistory(request, uncached, cacheHit = false, LmCost.of(request.model, price, uncached.usage))
     trackUsage(request, uncached.usage)
     uncached
 
@@ -249,11 +259,15 @@ final case class ManagedLanguageModel(
         case failed @ Left(_) => failed
     loop(0)
 
-  /** Append the history entry of a success or a cache hit. [[LmHistoryRecord.success]] gives the payload. */
-  private def appendHistory(request: LmRequest, response: LmResponse, cacheHit: Boolean)(using RuntimeContext): Unit =
+  /** Append the history entry of a success or a cache hit, with the cost estimate `cost`. [[LmHistoryRecord.success]]
+    * gives the payload.
+    */
+  private def appendHistory(request: LmRequest, response: LmResponse, cacheHit: Boolean, cost: LmCost)(using
+      RuntimeContext
+  ): Unit =
     if historyEnabled then
       RuntimeEnvironment.appendHistory(
-        HistoryEntry(component = s"lm:$id", payload = LmHistoryRecord.success(request, response, cacheHit))
+        HistoryEntry(component = s"lm:$id", payload = LmHistoryRecord.success(request, response, cacheHit, cost))
       )
 
   /** Append the history entry of a failure. [[LmHistoryRecord.failure]] gives the payload. */

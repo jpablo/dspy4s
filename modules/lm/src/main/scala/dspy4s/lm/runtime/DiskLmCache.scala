@@ -185,7 +185,7 @@ final class DiskLmCache(directory: Path, maxEntries: CacheCapacity = CacheCapaci
     this.synchronized {
       readRecord(recordPath(key))
         .orElse(readLegacyEntry(key))
-        .map(response => response.copy(cacheHit = true, usage = None))
+        .map(response => response.copy(cacheHit = true))
     }
 
   override def put(request: LmRequest, response: LmResponse): Unit =

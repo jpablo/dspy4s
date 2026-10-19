@@ -163,7 +163,7 @@ class DiskCacheRecordSuite extends FunSuite:
   test("a JSON record round trips across cache instances") {
     withDirectory { directory =>
       DiskLmCache(directory).put(request, response)
-      assertEquals(DiskLmCache(directory).get(request), Some(response.copy(usage = None, cacheHit = true)))
+      assertEquals(DiskLmCache(directory).get(request), Some(response.copy(cacheHit = true)))
     }
   }
 

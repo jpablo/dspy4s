@@ -129,7 +129,19 @@ class LmHistoryEntrySuite extends FunSuite:
     val entry = lmEntries.lastOption.getOrElse(fail("no LM entry"))
     assertEquals(
       keys(entry),
-      Vector("model", "model_type", "cache_hit", "messages", "kwargs", "outputs", "usage", "response_model", "uuid")
+      Vector(
+        "model",
+        "model_type",
+        "cache_hit",
+        "messages",
+        "kwargs",
+        "outputs",
+        "usage",
+        "cost",
+        "cost_details",
+        "response_model",
+        "uuid"
+      )
     )
     assertEquals(value(entry, "model"), "gpt-test")
     assertEquals(value(entry, "model_type"), "chat")
