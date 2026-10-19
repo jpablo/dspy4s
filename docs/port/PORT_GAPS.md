@@ -2029,10 +2029,11 @@ the `parameters` of a function. The two MCP example pages are translated. Tests:
 
 ## G-49 — Experimental upstream tracks that wait
 
-**Status:** In progress. Decision D6 (2026-10-18): the decision types, a TypeSafe Jev client, and ReAnchor are
-ported; `dspy.Flex` waits for P8. The types and the decoder are done (batch 28, `dspy4s.core.decisions`), and the
-evidence path of a generative model with the settings on `Predict` (batch 29, `DecisionAdapter`), and the Jev client
-with the System One path (batch 30, `TypeSafeModel`). ReAnchor is next. ·
+**Status:** Partly closed. Decision D6 (2026-10-18): the decision types, a TypeSafe Jev client, and ReAnchor are
+ported; `dspy.Flex` waits for P8, and ReActV2 comes next. Done: the types and the decoder (batch 28,
+`dspy4s.core.decisions`), the evidence path of a generative model with the settings on `Predict` (batch 29,
+`DecisionAdapter`), the Jev client with the System One path (batch 30, `TypeSafeModel`), and ReAnchor with the
+evidence log (batch 31, `dspy4s.optimize.ReAnchor`). ·
 **Verification:** I · **Upgrade items:** A8, P9, O6
 
 - **Decision types.** `Noul`, `Score`, and `Choice` outputs, a `DecisionAdapter` that asks for evidence and decodes

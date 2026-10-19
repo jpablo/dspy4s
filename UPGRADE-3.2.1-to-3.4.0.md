@@ -838,6 +838,44 @@ The full suite passes: 1,904 tests, 0 failures, 6 live tests skipped.
     gap.
   - The client has no `dump_state`, `load_state`, or `copy`, and reads the key only at construction.
 
+### Batch 31 (2026-10-19): ReAnchor (O6) and the evidence log
+
+The full suite passes: 1,944 tests, 0 failures, 6 live tests skipped.
+
+- **`ReAnchor`** (package `dspy4s.optimize`, experimental; upstream `dspy.experimental.ReAnchor`). It fits the
+  threshold of each Noul output, the cuts of each Score output, and the weights of each Choice output against the
+  metric (decision 6). It keeps a candidate only when the total training score is strictly higher and a fold check
+  passes, and it keeps the fitted behavior only when it beats the original settings. The result is the `decisions`
+  entries of the predictors, so the program state saves them. `ReAnchorConfig.requireCache` makes `compile` fail
+  unless the model of the context has a cache. `compile` puts the `ReAnchorReport` in the metadata of the result,
+  and writes `report.json` when `logDir` is set.
+- **`ReAnchorSearch`** holds the search rules and the Python number rules that the search needs: `math.fsum`,
+  `round` (half-even on the exact binary value), and a port of `random.Random(0).shuffle`. The folds and the fitted
+  values thus match upstream. Six scenarios gave the same values as upstream `calibrate` in the dspy venv.
+- **`DecisionEvidenceLog`** (package `dspy4s.core.decisions`). It is the scoped log of the evidence of each call. The
+  scope travels to worker threads as a `ContextPropagation.Carrier`. `PredictEngine` records the evidence on the
+  generative path (the new `ParsedOutput.evidence`) and on the System One path.
+- **The key of the predictor that runs.** `RuntimeScope.predictor: Option[PredictorKey]` replaces the flag
+  `withinPredictor`, which is now a method. The evidence of the `Predict` inside `ChainOfThought` thus belongs to the
+  `ChainOfThought` leaf, as its trace entry does.
+- **Decided by Claude, review.**
+  - One pass with the log gives both the evidence and the start scores. Upstream runs one more pass for the start
+    scores. The result is the same for a deterministic program.
+  - A failed pass gives the first error of the program or the metric. Upstream gives the "Execution cancelled" error
+    of its executor.
+  - A Choice with one label gives no flip points. Upstream raises an error there.
+  - On the generative path, the evidence goes to the log after the parse, because the decode is a part of the parse.
+    A decode error fails the pass, so the fit does not change.
+  - The `score` of the candidate in the `OptimizationReport` is the mean training score from 0 to 1.
+  - Removing the `RuntimeScope` field changes the source form of `RuntimeScope(withinPredictor = ...)`.
+- **Tests.** `ReAnchorSuite` (15) and `ReAnchorUpstreamSuite` (25): the cases of `test_reanchor_calibrate.py` and
+  `test_reanchor.py`, with the upstream values. Not ported: the per-predictor cache switch, the log lines, the
+  `_compiled` mark, and the per-call model (the port has none of these), and a metric that returns a `Prediction`
+  (the port metric returns a `Double`). The inner part of the nested-scope test cannot be ported, because
+  `recording` gives the entries only when the body completes.
+- **Open point.** The cache check reads only the model of the runtime context. `OptimizableStructure` does not show
+  a model that a predictor binds itself.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -853,8 +891,9 @@ Open points from batch 1, for the owner:
   typed inputs prevent them. Approximately 25 apply.
 - The review also found parity defects that are older than 3.2.1. The largest are in `BootstrapFewShot`, in the
   GEPA engine, and in the LM cache key.
-- Upstream marks four new features as experimental: decision types, ReAnchor, `dspy.Flex`, and ReActV2. Wait for
-  them to become stable.
+- Upstream marks four new features as experimental: decision types, ReAnchor, `dspy.Flex`, and ReActV2. Decision
+  D6 ports the decision types with a Jev client and ReAnchor (done in batches 28 to 31), then ReActV2. `dspy.Flex`
+  waits.
 - Upstream deprecated `CodeAct` and `ProgramOfThought`. It removes them in 3.5 and names `RLM` as the replacement.
   dspy4s removed them in batch 3 (decision D1).
 
@@ -954,10 +993,9 @@ Open points from batch 1, for the owner:
       **Decided 2026-10-18: not mirrored.** The XML adapter keeps a JSON value inside the tag of a list, dict, or
       model output. The prompt asks for JSON text there. See "Deliberately not mirrored".
 - [x] **A7. `append_instructions` on signatures** (498760149). → G-48 (R)
-- [ ] **A8. Decision types `Noul`, `Score`, `Choice`** (e83978c08, 4c6448e03). Experimental. → G-49 (I)
-      In progress: the types and the decoder are done (batch 28), the evidence path for a generative model and the
-      settings on `Predict` (batch 29), and the Jev client with the System One path (batch 30). ReAnchor (O6)
-      follows.
+- [x] **A8. Decision types `Noul`, `Score`, `Choice`** (e83978c08, 4c6448e03). Experimental. → G-49 (I)
+      Done: the types and the decoder (batch 28), the evidence path for a generative model and the settings on
+      `Predict` (batch 29), the Jev client with the System One path (batch 30), and the evidence log (batch 31).
 
 ## Phase 3: programs
 
@@ -1003,7 +1041,8 @@ Open points from batch 1, for the owner:
   `truncate_history_outputs`. → G-45 (C)
 - [x] **O4. GEPA objective-aware frontiers** (638e155cf). → G-45 (C)
 - [x] **O5. GEPA multiple proposals with parallel evaluation** (aa9d2d053, 822f39319). → G-45 (C)
-- [ ] **O6. ReAnchor calibration optimizer** (e8ec009c6). Experimental. → G-49 (I)
+- [x] **O6. ReAnchor calibration optimizer** (e8ec009c6). Experimental. → G-49 (I)
+      Done in batch 31.
 
 ## Checked and already correct in dspy4s
 
