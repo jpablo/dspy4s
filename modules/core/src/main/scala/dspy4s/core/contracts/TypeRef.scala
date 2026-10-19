@@ -45,6 +45,21 @@ object TypeRef:
     */
   val history: TypeRef = TypeRef("history")
 
+  /** The type of a `Noul` decision output: a Boolean decision with a probability (experimental, upstream
+    * `dspy.experimental.Noul`). See [[dspy4s.core.decisions]].
+    */
+  val noul: TypeRef = TypeRef("noul")
+
+  /** The type of a `Score` decision output: a continuous score over ordered levels. [[FieldSpec.enumValues]] holds the
+    * levels, in increasing order (experimental, upstream `dspy.experimental.Score`).
+    */
+  val score: TypeRef = TypeRef("score")
+
+  /** The type of a `Choice` decision output: one option of a closed set. [[FieldSpec.enumValues]] holds the option
+    * labels, in the order of declaration (experimental, upstream `dspy.experimental.Choice`).
+    */
+  val choice: TypeRef = TypeRef("choice")
+
   /** Parse a string DSL type token (e.g. the `"bool"` in `"comment -> toxic: bool"`) into the matching well-known
     * [[TypeRef]]. Accepts a handful of synonyms (`"str"`, `"integer"`, `"float"`, `"number"`, `"dict"`, `"map"`) and is
     * case-insensitive. A `dict[...]` token is [[TypeRef.json]], as `dict` is. Unknown tokens become opaque

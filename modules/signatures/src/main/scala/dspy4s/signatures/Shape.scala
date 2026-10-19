@@ -2,6 +2,7 @@ package dspy4s.signatures
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, NotFoundError}
 import dspy4s.algebra.{IsEq, Law, <->}
+import dspy4s.core.decisions.Score
 import zio.blocks.schema.{DynamicValue, Schema}
 
 /** A schema-aware view of a user type `A`, used as the input or output of a `Signature`. Lists fields in declaration
@@ -52,6 +53,9 @@ object Shape:
     * framework's canonical narrowing of zio-blocks' dynamic schema. Array-like types are deliberately excluded because
     * their schema derivation consumes an open `ClassTag`; custom array semantics belong behind an explicitly branded
     * shape. Consequently ambient evidence cannot change the meaning of the same object type.
+    *
+    * A `Score[L]` (experimental) has no value of `L`, thus its structural schema does not hold the levels of `L`. The
+    * given for `Score[L]` below derives the schema of `L` structurally, and keeps its case names as the levels.
     */
   transparent inline def canonicalSchema[A]: Schema[A] =
     @annotation.unused
@@ -118,6 +122,8 @@ object Shape:
     given Schema[java.util.Currency] = Schema.currency
     @annotation.unused
     given Schema[java.util.UUID] = Schema.uuid
+    @annotation.unused
+    given canonicalScoreSchema[L](using levels: StructuralSchema[L]): Schema[Score[L]] = Score.schemaOf(levels.schema)
 
     // Both definitions are intentionally applicable. An ambient Schema[T] is therefore not selected by
     // zio-blocks' nested implicit search; its macro falls back to structural derivation for T instead.
@@ -135,6 +141,18 @@ object Shape:
       throw new IllegalStateException("canonical class-tag blocker must never be evaluated")
 
     Schema.derived[A]
+
+  /** The structural schema of `A`: the schema that `Schema.derived` makes where the canonical blockers are in scope.
+    * The inline given expands where the search finds it, thus in [[canonicalSchema]] the derivation of `A` is also
+    * canonical. [[canonicalSchema]] uses it for the levels of a `Score[L]`.
+    *
+    * The class is public because [[canonicalSchema]] expands in the package of the caller, and the implicit search
+    * there must find the given.
+    */
+  final class StructuralSchema[A](val schema: Schema[A])
+
+  object StructuralSchema:
+    inline given derived[A]: StructuralSchema[A] = StructuralSchema(Schema.derived[A])
 
   /** Canonical case-class/product shape. This path ignores ambient schemas and is closed over structural derivation,
     * making it suitable for type-indexed record-boundary objects.

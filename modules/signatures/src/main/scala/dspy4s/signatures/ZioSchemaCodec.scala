@@ -10,6 +10,7 @@ import dspy4s.core.contracts.{
   TypeRef,
   ValidationError
 }
+import dspy4s.core.decisions.{Choice, Noul, Score}
 import zio.blocks.chunk.{Chunk, ChunkMap, NonEmptyChunk}
 import zio.blocks.docs.Doc
 import zio.blocks.schema.binding.{Binding, BindingType}
@@ -140,10 +141,18 @@ private[signatures] object ZioSchemaCodec:
           case _: PrimitiveType.Double => DynamicValue.Primitive(PrimitiveValue.Double(i.toDouble))
           case _: PrimitiveType.Float  => DynamicValue.Primitive(PrimitiveValue.Float(i.toFloat))
           case _                       => dv
-      case DynamicValue.Primitive(PrimitiveValue.Long(l)) if isInt(l) =>
-        prim match
-          case _: PrimitiveType.Int => DynamicValue.Primitive(PrimitiveValue.Int(l.toInt))
-          case _                    => dv
+      case DynamicValue.Primitive(PrimitiveValue.Long(l)) => prim match
+          case _: PrimitiveType.Int if isInt(l) => DynamicValue.Primitive(PrimitiveValue.Int(l.toInt))
+          case _: PrimitiveType.Double          => DynamicValue.Primitive(PrimitiveValue.Double(l.toDouble))
+          case _: PrimitiveType.Float           => DynamicValue.Primitive(PrimitiveValue.Float(l.toFloat))
+          case _                                => dv
+      // The dynamic JSON codec of zio-blocks gives a `BigDecimal` for each number that is not an integer.
+      case DynamicValue.Primitive(PrimitiveValue.BigDecimal(n)) => prim match
+          case _: PrimitiveType.Double                => DynamicValue.Primitive(PrimitiveValue.Double(n.toDouble))
+          case _: PrimitiveType.Float                 => DynamicValue.Primitive(PrimitiveValue.Float(n.toFloat))
+          case _: PrimitiveType.Int if n.isValidInt   => DynamicValue.Primitive(PrimitiveValue.Int(n.toInt))
+          case _: PrimitiveType.Long if n.isValidLong => DynamicValue.Primitive(PrimitiveValue.Long(n.toLong))
+          case _                                      => dv
       case _ => dv
 
   private def isInt(l: Long): Boolean = l >= Int.MinValue && l <= Int.MaxValue
@@ -176,12 +185,13 @@ private[signatures] object ZioSchemaCodec:
 
   /** Allowed case names for an enum field, i.e. a `Reflect.Variant`'s cases. Empty for any non-variant reflect. The
     * wire `typeRef` for a variant stays `TypeRef.string` (the LM sees a flat label); these values ride alongside so
-    * adapters can tell the LM which labels are valid. An `Option` has the enum values of its element.
+    * adapters can tell the LM which labels are valid. An `Option` has the enum values of its element. A `Score` field
+    * has its levels, and a `Choice` field has its option labels (see [[decisionField]]).
     */
   private def enumValuesOf(reflect: Reflect[?, ?]): Vector[String] =
     optionSomeValueReflect(reflect) match
       case Some(element) => enumValuesOf(withoutDeferred(element))
-      case None          => caseNamesOf(reflect)
+      case None          => decisionField(reflect).fold(caseNamesOf(reflect))(_._2)
 
   private def caseNamesOf(reflect: Reflect[?, ?]): Vector[String] =
     reflect match
@@ -242,7 +252,23 @@ private[signatures] object ZioSchemaCodec:
   private def typeRefFor(reflect: Reflect[?, ?]): TypeRef =
     optionSomeValueReflect(reflect) match
       case Some(element) => typeRefFor(withoutDeferred(element))
-      case None          => typeRefOfValue(reflect)
+      case None          => decisionField(reflect).fold(typeRefOfValue(reflect))(_._1)
+
+  /** The type and the enum values of a decision field (experimental, upstream `dspy.experimental`): a [[Noul]] has no
+    * enum values, a [[Score]] has its levels (the cases of `L`, which the schema of `Score[L]` holds), and a [[Choice]]
+    * has its option labels (the cases of the reflect of its `value` field). `None` for each other reflect. The
+    * derivation knows the three types by their type id, not by their structure.
+    */
+  private def decisionField(reflect: Reflect[?, ?]): Option[(TypeRef, Vector[String])] =
+    withoutDeferred(reflect) match
+      case rec: Reflect.Record[?, ?] if isType(rec.typeId, noulTypeId)   => Some(TypeRef.noul -> Vector.empty)
+      case rec: Reflect.Record[?, ?] if isType(rec.typeId, scoreTypeId)  => Some(TypeRef.score -> Score.levelsOf(rec))
+      case rec: Reflect.Record[?, ?] if isType(rec.typeId, choiceTypeId) =>
+        val options = rec.fields.find(_.name == "value").fold(Vector.empty[String])(term =>
+          caseNamesOf(withoutDeferred(term.value))
+        )
+        Some(TypeRef.choice -> options)
+      case _ => None
 
   /** The reflect behind a deferred reflect. zio-blocks defers the reflect of some nested types. */
   private def withoutDeferred(reflect: Reflect[?, ?]): Reflect[?, ?] =
@@ -264,6 +290,10 @@ private[signatures] object ZioSchemaCodec:
   // their structure.
   private val historyTypeId: TypeId[History]   = summon[Schema[History]].reflect.typeId
   private val toolCallTypeId: TypeId[ToolCall] = summon[Schema[ToolCall]].reflect.typeId
+  private val noulTypeId: TypeId[Noul]         = summon[Schema[Noul]].reflect.typeId
+  // `Score` and `Choice` are generic. The full name of a type id does not include the type arguments.
+  private val scoreTypeId: TypeId[Score]   = TypeId.of[Score]
+  private val choiceTypeId: TypeId[Choice] = TypeId.of[Choice]
 
   private def isType(typeId: TypeId[?], known: TypeId[?]): Boolean = typeId.fullName == known.fullName
 
