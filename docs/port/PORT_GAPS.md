@@ -1375,8 +1375,8 @@ null output shows the "Not supplied" text, where upstream shows `None`. The UPGR
 
 ## G-30 — Adapter prompts are not byte-equal to upstream
 
-**Status:** Resolved for the adapters (2026-10-18, batch 25, decision D3 with the boundary rule). The prompts of
-ChainOfThought, ReAct, and RLM are open (G-37, G-38). · **Verification:** C (golden tests)
+**Status:** Resolved (2026-10-18, decision D3 with the boundary rule): the adapters in batch 25, and ChainOfThought,
+ReAct, and RLM in batch 27. · **Verification:** C (golden tests)
 
 **ChatAdapter differences.**
 
@@ -1553,7 +1553,7 @@ Not ported: upstream first looks for the Deno binary of the `deno` Python packag
 
 ## G-35 — Interpreter lifecycle in the code programs
 
-**Status:** In progress. The failure handling is resolved (2026-10-11, batch 1). The shared interpreter instance ended with the removal of `CodeAct` and `ProgramOfThought` (batch 3, G-39). The factory and the silent restart are resolved (batch 4). The runtime description (I7) is open. · **Verification:** C (failure handling, factory), R (others) · **Upgrade items:** P1, P2, I7
+**Status:** In progress. The failure handling is resolved (2026-10-11, batch 1). The shared interpreter instance ended with the removal of `CodeAct` and `ProgramOfThought` (batch 3, G-39). The factory and the silent restart are resolved (batch 4). The runtime description (I7) is resolved (2026-10-18, batch 27). · **Verification:** C (failure handling, factory, I7), R (others) · **Upgrade items:** P1, P2, I7
 
 **Upstream.** An interpreter failure ends the run (`dspy/predict/rlm.py:775-778`, 89696e0cc). Each `forward` gets
 its own interpreter from a factory, and `dspy.settings.interpreter_factory` sets the default
@@ -1596,9 +1596,14 @@ Tests: `RLMSuite`, `RuntimeEnvironmentSuite`.
 Deliberate difference from upstream: the dspy4s factory gets the tools and the output fields as arguments. The
 upstream factory has no arguments, and RLM changes the `tools` dictionary of the interpreter after the creation.
 
-**Direction (open).** Let an interpreter describe its runtime (`execution_instructions`, I7) and put that text in the
-RLM prompt. This changes the prompt, so it waits for decision D3. Add a deadline to the REPL read; upstream has none
-for this interpreter.
+**Resolution (I7, batch 27).** `ReplInterpreterFactory` is a trait with `executionInstructions` (a function literal
+still converts to it, with no text). `LocalPythonInterpreter.factory()` and `RLM.defaultInterpreterFactory` (the Deno
+sandbox) have the upstream texts. RLM puts the text of the factory under "Execution environment:" in its action
+prompt. At each call it uses the text of the factory that it resolves for the call, and replaces only its own
+fragment of the instructions (upstream `_action_signature_for_current_factory`). Tests: `ExecutionInstructionsSuite`,
+`ProgramPromptParitySuite`, `RLMInstructionsSuite`.
+
+**Direction (open).** Add a deadline to the REPL read; upstream has none for this interpreter.
 
 ---
 
@@ -1620,7 +1625,7 @@ gives RLM an interpreter with no Deno. Tests: `LocalPythonInterpreterSuite` (ski
 
 ## G-37 — ReAct differs from upstream
 
-**Status:** In progress. The truncation rule is resolved (2026-10-11, batch 1). The default limit is resolved (2026-10-11, decision D4). The prompt needs decision D3. · **Verification:** C · **Upgrade item:** P3
+**Status:** In progress. The truncation rule is resolved (2026-10-11, batch 1). The default limit is resolved (2026-10-11, decision D4). The prompt is resolved (2026-10-18, batch 27, decision D3). · **Verification:** C · **Upgrade item:** P3
 
 - **Truncation with one entry (resolved).** On a context overflow, `truncateOnOverflow` dropped the only entry and
   tried again with an empty trajectory. Upstream raises `ContextWindowExceededError`
@@ -1632,13 +1637,20 @@ gives RLM an interpreter with no Deno. Tests: `LocalPythonInterpreterSuite` (ski
 - **Prompt.** The instructions are a paraphrase (`ReAct.scala:159-165` against `react.py:53-58,71`). The tool list has
   its own format (`ReAct.scala:151-158`). `next_tool_name` is a free string (`ReActProtocol.scala:29-33`); upstream uses
   a `Literal` of the tool names (`react.py:77`), which `FieldSpec.enumValues` can express.
+- **Prompt (resolved, batch 27).** The react step and the extractor send the upstream messages, inside the boundary
+  rule of D3: the instructions, the tool list (`Tool.__str__`, with the arguments as JSON text), the finish tool, the
+  four fields with no descriptions, `next_tool_name` with the tool names as enum values, the trajectory as the user
+  content of the adapter of the run, and the extractor with the base instructions. A tool error gives the
+  observation `Execution error in <name>: <message>`. Tests: `ProgramPromptParitySuite` (a golden run of three
+  steps), `ToolTextSuite`, `ReActSuite`.
 
 ---
 
 ## G-38 — RLM differs from upstream
 
 **Status:** In progress. The namespace checks, the odd truncation limit, and the `max_iters` text are resolved
-(2026-10-14, batch 13). · **Verification:** R · **Upgrade items:** P5, P6, P8, I8
+(2026-10-14, batch 13). The prompt is resolved (2026-10-18, batch 27). · **Verification:** R, C (prompt) · **Upgrade
+items:** P5, P6, P8, I8
 
 - **Namespace checks.** Upstream rejects duplicate tools, names that are not identifiers, inputs that collide with
   built-ins or tools, and outputs named `trajectory` or `final_reasoning` (`dspy/predict/rlm.py:243-297`, 74194bfab).
@@ -1658,6 +1670,12 @@ that are keywords (`PythonNames`), reserved sandbox names for tools and inputs (
 `_dspy*`, `__dspy*`), inputs with the name of a tool, and outputs named `trajectory` or `final_reasoning`. The input
 name `interpreter_factory` has no meaning in the port and is not reserved. The truncation keeps `limit / 2` characters
 at the start and `limit - limit / 2` at the end. Tests: `RLMNamespaceSuite`.
+
+**Resolution (prompt, batch 27).** The action and the extract prompts match upstream within the boundary rule of D3:
+the 3.4.0 template, the execution text of the interpreter (I7), the output lines with the type text of the port, the
+tool docs, the type name `REPLHistory`, the numbered list of the variables, and the extract instructions. The upstream
+prompt also describes the sub-agents of the sandbox `dspy` facade; the port has no facade (P8), so its prompt has no
+such text. Tests: `ProgramPromptParitySuite` (a run that submits, and a run that extracts), `RLMInstructionsSuite`.
 
 ---
 

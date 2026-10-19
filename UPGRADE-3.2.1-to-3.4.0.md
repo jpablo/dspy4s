@@ -702,6 +702,54 @@ The full suite passes: 1,743 tests, 0 failures, 6 live tests skipped (before the
 - **Tests.** `McpToolsSuite` (15), `McpSdkClientSuite` (7, a server of the SDK in a child JVM over stdio),
   `McpSdkPagingSuite` (4, a fake transport), and one more test in `ToolSchemaBridgeSuite`.
 
+### Batch 27 (2026-10-18): the prompts of ChainOfThought, ReAct, and RLM, and I7
+
+The full suite passes: 1,814 tests, 0 failures, 6 live tests skipped.
+
+- **D3, the programs** (G-30, G-37, G-38). `scripts/golden/program_prompts.py` runs upstream ChainOfThought, ReAct,
+  and RLM with a scripted model and records each LM call. `ProgramPromptParitySuite` runs the same programs of the
+  port with the same replies and compares each request.
+  - **The instructions of a derived signature.** `SignatureOps.prependOutput`, `appendInput`, and `replaceOutputs`
+    keep the instructions that the layout had, as upstream `Signature.prepend` and `append`: a layout with no
+    instructions keeps the default instructions of its own fields (`SignatureLayout.effectiveInstructions`). Before,
+    the objective of ChainOfThought named `reasoning`. The rule also corrects the ReAct extractor,
+    MultiChainComparison, the `hint_` field of Refine, and the AutoEvaluation judge. Three laws state it (L7a to L7c).
+  - **ReAct.** The upstream instructions, tool list, and finish tool; the four fields with no descriptions;
+    `next_tool_name` with enum values; the trajectory as the user content of the adapter of the run; an error
+    observation `Execution error in <name>: <message>`.
+  - **RLM.** The 3.4.0 template, the execution text of the interpreter, the output lines with the type text of the
+    port, the type name `REPLHistory`, the numbered list of the variables, and the extract instructions. No sub-agent
+    text (P8).
+- **I7** (G-35). `ReplInterpreterFactory` is a trait with `executionInstructions`. The local Python factory and the
+  Deno factory have the upstream texts. RLM uses the text of the factory of each call, and replaces only its own
+  fragment of the instructions.
+- **Upstream rules that the runs showed.**
+  - ReAct keeps one tool for each name, as a Python dict: a later tool takes the place of an earlier one, so a user
+    tool named `finish` gives its place to the injected tool.
+  - In the RLM tool docs, one newline comes before "Additional tools". An argument type is the JSON `type`, else
+    `Any`.
+  - The RLM template fills its placeholders in one pass, as `str.format`.
+- **API changes, for the review of the owner.**
+  - `Adapter.formatUserMessageContent` is a new public method (the user content of a turn; ReAct writes its
+    trajectory with it). The default is the chat form; the XML, two-step, and Refine hint adapters override it.
+  - `TrajectoryAgent.renderTrajectory` takes a `RuntimeContext`.
+  - `RLMModel.ActionInputs.variables_info` and `ExtractInputs.variables_info` are `Vector[String]`, not `String`.
+  - The instructions of the MultiChainComparison predictor, the ReAct extractor, and the judge are now the default
+    text, not `None`, as upstream. An optimizer sees that text.
+  - `ReplInterpreterFactory` is a trait, not a function type.
+- **Changes in behavior.**
+  - The Refine hint adapter ignores the instructions when it matches a layout. Without this, the advice did not
+    reach a ChainOfThought whose base signature has no instructions.
+- **Open points, for the owner.**
+  - A tool name that the model writes and that is not a tool gives the port observation, and the loop continues.
+    Upstream ends the loop with a parse error.
+  - With the TwoStepAdapter, ReAct shows a list observation as a numbered list. Upstream shows the Python form.
+  - A `copy` of an RLM resolves its factory again. Upstream keeps the factory of the first construction.
+- **Tests.** `ProgramPromptParitySuite` (7), `ExecutionInstructionsSuite` (2), `RLMInstructionsSuite`,
+  `ToolTextSuite`, `UserMessageContentSuite`, laws L7a to L7c in `SignatureOpsLawSuite`, and new tests in
+  `ChainOfThoughtSuite`, `ReActSuite`, and `RefinePerModuleAdviceSuite`. `ReActSuite`, `GepaReActTraceSuite`, and
+  `InterpretedTrajectoryAgentLawSuite` changed for the new trajectory text.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -825,7 +873,7 @@ Open points from batch 1, for the owner:
 - [x] **I4. Mount collisions** (072c72164). → G-33 (R)
 - [x] **I5. Launch flags, Deno version check, probe timeout** (07a0f7aa6). → G-34 (R)
 - [x] **I6. Persistent local Python REPL** (d58c3007e, 453823209). → G-36 (R)
-- [ ] **I7. `execution_instructions`** (0b93fb148, 750017192). → G-35 (R)
+- [x] **I7. `execution_instructions`** (0b93fb148, 750017192). → G-35 (R) Done in batch 27.
 - [ ] **I8. `SandboxSerializable`** (ed4d479a1). → G-38 (R)
 - [x] **I9. Callback events**: interpreter lifecycle (b11cfe874), optimizer compile (80553206b), and the end event
       for base exceptions (970f72900). → G-40 (C for the end event, R for the others)

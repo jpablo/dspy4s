@@ -403,6 +403,9 @@ constraints. The port has no model of Python types, so a few places of a prompt 
 - The two-step adapter prints a list or dict value as JSON. Upstream prints the Python `repr`.
 - A value of an input or a demo prints as upstream prints it: `True`, `False`, `None`, the Python form of a float,
   and JSON with the separators `", "` and `": "`.
+- ReAct writes the arguments of a tool as JSON text. Upstream writes the Python text of a dict.
+- The RLM action prompt has no text about the sub-agents of the sandbox `dspy` facade, because the port has no facade
+  (upgrade item P8).
 
 ## What this means in practice
 
