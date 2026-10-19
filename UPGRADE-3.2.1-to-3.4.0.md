@@ -806,6 +806,38 @@ The full suite passes: 1,865 tests, 0 failures, 6 live tests skipped.
 - **Tests.** `DecisionAdapterSuite` (9), `PredictDecisionSuite` (6), `DecisionProgramSuite` (5),
   `DecisionPersistenceSuite` (3), `StreamingDecisionSuite` (2).
 
+### Batch 30 (2026-10-19): the Jev client and the System One path (A8, part 3)
+
+The full suite passes: 1,904 tests, 0 failures, 6 live tests skipped.
+
+- **`TypeSafeModel`** (upstream `dspy.experimental.TypeSafe`, decision 4). An HTTP client of `POST /v1/systemone`
+  with a Bearer key, and no SDK. `TypeSafeModel.fromEnv` reads `TYPESAFE_API_KEY`, `TYPESAFE_DEFAULT_MODEL`, and
+  `TYPESAFE_BASE_URL`. The model accepts only decision requests (`DecisionRequests`), checks each reply with the
+  wire rules of the vendored lm15 provider, and maps each error status as upstream `normalize_error` and
+  `map_http_error`. The key goes only to the `Authorization` header.
+- **The System One path.** `LanguageModel.supportsDecisionRequests` marks a System One model. `Predict` then uses no
+  adapter: it sends the state (`instructions`, `input_fields`, `inputs`, and `demos` when the call has demos) and the
+  question of each decision output. The threshold, the cuts, and the weights stay local, so a cached answer serves
+  new settings. Each output must be a decision output (a native `Boolean` or enum output needs no settings entry).
+  Generation settings and a stream to a listener fail before the request (decision 7).
+- **Wrappers.** `ManagedLanguageModel` and the stream wrapper forward the new flag. `JdkHttpTransport` lets a header
+  of the caller replace a default header with the same name.
+- **A defect fixed** (`fa969940`, found in batch 29). The output shape of `ChainOfThought`, the ReAct extractor, and
+  `MultiChainComparison` gave the JSON schema of the base output, so the strict schema of the JSON adapter had no
+  `reasoning` or `rationale` property. The shape now puts the added property first. The decision adapter lost the
+  other properties of a recursive output type; it now replaces the root `$ref` first.
+- **Tests.** `TypeSafeModelSuite` (8), `PredictSystemOneSuite` (7), `PredictTypeSafeSuite` (3),
+  `StreamingSystemOneSuite` (2), `AugmentedResponseFormatSuite` (1), `AugmentedSchemaPathsSuite` (5), and 5 new
+  tests in `OutputAugmentationSuite`.
+- **Open points, for review.**
+  - The request keeps the JSON form of the values, so the wire sends `0` where upstream sends `0.0`. The numbers are
+    equal.
+  - The `rolloutId` of a call changes only the cache key. Upstream passes `rollout_id` in the config, so a TypeSafe
+    call with it fails with the generation-settings error.
+  - The cache key does not include the base URL. The upstream key does. The OpenAI provider of the port has the same
+    gap.
+  - The client has no `dump_state`, `load_state`, or `copy`, and reads the key only at construction.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -923,8 +955,9 @@ Open points from batch 1, for the owner:
       model output. The prompt asks for JSON text there. See "Deliberately not mirrored".
 - [x] **A7. `append_instructions` on signatures** (498760149). → G-48 (R)
 - [ ] **A8. Decision types `Noul`, `Score`, `Choice`** (e83978c08, 4c6448e03). Experimental. → G-49 (I)
-      In progress: the types and the decoder are done (batch 28), and the evidence path for a generative model and
-      the settings on `Predict` (batch 29). The Jev client and ReAnchor follow.
+      In progress: the types and the decoder are done (batch 28), the evidence path for a generative model and the
+      settings on `Predict` (batch 29), and the Jev client with the System One path (batch 30). ReAnchor (O6)
+      follows.
 
 ## Phase 3: programs
 
