@@ -1,129 +1,94 @@
 # dspy4s `programs`
 
-The program (module) layer — the inference patterns you actually compose: `Predict`, `ChainOfThought`,
-`ReAct`, `MultiChainComparison`, `BestOfN`, `Refine`, `RLM`, plus the
-introspection type-class the optimizers rely on and the in-memory retrievers. Depends on `core`, `lm`,
-`adapters`, and [`signatures`](../signatures/README.md).
+`programs` contains the programs that you compose: `Predict`, `ChainOfThought`, `ReAct`, `MultiChainComparison`,
+`BestOfN`, `Refine`, and `RLM`. It also contains the composition operators, the program capabilities for the
+optimizers, and two in-memory retrievers. It uses `core`, `lm`, `adapters`, and [`signatures`](../signatures/README.md).
 
-## The core idea
+## Main concepts
 
-Every program is a `Module[I, O]`: its semantic computation is wrapped uniformly as
-`ProgramCall[I] => Either[DspyError, Prediction[O]]`. A `final apply` adds the universal lifecycle (callbacks, tracing,
-history); subclasses implement only `forward`, so bookkeeping is never reimplemented or mutated in place.
+- **A program is a `Module[I, O]`.** A program implements `forward`, which takes a `ProgramCall[I]` and returns
+  `Either[DspyError, Prediction[O]]`. The `final apply` adds the callbacks, the trace, and the history.
+- **Two kinds of programs.** Domain-valued programs, for example `Predict[I, O]`, encode the input `I` and decode the
+  output `O`. Record-valued programs (`DynamicModule`) have records on each side, for a signature that exists only at
+  runtime. `Predict` and `DynamicPredict` run the same `PredictEngine`.
+- **Program capabilities.** `OptimizableStructure[P]` gives the predictors of a program in a fixed order. `read` gives
+  their parameters, and `replace` writes new parameters back. `ProgramRunner[P]` runs a program from an input record.
+  The [`optimize`](../optimize/README.md) and [`gepa`](../gepa/README.md) modules use these capabilities.
 
-Programs live on two layers that share one engine:
-
-- **Domain-valued programs** — `Predict[I, O]`, `ChainOfThought[I, O]`, `ReAct[I, O]`, … bind input/output
-  types and encode/decode at the boundary.
-- **Record-valued programs** — `DynamicModule = Module[DynamicValue.Record, DynamicValue.Record]`, where programs can build
-  and augment signatures at runtime. Its `RawPrediction` is lifted through `Prediction.dynamic` at the module
-  boundary. `DynamicPredict` is the executable prediction leaf for these programs. The
-  `Predict[I, O]` is its sibling: each is a thin module over the same `PredictEngine` execution body.
-
-The bridge for optimization is `OptimizableStructure[P]`, the dspy4s analogue of Python's `named_predictors()`: it exposes
-non-executable predictor views (`inspect` / `readIdentified`) and `OptimizableParameters` values (`read`), then writes
-an arity-matched parameter vector back through `replace`. This is what the [`optimize`](../optimize/README.md) and
-[`gepa`](../gepa/README.md) modules drive.
-
-## Key types
+## Main types
 
 ### Programs
 
-| Type | Role |
-|------|------|
-| `Predict[I, O]` | The fundamental predictor: encode `I`, run its `PredictEngine` against the LM, decode into `Prediction[O]`. |
-| `DynamicPredict` | The dynamic predictor for runtime-known layouts: accept a `ProgramCall[DynamicValue.Record]`, run the shared engine, and return `Prediction[DynamicValue.Record]`. |
-| `OptimizableParameters` | The writable optimizer/persistence carrier: instructions, demos, and module config only. |
-| `OptimizableView` | A non-executable snapshot pairing `OptimizableParameters` with read-only signature structure and module name. |
-| `ChainOfThought[I, O]` | Wraps `Predict` and prepends a `reasoning: String` output via `OutputAugmentation` (idempotent if `O` already has it). |
-| `ReAct[I, O]` | Reasoning-and-acting agent: iterates over a tool set using a text protocol (`next_thought` / `next_tool_name` / `next_tool_args`), then a CoT-augmented extractor produces `O`. Learnable: `reactPredict`, `extractorPredict`. |
-| `MultiChainComparison[I, O]` | Compares `m` candidate reasoning chains and synthesizes a corrected `rationale`. |
-| `BestOfN[I, O]` | Runs an inner program up to `n` times (varied by `rolloutId`), keeps the highest-reward result; short-circuits at a threshold. |
-| `Refine[P]` | Iterative feedback loop: runs, generates advice from the trace + reward, injects per-predictor hints into the next attempt. |
-| `RLM[I, O]` | Recursive Language Model (experimental): long inputs become REPL variables the LM explores with generated code calling `llm_query()` / `SUBMIT()`. |
-| `Parallel` | Concurrent executor over `(DynamicModule, ProgramCall)` tasks. |
+| Type | Description |
+|------|-------------|
+| `Predict[I, O]` | The base predictor. It encodes `I`, calls the LM through the adapter, and decodes the response. `withLm` binds a model to it. `erase` gives a `DynamicPredict` with the same configuration. |
+| `DynamicPredict` | The predictor for a `SignatureLayout`. Its input and its output are records. |
+| `ChainOfThought[I, O]` | Runs a `Predict` that has a `reasoning: String` output first. The output is a named tuple. |
+| `ReAct[I, O]` | An agent that calls tools. In each step, the model writes `next_thought`, `next_tool_name`, and `next_tool_args`. When the model selects `finish`, or after `maxIterations` steps, an extractor writes the output with a `reasoning` field first. |
+| `MultiChainComparison[I, O]` | Compares `m` candidate completions, and writes a corrected `rationale` and the answer. |
+| `BestOfN` | Runs an inner program up to `n` times with different `rolloutId` values, and keeps the result with the highest reward. |
+| `Refine` | Works like `BestOfN`. After an attempt with a reward below `threshold`, a critic predictor writes advice for the next attempt. |
+| `RLM[I, O]` | A recursive language model. The inputs become variables in a Python REPL. The model writes code that reads them, calls `llm_query()`, and ends with `SUBMIT()`. |
+| `DynamicSignature` | A signature that you parse at runtime. Each parse makes new input and output types, so its programs compose and optimize like domain-valued programs. |
+| `Parallel` | Runs `(DynamicModule, ProgramCall)` tasks on more than one thread. |
 
 ### Composition
 
-Modules compose without adding lifecycle noise: structural nodes are transparent, while semantic leaves retain
-their callbacks, trace, history, and optimizer-addressable predictors.
+A composition node adds no callbacks, trace, or history of its own. The programs in it keep their own records, and
+the optimizers can find their predictors.
 
-- `Compose.lift` / `liftEither` embed local transformations.
-- `>>>` composes dependent stages.
-- `mapOutput`, `contramapInput`, and `dimap` adapt domain boundaries while preserving the inner raw prediction.
-- `fanout` pairs two programs over one shared input, left-to-right.
-- `split` pairs two programs over independent tuple inputs, left-to-right.
-- `recoverWith(policy)(fallback)` makes error selection explicit and retains both branches for optimization.
+- `Compose.lift` and `Compose.liftEither` make a program from a Scala function.
+- `>>>` (or `andThen`) runs two programs in sequence.
+- `mapOutput`, `contramapInput`, and `dimap` change the output type or the input type.
+- `fanout` (`&&&`) runs two programs on one input. `split` (`***`) runs two programs on the two parts of a tuple.
+- `recoverWith(policy)(fallback)` runs `fallback` when `policy` accepts the error.
+- `mode(m)` changes the call controls of a program, for example with `Mode.temperature`.
 
-### Contracts & introspection
+### Contracts and tools
 
-| Type | Role |
-|------|------|
-| `Module[I, O]` | Semantic program trait: `forward` returns `Prediction[O]`; `final apply` owns the lifecycle. `DynamicModule` specializes both sides to records. |
-| `ProgramCall[I]` | The uniform call envelope: input carrier `I`, config bag, `traceEnabled`, and `rolloutId`; `mapInput` preserves the controls. |
-| `ProgramRunner[P]` | Runs domain-valued or record-valued `P` from a `ProgramCall[DynamicValue.Record]`; shared by evaluation, optimization, and streaming. |
-| `Prediction[O]` | Domain output `O` + its `RawPrediction` evidence (completions, usage). |
-| `OptimizableStructure[P]` / `OptimizableLeaf[P]` | The introspection type-classes: a composite's learnable predictors (with dotted names like `"field.sub"`) and a single learnable leaf. Instances are hand-written for composites and structurally derived for case classes. The module of a leaf type records a `PredictorKey` in its trace entries (`ModuleLifecycle.predictor`); an optimizer uses the key to find the calls of the leaf. |
-| `ToolFunction` | The tool contract: `name`, `description`, `argSchema`, `invoke(args)`. `fromMethod` derives one from a method via a macro. |
-| `ActionInterpreter[Action, Observation]` | Executes an agent action and distinguishes success, recoverable failure, and fatal `Left`. |
-| `AgentLoop` | The bounded `Continue` / `Done` / exhaustion state-machine kernel shared by ReAct and RLM. |
-| `TrajectoryAgent[I, O, S]` | Final loop-then-extract template used by ReAct; owns extraction count, failure short-circuiting, envelope preservation, and complete-trajectory attachment. |
-| `InterpretedTrajectoryAgent[I, O, Entry]` | Explicit state machine for the final generate → prepare → interpret → record → decide transition of ReAct. |
-| `Aggregation.majority` | Picks the most-common field value across candidate completions (ties to first). |
-| `KNN` / `EmbeddingsRetriever` | Brute-force in-memory retrievers (no FAISS): nearest trainset examples by dot product, top-k passages by cosine. |
+| Type | Description |
+|------|-------------|
+| `ProgramCall[I]` | One call: the input, the `config` options, `traceEnabled`, and `rolloutId`. |
+| `Prediction[O]` | The output `O` and its `RawPrediction` (`raw`), with the completions and the token usage. |
+| `OptimizableStructure[P]` / `OptimizableLeaf[P]` | The predictors of a program, and one predictor. The built-in composites have their own instances, and the compiler derives an instance for a case class. |
+| `ToolFunction` | A tool: `name`, `description`, `argSchema`, and `invoke(args)`. `ToolFunction.fromMethod` makes a tool from a method. |
+| `AgentLoop` / `TrajectoryAgent` | The bounded loop of the agents, and the template of `ReAct`: a loop that makes a trajectory, and then one extraction. |
+| `Aggregation.majority` | Selects the most frequent value of a field in the candidate completions. |
+| `KNN` / `EmbeddingsRetriever` | `KNN` finds the nearest trainset examples by dot product. `EmbeddingsRetriever` finds the top-k passages by cosine similarity. |
 
 ## Design notes
 
-- **Module purity.** `forward` is side-effect-free; trace, history, and callbacks are a transparent `final`
-  wrapper, so every program is observed identically with no subclass boilerplate. (The
-  [module-purity memory](../../README.md): runtime owns bookkeeping, no `ProgramMeta`/`BaseModule`/`Parameter`.)
-- **Two sibling layers with explicit erasure.** `Predict[I, O]` and `DynamicPredict` each own a `PredictEngine` built
-  from their signature representation, so a `Predict` call emits one `predict` module lifecycle rather than a
-  wrapper-over-dynamic pair. `Predict.erase` creates a one-way dynamic snapshot with the same engine state;
-  programs that start with a runtime-known layout construct `DynamicPredict` directly.
-- **`OptimizableStructure` is the optimizer backbone.** Optimizers never special-case program types — they read the
-  predictor genome through `OptimizableStructure`, build edited copies, and `replace`. This is why one optimizer codepath
-  covers a bare `Predict` and an arbitrary composite.
-- **Config layering and bound LMs.** Module-level and per-call `config` merge with per-call winning;
-  `rolloutId` is a first-class cache-busting field, not part of the provider bag. A predictor can bind its own
-  `LanguageModel`, overriding the ambient context.
-- **A conversation history is an input.** A program does not keep earlier turns. A signature takes them as one
-  input field of type `History`, and `Predict`, `ChainOfThought`, and `DynamicPredict` give that value to the adapter
-  with no change. The adapter replays the messages as earlier turns (see [`adapters`](../adapters/README.md)). A
-  native tool call keeps its provider `id` in the typed output (`Vector[ToolCall]`) and in the raw prediction, so the
-  caller can put the call and its `ToolCallResult` into the history of the next call.
-- **ReAct stays on the text protocol.** Tools are selected via output fields, not provider-native
-  function-calling; tool failures become trajectory observations, and context-window overflow triggers
-  trajectory truncation and retry. The native function-calling path is adapter-level and deliberately not
-  wired into ReAct (see the [design memory](../../README.md)).
-- **Agent templates own behavioral laws.** `TrajectoryAgent.forward` and
-  `InterpretedTrajectoryAgent.trajectoryStep` are final, so subclasses choose the action ADT but cannot
-  alter the orchestration. `InterpretedTrajectoryAgent.State` gives each phase exactly the data available there, while
-  state-specific transition ADTs enumerate its legal successors; rejection and interpreted-outcome recording are
-  separate states. `TrajectoryAgentLawSuite` pins extract-once, short-circuit, raw-envelope, and full-history behavior;
-  `InterpretedTrajectoryAgentLawSuite` pins the `Halted`, `Rejected`, `Ready`, post-outcome `decide`, and fatal-error
-  branches.
+- **One module event for each `Predict` call.** `Predict` and `DynamicPredict` each have their own `PredictEngine`.
+  Thus a `Predict` call sends one `predict` module event, with no second event from an inner `DynamicPredict`.
+- **Config and bound models.** The `config` of a module and the `config` of a call merge. On a key collision, the
+  value of the call has priority. A model that you bind to a predictor has priority over the model of the context.
+- **The conversation history is an input.** A signature takes the earlier turns in one input field of type
+  `History`, and the adapter sends them (see [`adapters`](../adapters/README.md)). A native tool call keeps its
+  provider `id`. Thus you can put the call and its `ToolCallResult` into the history of the next call.
+- **ReAct uses a text protocol.** The model selects a tool through output fields. ReAct does not use the native
+  function calls of the adapters. A tool failure becomes an observation in the trajectory. On a context window
+  overflow, ReAct removes the oldest trajectory entry and tries again.
+- **Fixed agent templates.** `TrajectoryAgent.forward` and `InterpretedTrajectoryAgent.trajectoryStep` are `final`. A
+  subclass selects its action type, but it cannot change the order of the steps.
 
 ## Source layout
 
-| Path | Contents |
-|------|----------|
-| `Predict.scala`, `DynamicPredict.scala` | sibling domain-value and runtime-record predictors over the shared engine |
-| `ChainOfThought.scala`, `ReAct.scala`, `RLM.scala`, `MultiChainComparison.scala` | the composite programs |
-| `BestOfN.scala`, `Refine.scala`, `Parallel.scala`, `Aggregation.scala` | wrappers and utilities |
-| `optimization/OptimizableLeaf.scala`, `OptimizableStructure.scala` | leaf lens and composite optimizer-structure typeclasses |
-| `optimization/CompositeOptimizableStructureInstances.scala`, `OptimizableStructureDerivation.scala` | built-in composite instances and strict Mirror derivation |
-| `contracts/Module.scala`, `ProgramCall.scala`, `ProgramRuntime.scala` | module boundary, call envelope, and runtime resolution contracts |
-| `contracts/ToolFunction.scala`, `ToolCall.scala`, `ActionInterpreter.scala` | callable tools, action messages, and the action-execution boundary |
-| `ProgramRunner.scala` | the shared domain/record running capability |
-| `RecordCodec.scala` | sealed canonical decoding evidence for the record-to-domain input boundary |
-| `retrievers/KNN.scala`, `EmbeddingsRetriever.scala` | in-memory retrieval |
-| `runtime/AgentLoop.scala`, `TrajectoryAgent.scala`, `InterpretedTrajectoryAgent.scala` | bounded iteration, loop-then-extract, and interpreted-action templates |
-| `runtime/PredictEngine.scala`, `SettingsProgramRuntime.scala`, `ParallelExecutor.scala`, `ToolExecutor.scala` | the shared prediction body, model/adapter resolution, concurrency, tool dispatch |
-| `internal/ToolMacro.scala` | the `ToolFunction.fromMethod` derivation macro |
+| Package | Contents |
+|---------|----------|
+| top level | `Parallel`, `Aggregation`, `ProgramRunner`, `RecordCodec`, `DynamicSignature`, and the limit types, for example `AttemptCount` |
+| `strategies/` | `Predict`, `DynamicPredict`, and the other programs |
+| `compose/` | the composition operators and `Mode` |
+| `contracts/` | `Module`, `ProgramCall`, `Prediction`, `ModuleLifecycle`, `ToolFunction`, and `ActionInterpreter` |
+| `optimization/` | `OptimizableStructure`, `OptimizableLeaf`, `OptimizableParameters`, and their instances |
+| `algebra/` | `Program` (a module with a fixed number of predictors) and the `algebra` instances for programs |
+| `runtime/` | `PredictEngine`, the agent loops, `ParallelExecutor`, and `ToolExecutor` |
+| `retrievers/` | `KNN` and `EmbeddingsRetriever` |
+| `internal/` | the macro of `ToolFunction.fromMethod` |
 
 ## Relation to dspy
 
-This ports `dspy.predict` and the module family. The shape decisions specific to dspy4s — pure modules with
-runtime-owned bookkeeping, the domain/record split sharing one engine, and `OptimizableStructure` standing in for
-`named_predictors()` — are what let the program API and the optimizers coexist over one substrate.
+`programs` is the port of `dspy.predict` and of the module classes. These are the main differences:
+
+- A program has no state that changes, and the runtime keeps the trace and the history.
+- Domain-valued programs and record-valued programs use one engine.
+- `OptimizableStructure` takes the place of `named_predictors()`.

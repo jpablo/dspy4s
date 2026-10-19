@@ -1,102 +1,87 @@
 # dspy4s `signatures`
 
-The signature-definition layer. Where [`core`](../core/README.md) carries a runtime `SignatureLayout`
-(separate input and output field cohorts), `signatures` pairs that layout with Scala types — an input type `I` and an
-output type `O` — and the bidirectional codec that moves between a domain value and the `DynamicValue.Record`
-interchange format. This is what gives the program API (`Predict[I, O]`, `ChainOfThought[I, O]`, …) its
-compile-time safety. It depends only on `core`.
+`signatures` gives a signature Scala types: an input type `I` and an output type `O`. A `Signature[I, O]` holds a
+`SignatureLayout` from [`core`](../core/README.md), a `Shape[I]`, and a `Shape[O]`. The domain-valued programs, for
+example `Predict[I, O]`, use it. In the build, the module depends only on `core`.
 
-## The core idea
+## Main concepts
 
-A `Signature[I, O]` wraps a `SignatureLayout` alongside a `Shape[I]` and a `Shape[O]` — schema-aware
-projections of the input and output types. At compile time a macro inspects a case-class (or named-tuple, or
-`Spec`-trait) signature, extracts each field's name and type, assigns it to an input or output cohort, and derives its wire `TypeRef` from the
-field's zio-blocks `Schema`. At runtime, `Shape` uses that same `Schema` to **encode** a domain value into a
-record (`Schema.toDynamicValue`) and to **decode** a record back into the domain value
-(`Schema.fromDynamicValue`, after LM-shaped coercion). The codec speaks only `DynamicValue.Record` end to end —
-no intermediate `Map[String, Any]` — so the `programs` layer can hand the adapter an `I`, decode the
-model's reply into `O`, and pair that value with its raw execution evidence as a `Prediction[O]`.
+- **Types from Scala code.** You make a signature from case classes, a `Spec` trait, a method, a function type, or a
+  text. Except for `fromStringDynamic`, dspy4s derives a zio-blocks `Schema` for `I` and `O`. It makes a `FieldSpec`
+  for each field from that `Schema`.
+- **The `Shape` codecs.** `Shape.encode` changes a Scala value into a `DynamicValue.Record`, the interchange format.
+  `Shape.decode` changes a record into a Scala value. The layout and the codecs use the same `Schema`, thus they agree.
+- **Errors at compile time.** A macro stops the compilation for a field type with no `Schema`, for two fields with the
+  same name, or for a trait or a method that it does not support.
 
 ```scala
 case class Input(sentence: String)
 case class Output(sentiment: Emotion)
 
-val sig = Signature.derived[Input, Output] // layout + RoundTripShape[Input] + RoundTripShape[Output]
+val sig = Signature.derived[Input, Output]("Sentiment") // layout + RoundTripShape[Input] + RoundTripShape[Output]
 ```
 
-## Key types
+## Ways to make a signature
 
-| Type | Role |
-|------|------|
-| `Signature[I, O]` | A `SignatureLayout` paired with `Shape[I]` and `Shape[O]`. Four entry points — `derived[I, O]` (case classes), `of[T <: Spec]` (trait spec), `from(method)` (method introspection), `fromType[F]`. |
-| `Shape[A]` | The general domain/record boundary: `fieldSpecs`, encode (`A => Record`), and decode (`Record => Either[DspyError, A]`). It does not claim a total round trip for every possible carrier. |
-| `RoundTripShape[A]` | A lawful `Shape[A]` satisfying `decode(encode(a)) == Right(a)`. Schema-derived product and named-tuple shapes implement it. |
-| `Shape.MapShape` | The dynamic fallback for raw records. It validates required fields on decode and therefore is intentionally only a `Shape[DynamicValue.Record]`, not a `RoundTripShape`: its carrier can represent invalid records. |
-| `ZioSchemaCodec` | The bridge between a zio-blocks `Schema[A]`/`Reflect` and a dspy4s `RoundTripShape[A]`: derives `FieldSpec`s, maps wire `TypeRef`s (`typeRefFor`), and normalizes LM strings before decode. |
-| `SignatureBuilder` | A fluent, macro-free builder (`.input[T](name)` / `.output[T](name)`) for assembling a layout programmatically. |
-| `Spec` / `InputField[A]` / `OutputField[A]` | The declarative trait-spec surface: a `Spec` subclass declares fields as `InputField`/`OutputField` members. |
-| `OutputAugmentation` | Type-level machinery to prepend a named field to an output type (the `WithField[O, Name, T]` match type), idempotent and cast-free — how `ChainOfThought` adds `reasoning: String`. |
-| `SchemaInterop` | The public seam onto `ZioSchemaCodec` (`decodeValue[A]`, `typeRef[A]`) for code outside this module, e.g. tool-argument decoding. |
+| Entry point | Source of the fields |
+|-------------|----------------------|
+| `Signature.derived[I, O](name)` | two case classes |
+| `Signature.of[T <: Spec]` | a `Spec` trait: each abstract method returns an `InputField[A]` or an `OutputField[A]` |
+| `Signature.from(method)` | a method: the parameters are the inputs, and the return type gives the outputs |
+| `Signature.fromType[F]` | a function type, for example `(sentence: String) => Emotion` |
+| `Signature.fromString("question -> answer: bool")` | a literal text, parsed at compile time. The field types can be `str`, `int`, `float`, `bool`, and `History` (inputs only). |
+| `Signature.fromStringDynamic(text)` | a text at runtime. `I` and `O` are `DynamicValue.Record`. |
+| `Signature.builder(name)` | a `SignatureBuilder` with `.input[T](name)` and `.output[T](name)`. `build` gives a `SignatureLayout`. |
 
-## Shape law boundary
+`of`, `from`, `fromType`, and `fromString` give a named tuple for `I`. `from` and `fromType` put a single output value
+in a field `result`.
 
-Schema-backed shapes carry their law on the abstract `RoundTripShape[A]` trait:
+## Main types
+
+| Type | Description |
+|------|-------------|
+| `Signature[I, O]` | A name, a `SignatureLayout`, a `Shape[I]`, and a `Shape[O]`. `markToolCalls(name)` gives an output field the type `TypeRef.toolCalls`. |
+| `Shape[A]` | The `Shape` codecs of one type: `fieldSpecs`, `encode`, `decode`, and `jsonSchemaString`. |
+| `RoundTripShape[A]` | A `Shape[A]` with a law: `decode(encode(a)) == Right(a)`. Each shape that comes from a `Schema` has this type. |
+| `Shape.MapShape` | The shape of `fromStringDynamic`. Its `decode` only checks that each field of the layout is in the record. |
+| `OutputAugmentation` | Adds a field at the start of an output, for example `reasoning: String` in `ChainOfThought`. The result type `WithField[O, Name, T]` is a named tuple. |
+| `InputAugmentation` | Adds `String` fields at the end of an input, for example `trajectory` in `ReAct`. |
+| `SchemaInterop` | Gives other modules `decodeValue[A]` and `typeRef[A]`, for example to decode the arguments of a tool. |
+| `ZioSchemaCodec` | The internal object that makes a `RoundTripShape`, the `FieldSpec` values, and the JSON schema from a `Schema`. |
+
+## The law of a shape
 
 ```scala
 shape.decode(shape.encode(value)) == Right(value)
 ```
 
-There is no reverse law requiring `encode(decode(record)) == record`. Decode may normalize LM-shaped primitives and
-accept additional wire fields, so re-encoding can legitimately produce a canonicalized record.
-
-The distinction from `Shape[A]` matters for dynamic signatures. A `MapShape` can require a field named `answer`, while
-its Scala carrier remains the unrestricted type `DynamicValue.Record`; a record without `answer` is representable and
-correctly fails decoding. Claiming the round-trip law for that carrier would be false.
-[`RoundTripShapeLawSuite`](src/test/scala/dspy4s/signatures/RoundTripShapeLawSuite.scala) executes the positive law and pins
-this dynamic counterexample.
+There is no law in the opposite direction, because `decode` can change the values of a model into a standard form.
+A `MapShape` is not a `RoundTripShape`: a record without a required field is a valid `DynamicValue.Record`, but its
+decode fails. [`RoundTripShapeLawSuite`](src/test/scala/dspy4s/signatures/RoundTripShapeLawSuite.scala) checks the law
+and this case.
 
 ## Design notes
 
-- **One codec, no `FieldCodec`.** All encode/decode goes through zio-blocks `Schema` on the `DynamicValue.Record`
-  interchange format. There is no per-field codec layer (it was removed; don't reintroduce it).
-- **Metadata derives from the same `Reflect` as the decode.** `FieldSpec`s (name and wire type) come from the
-  field's `Reflect`, and the decode path is driven by it too, so names and type mappings never drift.
-- **LM-shaped coercion before decode.** `ZioSchemaCodec.normalize` walks the `DynamicValue` and coerces
-  primitives the way LM output tends to arrive — `"true"` → `Boolean`, `"42"` → `Int`, trimmed numerics,
-  Option/Variant wrapping — so a loosely formatted model reply still decodes into the target Scala value.
-- **A `History` field is the conversation history.** A field of type `History` (see
-  [`core`](../core/README.md)) gets `TypeRef.history` from each entry point: `derived`, `of`, `from`, `fromType`,
-  `fromString` (`"question, history: History -> answer"`), and the builder. `typeRefFor` knows the type by the type
-  name of its record `Reflect`, not by its structure. An adapter replays the messages of that field as earlier turns.
-- **An absent `Option` field is `None`.** `ZioSchemaCodec.normalize` gives `None` to each `Option` field that a
-  record lacks, at each level of nesting. So a tool call that a model writes as `{name, args}` decodes into a
-  `ToolCall` with no `id`. A required field that is absent is a decode failure.
-- **The JSON schema does not ask for `ToolCall.id`.** `Shape.jsonSchemaString` removes the `id` of each `ToolCall`
-  from the schema that a model sees. The id comes from the provider, not from the text of the model.
-- **Direction-neutral shapes.** `Shape[A]` derives role-free field metadata. `Signature.derived` assigns the input
-  and output shapes' fields to the corresponding `SignatureLayout` cohorts.
-- **Law claims follow the carrier.** Schema-derived shapes return `RoundTripShape[A]`; validating raw-record shapes
-  remain plain `Shape[A]`. The API does not attach a stronger equation than a carrier can satisfy.
-- **Compile-time validation.** The macros (`FunctionMacro`, `SpecMacro`) fail compilation when a field type
-  lacks a `Schema`, names collide, or the trait/method shape is invalid — type errors, not runtime surprises.
+- **The schema comes from the structure of the type.** `derived` and the macros ignore a custom `Schema` in scope for
+  `I`, `O`, and their fields. Thus a custom `given` cannot change the fields or the codecs of a signature.
+- **Decode accepts the text of a model.** Before the decode, `ZioSchemaCodec.normalize` changes `"true"` into a
+  `Boolean` and `"42"` into an `Int`. It also removes a currency symbol and commas from a number, and changes a text
+  into an enum case.
+- **An absent `Option` field is `None`,** also in a nested record. The values `null`, `"none"`, and `"n/a"` are also
+  `None`. An absent field that is not an `Option` makes the decode fail.
+- **A `History` field gets `TypeRef.history`** from each entry point and from the builder.
+- **The JSON schema has no `ToolCall.id`.** `Shape.jsonSchemaString` removes the `id` of each `ToolCall` from the
+  schema that a model sees. The id comes from the provider.
 
 ## Source layout
 
-| File | Contents |
-|------|----------|
-| `Signature.scala` | `Signature[I, O]` and its four entry points |
-| `Shape.scala` | `Shape[A]`, lawful `RoundTripShape[A]`, `SchemaTupleShape`, `MapShape`, derivation factories |
-| `ZioSchemaCodec.scala` | the Schema↔Shape bridge, `normalize`, `typeRefFor`, field-spec derivation, the JSON schema for a model |
-| `SignatureBuilder.scala` | the fluent, macro-free builder |
-| `Spec.scala` | the `Spec` trait + `InputField`/`OutputField` markers |
-| `OutputAugmentation.scala` | type-level field prepending (`WithField`, `PrependField`) |
-| `SchemaInterop.scala` | public codec seam for other modules |
-| `internal/FunctionMacro.scala`, `internal/SpecMacro.scala` | the derivation macros |
+| Package | Contents |
+|---------|----------|
+| `signatures/` | `Signature`, `Shape`, `ZioSchemaCodec`, `SignatureBuilder`, `Spec`, the two augmentations, and `SchemaInterop` |
+| `signatures/internal/` | the macros: `FunctionMacro` (`from`, `fromType`, `fromString`), `SpecMacro` (`of`), and their helpers |
 
 ## Relation to dspy
 
-Python dspy has no static signature types — a `Signature` is a runtime object with attribute access. The
-`signatures` module is the dspy4s addition that represents signature inputs and outputs as Scala types while keeping a
-faithful runtime `SignatureLayout` underneath, so the domain-valued and record-valued programs in
-[`programs`](../programs/README.md) share one representation. Per the [single-codec
-decision](../../README.md), zio-blocks `Schema` is the only codec involved.
+A Python DSPy signature is a runtime object with no static types. A dspy4s signature has Scala types for its inputs
+and its outputs, and a `SignatureLayout` at runtime. Thus the domain-valued programs and the record-valued programs in
+[`programs`](../programs/README.md) both use `SignatureLayout`. The zio-blocks `Schema` is the only codec.

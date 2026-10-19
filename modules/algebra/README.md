@@ -1,40 +1,22 @@
 # dspy4s `algebra`
 
-This module defines the small algebraic structures that dspy4s uses to describe composition. It gives names and laws
-to operations such as:
+`algebra` contains the algebraic structures that dspy4s uses to describe composition. The module contains no model,
+adapter, schema, or runtime code, and its main code uses no external library. The `core` module depends on it.
 
-- combine two values;
-- run one operation after another;
-- map one form of composition into another;
-- read and replace one part of a value;
-- track a static resource count during composition.
+Most users do not use this module directly. Use it to add a composition rule, a type-class instance, or a law test. To
+make and run a program, start with the [`programs`](../programs/README.md) module.
 
-The module contains no model, adapter, schema, or runtime code. Its production code has no external library
-dependencies. This keeps the law vocabulary available to every higher dspy4s module.
+## Main concepts
 
-```mermaid
-flowchart LR
-    algebra["algebra<br/>structures and laws"] --> core["core<br/>shared contracts"]
-    core --> signatures
-    core --> lm
-    core --> programs
-    programs --> evaluate
-    programs --> optimize
-```
+- **Operations and laws.** A structure has operations, for example the identity and the composition of a `Category`.
+  It also has laws: equations that the operations must satisfy. The laws are methods on the trait, thus each instance
+  gets them.
+- **A test checks a law.** `IsEq[A]` holds the two sides of an equation, `<->` makes an `IsEq`, and `@Law` marks a law
+  method. The test compares the two sides: with `==` for plain values, or on sample inputs for functions.
+- **The weakest true structure.** Give a type the weakest structure whose laws are all true for it. Then code cannot
+  use a law that is false for the type.
 
-Most users do not need to use this module directly. Use it when you add a new composition rule, a reusable type-class
-instance, or a law suite. To build and run a program, start with the
-[`programs`](../programs/README.md) module.
-
-## The core idea
-
-An algebraic structure has two parts:
-
-1. **Operations** say what code can do. For example, a `Category` provides an identity operation and composition.
-2. **Laws** say which results must be equal. For example, category composition must be associative.
-
-The laws are part of each trait. A concrete instance supplies the operations and inherits the law statements. A test
-suite then checks the statements with an equality that is valid for that instance.
+`f >>> g` means "run `f`, then run `g`":
 
 ```scala
 import dspy4s.algebra.*
@@ -51,12 +33,7 @@ val law = functions.associativity(normalize, length, positive)
 assert(law.lhs("  Hello  ") == law.rhs("  Hello  "))
 ```
 
-The `>>>` notation uses diagram order: `f >>> g` means “run `f`, then run `g`.”
-
-## Laws are executable specifications
-
-`IsEq[A]` stores the left and right sides of an equation. The `<->` operator constructs this value. `@Law` marks a
-method as a law statement.
+A law method in a trait:
 
 ```scala
 @Law("associativity")
@@ -64,139 +41,81 @@ def associativity(a: M, b: M, c: M): IsEq[M] =
   a.combine(b).combine(c) <-> a.combine(b.combine(c))
 ```
 
-These types state laws, but they do not prove them. The test suite chooses how to compare both sides:
-
-- use structural equality for ordinary values;
-- run both sides on sample inputs for functions;
-- compare visible output, parameters, or decoded values for effectful carriers.
-
-This rule prevents the library from using Scala object identity as a false test for functions or program modules.
-
-## Main structures
+## Main types
 
 ### Values and optics
 
-| Type | Purpose |
-|---|---|
-| `Monoid[M]` | Combines values with an associative operation and an identity value. |
-| `MonoidAction[M, A]` | Applies monoid values to values of `A` and states how combined actions behave. |
-| `Lens[S, A]` | Reads and replaces one exact part `A` of a larger value `S`. It carries Get-Put, Put-Get, and Put-Put laws. |
-| `IsEq[A]` / `@Law` | Stores and labels a law statement for a test suite. |
+| Type | Description |
+|------|-------------|
+| `Monoid[M]` | `combine` joins two values, and the `empty` value changes nothing. `(a combine b) combine c` is equal to `a combine (b combine c)`. |
+| `MonoidAction[M, A]` | Applies the values of a monoid `M` to values of `A`. |
+| `Optic` | An optic reads a part (the focus) of a value, and builds a new value with a new focus. `andThen` composes two optics. |
+| `Lens[S, A]` | An optic that reads and replaces one part `A` of `S`. It has six laws, for example: to write back the part that you read changes nothing. |
 
 ### Categories and mappings
 
-| Type | Purpose |
-|---|---|
-| `Category[P, Hom]` | Defines identity and sequential composition for morphisms `Hom[A, B]`. `P[A]` can restrict valid objects. |
-| `Isomorphism[P, Hom, A, B]` | Pairs a forward morphism with its inverse. |
-| `Functor` | Maps objects and morphisms from one category to another. It preserves identity and composition. |
-| `NaturalTransformation` | Maps one functor to another with one component for each source object. |
-| `Profunctor` | Maps both boundaries of a two-parameter structure. Its first boundary is contravariant and its second boundary is covariant. |
-| `Opposite` | Reverses all morphisms in a category. |
-| `Monad` | Defines a categorical monad from an endofunctor, a unit, and multiplication. |
-| `ScalaMonad` | Specializes `Monad` to Scala functions and provides `pure`, `map`, `flatten`, and `flatMap`. |
-| `Kleisli` | Represents an effectful morphism `A => F[B]`; `kleisliCategory` composes these morphisms with a `ScalaMonad`. |
+A category has morphisms `Hom[A, B]` from an object `A` to an object `B`, for example the functions `A => B`. You can
+compose two morphisms when the output of the first is the input of the second.
 
-The module supplies a category for Scala functions and a `ScalaMonad` for `Either[E, *]`. It also supplies constructors
-for identity and composed functors, opposite categories, monoid deloopings, and Kleisli categories.
+| Type | Description |
+|------|-------------|
+| `Category[P, Hom]` | The identity `id` and the composition `>>>`. `P[A]` can limit the objects. `functionCategory` is the category of Scala functions. |
+| `Isomorphism`, `Opposite` | A morphism and its inverse. A category with the direction of each morphism reversed. |
+| `Functor` | Maps one category to a different category, and keeps identities and compositions. An `Endofunctor[F]` gives a `map` for `F`. |
+| `NaturalTransformation` | Maps one functor to a different functor. |
+| `Profunctor` | A type `F[A, B]` whose input and output you can change with `dimap`. |
+| `Monad`, `ScalaMonad` | A monad runs steps in sequence, and each step returns an `F[B]`. `ScalaMonad` gives `pure` and `flatMap` for Scala types. In its `Either` instance, the first `Left` stops the steps after it. |
+| `Kleisli` | A function `A => F[B]` whose result has an effect `F`. `kleisliCategory` composes these morphisms with a `ScalaMonad`. |
 
 ### Graded and ordered execution
 
-Some dspy4s operations have visible order and can fail. The module gives these operations precise, weak contracts. It
-does not assign laws that effects can break.
+A graded category gives a natural number, the grade, to each morphism. Composition adds the grades. In dspy4s, the
+grade of a `Program` is the number of its `OptimizableParameters` values, and the result type keeps the sum.
 
-| Type | Purpose |
-|---|---|
-| `NatGradedCategory[P, Hom]` | Adds a natural-number grade to each morphism. Identity has grade `0`; composition adds grades. |
-| `AnyGrade` | Hides a grade but keeps the original morphism. This permits ordinary category law statements. |
-| `GradedFunctor` | Maps a graded category to an ordinary category and hides or interprets the grade. |
-| `GradePreservingFunctor` | Maps between graded categories and keeps the exact grade. |
-| `OrderedFanout` | Runs two graded morphisms on one shared input, from left to right, and pairs their outputs. |
-| `TensorOps` | Pairs two morphisms that have independent inputs. It makes no coherence claim. |
-| `OrderedTensorOps` | Adds ordered `tensor`, `swap`, `copy`, and `discard` operations without false symmetry or naturality laws. |
+| Type | Description |
+|------|-------------|
+| `NatGradedCategory` | A category whose morphisms `Hom[A, B, N]` have a grade `N`. `AnyGrade` hides the grade. |
+| `GradedFunctor`, `GradePreservingFunctor` | Map a graded category to an ordinary category, or to a graded category with the same grades. |
+| `TensorOps` | `tensor` runs two morphisms on the two parts of a pair. It adds no laws to the category laws. |
+| `OrderedTensorOps` | Adds `swap`, `copy`, and `discard`, with no symmetry or naturality laws. |
+| `OrderedFanout` | `fanout` gives one input to two graded morphisms and runs them from left to right. |
 
-The grade in the program algebra is parameter arity. If one program has `N` optimizable parameter groups and another
-has `M`, their composition has grade `N + M`. Scala keeps this sum in the result type.
+## Weak and strong structures
 
-## Weak and strong composition structures
+An effect makes the order visible: the first program can fail before the second program runs. Thus the ordered types
+state no laws that effects can break. Use a type of the strong branch only when all its laws are true:
 
-The module keeps effectful execution separate from stronger mathematical structures.
+| Type | Laws that it adds |
+|------|-------------------|
+| `MonoidalCategory` | `tensor` keeps identities and compositions. The associator and the unitors satisfy the pentagon and the triangle laws. |
+| `SymmetricMonoidalCategory` | A natural `braiding` swaps the two parts of a pair. |
+| `CopyDiscardCategory` | Each object has a `copy` and a `discard`. To copy a value and discard one copy gives the value. |
+| `MarkovCategory` | To discard the output of a morphism is the same as to discard its input. |
+| `CartesianCategory` | To copy the output of a morphism is the same as to copy its input and run the morphism on each copy. |
 
-```mermaid
-classDiagram
-    class Category
-    class TensorOps
-    class OrderedTensorOps
-    class MonoidalCategory
-    class SymmetricMonoidalCategory
-    class CopyDiscardCategory
-    class MarkovCategory
-    class CartesianCategory
-
-    Category <|-- TensorOps
-    TensorOps <|-- OrderedTensorOps
-    TensorOps <|-- MonoidalCategory
-    MonoidalCategory <|-- SymmetricMonoidalCategory
-    SymmetricMonoidalCategory <|-- CopyDiscardCategory
-    CopyDiscardCategory <|-- MarkovCategory
-    MarkovCategory <|-- CartesianCategory
-```
-
-`OrderedTensorOps` is for runtime operations whose order is visible. For example, the first program can fail before the
-second program runs. Such a carrier does not necessarily satisfy tensor interchange, symmetry, or discard naturality.
-
-Use the stronger branch only when the carrier satisfies its additional laws:
-
-| Type | Additional guarantee |
-|---|---|
-| `MonoidalCategory` | Tensor is a bifunctor; associators and unitors satisfy coherence laws. |
-| `SymmetricMonoidalCategory` | A natural symmetric braiding can exchange both sides. |
-| `CopyDiscardCategory` | Every object has coherent copy and discard operations. |
-| `MarkovCategory` | Every morphism preserves discard. |
-| `CartesianCategory` | Every morphism also preserves copy. |
-
-Do not select the strongest name only because it has more operations. Select the weakest structure that states all true
-laws for the carrier. This makes invalid rewrites unavailable.
+`MonoidalCategory` extends `TensorOps`, and each other type extends the type above it.
 
 ## How dspy4s uses this module
 
-| Consumer | Algebraic model |
-|---|---|
-| `LmUsage`, `RawPrediction`, and `RuntimeOutput` | `Monoid` instances define lawful accumulation. |
-| `RuntimeOutput` and `Prediction` | `ScalaMonad` instances define sequencing and short-circuit behavior. |
-| `ProgramCall` and `SizedVector` | `Endofunctor` instances map values without changing their structural context. |
-| `OptimizableLeaf` and `OptimizableStructure` | `Lens` laws specify safe parameter reads and replacements. |
-| `Mode` | A `Monoid` and `MonoidAction` specify how execution modes combine and apply. |
-| `Program` | A `NatGradedCategory` tracks parameter arity during composition. |
-| Program parameterization | A `GradePreservingFunctor` maps programs to their parameter structure. |
-| Module composition | `OrderedTensorOps` and `OrderedFanout` describe ordered `split` and shared-input `fanout`. |
+| Type | Structure |
+|------|-----------|
+| `LmUsage`, `RawPrediction`, `RuntimeDelta` | `Monoid` |
+| `Executed`, `Prediction` | `ScalaMonad`: it runs two steps and keeps the records of the two steps. |
+| `ProgramCall`, `SizedVector` | `Endofunctor` |
+| `OptimizableLeaf`, `OptimizableStructure` | `Lens` on the parameters of a program |
+| `Mode` | `Monoid` and `MonoidAction` on `Module` |
+| `Module` | `OrderedTensorOps` |
+| `Program` | `NatGradedCategory` and `OrderedFanout` |
 
-For the program-specific instances, see
-[`programs/algebra`](../programs/src/main/scala/dspy4s/programs/algebra/) and the
+For the program instances, see [`programs/algebra`](../programs/src/main/scala/dspy4s/programs/algebra/) and the
 [`Program` guide](../programs/src/main/scala/dspy4s/programs/algebra/Program.md).
 
 ## Source layout
 
-| File | Contents |
-|---|---|
-| `Laws.scala` | `IsEq`, `<->`, and `@Law` |
-| `Monoid.scala`, `MonoidAction.scala` | value combination and monoid actions |
-| `Lens.scala` | lawful read and replace optics |
-| `Category.scala`, `Opposite.scala`, `Isomorphism.scala` | category base types and constructors |
-| `Functor.scala`, `NaturalTransformation.scala`, `Profunctor.scala` | mappings between categorical structures |
-| `Monad.scala`, `Kleisli.scala` | categorical and Scala monads, plus effectful composition |
-| `NatGradedCategory.scala` | graded categories and graded functors |
-| `OrderedFanout.scala`, `OrderedTensorOps.scala` | weak contracts for ordered effectful execution |
-| `CopyDiscardCategory.scala` | monoidal, symmetric, copy-discard, Markov, and cartesian category hierarchy |
+All files are in the package `dspy4s.algebra`. Most files have the name of their main type. `Laws.scala` contains
+`IsEq` and `@Law`, and `CopyDiscardCategory.scala` contains the strong branch.
 
 ## Tests
 
-Run this module's tests from the repository root:
-
-```shell
-sbt algebra/test
-```
-
-`AlgebraConstructionSuite` checks `Either` as a `ScalaMonad` and checks the Kleisli category laws.
-`CopyDiscardCategorySuite` checks all structural, monoidal, symmetric, copy-discard, and cartesian laws for Scala
-functions.
+Run `sbt algebra/test` from the root of the repository. The suites check the laws on Scala functions, `Either`, the
+Kleisli category, and lenses. `UnlawfulOpticFixturesSuite` shows that the lens laws find an incorrect lens.

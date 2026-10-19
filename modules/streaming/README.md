@@ -1,17 +1,16 @@
 # dspy4s `streaming`
 
-Token-level streaming on top of the blocking program surface. Wrap a program with `Streamify.streamify` and
-calling it returns a `ClosableIterator[StreamEvent]` that yields field-routed tokens, status messages, and the
-final prediction as they happen, instead of one blocking result. Depends on `core`, `lm`, `adapters`, and
-[`programs`](../programs/README.md).
+`streaming` gives the output of a program as a stream of events while the program runs. Wrap a program with
+`Streamify.streamify`. A call then returns a `ClosableIterator[StreamEvent]` in place of one result. It uses `core`,
+`lm`, `adapters`, and [`programs`](../programs/README.md).
 
-## The core idea
+## Main concepts
 
-`streamify` runs the program on a daemon producer thread, injecting a wrapped `StreamingLanguageModel` into the
-runtime. As the underlying LM generates, the wrapper siphons each chunk through the active adapter (parsing
-tokens into output fields per signature) and pushes events onto a bounded queue; the caller consumes them off
-the queue as a lazy iterator, with backpressure when the buffer fills. Four event types flow: token, status,
-prediction, and error.
+- **A producer thread.** `streamify` runs the program on a daemon thread. The thread puts the events into a bounded
+  queue, and the caller reads them from the iterator. When the queue is full, the thread waits.
+- **A wrapped model.** For the call, a `StreamingLanguageModelWrapper` replaces the configured LM. The wrapper gives
+  each text chunk to the adapter, and the adapter divides the text into the output fields. The configured LM must be
+  a `StreamingLanguageModel`, or the stream has no `TokenEvent`s.
 
 ```scala
 val stream = Streamify.streamify(program)
@@ -24,49 +23,37 @@ events.foreach {
 }
 ```
 
-## Key types
+## Main types
 
-| Type | Role |
-|------|------|
-| `Streamify.streamify[P](program, …)` | Entry point: wraps a program (via the `Streamable` type-class) into a function returning `ClosableIterator[StreamEvent]`. Optional status-message provider, stream listeners, final-prediction toggle, queue capacity. |
-| `Streamable[P]` | Type-class that knows how to `run` a program from inputs and report its `knownSignatures` (for listener validation). Instances for `DynamicModule`, `Predict`, `ChainOfThought`, `ReAct`. |
-| `StreamEvent` | Sealed root: `TokenEvent` (field-routed text), `StatusEvent` (callback-derived progress), `PredictionEvent` (final `RawPrediction`), `ErrorEvent` (`DspyError`). |
-| `StreamListener` | A subscription filter: a specific output field, optionally scoped to a named predictor, with `allowReuse` semantics (fire once per field cycle, or every time). |
-| `StatusMessageProvider` | Hooks (`moduleStart`/`lmStart`/`toolStart`/…) to customize status text; a default is provided. |
-| `StreamingLanguageModelWrapper` | Wraps a `StreamingLanguageModel`: feeds chunks into the queue while assembling a complete `LmResponse` for non-streaming callers, routing per-signature. |
-| `StreamingQueue[A]` | The bounded producer-consumer queue: backpressure on full, consumer-abandon detection to unblock the producer, `asIterator` → `ClosableIterator[A]`. |
+| Type | Description |
+|------|-------------|
+| `Streamify.streamify[P]` | The entry point. It returns a function from an input record to a `ClosableIterator[StreamEvent]`. Other parameters set the status messages, the listeners, and the queue capacity. |
+| `Streamable[P]` | The type class that runs a program and gives the signatures of its predictors. There are instances for each `DynamicModule`, and for `Predict`, `ChainOfThought`, and `ReAct`. |
+| `StreamEvent` | A `TokenEvent` (a text chunk of one output field), a `StatusEvent` (a progress message), a `PredictionEvent` (the final `RawPrediction`), or an `ErrorEvent`. |
+| `StreamListener` | Selects the tokens of one output field, and optionally of one predictor. |
+| `StatusMessageProvider` | Writes the status text for module, LM, and tool events. The default writes a message only for tool calls. |
 
 ## Design notes
 
-- **Per-signature routing.** The wrapper reads `ActivePredictContext.current` at the start of each LM call to
-  bind the predict name and signature, so a multi-predictor program (e.g. `ReAct`'s per-step predictor plus its
-  extractor) emits chunks under each predictor's correct field names.
-- **Adapter-driven field parsing.** With an adapter configured, raw text is fed to `adapter.streamingState`,
-  which emits `FieldChunk`s per field; without one, tokens emit with an empty `fieldName`.
-- **Listener filtering with `allowReuse`.** When listeners are present, only matching chunks enqueue. A
-  non-reusable listener fires for one field cycle (through `isLastChunk`) then mutes for the rest of the run;
-  reusable listeners fire on every matching call. Matches Python dspy semantics.
-- **Backpressure and clean teardown.** The producer is a daemon thread; if the consumer `close`s the iterator,
-  a `consumerAbandoned` flag is set and the queue cleared, unblocking a producer parked in `put`.
-- **Static listener validation.** On construction, `streamify` walks the program's `knownSignatures` and warns
-  about listeners aimed at field/predictor names that don't exist; validation is skipped for opaque composites.
-- **Dual-mode wrapper.** `call` consumes the whole stream and returns an assembled `LmResponse` to
-  non-streaming callers; `stream` hands back the chunk iterator directly.
+- **The tokens of each predictor.** At the start of each LM call, the wrapper reads `ActivePredictContext.current`
+  to get the active predictor. Thus each token of `ReAct` has the correct predictor name and field name.
+- **Listeners and `allowReuse`.** If there are listeners, only the tokens that match a listener go into the queue. A
+  listener with `allowReuse = false` gets the tokens of one field only, up to the chunk with `isLastChunk = true`. A
+  listener with `allowReuse = true` (the default) gets the tokens of each LM call.
+- **Listener checks.** `streamify` compares each listener with the known signatures of the program. It sends a
+  message to `warningSink` for a field name or a predictor name that does not exist.
+- **Close.** When the consumer closes the iterator, the queue removes its events and refuses new events. Thus a
+  producer thread that waits on a full queue can continue.
 
 ## Source layout
 
-| File | Contents |
-|------|----------|
-| `Streamify.scala` | the `streamify` entry point, producer-thread coordination, listener validation |
-| `Streamable.scala` | the `Streamable[P]` type-class and its instances |
-| `StreamingLanguageModelWrapper.scala` | the per-signature chunk-siphoning LM wrapper |
-| `StreamingQueue.scala` | the bounded backpressure queue + closable iterator |
-| `StatusStreamingCallback.scala` | a `CallbackHandler` turning runtime events into `StatusEvent`s |
-| `StatusMessageProvider.scala` | the status-text customization trait + default |
-| `contracts/StreamingContracts.scala` | the `StreamEvent` hierarchy and `StreamListener` |
+| Package | Contents |
+|---------|----------|
+| top level | `Streamify`, `Streamable`, `StreamingLanguageModelWrapper`, `StreamingQueue`, `StatusMessageProvider`, and `StatusStreamingCallback` (makes the `StatusEvent`s) |
+| `contracts/` | `StreamEvent`, its four event types, and `StreamListener` |
 
 ## Relation to dspy
 
-This ports `dspy.streamify` and the streaming listener model. It builds on the `StreamingLanguageModel` from
-[`lm`](../lm/README.md) and the per-field `AdapterStreamingState` from [`adapters`](../adapters/README.md), so
-streaming is layered on the existing blocking surface rather than a separate execution path.
+`streaming` is the port of `dspy.streamify` and of its stream listeners. It uses the `StreamingLanguageModel` of
+[`lm`](../lm/README.md) and the `AdapterStreamingState` of [`adapters`](../adapters/README.md). One difference:
+`allowReuse` is `true` by default, but `allow_reuse` in Python DSPy is `False` by default.
