@@ -107,7 +107,7 @@ final case class SignatureLayout private (
       inputFields.sameElements(other.inputFields) &&
       outputFields.sameElements(other.outputFields)
 
-  /** Serialize this standalone layout to a [[zio.blocks.schema.DynamicValue.Record]] -- the same codec-spine type
+  /** Serialize this standalone layout to a [[zio.blocks.schema.DynamicValue.Record]] -- the same interchange format
     * carried elsewhere in dspy4s. Round-trips with [[SignatureLayout.fromState]] and serializes to clean JSON via
     * [[dumpJson]]. `Option` fields (`instructions`, and per-field `description` / `prefix` / `defaultValue`) encode as
     * `DynamicValue.Null` when empty. The higher-level program persistence API deliberately uses its smaller

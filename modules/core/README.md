@@ -1,6 +1,6 @@
 # dspy4s `core`
 
-The foundation every other module builds on. `core` defines the data spine (how inputs, outputs, examples, and
+The foundation every other module builds on. `core` defines the interchange format (how inputs, outputs, examples, and
 predictions are represented), the signature/field metadata model, the execution context that threads through
 every call, the error hierarchy, and the observability events. It has no dependencies on the rest of dspy4s.
 
@@ -8,9 +8,9 @@ every call, the error hierarchy, and the observability events. It has no depende
 
 Four abstractions anchor the framework:
 
-- **A single data spine.** All data — example inputs, model outputs, configs — flows as a zio-blocks
+- **A single interchange format.** All data — example inputs, model outputs, configs — flows as a zio-blocks
   `DynamicValue.Record`, a schema-backed discriminated-union value rather than `Map[String, Any]`. The `:=`
-  operator and the `DynamicValues` helpers lift Scala values onto this spine at the edges; internal codec paths
+  operator and the `DynamicValues` helpers lift Scala values into this format at the edges; internal codec paths
   produce `DynamicValue` directly so nothing is lost in round-trips.
 - **A signature/field model.** A `SignatureLayout` stores ordered input and output cohorts of role-free
   `FieldSpec` metadata. Each field has a wire `TypeRef`, description, prefix, and constraints. Adapters and programs
@@ -32,7 +32,7 @@ Four abstractions anchor the framework:
 | `RawPrediction` | Adapter-parsed prediction data before schema decoding into semantic output `O`: field values, optional multi-candidate `Completions`, and structured `LmUsage`. "Raw" does not mean unparsed LM text. Has lenient accessors (`asString`, `asInt`, `asDouble`, `asBoolean`). |
 | `LmUsage` / `TokenCategory` | Token accounting shared by predictions and LM responses; pointwise addition is a commutative monoid. |
 | `Completions` | A column-oriented view of N candidate completions; `at(i)` reconstructs row `i` as a `RawPrediction`. |
-| `DynamicValues` | The helper surface over the spine: `fromAny`, `recordFromEntries`, `recordGet`, `mergeRecords`, `renderText`, plus the `:=` and `updated` extensions. `fromAny` is reserved for user-facing edges. |
+| `DynamicValues` | The helper surface over the interchange format: `fromAny`, `recordFromEntries`, `recordGet`, `mergeRecords`, `renderText`, plus the `:=` and `updated` extensions. `fromAny` is reserved for user-facing edges. |
 
 ### Signature / fields
 
@@ -61,8 +61,8 @@ Four abstractions anchor the framework:
 
 ## Design notes
 
-- **Schema-backed bags, not `Any`.** The `:=` operator requires a `Schema` in scope, so values lifted onto the
-  spine are losslessly encodable. This is what lets the same record serialize cleanly to JSON and flow through
+- **Schema-backed bags, not `Any`.** The `:=` operator requires a `Schema` in scope, so values lifted into the
+  interchange format are losslessly encodable. This is what lets the same record serialize cleanly to JSON and flow through
   both domain-value and record-value call paths.
 - **The runtime owns bookkeeping.** Programs are pure; trace, history, callbacks, and the call stack live in
   `RuntimeContext`/`RuntimeEnvironment`, not on per-instance fields. Nested and concurrent scopes coexist
@@ -79,7 +79,7 @@ Four abstractions anchor the framework:
 |----------------|----------|
 | `data/` | Individual `Example`, `Completions`, and `RawPrediction` data aggregates |
 | `contracts/Usage.scala` | `LmUsage` and `TokenCategory` execution metadata |
-| `contracts/DynamicValues.scala` | spine helpers + `:=` / `updated` extensions |
+| `contracts/DynamicValues.scala` | interchange-format helpers + `:=` / `updated` extensions |
 | `contracts/Runtime.scala` | Cycle-breaking LM/adapter reference traits |
 | `contracts/RuntimeContext.scala` | `RuntimeContext`, services/config/scope partitions, and the flat compatibility surface |
 | `contracts/RuntimeOutput.scala` | `TraceEntry`, `HistoryEntry`, the `RuntimeDelta` monoid, and `Executed[A]` |

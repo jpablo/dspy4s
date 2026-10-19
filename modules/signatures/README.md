@@ -3,7 +3,7 @@
 The signature-definition layer. Where [`core`](../core/README.md) carries a runtime `SignatureLayout`
 (separate input and output field cohorts), `signatures` pairs that layout with Scala types — an input type `I` and an
 output type `O` — and the bidirectional codec that moves between a domain value and the `DynamicValue.Record`
-spine. This is what gives the program API (`Predict[I, O]`, `ChainOfThought[I, O]`, …) its
+interchange format. This is what gives the program API (`Predict[I, O]`, `ChainOfThought[I, O]`, …) its
 compile-time safety. It depends only on `core`.
 
 ## The core idea
@@ -58,7 +58,7 @@ this dynamic counterexample.
 ## Design notes
 
 - **One codec, no `FieldCodec`.** All encode/decode goes through zio-blocks `Schema` on the `DynamicValue.Record`
-  spine. There is no per-field codec layer (it was removed; don't reintroduce it).
+  interchange format. There is no per-field codec layer (it was removed; don't reintroduce it).
 - **Metadata derives from the same `Reflect` as the decode.** `FieldSpec`s (name and wire type) come from the
   field's `Reflect`, and the decode path is driven by it too, so names and type mappings never drift.
 - **LM-shaped coercion before decode.** `ZioSchemaCodec.normalize` walks the `DynamicValue` and coerces
@@ -97,6 +97,6 @@ this dynamic counterexample.
 
 Python dspy has no static signature types — a `Signature` is a runtime object with attribute access. The
 `signatures` module is the dspy4s addition that represents signature inputs and outputs as Scala types while keeping a
-faithful runtime `SignatureLayout` underneath, so the program API and runtime-record spine in
+faithful runtime `SignatureLayout` underneath, so the domain-valued and record-valued programs in
 [`programs`](../programs/README.md) share one representation. Per the [single-codec
 decision](../../README.md), zio-blocks `Schema` is the only codec involved.

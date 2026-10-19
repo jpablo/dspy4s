@@ -15,9 +15,9 @@ Programs live on two layers that share one engine:
 
 - **Domain-valued programs** — `Predict[I, O]`, `ChainOfThought[I, O]`, `ReAct[I, O]`, … bind input/output
   types and encode/decode at the boundary.
-- **The dynamic spine** — `DynamicModule = Module[DynamicValue.Record, DynamicValue.Record]`, where programs can build
+- **Record-valued programs** — `DynamicModule = Module[DynamicValue.Record, DynamicValue.Record]`, where programs can build
   and augment signatures at runtime. Its `RawPrediction` is lifted through `Prediction.dynamic` at the module
-  boundary. `DynamicPredict` is the executable prediction leaf on this spine. The
+  boundary. `DynamicPredict` is the executable prediction leaf for these programs. The
   `Predict[I, O]` is its sibling: each is a thin module over the same `PredictEngine` execution body.
 
 The bridge for optimization is `OptimizableStructure[P]`, the dspy4s analogue of Python's `named_predictors()`: it exposes

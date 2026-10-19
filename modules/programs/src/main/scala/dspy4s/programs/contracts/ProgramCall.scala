@@ -5,7 +5,7 @@ import zio.blocks.schema.DynamicValue
 
 /** The uniform invocation envelope for every program boundary.
   *
-  * `I` is the boundary's input carrier: modules use their Scala input type, while the dynamic spine uses
+  * `I` is the boundary's input carrier: modules use their Scala input type, while record-valued programs use
   * `DynamicValue.Record`. [[mapInput]] changes only that carrier and preserves every execution control, making
   * `ProgramCall` a lawful functor in `I`:
   *
@@ -39,7 +39,7 @@ final case class ProgramCall[I](
       cachedEncoding = (shape, computed)
       computed
 
-  /** Map this call onto the dynamic record spine while reusing the memoized encoding. */
+  /** Map this call to a record-valued call while reusing the memoized encoding. */
   private[dspy4s] def encoded(shape: dspy4s.signatures.Shape[I]): ProgramCall[DynamicValue.Record] =
     mapInput(_ => encodedInput(shape))
 

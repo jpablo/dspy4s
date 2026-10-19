@@ -14,7 +14,7 @@ import scala.util.Try
   */
 private[adapters] object JsonDynamic:
 
-  /** Recursively convert a parsed `ujson.Value` into the dspy4s `DynamicValue` spine. */
+  /** Recursively convert a parsed `ujson.Value` into the `DynamicValue` interchange format. */
   def fromUjson(value: Value): DynamicValue =
     value match
       case ujson.Str(v) => DynamicValue.Primitive(PrimitiveValue.String(v))

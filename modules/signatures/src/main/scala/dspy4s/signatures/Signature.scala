@@ -106,9 +106,9 @@ object Signature:
   transparent inline def fromString(inline dsl: String, inline instructions: String = "") =
     ${ internal.FunctionMacro.fromStringImpl('dsl, 'instructions) }
 
-  /** Parse a DSPy-style string DSL into a `Signature` whose input/output shapes are the raw spine type
+  /** Parse a DSPy-style string DSL into a `Signature` whose input/output shapes are the raw
     * `DynamicValue.Record`. Unlike [[fromString]], this accepts a **runtime** string (the DSL carries no static schema,
-    * so I/O stays at the spine type). Use `DynamicValues.recordFromEntries(...)` to build inputs.
+    * so I/O stays `DynamicValue.Record`). Use `DynamicValues.recordFromEntries(...)` to build inputs.
     *
     * For static type-safe inputs and outputs, prefer the compile-time [[fromString]], `Signature.fromType[F]`,
     * `Signature.from(method)`, or `Signature.of[T <: Spec]`.

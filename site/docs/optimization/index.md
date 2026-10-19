@@ -18,7 +18,7 @@ is the improved program:
 
 Optimizers are generic over the program type. `OptimizableStructure[P]` exposes each leaf's
 writable `OptimizableParameters`, while `ProgramRunner[P]` executes either domain-valued programs or
-the record-valued `DynamicModule` spine. The returned program can be
+record-valued `DynamicModule` programs. The returned program can be
 [saved and loaded](../runtime/saving-and-loading.md), so optimization runs once
 and the result ships with your application.
 

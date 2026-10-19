@@ -74,7 +74,7 @@ final case class Predict[I, O](
   /** The bound LM, if any (`get_lm`); `None` means the predictor uses the ambient `RuntimeContext` LM. */
   def boundLm: Option[LanguageModel] = lm
 
-  /** Forget the static input/output shapes and expose this predictor on the dynamic record spine.
+  /** Forget the static input/output shapes and expose this predictor as a record-valued program.
     *
     * This is a one-way, immutable snapshot: it preserves the complete engine configuration, including the output JSON
     * schema derived from `O`, but the returned module no longer validates or decodes values. For every input whose

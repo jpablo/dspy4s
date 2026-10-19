@@ -331,7 +331,7 @@ adapter/LM/callback dance that Python has spread across
 
 **Every program now carries its domain and codomain.** Beyond `Predict`/`ChainOfThought`, the agents (`ReAct` / `RLM`),
 `MultiChainComparison`, and `BestOfN` / `Refine` are all `Module[I, …]` —
-`DynamicPredict` is the prediction leaf on the dynamic spine: it executes runtime-built signatures while
+`DynamicPredict` is the prediction leaf for record-valued programs: it executes runtime-built signatures while
 `Predict` is its sibling over the shared engine. Some agent internals construct dynamic prediction passes, but
 programs do not delegate through a universal `DynamicPredict` substrate. Three pieces made this clean:
 - **`OutputAugmentation`** (`dspy4s.signatures`) — the shared `WithField[O, Name, T]` + `PrependField` typeclass that

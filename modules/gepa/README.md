@@ -366,7 +366,7 @@ file stays unchanged.
 
 ## Relation to dspy
 
-GEPA uses the shared `OptimizableStructure` / `ProgramRunner` introspection and execution spines also used by
+GEPA uses the shared `OptimizableStructure` / `ProgramRunner` introspection and execution capabilities also used by
 COPRO/MIPROv2, and depends on `evaluate` for scoring. It is *not* a `Teleprompter` — its `compile` takes a
 `FeedbackMetric` and a reflection LM and returns an `Either[DspyError, GepaResult[P]]` rather than an
 `OptimizationReport[P]`.

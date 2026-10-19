@@ -45,13 +45,13 @@ Module[I, O]                            # ONE semantic base (port of dspy.Module
 
 dspy4s has **one semantic base `Module[I, O]`** — the port of `dspy.Module` — whose uniform execution type is
 `ProgramCall[I] => Either[DspyError, Prediction[O]]`. Its `apply` is `final` (the lifecycle wrapping) over an abstract
-`forward`. The dynamic spine chooses `DynamicValue.Record` for both semantic parameters; **`DynamicModule`** adds a
+`forward`. Record-valued programs choose `DynamicValue.Record` for both semantic parameters; **`DynamicModule`** adds a
 raw `forwardDynamic: ... => RawPrediction` hook and lifts it with `Prediction.dynamic`. Domain-valued programs
 use their domain types directly — `Predict` / `ChainOfThought` / `ReAct` /
 `MultiChainComparison` / `BestOfN` / `Refine`. **`DynamicPredict`** is the data-bag executable for runtime-built
 signatures; `Predict` is its sibling over `PredictEngine`, and
 `ChainOfThought` composes an inner `Predict`. `ProgramCall[I]` is the uniform boundary envelope at both layers:
-modules choose a Scala domain type for `I`, while the dynamic spine chooses `DynamicValue.Record`; in either
+modules choose a Scala domain type for `I`, while record-valued programs choose `DynamicValue.Record`; in either
 case the envelope adds `config` / `traceEnabled` / `rolloutId`. The agents run their loop/extractor over the data-bag
 layer internally and decode the result back to the output. `MultiChainComparison` uses
 `MultiChainInput[I]`—base input plus candidate completions—as its semantic `I`, mirroring Python's
@@ -132,7 +132,7 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
    `ChainOfThought[I,O]` *is a* `Module[I, WithReasoning[O]]` that holds an inner `Predict[I, Out]`
    (built once, memoized) and whose `forward` delegates to it — so a CoT call emits a `chain_of_thought` module
    event wrapping the inner `predict` event, mirroring Python's nesting. The layer is **not** a separate
-   surface beside the spine anymore; `Predict`/`ChainOfThought` are `Module`s like every other program.
+   surface beside the record-valued programs anymore; `Predict`/`ChainOfThought` are `Module`s like every other program.
 
 6. **Cross-cutting wrapping is universal (matches Python).** Python puts the
    callback/trace/usage wrapping on `Module.__call__` — universal and

@@ -6,15 +6,15 @@ import zio.blocks.schema.{DynamicValue, Schema}
 
 /** A schema-aware view of a user type `A`, used as the input or output of a `Signature`. Lists fields in declaration
   * order, converts each to a `FieldSpec` for the runtime `SignatureLayout`, and encodes / decodes values against the
-  * `DynamicValue.Record` spine carried through `ProgramCall`, adapters, and `RawPrediction`.
+  * `DynamicValue.Record` interchange format carried through `ProgramCall`, adapters, and `RawPrediction`.
   *
-  * The codec spine is `DynamicValue.Record` end-to-end: `Shape.encode` produces one, `Shape.decode` consumes one, and
-  * adapters speak the same intermediate. There is no `Map[String, Any]` round-trip.
+  * The interchange format is `DynamicValue.Record` end-to-end: `Shape.encode` produces one, `Shape.decode` consumes
+  * one, and adapters speak the same intermediate. There is no `Map[String, Any]` round-trip.
   */
 trait Shape[A]:
   def fieldSpecs: Vector[FieldSpec]
 
-  /** Encode a value to a `DynamicValue.Record` (the codec-spine intermediate). */
+  /** Encode a value to a `DynamicValue.Record` (the interchange format). */
   def encode(value: A): DynamicValue.Record
 
   /** Decode a value from a `DynamicValue.Record` produced by an adapter or supplied by user code. */
@@ -143,7 +143,7 @@ object Shape:
     ZioSchemaCodec.derivedFromZioSchema[A](using canonicalSchema[A])
 
   /** A `Shape[DynamicValue.Record]` for the dynamic path (`Signature.fromStringDynamic`), where the DSL carries no
-    * static schema, so the domain value stays at the spine type. `encode` is the identity; `decode` only validates that
+    * static schema, so the domain value stays a raw record. `encode` is the identity; `decode` only validates that
     * every field listed in `fieldSpecs` is present in the raw record (no per-field coercion -- that happens upstream in
     * the adapter / `ZioSchemaCodec.normalize` for schema-backed shapes).
     */

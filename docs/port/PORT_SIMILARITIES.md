@@ -50,7 +50,7 @@ The split between `core/contracts` and `core/runtime` inside dspy4s
 mirrors Python's `primitives/` vs `signatures/` split for code-search
 purposes — same logical division, collapsed at the build-graph level.
 
-## Data spine
+## Call path
 
 A single LM call walks the same path in both:
 

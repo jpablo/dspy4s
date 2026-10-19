@@ -53,7 +53,9 @@ object ModuleLifecycle:
   ): ModuleLifecycle[I, O] =
     Observed(CallObservation(inputs, traceEnabled, outputs))
 
-  /** Standard dynamic-spine observation: both semantic values are records and the result retains its raw envelope. */
+  /** Standard observation for record-valued programs: both semantic values are records and the result retains its raw
+    * envelope.
+    */
   val dynamic: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] =
     observed(_.input, _.traceEnabled, _.raw.values)
 
@@ -73,7 +75,7 @@ object ModuleLifecycle:
   def predictor[I, O](shape: Shape[I], key: PredictorKey): ModuleLifecycle[I, O] =
     Observed(CallObservation(call => call.encodedInput(shape), _.traceEnabled, _.raw.values, Some(key)))
 
-  /** [[predictor]] for a module on the dynamic record spine. */
+  /** [[predictor]] for a record-valued program. */
   def dynamicPredictor(key: PredictorKey): ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] =
     Observed(CallObservation(_.input, _.traceEnabled, _.raw.values, Some(key)))
 

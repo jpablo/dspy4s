@@ -75,7 +75,7 @@ lazy val algebra = (project in file("modules/algebra"))
   )
 
 // `core` owns the contract layer that everything else builds on. We pull in
-// zio-blocks-schema here because `DynamicValue` is the spine type carried
+// zio-blocks-schema here because `DynamicValue` is the interchange format carried
 // through `Example.values`, `ProgramCall.input`, `RawPrediction.values`,
 // and `ParsedOutput.values` — the codec intermediate shared by adapters,
 // programs, evaluate, and the signatures API.

@@ -39,7 +39,7 @@ import zio.blocks.typeid.{Owner, TypeId}
   *   - [[jsonSchemaForModel]] -- the JSON schema of a `Schema[A]` for a prompt, with no `id` in a `ToolCall`, and with
   *     `$defs` for a recursive type.
   *
-  * No `Map[String, Any]` round-trip: the spine is `DynamicValue.Record` end-to-end.
+  * No `Map[String, Any]` round-trip: the interchange format is `DynamicValue.Record` end-to-end.
   */
 private[signatures] object ZioSchemaCodec:
 

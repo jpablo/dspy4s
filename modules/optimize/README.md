@@ -40,7 +40,7 @@ trait Teleprompter[P]:
 (program + score + optional `EvaluationResult` + metadata). When no `valset` is supplied, optimizers score on
 the trainset.
 
-### Two type-class spines
+### Two program capabilities
 
 Optimizers are generic over the program type `P`, working through two given instances rather than a fixed
 program class:
@@ -50,8 +50,8 @@ program class:
   back. One `Predict` is a length-1 list; a composite exposes all its leaves. This is what lets a single code path
   optimize both a standalone predictor and an arbitrary composite.
 - **`ProgramRunner[P]`** — run `P` on a record-valued `ProgramCall`, yielding the `RawPrediction` evidence that `Evaluate`
-  consumes. This is the "spine unification": it lets the optimizers target domain-valued programs (`Predict[I, O]`,
-  `ChainOfThought[I, O]`, `ReAct[I, O]`, …) as well as the record-valued `DynamicModule` spine, with no
+  consumes. This is what lets the optimizers target domain-valued programs (`Predict[I, O]`,
+  `ChainOfThought[I, O]`, `ReAct[I, O]`, …) as well as record-valued `DynamicModule` programs, with no
   `asInstanceOf`.
 
 Scoring across the family goes through `Evaluate` + the metric via shared helpers in `OptimizerSupport` (the
@@ -103,7 +103,7 @@ instruction-proposal phase.
 
 Not a `Teleprompter` — it `compile`s a `Vector[DynamicModule]` into a single `DynamicModule` that runs all
 members (or a random `size`-sized sample) per call and folds their outputs through a `reduceFn` (majority vote
-by default). Built on the dynamic spine because an ensemble is inherently heterogeneous; it can nest anywhere a
+by default). Built on record-valued programs because an ensemble is inherently heterogeneous; it can nest anywhere a
 program is expected.
 
 ## Persistence
@@ -120,7 +120,7 @@ compatibility policy.
 | File | Contents |
 |------|----------|
 | `contracts/OptimizeContracts.scala` | `Teleprompter`, `OptimizationReport`, `CandidateProgram` |
-| `programs/ProgramRunner.scala` | the shared `ProgramRunner[P]` spine for domain- and record-valued programs |
+| `programs/ProgramRunner.scala` | the shared `ProgramRunner[P]` capability for domain- and record-valued programs |
 | `OptimizerSupport.scala` | shared instruction-edit, seed→rolloutId, and scoring helpers |
 | `LabeledFewShot.scala`, `BootstrapFewShot*.scala`, `KNNFewShot.scala` | demo optimizers |
 | `COPRO.scala`, `MIPROv2.scala`, `InferRules.scala` | instruction (and demo) optimizers |

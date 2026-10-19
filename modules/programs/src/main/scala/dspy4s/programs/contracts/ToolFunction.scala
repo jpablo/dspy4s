@@ -5,8 +5,8 @@ import zio.blocks.schema.{DynamicValue, Schema}
 
 /** A callable tool exposed to tool-using programs (`ReAct`, ...). `invoke` receives the call arguments as a
   * `DynamicValue.Record` (the named params parsed from the LM's tool call) and returns its result as a `DynamicValue`,
-  * so both ends travel the spine without a lossy `Any` round-trip. Extract args with `DynamicValues.recordGet` / a
-  * `Schema`-backed decode; build the result with [[ToolFunction.result]].
+  * so both ends stay in the interchange format, with no lossy `Any` round-trip. Extract args with
+  * `DynamicValues.recordGet` / a `Schema`-backed decode; build the result with [[ToolFunction.result]].
   */
 trait ToolFunction:
   def name: String

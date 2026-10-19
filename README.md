@@ -36,7 +36,7 @@ the output, with no signature changes.
 - **Compile-time field checks.** Signatures are ordinary Scala types. A wrong
   field name is a compile error, not a runtime lookup failure, and output access
   (`_.output.sentiment`) is checked by the compiler.
-- **One codec spine.** Field values flow through a single `DynamicValue.Record`
+- **One interchange format.** Field values flow through a single `DynamicValue.Record`
   intermediate (from `zio-blocks-schema`) shared by adapters, programs,
   evaluation, and the program API. Decode failures surface at the call
   boundary as `Either[DspyError, _]`, not via lazy field access.
@@ -57,7 +57,7 @@ dspy4s is split into focused modules so you can depend only on what you need.
 | Module      | Artifact           | What it gives you                                            |
 |-------------|--------------------|-------------------------------------------------------------|
 | `algebra`   | `dspy4s-algebra`   | Categories, functors, monads, optics, and executable laws. |
-| `core`      | `dspy4s-core`      | Contract layer: `Example`, `DynamicValue` spine, runtime.   |
+| `core`      | `dspy4s-core`      | Contract layer: `Example`, interchange format, runtime.     |
 | `signatures` | `dspy4s-signatures` | Static `Signature` / `Spec` surface and `Shape` codecs.   |
 | `lm`        | `dspy4s-lm`        | Provider-agnostic LM API and the OpenAI client.             |
 | `adapters`  | `dspy4s-adapters`  | Chat / JSON / XML adapters and native function-calling.     |
@@ -122,7 +122,7 @@ uv run mkdocs serve
 
 ## Relationship to DSPy
 
-dspy4s follows the upstream DSPy decomposition (the data spine, composite
+dspy4s follows the upstream DSPy decomposition (the call path, composite
 programs, adapter contracts, and optimizer pattern), so concepts carry over.
 The main differences are in the surface: signatures are produced by macros and
 typeclasses rather than Python metaclasses, inputs and outputs are checked by

@@ -24,7 +24,7 @@ final case class QAOutput(answer: String) derives Schema
   *   - `OptimizableStructure[TwoStageQA]` is structurally derived (each `Predict` field resolves to the
   *     `predictOptimizableLeaf` leaf, so the composite reads as 2 predictors and replaces them positionally);
   *   - it supplies its OWN `ProgramRunner` (a one-liner) because a bare composite does not expose a signature.
-  * This is the worked example of how user composites participate in the unified optimize spine.
+  * This is the worked example of how user composites supply the program capabilities that optimizers use.
   */
 final case class TwoStageQA(
     classify: Predict[QAInput, QAOutput],
@@ -34,7 +34,7 @@ final case class TwoStageQA(
 object TwoStageQA:
   /** User-supplied ProgramRunner: decode inputs once via the first stage's signature, run both stages in sequence, and
     * return the second stage's raw prediction. Real composites would thread intermediate outputs; here the two stages
-    * share the QA signature, which is enough to exercise the spine.
+    * share the QA signature, which is enough to exercise the `ProgramRunner` capability.
     */
   given ProgramRunner[TwoStageQA] with
     def run(program: TwoStageQA, call: ProgramCall[zio.blocks.schema.DynamicValue.Record])(using
@@ -87,7 +87,7 @@ class TypedProgramOptimizeSuite extends FunSuite:
 
   // ── 1. Bootstrap over a Predict[I, O] student ─────────────────────────────
 
-  test("BootstrapFewShot optimizes a Predict[I, O] via the ProgramRunner spine") {
+  test("BootstrapFewShot optimizes a Predict[I, O] via the ProgramRunner capability") {
     val student = Predict[QAInput, QAOutput](sig)
     // Teacher (== student here) answers each training question correctly, so every example bootstraps.
     val answers   = Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3")
@@ -132,7 +132,7 @@ class TypedProgramOptimizeSuite extends FunSuite:
 
   // ── 3. End-to-end: bootstrap a composite, then run it offline ─────────────
 
-  test("BootstrapFewShot over a user composite runs the spine and produces a runnable program") {
+  test("BootstrapFewShot over a user composite runs its ProgramRunner and produces a runnable program") {
     val student = TwoStageQA(
       classify = Predict[QAInput, QAOutput](sig, name = Some("classify")),
       answer = Predict[QAInput, QAOutput](sig, name = Some("answer"))

@@ -72,7 +72,7 @@ object CallbackDispatcher:
     )(thunk)
 
   /** Wrap a tool invocation in a `ToolStartEvent` / `ToolEndEvent` pair. Fixed to `DynamicValue` (not generic like the
-    * other scopes) because tool args and results travel the spine as `DynamicValue` end to end.
+    * other scopes) because tool args and results stay in the interchange format (`DynamicValue`) end to end.
     */
   def withTool(
       toolName: String,

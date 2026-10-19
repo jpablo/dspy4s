@@ -21,8 +21,8 @@ import scala.concurrent.Future
   * input `I` and output `O`; the uniform execution boundary adds [[ProgramCall]] on input and [[Prediction]] on output.
   * The *same* base serves both layers of dspy4s:
   *
-  *   - the dynamic spine, `Module[DynamicValue.Record, DynamicValue.Record]` (see [[DynamicModule]]), whose raw engine
-  *     result is lifted by [[Prediction.dynamic]]; and
+  *   - the record-valued surface, `Module[DynamicValue.Record, DynamicValue.Record]` (see [[DynamicModule]]), whose
+  *     raw engine result is lifted by [[Prediction.dynamic]]; and
   *   - the domain-valued surface, `Module[I, O]`, used by `Predict[I, O]`, `ChainOfThought[I, O]`, and the other
   *     programs — matching Python, where `Predict` / `ChainOfThought` / `ReAct` are all `Module`s.
   *
@@ -140,11 +140,11 @@ trait Module[I, O]:
 private[programs] trait TransparentModule[I, O] extends Module[I, O]:
   final override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.transparent
 
-/** The dynamic program spine: `Module[DynamicValue.Record, DynamicValue.Record]` with a lifecycle strategy for the
+/** Record-valued programs: `Module[DynamicValue.Record, DynamicValue.Record]` with a lifecycle strategy for the
   * record shapes. Subclasses implement [[forwardDynamic]] in terms of the raw engine envelope; this trait lifts that
   * result exactly once through [[Prediction.dynamic]], making the ordinary [[Module]] boundary uniform.
   *
-  * [[dspy4s.programs.strategies.DynamicPredict DynamicPredict]] is the dynamic prediction module on this spine;
+  * [[dspy4s.programs.strategies.DynamicPredict DynamicPredict]] is the record-valued prediction module;
   * user-defined data-bag programs may extend it too. [[dspy4s.programs.strategies.Predict Predict]] is a sibling module
   * over the shared `PredictEngine`, not a wrapper around `DynamicPredict`.
   */

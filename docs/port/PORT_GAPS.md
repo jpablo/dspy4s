@@ -157,7 +157,7 @@ get the wrapping; `BestOfN` accordingly records its own trace entry. See
 [PORT_MODULE_HIERARCHY.md](PORT_MODULE_HIERARCHY.md).
 
 **Evolution.** `Module` later became generic again and now uses semantic parameters throughout:
-`Module[I, O]#forward` returns `Prediction[O]`. The dynamic spine is
+`Module[I, O]#forward` returns `Prediction[O]`. The record-valued program type is
 `DynamicModule = Module[DynamicValue.Record, DynamicValue.Record]`; its `RawPrediction` is lifted into the
 uniform result by `Prediction.dynamic`. This removes the former domain/record result asymmetry while `apply` remains
 `final` on the one common base, so the wrapping is still universal and non-bypassable: G-2 stays resolved.
@@ -666,8 +666,8 @@ A verification spike (trace + failure capture) surfaced four bounded prerequisit
 - **v1:** add P-c (named predictors) → multi-predictor programs; closes Refine per-module advice as a freebie.
 - **v2:** merge proposer (crossover), multi-objective frontier types, eval cache, run_dir resume, wandb/mlflow.
 
-Lives in `modules/gepa` (`dspy4s-gepa`, depends on `optimize` for the shared `OptimizableStructure`/`ProgramRunner`/`Teleprompter`
-spine). Tier 2.
+Lives in `modules/gepa` (`dspy4s-gepa`, depends on `optimize` for the shared `OptimizableStructure`/`ProgramRunner` capabilities
+and the `Teleprompter` contract). Tier 2.
 
 ---
 
@@ -697,7 +697,7 @@ Part of the exported optimizer surface; the demo+rule dual strategy is distinct 
 
 ### Proposed direction
 
-Port on the existing spine (`OptimizableStructure`, `ProgramRunner`, `Evaluate`, per-module trace). The trajectory
+Build the port on the existing `OptimizableStructure`, `ProgramRunner`, `Evaluate`, and per-module trace. The trajectory
 capture GEPA added (failure traces, per-component association) covers SIMBA's introspection needs; the
 numpy softmax is a few lines of Scala. Tier 2.
 
