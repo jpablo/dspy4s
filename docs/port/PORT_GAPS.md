@@ -1218,8 +1218,8 @@ official address only (`LmCapabilities.forBaseUrl`); an other server has none un
 
 ## G-27 — LM history holds no prompt and no completion; no cost estimate
 
-**Status:** In progress. The history content and `inspectHistory` are resolved (2026-10-14, batch 15); the cost
-estimate is open. · **Verification:** R · **Upgrade items:** L10, I11
+**Status:** Resolved. The history content and `inspectHistory` are resolved (2026-10-14, batch 15), and the cost
+estimate (2026-10-18, batch 24). · **Verification:** R · **Upgrade items:** L10, I11
 
 **Upstream.** A history entry stores messages, outputs, usage, cost, and the response id
 (`dspy/clients/execution.py:738-754`). `inspect_history` prints messages, responses, and tool calls
@@ -1237,8 +1237,13 @@ note for `inspect_history` covers the function, not this content. There is no co
 a streamed call. `RuntimeEnvironment.inspectHistory` shows only the `lm:` entries, in the layout of upstream
 `pretty_print_history`, with the tool calls. Tests: `LmHistoryEntrySuite`, `InspectHistorySuite`.
 
-**Direction (cost, open).** Upstream reads the prices from a model catalog. The port has no catalog, so a cost
-estimate needs a decision of the owner: a catalog, prices that the user declares, or no cost.
+**Resolution (cost, batch 24).** The user declares the prices of a model (decision L10, 2026-10-18):
+`ManagedLanguageModel(price = Some(LmPrice(inputPerMillion, outputPerMillion, ...)))`. Each history entry of a success
+then has `cost` (US dollars, or `null`) and `cost_details` (`{"kind": "estimate", ...}` or `{"kind": "unknown",
+"reason"}`), after `usage`, as upstream. `LmCost.of` splits the cached and the reasoning tokens as upstream
+`_estimate_cost` does for an OpenAI usage. An unknown price or usage gives no estimate, not zero. A cache hit has no
+usage and keeps the cost of the stored usage. Nested usage trackers already roll up: a call records its usage in each
+active tracker (upstream bb8ba59c0). Tests: `LmCostSuite`, `LmHistoryEntrySuite`, `LmCacheSuite`.
 
 ---
 

@@ -592,6 +592,36 @@ scope). Phase 0 to phase 4 below record them.
   `OpenAiLanguageModel.capabilities`, `effectiveCapabilities`, and `withCapabilities`.
 - **Test.** `LmCapabilitiesSuite`.
 
+### Batch 24 (2026-10-18): the cost estimate
+
+- **L10** (G-27). The user declares the price of a model on the managed model:
+  `ManagedLanguageModel(delegate, price = Some(LmPrice(inputPerMillion = 0.15, outputPerMillion = 0.60)))`. The prices
+  are in US dollars for one million tokens. A cached token and a reasoning token can have their own price; else they
+  have the input price and the output price, as upstream.
+- **The history entry.** Each entry of a success has `cost` and `cost_details` after `usage`, as upstream `finalize`:
+  - `cost` is the estimate in US dollars, or `null`;
+  - `cost_details` is `{"kind": "estimate", "currency": "USD", "model", "source": "declared"}`, or
+    `{"kind": "unknown", "reason"}` with the upstream reason text ("input or output usage was not reported", "usage
+    dimensions cannot be separated safely") or "no price is declared for the model".
+  - A failure entry has no cost.
+- **The rule** (`LmCost.of`, upstream `_estimate_cost` for an OpenAI usage). The cached tokens are a part of the
+  prompt tokens, and the reasoning tokens are a part of the completion tokens. A cached count above the prompt count,
+  or a reasoning count above the completion count, gives no estimate.
+- **Nested roll-up.** The port already records the usage of a call in each active `UsageTracker`, so a nested tracker
+  rolls up into its parent, as upstream bb8ba59c0. A test now checks it.
+- **Decided by Claude, review.**
+  - The price is on `ManagedLanguageModel`, because the managed model writes the history and the usage.
+  - A cache hit has no usage, as upstream, and its cost comes from the usage that the cache keeps. To make this
+    possible, `LmCache.get` now returns the stored usage, and `ManagedLanguageModel` removes the usage of a hit.
+    Upstream stores the cost in the cache record; the port computes it again, so a price change between the call and
+    the hit changes the cost of the hit.
+  - `cost_details` names `source: declared` in place of the catalog metadata of upstream.
+- **API changes.** `LmPrice` and `LmCost` in `dspy4s.lm.contracts`; `ManagedLanguageModel.price`;
+  `LmHistoryRecord.success` takes the cost. `InMemoryLmCache.get` and `DiskLmCache.get` keep the usage of the
+  stored response.
+- **Tests.** `LmCostSuite`; `LmHistoryEntrySuite`, `LmCacheSuite`, and `DiskCacheRecordSuite` changed for the new
+  keys and the new `get` rule.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -672,9 +702,9 @@ Open points from batch 1, for the owner:
 - [x] **L7. Responses request and output shapes** (0312f0da6, 891958702, 24ec85de4). → G-26 (R)
 - [x] **L8. Connection lifecycle**: `close` on the client, and one HTTP client for each configuration. → G-26 (R)
 - [x] **L9. Versioned plain-data cache record** in place of Java serialization. → G-24 (R)
-- [ ] **L10. Advisory cost estimate** and nested cost roll-up (bb8ba59c0). → G-27 (R)
+- [x] **L10. Advisory cost estimate** and nested cost roll-up (bb8ba59c0). → G-27 (R)
       **Decided 2026-10-18:** the user declares the prices of each model. An unknown price gives no cost, not zero,
-      as upstream.
+      as upstream. Done in batch 24.
 
 ## Phase 2: adapters / signatures / streaming
 
