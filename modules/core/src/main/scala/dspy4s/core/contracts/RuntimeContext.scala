@@ -49,19 +49,23 @@ final case class RuntimeConfig(
 final case class RuntimeScope(
     asyncTaskId: Option[String] = None,
     callStack  : Vector[String] = Vector.empty,
-    /** `true` while a predictor that owns a [[PredictorKey]] runs. A module that starts inside that extent records no
-      * key in its trace entries.
+    /** The key of the predictor that runs: the outermost module on the call path that owns a [[PredictorKey]]. A module
+      * that starts inside that extent records no key in its trace entries, and the decision evidence of the extent
+      * belongs to this key.
       */
-    withinPredictor: Boolean = false
+    predictor: Option[PredictorKey] = None
 ) derives CanEqual:
   /** The innermost open call scope's id -- always the top of [[callStack]]. */
   def activeCallId: Option[String] = callStack.lastOption
+
+  /** `true` while a predictor that owns a [[PredictorKey]] runs. */
+  def withinPredictor: Boolean = predictor.isDefined
 
   def fillFrom(defaults: RuntimeScope): RuntimeScope =
     RuntimeScope(
       asyncTaskId = asyncTaskId.orElse(defaults.asyncTaskId),
       callStack = if callStack.nonEmpty then callStack else defaults.callStack,
-      withinPredictor = withinPredictor || defaults.withinPredictor
+      predictor = predictor.orElse(defaults.predictor)
     )
 
 /** The unit of execution context, partitioned into services, configuration, dynamic scope, and accumulated delta. It is

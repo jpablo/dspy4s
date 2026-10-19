@@ -8,6 +8,7 @@ import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.HistoryLimit
 import dspy4s.core.contracts.HistoryRenderer
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeDelta
 import dspy4s.core.contracts.TraceEntry
@@ -145,16 +146,19 @@ object RuntimeEnvironment:
   /** `true` while a predictor that owns a [[dspy4s.core.contracts.PredictorKey]] runs on this thread. */
   def withinPredictor: Boolean = current.scope.withinPredictor
 
-  /** Mark the extent of `thunk` as the body of a predictor, then restore the previous mark. Like [[withActiveCall]],
-    * this keeps the trace and the history that `thunk` accumulates.
+  /** The key of the predictor that runs on this thread, or `None` outside a predictor. */
+  def activePredictor: Option[PredictorKey] = current.scope.predictor
+
+  /** Mark the extent of `thunk` as the body of the predictor with the key `key`, then restore the previous mark. Like
+    * [[withActiveCall]], this keeps the trace and the history that `thunk` accumulates.
     */
-  def withinPredictor[A](thunk: => A): A =
+  def withinPredictor[A](key: PredictorKey)(thunk: => A): A =
     val previous = localContext
-    contextRef.set(previous.withScope(previous.scope.copy(withinPredictor = true)))
+    contextRef.set(previous.withScope(previous.scope.copy(predictor = Some(key))))
     try thunk
     finally
       val after = localContext
-      contextRef.set(after.withScope(after.scope.copy(withinPredictor = previous.scope.withinPredictor)))
+      contextRef.set(after.withScope(after.scope.copy(predictor = previous.scope.predictor)))
 
   /** Replace this thread's overlay context wholesale for the duration of `thunk`, restoring the previous overlay on
     * exit. The low-level primitive the other `with*` helpers build on. Because the restore is wholesale, any state

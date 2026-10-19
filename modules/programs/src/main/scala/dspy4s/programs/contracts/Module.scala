@@ -21,8 +21,8 @@ import scala.concurrent.Future
   * input `I` and output `O`; the uniform execution boundary adds [[ProgramCall]] on input and [[Prediction]] on output.
   * The *same* base serves both layers of dspy4s:
   *
-  *   - the record-valued surface, `Module[DynamicValue.Record, DynamicValue.Record]` (see [[DynamicModule]]), whose
-  *     raw engine result is lifted by [[Prediction.dynamic]]; and
+  *   - the record-valued surface, `Module[DynamicValue.Record, DynamicValue.Record]` (see [[DynamicModule]]), whose raw
+  *     engine result is lifted by [[Prediction.dynamic]]; and
   *   - the domain-valued surface, `Module[I, O]`, used by `Predict[I, O]`, `ChainOfThought[I, O]`, and the other
   *     programs — matching Python, where `Predict` / `ChainOfThought` / `ReAct` are all `Module`s.
   *
@@ -60,13 +60,14 @@ trait Module[I, O]:
       case ModuleLifecycle.Observed(observation) =>
         val inputBag = observation.inputs(call)
         // The outermost predictor on the call path owns the key. A module that runs inside a predictor (the `Predict`
-        // inside `ChainOfThought`) records no key, so one predictor call gives exactly one entry with a key.
+        // inside `ChainOfThought`) records no key, so one predictor call gives exactly one entry with a key. The scope
+        // keeps the key, so the decision evidence of the call belongs to the same predictor.
         val nested       = RuntimeEnvironment.withinPredictor
         val predictorKey = observation.predictor.filterNot(_ => nested)
         CallbackDispatcher.withModule(moduleName, inputBag) {
           val result = predictorKey match
-            case Some(_) => RuntimeEnvironment.withinPredictor(forward(call))
-            case None    => forward(call)
+            case Some(key) => RuntimeEnvironment.withinPredictor(key)(forward(call))
+            case None      => forward(call)
           if observation.traceEnabled(call) then
             result match
               case Right(output) =>
@@ -140,13 +141,13 @@ trait Module[I, O]:
 private[programs] trait TransparentModule[I, O] extends Module[I, O]:
   final override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.transparent
 
-/** Record-valued programs: `Module[DynamicValue.Record, DynamicValue.Record]` with a lifecycle strategy for the
-  * record shapes. Subclasses implement [[forwardDynamic]] in terms of the raw engine envelope; this trait lifts that
-  * result exactly once through [[Prediction.dynamic]], making the ordinary [[Module]] boundary uniform.
+/** Record-valued programs: `Module[DynamicValue.Record, DynamicValue.Record]` with a lifecycle strategy for the record
+  * shapes. Subclasses implement [[forwardDynamic]] in terms of the raw engine envelope; this trait lifts that result
+  * exactly once through [[Prediction.dynamic]], making the ordinary [[Module]] boundary uniform.
   *
-  * [[dspy4s.programs.strategies.DynamicPredict DynamicPredict]] is the record-valued prediction module;
-  * user-defined data-bag programs may extend it too. [[dspy4s.programs.strategies.Predict Predict]] is a sibling module
-  * over the shared `PredictEngine`, not a wrapper around `DynamicPredict`.
+  * [[dspy4s.programs.strategies.DynamicPredict DynamicPredict]] is the record-valued prediction module; user-defined
+  * data-bag programs may extend it too. [[dspy4s.programs.strategies.Predict Predict]] is a sibling module over the
+  * shared `PredictEngine`, not a wrapper around `DynamicPredict`.
   */
 trait DynamicModule extends Module[DynamicValue.Record, DynamicValue.Record]:
   // A dynamic module that is an optimizable leaf overrides this with `ModuleLifecycle.dynamicPredictor(key)`.

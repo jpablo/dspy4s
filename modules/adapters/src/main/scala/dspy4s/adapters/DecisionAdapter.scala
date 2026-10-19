@@ -40,11 +40,12 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   *
   * The parse (upstream `DecisionAdapter._decode`): `inner` parses the reply with the evidence layout. The value of each
   * evidence field (a JSON object, or its JSON text) gives the evidence ([[DecisionPlan.evidence]]), and
-  * [[DecisionPlan.decode]] gives the output values, which replace the evidence values. Each other value stays. A
-  * malformed evidence value is a `Left`: a [[dspy4s.core.contracts.ParseError]], so that the predictor can try the
-  * fallback adapter (upstream: the evidence model of the field rejects it in the parse of the adapter). An error of the
-  * decode (for example a distribution with a total of zero) is not a parse error: upstream `_decode` raises it after
-  * the adapter call.
+  * [[DecisionPlan.decode]] gives the output values, which replace the evidence values. Each other value stays. The
+  * result keeps the evidence of each decision output in [[ParsedOutput.evidence]], so that the predictor can record it
+  * (upstream `record_evidence`). A malformed evidence value is a `Left`: a [[dspy4s.core.contracts.ParseError]], so
+  * that the predictor can try the fallback adapter (upstream: the evidence model of the field rejects it in the parse
+  * of the adapter). An error of the decode (for example a distribution with a total of zero) is not a parse error:
+  * upstream `_decode` raises it after the adapter call.
   */
 final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Adapter:
 
@@ -72,8 +73,9 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
       parsed   <- inner.parse(evidence, output)
       answers  <- answersOf(parsed.values, output.text)
       decoded  <- plan.decode(answers)
-    yield parsed.copy(values =
-      decoded.fields.foldLeft(parsed.values)((values, entry) => values.updated(entry._1, entry._2))
+    yield parsed.copy(
+      values = decoded.fields.foldLeft(parsed.values)((values, entry) => values.updated(entry._1, entry._2)),
+      evidence = plan.kinds.flatMap((name, _) => answers.get(name).map(name -> _))
     )
 
   override def formatUserMessageContent(layout: SignatureLayout, values: DynamicValue.Record): String =
@@ -259,21 +261,23 @@ object DecisionAdapter:
       )
     )
 
-  /** The output values of the answers of a System One model, by question name (upstream `DecisionAdapter._decode`): the
-    * evidence of each decision output of `plan` ([[DecisionPlan.evidence]]), then [[DecisionPlan.decode]]. A decision
-    * output with no answer is a `Left`.
+  /** The evidence of each decision output of `plan` in the answers of a System One model, by question name, in the
+    * order of the layout (upstream `DecisionAdapter._decode`, with [[DecisionPlan.evidence]]). [[DecisionPlan.decode]]
+    * then gives the output values. A decision output with no answer is a `Left`.
     */
-  def systemOneValues(plan: DecisionPlan, answers: DynamicValue.Record): Either[DspyError, DynamicValue.Record] =
-    plan.kinds
-      .foldLeft[Either[DspyError, Map[String, DecisionEvidence]]](Right(Map.empty)) { case (acc, (name, _)) =>
+  def systemOneEvidence(
+      plan   : DecisionPlan,
+      answers: DynamicValue.Record
+  ): Either[DspyError, Vector[(String, DecisionEvidence)]] =
+    plan.kinds.foldLeft[Either[DspyError, Vector[(String, DecisionEvidence)]]](Right(Vector.empty)) {
+      case (acc, (name, _)) =>
         for
           found  <- acc
           answer <- DynamicValues.recordGet(answers, name)
                       .toRight(ValidationError(s"The reply of the System One model has no answer for '$name'"))
           evidence <- plan.evidence(name, answer)
-        yield found.updated(name, evidence)
-      }
-      .flatMap(plan.decode)
+        yield found :+ (name -> evidence)
+    }
 
   private def evidenceType(kind: DecisionKind): TypeRef =
     kind match

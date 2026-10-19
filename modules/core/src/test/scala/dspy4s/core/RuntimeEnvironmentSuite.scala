@@ -178,7 +178,9 @@ class RuntimeEnvironmentSuite extends FunSuite:
   }
 
   test("the flat copy keeps the predictor extent of the scope") {
-    val context = RuntimeContext().withScope(dspy4s.core.contracts.RuntimeScope(withinPredictor = true))
+    val layout  = dspy4s.core.contracts.SignatureLayout.parse("question -> answer").fold(e => fail(e.message), identity)
+    val key     = dspy4s.core.contracts.PredictorKey.from("predict", layout)
+    val context = RuntimeContext().withScope(dspy4s.core.contracts.RuntimeScope(predictor = Some(key)))
     assert(context.copy(disableHistory = Some(true)).scope.withinPredictor, "copy lost scope.withinPredictor")
   }
 

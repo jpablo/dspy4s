@@ -287,6 +287,24 @@ final case class DecisionPlan private (
       )
     }
 
+  /** The effective settings of `name` (upstream `DecisionState.fields[name]`): the explicit settings, with the default
+    * parameter of the kind when they do not set it. The default is the threshold 0.5 for a [[DecisionKind.Noul]], the
+    * cuts `[0.5, 1.5, ...]` for a [[DecisionKind.Score]], and the weight 1.0 for each label of a
+    * [[DecisionKind.Choice]] (explicit weights replace all of these weights). The instructions and the criteria stay as
+    * they are. `None` for a name that is not a decision output of this plan.
+    */
+  def effectiveSettings(name: String): Option[DecisionSettings] =
+    kindOf(name).map { kind =>
+      val explicit = settingsOf(name)
+      kind match
+        case DecisionKind.Noul =>
+          explicit.copy(threshold = explicit.threshold.orElse(Some(DecisionPlan.defaultThreshold)))
+        case DecisionKind.Score(levels) =>
+          explicit.copy(cuts = explicit.cuts.orElse(Some(DecisionPlan.defaultCuts(levels.size))))
+        case DecisionKind.Choice(labels) =>
+          explicit.copy(weights = explicit.weights.orElse(Some(labels.map(_ -> 1.0).toMap)))
+    }
+
   /** The question of `name` for the backend (upstream `_question`): a record with `instructions` (the explicit
     * instructions, else the description of the field), `type` (`noul`, `score`, or `choice`), and `criteria` when
     * [[criteria]] gives a value or the settings set the criteria (an explicit null stays null). A field with no
@@ -405,10 +423,10 @@ final case class DecisionPlan private (
                  (),
                  ValidationError(s"Invalid Score distribution for '$name': the keys must be 0 to ${levels.size - 1}")
                )
-          read  <- checked(name, indexes.map(probabilities), confidence)
-          total <- positive(name, "Score", read)
+          read <- checked(name, indexes.map(probabilities), confidence)
+          _    <- positive(name, "Score", read)
         yield
-          val value = indexes.map(i => i * read(i)).sum / total
+          val value = DecisionPlan.meanLevel(read)
           val cuts  = settingsOf(name).cuts.getOrElse(DecisionPlan.defaultCuts(levels.size))
           DynamicValue.Record(
             "value"         -> DecisionJson.number(value),
@@ -520,6 +538,13 @@ object DecisionPlan:
   /** The default cuts of a [[DecisionKind.Score]] with `levels` levels: `[0.5, 1.5, ...]` (upstream `DecisionState`).
     */
   private def defaultCuts(levels: Int): Vector[Double] = (0 until levels - 1).map(_ + 0.5).toVector
+
+  /** The mean level index of a Score distribution, `sum(i * p(i)) / sum(p)`, with `probabilities(i)` the probability of
+    * the level index `i` (upstream `DecisionState._decode`). The decode and ReAnchor use this one function, so that a
+    * fitted cut compares with the same value as the decode.
+    */
+  private[dspy4s] def meanLevel(probabilities: Vector[Double]): Double =
+    probabilities.indices.map(i => i * probabilities(i)).sum / probabilities.sum
 
   /** The plan of `layout` with the explicit `settings`. Each rich output is a decision output. A native output is one
     * only when `settings` has an entry for it. A `Left` comes when a settings entry names an output that cannot be a

@@ -17,7 +17,8 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.ConfigurationError
-import dspy4s.core.decisions.{DecisionPlan, DecisionSettings}
+import dspy4s.core.contracts.PredictorKey
+import dspy4s.core.decisions.{DecisionEvidence, DecisionEvidenceLog, DecisionPlan, DecisionSettings}
 import dspy4s.core.runtime.ActivePredictContext
 import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -95,6 +96,7 @@ private[dspy4s] final case class PredictEngine(
             resolved   <- runtime.resolveAdapter
             adapter    <- resolveDecisions(resolved, model)
             answer     <- answerWithFallback(adapter, model, buildInvocation(call, model))
+            _           = answer.parsed.foreach(parsed => recordEvidence(parsed.evidence))
             prediction <- buildPrediction(
                             answer.parsed.map(_.values),
                             answer.response,
@@ -115,10 +117,11 @@ private[dspy4s] final case class PredictEngine(
     *
     * The request is [[DecisionRequests.request]] with the state of [[DecisionAdapter.systemOneState]] and the questions
     * of [[DecisionAdapter.systemOneQuestions]], and the `rolloutId` of the call (it changes only the cache key). The
-    * call dispatches the LM callback events. The answers of the reply give the output values
-    * ([[DecisionAdapter.systemOneValues]]), and the prediction keeps the usage of the reply. Each nested decision
-    * output fails the plan first, so a System One call gives no warning for it (upstream `resolve_adapter` makes the
-    * `DecisionState` before the warnings).
+    * call dispatches the LM callback events. The answers of the reply give the evidence
+    * ([[DecisionAdapter.systemOneEvidence]]), which goes to the evidence log before the decode, as upstream. The decode
+    * gives the output values, and the prediction keeps the usage of the reply. Each nested decision output fails the
+    * plan first, so a System One call gives no warning for it (upstream `resolve_adapter` makes the `DecisionState`
+    * before the warnings).
     */
   private def decide(call: ProgramCall[DynamicValue.Record], model: LanguageModel)(using
       RuntimeContext
@@ -141,9 +144,21 @@ private[dspy4s] final case class PredictEngine(
                     model.call(request)
                   }
       answers    <- DecisionRequests.answers(response)
-      values     <- DecisionAdapter.systemOneValues(plan, answers)
+      evidence   <- DecisionAdapter.systemOneEvidence(plan, answers)
+      _           = recordEvidence(evidence)
+      values     <- plan.decode(evidence.toMap)
       prediction <- buildPrediction(Vector(values), response, Vector.empty)
     yield prediction
+
+  /** Add the decision evidence of one completion to the evidence log (upstream `DecisionAdapter._decode` with
+    * `record_evidence`). The key is the key of the predictor that runs ([[RuntimeEnvironment.activePredictor]]), so
+    * that the evidence of the `Predict` inside `ChainOfThought` belongs to the `ChainOfThought` leaf, as its trace
+    * entry does. With no such predictor, the key of this engine.
+    */
+  private def recordEvidence(evidence: Vector[(String, DecisionEvidence)]): Unit =
+    if evidence.nonEmpty then
+      val key = RuntimeEnvironment.activePredictor.getOrElse(PredictorKey.from(moduleName, layout))
+      evidence.foreach((field, value) => DecisionEvidenceLog.record(key, field, value))
 
   /** The adapter of a call with the decision outputs of the layout (upstream `resolve_adapter` in
     * `dspy/adapters/decision.py`): `adapter` itself when the layout has no decision output, else a [[DecisionAdapter]]
