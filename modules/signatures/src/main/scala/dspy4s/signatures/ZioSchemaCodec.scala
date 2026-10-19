@@ -190,11 +190,11 @@ private[signatures] object ZioSchemaCodec:
     */
   private def enumValuesOf(reflect: Reflect[?, ?]): Vector[String] =
     optionSomeValueReflect(reflect) match
-      case Some(element) => enumValuesOf(withoutDeferred(element))
+      case Some(element) => enumValuesOf(element)
       case None          => decisionField(reflect).fold(caseNamesOf(reflect))(_._2)
 
   private def caseNamesOf(reflect: Reflect[?, ?]): Vector[String] =
-    reflect match
+    withoutDeferred(reflect) match
       case variant: Reflect.Variant[?, ?] =>
         val cases            = variant.cases.toVector
         val allParameterless = cases.forall { term =>
@@ -251,7 +251,7 @@ private[signatures] object ZioSchemaCodec:
     */
   private def typeRefFor(reflect: Reflect[?, ?]): TypeRef =
     optionSomeValueReflect(reflect) match
-      case Some(element) => typeRefFor(withoutDeferred(element))
+      case Some(element) => typeRefFor(element)
       case None          => decisionField(reflect).fold(typeRefOfValue(reflect))(_._1)
 
   /** The type and the enum values of a decision field (experimental, upstream `dspy.experimental`): a [[Noul]] has no
@@ -264,20 +264,20 @@ private[signatures] object ZioSchemaCodec:
       case rec: Reflect.Record[?, ?] if isType(rec.typeId, noulTypeId)   => Some(TypeRef.noul -> Vector.empty)
       case rec: Reflect.Record[?, ?] if isType(rec.typeId, scoreTypeId)  => Some(TypeRef.score -> Score.levelsOf(rec))
       case rec: Reflect.Record[?, ?] if isType(rec.typeId, choiceTypeId) =>
-        val options = rec.fields.find(_.name == "value").fold(Vector.empty[String])(term =>
-          caseNamesOf(withoutDeferred(term.value))
-        )
+        val options = rec.fields.find(_.name == "value").fold(Vector.empty[String])(term => caseNamesOf(term.value))
         Some(TypeRef.choice -> options)
       case _ => None
 
-  /** The reflect behind a deferred reflect. zio-blocks defers the reflect of some nested types. */
+  /** The reflect behind a deferred reflect. zio-blocks defers the reflect of a field with a default value, and of a
+    * field whose type can be recursive.
+    */
   private def withoutDeferred(reflect: Reflect[?, ?]): Reflect[?, ?] =
     reflect match
       case deferred: Reflect.Deferred[?, ?] => withoutDeferred(deferred.value)
       case other                            => other
 
   private def typeRefOfValue(reflect: Reflect[?, ?]): TypeRef =
-    reflect match
+    withoutDeferred(reflect) match
       case prim: Reflect.Primitive[?, ?]                                  => primitiveTypeRef(prim.primitiveType)
       case _: Reflect.Variant[?, ?]                                       => TypeRef.string
       case rec: Reflect.Record[?, ?] if isType(rec.typeId, historyTypeId) => TypeRef.history
