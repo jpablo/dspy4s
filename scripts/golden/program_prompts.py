@@ -1,4 +1,4 @@
-"""Write the golden LM calls of ChainOfThought, ReAct, and RLM (UPGRADE-3.2.1-to-3.4.0.md, decision D3).
+"""Write the golden LM calls of ChainOfThought, ReAct, ReActV2, and RLM (UPGRADE-3.2.1-to-3.4.0.md, decision D3).
 
 Each case runs an upstream program with a scripted model (``DummyLM``) and records each call: the messages that the
 program sends, and the text that the model gives back. The Scala suite ``ProgramPromptParitySuite`` runs the same
@@ -11,6 +11,11 @@ which is the upstream text with these changes:
 - ``next_tool_name`` has the type name ``str`` and no hint in the output reminder: the port gives the field enum values,
   not a ``Literal`` type. The note of the field is the same.
 - ``next_tool_args`` has the type name ``dict``, not ``dict[str, Any]``.
+
+ReActV2 shows the text of each tool in its `tools` input, with the arguments as JSON text, as ReAct. Its inputs are
+optional fields, and an optional field shows the type text of its element: ``str``, not ``UnionType[str, NoneType]``.
+``next_thought`` has no hint in the output reminder: upstream types it as ``dspy.Reasoning``, and the port types it as
+a ``str`` field (point 4 of P10), which has no hint.
 
 RLM runs with the local interpreter of each side (upstream ``LocalInterpreter``, the port ``LocalPythonInterpreter``).
 Upstream adds the sub-agent text of the sandbox ``dspy`` facade to each action prompt. The port has no facade (upgrade
@@ -109,6 +114,37 @@ def main():
     )
     assert prediction.answer == "5 cats", prediction
     cases.append({"id": "react", "calls": calls, "answer": prediction.answer})
+
+    # ReActV2 shows the text of each tool in the `tools` input at each call, so the port form of the tool text must be
+    # active for the whole run. An optional input shows the type text of its element (the boundary rule of D3), and
+    # `next_thought` is a `str` field with no hint (point 4 of P10).
+    Tool.__str__ = tool_text
+    try:
+        prediction, calls = run(
+            dspy.ReActV2(dspy.Signature("question -> answer, count: int", "Count the cats."), tools=[search, add]),
+            [
+                {
+                    "next_thought": "I should search and add.",
+                    "tool_calls": dspy.ToolCalls.from_dict_list(
+                        [{"name": "search", "args": {"query": "cats"}}, {"name": "add", "args": {"a": 2, "b": 3}}]
+                    ),
+                },
+                {
+                    "next_thought": "I can answer now.",
+                    "tool_calls": dspy.ToolCalls.from_dict_list(
+                        [{"name": "submit", "args": {"answer": "5 cats", "count": 5}}]
+                    ),
+                },
+            ],
+            {"question": "How many cats?"},
+            transform=lambda text: text.replace("(UnionType[str, NoneType])", "(str)").replace(
+                "`[[ ## next_thought ## ]]` (must be formatted as a valid Python str)", "`[[ ## next_thought ## ]]`"
+            ),
+        )
+    finally:
+        Tool.__str__ = original
+    assert (prediction.answer, prediction.count, prediction.termination_reason) == ("5 cats", 5, "submit"), prediction
+    cases.append({"id": "react_v2", "calls": calls, "answer": prediction.answer})
 
     # The port has no sandbox facade (P8), so the RLM prompts have no sub-agent text.
     rlm_module.SUB_AGENT_INSTRUCTIONS = ""

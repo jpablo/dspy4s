@@ -4,6 +4,7 @@ import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
+import dspy4s.adapters.contracts.NativeFunctionCalling
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.adapters.internal.AdapterTextSupport
 import dspy4s.adapters.internal.ConversationHistory
@@ -41,7 +42,8 @@ final case class XMLAdapter(
     val schema     = OutputSchema(invocation.outputJsonSchema)
     val systemText = PromptText.systemMessage(layout, layout, fieldStructure(layout, schema))
 
-    // This adapter has no native function calling: a turn of the history with tool calls stays text.
+    // This adapter has no native function calling: a turn of the history with tool calls stays text, and the request
+    // has no tool options (upstream `Adapter._call_preprocess`).
     Right(
       FormattedPrompt(
         messages = ConversationHistory.messages(
@@ -50,7 +52,8 @@ final case class XMLAdapter(
           systemText,
           useNativeFunctionCalling = false,
           Turns
-        )
+        ),
+        removedOptions = NativeFunctionCalling.ToolOptionKeys
       )
     )
 

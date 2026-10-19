@@ -38,8 +38,9 @@ trait Adapter extends AdapterRef:
   ): Either[DspyError, Vector[ParsedOutput]] =
     for
       prompt <- format(invocation)
-      // Merge adapter-contributed requestOptions UNDER the request's existing options (per-call/module wins).
-      mergedOptions = FormattedPrompt.mergeOptions(prompt.requestOptions, invocation.request.options)
+      // Merge adapter-contributed requestOptions UNDER the request's existing options (per-call/module wins), after
+      // the removal of the options that the adapter removes.
+      mergedOptions = prompt.options(invocation.request.options)
       response     <- languageModel.call(invocation.request.copy(messages = prompt.messages, options = mergedOptions))
       parsed       <- parseOutputs(invocation.layout, response.outputs)
     yield parsed

@@ -149,27 +149,23 @@ private[adapters] object AdapterTextSupport:
   private val NullTexts: Set[String] = Set("null", "None")
 
   /** The value of a `tool_calls` output field that the model wrote as text (native function calling is not active). The
-    * text is a JSON list of `{"name", "args"}` objects, or a JSON object with that list under the key `tool_calls`.
-    * Each other text is an error.
+    * text is a JSON value in a form of [[toolCallsValue]]. Each other text is an error.
     */
   def textToolCalls(raw: String): Either[DspyError, DynamicValue] =
     JsonDynamic.parse(raw).flatMap(toolCallsValue)
 
-  /** The value of a `tool_calls` output field from a JSON value: a list of `{"name", "args"}` objects, or an object
-    * with that list under the key `tool_calls`. The value has the form of [[NativeFunctionCalling.encodeToolCalls]].
+  /** The value of a `tool_calls` output field from a JSON value, in a form that upstream `ToolCalls.validate_input`
+    * accepts ([[ToolCall.fromDynamic]]): a list of `{"name", "args"}` objects, an object with that list under the key
+    * `tool_calls`, or one call object with `args` or `arguments`. The value has the form of
+    * [[NativeFunctionCalling.encodeToolCalls]].
     */
   def toolCallsValue(value: DynamicValue): Either[DspyError, DynamicValue] =
-    val calls = value match
-      case record: DynamicValue.Record => DynamicValues.recordGet(record, ToolCallsKey).flatMap(ToolCall.fromDynamic)
-      case other                       => ToolCall.fromDynamic(other)
-    calls
+    ToolCall
+      .fromDynamic(value)
       .map(NativeFunctionCalling.encodeToolCalls)
       .toRight(ValidationError(
         s"Expected a JSON list of tool calls, each with a name and args, found: ${DynamicValues.renderText(value)}"
       ))
-
-  /** The key of the list in the object form of a text `tool_calls` value (upstream `ToolCalls`). */
-  private val ToolCallsKey: String = "tool_calls"
 
   /** Coerce a raw string field value into the `DynamicValue` its declared `TypeRef` demands. Shared by the Chat and XML
     * adapters so a `json` / `list` field decodes identically regardless of which adapter parsed it.

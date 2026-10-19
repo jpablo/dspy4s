@@ -3,6 +3,7 @@ package dspy4s.adapters
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt
+import dspy4s.adapters.contracts.NativeFunctionCalling
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.adapters.internal.AdapterTextSupport
 import dspy4s.adapters.internal.DemoMessages
@@ -44,7 +45,8 @@ final case class TwoStepAdapter(
 ) extends Adapter:
 
   /** The system message, the demos, and the current request (upstream `TwoStepAdapter.format`). A turn shows each field
-    * that its values have as `name: value`. An incomplete demo shows the output fields that it has only.
+    * that its values have as `name: value`. An incomplete demo shows the output fields that it has only. The request
+    * has no tool options, because this adapter has no native function calling (upstream `Adapter._call_preprocess`).
     */
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     val layout = invocation.layout
@@ -55,7 +57,8 @@ final case class TwoStepAdapter(
     val inputs = AdapterTextSupport.withInputDefaults(layout.inputFields, invocation.inputs.values)
     Right(FormattedPrompt(
       messages = (Message(role = MessageRole.System, text = Some(taskDescription(layout))) +: demos) :+
-        Message(role = MessageRole.User, text = Some(fieldsText(layout.inputFields, inputs)))
+        Message(role = MessageRole.User, text = Some(fieldsText(layout.inputFields, inputs))),
+      removedOptions = NativeFunctionCalling.ToolOptionKeys
     ))
 
   /** The input fields as `name: value` blocks (upstream `TwoStepAdapter.format_user_message_content`). */

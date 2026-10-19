@@ -46,10 +46,32 @@ object NativeFunctionCalling:
   def isActive(useNative: Boolean)(using RuntimeContext): Boolean =
     useNative && lmSupportsFunctionCalling
 
-  /** The fields of `layout` that the prompt shows: with native function calling active, no tool calls field. */
+  /** True for the input field that holds the texts of the tools (`typeRef == TypeRef.tools`). */
+  def isToolsField(field: FieldSpec): Boolean =
+    field.typeRef == TypeRef.tools
+
+  /** The fields of `layout` that the prompt shows. With native function calling active, the prompt shows no tool calls
+    * field. When `layout` also has a tool calls field, the prompt does not show the tools input field either: the
+    * request has the tools as provider tools (upstream `_call_preprocess` deletes the two fields).
+    */
   def promptLayout(layout: SignatureLayout, useNative: Boolean)(using RuntimeContext): SignatureLayout =
-    if isActive(useNative) then layout.withOutputFields(layout.outputFields.filterNot(isToolCallsField))
+    if isActive(useNative) && layout.outputFields.exists(isToolCallsField) then
+      layout
+        .withInputFields(layout.inputFields.filterNot(isToolsField))
+        .withOutputFields(layout.outputFields.filterNot(isToolCallsField))
     else layout
+
+  /** The request options of native function calling (upstream `_call_preprocess`). */
+  val ToolOptionKeys: Set[String] = Set("tools", "tool_choice", "parallel_tool_calls")
+
+  /** The request options that the request must not have ([[FormattedPrompt.removedOptions]]), also when the call config
+    * has them (upstream `_call_preprocess` pops them from the options of the call): [[ToolOptionKeys]] when the adapter
+    * does not have `useNative`, and when `layout` has a tool calls field but the LM does not support function calling.
+    * Else none.
+    */
+  def removedOptions(layout: SignatureLayout, useNative: Boolean)(using RuntimeContext): Set[String] =
+    if !useNative || (layout.outputFields.exists(isToolCallsField) && !lmSupportsFunctionCalling) then ToolOptionKeys
+    else Set.empty
 
   /** The provider `tools` (and optional `parallel_tool_calls`) request options to contribute, or an empty record when
     * native calling is not active. Active iff `useNative` is on AND `tools` were supplied AND the layout declares a

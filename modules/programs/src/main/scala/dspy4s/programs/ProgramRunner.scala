@@ -72,4 +72,7 @@ object ProgramRunner extends LowPriorityProgramRunner:
   given fromRLM[I, O]: ProgramRunner[RLM[I, O]] =
     signatureBacked[I, O, RLM[I, O]](_.baseSignature.inputShape)
 
+  given fromReActV2[I, O]: ProgramRunner[ReActV2[I, O]] =
+    signatureBacked[I, O, ReActV2[I, O]](_.baseSignature.inputShape)
+
   def apply[P](using runner: ProgramRunner[P]): ProgramRunner[P] = runner

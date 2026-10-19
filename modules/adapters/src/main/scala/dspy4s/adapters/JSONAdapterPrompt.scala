@@ -44,7 +44,8 @@ private[adapters] object JSONAdapterPrompt:
             parallelToolCalls,
             toolChoice
           )
-        )
+        ),
+        removedOptions = NativeFunctionCalling.removedOptions(layout, useNativeFunctionCalling)
       )
     )
 

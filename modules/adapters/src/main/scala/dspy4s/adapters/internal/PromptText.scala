@@ -10,8 +10,8 @@ import zio.blocks.schema.DynamicValue
   *
   * The type text of a field (the type slots):
   *   - The type name is `str`, `int`, `float`, `bool`, `dict` ([[TypeRef.json]]), `list` ([[TypeRef.list]]), `History`,
-  *     or `ToolCalls`. An other [[TypeRef]] shows its `repr`. A field with enum values shows `str`. An optional field
-  *     shows the name of its type.
+  *     `list[Tool]` ([[TypeRef.tools]]), or `ToolCalls`. An other [[TypeRef]] shows its `repr`. A field with enum
+  *     values shows `str`. An optional field shows the name of its type.
   *   - The note of an output field: `True or False` for a bool, `a single int value` or `a single float value` for a
   *     number, the `Literal` note for a field with enum values, and a JSON schema for a structured field and for a tool
   *     calls field. A field of an other type (an opaque [[TypeRef]], for example the evidence type of a decision
@@ -167,10 +167,7 @@ private[adapters] object PromptText:
   def jsonable(field: FieldSpec, value: DynamicValue): DynamicValue =
     if field.typeRef != TypeRef.toolCalls then value
     else
-      val calls = value match
-        case record: DynamicValue.Record => DynamicValues.recordGet(record, ToolCallsKey).flatMap(ToolCall.fromDynamic)
-        case other                       => ToolCall.fromDynamic(other)
-      calls.fold(value) { found =>
+      ToolCall.fromDynamic(value).fold(value) { found =>
         val items = found.map(call => DynamicValues.record("name" := call.name, "args" -> call.args))
         DynamicValues.record(ToolCallsKey -> DynamicValue.Sequence(Chunk.from(items)))
       }
@@ -209,7 +206,13 @@ private[adapters] object PromptText:
       * at the end. `None` when the output schema has no property for `field`.
       */
     def propertyText(field: FieldSpec): Option[String] =
-      property(field.name).map(found => PythonText.json(withDefinitions(found)))
+      propertySchema(field.name).map(PythonText.json(_))
+
+    /** The schema of the property `name` of the output schema, with the `$defs` entries that the property uses at the
+      * end. `None` when the output schema has no such property.
+      */
+    def propertySchema(name: String): Option[DynamicValue] =
+      property(name).map(withDefinitions)
 
     private def property(name: String): Option[DynamicValue] =
       root.flatMap(recordAt(_, "properties")).flatMap(DynamicValues.recordGet(_, name))

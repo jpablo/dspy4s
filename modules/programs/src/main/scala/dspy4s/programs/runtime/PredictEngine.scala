@@ -3,7 +3,6 @@ package dspy4s.programs.runtime
 import dspy4s.adapters.DecisionAdapter
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
-import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.NativeFunctionCalling
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.adapters.contracts.ToolSpec
@@ -226,8 +225,9 @@ private[dspy4s] final case class PredictEngine(
                     request = DynamicValues.record("model" := model.id, "mode" := model.mode.toString)
                   ) {
                     // G-7: merge the adapter-contributed request options (e.g. `response_format`) UNDER the existing
-                    // request options, so explicit per-call/module config wins on key collision.
-                    val mergedOptions = FormattedPrompt.mergeOptions(prompt.requestOptions, invocation.request.options)
+                    // request options, so explicit per-call/module config wins on key collision. The options that the
+                    // adapter removes (`FormattedPrompt.removedOptions`) go first.
+                    val mergedOptions = prompt.options(invocation.request.options)
                     model.call(invocation.request.copy(messages = prompt.messages, options = mergedOptions))
                   }
     yield PredictEngine.Attempt(response, parseOutputs(adapter, response.outputs))

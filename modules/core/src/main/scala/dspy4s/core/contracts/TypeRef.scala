@@ -23,6 +23,7 @@ final case class TypeRef(repr: String) derives CanEqual:
       case "list"    => Some("list")
       case "json"    => Some("dict")
       case "history" => Some("History")
+      case "tools"   => Some("list[Tool]")
       case _         => None
 
 object TypeRef:
@@ -44,6 +45,13 @@ object TypeRef:
     * value. See [[History]].
     */
   val history: TypeRef = TypeRef("history")
+
+  /** The type of the input field that holds the tools of a call (the analogue of Python dspy's `list[dspy.Tool]` input
+    * annotation; experimental, for `ReActV2`). The value is a list with the text of each tool. When native function
+    * calling is active for the call, the adapter does not show the field: the request has the tools as provider tools
+    * (upstream `Adapter._call_preprocess` deletes the field). Else the adapter shows the value as a JSON list.
+    */
+  val tools: TypeRef = TypeRef("tools")
 
   /** The type of a `Noul` decision output: a Boolean decision with a probability (experimental, upstream
     * `dspy.experimental.Noul`). See [[dspy4s.core.decisions]].

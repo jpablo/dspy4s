@@ -97,6 +97,50 @@
       "answer": "5 cats"
     },
     {
+      "id": "react_v2",
+      "calls": [
+        {
+          "messages": [
+            {
+              "role": "system",
+              "content": "Your input fields are:\n1. `question` (str): \n2. `history` (History): \n3. `tools` (list[Tool]):\nYour output fields are:\n1. `next_thought` (str): \n2. `tool_calls` (ToolCalls): \n    Type description of ToolCalls: Tool calls must be a JSON object with `tool_calls`, a list of calls. Each call must include `name` and `args`. Example: {\"tool_calls\": [{\"name\": \"search\", \"args\": {\"query\": \"cats\"}}]}\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## question ## ]]\n{question}\n\n[[ ## history ## ]]\n{history}\n\n[[ ## tools ## ]]\n{tools}\n\n[[ ## next_thought ## ]]\n{next_thought}\n\n[[ ## tool_calls ## ]]\n{tool_calls}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"object\", \"$defs\": {\"ToolCall\": {\"type\": \"object\", \"properties\": {\"args\": {\"type\": \"object\", \"additionalProperties\": true, \"title\": \"Args\"}, \"name\": {\"type\": \"string\", \"title\": \"Name\"}}, \"required\": [\"name\", \"args\"], \"title\": \"ToolCall\"}}, \"properties\": {\"tool_calls\": {\"type\": \"array\", \"items\": {\"$ref\": \"#/$defs/ToolCall\"}, \"title\": \"Tool Calls\"}}, \"required\": [\"tool_calls\"], \"title\": \"ToolCalls\"}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Count the cats.\n        You are an Agent. Use the supplied tools to produce `answer`, `count` from `question`.\n        Call tools when more information is needed.\n        When the final answer is ready, call `submit` with `answer`, `count`.\n        The available tools are: `search`, `add`, `submit`."
+            },
+            {
+              "role": "user",
+              "content": "[[ ## question ## ]]\nHow many cats?\n\n[[ ## tools ## ]]\n[\"search, whose description is <desc>Search the web for a query.</desc>. It takes arguments {\\\"query\\\": {\\\"type\\\": \\\"string\\\"}}.\", \"add. It takes arguments {\\\"a\\\": {\\\"type\\\": \\\"integer\\\"}, \\\"b\\\": {\\\"type\\\": \\\"integer\\\"}}.\", \"submit, whose description is <desc>Submit the final outputs for the task.</desc>. It takes arguments {\\\"answer\\\": {\\\"type\\\": \\\"string\\\"}, \\\"count\\\": {\\\"type\\\": \\\"integer\\\"}}.\"]\n\nRespond with the corresponding output fields, starting with the field `[[ ## next_thought ## ]]`, then `[[ ## tool_calls ## ]]` (must be a JSON object like {\"tool_calls\": [{\"name\": \"...\", \"args\": {...}}]}), and then ending with the marker for `[[ ## completed ## ]]`."
+            }
+          ],
+          "output": "[[ ## next_thought ## ]]\nI should search and add.\n\n[[ ## tool_calls ## ]]\n{\"tool_calls\": [{\"name\": \"search\", \"args\": {\"query\": \"cats\"}}, {\"name\": \"add\", \"args\": {\"a\": 2, \"b\": 3}}]}"
+        },
+        {
+          "messages": [
+            {
+              "role": "system",
+              "content": "Your input fields are:\n1. `question` (str): \n2. `history` (History): \n3. `tools` (list[Tool]):\nYour output fields are:\n1. `next_thought` (str): \n2. `tool_calls` (ToolCalls): \n    Type description of ToolCalls: Tool calls must be a JSON object with `tool_calls`, a list of calls. Each call must include `name` and `args`. Example: {\"tool_calls\": [{\"name\": \"search\", \"args\": {\"query\": \"cats\"}}]}\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## question ## ]]\n{question}\n\n[[ ## history ## ]]\n{history}\n\n[[ ## tools ## ]]\n{tools}\n\n[[ ## next_thought ## ]]\n{next_thought}\n\n[[ ## tool_calls ## ]]\n{tool_calls}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"object\", \"$defs\": {\"ToolCall\": {\"type\": \"object\", \"properties\": {\"args\": {\"type\": \"object\", \"additionalProperties\": true, \"title\": \"Args\"}, \"name\": {\"type\": \"string\", \"title\": \"Name\"}}, \"required\": [\"name\", \"args\"], \"title\": \"ToolCall\"}}, \"properties\": {\"tool_calls\": {\"type\": \"array\", \"items\": {\"$ref\": \"#/$defs/ToolCall\"}, \"title\": \"Tool Calls\"}}, \"required\": [\"tool_calls\"], \"title\": \"ToolCalls\"}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Count the cats.\n        You are an Agent. Use the supplied tools to produce `answer`, `count` from `question`.\n        Call tools when more information is needed.\n        When the final answer is ready, call `submit` with `answer`, `count`.\n        The available tools are: `search`, `add`, `submit`."
+            },
+            {
+              "role": "user",
+              "content": "[[ ## question ## ]]\nHow many cats?\n\nRespond with the corresponding output fields, starting with the field `[[ ## next_thought ## ]]`, then `[[ ## tool_calls ## ]]` (must be a JSON object like {\"tool_calls\": [{\"name\": \"...\", \"args\": {...}}]}), and then ending with the marker for `[[ ## completed ## ]]`."
+            },
+            {
+              "role": "assistant",
+              "content": "[[ ## next_thought ## ]]\nI should search and add.\n\n[[ ## tool_calls ## ]]\n{\"tool_calls\": [{\"name\": \"search\", \"args\": {\"query\": \"cats\"}}, {\"name\": \"add\", \"args\": {\"a\": 2, \"b\": 3}}]}\n\n[[ ## completed ## ]]\n"
+            },
+            {
+              "role": "user",
+              "content": "[[ ## tool_call_results ## ]]\n{\"tool_call_results\": [{\"call_id\": \"call_0_0\", \"name\": \"search\", \"value\": \"3 results for cats\", \"is_error\": false}, {\"call_id\": \"call_0_1\", \"name\": \"add\", \"value\": 5, \"is_error\": false}]}"
+            },
+            {
+              "role": "user",
+              "content": "[[ ## tools ## ]]\n[\"search, whose description is <desc>Search the web for a query.</desc>. It takes arguments {\\\"query\\\": {\\\"type\\\": \\\"string\\\"}}.\", \"add. It takes arguments {\\\"a\\\": {\\\"type\\\": \\\"integer\\\"}, \\\"b\\\": {\\\"type\\\": \\\"integer\\\"}}.\", \"submit, whose description is <desc>Submit the final outputs for the task.</desc>. It takes arguments {\\\"answer\\\": {\\\"type\\\": \\\"string\\\"}, \\\"count\\\": {\\\"type\\\": \\\"integer\\\"}}.\"]\n\nRespond with the corresponding output fields, starting with the field `[[ ## next_thought ## ]]`, then `[[ ## tool_calls ## ]]` (must be a JSON object like {\"tool_calls\": [{\"name\": \"...\", \"args\": {...}}]}), and then ending with the marker for `[[ ## completed ## ]]`."
+            }
+          ],
+          "output": "[[ ## next_thought ## ]]\nI can answer now.\n\n[[ ## tool_calls ## ]]\n{\"tool_calls\": [{\"name\": \"submit\", \"args\": {\"answer\": \"5 cats\", \"count\": 5}}]}"
+        }
+      ],
+      "answer": "5 cats"
+    },
+    {
       "id": "rlm_submit",
       "calls": [
         {

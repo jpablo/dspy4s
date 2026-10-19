@@ -44,5 +44,6 @@ package object programs:
     Predict,
     RLM,
     ReAct,
+    ReActV2,
     Refine
   }

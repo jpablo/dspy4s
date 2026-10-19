@@ -46,7 +46,7 @@ private[programs] object ToolText:
     jsonType(typeRef).fold(DynamicValue.Record.empty)(name => DynamicValues.record("type" := name))
 
   /** The JSON schema type of a wire type (the types of upstream `Tool._parse_function`). */
-  private def jsonType(typeRef: TypeRef): Option[String] =
+  private[programs] def jsonType(typeRef: TypeRef): Option[String] =
     typeRef match
       case TypeRef.string => Some("string")
       case TypeRef.int    => Some("integer")

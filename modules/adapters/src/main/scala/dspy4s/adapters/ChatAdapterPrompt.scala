@@ -31,7 +31,8 @@ private[adapters] object ChatAdapterPrompt:
           useNativeFunctionCalling,
           parallelToolCalls,
           toolChoice
-        )
+        ),
+        removedOptions = NativeFunctionCalling.removedOptions(layout, useNativeFunctionCalling)
       )
     )
 

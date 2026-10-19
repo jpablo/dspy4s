@@ -64,8 +64,13 @@ object ToolCall:
       )
     }
 
-  /** The calls of a tool calls value: a sequence of call records. `None` when the value is not a sequence, or when an
-    * entry is not a call record.
+  /** The calls of a tool calls value, in the forms that upstream `ToolCalls.validate_input` accepts
+    * (`dspy/adapters/types/tool.py`):
+    *   - a sequence of call records;
+    *   - a record with a sequence of call records under the key `tool_calls`;
+    *   - one call record that has `name` and `args` or `arguments`, or that has `function`.
+    *
+    * `None` for each other value, and when an entry of the sequence is not a call record.
     */
   def fromDynamic(value: DynamicValue): Option[Vector[ToolCall]] =
     value match
@@ -75,7 +80,20 @@ object ToolCall:
           case _                           => None
         }
         Option.when(calls.forall(_.isDefined))(calls.flatten)
+      case record: DynamicValue.Record => DynamicValues.recordGet(record, ToolCallsKey) match
+          case Some(calls: DynamicValue.Sequence) => fromDynamic(calls)
+          case Some(_)                            => None
+          case None if isCallRecord(record)       => fromRecord(record).map(Vector(_))
+          case None                               => None
       case _ => None
+
+  /** The key of the list in the object form of a tool calls value (upstream `ToolCalls`). */
+  private val ToolCallsKey: String = "tool_calls"
+
+  /** `true` for a record in the form of one call (upstream `_is_tool_call_dict`). */
+  private def isCallRecord(record: DynamicValue.Record): Boolean =
+    def has(key: String): Boolean = DynamicValues.recordGet(record, key).isDefined
+    (has("name") && (has("args") || has("arguments"))) || has("function")
 
   private def argumentsRecord(arguments: Option[DynamicValue]): DynamicValue.Record =
     arguments match

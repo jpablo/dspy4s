@@ -6,7 +6,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, MessageRole}
 import dspy4s.programs.contracts.{ToolFunction, description}
 import dspy4s.core.runtime.LocalPythonInterpreter
-import dspy4s.programs.strategies.{ChainOfThought, RLM, ReAct}
+import dspy4s.programs.strategies.{ChainOfThought, RLM, ReAct, ReActV2}
 import dspy4s.signatures.Signature
 import munit.FunSuite
 
@@ -20,11 +20,11 @@ object ProgramPromptTools:
 
   def add(a: Int, b: Int): Int = a + b
 
-/** The LM calls of ChainOfThought, ReAct, and RLM are equal to the upstream calls (decision D3, PORT_GAPS G-30, G-37,
-  * and G-38). Each case of the golden data holds the calls of an upstream run with a scripted model: the messages, and
-  * the text that the model gave back. The suite runs the same program of the port with a model that gives back the same
-  * texts, and compares the messages, character for character. Run `scripts/golden/program_prompts.py` to write the data
-  * again.
+/** The LM calls of ChainOfThought, ReAct, ReActV2, and RLM are equal to the upstream calls (decision D3, PORT_GAPS
+  * G-30, G-37, and G-38). Each case of the golden data holds the calls of an upstream run with a scripted model: the
+  * messages, and the text that the model gave back. The suite runs the same program of the port with a model that gives
+  * back the same texts, and compares the messages, character for character. Run `scripts/golden/program_prompts.py` to
+  * write the data again.
   *
   * The ReAct data is in the port form of the boundary rule of D3: the arguments of a tool are JSON text, and the type
   * text of `next_tool_name` and `next_tool_args` is the text of the port (see the generator). The RLM data has no
@@ -102,6 +102,22 @@ class ProgramPromptParitySuite extends FunSuite:
     assertCalls("react") {
       val result = react((question = "How many cats?"))
       assertEquals(result.map(_.output.answer), Right(caseOf("react")("answer").str))
+    }
+  }
+
+  test("ReActV2 sends the upstream messages for each turn, with the tools and the history of the run") {
+    val tools = Vector(
+      ToolFunction.fromMethod(ProgramPromptTools.search),
+      ToolFunction.fromMethod(ProgramPromptTools.add)
+    )
+    val agent = ReActV2(
+      baseSignature = Signature.fromString("question -> answer, count: int").withInstructions("Count the cats."),
+      tools = tools
+    )
+    assertCalls("react_v2") {
+      val result = agent((question = "How many cats?"))
+      assertEquals(result.map(r => (r.output.answer, r.output.count)), Right((caseOf("react_v2")("answer").str, 5)))
+      assertEquals(result.map(ReActV2.terminationReason), Right(Some(ReActV2.TerminationReason.Submit)))
     }
   }
 

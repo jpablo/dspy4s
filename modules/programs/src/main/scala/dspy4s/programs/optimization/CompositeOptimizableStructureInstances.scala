@@ -1,6 +1,6 @@
 package dspy4s.programs.optimization
 
-import dspy4s.programs.strategies.{MultiChainComparison, ReAct, RLM}
+import dspy4s.programs.strategies.{MultiChainComparison, ReAct, ReActV2, RLM}
 
 /** Hand-written [[OptimizableStructure]] instances for composite programs whose learnable sub-predicts are hoisted to
   * stable, `copy`-reachable members. Inheriting these instances into the [[OptimizableStructure]] companion keeps them
@@ -28,6 +28,27 @@ private[optimization] trait CompositeOptimizableStructureInstances:
       _.extractPredictOverride,
       (program, nextA, nextB) => program.copy(actionPredictOverride = nextA, extractPredictOverride = nextB)
     )
+
+  /** ReActV2 (experimental): one optimizable part, the step predictor `react` (upstream `ReActV2.react`). `replace`
+    * writes the parameters through [[ReActV2.reactPredict]] into `reactPredictOverride`; parameters equal to the
+    * current ones give the same program.
+    */
+  given reactV2OptimizableStructure[I, O]: OptimizableStructure.Of[ReActV2[I, O], 1] with
+    def arity(@annotation.unused program: ReActV2[I, O]): Int = 1
+
+    def inspect(program: ReActV2[I, O]): Vector[OptimizableView] =
+      Vector(program.reactPredict.optimizableView)
+
+    override def inspectNamed(program: ReActV2[I, O]): Vector[(String, OptimizableView)] =
+      Vector("react" -> program.reactPredict.optimizableView)
+
+    def replace(program: ReActV2[I, O], updates: Vector[OptimizableParameters]): ReActV2[I, O] =
+      require(updates.size == 1, s"ReActV2 expects exactly 1 update (react), got ${updates.size}")
+      if updates == read(program) then program
+      else
+        program.copy(reactPredictOverride =
+          updateOverride(program.reactPredict, program.reactPredictOverride, updates.head)
+        )
 
   given multiChainComparisonOptimizableStructure[I, O]
       : OptimizableStructure.Of[MultiChainComparison[I, O], 1] with
