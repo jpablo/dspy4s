@@ -1014,6 +1014,21 @@ Open points from batch 1, for the owner:
       **Decided 2026-10-18: wait** (it needs P8).
 - [ ] **P10. ReActV2 changes** (b3897e271, ca54a855a, 05728f6ad): reserved outputs, an error when the forced
       submit gives no outputs, and an async path. It is still experimental. → G-19 (R)
+      **Decided 2026-10-19: port ReActV2, with these six points.**
+      1. `ReActV2[I, O]` is a new typed program, from a typed signature and a list of `ToolFunction` values (MCP tools
+         too). `ReAct` does not change (G-7b). The step predictor `react` is the part that an optimizer can change.
+      2. The result is `Prediction[O]`. The `history` (a `History`) and the `termination_reason` are raw values with
+         the upstream keys. Helper methods read them, and the reason is an enum (`Submit`, `ForcedSubmit`). An output
+         with the name `history` or `termination_reason` fails at construction.
+      3. The tool calls use the adapter path of G-7b and G-28: native function calling when the model supports it,
+         else the text `tool_calls` field. The forced submit sets `tool_choice` to `submit` in the call config.
+      4. `next_thought` is a string field. Upstream types it as `dspy.Reasoning`; the port has no `Reasoning` type,
+         and it is a separate item.
+      5. An input field of the type `History` in the signature gives the start history. `maxIterations` is fixed at
+         construction.
+      6. A failed forced submit is a `Left` with the upstream message. A tool error and an unknown tool are error
+         results that go back to the model. A parse error or a full context window starts the forced submit. No
+         separate async path: `applyAsync` covers it, and the upstream tests of the async path only are not ported.
 
 ## Phase 4: interpreters / runtime
 
