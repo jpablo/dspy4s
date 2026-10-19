@@ -95,9 +95,11 @@ class ReActSuite extends FunSuite:
       assertEquals(pred.output.answer, "Brussels")
       assertEquals(search.calls.get(), 1)
       val traj = lookupString(pred.raw.values, "trajectory")
-      assert(traj.contains("tool_name: search"), s"trajectory missing tool call: $traj")
-      assert(traj.contains("observation: Brussels"), s"trajectory missing observation: $traj")
-      assert(traj.contains("tool_name: finish"), s"trajectory missing finish: $traj")
+      // The trajectory is the user message content of the adapter (upstream `_format_trajectory`). This test adapter
+      // has the default form: the chat markers.
+      assert(traj.contains("[[ ## tool_name_0 ## ]]\nsearch"), s"trajectory missing tool call: $traj")
+      assert(traj.contains("[[ ## observation_0 ## ]]\nBrussels"), s"trajectory missing observation: $traj")
+      assert(traj.contains("[[ ## tool_name_1 ## ]]\nfinish"), s"trajectory missing finish: $traj")
     }
   }
 
@@ -163,6 +165,23 @@ class ReActSuite extends FunSuite:
       assertEquals(pred.output.answer, "done")
       assertEquals(search.calls.get(), 0)
       assert(lookupString(pred.raw.values, "trajectory").contains("does not exist"))
+    }
+  }
+
+  test("react records the upstream observation of a tool error and of a structured result") {
+    val failing = ToolFunction("broken", "Fails.")(_ => Left(dspy4s.core.contracts.RuntimeError("tool", "boom")))
+    val listing = ToolFunction("listing")(_ => Right(ToolFunction.result(Vector("a", "b"))))
+    val lm      = new ScriptedLm(Vector("try it||broken||", "list||listing||", "I have what I need||finish||", "done"))
+    val react   = ReAct(baseSignature = qaSignature, tools = Vector(failing, listing), maxIterations = IterationLimit(5))
+
+    withReact(lm) {
+      val result = react((question = "q?"))
+      assertEquals(result.map(_.output.answer), Right("done"))
+      val traj = lookupString(result.toOption.get.raw.values, "trajectory")
+      // Upstream `ReAct.forward`: `Execution error in <name>: <message>`, with no quotes around the name.
+      assert(traj.contains("[[ ## observation_0 ## ]]\nExecution error in broken: boom"), traj)
+      // Upstream `format_field_value` of a list for a `str` field: a numbered list.
+      assert(traj.contains("[[ ## observation_1 ## ]]\n[1] «a»\n[2] «b»"), traj)
     }
   }
 
@@ -241,11 +260,15 @@ class ReActSuite extends FunSuite:
       assertEquals(result.toOption.get.output.answer, "Brussels")
       // Two extractor attempts: full trajectory, then with the oldest step dropped.
       assertEquals(probe.extractorTrajectories.size, 2)
-      assert(probe.extractorTrajectories(0).contains("Step 1") && probe.extractorTrajectories(0).contains("Step 2"))
-      assert(!probe.extractorTrajectories(1).contains("Step 1") && probe.extractorTrajectories(1).contains("Step 2"))
+      assert(
+        probe.extractorTrajectories(0).contains("thought_0") && probe.extractorTrajectories(0).contains("thought_1")
+      )
+      assert(
+        !probe.extractorTrajectories(1).contains("thought_0") && probe.extractorTrajectories(1).contains("thought_1")
+      )
       // The RETURNED trajectory stays complete (documented delta from upstream's in-place pops).
       val traj = lookupString(result.toOption.get.raw.values, "trajectory")
-      assert(traj.contains("Step 1"), traj)
+      assert(traj.contains("thought_0"), traj)
     }
   }
 
@@ -267,10 +290,10 @@ class ReActSuite extends FunSuite:
       val result = react((question = "q?"))
       assert(result.isRight, result.toString)
       val traj = lookupString(result.toOption.get.raw.values, "trajectory")
-      // Step 1 (the first search) was truncated away; step 2 and the finish step (iteration 3 -> "Step 3") remain.
-      assert(!traj.contains("Step 1"), traj)
-      assert(traj.contains("Step 2"), traj)
-      assert(traj.contains("Step 3") && traj.contains("tool_name: finish"), traj)
+      // Step 0 (the first search) was truncated away; step 1 and the finish step (iteration 3 -> "thought_2") remain.
+      assert(!traj.contains("thought_0"), traj)
+      assert(traj.contains("thought_1"), traj)
+      assert(traj.contains("thought_2") && traj.contains("[[ ## tool_name_2 ## ]]\nfinish"), traj)
     }
   }
 
@@ -286,7 +309,8 @@ class ReActSuite extends FunSuite:
       val result = react((question = "q?"))
       assert(result.isRight, result.toString)
       assertEquals(result.toOption.get.output.answer, "best guess")
-      assertEquals(probe.extractorTrajectories.toList, List("(empty)"))
+      // An empty trajectory is an empty text (upstream `_format_trajectory` of an empty dict).
+      assertEquals(probe.extractorTrajectories.toList, List(""))
     }
   }
 
@@ -310,9 +334,9 @@ class ReActSuite extends FunSuite:
       assertEquals(result.map(_.output.answer), Right("Brussels"))
       assertEquals(lm.calls.get(), 3, "one react step, one overflow, one extract call")
       assertEquals(probe.extractorTrajectories.size, 1)
-      assert(probe.extractorTrajectories.head.contains("Step 1"), probe.extractorTrajectories.head)
+      assert(probe.extractorTrajectories.head.contains("thought_0"), probe.extractorTrajectories.head)
       val traj = lookupString(result.toOption.get.raw.values, "trajectory")
-      assert(traj.contains("Step 1") && traj.contains("tool_name: search"), traj)
+      assert(traj.contains("thought_0") && traj.contains("[[ ## tool_name_0 ## ]]\nsearch"), traj)
     }
   }
 
@@ -333,6 +357,9 @@ class ReActSuite extends FunSuite:
         case other                                                     => fail(s"expected the overflow error, got $other")
       assertEquals(lm.calls.get(), 2, "one react step and one extract call")
       assertEquals(probe.extractorTrajectories.size, 1)
-      assert(probe.extractorTrajectories.head.contains("tool_name: finish"), probe.extractorTrajectories.head)
+      assert(
+        probe.extractorTrajectories.head.contains("[[ ## tool_name_0 ## ]]\nfinish"),
+        probe.extractorTrajectories.head
+      )
     }
   }

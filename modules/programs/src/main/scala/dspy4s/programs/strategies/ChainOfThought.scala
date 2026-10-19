@@ -103,6 +103,10 @@ object ChainOfThought:
     description = Some("${reasoning}")
   ))
 
+  /** `layout` with the `reasoning` output first (upstream `signature.prepend`). The result keeps the effective
+    * instructions of `layout`: a layout with no instructions keeps the default instructions of its own fields, which do
+    * not name `reasoning` (see [[dspy4s.core.contracts.SignatureOps]]).
+    */
   private[dspy4s] def augmentLayout(layout: SignatureLayout): SignatureLayout =
     layout.prependOutput(reasoningField)
 

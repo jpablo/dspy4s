@@ -37,8 +37,10 @@ trait TrajectoryAgent[I, O, S] extends Module[I, O]:
   /** Raw-prediction field under which the complete rendered trajectory is exposed. */
   protected def trajectoryKey: String
 
-  /** Render the trajectory for both the iterative policy and final extractor. */
-  protected def renderTrajectory(trajectory: Vector[S]): String
+  /** Render the trajectory for both the iterative policy and final extractor. The text can depend on the runtime
+    * context, for example on its adapter (upstream `ReAct._format_trajectory`).
+    */
+  protected def renderTrajectory(trajectory: Vector[S])(using RuntimeContext): String
 
   /** One domain-specific transition: act, append an entry, and decide whether the trajectory is complete. */
   protected def trajectoryStep(call: ProgramCall[I])(using
@@ -50,7 +52,7 @@ trait TrajectoryAgent[I, O, S] extends Module[I, O]:
   ): Either[DspyError, Prediction[O]] =
     TrajectoryAgent.runAndExtractPrediction[S, O](
       maxIterations,
-      renderTrajectory,
+      trajectory => renderTrajectory(trajectory),
       trajectoryKey
     )(trajectoryStep(call)) {
       rendered =>

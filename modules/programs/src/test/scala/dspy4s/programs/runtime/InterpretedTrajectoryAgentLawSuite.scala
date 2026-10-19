@@ -50,7 +50,8 @@ final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
     override protected val trajectoryKey: String                                = "trajectory"
     override protected val actionInterpreter: ActionInterpreter[String, String] = interpreterValue
 
-    override protected def renderTrajectory(trajectory: Vector[String]): String = trajectory.mkString(" -> ")
+    override protected def renderTrajectory(trajectory: Vector[String])(using RuntimeContext): String =
+      trajectory.mkString(" -> ")
 
     override protected def generateStep(
         call      : ProgramCall[String],

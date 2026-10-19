@@ -117,7 +117,7 @@ Only the output boundary changes:
 | Signature component | Augmented value |
 |---|---|
 | Name | Same as the base signature |
-| Instructions | Same as the base signature |
+| Instructions | The effective instructions of the base signature: its instructions, else its default instructions, which do not name `reasoning` |
 | Input fields | Unchanged |
 | Output fields | `reasoning` followed by the base fields, idempotently |
 | Input shape | The base input shape |

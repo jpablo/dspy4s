@@ -117,7 +117,7 @@ Their carrier types are:
 
 ```scala
 final case class ActionInputs(
-    variables_info: String,
+    variables_info: Vector[String],
     repl_history: String,
     iteration: String
 )
@@ -128,10 +128,14 @@ final case class ActionStep(
 )
 
 final case class ExtractInputs(
-    variables_info: String,
+    variables_info: Vector[String],
     repl_history: String
 )
 ```
+
+`variables_info` has the metadata text of each input variable. The prompt shows the list as a numbered list, as
+upstream `format_field_value` shows a list value of a `str` field. The prompt shows the type name `REPLHistory` for
+`repl_history`, as upstream.
 
 The action output shape is deliberately lenient. Missing `reasoning` or `code` fields decode as empty strings, and
 present values are rendered as text. This keeps imperfect action formatting inside the agent loop; failures that make
@@ -463,6 +467,17 @@ RuntimeEnvironment.withSettings(RuntimeContext(interpreterFactory = Some(factory
   rlm(input) // uses `factory`
 }
 ```
+
+A factory can tell the model how its code runs: `ReplInterpreterFactory.executionInstructions` (upgrade item I7,
+upstream `execution_instructions`). The action instructions then have a part `Execution environment:` with that text.
+`RLM.defaultInterpreterFactory` and `LocalPythonInterpreter.factory()` have the upstream texts of `PythonInterpreter`
+and `LocalInterpreter`. A factory from a function literal has no text, and the instructions have no such part.
+
+RLM writes its action instructions with the factory that it selects at construction. For each call, it uses the text
+of the factory that it selects for that call. When that text is different, the call replaces the `Execution
+environment:` part of the instructions, or adds it at the end when an optimizer removed it (upstream
+`_action_signature_for_current_factory`). The other changes of an optimizer to the instructions stay. The port has no
+sandbox `dspy` facade (upgrade item P8), so the instructions have no sub-agent part.
 
 The default interpreter runs Python through Pyodide under Deno rather than as an unrestricted host `python3` process.
 If a custom `ReplCodeInterpreter` is supplied, its isolation, persistence, timeout, and tool-bridge guarantees become

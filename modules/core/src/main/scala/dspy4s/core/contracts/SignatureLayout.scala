@@ -64,8 +64,13 @@ final case class SignatureLayout private (
     * writes them.
     */
   def appendInstructions(text: String): SignatureLayout =
-    val base = instructions.getOrElse(dspy4s.core.signatures.SignatureDsl.defaultInstructions(this))
-    withInstructions(Some(s"$base\n\n$text"))
+    withInstructions(Some(s"$effectiveInstructions\n\n$text"))
+
+  /** The instructions, else the default instructions of the fields of this layout (dspy's `_default_instructions`).
+    * Upstream computes the default instructions when it makes a signature, so they name the fields of that signature.
+    */
+  private[dspy4s] def effectiveInstructions: String =
+    instructions.getOrElse(dspy4s.core.signatures.SignatureDsl.defaultInstructions(this))
 
   // ── Field-mutation helpers ──────────────────────────────────────────
   // Narrowed to `private[dspy4s]`: composite programs

@@ -2,6 +2,7 @@ package dspy4s.programs
 
 import zio.blocks.schema.Schema
 
+import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.{
   :=, DspyError, DynamicValues, LmUsage, NotFoundError, RuntimeContext, SignatureLayout,
@@ -110,6 +111,16 @@ class ChainOfThoughtSuite extends FunSuite:
       adapter = Some(adapter)
     )
 
+  /** A model that gives back `text` and keeps each request. */
+  private final class CapturingLm(text: String) extends LanguageModel:
+    @volatile var requests: Vector[LmRequest] = Vector.empty
+    override val id: String                   = "capturing-lm"
+    override val mode: LmMode                 = LmMode.Chat
+
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      requests = requests :+ request
+      Right(LmResponse(outputs = Vector(LmOutput(text = text))))
+
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
@@ -120,6 +131,27 @@ class ChainOfThoughtSuite extends FunSuite:
     val layout = ChainOfThought.augmentLayout(sig.layout)
 
     assertEquals(layout.outputFields.map(_.name), Vector("reasoning", "summary"))
+  }
+
+  // Upstream computes the default instructions when it makes the signature, and `prepend` keeps them
+  // (`dspy/predict/chain_of_thought.py`). The objective thus names the base fields only.
+  test("ChainOfThought.augmentLayout keeps the default instructions of the base signature") {
+    val layout = ChainOfThought.augmentLayout(Signature.of[TcotSummarizeSpec].layout)
+    assertEquals(layout.effectiveInstructions, "Given the fields `document`, produce the fields `summary`.")
+  }
+
+  test("a ChainOfThought over a typed signature sends the default instructions of the base signature") {
+    val sig = Signature.derived[TcotCaseInput, TcotCaseOutput]("CaseClassCot")
+    val lm  = new CapturingLm("[[ ## reasoning ## ]]\nShort.\n\n[[ ## summary ## ]]\nok\n\n[[ ## completed ## ]]")
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      assertEquals(ChainOfThought(sig)(TcotCaseInput("...")).map(_.output.summary), Right("ok"))
+    }
+    val system = lm.requests.headOption.flatMap(_.messages.headOption).flatMap(_.text).getOrElse("")
+    assert(
+      system.endsWith("your objective is: \n        Given the fields `document`, produce the fields `summary`."),
+      system
+    )
   }
 
   test("ChainOfThought.run returns a prediction with reasoning prepended") {

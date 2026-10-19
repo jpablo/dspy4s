@@ -8,11 +8,15 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 /** Data exchanged between an [[RLM]] strategy, its action predictor, and its persistent Python REPL. */
 object RLMModel:
-  /** The action predict's input. Base inputs reach the LM only as REPL variable metadata. */
-  final case class ActionInputs(variables_info: String, repl_history: String, iteration: String) derives Schema
+  /** The action predict's input. Base inputs reach the LM only as REPL variable metadata: `variables_info` has the
+    * [[ReplVariable.format]] text of each variable, and the prompt shows the list as a numbered list (upstream
+    * `variables_info = [variable.format() for variable in variables]`).
+    */
+  final case class ActionInputs(variables_info: Vector[String], repl_history: String, iteration: String)
+      derives Schema
 
   /** The extract-fallback predict's input. */
-  final case class ExtractInputs(variables_info: String, repl_history: String) derives Schema
+  final case class ExtractInputs(variables_info: Vector[String], repl_history: String) derives Schema
 
   /** The output of one action step. */
   final case class ActionStep(reasoning: String, code: String)
@@ -66,6 +70,17 @@ object RLMModel:
     def format(index: Int, maxOutputChars: OutputCharLimit): String =
       val reasoningLine = if reasoning.nonEmpty then s"Reasoning: $reasoning\n" else ""
       s"=== Step ${index + 1} ===\n${reasoningLine}Code:\n```python\n$code\n```\n${RLMReplProtocol.formatOutputBlock(output, maxOutputChars)}"
+
+  /** The type of the `repl_history` inputs. The prompt shows the type name `REPLHistory` (upstream `REPLHistory` in
+    * `dspy/primitives/repl_types.py`), and the value is the text of [[RLMReplProtocol.renderHistory]].
+    */
+  private[programs] val ReplHistoryType: TypeRef = TypeRef("REPLHistory")
+
+  private[programs] val variablesInfoField: FieldSpec = FieldSpec(
+    "variables_info",
+    typeRef = TypeRef.string,
+    description = Some("Metadata about the variables available in the REPL")
+  )
 
   private[programs] val reasoningField: FieldSpec = FieldSpec(
     "reasoning",

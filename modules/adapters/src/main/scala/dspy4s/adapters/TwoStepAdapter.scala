@@ -58,6 +58,10 @@ final case class TwoStepAdapter(
         Message(role = MessageRole.User, text = Some(fieldsText(layout.inputFields, inputs)))
     ))
 
+  /** The input fields as `name: value` blocks (upstream `TwoStepAdapter.format_user_message_content`). */
+  override def formatUserMessageContent(layout: SignatureLayout, values: DynamicValue.Record): String =
+    fieldsText(layout.inputFields, values)
+
   override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
     val chat = ChatAdapter()
     for

@@ -1,7 +1,9 @@
 package dspy4s.adapters.contracts
 
+import dspy4s.adapters.ChatAdapterPrompt
 import dspy4s.core.contracts.{AdapterRef, DspyError, RuntimeContext, SignatureLayout}
 import dspy4s.lm.contracts.{LanguageModel, LmOutput}
+import zio.blocks.schema.DynamicValue
 
 trait Adapter extends AdapterRef:
   def name: String
@@ -18,6 +20,13 @@ trait Adapter extends AdapterRef:
   def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt]
 
   def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput]
+
+  /** The text of a user turn that shows the values of the input fields of `layout` that `values` has, with no output
+    * reminder (upstream `Adapter.format_user_message_content` with `main_request=False`). `ReAct` writes its trajectory
+    * with this text (upstream `ReAct._format_trajectory`). The default is the marker form of the chat adapter.
+    */
+  def formatUserMessageContent(layout: SignatureLayout, values: DynamicValue.Record): String =
+    ChatAdapterPrompt.userText(layout, values, reminder = None)
 
   /** Streaming-aware adapters override this to return a per-call state machine. The default returns [[None]] and the
     * streaming pipeline falls back to emitting raw tokens with an empty field name.

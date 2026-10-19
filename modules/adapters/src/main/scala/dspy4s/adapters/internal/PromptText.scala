@@ -1,7 +1,6 @@
 package dspy4s.adapters.internal
 
 import dspy4s.core.contracts.{:=, DynamicValues, FieldSpec, SignatureLayout, ToolCall, TypeRef}
-import dspy4s.core.signatures.SignatureDsl
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 
@@ -65,7 +64,7 @@ private[adapters] object PromptText:
     * adapter takes them from the full layout, also when the prompt does not show each field of the layout.
     */
   def instructions(layout: SignatureLayout): String =
-    layout.instructions.getOrElse(SignatureDsl.defaultInstructions(layout))
+    layout.effectiveInstructions
 
   /** The task description of the Chat, JSON, and XML adapters (upstream `ChatAdapter.format_task_description`): each
     * line of the dedented instructions on a new line, after eight spaces.

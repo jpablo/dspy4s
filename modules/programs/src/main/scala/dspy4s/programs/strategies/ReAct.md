@@ -143,6 +143,12 @@ error appends nothing. For a ready action, ReAct's decision runs after recording
 The user supplies `ToolFunction` values. ReAct adds one more tool named `finish` and lists every available tool in the
 react predictor's instructions, including each tool's description and argument schema when available.
 
+The instructions are the upstream text of `ReAct.__init__`. Each tool has the line `(n) <name>, whose description is
+<desc>...</desc>. It takes arguments {...}.` (upstream `Tool.__str__`). A tool with no description has the line
+`(n) <name>. It takes arguments {...}.`. The arguments are JSON text: the `properties` of `ToolFunction.inputSchema`
+when the tool has one, else one `{"type": ...}` for each entry of `argSchema`. The field `next_tool_name` has the tool
+names as enum values, and `next_tool_args` is a `dict` field.
+
 The model does **not** use provider-native function calling here. It emits the ordinary signature fields
 `next_tool_name` and `next_tool_args`. ReAct resolves that name and invokes the corresponding `ToolFunction` locally.
 
@@ -189,20 +195,35 @@ object WeatherAgent:
     }
 ```
 
-An idealized run for `"What's the weather in Tokyo?"` looks like this:
+An idealized run for `"What's the weather in Tokyo?"` gives the trajectory below. The trajectory is the user message
+content of the adapter of the run for the signature `thought_0, tool_name_0, tool_args_0, observation_0, ... -> x`
+(upstream `ReAct._format_trajectory`). This example uses the default `ChatAdapter`. The tool arguments are JSON text.
+An empty trajectory is an empty text.
 
 ```text
-## Step 1
-thought: I need current weather data.
-tool_name: get_weather
-tool_args: {"city": Tokyo}
-observation: The weather in Tokyo is sunny and 25°C
+[[ ## thought_0 ## ]]
+I need current weather data.
 
-## Step 2
-thought: I have enough information to answer.
-tool_name: finish
-tool_args: {}
-observation: Completed.
+[[ ## tool_name_0 ## ]]
+get_weather
+
+[[ ## tool_args_0 ## ]]
+{"city": "Tokyo"}
+
+[[ ## observation_0 ## ]]
+The weather in Tokyo is sunny and 25°C
+
+[[ ## thought_1 ## ]]
+I have enough information to answer.
+
+[[ ## tool_name_1 ## ]]
+finish
+
+[[ ## tool_args_1 ## ]]
+{}
+
+[[ ## observation_1 ## ]]
+Completed.
 ```
 
 The extractor then sees the original question and this trajectory and produces something like:
@@ -223,7 +244,7 @@ prediction machinery.
 | Situation | Behavior |
 |---|---|
 | Unknown tool name | Append an `Execution error: tool ... does not exist` observation and continue |
-| Tool returns an error | Append an error observation and continue |
+| Tool returns an error | Append the observation `Execution error in <name>: <message>` and continue |
 | Empty tool name | Append `No tool was selected.` and run the extractor |
 | Model selects `finish` | Append the finish entry and run the extractor |
 | `maxIterations` reached | Run the extractor over the trajectory gathered so far |

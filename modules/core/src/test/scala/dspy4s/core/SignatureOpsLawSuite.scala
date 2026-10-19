@@ -62,6 +62,9 @@ class SignatureOpsLawSuite extends munit.ScalaCheckSuite:
   /** Execute a stated field-cohort equation under `sameElements`. */
   private def holdsFields(eq: IsEq[Vector[FieldSpec]]): Boolean = eq.lhs.sameElements(eq.rhs)
 
+  /** Execute a stated equation of the instructions text. */
+  private def holdsText(eq: IsEq[String]): Boolean = eq.lhs == eq.rhs
+
   // Each property runs the corresponding @Law statement from SignatureOps.laws over generated inputs.
 
   property("L1a prependOutput preserves the inputs") {
@@ -93,6 +96,15 @@ class SignatureOpsLawSuite extends munit.ScalaCheckSuite:
   }
   property("L6 withInstructions: the last write wins") {
     Prop.forAll(genLayout, genInstr, genInstr)((s, a, b) => holdsLayout(laws.instructionsLastWriteWins(s, a, b)))
+  }
+  property("L7a prependOutput keeps the effective instructions") {
+    Prop.forAll(genLayout, genOutField)((s, f) => holdsText(laws.prependOutputKeepsInstructions(s, f)))
+  }
+  property("L7b appendInput keeps the effective instructions") {
+    Prop.forAll(genLayout, genInField)((s, g) => holdsText(laws.appendInputKeepsInstructions(s, g)))
+  }
+  property("L7c replaceOutputs keeps the effective instructions") {
+    Prop.forAll(genLayout, genOutFields)((s, fs) => holdsText(laws.replaceOutputsKeepsInstructions(s, fs)))
   }
 
   // ── The submonoids as explicit Monoid instances (laws inherited from the Monoid trait, run observationally) ──

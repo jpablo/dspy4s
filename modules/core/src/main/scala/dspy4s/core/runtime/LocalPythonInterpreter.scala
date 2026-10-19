@@ -448,19 +448,31 @@ final class LocalPythonInterpreter(
 object LocalPythonInterpreter:
 
   /** A factory for `RLM` (`RuntimeContext.interpreterFactory`): a new interpreter for each call, with the tools and the
-    * output fields of the call. An empty list of output fields gives a `SUBMIT` with one value.
+    * output fields of the call. An empty list of output fields gives a `SUBMIT` with one value. The factory has the
+    * [[ExecutionInstructions]] of this interpreter.
     */
   def factory(
       executionTimeout: Option[FiniteDuration] = None,
       python          : String                 = "python3"
   ): ReplInterpreterFactory =
-    (tools, outputFields) =>
-      LocalPythonInterpreter(
-        tools = tools,
-        outputFields = Option.when(outputFields.nonEmpty)(outputFields),
-        executionTimeout = executionTimeout,
-        python = python
-      )
+    new ReplInterpreterFactory:
+      override def apply(tools: Vector[SandboxTool], outputFields: Vector[SandboxOutputField]): ReplCodeInterpreter =
+        LocalPythonInterpreter(
+          tools = tools,
+          outputFields = Option.when(outputFields.nonEmpty)(outputFields),
+          executionTimeout = executionTimeout,
+          python = python
+        )
+
+      override val executionInstructions: String = ExecutionInstructions
+
+  /** The text that tells the model how the code of this interpreter runs (upgrade item I7, upstream
+    * `LocalInterpreter.execution_instructions` in `dspy/primitives/local_interpreter.py`).
+    */
+  val ExecutionInstructions: String =
+    "Code runs as Python in a persistent local subprocess. State, imports, functions, and JSON-compatible " +
+      "variables persist for this session. Host tools and SUBMIT are available as global functions. All threads " +
+      "must finish before each code execution returns; use context-managed executors for parallel work."
 
   /** The time limit for the `ready` message of the worker (upstream `start`). */
   private val StartupTimeout: FiniteDuration = 10.seconds

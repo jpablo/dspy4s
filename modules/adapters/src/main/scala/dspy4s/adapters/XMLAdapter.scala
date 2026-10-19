@@ -57,6 +57,10 @@ final case class XMLAdapter(
   override def streamingState(layout: SignatureLayout): Option[AdapterStreamingState] =
     Some(new XmlStreamingState(layout.outputFields))
 
+  /** The tag form of the input fields, with no output reminder (upstream `XMLAdapter.format_user_message_content`). */
+  override def formatUserMessageContent(layout: SignatureLayout, values: DynamicValue.Record): String =
+    Turns.user(layout, values, mainRequest = false)
+
   override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
     // The plain-text fallback only applies when the reply is not an XML document at all (the model ignored the
     // format). Falling back on ANY structured failure would mask real errors: a present-but-unfillable field

@@ -50,7 +50,7 @@ class GepaReActTraceSuite extends FunSuite:
       val text =
         if !ask.contains("`[[ ## next_thought ## ]]`") then
           "[[ ## reasoning ## ]]\nThe search gave the capital.\n\n[[ ## answer ## ]]\nBrussels\n\n[[ ## completed ## ]]"
-        else if ask.contains("observation: Brussels") then step("I have the answer.", "finish", "{}")
+        else if ask.contains("[[ ## observation_0 ## ]]\nBrussels") then step("I have the answer.", "finish", "{}")
         else step("I look it up.", "search", """{"query": "capital of Belgium"}""")
       Right(LmResponse(outputs = Vector(LmOutput(text = text))))
 

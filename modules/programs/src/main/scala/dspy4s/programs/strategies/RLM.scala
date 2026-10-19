@@ -1,21 +1,26 @@
 package dspy4s.programs.strategies
 
 import dspy4s.programs.{IterationLimit, LlmCallLimit, OutputCharLimit}
+import dspy4s.adapters.internal.ProgramPromptText
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.ReplCodeInterpreter
 import dspy4s.core.contracts.ReplInterpreterFactory
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.SandboxOutputField
 import dspy4s.core.contracts.SandboxTool
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.runtime.DenoPyodideInterpreter
 import dspy4s.core.runtime.PythonNames
+import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.contracts.Prediction
+import dspy4s.programs.internal.ToolText
 import dspy4s.signatures.{Shape, Signature}
 import zio.blocks.schema.DynamicValue
 
@@ -38,6 +43,8 @@ import zio.blocks.schema.DynamicValue
   *   - Upstream's `SandboxSerializable` custom-serialization path (bespoke setup/assignment code per value) is not
   *     ported — inputs are plain `DynamicValue`s injected by the interpreter.
   *   - The async path is omitted.
+  *   - The action prompt has no sub-agent text (upstream `SUB_AGENT_INSTRUCTIONS`): the port has no sandbox `dspy`
+  *     facade (upgrade item P8). The interpreter rules hold the execution text of the factory only (I7).
   *
   * @param baseSignature
   *   the task signature; inputs become REPL variables, outputs the SUBMIT fields
@@ -68,7 +75,8 @@ import zio.blocks.schema.DynamicValue
   * @param interpreterFactory
   *   builds the per-forward REPL from (tools, output fields). `None` selects the factory of the runtime context
   *   (`RuntimeContext.interpreterFactory`), and a fresh [[DenoPyodideInterpreter]] when the context has none. RLM
-  *   closes what the factory builds after each forward.
+  *   closes what the factory builds after each forward. The action prompt shows the
+  *   [[ReplInterpreterFactory.executionInstructions]] of the factory of each call.
   */
 final case class RLM[I, O](
     baseSignature     : Signature[I, O],
@@ -97,19 +105,25 @@ final case class RLM[I, O](
   private val baseLayout: SignatureLayout      = baseSignature.layout
   private val outputFieldNames: Vector[String] = baseLayout.outputFields.map(_.name)
 
+  /** The execution text of the factory that RLM resolves at construction: the factory of the program, then the factory
+    * of the ambient runtime context, then [[RLM.defaultInterpreterFactory]] (upstream `_build_signatures`). The action
+    * instructions hold its interpreter rules. A call on a factory with a different text changes these rules for that
+    * call (see [[actionPredictFor]]).
+    */
+  private val initialExecutionInstructions: String =
+    RLM.resolveInterpreterFactory(interpreterFactory)(using RuntimeEnvironment.current).executionInstructions
+
+  private val initialInterpreterRules: String = RLMReplProtocol.interpreterRules(initialExecutionInstructions)
+
   /** Per-iteration action signature: `variables_info, repl_history, iteration -> reasoning, code`, instructed with the
     * REPL protocol (upstream's `ACTION_INSTRUCTIONS_TEMPLATE` + user-tool docs).
     */
   val actionSignature: SignatureLayout = baseLayout
     .withInputFields(Vector(
-      FieldSpec(
-        "variables_info",
-        typeRef = TypeRef.string,
-        description = Some("Metadata about the variables available in the REPL")
-      ),
+      RLMModel.variablesInfoField,
       FieldSpec(
         "repl_history",
-        typeRef = TypeRef.string,
+        typeRef = RLMModel.ReplHistoryType,
         description = Some("Previous REPL code executions and their outputs")
       ),
       FieldSpec(
@@ -124,18 +138,14 @@ final case class RLM[I, O](
   /** Extract-fallback signature: `variables_info, repl_history -> <base outputs>`. */
   val extractSignature: SignatureLayout = baseLayout
     .withInputFields(Vector(
-      FieldSpec(
-        "variables_info",
-        typeRef = TypeRef.string,
-        description = Some("Metadata about the variables available in the REPL")
-      ),
+      RLMModel.variablesInfoField,
       FieldSpec(
         "repl_history",
-        typeRef = TypeRef.string,
+        typeRef = RLMModel.ReplHistoryType,
         description = Some("Your REPL interactions so far")
       )
     ))
-    .withInstructions(Some(buildExtractInstructions))
+    .withInstructions(Some(RLMReplProtocol.extractInstructions(baseLayout.effectiveInstructions)))
 
   /** The per-iteration action predict (addressable + tunable, like ReAct's `reactPredict`) — a
     * `Predict[ActionInputs, ActionStep]`: the action signature's I/O is fully synthetic (base inputs reach the LM only
@@ -164,31 +174,47 @@ final case class RLM[I, O](
     name = Some(extractProgramName)
   ))
 
+  /** The action instructions (upstream `RLM._build_signatures`): the effective instructions of the base signature, the
+    * template with the interpreter rules of the factory of the construction, and the docs of the user tools. Each
+    * output field is `- ` and its placeholder in the structure of the adapters (upstream `translate_field_type`).
+    */
   private def buildActionInstructions: String =
     val inputs           = baseLayout.inputFields.map(f => s"`${f.name}`").mkString(", ")
     val finalOutputNames = outputFieldNames.mkString(", ")
-    val outputFields     = baseLayout.outputFields.map { f =>
-      val desc = f.description.filterNot(_.startsWith("${")).fold("")(d => s": $d")
-      s"- ${f.name} (${f.typeRef.repr})$desc"
-    }.mkString("\n")
-    val taskInstructions = baseLayout.instructions.fold("")(_ + "\n\n")
+    val outputSchema     = baseSignature.outputShape.jsonSchemaString
+    val outputFields     =
+      baseLayout.outputFields.map(f => s"- ${ProgramPromptText.outputPlaceholder(f, outputSchema)}").mkString("\n")
+    val taskInstructions = Option(baseLayout.effectiveInstructions).filter(_.nonEmpty).fold("")(_ + "\n\n")
     val toolDocs         =
       if tools.isEmpty then ""
       else
         val lines = tools.map { tool =>
-          val params = tool.argSchema.map { case (name, typeRef) => s"$name: ${typeRef.repr}" }.mkString(", ")
-          val desc   = (if tool.description.nonEmpty then tool.description else "No description").replace("\n", "  ")
-          s"- `${tool.name}($params)` - $desc"
+          val desc = (if tool.description.nonEmpty then tool.description else "No description").replace("\n", "  ")
+          s"- `${tool.name}(${ToolText.parameters(tool)})` - $desc"
         }
-        "\n\nAdditional tools available (use these instead of standard library equivalents):\n" + lines.mkString("\n")
-    taskInstructions + RLM.actionInstructionsTemplate(inputs, outputFields, finalOutputNames, maxLlmCalls) + toolDocs
-
-  private def buildExtractInstructions: String =
-    val taskInstructions = baseLayout.instructions
-      .fold("")(t => s"The trajectory was generated with the following objective: \n$t\n\n")
+        "\nAdditional tools available (use these instead of standard library equivalents):\n" + lines.mkString("\n")
     taskInstructions +
-      "Based on the REPL trajectory, extract the final outputs now.\n\n" +
-      "Review your trajectory to see what information you gathered and what values you computed, then provide the final outputs."
+      RLM.actionInstructionsTemplate(inputs, outputFields, finalOutputNames, maxLlmCalls, initialInterpreterRules) +
+      toolDocs
+
+  /** The action predict for a call on `factory` (upstream `_action_signature_for_current_factory`). A factory with the
+    * execution text of the construction gives [[actionPredict]] with no change, so the instructions of an optimizer
+    * stay as they are. For a factory with another text, the predict has the interpreter rules of that text: they
+    * replace the first copy of the rules of the construction in the instructions, or they come at the end when an
+    * optimizer removed those rules. The other parts of the instructions stay.
+    */
+  private[programs] def actionPredictFor(factory: RLM.InterpreterFactory): Predict[RLM.ActionInputs, RLM.ActionStep] =
+    val executionInstructions = factory.executionInstructions
+    if executionInstructions == initialExecutionInstructions then actionPredict
+    else
+      val current = actionPredict.signature.layout.effectiveInstructions
+      val rules   = RLMReplProtocol.interpreterRules(executionInstructions)
+      val start   = if initialInterpreterRules.isEmpty then -1 else current.indexOf(initialInterpreterRules)
+      val updated =
+        if start >= 0 then
+          current.substring(0, start) + rules + current.substring(start + initialInterpreterRules.length)
+        else current + rules
+      actionPredict.copy(signature = actionPredict.signature.withInstructions(Some(updated)))
 
   override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.typed(baseSignature.inputShape)
 
@@ -225,9 +251,18 @@ object RLM:
   /** Builds the per-forward REPL from the sandbox tools and the schema-validated SUBMIT output fields. */
   type InterpreterFactory = ReplInterpreterFactory
 
-  /** Fresh sandboxed [[DenoPyodideInterpreter]] per forward (closed by RLM afterwards) — upstream's default. */
-  val defaultInterpreterFactory: InterpreterFactory =
-    (tools, outputs) => new DenoPyodideInterpreter(tools = tools, outputFields = outputs)
+  /** Fresh sandboxed [[DenoPyodideInterpreter]] per forward (closed by RLM afterwards) — upstream's default. Its
+    * execution text is the text of upstream `PythonInterpreter.execution_instructions`
+    * (`dspy/primitives/python_interpreter.py`, upgrade item I7).
+    */
+  val defaultInterpreterFactory: InterpreterFactory = new InterpreterFactory:
+    override def apply(tools: Vector[SandboxTool], outputs: Vector[SandboxOutputField]): ReplCodeInterpreter =
+      new DenoPyodideInterpreter(tools = tools, outputFields = outputs)
+
+    override val executionInstructions: String =
+      "Python runs in Pyodide/WebAssembly. State persists across executions, but subprocesses and native " +
+        "extensions are unavailable. Python standard libraries such as re, json, collections, and math are " +
+        "available. Host filesystem, environment, and network access require explicit permission."
 
   /** The factory for the next interpreter (upstream `resolve_interpreter_factory`): the factory of the program, then
     * the factory of the runtime context, then [[defaultInterpreterFactory]]. `RLMExecution` calls this for each
@@ -282,9 +317,10 @@ object RLM:
       inputs          : String,
       outputFields    : String,
       finalOutputNames: String,
-      maxLlmCalls     : LlmCallLimit
+      maxLlmCalls     : LlmCallLimit,
+      interpreterRules: String
   ): String =
-    RLMReplProtocol.actionInstructionsTemplate(inputs, outputFields, finalOutputNames, maxLlmCalls)
+    RLMReplProtocol.actionInstructionsTemplate(inputs, outputFields, finalOutputNames, maxLlmCalls, interpreterRules)
 
   /** Upstream `REPLHistory.format`. */
   private[programs] def renderHistory(entries: Vector[ReplEntry], maxOutputChars: OutputCharLimit): String =

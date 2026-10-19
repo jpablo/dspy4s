@@ -23,35 +23,39 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
       field.name -> DynamicValues.recordGet(inputs, field.name).getOrElse(DynamicValue.Null)
     }.toMap
     // The variable metadata is fixed for the whole forward, so its prompt rendering is computed once here rather
-    // than per iteration.
+    // than per iteration. The prompt shows the list as a numbered list (upstream `variables_info`).
     val variablesInfo = baseLayout.inputFields.map { field =>
       RLM.ReplVariable.fromValue(field.name, inputVars(field.name), Some(field)).format
-    }.mkString("\n\n")
+    }
 
     val sandboxTools = RLM.makeLlmTools(rlm.maxLlmCalls, rlm.subLm, ctx) ++
       SandboxToolBridge.fromToolFunctions(rlm.tools)
     val outputFields = baseLayout.outputFields.map { field =>
       SandboxOutputField(field.name, field.typeRef.pythonTypeName)
     }
-    val factory           = RLM.resolveInterpreterFactory(rlm.interpreterFactory)
+    val factory = RLM.resolveInterpreterFactory(rlm.interpreterFactory)
+    // The action predict of this call has the execution text of the factory of this call.
+    val actionPredict     = rlm.actionPredictFor(factory)
     val interpreter       = factory(sandboxTools, outputFields)
     val actionInterpreter = replActionInterpreter(interpreter, inputVars)
-    try iterate(call, actionInterpreter, variablesInfo)
+    try iterate(call, actionPredict, actionInterpreter, variablesInfo)
     finally interpreter.close()
 
   private def iterate(
       call             : ProgramCall[I],
+      actionPredict    : Predict[RLM.ActionInputs, RLM.ActionStep],
       actionInterpreter: ActionInterpreter[RLM.ReplAction, RLM.ReplExecution],
-      variablesInfo    : String
+      variablesInfo    : Vector[String]
   )(using RuntimeContext): Either[DspyError, Prediction[O]] =
     AgentLoop.run[Vector[RLM.ReplEntry], Prediction[O]](Vector.empty, 0, rlm.maxIterations)(
       onExhausted = history => extractFallback(call, variablesInfo, history)
-    )(rlmStep(call, actionInterpreter, variablesInfo))
+    )(rlmStep(call, actionPredict, actionInterpreter, variablesInfo))
 
   private def rlmStep(
       call             : ProgramCall[I],
+      actionPredict    : Predict[RLM.ActionInputs, RLM.ActionStep],
       actionInterpreter: ActionInterpreter[RLM.ReplAction, RLM.ReplExecution],
-      variablesInfo    : String
+      variablesInfo    : Vector[String]
   )(using
       RuntimeContext
   ): (Vector[RLM.ReplEntry], Int) => Either[DspyError, AgentLoop.Step[Vector[RLM.ReplEntry], Prediction[O]]] =
@@ -61,7 +65,7 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
         repl_history = RLM.renderHistory(history, rlm.maxOutputChars),
         iteration = s"${iteration + 1}/${rlm.maxIterations}"
       )
-      rlm.actionPredict(call.mapInput(_ => actionInputs)).flatMap { action =>
+      actionPredict(call.mapInput(_ => actionInputs)).flatMap { action =>
         val reasoning = action.output.reasoning
         val rawCode   = action.output.code
         if rlm.verbose then
@@ -142,7 +146,7 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
 
   private def extractFallback(
       call         : ProgramCall[I],
-      variablesInfo: String,
+      variablesInfo: Vector[String],
       history      : Vector[RLM.ReplEntry]
   )(using RuntimeContext): Either[DspyError, Prediction[O]] =
     RuntimeEnvironment.warn("RLM", "reached max iterations, using extract to get final output")
