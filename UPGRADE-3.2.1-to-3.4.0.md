@@ -750,6 +750,33 @@ The full suite passes: 1,814 tests, 0 failures, 6 live tests skipped.
   `ChainOfThoughtSuite`, `ReActSuite`, and `RefinePerModuleAdviceSuite`. `ReActSuite`, `GepaReActTraceSuite`, and
   `InterpretedTrajectoryAgentLawSuite` changed for the new trajectory text.
 
+### Batch 28 (2026-10-18): the decision types (A8, part 1)
+
+The full suite passes: 1,839 tests, 0 failures, 6 live tests skipped.
+
+- **The values** (package `dspy4s.core.decisions`, experimental). `Noul`, `Score[L]`, and `Choice[O]` hold the
+  value, the confidence, and the evidence of a decision output. `L` and `O` are Scala enums: their cases are the
+  levels of a Score, in order, and the options of a Choice (decision 1). `Score.levelIn(L.values)` gives the level as
+  a case of the enum.
+- **The rules.** `DecisionPlan` holds the rules of upstream `DecisionState`: the decision outputs of a layout, the
+  defaults, the validation of the settings, the criteria, the question for the backend, the evidence of an answer, and
+  the decoding (the threshold of a Noul, the cuts of a Score, the weights of a Choice). `DecisionSettings` holds the
+  explicit settings of one output, with the JSON form of the upstream `fields` entry. The plan is pure: the next
+  batch connects it to `Predict`.
+- **The fields.** `TypeRef.noul`, `score`, and `choice` mark a rich decision output, with the levels or the options
+  in `enumValues`. A typed field of type `Noul`, `Score[L]`, or `Choice[O]` gets them from its schema: the schema of
+  `Score[L]` carries the case names of `L` as `Modifier.config` entries. A `Boolean` field, and a field of a Scala
+  enum, can be a native decision output.
+- **Decided by Claude, review.**
+  - An optional field is not a decision output, as upstream `decision_type` gives `None` for `Optional[...]`.
+  - The JSON form writes the weights in label order, because a Scala `Map` has no order.
+  - The evidence of a Score answer accepts only the string keys `"0"` to `"N-1"` of a JSON object.
+  - `Shape.StructuralSchema` is a new public type, so that `Signature.derived` gives a Score field its levels.
+- **Tests.** `DecisionPlanSuite` (20 tests: the cases of upstream `test_decision_parameters.py`) and
+  `DecisionFieldSuite` (6 tests).
+- **A defect found, for the next fix.** A field with a default value (for example `count: Int = 3`) gets the type
+  `json`, so the prompt shows it as a `dict`. `DefaultFieldTypeRefSuite` reproduces it.
+
 Open points from batch 1, for the owner:
 
 - The random search rejects an explicit empty validation set. Upstream uses the trainset.
@@ -812,8 +839,28 @@ Open points from batch 1, for the owner:
 - [x] **D5. Optional output fields.** `FieldSpec` has no optional flag, so the adapters cannot apply the upstream
       rule (G-29). **Decided 2026-10-13:** `FieldSpec.optional`, set by `Option[T]` and by `Optional[T]`; a missing
       output takes its default, else a null when optional, else a parse error.
-- [ ] **D6. Experimental tracks.** Confirm that decision types, ReAnchor, `dspy.Flex`, and ReActV2 wait (G-49,
+- [x] **D6. Experimental tracks.** Confirm that decision types, ReAnchor, `dspy.Flex`, and ReActV2 wait (G-49,
       G-19).
+      **Decided 2026-10-18: port three of the four.** The decision types (A8) serve TypeSafe Jev, a System One model
+      that gives probabilities and no text; the owner wants them, with a Jev client and ReAnchor (O6). ReActV2 (P10)
+      comes after them: upstream makes it the implementation of `dspy.ReAct` in 3.5. `dspy.Flex` (P9) waits, because
+      it needs P8. The seven design decisions of the decision types (2026-10-18):
+      1. A typed field `Noul`, `Score[L]`, or `Choice[O]`, where `L` and `O` are Scala enums, gives the answer space. A
+         native `Boolean` or enum output opts in with a settings entry. The layout API has `TypeRef.noul`, `score`,
+         and `choice`, with the options in `enumValues`, for option sets from data.
+      2. The result values `Noul`, `Score[L]`, and `Choice[O]` are in the package `dspy4s.core.decisions`, marked
+         experimental in the scaladoc.
+      3. An immutable map of `DecisionSettings` on `Predict` and `DynamicPredict` holds the threshold, cuts, weights,
+         instructions, and criteria. It is validated as upstream, saved with the program, and an optimizable
+         parameter.
+      4. `TypeSafeModel` is a `LanguageModel` in the LM module that accepts only decision requests, with a capability
+         flag. It is an HTTP client for `POST /v1/systemone` with a Bearer token (`TYPESAFE_API_KEY`), and no SDK.
+      5. A generative model gets the evidence form of upstream: an evidence object for each decision output, and the
+         demos as task examples in the instructions. The prompt text follows the boundary rule of D3.
+      6. ReAnchor is in the `optimize` module. A scoped recorder of the runtime logs the evidence of each call.
+      7. Scope limits as upstream: no async path; a stream with decision outputs is an error; a nested decision output
+         gives a warning and no evidence decoding; RLM decision outputs give a warning; with Jev, each output must be a
+         decision output.
 
 ## Phase 1: lm / clients
 
@@ -847,6 +894,8 @@ Open points from batch 1, for the owner:
       model output. The prompt asks for JSON text there. See "Deliberately not mirrored".
 - [x] **A7. `append_instructions` on signatures** (498760149). → G-48 (R)
 - [ ] **A8. Decision types `Noul`, `Score`, `Choice`** (e83978c08, 4c6448e03). Experimental. → G-49 (I)
+      In progress: the types and the decoder are done (batch 28). The evidence path, the Jev client, and ReAnchor
+      follow.
 
 ## Phase 3: programs
 
@@ -860,7 +909,9 @@ Open points from batch 1, for the owner:
 - [x] **P6. RLM truncation with an odd limit** (35ef21f16). → G-38 (R)
 - [x] **P7. Deprecation of `CodeAct` and `ProgramOfThought`** (99bb44bf4). dspy4s removed them (D1). → G-39 (C)
 - [ ] **P8. Sandbox `dspy` facade and sub-agents in RLM** (ba3f9198e). Large. → G-38 (I)
+      **Decided 2026-10-18: wait.**
 - [ ] **P9. `dspy.Flex`** (e4e97aae2, f70d08a5b, 573cfe707). Experimental. → G-49 (I)
+      **Decided 2026-10-18: wait** (it needs P8).
 - [ ] **P10. ReActV2 changes** (b3897e271, ca54a855a, 05728f6ad): reserved outputs, an error when the forced
       submit gives no outputs, and an async path. It is still experimental. → G-19 (R)
 
@@ -875,6 +926,7 @@ Open points from batch 1, for the owner:
 - [x] **I6. Persistent local Python REPL** (d58c3007e, 453823209). → G-36 (R)
 - [x] **I7. `execution_instructions`** (0b93fb148, 750017192). → G-35 (R) Done in batch 27.
 - [ ] **I8. `SandboxSerializable`** (ed4d479a1). → G-38 (R)
+      **Decided 2026-10-18: wait.**
 - [x] **I9. Callback events**: interpreter lifecycle (b11cfe874), optimizer compile (80553206b), and the end event
       for base exceptions (970f72900). → G-40 (C for the end event, R for the others)
 - [x] **I10. MCP**: SDK v2 (32bcd36ce) and structured results (ca0a088bd). → G-47 (R)

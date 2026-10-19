@@ -2029,7 +2029,9 @@ the `parameters` of a function. The two MCP example pages are translated. Tests:
 
 ## G-49 — Experimental upstream tracks that wait
 
-**Status:** Open (deferred, decision D6) · **Verification:** I · **Upgrade items:** A8, P9, O6
+**Status:** In progress. Decision D6 (2026-10-18): the decision types, a TypeSafe Jev client, and ReAnchor are
+ported; `dspy.Flex` waits for P8. The types and the decoder are done (batch 28, `dspy4s.core.decisions`). ·
+**Verification:** I · **Upgrade items:** A8, P9, O6
 
 - **Decision types.** `Noul`, `Score`, and `Choice` outputs, a `DecisionAdapter` that asks for evidence and decodes
   with thresholds, cuts, and weights (`dspy/adapters/decision.py:68-146`, `dspy/adapters/types/decision.py`), and the
