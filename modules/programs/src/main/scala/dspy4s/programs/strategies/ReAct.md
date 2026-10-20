@@ -245,6 +245,8 @@ prediction machinery.
 |---|---|
 | Unknown tool name | Append an `Execution error: tool ... does not exist` observation and continue |
 | Tool returns an error | Append the observation `Execution error in <name>: <message>` and continue |
+| Tool throws a non-fatal exception | Append the observation `Execution error in <name>: <ClassName>: <message>` (the class name alone when the exception has no message) and continue |
+| Tool throws a fatal error, for example an `InterruptedException` | The error goes up to the caller of the program |
 | Empty tool name | Append `No tool was selected.` and run the extractor |
 | Model selects `finish` | Append the finish entry and run the extractor |
 | `maxIterations` reached | Run the extractor over the trajectory gathered so far |
@@ -311,6 +313,8 @@ A useful reading order is:
 6. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): the bounded continue/done recursion.
 7. [`runtime/TrajectoryTruncation.scala`](../runtime/TrajectoryTruncation.scala): context-window retry behavior.
 8. [`contracts/ToolFunction.scala`](../contracts/ToolFunction.scala): the tool abstraction and method derivation.
+   [`runtime/ToolExecutor.scala`](../runtime/ToolExecutor.scala) runs one tool call and turns a non-fatal exception into
+   an error.
 9. [`ReActSuite.scala`](../../../../../test/scala/dspy4s/programs/ReActSuite.scala): executable examples of finish, limits,
    tool errors, callbacks, and truncation.
 10. [`InterpretedTrajectoryAgentLawSuite.scala`](../../../../../test/scala/dspy4s/programs/runtime/InterpretedTrajectoryAgentLawSuite.scala)
@@ -321,4 +325,5 @@ A useful reading order is:
 
 This guide describes the current dspy4s implementation. It assumes the ambient `RuntimeContext` supplies an LM and an
 adapter. `ToolFunction` execution is synchronous, and ReAct's tool selection uses signature output fields rather than
-provider-native function calling.
+provider-native function calling. For an agent that uses provider-native function calling when the model supports it,
+see the experimental [`ReActV2`](ReActV2.scala).
