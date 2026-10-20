@@ -834,8 +834,9 @@ The full suite passes: 1,904 tests, 0 failures, 6 live tests skipped.
     equal.
   - The `rolloutId` of a call changes only the cache key. Upstream passes `rollout_id` in the config, so a TypeSafe
     call with it fails with the generation-settings error.
-  - The cache key does not include the base URL. The upstream key does. The OpenAI provider of the port has the same
-    gap.
+  - The cache key of a TypeSafe call does not include the base URL. The upstream TypeSafe key does
+    (`test_cache_identity_and_controls`). The OpenAI provider matches upstream: `dspy.LM` leaves `api_base` and
+    `base_url` out of its key (`ignored_args_for_cache_key`).
   - The client has no `dump_state`, `load_state`, or `copy`, and reads the key only at construction.
 
 ### Batch 31 (2026-10-19): ReAnchor (O6) and the evidence log
