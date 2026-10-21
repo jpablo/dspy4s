@@ -174,11 +174,28 @@ private[runtime] object DiskCacheModel:
   * again as `<key>.json` and removes the `.bin` file. A legacy entry that the filter rejects, or that does not decode,
   * is a miss, and `get` removes it. `put` writes only the JSON record.
   *
+  * A response with no JSON text, for example one with tool-call arguments that are nested too deep for the stack, is
+  * not stored: `put` writes no file and does not throw (upstream `Cache.put` logs the failure and continues).
+  *
   * `size`, `clear`, and the eviction of the oldest entries count the two kinds of file.
+  *
+  * The cache keeps a count of its entries (upstream `diskcache` keeps the count in its index). The first `put` lists
+  * the directory to set the count. Each file that the cache writes or removes changes the count, so a `put` below
+  * `maxEntries` does not list the directory. When the count passes `maxEntries`, the eviction lists the directory,
+  * reads the time of each entry one time, removes the oldest entries, and sets the count again from the list. A second
+  * writer of the directory does not change the count of this cache. Thus the directory can hold more entries than
+  * `maxEntries`, until the count of this cache passes `maxEntries`.
   */
-final class DiskLmCache(directory: Path, maxEntries: CacheCapacity = CacheCapacity(200000)) extends LmCache:
+final class DiskLmCache private[runtime] (directory: Path, maxEntries: CacheCapacity, files: DiskLmCache.EntryFiles)
+    extends LmCache:
   import DiskLmCache.*
   Files.createDirectories(directory)
+
+  def this(directory: Path, maxEntries: CacheCapacity = CacheCapacity(200000)) =
+    this(directory, maxEntries, DiskLmCache.EntryFiles.system)
+
+  /** The count of the entries, or `None` before the first `put` and after `clear`. */
+  private var entryCount: Option[Int] = None
 
   override def get(request: LmRequest): Option[LmResponse] =
     val key = RequestHash.forRequest(request)
@@ -192,9 +209,10 @@ final class DiskLmCache(directory: Path, maxEntries: CacheCapacity = CacheCapaci
     val key = RequestHash.forRequest(request)
     this.synchronized {
       try
-        writeRecord(recordPath(key), response)
-        val _ = Files.deleteIfExists(legacyPath(key))
-        evictOverflow()
+        if entryCount.isEmpty then entryCount = Some(entryPaths.size)
+        if store(key, response) then
+          remove(legacyPath(key))
+          if entryCount.exists(_ > maxEntries) then evictOverflow()
       catch
         case NonFatal(_) => ()
     }
@@ -206,6 +224,7 @@ final class DiskLmCache(directory: Path, maxEntries: CacheCapacity = CacheCapaci
 
   def clear(): Unit =
     this.synchronized {
+      entryCount = None
       entryPaths.foreach(path => Files.deleteIfExists(path))
     }
 
@@ -243,30 +262,46 @@ final class DiskLmCache(directory: Path, maxEntries: CacheCapacity = CacheCapaci
         case Some(value) =>
           // When the write fails, the legacy entry stays, so that a later `get` can move it.
           try
-            writeRecord(recordPath(key), value)
-            remove(path)
+            if store(key, value) then remove(path)
           catch
             case NonFatal(_) => ()
         case None => remove(path)
       response
 
-  private def writeRecord(path: Path, response: LmResponse): Unit =
-    val bytes = DynamicJson.encodeExact(encodeResponse(response)).getBytes(StandardCharsets.UTF_8)
-    val temp  = path.resolveSibling(path.getFileName.toString + ".tmp")
-    val _     = Files.write(
-      temp,
-      bytes,
-      StandardOpenOption.CREATE,
-      StandardOpenOption.TRUNCATE_EXISTING,
-      StandardOpenOption.WRITE
-    )
-    moveIntoPlace(temp, path)
+  /** Write the JSON record of `response` for `key`, and add the record to the count when it is a new file. A response
+    * with no JSON text gives `false`, and the function writes no file. A failure of the file system throws.
+    */
+  private def store(key: String, response: LmResponse): Boolean =
+    val path    = recordPath(key)
+    val created = !Files.exists(path)
+    val written = writeRecord(path, response)
+    if written && created then changeCount(1)
+    written
 
+  private def writeRecord(path: Path, response: LmResponse): Boolean =
+    DynamicJson.encodeExactChecked(encodeResponse(response)) match
+      case Left(_)     => false
+      case Right(json) =>
+        val temp = path.resolveSibling(path.getFileName.toString + ".tmp")
+        val _    = Files.write(
+          temp,
+          json.getBytes(StandardCharsets.UTF_8),
+          StandardOpenOption.CREATE,
+          StandardOpenOption.TRUNCATE_EXISTING,
+          StandardOpenOption.WRITE
+        )
+        moveIntoPlace(temp, path)
+        true
+
+  /** Remove the file at `path`, and remove it from the count when the file was there. */
   private def remove(path: Path): Unit =
     try
-      val _ = Files.deleteIfExists(path)
+      if Files.deleteIfExists(path) then changeCount(-1)
     catch
       case NonFatal(_) => ()
+
+  private def changeCount(delta: Int): Unit =
+    entryCount = entryCount.map(count => math.max(0, count + delta))
 
   private def moveIntoPlace(temp: Path, target: Path): Unit =
     try
@@ -275,21 +310,19 @@ final class DiskLmCache(directory: Path, maxEntries: CacheCapacity = CacheCapaci
       case _: AtomicMoveNotSupportedException => val _ = Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING)
 
   private def entryPaths: Vector[Path] =
-    val stream = Files.list(directory)
-    try stream.iterator().asScala
-        .filter { path =>
-          val name = path.getFileName.toString
-          Files.isRegularFile(path) && (name.endsWith(RecordSuffix) || name.endsWith(LegacySuffix))
-        }
-        .toVector
-    finally stream.close()
+    files.list(directory)
 
+  /** List the directory, set the count from the list, and remove the oldest entries above `maxEntries`. The function
+    * reads the time of each entry one time. A file that goes away before the function reads its time is not an entry.
+    */
   private def evictOverflow(): Unit =
-    val entries = entryPaths
-      .sortBy(path => Files.getLastModifiedTime(path).toMillis)
+    val entries = entryPaths.flatMap { path =>
+      try Some(path -> files.modifiedMillis(path))
+      catch case NonFatal(_) => None
+    }
+    entryCount = Some(entries.size)
     val overflow = entries.size - maxEntries
-    if overflow > 0 then
-      entries.take(overflow).foreach(path => Files.deleteIfExists(path))
+    if overflow > 0 then entries.sortBy(_._2).take(overflow).foreach((path, _) => remove(path))
 
 object DiskLmCache:
   /** The value of the `_dspy4s_format` key of a disk record. */
@@ -298,6 +331,30 @@ object DiskLmCache:
   private val FormatKey    = "_dspy4s_format"
   private val RecordSuffix = ".json"
   private val LegacySuffix = ".bin"
+
+  /** The file operations of the count and of the eviction of the entries. A test can count them. */
+  private[runtime] trait EntryFiles:
+    /** The entry files in `directory`: each regular file with the suffix of a record or of a legacy entry. */
+    def list(directory: Path): Vector[Path]
+
+    /** The time of the last change of the file at `path`, in milliseconds. */
+    def modifiedMillis(path: Path): Long
+
+  private[runtime] object EntryFiles:
+    /** The operations of the file system. */
+    val system: EntryFiles = new EntryFiles:
+      override def list(directory: Path): Vector[Path] =
+        val stream = Files.list(directory)
+        try stream.iterator().asScala
+            .filter { path =>
+              val name = path.getFileName.toString
+              Files.isRegularFile(path) && (name.endsWith(RecordSuffix) || name.endsWith(LegacySuffix))
+            }
+            .toVector
+        finally stream.close()
+
+      override def modifiedMillis(path: Path): Long =
+        Files.getLastModifiedTime(path).toMillis
 
   /** The JSON record of a response (upstream `CallResult.dump`). */
   private def encodeResponse(response: LmResponse): DynamicValue.Record =

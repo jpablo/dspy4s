@@ -7,6 +7,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.LmErrorDetails
 import dspy4s.core.contracts.LmRateLimitError
+import dspy4s.core.contracts.LmUnexpectedError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.:=
@@ -34,6 +35,8 @@ import zio.blocks.schema.Schema
 
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
+import scala.util.Success
+import scala.util.Try
 
 private final case class ContractInput(question: String) derives Schema
 private final case class ContractOutput(answer: String) derives Schema
@@ -82,6 +85,27 @@ class StreamingWrapperContractSuite extends FunSuite:
       Left(RuntimeError("test", "the non-stream path is not used"))
 
     override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] = chunks.iterator
+
+  /** A stream model whose `stream` runs `open`. */
+  private final class Opening(open: () => Iterator[LmChunk]) extends StreamingLanguageModel:
+    override val id: String   = "opening"
+    override val mode: LmMode = LmMode.Chat
+
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      Left(RuntimeError("test", "the non-stream path is not used"))
+
+    override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] = open()
+
+  /** A stream that gives one chunk, then throws `failure` at the next read. It records its close. */
+  private final class Breaking(failure: () => Throwable) extends ClosableIterator[LmChunk]:
+    @volatile var closed          = false
+    private var sent              = false
+    override def hasNext: Boolean = true
+    override def next(): LmChunk  =
+      if sent then throw failure()
+      sent = true
+      LmChunk(text = "Hi")
+    override def close(): Unit = closed = true
 
   private final class Lines(items: Vector[String]) extends ClosableIterator[String]:
     private var index             = 0
@@ -220,4 +244,62 @@ class StreamingWrapperContractSuite extends FunSuite:
       wrapper.call(request),
       Left(ContextWindowExceededError(details = LmErrorDetails(model = Some("gpt-test"))))
     )
+  }
+
+  // ── A delegate that throws (the rule of ManagedLanguageModel, upstream `error_boundary(..., unexpected=True)`) ──
+
+  test("a delegate stream that throws during a read gives an LmUnexpectedError, and the stream closes") {
+    val source  = Breaking(() => IllegalStateException("the stream broke"))
+    val wrapper = StreamingLanguageModelWrapper(Opening(() => source), StreamingQueue[StreamEvent]())
+
+    given RuntimeContext = RuntimeEnvironment.current
+    wrapper.call(request) match
+      case Left(error: LmUnexpectedError) =>
+        assertEquals(error.message, "the stream broke")
+        assertEquals(error.details.model, Some("gpt-test"))
+      case other => fail(s"expected an LmUnexpectedError, got $other")
+    assert(source.closed, "the wrapper must close the stream of the delegate")
+  }
+
+  test("a delegate that throws when it opens the stream gives an LmUnexpectedError") {
+    val wrapper = StreamingLanguageModelWrapper(
+      Opening(() => throw IllegalStateException("no stream")),
+      StreamingQueue[StreamEvent]()
+    )
+
+    given RuntimeContext = RuntimeEnvironment.current
+    Try(wrapper.call(request)) match
+      case Success(Left(error: LmUnexpectedError)) =>
+        assertEquals(error.message, "no stream")
+        assertEquals(error.details.model, Some("gpt-test"))
+      case other => fail(s"expected an LmUnexpectedError, got $other")
+  }
+
+  test("a close of the delegate stream that throws does not change the result, as in ManagedLanguageModel") {
+    val source = new ClosableIterator[LmChunk]:
+      private var sent              = false
+      override def hasNext: Boolean = !sent
+      override def next(): LmChunk  =
+        sent = true
+        LmChunk(text = "ok", finishReason = Some("stop"))
+      override def close(): Unit = throw IllegalStateException("the close failed")
+    val wrapper = StreamingLanguageModelWrapper(Opening(() => source), StreamingQueue[StreamEvent]())
+
+    given RuntimeContext = RuntimeEnvironment.current
+    assertEquals(Try(wrapper.call(request)).map(_.map(_.outputs.map(_.text))), Success(Right(Vector("ok"))))
+  }
+
+  test("a fatal error of the delegate stream goes up to the caller, and the stream closes") {
+    val source  = Breaking(() => InterruptedException("stop"))
+    val wrapper = StreamingLanguageModelWrapper(Opening(() => source), StreamingQueue[StreamEvent]())
+
+    given RuntimeContext = RuntimeEnvironment.current
+    // `intercept` catches only non-fatal errors, so the test catches the fatal error itself.
+    val thrown =
+      try
+        val _ = wrapper.call(request)
+        None
+      catch case error: InterruptedException => Some(error.getMessage)
+    assertEquals(thrown, Some("stop"))
+    assert(source.closed, "the wrapper must close the stream of the delegate")
   }

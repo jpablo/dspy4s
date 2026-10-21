@@ -7,7 +7,6 @@ import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.LmUsage
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.runtime.ActivePredictContext
 import dspy4s.core.runtime.StreamProgress
 import dspy4s.lm.contracts.ForwardingLanguageModel
@@ -18,6 +17,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.lm.contracts.StreamingLanguageModel
+import dspy4s.lm.runtime.ManagedLanguageModel
 import dspy4s.lm.runtime.ToolCallAssembler
 import dspy4s.streaming.contracts.StreamEvent
 import dspy4s.streaming.contracts.StreamListener
@@ -75,14 +75,19 @@ final class StreamingLanguageModelWrapper private (
 
   /** Stream the call, give the tokens to the listeners, and assemble the response. A [[LmChunk.cached]] chunk gives its
     * response as is, and no token goes to a listener (upstream: a cache hit sends no stream chunk).
+    *
+    * A non-fatal exception, for example of the delegate when it opens or reads the stream, gives an
+    * [[dspy4s.core.contracts.LmUnexpectedError]], as in [[ManagedLanguageModel]] (upstream
+    * `error_boundary(..., unexpected=True)` in `dspy/clients/errors.py`). A fatal error goes up to the caller.
     */
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
     val ctx                        = activeContext()
     val text                       = new StringBuilder
     var lastUsage: Option[LmUsage] = None
     val toolDeltas                 = mutable.ArrayBuffer.empty[LmToolCallDelta]
-    val chunks                     = delegate.stream(request)
+    var chunks: Iterator[LmChunk]  = Iterator.empty
     try
+      chunks = delegate.stream(request)
       // Providers reify transport/HTTP failures into a terminal chunk with `finishReason = "error"`, the
       // message under `raw`, and the typed failure in `error` (see OpenAiLanguageModel.stream). Surface that as
       // a Left instead of folding it into a successful empty response the adapter would then misreport as a
@@ -114,30 +119,47 @@ final class StreamingLanguageModelWrapper private (
             )
           )
     catch
-      case NonFatal(error) =>
-        Left(RuntimeError("streaming_lm", Option(error.getMessage).getOrElse(error.getClass.getSimpleName)))
+      case NonFatal(error) => Left(ManagedLanguageModel.unexpected(error, request))
     finally
       // The delegate's iterator self-closes only on exhaustion; an exception mid-stream (from emit/receive)
-      // would otherwise abandon the live HTTP SSE connection until GC finalization.
+      // would otherwise abandon the live HTTP SSE connection until GC finalization. A non-fatal exception of the
+      // close does not change the result, as in ManagedLanguageModel.
       chunks match
-        case closable: ClosableIterator[?] => closable.close()
-        case _                             => ()
+        case closable: ClosableIterator[?] =>
+          try closable.close()
+          catch case NonFatal(_) => ()
+        case _ => ()
 
-  /** The chunks of the delegate. Each chunk goes to the listeners, except a [[LmChunk.cached]] chunk. A close of the
-    * result closes the stream of the delegate, so a caller that stops early releases the connection.
+  /** The chunks of the delegate. Each chunk goes to the listeners, except a [[LmChunk.cached]] chunk and a failure
+    * chunk, as in [[call]]. At the end of the stream, when `hasNext` gives `false`, the wrapper flushes the stream
+    * state of the adapter, as [[call]] does: the listeners get the held end of a field and the value of the
+    * single-output fallback (upstream `StreamListener.flush`). A stream with a cached chunk or a failure chunk gets no
+    * flush, as in [[call]].
+    *
+    * A close of the result closes the stream of the delegate, so a caller that stops early releases the connection. A
+    * close before the end of the stream gives no flush.
     */
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
     val ctx    = activeContext()
     val chunks = delegate.stream(request)
     new ClosableIterator[LmChunk]:
-      override def hasNext: Boolean = chunks.hasNext
+      private var flushPending = true
+
+      override def hasNext: Boolean =
+        val more = chunks.hasNext
+        if !more && flushPending then
+          flushPending = false
+          flush(ctx)
+        more
 
       override def next(): LmChunk =
         val chunk = chunks.next()
-        if chunk.cachedResponse.isEmpty then emit(ctx, chunk)
+        if chunk.cachedResponse.isDefined || chunk.reportedFailure.isDefined then flushPending = false
+        else emit(ctx, chunk)
         chunk
 
       override def close(): Unit =
+        flushPending = false
         chunks match
           case closable: ClosableIterator[?] => closable.close()
           case _                             => ()

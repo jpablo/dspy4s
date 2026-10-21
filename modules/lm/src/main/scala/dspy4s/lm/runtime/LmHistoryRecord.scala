@@ -28,7 +28,8 @@ import java.util.UUID
   *   - `messages`: one object for each message of the request, with `role` (lower case) and `content` (the text, else
   *     an empty string), then `tool_calls` (when the message has tool calls), `tool_call_id` and `name` (when the
   *     message has them), and `parts` (a list of `{"kind", "payload"}`, when the message has parts);
-  *   - `kwargs`: the options of the request;
+  *   - `kwargs`: the options of the request, with no top-level key that starts with `api_`, for example `api_key`
+  *     (upstream `finalize`, and `BaseLM._record_response` in `dspy/clients/base_lm.py`). A nested key stays;
   *   - `outputs`: one object for each output, with `text` and `tool_calls`;
   *   - `usage`: `prompt_tokens`, `completion_tokens`, `total_tokens`, then each extra under its wire name, or `null`;
   *   - `cost`: the estimated cost in US dollars, or `null` when the estimate is unknown (decision L10);
@@ -85,7 +86,7 @@ object LmHistoryRecord:
       "model_type" := lowerCase(request.mode.toString),
       "cache_hit"  := cacheHit,
       "messages"   -> sequence(request.messages.map(message)),
-      "kwargs"     -> request.options
+      "kwargs"     -> DynamicValues.recordFilterKeys(request.options, key => !key.startsWith("api_"))
     )
 
   private def message(value: Message): DynamicValue =

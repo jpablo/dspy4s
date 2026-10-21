@@ -1,10 +1,11 @@
 package dspy4s.lm.providers
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, ParseError}
+import dspy4s.core.contracts.{DspyError, DynamicValues, ParseError, ValidationError}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, Schema}
 
 import java.nio.charset.StandardCharsets
+import scala.util.control.NonFatal
 
 /** JSON (de)serialization and navigation for the provider layer, on `DynamicValue` — the principled replacement for the
   * hand-rolled `Any`-based `JsonCodec`. Serialization delegates to zio-blocks' total `DynamicValue` JSON codec;
@@ -23,6 +24,17 @@ private[lm] object DynamicJson:
     */
   def encodeExact(value: DynamicValue): String =
     new String(codec.encode(value), StandardCharsets.UTF_8)
+
+  /** Render a value like [[encodeExact]], or give a `ValidationError` when the value has no JSON text. The codec is
+    * recursive, so a value that is nested too deep for the stack of the thread gives the error, as in [[decode]]. A
+    * value that the codec rejects, for example a NaN, gives the error too.
+    */
+  def encodeExactChecked(value: DynamicValue): Either[DspyError, String] =
+    try Right(encodeExact(value))
+    catch
+      case _: StackOverflowError => Left(ValidationError("The value has no JSON text: the value is nested too deep"))
+      case NonFatal(error)       =>
+        Left(ValidationError(s"The value has no JSON text: ${Option(error.getMessage).getOrElse(error.toString)}"))
 
   /** Parse a JSON string. Text that is not JSON gives a `ParseError`. The codec is recursive, so a value that is nested
     * too deep for the stack of the thread gives a `ParseError` too: a body from the network must not stop the caller

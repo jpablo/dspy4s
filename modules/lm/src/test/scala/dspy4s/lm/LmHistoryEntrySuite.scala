@@ -200,6 +200,33 @@ class LmHistoryEntrySuite extends FunSuite:
     assertEquals(value(entry, "error_message"), "bad key")
   }
 
+  test("the kwargs of an entry have no top-level key that starts with api_ (upstream finalize)") {
+    given RuntimeContext = RuntimeEnvironment.current
+    val withSecrets      = request.copy(options =
+      DynamicValues.record(
+        "api_key"     := "sk-secret",
+        "temperature" := 0.5,
+        "api_base"    := "https://example.test/v1",
+        "extra_body"  -> DynamicValues.record("api_version" := "2024-01-01")
+      )
+    )
+    assert(ManagedLanguageModel(delegate = Fixed(Right(response))).call(withSecrets).isRight)
+    assert(ManagedLanguageModel(delegate = Fixed(Left(LmAuthError("bad key")))).call(withSecrets).isLeft)
+    val entries = lmEntries
+    assertEquals(entries.size, 2)
+    entries.foreach { entry =>
+      val kwargs = DynamicValues.recordGet(entry.payload, "kwargs") match
+        case Some(record: DynamicValue.Record) => record
+        case other                             => fail(s"kwargs is not an object: $other")
+      // Upstream removes only the top-level keys, so a nested key that starts with `api_` stays.
+      assertEquals(kwargs.fields.toVector.map(_._1), Vector("temperature", "extra_body"))
+      assertEquals(
+        value(entry, "kwargs"),
+        Map("temperature" -> BigDecimal(0.5), "extra_body" -> Map("api_version" -> "2024-01-01"))
+      )
+    }
+  }
+
   test("the entry of a streamed call has the assembled outputs and the usage of the chunks") {
     given RuntimeContext = RuntimeEnvironment.current
     val chunks           = Vector(

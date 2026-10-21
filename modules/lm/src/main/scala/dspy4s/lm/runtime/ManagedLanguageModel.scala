@@ -441,9 +441,10 @@ object ManagedLanguageModel:
 
   /** The error of a non-fatal exception of the delegate (upstream `wrap_error`: `LMUnexpectedError(str(exc))` with the
     * model). The message is the message of the exception, or the simple class name when the message is empty or null.
-    * An anonymous class has no simple name. For an anonymous class, the name is the full class name.
+    * An anonymous class has no simple name. For an anonymous class, the name is the full class name. The stream wrapper
+    * of `streamify` gives the same error for an exception of its model.
     */
-  private def unexpected(error: Throwable, request: LmRequest): LmUnexpectedError =
+  def unexpected(error: Throwable, request: LmRequest): LmUnexpectedError =
     val name    = Some(error.getClass.getSimpleName).filter(_.nonEmpty).getOrElse(error.getClass.getName)
     val message = Option(error.getMessage).filter(_.nonEmpty).getOrElse(name)
     LmUnexpectedError(message, LmErrorDetails(model = Some(request.model)))
