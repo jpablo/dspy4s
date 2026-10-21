@@ -1002,6 +1002,17 @@ Open points from batch 1, for the owner:
       7. Scope limits as upstream: no async path; a stream with decision outputs is an error; a nested decision output
          gives a warning and no evidence decoding; RLM decision outputs give a warning; with Jev, each output must be a
          decision output.
+- [x] **D7. Values outside the allowed set.** A string-signature output with allowed values (`Literal[...]`) took any
+      text in the port; upstream `parse_value` rejects other text (open point X.2). ReAct `next_tool_name` has the tool
+      names as allowed values, so an invented tool name fails the upstream call; the port gave an observation (B27.1).
+      **Decided 2026-10-21: reject, as upstream.** A value outside the allowed set is a parse error: the chat adapter
+      then tries the JSON fallback, and the call fails when that also fails. String signatures thus act as typed
+      enums, and ReAct fails on an invented tool name, as upstream.
+- [x] **D8. The runtime context.** The port keeps the context in two places: the `using RuntimeContext` of each call,
+      and the context installed on the thread. Callbacks, parallel workers, and parts of GEPA read the installed one
+      (G-50). **Decided 2026-10-21: the given context wins.** Each public entry point (a program call, `compile`,
+      `evaluate`) installs the context that it gets for the duration of the call, as `Evaluate` and GEPA (b36)
+      already do. The API does not change.
 
 ## Phase 1: lm / clients
 

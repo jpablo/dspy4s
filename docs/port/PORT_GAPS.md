@@ -2051,7 +2051,8 @@ evidence log (batch 31, `dspy4s.optimize.ReAnchor`). ·
 
 ## G-50 — The runtime context has two sources of truth
 
-**Status:** Open · **Verification:** R
+**Status:** Open. Decision D8 (2026-10-21): the given context wins; each public entry point installs it for the
+duration of the call. · **Verification:** R
 
 This item is a dspy4s design point, not an upstream difference. `RuntimeEnvironment` has a process-wide default and
 a `ThreadLocal` (`modules/core/.../runtime/RuntimeEnvironment.scala:41,51`). The LM comes from the `using` context
