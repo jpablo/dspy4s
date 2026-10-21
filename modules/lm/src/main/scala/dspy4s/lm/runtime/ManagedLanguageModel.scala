@@ -16,11 +16,9 @@ import dspy4s.lm.contracts.LmCache
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmCost
 import dspy4s.lm.contracts.LmMode
-import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmPrice
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
-import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.core.contracts.LmUsage
 import dspy4s.lm.contracts.RetryPolicy
 import dspy4s.lm.contracts.StreamingLanguageModel
@@ -186,18 +184,20 @@ final case class ManagedLanguageModel(
     *     The key is the key of [[call]].
     *   - Stream guard: a stream of the delegate that ends with no chunk that has a finish reason gets a last
     *     [[LmChunk.failure]] chunk with an [[dspy4s.core.contracts.LmStreamAssemblyError]].
-    *   - Retry: when the stream fails before its first chunk with text or a tool call, the retry policy decides on a
-    *     new attempt, as for [[call]]. The caller gets no chunk of an attempt that failed. After the first chunk with
-    *     text or a tool call, a failure ends the stream, with no retry (upstream `_retryable`: no replay after visible
-    *     output).
+    *   - Retry: when the stream fails before its first chunk with text, reasoning, a citation, or a tool call, the
+    *     retry policy decides on a new attempt, as for [[call]]. The caller gets no chunk of an attempt that failed.
+    *     After the first such chunk, a failure ends the stream, with no retry (upstream `_retryable`: no replay after
+    *     visible output; a thinking delta and a citation delta are visible output too).
     *   - History: one entry for each streamed call, when the stream ends: the entry of [[call]] for a success or a
     *     cache hit, and the failure entry of [[call]] for a failure.
     *   - Usage: the usage of the chunks is recorded, also when the stream fails after the chunk that has the usage. A
     *     cache hit records no usage.
+    *   - Output: the stored response has the output of [[StreamAccumulator]] in the mode of the delegate.
     *
     * A delegate that cannot stream gives one terminal chunk assembled from [[call]], or a reified
-    * `finishReason = "error"` chunk on failure. The chunk carries the text and the tool calls of the first output. Each
-    * tool call is one complete delta, so `ToolCallAssembler.assemble` gives the call back with its id.
+    * `finishReason = "error"` chunk on failure. The chunk carries the text, the reasoning, the citations, and the tool
+    * calls of the first output. Each tool call is one complete delta, so `ToolCallAssembler.assemble` gives the call
+    * back with its id.
     */
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
     delegate match
@@ -309,10 +309,10 @@ final case class ManagedLanguageModel(
   /** One streamed call to a streaming delegate, with the retry, the stream guard, the history, the usage, and the cache
     * store of [[stream]].
     *
-    * An attempt holds back its chunks until its first chunk with text or a tool call, or until its chunk with a finish
-    * reason. Then the attempt is visible: the held chunks and all later chunks go to the caller. A failure of an
-    * attempt that is not visible drops its chunks, and the retry policy decides on a new attempt. A failure of a
-    * visible attempt ends the stream.
+    * An attempt holds back its chunks until its first chunk with text, reasoning, a citation, or a tool call, or until
+    * its chunk with a finish reason. Then the attempt is visible: the held chunks and all later chunks go to the
+    * caller. A failure of an attempt that is not visible drops its chunks, and the retry policy decides on a new
+    * attempt. A failure of a visible attempt ends the stream.
     *
     * The history entry, the usage record, and the cache store occur at the end of the stream. A caller that closes the
     * stream before its end gets none of them. A stream with a [[LmChunk.cached]] chunk is a cache hit of the delegate:
@@ -326,8 +326,7 @@ final case class ManagedLanguageModel(
   ) extends ClosableIterator[LmChunk]:
     private val ready                      = mutable.Queue.empty[LmChunk]
     private val held                       = mutable.ArrayBuffer.empty[LmChunk]
-    private val text                       = new StringBuilder
-    private val toolDeltas                 = mutable.ArrayBuffer.empty[LmToolCallDelta]
+    private val parts                      = StreamAccumulator(streaming.mode)
     private var usage: Option[LmUsage]     = None
     private var cached: Option[LmResponse] = None
     private var attempt                    = 0
@@ -377,16 +376,18 @@ final case class ManagedLanguageModel(
           fail(error, LmChunk.failure(error))
 
     private def accept(chunk: LmChunk): Unit =
-      text.append(chunk.text)
-      toolDeltas ++= chunk.toolCalls
+      parts.push(chunk)
       chunk.usage.foreach(value => usage = Some(value))
       chunk.cachedResponse.foreach(response => cached = Some(response))
       if chunk.isFinal then complete = true
       if visible then ready += chunk
       else
         held += chunk
-        // Upstream `_retryable`: no retry after visible output, and no retry after the end of the stream.
-        if chunk.text.nonEmpty || chunk.toolCalls.nonEmpty || complete then show()
+        // Upstream `_retryable`: no retry after visible output, and no retry after the end of the stream. Upstream
+        // `ListenerBridge.chunk` gives a chunk for a thinking delta and a citation delta too.
+        val output = chunk.text.nonEmpty || chunk.reasoning.nonEmpty || chunk.citations.nonEmpty ||
+          chunk.toolCalls.nonEmpty
+        if output || complete then show()
 
     private def show(): Unit =
       visible = true
@@ -401,8 +402,7 @@ final case class ManagedLanguageModel(
         if delay > 0L then sleep(delay)
         attempt += 1
         held.clear()
-        text.clear()
-        toolDeltas.clear()
+        parts.clear()
         usage = None
         cached = None
         complete = false
@@ -421,8 +421,8 @@ final case class ManagedLanguageModel(
       cached match
         case Some(response) => val _ = acceptHit(request, response)
         case None           =>
-          val output = LmOutput(text = text.toString, toolCalls = ToolCallAssembler.assemble(toolDeltas))
-          val _      = acceptResponse(request, key(), LmResponse(outputs = Vector(output), usage = usage))
+          val response = LmResponse(outputs = Vector(parts.output), usage = usage)
+          val _        = acceptResponse(request, key(), response)
 
     /** Close the stream of the delegate, so that the connection does not stay open. A non-fatal exception of the close
       * does not change the result: the attempt ends in each case.

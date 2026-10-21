@@ -12,13 +12,11 @@ import dspy4s.core.runtime.StreamProgress
 import dspy4s.lm.contracts.ForwardingLanguageModel
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmMode
-import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
-import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.lm.runtime.ManagedLanguageModel
-import dspy4s.lm.runtime.ToolCallAssembler
+import dspy4s.lm.runtime.StreamAccumulator
 import dspy4s.streaming.contracts.StreamEvent
 import dspy4s.streaming.contracts.StreamListener
 import dspy4s.streaming.contracts.TokenEvent
@@ -74,7 +72,9 @@ final class StreamingLanguageModelWrapper private (
     listeners.isEmpty || listeners.exists(listener => outputFields.exists(listener.matches(predictName, _)))
 
   /** Stream the call, give the tokens to the listeners, and assemble the response. A [[LmChunk.cached]] chunk gives its
-    * response as is, and no token goes to a listener (upstream: a cache hit sends no stream chunk).
+    * response as is, and no token goes to a listener (upstream: a cache hit sends no stream chunk). The output of the
+    * response is the output of a [[dspy4s.lm.runtime.StreamAccumulator]] in the mode of the delegate, as in
+    * [[ManagedLanguageModel]].
     *
     * A non-fatal exception, for example of the delegate when it opens or reads the stream, gives an
     * [[dspy4s.core.contracts.LmUnexpectedError]], as in [[ManagedLanguageModel]] (upstream
@@ -82,9 +82,8 @@ final class StreamingLanguageModelWrapper private (
     */
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
     val ctx                        = activeContext()
-    val text                       = new StringBuilder
+    val parts                      = StreamAccumulator(delegate.mode)
     var lastUsage: Option[LmUsage] = None
-    val toolDeltas                 = mutable.ArrayBuffer.empty[LmToolCallDelta]
     var chunks: Iterator[LmChunk]  = Iterator.empty
     try
       chunks = delegate.stream(request)
@@ -102,22 +101,15 @@ final class StreamingLanguageModelWrapper private (
               case Some(failure) => streamError = Some(failure)
               case None          =>
                 emit(ctx, chunk)
-                text.append(chunk.text)
+                parts.push(chunk)
                 chunk.usage.foreach(usage => lastUsage = Some(usage))
-                if chunk.toolCalls.nonEmpty then toolDeltas ++= chunk.toolCalls
       }
       (cached, streamError) match
         case (Some(response), _) => Right(response)
         case (_, Some(failure))  => Left(failure)
         case (None, None)        =>
           flush(ctx)
-          val toolCalls = ToolCallAssembler.assemble(toolDeltas.toVector)
-          Right(
-            LmResponse(
-              outputs = Vector(LmOutput(text = text.toString, toolCalls = toolCalls)),
-              usage = lastUsage
-            )
-          )
+          Right(LmResponse(outputs = Vector(parts.output), usage = lastUsage))
     catch
       case NonFatal(error) => Left(ManagedLanguageModel.unexpected(error, request))
     finally

@@ -2,6 +2,8 @@ package dspy4s.lm.contracts
 
 import dspy4s.core.contracts.{DspyError, LmUsage, RuntimeContext, RuntimeError, ToolCall}
 import dspy4s.lm.providers.DynamicJson
+import dspy4s.lm.providers.ResponsesWire
+import zio.blocks.schema.DynamicValue
 
 /** A single tool-call delta extracted from one streaming LM chunk. OpenAI emits `id`/`function.name` on the first delta
   * for an index and `function.arguments` fragments on subsequent deltas; consumers accumulate by `index`.
@@ -24,20 +26,29 @@ final case class LmToolCallDelta(
   * complete: [[dspy4s.lm.runtime.ManagedLanguageModel]] reports it as a
   * [[dspy4s.core.contracts.LmStreamAssemblyError]].
   *
+  * @param reasoning
+  *   a part of the reasoning text (upstream lm15 `ThinkingDelta` in `dspy/_vendor/lm15/types.py`). The assembled output
+  *   has the joined parts under the metadata key `reasoning_content`.
+  * @param citations
+  *   the citations that this chunk adds (upstream lm15 `CitationDelta`). Each citation has the form of a citation in
+  *   the metadata of a Responses output. The assembled output has the citations of all chunks, in order, under the
+  *   metadata key `citations`.
   * @param cachedResponse
   *   the complete response of a cache hit. A chunk with this field is the only chunk of its stream. A consumer returns
   *   this response, and gives no token of it to a stream listener (upstream: a cache hit sends no stream chunk). The
-  *   chunk also has the text and the tool calls of the first output, for a consumer that assembles the chunks. Build it
-  *   with [[LmChunk.cached]].
+  *   chunk also has the text, the reasoning, the citations, and the tool calls of the first output, for a consumer that
+  *   assembles the chunks. Build it with [[LmChunk.cached]].
   */
 final case class LmChunk(
-    text          : String                  = "",
-    finishReason  : Option[String]          = None,
-    usage         : Option[LmUsage]         = None,
-    toolCalls     : Vector[LmToolCallDelta] = Vector.empty,
-    raw           : Option[Any]             = None,
-    error         : Option[DspyError]       = None,
-    cachedResponse: Option[LmResponse]      = None
+    text          : String                      = "",
+    finishReason  : Option[String]              = None,
+    usage         : Option[LmUsage]             = None,
+    toolCalls     : Vector[LmToolCallDelta]     = Vector.empty,
+    reasoning     : String                      = "",
+    citations     : Vector[DynamicValue.Record] = Vector.empty,
+    raw           : Option[Any]                 = None,
+    error         : Option[DspyError]           = None,
+    cachedResponse: Option[LmResponse]          = None
 ):
   def isFinal: Boolean = finishReason.isDefined
 
@@ -57,22 +68,27 @@ object LmChunk:
     LmChunk(finishReason = Some("error"), raw = Some(Map("error" -> error.message)), error = Some(error))
 
   /** The only chunk of a stream that the cache answered. `response` is the stored response, with `cacheHit = true`. The
-    * chunk has the finish reason `stop`, no usage, and the text and the tool calls of the first output of `response`.
-    * Each tool call is one complete delta, so `ToolCallAssembler.assemble` gives the call back with its id.
+    * chunk has the finish reason `stop`, no usage, and the text, the reasoning, the citations, and the tool calls of
+    * the first output of `response`. Each tool call is one complete delta, so `ToolCallAssembler.assemble` gives the
+    * call back with its id.
     */
   def cached(response: LmResponse): LmChunk =
     fromResponse(response).copy(cachedResponse = Some(response.copy(cacheHit = true)))
 
-  /** One terminal chunk for a whole response: the text and the tool calls of the first output of `response`, and the
-    * finish reason `stop`. The chunk has no usage. Each tool call is one complete delta, so
-    * `ToolCallAssembler.assemble` gives the call back with its id.
+  /** One terminal chunk for a whole response: the text, the reasoning, the citations, and the tool calls of the first
+    * output of `response`, and the finish reason `stop`. The reasoning and the citations come from the metadata keys
+    * `reasoning_content` and `citations` of the output. The chunk has no usage. Each tool call is one complete delta,
+    * so `ToolCallAssembler.assemble` gives the call back with its id.
     */
   private[lm] def fromResponse(response: LmResponse): LmChunk =
-    val output = response.outputs.headOption
+    val output   = response.outputs.headOption
+    val metadata = output.fold(DynamicValue.Record.empty)(_.metadata)
     LmChunk(
       text = output.map(_.text).getOrElse(""),
       finishReason = Some("stop"),
-      toolCalls = output.map(_.toolCalls).getOrElse(Vector.empty).zipWithIndex.map(toolCallDelta)
+      toolCalls = output.map(_.toolCalls).getOrElse(Vector.empty).zipWithIndex.map(toolCallDelta),
+      reasoning = ResponsesWire.reasoningOf(metadata),
+      citations = ResponsesWire.citationsOf(metadata)
     )
 
   /** One complete tool call as a stream delta: the id, the name, and the JSON text of the arguments. */

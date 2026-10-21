@@ -156,6 +156,51 @@ class OpenAiStreamGuardSuite extends FunSuite:
     )
   }
 
+  test("a tool-call id, name, or arguments that is not a string gives its Python text, as upstream str") {
+    // Upstream `parse_stream_events` reads `str(value or "")`: a value that is false in Python gives no text, and each
+    // other value gives the text of Python `str`. The upstream values come from the lm15 parser of upstream.
+    val cases: Vector[(String, String, String, LmToolCallDelta)] = Vector(
+      ("5", "true", "1.5", LmToolCallDelta(0, Some("5"), Some("True"), Some("1.5"))),
+      ("0", "false", "0", LmToolCallDelta(0, None, None, None)),
+      ("null", "null", "null", LmToolCallDelta(0, None, None, None)),
+      ("[]", "{}", "false", LmToolCallDelta(0, None, None, None)),
+      (
+        "12345678901234567890",
+        "\"f\"",
+        "1e20",
+        LmToolCallDelta(0, Some("12345678901234567890"), Some("f"), Some("1e+20"))
+      ),
+      ("\"c\"", "\"f\"", "0.1", LmToolCallDelta(0, Some("c"), Some("f"), Some("0.1"))),
+      ("\"c\"", "\"f\"", "1e-5", LmToolCallDelta(0, Some("c"), Some("f"), Some("1e-05"))),
+      ("\"c\"", "\"f\"", "-2.5e19", LmToolCallDelta(0, Some("c"), Some("f"), Some("-2.5e+19"))),
+      (
+        "\"c\"",
+        "\"f\"",
+        """[1,"a",true,null]""",
+        LmToolCallDelta(0, Some("c"), Some("f"), Some("[1, 'a', True, None]"))
+      ),
+      ("\"c\"", "\"f\"", """{"a":{"b":[]}}""", LmToolCallDelta(0, Some("c"), Some("f"), Some("{'a': {'b': []}}"))),
+      (
+        "\"c\"",
+        "\"f\"",
+        "[\"it's\",\"say \\\"hi\\\"\",\"a\\nb\",\"\\u00e9\",\"\\u007f\",\"\\u200b\",\"\\\\\"]",
+        LmToolCallDelta(
+          0,
+          Some("c"),
+          Some("f"),
+          Some("[\"it's\", 'say \"hi\"', 'a\\nb', '\u00e9', '\\x7f', '\\u200b', '\\\\']")
+        )
+      )
+    )
+    cases.foreach { (id, name, arguments, expected) =>
+      val call        = s"""{"index":0,"id":$id,"function":{"name":$name,"arguments":$arguments}}"""
+      val (chunks, _) =
+        chunksOf(s"""data: {"choices":[{"delta":{"tool_calls":[$call]},"finish_reason":"tool_calls"}]}""", "")
+      assertEquals(failures(chunks), Vector.empty, call)
+      assertEquals(chunks.flatMap(_.toolCalls), Vector(expected), call)
+    }
+  }
+
   // ── Error events in the stream ──────────────────────────────────────────────────────────────────────────────
 
   test("an error event in the stream gives the typed error of its code, and the stream ends") {

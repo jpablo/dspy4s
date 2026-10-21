@@ -7,13 +7,23 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.LmProviderResponseError
 import dspy4s.core.contracts.LmRateLimitError
 import dspy4s.core.contracts.LmStreamAssemblyError
+import dspy4s.core.contracts.LmUsage
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
+import dspy4s.core.contracts.TokenCategory
 import dspy4s.core.contracts.ToolCall
+import dspy4s.lm.contracts.LmCost
 import dspy4s.lm.contracts.LmMode
+import dspy4s.lm.contracts.LmPrice
 import dspy4s.lm.contracts.LmRequest
+import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
+import dspy4s.lm.runtime.CacheCapacity
+import dspy4s.lm.runtime.InMemoryLmCache
+import dspy4s.lm.runtime.ManagedLanguageModel
+import dspy4s.lm.runtime.RetryCount
+import dspy4s.lm.runtime.RetryPolicies
 import dspy4s.lm.runtime.ToolCallAssembler
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
@@ -83,10 +93,48 @@ class ResponsesModeSuite extends FunSuite:
     options = DynamicValues.record()
   )
 
-  private def model(transport: HttpTransport): OpenAiLanguageModel =
+  /** A Responses body with reasoning summary parts and two annotations, and the events of a stream of the same
+    * response.
+    */
+  private val citedBody: String = """{"model": "gpt-test", "output": [
+      |  {"type": "reasoning", "summary": [{"type": "summary_text", "text": "Think"},
+      |                                    {"type": "summary_text", "text": " more."}]},
+      |  {"type": "message", "content": [{"type": "output_text", "text": "Paris", "annotations": [
+      |    {"type": "url_citation", "url": "https://x.test", "title": "X", "start_index": 0, "end_index": 5},
+      |    {"type": "file_citation", "file_id": "file_1", "filename": "notes.txt", "index": 2}
+      |  ]}]}
+      |], "usage": {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6}}""".stripMargin
+
+  private val citedLines: Vector[String] = Vector(
+    """data: {"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_1"}}""",
+    """data: {"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":"Think"}""",
+    """data: {"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":1,"delta":" more."}""",
+    """data: {"type":"response.output_text.delta","output_index":1,"delta":"Paris"}""",
+    """data: {"type":"response.output_text.annotation.added","output_index":1,"annotation_index":0,"annotation":{"type":"url_citation","url":"https://x.test","title":"X","start_index":0,"end_index":5}}""",
+    """data: {"type":"response.output_text.annotation.added","output_index":1,"annotation_index":1,"annotation":{"type":"file_citation","file_id":"file_1","filename":"notes.txt","index":2}}""",
+    completed,
+    ""
+  )
+
+  /** A Responses body with reasoning content parts, and the events of a stream of the same response. */
+  private val reasonedBody: String = """{"model": "gpt-test", "output": [
+      |  {"type": "reasoning", "content": [{"type": "reasoning_text", "text": "Raw"},
+      |                                    {"type": "reasoning_text", "text": " chain."}]},
+      |  {"type": "message", "content": [{"type": "output_text", "text": "Paris"}]}
+      |], "usage": {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6}}""".stripMargin
+
+  private val reasonedLines: Vector[String] = Vector(
+    """data: {"type":"response.reasoning_text.delta","output_index":0,"content_index":0,"delta":"Raw"}""",
+    """data: {"type":"response.reasoning_text.delta","output_index":0,"content_index":1,"delta":" chain."}""",
+    """data: {"type":"response.output_text.delta","output_index":1,"delta":"Paris"}""",
+    completed,
+    ""
+  )
+
+  private def model(transport: HttpTransport, mode: LmMode = LmMode.Responses): OpenAiLanguageModel =
     OpenAiLanguageModel(
       model = "gpt-test",
-      mode = LmMode.Responses,
+      mode = mode,
       client = OpenAiClient(apiKey = "x", baseUrl = "https://api.test/v1", transport = transport)
     )
 
@@ -94,6 +142,19 @@ class ResponsesModeSuite extends FunSuite:
     DynamicJson.decode(text) match
       case Right(value: DynamicValue.Record) => value
       case other                             => fail(s"not a JSON object: $other")
+
+  /** The response that a managed model assembles from a stream of `lines` in `mode`. The managed model stores the
+    * assembled response in its cache, and the next call gives that response back.
+    */
+  private def assembled(lines: Vector[String], mode: LmMode = LmMode.Responses): LmResponse =
+    given RuntimeContext = RuntimeContext(disableHistory = Some(true))
+    val managed          =
+      ManagedLanguageModel(delegate = model(Streaming(lines), mode), cache = Some(InMemoryLmCache(CacheCapacity(4))))
+    val chunks = managed.stream(request).toVector
+    assertEquals(chunks.flatMap(_.error), Vector.empty)
+    managed.call(request) match
+      case Right(response) if response.cacheHit => response
+      case other                                => fail(s"the stream gave no cached response: $other")
 
   test("a call in the Responses mode goes to the Responses endpoint with the Responses body") {
     val transport        = Recording(responsesBody)
@@ -223,6 +284,111 @@ class ResponsesModeSuite extends FunSuite:
     given RuntimeContext = RuntimeContext()
     val chunks           = model(Streaming(lines)).stream(request).toVector
     assert(chunks.last.error.exists(_.isInstanceOf[LmStreamAssemblyError]), chunks.toString)
+  }
+
+  test("a Responses call and a Responses stream read the cached and the reasoning counts of the usage") {
+    // Upstream lm15 `OpenAILM.parse_response` and `_parse_single_stream_event` (`dspy/_vendor/lm15/providers/openai.py`)
+    // read `cached_tokens` of `input_tokens_details` and `reasoning_tokens` of `output_tokens_details`.
+    val usage =
+      """{"input_tokens":10,"output_tokens":8,"total_tokens":18,"input_tokens_details":{"cached_tokens":4},"output_tokens_details":{"reasoning_tokens":5}}"""
+    val body =
+      s"""{"model": "gpt-test", "output": [{"type": "message", "content": [{"type": "output_text", "text": "Paris"}]}], "usage": $usage}"""
+    val lines = Vector(
+      """data: {"type":"response.output_text.delta","output_index":0,"delta":"Paris"}""",
+      s"""data: {"type":"response.completed","response":{"output":[{"type":"message"}],"usage":$usage}}""",
+      ""
+    )
+    val expected = LmUsage(
+      totalTokens = 18L,
+      promptTokens = 10L,
+      completionTokens = 8L,
+      extras = Map(TokenCategory.Cached -> 4L, TokenCategory.Reasoning -> 5L)
+    )
+    given RuntimeContext = RuntimeContext()
+    model(Recording(body)).call(request) match
+      case Right(response) => assertEquals(response.usage, Some(expected))
+      case Left(error)     => fail(s"the call failed: $error")
+    val streamed = model(Streaming(lines)).stream(request).toVector.flatMap(_.usage)
+    assertEquals(streamed, Vector(expected))
+    // The cost estimate of batch 24 prices the cached tokens and the reasoning tokens at their own rates.
+    val price = LmPrice(
+      inputPerMillion = 1.0,
+      outputPerMillion = 2.0,
+      cachedInputPerMillion = Some(0.5),
+      reasoningPerMillion = Some(4.0)
+    )
+    assertEquals(
+      LmCost.of("gpt-test", Some(price), streamed.headOption),
+      LmCost.Estimate((6.0 + 2.0 + 6.0 + 20.0) / 1_000_000.0, "gpt-test")
+    )
+  }
+
+  test("the assembled response of a Responses stream has the reasoning and the citations of a plain call") {
+    // Upstream lm15 `_parse_single_stream_event` (`dspy/_vendor/lm15/providers/openai.py`) gives a thinking delta for
+    // each reasoning text event and a citation delta for each annotation event.
+    Vector((citedBody, citedLines), (reasonedBody, reasonedLines)).foreach { (body, lines) =>
+      given RuntimeContext = RuntimeContext()
+      val plain            = model(Recording(body)).call(request) match
+        case Right(response) => response
+        case Left(error)     => fail(s"the call failed: $error")
+      assert(plain.outputs.exists(_.metadata.fields.nonEmpty), plain.toString)
+      val streamed = assembled(lines)
+      assertEquals(streamed.outputs.map(_.text), plain.outputs.map(_.text))
+      assertEquals(streamed.outputs.map(_.metadata), plain.outputs.map(_.metadata))
+    }
+  }
+
+  test("a managed Responses stream gives a reasoning event to the caller, and does not retry after it") {
+    // Upstream `_attempt` and `_retryable` (`dspy/clients/execution.py`): a thinking delta is a chunk for the stream,
+    // and an attempt with a chunk for the stream gets no retry.
+    val lines = Vector(
+      """data: {"type":"response.reasoning_summary_text.delta","output_index":0,"delta":"Think"}""",
+      """data: {"type":"error","code":"rate_limit_exceeded","message":"slow down"}""",
+      ""
+    )
+    val transport        = Streaming(lines)
+    given RuntimeContext = RuntimeContext(disableHistory = Some(true))
+    val managed          = ManagedLanguageModel(
+      delegate = model(transport),
+      retryPolicy = RetryPolicies.maxRetries(RetryCount(2)),
+      sleep = _ => ()
+    )
+    val chunks = managed.stream(request).toVector
+    assertEquals(transport.streamed.size, 1)
+    assertEquals(chunks.size, 2, chunks.toString)
+    assert(chunks.last.error.exists(_.isInstanceOf[LmRateLimitError]), chunks.toString)
+  }
+
+  test("streamed Responses arguments that are not JSON give partial_json, and the chat stream keeps its rule") {
+    // Upstream lm15 `StreamAccumulator.push` and `_parse_json_best_effort` (`dspy/_vendor/lm15/result.py`): the text
+    // keeps its white space, and only an empty text gives an empty record.
+    def call(index: Int, name: String, arguments: String): Vector[String] =
+      Vector(
+        s"""data: {"type":"response.output_item.added","output_index":$index,"item":{"type":"function_call","call_id":"call_$index","name":"$name","arguments":""}}""",
+        s"""data: {"type":"response.function_call_arguments.delta","output_index":$index,"delta":$arguments}"""
+      )
+    val lines = call(0, "search", """" {\"q\": """") ++ call(1, "blank", """"  """") ++
+      call(2, "spaced", """" {\"a\": 1} """") ++ call(3, "empty", """""""") ++ Vector(
+        """data: {"type":"response.completed","response":{"output":[{"type":"function_call"}]}}""",
+        ""
+      )
+    assertEquals(
+      assembled(lines).outputs.flatMap(_.toolCalls),
+      Vector(
+        ToolCall(name = "search", args = json("""{"partial_json": " {\"q\": "}"""), id = Some("call_0")),
+        ToolCall(name = "blank", args = json("""{"partial_json": "  "}"""), id = Some("call_1")),
+        ToolCall(name = "spaced", args = json("""{"a": 1}"""), id = Some("call_2")),
+        ToolCall(name = "empty", args = DynamicValue.Record.empty, id = Some("call_3"))
+      )
+    )
+    val chat = Vector(
+      """data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_0","function":{"name":"search","arguments":" {\"q\": "}}]},"finish_reason":"tool_calls"}]}""",
+      "data: [DONE]"
+    )
+    assertEquals(
+      assembled(chat, LmMode.Chat).outputs.flatMap(_.toolCalls),
+      Vector(ToolCall(name = "search", args = json("""{"input": "{\"q\":"}"""), id = Some("call_0")))
+    )
   }
 
   test("a call in the chat mode still goes to the chat endpoint with messages") {

@@ -49,6 +49,7 @@ private[lm] object ResponsesWire:
     final val outputIndex         = "output_index"
     final val item                = "item"
     final val response            = "response"
+    final val annotation          = "annotation"
 
     /** The options that the Responses body does not send as null (upstream: the former config serializer omitted them).
       */
@@ -79,13 +80,16 @@ private[lm] object ResponsesWire:
 
   /** The `type` values of the events of a Responses stream that the stream parser reads. */
   private object Events:
-    final val textDelta      = "response.output_text.delta"
-    final val refusalDelta   = "response.refusal.delta"
-    final val itemAdded      = "response.output_item.added"
-    final val argumentsDelta = "response.function_call_arguments.delta"
-    final val completed      = "response.completed"
-    final val error          = "error"
-    final val responseError  = "response.error"
+    final val textDelta             = "response.output_text.delta"
+    final val refusalDelta          = "response.refusal.delta"
+    final val reasoningSummaryDelta = "response.reasoning_summary_text.delta"
+    final val reasoningTextDelta    = "response.reasoning_text.delta"
+    final val annotationAdded       = "response.output_text.annotation.added"
+    final val itemAdded             = "response.output_item.added"
+    final val argumentsDelta        = "response.function_call_arguments.delta"
+    final val completed             = "response.completed"
+    final val error                 = "error"
+    final val responseError         = "response.error"
 
   /** The finish reasons of the end chunk of a Responses stream (upstream lm15 `StreamEndEvent`). */
   private object Finish:
@@ -157,21 +161,45 @@ private[lm] object ResponsesWire:
         val reasoning = records.filter(isKind(_, Kinds.reasoning)).flatMap(reasoningTexts).mkString
         val citations =
           parts.flatMap(part => listOf(part, Keys.annotations)).flatMap(DynamicJson.asRecord).map(citation)
-        val metadata = DynamicValues.recordFromEntries(
-          Option.when(reasoning.nonEmpty)(Keys.reasoningContent -> string(reasoning)).toVector ++
-            Option.when(citations.nonEmpty)(Keys.citations -> sequence(citations))
-        )
         Right(
           if text.trim.isEmpty && toolCalls.isEmpty then Vector.empty
-          else Vector(LmOutput(text = text, toolCalls = toolCalls, metadata = metadata))
+          else Vector(LmOutput(text = text, toolCalls = toolCalls, metadata = outputMetadata(reasoning, citations)))
         )
       case _ => Left(ParseError("lm", "The Responses body has no output array"))
+
+  /** The metadata of an output with the reasoning text `reasoning` and the citations `citations`: the key
+    * `reasoning_content` when the text is not empty, and the key `citations` when there is a citation. The plain path
+    * ([[outputs]]) and the assembly of a stream ([[dspy4s.lm.runtime.StreamAccumulator]]) use it, so the two give the
+    * same metadata.
+    */
+  def outputMetadata(reasoning: String, citations: Vector[DynamicValue.Record]): DynamicValue.Record =
+    DynamicValues.recordFromEntries(
+      Option.when(reasoning.nonEmpty)(Keys.reasoningContent -> string(reasoning)).toVector ++
+        Option.when(citations.nonEmpty)(Keys.citations -> sequence(citations))
+    )
+
+  /** The reasoning text of an output metadata (the inverse of [[outputMetadata]]): the `reasoning_content` string, else
+    * an empty text.
+    */
+  def reasoningOf(metadata: DynamicValue.Record): String =
+    stringOf(metadata, Keys.reasoningContent).getOrElse("")
+
+  /** The citations of an output metadata (the inverse of [[outputMetadata]]): the objects of the `citations` array. */
+  def citationsOf(metadata: DynamicValue.Record): Vector[DynamicValue.Record] =
+    listOf(metadata, Keys.citations).flatMap(DynamicJson.asRecord)
 
   /** The chunk of one event of a Responses stream (upstream lm15 `OpenAILM.parse_stream_events` and
     * `_parse_single_stream_event` in `dspy/_vendor/lm15/providers/openai.py`). The `type` of the event selects the
     * rule:
     *
     *   - `response.output_text.delta` and `response.refusal.delta` give a chunk with the text `delta`.
+    *   - `response.reasoning_summary_text.delta` and `response.reasoning_text.delta` give a chunk with the reasoning
+    *     text `delta` (upstream `ThinkingDelta`). A reasoning item with content parts and summary parts gives the two
+    *     texts here, and [[outputs]] gives the content parts only.
+    *   - `response.output_text.annotation.added` with an `annotation` object gives a chunk with the citation of the
+    *     annotation (upstream `CitationDelta`). The citation has the form of a citation of [[outputs]], so the
+    *     assembled stream has the citations of a plain call. Upstream lm15 also drops an annotation with no url, no
+    *     title, and no text. The plain path of the port keeps it, and so does the stream.
     *   - `response.output_item.added` of a `function_call` item gives a chunk with one tool-call delta: the index is
     *     `output_index`, the id is the `call_id` (else the `id`) of the item, and the delta has the `name` and the
     *     `arguments` (else an empty text) of the item.
@@ -180,8 +208,8 @@ private[lm] object ResponsesWire:
     *   - `response.completed` gives the end chunk. Its finish reason is `tool_call` when the `output` of the response
     *     has a `function_call` item, else `stop`. Its usage is the `usage` of the response.
     *   - `error` and `response.error` give a `Left` with the error of [[OpenAiErrors.fromResponsesStreamError]].
-    *   - Each other event gives no chunk. The port has no chunk field for reasoning, citations, audio, or images, so it
-    *     skips their events.
+    *   - Each other event gives no chunk. The port has no chunk field for audio or images (G-32), so it skips their
+    *     events.
     *
     * An `output_index` that is not a number gives the index 0, and a `delta` that is not a string gives an empty text.
     * An empty id or name counts as no id or name.
@@ -190,8 +218,12 @@ private[lm] object ResponsesWire:
     val index = DynamicValues.recordGet(event, Keys.outputIndex).flatMap(DynamicJson.asLong).fold(0)(_.toInt)
     def delta = stringOf(event, WireKeys.delta).getOrElse("")
     stringOf(event, WireKeys.`type`).getOrElse("") match
-      case Events.textDelta | Events.refusalDelta => Right(Some(LmChunk(text = delta)))
-      case Events.itemAdded                       =>
+      case Events.textDelta | Events.refusalDelta                   => Right(Some(LmChunk(text = delta)))
+      case Events.reasoningSummaryDelta | Events.reasoningTextDelta => Right(Some(LmChunk(reasoning = delta)))
+      case Events.annotationAdded                                   =>
+        val annotation = DynamicValues.recordGet(event, Keys.annotation).flatMap(DynamicJson.asRecord)
+        Right(annotation.map(found => LmChunk(citations = Vector(citation(found)))))
+      case Events.itemAdded =>
         val call =
           DynamicValues.recordGet(event, Keys.item).flatMap(DynamicJson.asRecord).filter(isKind(_, Kinds.functionCall))
         Right(call.map { item =>
@@ -388,7 +420,7 @@ private[lm] object ResponsesWire:
     val parts   = if content.nonEmpty then content else listOf(item, Keys.summary)
     parts.flatMap(part => DynamicJson.field(part, WireKeys.text)).flatMap(DynamicJson.asString).filter(_.nonEmpty)
 
-  private def citation(annotation: DynamicValue.Record): DynamicValue =
+  private def citation(annotation: DynamicValue.Record): DynamicValue.Record =
     val described = Set(Keys.citedText, WireKeys.text, Keys.supportedText, Keys.documentTitle, Keys.title, Keys.url)
     val metadata  = DynamicValues.recordFilterKeys(annotation, key => !described.contains(key))
     val entries   = Vector(

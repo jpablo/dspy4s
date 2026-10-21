@@ -99,7 +99,8 @@ private[providers] object OpenAiStreamChunk:
     *   - `delta` must be an object, and `content` a string.
     *   - Each element of `tool_calls` that is an object gives a tool call. An `index` that is not a number (or the text
     *     of a number) gives the position of the call in the array, as in [[decode]]. `id`, `function.name`, and
-    *     `function.arguments` must be strings.
+    *     `function.arguments` follow `str(value or "")` ([[PythonStr.orEmpty]]): a string stays, a value that is false
+    *     in Python gives no value, and each other value gives the text of Python `str`, for example `True` or `1.5`.
     *   - A string `finish_reason` stays. Each other value that is not null and not `false` gives `stop` (upstream gives
     *     `stop` for a finish reason that is not in `_FINISH_REASON_MAP`).
     *   - `usage` must be an object. Its counts follow [[OpenAiUsage.fromDynamic]].
@@ -132,9 +133,9 @@ private[providers] object OpenAiStreamChunk:
     val function = DynamicJson.field(call, WireKeys.function).flatMap(DynamicJson.asRecord)
     OpenAiStreamToolCall(
       index = Some(DynamicJson.field(call, WireKeys.index).flatMap(DynamicJson.asLong).fold(position)(_.toInt)),
-      id = textOf(call, WireKeys.id),
+      id = pythonTextOf(call, WireKeys.id),
       function = function.map(f =>
-        OpenAiStreamFunction(name = textOf(f, WireKeys.name), arguments = textOf(f, WireKeys.arguments))
+        OpenAiStreamFunction(name = pythonTextOf(f, WireKeys.name), arguments = pythonTextOf(f, WireKeys.arguments))
       )
     )
 
@@ -146,3 +147,7 @@ private[providers] object OpenAiStreamChunk:
 
   private def textOf(record: DynamicValue.Record, key: String): Option[String] =
     DynamicJson.field(record, key).flatMap(DynamicJson.asString)
+
+  /** The value of `key` with the rule `str(value or "")` of upstream `parse_stream_events`. */
+  private def pythonTextOf(record: DynamicValue.Record, key: String): Option[String] =
+    DynamicJson.field(record, key).flatMap(PythonStr.orEmpty)

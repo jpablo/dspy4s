@@ -48,5 +48,6 @@ private[lm] object WireKeys:
   final val toolCallId = "tool_call_id"
 
   // Synthetic keys used to wrap tool-call arguments that aren't a JSON object
-  final val input = "input"
-  final val value = "value"
+  final val input       = "input"
+  final val value       = "value"
+  final val partialJson = "partial_json"
