@@ -66,8 +66,8 @@ final case class Example(
 
 object Example:
   /** Convenience constructor: `Example("q" -> "...", "a" -> "...")`. Produces an example with no declared input keys;
-    * call `withInputs(...)` to mark a subset as inputs. [[DynamicValues.fromAny]] lifts the values into the
-    * interchange format.
+    * call `withInputs(...)` to mark a subset as inputs. [[DynamicValues.fromAny]] lifts the values into the interchange
+    * format.
     */
   def apply(entries: (String, DynamicValue)*): Example =
     Example(values = DynamicValues.recordFromEntries(entries))

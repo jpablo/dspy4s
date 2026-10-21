@@ -51,10 +51,10 @@ final case class ZsNum(value: Int)                  extends ZsExpr derives Schem
 final case class ZsAdd(left: ZsExpr, right: ZsExpr) extends ZsExpr derives Schema
 final case class ZsHolder(node: ZsNode, chain: Option[ZsChain], expr: ZsExpr) derives Schema
 
-/** The interchange format is now `DynamicValue.Record` end-to-end -- there is no `Map[String, Any]` intermediate --
-  * so the historical tests that exercised the `dynamicToAny` / `anyToDynamic` converters are gone (those helpers
-  * were deleted). What remains exercises `fieldSpecsFromReflect`, `normalize`, and the native `encode` / `decode`
-  * round-trip through `DynamicValue.Record`.
+/** The interchange format is now `DynamicValue.Record` end-to-end -- there is no `Map[String, Any]` intermediate -- so
+  * the historical tests that exercised the `dynamicToAny` / `anyToDynamic` converters are gone (those helpers were
+  * deleted). What remains exercises `fieldSpecsFromReflect`, `normalize`, and the native `encode` / `decode` round-trip
+  * through `DynamicValue.Record`.
   */
 class ZioSchemaCodecSuite extends FunSuite:
 
