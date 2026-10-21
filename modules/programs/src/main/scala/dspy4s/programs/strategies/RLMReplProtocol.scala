@@ -1,6 +1,7 @@
 package dspy4s.programs.strategies
 
-import dspy4s.core.contracts.DynamicValues
+import dspy4s.adapters.internal.ProgramOutputValues
+import dspy4s.core.contracts.{DynamicValues, SignatureLayout, updated}
 import dspy4s.programs.{LlmCallLimit, OutputCharLimit}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
@@ -118,6 +119,29 @@ private[programs] object RLMReplProtocol:
       case None => Left(
           s"[Error] FINAL returned a non-dict payload, expected dict with fields: ${outputFieldNames.mkString(", ")}"
         )
+
+  /** The SUBMIT values `record` with the allowed values of the outputs of `layout` checked (upstream
+    * `_process_final_output` reads each value with `parse_value`, `dspy/predict/rlm.py`). An output with allowed values
+    * (decision D7) takes the value of the rule of the adapters ([[ProgramOutputValues.allowedValue]]): for example, the
+    * text ` 'yes' ` gives `yes`. The other outputs do not change.
+    *
+    * A value outside the allowed values gives the observation `[Type Error] <name>: expected Literal, got <type>:
+    * <error>`, with `Optional` for an optional output and the Python type name of the value, as upstream. The parts of
+    * two or more outputs are in the order of the outputs, with `; ` between them. The error text is the text of the
+    * port, not the text of pydantic.
+    */
+  def checkAllowedValues(record: DynamicValue.Record, layout: SignatureLayout): Either[String, DynamicValue.Record] =
+    val checked = layout.outputFields.filter(ProgramOutputValues.hasAllowedValues).map { field =>
+      val value    = DynamicValues.recordGet(record, field.name).getOrElse(DynamicValue.Null)
+      val expected = if field.optional then "Optional" else "Literal"
+      ProgramOutputValues.allowedValue(field, value)
+        .map(field.name -> _)
+        .left.map(error => s"${field.name}: expected $expected, got ${pythonTypeName(value)}: ${error.message}")
+    }
+    val problems = checked.collect { case Left(problem) => problem }
+    val values   = checked.collect { case Right(entry) => entry }
+    if problems.nonEmpty then Left(s"[Type Error] ${problems.mkString("; ")}")
+    else Right(values.foldLeft(record)((done, entry) => done.updated(entry._1, entry._2)))
 
   /** Upstream `_strip_code_fences`: strip decorative outer fences, accept ```python/```py/bare fences, REJECT an
     * explicit non-Python language tag (the error becomes an `[Error]` observation).

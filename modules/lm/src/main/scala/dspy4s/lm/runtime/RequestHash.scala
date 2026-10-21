@@ -1,15 +1,33 @@
 package dspy4s.lm.runtime
 
-import dspy4s.core.contracts.ToolCall
+import dspy4s.core.contracts.{DspyError, ToolCall, ValidationError}
 import dspy4s.lm.contracts.{ContentPart, LmRequest, Message}
 import zio.blocks.schema.DynamicValue
 
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import scala.util.control.NonFatal
 
 object RequestHash:
+
+  /** The cache key of `request`. The encoder is recursive, so a value in the request that is nested too deep for the
+    * stack of the thread throws a `StackOverflowError`. [[forRequestChecked]] gives a `Left` for that request.
+    */
   def forRequest(request: LmRequest): String =
     sha256(encodeRequest(request))
+
+  /** The cache key of `request` like [[forRequest]], or a `ValidationError` when the function cannot build the key, for
+    * example when a value in the request is nested too deep for the stack of the thread, as the arguments of a tool
+    * call in a message can be (the rule of `DynamicJson.encodeExactChecked`). A cache stores and reads nothing for such
+    * a request, so the model gets the call (upstream `Cache.get` and `Cache.put` catch the exception of `cache_key`,
+    * log it, and go on with no cache, `dspy/clients/cache.py`).
+    */
+  def forRequestChecked(request: LmRequest): Either[DspyError, String] =
+    try Right(forRequest(request))
+    catch
+      case _: StackOverflowError => Left(ValidationError("The request has no cache key: a value is nested too deep"))
+      case NonFatal(error)       =>
+        Left(ValidationError(s"The request has no cache key: ${Option(error.getMessage).getOrElse(error.toString)}"))
 
   private def encodeRequest(request: LmRequest): String =
     val messages  = request.messages.map(encodeMessage).mkString("[", ",", "]")

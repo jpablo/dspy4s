@@ -15,6 +15,7 @@ import munit.FunSuite
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import java.nio.file.Files
+import scala.concurrent.duration.Duration
 
 class EvaluateSuite extends FunSuite:
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
@@ -244,4 +245,13 @@ class EvaluateSuite extends FunSuite:
     val eval = result.toOption.get
     assertEquals(eval.metricName, "lengthy")
     assertEquals(eval.results.map(_.score).toList, List(0.0, 1.0, 0.0))
+  }
+
+  // Upstream `Evaluate` has no time limit: its `ParallelExecutor` only submits a slow example again
+  // (`dspy/utils/parallelizer.py`). A test that waits for the 120 seconds of the old default is too slow for the suite,
+  // so this test reads the limit.
+  test("an evaluation has no time limit by default, as upstream") {
+    val config = EvaluateConfig(devset = Vector(ex("question" := "q1")), metric = new ExactMatch())
+    assertEquals(config.timeout: Duration, Duration.Inf)
+    assertEquals(Evaluate(devset = config.devset, metric = config.metric).config.timeout, Duration.Inf)
   }

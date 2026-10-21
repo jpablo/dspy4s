@@ -162,6 +162,10 @@ object UsageTracking:
   *
   * The delegate can be a second managed model. A cache hit of that model is a hit of this model too: this model does
   * not store it, records no usage for it, and writes the history entry of a hit.
+  *
+  * A request with no cache key ([[RequestHash.forRequestChecked]]), for example one with a value nested too deep for
+  * the stack, is a miss of [[InMemoryLmCache]] and [[DiskLmCache]], and they store nothing for it. The delegate thus
+  * gets each call of that request (upstream `Cache.get` and `Cache.put` go on with no cache, `dspy/clients/cache.py`).
   */
 final case class ManagedLanguageModel(
     delegate   : LanguageModel,

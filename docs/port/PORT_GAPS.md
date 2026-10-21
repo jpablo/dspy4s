@@ -1733,13 +1733,16 @@ Open after the removal:
 
 ## G-41 — Parallel execution differences
 
-**Status:** Open · **Verification:** R. The GEPA evaluation has no batch time limit since b36 (`c1352888`):
-`ParallelExecutor` takes `Duration.Inf`. The other callers keep the 120 s limit.
+**Status:** Open · **Verification:** R. The GEPA evaluation has no batch time limit since b36 (`c1352888`). Since b45,
+no caller has a batch time limit by default: `Duration.Inf` is the default `timeout` of `ParallelExecutor`, of
+`ParallelExecutor.fromSettings`, of `EvaluateConfig` and `Evaluate.apply`, and of `Parallel`.
 
-- **Timeout.** `ParallelExecutor` fails the full batch if no task completes in the limit
-  (`modules/programs/.../runtime/ParallelExecutor.scala:98-100,121-122`). Upstream submits the slow task again and
-  continues (`dspy/utils/parallelizer.py:207-225`). `PORT_BACKLOG.md` defers the straggler retry only.
-- **Typed `Parallel`.** `Parallel.run` accepts `DynamicModule` only (`modules/programs/.../Parallel.scala:25-27`), and
+- **Timeout.** Upstream never fails a batch for time. Its `timeout` (120 s) submits a slow task again when few tasks
+  remain, and the batch continues (`dspy/utils/parallelizer.py:207-224`). The port does not submit a task again, so its
+  default is no time limit. A caller that gives a finite `timeout` still gets a `Left` for the full batch when no task
+  completes in that time (`modules/programs/.../runtime/ParallelExecutor.scala`). `PORT_BACKLOG.md` defers the
+  resubmission of a slow task.
+- **Typed `Parallel`.** `Parallel.run` accepts `DynamicModule` only (`modules/programs/.../Parallel.scala:30-32`), and
   `fanout` is sequential (`modules/programs/.../compose/Both.scala:12-15`).
 - **Temperature for `n > 1`.** Upstream sets 0.7 when the temperature is low (`dspy/predict/predict.py:179-185`).
   `PredictEngine.scala:96-121` has no equivalent.

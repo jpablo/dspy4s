@@ -478,3 +478,61 @@ class RLMSuite extends FunSuite:
     }
     assertEquals(outer.toVector, Vector("inner", "outer"))
   }
+
+  // ── The allowed values of a SUBMIT (decision D7) ────────────────────────────────────────────────────────────
+  // Upstream `_process_final_output` reads each SUBMIT value with `parse_value` (`dspy/predict/rlm.py`). A value
+  // outside a `Literal[...]` gives the observation `[Type Error] <name>: expected Literal, got <type>: <error>`, and
+  // the loop continues. A value that `parse_value` accepts after its steps is the allowed value itself.
+
+  /** An RLM over `dsl`, with a REPL that gives the SUBMIT payloads `payloads` in order. */
+  private def submitting(dsl: String, payloads: String*): (RLM[DynamicValue.Record, DynamicValue.Record], ScriptedLm) =
+    val signature = Signature.fromStringDynamic(dsl).fold(error => fail(error.message), identity)
+    val results   = payloads.toVector.map(json => Right(CodeResult("", "", 0, finalOutput = Some(json))))
+    val repl      = new ScriptedRepl(results)
+    val lm        = new ScriptedLm(payloads.toVector.map(_ => "submit||```python\nSUBMIT()\n```"))
+    (RLM(baseSignature = signature, interpreterFactory = Some((_, _) => repl)), lm)
+
+  test("a SUBMIT value outside the allowed values is a [Type Error] observation, and the loop continues") {
+    val (program, lm) = submitting(
+      "context, query -> answer: Literal['yes', 'no'], note",
+      """{"answer": "maybe", "note": "n"}""",
+      """{"answer": " 'yes' ", "note": "n"}"""
+    )
+    withRlm(lm, new ProbeAdapter) {
+      val result = program(rec("context" := "c", "query" := "q")).fold(error => fail(error.message), identity)
+      // Upstream `parse_value` strips the text and removes the quotes, and gives the allowed value.
+      assertEquals(DynamicValues.recordGet(result.output, "answer").map(DynamicValues.renderText), Some("yes"))
+      assertEquals(DynamicValues.recordGet(result.raw.values, "answer").map(DynamicValues.renderText), Some("yes"))
+      val trajectory = result.raw.asString("trajectory").toOption.getOrElse("")
+      assert(
+        trajectory.contains(
+          "[Type Error] answer: expected Literal, got str: Value 'maybe' is not one of the allowed values: yes; no"
+        ),
+        trajectory
+      )
+      assertEquals(lm.calls.get(), 2)
+    }
+  }
+
+  test("each SUBMIT value outside its allowed values is in the [Type Error], also a value that is not a string") {
+    val (program, lm) = submitting(
+      "context, query -> tone: Literal['calm', 'angry'], topic: Literal['billing', 'login']",
+      """{"tone": 3, "topic": "Billing"}""",
+      """{"tone": "Literal['calm']", "topic": "login"}"""
+    )
+    withRlm(lm, new ProbeAdapter) {
+      val result = program(rec("context" := "c", "query" := "q")).fold(error => fail(error.message), identity)
+      assertEquals(
+        Vector("tone", "topic").map(name => DynamicValues.recordGet(result.output, name).map(DynamicValues.renderText)),
+        Vector(Some("calm"), Some("login"))
+      )
+      val trajectory = result.raw.asString("trajectory").toOption.getOrElse("")
+      assert(
+        trajectory.contains(
+          "[Type Error] tone: expected Literal, got int: Value '3' is not one of the allowed values: calm; angry; " +
+            "topic: expected Literal, got str: Value 'Billing' is not one of the allowed values: billing; login"
+        ),
+        trajectory
+      )
+    }
+  }

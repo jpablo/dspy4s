@@ -88,14 +88,20 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
             case RLM.ReplExecution.Observed(entry) =>
               if rlm.verbose then Console.err.println(RLM.formatOutputBlock(entry.output, rlm.maxOutputChars))
               Right(AgentLoop.Step.Continue(history :+ entry))
-            case RLM.ReplExecution.Submitted(entry, outputsRecord) =>
-              // The single schema decode of the SUBMIT payload: a failed decode becomes a `[Type Error]`
-              // observation and the loop continues (upstream parity); a successful one terminates the loop.
-              baseSignature.outputShape.decode(outputsRecord) match
-                case Left(decodeError) =>
-                  val failed = entry.copy(output = s"[Type Error] ${decodeError.message}")
+            case RLM.ReplExecution.Submitted(entry, submitted) =>
+              // The check of the allowed values (decision D7), then the single schema decode of the SUBMIT payload. A
+              // failure of the two becomes a `[Type Error]` observation and the loop continues (upstream
+              // `_process_final_output`); a success terminates the loop.
+              val decoded = RLMReplProtocol.checkAllowedValues(submitted, baseLayout).flatMap { outputsRecord =>
+                baseSignature.outputShape.decode(outputsRecord) match
+                  case Left(decodeError) => Left(s"[Type Error] ${decodeError.message}")
+                  case Right(output)     => Right(outputsRecord -> output)
+              }
+              decoded match
+                case Left(typeError) =>
+                  val failed = entry.copy(output = typeError)
                   Right(AgentLoop.Step.Continue(history :+ failed))
-                case Right(output) =>
+                case Right((outputsRecord, output)) =>
                   Right(AgentLoop.Step.Done(finishWith(output, outputsRecord, reasoning, history :+ entry)))
         }
       }

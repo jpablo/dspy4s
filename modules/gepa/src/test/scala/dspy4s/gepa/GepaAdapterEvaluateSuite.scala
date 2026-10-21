@@ -7,6 +7,7 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.:=
@@ -210,6 +211,46 @@ class GepaAdapterEvaluateSuite extends FunSuite:
         failureScore = -1.0
       ).evaluate(batch, Candidate.seed(program), captureTraces = false)
       assertEquals(result.scores, Vector(1.0, -1.0, 1.0))
+    }
+  }
+
+  // ── The text of a failed example ────────────────────────────────────────────────────────────────────────────
+  // Upstream gives a failed example a `FailedPrediction` in the place of its prediction (`bootstrap_trace_data` in
+  // `dspy/teleprompt/bootstrap_trace.py`). Its `completion_text` is the raw response of the model for a parse failure
+  // (`AdapterParseError.lm_response`). `make_reflective_dataset` (`dspy/teleprompt/gepa/gepa_utils.py`) reads it from
+  // the failed trace entry.
+
+  /** Gives a reply with no field marker for BAD-FORMAT, a `Left` for LM-ERROR, and an exception for LM-THROWS. */
+  private final class FailingLm extends LanguageModel:
+    override val id: String                                                                    = "failing"
+    override val mode: LmMode                                                                  = LmMode.Chat
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      val prompt = request.messages.flatMap(_.text).mkString("\n")
+      if prompt.contains("LM-THROWS") then throw IllegalStateException("the LM failed")
+      else if prompt.contains("LM-ERROR") then Left(RuntimeError("failing_lm", "the model is down"))
+      else
+        val text =
+          if prompt.contains("BAD-FORMAT") then "I do not know the format."
+          else "[[ ## answer ## ]]\nParis\n\n[[ ## source ## ]]\natlas\n\n[[ ## completed ## ]]"
+        Right(LmResponse(outputs = Vector(LmOutput(text = text))))
+
+  test("a failed example keeps the text of upstream FailedPrediction: the raw response, else the error message") {
+    // Two outputs, so the JSON fallback of the chat adapter does not take the whole reply as the value of one output.
+    val twoOutputs = DynamicPredict(layout =
+      SignatureLayout.parse("question -> answer, source").toOption.get.withInstructions(Some("Answer."))
+    )
+    val batch = Vector("France?", "BAD-FORMAT?", "LM-ERROR?", "LM-THROWS?", "METRIC-THROWS?").map(example)
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new FailingLm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val adapter          = new GepaAdapter(twoOutputs, throwingMetric, failureScore = -1.0)
+      val trajectories     = adapter.evaluate(batch, Candidate.seed(twoOutputs), captureTraces = true).trajectories
+        .getOrElse(fail("the evaluation with traces must give the trajectories"))
+      assertEquals(trajectories.map(_.failed), Vector(false, true, true, true, true))
+      assertEquals(trajectories(0).failure, None)
+      assertEquals(trajectories(1).failure, Some("I do not know the format."))
+      assert(trajectories(2).failure.exists(_.contains("the model is down")), trajectories(2).failure.toString)
+      assert(trajectories(3).failure.exists(_.contains("the LM failed")), trajectories(3).failure.toString)
+      assert(trajectories(4).failure.exists(_.contains("the metric failed")), trajectories(4).failure.toString)
     }
   }
 

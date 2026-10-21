@@ -19,8 +19,7 @@ import dspy4s.evaluate.contracts.Metric
 import dspy4s.programs.runtime.ParallelExecutor
 import zio.blocks.schema.DynamicValue
 
-import scala.concurrent.duration.FiniteDuration
-import scala.concurrent.duration.DurationInt
+import scala.concurrent.duration.Duration
 
 final case class EvaluateConfig(
     devset          : Vector[Example],
@@ -33,7 +32,11 @@ final case class EvaluateConfig(
     saveAsCsv       : Option[String]       = None,
     saveAsJson      : Option[String]       = None,
     provideTraceback: Boolean              = false,
-    timeout         : FiniteDuration       = 120.seconds,
+    /** The time limit of the [[ParallelExecutor]] of a run. The default, `Duration.Inf`, gives no time limit: upstream
+      * `Evaluate` never fails for time, because the `timeout` of its executor only submits a slow example again
+      * (`dspy/utils/parallelizer.py`, PORT_GAPS G-41).
+      */
+    timeout: Duration = Duration.Inf,
     /** Metadata carried into the evaluation scope's [[RuntimeContext.callbackMetadata]], so callbacks firing during the
       * run can read it (Python's `Evaluate(callback_metadata=…)`). Empty default → scope unchanged.
       */
@@ -49,7 +52,7 @@ final case class EvaluateConfig(
   * The run installs the context that it gets (UPGRADE-3.2.1-to-3.4.0, decision D8: the given context wins), so the
   * callbacks and the parallel workers use the settings of that context.
   */
-final class Evaluate(config: EvaluateConfig) extends Evaluator:
+final class Evaluate(val config: EvaluateConfig) extends Evaluator:
 
   def apply(
       metric          : Option[Metric]              = None,
@@ -221,7 +224,7 @@ object Evaluate:
       displayTable    : Int                 = 0,
       saveAsCsv       : Option[String]      = None,
       saveAsJson      : Option[String]      = None,
-      timeout         : FiniteDuration      = 120.seconds,
+      timeout         : Duration            = Duration.Inf,
       callbackMetadata: DynamicValue.Record = DynamicValue.Record.empty
   ): Evaluate =
     val displaySpec: Either[Boolean, Int] = if displayTable > 0 then Right(displayTable) else Left(false)

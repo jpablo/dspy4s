@@ -153,8 +153,8 @@ private[runtime] object DiskCacheModel:
 /** An [[LmCache]] with one file for each entry in `directory` (upstream: a versioned plain-data record,
   * `CallResult.dump` and `CACHE_FORMAT` in `dspy/clients/call_result.py`).
   *
-  * The file of an entry is `<key>.json`, where the key is [[RequestHash.forRequest]] of the request. The file is one
-  * JSON object:
+  * The file of an entry is `<key>.json`, where the key is [[RequestHash.forRequestChecked]] of the request. A request
+  * with no key is a miss, and `put` writes no file for it. The file is one JSON object:
   * {{{
   * {
   *   "_dspy4s_format": "dspy4s-lm-result-v1",
@@ -182,9 +182,12 @@ private[runtime] object DiskCacheModel:
   * The cache keeps a count of its entries (upstream `diskcache` keeps the count in its index). The first `put` lists
   * the directory to set the count. Each file that the cache writes or removes changes the count, so a `put` below
   * `maxEntries` does not list the directory. When the count passes `maxEntries`, the eviction lists the directory,
-  * reads the time of each entry one time, removes the oldest entries, and sets the count again from the list. A second
-  * writer of the directory does not change the count of this cache. Thus the directory can hold more entries than
-  * `maxEntries`, until the count of this cache passes `maxEntries`.
+  * reads the time of each entry one time, removes the oldest entries down to 90% of `maxEntries` (rounded down, and 1
+  * at least), and sets the count again from the list. Thus the next eviction comes after 10% of `maxEntries` new
+  * entries, not at the next `put`. This rule is the port form of the cull of upstream `diskcache`: each `set` at the
+  * size limit removes up to `cull_limit` entries (10 by default) through the SQLite index, which the port does not
+  * have. A second writer of the directory does not change the count of this cache. Thus the directory can hold more
+  * entries than `maxEntries`, until the count of this cache passes `maxEntries`.
   */
 final class DiskLmCache private[runtime] (directory: Path, maxEntries: CacheCapacity, files: DiskLmCache.EntryFiles)
     extends LmCache:
@@ -197,24 +200,31 @@ final class DiskLmCache private[runtime] (directory: Path, maxEntries: CacheCapa
   /** The count of the entries, or `None` before the first `put` and after `clear`. */
   private var entryCount: Option[Int] = None
 
+  /** The number of entries that an eviction keeps: 90% of `maxEntries`, rounded down, and 1 at least, so the entry of
+    * the `put` stays.
+    */
+  private val evictionTarget: Int = math.max(1, (maxEntries.toLong * 9L / 10L).toInt)
+
   override def get(request: LmRequest): Option[LmResponse] =
-    val key = RequestHash.forRequest(request)
-    this.synchronized {
-      readRecord(recordPath(key))
-        .orElse(readLegacyEntry(key))
-        .map(response => response.copy(cacheHit = true))
+    RequestHash.forRequestChecked(request).toOption.flatMap { key =>
+      this.synchronized {
+        readRecord(recordPath(key))
+          .orElse(readLegacyEntry(key))
+          .map(response => response.copy(cacheHit = true))
+      }
     }
 
   override def put(request: LmRequest, response: LmResponse): Unit =
-    val key = RequestHash.forRequest(request)
-    this.synchronized {
-      try
-        if entryCount.isEmpty then entryCount = Some(entryPaths.size)
-        if store(key, response) then
-          remove(legacyPath(key))
-          if entryCount.exists(_ > maxEntries) then evictOverflow()
-      catch
-        case NonFatal(_) => ()
+    RequestHash.forRequestChecked(request).foreach { key =>
+      this.synchronized {
+        try
+          if entryCount.isEmpty then entryCount = Some(entryPaths.size)
+          if store(key, response) then
+            remove(legacyPath(key))
+            if entryCount.exists(_ > maxEntries) then evictOverflow()
+        catch
+          case NonFatal(_) => ()
+      }
     }
 
   def size: Int =
@@ -312,8 +322,9 @@ final class DiskLmCache private[runtime] (directory: Path, maxEntries: CacheCapa
   private def entryPaths: Vector[Path] =
     files.list(directory)
 
-  /** List the directory, set the count from the list, and remove the oldest entries above `maxEntries`. The function
-    * reads the time of each entry one time. A file that goes away before the function reads its time is not an entry.
+  /** List the directory, set the count from the list, and remove the oldest entries above [[evictionTarget]]. The
+    * function reads the time of each entry one time. A file that goes away before the function reads its time is not an
+    * entry.
     */
   private def evictOverflow(): Unit =
     val entries = entryPaths.flatMap { path =>
@@ -321,7 +332,7 @@ final class DiskLmCache private[runtime] (directory: Path, maxEntries: CacheCapa
       catch case NonFatal(_) => None
     }
     entryCount = Some(entries.size)
-    val overflow = entries.size - maxEntries
+    val overflow = entries.size - evictionTarget
     if overflow > 0 then entries.sortBy(_._2).take(overflow).foreach((path, _) => remove(path))
 
 object DiskLmCache:

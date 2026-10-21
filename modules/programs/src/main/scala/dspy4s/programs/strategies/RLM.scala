@@ -25,6 +25,8 @@ import dspy4s.programs.runtime.RunUsage
 import dspy4s.signatures.{Shape, Signature}
 import zio.blocks.schema.DynamicValue
 
+import java.util.concurrent.atomic.AtomicBoolean
+
 /** RLM — Recursive Language Model (a port of `dspy.RLM`, upstream-`@experimental`; PORT_GAPS G-20 part 2).
   *
   * An inference strategy where LONG CONTEXTS never enter the prompt: input fields are injected into a sandboxed Python
@@ -40,7 +42,9 @@ import zio.blocks.schema.DynamicValue
   *
   * ==Deltas from Python==
   *   - Output-type validation is the signature's `Schema` decode over the whole SUBMIT payload, not per-field pydantic
-  *     `parse_value`; a failed decode becomes a `[Type Error] …` observation and the loop continues.
+  *     `parse_value`; a failed decode becomes a `[Type Error] …` observation and the loop continues. Before the decode,
+  *     an output with allowed values (a `Literal[...]` or a Scala enum) takes the rule of the adapters (decision D7),
+  *     as upstream `parse_value` does for a `Literal`.
   *   - Upstream's `SandboxSerializable` custom-serialization path (bespoke setup/assignment code per value) is not
   *     ported — inputs are plain `DynamicValue`s injected by the interpreter.
   *   - The async path is omitted.
@@ -104,14 +108,20 @@ final case class RLM[I, O](
       * first construction (upstream sets `_initial_execution_instructions` in `__init__`, and a deep copy keeps it,
       * `dspy/predict/rlm.py`). When [[interpreterFactory]] is set, its execution text wins over this text.
       */
-    contextExecutionInstructions: String = RLM.contextExecutionInstructions
+    contextExecutionInstructions: String = RLM.contextExecutionInstructions,
+    /** The latch of the decision-output warning. The default value is a new latch, and a `copy` keeps the latch. Thus a
+      * construction writes the warning one time, and a copy does not write it again (upstream `RLM.__init__` warns, and
+      * a deep copy does not run `__init__`, `dspy/predict/rlm.py`). The latch takes no part in the equality of an RLM.
+      */
+    decisionWarning: RLM.WarningLatch = RLM.WarningLatch()
 ) extends Module[I, O]:
 
   override val moduleName: String = "rlm"
   RLM.checkNames(tools.map(_.name), baseSignature.layout)
   // Experimental decision outputs: `SUBMIT` gets no evidence decoding. Upstream `RLM.__init__` warns, and the program
   // runs.
-  if RLM.hasDecisionOutputs(baseSignature) then RuntimeEnvironment.warn("RLM", RLM.DecisionOutputsWarning)
+  if RLM.hasDecisionOutputs(baseSignature) then
+    decisionWarning.once(RuntimeEnvironment.warn("RLM", RLM.DecisionOutputsWarning))
 
   private val baseLayout: SignatureLayout      = baseSignature.layout
   private val outputFieldNames: Vector[String] = baseLayout.outputFields.map(_.name)
@@ -302,6 +312,25 @@ object RLM:
     */
   def isReservedSandboxName(name: String): Boolean =
     ReservedToolNames.contains(name) || name == "dspy" || name.startsWith("_dspy") || name.startsWith("__dspy")
+
+  /** A latch that runs one action at most (the parameter `decisionWarning` of [[RLM]]). Each latch is equal to each
+    * other latch, so a latch takes no part in the equality of an RLM.
+    */
+  final class WarningLatch:
+    private val done = AtomicBoolean(false)
+
+    /** Run `action` when the latch ran no action before. */
+    def once(action: => Unit): Unit =
+      if done.compareAndSet(false, true) then action
+
+    override def equals(other: Any): Boolean =
+      other match
+        case _: WarningLatch => true
+        case _               => false
+
+    override def hashCode: Int = 0
+
+    override def toString: String = "WarningLatch"
 
   /** The warning of an RLM with decision outputs (upstream `RLM.__init__`). */
   private val DecisionOutputsWarning: String =

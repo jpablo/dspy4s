@@ -126,3 +126,17 @@ class ParallelExecutorSuite extends FunSuite:
     val unlimited = ParallelExecutor(numThreads = ThreadCount(3), timeout = Duration.Inf).execute(task, data)
     assertEquals(unlimited.map(_.results), Right(Vector(Some(1), Some(2), Some(3))))
   }
+
+  // Upstream `ParallelExecutor` never fails a batch for time: its `timeout` only submits a slow task again
+  // (`dspy/utils/parallelizer.py`). The port has no resubmission (PORT_BACKLOG), so its default is no time limit.
+  // A test that waits for the 120 seconds of the old default is too slow for the suite, so these tests read the limits.
+
+  test("the default executor and the executor of the settings have no time limit, as upstream") {
+    given RuntimeContext = RuntimeEnvironment.current
+    assertEquals(ParallelExecutor().timeout, Duration.Inf)
+    assertEquals(ParallelExecutor.fromSettings().timeout, Duration.Inf)
+  }
+
+  test("a Parallel has no time limit by default") {
+    assertEquals(Parallel().timeout: Duration, Duration.Inf)
+  }

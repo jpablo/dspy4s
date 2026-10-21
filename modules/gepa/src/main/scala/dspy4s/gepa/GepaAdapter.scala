@@ -7,7 +7,9 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.Example
+import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.contracts.TraceEntry
@@ -91,8 +93,10 @@ final class GepaAdapter[P](
     * The program-level feedback of the metric gives the score and the objective scores of an example. The metric gets
     * one call for each run that passes. A run that fails, a metric that gives a `Left`, or an exception has
     * `failureScore` and no objective score. A failure of the whole executor (for example a fatal error in a worker
-    * thread) gives each example `failureScore`. [[EvaluationBatch.objectiveScores]] is `None` when no example of the
-    * batch has an objective score. The adapter does not read the objective scores of a component-level feedback.
+    * thread) gives each example `failureScore`. The trajectory of a run that fails, or of an example whose run or
+    * metric throws, has the text of the failure ([[Trajectory.failure]]). [[EvaluationBatch.objectiveScores]] is `None`
+    * when no example of the batch has an objective score. The adapter does not read the objective scores of a
+    * component-level feedback.
     *
     * With `captureTraces` (the reflective path), [[RuntimeContext.captureFailureTraces]] is on, so a parse failure
     * stays in the trace with the raw response (G-12 P-a/P-b). `addFormatFailureAsFeedback` decides if that failure
@@ -114,10 +118,12 @@ final class GepaAdapter[P](
         task = (example: Example) => runOne(prog, example, captureTraces)(using RuntimeEnvironment.current),
         data = batch
       ) match
-      // An example that threw has no result, and it gets the failure score.
-      case Right(outcome) => batch.indices.toVector.map(i => outcome.results(i).getOrElse(failedRun(batch(i))))
+      // An example that threw has no result, and it gets the failure score and the error of the executor.
+      case Right(outcome) => batch.indices.toVector.map(i =>
+          outcome.results(i).getOrElse(failedRun(batch(i), outcome.errors.getOrElse(i, GepaAdapter.NotCompleted)))
+        )
       // A failure of the whole executor: each example gets the failure score.
-      case Left(_) => batch.map(failedRun)
+      case Left(error) => batch.map(failedRun(_, error))
     EvaluationBatch(
       outputs = runs.map(_.prediction),
       scores = runs.map(_.score),
@@ -320,14 +326,15 @@ final class GepaAdapter[P](
   private def text(value: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(value))
 
   /** The output structure that the model must follow, as text: the chat prompt of `layout` with no demos and no inputs.
-    * Upstream uses a `ChatAdapter` for this text, whichever adapter the program uses.
+    * Upstream uses a `ChatAdapter` for this text, whichever adapter the program uses. Each message is its role, `": "`,
+    * its content, and a line end (upstream `role + ": " + content + "\n"` in `make_reflective_dataset`).
     */
   private def structureInstruction(layout: SignatureLayout)(using RuntimeContext): String =
     ChatAdapter()
       .format(AdapterInvocation(layout, demos = Vector.empty, inputs = Example.empty, request = LmRequest(model = "")))
       .fold(
         _ => "",
-        _.messages.map(m => s"${m.role.toString.toLowerCase}: ${m.text.getOrElse("").strip}").mkString("\n")
+        _.messages.map(m => s"${m.role.toString.toLowerCase}: ${m.text.getOrElse("").strip}\n").mkString
       )
 
   /** Run one example in an isolated context and assemble its [[Trajectory]]. With `captureTraces`, the context captures
@@ -348,16 +355,30 @@ final class GepaAdapter[P](
               // The scores-only path gives an empty output for each example with no score, as `Evaluate` does
               // (upstream uses `Evaluate` for this path). The reflective path keeps the prediction.
               Trajectory(example, if captureTraces then prediction else RawPrediction.empty, trace, failureScore)
-        case Left(_) =>
+        case Left(error) =>
           // With `captureTraces`, the trace already holds the failure entry (raw response) via captureFailureTraces.
-          Trajectory(example, RawPrediction.empty, trace, failureScore, failed = true)
+          Trajectory(example, RawPrediction.empty, trace, failureScore, failure = Some(GepaAdapter.failureText(error)))
     }
 
-  /** The trajectory of an example that has no result, because its run did not complete. */
-  private def failedRun(example: Example): Trajectory =
-    Trajectory(example, RawPrediction.empty, Vector.empty, failureScore, failed = true)
+  /** The trajectory of an example that has no result, because its run did not complete. `error` is the error of the
+    * executor for the example, for example the error of an exception of the run or of the metric.
+    */
+  private def failedRun(example: Example, error: DspyError): Trajectory =
+    Trajectory(example, RawPrediction.empty, Vector.empty, failureScore, failure = Some(GepaAdapter.failureText(error)))
 
 object GepaAdapter:
+
+  /** The text of a run that failed with `error` ([[Trajectory.failure]]): the raw response of the model for a parse
+    * error that has it (upstream `FailedPrediction(completion_text=e.lm_response)` in `bootstrap_trace_data`), else the
+    * message of the error.
+    */
+  private def failureText(error: DspyError): String =
+    error match
+      case ParseError(_, _, Some(raw)) => raw
+      case other                       => other.message
+
+  /** The error of an example that the executor did not run, because it stopped the batch first. */
+  private val NotCompleted: DspyError = RuntimeError("gepa_adapter", "The run of the example did not complete")
 
   /** The executor of one evaluation of `batchSize` examples ([[GepaAdapter.evaluate]]). The number of threads comes
     * from the context, or else it is [[ParallelExecutor.DefaultNumThreads]].

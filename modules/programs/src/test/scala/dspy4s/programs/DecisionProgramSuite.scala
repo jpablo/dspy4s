@@ -187,6 +187,19 @@ class DecisionProgramSuite extends FunSuite:
     assert(!plain.contains("Noul"), plain)
   }
 
+  test("an RLM writes the decision-output warning one time for a construction, and a copy does not write it again") {
+    // Upstream `RLM.__init__` warns, and a deep copy does not run `__init__` (`dspy/predict/rlm.py`). An optimizer
+    // makes a copy for each candidate.
+    def count(text: String): Int = text.sliding("RLM support for Noul".length).count(_ == "RLM support for Noul")
+    val (program, first)         = captureErr(RLM(baseSignature = signature))
+    assertEquals(count(first), 1, first)
+    val (copied, afterCopy) = captureErr(program.copy(maxIterations = IterationLimit(3)).copy(verbose = true))
+    assertEquals(afterCopy, "", "a copy must not warn again")
+    assertEquals(copied.maxIterations, IterationLimit(3))
+    val (_, second) = captureErr(RLM(baseSignature = signature))
+    assertEquals(count(second), 1, "a new construction warns again")
+  }
+
   private def at(value: DynamicValue, path: String*): Option[DynamicValue] =
     path.foldLeft(Option(value)) {
       case (Some(record: DynamicValue.Record), key) => DynamicValues.recordGet(record, key)

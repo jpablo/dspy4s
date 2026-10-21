@@ -207,6 +207,23 @@ class GepaFailureFeedbackSuite extends FunSuite:
     assert(record.feedback.contains("\nuser: Respond with the corresponding output fields"), record.feedback)
   }
 
+  test("the feedback of a failed call is the upstream text, with a line end after each message") {
+    val records = reflect(loop, new FormatLm(failFinisher = true), new RecordingMetric, addFailureAsFeedback = true)
+    // Upstream `make_reflective_dataset` adds `role + ": " + content + "\n"` for each message of the chat prompt
+    // (`dspy/teleprompt/gepa/gepa_utils.py`). The text comes from dspy 3.4.0 for the signature
+    // `question, note -> answer, source` with the instruction "Answer with the note.".
+    val upstream = "Your output failed to parse. Follow this structure:\n" +
+      "system: Your input fields are:\n1. `question` (str): \n2. `note` (str):\nYour output fields are:\n" +
+      "1. `answer` (str): \n2. `source` (str):\n" +
+      "All interactions will be structured in the following way, with the appropriate values filled in.\n\n" +
+      "[[ ## question ## ]]\n{question}\n\n[[ ## note ## ]]\n{note}\n\n[[ ## answer ## ]]\n{answer}\n\n" +
+      "[[ ## source ## ]]\n{source}\n\n[[ ## completed ## ]]\n" +
+      "In adhering to this structure, your objective is: \n        Answer with the note.\n" +
+      "user: Respond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, then " +
+      "`[[ ## source ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`.\n"
+    assertEquals(records(finisherId).map(_.feedback), Vector(upstream))
+  }
+
   test("with the option on, a leaf that passed in a run that failed gets no record, and the metric gets no call") {
     val metric  = new RecordingMetric
     val records = reflect(loop, new FormatLm(failFinisher = true), metric, addFailureAsFeedback = true)

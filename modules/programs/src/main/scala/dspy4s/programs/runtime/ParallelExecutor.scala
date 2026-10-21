@@ -14,7 +14,6 @@ import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.duration.Duration
-import scala.concurrent.duration.DurationInt
 import scala.concurrent.duration.FiniteDuration
 import scala.util.control.NonFatal
 
@@ -29,14 +28,15 @@ final case class ParallelExecutionResult[+A](
   * @param maxErrors
   *   the number of tasks that can fail before the executor cancels the batch and gives a `Left`
   * @param timeout
-  *   the longest wait for the next task that completes. When no task completes in this time, the batch is a `Left`.
-  *   Upstream submits a slow task again and never fails the batch. `Duration.Inf` gives no time limit: the executor
-  *   then waits for each task.
+  *   the longest wait for the next task that completes. When no task completes in this time, the batch is a `Left`. The
+  *   default, `Duration.Inf`, gives no time limit: the executor then waits for each task. Upstream never fails a batch
+  *   for time: its `timeout` (120 seconds) only submits a slow task again (`dspy/utils/parallelizer.py`). The port does
+  *   not submit a task again (PORT_GAPS G-41).
   */
 final class ParallelExecutor(
     val numThreads: ThreadCount = ParallelExecutor.DefaultNumThreads,
     val maxErrors : ErrorLimit  = ErrorLimit(10),
-    val timeout   : Duration    = 120.seconds
+    val timeout   : Duration    = Duration.Inf
 ):
 
   // The workers run in the effective context of the call: the given context, filled from the installed one (decision
@@ -160,10 +160,10 @@ object ParallelExecutor:
 
   /** Build an executor from the ambient context's `numThreads` / `maxErrors`, falling back to the defaults. Explicit
     * `numThreads` / `maxErrors` arguments win over the context (the resolution chain [[dspy4s.programs.Parallel]]
-    * uses); the fallback constants live only here.
+    * uses); the fallback constants live only here. The default `timeout` gives no time limit, as for the constructor.
     */
   def fromSettings(
-      timeout   : Duration            = 120.seconds,
+      timeout   : Duration            = Duration.Inf,
       numThreads: Option[ThreadCount] = None,
       maxErrors : Option[ErrorLimit]  = None
   )(using RuntimeContext): ParallelExecutor =

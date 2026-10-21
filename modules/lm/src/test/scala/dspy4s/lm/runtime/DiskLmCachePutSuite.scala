@@ -87,21 +87,54 @@ class DiskLmCachePutSuite extends FunSuite:
     }
   }
 
-  test("an eviction reads the time of each entry one time, and removes the oldest entry") {
+  test("an eviction reads the time of each entry one time, and removes the oldest entries down to 90% of the cap") {
     withDirectory { directory =>
       val files = CountingFiles()
-      val cache = new DiskLmCache(directory, CacheCapacity(3), files)
-      (1 to 3).foreach { index =>
+      val cache = new DiskLmCache(directory, CacheCapacity(10), files)
+      (1 to 10).foreach { index =>
         cache.put(requestOf(index), response)
         age(directory, index)
       }
       files.reset()
-      cache.put(requestOf(4), response)
+      cache.put(requestOf(11), response)
       assertEquals(files.listings.get(), 1)
-      assertEquals(files.timeReads.get(), 4, "the eviction must read the time of each of the 4 entries one time")
-      assertEquals(cache.size, 3)
-      assert(cache.get(requestOf(1)).isEmpty, "the oldest entry must go")
-      (2 to 4).foreach(index => assert(cache.get(requestOf(index)).isDefined, s"entry $index must stay"))
+      assertEquals(files.timeReads.get(), 11, "the eviction must read the time of each of the 11 entries one time")
+      assertEquals(cache.size, 9)
+      (1 to 2).foreach(index => assert(cache.get(requestOf(index)).isEmpty, s"the old entry $index must go"))
+      (3 to 11).foreach(index => assert(cache.get(requestOf(index)).isDefined, s"entry $index must stay"))
+    }
+  }
+
+  // Upstream `diskcache` culls through its SQLite index: each `set` at the size limit removes up to `cull_limit`
+  // entries. The port removes 10% of the cap at one time, so the puts after an eviction do not list the directory.
+  test("after an eviction, the puts do not list the directory until the count passes the cap again") {
+    withDirectory { directory =>
+      val files = CountingFiles()
+      val cache = new DiskLmCache(directory, CacheCapacity(10), files)
+      (1 to 11).foreach { index =>
+        cache.put(requestOf(index), response)
+        age(directory, index)
+      }
+      files.reset()
+      cache.put(requestOf(12), response)
+      assertEquals(files.listings.get(), 0, "the cache has 10 entries after the put, so it must not list")
+      assertEquals(files.timeReads.get(), 0)
+      age(directory, 12)
+      cache.put(requestOf(13), response)
+      assertEquals(files.listings.get(), 1, "the cache has 11 entries after the put, so it must evict")
+      assertEquals(cache.size, 9)
+      assertEquals((1 to 13).filter(index => cache.get(requestOf(index)).isDefined).toVector, (5 to 13).toVector)
+    }
+  }
+
+  test("the eviction of a cap of 1 keeps the entry of the put") {
+    withDirectory { directory =>
+      val cache = new DiskLmCache(directory, CacheCapacity(1), CountingFiles())
+      cache.put(requestOf(1), response)
+      age(directory, 1)
+      cache.put(requestOf(2), response)
+      assertEquals(cache.size, 1)
+      assert(cache.get(requestOf(2)).isDefined, "the entry of the put must stay")
     }
   }
 
@@ -114,21 +147,26 @@ class DiskLmCachePutSuite extends FunSuite:
         other.put(requestOf(index), response)
         age(directory, index)
       }
+      // The cap is 3, so an eviction keeps 2 entries (90% of the cap, rounded down).
       val cache = new DiskLmCache(directory, CacheCapacity(3), CountingFiles())
       cache.put(requestOf(4), response)
       age(directory, 4)
-      assertEquals(cache.size, 3)
-      assert(cache.get(requestOf(1)).isEmpty, "the oldest entry must go")
+      assertEquals(cache.size, 2)
+      assertEquals((1 to 4).filter(index => cache.get(requestOf(index)).isDefined).toVector, Vector(3, 4))
 
-      // The second cache writes two entries. The count of the first cache does not include them, so the next put of
-      // the first cache that passes the cap counts the directory again and removes the oldest entries.
+      // The second cache writes two entries. The count of the first cache does not include them, so the directory can
+      // hold more entries than the cap, until a put of the first cache passes the cap. That put counts the directory
+      // again and removes the oldest entries.
       (5 to 6).foreach { index =>
         other.put(requestOf(index), response)
         age(directory, index)
       }
       cache.put(requestOf(7), response)
-      assertEquals(cache.size, 3)
-      assertEquals((2 to 7).filter(index => cache.get(requestOf(index)).isDefined).toVector, Vector(5, 6, 7))
+      age(directory, 7)
+      assertEquals(cache.size, 5)
+      cache.put(requestOf(8), response)
+      assertEquals(cache.size, 2)
+      assertEquals((3 to 8).filter(index => cache.get(requestOf(index)).isDefined).toVector, Vector(7, 8))
     }
   }
 
