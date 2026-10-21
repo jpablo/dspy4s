@@ -246,6 +246,75 @@ class DecisionAdapterSuite extends FunSuite:
     assert(text.contains(""""probabilities""""), text)
   }
 
+  /** The value of `body`, and the text that `body` writes to the standard error stream. */
+  private def withStderr[A](body: => A): (A, String) =
+    val buffer = java.io.ByteArrayOutputStream()
+    val value  = Console.withErr(java.io.PrintStream(buffer, true, "UTF-8"))(body)
+    (value, buffer.toString("UTF-8"))
+
+  /** The number of times that `text` has `part`. */
+  private def countOf(text: String, part: String): Int = text.sliding(part.length).count(_ == part)
+
+  /** A layout with the Noul output `urgent` and the output `other`, and its decision plan. */
+  private def probeOf(other: FieldSpec): (SignatureLayout, DecisionPlan) =
+    val probe = SignatureLayout
+      .create(
+        name = "Probe",
+        inputFields = Vector(FieldSpec("ticket")),
+        outputFields = Vector(FieldSpec("urgent", TypeRef.noul, description = Some("Is it urgent?")), other)
+      )
+      .fold(error => fail(error.message), identity)
+    (probe, DecisionPlan.of(probe, Map.empty).fold(error => fail(error.message), identity))
+
+  private def probeInvocation(probe: SignatureLayout): AdapterInvocation =
+    AdapterInvocation(
+      layout = probe,
+      demos = Vector.empty,
+      inputs = Example(values = DynamicValues.record("ticket" := "Checkout fails."), inputKeys = Set("ticket")),
+      request = LmRequest(model = "stub")
+    )
+
+  /** The `response_format` of the request of `adapter` for `probe`, and the text of the standard error stream. */
+  private def responseFormatOf(adapter: Adapter, probe: SignatureLayout)(using
+      RuntimeContext
+  ): (Option[DynamicValue], String) =
+    withStderr {
+      adapter.format(probeInvocation(probe)).fold(
+        error => fail(error.message),
+        prompt => DynamicValues.recordGet(prompt.requestOptions, "response_format")
+      )
+    }
+
+  test("an output with no schema gives JSON mode with the warning of the JSON adapter, once for a call") {
+    // Upstream `DecisionAdapter.__call__` gives the evidence signature to the inner adapter. `JSONAdapter` then fails
+    // to build the schema of the other output, and logs the warning of `_prepare_response_format` before JSON mode. A
+    // dict output is an open map: JSON mode with no warning. The chat adapter sends no response format.
+    given RuntimeContext = RuntimeContext(lm = Some(StubLm(responseSchema = true)))
+    val warning          = "Failed to build structured output schema; using JSON mode before execution."
+    val jsonMode         = DynamicValues.record("type" := "json_object")
+
+    val (opaque, opaquePlan)   = probeOf(FieldSpec("detail", TypeRef("Widget")))
+    val (opaqueFormat, logged) = responseFormatOf(DecisionAdapter(JSONAdapter(), opaquePlan), opaque)
+    assertEquals(opaqueFormat, Some(jsonMode))
+    assertEquals(countOf(logged, warning), 1, logged)
+    // The parse of the reply builds the output schema again, and gives no warning.
+    val (parsedReply, parseLog) = withStderr(
+      DecisionAdapter(JSONAdapter(), opaquePlan)
+        .parse(probeInvocation(opaque), LmOutput(text = """{"urgent": {"noul": 0.9}, "detail": "x"}"""))
+    )
+    assert(parsedReply.isRight, parsedReply.toString)
+    assert(!parseLog.contains(warning), parseLog)
+
+    val (openMap, openMapPlan) = probeOf(FieldSpec("detail", TypeRef.json))
+    val (openFormat, quiet)    = responseFormatOf(DecisionAdapter(JSONAdapter(), openMapPlan), openMap)
+    assertEquals(openFormat, Some(jsonMode))
+    assert(!quiet.contains(warning), quiet)
+
+    val (chatFormat, chatLog) = responseFormatOf(DecisionAdapter(ChatAdapter(), opaquePlan), opaque)
+    assertEquals(chatFormat, None)
+    assert(!chatLog.contains(warning), chatLog)
+  }
+
   private lazy val reply = """[[ ## urgent ## ]]
       |{"noul": 0.9}
       |

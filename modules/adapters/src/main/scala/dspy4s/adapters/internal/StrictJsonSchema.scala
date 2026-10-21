@@ -139,15 +139,27 @@ private[adapters] object StrictJsonSchema:
       Right(schema.updated("additionalProperties", DynamicValue.Primitive(PrimitiveValue.Boolean(false))))
     else Right(schema)
 
-  /** `true` when `value` has an open map at some level ([[isOpenMap]]). [[shape]] gives a `Left` for such a schema. The
-    * JSON adapter then sends JSON mode with no warning, as upstream does for an open map (`_has_open_ended_mapping` in
-    * `dspy/adapters/json_adapter.py`).
-    */
-  def hasOpenMap(value: DynamicValue): Boolean =
+  /** `true` when `value` has an open map at some level ([[isOpenMap]]). [[shape]] gives a `Left` for such a schema. */
+  private def hasOpenMap(value: DynamicValue): Boolean =
     value match
       case schema: DynamicValue.Record => isOpenMap(schema) || schema.fields.exists((_, inner) => hasOpenMap(inner))
       case list: DynamicValue.Sequence => list.elements.exists(hasOpenMap)
       case _                           => false
+
+  /** `true` when the output schema `schema` has an open map ([[isOpenMap]]) below its root: in a property, in an item,
+    * or in a definition. This is the open map of an output field. The JSON adapter then sends JSON mode with no
+    * warning, as upstream does for an open map (`_has_open_ended_mapping` in `dspy/adapters/json_adapter.py` tests the
+    * type of each output field). The root is the object of the output fields, so an open root is not the open map of a
+    * field: the decision adapter writes an open root when a field has no schema. [[shape]] gives a `Left` for an open
+    * root.
+    */
+  def hasFieldOpenMap(schema: DynamicValue.Record): Boolean =
+    schema.fields.exists((_, inner) => hasOpenMap(inner))
+
+  /** The schema of an open map: an object with any properties (upstream `dict`). */
+  val OpenMapSchema: DynamicValue.Record = DynamicValue.Record(
+    Chunk("type" -> str("object"), "additionalProperties" -> DynamicValue.Primitive(PrimitiveValue.Boolean(true)))
+  )
 
   /** `true` for an object schema whose `additionalProperties` is a schema or `true`. */
   private def isOpenMap(schema: DynamicValue.Record): Boolean =

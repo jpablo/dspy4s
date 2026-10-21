@@ -10,7 +10,8 @@ import scala.util.matching.Regex
 
 /** The text forms of Python that the prompts of upstream use: `str()` and `repr()` of a value, `json.dumps` with
   * `ensure_ascii=False` and with ASCII escapes, `str.strip`, `str.splitlines`, and `textwrap.dedent`. The adapters use
-  * these forms so that a prompt is equal to the upstream prompt, character for character (decision D3).
+  * these forms so that a prompt is equal to the upstream prompt, character for character (decision D3). The parsers
+  * also read a JSON string and a Python string literal, as upstream `parse_value` reads them.
   *
   * A value is a `DynamicValue`. An `Option` value of a typed record (the `Some` and `None` variants) prints as its
   * element or as `None`. An enum case with no fields prints as its case name.
@@ -65,6 +66,116 @@ private[adapters] object PythonText:
     char match
       case '\n' | '\u000b' | '\u000c' | '\r' | '\u001c' | '\u001d' | '\u001e' | '\u0085' | ' ' | ' ' => true
       case _                                                                                         => false
+
+  /** The text of the JSON string `text`: the text between the double quotes at its two ends, with each JSON escape
+    * decoded (`json_repair.loads` of a JSON string). `None` when `text` is not one JSON string: it has no double quote
+    * at each end, it has a double quote or a line break inside, or it has an escape that JSON does not have.
+    */
+  def jsonString(text: String): Option[String] =
+    quotedBody(text, '"').flatMap(body => unescape(body, '"', jsonEscape))
+
+  /** The text of the Python string literal `text` (`ast.literal_eval` of a `str` literal): the text between the quotes
+    * (`'` or `"`) at its two ends, after an optional prefix `u`, `U`, `r`, or `R`. Each Python escape is decoded,
+    * except in a raw literal (`r` or `R`). An escape that Python does not know keeps its backslash. `None` when `text`
+    * is not one such literal: another prefix, a quote of the literal or a line break inside, a bad escape, or a
+    * `\N{...}` escape. A literal in triple quotes, two literals in sequence, and a literal in parentheses are not read.
+    */
+  def stringLiteral(text: String): Option[String] =
+    val (prefix, literal) = text.span(_.isLetter)
+    val raw               = prefix == "r" || prefix == "R"
+    Option
+      .when(prefix.isEmpty || prefix == "u" || prefix == "U" || raw)(literal)
+      .flatMap(_.headOption)
+      .filter(quote => quote == '\'' || quote == '"')
+      .flatMap(quote =>
+        quotedBody(literal, quote).flatMap(body => unescape(body, quote, if raw then rawEscape else pythonEscape))
+      )
+
+  /** The text between the two `quote` characters at the ends of `text`, or `None`. */
+  private def quotedBody(text: String, quote: Char): Option[String] =
+    Option.when(text.length > 1 && text.head == quote && text.last == quote)(text.substring(1, text.length - 1))
+
+  /** The text of the body `body` of a string in `quote` characters, with each escape that `escape` decodes. `escape`
+    * gets the body and the index after a backslash, and gives the decoded text and the next index, or `None` for a bad
+    * escape. `None` when the body has a bad escape, a `quote` character, or a line break that is not in an escape.
+    */
+  private def unescape(body: String, quote: Char, escape: (String, Int) => Option[(String, Int)]): Option[String] =
+    val out   = new StringBuilder
+    var index = 0
+    var valid = true
+    while valid && index < body.length do
+      val char = body.charAt(index)
+      if char == '\\' then
+        escape(body, index + 1) match
+          case Some((decoded, next)) =>
+            out.append(decoded)
+            index = next
+          case None => valid = false
+      else if char == quote || char == '\n' || char == '\r' then valid = false
+      else
+        out.append(char)
+        index += 1
+    Option.when(valid)(out.toString)
+
+  /** A JSON escape: `\"`, `\\`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t`, or `\u` and four hexadecimal digits. */
+  private def jsonEscape(body: String, index: Int): Option[(String, Int)] =
+    charAt(body, index).flatMap {
+      case 'u'  => hexCode(body, index + 1, 4).map(code => (code.toChar.toString, index + 5))
+      case char => JsonEscapes.get(char).map(decoded => (decoded, index + 1))
+    }
+
+  private val JsonEscapes: Map[Char, String] =
+    Map('"' -> "\"", '\\' -> "\\", '/' -> "/", 'b' -> "\b", 'f' -> "\f", 'n' -> "\n", 'r' -> "\r", 't' -> "\t")
+
+  /** A Python escape of a `str` literal: a line break (a line continuation, which gives no text), a simple escape, one
+    * to three octal digits, or `\x`, `\u`, and `\U` with two, four, and eight hexadecimal digits. Each other character
+    * keeps the backslash. `\N{...}` is not read.
+    */
+  private def pythonEscape(body: String, index: Int): Option[(String, Int)] =
+    charAt(body, index).flatMap {
+      case '\n' => Some(("", index + 1))
+      case '\r' => Some(("", if charAt(body, index + 1).contains('\n') then index + 2 else index + 1))
+      case 'x'  => hexCode(body, index + 1, 2).map(code => (Character.toString(code), index + 3))
+      case 'u'  => hexCode(body, index + 1, 4).map(code => (Character.toString(code), index + 5))
+      case 'U'  => hexCode(body, index + 1, 8).filter(Character.isValidCodePoint).map(code =>
+          (Character.toString(code), index + 9)
+        )
+      case 'N'                     => None
+      case octal if isOctal(octal) =>
+        val digits = body.substring(index, math.min(index + 3, body.length)).takeWhile(isOctal)
+        Some((Character.toString(Integer.parseInt(digits, 8)), index + digits.length))
+      case char => Some((PythonEscapes.getOrElse(char, s"\\$char"), index + 1))
+    }
+
+  private val PythonEscapes: Map[Char, String] = Map(
+    '\\' -> "\\",
+    '\'' -> "'",
+    '"'  -> "\"",
+    'a'  -> "\u0007",
+    'b'  -> "\b",
+    'f'  -> "\f",
+    'n'  -> "\n",
+    'r'  -> "\r",
+    't'  -> "\t",
+    'v'  -> "\u000b"
+  )
+
+  /** An escape of a raw Python literal: the backslash and the next character stay. */
+  private def rawEscape(body: String, index: Int): Option[(String, Int)] =
+    charAt(body, index).map(char => (s"\\$char", index + 1))
+
+  private def isOctal(char: Char): Boolean = char >= '0' && char <= '7'
+
+  /** The character at `index` of `text`, or `None` after the end. */
+  private def charAt(text: String, index: Int): Option[Char] =
+    Option.when(index < text.length)(text.charAt(index))
+
+  /** The number of the `count` hexadecimal digits at `index` of `text`, or `None`. */
+  private def hexCode(text: String, index: Int, count: Int): Option[Int] =
+    Option
+      .when(index + count <= text.length)(text.substring(index, index + count))
+      .filter(digits => digits.forall(char => Character.digit(char, 16) >= 0))
+      .map(digits => Integer.parseUnsignedInt(digits, 16))
 
   /** Python `textwrap.dedent`: the text with no common leading spaces and tabs. A line of spaces and tabs only becomes
     * an empty line.

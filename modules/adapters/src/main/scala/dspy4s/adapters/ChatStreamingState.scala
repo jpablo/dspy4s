@@ -26,8 +26,8 @@ import scala.collection.mutable
   *     field starts a section that the stream drops.
   *   - The single-output fallback of the parser (a port rule): with one output field, the state holds the text until
   *     the first header of that field, and drops the held text at that header. When the field has no header at the end,
-  *     the whole text, stripped, is the value of the field, in one last chunk. Upstream streams only the text after the
-  *     start header (`StreamListener.receive`).
+  *     the whole text, with the line ends of a section and stripped, is the value of the field, in one last chunk.
+  *     Upstream streams only the text after the start header (`StreamListener.receive`).
   *   - Boundary whitespace (upstream `_default_handle_stream_chunk`): the parser strips each field value, so the chunks
   *     of a field do too. The leading whitespace of a field is dropped. A run of whitespace is held until more text of
   *     the same field arrives, and is dropped at the end of the field. Thus the text of the chunks of a field, joined,
@@ -78,10 +78,15 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
     if flushed.isEmpty then Vector.empty
     else flushed.init :+ flushed.last.copy(isLast = true)
 
-  /** The value of the single-output fallback at the end: the whole text, when the one output field had no header. */
+  /** The value of the single-output fallback at the end: the whole text, when the one output field had no header. The
+    * value has the line ends of the parser (`ChatAdapterParser.fallbackText`).
+    */
   private def fallbackValue: Vector[FieldChunk] =
     val out = mutable.ArrayBuffer.empty[FieldChunk]
-    if fallbackOpen then singleFieldFallback.foreach(field => closeField(field.name, fallbackText.toString, out))
+    if fallbackOpen then
+      singleFieldFallback.foreach(field =>
+        closeField(field.name, ChatAdapterParser.fallbackText(fallbackText.toString), out)
+      )
     out.toVector
 
   private def drain(forceFlush: Boolean): Vector[FieldChunk] =

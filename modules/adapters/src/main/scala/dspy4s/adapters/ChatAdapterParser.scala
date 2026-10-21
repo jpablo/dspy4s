@@ -27,12 +27,13 @@ private[adapters] object ChatAdapterParser:
     val outputNames = fields.map(_.name).toSet
     val values      = extractSections(output.text, outputNames)
 
-    // The single-output fallback is a port rule: upstream `ChatAdapter.parse` has none. It strips the text with Python
+    // The single-output fallback is a port rule: upstream `ChatAdapter.parse` has none. The value has the line ends of
+    // a section value (the lines of Python `str.splitlines`, joined with `\n`), and the parser strips it with Python
     // `str.strip`, as for the other values. Thus the joined stream chunks of the field are this value
     // (`ChatStreamingState`).
-    val stripped = PythonText.strip(output.text)
     val resolved =
-      if values.isEmpty && fields.size == 1 && stripped.nonEmpty then Map(fields.head.name -> stripped)
+      if values.isEmpty && fields.size == 1 && PythonText.strip(output.text).nonEmpty then
+        Map(fields.head.name -> fallbackText(output.text))
       else values
 
     AdapterTextSupport
@@ -54,6 +55,13 @@ private[adapters] object ChatAdapterParser:
     */
   def textFields(layout: SignatureLayout, providerCalls: Boolean): Vector[FieldSpec] =
     layout.outputFields.filterNot(field => providerCalls && NativeFunctionCalling.isToolCallsField(field))
+
+  /** The value of the single-output fallback for the whole text `text` of a reply with no header: the lines of `text`
+    * (Python `str.splitlines`), joined with `\n`, and stripped with Python `str.strip`. A section value has the same
+    * line ends ([[extractSections]]), so a CRLF reply gives the value of an LF reply.
+    */
+  def fallbackText(text: String): String =
+    PythonText.strip(PythonText.splitLines(text).mkString("\n"))
 
   /** The text of each output field. The first header of a field wins (upstream `ChatAdapter.parse`): the lines of a
     * later header of the same field are dropped. The lines come from Python `str.splitlines`, as upstream, so a CRLF

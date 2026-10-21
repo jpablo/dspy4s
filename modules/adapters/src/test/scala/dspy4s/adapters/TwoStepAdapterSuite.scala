@@ -5,6 +5,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.:=
@@ -97,6 +98,27 @@ class TwoStepAdapterSuite extends FunSuite:
     val fallback = extractionLm.requests(1)
     assert(fallback.messages.flatMap(_.text).mkString.contains("Outputs will be a JSON object"), fallback.toString)
     assert(DynamicValues.recordGet(fallback.options, "response_format").isDefined, fallback.options.toString)
+  }
+
+  test("a parse error of the extraction has the upstream wrapper text and the original completion") {
+    // Upstream `TwoStepAdapter.parse` catches the `AdapterParseError` of `ChatAdapter()(...)`, after its JSON
+    // fallback, and raises an `AdapterParseError` with `lm_response=completion` and the message
+    // "Failed to parse response from the original completion: {e}" (`dspy/adapters/two_step_adapter.py`).
+    val twoOutputs = SignatureLayout.create(
+      name = "QA",
+      inputFields = Vector(FieldSpec("question")),
+      outputFields = Vector(FieldSpec("answer"), FieldSpec("note"))
+    ).toOption.get
+    val extractionLm     = new RecordingLm("no fields here", responseSchema = false)
+    given RuntimeContext = RuntimeContext()
+    val completion       = "Paris is the capital."
+    TwoStepAdapter(extractionLm).parse(twoOutputs, LmOutput(text = completion)) match
+      case Left(error: ParseError) =>
+        assert(error.message.startsWith("Failed to parse response from the original completion: "), error.message)
+        assert(error.message.length > "Failed to parse response from the original completion: ".length, error.message)
+        assertEquals(error.raw, Some(completion))
+      case other => fail(s"expected a parse error, got $other")
+    assertEquals(extractionLm.requests.size, 2)
   }
 
   test("TwoStepAdapter surfaces an extraction-model failure") {

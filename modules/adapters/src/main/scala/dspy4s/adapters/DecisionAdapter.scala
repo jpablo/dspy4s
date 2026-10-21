@@ -122,9 +122,10 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
     * of each evidence field. When the root of the output schema is a `$ref` (a recursive output type), the schema that
     * it names replaces it first ([[StrictJsonSchema.inlineRootRef]]), so that the other properties stay. With no output
     * schema, the schema of the fields of `evidence` ([[StrictJsonSchema.fromFields]]), with the evidence schemas. When
-    * a field has a type with no schema there, the result has only the evidence properties and
-    * `"additionalProperties": true`: the JSON adapter then sends JSON mode, as it does for that field with no decision
-    * outputs.
+    * a field has a type with no schema there, the result has the evidence properties, the open map schema of each field
+    * of the type `json`, and `"additionalProperties": true` at the root. The JSON adapter then sends JSON mode, as it
+    * does for that field with no decision outputs: with no warning for an open map, else with the warning of a failed
+    * schema build (upstream `JSONAdapter._prepare_response_format` with the evidence signature).
     */
   private def outputSchema(invocation: AdapterInvocation, evidence: SignatureLayout): DynamicValue.Record =
     val schemas = plan.kinds.map((name, kind) => name -> DecisionAdapter.evidenceSchema(kind))
@@ -136,11 +137,12 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
           case _                                 => DynamicValue.Record.empty
         typed.updated("properties", schemas.foldLeft(properties)((acc, entry) => acc.updated(entry._1, entry._2)))
       case _ =>
-        val fields = evidence.outputFields.filterNot(NativeFunctionCalling.isToolCallsField)
+        val fields   = evidence.outputFields.filterNot(NativeFunctionCalling.isToolCallsField)
+        val openMaps = fields.filter(_.typeRef == TypeRef.json).map(_.name -> StrictJsonSchema.OpenMapSchema)
         StrictJsonSchema.fromFields(fields, schemas.toMap).getOrElse(
           DynamicValue.Record(
             "type"                 -> DecisionAdapter.text("object"),
-            "properties"           -> DynamicValue.Record(Chunk.from(schemas)),
+            "properties"           -> DynamicValue.Record(Chunk.from(schemas ++ openMaps)),
             "additionalProperties" -> DynamicValue.Primitive(PrimitiveValue.Boolean(true))
           )
         )

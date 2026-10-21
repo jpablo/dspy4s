@@ -91,6 +91,7 @@ private[adapters] object ConversationHistory:
       nativeCalls  : Boolean,
       turns        : TurnText
   ): Vector[Message] =
+    // An output field with a null value is absent (upstream `message.get(name) is None`).
     def has(field: FieldSpec): Boolean =
       DynamicValues.recordGet(message, field.name) match
         case None | Some(_: DynamicValue.Null.type) => false
@@ -98,8 +99,9 @@ private[adapters] object ConversationHistory:
 
     // A replayed user turn keeps the output reminder of its request (upstream f207d35cf), so the messages of one call
     // are the start of the messages of the next call. A message with no input field gets no user turn: a turn of
-    // outputs only must not get a user turn that holds the reminder alone.
-    val inputs   = requestLayout.inputFields.filter(has)
+    // outputs only must not get a user turn that holds the reminder alone. An input key with a null value counts, and
+    // the turn shows `None` for it (upstream `format_conversation_history` tests `name in message`).
+    val inputs   = requestLayout.inputFields.filter(field => DynamicValues.recordGet(message, field.name).isDefined)
     val userTurn = Option
       .when(inputs.nonEmpty)(turns.user(requestLayout.withInputFields(inputs), message, mainRequest = true))
       .filter(_.nonEmpty)

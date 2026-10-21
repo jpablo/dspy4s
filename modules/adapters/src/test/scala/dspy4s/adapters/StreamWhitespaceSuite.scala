@@ -126,6 +126,22 @@ class StreamWhitespaceSuite extends FunSuite:
     }
   }
 
+  test("with one output field and no header, a CRLF reply gives the line ends of a section, in the parser and chunks") {
+    // A section value has the lines of Python `str.splitlines`, joined with `\n` (upstream `ChatAdapter.parse`). The
+    // single-output fallback is a port rule, and it gives its value the same line ends.
+    val lf     = "first line\nsecond line\n\nlast line\n"
+    val parsed = parsedText(ChatAdapter(), layoutOf(answerOnly), lf)
+    assertEquals(parsed, Map("answer" -> "first line\nsecond line\n\nlast line"))
+    Vector(lf.replace("\n", "\r\n"), lf.replace("\n", "\r"), "first line\r\nsecond line  last line").foreach {
+      text =>
+        assertEquals(parsedText(ChatAdapter(), layoutOf(answerOnly), text), parsed, text)
+        twoPartSplits(text).foreach { parts =>
+          val (joined, _) = stream(ChatStreamingState(answerOnly), parts)
+          assertEquals(joined, parsed, parts.toString)
+        }
+    }
+  }
+
   test("with one output field, the text before the header is not a chunk of the field, as in the parser") {
     val text   = "Sure, here it is.\n[[ ## answer ## ]]\n42\n\n[[ ## completed ## ]]"
     val parsed = parsedText(ChatAdapter(), layoutOf(answerOnly), text)

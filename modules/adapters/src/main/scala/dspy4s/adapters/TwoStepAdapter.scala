@@ -81,6 +81,9 @@ final case class TwoStepAdapter(
     * structured output field from `outputJsonSchema`, as upstream copies the annotated output fields. After a parse
     * error of the chat format, the step runs one more time with the fallback of the chat adapter, a [[JSONAdapter]]
     * (upstream `ChatAdapter.__call__`). An error of the format step or of the model gives no second call.
+    *
+    * A parse error of the last parse becomes the error of [[originalCompletionError]]. An error of the format step or
+    * of the model stays as it is, as upstream catches only `AdapterParseError`.
     */
   private def extract(layout: SignatureLayout, outputJsonSchema: Option[String], output: LmOutput)(using
       RuntimeContext
@@ -99,11 +102,25 @@ final case class TwoStepAdapter(
                    )
       parsed <- attempt(chat, invocation).flatMap {
                   case Left(error: ParseError) => chat.fallback match
-                      case Some(next) => attempt(next, invocation).flatten
-                      case None       => Left(error)
-                  case other => other
+                      case Some(next) => attempt(next, invocation)
+                      case None       => Right(Left(error))
+                  case other => Right(other)
                 }
-    yield parsed
+      result <- parsed.left.map(originalCompletionError(_, output.text))
+    yield result
+
+  /** The error of the extraction step for the parse error `error` (upstream `TwoStepAdapter.parse`): the text "Failed
+    * to parse response from the original completion: " and the message of `error`, with the completion of the main LM
+    * `completion` as the raw response (upstream `lm_response=completion`). Each other error stays as it is.
+    */
+  private def originalCompletionError(error: DspyError, completion: String): DspyError =
+    error match
+      case parse: ParseError => ParseError(
+          name,
+          s"Failed to parse response from the original completion: ${parse.message}",
+          raw = Some(completion)
+        )
+      case other => other
 
   /** Format with `adapter`, call the extraction model, and parse. The inner result is the result of the parse step, so
     * that the caller can tell a parse error from an error of the other steps. The format step sees the extraction model

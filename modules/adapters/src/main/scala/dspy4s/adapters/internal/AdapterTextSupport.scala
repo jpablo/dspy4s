@@ -116,9 +116,9 @@ private[adapters] object AdapterTextSupport:
     *   2. Remove a `Literal[...]` or a `str[...]` wrapper.
     *   3. Remove one pair of quotes (`'` or `"`).
     *
-    * Then upstream reads the text with `json_repair`, so the last comparison removes one more pair of quotes, with
-    * whitespace around it. A text that gives no allowed value is an error, thus a parse error of the parser, and the
-    * chat adapter then tries its JSON fallback.
+    * Then upstream reads the text with `json_repair.loads`, and else with `ast.literal_eval`, so the last comparison
+    * takes the text of [[literalText]]. A text that gives no allowed value is an error, thus a parse error of the
+    * parser, and the chat adapter then tries its JSON fallback.
     *
     * A Scala enum output has the same rule. Upstream `find_enum_member` compares the text of an `Enum` with no step.
     */
@@ -130,11 +130,23 @@ private[adapters] object AdapterTextSupport:
         stripped.substring(stripped.indexOf('[') + 1, stripped.length - 1)
       else stripped
     )
-    val repaired = Some(PythonText.strip(unwrapped)).filter(isQuoted).map(withoutQuotes)
-    (Iterator(raw, unwrapped) ++ repaired.iterator)
+    (Iterator(raw, unwrapped) ++ literalText(unwrapped).iterator)
       .find(allowed.contains)
       .map(text => DynamicValue.Primitive(PrimitiveValue.String(text)))
       .toRight(notAllowedValue(field, raw))
+
+  /** The string that upstream `parse_value` reads from `text` in its last step, after the JSON whitespace at the two
+    * ends (space, tab, and line breaks) goes. `json_repair.loads` comes first: a JSON string in double quotes gives its
+    * text with the JSON escapes decoded ([[PythonText.jsonString]]). Else `ast.literal_eval` reads a Python string
+    * literal, also with a `u` or an `r` prefix, with the Python escapes decoded ([[PythonText.stringLiteral]]). `None`
+    * when `text` is neither.
+    */
+  private def literalText(text: String): Option[String] =
+    val trimmed = text.dropWhile(JsonWhitespace.contains).reverse.dropWhile(JsonWhitespace.contains).reverse
+    PythonText.jsonString(trimmed).orElse(PythonText.stringLiteral(trimmed))
+
+  /** The whitespace that `json_repair` skips around a value. */
+  private val JsonWhitespace: Set[Char] = Set(' ', '\t', '\n', '\r')
 
   /** The error of the text or the JSON text `text` that is not an allowed value of the output field `field`. */
   def notAllowedValue(field: FieldSpec, text: String): DspyError =
@@ -240,19 +252,35 @@ private[adapters] object AdapterTextSupport:
       case other if isListOf(other) => listOfValue(other, JsonDynamic.parse(raw).toOption, raw)
       case _                        => Right(DynamicValue.Primitive(PrimitiveValue.String(raw)))
 
-  /** `true` for a list type with an item type, for example the type `list[str]` of a string signature. */
-  def isListOf(typeRef: TypeRef): Boolean = typeRef.repr.startsWith("list[")
+  /** `true` for a list type with an item type, for example the type `list[str]` of a string signature. A `tuple[...]`,
+    * a `set[...]`, and a `frozenset[...]` are list types too: upstream `parse_value` gives a tuple or a set, and the
+    * port has no tuple or set value.
+    */
+  def isListOf(typeRef: TypeRef): Boolean = ListTypePrefixes.exists(typeRef.repr.startsWith)
+
+  /** The type tokens of [[isListOf]], in lower case, as [[TypeRef.fromToken]] gives them. */
+  private val ListTypePrefixes: Vector[String] = Vector("list[", "tuple[", "set[", "frozenset[")
+
+  /** The type tokens of a set type of [[isListOf]]. */
+  private val SetTypePrefixes: Vector[String] = Vector("set[", "frozenset[")
 
   /** The value of a field of the list type `typeRef` ([[isListOf]]) from its JSON value `value`: the value when it is a
     * list, else an error (upstream `parse_value` validates a list). The items stay as they are. The Chat, JSON, and XML
     * adapters use this function, so a list value has the same rule in each format.
+    *
+    * A set type keeps the first copy of each equal value, in the order of the list: `["b", "a", "b"]` gives
+    * `["b", "a"]`. A Python set has no order (the order of a set of texts changes with the hash seed of the process),
+    * so only its rule for equal values applies: a set keeps the copy that it got first. Two values are equal when their
+    * `DynamicValue`s are equal.
     *
     * @param raw
     *   the text of the value, for the error
     */
   def listOfValue(typeRef: TypeRef, value: Option[DynamicValue], raw: String): Either[DspyError, DynamicValue] =
     value
-      .collect { case list: DynamicValue.Sequence => list }
+      .collect { case list: DynamicValue.Sequence =>
+        if SetTypePrefixes.exists(typeRef.repr.startsWith) then DynamicValue.Sequence(list.elements.distinct) else list
+      }
       .toRight(ValidationError(s"Expected a JSON list for ${typeRef.repr} from '$raw'"))
 
   /** The `Int` of an integer text, or of a float text with no fraction (`3.0`). */

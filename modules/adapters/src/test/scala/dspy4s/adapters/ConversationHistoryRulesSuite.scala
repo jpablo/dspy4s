@@ -76,6 +76,17 @@ class ConversationHistoryRulesSuite extends FunSuite:
 
   private val oneTurn: History = History.empty :+ DynamicValues.record("question" := "What is 1+1?", "answer" := "2")
 
+  /** The user turn of a history message whose `question` is null, for each text adapter (upstream `adapter.format`). */
+  private val nullInputTurns: Map[String, String] = Map(
+    "ChatAdapter" ->
+      ("[[ ## question ## ]]\nNone\n\nRespond with the corresponding output fields, starting with the " +
+        "field `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."),
+    "JSONAdapter" ->
+      "[[ ## question ## ]]\nNone\n\nRespond with a JSON object in the following order of fields: `answer`.",
+    "XMLAdapter" ->
+      "<question>\nNone\n</question>\n\nRespond with the corresponding output fields wrapped in XML tags `<answer>`."
+  )
+
   private val searchResult: Vector[ToolCallResult] =
     ToolCallResult.forCalls(Vector(search), Vector(DynamicValues.fromAny("cat result"))).toOption.get
 
@@ -156,11 +167,17 @@ class ConversationHistoryRulesSuite extends FunSuite:
       )
     }
 
-    test(s"$name: a field with a null value is absent from the replayed turn") {
+    test(s"$name: an input field with a null value shows None in a user turn, as upstream") {
+      // Upstream `format_conversation_history` tests `name in message`, so a key with the value `None` gives a user
+      // turn, and `format_field_value` shows `None`. The texts come from a run of upstream `adapter.format`.
       val history  = History.empty :+ DynamicValues.record("question" -> DynamicValue.Null, "answer" := "2")
       val messages = messagesOf(adapter, qaWithHistory, withHistory("What is 3+3?", history))
-      assertEquals(roles(messages), Vector(System, Assistant, User))
-      assert(!textOf(messages(1)).contains("null"), textOf(messages(1)))
+      assertEquals(roles(messages), Vector(System, User, Assistant, User))
+      assertEquals(textOf(messages(1)), nullInputTurns(name))
+      val inputsOnly = History.empty :+ DynamicValues.record("question" -> DynamicValue.Null)
+      val replayed   = messagesOf(adapter, qaWithHistory, withHistory("What is 3+3?", inputsOnly))
+      assertEquals(roles(replayed), Vector(System, User, Assistant, User))
+      assertEquals(textOf(replayed(1)), nullInputTurns(name))
     }
 
     test(s"$name: a replayed turn does not use the default value of a field that the message lacks") {

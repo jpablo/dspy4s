@@ -104,8 +104,9 @@ private[adapters] object JSONAdapterPrompt:
     *
     * When the schema build fails and the adapter goes back to JSON mode, the adapter logs the warning of upstream
     * ([[SchemaBuildWarning]]). A tool calls field and an open map give JSON mode with no warning, as upstream. An open
-    * map is a field of the type `json` (upstream `dict`), or an open map in the typed schema
-    * ([[dspy4s.adapters.internal.StrictJsonSchema.hasOpenMap]]).
+    * map is a field of the type `json` (upstream `dict`), or an open map below the root of the typed schema
+    * ([[dspy4s.adapters.internal.StrictJsonSchema.hasFieldOpenMap]]). An open root is a failed build: the decision
+    * adapter writes it when a field has no schema, and upstream then logs the warning.
     */
   private def responseFormatOptions(invocation: AdapterInvocation, useNativeFunctionCalling: Boolean)(using
       ctx: RuntimeContext
@@ -136,7 +137,7 @@ private[adapters] object JSONAdapterPrompt:
         case None => StrictJsonSchema.fromFields(fields)
       val optionalFields = fields.filter(_.optional).map(_.name).toSet
       val openMap        = invocation.outputJsonSchema match
-        case Some(_) => schema.exists(StrictJsonSchema.hasOpenMap)
+        case Some(_) => schema.exists(StrictJsonSchema.hasFieldOpenMap)
         case None    => fields.exists(_.typeRef == TypeRef.json)
       if openMap then JsonMode
       else

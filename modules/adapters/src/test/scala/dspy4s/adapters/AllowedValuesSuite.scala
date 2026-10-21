@@ -22,8 +22,9 @@ import scala.collection.mutable.ArrayBuffer
   * in `dspy/adapters/utils.py`). A value outside the allowed values is a parse error in each parser.
   *
   * Upstream compares the text with the members, case-sensitive, after these steps: it strips the whitespace, removes a
-  * `Literal[...]` or `str[...]` wrapper, and removes one pair of quotes. Then `json_repair` reads the text, so one more
-  * pair of quotes, with whitespace around it, also goes. The cases come from runs of upstream `parse_value`.
+  * `Literal[...]` or `str[...]` wrapper, and removes one pair of quotes. Then `json_repair` reads the text, and else
+  * `ast.literal_eval` reads it: a JSON string or a Python string literal, with whitespace around it, gives its text.
+  * The cases come from runs of upstream `parse_value`.
   */
 class AllowedValuesSuite extends FunSuite:
 
@@ -82,6 +83,41 @@ class AllowedValuesSuite extends FunSuite:
     "Literal[ 'pos']" -> "pos"
   )
 
+  /** Values that upstream reads in the last step, with the member that it gives: `json_repair.loads` decodes the JSON
+    * escapes of a value in double quotes, and `ast.literal_eval` reads a Python string literal, also with a `u`, `U`,
+    * `r`, or `R` prefix and with the Python escapes.
+    */
+  private val literalForms: Vector[(String, String)] = Vector(
+    "u'pos'"           -> "pos",
+    "U\"neg\""         -> "neg",
+    "r'pos'"           -> "pos",
+    "R\"neg\""         -> "neg",
+    "'\"p\\u006fs\"'"  -> "pos",
+    "'\"\\u006eeg\"'"  -> "neg",
+    "'\"n\\u0065g\" '" -> "neg",
+    "\"'\\x70os'\""    -> "pos",
+    "u'p\\x6fs'"       -> "pos",
+    "u'\\u006eeg'"     -> "neg",
+    "u'p\\157s'"       -> "pos",
+    "Literal[u'neg']"  -> "neg",
+    "\"u'pos'\""       -> "pos"
+  )
+
+  /** Escape and literal forms that upstream `parse_value` rejects for `Literal['pos', 'neg']`. */
+  private val rejectedLiteralForms: Vector[String] = Vector(
+    "\"p\\u006fs\"",
+    "'\u00a0\"pos\"\u00a0'",
+    "'\"p\"os\"'",
+    "ur'pos'",
+    "b'pos'",
+    "u'pos",
+    "'\"pos\\\"'",
+    "u'p\\N{LATIN SMALL LETTER O}s'",
+    "u'p\\x6s'",
+    "u'po\ns'",
+    "'\"\\/pos\"'"
+  )
+
   private def parse(adapter: Adapter, layout: SignatureLayout, text: String): Either[DspyError, DynamicValue.Record] =
     adapter.parse(layout, LmOutput(text = text)).map(_.values)
 
@@ -102,6 +138,17 @@ class AllowedValuesSuite extends FunSuite:
     for (name, adapter, reply) <- formats; (value, member) <- accepted do
       val result = parse(adapter, literalLayout, reply(value))
       assertEquals(result.map(label), Right(Some(member)), s"$name, value '$value'")
+  }
+
+  test("a JSON escape in a quoted value and a Python string literal give the member, as json_repair and literal_eval") {
+    for (name, adapter, reply) <- formats; (value, member) <- literalForms do
+      val result = parse(adapter, literalLayout, reply(value))
+      assertEquals(result.map(label), Right(Some(member)), s"$name, value '$value'")
+  }
+
+  test("the escape and literal forms that upstream rejects are a parse error in each parser") {
+    for (name, adapter, reply) <- formats; value <- rejectedLiteralForms do
+      assertParseError(parse(adapter, literalLayout, reply(value)), s"$name, value '$value'")
   }
 
   test("JSON whitespace around a member goes, as upstream strips the text") {
