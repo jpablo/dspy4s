@@ -171,5 +171,18 @@ dspy4s:
    persistence, and long-lived entities. Use the `ai-compaction` branch as the reference for long sessions
    if it merges.
 
+   The code harness proposal ([CODE_HARNESS.md](../CODE_HARNESS.md)) covers most of this gap for a coding
+   agent. The newest version, with section 7 "Sessions and the controller", is on branch `code-harness`.
+   - A session is an append-only log, kept as a value and in a JSONL file. A pure projection makes the
+     `History` of each turn.
+   - Pluggable context strategies keep a long session inside the context window and never change the log.
+   - A controller conversation that never ends starts work sessions, and it uses `tell` and `observe` on
+     them.
+   - The policy, compactor, and sub-query steps are `Predict` leaves, so the optimizers can tune them.
+
+   The proposal does not give a conversation wrapper for ordinary programs, and it does not merge
+   conversations from parallel branches. The `ai-compaction` design is close to its memory tree: a full
+   transcript, a compacted view, and a `recall` tool.
+
 In one sentence: the two projects share the single generation and now also decisions and MCP tools;
 above that, dspy4s compiles programs and kyo-ai keeps conversations.
