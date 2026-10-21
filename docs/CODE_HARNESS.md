@@ -704,6 +704,25 @@ The other option is a nudge: a classifier finds "real work" in the controller an
 session. The classifier can be wrong in both directions, and it needs its own tests. A restriction is a fact of
 the type system, and a test can check it.
 
+The controller has two kinds of access to a session, with different effects:
+
+| Function | Effect on the session |
+|---|---|
+| `observe(session, question)` | None. It is a probe on the session log. |
+| `tell(session, message)` | The message goes into the session log. The session agent reads it and can act on it. |
+
+Rules for `tell`:
+
+- The message has its own kind, `controller`, so the user and the agent know who sent it.
+- If a turn runs, the message goes in between two steps, as in uniichat. If the session is idle, the message
+  starts a turn, also when the user is not in the session.
+- The reply goes back to the controller as an event.
+- A rule for all sessions is a `tell` to each open session.
+
+The controller delegates. It never runs an effect on the scope of a session. When the user confirms an action in
+the controller, for example the removal of a worktree, the controller sends the confirmation to the session with
+`tell`, and the session does the action.
+
 ### 7.4 What the controller sees
 
 The model has no state between calls. The state of a session is its log, plus the REPL and the workspace. So:
@@ -813,7 +832,7 @@ log is the truth, and the graph is a derivation (7.2). The queries:
 | `firstMention(c)` | The first assertion about `c` |
 | `timeline(c)` | All the assertions about `c`, in order |
 | `stateAt(t)` | What the session knew at message `t` |
-| `lineage(f)` | The facts that led to `f`: the links `comes from`, `answers`, `refines`, `contradicts` and `replaces`, followed back and sorted by time |
+| `lineage(f)` | The facts that led to `f`. The query goes back along the links `comes from`, `answers`, `refines`, `contradicts` and `replaces`, and it sorts the facts by time. |
 
 The discussion that added this section is an example. The lineage of "time on each fact" is:
 
@@ -879,24 +898,107 @@ trait Graph:
 - The cited message ids make part of this check exact. A first mention is correct or wrong.
 - The controller has its own leaves: its policy, and the leaf that writes a `SessionCard`.
 
-### 7.9 Decisions and open questions
+### 7.9 The end of a session
+
+A session holds different resources, and an end means something different for each one:
+
+| Resource | Can the harness make it again? |
+|---|---|
+| The log | No. The memory tree, the graph, and the links from the controller come from it. |
+| Derived data (memory tree, graph) | Yes, from the log. |
+| The live REPL | Partly. The definitions are lost, but the log still has the cells. |
+| A worktree with no changes | Yes, from the branch. |
+| A worktree with uncommitted changes | No. |
+| A merged branch | Yes. The base branch has the commits. |
+| A branch that is not merged | No. The reflog keeps it only for a short time. |
+| A scratch directory | No. |
+
+Three principles come from this table.
+
+**1. The end is an event, not a deletion.** The harness appends `Ended(outcome, reason)` to the log, and the log
+stays. The user can reopen a closed session. The harness then appends `Reopened`, and it makes the scope again
+if necessary. uniichat has the same rule: nothing is lost.
+
+**2. Make a plan first, then remove.** A pure function makes a plan from the state of the scope:
+
+```scala
+enum Outcome:
+  case Merged, Parked
+  case Abandoned(reason: String)
+  case Replaced(by: SessionRef)
+
+enum ReleaseStep:
+  case RemoveWorktree(path: Path)
+  case DeleteBranch(name: String)
+  case KeepRef(name: String, commit: Sha)  // makes a later delete reversible
+  case ArchiveDirectory(path: Path, to: Path)
+  case Keep(resource: String, reason: String)
+
+def releasePlan(scope: ScopeState, outcome: Outcome): Vector[ReleaseStep]  // pure
+```
+
+A handler runs the plan, and the ledger records each step. A dry run shows the plan with no effect. Tests can
+check the laws of the plan:
+
+- A worktree with uncommitted changes never gets `RemoveWorktree`.
+- A branch that is not merged never gets `DeleteBranch` without a `KeepRef` before it.
+
+**3. Reversible steps run automatically, and irreversible steps need the user.** When it costs little, the plan
+first makes an irreversible step reversible. For example, it adds a ref `archive/<session>` before it deletes a
+branch, or it makes an archive file before it deletes a directory. A step that stays irreversible needs a
+confirmation from the user.
+
+The default plans:
+
+| Outcome | Log | Worktree | Branch | Scratch directory |
+|---|---|---|---|---|
+| Merged | Keep | Remove | Delete (the base has the commits) | Not applicable |
+| Parked | Keep | Keep | Keep | Keep |
+| Abandoned | Keep | Remove if it has no changes | Keep a ref, then delete | Archive, then delete |
+| Replaced | Keep | Remove if it has no changes | Keep | Keep |
+
+The plans are values, so a user or a project can change them.
+
+Who ends a session:
+
+- The user, in the session or through the controller. The controller sends the end to the session with `tell`
+  (7.3), and the session runs the plan.
+- The session agent can propose an end. The goal check (the `Noul` leaf of design C) gives a good signal. The
+  user then confirms the outcome.
+
+The ledger after a removal: a ledger entry such as "wrote `src/Foo.scala` in worktree X" points to nothing
+after the worktree is gone. The log stays, so the facts that cite message ids keep their sources. Only the
+artifact entries need more. A small solution: at the end of each turn, the session records the commit hash of
+its scope and whether the scope has changes (`ScopeSnapshot(head, clean)`). The release plan keeps a ref before
+it deletes a branch. Then a path and a commit hash still point to the file. The same snapshot gives the
+`ScopeState` of `releasePlan`.
+
+A content hash for each write is not in the first version. A hash only shows that two contents are the same.
+To get a content back, the harness must also store it, so each write costs a hash and storage. A write that the
+session never commits is lost when its scope is removed. The plans prevent most of these losses, because they
+never remove a worktree with changes.
+
+### 7.10 Decisions and open questions
 
 Decisions, 2026-10-21:
 
 1. The ontology is pluggable (7.5). The default kinds are an example. The mechanism is the important part.
-2. By default, information goes from the sessions to the controller. Each session can read the ontology and
-   query the graphs (7.7).
+2. By default, information goes from the sessions to the controller. A session reads the ontology and the
+   graphs only on demand, through the `Graph` API (7.7). Nothing goes into its context automatically.
 3. The first version keeps one graph for each session.
+4. A user can start a session directly in a repository, outside the controller. The session still sends its
+   events to the controller.
+5. There is one controller for each user.
+6. The controller acts on sessions through `observe` and `tell` (7.3). A `tell` to an idle session starts a
+   turn.
+7. The controller delegates. It never runs an effect on the scope of a session. A confirmation in the
+   controller goes to the session with `tell`, and the session does the action.
+8. The end of a session is an event. The log always stays, and the user can reopen a closed session (7.9).
+9. The plans of 7.9 are the default plans. A user or a project can change them.
+10. At the end of each turn, the session records a `ScopeSnapshot` with the commit hash of its scope (7.9). The
+    first version does not record a content hash for each write.
 
-Open questions:
-
-1. Can a user start a session directly in a repository, outside the controller? If yes, does the session still
-   send its events to the controller?
-2. Who ends a session, and what does the end do: merge the branch, remove the worktree, or only mark the session
-   as closed?
-3. Is there one controller for each user, or one for each machine?
-4. Can the controller send a decision to the sessions, for example a rule for all sessions? Or do the sessions
-   only read the controller graph?
+Section 7 has no open questions now.
 
 ## 8. Comparison
 
@@ -967,7 +1069,7 @@ tree exists. Design A stays available as an early check of the foundation.
 | 3. RLM | F4, F5: variables, `llmQuery` through `subQuery`, `rlm(...)` children, the shared budget, the depth limit. | RLM in the harness. |
 | 4. Memory tree | `Memory`, `View`, the memory laws, the `compress` and `merge` leaves, the builder, `zoom` and `date` as guest functions. The projection of design C. | A memory that loses no detail. |
 | 5. Optimization | A `FeedbackMetric` from tests, the memory metric, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
-| 6. Work sessions | `Derivation`, `ContextStrategy` (window, prefix summary, memory tree), scopes (directory, worktree, scratch), a CLI that opens one session, steering, the goal check. | A coding agent for daily use, one session at a time. |
+| 6. Work sessions | `Derivation`, `ContextStrategy` (window, prefix summary, memory tree), scopes (directory, worktree, scratch), a CLI that opens one session, steering, the goal check, `ScopeSnapshot`, the end of a session and its release plans (7.9). | A coding agent for daily use, one session at a time. |
 | 7. Controller | The controller API (7.3), the ledger events, pluggable ontologies, the extraction at the end of each turn, the time queries (7.6), the `Graph` guest API in sessions (7.7), probes, `SessionCard`, the graph metric. | One controller above all sessions. |
 | Later | A forked JVM with the nightly compiler and capture checking. MCP tools as guest functions (`McpTools`). A policy variant with `run_scala` as a native tool through the adapter. Prompt-cache marks in `LmRequest`. RLM on the kernel. | |
 
@@ -987,7 +1089,7 @@ tree exists. Design A stays available as an early check of the foundation.
 7. **Permissions.** No checks (pi: use a container), or a `guarded` handler with a policy (atc)?
 8. **Tasks.** Where do the evaluation tasks come from: the history of this repository, a public benchmark, or
    both?
-9. **Controller.** Section 7.9 lists the decisions and the open questions about the sessions and the controller.
+9. **Controller.** Section 7.10 lists the decisions and the open questions about the sessions and the controller.
 
 ## 11. Alternatives considered
 
