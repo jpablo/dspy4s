@@ -57,7 +57,7 @@ final case class XMLAdapter(
       )
     )
 
-  override def streamingState(layout: SignatureLayout): Option[AdapterStreamingState] =
+  override def streamingState(layout: SignatureLayout)(using RuntimeContext): Option[AdapterStreamingState] =
     Some(new XmlStreamingState(layout.outputFields))
 
   /** The tag form of the input fields, with no output reminder (upstream `XMLAdapter.format_user_message_content`). */

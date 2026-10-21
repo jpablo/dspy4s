@@ -23,18 +23,17 @@ private[adapters] object ChatAdapterParser:
     val providerCalls                           = nativeCalls || output.toolCalls.nonEmpty
     def fromProvider(field: FieldSpec): Boolean = providerCalls && NativeFunctionCalling.isToolCallsField(field)
 
-    val textFields  = layout.outputFields.filterNot(fromProvider)
-    val outputNames = textFields.map(_.name).toSet
+    val fields      = textFields(layout, providerCalls)
+    val outputNames = fields.map(_.name).toSet
     val values      = extractSections(output.text, outputNames)
 
-    // The single-output fallback is a port rule: upstream `ChatAdapter.parse` has none. It strips the text with
-    // `String.strip`, as for the other values. Thus the joined stream chunks of the field are this value
+    // The single-output fallback is a port rule: upstream `ChatAdapter.parse` has none. It strips the text with Python
+    // `str.strip`, as for the other values. Thus the joined stream chunks of the field are this value
     // (`ChatStreamingState`).
+    val stripped = PythonText.strip(output.text)
     val resolved =
-      if values.isEmpty && textFields.size == 1 && output.text.strip.nonEmpty then
-        Map(textFields.head.name -> output.text.strip)
-      else
-        values
+      if values.isEmpty && fields.size == 1 && stripped.nonEmpty then Map(fields.head.name -> stripped)
+      else values
 
     AdapterTextSupport
       .decodeOutputFields(layout, output.text) { field =>
@@ -49,9 +48,22 @@ private[adapters] object ChatAdapterParser:
       }
       .map(entries => AdapterTextSupport.parsedOutput(adapterName, output, entries))
 
+  /** The output fields of `layout` that the text of the reply gives: each output field, less the tool calls field when
+    * `providerCalls` is `true`. The provider tool calls then fill that field. [[ChatStreamingState]] gets the same
+    * fields, so the stream follows the single-output fallback of the parser.
+    */
+  def textFields(layout: SignatureLayout, providerCalls: Boolean): Vector[FieldSpec] =
+    layout.outputFields.filterNot(field => providerCalls && NativeFunctionCalling.isToolCallsField(field))
+
   /** The text of each output field. The first header of a field wins (upstream `ChatAdapter.parse`): the lines of a
     * later header of the same field are dropped. The lines come from Python `str.splitlines`, as upstream, so a CRLF
-    * reply gives the values of an LF reply. Each text is stripped at both ends, as upstream (`"\n".join(v).strip()`).
+    * reply gives the values of an LF reply. Each text is stripped at both ends with Python `str.strip`, as upstream
+    * (`"\n".join(v).strip()`).
+    *
+    * A header starts a line after Python whitespace only (upstream `field_header_pattern.match(line.strip())`). The
+    * rest of the line after the header is the first text of the field. Upstream cuts that rest from the line before the
+    * strip (`line[match.end():]`), so after leading whitespace it keeps a part of the header. The port cuts it from the
+    * stripped line.
     */
   private def extractSections(text: String, outputNames: Set[String]): Map[String, String] =
     val out                          = scala.collection.mutable.LinkedHashMap.empty[String, StringBuilder]
@@ -59,11 +71,11 @@ private[adapters] object ChatAdapterParser:
     PythonText
       .splitLines(text)
       .foreach { rawLine =>
-        val stripped = rawLine.trim
+        val stripped = PythonText.strip(rawLine)
         ChatAdapter.MarkerPattern.findPrefixMatchOf(stripped) match
           case Some(marker) =>
             val fieldName = marker.group(1)
-            val trailing  = stripped.substring(marker.end).trim
+            val trailing  = PythonText.strip(stripped.substring(marker.end))
             if fieldName == ChatAdapter.CompletedFieldName then
               currentField = None
             else if outputNames.contains(fieldName) && !out.contains(fieldName) then
@@ -81,6 +93,6 @@ private[adapters] object ChatAdapterParser:
     out
       .iterator
       .map { (name, value) =>
-        name -> value.toString.strip
+        name -> PythonText.strip(value.toString)
       }
       .toMap

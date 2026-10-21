@@ -131,38 +131,79 @@ final class StreamingLanguageModelWrapper private (
         case _ => ()
 
   /** The chunks of the delegate. Each chunk goes to the listeners, except a [[LmChunk.cached]] chunk and a failure
-    * chunk, as in [[call]]. At the end of the stream, when `hasNext` gives `false`, the wrapper flushes the stream
-    * state of the adapter, as [[call]] does: the listeners get the held end of a field and the value of the
-    * single-output fallback (upstream `StreamListener.flush`). A stream with a cached chunk or a failure chunk gets no
-    * flush, as in [[call]].
+    * chunk, as in [[call]]. At the end of the stream, the wrapper flushes the stream state of the adapter, as [[call]]
+    * does: the listeners get the held end of a field and the value of the single-output fallback (upstream
+    * `StreamListener.flush`). A stream with a cached chunk or a failure chunk gets no flush, as in [[call]].
+    *
+    * The flush occurs at the `hasNext` that gives `false`, or in the `next` that takes the last chunk. While a flush is
+    * pending, `next` asks the delegate if it has one more chunk before `next` gives its chunk, so a caller that uses
+    * only `next` also gets the flush. The listeners get the tokens of a chunk before that check. The caller gets the
+    * chunk when the delegate has the next chunk or ends. With no stream state, no flush is pending, and `next` does no
+    * check.
+    *
+    * A non-fatal exception of the delegate, when it opens the stream or during a read, gives a failure chunk with an
+    * [[dspy4s.core.contracts.LmUnexpectedError]], the last chunk of the stream, as [[call]] gives a `Left` (upstream
+    * `error_boundary(..., unexpected=True)`). The wrapper then closes the stream of the delegate. A fatal error goes up
+    * to the caller, and the stream of the delegate stays open until the caller closes the result.
     *
     * A close of the result closes the stream of the delegate, so a caller that stops early releases the connection. A
-    * close before the end of the stream gives no flush.
+    * close before the end of the stream gives no flush. A non-fatal exception of the close of the delegate does not go
+    * to the caller, as in [[ManagedLanguageModel]]. After a close, the result has no more chunks.
     */
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
     val ctx    = activeContext()
-    val chunks = delegate.stream(request)
+    val opened =
+      try delegate.stream(request)
+      catch case NonFatal(error) => Iterator.single(LmChunk.failure(ManagedLanguageModel.unexpected(error, request)))
     new ClosableIterator[LmChunk]:
-      private var flushPending = true
+      private var chunks: Iterator[LmChunk] = opened
+      private var flushPending              = ctx.state.isDefined
 
       override def hasNext: Boolean =
-        val more = chunks.hasNext
+        val more = guarded(chunks.hasNext) { failure =>
+          chunks = Iterator.single(failure)
+          true
+        }
         if !more && flushPending then
           flushPending = false
           flush(ctx)
         more
 
       override def next(): LmChunk =
-        val chunk = chunks.next()
+        if !hasNext then throw new NoSuchElementException("The stream of the wrapper has no more chunks")
+        val chunk = guarded(chunks.next())(identity)
         if chunk.cachedResponse.isDefined || chunk.reportedFailure.isDefined then flushPending = false
-        else emit(ctx, chunk)
+        else
+          emit(ctx, chunk)
+          // The check of the end of the stream: at the end, `hasNext` flushes the stream state.
+          if flushPending then
+            val _ = hasNext
         chunk
 
       override def close(): Unit =
         flushPending = false
+        release()
+
+      /** The value of `read`, a read of the delegate. A non-fatal exception closes the stream of the delegate, and
+        * gives `recover` of the failure chunk with an [[dspy4s.core.contracts.LmUnexpectedError]].
+        */
+      private def guarded[A](read: => A)(recover: LmChunk => A): A =
+        try read
+        catch
+          case NonFatal(error) =>
+            release()
+            recover(LmChunk.failure(ManagedLanguageModel.unexpected(error, request)))
+
+      /** Close the stream of the delegate. A non-fatal exception of the close does not go to the caller. After this
+        * close, the delegate gives no more chunks.
+        */
+      private def release(): Unit =
         chunks match
-          case closable: ClosableIterator[?] => closable.close()
-          case _                             => ()
+          case closable: ClosableIterator[?] =>
+            try closable.close()
+            catch case NonFatal(_) => ()
+          case _ => ()
+        chunks = Iterator.empty
 
   /** Bundles per-LM-call state. Resolved once at the start of each `call()` / `stream()` so the same predict context
     * governs every chunk in that invocation, even if nested context pushes happen meanwhile.
@@ -172,7 +213,7 @@ final class StreamingLanguageModelWrapper private (
       state      : Option[AdapterStreamingState]
   )
 
-  private def activeContext(): CallContext =
+  private def activeContext()(using RuntimeContext): CallContext =
     ActivePredictContext.current match
       case Some(active) =>
         val state = adapter.flatMap(_.streamingState(active.layout))

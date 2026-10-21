@@ -6,12 +6,14 @@ import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ReplCodeInterpreter
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
+import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.programs.strategies.{ChainOfThought, Predict, RLM, ReAct, ReActV2}
 import dspy4s.signatures.Signature
@@ -51,6 +53,26 @@ class StreamableSuite extends FunSuite:
       Right(CodeResult("", "", 0, finalOutput = Some(payload)))
     override def close(): Unit = ()
 
+  /** A model that supports function calling. Each call streams `text` and the native tool call `toolName` with the JSON
+    * arguments `arguments`, as one chunk.
+    */
+  private final class NativeReplyLm(text: String, toolName: String, arguments: String) extends StreamingLanguageModel:
+    override val id: String                       = "native-reply"
+    override val mode: LmMode                     = LmMode.Chat
+    override val supportsFunctionCalling: Boolean = true
+
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      Left(RuntimeError("test", "the non-stream path is not used"))
+
+    override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
+      Iterator(
+        LmChunk(
+          text = text,
+          finishReason = Some("stop"),
+          toolCalls = Vector(LmToolCallDelta(index = 0, name = Some(toolName), argumentsFragment = Some(arguments)))
+        )
+      )
+
   /** The events of one `streamify` run of `program` with a chat adapter and a model that replies `reply`. */
   private def streamRun[P: Streamable](
       program : P,
@@ -58,7 +80,17 @@ class StreamableSuite extends FunSuite:
       listener: StreamListener,
       warnings: ArrayBuffer[String]
   ): Vector[StreamEvent] =
-    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(OneReplyLm(reply)), adapter = Some(ChatAdapter()))) {
+    streamRunWith(program, OneReplyLm(reply), ChatAdapter(), listener, warnings)
+
+  /** The events of one `streamify` run of `program` with the adapter `adapter` and the model `lm`. */
+  private def streamRunWith[P: Streamable](
+      program : P,
+      lm      : StreamingLanguageModel,
+      adapter : ChatAdapter,
+      listener: StreamListener,
+      warnings: ArrayBuffer[String]
+  ): Vector[StreamEvent] =
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(adapter))) {
       given RuntimeContext = RuntimeEnvironment.current
       val stream           = Streamify.streamify(
         program,
@@ -151,6 +183,25 @@ class StreamableSuite extends FunSuite:
       """{"tool_calls": [{"name": "submit", "args": {"answer": "42"}}]}""" + "\n\n[[ ## completed ## ]]"
     val warnings = ArrayBuffer.empty[String]
     val events   = streamRun(program, reply, StreamListener("next_thought"), warnings)
+
+    val tokens = events.collect { case e: TokenEvent => e }
+    assertEquals(warnings.toVector, Vector.empty[String])
+    assertEquals(tokens.map(_.chunk).mkString, "I can answer now.")
+    assertEquals(tokens.map(_.predictName).toSet, Set("react"))
+    assertEquals(
+      events.collect { case e: PredictionEvent => lookupString(e.prediction.values, "answer") },
+      Vector("42")
+    )
+  }
+
+  // With native tool calls, the parser takes the reply with no header as `next_thought`, the one text output field.
+  // The stream gives the same value.
+  test("streamify runs ReActV2 with native tool calls, and streams next_thought of a reply with no header") {
+    val program  = ReActV2(qa, Vector.empty)
+    val lm       = NativeReplyLm("I can answer now.", "submit", """{"answer": "42"}""")
+    val adapter  = ChatAdapter(useNativeFunctionCalling = true)
+    val warnings = ArrayBuffer.empty[String]
+    val events   = streamRunWith(program, lm, adapter, StreamListener("next_thought"), warnings)
 
     val tokens = events.collect { case e: TokenEvent => e }
     assertEquals(warnings.toVector, Vector.empty[String])

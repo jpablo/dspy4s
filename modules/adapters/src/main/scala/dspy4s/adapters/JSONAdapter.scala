@@ -26,7 +26,7 @@ final case class JSONAdapter(
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     JSONAdapterPrompt.format(invocation, useNativeFunctionCalling, parallelToolCalls, toolChoice)
 
-  override def streamingState(layout: SignatureLayout): Option[AdapterStreamingState] =
+  override def streamingState(layout: SignatureLayout)(using RuntimeContext): Option[AdapterStreamingState] =
     Some(
       new JsonStreamingState(layout.outputFields)
     )

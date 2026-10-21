@@ -66,9 +66,16 @@ final case class ChatAdapter(
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     ChatAdapterPrompt.format(invocation, useNativeFunctionCalling, parallelToolCalls, toolChoice)
 
-  override def streamingState(layout: SignatureLayout): Option[AdapterStreamingState] =
+  /** The stream state of the text fields of the parser: with native function calling active, the tool calls field is
+    * not a text field ([[ChatAdapterParser.textFields]]). When native function calling is not active, the parser also
+    * removes that field for a reply that has provider tool calls. The stream state cannot know these calls before the
+    * end of the stream, so it then gets each output field.
+    */
+  override def streamingState(layout: SignatureLayout)(using RuntimeContext): Option[AdapterStreamingState] =
     Some(
-      new ChatStreamingState(layout.outputFields)
+      new ChatStreamingState(
+        ChatAdapterParser.textFields(layout, NativeFunctionCalling.isActive(useNativeFunctionCalling))
+      )
     )
 
   override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =

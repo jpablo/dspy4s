@@ -107,6 +107,23 @@ class StreamingWrapperContractSuite extends FunSuite:
       LmChunk(text = "Hi")
     override def close(): Unit = closed = true
 
+  /** A stream that gives one chunk, then throws `failure` at the next `hasNext`. It records its close. */
+  private final class BreakingCheck(failure: () => Throwable) extends ClosableIterator[LmChunk]:
+    @volatile var closed          = false
+    private var sent              = false
+    override def hasNext: Boolean = if sent then throw failure() else true
+    override def next(): LmChunk  =
+      sent = true
+      LmChunk(text = "Hi")
+    override def close(): Unit = closed = true
+
+  /** The joined text of the chunks before the failure chunk at the end of `chunks`, and the error of that chunk. */
+  private def textAndFailure(chunks: Try[Vector[LmChunk]]): (String, Option[DspyError]) =
+    chunks match
+      case Success(items) if items.lastOption.exists(_.reportedFailure.isDefined) =>
+        (items.init.map(_.text).mkString, items.lastOption.flatMap(_.reportedFailure))
+      case other => fail(s"expected the chunks of the stream and a failure chunk at the end, got $other")
+
   private final class Lines(items: Vector[String]) extends ClosableIterator[String]:
     private var index             = 0
     override def hasNext: Boolean = index < items.size
@@ -302,4 +319,62 @@ class StreamingWrapperContractSuite extends FunSuite:
       catch case error: InterruptedException => Some(error.getMessage)
     assertEquals(thrown, Some("stop"))
     assert(source.closed, "the wrapper must close the stream of the delegate")
+  }
+
+  // ── The same rule on the stream path: the failure is a failure chunk, the last chunk of the stream ──
+
+  test("on the stream path, a delegate stream that throws during a read gives a failure chunk, and the stream closes") {
+    val reads  = Breaking(() => IllegalStateException("the stream broke"))
+    val checks = BreakingCheck(() => IllegalStateException("the check broke"))
+    Vector(reads -> "the stream broke", checks -> "the check broke").foreach { (source, message) =>
+      val wrapper          = StreamingLanguageModelWrapper(Opening(() => source), StreamingQueue[StreamEvent]())
+      given RuntimeContext = RuntimeEnvironment.current
+      textAndFailure(Try(wrapper.stream(request).toVector)) match
+        case ("Hi", Some(error: LmUnexpectedError)) =>
+          assertEquals(error.message, message)
+          assertEquals(error.details.model, Some("gpt-test"))
+        case other => fail(s"expected the chunk Hi and an LmUnexpectedError, got $other")
+    }
+    assert(reads.closed, "the wrapper must close the stream of the delegate after a read that throws")
+    assert(checks.closed, "the wrapper must close the stream of the delegate after a check that throws")
+  }
+
+  test("on the stream path, a delegate that throws when it opens the stream gives one failure chunk") {
+    val wrapper = StreamingLanguageModelWrapper(
+      Opening(() => throw IllegalStateException("no stream")),
+      StreamingQueue[StreamEvent]()
+    )
+
+    given RuntimeContext = RuntimeEnvironment.current
+    textAndFailure(Try(wrapper.stream(request).toVector)) match
+      case ("", Some(error: LmUnexpectedError)) =>
+        assertEquals(error.message, "no stream")
+        assertEquals(error.details.model, Some("gpt-test"))
+      case other => fail(s"expected only an LmUnexpectedError, got $other")
+  }
+
+  test("on the stream path, a fatal error of the delegate stream goes up to the caller") {
+    val source  = Breaking(() => InterruptedException("stop"))
+    val wrapper = StreamingLanguageModelWrapper(Opening(() => source), StreamingQueue[StreamEvent]())
+
+    given RuntimeContext = RuntimeEnvironment.current
+    // `intercept` catches only non-fatal errors, so the test catches the fatal error itself.
+    val thrown =
+      try
+        val _ = wrapper.stream(request).toVector
+        None
+      catch case error: InterruptedException => Some(error.getMessage)
+    assertEquals(thrown, Some("stop"))
+  }
+
+  test("on the stream path, a next after the end of the stream throws NoSuchElementException, as for each iterator") {
+    val wrapper = StreamingLanguageModelWrapper(
+      ScriptedLm(Vector(LmChunk(text = "ok", finishReason = Some("stop")))),
+      StreamingQueue[StreamEvent]()
+    )
+
+    given RuntimeContext = RuntimeEnvironment.current
+    val stream           = wrapper.stream(request)
+    assertEquals(stream.next().text, "ok")
+    val _ = intercept[NoSuchElementException](stream.next())
   }

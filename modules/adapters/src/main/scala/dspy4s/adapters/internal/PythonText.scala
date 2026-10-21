@@ -17,14 +17,27 @@ import scala.util.matching.Regex
   */
 private[adapters] object PythonText:
 
-  /** Python `str.strip()`: no whitespace at the start and at the end. Python whitespace is `str.isspace`. */
+  /** Python `str.strip()`: no whitespace at the start and at the end. Python whitespace is `str.isspace`. Java
+    * `String.strip` is different: it keeps U+0085, U+00A0, U+2007, and U+202F.
+    */
   def strip(text: String): String =
     val start = text.indexWhere(char => !isSpace(char))
     if start < 0 then ""
     else text.substring(start, text.lastIndexWhere(char => !isSpace(char)) + 1)
 
-  /** The characters for which Python `str.isspace` is true. */
-  private def isSpace(char: Char): Boolean =
+  /** Python `str.lstrip()`: no whitespace at the start. */
+  def lstrip(text: String): String =
+    val start = text.indexWhere(char => !isSpace(char))
+    if start < 0 then "" else text.substring(start)
+
+  /** Python `str.rstrip()`: no whitespace at the end. */
+  def rstrip(text: String): String =
+    text.substring(0, text.lastIndexWhere(char => !isSpace(char)) + 1)
+
+  /** The characters for which Python `str.isspace` is true (the list of the dspy venv, Python 3.12). Each one is in the
+    * Basic Multilingual Plane, so a test of each `Char` is a test of each code point.
+    */
+  def isSpace(char: Char): Boolean =
     char match
       case ' ' | '\t' | '\n' | '\u000b' | '\u000c' | '\r' | '\u001c' | '\u001d' | '\u001e' | '\u001f' | '\u0085' |
           ' ' | ' ' | ' ' | ' ' | ' ' | ' ' | '　' => true
@@ -47,7 +60,8 @@ private[adapters] object PythonText:
     if start < text.length then lines += text.substring(start)
     lines.result()
 
-  private def isLineBreak(char: Char): Boolean =
+  /** The line breaks of Python `str.splitlines`. Each one is also whitespace ([[isSpace]]). */
+  def isLineBreak(char: Char): Boolean =
     char match
       case '\n' | '\u000b' | '\u000c' | '\r' | '\u001c' | '\u001d' | '\u001e' | '\u0085' | ' ' | ' ' => true
       case _                                                                                         => false

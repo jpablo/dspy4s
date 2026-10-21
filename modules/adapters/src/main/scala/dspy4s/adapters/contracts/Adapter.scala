@@ -37,6 +37,8 @@ trait Adapter extends AdapterRef:
     ChatAdapterPrompt.userText(layout, values, reminder = None)
 
   /** Streaming-aware adapters override this to return a per-call state machine. The default returns [[None]] and the
-    * streaming pipeline falls back to emitting raw tokens with an empty field name.
+    * streaming pipeline falls back to emitting raw tokens with an empty field name. The context is the context of the
+    * call, as for [[parse]], so the state can follow the same rules as the parse of the call, for example native
+    * function calling.
     */
-  def streamingState(layout: SignatureLayout): Option[AdapterStreamingState] = None
+  def streamingState(layout: SignatureLayout)(using RuntimeContext): Option[AdapterStreamingState] = None
