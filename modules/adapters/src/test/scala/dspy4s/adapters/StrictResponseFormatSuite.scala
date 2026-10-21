@@ -214,6 +214,39 @@ class StrictResponseFormatSuite extends FunSuite:
     assertEquals(responseFormat(layoutOf("question -> answer"), Some("{not valid json")), jsonMode)
   }
 
+  /** The value of `body`, and the text that `body` writes to the standard error stream. */
+  private def withStderr[A](body: => A): (A, String) =
+    val buffer = java.io.ByteArrayOutputStream()
+    val value  = Console.withErr(java.io.PrintStream(buffer, true, "UTF-8"))(body)
+    (value, buffer.toString("UTF-8"))
+
+  test("JSON mode after a failed schema build logs the upstream warning, and only then") {
+    // Upstream `JSONAdapter._prepare_response_format` logs the warning only when
+    // `_get_structured_outputs_response_format` raises. An open map, a text tool calls field, and a model with no
+    // schema support give JSON mode with no warning.
+    val warning = "Failed to build structured output schema; using JSON mode before execution."
+    val badRef  = """{"type":"object","properties":{"answer":{"$ref":"#/$defs/Missing","title":"T"}}}"""
+    Vector(
+      withStderr(responseFormat(layoutOf("question -> answer: Widget"))),
+      withStderr(responseFormat(layoutOf("question -> answer"), Some("{not valid json"))),
+      withStderr(responseFormat(layoutOf("question -> answer"), Some(badRef)))
+    ).foreach { (format, log) =>
+      assertEquals(format, jsonMode)
+      assert(log.contains(warning), log)
+    }
+    Vector(
+      withStderr(responseFormat(layoutOf("question -> answer, tool_calls: tool_calls"))),
+      withStderr(responseFormat(layoutOf("question -> answer, data: dict"))),
+      withStderr(responseFormat(layoutOf("question -> scores: json, kind"), Some(mapSchema)))
+    ).foreach { (format, log) =>
+      assertEquals(format, jsonMode)
+      assert(!log.contains(warning), log)
+    }
+    val (strict, strictLog) = withStderr(responseFormat(layoutOf("question -> answer: int")))
+    assertEquals(strict("type").str, "json_schema")
+    assert(!strictLog.contains(warning), strictLog)
+  }
+
   // ── The strict shape, rule by rule ──────────────────────────────────────────────────────────────────────────
 
   private def shaped(schema: String, optional: Set[String] = Set.empty): ujson.Value =

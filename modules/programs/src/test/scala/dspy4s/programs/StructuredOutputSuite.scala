@@ -1,6 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.adapters.ChatAdapter
+import dspy4s.adapters.TwoStepAdapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, :=}
 import dspy4s.core.data.Example
@@ -127,4 +128,29 @@ class StructuredOutputSuite extends FunSuite:
       assertEquals(out.map(_.amount), Right(None))
       assertEquals(out.map(_.tags), Right(Nil))
     }
+  }
+
+  test("TwoStepAdapter gives the output schema of the signature to the extraction prompt") {
+    // Upstream `_create_extractor_signature` copies the annotated output fields, so the extraction prompt has the JSON
+    // schema of each structured type (`dspy/adapters/two_step_adapter.py`). The port shows its own JSON schema (D3).
+    val extractionPrompts = scala.collection.mutable.ArrayBuffer.empty[String]
+    val extractionLm      = new LanguageModel:
+      override val id: String                                                                    = "extraction"
+      override val mode: LmMode                                                                  = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        extractionPrompts += request.messages.flatMap(_.text).mkString("\n")
+        Right(LmResponse(outputs = Vector(LmOutput(text = completion))))
+
+    RuntimeEnvironment.withSettings(
+      RuntimeContext(
+        lm = Some(new ScriptedLm("The tags are urgent and billing; one MacBook Pro item; 2399.")),
+        adapter = Some(TwoStepAdapter(extractionLm))
+      )
+    ) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val out              = Predict(signature)(TagInput("classify this")).map(_.output)
+      assertEquals(out.map(_.items), Right(List(TagItem("MacBook Pro", 0.92))))
+    }
+    val prompt = extractionPrompts.mkString("\n")
+    assert(prompt.contains("\"score\""), s"the extraction prompt has no schema of the items of `items`:\n$prompt")
   }

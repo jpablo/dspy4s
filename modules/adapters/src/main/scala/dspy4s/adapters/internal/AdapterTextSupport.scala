@@ -184,11 +184,23 @@ private[adapters] object AdapterTextSupport:
       case TypeRef.json | TypeRef.list => JsonDynamic.parse(raw).left.map(_ =>
           ValidationError(s"Field could not be parsed as JSON from '$raw'")
         )
-      case other if other.repr.startsWith("list[") =>
-        JsonDynamic.parse(raw) match
-          case Right(list: DynamicValue.Sequence) => Right(list)
-          case _                                  => Left(ValidationError(s"Expected a JSON list for ${other.repr} from '$raw'"))
-      case _ => Right(DynamicValue.Primitive(PrimitiveValue.String(raw)))
+      case other if isListOf(other) => listOfValue(other, JsonDynamic.parse(raw).toOption, raw)
+      case _                        => Right(DynamicValue.Primitive(PrimitiveValue.String(raw)))
+
+  /** `true` for a list type with an item type, for example the type `list[str]` of a string signature. */
+  def isListOf(typeRef: TypeRef): Boolean = typeRef.repr.startsWith("list[")
+
+  /** The value of a field of the list type `typeRef` ([[isListOf]]) from its JSON value `value`: the value when it is a
+    * list, else an error (upstream `parse_value` validates a list). The items stay as they are. The Chat, JSON, and XML
+    * adapters use this function, so a list value has the same rule in each format.
+    *
+    * @param raw
+    *   the text of the value, for the error
+    */
+  def listOfValue(typeRef: TypeRef, value: Option[DynamicValue], raw: String): Either[DspyError, DynamicValue] =
+    value
+      .collect { case list: DynamicValue.Sequence => list }
+      .toRight(ValidationError(s"Expected a JSON list for ${typeRef.repr} from '$raw'"))
 
   /** The `Int` of an integer text, or of a float text with no fraction (`3.0`). */
   private def wholeNumber(text: String): Option[Int] =

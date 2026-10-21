@@ -56,21 +56,41 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
 
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     DecisionAdapter.evidenceLayout(invocation.layout, plan).flatMap { evidence =>
-      inner.format(
-        invocation.copy(
-          layout = withTaskExamples(invocation, evidence),
-          demos = Vector.empty,
-          outputJsonSchema = Some(PythonText.json(outputSchema(invocation, evidence)))
-        )
-      )
+      inner.format(evidenceInvocation(invocation, evidence).copy(layout = withTaskExamples(invocation, evidence)))
     }
 
   override def parse(layout: SignatureLayout, output: LmOutput)(using
       RuntimeContext
   ): Either[DspyError, ParsedOutput] =
+    decodeWith(layout, output)(evidence => inner.parse(evidence, output))
+
+  /** The parse of `inner` gets the invocation of the request: the evidence layout, and the output schema with the
+    * evidence schemas.
+    */
+  override def parse(invocation: AdapterInvocation, output: LmOutput)(using
+      RuntimeContext
+  ): Either[DspyError, ParsedOutput] =
+    decodeWith(invocation.layout, output)(evidence => inner.parse(evidenceInvocation(invocation, evidence), output))
+
+  /** The invocation of `inner` for the evidence layout `evidence`: no demos, and the output schema with the evidence
+    * schemas ([[outputSchema]]).
+    */
+  private def evidenceInvocation(invocation: AdapterInvocation, evidence: SignatureLayout): AdapterInvocation =
+    invocation.copy(
+      layout = evidence,
+      demos = Vector.empty,
+      outputJsonSchema = Some(PythonText.json(outputSchema(invocation, evidence)))
+    )
+
+  /** The output values of `output`: `parseEvidence` parses it with the evidence layout of `layout`, then the evidence
+    * gives the decisions.
+    */
+  private def decodeWith(layout: SignatureLayout, output: LmOutput)(
+      parseEvidence: SignatureLayout => Either[DspyError, ParsedOutput]
+  ): Either[DspyError, ParsedOutput] =
     for
       evidence <- DecisionAdapter.evidenceLayout(layout, plan)
-      parsed   <- inner.parse(evidence, output)
+      parsed   <- parseEvidence(evidence)
       answers  <- answersOf(parsed.values, output.text)
       decoded  <- plan.decode(answers)
     yield parsed.copy(

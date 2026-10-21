@@ -47,6 +47,10 @@ class ConversationHistoryRulesSuite extends FunSuite:
     layoutOf(Vector(FieldSpec("question"), historyField), Vector(FieldSpec("answer")))
   private val qaPlain: SignatureLayout = layoutOf(Vector(FieldSpec("question")), Vector(FieldSpec("answer")))
 
+  /** `question, history -> answer, note`. */
+  private val qaNoteWithHistory: SignatureLayout =
+    layoutOf(Vector(FieldSpec("question"), historyField), Vector(FieldSpec("answer"), FieldSpec("note")))
+
   /** `question, history -> next_thought, summary, tool_calls`. */
   private val agentWithHistory: SignatureLayout = layoutOf(
     Vector(FieldSpec("question"), historyField),
@@ -132,10 +136,11 @@ class ConversationHistoryRulesSuite extends FunSuite:
       }
     }
 
-    test(s"$name: a message with input fields only gives a user turn and no assistant turn") {
+    test(s"$name: a message with input fields only gives a user turn and an assistant turn") {
+      // Upstream `format_conversation_history` formats the assistant turn of each message with the full signature.
       val history  = History.empty :+ DynamicValues.record("question" := "What is 1+1?")
       val messages = messagesOf(adapter, qaWithHistory, withHistory("What is 3+3?", history))
-      assertEquals(roles(messages), Vector(System, User, User))
+      assertEquals(roles(messages), Vector(System, User, Assistant, User))
       assertEquals(
         textOf(messages(1)),
         textOf(messagesOf(adapter, qaPlain, DynamicValues.record("question" := "What is 1+1?")).last)
@@ -212,13 +217,48 @@ class ConversationHistoryRulesSuite extends FunSuite:
     }
   }
 
+  // The texts that upstream `Adapter.format` gives for the history [{"question": "q1"}, {"question": "q2", "answer":
+  // "a2"}] with the signature `question, history -> answer, note`: each assistant turn has each output field, with
+  // `None` (`null` in JSON) for a field that the message does not have.
+  Vector(
+    (
+      "ChatAdapter",
+      chat,
+      "[[ ## answer ## ]]\nNone\n\n[[ ## note ## ]]\nNone\n\n[[ ## completed ## ]]\n",
+      "[[ ## answer ## ]]\na2\n\n[[ ## note ## ]]\nNone\n\n[[ ## completed ## ]]\n"
+    ),
+    (
+      "JSONAdapter",
+      json,
+      "{\n  \"answer\": null,\n  \"note\": null\n}",
+      "{\n  \"answer\": \"a2\",\n  \"note\": null\n}"
+    ),
+    (
+      "XMLAdapter",
+      xml,
+      "<answer>\nNone\n</answer>\n\n<note>\nNone\n</note>",
+      "<answer>\na2\n</answer>\n\n<note>\nNone\n</note>"
+    )
+  ).foreach { (name, adapter, inputsOnly, oneOutput) =>
+    test(s"$name (text): the exact text of the assistant turns of partial messages, as upstream") {
+      val history = History.empty :+ DynamicValues.record("question" := "q1") :+
+        DynamicValues.record("question" := "q2", "answer" := "a2")
+      val messages = messagesOf(adapter, qaNoteWithHistory, withHistory("q3", history))
+      assertEquals(roles(messages), Vector(System, User, Assistant, User, Assistant, User))
+      assertEquals(textOf(messages(2)), inputsOnly)
+      assertEquals(textOf(messages(4)), oneOutput)
+    }
+  }
+
   test("ChatAdapter (text): the exact text of a tool turn") {
     val messages = messagesOf(chat, agentWithHistory, withHistory("Q2", History.empty :+ toolTurn))
     assertEquals(roles(messages), Vector(System, User, Assistant, User, User))
-    // The assistant turn has the fields of the message only: no `summary`. A call has no id as text.
+    // The assistant turn has each output field: `summary`, which the message does not have, is `None`. A call has no
+    // id as text.
     assertEquals(
       textOf(messages(2)),
-      s"[[ ## next_thought ## ]]\nI should search.\n\n[[ ## tool_calls ## ]]\n$callsText\n\n[[ ## completed ## ]]\n"
+      s"[[ ## next_thought ## ]]\nI should search.\n\n[[ ## summary ## ]]\nNone\n\n[[ ## tool_calls ## ]]\n" +
+        s"$callsText\n\n[[ ## completed ## ]]\n"
     )
     assertEquals(textOf(messages(3)), s"[[ ## tool_call_results ## ]]\n$resultsText")
   }
@@ -229,9 +269,9 @@ class ConversationHistoryRulesSuite extends FunSuite:
     // Upstream `JSONAdapter.format_assistant_message_content`: `json.dumps(..., indent=2)`.
     assertEquals(
       textOf(messages(2)),
-      "{\n  \"next_thought\": \"I should search.\",\n  \"tool_calls\": {\n    \"tool_calls\": [\n      {\n" +
-        "        \"name\": \"search\",\n        \"args\": {\n          \"query\": \"cats\"\n        }\n      }\n" +
-        "    ]\n  }\n}"
+      "{\n  \"next_thought\": \"I should search.\",\n  \"summary\": null,\n  \"tool_calls\": {\n" +
+        "    \"tool_calls\": [\n      {\n        \"name\": \"search\",\n        \"args\": {\n" +
+        "          \"query\": \"cats\"\n        }\n      }\n    ]\n  }\n}"
     )
     assertEquals(textOf(messages(3)), s"[[ ## tool_call_results ## ]]\n$resultsText")
   }
@@ -241,7 +281,8 @@ class ConversationHistoryRulesSuite extends FunSuite:
     assertEquals(roles(messages), Vector(System, User, Assistant, User, User))
     assertEquals(
       textOf(messages(2)),
-      s"<next_thought>\nI should search.\n</next_thought>\n\n<tool_calls>\n$callsText\n</tool_calls>"
+      s"<next_thought>\nI should search.\n</next_thought>\n\n<summary>\nNone\n</summary>\n\n<tool_calls>\n" +
+        s"$callsText\n</tool_calls>"
     )
     assertEquals(textOf(messages(3)), s"<tool_call_results>\n$resultsText\n</tool_call_results>")
     assert(messages.forall(m => m.toolCalls.isEmpty && m.toolCallId.isEmpty), messages.toString)
@@ -315,11 +356,14 @@ class ConversationHistoryRulesSuite extends FunSuite:
       assertEquals(roles(messages), Vector(System, User, User))
     }
 
-    test(s"$name (native): a tool calls value that is not a sequence of calls stays a field value") {
+    test(s"$name (native): a tool calls value that is not a sequence of calls is a text turn with no tool calls") {
+      // Upstream formats the text turn with the signature of the request, which has no tool calls field when native
+      // function calling is active (`Adapter._call_preprocess`). Thus the value does not show.
       val message  = DynamicValues.record("question" := "Q1", "tool_calls" := "search the web")
       val messages = messagesOf(adapter, agentWithHistory, withHistory("Q2", History.empty :+ message))
       assertEquals(roles(messages), Vector(System, User, Assistant, User))
-      assert(textOf(messages(2)).contains("search the web"), textOf(messages(2)))
+      assert(!textOf(messages(2)).contains("search the web"), textOf(messages(2)))
+      assert(textOf(messages(2)).contains("next_thought") && textOf(messages(2)).contains("summary"))
       assert(messages.forall(_.toolCalls.isEmpty), messages.toString)
     }
 

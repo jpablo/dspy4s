@@ -212,6 +212,11 @@ object Refine:
     ): Either[DspyError, ParsedOutput] =
       baseAdapter.parse(layout, output)
 
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
+        RuntimeContext
+    ): Either[DspyError, ParsedOutput] =
+      baseAdapter.parse(invocation, output)
+
   /** The critic's input: the six grounding fields of [[RefineFeedback.layout]], field names matching the layout
     * exactly.
     */

@@ -1,7 +1,7 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.{NativeFunctionCalling, ParsedOutput}
-import dspy4s.adapters.internal.AdapterTextSupport
+import dspy4s.adapters.internal.{AdapterTextSupport, PythonText}
 import dspy4s.core.contracts.{DspyError, FieldSpec, SignatureLayout}
 import dspy4s.lm.contracts.LmOutput
 import zio.blocks.schema.DynamicValue
@@ -50,14 +50,14 @@ private[adapters] object ChatAdapterParser:
       .map(entries => AdapterTextSupport.parsedOutput(adapterName, output, entries))
 
   /** The text of each output field. The first header of a field wins (upstream `ChatAdapter.parse`): the lines of a
-    * later header of the same field are dropped. Each text is stripped at both ends, as upstream
-    * (`"\n".join(v).strip()`).
+    * later header of the same field are dropped. The lines come from Python `str.splitlines`, as upstream, so a CRLF
+    * reply gives the values of an LF reply. Each text is stripped at both ends, as upstream (`"\n".join(v).strip()`).
     */
   private def extractSections(text: String, outputNames: Set[String]): Map[String, String] =
     val out                          = scala.collection.mutable.LinkedHashMap.empty[String, StringBuilder]
     var currentField: Option[String] = None
-    text
-      .split('\n')
+    PythonText
+      .splitLines(text)
       .foreach { rawLine =>
         val stripped = rawLine.trim
         ChatAdapter.MarkerPattern.findPrefixMatchOf(stripped) match

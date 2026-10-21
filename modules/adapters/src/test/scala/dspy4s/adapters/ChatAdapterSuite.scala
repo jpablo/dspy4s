@@ -269,6 +269,19 @@ class ChatAdapterSuite extends FunSuite:
     assertEquals(lookup(values, "answer"), Some("42": Any))
   }
 
+  test("parse reads a CRLF reply and a CR reply as the LF reply, as upstream `str.splitlines`") {
+    val signature        = SignatureDsl.parse("question -> reasoning, answer: int").toOption.get
+    given RuntimeContext = RuntimeEnvironment.current
+    val lf               = "[[ ## reasoning ## ]]\nFirst X.\nThen Y.\n\n[[ ## answer ## ]]\n42\n\n" +
+      "[[ ## completed ## ]]\n"
+
+    def values(text: String): DynamicValue.Record =
+      ChatAdapter().parse(signature, LmOutput(text = text)).fold(error => fail(s"parse failed: $error"), _.values)
+    assertEquals(lookup(values(lf), "reasoning"), Some("First X.\nThen Y.": Any))
+    assertEquals(values(lf.replace("\n", "\r\n")), values(lf))
+    assertEquals(values(lf.replace("\n", "\r")), values(lf))
+  }
+
   test("parse tolerates a missing completed marker") {
     val signature        = SignatureDsl.parse("question -> answer").toOption.get
     given RuntimeContext = RuntimeEnvironment.current

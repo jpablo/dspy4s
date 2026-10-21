@@ -15,6 +15,8 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import munit.FunSuite
 
+import scala.collection.mutable.ArrayBuffer
+
 class TwoStepAdapterSuite extends FunSuite:
 
   /** Records the prompt it was called with and returns a fixed completion. */
@@ -24,6 +26,16 @@ class TwoStepAdapterSuite extends FunSuite:
     override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       lastPrompt = Some(request.messages.flatMap(_.text).mkString("\n"))
+      Right(LmResponse(outputs = Vector(LmOutput(text = response))))
+
+  /** Records each request and gives the same reply to each one. */
+  private final class RecordingLm(response: String, responseSchema: Boolean) extends LanguageModel:
+    val requests: ArrayBuffer[LmRequest]                                                       = ArrayBuffer.empty
+    override val id: String                                                                    = "recording"
+    override val mode: LmMode                                                                  = LmMode.Chat
+    override val supportsResponseSchema: Boolean                                               = responseSchema
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      requests += request
       Right(LmResponse(outputs = Vector(LmOutput(text = response))))
 
   private val layout: SignatureLayout = SignatureLayout.create(
@@ -63,6 +75,28 @@ class TwoStepAdapterSuite extends FunSuite:
     assertEquals(DynamicValues.recordGet(parsed.values, "answer").map(DynamicValues.renderText), Some("Paris"))
     // The extraction step was handed the main LM's free-form completion as its `text` input.
     assert(extractionLm.lastPrompt.exists(_.contains("capital of France is Paris")), extractionLm.lastPrompt.toString)
+  }
+
+  test("the extraction step tries the JSON adapter after a parse error of the chat format, as upstream") {
+    // Upstream `TwoStepAdapter.parse` calls `ChatAdapter()(lm=self.extraction_model, ...)`, and
+    // `ChatAdapter.__call__` tries `JSONAdapter` after an `AdapterParseError` (`dspy/adapters/chat_adapter.py`). The
+    // JSON adapter builds `response_format` from the extraction model (`JSONAdapter._prepare_response_format`).
+    val twoOutputs = SignatureLayout.create(
+      name = "QA",
+      inputFields = Vector(FieldSpec("question")),
+      outputFields = Vector(FieldSpec("answer"), FieldSpec("note"))
+    ).toOption.get
+    val extractionLm     = new RecordingLm("""{"answer": "Paris", "note": "the capital"}""", responseSchema = true)
+    given RuntimeContext = RuntimeContext(lm = Some(new RecordingLm("unused", responseSchema = false)))
+
+    val parsed = TwoStepAdapter(extractionLm).parse(twoOutputs, LmOutput(text = "Paris is the capital."))
+      .fold(error => fail(s"parse failed: $error"), identity)
+    assertEquals(DynamicValues.recordGet(parsed.values, "answer").map(DynamicValues.renderText), Some("Paris"))
+    assertEquals(DynamicValues.recordGet(parsed.values, "note").map(DynamicValues.renderText), Some("the capital"))
+    assertEquals(extractionLm.requests.size, 2)
+    val fallback = extractionLm.requests(1)
+    assert(fallback.messages.flatMap(_.text).mkString.contains("Outputs will be a JSON object"), fallback.toString)
+    assert(DynamicValues.recordGet(fallback.options, "response_format").isDefined, fallback.options.toString)
   }
 
   test("TwoStepAdapter surfaces an extraction-model failure") {

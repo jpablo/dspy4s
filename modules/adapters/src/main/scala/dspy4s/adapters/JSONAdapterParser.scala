@@ -77,7 +77,8 @@ private[adapters] object JSONAdapterParser:
     * calls field takes a JSON list of calls, or the JSON text of such a list. A JSON string for a field whose type is
     * not a string goes through the text coercion of the chat format (`AdapterTextSupport.coerceOutputText`), as
     * upstream `parse_value` reads a string with `json_repair`: `"3"` for an `int` field is `3`, and `"[1, 2]"` for a
-    * `list` field is a list. An optional field also takes the lenient forms of `AdapterTextSupport.optionalFallback`.
+    * `list` field is a list. A JSON value for a `list[T]` field of a string signature must be a list, as in the chat
+    * format. An optional field also takes the lenient forms of `AdapterTextSupport.optionalFallback`.
     */
   private def decode(field: FieldSpec, value: Value): Either[DspyError, DynamicValue] =
     value match
@@ -159,7 +160,10 @@ private[adapters] object JSONAdapterParser:
           .toRight(ValidationError(s"Expected boolean value, found: $value"))
           .map(boolean => DynamicValue.Primitive(PrimitiveValue.Boolean(boolean)))
       case TypeRef.json | TypeRef.list => Right(JsonDynamic.fromUjson(value))
-      case _                           => Right(DynamicValue.Primitive(PrimitiveValue.String(value.strOpt.getOrElse(renderJson(value)))))
+      // A string signature type such as `list[str]`: the rule of the chat format (`AdapterTextSupport.listOfValue`).
+      case other if AdapterTextSupport.isListOf(other) =>
+        AdapterTextSupport.listOfValue(other, Some(JsonDynamic.fromUjson(value)), renderJson(value))
+      case _ => Right(DynamicValue.Primitive(PrimitiveValue.String(value.strOpt.getOrElse(renderJson(value)))))
 
   private def renderJson(value: Value): String =
     value match

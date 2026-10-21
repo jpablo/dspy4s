@@ -133,9 +133,11 @@ private[adapters] object ConversationHistory:
           }
         else content.map(text => Message(role = MessageRole.Assistant, text = Some(text))).toVector
       case _ =>
-        // The calls go as a field value with no ids and no results (`PromptText.jsonable`). The results go in one more
-        // user turn, as the object of upstream `ToolCallResults`.
-        val assistantTurn = assistantText(layout.outputFields.filter(has), message)
+        // Each output field of the request shows, with a null for a field that the message does not have, so that a
+        // message with inputs only also gets an assistant turn (upstream `format_assistant_message_content` with the
+        // signature of the request). The calls go as a field value with no ids and no results (`PromptText.jsonable`).
+        // The results go in one more user turn, as the object of upstream `ToolCallResults`.
+        val assistantTurn = assistantText(requestLayout.outputFields, message)
           .map(text => Message(role = MessageRole.Assistant, text = Some(text)))
         val resultsTurn = Option.when(results.nonEmpty) {
           val shown = DynamicValues.record(History.ToolCallResultsKey -> toolCallResultsValue(results))

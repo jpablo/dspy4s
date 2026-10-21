@@ -66,8 +66,12 @@ class ProgramHistorySuite extends FunSuite:
       textOf(messages(2)),
       "[[ ## reasoning ## ]]\n1 and 1 make 2.\n\n[[ ## answer ## ]]\n2\n\n[[ ## completed ## ]]\n"
     )
-    // A turn with no reasoning shows the answer only.
-    assertEquals(textOf(messages(4)), "[[ ## answer ## ]]\n4\n\n[[ ## completed ## ]]\n")
+    // A turn with no reasoning shows `None` for it, as upstream (`format_conversation_history` formats each output
+    // field of the signature).
+    assertEquals(
+      textOf(messages(4)),
+      "[[ ## reasoning ## ]]\nNone\n\n[[ ## answer ## ]]\n4\n\n[[ ## completed ## ]]\n"
+    )
     val current = textOf(messages.last)
     assert(current.contains("What is 3+3?"), current)
     assert(!current.contains("history") && !current.contains("What is 1+1?"), current)

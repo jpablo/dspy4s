@@ -230,7 +230,7 @@ private[dspy4s] final case class PredictEngine(
                     val mergedOptions = prompt.options(invocation.request.options)
                     model.call(invocation.request.copy(messages = prompt.messages, options = mergedOptions))
                   }
-    yield PredictEngine.Attempt(response, parseOutputs(adapter, response.outputs))
+    yield PredictEngine.Attempt(response, parseOutputs(adapter, invocation, response.outputs))
 
   private def buildInvocation(call: ProgramCall[DynamicValue.Record], model: LanguageModel): AdapterInvocation =
     warnOnExtraInputs(call)
@@ -275,7 +275,8 @@ private[dspy4s] final case class PredictEngine(
           s"expected input fields: [$expected]"
       )
 
-  private def parseOutputs(adapter: Adapter, outputs: Vector[LmOutput])(using
+  /** Parse each output with `adapter` (`Adapter.parse` with `invocation`, the invocation of the request). */
+  private def parseOutputs(adapter: Adapter, invocation: AdapterInvocation, outputs: Vector[LmOutput])(using
       RuntimeContext
   ): Either[DspyError, Vector[ParsedOutput]] =
     outputs.zipWithIndex.foldLeft[Either[DspyError, Vector[ParsedOutput]]](Right(Vector.empty)) { (acc, pair) =>
@@ -286,7 +287,7 @@ private[dspy4s] final case class PredictEngine(
                     adapterName = adapter.name,
                     inputs = DynamicValues.record("phase" := "parse", "index" := index)
                   ) {
-                    adapter.parse(layout, output)
+                    adapter.parse(invocation, output)
                   }
       yield soFar :+ parsed
     }

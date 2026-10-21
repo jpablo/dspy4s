@@ -120,6 +120,15 @@ class AdapterFallbackSuite extends FunSuite:
     assertEquals(lm.requests.size, 1)
   }
 
+  test("the predictor is the one call path: the adapter contract has no call method without the fallback") {
+    // Upstream `Adapter.__call__` is the one call path of an adapter, and `ChatAdapter.__call__` has the fallback
+    // (`dspy/adapters/chat_adapter.py`). In the port, `PredictEngine` has the fallback.
+    val errors = compileErrors(
+      "(??? : dspy4s.adapters.contracts.Adapter).execute(???, ???)(using RuntimeContext())"
+    )
+    assert(errors.contains("execute is not a member"), errors)
+  }
+
   test("a typed output with an Option field that the response does not have is None") {
     val signature = Signature.derived[FallbackQuestion, FallbackAnswer]("QA")
     val lm        = scripted("[[ ## answer ## ]]\nParis\n\n[[ ## completed ## ]]")

@@ -1,6 +1,6 @@
 package dspy4s.programs
 
-import dspy4s.adapters.ChatAdapter
+import dspy4s.adapters.{ChatAdapter, TwoStepAdapter}
 import dspy4s.core.contracts.{:=, DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout, TypeRef}
 import dspy4s.core.decisions.{Choice, DecisionSettings, Noul, Score}
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -162,6 +162,21 @@ class PredictDecisionSuite extends FunSuite:
       DynamicValues.recordGet(raw, "native_urgent"),
       Some(DynamicValue.Primitive(PrimitiveValue.Boolean(false)))
     )
+  }
+
+  test("with a TwoStepAdapter, the extraction prompt has the evidence schemas, and the evidence gives the decisions") {
+    // Upstream `TwoStepAdapter.parse` builds the extractor signature from the output fields that the decision adapter
+    // gives it, with their annotations (`dspy/adapters/decision.py`, `dspy/adapters/two_step_adapter.py`).
+    val extraction = Replay(reply)
+    val result     = RuntimeEnvironment.withSettings(
+      RuntimeContext(lm = Some(Replay("It is urgent and severe.")), adapter = Some(TwoStepAdapter(extraction)))
+    ) {
+      given RuntimeContext = RuntimeEnvironment.current
+      configured(PdTicket("Checkout fails."))
+    }
+    assertEquals(result.map(_.output.category.value), Right(PdTeam.technical))
+    val prompt = extraction.calls.flatMap(_.messages).flatMap(_.text).mkString("\n")
+    assert(prompt.contains("Confidence in the decision, from 0 to 1."), prompt)
   }
 
   test("the settings are an optimizable parameter, and the state record keeps them") {

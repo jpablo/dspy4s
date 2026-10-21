@@ -3,7 +3,8 @@ package dspy4s.adapters
 import dspy4s.adapters.contracts.{AdapterInvocation, FormattedPrompt, NativeFunctionCalling, ToolChoice}
 import dspy4s.adapters.internal.{ConversationHistory, JsonDynamic, PromptText, PythonText, StrictJsonSchema, TurnText}
 import dspy4s.adapters.internal.PromptText.OutputSchema
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout, updated}
+import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout, TypeRef, updated}
+import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
@@ -100,6 +101,11 @@ private[adapters] object JSONAdapterPrompt:
     * JSON mode, `{"type": "json_object"}`, replaces the schema when an output is a tool calls field and native function
     * calling is not active, or when no strict schema results: the typed schema does not parse, a field type has no
     * schema, or the schema has an open map.
+    *
+    * When the schema build fails and the adapter goes back to JSON mode, the adapter logs the warning of upstream
+    * ([[SchemaBuildWarning]]). A tool calls field and an open map give JSON mode with no warning, as upstream. An open
+    * map is a field of the type `json` (upstream `dict`), or an open map in the typed schema
+    * ([[dspy4s.adapters.internal.StrictJsonSchema.hasOpenMap]]).
     */
   private def responseFormatOptions(invocation: AdapterInvocation, useNativeFunctionCalling: Boolean)(using
       ctx: RuntimeContext
@@ -129,26 +135,36 @@ private[adapters] object JSONAdapterPrompt:
           }
         case None => StrictJsonSchema.fromFields(fields)
       val optionalFields = fields.filter(_.optional).map(_.name).toSet
-      schema
-        .map(embedConstraints(_, fields))
-        .flatMap(StrictJsonSchema.shape(_, optionalFields).toOption) match
-        case Some(strict) => DynamicValue.Record(
-            Chunk(
-              "type"        -> DynamicValue.Primitive(PrimitiveValue.String("json_schema")),
-              "json_schema" -> DynamicValue.Record(
-                Chunk(
-                  "name"   -> DynamicValue.Primitive(PrimitiveValue.String(StrictJsonSchema.Name)),
-                  "schema" -> strict,
-                  "strict" -> DynamicValue.Primitive(PrimitiveValue.Boolean(true))
+      val openMap        = invocation.outputJsonSchema match
+        case Some(_) => schema.exists(StrictJsonSchema.hasOpenMap)
+        case None    => fields.exists(_.typeRef == TypeRef.json)
+      if openMap then JsonMode
+      else
+        schema
+          .map(embedConstraints(_, fields))
+          .flatMap(StrictJsonSchema.shape(_, optionalFields).toOption) match
+          case Some(strict) => DynamicValue.Record(
+              Chunk(
+                "type"        -> DynamicValue.Primitive(PrimitiveValue.String("json_schema")),
+                "json_schema" -> DynamicValue.Record(
+                  Chunk(
+                    "name"   -> DynamicValue.Primitive(PrimitiveValue.String(StrictJsonSchema.Name)),
+                    "schema" -> strict,
+                    "strict" -> DynamicValue.Primitive(PrimitiveValue.Boolean(true))
+                  )
                 )
               )
             )
-          )
-        case None => JsonMode
+          case None =>
+            RuntimeEnvironment.warn("JSONAdapter", SchemaBuildWarning)
+            JsonMode
 
   /** The JSON mode format: the response is a JSON object, with no schema. */
   private val JsonMode: DynamicValue.Record =
     DynamicValue.Record(Chunk.single("type" -> DynamicValue.Primitive(PrimitiveValue.String("json_object"))))
+
+  /** The warning when the schema build fails (upstream `JSONAdapter._prepare_response_format`). */
+  private val SchemaBuildWarning: String = "Failed to build structured output schema; using JSON mode before execution."
 
   /** `schema` with no property in `names`. [[StrictJsonSchema.shape]] writes `required` again from the properties. */
   private def withoutProperties(schema: DynamicValue.Record, names: Set[String]): DynamicValue.Record =

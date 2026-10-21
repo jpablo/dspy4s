@@ -133,14 +133,28 @@ private[adapters] object StrictJsonSchema:
 
   /** An object schema with no `additionalProperties` gets `additionalProperties: false`. An open map is a `Left`. */
   private def close(schema: DynamicValue.Record): Either[DspyError, DynamicValue.Record] =
-    if !hasType(schema, "object") then Right(schema)
-    else
-      DynamicValues.recordGet(schema, "additionalProperties") match
-        case None =>
-          Right(schema.updated("additionalProperties", DynamicValue.Primitive(PrimitiveValue.Boolean(false))))
-        case Some(_: DynamicValue.Record) | Some(DynamicValue.Primitive(PrimitiveValue.Boolean(true))) =>
-          Left(ValidationError(s"Strict mode does not take an open map: ${JsonDynamic.toUjson(schema)}"))
-        case Some(_) => Right(schema)
+    if isOpenMap(schema) then
+      Left(ValidationError(s"Strict mode does not take an open map: ${JsonDynamic.toUjson(schema)}"))
+    else if hasType(schema, "object") && DynamicValues.recordGet(schema, "additionalProperties").isEmpty then
+      Right(schema.updated("additionalProperties", DynamicValue.Primitive(PrimitiveValue.Boolean(false))))
+    else Right(schema)
+
+  /** `true` when `value` has an open map at some level ([[isOpenMap]]). [[shape]] gives a `Left` for such a schema. The
+    * JSON adapter then sends JSON mode with no warning, as upstream does for an open map (`_has_open_ended_mapping` in
+    * `dspy/adapters/json_adapter.py`).
+    */
+  def hasOpenMap(value: DynamicValue): Boolean =
+    value match
+      case schema: DynamicValue.Record => isOpenMap(schema) || schema.fields.exists((_, inner) => hasOpenMap(inner))
+      case list: DynamicValue.Sequence => list.elements.exists(hasOpenMap)
+      case _                           => false
+
+  /** `true` for an object schema whose `additionalProperties` is a schema or `true`. */
+  private def isOpenMap(schema: DynamicValue.Record): Boolean =
+    hasType(schema, "object") &&
+      (DynamicValues.recordGet(schema, "additionalProperties") match
+        case Some(_: DynamicValue.Record) | Some(DynamicValue.Primitive(PrimitiveValue.Boolean(true))) => true
+        case _                                                                                         => false)
 
   /** Each property in strict shape, and each property name in `required`. */
   private def shapeProperties(

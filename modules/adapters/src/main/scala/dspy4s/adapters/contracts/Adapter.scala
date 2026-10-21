@@ -2,7 +2,7 @@ package dspy4s.adapters.contracts
 
 import dspy4s.adapters.ChatAdapterPrompt
 import dspy4s.core.contracts.{AdapterRef, DspyError, RuntimeContext, SignatureLayout}
-import dspy4s.lm.contracts.{LanguageModel, LmOutput}
+import dspy4s.lm.contracts.LmOutput
 import zio.blocks.schema.DynamicValue
 
 trait Adapter extends AdapterRef:
@@ -21,6 +21,14 @@ trait Adapter extends AdapterRef:
 
   def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput]
 
+  /** The parse of `output`, the reply to the request that [[format]] made from `invocation`. The predictor calls this
+    * method. The default is `parse(invocation.layout, output)`. An adapter that needs more of the invocation overrides
+    * it: [[dspy4s.adapters.TwoStepAdapter]] gives the output JSON schema of the invocation to its extraction prompt. An
+    * adapter that wraps another adapter gives the invocation to the parse of that adapter.
+    */
+  def parse(invocation: AdapterInvocation, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+    parse(invocation.layout, output)
+
   /** The text of a user turn that shows the values of the input fields of `layout` that `values` has, with no output
     * reminder (upstream `Adapter.format_user_message_content` with `main_request=False`). `ReAct` writes its trajectory
     * with this text (upstream `ReAct._format_trajectory`). The default is the marker form of the chat adapter.
@@ -32,25 +40,3 @@ trait Adapter extends AdapterRef:
     * streaming pipeline falls back to emitting raw tokens with an empty field name.
     */
   def streamingState(layout: SignatureLayout): Option[AdapterStreamingState] = None
-
-  def execute(languageModel: LanguageModel, invocation: AdapterInvocation)(using
-      RuntimeContext
-  ): Either[DspyError, Vector[ParsedOutput]] =
-    for
-      prompt <- format(invocation)
-      // Merge adapter-contributed requestOptions UNDER the request's existing options (per-call/module wins), after
-      // the removal of the options that the adapter removes.
-      mergedOptions = prompt.options(invocation.request.options)
-      response     <- languageModel.call(invocation.request.copy(messages = prompt.messages, options = mergedOptions))
-      parsed       <- parseOutputs(invocation.layout, response.outputs)
-    yield parsed
-
-  private def parseOutputs(layout: SignatureLayout, outputs: Vector[LmOutput])(using
-      RuntimeContext
-  ): Either[DspyError, Vector[ParsedOutput]] =
-    outputs.foldLeft(Right(Vector.empty): Either[DspyError, Vector[ParsedOutput]]) { (acc, output) =>
-      for
-        soFar  <- acc
-        parsed <- parse(layout, output)
-      yield soFar :+ parsed
-    }

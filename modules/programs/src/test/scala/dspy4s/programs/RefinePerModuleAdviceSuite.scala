@@ -91,6 +91,15 @@ class RefinePerModuleAdviceSuite extends FunSuite:
       }
       Right(ParsedOutput(values = DynamicValues.recordFromEntries(entries)))
 
+    /** The invocations of the parse calls that have an invocation. */
+    val parsed: mutable.ArrayBuffer[AdapterInvocation] = mutable.ArrayBuffer.empty
+
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
+        RuntimeContext
+    ): Either[DspyError, ParsedOutput] =
+      parsed += invocation
+      parse(invocation.layout, output)
+
   /** One LM that plays both task and reflection roles, routed by the prompt's OUTPUTS tag:
     *   - `advice` -> returns a per-module JSON advice dict telling each predictor its own secret token.
     *   - `hint` -> emits "good" iff the hinter's prompt carries the hinter token (via injected `hint_`).
@@ -164,6 +173,22 @@ class RefinePerModuleAdviceSuite extends FunSuite:
     )
     assert(hint.format(invocation).isRight)
     assert(adapter.prompts("reasoning,answer").contains("hint_: Use the map."), adapter.prompts.toString)
+  }
+
+  test("the hint adapter gives the invocation of the request to the parse of its base adapter") {
+    // `TwoStepAdapter` takes the output schema of the invocation for its extraction prompt.
+    val adapter          = RecordingAdapter()
+    val hint             = Refine.HintInjectingAdapter(adapter, Map.empty)
+    given RuntimeContext = RuntimeContext()
+    val invocation       = AdapterInvocation(
+      layout = Signature.fromString("q -> answer").layout,
+      demos = Vector.empty,
+      inputs = Example(values = rec("q" := "Where?"), inputKeys = Set("q")),
+      request = LmRequest(model = "m"),
+      outputJsonSchema = Some("""{"type": "object"}""")
+    )
+    assert(hint.parse(invocation, LmOutput(text = "")).isRight)
+    assertEquals(adapter.parsed.toVector, Vector(invocation))
   }
 
   test("parseAdvice decodes a JSON dict and falls back to uniform advice for non-JSON") {

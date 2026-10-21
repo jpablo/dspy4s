@@ -33,8 +33,9 @@ import zio.blocks.schema.DynamicValue
   * call), and [[parse]] — which receives the `RuntimeContext` — performs the extraction call itself.
   *
   * Delta from Python (carried over): the extractor signature is built fresh with no demos, so the extraction step
-  * cannot be optimized/learned (upstream notes the same limitation). The extraction prompt has no output JSON schema,
-  * so a structured field takes the schema note of a bare list or dict.
+  * cannot be optimized/learned (upstream notes the same limitation). The extraction prompt shows the output JSON schema
+  * of the invocation, in the form of the port (decision D3). With no such schema, as for `DynamicPredict`, a structured
+  * field takes the schema note of a bare list or dict.
   *
   * This adapter does not replay a conversation history. As upstream, it shows a `History` input as one field value of
   * the user message.
@@ -65,7 +66,25 @@ final case class TwoStepAdapter(
   override def formatUserMessageContent(layout: SignatureLayout, values: DynamicValue.Record): String =
     fieldsText(layout.inputFields, values)
 
+  /** The extraction step with no output JSON schema. See [[extract]]. */
   override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+    extract(layout, outputJsonSchema = None, output)
+
+  /** The extraction step with the output JSON schema of `invocation`. See [[extract]]. */
+  override def parse(invocation: AdapterInvocation, output: LmOutput)(using
+      RuntimeContext
+  ): Either[DspyError, ParsedOutput] =
+    extract(invocation.layout, invocation.outputJsonSchema, output)
+
+  /** The extraction step (upstream `TwoStepAdapter.parse`): the extraction model gets a [[ChatAdapter]] prompt for the
+    * extractor signature of `layout`, with `text` as the completion of the main LM. The prompt takes the schema of each
+    * structured output field from `outputJsonSchema`, as upstream copies the annotated output fields. After a parse
+    * error of the chat format, the step runs one more time with the fallback of the chat adapter, a [[JSONAdapter]]
+    * (upstream `ChatAdapter.__call__`). An error of the format step or of the model gives no second call.
+    */
+  private def extract(layout: SignatureLayout, outputJsonSchema: Option[String], output: LmOutput)(using
+      RuntimeContext
+  ): Either[DspyError, ParsedOutput] =
     val chat = ChatAdapter()
     for
       extractorLayout <- buildExtractorLayout(layout)
@@ -75,13 +94,34 @@ final case class TwoStepAdapter(
                      demos = Vector.empty,
                      inputs =
                        Example(values = DynamicValues.record(textField := output.text), inputKeys = Set(textField)),
-                     request = LmRequest(model = extractionModel.id)
+                     request = LmRequest(model = extractionModel.id),
+                     outputJsonSchema = outputJsonSchema
                    )
-      prompt   <- chat.format(invocation)
-      response <- extractionModel.call(LmRequest(model = extractionModel.id, messages = prompt.messages))
-      lmOutput <- response.outputs.headOption.toRight(ParseError(name, "Extraction model returned no output"))
-      parsed   <- chat.parse(extractorLayout, lmOutput)
+      parsed <- attempt(chat, invocation).flatMap {
+                  case Left(error: ParseError) => chat.fallback match
+                      case Some(next) => attempt(next, invocation).flatten
+                      case None       => Left(error)
+                  case other => other
+                }
     yield parsed
+
+  /** Format with `adapter`, call the extraction model, and parse. The inner result is the result of the parse step, so
+    * that the caller can tell a parse error from an error of the other steps. The format step sees the extraction model
+    * as the model of the context: the JSON adapter asks that model for response schema support (upstream
+    * `JSONAdapter._prepare_response_format` gets the extraction model).
+    */
+  private def attempt(adapter: Adapter, invocation: AdapterInvocation)(using
+      context: RuntimeContext
+  ): Either[DspyError, Either[DspyError, ParsedOutput]] =
+    val formatContext = context.withServices(context.services.copy(lm = Some(extractionModel)))
+    for
+      prompt   <- adapter.format(invocation)(using formatContext)
+      response <-
+        extractionModel.call(
+          invocation.request.copy(messages = prompt.messages, options = prompt.options(invocation.request.options))
+        )
+      lmOutput <- response.outputs.headOption.toRight(ParseError(name, "Extraction model returned no output"))
+    yield adapter.parse(invocation, lmOutput)
 
   /** The on-the-fly extractor signature: `text -> <the original output fields>` (upstream
     * `_create_extractor_signature`). When the original signature already has an output field named `text`, the
