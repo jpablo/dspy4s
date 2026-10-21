@@ -2,17 +2,41 @@ package dspy4s.optimize
 
 import dspy4s.programs.ProgramRunner
 
+import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.ValidationError
 import dspy4s.evaluate.Evaluate
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.programs.optimization.OptimizableStructure
+import dspy4s.programs.optimization.PredictorTraces
 
 /** Cross-optimizer helpers shared by the teleprompter family (COPRO, MIPROv2, GroundedProposer). Kept in one place so
   * the seed→rolloutId mapping and the Evaluate+ProgramRunner scoring wiring stay identical across optimizers.
   */
 private[optimize] object OptimizerSupport:
+
+  /** Reject a student or a teacher in which two leaves have the same predictor key (UPGRADE-3.2.1-to-3.4.0, decision
+    * D2). [[BootstrapFewShot]] and each optimizer that calls it make this check before they run a program.
+    */
+  def requireDistinctKeys[P](student: P, teacher: Option[P])(using
+      ps: OptimizableStructure[P]
+  ): Either[DspyError, Unit] = (student +: teacher.toVector).foldLeft[Either[DspyError, Unit]](Right(())) {
+    (checked, program) =>
+      checked.flatMap(_ => PredictorTraces.requireDistinctKeys(ps.readIdentified(program)))
+  }
+
+  /** The program of one bootstrap candidate, for an optimizer that makes more than one candidate. A `ValidationError`
+    * from [[BootstrapFewShot]] is a configuration error: two leaves with the same key, a leaf type that records no key,
+    * or a teacher that does not agree with the student. The optimizer must return that error. Each other failure gives
+    * no candidate (`None`), and the optimizer continues.
+    */
+  def bootstrapCandidate[P](result: Either[DspyError, OptimizationReport[P]]): Either[DspyError, Option[P]] =
+    result match
+      case Right(report)                => Right(Some(report.bestProgram))
+      case Left(error: ValidationError) => Left(error)
+      case Left(_)                      => Right(None)
 
   /** The common successful result when a program exposes no optimizable leaves. */
   def noOptimizableLeavesReport[P](student: P): OptimizationReport[P] =
@@ -38,10 +62,21 @@ private[optimize] object OptimizerSupport:
     */
   def seedBase(seed: Long): Int = math.floorMod(seed.toInt, 1024)
 
+  /** The error for an optimizer that has no example to score its candidates on. [[Evaluate]] rejects an empty devset,
+    * and an optimizer cannot select a candidate that has no score. Each optimizer that scores candidates returns this
+    * error before it does other work (Python raises `ValueError`).
+    */
+  def emptyEvalsetError(optimizer: String): DspyError =
+    ValidationError(
+      s"$optimizer cannot score candidates on an empty evaluation set. " +
+        "Give a valset (or a trainset, when there is no valset) with at least one example."
+    )
+
   /** Run `program` on `evalset` with `metric` via `runner`, returning the aggregate score (0..100), or `None` when the
     * WHOLE evaluation fails (timeout / maxErrors exceeded). A failed eval is "unknown", not "scored zero" — callers
     * that select a best candidate must not silently collapse `None` into `0.0` (MIPROv2 chooses `0.0` for a
-    * non-selectable trial; COPRO keeps it as `None`).
+    * non-selectable trial; COPRO keeps it as `None`). An empty `evalset` also gives `None`. Each caller rejects an
+    * empty set first with [[emptyEvalsetError]].
     */
   def evalScore[P](program: P, evalset: Vector[Example], metric: Metric, runner: ProgramRunner[P])(using
       RuntimeContext

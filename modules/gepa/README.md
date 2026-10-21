@@ -1,42 +1,59 @@
 # dspy4s `gepa`
 
-GEPA — **Ge**netic-**Pa**reto reflective prompt optimization. Instead of bootstrapping demos or sampling
-instruction rewrites blindly, GEPA *reflects*: it reads what a program actually did on a few examples — the
-inputs, the generated outputs, and natural-language feedback on what went wrong — and asks a strong "reflection
-LM" to rewrite the failing instruction to fix it. Over many such mutations, guided by a Pareto frontier and
-occasional crossover between lineages, the program's instructions evolve.
+`gepa` contains GEPA (Genetic-Pareto), an optimizer that improves the instructions of a program. GEPA runs the
+program on a few examples, and a metric gives a score and a feedback text for each example. A reflection LM reads the
+inputs, the outputs, and the feedback, and writes a new instruction. GEPA keeps the good candidates on Pareto fronts,
+and it can merge two candidates. It uses the `core`, `programs`, `evaluate`, and `optimize` modules.
 
-This is a self-contained port of the external Python `gepa` engine plus the dspy4s adapter that bridges
-programs into it (PORT_GAPS G-12).
+## Main concepts
 
-## What makes GEPA different
+- **Instructions only.** Each predictor of the program is one component. GEPA changes only the instruction of each
+  component. The fields, the demos, and the structure of the program stay the same. A `Candidate` is a
+  `Map[OptimizableId, Option[String]]`: `None` is no instruction, and `Some("")` is an empty instruction.
+- **A feedback metric.** The optimizers of [`optimize`](../optimize/README.md) use a `Metric`, which gives a `Double`.
+  GEPA uses a `FeedbackMetric`, which also gives a feedback text. The reflection LM uses this text to write the new
+  instruction.
+- **A reflection LM.** This model writes the new instructions. It is usually stronger than the model of the task.
+- **Pareto fronts.** GEPA keeps a pool of candidates. By default, a front is the set of the candidates with the best
+  score on one validation example. GEPA selects a parent from the fronts, so a candidate that is the best on one
+  example only can be a parent.
+- **A budget of metric calls.** One metric call is the evaluation of one example. The calls of the reflection LM do
+  not count. The budget is a hard limit.
 
-The other optimizers in [`optimize`](../optimize/README.md) take a plain `Metric` (a `Double`). GEPA needs
-two extra things:
-
-- A **`FeedbackMetric`** — a score *plus* natural-language feedback. The feedback is the "gradient" of the
-  search: concrete, actionable text ("the answer was wrong, the correct one is X", "the format was invalid")
-  is what the reflection LM rewrites instructions against. A bare score teaches it little.
-- A **reflection LM** — usually a stronger model than the one running the task — that does the rewriting.
+## Use
 
 ```scala
 val gepa = new Gepa[MyProgram](
   metric = myFeedbackMetric,      // FeedbackMetric: score + feedback
   reflectionLm = strongModel,     // rewrites instructions from feedback
-  config = GepaConfig(maxMetricCalls = 200)
+  config = GepaConfig(budget = GepaBudget.Auto(AutoBudget.Light))
 )
 
-val result = gepa.compile(student, trainset, valset)  // GepaResult[MyProgram]
-result.bestProgram   // the evolved program
-result.bestScore     // its mean validation score
+gepa.compile(student, trainset, valset) match  // Either[DspyError, GepaResult[MyProgram]]
+  case Right(result) =>
+    result.bestProgram   // the evolved program
+    result.bestScore     // its mean validation score
+    result.stopReason    // why the run stopped
+  case Left(error) =>
+    error.message        // GEPA cannot find the calls of each predictor (see "Reflective records")
 ```
 
-GEPA evolves **instructions only** — one per predictor (component). The program's structure (fields, demos,
-wiring) is fixed. A `Candidate` is therefore a `Map[OptimizableId, Option[String]]` — the genome — and
-the seed candidate is the program's current instructions. The option preserves the distinction between no
-instruction (`None`) and an explicitly empty instruction (`Some("")`).
+With no validation set, or with an empty one, GEPA uses the trainset for the Pareto scores.
 
-## The signal: `FeedbackMetric`
+`GepaConfig.budget` has one of three forms:
+
+| `budget` | Metric calls |
+|----------|--------------|
+| `GepaBudget.MetricCalls(n)` | `n` |
+| `GepaBudget.FullEvals(n)` | `n` × (the trainset size + the size of the validation set that you give) |
+| `GepaBudget.Auto(level)` | the formula of `GepaBudget.auto`, for `Light`, `Medium`, or `Heavy` |
+
+`Auto` uses the number of components, the number of candidates of the level (6, 12, or 18), and the size of the
+validation set. With no validation set, it uses the size of the trainset. For one component, `Light`, and 4
+validation examples, it gives 396. `GepaResult.maxMetricCalls` gives the budget in metric calls, and
+`GepaResult.totalMetricCalls` gives the calls that the run used.
+
+## The feedback metric
 
 ```scala
 trait FeedbackMetric extends Metric:
@@ -46,101 +63,219 @@ trait FeedbackMetric extends Metric:
   )(using RuntimeContext): Either[DspyError, ScoreWithFeedback]
 ```
 
-Feedback is requested at two granularities:
+GEPA asks for feedback at two levels:
 
-- **Program level** (`component = None`) — overall score + program-wide feedback for one example. Drives
-  candidate scoring and acceptance.
-- **OptimizableLeaf level** (`component = Some(name)`, with that predictor's trace slice) — feedback aimed at one
-  named predictor. The reflection loop assembles each component's reflective dataset from these.
+- **Program level** (`component = None`): the score and the feedback of the full program on one example. GEPA uses
+  this score to compare candidates.
+- **Component level** (`component = Some(name)`): the feedback for one component. `componentTrace` holds the one call
+  of that component that GEPA selected. GEPA makes the reflective records from this feedback.
 
-It `extends Metric` (its `score` is the program-level feedback's score) so a single instance is both the
-scoring metric the adapter feeds to `Evaluate` and the source of reflection feedback. A wrong prediction is a
-**low score with feedback**, not a `Left` — GEPA learns from those; `Left` is reserved for unrecoverable
-scoring failures.
+A `FeedbackMetric` is also a `Metric`: its `score` is the score of the program-level feedback. Thus you can also use
+it with `Evaluate`. Write feedback that tells what is wrong, for example the correct answer or the format error. For a
+wrong prediction, give a low score and a feedback text. Return a `Left` only when the metric cannot score the example.
 
-## The mechanics
+### Objective scores
 
-### Adapter
+A metric can also give scores for named objectives, for example accuracy and cost:
 
-`GepaAdapter` bridges a dspy4s program into the engine (Python's `DspyAdapter`). It applies a `Candidate` to
-the program (rewriting each optimizable leaf's instruction by stable structure ID) and evaluates a batch in one of two
-modes:
+```scala
+ScoreWithFeedback(score = 0.75, feedback = "...", objectiveScores = Map("accuracy" -> 1.0, "cost" -> 0.5))
+```
 
-- **Scores-only** (acceptance / full-eval fast path) — runs through `Evaluate` for scores.
-- **With traces** (the reflective path) — each example runs in an *isolated* context with a fresh trace and
-  failure-trace capture on, so its trajectory is exactly its own and a parse failure becomes reflection signal
-  (the raw, unparseable response is captured).
+GEPA reads the objective scores of the program-level feedback only, and a larger objective score is better. The
+acceptance of a candidate and the best candidate of a run use `score` only. `GepaConfig.frontierType` selects the
+fronts for the parent selection and for the merge:
 
-### The search loop (`GepaEngine`)
+| Type | One front for each | Value of a candidate |
+|------|--------------------|----------------------|
+| `Instance` (default) | validation example | its score on the example |
+| `Objective` | objective | the mean of its objective score, over the examples that have one |
+| `Hybrid` | validation example, and objective | the two values above |
+| `Cartesian` | pair of a validation example and an objective | its objective score on the example |
 
-`optimize` seeds the state by full-evaluating the starting candidate on the valset, then loops until the
-metric-call budget (`maxMetricCalls`) is exhausted. Each iteration is either:
+Each type other than `Instance` needs objective scores. If the seed candidate has none, `compile` returns a `Left`
+after the seed evaluation. `GepaResult.state` gives the objective data of a run, for example
+`objectiveAggregates(i)`, `objectiveFront`, and `fronts`.
 
-1. **A reflective mutation.** A `CandidateSelector` (Pareto by default) picks a parent from the pool; a
-   `ComponentSelector` (round-robin) picks which component to evolve; a minibatch is sampled from the
-   trainset; the adapter evaluates the parent on it *with traces*; the per-component reflective dataset
-   (`ReflectiveRecord`s: inputs / generated outputs / feedback) is built; `InstructionProposer` asks the
-   reflection LM for a rewritten instruction; the new candidate is accepted if it improves on the minibatch and
-   then full-evaluated on the valset and added to the pool.
+## How a run works
 
-2. **A merge (crossover).** When enabled and one is scheduled, `MergeProposer` combines two Pareto-frontier
-   descendants of a common ancestor: for each component it takes the version from whichever descendant
-   *improved* it, stacking the two lineages' complementary gains. Merge only fires for multi-component programs
-   with branching lineage (a single-component program can never satisfy the "desirable predictor" gate, so it's
-   a safe no-op there).
+`GepaEngine` first evaluates the seed candidate (the current instructions) on the validation set. Then each
+iteration makes a reflective mutation or a merge.
 
-The **budget** counts metric (evaluation) calls only — reflection-LM calls are free, matching gepa.
+A reflective mutation has these steps:
 
-### Supporting pieces
+1. The candidate selector (`Pareto` by default) selects a parent from the fronts.
+2. The minibatch sampler takes a minibatch from the trainset (3 examples by default).
+3. `GepaAdapter` runs the parent on each example of the minibatch in an isolated context, and records the trace.
+4. The component selector (`RoundRobin` by default) selects the component to change.
+5. The adapter makes the reflective records of that component.
+6. The instruction proposer gives the records to the reflection LM, and gets a new instruction.
+7. The engine runs the child on the same minibatch. If the sum of its scores is larger than that of the parent, the
+   engine evaluates the child on the validation set and adds it to the pool.
 
-- **`GepaState`** — the evolving pool: candidates, each candidate's per-validation-instance subscores, and
-  lineage (`parents`), plus the running metric-call meter. The Pareto frontier is derived from the subscores;
-  `bestIndex` is the candidate with the best mean validation score.
-- **`MinibatchSampler`** — chooses each iteration's reflective minibatch. Default `EpochShuffled` (gepa's
-  default) walks a per-epoch shuffle so every train example is used once per epoch before repeats; `RandomDraw`
-  is the independent-draw v0 sampler.
-- **`GepaEvalCache`** — memoizes scores-only evaluations by `(candidate, example)`, so a merged candidate's
-  subsample eval is reused on its later full-eval, and re-scored pairs are free. Only actual (uncached) evals
-  are charged against the budget.
-- **`GepaStatePersistence`** — JSON save/load of the search state (pool, subscores, lineage, meter) for
-  resuming an interrupted run. The eval cache, RNG position, and merge schedule are not persisted; a resumed
-  run keeps every discovered candidate (no budget re-spent) and continues from that pool.
+If the parent has the perfect score on each example of the minibatch, the iteration makes no proposal
+(`skipPerfectScore`). An iteration with no new instruction also makes no proposal. Its minibatch evaluation still
+uses the budget. If the proposer returns a `Left`, the engine calls it one more time. After a second `Left`, the
+iteration makes no proposal, and `GepaState.failedProposals` counts it.
 
-## Config highlights (`GepaConfig`)
+`GepaEvalCache` keeps the score of each pair of a candidate and an example. A pair in the cache uses no more metric
+calls.
 
-| Field | Meaning |
-|-------|---------|
-| `maxMetricCalls` | budget — total metric (eval) calls before stopping (required) |
-| `reflectionMinibatchSize` | examples per reflective minibatch (default 3) |
-| `candidateSelector` / `componentSelector` | parent selection (Pareto) and component selection (round-robin) |
-| `batchSampler` | `EpochShuffled` (default) or `RandomDraw` |
-| `useMerge` / `maxMergeInvocations` | enable crossover (default on) and cap accepted merges |
-| `skipPerfectScore` / `perfectScore` | skip reflecting on already-perfect minibatches |
-| `stopOnPerfectScore` | opt-in early stop when the best candidate is perfect (off, for gepa parity) |
-| `seed` | deterministic for a fixed seed |
+### Reflective records
+
+A `ReflectiveRecord` holds the inputs of one call of a component, its outputs, and the feedback. Each run of an
+example gives one record for each component at most:
+
+- A predictor writes its key (its module name and its signature structure) into each trace entry. GEPA uses the key
+  to find the calls of each component, also in a loop (`ReAct`, `RLM`).
+- From a run that passed, GEPA selects one call at random, with the seed. The metric gets this call as
+  `componentTrace`.
+- By default, a call that failed and a run that failed give no record.
+- With `addFormatFailureAsFeedback = true`, the first call that failed gives the record: the raw response of the
+  model and the output structure to follow. The metric gets no call for it.
+
+`compile` returns a `Left(ValidationError)` when GEPA cannot find the calls of each predictor:
+
+- Two predictors have the same module name and the same signature structure. `compile` finds this before any LM call.
+  Give each predictor a name, for example `Predict(signature, name = Some("second_pass"))`.
+- A predictor type records no key in its trace entries. Its module must use `ModuleLifecycle.predictor` or
+  `ModuleLifecycle.dynamicPredictor`.
+
+### Merge
+
+A merge (`MergeProposer`) takes two candidates of the fronts that have a common ancestor. For each component, the
+merged candidate takes the instruction of the candidate that changed it. If the two candidates changed it, the
+merged candidate takes the instruction of the candidate with the larger mean validation score.
+
+Each candidate that a reflective mutation adds schedules one merge, and the engine tries it in the next iteration.
+The engine evaluates the merged candidate on 5 validation examples. If its sum is at least the sum of the better
+parent, the engine evaluates it on the validation set and adds it to the pool.
+
+A merge needs a program with two components or more. The two candidates must also share at least `mergeValOverlapFloor`
+validation examples (5 by default). Set a lower value for a validation set with fewer than 5 examples.
+
+### More than one proposal in an iteration
+
+By default, an iteration has one task: one parent and one minibatch. `GepaConfig.proposalSampling` gives an iteration
+more tasks, and each task can give one proposal.
+
+| `proposalSampling` | Tasks of one iteration |
+|--------------------|------------------------|
+| `Single` (default) | one parent, one minibatch |
+| `SameParent(n)` | one parent, `n` minibatches |
+| `Independent(n)` | `n` parent draws, each with its own minibatch |
+| `PxN(p, n)` | `p` parent draws, `n` minibatches for each |
+
+`acceptance` decides when a proposal passes. `proposalSelection` selects the proposals that go to the pool.
+
+| `acceptance` | A proposal passes when |
+|--------------|------------------------|
+| `StrictImprovement` (default) | the minibatch sum of the child is larger than that of the parent |
+| `ImprovementOrEqual` | it is larger or equal |
+
+| `proposalSelection` | Selected proposals |
+|---------------------|--------------------|
+| `AllImprovements` (default) | each proposal that passes, in task order |
+| `BestImprovement` | the one with the largest gain; the first one wins a tie |
+| `TopK(k)` | the `k` with the largest gains, largest first |
+
+The engine evaluates the parents, the children, and the selected candidates in parallel batches
+(`GepaAdapter.batchEvaluate`). An iteration starts only when its largest possible cost fits in the budget that
+remains.
+
+## The instruction proposer
+
+`DefaultInstructionProposer` is the default proposer. For each selected component, it runs one predictor call on the
+reflection LM. The inputs are the current instruction and the reflective records as one JSON text
+(`ReflectiveRecord.toJson`). The output field is `new_instruction`, and an empty instruction is a failure. The
+proposer uses its own `JSONAdapter`, so the adapter of the context has no effect.
+
+| Option | Effect |
+|--------|--------|
+| `additionalInstructions` | more requirements for each new instruction, for example a voice or a format |
+| `baseInstructions` | replaces the instructions of the proposal call; the fields stay |
+| `maxChars` | the largest number of Unicode code points of a new instruction |
+| `adapter` | the adapter of the calls of the proposer |
+
+With `maxChars`, a draft that is too long gets one call that asks the model to shorten it. A result that is empty or
+still too long is a failure.
+
+```scala
+val gepa = new Gepa[MyProgram](
+  metric = myFeedbackMetric,
+  reflectionLm = strongModel,
+  config = GepaConfig(budget = GepaBudget.MetricCalls(MetricCallCount(200))),
+  instructionProposer = DefaultInstructionProposer(
+    additionalInstructions = Some("Write instructions in imperative voice."),
+    maxChars = Some(InstructionCharLimit(1500))
+  )
+)
+```
+
+To write your own proposer, implement `InstructionProposer.propose`. The engine calls it one time for each task,
+with the parent candidate, the reflective records, and the selected components. The language model of the context
+of that call is the reflection LM. The trace entries of the call do not go to your context. The history entries go
+to it.
+
+## Stop and resume
+
+| `stopReason` | Cause |
+|--------------|-------|
+| `BudgetExhausted` | the run used each metric call of its budget |
+| `IterationDoesNotFit(required, remaining)` | the next iteration needs more calls than remain, so it does not start |
+| `PerfectScore` | `stopOnPerfectScore` is on, and the best candidate has the perfect score |
+
+`GepaResult.iterations` gives the number of iterations. `GepaResult.state.failedProposals` gives the number of tasks
+for which the proposer failed two times.
+
+Set `GepaConfig.runDir` to save a checkpoint after the seed evaluation and after each iteration. A run with a
+checkpoint in that directory continues it. Each random draw comes from the seed and the iteration index, so a resumed
+run makes the same draws as a run with no stop. A checkpoint that cannot be read, or that does not agree with the
+program or the configuration, gives a `Left`. The file then stays unchanged.
+
+## Configuration (`GepaConfig`)
+
+| Field | Description |
+|-------|-------------|
+| `budget` | the budget in metric calls (required) |
+| `runDir` | the directory of the checkpoint (default none) |
+| `reflectionMinibatchSize` | the number of examples in a minibatch (default 3) |
+| `candidateSelector` | the parent selection: `Pareto` (default) or `CurrentBest` |
+| `componentSelector` | the components to change: `RoundRobin` (default, one for each iteration) or `All` |
+| `batchSampler` | `EpochShuffled` (default, each example one time before a repeat) or `RandomDraw` |
+| `frontierType` | the Pareto fronts: `Instance` (default), `Objective`, `Hybrid`, or `Cartesian` |
+| `proposalSampling` / `proposalSelection` / `acceptance` | the tasks of an iteration, and the proposals that go to the pool |
+| `useMerge` / `maxMergeInvocations` | merge on or off (default on), and the number of accepted merges after which the engine schedules no new merge (default 5) |
+| `mergeValOverlapFloor` | the smallest number of validation examples that the two candidates of a merge share (default 5) |
+| `skipPerfectScore` / `perfectScore` | no reflection on a minibatch with the perfect score (default on, and 1.0) |
+| `stopOnPerfectScore` | stop when the best candidate has the perfect score (default off) |
+| `failureScore` | the score of an example when the run or the metric fails (default 0.0) |
+| `addFormatFailureAsFeedback` | a call that failed gives a reflective record (default off) |
+| `seed` | the seed of the random sources (default 0) |
 
 ## Source layout
 
-| File | Contents |
-|------|----------|
-| `Gepa.scala` | user-facing optimizer; wires adapter + engine |
-| `contracts/FeedbackMetric.scala` | `FeedbackMetric`, `ScoreWithFeedback` |
-| `GepaAdapter.scala` | program ↔ engine bridge (apply candidate, evaluate, capture traces) |
-| `GepaEngine.scala` | the search loop + `GepaConfig` / `GepaResult` |
-| `GepaState.scala` | candidate pool, subscores, lineage, Pareto frontier |
-| `Candidate.scala` | the genome (component → optional instruction) + seed/apply |
-| `InstructionProposer.scala` | reflective mutation (prompt the reflection LM) |
-| `MergeProposer.scala` | crossover over common ancestors |
-| `MinibatchSampler.scala` | minibatch sampling strategies |
-| `ReflectiveRecord.scala`, `EvaluationBatch.scala` | reflective dataset record + batch/trajectory results |
-| `GepaEvalCache.scala` | scores-only memoization |
-| `GepaStatePersistence.scala` | run-state JSON save / load |
+| Files | Contents |
+|-------|----------|
+| `Gepa.scala`, `GepaEngine.scala` | the optimizer, the search loop, `GepaConfig`, and `GepaResult` |
+| `GepaBudget.scala`, `GepaLimits.scala` | the budget, `AutoBudget`, `GepaStopReason`, and the refined number types, for example `MetricCallCount` |
+| `contracts/FeedbackMetric.scala` | `FeedbackMetric` and `ScoreWithFeedback` |
+| `GepaAdapter.scala`, `EvaluationBatch.scala`, `ReflectiveRecord.scala` | the runs of a candidate on examples, and the reflective records |
+| `Candidate.scala`, `GepaState.scala` | the candidates, the pool, the Pareto fronts, `CandidateSelector`, and `ComponentSelector` |
+| `InstructionProposer.scala`, `GepaProposals.scala`, `MergeProposer.scala` | the proposer, the options for more than one proposal, and the merge |
+| `MinibatchSampler.scala`, `GepaRandom.scala` | the minibatches and the random sources |
+| `GepaEvalCache.scala`, `GepaStatePersistence.scala` | the cache of scores, and the checkpoint in JSON |
 
 ## Relation to dspy
 
-GEPA uses the shared `OptimizableStructure` / `ProgramRunner` introspection and execution spines also used by
-COPRO/MIPROv2, and depends on `evaluate` for scoring. It is *not* a `Teleprompter` — its `compile` takes a
-`FeedbackMetric` and a reflection LM and returns a `GepaResult[P]` rather than an `OptimizationReport[P]`.
-Deferred relative to upstream: multi-objective frontiers and run-dir resume beyond the single-objective
-instance frontier (PORT_GAPS G-12). Per the [module-purity principle](../../README.md), the program stays an
-immutable pure function — its instructions are the only thing the search rewrites, always into fresh copies.
+`gepa` is a port of the dspy `GEPA` optimizer and of the Python `gepa` engine. G-12 and G-45 in
+[PORT_GAPS](../../docs/port/PORT_GAPS.md) record the port.
+
+- `Gepa` uses the program capabilities `OptimizableStructure[P]` and `ProgramRunner[P]`, as `COPRO` and `MIPROv2` do.
+  It is not a `Teleprompter`: `compile` returns a `GepaResult[P]` in place of an `OptimizationReport[P]`.
+- The program has no state that changes. Each candidate gives a new copy of the program.
+- The budget is a hard limit. Upstream can use more metric calls than its budget.
+- A checkpoint keeps the merge schedule, and the random draws come from the seed. Upstream loses the merge schedule
+  and the random state on a resume.
+- Not ported: the `skills` and `truncate_history_outputs` options of the proposer, `track_best_outputs`, and the
+  callbacks of the engine.

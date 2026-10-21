@@ -30,6 +30,29 @@ Pareto front of candidates, trading off competing objectives. It is a
 self-contained implementation plus a dspy4s adapter, and it follows the same
 `compile(student, trainset)` shape as the optimizers above.
 
+A reflection model writes each new instruction. `Gepa` takes that model, and
+an optional `instructionProposer`. The default is `DefaultInstructionProposer()`.
+Its options add requirements for each new instruction
+(`additionalInstructions`), replace the instructions of the proposal call
+(`baseInstructions`), and set a length limit (`maxChars`). To control the
+proposal fully, implement the `InstructionProposer` trait.
+
+A metric can also give scores for named objectives
+(`ScoreWithFeedback.objectiveScores`), for example accuracy and cost.
+`GepaConfig.frontierType` then selects how GEPA keeps candidates that are good
+on one objective: `Objective`, `Hybrid`, or `Cartesian`. The default is
+`Instance`, which uses the score of each validation example only.
+
+An iteration makes one proposal by default. `GepaConfig.proposalSampling`
+gives it more: for example `SameParent(4)` proposes four children of one
+parent, each from its own minibatch, and evaluates them in parallel.
+
+The budget of a run (`GepaConfig.budget`) is a number of metric calls, a
+number of full evaluations, or a level of effort: `GepaBudget.Auto(Light)`,
+`Medium`, or `Heavy`. With no validation set, GEPA uses the trainset for the
+Pareto scores. `GepaResult.stopReason` tells why a run stopped, and
+`GepaConfig.runDir` lets a stopped run continue.
+
 ## Choosing one
 
 | Optimizer | Strategy | Use when |

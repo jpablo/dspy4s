@@ -31,13 +31,13 @@ extension (record: DynamicValue.Record)
 
 /** Convenience helpers around `zio.blocks.schema.DynamicValue` / `DynamicValue.Record`. Used at the user-input boundary
   * — `Example("q" -> "hello")`, `DynamicValues.record("text" := text)` — where callers pass plain Scala values that
-  * need to be lifted into the spine type. The codec spine (`Shape.encode` / `Shape.decode` backed by zio-blocks Schema)
-  * never goes through these helpers; it produces and consumes `DynamicValue` directly.
+  * need to be lifted into the interchange format. The `Shape` codecs (`Shape.encode` / `Shape.decode` backed by
+  * zio-blocks Schema) never go through these helpers; they produce and consume `DynamicValue` directly.
   */
 object DynamicValues:
 
   /** Lift a plain Scala value into a `DynamicValue`. Pass-through for values that are already a `DynamicValue`. Used
-    * only at user-facing boundaries — not in the codec spine.
+    * only at user-facing boundaries, not in the `Shape` codecs.
     */
   def fromAny(value: Any): DynamicValue =
     if Objects.isNull(value) then DynamicValue.Null

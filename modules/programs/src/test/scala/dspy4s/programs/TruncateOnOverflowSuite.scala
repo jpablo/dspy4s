@@ -3,8 +3,8 @@ package dspy4s.programs
 import dspy4s.core.contracts.{ContextWindowExceededError, DspyError, RuntimeError}
 import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
 
-/** Laws for the shared overflow loop. The migrated ReAct/CodeAct truncation paths are covered by their own suites; this
-  * pins drop-oldest order, exhaustion, the empty-view guard, and the non-overflow short-circuit.
+/** Laws for the shared overflow loop. The migrated ReAct truncation paths are covered by the ReAct suite; this pins
+  * drop-oldest order, exhaustion, the empty-view guard, and the non-overflow short-circuit.
   */
 class TruncateOnOverflowSuite extends munit.FunSuite:
 
@@ -59,4 +59,29 @@ class TruncateOnOverflowSuite extends munit.FunSuite:
     }
     assert(result.isLeft)
     assertEquals(calls, 1)
+  }
+
+  // PORT_GAPS G-37: upstream `truncate_trajectory` raises when the trajectory has one tool call. A run on an empty
+  // trajectory is not a retry of the same task.
+
+  test("overflow with one entry: stops with the overflow error and does not run on an empty view") {
+    val rendered       = scala.collection.mutable.ArrayBuffer.empty[String]
+    val (result, used) = truncateOnOverflow(Vector(1), maxAttempts = 3)(_.mkString(",")) { text =>
+      rendered += text
+      Left(cwe)
+    }
+    assertEquals(result, Left(cwe): Either[DspyError, String])
+    assertEquals(rendered.toVector, Vector("1"))
+    assertEquals(used, Vector(1))
+  }
+
+  test("overflow with two entries: drops one entry, then stops at the last entry") {
+    val rendered       = scala.collection.mutable.ArrayBuffer.empty[String]
+    val (result, used) = truncateOnOverflow(Vector(1, 2), maxAttempts = 5)(_.mkString(",")) { text =>
+      rendered += text
+      Left(cwe)
+    }
+    assertEquals(result, Left(cwe): Either[DspyError, String])
+    assertEquals(rendered.toVector, Vector("1,2", "2"))
+    assertEquals(used, Vector(2))
   }

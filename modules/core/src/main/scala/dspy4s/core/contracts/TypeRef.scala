@@ -1,5 +1,7 @@
 package dspy4s.core.contracts
 
+import scala.util.matching.Regex
+
 /** Wire-format type tag for a field, surfaced to the LM via adapter prompts (e.g. `"answer: bool"`).
   *
   * This is the *adapter / prompt* type, not the Scala type -- `Shape[A]` carries the static Scala-side encoding. A
@@ -14,13 +16,15 @@ final case class TypeRef(repr: String) derives CanEqual:
   /** Python/DSPy-facing name for well-known wire types. `None` means there is no safe direct Python equivalent. */
   def pythonTypeName: Option[String] =
     repr match
-      case "string" => Some("str")
-      case "int"    => Some("int")
-      case "double" => Some("float")
-      case "bool"   => Some("bool")
-      case "list"   => Some("list")
-      case "json"   => Some("dict")
-      case _        => None
+      case "string"  => Some("str")
+      case "int"     => Some("int")
+      case "double"  => Some("float")
+      case "bool"    => Some("bool")
+      case "list"    => Some("list")
+      case "json"    => Some("dict")
+      case "history" => Some("History")
+      case "tools"   => Some("list[Tool]")
+      case _         => None
 
 object TypeRef:
   val string: TypeRef = TypeRef("string")
@@ -36,10 +40,39 @@ object TypeRef:
     */
   val toolCalls: TypeRef = TypeRef("tool_calls")
 
+  /** The type of the input field that holds the conversation history (the analogue of Python dspy's `History` input
+    * annotation). An adapter replays the messages of that field as earlier turns and does not show the field as a
+    * value. See [[History]].
+    */
+  val history: TypeRef = TypeRef("history")
+
+  /** The type of the input field that holds the tools of a call (the analogue of Python dspy's `list[dspy.Tool]` input
+    * annotation; experimental, for `ReActV2`). The value is a list with the text of each tool. When native function
+    * calling is active for the call, the adapter does not show the field: the request has the tools as provider tools
+    * (upstream `Adapter._call_preprocess` deletes the field). Else the adapter shows the value as a JSON list.
+    */
+  val tools: TypeRef = TypeRef("tools")
+
+  /** The type of a `Noul` decision output: a Boolean decision with a probability (experimental, upstream
+    * `dspy.experimental.Noul`). See [[dspy4s.core.decisions]].
+    */
+  val noul: TypeRef = TypeRef("noul")
+
+  /** The type of a `Score` decision output: a continuous score over ordered levels. [[FieldSpec.enumValues]] holds the
+    * levels, in increasing order (experimental, upstream `dspy.experimental.Score`).
+    */
+  val score: TypeRef = TypeRef("score")
+
+  /** The type of a `Choice` decision output: one option of a closed set. [[FieldSpec.enumValues]] holds the option
+    * labels, in the order of declaration (experimental, upstream `dspy.experimental.Choice`).
+    */
+  val choice: TypeRef = TypeRef("choice")
+
   /** Parse a string DSL type token (e.g. the `"bool"` in `"comment -> toxic: bool"`) into the matching well-known
     * [[TypeRef]]. Accepts a handful of synonyms (`"str"`, `"integer"`, `"float"`, `"number"`, `"dict"`, `"map"`) and is
-    * case-insensitive. Unknown tokens become opaque `TypeRef(other)`. An empty / missing token defaults to
-    * [[TypeRef.string]] (DSPy convention -- fields without a type annotation are strings).
+    * case-insensitive. A `dict[...]` token is [[TypeRef.json]], as `dict` is. Unknown tokens become opaque
+    * `TypeRef(other)`. An empty / missing token defaults to [[TypeRef.string]] (DSPy convention -- fields without a
+    * type annotation are strings).
     */
   def fromToken(token: String): TypeRef =
     token.trim.toLowerCase match
@@ -49,4 +82,9 @@ object TypeRef:
       case "bool" | "boolean"            => bool
       case "json" | "dict" | "map"       => json
       case "tool_calls" | "toolcalls"    => toolCalls
+      case "history"                     => history
+      case DictToken()                   => json
       case other                         => TypeRef(other)
+
+  /** A `dict` token with type arguments, for example `dict[str, int]` (after the token becomes lower case). */
+  private val DictToken: Regex = """dict\[.*\]""".r

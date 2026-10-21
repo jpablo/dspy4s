@@ -1,11 +1,9 @@
 package dspy4s.lm.providers
 
-import dspy4s.core.contracts.ContextWindowExceededError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.updated
 import dspy4s.lm.contracts.Embedder
 import zio.blocks.schema.DynamicValue
@@ -28,6 +26,9 @@ final case class OpenAiEmbedder(
 
   override def id: String = model
 
+  /** Close the transport. The embedder stays usable: a later call opens new connections. */
+  def close(): Unit = transport.close()
+
   override def embed(texts: Vector[String])(using RuntimeContext): Either[DspyError, Vector[Vector[Float]]] =
     if texts.isEmpty then Right(Vector.empty)
     else
@@ -41,16 +42,14 @@ final case class OpenAiEmbedder(
       .updated("input", DynamicValues.fromAny(batch.toList))
     val url     = s"${baseUrl.stripSuffix("/")}$embeddingsEndpoint"
     val headers = Map("Authorization" -> s"Bearer $apiKey")
-    transport.sendJson(url, headers, DynamicJson.encode(payload)).flatMap { response =>
-      if response.status < 200 || response.status >= 300 then Left(statusError(response.status, response.body))
-      else DynamicJson.decode(response.body).flatMap(parseRows(_, expected = batch.size))
-    }
-
-  /** Map a non-2xx like the chat client: HTTP 400 with a context-window marker becomes a structured error. */
-  private def statusError(status: Int, body: String): DspyError =
-    if status == 400 && OpenAiClient.isContextWindowError(body) then
-      ContextWindowExceededError(model = Some(model))
-    else RuntimeError("openai_embeddings", s"OpenAI embeddings request failed with status $status: $body")
+    // A failure gets the same LM error as a failure of the chat client (see `OpenAiErrors`).
+    transport.sendJson(url, headers, DynamicJson.encode(payload))
+      .left.map(OpenAiErrors.withRequestDetails(_, Some(model)))
+      .flatMap { response =>
+        if response.status < 200 || response.status >= 300 then
+          Left(OpenAiErrors.fromResponse(response.status, response.headers, response.body, Some(model)))
+        else DynamicJson.decode(response.body).flatMap(parseRows(_, expected = batch.size))
+      }
 
   /** Extract `data[*].embedding` ordered by `data[*].index` (the authoritative row order). */
   private def parseRows(raw: DynamicValue, expected: Int): Either[DspyError, Vector[Vector[Float]]] =
@@ -98,7 +97,8 @@ final case class OpenAiEmbedder(
 
 object OpenAiEmbedder:
   /** Build from `OPENAI_API_KEY` (or `envVar`), mirroring [[OpenAiLanguageModel.fromEnv]]. `baseUrl` points at any
-    * OpenAI-compatible server's `/embeddings` endpoint.
+    * OpenAI-compatible server's `/embeddings` endpoint. An `envVar` that is absent or empty gives
+    * [[dspy4s.core.contracts.LmNotConfiguredError]].
     */
   def fromEnv(
       model  : String,
@@ -107,7 +107,7 @@ object OpenAiEmbedder:
   ): Either[DspyError, OpenAiEmbedder] =
     sys.env.get(envVar) match
       case Some(value) if value.nonEmpty => Right(OpenAiEmbedder(model = model, apiKey = value, baseUrl = baseUrl))
-      case _                             => Left(RuntimeError("openai_config", s"Missing '$envVar' environment variable"))
+      case _                             => Left(OpenAiErrors.notConfigured(envVar))
 
   /** Embedder against a LOCAL OpenAI-compatible server that does not check credentials (e.g. Ollama's
     * `http://localhost:11434/v1`), mirroring [[OpenAiLanguageModel.local]].

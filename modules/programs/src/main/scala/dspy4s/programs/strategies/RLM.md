@@ -58,7 +58,7 @@ final case class RLM[I, O](
     verbose: Boolean = false,
     tools: Vector[ToolFunction] = Vector.empty,
     subLm: Option[LanguageModel] = None,
-    interpreterFactory: RLM.InterpreterFactory = RLM.defaultInterpreterFactory,
+    interpreterFactory: Option[RLM.InterpreterFactory] = None,
     actionProgramName: String = "rlm_action",
     extractProgramName: String = "rlm_extract",
     actionPredictOverride: Option[Predict[RLM.ActionInputs, RLM.ActionStep]] = None,
@@ -77,13 +77,13 @@ Its fields have distinct responsibilities:
 | `verbose` | Logs each action and ordinary step output to stderr |
 | `tools` | Extra `ToolFunction` values callable from generated Python |
 | `subLm` | Optional LM used by the in-REPL `llm_query` tools |
-| `interpreterFactory` | Creates the stateful REPL owned by one forward call |
+| `interpreterFactory` | Creates the stateful REPL owned by one forward call. `None` selects the factory of the runtime context, then the Deno sandbox |
 | `actionProgramName` | Module name of the per-iteration predictor |
 | `extractProgramName` | Module name of the fallback predictor |
 | `actionPredictOverride` | Immutable replacement for the default action predictor |
 | `extractPredictOverride` | Immutable replacement for the default fallback predictor |
 
-The outer module name is always `rlm`. Unlike `ChainOfThought`, `ReAct`, and `CodeAct`, RLM does not add a reasoning
+The outer module name is always `rlm`. Unlike `ChainOfThought` and `ReAct`, RLM does not add a reasoning
 field to `O`. It returns the base output type directly. The final action reasoning and rendered trajectory are kept in
 `Prediction.raw` instead.
 
@@ -117,7 +117,7 @@ Their carrier types are:
 
 ```scala
 final case class ActionInputs(
-    variables_info: String,
+    variables_info: Vector[String],
     repl_history: String,
     iteration: String
 )
@@ -128,10 +128,14 @@ final case class ActionStep(
 )
 
 final case class ExtractInputs(
-    variables_info: String,
+    variables_info: Vector[String],
     repl_history: String
 )
 ```
+
+`variables_info` has the metadata text of each input variable. The prompt shows the list as a numbered list, as
+upstream `format_field_value` shows a list value of a `str` field. The prompt shows the type name `REPLHistory` for
+`repl_history`, as upstream.
 
 The action output shape is deliberately lenient. Missing `reasoning` or `code` fields decode as empty strings, and
 present values are rendered as text. This keeps imperfect action formatting inside the agent loop; failures that make
@@ -216,7 +220,8 @@ enum ReplExecution:
 
 That separation is useful. A failed Python action can still produce an observation that helps the next action, so
 `Right(ActionOutcome.Failed(Observed(...)))` continues. A `Left(DspyError)` is reserved for a failure outside this
-recoverable action protocol.
+recoverable action protocol. A `Left` from the REPL is such a failure: the interpreter itself failed, generated code
+cannot repair it, and the run ends with that error.
 
 ```mermaid
 flowchart TD
@@ -227,7 +232,7 @@ flowchart TD
     run --> result{"Interpreter result"}
     result -->|"stdout, exit 0"| observed["Succeeded(Observed(entry))"]
     result -->|"stderr, non-zero"| userError["Failed(Observed([Error] ...))"]
-    result -->|"interpreter failure"| interpreterError["Failed(Observed([Error] ...))"]
+    result -->|"Left(DspyError)"| interpreterError["Return Left(error)"]
     result -->|"finalOutput"| submit{"Complete and Shape[O]-valid?"}
     submit -->|"no"| submitError["Failed(Observed(error entry))"]
     submit -->|"yes"| submitted["Succeeded(Submitted(entry, record))"]
@@ -235,7 +240,6 @@ flowchart TD
     fenceError --> continue["Append entry and continue"]
     observed --> continue
     userError --> continue
-    interpreterError --> continue
     submitError --> continue
     submitted --> done["Decode O and finish"]
 ```
@@ -405,7 +409,7 @@ User `ToolFunction` values take two paths:
 flowchart LR
     tools["Vector[ToolFunction]"]
     tools --> instructions["Rendered in action instructions"]
-    tools --> bridge["CodeAct.sandboxTools"]
+    tools --> bridge["SandboxToolBridge.fromToolFunctions"]
     bridge --> repl["Callable by name inside Python"]
 ```
 
@@ -448,6 +452,33 @@ RLM owns the interpreter returned by `interpreterFactory` and always closes it. 
 create a fresh interpreter or otherwise transfer ownership to the call; it should not return a shared interpreter that
 must remain alive afterward.
 
+RLM selects the factory for each forward call in this order:
+
+1. the `interpreterFactory` of the program, when it is set;
+2. the `interpreterFactory` of the runtime context, when it is set;
+3. `RLM.defaultInterpreterFactory`, which creates a `DenoPyodideInterpreter`.
+
+A factory in the runtime context applies to each RLM in its scope that has no factory of its own:
+
+```scala
+val factory: ReplInterpreterFactory = (tools, outputFields) => myInterpreter(tools, outputFields)
+
+RuntimeEnvironment.withSettings(RuntimeContext(interpreterFactory = Some(factory))) {
+  rlm(input) // uses `factory`
+}
+```
+
+A factory can tell the model how its code runs: `ReplInterpreterFactory.executionInstructions` (upgrade item I7,
+upstream `execution_instructions`). The action instructions then have a part `Execution environment:` with that text.
+`RLM.defaultInterpreterFactory` and `LocalPythonInterpreter.factory()` have the upstream texts of `PythonInterpreter`
+and `LocalInterpreter`. A factory from a function literal has no text, and the instructions have no such part.
+
+RLM writes its action instructions with the factory that it selects at construction. For each call, it uses the text
+of the factory that it selects for that call. When that text is different, the call replaces the `Execution
+environment:` part of the instructions, or adds it at the end when an optimizer removed it (upstream
+`_action_signature_for_current_factory`). The other changes of an optimizer to the instructions stay. The port has no
+sandbox `dspy` facade (upgrade item P8), so the instructions have no sub-agent part.
+
 The default interpreter runs Python through Pyodide under Deno rather than as an unrestricted host `python3` process.
 If a custom `ReplCodeInterpreter` is supplied, its isolation, persistence, timeout, and tool-bridge guarantees become
 part of that implementation's trust boundary.
@@ -460,7 +491,7 @@ RLM distinguishes mistakes the agent can learn from from failures that prevent t
 |---|---|
 | Explicit non-Python Markdown fence | Append an `[Error]` observation without invoking the REPL |
 | Python exits non-zero | Append stderr as an `[Error]` observation and continue |
-| REPL returns `Left(DspyError)` | Convert it to an `[Error]` observation and continue |
+| REPL returns `Left(DspyError)` | Return `Left(error)` immediately; RLM still closes the interpreter |
 | `SUBMIT` payload is not a record | Append an `[Error]` observation and continue |
 | `SUBMIT` omits a declared output | Append an `[Error]` observation and continue |
 | `SUBMIT` fails `Shape[O]` decoding | Append a `[Type Error]` observation and continue |
@@ -538,7 +569,7 @@ The inner predictors are stable members, so callbacks and tracing can observe ev
 inputs and in the final trajectory.
 
 The current [`Streamable.scala`](../../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala) defines
-dedicated instances for `Predict`, `ChainOfThought`, `ReAct`, `CodeAct`, and `ProgramOfThought`, but not for `RLM`.
+dedicated instances for `Predict`, `ChainOfThought`, and `ReAct`, but not for `RLM`.
 Consequently, RLM does not yet have the same `Streamify` entry point and listener-signature validation as those
 programs.
 
@@ -547,14 +578,11 @@ programs.
 | Program | What the action model receives | Action language | State/evidence | Final output |
 |---|---|---|---|---|
 | `ReAct` | Input + tool trajectory | Named tool call | Rendered trajectory | Extractor always: reasoning + `O` |
-| `CodeAct` | Input + code trajectory | Python snippet | Trajectory + interpreter-specific state | Extractor always: reasoning + `O` |
 | `RLM` | Metadata + REPL history | Python over injected variables | Stateful REPL + history | `SUBMIT` → `O`; extractor on exhaustion |
-| `ProgramOfThought` | Task + program feedback | Complete program | Retry history | Answerer after successful code |
 
 RLM is most useful when the data itself is the object being explored: a large document, dataset, collection, or nested
 value that code can inspect selectively. ReAct is clearer when the domain is naturally a small vocabulary of explicit
-actions. CodeAct is a better fit when code execution gathers evidence but the final answer should always be
-synthesized by a separate predictor.
+actions.
 
 ## Reading the implementation
 

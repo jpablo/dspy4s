@@ -4,6 +4,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.ValidationError
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.evaluate.metrics.ExactMatch
@@ -82,15 +83,38 @@ class BootstrapFewShotWithRandomSearchSuite extends FunSuite:
     assert(stoppedEarly, s"should have stopped early but metadata was: ${report.metadata}")
   }
 
-  test("BootstrapFewShotWithRandomSearch handles empty trainset gracefully") {
+  // PORT_GAPS G-46 (upstream c7ee4462a): `Evaluate` rejects an empty devset. With no valset, the trainset is the
+  // evaluation set, so an empty trainset gives no candidate a score. Python raises `ValueError` at the first candidate.
+  test("BootstrapFewShotWithRandomSearch rejects an empty trainset when there is no valset") {
     val metric    = new ExactMatch(answerField = "answer")
     val optimizer = new BootstrapFewShotWithRandomSearch[DemoAwarePredictProgram](
       RandomSearchConfig(metric = metric, numCandidates = SearchCandidateCount(2))
     )
     given RuntimeContext = RuntimeEnvironment.current
 
-    val result = optimizer.compile(zeroShotStudent, Vector.empty)
-    assert(result.isRight)
-    val report = result.toOption.get
-    assertEquals(report.bestProgram.demos.size, 0)
+    optimizer.compile(zeroShotStudent, Vector.empty) match
+      case Left(error: ValidationError) => assert(error.message.contains("empty"), error.message)
+      case other                        => fail(s"expected a ValidationError, got $other")
+  }
+
+  // Upstream `self.valset = valset or trainset` (`dspy/teleprompt/random_search.py:59`): an empty valset selects the
+  // trainset as the evaluation set.
+  test("BootstrapFewShotWithRandomSearch scores the candidates on the trainset when the valset is empty") {
+    val trainset = (1 to 3).map(i =>
+      Example(rec("question" := s"q$i", "answer" := s"a$i"), inputKeys = Set("question"))
+    ).toVector
+    val optimizer = new BootstrapFewShotWithRandomSearch[DemoAwarePredictProgram](
+      RandomSearchConfig(metric = new ExactMatch(answerField = "answer"), numCandidates = SearchCandidateCount(1))
+    )
+    given RuntimeContext = RuntimeEnvironment.current
+
+    optimizer.compile(zeroShotStudent, trainset, teacher = Some(oracleTeacher), valset = Some(Vector.empty)) match
+      case Right(report) =>
+        assert(report.candidates.nonEmpty, s"no candidate: ${report.metadata}")
+        report.candidates.foreach { candidate =>
+          candidate.metadata.get("per_example") match
+            case Some(scores: Vector[?]) => assertEquals(scores.size, trainset.size)
+            case other                   => fail(s"no per-example scores: $other")
+        }
+      case Left(error) => fail(s"expected a report, got $error")
   }

@@ -11,13 +11,18 @@ import dspy4s.programs.runtime.ParallelExecutionResult
 import dspy4s.programs.runtime.ParallelExecutor
 import zio.blocks.schema.DynamicValue
 
-import scala.concurrent.duration.DurationInt
-import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration.Duration
 
+/** Runs programs in parallel with a [[ParallelExecutor]] (upstream `dspy.Parallel`).
+  *
+  * @param timeout
+  *   the time limit of the executor. The default, `Duration.Inf`, gives no time limit: upstream never fails a batch for
+  *   time, and its `timeout` only submits a slow task again (`dspy/utils/parallelizer.py`, PORT_GAPS G-41).
+  */
 final case class Parallel(
     numThreads: Option[ThreadCount] = None,
     maxErrors : Option[ErrorLimit]  = None,
-    timeout   : FiniteDuration      = 120.seconds
+    timeout   : Duration            = Duration.Inf
 ):
   private def resolvedExecutor(using RuntimeContext): ParallelExecutor =
     ParallelExecutor.fromSettings(timeout = timeout, numThreads = numThreads, maxErrors = maxErrors)

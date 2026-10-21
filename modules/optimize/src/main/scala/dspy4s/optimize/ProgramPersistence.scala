@@ -22,7 +22,8 @@ import java.nio.file.Paths
   * composite use the same path: [[dumpState]] serializes every writable [[OptimizableParameters]], and [[loadState]]
   * writes those parameter values into a fresh program through `OptimizableStructure.replace`.
   *
-  * '''Round-trip scope.''' The persisted state is exactly instructions, demos, and module-level config. Signature field
+  * '''Round-trip scope.''' The persisted state is exactly instructions, demos, module-level config, and the
+  * experimental decision settings (omitted when there are none, as upstream `Predict.dump_state`). Signature field
   * structure, module names, runtimes, output schemas, bound LMs, tools, callbacks, and history belong to the fresh
   * target program and are preserved during loading. Loading therefore requires the same optimizable-leaf structure and
   * order, plus a compatible architecture; ordinal IDs detect missing or extra entries, not a same-cardinality reorder.

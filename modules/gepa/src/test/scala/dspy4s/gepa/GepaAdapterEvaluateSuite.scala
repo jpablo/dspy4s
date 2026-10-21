@@ -4,8 +4,10 @@ import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.:=
@@ -22,6 +24,8 @@ import dspy4s.programs.ProgramRunner
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.optimization.OptimizableId
 import munit.FunSuite
+
+import scala.concurrent.duration.Duration
 
 class GepaAdapterEvaluateSuite extends FunSuite:
 
@@ -99,6 +103,17 @@ class GepaAdapterEvaluateSuite extends FunSuite:
     }
   }
 
+  // PORT_GAPS G-46: an empty batch has no output and no score. The adapter runs nothing for it.
+  test("evaluate on an empty batch returns an empty batch on the two paths") {
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val scoresOnly       = adapter.evaluate(Vector.empty, Candidate.seed(program), captureTraces = false)
+      assertEquals(scoresOnly, EvaluationBatch(Vector.empty, Vector.empty, trajectories = None))
+      val withTraces = adapter.evaluate(Vector.empty, Candidate.seed(program), captureTraces = true)
+      assertEquals(withTraces, EvaluationBatch(Vector.empty, Vector.empty, trajectories = Some(Vector.empty)))
+    }
+  }
+
   test("a different candidate instruction is actually applied before evaluation") {
     // Sanity: the candidate's instruction reaches the predictor (we can't see it change the scripted LM's answer,
     // but the prompt the LM sees must carry the candidate instruction).
@@ -117,16 +132,138 @@ class GepaAdapterEvaluateSuite extends FunSuite:
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
       val evalBatch        = adapter.evaluate(batch, Candidate.seed(program), captureTraces = true)
-      val dataset          = adapter.makeReflectiveDataset(Candidate.seed(program), evalBatch, Vector(OptimizableId(0)))
+      val dataset          = adapter
+        .makeReflectiveDataset(Candidate.seed(program), evalBatch, Vector(OptimizableId(0)))
+        .fold(error => fail(error.message), identity)
 
       assertEquals(dataset.keySet, Set(OptimizableId(0)))
       val records = dataset(OptimizableId(0))
       assertEquals(records.size, 2)
       // inputs carry the question; generated outputs carry the model's answer; feedback explains the verdict.
-      assert(records.head.inputs.contains("France"), records.head.inputs)
-      assert(records.head.generatedOutputs.contains("Paris"), records.head.generatedOutputs)
+      assert(ReflectionFixtures.text(records.head.inputs).contains("France"), records.head.inputs)
+      assert(ReflectionFixtures.text(records.head.generatedOutputs).contains("Paris"), records.head.generatedOutputs)
       assert(records.head.feedback.contains("expected"), records.head.feedback)
       // The wrong-answer example's feedback reflects the mismatch (gold Paris vs predicted Lyon).
       assert(records(1).feedback.contains("Lyon"), records(1).feedback)
     }
+  }
+
+  // ── An exception of a run or of the metric ──────────────────────────────────────────────────────────────────
+  // Upstream gives the executor of the evaluation the error limit `len(batch) * 100` (dspy `gepa_utils.py`,
+  // `DspyAdapter.evaluate`) or `len(dataset) * 10` (`bootstrap_trace_data`). A batch cannot reach these limits, so only
+  // the examples that raised get the failure score.
+
+  /** Answers "Paris". Throws an exception for a question with the word LM-THROWS. */
+  private final class ThrowingLm extends LanguageModel:
+    override val id: String                                                                    = "throwing"
+    override val mode: LmMode                                                                  = LmMode.Chat
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      val prompt = request.messages.flatMap(_.text).mkString("\n")
+      if prompt.contains("LM-THROWS") then throw IllegalStateException("the LM failed")
+      Right(LmResponse(outputs = Vector(LmOutput(text = "[[ ## answer ## ]]\nParis\n\n[[ ## completed ## ]]"))))
+
+  /** The exact-answer metric. Throws an exception for a question with the word METRIC-THROWS. */
+  private lazy val throwingMetric: FeedbackMetric = new FeedbackMetric:
+    override def name: String = "exact_answer_or_exception"
+    override def feedback(
+        example       : Example,
+        prediction    : RawPrediction,
+        trace         : Vector[TraceEntry],
+        component     : Option[String],
+        componentTrace: Vector[TraceEntry]
+    )(using RuntimeContext): Either[DspyError, ScoreWithFeedback] =
+      val question = example.get("question").map(DynamicValues.renderText).getOrElse("")
+      if question.contains("METRIC-THROWS") then throw IllegalStateException("the metric failed")
+      else metric.feedback(example, prediction, trace, component, componentTrace)
+
+  private def example(question: String): Example =
+    Example(values = DynamicValues.record("question" := question, "answer" := "Paris"), inputKeys = Set("question"))
+
+  test("ten examples that throw get the failure score, and the other examples keep their scores, on the two paths") {
+    // Five runs throw and five metric calls throw: 10 exceptions, the default error limit of an executor.
+    val throwing = (1 to 5).toVector.flatMap(i => Vector(example(s"LM-THROWS $i?"), example(s"METRIC-THROWS $i?")))
+    val batch    = throwing ++ Vector(example("France?"), example("France again?"))
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ThrowingLm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val adapter          = new GepaAdapter(program, throwingMetric, failureScore = -1.0)
+      Vector(false, true).foreach { captureTraces =>
+        val result = adapter.evaluate(batch, Candidate.seed(program), captureTraces)
+        assertEquals(result.scores, Vector.fill(10)(-1.0) ++ Vector(1.0, 1.0), s"captureTraces=$captureTraces")
+        assertEquals(result.outputs(10).get("answer").map(DynamicValues.renderText), Some("Paris"))
+      }
+      val traced = adapter.evaluate(batch, Candidate.seed(program), captureTraces = true)
+      assertEquals(traced.trajectories.map(_.map(_.failed)), Some(Vector.fill(10)(true) ++ Vector(false, false)))
+    }
+  }
+
+  test("the error limit of the context does not apply to the evaluation") {
+    val batch   = Vector(example("France?"), example("LM-THROWS?"), example("France again?"))
+    val context = RuntimeContext(
+      lm = Some(new ThrowingLm),
+      adapter = Some(ChatAdapter()),
+      maxErrors = Some(ErrorLimit(1))
+    )
+    RuntimeEnvironment.withSettings(context) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result           = new GepaAdapter(
+        program,
+        metric,
+        failureScore = -1.0
+      ).evaluate(batch, Candidate.seed(program), captureTraces = false)
+      assertEquals(result.scores, Vector(1.0, -1.0, 1.0))
+    }
+  }
+
+  // ── The text of a failed example ────────────────────────────────────────────────────────────────────────────
+  // Upstream gives a failed example a `FailedPrediction` in the place of its prediction (`bootstrap_trace_data` in
+  // `dspy/teleprompt/bootstrap_trace.py`). Its `completion_text` is the raw response of the model for a parse failure
+  // (`AdapterParseError.lm_response`). `make_reflective_dataset` (`dspy/teleprompt/gepa/gepa_utils.py`) reads it from
+  // the failed trace entry.
+
+  /** Gives a reply with no field marker for BAD-FORMAT, a `Left` for LM-ERROR, and an exception for LM-THROWS. */
+  private final class FailingLm extends LanguageModel:
+    override val id: String                                                                    = "failing"
+    override val mode: LmMode                                                                  = LmMode.Chat
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      val prompt = request.messages.flatMap(_.text).mkString("\n")
+      if prompt.contains("LM-THROWS") then throw IllegalStateException("the LM failed")
+      else if prompt.contains("LM-ERROR") then Left(RuntimeError("failing_lm", "the model is down"))
+      else
+        val text =
+          if prompt.contains("BAD-FORMAT") then "I do not know the format."
+          else "[[ ## answer ## ]]\nParis\n\n[[ ## source ## ]]\natlas\n\n[[ ## completed ## ]]"
+        Right(LmResponse(outputs = Vector(LmOutput(text = text))))
+
+  test("a failed example keeps the text of upstream FailedPrediction: the raw response, else the error message") {
+    // Two outputs, so the JSON fallback of the chat adapter does not take the whole reply as the value of one output.
+    val twoOutputs = DynamicPredict(layout =
+      SignatureLayout.parse("question -> answer, source").toOption.get.withInstructions(Some("Answer."))
+    )
+    val batch = Vector("France?", "BAD-FORMAT?", "LM-ERROR?", "LM-THROWS?", "METRIC-THROWS?").map(example)
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new FailingLm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val adapter          = new GepaAdapter(twoOutputs, throwingMetric, failureScore = -1.0)
+      val trajectories     = adapter.evaluate(batch, Candidate.seed(twoOutputs), captureTraces = true).trajectories
+        .getOrElse(fail("the evaluation with traces must give the trajectories"))
+      assertEquals(trajectories.map(_.failed), Vector(false, true, true, true, true))
+      assertEquals(trajectories(0).failure, None)
+      assertEquals(trajectories(1).failure, Some("I do not know the format."))
+      assert(trajectories(2).failure.exists(_.contains("the model is down")), trajectories(2).failure.toString)
+      assert(trajectories(3).failure.exists(_.contains("the LM failed")), trajectories(3).failure.toString)
+      assert(trajectories(4).failure.exists(_.contains("the metric failed")), trajectories(4).failure.toString)
+    }
+  }
+
+  // ── The limits of the executor of an evaluation ─────────────────────────────────────────────────────────────
+  // The `timeout` of upstream never fails the batch: it only submits a slow example again (dspy
+  // `utils/parallelizer.py`). An evaluation thus has no time limit. A test that waits for the 120 seconds of the default
+  // limit of `ParallelExecutor` is too slow for the suite, so this test reads the limits of the executor.
+
+  test("the executor of an evaluation has no time limit, and its error limit is 100 times the batch size") {
+    given RuntimeContext = RuntimeContext(maxErrors = Some(ErrorLimit(1)))
+    val executor         = GepaAdapter.evaluationExecutor(batchSize = 3)
+    assertEquals(executor.timeout, Duration.Inf)
+    assertEquals(executor.maxErrors, ErrorLimit(300))
+    // An empty batch gives a valid limit too.
+    assertEquals(GepaAdapter.evaluationExecutor(batchSize = 0).maxErrors, ErrorLimit(100))
   }

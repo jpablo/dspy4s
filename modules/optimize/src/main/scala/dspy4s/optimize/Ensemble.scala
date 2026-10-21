@@ -1,9 +1,12 @@
 package dspy4s.optimize
 
+import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.ValidationError
+import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.programs.Aggregation
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
@@ -16,13 +19,13 @@ import zio.blocks.schema.DynamicValue
   * majority vote (`dspy.majority` upstream), which is the default here via [[Aggregation.majority]].
   *
   * Shape choice: dspy4s splits programs into a domain-valued API (`Predict[I, O]`, `ChainOfThought[I, O]`, ...) and a
-  * dynamic spine (`DynamicModule = Module[DynamicValue.Record, DynamicValue.Record]`). An ensemble is inherently
+  * record-valued API (`DynamicModule = Module[DynamicValue.Record, DynamicValue.Record]`). An ensemble is inherently
   * heterogeneous and generic over its members — Python's `EnsembledProgram` just forwards `*args, **kwargs` to each
   * member and reduces a list of arbitrary outputs. A faithful generic shape would require all members to share an exact
   * `Module[I, O]` and a reducer over `O`; that's both more restrictive than upstream and awkward. So we build on the
-  * dynamic spine: members are `DynamicModule`s, the reducer folds their semantic output records, and the result is
+  * record-valued API: members are `DynamicModule`s, the reducer folds their semantic output records, and the result is
   * itself a `DynamicModule` (so an ensemble can nest / be used anywhere a program is). This matches the "prefer the
-  * dynamic spine for genuinely-generic edges" guidance.
+  * record-valued API for genuinely-generic edges" guidance.
   *
   * Upstream's `deterministic` flag must be `False` (it asserts), so there is no deterministic example-hashing path to
   * port. We keep a `seed` instead so the `size`-sampling is reproducible in tests and runs.
@@ -43,9 +46,16 @@ final case class Ensemble(
 
   val name: String = "ensemble"
 
-  /** Build the ensembled program over the given members. */
+  /** Build the ensembled program over the given members. The call is a compile scope (upstream
+    * `_with_compile_callbacks`) with the input `programs_size`, because an ensemble has no trainset. The output of the
+    * scope is the ensembled program.
+    */
   def compile(programs: Vector[DynamicModule]): DynamicModule =
-    Ensemble.EnsembledProgram(programs, reduceFn, size, seed)
+    val ensembled: DynamicModule = Ensemble.EnsembledProgram(programs, reduceFn, size, seed)
+    val inputs                   = DynamicValues.record("programs_size" := programs.size)
+    CallbackDispatcher
+      .withCompile(this, getClass.getSimpleName, inputs)(Right(ensembled): Either[DspyError, DynamicModule])
+      .getOrElse(ensembled)
 
 object Ensemble:
 

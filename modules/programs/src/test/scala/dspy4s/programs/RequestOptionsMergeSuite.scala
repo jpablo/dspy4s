@@ -10,7 +10,14 @@ import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
 import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
-import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
+
+import scala.concurrent.duration.*
+import scala.concurrent.{Await, ExecutionContext, Future, TimeoutException}
+
+// A recursive output type: each step holds a list of steps.
+final case class RoPlanStep(action: String, substeps: List[RoPlanStep]) derives Schema
+final case class RoPlanOutput(plan: RoPlanStep) derives Schema
 
 /** G-7 v1: the engine merges `FormattedPrompt.requestOptions` UNDER `invocation.request.options` (per-call / module
   * options win on collision) before calling the LM.
@@ -92,4 +99,30 @@ class RequestOptionsMergeSuite extends FunSuite:
       case DynamicValue.Primitive(zio.blocks.schema.PrimitiveValue.String(s)) => s
     }
     assertEquals(rfType, Some("json_schema"))
+  }
+
+  private def get(record: DynamicValue.Record, path: String*): Option[DynamicValue] =
+    path.foldLeft(Option[DynamicValue](record)) {
+      case (Some(current: DynamicValue.Record), key) => DynamicValues.recordGet(current, key)
+      case _                                         => None
+    }
+
+  test("end-to-end: a recursive output type gives a strict response schema with $defs and a $ref") {
+    // zio-blocks writes no `$ref`, and its JSON schema of a recursive type does not return. The time limit makes a
+    // hang a failure.
+    val sig  = dspy4s.signatures.Signature.derived[MCQAInput, RoPlanOutput]("Plan")
+    val call = Future(capture(JSONAdapter())(Predict(sig)(MCQAInput("x")): Unit))(using ExecutionContext.global)
+    val reqs =
+      try Await.result(call, 10.seconds)
+      catch case _: TimeoutException => fail("Predict did not send a request in 10 seconds")
+    assertEquals(reqs.size, 1)
+    val format = DynamicValues.recordGet(reqs.head.options, "response_format") match
+      case Some(record: DynamicValue.Record) => record
+      case other                             => fail(s"expected a response_format record, got: $other")
+    assertEquals(get(format, "type"), Some(DynamicValue.Primitive(PrimitiveValue.String("json_schema"))))
+    assertEquals(get(format, "json_schema", "strict"), Some(DynamicValue.Primitive(PrimitiveValue.Boolean(true))))
+    val ref = DynamicValues.record("$ref" := "#/$defs/RoPlanStep")
+    assertEquals(get(format, "json_schema", "schema", "properties", "plan"), Some(ref))
+    val substeps = get(format, "json_schema", "schema", "$defs", "RoPlanStep", "properties", "substeps", "items")
+    assertEquals(substeps, Some(ref))
   }

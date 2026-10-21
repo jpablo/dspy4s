@@ -1,164 +1,121 @@
-# dspy4s Examples
+# dspy4s `examples`
 
-This module ports the code from the [Python DSPy documentation](https://dspy.ai) to **dspy4s**, one Scala
-file per doc page. Each file mirrors a page under `docs/docs/...` in the upstream repo, keeps the original
-Python inline (in `// |` comment blocks) next to the Scala translation, and carries a `Status:` header
-explaining what was translated and what (if anything) is out of scope.
-
-These examples double as living documentation of the dspy4s surface and as a smoke test that the API actually
-works end-to-end.
+`examples` translates the code of the [Python DSPy documentation](https://dspy.ai) to dspy4s. Each documentation
+page with code has one Scala file. The module also has demos that are not translations. It uses all the other library modules,
+and sbt does not publish it.
 
 ## Conventions
 
-- **One file per doc page.** The file's header lists the upstream `Source:` / `Upstream:` page.
-- **Python is preserved inline.** Each snippet shows the original Python (`// | ...`) above its Scala port.
-- **`Status:` header.** Every file states `translated` / `complete` / `blocked` plus the specifics.
-- **Runnable examples expose a uniquely-named top-level `@main`** (e.g. `emailExtractionMain`) so files that
-  share a package don't collide on a single entry point.
+- **One file for each page.** The header of a translation gives the URL of the source page and a `Status:` line. The
+  status is `translated` or `blocked`.
+- **The Python stays in the file.** Comment lines that start with `// |` show the Python code above its Scala
+  translation.
+- **A unique name for each `@main`.** For example, the email tutorial has `emailExtractionMain`. Thus two files in
+  one package do not have the same entry point.
+- **Parts for the documentation site.** The site includes parts of these files. A `--8<-- [start:<name>]` comment and
+  a `--8<-- [end:<name>]` comment mark each part.
+- **Scaffolds.** `tools/scaffold.py` makes a new file from an upstream page. It does not overwrite a file.
 
-## Running an example
-
-```bash
-sbt "examples/runMain <fully.qualified.mainName>"
-```
-
-LM-backed examples obtain their model through `Demo.withLm`, which reads **`OPENAI_API_KEY`** (and optional
-**`DSPY_MODEL`**, default `gpt-5.5`) from the environment:
+## Run an example
 
 ```bash
 OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.email_extraction.emailExtractionMain"
 ```
 
-Examples marked _offline_ below make no LM calls and need no key.
+- Give the full name of the `@main`: `dspy4s.examples.<package>.<name>`. The tables below show the two parts.
+- Most examples get the model from `Demo.withLm` in `Demo.scala`. It reads `OPENAI_API_KEY` and `DSPY_MODEL` (the
+  default is `gpt-5.5`).
+- The examples marked "offline" make no LM call and need no key.
+- Give the two MCP examples a class path as the argument. Use the output of
+  `sbt -error "export examples/Runtime/fullClasspath"`.
 
-## Legend
+## Translations
 
-| Mark | Meaning |
-|------|---------|
-| ✅ | **Ported** — runnable; the DSPy-relevant snippets are translated. |
-| 🔧 | **Demo** — hand-written demonstration of a dspy4s surface (not a 1:1 doc port). |
-| 📄 | **Overview** — the source doc is prose only (no code snippets); the file is a placeholder. |
-| 🚫 | **Blocked** — not ported; depends on a dspy4s feature that doesn't exist yet. |
-| 🔑 | Runnable example that makes **live LM calls** (needs `OPENAI_API_KEY`). |
+### `learn.programming`
 
----
+| Page | `@main` | Notes |
+|------|---------|-------|
+| Signatures | `main` | String signatures use `Signature.fromType`. Class signatures become `Spec` traits. |
+| LanguageModels | `languageModelsMain` | The LM setup, direct calls, more than one LM, and the Responses API. |
+| Modules | `modulesMain` | dspy4s has no API for the `n=5` completions. |
+| Tools | `toolsMain` | `ReAct` with `ToolFunction.fromMethod`, and native tool calls. |
+| Adapters | `adaptersMain` | `adapter.format`, `ChatAdapter` and `JSONAdapter`, and `RuntimeEnvironment.inspectHistory`. |
+| Mcp | `mcpMain` | The tools of an MCP server as `ToolFunction` values (`McpTools.fromClient`), and a `ReAct` agent. The agent starts the server `mcpArithmeticServer`. |
 
-## ✅ Ported examples
+### `learn.evaluation`
 
-### `learn/programming`
+| Page | `@main` | Notes |
+|------|---------|-------|
+| Data | `dataMain` (offline) | `Example`, the inputs, and the labels. `DataLoader` is not translated. |
+| Metrics | `metricsMain` (offline), `metricsJudgeMain` | `FunctionMetric`, `Evaluate`, and the LM judge `SemanticF1`. |
 
-| Example | Run (`examples/runMain …`) | Coverage / notes |
-|---|---|---|
-| **Signatures** | `…learn.programming.main` 🔑 | 8/8 snippets. String signatures → `Signature.fromType`/`fromString`; class signatures → `Spec` traits. |
-| **LanguageModels** | `…learn.programming.languageModelsMain` 🔑 | LM setup/config, direct `call`, multiple LMs (`configure`/scoped override), generation config, usage, error handling. LiteLLM-only providers, Responses API, custom-LM save/load out of scope. |
-| **Modules** | `…learn.programming.modulesMain` 🔑 | Portable snippets; multi-completion `n=5` access noted unsupported. |
-| **Tools** | `…learn.programming.toolsMain` 🔑 | ReAct + `ToolFunction.fromMethod`; native function-calling toggle (`ChatAdapter(useNativeFunctionCalling=true)`, G-7b). Manual tool-call path / async tools out of scope. |
-| **Adapters** | `…learn.programming.adaptersMain` 🔑 | 1–6: Predict, `adapter.format(...)`, ChatAdapter/JSONAdapter selection, `inspect_history` (`RuntimeEnvironment.inspectHistory`, via a `ManagedLanguageModel`). |
+### `learn.optimization`
 
-### `learn/evaluation`
+| Page | `@main` | Notes |
+|------|---------|-------|
+| Optimizers | `optimizersMain` | `BootstrapFewShotWithRandomSearch`, and `save` and `load` with `ProgramPersistence`. |
 
-| Example | Run | Coverage / notes |
-|---|---|---|
-| **Data** | `…learn.evaluation.dataMain` _(offline)_ | `Example` construction + inputs/labels. `DataLoader` (csv/json/parquet/HF) not ported. |
-| **Metrics** | `…learn.evaluation.metricsMain` _(offline)_ · `…metricsJudgeMain` 🔑 | `FunctionMetric` + `Evaluate`; LLM-as-judge now runnable via `SemanticF1` (G-6, `metricsJudgeMain`). Retrieval-trace metrics still need a retriever. |
+### `deep_dive.data_handling`
 
-### `learn/optimization`
+| Page | `@main` | Notes |
+|------|---------|-------|
+| Examples | `examplesMain` (offline) | The `Example` API. An `Example` is immutable, so `withValue` returns a copy. |
+| LoadingCustomData | `loadingCustomDataMain` (offline) | `Example` values from rows, and a split into a train set and a dev set. |
 
-| Example | Run | Coverage / notes |
-|---|---|---|
-| **Optimizers** | `…learn.optimization.optimizersMain` 🔑 | `BootstrapFewShotWithRandomSearch.compile`; program `.save`/`.load` via `ProgramPersistence` (G-4). |
+### `tutorials.<name>`
 
-### `deep_dive/data_handling`
+| Page | `@main` | Notes |
+|------|---------|-------|
+| `conversation_history` | `conversationHistoryMain` | A `History` input field. |
+| `email_extraction` | `emailExtractionMain` | Enums and case classes with `derives Schema`, and four `ChainOfThought` programs. |
+| `output_refinement` | `bestOfNAndRefineMain` | `BestOfN` and `Refine` with reward functions. |
+| `streaming` | `streamingMain` | `Streamify.streamify` gives a synchronous `ClosableIterator[StreamEvent]`. Also a `StreamListener` and a `StatusMessageProvider`. |
+| `async` | `asyncMain` | `ContextPropagation.future`. Async tools are not translated. |
+| `cache` | `cacheMain` | A cache for each LM with `ManagedLanguageModel`. There is no global cache. |
+| `observability` | `observabilityMain` | `ReAct` and a custom `CallbackHandler`. |
+| `sample_code_generation` | `sampleCodeGenerationMain` | Three signatures and an agent that uses them. |
+| `ai_text_game` | `aiTextGameMain` | Three signatures and the `GameAI` module. The console game is not translated. |
+| `yahoo_finance_react` | `yahooFinanceReactMain` | `ReAct` with finance tools. The tools return static data. |
+| `llms_txt_generation` | `llmsTxtMain` | Signatures in a pipeline. The GitHub HTTP calls are not translated. |
+| `saving` | `savingMain` (offline) | `save` and `load` with `ProgramPersistence`. A small trainset replaces GSM8K. |
+| `optimizer_tracking` | `optimizerTrackingMain` | `MIPROv2` with a `CallbackHandler` that counts the LM calls. |
+| `mcp` | `mcpTutorialMain` | The airline MCP server `airlineMcpServer`, and a `ReAct` agent that uses its tools. The agent starts the server in a child JVM. |
 
-| Example | Run | Coverage / notes |
-|---|---|---|
-| **Examples** | `…deep_dive.data_handling.examplesMain` _(offline)_ | Full `dspy.Example` API (1–6). Immutable `case class`, so `withValue(...)` replaces in-place mutation. |
-| **LoadingCustomData** | `…deep_dive.data_handling.loadingCustomDataMain` _(offline)_ | Build `Example`s from rows + train/dev split. CSV/pandas I/O and `Dataset` base class out of scope. |
+### Top level (no package: `dspy4s.examples.cheatsheetMain`)
 
-### `tutorials`
+| Page | `@main` | Notes |
+|------|---------|-------|
+| Cheatsheet | `cheatsheetMain` (offline) | The cheatsheet snippets that dspy4s supports. Comments mark the optimizers that dspy4s does not have. |
 
-| Example | Run (`…tutorials.<pkg>.<main>`) | Coverage / notes |
-|---|---|---|
-| **email_extraction** | `email_extraction.emailExtractionMain` 🔑 | Enums/case classes/`Option`/`List` via `derives Schema`; four composed `ChainOfThought`s. MLflow autolog out of scope. |
-| **output_refinement** | `output_refinement.bestOfNAndRefineMain` 🔑 | 6/6. `BestOfN[I,O]` / `Refine[I,O]` with reward functions over `Prediction[O]`. |
-| **streaming** | `streaming.streamingMain` 🔑 | 1–9. Synchronous `streamify` → `ClosableIterator[StreamEvent]`; per-field & per-predict listeners; status provider. |
-| **async** | `async.asyncMain` 🔑 | `acall` → `applyAsync`/`ContextPropagation.future`. Async _tools_ not portable (synchronous `ToolFunction`). |
-| **cache** | `cache.cacheMain` 🔑 | Per-LM `ManagedLanguageModel(cache=…)` (Noop/InMemory/Disk/custom) + usage tracking. No global `configure_cache`. |
-| **observability** | `observability.observabilityMain` 🔑 | ReAct + custom `CallbackHandler` (`on_module_end` → `ModuleEndEvent`). `inspect_history`/MLflow/ColBERT out of scope. |
-| **sample_code_generation** | `sample_code_generation.sampleCodeGenerationMain` 🔑 | Two signatures + refine CoT + composing agent. URL fetching / interactive console / JSON save out of scope. |
-| **ai_text_game** | `ai_text_game.aiTextGameMain` 🔑 | Three signatures + `GameAI` (`dict[str,int]`→`Map`). Save/load, console UI, game loop out of scope. |
-| **yahoo_finance_react** | `yahoo_finance_react.yahooFinanceReactMain` 🔑 | ReAct + finance tools via `ToolFunction.fromMethod`. Live yfinance/LangChain data stubbed. |
-| **llms_txt_generation** | `llms_txt_generation.llmsTxtMain` 🔑 | Signatures + composed pipeline. GitHub HTTP fetching out of scope. |
-| **saving** | `saving.savingMain` _(offline)_ | Program state `save`/`load` round-trip via `ProgramPersistence` (G-4). GSM8K swapped for a hand-built trainset; `save_program=True` code-pickling out of scope. |
-| **optimizer_tracking** | `optimizer_tracking.optimizerTrackingMain` 🔑 | MIPROv2 + a `CallbackHandler` tracking LM calls (the dspy4s observability seam). MLflow autolog out of scope; GSM8K swapped. |
+## Other demos
 
-### Top-level
+| Package | `@main` | Notes |
+|---------|---------|-------|
+| `signatures` | `builderMain` (offline), `caseClassMain`, `functionMain`, `specMain` | The four ways to declare a signature: `Signature.builder`, `Signature.derived`, `Signature.fromType`, and `Signature.of`. |
+| `tutorials.react_vs_rlm` | `reactVsRlmMain` | `ReAct` and `RLM` do one task with the same tools. The source is the MIT project [react2rlm](https://github.com/RamXX/react2rlm). `RLM` needs Deno. |
+| `tutorials.talk_to_your_data` | `talkToYourDataMain`, `tytdSelfCheckMain` (offline) | An analytics agent with `RLM` and `GEPA`. The agent needs Deno. Its [README](./src/main/scala/dspy4s/examples/tutorials/talk_to_your_data/README.md) gives the details. |
+| `verify` | `optimizerSmokeMain`, `gepaSmokeMain` | Runs of `COPRO`, `MIPROv2`, and `GEPA` with a real model. They read `OPENAI_MODEL` (the default is `gpt-4o-mini`). |
 
-| Example | Run | Coverage / notes |
-|---|---|---|
-| **Cheatsheet** | `…examples.cheatsheetMain` _(offline)_ | Portable cheatsheet snippets (modules, retrieval, metrics, optimizers incl. COPRO/MIPROv2/Ensemble/KNNFewShot, save/load, tools, streaming, cache, refinement). Still-unported optimizers (BootstrapFinetune, Optuna, SIMBA) marked inline. |
+## Prose pages
 
-> `Demo.scala` is not an example — it's the shared runner (`Demo.withLm`) that wires an OpenAI LM + `ChatAdapter`
-> into the ambient `RuntimeContext` for the 🔑 examples.
+Some upstream pages have prose and no code. For each of them, a `README.md` adapts the page to dspy4s:
 
----
+- [`learn/`](./src/main/scala/dspy4s/examples/learn/README.md), with the subfolders
+  [`programming/`](./src/main/scala/dspy4s/examples/learn/programming/README.md),
+  [`evaluation/`](./src/main/scala/dspy4s/examples/learn/evaluation/README.md), and
+  [`optimization/`](./src/main/scala/dspy4s/examples/learn/optimization/README.md)
+- [`production/`](./src/main/scala/dspy4s/examples/production/README.md)
+- [`tutorials/`](./src/main/scala/dspy4s/examples/tutorials/README.md), the index of the tutorials
+- the index pages of the tutorial groups, in `tutorials/<name>/README.md`: `build_ai_program`, `core_development`,
+  `real_world_examples`, `optimize_ai_program`, `gepa_ai_program`, `rl_ai_program`, `classification`, and `papillon`
 
-## 🔧 Signature demos (`signatures/`)
+## Blocked pages
 
-Hand-written demonstrations of the four ways to declare a `Signature` (not 1:1 doc ports).
+These pages need a feature that dspy4s does not have yet. The header of each file names the feature.
 
-| Example | Run | Surface |
-|---|---|---|
-| **BuilderExample** | `…signatures.builderMain` _(offline)_ | Programmatic `Signature.builder(...)`. |
-| **CaseClassExample** | `…signatures.caseClassMain` 🔑 | `Signature.derived[In, Out]` from two case classes. |
-| **FunctionExample** | `…signatures.functionMain` 🔑 | `Signature.fromType[(in: I) => (out: O)]`. |
-| **SpecExample** | `…signatures.specMain` 🔑 | `Signature.of[T <: Spec]` from a trait with `InputField`/`OutputField`. |
-
----
-
-## 📄 Section docs (adapted prose pages)
-
-The upstream DSPy pages that are prose only (overviews, landing/index pages, links to external tutorials)
-have no code to port. Instead of empty Scala placeholders, each is a `README.md` adapted for dspy4s — same
-topic, rewritten for the Scala port, with attribution to the MIT-licensed source and links to the relevant
-example files:
-
-- [`learn/`](./src/main/scala/dspy4s/examples/learn/README.md) — learning dspy4s overview (the three stages)
-- [`learn/programming/`](./src/main/scala/dspy4s/examples/learn/programming/README.md) — programming in dspy4s
-- [`learn/evaluation/`](./src/main/scala/dspy4s/examples/learn/evaluation/README.md) — evaluation in dspy4s
-- [`learn/optimization/`](./src/main/scala/dspy4s/examples/learn/optimization/README.md) — optimization in dspy4s
-- [`production/`](./src/main/scala/dspy4s/examples/production/README.md) — dspy4s in production
-- [`tutorials/`](./src/main/scala/dspy4s/examples/tutorials/README.md) — tutorials index (ported / blocked / external)
-- tutorial landing pages: `build_ai_program`, `core_development`, `real_world_examples`,
-  `optimize_ai_program`, `gepa_ai_program`, `rl_ai_program`, `classification`, `papillon`
-  (each a `README.md` under `tutorials/<name>/`).
-
----
-
-## 🚫 Blocked — not ported
-
-These depend on dspy4s features that don't exist yet. Each file's header points at the closest supported
-alternative where one exists.
-
-| Example | Blocked on | Supported alternative |
-|---|---|---|
-| `deep_dive/data_handling/BuiltInDatasets` | built-in dataset loaders (`dspy.datasets`, HotPotQA/GSM8K) | `LoadingCustomData` (build `Example`s yourself) |
-| `learn/programming/Assertions7` | `dspy.Assert` / `dspy.Suggest` backtracking | `output_refinement` (`Refine` / `BestOfN`) |
-| `learn/programming/Mcp` & `tutorials/mcp` | MCP client/tool bridge | plain `ToolFunction`s (`learn/programming/Tools`) |
-| `tutorials/conversation_history` | `dspy.History` input type + mutable `predict.demos` (`inspect_history` is now ported — see Adapters) | — |
-| `tutorials/deployment` | model serving (FastAPI app / MLflow serving) | wrap a program in your own HTTP layer |
-| `tutorials/mem0_react_agent` | mem0 long-term memory store | ReAct itself is portable (`Tools`) |
-
----
-
-## At a glance
-
-- **23** ported doc examples (✅) + **4** signature demos (🔧) = **28** runnable `@main`s (the Metrics
-  example carries two: `metricsMain` + `metricsJudgeMain`).
-- **7** run offline (no key): `dataMain`, `metricsMain`, `builderMain`, `examplesMain`, `cheatsheetMain`,
-  `loadingCustomDataMain`, `savingMain`. The other 21 need `OPENAI_API_KEY` (🔑).
-- **14** adapted prose docs (📄, now `README.md` per section) and **7** blocked files (🚫) — shown as 6 rows above (the two MCP pages share one).
-- **35** Scala source files (27 runnable + 7 blocked + the shared `Demo` runner) plus **14** section `README.md`s.
-
-When a feature lands in dspy4s (datasets, MCP, the `dspy.History` input type, …), the corresponding 🚫 file is
-the next thing to port — its header already records exactly what's missing.
+| File | Feature that it needs | Alternative |
+|------|-----------------------|-------------|
+| `deep_dive/data_handling/BuiltInDatasets` | the dataset loaders (`dspy.datasets`) | `LoadingCustomData` |
+| `learn/programming/Assertions7` | `dspy.Assert` and `dspy.Suggest` | `Refine` and `BestOfN` (`output_refinement`) |
+| `tutorials/deployment` | a server for a program (FastAPI, MLflow) | Put the program in your own HTTP layer. |
+| `tutorials/mem0_react_agent` | the mem0 memory store | `ReAct` (`learn/programming/Tools`) |

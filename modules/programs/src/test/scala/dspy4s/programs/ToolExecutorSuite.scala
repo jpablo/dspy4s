@@ -1,11 +1,23 @@
 package dspy4s.programs
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, RuntimeError, TypeRef, :=}
+import dspy4s.core.contracts.{
+  CallbackEvent,
+  CallbackHandler,
+  DspyError,
+  DynamicValues,
+  RuntimeContext,
+  RuntimeError,
+  ToolEndEvent,
+  TypeRef,
+  :=
+}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.{ToolCallRequest, ToolFunction, description}
 import dspy4s.programs.runtime.ToolExecutor
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 import munit.FunSuite
+
+import scala.collection.mutable.ArrayBuffer
 
 object ToolExecutorSuite:
   /** A plain method, the dspy4s analogue of Python's `def get_weather(city: str) -> str`. */
@@ -109,5 +121,39 @@ class ToolExecutorSuite extends FunSuite:
             s"expected the tool failure to be carried as Left, got: ${callResult.result}"
           )
         case Left(err) => fail(s"dispatch itself should succeed; got: $err")
+    }
+  }
+
+  // Upstream `ReAct.forward` and `ReActV2._execute_tool_calls` catch each exception of a tool and give the model the
+  // error text. The port form of the text is the class name and the message of the exception (the last line of the
+  // upstream traceback).
+  test("a tool that throws gives a Left with the exception text, and the end event gets it") {
+    val events   = ArrayBuffer.empty[CallbackEvent]
+    val callback = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = events += event
+    val loud  = ToolFunction("loud")(_ => throw IllegalStateException("boom"))
+    val quiet = ToolFunction("quiet")(_ => throw IllegalStateException())
+    RuntimeEnvironment.withSettings(RuntimeContext(callbacks = Vector(callback))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val first            = ToolExecutor.invoke(ToolCallRequest("loud", DynamicValue.Record.empty), Vector(loud, quiet))
+      assertEquals(first.map(_.result.left.map(_.message)), Right(Left("IllegalStateException: boom")))
+      val second = ToolExecutor.invoke(ToolCallRequest("quiet", DynamicValue.Record.empty), Vector(loud, quiet))
+      assertEquals(second.map(_.result.left.map(_.message)), Right(Left("IllegalStateException")))
+    }
+    val ends = events.toVector.collect { case end: ToolEndEvent => end.toolName -> end.output.left.map(_.message) }
+    assertEquals(ends, Vector("loud" -> Left("IllegalStateException: boom"), "quiet" -> Left("IllegalStateException")))
+  }
+
+  test("a fatal error of a tool is not caught") {
+    val fatal = ToolFunction("fatal")(_ => throw InterruptedException("stop"))
+    RuntimeEnvironment.withSettings(RuntimeContext()) {
+      given RuntimeContext = RuntimeEnvironment.current
+      // `intercept` catches only non-fatal errors, so the test catches the fatal error itself.
+      val thrown =
+        try
+          val _ = ToolExecutor.invoke(ToolCallRequest("fatal", DynamicValue.Record.empty), Vector(fatal))
+          None
+        catch case error: InterruptedException => Some(error.getMessage)
+      assertEquals(thrown, Some("stop"))
     }
   }

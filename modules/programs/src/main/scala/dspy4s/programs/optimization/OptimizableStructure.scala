@@ -121,51 +121,38 @@ object OptimizableStructure extends CompositeOptimizableStructureInstances with 
 
   /** Named (non-inline) carrier of the derived behaviour. Keeping it a named class — rather than an anonymous class
     * inside `derived` — avoids `-Werror` rejecting an inline-duplicated anonymous class definition at each use site.
+    *
+    * The Mirror converts a program to the typed tuple of its fields and back, so [[FieldStructures]] applies each field
+    * instance to a value of its own field type.
     */
-  private[dspy4s] final class DerivedOptimizableStructure[P <: Product, N <: Int](
-      m             : Mirror.ProductOf[P],
-      fieldInstances: List[OptimizableStructure[Any]],
-      labels        : List[String]
+  private[dspy4s] final class DerivedOptimizableStructure[P <: Product, Elems <: Tuple, N <: Int](
+      m     : Mirror.ProductOf[P] { type MirroredElemTypes = Elems },
+      fields: FieldStructures[Elems, N],
+      labels: List[String]
   ) extends OptimizableStructure.Of[P, N]:
-    def arity(program: P): Int =
-      fieldInstances.zipWithIndex.map { case (instance, index) => instance.arity(program.productElement(index)) }.sum
+    private def elements(program: P): Elems = Tuple.fromProductTyped(program)(using m)
 
-    def inspect(program: P): Vector[OptimizableView] =
-      fieldInstances.zipWithIndex.foldLeft(Vector.empty[OptimizableView]) { case (acc, (inst, i)) =>
-        acc ++ inst.inspect(program.productElement(i))
-      }
+    def arity(program: P): Int = fields.arity(elements(program))
+
+    def inspect(program: P): Vector[OptimizableView] = fields.inspect(elements(program))
 
     /** Names each optimizable leaf by its case-class field path (P-c). A field whose value is a leaf predict gets just
       * the field label (its leaf name "self" is collapsed); a nested composite field yields `"field.sub"`.
       */
     override def inspectNamed(program: P): Vector[(String, OptimizableView)] =
-      fieldInstances.zip(labels).zipWithIndex.flatMap { case ((inst, label), i) =>
-        inst.inspectNamed(program.productElement(i)).map { case (sub, view) =>
-          (if sub == "self" then label else s"$label.$sub") -> view
-        }
+      fields.inspectNamedByField(elements(program)).zip(labels).flatMap { case (named, label) =>
+        named.map { case (sub, view) => (if sub == "self" then label else s"$label.$sub") -> view }
       }.toVector
 
     def replace(program: P, updates: Vector[OptimizableParameters]): P =
-      val arities  = fieldInstances.zipWithIndex.map { case (inst, i) => inst.read(program.productElement(i)).size }
-      val expected = arities.sum
+      val (expected, distribute) = fields.replacement(elements(program))
       require(expected == updates.size, s"OptimizableStructure.replace expected $expected updates, got ${updates.size}")
-      var cursor      = 0
-      val rebuiltArgs = fieldInstances.zipWithIndex.map { case (inst, i) =>
-        val value = program.productElement(i)
-        val arity = arities(i)
-        val slice = updates.slice(cursor, cursor + arity)
-        cursor += arity
-        inst.replace(value, slice)
-      }
-      m.fromProduct(Tuple.fromArray(rebuiltArgs.toArray))
+      m.fromTuple(distribute(updates))
 
   /** Recurse over the Mirror's element types, summoning each field's fixed-arity optimizable structure.
     *
-    * The widening to `OptimizableStructure[Any]` is the single, narrowly-scoped accommodation needed to hold the
-    * heterogeneous per-field instances in one homogeneous list. It is type-safe: the i-th instance is only ever applied
-    * to `program.productElement(i)`, whose runtime value the Mirror guarantees to be of the corresponding element type.
-    * No `asInstanceOf` is used on program values; the cast is confined to the instance witness, which never inspects
-    * more than its own field.
+    * Each operation takes the typed tuple of field values. The instance for `Head *: Tail` applies the head structure
+    * to the head value and delegates the tail, so no instance is widened and no value is cast.
     *
     * This compiler evidence retains the sum of field arities in the derived result type.
     */
@@ -174,21 +161,44 @@ object OptimizableStructure extends CompositeOptimizableStructureInstances with 
       "Declare an explicit OptimizableStructure.empty instance for intentionally parameter-free field types."
   )
   sealed trait FieldStructures[Elems <: Tuple, N <: Int]:
-    def instances: List[OptimizableStructure[Any]]
+    def arity(fields: Elems): Int
+
+    def inspect(fields: Elems): Vector[OptimizableView]
+
+    /** The named views of each field, in field order. */
+    def inspectNamedByField(fields: Elems): List[Vector[(String, OptimizableView)]]
+
+    /** Measure the fields once. The result is the update count that the fields expect, and the function that
+      * distributes that many updates in field order.
+      */
+    def replacement(fields: Elems): (Int, Vector[OptimizableParameters] => Elems)
 
   given emptyFieldStructures: FieldStructures[EmptyTuple, 0] with
-    val instances: List[OptimizableStructure[Any]] = Nil
+    def arity(@annotation.unused fields  : EmptyTuple): Int                     = 0
+    def inspect(@annotation.unused fields: EmptyTuple): Vector[OptimizableView] = Vector.empty
+
+    def inspectNamedByField(@annotation.unused fields: EmptyTuple): List[Vector[(String, OptimizableView)]] = Nil
+
+    def replacement(fields: EmptyTuple): (Int, Vector[OptimizableParameters] => EmptyTuple) =
+      0 -> (_ => fields)
 
   given consFieldStructures[Head, Tail <: Tuple, NHead <: Int, NTail <: Int](using
       head: OptimizableStructure.WithArity[Head, NHead],
       tail: FieldStructures[Tail, NTail]
   ): FieldStructures[Head *: Tail, NHead + NTail] with
-    val instances: List[OptimizableStructure[Any]] = widen(head) :: tail.instances
+    def arity(fields: Head *: Tail): Int =
+      head.arity(fields.head) + tail.arity(fields.tail)
 
-  /** Confines the unavoidable widening of a per-field `OptimizableStructure[A]` to a `OptimizableStructure[Any]` to one
-    * private helper. Safe because the Mirror pairs this instance positionally with a value of type `A` (see
-    * [[FieldStructures]]); `OptimizableStructure` is invariant so the compiler cannot prove the subtype, but the
-    * runtime contract holds.
-    */
-  private[dspy4s] def widen[A](inst: OptimizableStructure[A]): OptimizableStructure[Any] =
-    inst.asInstanceOf[OptimizableStructure[Any]]
+    def inspect(fields: Head *: Tail): Vector[OptimizableView] =
+      head.inspect(fields.head) ++ tail.inspect(fields.tail)
+
+    def inspectNamedByField(fields: Head *: Tail): List[Vector[(String, OptimizableView)]] =
+      head.inspectNamed(fields.head) :: tail.inspectNamedByField(fields.tail)
+
+    def replacement(fields: Head *: Tail): (Int, Vector[OptimizableParameters] => Head *: Tail) =
+      val headCount                   = head.read(fields.head).size
+      val (tailCount, distributeTail) = tail.replacement(fields.tail)
+      (headCount + tailCount) -> { updates =>
+        val (headUpdates, tailUpdates) = updates.splitAt(headCount)
+        head.replace(fields.head, headUpdates) *: distributeTail(tailUpdates)
+      }

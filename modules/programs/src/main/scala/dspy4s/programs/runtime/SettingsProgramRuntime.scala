@@ -1,5 +1,6 @@
 package dspy4s.programs.runtime
 
+import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
@@ -35,3 +36,10 @@ object SettingsProgramRuntime:
     * anonymous instances compare by reference and would make every default-runtime module unequal to its rebuild.
     */
   val default: ProgramRuntime = new SettingsProgramRuntime {}
+
+  /** The adapter of `context`, else a default [[ChatAdapter]] (upstream `dspy.settings.adapter or dspy.ChatAdapter()`).
+    */
+  private[programs] def adapterOrChat(context: RuntimeContext): Adapter =
+    context.adapter match
+      case Some(adapter: Adapter) => adapter
+      case _                      => ChatAdapter()

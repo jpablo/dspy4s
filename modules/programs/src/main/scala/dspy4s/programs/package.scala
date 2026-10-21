@@ -38,13 +38,12 @@ package object programs:
   export strategies.{
     BestOfN,
     ChainOfThought,
-    CodeAct,
     DynamicPredict,
     MultiChainComparison,
     MultiChainInput,
     Predict,
-    ProgramOfThought,
     RLM,
     ReAct,
+    ReActV2,
     Refine
   }

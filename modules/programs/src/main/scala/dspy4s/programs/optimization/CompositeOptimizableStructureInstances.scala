@@ -1,6 +1,6 @@
 package dspy4s.programs.optimization
 
-import dspy4s.programs.strategies.{CodeAct, MultiChainComparison, ProgramOfThought, ReAct, RLM}
+import dspy4s.programs.strategies.{MultiChainComparison, ReAct, ReActV2, RLM}
 
 /** Hand-written [[OptimizableStructure]] instances for composite programs whose learnable sub-predicts are hoisted to
   * stable, `copy`-reachable members. Inheriting these instances into the [[OptimizableStructure]] companion keeps them
@@ -20,15 +20,6 @@ private[optimization] trait CompositeOptimizableStructureInstances:
       (program, nextA, nextB) => program.copy(reactPredictOverride = nextA, extractorPredictOverride = nextB)
     )
 
-  given codeActOptimizableStructure[I, O]: OptimizableStructure.Of[CodeAct[I, O], 2] =
-    twoPredictStructure("CodeAct", "codeact", "extractor")(
-      _.codeActPredict,
-      _.codeActPredictOverride,
-      _.extractorPredict,
-      _.extractorPredictOverride,
-      (program, nextA, nextB) => program.copy(codeActPredictOverride = nextA, extractorPredictOverride = nextB)
-    )
-
   given rlmOptimizableStructure[I, O]: OptimizableStructure.Of[RLM[I, O], 2] =
     twoPredictStructure("RLM", "action", "extract")(
       _.actionPredict,
@@ -38,36 +29,25 @@ private[optimization] trait CompositeOptimizableStructureInstances:
       (program, nextA, nextB) => program.copy(actionPredictOverride = nextA, extractPredictOverride = nextB)
     )
 
-  given programOfThoughtOptimizableStructure[I, O]: OptimizableStructure.Of[ProgramOfThought[I, O], 3] with
-    def arity(@annotation.unused program: ProgramOfThought[I, O]): Int    = 3
-    def inspect(program: ProgramOfThought[I, O]): Vector[OptimizableView] =
-      Vector(
-        program.generatorPredict.optimizableView,
-        program.regeneratorPredict.optimizableView,
-        program.answererPredict.optimizableView
-      )
+  /** ReActV2 (experimental): one optimizable part, the step predictor `react` (upstream `ReActV2.react`). `replace`
+    * writes the parameters through [[ReActV2.reactPredict]] into `reactPredictOverride`; parameters equal to the
+    * current ones give the same program.
+    */
+  given reactV2OptimizableStructure[I, O]: OptimizableStructure.Of[ReActV2[I, O], 1] with
+    def arity(@annotation.unused program: ReActV2[I, O]): Int = 1
 
-    override def inspectNamed(program: ProgramOfThought[I, O]): Vector[(String, OptimizableView)] =
-      Vector(
-        "generator"   -> program.generatorPredict.optimizableView,
-        "regenerator" -> program.regeneratorPredict.optimizableView,
-        "answerer"    -> program.answererPredict.optimizableView
-      )
+    def inspect(program: ReActV2[I, O]): Vector[OptimizableView] =
+      Vector(program.reactPredict.optimizableView)
 
-    def replace(program: ProgramOfThought[I, O], updates: Vector[OptimizableParameters]): ProgramOfThought[I, O] =
-      require(
-        updates.size == 3,
-        s"ProgramOfThought expects exactly 3 updates (generator, regenerator, answerer), got ${updates.size}"
-      )
-      if updates == inspect(program).map(_.parameters) then program
+    override def inspectNamed(program: ReActV2[I, O]): Vector[(String, OptimizableView)] =
+      Vector("react" -> program.reactPredict.optimizableView)
+
+    def replace(program: ReActV2[I, O], updates: Vector[OptimizableParameters]): ReActV2[I, O] =
+      require(updates.size == 1, s"ReActV2 expects exactly 1 update (react), got ${updates.size}")
+      if updates == read(program) then program
       else
-        val nextGenerator   = updateOverride(program.generatorPredict, program.generatorPredictOverride, updates(0))
-        val nextRegenerator = updateOverride(program.regeneratorPredict, program.regeneratorPredictOverride, updates(1))
-        val nextAnswerer    = updateOverride(program.answererPredict, program.answererPredictOverride, updates(2))
-        program.copy(
-          generatorPredictOverride = nextGenerator,
-          regeneratorPredictOverride = nextRegenerator,
-          answererPredictOverride = nextAnswerer
+        program.copy(reactPredictOverride =
+          updateOverride(program.reactPredict, program.reactPredictOverride, updates.head)
         )
 
   given multiChainComparisonOptimizableStructure[I, O]
@@ -87,10 +67,9 @@ private[optimization] trait CompositeOptimizableStructureInstances:
       if updates.head == program.comparePredict.optimizableParameters then program
       else program.copy(comparePredictParametersOverride = Some(updates.head))
 
-  /** The shared shape of a two-predict composite instance (ReAct / CodeAct / RLM): two addressable predicts, two
-    * `copy`-reachable override fields, and a rebuild via `copy`. The no-op guard (return the SAME program when the
-    * updates equal the current parameters) is decided once here, matching the guards the arity-3 and arity-1 instances
-    * below already carry.
+  /** The shared shape of a two-predict composite instance (ReAct / RLM): two addressable predicts, two `copy`-reachable
+    * override fields, and a rebuild via `copy`. The no-op guard (return the SAME program when the updates equal the
+    * current parameters) is decided once here, matching the guard the arity-1 instance above already carries.
     */
   private def twoPredictStructure[P, PA: OptimizableLeaf, PB: OptimizableLeaf](
       label: String,

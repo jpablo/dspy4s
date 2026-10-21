@@ -92,11 +92,20 @@ final class COPRO[P: {OptimizableStructure, ProgramRunner}](config: COPROConfig)
       teacher : Option[P]               = None,
       valset  : Option[Vector[Example]] = None
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
+    Teleprompter.withCompileCallbacks(this, trainset, valset)(compileInScope(student, trainset, valset))
+
+  /** The work of [[compile]], inside its compile scope. */
+  private def compileInScope(
+      student : P,
+      trainset: Vector[Example],
+      valset  : Option[Vector[Example]]
+  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     val evalset: Vector[Example] = valset.getOrElse(trainset)
     val leafCount                = ps.read(student).size
 
     if leafCount == 0 then
       Right(OptimizerSupport.noOptimizableLeavesReport(student))
+    else if evalset.isEmpty then Left(OptimizerSupport.emptyEvalsetError(name))
     else
       // Greedy coordinate ascent: optimize each leaf's instruction in turn, keeping the others fixed.
       var current       = student

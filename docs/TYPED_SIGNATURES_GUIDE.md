@@ -424,7 +424,7 @@ need the value back, that's what `Prediction.output` is for.
 
 Note that `SignatureLayout`'s cohort-mutation helpers (`withInputFields` and
 `withOutputFields`) are `private[dspy4s]` — only composite programs like
-`CodeAct` and `MultiChainComparison` use them. User code stays on
+`MultiChainComparison` use them. User code stays on
 the `Signature` API.
 
 ---

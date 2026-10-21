@@ -22,6 +22,12 @@ private[lm] object WireKeys:
   final val streamOptions = "stream_options"
   final val includeUsage  = "include_usage"
 
+  // Stream chunks. The chunk codec of `OpenAiStreamChunk` derives these keys, and its lenient reader names them.
+  final val delta        = "delta"
+  final val finishReason = "finish_reason"
+  final val index        = "index"
+  final val error        = "error"
+
   // Response / shared structure
   final val choices   = "choices"
   final val output    = "output"
@@ -35,6 +41,13 @@ private[lm] object WireKeys:
   final val name      = "name"
   final val arguments = "arguments"
 
+  // Tool call identity. The Responses API names the id of a call `call_id`. A tool message names the call that it
+  // answers with `tool_call_id`.
+  final val id         = "id"
+  final val callId     = "call_id"
+  final val toolCallId = "tool_call_id"
+
   // Synthetic keys used to wrap tool-call arguments that aren't a JSON object
-  final val input = "input"
-  final val value = "value"
+  final val input       = "input"
+  final val value       = "value"
+  final val partialJson = "partial_json"

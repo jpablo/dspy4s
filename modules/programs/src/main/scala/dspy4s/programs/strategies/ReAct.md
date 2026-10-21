@@ -42,7 +42,7 @@ Conceptually, the class has this shape:
 final case class ReAct[I, O](
     baseSignature: Signature[I, O],
     tools: Vector[ToolFunction],
-    maxIterations: IterationLimit = IterationLimit(5)
+    maxIterations: IterationLimit = IterationLimit(20)
 ) extends Module[I, ReAct.WithReasoning[O]]
 ```
 
@@ -101,6 +101,10 @@ The decoder for this step is deliberately lenient. Missing thought or tool-name 
 arguments may arrive as a record or as JSON text; malformed, missing, or non-object arguments become an empty record.
 This lets the control loop decide how to proceed instead of turning a slightly malformed action into a decoding failure.
 
+The adapter parser comes before this decoder. The tool names are the allowed values of `next_tool_name`, so the
+parsers of the port reject an empty name and a name that is not a tool, as upstream `parse_value` rejects a value
+outside a `Literal` (decision D7). See "What happens when things go wrong?".
+
 ## One loop iteration
 
 The trajectory is a `Vector[TrajectoryEntry]`. Each iteration reads the current vector and either returns an updated
@@ -122,8 +126,8 @@ flowchart TD
 ```
 
 The bounded recursion lives in [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala), while
-[`runtime/TrajectoryAgent.scala`](../runtime/TrajectoryAgent.scala) owns the loop-then-extract postlude. ReAct and CodeAct
-also share [`runtime/InterpretedTrajectoryAgent.scala`](../runtime/InterpretedTrajectoryAgent.scala), whose final transition
+[`runtime/TrajectoryAgent.scala`](../runtime/TrajectoryAgent.scala) owns the loop-then-extract postlude. ReAct
+also uses [`runtime/InterpretedTrajectoryAgent.scala`](../runtime/InterpretedTrajectoryAgent.scala), whose final transition
 is:
 
 ```text
@@ -142,6 +146,14 @@ error appends nothing. For a ready action, ReAct's decision runs after recording
 
 The user supplies `ToolFunction` values. ReAct adds one more tool named `finish` and lists every available tool in the
 react predictor's instructions, including each tool's description and argument schema when available.
+
+The instructions are the upstream text of `ReAct.__init__`. Each tool has the line `(n) <name>, whose description is
+<desc>...</desc>. It takes arguments {...}.` (upstream `Tool.__str__`). A tool with no description has the line
+`(n) <name>. It takes arguments {...}.`. The arguments are JSON text: the `properties` of `ToolFunction.inputSchema`
+when the tool has one, else one `{"type": ...}` for each entry of `argSchema`. The field `next_tool_name` has the tool
+names as enum values, and `next_tool_args` is a `dict` field. The parser accepts a tool name in the forms of upstream
+`parse_value`: the comparison is case-sensitive, after the parser removes the whitespace at the two ends, a
+`Literal[...]` or `str[...]` wrapper, and the quotes around the name.
 
 The model does **not** use provider-native function calling here. It emits the ordinary signature fields
 `next_tool_name` and `next_tool_args`. ReAct resolves that name and invokes the corresponding `ToolFunction` locally.
@@ -189,20 +201,35 @@ object WeatherAgent:
     }
 ```
 
-An idealized run for `"What's the weather in Tokyo?"` looks like this:
+An idealized run for `"What's the weather in Tokyo?"` gives the trajectory below. The trajectory is the user message
+content of the adapter of the run for the signature `thought_0, tool_name_0, tool_args_0, observation_0, ... -> x`
+(upstream `ReAct._format_trajectory`). This example uses the default `ChatAdapter`. The tool arguments are JSON text.
+An empty trajectory is an empty text.
 
 ```text
-## Step 1
-thought: I need current weather data.
-tool_name: get_weather
-tool_args: {"city": Tokyo}
-observation: The weather in Tokyo is sunny and 25°C
+[[ ## thought_0 ## ]]
+I need current weather data.
 
-## Step 2
-thought: I have enough information to answer.
-tool_name: finish
-tool_args: {}
-observation: Completed.
+[[ ## tool_name_0 ## ]]
+get_weather
+
+[[ ## tool_args_0 ## ]]
+{"city": "Tokyo"}
+
+[[ ## observation_0 ## ]]
+The weather in Tokyo is sunny and 25°C
+
+[[ ## thought_1 ## ]]
+I have enough information to answer.
+
+[[ ## tool_name_1 ## ]]
+finish
+
+[[ ## tool_args_1 ## ]]
+{}
+
+[[ ## observation_1 ## ]]
+Completed.
 ```
 
 The extractor then sees the original question and this trajectory and produces something like:
@@ -222,14 +249,18 @@ prediction machinery.
 
 | Situation | Behavior |
 |---|---|
-| Unknown tool name | Append an `Execution error: tool ... does not exist` observation and continue |
-| Tool returns an error | Append an error observation and continue |
-| Empty tool name | Append `No tool was selected.` and run the extractor |
+| Unknown tool name | A parse error of the react step (decision D7). The chat adapter tries its JSON fallback. When that also fails, the call returns `Left(ParseError)` with no extract step, as upstream: `AdapterParseError` is not a `ValueError`, so `ReAct.forward` does not catch it |
+| Tool returns an error | Append the observation `Execution error in <name>: <message>` and continue |
+| Tool throws a non-fatal exception | Append the observation `Execution error in <name>: <ClassName>: <message>` (the class name alone when the exception has no message) and continue |
+| Tool throws a fatal error, for example an `InterruptedException` | The error goes up to the caller of the program |
+| Empty tool name | The same parse error as an unknown tool name |
+| Unknown or empty tool name from an adapter that does not check the allowed values | Append `Execution error: tool ... does not exist` and continue, or append `No tool was selected.` and run the extractor |
 | Model selects `finish` | Append the finish entry and run the extractor |
 | `maxIterations` reached | Run the extractor over the trajectory gathered so far |
-| React-step context overflow | Drop the oldest trajectory entry and retry, up to three attempts |
+| React-step context overflow | Drop the oldest trajectory entry and retry, up to three attempts; the last entry is never dropped |
 | Persistent react-step overflow | End the loop and let the extractor make the best answer it can |
-| Extractor context overflow | Retry with oldest entries omitted, up to three attempts |
+| Extractor context overflow | Retry with oldest entries omitted, up to three attempts; the last entry is never dropped |
+| Persistent extractor overflow | Return the final `Left(ContextWindowExceededError)` |
 | Other react/extractor LM error | Return `Left(error)` |
 | Extractor decoding error | Return `Left(error)` |
 
@@ -289,6 +320,8 @@ A useful reading order is:
 6. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): the bounded continue/done recursion.
 7. [`runtime/TrajectoryTruncation.scala`](../runtime/TrajectoryTruncation.scala): context-window retry behavior.
 8. [`contracts/ToolFunction.scala`](../contracts/ToolFunction.scala): the tool abstraction and method derivation.
+   [`runtime/ToolExecutor.scala`](../runtime/ToolExecutor.scala) runs one tool call and turns a non-fatal exception into
+   an error.
 9. [`ReActSuite.scala`](../../../../../test/scala/dspy4s/programs/ReActSuite.scala): executable examples of finish, limits,
    tool errors, callbacks, and truncation.
 10. [`InterpretedTrajectoryAgentLawSuite.scala`](../../../../../test/scala/dspy4s/programs/runtime/InterpretedTrajectoryAgentLawSuite.scala)
@@ -299,4 +332,5 @@ A useful reading order is:
 
 This guide describes the current dspy4s implementation. It assumes the ambient `RuntimeContext` supplies an LM and an
 adapter. `ToolFunction` execution is synchronous, and ReAct's tool selection uses signature output fields rather than
-provider-native function calling.
+provider-native function calling. For an agent that uses provider-native function calling when the model supports it,
+see the experimental [`ReActV2`](ReActV2.scala).

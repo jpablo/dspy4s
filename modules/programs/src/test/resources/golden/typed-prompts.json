@@ -1,0 +1,32 @@
+{
+  "upstream": "f1260ff14",
+  "generator": "scripts/golden/adapter_prompts.py",
+  "cases": [
+    {
+      "adapter": "ChatAdapter",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str):\nYour output fields are:\n1. `answer` (str): \n2. `count` (int): \n3. `score` (float): \n4. `ok` (bool):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## question ## ]]\n{question}\n\n[[ ## answer ## ]]\n{answer}\n\n[[ ## count ## ]]\n{count}        # note: the value you produce must be a single int value\n\n[[ ## score ## ]]\n{score}        # note: the value you produce must be a single float value\n\n[[ ## ok ## ]]\n{ok}        # note: the value you produce must be True or False\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `answer`, `count`, `score`, `ok`."
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nWho is Ana?\n\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, then `[[ ## count ## ]]` (must be formatted as a valid Python int), then `[[ ## score ## ]]` (must be formatted as a valid Python float), then `[[ ## ok ## ]]` (must be formatted as a valid Python bool), and then ending with the marker for `[[ ## completed ## ]]`."
+        }
+      ]
+    },
+    {
+      "adapter": "JSONAdapter",
+      "messages": [
+        {
+          "role": "system",
+          "content": "Your input fields are:\n1. `question` (str):\nYour output fields are:\n1. `answer` (str): \n2. `count` (int): \n3. `score` (float): \n4. `ok` (bool):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\nInputs will have the following structure:\n\n[[ ## question ## ]]\n{question}\n\nOutputs will be a JSON object with the following fields.\n\n{\n  \"answer\": \"{answer}\",\n  \"count\": \"{count}        # note: the value you produce must be a single int value\",\n  \"score\": \"{score}        # note: the value you produce must be a single float value\",\n  \"ok\": \"{ok}        # note: the value you produce must be True or False\"\n}\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `answer`, `count`, `score`, `ok`."
+        },
+        {
+          "role": "user",
+          "content": "[[ ## question ## ]]\nWho is Ana?\n\nRespond with a JSON object in the following order of fields: `answer`, then `count` (must be formatted as a valid Python int), then `score` (must be formatted as a valid Python float), then `ok` (must be formatted as a valid Python bool)."
+        }
+      ]
+    }
+  ]
+}

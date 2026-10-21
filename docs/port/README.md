@@ -19,6 +19,9 @@ looking for.
 DSPy **3.1.3** (released 2026-02-05). Bump procedure in
 [PORT_BACKLOG.md](PORT_BACKLOG.md#upstream-parity-target).
 
+The actionable 3.2.1 changes are ported. The analysis of **3.4.0** is in
+[`UPGRADE-3.2.1-to-3.4.0.md`](../../UPGRADE-3.2.1-to-3.4.0.md) and in [PORT_GAPS.md](PORT_GAPS.md) G-23 to G-50.
+
 ## Related (outside this directory)
 
 - [../ARCHITECTURE.md](../ARCHITECTURE.md) — dspy4s on its own terms (not framed against Python).

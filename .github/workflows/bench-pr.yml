@@ -70,13 +70,15 @@ jobs:
         if: steps.plan.outputs.skip == 'false' && steps.plan.outputs.bootstrap == 'false'
         run: |
           git checkout --detach "${{ steps.plan.outputs.base }}"
-          sbt -batch "benchmarks/Jmh/run -wi 1 -i 2 -f 1 -t 1 -prof gc -rf json -rff benchmarks/base.json ${{ steps.plan.outputs.regex }}"
+          # sbt forks JMH in the benchmarks folder, so the result file needs an absolute path.
+          sbt -batch "benchmarks/Jmh/run -wi 1 -i 2 -f 1 -t 1 -prof gc -rf json -rff $GITHUB_WORKSPACE/benchmarks/base.json ${{ steps.plan.outputs.regex }}"
 
       - name: Benchmark pull-request head
         if: steps.plan.outputs.skip == 'false'
         run: |
           git checkout --detach "${{ steps.plan.outputs.head }}"
-          sbt -batch "benchmarks/Jmh/run -wi 1 -i 2 -f 1 -t 1 -prof gc -rf json -rff benchmarks/head.json ${{ steps.plan.outputs.regex }}"
+          # sbt forks JMH in the benchmarks folder, so the result file needs an absolute path.
+          sbt -batch "benchmarks/Jmh/run -wi 1 -i 2 -f 1 -t 1 -prof gc -rf json -rff $GITHUB_WORKSPACE/benchmarks/head.json ${{ steps.plan.outputs.regex }}"
 
       - name: Report comparison
         if: steps.plan.outputs.skip == 'false' && steps.plan.outputs.bootstrap == 'false'

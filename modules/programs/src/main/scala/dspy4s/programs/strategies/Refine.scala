@@ -3,7 +3,6 @@ package dspy4s.programs.strategies
 import dspy4s.programs.{AttemptCount, FailureCount}
 import dspy4s.programs.compose.{Mode, mode}
 import dspy4s.programs.optimization.*
-import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt
@@ -23,9 +22,10 @@ import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.runtime.AttemptSelection
+import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.programs.contracts.Prediction
 import dspy4s.signatures.Signature
-import zio.blocks.schema.Schema
+import zio.blocks.schema.{DynamicValue, Schema}
 
 import scala.compiletime.ops.int.+
 
@@ -50,6 +50,11 @@ import scala.compiletime.ops.int.+
   * Like [[BestOfN]], the winning attempt's isolated trace/history are propagated to the caller; `failCount` bounds
   * tolerated failures before giving up (defaults to `n`).
   *
+  * The LM usage of the result is the total of each attempt, of each OfferFeedback call, and of the model calls of
+  * `rewardFn`, not only of the selected attempt (decision D9 of UPGRADE-3.2.1-to-3.4.0; `Module.apply` opens the usage
+  * scope). Upstream runs all of them in the usage tracker of the `Refine` call (`dspy/predict/refine.py`,
+  * `dspy/primitives/module.py`).
+  *
   * ==Deltas from Python==
   *   - '''Trace-grounded, not source-grounded.''' Grounding is the runtime TRACE + I/O, not the program's / reward
   *     function's SOURCE CODE: dspy4s has no source introspection, so Python's `program_code`, `reward_code`, and
@@ -57,7 +62,9 @@ import scala.compiletime.ops.int.+
   *     trajectory).
   *   - '''Layout-keyed routing.''' Python routes advice by `signature` object identity; dspy4s routes by
   *     [[SignatureLayout]] value equality. Two predictors with structurally identical layouts therefore collapse to one
-  *     advice entry — acceptable, since identical layouts also yield identical advice.
+  *     advice entry — acceptable, since identical layouts also yield identical advice. The match ignores the
+  *     instructions: the view of a `ChainOfThought` has the instructions of its base signature, and its inner predict
+  *     has the effective instructions of that base signature.
   *
   * @tparam P
   *   the inner program type; a module (so `I`/`O` infer from it) that is also introspectable for its named optimizable
@@ -71,8 +78,8 @@ final case class Refine[P <: Module[I, O], I, O](
     failCount: Option[FailureCount] = None,
     /** Optional override for the OfferFeedback critic predict. When `None` (the default), it is built from
       * [[Refine.offerFeedbackSignature]]. Carrying it as a defaulted, `copy`-reachable field makes the critic
-      * addressable + immutably replaceable (see [[Refine.refineOptimizableStructure]]), mirroring the ReAct/CodeAct
-      * override pattern.
+      * addressable + immutably replaceable (see [[Refine.refineOptimizableStructure]]), mirroring the ReAct override
+      * pattern.
       */
     criticPredictOverride: Option[Predict[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice]] = None
 )(using
@@ -158,20 +165,19 @@ object Refine:
     )
 
   /** Resolve the base adapter from the ambient context, narrowing the `AdapterRef` to a concrete [[Adapter]]; falls
-    * back to a default [[ChatAdapter]] when none is configured (mirrors Python's `dspy.settings.adapter or
-    * dspy.ChatAdapter()`).
+    * back to a default [[dspy4s.adapters.ChatAdapter]] when none is configured (mirrors Python's `dspy.settings.adapter
+    * or dspy.ChatAdapter()`).
     */
   private[programs] def resolveBaseAdapter(context: RuntimeContext): Adapter =
-    context.adapter match
-      case Some(adapter: Adapter) => adapter
-      case _                      => ChatAdapter()
+    SettingsProgramRuntime.adapterOrChat(context)
 
   /** Wrapper [[Adapter]] that injects each predictor's OWN advice into ITS call, mirroring Python's `WrapperAdapter`
     * (`inputs["hint_"] = advice.get(signature2name[signature], "N/A")`). The predictor is identified by its
     * [[SignatureLayout]] (dspy4s's stand-in for Python's `signature` object identity); `adviceByLayout` maps each
     * predictor's layout to its advice. `format` looks up the invocation's layout: on a real (non-`N/A`, non-empty)
     * advice it appends a `hint_` INPUT field carrying that advice and delegates to `baseAdapter.format`; otherwise (no
-    * advice for this predictor) it delegates unchanged. `parse` is always unchanged.
+    * advice for this predictor) it delegates unchanged. `parse` is always unchanged. The lookup compares the fields and
+    * the name of the layouts, and not their instructions.
     */
   private[programs] final case class HintInjectingAdapter(
       baseAdapter   : Adapter,
@@ -179,8 +185,20 @@ object Refine:
   ) extends Adapter:
     override def name: String = s"${baseAdapter.name}+hint"
 
+    private val adviceByStructure: Map[SignatureLayout, String] =
+      adviceByLayout.map((layout, advice) => layout.withInstructions(None) -> advice)
+
+    /** The fallback of the base adapter, with the same advice (upstream `WrapperAdapter` calls the base adapter, which
+      * does its own fallback).
+      */
+    override def fallback: Option[Adapter] = baseAdapter.fallback.map(next => copy(baseAdapter = next))
+
+    override def formatUserMessageContent(layout: SignatureLayout, values: DynamicValue.Record): String =
+      baseAdapter.formatUserMessageContent(layout, values)
+
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-      adviceByLayout.get(invocation.layout).map(_.trim).filter(a => a.nonEmpty && a != "N/A") match
+      adviceByStructure.get(invocation.layout.withInstructions(None)).map(_.trim)
+        .filter(a => a.nonEmpty && a != "N/A") match
         case None         => baseAdapter.format(invocation) // no advice routed to this predictor
         case Some(advice) =>
           val hintField = FieldSpec(
@@ -198,6 +216,11 @@ object Refine:
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
       baseAdapter.parse(layout, output)
+
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
+        RuntimeContext
+    ): Either[DspyError, ParsedOutput] =
+      baseAdapter.parse(invocation, output)
 
   /** The critic's input: the six grounding fields of [[RefineFeedback.layout]], field names matching the layout
     * exactly.

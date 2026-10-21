@@ -4,6 +4,9 @@ import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.ContextWindowExceededError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.LmInvalidRequestError
+import dspy4s.core.contracts.LmRateLimitError
+import dspy4s.core.contracts.LmServerError
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.lm.contracts.LmChunk
 import zio.blocks.schema.DynamicValue
@@ -88,17 +91,17 @@ class OpenAiClientSuite extends FunSuite:
     assert(!body.contains("\"mode\""), s"payload should not include dspy4s-internal 'mode': $body")
   }
 
-  test("invoke surfaces non-2xx status as runtime error with rate-limit component on 429") {
+  test("invoke gives LmRateLimitError for HTTP 429") {
     val transport = new ScriptedTransport(
       nonStreamingResponses = Vector(Right(HttpResponse(429, Map.empty, """{"error":{"message":"rate limited"}}""")))
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
 
-    val result = client.invoke(DynamicValues.fromAny(Map("model" -> "m")))
-    assert(result.isLeft)
-    val error = result.left.toOption.get.asInstanceOf[RuntimeError]
-    assertEquals(error.component, "openai_rate_limit")
-    assert(error.message.contains("429"))
+    client.invoke(DynamicValues.fromAny(Map("model" -> "m"))) match
+      case Left(error: LmRateLimitError) =>
+        assertEquals(error.details.status, Some(429))
+        assert(error.message.contains("429"), error.message)
+      case other => fail(s"expected LmRateLimitError, got: $other")
   }
 
   test("invoke maps a 400 context-window overflow to ContextWindowExceededError carrying the model") {
@@ -114,11 +117,11 @@ class OpenAiClientSuite extends FunSuite:
     val result = client.invoke(DynamicValues.fromAny(Map("model" -> "gpt-4o-mini")))
     assert(result.isLeft)
     result.left.toOption.get match
-      case err: ContextWindowExceededError => assertEquals(err.model, Some("gpt-4o-mini"))
+      case err: ContextWindowExceededError => assertEquals(err.details.model, Some("gpt-4o-mini"))
       case other                           => fail(s"expected ContextWindowExceededError, got: $other")
   }
 
-  test("invoke keeps a generic 400 (non context-window) as the existing runtime error") {
+  test("invoke gives LmInvalidRequestError for an HTTP 400 that is not a context-window failure") {
     val transport = new ScriptedTransport(
       nonStreamingResponses = Vector(Right(HttpResponse(
         400,
@@ -128,11 +131,11 @@ class OpenAiClientSuite extends FunSuite:
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
 
-    val result = client.invoke(DynamicValues.fromAny(Map("model" -> "gpt-4o-mini")))
-    assert(result.isLeft)
-    val error = result.left.toOption.get.asInstanceOf[RuntimeError]
-    assertEquals(error.component, "openai_http")
-    assert(error.message.contains("400"))
+    client.invoke(DynamicValues.fromAny(Map("model" -> "gpt-4o-mini"))) match
+      case Left(error: LmInvalidRequestError) =>
+        assertEquals(error.details.providerCode, Some("invalid_request_error"))
+        assert(error.message.contains("400"), error.message)
+      case other => fail(s"expected LmInvalidRequestError, got: $other")
   }
 
   test("invoke returns parse error for malformed JSON body") {
@@ -219,10 +222,10 @@ class OpenAiClientSuite extends FunSuite:
       )))
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
-    val result = client.stream(DynamicValues.fromAny(Map("model" -> "m")))
-    assert(result.isLeft)
-    val error = result.left.toOption.get.asInstanceOf[RuntimeError]
-    assertEquals(error.component, "openai_server")
+    client.stream(DynamicValues.fromAny(Map("model" -> "m"))) match
+      case Left(error: LmServerError) => assert(error.message.contains("something bad"), error.message)
+      case Left(other)                => fail(s"expected LmServerError, got: $other")
+      case Right(_)                   => fail("expected a failure")
   }
 
   test("stream parses tool_calls deltas into LmChunk.toolCalls") {
@@ -255,25 +258,4 @@ class OpenAiClientSuite extends FunSuite:
     assertEquals(chunks(1).toolCalls.head.argumentsFragment, Some("{\"loc"))
     assertEquals(chunks(2).toolCalls.head.argumentsFragment, Some("ation\":\"Paris\"}"))
     assertEquals(chunks(2).finishReason, Some("tool_calls"))
-  }
-
-  test("stream ignores malformed SSE JSON lines without failing") {
-    val transport = new ScriptedTransport(
-      streamingResponses = Vector(Right(HttpStreamResponse(
-        status = 200,
-        headers = Map.empty,
-        dataLines = new VectorClosableIterator(Vector(
-          "data: {not valid json",
-          """data: {"choices":[{"delta":{"content":"ok"}}]}""",
-          "data: [DONE]",
-          ""
-        ))
-      )))
-    )
-    val client = OpenAiClient(apiKey = "x", transport = transport)
-    val iter   = client.stream(DynamicValues.fromAny(Map("model" -> "m"))).toOption.get
-    val chunks = scala.collection.mutable.ArrayBuffer.empty[LmChunk]
-    while iter.hasNext do chunks += iter.next()
-    assertEquals(chunks.size, 1)
-    assertEquals(chunks(0).text, "ok")
   }

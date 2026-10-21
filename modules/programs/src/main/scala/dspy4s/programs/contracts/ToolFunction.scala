@@ -5,8 +5,8 @@ import zio.blocks.schema.{DynamicValue, Schema}
 
 /** A callable tool exposed to tool-using programs (`ReAct`, ...). `invoke` receives the call arguments as a
   * `DynamicValue.Record` (the named params parsed from the LM's tool call) and returns its result as a `DynamicValue`,
-  * so both ends travel the spine without a lossy `Any` round-trip. Extract args with `DynamicValues.recordGet` / a
-  * `Schema`-backed decode; build the result with [[ToolFunction.result]].
+  * so both ends stay in the interchange format, with no lossy `Any` round-trip. Extract args with
+  * `DynamicValues.recordGet` / a `Schema`-backed decode; build the result with [[ToolFunction.result]].
   */
 trait ToolFunction:
   def name: String
@@ -22,6 +22,21 @@ trait ToolFunction:
     */
   def argSchema: Vector[(String, dspy4s.core.contracts.TypeRef)] = Vector.empty
 
+  /** The JSON schema of the arguments, when the tool has one: an object schema with `properties` and `required`, for
+    * example the `inputSchema` of an MCP tool (upgrade item I10; upstream `Tool.args` holds the schema of each
+    * argument). [[argSchema]] stays the flat view of the same arguments. `None` for a tool that has only [[argSchema]].
+    */
+  def inputSchema: Option[DynamicValue.Record] = None
+
+  /** Run the tool with the call arguments `args`. Return the result of the tool, or a `Left` for an error.
+    *
+    * An implementation can also throw. `ReAct` and `ReActV2` run each tool through
+    * [[dspy4s.programs.runtime.ToolExecutor.run]]: a non-fatal exception becomes a `Left` with the text
+    * `<ClassName>: <message>`, and the model gets it as an error (upstream: `except Exception` in `ReAct.forward` and
+    * in `ReActV2._execute_tool_calls`). A fatal error, for example an `InterruptedException`, goes up to the caller of
+    * the program. The sandbox interpreters (`RLM`) catch the exceptions of a tool themselves. Code that calls `invoke`
+    * directly gets the exception.
+    */
   def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue]
 
 /** Supplies a tool's description for [[ToolFunction.fromMethod]], co-located with the method definition:

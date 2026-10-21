@@ -6,7 +6,7 @@ A Scala 3 port of the Stanford DSPy framework. The defining design choices:
   compiler-checked, encoded/decoded by `Shape[A]` typeclass instances, and
   adapters / language models flow through a single erased runtime contract
   (`SignatureLayout`).
-- **`zio.blocks.schema.DynamicValue.Record` is the codec spine**: a single
+- **`zio.blocks.schema.DynamicValue.Record` is the interchange format**: a single
   intermediate carried through `Example`, `ProgramCall`, `RawPrediction`,
   `ParsedOutput`, and `Shape.encode/decode`. Adapters parse straight into
   Records; the `Signature` API encodes / decodes via `Schema.toDynamicValue` /
@@ -25,6 +25,7 @@ graph TD
   evaluate[dspy4s-evaluate]
   optimize[dspy4s-optimize]
   streaming[dspy4s-streaming]
+  mcp[dspy4s-mcp]
   examples[dspy4s-examples]
 
   core --> algebra
@@ -45,10 +46,14 @@ graph TD
   streaming --> lm
   streaming --> adapters
   streaming --> programs
+  mcp --> core
+  mcp --> adapters
+  mcp --> programs
   examples --> programs
   examples --> evaluate
   examples --> optimize
   examples --> streaming
+  examples --> mcp
 ```
 
 ## Modules
@@ -60,15 +65,15 @@ graph TD
    - `@Law` / `IsEq` statements shared by higher-level executable law suites
 
 2. **`core`** — contracts. Depends on `algebra`; its primary external dependency is `zio-blocks-schema`
-   (for `DynamicValue`, the codec spine type).
+   (for `DynamicValue`, the interchange format).
    - `SignatureLayout` and `FieldSpec` (erased runtime contract for adapters)
    - `Example`, `RawPrediction`, `Completions` — all field-carrying types
      hold a `DynamicValue.Record` for their values
    - `DynamicValues` — helpers (`fromAny`, `toAny`, `recordGet`,
      `recordUpdated`, `recordFromEntries`, `renderText`, `recordToMap`) used
      at user-input and observability boundaries to lift plain Scala values
-     into the spine and back. The codec spine itself never goes through
-     these helpers.
+     into the interchange format and back. The `Shape` codecs never go
+     through these helpers.
    - `RuntimeContext`, `Settings` (the `Module` program base lives in `programs`)
    - Error ADT (`DspyError`, `ValidationError`, `ParseError`, …)
    - Callbacks + thread-local context machinery
@@ -110,7 +115,7 @@ graph TD
    - `runtime/PredictEngine` — the shared execute body (private)
    - `contracts/Module` — the semantic program base `Module[I, O]`; its abstract `forward`
      consumes `ProgramCall[I]` and returns `Prediction[O]`, while `final apply` adds module callbacks and tracing.
-     `DynamicModule` is the dynamic-spine specialization
+     `DynamicModule` is the specialization for record-valued programs
      (`Module[DynamicValue.Record, DynamicValue.Record]`); its `RawPrediction` is lifted through
      `Prediction.dynamic` at the module boundary.
    - `DynamicPredict` — record-valued predict, extends `DynamicModule`
@@ -119,12 +124,12 @@ graph TD
    - `ChainOfThought[I, O]` — `Module` that composes an inner `Predict`
      (prepends `reasoning`; output is always a named tuple)
    - All other programs are `Module[I, …]` too:
-     `ReAct[I,O]` / `CodeAct[I,O]` / `ProgramOfThought[I,O]` (run their loop/extractor over the
-     data-bag layer internally, decode to `WithField[O,"reasoning",String]`), `MultiChainComparison[I,O]`
+     `ReAct[I,O]` (runs its loop/extractor over the
+     data-bag layer internally, decodes to `WithField[O,"reasoning",String]`), `MultiChainComparison[I,O]`
      (`MultiChainInput[I]` inside the uniform `ProgramCall`; `WithField[O,"rationale",String]`), and
      `BestOfN[I,O]` / `Refine[I,O]`
      (output-preserving best-of-n over an inner program). Output-augmenting programs share the
-     `dspy4s.signatures.OutputAugmentation` helper. `DynamicPredict` is the prediction leaf on the dynamic spine.
+     `dspy4s.signatures.OutputAugmentation` helper. `DynamicPredict` is the prediction leaf for record-valued programs.
    - `Parallel` / `Aggregation` — batch/combinator utilities (not `Module`s).
    - `contracts/ProgramCall.scala` — generic `ProgramCall[I]` (input + `config` /
      `traceEnabled` / `rolloutId`)
@@ -162,7 +167,7 @@ SignatureLayout ──→ ProgramCall[Record] ──→ DynamicPredict ──→
 `SignatureLayout` carries a name, optional instructions, and separate ordered input and output
 `Vector[FieldSpec]` cohorts (each spec has a `TypeRef` and metadata).
 Adapters consume `SignatureLayout` directly; composite programs (e.g.
-`ChainOfThought`, `CodeAct`, `MultiChainComparison`) augment a
+`ChainOfThought`, `MultiChainComparison`) augment a
 base layout with extra fields before handing it to a `DynamicPredict`.
 
 The cohort mutation helpers on `SignatureLayout` (`withInputFields` and `withOutputFields`) are
@@ -282,8 +287,8 @@ code:
 - **New composite program** — extend `Module` and implement `forward` (the
   `final apply` gives you the callback + trace wrapping), augment a base `SignatureLayout` with
   extra fields via the `private[dspy4s]` mutation helpers, internally
-  construct `DynamicPredict`. `CodeAct`, `ProgramOfThought`,
-  `MultiChainComparison` are the templates.
+  construct `DynamicPredict`.
+  `MultiChainComparison` is the template.
 - **New optimizer** — use `OptimizableStructure[P].inspect` for layout/name metadata,
   `read` / `replace` for writable `OptimizableParameters`, and `ProgramRunner[P]` for
   execution. `BootstrapFewShot` is the template.
@@ -316,7 +321,7 @@ code:
 
 For comparison with the upstream Python DSPy architecture:
 
-- [`port/PORT_SIMILARITIES.md`](port/PORT_SIMILARITIES.md) — what stayed the same (module decomposition, data spine, composite programs, optimizer pattern, cache/retry/history semantics).
+- [`port/PORT_SIMILARITIES.md`](port/PORT_SIMILARITIES.md) — what stayed the same (module decomposition, call path, composite programs, optimizer pattern, cache/retry/history semantics).
 - [`port/PORT_DIFFERENCES.md`](port/PORT_DIFFERENCES.md) — what changed shape and why (signature definition, I/O layer, parameter discovery, error handling, save/load, streaming).
 - [`port/PORT_MAP.md`](port/PORT_MAP.md) — per-symbol rename + behavioral-delta ledger.
 - [`port/PORT_LANGUAGE_NOTES.md`](port/PORT_LANGUAGE_NOTES.md) — Python→Scala idiom mechanics with code samples.
@@ -334,7 +339,7 @@ For comparison with the upstream Python DSPy architecture:
   plain Scala values into `DynamicValue` (`fromAny`,
   `recordFromEntries`) and flattening back (`toAny`, `recordToMap`,
   `renderText`). Used at user-input and observability surfaces; not in
-  the codec spine.
+  the `Shape` codecs.
 - `core/runtime/ActivePredictContext.scala` — thread-local stack.
 - `signatures/Signature.scala` — wrapper + six factory entry points.
 - `signatures/Shape.scala` — the general `Shape[A]` boundary, lawful

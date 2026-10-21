@@ -50,7 +50,7 @@ The split between `core/contracts` and `core/runtime` inside dspy4s
 mirrors Python's `primitives/` vs `signatures/` split for code-search
 purposes — same logical division, collapsed at the build-graph level.
 
-## Data spine
+## Call path
 
 A single LM call walks the same path in both:
 
@@ -114,8 +114,9 @@ behaviorally identical.
 
 ## Composite programs
 
-The full set of Python `predict/` modules is ported with the same
-behavior:
+The Python `predict/` modules in this table are ported with the same
+behavior. `ProgramOfThought` and `CodeAct` are not in the table: dspy4s
+removed them (see [PORT_DIFFERENCES §15](PORT_DIFFERENCES.md#15-codeact-and-programofthought-removed)).
 
 | Python | dspy4s | Notes |
 |---|---|---|
@@ -127,8 +128,6 @@ behavior:
 | `Parallel` | `Parallel` | fan-out with bounded concurrency |
 | `Aggregation.majority` | `Aggregation.majority` | mode-based voting |
 | `MultiChainComparison` | `MultiChainComparison` | compare N attempts via a meta-call |
-| `ProgramOfThought` | `ProgramOfThought` | generate → execute → regenerate loop |
-| `CodeAct` | `CodeAct` | code-action variant of ReAct |
 
 `ChainOfThought`'s "augment the signature with a reasoning field"
 trick, `ReAct`'s tool-call loop, `BestOfN`'s scoring threshold,

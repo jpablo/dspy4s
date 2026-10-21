@@ -6,6 +6,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.lm.contracts.Embedder
+import dspy4s.optimize.contracts.Teleprompter
 import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
@@ -31,9 +32,20 @@ final class KNNFewShot[P: {OptimizableStructure, ProgramRunner}](
     embedder       : Embedder,
     bootstrapConfig: BootstrapFewShotConfig = BootstrapFewShotConfig()
 ):
-  /** Embed the trainset (eager, like upstream's `KNN.__init__`) and wrap the student. */
+  /** Embed the trainset (eager, like upstream's `KNN.__init__`) and wrap the student. Two leaves with the same
+    * predictor key are a configuration error (decision D2), and `compile` returns it before it embeds the trainset.
+    *
+    * The call is a compile scope (upstream `_with_compile_callbacks`). Its `trainset_size` input is the size of the
+    * trainset of the constructor. Each call of the compiled program runs [[BootstrapFewShot]], so each call also opens
+    * a `BootstrapFewShot` compile scope, as upstream.
+    */
   def compile(student: P, teacher: Option[P] = None)(using RuntimeContext): Either[DspyError, KNNFewShotProgram[P]] =
-    KNN.create(k, trainset, embedder).map(knn => new KNNFewShotProgram(student, teacher, knn, bootstrapConfig))
+    Teleprompter.withCompileCallbacks(this, trainset) {
+      for
+        _   <- OptimizerSupport.requireDistinctKeys(student, teacher)
+        knn <- KNN.create(k, trainset, embedder)
+      yield new KNNFewShotProgram(student, teacher, knn, bootstrapConfig)
+    }
 
 /** The compiled artifact of [[KNNFewShot]]: a module that, per call, retrieves the query's nearest trainset neighbors,
   * bootstraps them onto the student as demos, and runs the result.

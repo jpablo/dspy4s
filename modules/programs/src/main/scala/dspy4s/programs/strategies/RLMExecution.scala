@@ -1,8 +1,7 @@
 package dspy4s.programs.strategies
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, ReplCodeInterpreter, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, DynamicValues, ReplCodeInterpreter, RuntimeContext, SandboxOutputField}
 import dspy4s.core.data.RawPrediction
-import dspy4s.core.runtime.DenoPyodideInterpreter
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.{ActionInterpreter, ActionOutcome, Prediction, ProgramCall}
 import dspy4s.programs.runtime.{AgentLoop, SandboxToolBridge}
@@ -12,6 +11,11 @@ import zio.blocks.schema.DynamicValue
   *
   * Configuration and addressable predictor leaves remain on `RLM`; this class owns the per-call interpreter lifecycle,
   * persistent REPL history, loop transitions, validated SUBMIT handling, and exhausted-budget extraction fallback.
+  *
+  * The LM usage of the result is the total of the usage scope of the RLM call, which `Module.apply` opens: the action
+  * calls, the sub-LM calls of `llm_query` and `llm_query_batched`, the model calls of the tools, and the extract call
+  * (upstream `Module.__call__` puts the total usage of the call on the result, `dspy/primitives/module.py`). An
+  * instance serves one call.
   */
 private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
   private val baseSignature    = rlm.baseSignature
@@ -24,34 +28,39 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
       field.name -> DynamicValues.recordGet(inputs, field.name).getOrElse(DynamicValue.Null)
     }.toMap
     // The variable metadata is fixed for the whole forward, so its prompt rendering is computed once here rather
-    // than per iteration.
+    // than per iteration. The prompt shows the list as a numbered list (upstream `variables_info`).
     val variablesInfo = baseLayout.inputFields.map { field =>
       RLM.ReplVariable.fromValue(field.name, inputVars(field.name), Some(field)).format
-    }.mkString("\n\n")
+    }
 
     val sandboxTools = RLM.makeLlmTools(rlm.maxLlmCalls, rlm.subLm, ctx) ++
       SandboxToolBridge.fromToolFunctions(rlm.tools)
     val outputFields = baseLayout.outputFields.map { field =>
-      DenoPyodideInterpreter.OutputField(field.name, field.typeRef.pythonTypeName)
+      SandboxOutputField(field.name, field.typeRef.pythonTypeName)
     }
-    val interpreter       = rlm.interpreterFactory(sandboxTools, outputFields)
+    val factory = RLM.resolveInterpreterFactory(rlm.interpreterFactory)
+    // The action predict of this call has the execution text of the factory of this call.
+    val actionPredict     = rlm.actionPredictFor(factory)
+    val interpreter       = factory(sandboxTools, outputFields)
     val actionInterpreter = replActionInterpreter(interpreter, inputVars)
-    try iterate(call, actionInterpreter, variablesInfo)
+    try iterate(call, actionPredict, actionInterpreter, variablesInfo)
     finally interpreter.close()
 
   private def iterate(
       call             : ProgramCall[I],
+      actionPredict    : Predict[RLM.ActionInputs, RLM.ActionStep],
       actionInterpreter: ActionInterpreter[RLM.ReplAction, RLM.ReplExecution],
-      variablesInfo    : String
+      variablesInfo    : Vector[String]
   )(using RuntimeContext): Either[DspyError, Prediction[O]] =
     AgentLoop.run[Vector[RLM.ReplEntry], Prediction[O]](Vector.empty, 0, rlm.maxIterations)(
       onExhausted = history => extractFallback(call, variablesInfo, history)
-    )(rlmStep(call, actionInterpreter, variablesInfo))
+    )(rlmStep(call, actionPredict, actionInterpreter, variablesInfo))
 
   private def rlmStep(
       call             : ProgramCall[I],
+      actionPredict    : Predict[RLM.ActionInputs, RLM.ActionStep],
       actionInterpreter: ActionInterpreter[RLM.ReplAction, RLM.ReplExecution],
-      variablesInfo    : String
+      variablesInfo    : Vector[String]
   )(using
       RuntimeContext
   ): (Vector[RLM.ReplEntry], Int) => Either[DspyError, AgentLoop.Step[Vector[RLM.ReplEntry], Prediction[O]]] =
@@ -61,7 +70,7 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
         repl_history = RLM.renderHistory(history, rlm.maxOutputChars),
         iteration = s"${iteration + 1}/${rlm.maxIterations}"
       )
-      rlm.actionPredict(call.mapInput(_ => actionInputs)).flatMap { action =>
+      actionPredict(call.mapInput(_ => actionInputs)).flatMap { action =>
         val reasoning = action.output.reasoning
         val rawCode   = action.output.code
         if rlm.verbose then
@@ -78,14 +87,20 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
             case RLM.ReplExecution.Observed(entry) =>
               if rlm.verbose then Console.err.println(RLM.formatOutputBlock(entry.output, rlm.maxOutputChars))
               Right(AgentLoop.Step.Continue(history :+ entry))
-            case RLM.ReplExecution.Submitted(entry, outputsRecord) =>
-              // The single schema decode of the SUBMIT payload: a failed decode becomes a `[Type Error]`
-              // observation and the loop continues (upstream parity); a successful one terminates the loop.
-              baseSignature.outputShape.decode(outputsRecord) match
-                case Left(decodeError) =>
-                  val failed = entry.copy(output = s"[Type Error] ${decodeError.message}")
+            case RLM.ReplExecution.Submitted(entry, submitted) =>
+              // The check of the allowed values (decision D7), then the single schema decode of the SUBMIT payload. A
+              // failure of the two becomes a `[Type Error]` observation and the loop continues (upstream
+              // `_process_final_output`); a success terminates the loop.
+              val decoded = RLMReplProtocol.checkAllowedValues(submitted, baseLayout).flatMap { outputsRecord =>
+                baseSignature.outputShape.decode(outputsRecord) match
+                  case Left(decodeError) => Left(s"[Type Error] ${decodeError.message}")
+                  case Right(output)     => Right(outputsRecord -> output)
+              }
+              decoded match
+                case Left(typeError) =>
+                  val failed = entry.copy(output = typeError)
                   Right(AgentLoop.Step.Continue(history :+ failed))
-                case Right(output) =>
+                case Right((outputsRecord, output)) =>
                   Right(AgentLoop.Step.Done(finishWith(output, outputsRecord, reasoning, history :+ entry)))
         }
       }
@@ -94,6 +109,11 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
     * upstream parity: the interpreter re-assigns the variables at the top of each code block, so a model-side mutation
     * of an input variable deliberately does not survive to the next step. The interpreter caches the serialized
     * assignment prelude per map instance, so the repeated injection costs no host-side re-encoding.
+    *
+    * A user-code error (a `CodeResult` with a non-zero exit code) becomes an `[Error]` observation and the loop
+    * continues. A `Left` from the REPL means that the interpreter itself failed (process, timeout, protocol). Generated
+    * code cannot repair that failure, so the `Left` ends the run and the LM gets no more calls. Upstream
+    * `_execute_code` catches only `CodeExecutionError` and `SyntaxError`. `run` still closes the interpreter.
     */
   private def replActionInterpreter(
       interpreter: ReplCodeInterpreter,
@@ -104,9 +124,7 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
           RuntimeContext
       ): Either[DspyError, ActionOutcome[RLM.ReplExecution]] =
         interpreter.execute(action.code, inputVars) match
-          case Left(error) =>
-            val entry = RLM.ReplEntry(action.reasoning, action.code, s"[Error] ${error.message}")
-            Right(ActionOutcome.Failed(RLM.ReplExecution.Observed(entry)))
+          case Left(error)   => Left(error)
           case Right(result) => result.finalOutput match
               case Some(finalJson) => RLM.parseSubmitted(finalJson, outputFieldNames) match
                   case Left(problem) =>
@@ -139,7 +157,7 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
 
   private def extractFallback(
       call         : ProgramCall[I],
-      variablesInfo: String,
+      variablesInfo: Vector[String],
       history      : Vector[RLM.ReplEntry]
   )(using RuntimeContext): Either[DspyError, Prediction[O]] =
     RuntimeEnvironment.warn("RLM", "reached max iterations, using extract to get final output")
@@ -151,8 +169,8 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
     rlm.extractPredict(call.mapInput(_ => extractInputs)).map { extracted =>
       Prediction(
         output = extracted.output,
-        // withRawValue on the extractor's raw envelope preserves its completions / LM usage (same rationale as
-        // TrajectoryAgent.runAndExtractPrediction).
+        // withRawValue on the extractor's raw envelope preserves its completions (same rationale as
+        // TrajectoryAgent.runAndExtractPrediction). `Module.apply` replaces the usage with the total of the call.
         raw = extracted.raw
           .withRawValue("trajectory", renderedHistory)
           .withRawValue("final_reasoning", "Extract forced final output")

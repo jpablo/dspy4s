@@ -90,6 +90,28 @@ class ToolSchemaBridgeSuite extends FunSuite:
     assertEquals(elementsOf(field(params, "required")).map(DynamicValues.renderText), Vector("query"))
   }
 
+  test("toOpenAiTools sends the input schema of a spec as the parameters, and keeps the other specs") {
+    val schema = DynamicValues.record(
+      "type"       := "object",
+      "properties" -> DynamicValues.record("query" -> DynamicValues.record("type" := "string")),
+      "required"   := List("query")
+    )
+    val rendered = ToolSchemaBridge.toOpenAiTools(Vector(
+      ToolSpec("search", Some("Search documents"), inputSchema = Some(schema)),
+      ToolSpec("lookup", parameters = Vector(ToolParameterSpec("id", TypeRef.int)))
+    ))
+    val parameters = rendered.map(_("function").asInstanceOf[Map[String, Any]]("parameters"))
+    assertEquals(parameters.head, DynamicValues.recordToMap(schema): Any)
+    assertEquals(
+      parameters.last,
+      Map(
+        "type"       -> "object",
+        "properties" -> Map("id" -> Map("type" -> "number", "description" -> "")),
+        "required"   -> Vector("id")
+      ): Any
+    )
+  }
+
   test("fromOutput maps lm tool calls to adapter tool call data") {
     val output = LmOutput(
       text = "",

@@ -11,6 +11,12 @@ import dspy4s.signatures.OutputAugmentation.PrependField
   * focus exact — writing parameters can never change the read-only [[OptimizableMetadata]], which excludes signature
   * structure and execution resources from optimizer replacement. `OptimizableParametersSuite` executes all seven
   * statements per instance.
+  *
+  * '''Trace key.''' An optimizer finds the calls of a leaf by the key of its metadata ([[OptimizableMetadata.key]]).
+  * The module of a leaf type must record that key in its trace entries: give it the lifecycle
+  * `ModuleLifecycle.predictor(shape, key)`, or `ModuleLifecycle.dynamicPredictor(key)` for a dynamic module. `Predict`,
+  * `ChainOfThought`, and `DynamicPredict` do this. An optimizer returns an error for a leaf type that records no key,
+  * and for a program in which two leaves have the same key (see [[PredictorTraces]]).
   */
 trait OptimizableLeaf[P] extends Lens[P, OptimizableParameters]:
   def metadata(program: P): OptimizableMetadata
@@ -27,7 +33,7 @@ object OptimizableLeaf:
     */
   given OptimizableLeaf[DynamicPredict] with
     def get(program: DynamicPredict): OptimizableParameters =
-      OptimizableParameters(program.layout.instructions, program.demos, program.config)
+      OptimizableParameters(program.layout.instructions, program.demos, program.config, program.decisions)
 
     def metadata(program: DynamicPredict): OptimizableMetadata =
       OptimizableMetadata.from(program.layout, program.moduleName)
@@ -38,7 +44,8 @@ object OptimizableLeaf:
         program.copy(
           layout = program.layout.withInstructions(updated.instructions),
           demos = updated.demos,
-          config = updated.config
+          config = updated.config,
+          decisions = updated.decisions
         )
 
   /** [[OptimizableLeaf]] for the single-leaf program [[Predict]]. A `Predict` field inside a user composite resolves
@@ -46,13 +53,13 @@ object OptimizableLeaf:
     * [[OptimizableStructure.derived]], and a standalone `Predict` is introspectable/tunable. Lives in the
     * [[OptimizableLeaf]] companion so it is in implicit scope without an explicit import.
     *
-    * Optimizable parameters are exactly instructions, demos, and module config. The signature field structure, output
-    * shape, name, runtime, bound LM, and tools remain on the original program and are exposed only as read-only
-    * metadata.
+    * Optimizable parameters are exactly instructions, demos, module config, and the decision settings. The signature
+    * field structure, output shape, name, runtime, bound LM, and tools remain on the original program and are exposed
+    * only as read-only metadata.
     */
   given predictOptimizableLeaf[I, O]: OptimizableLeaf[Predict[I, O]] with
     def get(program: Predict[I, O]): OptimizableParameters =
-      OptimizableParameters(program.signature.layout.instructions, program.demos, program.config)
+      OptimizableParameters(program.signature.layout.instructions, program.demos, program.config, program.decisions)
 
     def metadata(program: Predict[I, O]): OptimizableMetadata =
       OptimizableMetadata.from(program.signature.layout, program.moduleName)
@@ -63,14 +70,16 @@ object OptimizableLeaf:
         program.copy(
           demos = updated.demos,
           config = updated.config,
+          decisions = updated.decisions,
           signature = program.signature.withInstructions(updated.instructions)
         )
 
   /** [[OptimizableLeaf]] for the single-leaf program [[ChainOfThought]]. Like [[predictOptimizableLeaf]], but the
     * exposed layout is the **augmented** layout CoT actually runs (a leading `reasoning` output field prepended).
     *
-    * Optimizable parameters remain instructions, demos, and config. The augmented signature structure is metadata only;
-    * writing parameters changes the base signature's instructions, from which the same augmented structure is rebuilt.
+    * Optimizable parameters remain instructions, demos, config, and the decision settings. The augmented signature
+    * structure is metadata only; writing parameters changes the base signature's instructions, from which the same
+    * augmented structure is rebuilt.
     */
   given chainOfThoughtOptimizableLeaf[I, O](using
       prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O]
@@ -79,7 +88,7 @@ object OptimizableLeaf:
       ChainOfThought.augmentLayout(program.baseSignature.layout)
 
     def get(program: ChainOfThought[I, O]): OptimizableParameters =
-      OptimizableParameters(program.baseSignature.layout.instructions, program.demos, program.config)
+      OptimizableParameters(program.baseSignature.layout.instructions, program.demos, program.config, program.decisions)
 
     def metadata(program: ChainOfThought[I, O]): OptimizableMetadata =
       OptimizableMetadata.from(augmented(program), program.moduleName)
@@ -90,6 +99,7 @@ object OptimizableLeaf:
         program.copy(
           demos = updated.demos,
           config = updated.config,
+          decisions = updated.decisions,
           baseSignature = program.baseSignature.withInstructions(updated.instructions)
         )
 

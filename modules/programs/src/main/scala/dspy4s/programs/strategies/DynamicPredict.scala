@@ -1,8 +1,10 @@
 package dspy4s.programs.strategies
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.data.Example
+import dspy4s.core.decisions.DecisionSettings
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.adapters.contracts.ToolSpec
@@ -10,6 +12,7 @@ import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ProgramRuntime
 import dspy4s.programs.contracts.DynamicModule
+import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.runtime.PredictEngine
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import zio.blocks.schema.DynamicValue
@@ -28,8 +31,8 @@ import zio.blocks.schema.DynamicValue
   * They are siblings rather than wrappers: each configures its own shared [[PredictEngine]]. The dynamic surface is
   * needed wherever there is no static `I`/`O` to carry, including:
   *
-  *   - composite programs whose internal generations have runtime-built signatures, such as [[CodeAct]],
-  *     [[ProgramOfThought]], [[MultiChainComparison]], and the internal passes in [[ReAct]];
+  *   - composite programs whose internal generations have runtime-built signatures, such as [[MultiChainComparison]]
+  *     and the internal passes in [[ReAct]];
   *   - optimizer helper generations whose proposed signature exists only as a [[SignatureLayout]].
   *
   * For USER programs over runtime-string signatures, prefer [[DynamicSignature]] (`parse` + `predict()`): it mints
@@ -74,12 +77,40 @@ final case class DynamicPredict(
       * function-calling enabled and a `tool_calls` output field acts on them. Pure [[ToolSpec]] data (no invoke
       * closures) — the executable bodies stay on the calling program. Not serialized state. See G-7b.
       */
-    tools: Vector[ToolSpec] = Vector.empty
+    tools: Vector[ToolSpec] = Vector.empty,
+    /** Experimental. The explicit settings of the decision outputs, by output name (upstream `Predict.fields`). See
+      * [[Predict.decisions]].
+      */
+    decisions: Map[String, DecisionSettings] = Map.empty
 ) extends DynamicModule:
 
   override val moduleName: String = name.getOrElse("predict")
 
-  private val engine = PredictEngine(layout, demos, moduleName, runtime, outputJsonSchema, config, lm, tools)
+  // The key is the data of this leaf's `OptimizableMetadata`, so an optimizer finds the trace entries of the leaf.
+  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] =
+    ModuleLifecycle.dynamicPredictor(PredictorKey.from(moduleName, layout))
+
+  private val engine =
+    PredictEngine(layout, demos, moduleName, runtime, outputJsonSchema, config, lm, tools, decisions = decisions)
+
+  /** Experimental. This predictor with the explicit `settings` of the decision output `field` (upstream
+    * `Predict.fields[field]`). The settings replace the earlier settings of the field. A `Left` comes when the plan of
+    * the layout rejects the settings ([[dspy4s.core.decisions.DecisionPlan.of]]).
+    */
+  def withDecision(field: String, settings: DecisionSettings): Either[DspyError, DynamicPredict] =
+    PredictEngine.withDecision(layout, decisions, field, settings).map(updated => copy(decisions = updated))
+
+  /** Experimental. The effective criteria of the decision output `field` (upstream `get_criteria`): the explicit
+    * criteria, else the default of its kind. A `Left` comes when `field` is not a decision output.
+    */
+  def criteria(field: String): Either[DspyError, Option[DynamicValue]] =
+    PredictEngine.criteria(layout, decisions, field)
+
+  /** Experimental. This predictor with the criteria of the decision output `field` set to `criteria` (upstream
+    * `set_criteria`). The other settings of the field stay. A `Left` comes when the plan rejects the criteria.
+    */
+  def withCriteria(field: String, criteria: DynamicValue): Either[DspyError, DynamicPredict] =
+    PredictEngine.withCriteria(layout, decisions, field, criteria).map(updated => copy(decisions = updated))
 
   override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
       RuntimeContext

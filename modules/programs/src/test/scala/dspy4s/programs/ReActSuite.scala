@@ -1,5 +1,6 @@
 package dspy4s.programs
 
+import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt
@@ -8,6 +9,7 @@ import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ModuleStartEvent
+import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ToolEndEvent
@@ -79,6 +81,15 @@ class ReActSuite extends FunSuite:
 
   private val qaSignature = Signature.fromString("question -> answer")
 
+  /** A react step in the chat format, with the tool name `toolName` and the arguments `args` (JSON text). */
+  private def chatStep(toolName: String, args: String = "{}"): String =
+    s"[[ ## next_thought ## ]]\nthink\n\n[[ ## next_tool_name ## ]]\n$toolName\n\n" +
+      s"[[ ## next_tool_args ## ]]\n$args\n\n[[ ## completed ## ]]"
+
+  /** An extract reply in the chat format. */
+  private val chatExtract: String =
+    "[[ ## reasoning ## ]]\nThe tool said so.\n\n[[ ## answer ## ]]\nBrussels\n\n[[ ## completed ## ]]"
+
   test("react runs a tool, finishes, and extracts the answer from the trajectory") {
     val search = new SearchTool
     val lm     = new ScriptedLm(Vector(
@@ -95,9 +106,26 @@ class ReActSuite extends FunSuite:
       assertEquals(pred.output.answer, "Brussels")
       assertEquals(search.calls.get(), 1)
       val traj = lookupString(pred.raw.values, "trajectory")
-      assert(traj.contains("tool_name: search"), s"trajectory missing tool call: $traj")
-      assert(traj.contains("observation: Brussels"), s"trajectory missing observation: $traj")
-      assert(traj.contains("tool_name: finish"), s"trajectory missing finish: $traj")
+      // The trajectory is the user message content of the adapter (upstream `_format_trajectory`). This test adapter
+      // has the default form: the chat markers.
+      assert(traj.contains("[[ ## tool_name_0 ## ]]\nsearch"), s"trajectory missing tool call: $traj")
+      assert(traj.contains("[[ ## observation_0 ## ]]\nBrussels"), s"trajectory missing observation: $traj")
+      assert(traj.contains("[[ ## tool_name_1 ## ]]\nfinish"), s"trajectory missing finish: $traj")
+    }
+  }
+
+  test("the default iteration limit is 20, as upstream max_iters") {
+    val search = new SearchTool
+    // 20 steps that never select `finish`, then the reply for the extractor.
+    val lm    = new ScriptedLm(Vector.fill(20)("I must look again||search||query=capital of Belgium") :+ "Brussels")
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search))
+
+    assertEquals(react.maxIterations, IterationLimit(20))
+    withReact(lm) {
+      val result = react((question = "What is the capital of Belgium?"))
+      assert(result.isRight, s"failed: ${result.left.toOption.map(_.message).getOrElse("?")}")
+      assertEquals(search.calls.get(), 20)
+      assertEquals(result.toOption.get.output.answer, "Brussels")
     }
   }
 
@@ -151,6 +179,37 @@ class ReActSuite extends FunSuite:
     }
   }
 
+  test("react records the upstream observation of a tool error and of a structured result") {
+    val failing = ToolFunction("broken", "Fails.")(_ => Left(dspy4s.core.contracts.RuntimeError("tool", "boom")))
+    val listing = ToolFunction("listing")(_ => Right(ToolFunction.result(Vector("a", "b"))))
+    val lm      = new ScriptedLm(Vector("try it||broken||", "list||listing||", "I have what I need||finish||", "done"))
+    val react   = ReAct(baseSignature = qaSignature, tools = Vector(failing, listing), maxIterations = IterationLimit(5))
+
+    withReact(lm) {
+      val result = react((question = "q?"))
+      assertEquals(result.map(_.output.answer), Right("done"))
+      val traj = lookupString(result.toOption.get.raw.values, "trajectory")
+      // Upstream `ReAct.forward`: `Execution error in <name>: <message>`, with no quotes around the name.
+      assert(traj.contains("[[ ## observation_0 ## ]]\nExecution error in broken: boom"), traj)
+      // Upstream `format_field_value` of a list for a `str` field: a numbered list.
+      assert(traj.contains("[[ ## observation_1 ## ]]\n[1] «a»\n[2] «b»"), traj)
+    }
+  }
+
+  test("a tool that throws gives an error observation, and the run goes on") {
+    val throwing = ToolFunction("broken", "Throws.")(_ => throw IllegalStateException("boom"))
+    val lm       = new ScriptedLm(Vector("try it||broken||", "I have what I need||finish||", "done"))
+    val react    = ReAct(baseSignature = qaSignature, tools = Vector(throwing), maxIterations = IterationLimit(5))
+
+    withReact(lm) {
+      val result = react((question = "q?"))
+      assertEquals(result.map(_.output.answer), Right("done"))
+      val traj = result.map(prediction => lookupString(prediction.raw.values, "trajectory")).getOrElse("")
+      // Upstream: `Execution error in <name>: <traceback>`. The port form is the class name and the message.
+      assert(traj.contains("[[ ## observation_0 ## ]]\nExecution error in broken: IllegalStateException: boom"), traj)
+    }
+  }
+
   test("react emits tool callback events parented to the react module call") {
     val events   = ArrayBuffer.empty[CallbackEvent]
     val callback = new CallbackHandler:
@@ -201,7 +260,7 @@ class ReActSuite extends FunSuite:
     ): Either[DspyError, ParsedOutput] =
       ScriptedAdapter.parse(layout, output)
 
-  private def cwError: DspyError = dspy4s.core.contracts.ContextWindowExceededError(model = Some("either-react-lm"))
+  private def cwError: DspyError = dspy4s.core.contracts.ContextWindowExceededError()
 
   private def withLmAndAdapter[A](lm: LanguageModel, adapter: Adapter)(body: RuntimeContext ?=> A): A =
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(adapter))) {
@@ -226,20 +285,26 @@ class ReActSuite extends FunSuite:
       assertEquals(result.toOption.get.output.answer, "Brussels")
       // Two extractor attempts: full trajectory, then with the oldest step dropped.
       assertEquals(probe.extractorTrajectories.size, 2)
-      assert(probe.extractorTrajectories(0).contains("Step 1") && probe.extractorTrajectories(0).contains("Step 2"))
-      assert(!probe.extractorTrajectories(1).contains("Step 1") && probe.extractorTrajectories(1).contains("Step 2"))
+      assert(
+        probe.extractorTrajectories(0).contains("thought_0") && probe.extractorTrajectories(0).contains("thought_1")
+      )
+      assert(
+        !probe.extractorTrajectories(1).contains("thought_0") && probe.extractorTrajectories(1).contains("thought_1")
+      )
       // The RETURNED trajectory stays complete (documented delta from upstream's in-place pops).
       val traj = lookupString(result.toOption.get.raw.values, "trajectory")
-      assert(traj.contains("Step 1"), traj)
+      assert(traj.contains("thought_0"), traj)
     }
   }
 
   test("react step truncation is durable: later iterations and the result build on the truncated trajectory") {
     val search = new SearchTool
-    // Iteration 1: search (trajectory gains step 1). Iteration 2's react call overflows -> oldest step dropped ->
-    // retry succeeds with finish. The finish entry builds on the TRUNCATED view.
+    // Iterations 1 and 2: search (trajectory gains steps 1 and 2). Iteration 3's react call overflows -> oldest step
+    // dropped -> retry succeeds with finish. The finish entry builds on the TRUNCATED view. Two entries are necessary:
+    // the last entry is never dropped (PORT_GAPS G-37).
     val lm = new EitherLm(Vector(
       Right("look it up||search||query=x"),
+      Right("look again||search||query=y"),
       Left(cwError),
       Right("done||finish||"),
       Right("42")
@@ -250,9 +315,10 @@ class ReActSuite extends FunSuite:
       val result = react((question = "q?"))
       assert(result.isRight, result.toString)
       val traj = lookupString(result.toOption.get.raw.values, "trajectory")
-      // Step 1 (the search) was truncated away; only the finish step (iteration 2 -> "Step 2") remains.
-      assert(!traj.contains("Step 1"), traj)
-      assert(traj.contains("Step 2") && traj.contains("tool_name: finish"), traj)
+      // Step 0 (the first search) was truncated away; step 1 and the finish step (iteration 3 -> "thought_2") remain.
+      assert(!traj.contains("thought_0"), traj)
+      assert(traj.contains("thought_1"), traj)
+      assert(traj.contains("thought_2") && traj.contains("[[ ## tool_name_2 ## ]]\nfinish"), traj)
     }
   }
 
@@ -268,6 +334,100 @@ class ReActSuite extends FunSuite:
       val result = react((question = "q?"))
       assert(result.isRight, result.toString)
       assertEquals(result.toOption.get.output.answer, "best guess")
-      assertEquals(probe.extractorTrajectories.toList, List("(empty)"))
+      // An empty trajectory is an empty text (upstream `_format_trajectory` of an empty dict).
+      assertEquals(probe.extractorTrajectories.toList, List(""))
+    }
+  }
+
+  // PORT_GAPS G-37: the last trajectory entry is never dropped. A run on an empty trajectory is not a retry of the
+  // same task.
+
+  test("a react-step overflow with one entry ends the loop and the extractor keeps that entry") {
+    val search = new SearchTool
+    // Iteration 1: search (one entry). Iteration 2's react call overflows. The loop ends with no retry on an empty
+    // trajectory, and the extractor runs over the one entry.
+    val lm = new EitherLm(Vector(
+      Right("look it up||search||query=x"),
+      Left(cwError),
+      Right("Brussels")
+    ))
+    val probe = new ExtractProbeAdapter
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
+
+    withLmAndAdapter(lm, probe) {
+      val result = react((question = "capital?"))
+      assertEquals(result.map(_.output.answer), Right("Brussels"))
+      assertEquals(lm.calls.get(), 3, "one react step, one overflow, one extract call")
+      assertEquals(probe.extractorTrajectories.size, 1)
+      assert(probe.extractorTrajectories.head.contains("thought_0"), probe.extractorTrajectories.head)
+      val traj = lookupString(result.toOption.get.raw.values, "trajectory")
+      assert(traj.contains("thought_0") && traj.contains("[[ ## tool_name_0 ## ]]\nsearch"), traj)
+    }
+  }
+
+  test("an extract-step overflow with one entry returns the overflow error") {
+    val search = new SearchTool
+    // One react step (finish), then the extractor overflows. The extractor does not run again on an empty trajectory.
+    val lm = new EitherLm(Vector(
+      Right("done||finish||"),
+      Left(cwError),
+      Right("answer with no evidence")
+    ))
+    val probe = new ExtractProbeAdapter
+    val react = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
+
+    withLmAndAdapter(lm, probe) {
+      react((question = "q?")) match
+        case Left(_: dspy4s.core.contracts.ContextWindowExceededError) => ()
+        case other                                                     => fail(s"expected the overflow error, got $other")
+      assertEquals(lm.calls.get(), 2, "one react step and one extract call")
+      assertEquals(probe.extractorTrajectories.size, 1)
+      assert(
+        probe.extractorTrajectories.head.contains("[[ ## tool_name_0 ## ]]\nfinish"),
+        probe.extractorTrajectories.head
+      )
+    }
+  }
+
+  test("with a ChatAdapter, an invented tool name is a parse error of the step, and the call fails as upstream") {
+    // Decision D7. Upstream `next_tool_name` is `Literal[<tool names>]` (`dspy/predict/react.py:77`), so the chat parse
+    // and its JSON fallback raise `AdapterParseError`. That is a `DSPyError`, not a `ValueError`, so the
+    // `except ValueError` of `ReAct.forward` (`react.py:104`) does not catch it: the whole call raises, after two calls
+    // of the model and with no extract call.
+    val search = new SearchTool
+    val lm     = new ScriptedLm(Vector(chatStep("lookup"), chatStep("finish"), chatExtract))
+    val react  = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
+
+    withLmAndAdapter(lm, ChatAdapter()) {
+      val result = react((question = "capital?"))
+      assert(result.left.exists(_.isInstanceOf[ParseError]), result.toString)
+      assertEquals(lm.calls.get(), 2, "the chat step and its JSON fallback")
+      assertEquals(search.calls.get(), 0)
+    }
+  }
+
+  test("with a ChatAdapter, an empty tool name is a parse error of the step, as upstream") {
+    val search = new SearchTool
+    val lm     = new ScriptedLm(Vector(chatStep(""), chatStep("finish"), chatExtract))
+    val react  = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
+
+    withLmAndAdapter(lm, ChatAdapter()) {
+      val result = react((question = "capital?"))
+      assert(result.left.exists(_.isInstanceOf[ParseError]), result.toString)
+      assertEquals(lm.calls.get(), 2, "the chat step and its JSON fallback")
+    }
+  }
+
+  test("with a ChatAdapter, a quoted tool name is the tool, after the normalization of upstream parse_value") {
+    val search = new SearchTool
+    val lm     = new ScriptedLm(Vector(chatStep("'search'", """{"query": "capital"}"""), chatStep("finish"), chatExtract))
+    val react  = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
+
+    withLmAndAdapter(lm, ChatAdapter()) {
+      val result = react((question = "capital?"))
+      assertEquals(result.map(_.output.answer), Right("Brussels"))
+      assertEquals(search.calls.get(), 1)
+      val traj = result.map(prediction => lookupString(prediction.raw.values, "trajectory")).getOrElse("")
+      assert(traj.contains("[[ ## tool_name_0 ## ]]\nsearch"), traj)
     }
   }

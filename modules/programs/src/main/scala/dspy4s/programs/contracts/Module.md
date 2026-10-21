@@ -58,7 +58,6 @@ classDiagram
 
     class Predict
     class ChainOfThought
-    class ProgramOfThought
     class RLM
     class MultiChainComparison
     class BestOfN
@@ -77,7 +76,6 @@ classDiagram
     }
 
     class ReAct
-    class CodeAct
 
     note for TransparentModule "Composition<br/>Identity · AndThen · Both · Tensor<br/>Copy · Discard · Swap<br/><br/>Transformations<br/>Lift · LiftEither · MapOutput<br/>ContramapInput · Dimap<br/><br/>Control<br/>Moded · RecoverWith"
 
@@ -87,7 +85,6 @@ classDiagram
 
     Module <|-- Predict
     Module <|-- ChainOfThought
-    Module <|-- ProgramOfThought
     Module <|-- RLM
     Module <|-- MultiChainComparison
     Module <|-- BestOfN
@@ -101,13 +98,11 @@ classDiagram
 
     TrajectoryAgent <|-- InterpretedTrajectoryAgent
     InterpretedTrajectoryAgent <|-- ReAct
-    InterpretedTrajectoryAgent <|-- CodeAct
 
     style Module fill:#F3F4F6,stroke:#4B5563,color:#111827,stroke-width:2px
 
     style Predict fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
     style ChainOfThought fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
-    style ProgramOfThought fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
     style RLM fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
     style MultiChainComparison fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
     style BestOfN fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
@@ -124,17 +119,16 @@ classDiagram
     style TrajectoryAgent fill:#EDE9FE,stroke:#7C3AED,color:#4C1D95,stroke-width:2px
     style InterpretedTrajectoryAgent fill:#EDE9FE,stroke:#7C3AED,color:#4C1D95,stroke-width:2px
     style ReAct fill:#EDE9FE,stroke:#7C3AED,color:#4C1D95,stroke-width:2px
-    style CodeAct fill:#EDE9FE,stroke:#7C3AED,color:#4C1D95,stroke-width:2px
 ```
 
 The descendants fall into four semantic branches:
 
 | Branch | Purpose | Descendants |
 |---|---|---|
-| Direct executable programs | Implement a complete strategy directly | `Predict`, `ChainOfThought`, `ProgramOfThought`, `RLM`, `MultiChainComparison`, `BestOfN`, `Refine` |
+| Direct executable programs | Implement a complete strategy directly | `Predict`, `ChainOfThought`, `RLM`, `MultiChainComparison`, `BestOfN`, `Refine` |
 | `TransparentModule` | Structural syntax whose own node must not appear in callbacks, trace, or history | `Identity`, `AndThen`, `Both`, `Tensor`, `Copy`, `Discard`, `Swap`, `Lift`, `LiftEither`, `MapOutput`, `ContramapInput`, `Dimap`, `Moded`, `RecoverWith` |
 | `DynamicModule` | Execute over runtime `DynamicValue.Record` inputs and outputs | `DynamicPredict`, `KNNFewShotProgram`, internal `EnsembledProgram`, example `SimplifyModule`, example `ScoringModule` |
-| `TrajectoryAgent` | Gather a trajectory and then extract the result | `InterpretedTrajectoryAgent`, with concrete programs `ReAct` and `CodeAct` |
+| `TrajectoryAgent` | Gather a trajectory and then extract the result | `InterpretedTrajectoryAgent`, with the concrete program `ReAct` |
 
 This is an inheritance diagram, not a catalog of every type that mentions `Module`. In particular:
 
@@ -413,5 +407,5 @@ sbt --error \
 5. Read `DynamicModule`, `Predict`, and `DynamicPredict` to compare domain-specific and record carriers.
 6. Read `TrajectoryAgent` and `InterpretedTrajectoryAgent` for the deepest template-method branch.
 
-For the state machine beneath `ReAct` and `CodeAct`, continue with
+For the state machine beneath `ReAct`, continue with
 [`InterpretedTrajectoryAgent.md`](../runtime/InterpretedTrajectoryAgent.md).

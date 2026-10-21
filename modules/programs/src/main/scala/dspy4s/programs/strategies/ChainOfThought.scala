@@ -1,10 +1,11 @@
 package dspy4s.programs.strategies
 
-import dspy4s.core.contracts.{DspyError, FieldSpec, RuntimeContext, SignatureLayout, TypeRef}
+import dspy4s.core.contracts.{DspyError, FieldSpec, PredictorKey, RuntimeContext, SignatureLayout, TypeRef}
 import dspy4s.core.data.Example
+import dspy4s.core.decisions.DecisionSettings
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.{Module, ModuleLifecycle, ProgramCall, ProgramRuntime}
-import dspy4s.programs.runtime.SettingsProgramRuntime
+import dspy4s.programs.runtime.{PredictEngine, SettingsProgramRuntime}
 import dspy4s.signatures.OutputAugmentation.PrependField
 import dspy4s.programs.contracts.Prediction
 import dspy4s.signatures.{OutputAugmentation, Shape, Signature}
@@ -42,7 +43,11 @@ final case class ChainOfThought[I, O](
     /** Module-level LM defaults carried in [[OptimizableParameters]], matching [[Predict]] and [[DynamicPredict]].
       * Per-call config still wins on key collisions.
       */
-    config: DynamicValue.Record = DynamicValue.Record.empty
+    config: DynamicValue.Record = DynamicValue.Record.empty,
+    /** Experimental. The explicit settings of the decision outputs, by output name (upstream `Predict.fields` of the
+      * inner predictor), as [[Predict.decisions]]. The `reasoning` output stays a text output.
+      */
+    decisions: Map[String, DecisionSettings] = Map.empty
 )(using prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O])
     extends Module[I, ChainOfThought.WithReasoning[O]]:
 
@@ -51,7 +56,12 @@ final case class ChainOfThought[I, O](
 
   override val moduleName: String = name.getOrElse("chain_of_thought")
 
-  override protected val lifecycle: ModuleLifecycle[I, Out] = ModuleLifecycle.typed(baseSignature.inputShape)
+  // The key uses the augmented layout, as this leaf's `OptimizableMetadata` does. The inner `Predict` runs inside
+  // this predictor, so it records no key of its own.
+  override protected val lifecycle: ModuleLifecycle[I, Out] = ModuleLifecycle.predictor(
+    baseSignature.inputShape,
+    PredictorKey.from(moduleName, ChainOfThought.augmentLayout(baseSignature.layout))
+  )
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
     predict(call)
@@ -60,7 +70,23 @@ final case class ChainOfThought[I, O](
     * Left unnamed so it surfaces as a nested `predict` event under this program's `chain_of_thought` event.
     */
   private lazy val predict: Predict[I, Out] =
-    Predict(signature = augmentedSignature, demos = demos, runtime = runtime, config = config)
+    Predict(signature = augmentedSignature, demos = demos, runtime = runtime, config = config, decisions = decisions)
+
+  /** Experimental. This program with the explicit `settings` of the decision output `field`, as
+    * [[Predict.withDecision]].
+    */
+  def withDecision(field: String, settings: DecisionSettings): Either[DspyError, ChainOfThought[I, O]] =
+    PredictEngine.withDecision(augmentedLayout, decisions, field, settings).map(updated => copy(decisions = updated))
+
+  /** Experimental. The effective criteria of the decision output `field`, as [[Predict.criteria]]. */
+  def criteria(field: String): Either[DspyError, Option[DynamicValue]] =
+    PredictEngine.criteria(augmentedLayout, decisions, field)
+
+  /** Experimental. This program with the criteria of the decision output `field` set to `criteria`, as
+    * [[Predict.withCriteria]].
+    */
+  def withCriteria(field: String, criteria: DynamicValue): Either[DspyError, ChainOfThought[I, O]] =
+    PredictEngine.withCriteria(augmentedLayout, decisions, field, criteria).map(updated => copy(decisions = updated))
 
   private def augmentedSignature: Signature[I, Out] =
     Signature(
@@ -73,8 +99,8 @@ final case class ChainOfThought[I, O](
   private def augmentedLayout: SignatureLayout =
     ChainOfThought.augmentLayout(baseSignature.layout)
 
-  // The shared opening-position augmentation shape (idempotent prepend, decodePrepended, base JSON schema
-  // passthrough) — see [[OutputAugmentation.prependedStringShape]].
+  // The shared opening-position augmentation shape: an idempotent prepend, decodePrepended, and the base JSON schema
+  // with the `reasoning` property first. See [[OutputAugmentation.prependedStringShape]].
   private def augmentedOutputShape: Shape[Out] =
     OutputAugmentation.prependedStringShape(
       baseSignature.outputShape,
@@ -98,6 +124,10 @@ object ChainOfThought:
     description = Some("${reasoning}")
   ))
 
+  /** `layout` with the `reasoning` output first (upstream `signature.prepend`). The result keeps the effective
+    * instructions of `layout`: a layout with no instructions keeps the default instructions of its own fields, which do
+    * not name `reasoning` (see [[dspy4s.core.contracts.SignatureOps]]).
+    */
   private[dspy4s] def augmentLayout(layout: SignatureLayout): SignatureLayout =
     layout.prependOutput(reasoningField)
 

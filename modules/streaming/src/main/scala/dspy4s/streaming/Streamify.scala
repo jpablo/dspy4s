@@ -1,5 +1,6 @@
 package dspy4s.streaming
 
+import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.RuntimeContext
@@ -25,6 +26,12 @@ object Streamify:
     * signature and name, then builds a fresh adapter state machine for that signature. As a result, programs that
     * internally invoke multiple `DynamicPredict`s with different signatures stream per-field tokens correctly under
     * each predictor's own framing.
+    *
+    * The producer thread runs the program in the context that `streamify` gets (UPGRADE-3.2.1-to-3.4.0, decision D8:
+    * the given context wins), also when the caller did not install that context. Each field that the given context does
+    * not set comes from the context that is installed when the returned function runs, also the model and the adapter
+    * of the stream. Each invocation of the returned function takes the dynamic scope and the carriers of the thread
+    * that invokes it.
     */
   def streamify[P](
       program               : P,
@@ -46,14 +53,22 @@ object Streamify:
     validateListeners(streamable.knownSignatures(program), streamListeners, warningSink)
 
     inputs =>
-      val queue    = StreamingQueue[StreamEvent](queueCapacity)
-      val captured = ContextPropagation.captureAll
+      val queue = StreamingQueue[StreamEvent](queueCapacity)
+      // The producer thread runs in the effective context of `streamify`: the given context, filled from the installed
+      // one (decision D8: the given context wins). The model and the adapter of the stream come from that context too.
+      val (captured, effective) =
+        RuntimeEnvironment.withInstalled(outerContext)(installed ?=> (ContextPropagation.captureAll, installed))
 
       val provider = statusMessageProvider.getOrElse(StatusMessageProvider.default)
       val callback = new StatusStreamingCallback(provider, queue)
 
-      val currentLm = outerContext.lm
-      val adapter   = outerContext.adapter.collect { case a: Adapter => a }
+      val currentLm = effective.lm
+      // The stream rules come from the configured adapter. With no configured adapter, they are the chat rules
+      // (upstream `StreamListener.receive` and `flush` in `dspy/streaming/streaming_listener.py`).
+      val adapter = effective.adapter match
+        case Some(configured: Adapter) => Some(configured)
+        case Some(_)                   => None
+        case None                      => Some(ChatAdapter())
 
       val wrappedLm = currentLm.collect { case slm: StreamingLanguageModel =>
         StreamingLanguageModelWrapper(

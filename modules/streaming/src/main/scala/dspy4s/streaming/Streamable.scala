@@ -4,13 +4,13 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.programs.strategies.CodeAct
 import dspy4s.programs.strategies.ChainOfThought
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.strategies.Predict
 import dspy4s.programs.ProgramRunner
-import dspy4s.programs.strategies.ProgramOfThought
+import dspy4s.programs.strategies.RLM
 import dspy4s.programs.strategies.ReAct
+import dspy4s.programs.strategies.ReActV2
 import dspy4s.programs.contracts.DynamicModule
 import zio.blocks.schema.DynamicValue
 
@@ -73,27 +73,18 @@ object Streamable:
       )
     }
 
-  /** `CodeAct`: decode the record into the input, run it, and emit the raw prediction. Its two sub-predicts (the
-    * per-iteration code generator and the final extractor) are the stream-listener targets.
+  /** `RLM`: the action predictor of each iteration and the extract predictor of the fallback are the stream-listener
+    * targets (upstream `RLM.generate_action` and `RLM.extract`). A call can change the instructions of the action
+    * predictor, but not its name or its output fields.
     */
-  given codeAct[I, O](using ProgramRunner[CodeAct[I, O]]): Streamable[CodeAct[I, O]] =
+  given rlm[I, O](using ProgramRunner[RLM[I, O]]): Streamable[RLM[I, O]] =
     from { program =>
       Vector(
-        (program.codeActProgramName, program.codeActSignature),
-        // The extractor runs the CoT-AUGMENTED layout (a `reasoning` output prepended). Report that — not the
-        // un-augmented extractorSignature — so a `reasoning` stream listener isn't wrongly told it'll never fire.
-        (program.extractorProgramName, program.extractorPredict.signature.layout)
+        program.actionPredict.moduleName  -> program.actionPredict.signature.layout,
+        program.extractPredict.moduleName -> program.extractPredict.signature.layout
       )
     }
 
-  /** `ProgramOfThought`: decode the record into the input, run it, and emit the raw prediction. Its three stable inner
-    * predictors are the stream-listener targets.
-    */
-  given programOfThought[I, O](using ProgramRunner[ProgramOfThought[I, O]]): Streamable[ProgramOfThought[I, O]] =
-    from { program =>
-      Vector(
-        program.generatorPredict.moduleName   -> program.generatorPredict.signature.layout,
-        program.regeneratorPredict.moduleName -> program.regeneratorPredict.signature.layout,
-        program.answererPredict.moduleName    -> program.answererPredict.signature.layout
-      )
-    }
+  /** `ReActV2`: the step predictor is the one stream-listener target (upstream `ReActV2.react`). */
+  given reActV2[I, O](using ProgramRunner[ReActV2[I, O]]): Streamable[ReActV2[I, O]] =
+    from(program => Vector(program.reactPredict.moduleName -> program.reactPredict.layout))

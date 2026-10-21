@@ -4,6 +4,8 @@ import dspy4s.core.contracts.{
   ConfigurationError,
   DspyError,
   DynamicValues,
+  LmRateLimitError,
+  LmServerError,
   LmUsage,
   RuntimeContext,
   RuntimeError,
@@ -113,8 +115,8 @@ class LmRuntimeSuite extends FunSuite:
   test("managed language model retries until policy max retries is reached") {
     val delegate = new StubLanguageModel(
       Vector(
-        Left(RuntimeError("lm", "rate-limited")),
-        Left(RuntimeError("lm", "rate-limited")),
+        Left(LmRateLimitError("rate-limited")),
+        Left(LmRateLimitError("rate-limited")),
         Right(baseResponse)
       )
     )
@@ -130,8 +132,8 @@ class LmRuntimeSuite extends FunSuite:
   test("exponential backoff policy emits deterministic delays when jitter is disabled") {
     val delegate = new StubLanguageModel(
       Vector(
-        Left(RuntimeError("lm", "temporary-1")),
-        Left(RuntimeError("lm", "temporary-2")),
+        Left(LmServerError("temporary-1")),
+        Left(LmServerError("temporary-2")),
         Right(baseResponse)
       )
     )
@@ -164,7 +166,7 @@ class LmRuntimeSuite extends FunSuite:
       maxDelayMillis = RetryDelayMillis.applyUnsafe(Long.MaxValue),
       jitterFactor = JitterFactor(0.0)
     )
-    val error = RuntimeError("lm", "temporary")
+    val error = LmServerError("temporary")
 
     assertEquals(policy.delayBeforeNextAttemptMillis(0, error), base)
     assertEquals(policy.delayBeforeNextAttemptMillis(1, error), Long.MaxValue)

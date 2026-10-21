@@ -1,5 +1,6 @@
 package dspy4s.streaming
 
+import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt
@@ -22,10 +23,12 @@ import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
+import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.streaming.contracts.ErrorEvent
 import dspy4s.streaming.contracts.PredictionEvent
 import dspy4s.streaming.contracts.StatusEvent
 import dspy4s.streaming.contracts.StreamEvent
+import dspy4s.streaming.contracts.StreamListener
 import dspy4s.streaming.contracts.TokenEvent
 import zio.blocks.schema.DynamicValue
 import munit.FunSuite
@@ -181,6 +184,38 @@ class StreamifySuite extends FunSuite:
 
     val errors = events.collect { case e: ErrorEvent => e }
     assertEquals(errors.size, 1)
+  }
+
+  test("with no configured adapter, the stream uses the chat rules") {
+    // Upstream `StreamListener.receive` and `flush` use the chat rules when `settings.adapter` is `None`.
+    val chunks = Vector(
+      LmChunk(text = "[[ ## answer ## ]]\n"),
+      LmChunk(text = "42\n\n"),
+      LmChunk(text = "[[ ## completed ## ]]", finishReason = Some("stop"))
+    )
+    val signature = SignatureDsl.parse("question -> answer").toOption.get
+    // The predictor gets the chat adapter from its runtime, so the settings need no adapter.
+    val chatRuntime = new SettingsProgramRuntime:
+      override def resolveAdapter(using RuntimeContext): Either[DspyError, Adapter] = Right(ChatAdapter())
+
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ScriptedStreamingLm(chunks)))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      assert(summon[RuntimeContext].adapter.isEmpty)
+      val stream = Streamify.streamify(
+        program = DynamicPredict(layout = signature, runtime = chatRuntime),
+        streamListeners = Vector(StreamListener("answer"))
+      )(rec("question" := "x"))
+
+      val events = ArrayBuffer.empty[StreamEvent]
+      while stream.hasNext do events += stream.next()
+
+      val tokens      = events.collect { case e: TokenEvent => e }
+      val predictions = events.collect { case e: PredictionEvent => lookupString(e.prediction.values, "answer") }
+      assertEquals(predictions.toVector, Vector("42"))
+      assertEquals(tokens.map(_.fieldName).toSet, Set("answer"))
+      assertEquals(tokens.map(_.chunk).mkString, "42")
+      assert(tokens.lastOption.exists(_.isLastChunk), tokens.toString)
+    }
   }
 
   test("streamify can be called multiple times producing independent streams") {

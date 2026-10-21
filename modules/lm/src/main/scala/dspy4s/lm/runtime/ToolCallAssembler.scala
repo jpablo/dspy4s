@@ -2,9 +2,11 @@ package dspy4s.lm.runtime
 
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.:=
+import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.core.contracts.ToolCall
 import dspy4s.lm.providers.DynamicJson
+import dspy4s.lm.providers.WireKeys
 import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable
@@ -14,7 +16,11 @@ import scala.collection.mutable
   * OpenAI emits the function `name` and call `id` once (typically on the first delta for a given `index`) and the
   * `arguments` JSON string in fragments across subsequent deltas. We accumulate by `index`, preserving the order in
   * which indices first appeared, and JSON-decode the concatenated arguments into a `DynamicValue.Record`. Falls back to
-  * `{input: raw}` when the arguments string is not valid JSON — matches the non-streaming `parseArgs`.
+  * `{input: raw}` when the arguments string is not valid JSON, as the non-streaming `parseArgs` does. A stream in the
+  * Responses mode gives `{partial_json: raw}` for such a string (see [[assemble]]).
+  *
+  * Each call keeps its `id`, because a tool result must name it. An empty id counts as no id, as in
+  * `ProviderResponseParser`.
   */
 object ToolCallAssembler:
 
@@ -24,11 +30,18 @@ object ToolCallAssembler:
     val arguments: StringBuilder = new StringBuilder
 
     def merge(delta: LmToolCallDelta): Unit =
-      if id.isEmpty then id = delta.id
+      if id.isEmpty then id = idOf(delta)
       if name.isEmpty then name = delta.name
       delta.argumentsFragment.foreach(arguments.append)
 
-  def assemble(deltas: Iterable[LmToolCallDelta]): Vector[ToolCall] =
+  /** The tool calls of `deltas`, from a stream in `mode`. In the chat mode, the arguments go through
+    * [[parseArguments]]. In the Responses mode, the arguments go through [[partialArguments]] (upstream lm15
+    * `StreamAccumulator`).
+    */
+  def assemble(deltas: Iterable[LmToolCallDelta], mode: LmMode = LmMode.Chat): Vector[ToolCall] =
+    val arguments: String => DynamicValue.Record = mode match
+      case LmMode.Responses          => partialArguments
+      case LmMode.Chat | LmMode.Text => parseArguments(_)
     val ordered = mutable.ArrayBuffer.empty[Accumulator]
     val active  = mutable.HashMap.empty[Int, Accumulator]
     deltas.foreach { delta =>
@@ -43,7 +56,7 @@ object ToolCallAssembler:
     }
     ordered.iterator.flatMap { acc =>
       acc.name.map { name =>
-        ToolCall(name = name, args = parseArguments(acc.arguments.toString))
+        ToolCall(name = name, args = arguments(acc.arguments.toString), id = acc.id)
       }
     }.toVector
 
@@ -53,18 +66,64 @@ object ToolCallAssembler:
     * id/name keep attaching to the index's most recent call.
     */
   private def startsNewCall(current: Accumulator, delta: LmToolCallDelta): Boolean =
-    delta.id.exists(id => current.id.exists(_ != id)) ||
+    idOf(delta).exists(id => current.id.exists(_ != id)) ||
       delta.name.exists(name => current.name.exists(_ != name))
 
-  /** JSON-decode a tool-call `arguments` string into a `DynamicValue.Record`; `{input: raw}` when it is not valid JSON,
-    * `{value: json}` when it parses to a non-object. Shared with the non-streaming `ProviderResponseParser.parseArgs`
-    * so both paths decode identically.
+  /** The id of a delta. An empty id counts as no id: it does not set the id of a call, and it does not conflict with
+    * the id of the current call.
     */
-  private[runtime] def parseArguments(raw: String): DynamicValue.Record =
+  private def idOf(delta: LmToolCallDelta): Option[String] = delta.id.filter(_.nonEmpty)
+
+  /** The arguments of a provider tool call (the `arguments` value of a chat tool call or of a Responses `function_call`
+    * item) as a record. An object stays as it is. A text that is not blank goes through [[parseArguments]], as on the
+    * stream path. Each other value gives `{value: <value>}`. No value gives an empty record.
+    *
+    * @param notJson
+    *   the record of a text that is not JSON. The default is the chat rule, `{input: <text>}`. The Responses path gives
+    *   an empty record (upstream `responses_outputs` in `dspy/clients/legacy_outputs.py`).
+    */
+  private[lm] def decodeArguments(
+      raw    : Option[DynamicValue],
+      notJson: String => DynamicValue.Record = inputRecord
+  ): DynamicValue.Record =
+    raw match
+      case Some(rec: DynamicValue.Record) => rec
+      case Some(other)                    => DynamicJson.asString(other).filter(_.trim.nonEmpty) match
+          // OpenAI sends `arguments` as a JSON STRING; decode it into a Record (the ToolCall contract: args are decoded
+          // at the parse boundary). Text that is not JSON goes to `notJson` in parseArguments.
+          case Some(text) => parseArguments(text, notJson)
+          case None       => DynamicValues.recordFromEntries(Seq(WireKeys.value -> other))
+      case None => DynamicValue.Record.empty
+
+  /** JSON-decode a tool-call `arguments` string into a `DynamicValue.Record`; `notJson` of the trimmed text when it is
+    * not valid JSON (`{input: raw}` by default), `{value: json}` when it parses to a non-object. [[decodeArguments]]
+    * uses it for a response, so the stream path and the response path decode identically.
+    */
+  private[runtime] def parseArguments(
+      raw    : String,
+      notJson: String => DynamicValue.Record = inputRecord
+  ): DynamicValue.Record =
     val trimmed = raw.trim
-    if trimmed.isEmpty then DynamicValue.Record.empty
-    else
-      DynamicJson.decode(trimmed) match
-        case Right(rec: DynamicValue.Record) => rec
-        case Right(other)                    => DynamicValues.recordFromEntries(Seq("value" -> other))
-        case Left(_)                         => DynamicValues.recordFromEntries(Seq("input" := trimmed))
+    if trimmed.isEmpty then DynamicValue.Record.empty else jsonArguments(trimmed, notJson(trimmed))
+
+  /** The arguments of a call in a Responses stream (upstream lm15 `_parse_json_best_effort` in
+    * `dspy/_vendor/lm15/result.py`): an empty text gives an empty record, and a text that is not JSON gives
+    * `{partial_json: <text>}`. The text keeps its white space, so a text of white space only is not JSON. Each other
+    * text follows [[parseArguments]].
+    */
+  private def partialArguments(raw: String): DynamicValue.Record =
+    if raw.isEmpty then DynamicValue.Record.empty
+    else jsonArguments(raw, DynamicValues.recordFromEntries(Seq(WireKeys.partialJson := raw)))
+
+  /** The record of a JSON text: an object stays, and each other JSON value gives `{value: json}`. A text that is not
+    * JSON gives `notJson`.
+    */
+  private def jsonArguments(text: String, notJson: => DynamicValue.Record): DynamicValue.Record =
+    DynamicJson.decode(text) match
+      case Right(rec: DynamicValue.Record) => rec
+      case Right(other)                    => DynamicValues.recordFromEntries(Seq(WireKeys.value -> other))
+      case Left(_)                         => notJson
+
+  /** The chat rule for arguments that are not JSON: `{input: <text>}`. */
+  private def inputRecord(text: String): DynamicValue.Record =
+    DynamicValues.recordFromEntries(Seq(WireKeys.input := text))

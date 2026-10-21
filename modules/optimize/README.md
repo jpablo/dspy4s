@@ -1,29 +1,28 @@
 # dspy4s `optimize`
 
-The teleprompter (optimizer) family. Given a **student program**, a **trainset**, and a **metric**, an
-optimizer searches for a better version of the program — better few-shot demos, better instructions, or both —
-and returns the best one it found. This is the dspy4s port of `dspy.teleprompt`.
+`optimize` contains the optimizers (teleprompters). An optimizer gets a student program, a trainset, and a metric. It
+tries different demos, different instructions, or both, and returns the best program that it finds. It uses the
+`core`, `programs`, and `evaluate` modules.
 
-## The idea
+## Main concepts
 
-dspy programs have two learnable knobs that an optimizer can turn without you editing any prompt by hand:
+- **Demos and instructions.** An optimizer changes two parameters of each predictor: the demos (the few-shot
+  examples) and the instructions.
+- **Propose, score, select.** An optimizer makes candidate programs, scores each one with `Evaluate` and the metric,
+  and returns the best one. The student does not change.
+- **Two program capabilities.** An optimizer works on each program type `P` that has two given instances from the
+  `programs` module:
+  - `OptimizableStructure[P]` reads the `OptimizableParameters` of each predictor (`read`), and puts new parameters
+    into a copy of the program (`replace`). A composite program has all the predictors of its parts.
+  - `ProgramRunner[P]` runs `P` on a record input and returns a `RawPrediction` for `Evaluate`.
 
-- **Demos** — few-shot examples attached to a predictor.
-- **Instructions** — the natural-language instruction string on a predictor's signature.
-
-An optimizer takes the program, proposes variations of those knobs (by bootstrapping demos from the trainset,
-or asking an LM to rewrite instructions), scores each variation with your metric, and keeps the winner. You
-get back the same program type you put in, with its predictors' demos and/or instructions improved.
-
-```
- student ─┐
- trainset ─┼─► optimizer.compile ─► OptimizationReport(bestProgram, candidates…)
- metric  ─┘        (propose → score → select)
-```
+  Thus the optimizers work on domain-valued programs (`Predict[I, O]`, `ReAct[I, O]`, …) and on record-valued
+  programs (`DynamicModule`).
+- **Events.** Each `compile` call sends a compile start event and an end event.
 
 ## The contract
 
-Every demo/instruction optimizer implements `Teleprompter[P]`:
+Each demo optimizer and each instruction optimizer implements `Teleprompter[P]`:
 
 ```scala
 trait Teleprompter[P]:
@@ -36,103 +35,64 @@ trait Teleprompter[P]:
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]]
 ```
 
-`compile` returns an `OptimizationReport[P]` carrying the `bestProgram` plus every scored `CandidateProgram[P]`
-(program + score + optional `EvaluationResult` + metadata). When no `valset` is supplied, optimizers score on
-the trainset.
-
-### Two type-class spines
-
-Optimizers are generic over the program type `P`, working through two given instances rather than a fixed
-program class:
-
-- **`OptimizableStructure[P]`** — introspection: `inspect` exposes non-executable `OptimizableView`s (read-only signature/module
-  metadata plus optimizable parameters), `read` projects the `OptimizableParameters` values, and `replace` writes an edited parameter vector
-  back. One `Predict` is a length-1 list; a composite exposes all its leaves. This is what lets a single code path
-  optimize both a standalone predictor and an arbitrary composite.
-- **`ProgramRunner[P]`** — run `P` on a record-valued `ProgramCall`, yielding the `RawPrediction` evidence that `Evaluate`
-  consumes. This is the "spine unification": it lets the optimizers target domain-valued programs (`Predict[I, O]`,
-  `ChainOfThought[I, O]`, `ProgramOfThought[I, O]`, …) as well as the record-valued `DynamicModule` spine, with no
-  `asInstanceOf`.
-
-Scoring across the family goes through `Evaluate` + the metric via shared helpers in `OptimizerSupport` (the
-`seed → rolloutId` mapping and the eval wiring are kept in one place so every optimizer behaves identically).
+`compile` returns an `OptimizationReport[P]` with the `bestProgram` and each scored `CandidateProgram[P]`. An
+optimizer that scores candidates uses the `valset`, else the trainset. With no `valset`, `InferRules` uses the second
+half of the trainset.
 
 ## The optimizers
 
-| Optimizer | What it tunes | How |
-|-----------|---------------|-----|
-| `LabeledFewShot` | demos | attach up to `k` labeled trainset examples directly as demos (sampled or first-k) |
-| `BootstrapFewShot` | demos | run a teacher over the trainset, keep traces the metric accepts as demos |
-| `BootstrapFewShotWithRandomSearch` | demos | bootstrap `numCandidates` demo sets with different seeds, score each, keep the best |
-| `KNNFewShot` | demos (per query) | at each call, retrieve the query's nearest trainset neighbors and bootstrap *those* as demos |
-| `COPRO` | instructions | coordinate-ascent: per predictor, an LM proposes `breadth` instructions over `depth` refinement rounds, greedily keeping the best |
-| `MIPROv2` | demos + instructions | bootstrap demo-set candidates, propose instruction candidates (`GroundedProposer`), then random-search over the joint space |
-| `InferRules` | instructions (+ demos) | bootstrap demos, then induce natural-language rules from labeled examples and append the best-scoring rule set |
-| `Ensemble` | — | combine several already-compiled programs into one that runs all (or a sampled subset) and reduces by majority vote |
+| Optimizer | It changes | How |
+|-----------|------------|-----|
+| `LabeledFewShot` | demos | adds up to `k` trainset examples as demos |
+| `BootstrapFewShot` | demos | runs a teacher on the trainset, and keeps the runs that the metric accepts as demos |
+| `BootstrapFewShotWithRandomSearch` | demos | bootstraps `numCandidates` demo sets with different seeds, and keeps the best set |
+| `KNNFewShot` | demos, for each call | bootstraps the nearest trainset examples to the input as demos |
+| `COPRO` | instructions | for one predictor at a time, an LM proposes `breadth` instructions in `depth` rounds, and COPRO keeps the best |
+| `MIPROv2` | demos and instructions | bootstraps demo sets, proposes instructions with `GroundedProposer`, and does a random search of the combinations |
+| `InferRules` | instructions and demos | bootstraps demos, gets rules from an LM, and adds the best set of rules to the instructions |
+| `Ensemble` | (none) | makes one program that runs the given programs (or a sample of `size`), and selects the majority answer |
 
-A few that warrant detail:
+`KNNFewShot` and `Ensemble` do not implement `Teleprompter`. Each one returns a `DynamicModule`.
 
 ### `BootstrapFewShot`
 
-The workhorse demo optimizer. A teacher program runs over the trainset; for each example where the metric
-accepts the prediction (optionally above `metricThreshold`), the successful trace becomes a demo. Caps:
-`maxBootstrappedDemos` (bootstrapped) and `maxLabeledDemos` (raw labeled). Many other optimizers compose it.
+A teacher program runs on the trainset. With no teacher, the student is the teacher. An example passes when the
+metric score is more than 0, or at least `metricThreshold` if you set it. Each predictor that ran gets a demo from its
+trace of the passed example. `maxBootstrappedDemos` and `maxLabeledDemos` limit the demos. Many other optimizers use
+`BootstrapFewShot`.
 
-### `COPRO` — Coordinate-ascent Prompt Optimizer
+### `MIPROv2`
 
-Instruction-only. For each predictor: seed `breadth - 1` LM-proposed instructions (plus the current one),
-score the whole program with each applied to that predictor, keep the best, and run `depth - 1` further rounds
-that refine using the accumulated `(instruction, score)` attempts. Greedy/sequential across predictors. Deltas
-vs Python (interleaved joint search, output-prefix mutation, `track_stats`) are documented in `COPRO.scala`.
+MIPROv2 first bootstraps `numCandidates` demo sets, and adds one set with no demos. Then `GroundedProposer` proposes
+instructions for each predictor from a summary of the trainset, the demos, and a tip. Then MIPROv2 runs `numTrials`
+trials. Each trial selects a demo set and one instruction for each predictor at random. MIPROv2 returns the candidate
+with the best score.
 
-### `MIPROv2` — Multiprompt Instruction PRoposal Optimizer (v2)
+## Save and load a program
 
-Three phases, each reusing an existing component: (1) bootstrap `numCandidates` demo-set candidates (plus a
-zero-shot one); (2) propose instruction candidates per predictor via `GroundedProposer`; (3) random-search
-`numTrials` over (demo-assignment, per-predictor instruction) choices, scoring each trial, returning the best.
-The main delta from Python is **uniform random search instead of Optuna TPE** (no surrogate model, no
-minibatch/full-eval split, no successive halving); see `MIPROv2.scala`.
-
-### `GroundedProposer`
-
-Not a teleprompter itself — a reusable component (`propose/`) that proposes candidate instructions per
-predictor, grounded in a dataset summary and (optionally) bootstrapped demos, with rotating "tips". MIPROv2's
-instruction-proposal phase.
-
-### `Ensemble`
-
-Not a `Teleprompter` — it `compile`s a `Vector[DynamicModule]` into a single `DynamicModule` that runs all
-members (or a random `size`-sized sample) per call and folds their outputs through a `reduceFn` (majority vote
-by default). Built on the dynamic spine because an ensemble is inherently heterogeneous; it can nest anywhere a
-program is expected.
-
-## Persistence
-
-`ProgramPersistence` saves/loads a program's `OptimizableParameters` as JSON — the analogue of Python's
-`dump_state` / `load_state`. Every supported leaf exposes the same parameters: instructions, demos, and module-level config.
-Loading applies those values to a freshly constructed program while preserving signature structure, module names,
-runtimes, output schemas, bound LMs, and tools. See the authoritative
-[state contract](../../site/docs/runtime/saving-and-loading.md) for the lens laws, ordinal-ID limitation, and format
-compatibility policy.
+`ProgramPersistence` saves the instructions, the demos, and the configuration of each predictor as JSON. To load a
+state, give a new program with the same structure. The program keeps its signatures, LMs, and tools, and gets the
+saved values. The [state contract](../../site/docs/runtime/saving-and-loading.md) gives the rules and the limits.
 
 ## Source layout
 
-| File | Contents |
-|------|----------|
-| `contracts/OptimizeContracts.scala` | `Teleprompter`, `OptimizationReport`, `CandidateProgram` |
-| `programs/ProgramRunner.scala` | the shared `ProgramRunner[P]` spine for domain- and record-valued programs |
-| `OptimizerSupport.scala` | shared instruction-edit, seed→rolloutId, and scoring helpers |
-| `LabeledFewShot.scala`, `BootstrapFewShot*.scala`, `KNNFewShot.scala` | demo optimizers |
-| `COPRO.scala`, `MIPROv2.scala`, `InferRules.scala` | instruction (and demo) optimizers |
-| `propose/GroundedProposer.scala` | MIPROv2's instruction proposer |
-| `Ensemble.scala` | program ensembling |
-| `ProgramPersistence.scala` | program state save / load |
+| Package | Contents |
+|---------|----------|
+| `optimize/` | the optimizers, `OptimizerSupport`, the count types such as `DemoCount`, and `ProgramPersistence` |
+| `contracts/` | `Teleprompter`, `OptimizationReport`, and `CandidateProgram` |
+| `propose/` | `GroundedProposer` |
+| `para/` | `ParaCompile`, which runs `COPRO` on a `Program[I, O, N]` |
 
 ## Relation to dspy
 
-This module ports `dspy/teleprompt/` and `dspy/propose/`. Following the [module-purity
-principle](../../README.md), programs stay immutable pure functions; optimizers never mutate a student in
-place (Python monkey-patches `forward`) — they read the predictor genome through `OptimizableStructure`, build edited
-copies, and return a new program. `KNNFewShot` is the one case that can't be a `Teleprompter` (its behavior is
-per-call), so it returns a wrapper `DynamicModule` instead. The reflective genetic optimizer **GEPA** lives in
-its own [`gepa` module](../gepa/README.md) because it needs a richer feedback metric and a reflection LM.
+`optimize` ports `dspy/teleprompt/` and `dspy/propose/`.
+
+- An optimizer does not change the student. Thus `KNNFewShot` returns a new `DynamicModule`. Python DSPy changes
+  the `forward` method of the student.
+- `MIPROv2` uses a uniform random search in place of Optuna TPE.
+- `COPRO` optimizes one predictor at a time. Python DSPy optimizes all predictors in each round.
+- These optimizers are not ported yet: `SIMBA`, `BetterTogether`, `BootstrapFinetune`, `GRPO`,
+  `BootstrapFewShotWithOptuna`, and `ReAnchor`. `AvatarOptimizer` is not ported, by design. See
+  [PORT_GAPS](../../docs/port/PORT_GAPS.md).
+
+GEPA is in the [`gepa` module](../gepa/README.md), because it needs a metric that gives feedback and a reflection LM.

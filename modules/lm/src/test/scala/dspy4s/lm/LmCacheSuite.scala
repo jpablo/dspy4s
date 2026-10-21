@@ -54,14 +54,14 @@ class LmCacheSuite extends FunSuite:
     assertNotEquals(RequestHash.forRequest(asInt), RequestHash.forRequest(asString))
   }
 
-  test("in-memory cache returns cache hit response without usage") {
+  test("in-memory cache returns a cache hit with the stored usage") {
     val cache = new InMemoryLmCache(maxEntries = CacheCapacity(8))
     cache.put(baseRequest, baseResponse)
 
     val cached = cache.get(baseRequest)
     assert(cached.isDefined)
     assertEquals(cached.get.cacheHit, true)
-    assertEquals(cached.get.usage, None)
+    assertEquals(cached.get.usage, baseResponse.usage)
   }
 
   test("disk cache persists values across cache instances") {
@@ -75,7 +75,7 @@ class LmCacheSuite extends FunSuite:
       val cached = second.get(baseRequest)
       assert(cached.isDefined)
       assertEquals(cached.get.cacheHit, true)
-      assertEquals(cached.get.usage, None)
+      assertEquals(cached.get.usage, baseResponse.usage)
     finally deleteRecursively(tempDir)
   }
 

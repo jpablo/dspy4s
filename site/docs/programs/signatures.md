@@ -62,6 +62,17 @@ a Scala value, so `_.output.sentiment` has type `Emotion` with no cast:
 --8<-- "signatures/CaseClassExample.scala:derived-sig"
 ```
 
+### Optional outputs
+
+An output field of type `Option[T]` is optional. When the response of the model
+does not have the field, the value is `None`, and the call does not fail. In an
+inline signature, write the type as `Optional[T]` or `T | None`, for example
+`"question -> answer, note: Optional[str]"`.
+
+A required field that the response does not have is a parse error. With the
+default `ChatAdapter`, a parse error gives one more call in the JSON format
+(`useJsonAdapterFallback`).
+
 ## Building a signature programmatically
 
 When a case class per signature is overkill (exploration, shapes assembled from
@@ -81,6 +92,33 @@ shape and nested encode/decode:
 ```scala
 --8<-- "learn/programming/Signatures.scala:custom-types"
 ```
+
+## Conversation history
+
+A program does not keep the earlier turns of a conversation. To give them to
+the model, add an input field of type `History` to the signature:
+
+```scala
+--8<-- "tutorials/conversation_history/ConversationHistory.scala:signature"
+```
+
+A `History` holds messages. Each message is a record whose keys are field names
+of the same signature. The adapter does not show the field as a value. It
+replays each message before the current request: the input fields make an
+earlier user turn, and the output fields make the assistant turn that answered
+it.
+
+The caller adds each turn to the history and gives the history to the next
+call:
+
+```scala
+--8<-- "tutorials/conversation_history/ConversationHistory.scala:conversation"
+```
+
+A message can also hold the tool calls of a turn and the results of those calls
+(`History.withToolCallResults`). With
+[native function calling](tools-and-react.md#native-function-calling), the
+adapter sends them to the model as tool messages.
 
 ## Summary
 

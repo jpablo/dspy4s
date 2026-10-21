@@ -71,11 +71,10 @@ final case class MIPROv2Config(
   *     surrogate over the categorical (instruction-index, demo-index) parameters and samples promising combinations.
   *     dspy4s uses a seeded uniform-random search over the same parameter space. No surrogate model is built; trials
   *     are i.i.d. given the seed.
-  *   - '''Whole-program demo choice (broadcast), not per-predictor trace-routed demos.''' Each trial picks ONE
-  *     demo-assignment for the whole program. Today [[BootstrapFewShot]] itself broadcasts the same demos to every
-  *     predictor, so a demo-assignment's per-predictor vectors are identical; the per-predictor structure is carried
-  *     through faithfully so a future per-predictor bootstrap drops in without changing the search. Python's
-  *     `create_n_fewshot_demo_sets` + trace routing can give different predictors different demos within one set.
+  *   - '''Whole-program demo choice.''' Each trial picks ONE demo-assignment for the whole program.
+  *     [[BootstrapFewShot]] gives each predictor the demos of its own trace entries, so the per-predictor vectors of
+  *     one assignment can be different. Python picks a demo-set index for each predictor, so one trial can use demo
+  *     sets from different bootstrap runs.
   *   - '''Minibatch / full-eval distinction dropped.''' Python evaluates trials on a minibatch and periodically re-runs
   *     full evaluations (with successive promotion of the best param combo). dspy4s always does a full evaluation on
   *     the provided set every trial. No `minibatch_full_eval_steps`, no `_perform_full_evaluation`.
@@ -101,49 +100,66 @@ final class MIPROv2[P: {OptimizableStructure, ProgramRunner}](config: MIPROv2Con
       teacher : Option[P]               = None,
       valset  : Option[Vector[Example]] = None
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
+    Teleprompter.withCompileCallbacks(this, trainset, valset)(compileInScope(student, trainset, teacher, valset))
+
+  /** The work of [[compile]], inside its compile scope. */
+  private def compileInScope(
+      student : P,
+      trainset: Vector[Example],
+      teacher : Option[P],
+      valset  : Option[Vector[Example]]
+  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     val evalset: Vector[Example] = valset.getOrElse(trainset)
     val leafCount                = ps.read(student).size
 
     if leafCount == 0 then
       Right(OptimizerSupport.noOptimizableLeavesReport(student))
+    else if evalset.isEmpty then Left(OptimizerSupport.emptyEvalsetError(name))
     else
-      // ── Phase 1: demo-set candidates (whole-program demo assignments) ──
-      val demoCandidates: Vector[Vector[Vector[Example]]] = bootstrapDemoCandidates(student, trainset, teacher)
-
-      // ── Phase 2: instruction candidates (per predictor) ──
-      proposeInstructionCandidates(student, trainset, demoCandidates).map { instructionCandidates =>
+      for
+        // Two leaves with the same predictor key are a configuration error (decision D2).
+        _ <- OptimizerSupport.requireDistinctKeys(student, teacher)
+        // ── Phase 1: demo-set candidates (whole-program demo assignments) ──
+        demoCandidates <- bootstrapDemoCandidates(student, trainset, teacher)
+        // ── Phase 2: instruction candidates (per predictor) ──
+        instructionCandidates <- proposeInstructionCandidates(student, trainset, demoCandidates)
+      yield
         // ── Phase 3: random search over (demo-assignment, per-predictor instruction) ──
         searchTrials(student, evalset, demoCandidates, instructionCandidates, leafCount)
-      }
 
   // ── Phase 1 ─────────────────────────────────────────────────────────────
 
   /** Produce `numCandidates` whole-program demo assignments via [[BootstrapFewShot]] (distinct seeds), each read back
-    * as the per-predictor demo vectors, PLUS a zero-shot assignment (empty demos for every predictor).
+    * as the per-predictor demo vectors, PLUS a zero-shot assignment (empty demos for every predictor). A bootstrap run
+    * that fails gives the zero-shot assignment. A configuration error of the bootstrap is a `Left`
+    * (`OptimizerSupport.bootstrapCandidate`).
     */
   private def bootstrapDemoCandidates(
       student : P,
       trainset: Vector[Example],
       teacher : Option[P]
-  )(using RuntimeContext): Vector[Vector[Vector[Example]]] =
+  )(using RuntimeContext): Either[DspyError, Vector[Vector[Vector[Example]]]] =
     val leafCount = ps.read(student).size
     val zeroShot  = Vector.fill(leafCount)(Vector.empty[Example])
+    val start     = Right(Vector.empty): Either[DspyError, Vector[Vector[Vector[Example]]]]
 
-    val bootstrapped = (0 until config.numCandidates).iterator.map { k =>
-      val bootstrap = new BootstrapFewShot[P](
-        BootstrapFewShotConfig(
-          metric = Some(config.metric),
-          maxBootstrappedDemos = config.maxBootstrappedDemos,
-          maxLabeledDemos = config.maxLabeledDemos,
-          seed = config.seed + k
+    val bootstrapped = (0 until config.numCandidates).foldLeft(start) { (candidates, k) =>
+      candidates.flatMap { done =>
+        val bootstrap = new BootstrapFewShot[P](
+          BootstrapFewShotConfig(
+            metric = Some(config.metric),
+            maxBootstrappedDemos = config.maxBootstrappedDemos,
+            maxLabeledDemos = config.maxLabeledDemos,
+            seed = config.seed + k
+          )
         )
-      )
-      bootstrap.compile(student, trainset, teacher) match
-        case Right(report) => ps.read(report.bestProgram).map(_.demos)
-        case Left(_)       => zeroShot
-    }.toVector
+        OptimizerSupport.bootstrapCandidate(bootstrap.compile(student, trainset, teacher)).map { compiled =>
+          done :+ compiled.fold(zeroShot)(program => ps.read(program).map(_.demos))
+        }
+      }
+    }
 
-    (zeroShot +: bootstrapped).distinct
+    bootstrapped.map(candidates => (zeroShot +: candidates).distinct)
 
   // ── Phase 2 ─────────────────────────────────────────────────────────────
 

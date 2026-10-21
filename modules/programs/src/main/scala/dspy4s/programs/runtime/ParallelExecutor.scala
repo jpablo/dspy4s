@@ -13,7 +13,7 @@ import java.util.concurrent.ExecutorCompletionService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
-import scala.concurrent.duration.DurationInt
+import scala.concurrent.duration.Duration
 import scala.concurrent.duration.FiniteDuration
 import scala.util.control.NonFatal
 
@@ -23,28 +23,39 @@ final case class ParallelExecutionResult[+A](
     errors       : Map[Int, DspyError]
 )
 
+/** Runs a task for each item of a batch on a pool of `numThreads` threads (upstream `dspy/utils/parallelizer.py`).
+  *
+  * @param maxErrors
+  *   the number of tasks that can fail before the executor cancels the batch and gives a `Left`
+  * @param timeout
+  *   the longest wait for the next task that completes. When no task completes in this time, the batch is a `Left`. The
+  *   default, `Duration.Inf`, gives no time limit: the executor then waits for each task. Upstream never fails a batch
+  *   for time: its `timeout` (120 seconds) only submits a slow task again (`dspy/utils/parallelizer.py`). The port does
+  *   not submit a task again (PORT_GAPS G-41).
+  */
 final class ParallelExecutor(
-    numThreads: ThreadCount    = ThreadCount(8),
-    maxErrors : ErrorLimit     = ErrorLimit(10),
-    timeout   : FiniteDuration = 120.seconds
+    val numThreads: ThreadCount = ParallelExecutor.DefaultNumThreads,
+    val maxErrors : ErrorLimit  = ErrorLimit(10),
+    val timeout   : Duration    = Duration.Inf
 ):
 
-  // The public entry points declare `using RuntimeContext` as an API contract (workers run under the caller's
-  // context), but propagation happens via `ContextPropagation.captureAll` reading the ambient environment, so the
-  // parameter itself is unused.
+  // The workers run in the effective context of the call: the given context, filled from the installed one (decision
+  // D8 of UPGRADE-3.2.1-to-3.4.0: the given context wins). `ContextPropagation.captureAll` reads the installed
+  // context, so each entry point installs the given context first. A task reads `RuntimeEnvironment.current` on its
+  // worker to get that context.
   def execute[A, B](
       task: A => B,
       data: Vector[A]
-  )(using @annotation.unused ctx: RuntimeContext): Either[DspyError, ParallelExecutionResult[B]] =
+  )(using ctx: RuntimeContext): Either[DspyError, ParallelExecutionResult[B]] =
     // executeInternal already wraps each task call in a try/catch that turns a throw into the same
     // `RuntimeError`, so a total `task` only needs lifting into `Right` — no second catch here.
-    executeInternal(task = (item: A) => Right(task(item)), data = data)
+    RuntimeEnvironment.withInstalled(ctx)(executeInternal(task = (item: A) => Right(task(item)), data = data))
 
   def executeEither[A, B](
       task: A => Either[DspyError, B],
       data: Vector[A]
-  )(using @annotation.unused ctx: RuntimeContext): Either[DspyError, ParallelExecutionResult[B]] =
-    executeInternal(task = task, data = data)
+  )(using ctx: RuntimeContext): Either[DspyError, ParallelExecutionResult[B]] =
+    RuntimeEnvironment.withInstalled(ctx)(executeInternal(task = task, data = data))
 
   private def executeInternal[A, B](
       task: A => Either[DspyError, B],
@@ -95,7 +106,9 @@ final class ParallelExecutor(
       var timedOut          = false
 
       while completed < submitted && !cancelledByErrors && !timedOut do
-        val completedFuture = completion.poll(timeout.toMillis, TimeUnit.MILLISECONDS)
+        val completedFuture = timeout match
+          case limit: FiniteDuration => completion.poll(limit.toMillis, TimeUnit.MILLISECONDS)
+          case _: Duration.Infinite  => completion.take()
         if completedFuture == null then
           timedOut = true
         else
@@ -142,18 +155,21 @@ final class ParallelExecutor(
       val _ = pool.shutdownNow()
 
 object ParallelExecutor:
+  /** The number of threads of an executor when the caller and the context give none. */
+  val DefaultNumThreads: ThreadCount = ThreadCount(8)
+
   /** Build an executor from the ambient context's `numThreads` / `maxErrors`, falling back to the defaults. Explicit
     * `numThreads` / `maxErrors` arguments win over the context (the resolution chain [[dspy4s.programs.Parallel]]
-    * uses); the fallback constants live only here.
+    * uses); the fallback constants live only here. The default `timeout` gives no time limit, as for the constructor.
     */
   def fromSettings(
-      timeout   : FiniteDuration      = 120.seconds,
+      timeout   : Duration            = Duration.Inf,
       numThreads: Option[ThreadCount] = None,
       maxErrors : Option[ErrorLimit]  = None
   )(using RuntimeContext): ParallelExecutor =
     val ctx = summon[RuntimeContext]
     ParallelExecutor(
-      numThreads = numThreads.orElse(ctx.numThreads).getOrElse(ThreadCount(8)),
+      numThreads = numThreads.orElse(ctx.numThreads).getOrElse(DefaultNumThreads),
       maxErrors = maxErrors.orElse(ctx.maxErrors).getOrElse(ErrorLimit(10)),
       timeout = timeout
     )

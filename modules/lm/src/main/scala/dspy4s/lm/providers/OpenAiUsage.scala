@@ -11,6 +11,11 @@ import zio.blocks.schema.json.JsonCodecDeriver
   * no by-hand `DynamicValue` navigation. Both the Chat (`prompt_tokens`/`completion_tokens`) and the Responses
   * (`input_tokens`/`output_tokens`) naming conventions are modeled; the nested `*_tokens_details` blocks carry the
   * provider-specific extras. `toLmUsage` reconciles all of this into the domain `LmUsage`.
+  *
+  * The chat usage has the blocks `prompt_tokens_details` and `completion_tokens_details` (upstream `_usage_from_chat`
+  * in `dspy/_vendor/lm15/providers/openai_chat.py`). The Responses usage has the blocks `input_tokens_details` and
+  * `output_tokens_details` (upstream `OpenAILM.parse_response` and `_parse_single_stream_event` in
+  * `dspy/_vendor/lm15/providers/openai.py`).
   */
 private[lm] final case class OpenAiUsage(
     promptTokens           : Option[Long]               = None,
@@ -19,18 +24,22 @@ private[lm] final case class OpenAiUsage(
     inputTokens            : Option[Long]               = None,
     outputTokens           : Option[Long]               = None,
     promptTokensDetails    : Option[OpenAiTokenDetails] = None,
-    completionTokensDetails: Option[OpenAiTokenDetails] = None
+    completionTokensDetails: Option[OpenAiTokenDetails] = None,
+    inputTokensDetails     : Option[OpenAiTokenDetails] = None,
+    outputTokensDetails    : Option[OpenAiTokenDetails] = None
 ) derives Schema:
 
   /** `totalTokens` falls back to prompt + completion when absent. `extras` is the union of the prompt- and
-    * completion-side detail breakdowns (a category appearing on both sides, e.g. `audio_tokens`, is summed).
+    * completion-side detail breakdowns (a category appearing on both sides, e.g. `audio_tokens`, is summed). The prompt
+    * side is `prompt_tokens_details`, else `input_tokens_details`. The completion side is `completion_tokens_details`,
+    * else `output_tokens_details`.
     */
   def toLmUsage: LmUsage =
     val prompt     = promptTokens.orElse(inputTokens).getOrElse(0L)
     val completion = completionTokens.orElse(outputTokens).getOrElse(0L)
     val extras     = mergeCounts(
-      promptTokensDetails.map(_.toCategoryCounts).getOrElse(Map.empty),
-      completionTokensDetails.map(_.toCategoryCounts).getOrElse(Map.empty)
+      promptTokensDetails.orElse(inputTokensDetails).map(_.toCategoryCounts).getOrElse(Map.empty),
+      completionTokensDetails.orElse(outputTokensDetails).map(_.toCategoryCounts).getOrElse(Map.empty)
     )
     LmUsage(
       totalTokens = totalTokens.getOrElse(prompt + completion),
@@ -45,7 +54,9 @@ private[lm] final case class OpenAiUsage(
   ): Map[TokenCategory, Long] =
     b.foldLeft(a) { case (acc, (category, value)) => acc.updated(category, acc.getOrElse(category, 0L) + value) }
 
-/** One of OpenAI's `prompt_tokens_details` / `completion_tokens_details` sub-objects. */
+/** One of OpenAI's `prompt_tokens_details` / `completion_tokens_details` / `input_tokens_details` /
+  * `output_tokens_details` sub-objects.
+  */
 private[lm] final case class OpenAiTokenDetails(
     cachedTokens            : Option[Long] = None,
     audioTokens             : Option[Long] = None,

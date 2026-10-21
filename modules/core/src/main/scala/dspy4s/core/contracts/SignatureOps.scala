@@ -6,9 +6,15 @@ import dspy4s.algebra.{IsEq, Law, Monoid, <->}
   *
   * The low-level `withInputFields` / `withOutputFields` mutators on [[SignatureLayout]] stay `private[dspy4s]`; this
   * object names the augmentations composite programs actually perform, guarantees their idempotence, and gives them
-  * laws, so `ChainOfThought` / `ReAct` / `CodeAct` / `MultiChainComparison` stop hand-rolling layout surgery. Kept
+  * laws, so `ChainOfThought` / `ReAct` / `MultiChainComparison` stop hand-rolling layout surgery. Kept
   * `private[dspy4s]` for the same reason as the mutators: user code shapes I/O through the `Signature` API, not by
   * editing a layout.
+  *
+  * '''Instructions.''' A combinator that changes the fields keeps the effective instructions of the layout that it
+  * changes ([[SignatureLayout.effectiveInstructions]]). Upstream computes the default instructions when it makes a
+  * signature, and `Signature.append`, `prepend`, and `insert` keep them (`dspy/signatures/signature.py`). Thus a
+  * `ChainOfThought` over `question -> answer` keeps the objective "Given the fields `question`, produce the fields
+  * `answer`.", and the objective does not name `reasoning`.
   */
 private[dspy4s] object SignatureOps:
 
@@ -22,7 +28,7 @@ private[dspy4s] object SignatureOps:
       */
     def prependOutput(field: FieldSpec): SignatureLayout =
       if layout.fields.exists(_.name == field.name) then layout
-      else layout.withOutputFields(field +: layout.outputFields)
+      else keepInstructions(layout.withOutputFields(field +: layout.outputFields))
 
     /** Append `field` to the end of the input cohort, unless an input field of the same name already exists
       * (idempotent).
@@ -31,15 +37,19 @@ private[dspy4s] object SignatureOps:
       */
     def appendInput(field: FieldSpec): SignatureLayout =
       if layout.fields.exists(_.name == field.name) then layout
-      else layout.withInputFields(layout.inputFields :+ field)
+      else keepInstructions(layout.withInputFields(layout.inputFields :+ field))
 
-    /** Keep the inputs, replace every output field with `fields`. The loop-step signatures of `ReAct` and `CodeAct` use
-      * this to drop the base outputs (which their extractor produces) in favor of the per-iteration control outputs.
+    /** Keep the inputs, replace every output field with `fields`. The loop-step signature of `ReAct` uses this to drop
+      * the base outputs (which its extractor produces) in favor of the per-iteration control outputs.
       *
       * Output role is established by the target cohort.
       */
     def replaceOutputs(fields: Vector[FieldSpec]): SignatureLayout =
-      layout.withOutputFields(fields)
+      keepInstructions(layout.withOutputFields(fields))
+
+    /** `changed` with the effective instructions of `layout`, the layout before the change. */
+    private def keepInstructions(changed: SignatureLayout): SignatureLayout =
+      changed.withInstructions(Some(layout.effectiveInstructions))
 
   /** The signature-algebra laws stated ON the structure as `@Law` methods returning [[IsEq]] (the math-with-scala
     * statement style; see `core.algebra.Laws` and `docs/refactor/algebra.md`). `SignatureOpsLawSuite` EXECUTES these
@@ -97,6 +107,19 @@ private[dspy4s] object SignatureOps:
     @Law("L6 withInstructions: the last write wins")
     def instructionsLastWriteWins(s: SignatureLayout, a: String, b: String): IsEq[SignatureLayout] =
       s.withInstructions(Some(b)).withInstructions(Some(a)) <-> s.withInstructions(Some(a))
+
+    // L7: a field combinator keeps the effective instructions (upstream `append`, `prepend`, and `insert`).
+    @Law("L7a prependOutput keeps the effective instructions")
+    def prependOutputKeepsInstructions(s: SignatureLayout, f: FieldSpec): IsEq[String] =
+      s.prependOutput(f).effectiveInstructions <-> s.effectiveInstructions
+
+    @Law("L7b appendInput keeps the effective instructions")
+    def appendInputKeepsInstructions(s: SignatureLayout, g: FieldSpec): IsEq[String] =
+      s.appendInput(g).effectiveInstructions <-> s.effectiveInstructions
+
+    @Law("L7c replaceOutputs keeps the effective instructions")
+    def replaceOutputsKeepsInstructions(s: SignatureLayout, fs: Vector[FieldSpec]): IsEq[String] =
+      s.replaceOutputs(fs).effectiveInstructions <-> s.effectiveInstructions
 
 // ── Algebra 1's two commuting submonoids, as explicit Monoid instances ──────────────────────────────────────
 // The signature algebra's carrier is LAYOUT ENDOMORPHISMS (`SignatureLayout => SignatureLayout`), not layouts

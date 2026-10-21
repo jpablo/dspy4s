@@ -329,17 +329,17 @@ underlying call flow; the engine is the single home for the
 adapter/LM/callback dance that Python has spread across
 `Predict.__call__` and its helpers.
 
-**Every program now carries its domain and codomain.** Beyond `Predict`/`ChainOfThought`, the agents (`ReAct` / `CodeAct` /
-`ProgramOfThought`), `MultiChainComparison`, and `BestOfN` / `Refine` are all `Module[I, …]` —
-`DynamicPredict` is the prediction leaf on the dynamic spine: it executes runtime-built signatures while
+**Every program now carries its domain and codomain.** Beyond `Predict`/`ChainOfThought`, the agents (`ReAct` / `RLM`),
+`MultiChainComparison`, and `BestOfN` / `Refine` are all `Module[I, …]` —
+`DynamicPredict` is the prediction leaf for record-valued programs: it executes runtime-built signatures while
 `Predict` is its sibling over the shared engine. Some agent internals construct dynamic prediction passes, but
 programs do not delegate through a universal `DynamicPredict` substrate. Three pieces made this clean:
 - **`OutputAugmentation`** (`dspy4s.signatures`) — the shared `WithField[O, Name, T]` + `PrependField` typeclass that
   output-augmenting programs use to prepend `reasoning` / `rationale` (idempotent, cast-free, always a named tuple).
 - **`Signature.fromString`** — a `transparent inline` macro that parses a literal DSL at compile time into
   `NamedTuple` I/O, so the string DSL is compiler-checked; `fromStringDynamic` is the runtime (`Record`) version.
-- **`Streamable[P]`** (`dspy4s.streaming`) — `Streamify` takes any program through this typeclass, so the
-  agents stream without needing a record-valued `DynamicModule` twin.
+- **`Streamable[P]`** (`dspy4s.streaming`) — `Streamify` takes any program through this typeclass, so
+  `ReAct` streams without needing a record-valued `DynamicModule` twin.
 
 The cohort mutation helpers on `SignatureLayout` (`withInputFields` and
 `withOutputFields`) are `private[dspy4s]`. Composite programs use them
@@ -371,6 +371,49 @@ What genuinely remains:
 The non-architectural gaps live in [PORT_BACKLOG.md](PORT_BACKLOG.md);
 the streaming-specific ones in [STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md);
 the per-symbol deltas in [PORT_MAP.md](PORT_MAP.md).
+
+## 15. `CodeAct` and `ProgramOfThought`: removed
+
+**Convention.**
+
+Python DSPy 3.4 still has `dspy.CodeAct` and `dspy.ProgramOfThought`.
+Upstream deprecated the two modules in 3.4 and removes them in 3.5.
+Upstream names `dspy.RLM` as the replacement.
+
+dspy4s removed `CodeAct` and `ProgramOfThought` at the 3.4.0 target, so
+that no more work goes into them. Use `RLM` for a program that
+generates code and runs it.
+
+## 16. Prompt text: the boundary rule of decision D3
+
+**Convention.**
+
+The adapters write the upstream prompt text, character for character, where the text is fixed or where the port can
+compute it from its own field data: `TypeRef`, the enum values, the optional flag, the descriptions, and the
+constraints. The port has no model of Python types, so a few places of a prompt differ by design:
+
+- A structured type shows the type name of the port (`list`, `dict`, or the token of a string signature, such as
+  `list[str]`) and the JSON schema of the port (the property of the field in the output schema of a typed
+  signature). Upstream shows the Python annotation (`list[str]`, `Union[str, NoneType]`, the name of a model) and the
+  pydantic schema.
+- A field with enum values shows `str` and the note of a `Literal`. Upstream shows the `Literal` or the `Enum` type.
+- An optional field shows the text of its element type. Upstream shows `Union[T, NoneType]`.
+- The XML adapter asks for a list, dict, or model output as JSON text inside the tag (decision A6). Upstream asks
+  for nested elements.
+- The two-step adapter prints a list or dict value as JSON. Upstream prints the Python `repr`.
+- A value of an input or a demo prints as upstream prints it: `True`, `False`, `None`, the Python form of a float,
+  and JSON with the separators `", "` and `": "`.
+- ReAct and ReActV2 write the arguments of a tool as JSON text. Upstream writes the Python text of a dict.
+- After whitespace before a chat header, upstream `ChatAdapter.parse` keeps a part of the header in the value, because
+  it cuts the rest of the line with the offset of the stripped line (`line[match.end():]`). The port cuts the rest of
+  the stripped line, so the value is the text after the header.
+- ReActV2 (experimental) types `next_thought` as a `str` field, so the output reminder has no type hint for it.
+  Upstream types it as `dspy.Reasoning`, which the port does not have.
+- The RLM action prompt has no text about the sub-agents of the sandbox `dspy` facade, because the port has no facade
+  (upgrade item P8).
+- The evidence request of a decision output (experimental) shows the evidence JSON schema in the form of the port.
+  Upstream shows the pydantic form, with title-cased labels. A decision value prints with the field order of the
+  port (`value`, `confidence`, ...); upstream prints `confidence` first.
 
 ## What this means in practice
 

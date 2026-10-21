@@ -15,6 +15,7 @@ import munit.FunSuite
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import java.nio.file.Files
+import scala.concurrent.duration.Duration
 
 class EvaluateSuite extends FunSuite:
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
@@ -74,12 +75,20 @@ class EvaluateSuite extends FunSuite:
     assertEquals(DynamicValues.recordGet(seen.get(), "run_id").map(DynamicValues.renderText), Some("abc123"))
   }
 
-  test("Evaluate with empty devset returns score 0") {
+  // PORT_GAPS G-46 (upstream c7ee4462a): a score of 0.0 for no data looks like a valid result to an optimizer.
+  test("Evaluate with an empty devset is a validation error, not a score") {
+    val calls            = new java.util.concurrent.atomic.AtomicInteger(0)
     val evaluator        = Evaluate(devset = Vector.empty, metric = new ExactMatch())
     given RuntimeContext = RuntimeEnvironment.current
-    val result           = evaluator()((_: Example) => Right(RawPrediction.empty))
-    assert(result.isRight)
-    assertEquals(result.toOption.get.score, 0.0)
+    val result           = evaluator() { (_: Example) =>
+      val _ = calls.incrementAndGet()
+      Right(RawPrediction.empty)
+    }
+    result match
+      case Left(error: dspy4s.core.contracts.ValidationError) =>
+        assert(error.message.toLowerCase.contains("empty"), error.message)
+      case other => fail(s"expected a ValidationError, got $other")
+    assertEquals(calls.get(), 0)
   }
 
   test("Evaluate failure_score is used when predict fails") {
@@ -236,4 +245,13 @@ class EvaluateSuite extends FunSuite:
     val eval = result.toOption.get
     assertEquals(eval.metricName, "lengthy")
     assertEquals(eval.results.map(_.score).toList, List(0.0, 1.0, 0.0))
+  }
+
+  // Upstream `Evaluate` has no time limit: its `ParallelExecutor` only submits a slow example again
+  // (`dspy/utils/parallelizer.py`). A test that waits for the 120 seconds of the old default is too slow for the suite,
+  // so this test reads the limit.
+  test("an evaluation has no time limit by default, as upstream") {
+    val config = EvaluateConfig(devset = Vector(ex("question" := "q1")), metric = new ExactMatch())
+    assertEquals(config.timeout: Duration, Duration.Inf)
+    assertEquals(Evaluate(devset = config.devset, metric = config.metric).config.timeout, Duration.Inf)
   }

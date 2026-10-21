@@ -17,6 +17,7 @@ self-contained Scala guide and does not assume any DSPy background.
 | `dspy.InputField()` / `dspy.OutputField()` | `InputField[T]` / `OutputField[T]` |
 | `Literal["a", "b"]` | a Scala `enum ... derives Schema` |
 | pydantic `BaseModel` | a `case class ... derives Schema` |
+| `dspy.History` | `History`, as the type of an input field |
 | `dspy.configure(lm=...)` | `RuntimeContext` installed via `RuntimeEnvironment.withSettings` |
 | `BootstrapFewShot`, `COPRO`, `MIPROv2`, `GEPA` | same names |
 
@@ -125,9 +126,8 @@ val updated = example.withValue("input", "...")
 ## What is not ported yet
 
 Some DSPy features depend on machinery that dspy4s does not have yet, including
-dataset loaders (`dspy.datasets`), the MCP tool bridge, the `dspy.History` input
-type, model serving / deployment, and a few optimizers (BootstrapFinetune,
-Optuna, SIMBA). The
+dataset loaders (`dspy.datasets`), model serving /
+deployment, and a few optimizers (BootstrapFinetune, Optuna, SIMBA). The
 [examples module README](https://github.com/jpablo/dspy4s/blob/main/modules/examples/README.md)
 tracks the current state, and each blocked example records exactly what it is
 waiting on.

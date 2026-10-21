@@ -1,45 +1,84 @@
 package dspy4s.programs.strategies
 
-import dspy4s.core.contracts.DynamicValues
+import dspy4s.adapters.internal.ProgramOutputValues
+import dspy4s.core.contracts.{DynamicValues, SignatureLayout, updated}
 import dspy4s.programs.{LlmCallLimit, OutputCharLimit}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 import java.nio.charset.StandardCharsets
+import scala.util.matching.Regex
 
 /** Text and data protocol shared by the RLM prompt, persistent REPL history, and schema-validated SUBMIT boundary. */
 private[programs] object RLMReplProtocol:
   private val dynamicJsonCodec = Schema.dynamic.jsonCodec
 
-  /** Upstream's `ACTION_INSTRUCTIONS_TEMPLATE`, ported verbatim with the same placeholders. */
+  /** Upstream's `ACTION_INSTRUCTIONS_TEMPLATE` of dspy 3.4.0, ported verbatim with the same placeholders. The line
+    * about the standard libraries is not in the template: the execution text of the interpreter tells the model which
+    * libraries it has. The values go in with one pass over the template, as `str.format`, so a value that contains a
+    * placeholder or a `|` stays as it is.
+    */
   def actionInstructionsTemplate(
       inputs          : String,
       outputFields    : String,
       finalOutputNames: String,
-      maxLlmCalls     : LlmCallLimit
+      maxLlmCalls     : LlmCallLimit,
+      interpreterRules: String
   ): String =
-    s"""You are tasked with producing the following outputs given the inputs $inputs:
-       |$outputFields
-       |
-       |You have access to a Python REPL environment. Write Python code and it will be executed. You will see the output, then write more code based on what you learned. This is an iterative process.
-       |
-       |Available:
-       |- Variables: $inputs (your input data)
-       |- `llm_query(prompt)` - query a sub-LLM (~500K char capacity) for semantic analysis
-       |- `llm_query_batched(prompts)` - query multiple prompts concurrently (much faster for multiple queries)
-       |- `print()` - ALWAYS print to see results
-       |- `SUBMIT($finalOutputNames)` - submit final output when done
-       |- Standard libraries: re, json, collections, math, etc.
-       |
-       |IMPORTANT: This is ITERATIVE. Each code block you write will execute, you'll see the output, then you decide what to do next. Do NOT try to solve everything in one step.
-       |
-       |1. EXPLORE FIRST - Look at your data before processing it. Print samples, check types/lengths, understand the structure.
-       |2. ITERATE - Write small code snippets, observe outputs, then decide next steps. State persists between iterations.
-       |3. VERIFY BEFORE SUBMITTING - If results seem wrong (zeros, empty, unexpected), reconsider your approach.
-       |4. USE llm_query FOR SEMANTICS - String matching finds WHERE things are; llm_query understands WHAT things mean.
-       |5. MINIMIZE RETYPING (INPUTS & OUTPUTS) - When values are long, precise, or error-prone (IDs, numbers, code, quotes), re-access them via variables and parse/compute in code instead of retyping. Use small, targeted prints to sanity-check, but avoid manual copying when variables can carry the exact value.
-       |6. SUBMIT ONLY AFTER SEEING OUTPUTS - SUBMIT ends the current run immediately. If you need to inspect printed output, run it in one step, review the result, then call SUBMIT in a later step.
-       |
-       |You have max $maxLlmCalls sub-LLM calls. When done, call SUBMIT() with your output.""".stripMargin
+    val values = Map(
+      "inputs"             -> inputs,
+      "output_fields"      -> outputFields,
+      "final_output_names" -> finalOutputNames,
+      "max_llm_calls"      -> maxLlmCalls.toString,
+      "interpreter_rules"  -> interpreterRules
+    )
+    Placeholder.replaceAllIn(
+      ActionInstructionsTemplate,
+      found => Regex.quoteReplacement(values.getOrElse(found.group(1), found.matched))
+    )
+
+  private val Placeholder: Regex = """\{(\w+)\}""".r
+
+  private val ActionInstructionsTemplate: String =
+    """You are tasked with producing the following outputs given the inputs {inputs}:
+      |{output_fields}
+      |
+      |You have access to a Python REPL environment. Write Python code and it will be executed. You will see the output, then write more code based on what you learned. This is an iterative process.
+      |{interpreter_rules}
+      |Available:
+      |- Variables: {inputs} (your input data)
+      |- `llm_query(prompt)` - query a sub-LLM (~500K char capacity) for semantic analysis
+      |- `llm_query_batched(prompts)` - query multiple prompts concurrently (much faster for multiple queries)
+      |- `print()` - ALWAYS print to see results
+      |- `SUBMIT({final_output_names})` - submit final output when done
+      |
+      |IMPORTANT: This is ITERATIVE. Each code block you write will execute, you'll see the output, then you decide what to do next. Do NOT try to solve everything in one step.
+      |
+      |1. EXPLORE FIRST - Look at your data before processing it. Print samples, check types/lengths, understand the structure.
+      |2. ITERATE - Write small code snippets, observe outputs, then decide next steps. State persists between iterations.
+      |3. VERIFY BEFORE SUBMITTING - If results seem wrong (zeros, empty, unexpected), reconsider your approach.
+      |4. USE llm_query FOR SEMANTICS - String matching finds WHERE things are; llm_query understands WHAT things mean.
+      |5. MINIMIZE RETYPING (INPUTS & OUTPUTS) - When values are long, precise, or error-prone (IDs, numbers, code, quotes), re-access them via variables and parse/compute in code instead of retyping. Use small, targeted prints to sanity-check, but avoid manual copying when variables can carry the exact value.
+      |6. SUBMIT ONLY AFTER SEEING OUTPUTS - SUBMIT ends the current run immediately. If you need to inspect printed output, run it in one step, review the result, then call SUBMIT in a later step.
+      |
+      |You have max {max_llm_calls} sub-LLM calls. When done, call SUBMIT() with your output.""".stripMargin
+
+  /** The interpreter rules of the action instructions (upstream `RLM._format_interpreter_rules`): the execution text of
+    * the interpreter under the heading `Execution environment:`, or an empty text when the interpreter has no execution
+    * text. The port has no sandbox `dspy` facade (upgrade item P8), so the rules have no sub-agent text.
+    */
+  def interpreterRules(executionInstructions: String): String =
+    if executionInstructions.isEmpty then "" else s"\nExecution environment:\n$executionInstructions\n"
+
+  /** The upstream instructions of the extract-fallback signature (`RLM._build_signatures`), with the indent of the
+    * upstream source in the second paragraph.
+    */
+  def extractInstructions(taskInstructions: String): String =
+    val objective =
+      if taskInstructions.isEmpty then ""
+      else s"The trajectory was generated with the following objective: \n$taskInstructions\n\n\n"
+    objective + "Based on the REPL trajectory, extract the final outputs now.\n\n" +
+      "            Review your trajectory to see what information you gathered and what values you computed, then " +
+      "provide the final outputs."
 
   /** Upstream `REPLHistory.format`. */
   def renderHistory(entries: Vector[RLM.ReplEntry], maxOutputChars: OutputCharLimit): String =
@@ -51,9 +90,10 @@ private[programs] object RLMReplProtocol:
     val rawLen = output.length
     val body   =
       if rawLen > maxOutputChars then
-        val half    = maxOutputChars / 2
-        val omitted = rawLen - maxOutputChars
-        output.take(half) + s"\n\n... (${groupDigits(omitted)} characters omitted) ...\n\n" + output.takeRight(half)
+        val headChars = maxOutputChars / 2
+        val omitted   = rawLen - maxOutputChars
+        output.take(headChars) + s"\n\n... (${groupDigits(omitted)} characters omitted) ...\n\n" +
+          output.takeRight(maxOutputChars - headChars)
       else output
     s"Output (${groupDigits(rawLen)} chars):\n$body"
 
@@ -79,6 +119,29 @@ private[programs] object RLMReplProtocol:
       case None => Left(
           s"[Error] FINAL returned a non-dict payload, expected dict with fields: ${outputFieldNames.mkString(", ")}"
         )
+
+  /** The SUBMIT values `record` with the allowed values of the outputs of `layout` checked (upstream
+    * `_process_final_output` reads each value with `parse_value`, `dspy/predict/rlm.py`). An output with allowed values
+    * (decision D7) takes the value of the rule of the adapters ([[ProgramOutputValues.allowedValue]]): for example, the
+    * text ` 'yes' ` gives `yes`. The other outputs do not change.
+    *
+    * A value outside the allowed values gives the observation `[Type Error] <name>: expected Literal, got <type>:
+    * <error>`, with `Optional` for an optional output and the Python type name of the value, as upstream. The parts of
+    * two or more outputs are in the order of the outputs, with `; ` between them. The error text is the text of the
+    * port, not the text of pydantic.
+    */
+  def checkAllowedValues(record: DynamicValue.Record, layout: SignatureLayout): Either[String, DynamicValue.Record] =
+    val checked = layout.outputFields.filter(ProgramOutputValues.hasAllowedValues).map { field =>
+      val value    = DynamicValues.recordGet(record, field.name).getOrElse(DynamicValue.Null)
+      val expected = if field.optional then "Optional" else "Literal"
+      ProgramOutputValues.allowedValue(field, value)
+        .map(field.name -> _)
+        .left.map(error => s"${field.name}: expected $expected, got ${pythonTypeName(value)}: ${error.message}")
+    }
+    val problems = checked.collect { case Left(problem) => problem }
+    val values   = checked.collect { case Right(entry) => entry }
+    if problems.nonEmpty then Left(s"[Type Error] ${problems.mkString("; ")}")
+    else Right(values.foldLeft(record)((done, entry) => done.updated(entry._1, entry._2)))
 
   /** Upstream `_strip_code_fences`: strip decorative outer fences, accept ```python/```py/bare fences, REJECT an
     * explicit non-Python language tag (the error becomes an `[Error]` observation).

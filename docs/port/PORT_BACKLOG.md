@@ -20,6 +20,10 @@ and behavioral-delta ledger. The backlog below is *phase plan*; the map is
   the tag in a scratch worktree) so the comparison is against 3.1.3, not the
   drifted `main`.
 
+- Latest analyzed upstream: **3.4.0 plus 25 commits** (`f1260ff14`, 2026-10-08). The change list is
+  [`UPGRADE-3.2.1-to-3.4.0.md`](../../UPGRADE-3.2.1-to-3.4.0.md), and the resulting entries are
+  [PORT_GAPS](PORT_GAPS.md) G-23 to G-50. Nothing from that range is ported yet.
+
 When upstream tags a new release, bump this section, refresh the clone
 (`git fetch && git checkout release-X.Y.Z`), and audit the changelog for
 features that affect contracts or behavior dspy4s already ports. Treat any
@@ -236,7 +240,7 @@ Tracks:
   resume; live-model validated); **`InferRules`** (G-11, 81ffec1) — trainset-derived
   natural-language rules appended to instructions; **`KNNFewShot`** (G-10, 20a829f) —
   per-call dynamic few-shot via KNN retrieval. All built on the G-1 enablers
-  (`OptimizableStructure` introspection, `ProgramRunner` execution spine, instruction editing) + `Evaluate`.
+  (`OptimizableStructure` introspection, `ProgramRunner` execution capability, instruction editing) + `Evaluate`.
   **Still deferred:** `SIMBA` (G-13), `BetterTogether` (G-15),
   `GRPO`/`BootstrapFinetune` (G-16), `BootstrapFewShotWithOptuna` (G-17), and the
   remaining `propose` pieces (G-18: program-source `DescribeProgram`, iterative
@@ -248,6 +252,7 @@ Tracks:
   injection, host tools (`SandboxTool`), `SUBMIT` → `CodeResult.finalOutput`. PoT now honors
   SUBMIT; `CodeAct.sandboxTools` enables tools-inside-code. **Shipped (part 2):** the `RLM`
   driver module (`programs/RLM.scala`), live-validated through the real Deno sandbox. G-20 resolved.
+  `ProgramOfThought` and `CodeAct` were removed later (2026-10-11, G-39); `RLM` is the one code program.
 - ~~Retrievers (`Retrieve` abstraction, embedders, `KNNFewShot`)~~ **Shipped** (G-10):
   `Embedder` + `OpenAiEmbedder` (lm), `KNN` + `EmbeddingsRetriever`
   (programs.retrievers), `KNNFewShot` (optimize). Legacy `dspy.Retrieve`/vendor RMs

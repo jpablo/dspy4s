@@ -6,7 +6,8 @@ import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.{
-  CodeResult, DspyError, DynamicValues, FieldSpec, ReplCodeInterpreter, RuntimeContext, RuntimeError, SignatureLayout
+  CodeResult, DspyError, DynamicValues, FieldSpec, ReplCodeInterpreter, RuntimeContext, RuntimeError, SandboxTool,
+  SignatureLayout, TypeRef
 }
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
@@ -70,7 +71,7 @@ class RLMSuite extends FunSuite:
       repl         : ScriptedRepl,
       maxIterations: IterationLimit = IterationLimit(5)
   ): RLM[(context: String, query: String), (answer: String)] =
-    RLM(baseSignature = qaSignature, maxIterations = maxIterations, interpreterFactory = (_, _) => repl)
+    RLM(baseSignature = qaSignature, maxIterations = maxIterations, interpreterFactory = Some((_, _) => repl))
 
   test("SUBMIT terminates the loop: outputs decode, trajectory + final_reasoning ride on .raw, repl is closed") {
     val repl = new ScriptedRepl(Vector(
@@ -216,6 +217,45 @@ class RLMSuite extends FunSuite:
     }
   }
 
+  // The bridge from `ToolFunction` to `SandboxTool` (G-20: tools-inside-code).
+
+  test("user tools reach the interpreter factory as SandboxTools (name, Python parameter declarations, context)") {
+    val tool = new dspy4s.programs.contracts.ToolFunction:
+      override val name: String                         = "get_weather"
+      override val description: String                  = "weather lookup"
+      override def argSchema: Vector[(String, TypeRef)] =
+        Vector("city" -> TypeRef.string, "days" -> TypeRef.int)
+      override def invoke(args: DynamicValue.Record)(using RuntimeContext) =
+        val city = DynamicValues.recordGet(args, "city").map(DynamicValues.renderText).getOrElse("?")
+        Right(DynamicValues.fromAny(s"sunny in $city"))
+
+    val repl    = new ScriptedRepl(Vector(Right(CodeResult("", "", 0, finalOutput = Some("""{"answer": "42"}""")))))
+    val bridged = ArrayBuffer.empty[SandboxTool]
+    val program = RLM(
+      baseSignature = qaSignature,
+      tools = Vector(tool),
+      interpreterFactory = Some { (sandboxTools, _) =>
+        bridged ++= sandboxTools
+        repl
+      }
+    )
+
+    withRlm(new ScriptedLm(Vector("solved it||```python\nSUBMIT(answer='42')\n```")), new ProbeAdapter) {
+      assert(program((context = "c", query = "q")).isRight)
+    }
+
+    // The built-in `llm_query` tools come first. The user tools come after them.
+    assertEquals(bridged.map(_.name).toVector, Vector("llm_query", "llm_query_batched", "get_weather"))
+    val weather = bridged.last
+    // Wire types map to Python type hints: string -> str, int -> int.
+    assertEquals(
+      weather.parameters,
+      Vector(SandboxTool.Param("city", Some("str")), SandboxTool.Param("days", Some("int")))
+    )
+    // The call works outside a dspy4s call stack, because the bridge captured the context of the run.
+    assertEquals(weather.invoke(rec("city" := "Paris")).map(DynamicValues.renderText), Right("sunny in Paris"))
+  }
+
   test("ReplVariable.fromValue renders metadata with a head+tail preview, not the full value") {
     val long = "x" * 3000
     val v    = RLM.ReplVariable.fromValue(
@@ -274,7 +314,7 @@ class RLMSuite extends FunSuite:
       baseSignature = qaSignature,
       maxIterations = IterationLimit(5),
       verbose = true,
-      interpreterFactory = (_, _) => repl
+      interpreterFactory = Some((_, _) => repl)
     )
     val captured = new java.io.ByteArrayOutputStream
     withRlm(lm, new ProbeAdapter) {
@@ -302,4 +342,197 @@ class RLMSuite extends FunSuite:
     val logged = captured.toString
     assert(logged.contains("WARN [dspy4s] RLM: reached max iterations, using extract to get final output"), logged)
     assert(!logged.contains("RLM iteration"), logged)
+  }
+
+  // PORT_GAPS G-35 (upstream 89696e0cc): a `Left` from the interpreter means that the interpreter failed. Generated
+  // code cannot repair that, so the run must stop.
+
+  test("an interpreter failure ends the run: no observation and no more LM calls") {
+    val failure = RuntimeError("code_interpreter", "Deno executable not found")
+    val repl    = new ScriptedRepl(Vector(Left(failure)))
+    val lm      = new ScriptedLm(Vector(
+      "first try||```python\nprint(1)\n```",
+      "second try||```python\nprint(2)\n```",
+      "extract"
+    ))
+    val program = rlm(repl)
+
+    withRlm(lm, new ProbeAdapter) {
+      val result = program((context = "c", query = "q"))
+      assertEquals(result.left.toOption, Some(failure))
+      assertEquals(lm.calls.get(), 1, "the LM must not see an interpreter failure as an observation")
+      assertEquals(repl.executed.size, 1)
+      assert(repl.closed, "RLM must close the interpreter that it built")
+    }
+  }
+
+  test("a user-code error is still an observation and the loop continues") {
+    val repl = new ScriptedRepl(Vector(
+      Right(CodeResult("", "NameError: name 'x' is not defined", 1)),
+      Right(CodeResult("", "", 0, finalOutput = Some("""{"answer": "ok"}""")))
+    ))
+    val lm = new ScriptedLm(Vector(
+      "first try||```python\nprint(x)\n```",
+      "second try||```python\nSUBMIT(answer='ok')\n```"
+    ))
+    val probe   = new ProbeAdapter
+    val program = rlm(repl)
+
+    withRlm(lm, probe) {
+      val result = program((context = "c", query = "q"))
+      assertEquals(result.map(_.output.answer), Right("ok"))
+      assertEquals(lm.calls.get(), 2)
+      assert(probe.actionHistories.lastOption.exists(_.contains("NameError")), probe.actionHistories.toString)
+    }
+  }
+
+  // The tests below are for the interpreter factory of the runtime context (PORT_GAPS G-35; upstream
+  // `dspy.settings.interpreter_factory` and `resolve_interpreter_factory`).
+
+  private def submitRepl(answer: String): ScriptedRepl =
+    new ScriptedRepl(Vector(Right(CodeResult("", "", 0, finalOutput = Some(s"""{"answer": "$answer"}""")))))
+
+  private def submitLm: ScriptedLm = new ScriptedLm(Vector("solved it||```python\nSUBMIT(answer='x')\n```"))
+
+  test("an RLM without a factory uses the factory of the runtime context") {
+    val repl    = submitRepl("from context")
+    val seen    = ArrayBuffer.empty[(Vector[String], Vector[String])]
+    val program = RLM(baseSignature = qaSignature)
+    val context = RuntimeContext(
+      lm = Some(submitLm),
+      adapter = Some(new ProbeAdapter),
+      interpreterFactory = Some { (tools, outputs) =>
+        seen += ((tools.map(_.name), outputs.map(_.name)))
+        repl
+      }
+    )
+
+    RuntimeEnvironment.withSettings(context) {
+      given RuntimeContext = RuntimeEnvironment.current
+      assertEquals(program((context = "c", query = "q")).map(_.output.answer), Right("from context"))
+    }
+    // The factory gets the sandbox tools and the output fields of SUBMIT, and RLM closes the interpreter.
+    assertEquals(seen.toVector, Vector((Vector("llm_query", "llm_query_batched"), Vector("answer"))))
+    assert(repl.closed, "RLM must close the interpreter that the context factory built")
+  }
+
+  test("the factory of the RLM wins over the factory of the runtime context") {
+    val own     = submitRepl("from program")
+    val ambient = submitRepl("from context")
+    val program = RLM(baseSignature = qaSignature, interpreterFactory = Some((_, _) => own))
+    val context = RuntimeContext(
+      lm = Some(submitLm),
+      adapter = Some(new ProbeAdapter),
+      interpreterFactory = Some((_, _) => ambient)
+    )
+
+    RuntimeEnvironment.withSettings(context) {
+      given RuntimeContext = RuntimeEnvironment.current
+      assertEquals(program((context = "c", query = "q")).map(_.output.answer), Right("from program"))
+    }
+    assertEquals(ambient.executed.size, 0)
+  }
+
+  test("the context factory builds one interpreter for each call") {
+    val built   = ArrayBuffer.empty[ScriptedRepl]
+    val program = RLM(baseSignature = qaSignature)
+    val context = RuntimeContext(
+      lm = Some(new ScriptedLm(Vector.fill(2)("solved it||```python\nSUBMIT(answer='x')\n```"))),
+      adapter = Some(new ProbeAdapter),
+      interpreterFactory = Some { (_, _) =>
+        val repl = submitRepl(s"call ${built.size + 1}")
+        built += repl
+        repl
+      }
+    )
+
+    RuntimeEnvironment.withSettings(context) {
+      given RuntimeContext = RuntimeEnvironment.current
+      assertEquals(program((context = "c", query = "q")).map(_.output.answer), Right("call 1"))
+      assertEquals(program((context = "c", query = "q")).map(_.output.answer), Right("call 2"))
+    }
+    assertEquals(built.size, 2)
+    assert(built.forall(_.closed), "RLM must close each interpreter")
+  }
+
+  test("a factory in a nested scope replaces the factory of the outer scope for that scope only") {
+    val outer                                  = ArrayBuffer.empty[String]
+    val program                                = RLM(baseSignature = qaSignature)
+    def context(label: String): RuntimeContext =
+      RuntimeContext(
+        lm = Some(submitLm),
+        adapter = Some(new ProbeAdapter),
+        interpreterFactory = Some { (_, _) =>
+          outer += label
+          submitRepl(label)
+        }
+      )
+
+    RuntimeEnvironment.withSettings(context("outer")) {
+      RuntimeEnvironment.withSettings(context("inner")) {
+        given RuntimeContext = RuntimeEnvironment.current
+        assertEquals(program((context = "c", query = "q")).map(_.output.answer), Right("inner"))
+      }
+      given RuntimeContext = RuntimeEnvironment.current
+      assertEquals(program((context = "c", query = "q")).map(_.output.answer), Right("outer"))
+    }
+    assertEquals(outer.toVector, Vector("inner", "outer"))
+  }
+
+  // ── The allowed values of a SUBMIT (decision D7) ────────────────────────────────────────────────────────────
+  // Upstream `_process_final_output` reads each SUBMIT value with `parse_value` (`dspy/predict/rlm.py`). A value
+  // outside a `Literal[...]` gives the observation `[Type Error] <name>: expected Literal, got <type>: <error>`, and
+  // the loop continues. A value that `parse_value` accepts after its steps is the allowed value itself.
+
+  /** An RLM over `dsl`, with a REPL that gives the SUBMIT payloads `payloads` in order. */
+  private def submitting(dsl: String, payloads: String*): (RLM[DynamicValue.Record, DynamicValue.Record], ScriptedLm) =
+    val signature = Signature.fromStringDynamic(dsl).fold(error => fail(error.message), identity)
+    val results   = payloads.toVector.map(json => Right(CodeResult("", "", 0, finalOutput = Some(json))))
+    val repl      = new ScriptedRepl(results)
+    val lm        = new ScriptedLm(payloads.toVector.map(_ => "submit||```python\nSUBMIT()\n```"))
+    (RLM(baseSignature = signature, interpreterFactory = Some((_, _) => repl)), lm)
+
+  test("a SUBMIT value outside the allowed values is a [Type Error] observation, and the loop continues") {
+    val (program, lm) = submitting(
+      "context, query -> answer: Literal['yes', 'no'], note",
+      """{"answer": "maybe", "note": "n"}""",
+      """{"answer": " 'yes' ", "note": "n"}"""
+    )
+    withRlm(lm, new ProbeAdapter) {
+      val result = program(rec("context" := "c", "query" := "q")).fold(error => fail(error.message), identity)
+      // Upstream `parse_value` strips the text and removes the quotes, and gives the allowed value.
+      assertEquals(DynamicValues.recordGet(result.output, "answer").map(DynamicValues.renderText), Some("yes"))
+      assertEquals(DynamicValues.recordGet(result.raw.values, "answer").map(DynamicValues.renderText), Some("yes"))
+      val trajectory = result.raw.asString("trajectory").toOption.getOrElse("")
+      assert(
+        trajectory.contains(
+          "[Type Error] answer: expected Literal, got str: Value 'maybe' is not one of the allowed values: yes; no"
+        ),
+        trajectory
+      )
+      assertEquals(lm.calls.get(), 2)
+    }
+  }
+
+  test("each SUBMIT value outside its allowed values is in the [Type Error], also a value that is not a string") {
+    val (program, lm) = submitting(
+      "context, query -> tone: Literal['calm', 'angry'], topic: Literal['billing', 'login']",
+      """{"tone": 3, "topic": "Billing"}""",
+      """{"tone": "Literal['calm']", "topic": "login"}"""
+    )
+    withRlm(lm, new ProbeAdapter) {
+      val result = program(rec("context" := "c", "query" := "q")).fold(error => fail(error.message), identity)
+      assertEquals(
+        Vector("tone", "topic").map(name => DynamicValues.recordGet(result.output, name).map(DynamicValues.renderText)),
+        Vector(Some("calm"), Some("login"))
+      )
+      val trajectory = result.raw.asString("trajectory").toOption.getOrElse("")
+      assert(
+        trajectory.contains(
+          "[Type Error] tone: expected Literal, got int: Value '3' is not one of the allowed values: calm; angry; " +
+            "topic: expected Literal, got str: Value 'Billing' is not one of the allowed values: billing; login"
+        ),
+        trajectory
+      )
+    }
   }

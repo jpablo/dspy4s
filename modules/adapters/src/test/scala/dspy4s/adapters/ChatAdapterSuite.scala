@@ -91,8 +91,13 @@ class ChatAdapterSuite extends FunSuite:
     // `# note:` comment showing the typing constraint.
     assert(system.contains("# note: the value you produce must be a single int value"), system)
     assert(system.contains("# note: the value you produce must be a single float value"), system)
-    assert(system.contains("# note: the value you produce must be true or false"), system)
-    assert(system.contains("# note: the value you produce must be a valid JSON object"), system)
+    assert(system.contains("# note: the value you produce must be True or False"), system)
+    assert(
+      system.contains(
+        """# note: the value you produce must adhere to the JSON schema: {"type": "object", "additionalProperties": true}"""
+      ),
+      system
+    )
     // String fields get no note.
     val questionLine = system.linesIterator.find(_.contains("{question}")).getOrElse("")
     assert(!questionLine.contains("# note:"), s"string input should not carry a type note: '$questionLine'")
@@ -112,7 +117,7 @@ class ChatAdapterSuite extends FunSuite:
     // Output reminder names each output marker; non-string fields get a
     // parenthetical type hint, strings don't.
     assert(
-      mainUser.contains("`[[ ## answer ## ]]` (must be formatted as a valid int)"),
+      mainUser.contains("`[[ ## answer ## ]]` (must be formatted as a valid Python int)"),
       s"main user reminder missing int hint: $mainUser"
     )
     // The `summary` field is str and should not carry a parenthetical.
@@ -262,6 +267,19 @@ class ChatAdapterSuite extends FunSuite:
       Some("First I consider X.\nThen I weigh Y.\nFinally I conclude Z.": Any)
     )
     assertEquals(lookup(values, "answer"), Some("42": Any))
+  }
+
+  test("parse reads a CRLF reply and a CR reply as the LF reply, as upstream `str.splitlines`") {
+    val signature        = SignatureDsl.parse("question -> reasoning, answer: int").toOption.get
+    given RuntimeContext = RuntimeEnvironment.current
+    val lf               = "[[ ## reasoning ## ]]\nFirst X.\nThen Y.\n\n[[ ## answer ## ]]\n42\n\n" +
+      "[[ ## completed ## ]]\n"
+
+    def values(text: String): DynamicValue.Record =
+      ChatAdapter().parse(signature, LmOutput(text = text)).fold(error => fail(s"parse failed: $error"), _.values)
+    assertEquals(lookup(values(lf), "reasoning"), Some("First X.\nThen Y.": Any))
+    assertEquals(values(lf.replace("\n", "\r\n")), values(lf))
+    assertEquals(values(lf.replace("\n", "\r")), values(lf))
   }
 
   test("parse tolerates a missing completed marker") {

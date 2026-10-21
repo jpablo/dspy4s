@@ -6,18 +6,18 @@
 
 A landing page for DSPy's "build a real application" tutorials. Most of these are Jupyter notebooks that
 haven't been ported to dspy4s; the ones with a dspy4s counterpart are linked below, and the building blocks
-they rely on (signatures, `ChainOfThought`, `ReAct`, `ProgramOfThought`) are all available.
+they rely on (signatures, `ChainOfThought`, `ReAct`) are all available.
 
 | DSPy tutorial | dspy4s status |
 |---|---|
-| Managing Conversation History | 🚫 blocked — needs `dspy.History` + mutable demos ([dir](../conversation_history/)). |
+| Managing Conversation History | see [`tutorials/conversation_history`](../conversation_history/ConversationHistory.scala) (a `History` input field). |
 | Building AI Agents | use `ReAct` + `ToolFunction` ([`learn/programming/Tools.scala`](../../learn/programming/Tools.scala)). |
 | Customizing DSPy Modules | compose `Module[I, O]` values (see the tutorial examples that build multi-step pipelines). |
 | Retrieval-Augmented Generation / Multi-Hop / RAG-as-agent | not ported — dspy4s has no retriever; wire your own retrieval into a `ToolFunction`. |
 | Entity Extraction | see [`tutorials/email_extraction`](../email_extraction/EmailExtraction.scala) (structured extraction). |
 | Classification | [classification notes](../classification/README.md); enum outputs (see `signatures/CaseClassExample`). |
 | Privacy-Conscious Delegation (PAPILLON) | external notebook — [notes](../papillon/README.md). |
-| Program of Thought | `ProgramOfThought[I, O]` is available in the `programs` module. |
+| Program of Thought | not available: upstream deprecated `ProgramOfThought` in DSPy 3.4, and `RLM` is the replacement. |
 | Image generation / Audio | not ported — no multimodal surface. |
 
 The reusable patterns are demonstrated across [`learn/programming`](../../learn/programming/README.md) and the

@@ -50,7 +50,7 @@ final case class Example(
 
   def withAugmented(flag: Boolean): Example = copy(augmented = flag)
 
-  /** Serialize to a [[zio.blocks.schema.DynamicValue.Record]] -- the codec spine carried everywhere else in dspy4s.
+  /** Serialize to a [[zio.blocks.schema.DynamicValue.Record]] -- the interchange format used everywhere else in dspy4s.
     * Round-trips with [[Example.fromState]] and serializes to clean JSON via the `DynamicValue` JSON codec. The record
     * has three fields: `values` (the field-value record verbatim), `inputKeys` (a sequence of the input field-name
     * strings), and `augmented` (a boolean). Mirrors `SignatureLayout.dumpState`.
@@ -66,7 +66,8 @@ final case class Example(
 
 object Example:
   /** Convenience constructor: `Example("q" -> "...", "a" -> "...")`. Produces an example with no declared input keys;
-    * call `withInputs(...)` to mark a subset as inputs. Values are lifted into the spine via [[DynamicValues.fromAny]].
+    * call `withInputs(...)` to mark a subset as inputs. [[DynamicValues.fromAny]] lifts the values into the interchange
+    * format.
     */
   def apply(entries: (String, DynamicValue)*): Example =
     Example(values = DynamicValues.recordFromEntries(entries))

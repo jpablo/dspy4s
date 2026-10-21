@@ -27,7 +27,7 @@ class JSONAdapterSuite extends FunSuite:
   override def afterEach(context: AfterEach): Unit =
     RuntimeEnvironment.resetForTests()
 
-  test("format injects json output contract into system message") {
+  test("format shows the JSON output structure, a JSON demo, and the marker form of the inputs") {
     val signature  = SignatureDsl.parse("question -> answer, score: float").toOption.get
     val invocation = AdapterInvocation(
       layout = signature,
@@ -47,13 +47,13 @@ class JSONAdapterSuite extends FunSuite:
     assert(formatted.isRight)
     val messages = formatted.toOption.get.messages
     assertEquals(messages.head.role, MessageRole.System)
-    assert(messages.head.text.get.contains("valid JSON object"))
+    assert(messages.head.text.get.contains("Outputs will be a JSON object with the following fields."))
     assert(messages(2).role == MessageRole.Assistant)
-    assert(messages(2).text.get.contains("\"answer\""))
-    assert(messages.last.text.get.contains("Question: Capital of Belgium?"))
+    assertEquals(messages(2).text.get, "{\n  \"answer\": \"Paris\",\n  \"score\": 0.95\n}")
+    assert(messages.last.text.get.startsWith("[[ ## question ## ]]\nCapital of Belgium?"), messages.last.text.get)
   }
 
-  test("format inlines outputJsonSchema in the system message when supplied") {
+  test("format does not show the outputJsonSchema in a block of its own, as upstream") {
     val signature    = SignatureDsl.parse("question -> answer").toOption.get
     val schemaString = """{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"""
     val invocation   = AdapterInvocation(
@@ -69,17 +69,11 @@ class JSONAdapterSuite extends FunSuite:
 
     assert(formatted.isRight)
     val systemText = formatted.toOption.get.messages.head.text.get
-    assert(
-      systemText.contains("conforms to the following JSON Schema"),
-      s"expected schema-aware instruction, got:\n$systemText"
-    )
-    assert(
-      systemText.contains(schemaString),
-      s"expected schema inlined in system message, got:\n$systemText"
-    )
+    assert(!systemText.contains("JSON Schema"), s"unexpected schema instruction, got:\n$systemText")
+    assert(!systemText.contains(schemaString), s"unexpected schema text in the system message, got:\n$systemText")
   }
 
-  test("format falls back to the keys-list instruction when outputJsonSchema is None") {
+  test("format lists the output keys in the structure and in the reminder when outputJsonSchema is None") {
     val signature  = SignatureDsl.parse("question -> answer, score").toOption.get
     val invocation = AdapterInvocation(
       layout = signature,
@@ -90,10 +84,17 @@ class JSONAdapterSuite extends FunSuite:
     )
 
     given RuntimeContext = RuntimeEnvironment.current
-    val systemText       = JSONAdapter().format(invocation).toOption.get.messages.head.text.get
+    val messages         = JSONAdapter().format(invocation).toOption.get.messages
+    val systemText       = messages.head.text.get
     assert(
-      systemText.contains("exactly these keys: answer, score"),
-      s"expected key-list instruction, got:\n$systemText"
+      systemText.contains("{\n  \"answer\": \"{answer}\",\n  \"score\": \"{score}\"\n}"),
+      s"expected the keys in the output structure, got:\n$systemText"
+    )
+    assert(
+      messages.last.text.get.endsWith(
+        "Respond with a JSON object in the following order of fields: `answer`, then `score`."
+      ),
+      messages.last.text.get
     )
     assert(
       !systemText.contains("JSON Schema"),

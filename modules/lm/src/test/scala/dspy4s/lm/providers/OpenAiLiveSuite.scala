@@ -1,5 +1,6 @@
 package dspy4s.lm.providers
 
+import dspy4s.core.contracts.LmAuthError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.:=
@@ -15,9 +16,10 @@ import munit.FunSuite
 /** Integration tests that hit the real OpenAI chat-completions endpoint.
   *
   * Run conditions:
-  *   - Set OPENAI_API_KEY in the environment, in JVM system properties, or in a `.env` file at the project root
-  *     (resolved by walking up from the test cwd). If the variable is missing or empty these tests are marked "ignored"
-  *     via MUnit's `assume(...)`, so `sbt test` still succeeds without credentials.
+  *   - Set OPENAI_API_KEY and OPENAI_LIVE_ENABLED=true in the environment, in JVM system properties, or in a `.env`
+  *     file at the project root (resolved by walking up from the test cwd). If one of the two is missing or empty,
+  *     MUnit's `assume(...)` skips each test of this suite, so `sbt test` succeeds without credentials and makes no
+  *     network request.
   *   - Optionally set OPENAI_BASE_URL to point at Azure OpenAI, OpenRouter, LiteLLM proxy, or any OpenAI-compatible
   *     endpoint.
   *
@@ -128,7 +130,8 @@ class OpenAiLiveSuite extends FunSuite:
     assert(usage.completionTokens > 0L)
   }
 
-  test("live: client reports openai_auth on a bogus API key") {
+  test("live: client reports LmAuthError on a bogus API key") {
+    requireLive()
     val badClient = OpenAiClient(
       apiKey = "sk-this-key-does-not-exist-12345",
       baseUrl = baseUrl.getOrElse(OpenAiClient.defaultBaseUrl)
@@ -140,13 +143,7 @@ class OpenAiLiveSuite extends FunSuite:
       messages = Vector(Message(role = MessageRole.User, text = Some("x"))),
       options = DynamicValues.record("max_tokens" := 1)
     )
-    val result = lm.call(request)
-    assert(result.isLeft, "expected auth failure")
-    val error = result.swap.toOption.get match
-      case e: dspy4s.core.contracts.RuntimeError => e
-      case other                                 => fail(s"expected RuntimeError, got ${other.getClass.getSimpleName}: ${other.message}")
-    assert(
-      error.component == "openai_auth" || error.component == "openai_http",
-      s"unexpected error component: ${error.component} / ${error.message}"
-    )
+    lm.call(request) match
+      case Left(_: LmAuthError) => ()
+      case other                => fail(s"expected LmAuthError, got $other")
   }

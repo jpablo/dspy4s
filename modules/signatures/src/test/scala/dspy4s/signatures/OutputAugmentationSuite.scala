@@ -7,6 +7,10 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 import scala.NamedTuple
 import munit.FunSuite
 
+final case class OaAnswer(answer: String, score: Double)
+final case class OaReasoned(reasoning: String, answer: String)
+final case class OaNode(label: String, children: List[OaNode])
+
 class OutputAugmentationSuite extends FunSuite:
 
   case class Answer(answer: String, score: Double)
@@ -156,4 +160,72 @@ class OutputAugmentationSuite extends FunSuite:
         hook = out => if out.answer.isEmpty then Left(ValidationError("empty answer")) else Right(out)
       )
     assert(rejected.isLeft, s"hook should reject empty answer, got $rejected")
+  }
+
+  // ── prependedStringShape: the JSON schema of the augmented output ──────────────────────
+
+  private def reasoningField: FieldSpec = FieldSpec("reasoning")
+
+  private def parsed(schema: Option[String]): DynamicValue.Record =
+    schema.flatMap(DynamicValues.parseJsonRecord).getOrElse(fail(s"no JSON schema: $schema"))
+
+  private def at(record: DynamicValue.Record, path: String*): Option[DynamicValue] =
+    path.foldLeft[Option[DynamicValue]](Some(record)) {
+      case (Some(node: DynamicValue.Record), key) => DynamicValues.recordGet(node, key)
+      case _                                      => None
+    }
+
+  private def keysAt(record: DynamicValue.Record, path: String*): Vector[String] =
+    at(record, path*) match
+      case Some(node: DynamicValue.Record) => DynamicValues.recordKeys(node)
+      case other                           => fail(s"no object at ${path.mkString("/")}: $other")
+
+  private def names(value: Option[DynamicValue]): Vector[String] =
+    value match
+      case Some(list: DynamicValue.Sequence) => list.elements.toVector.flatMap(DynamicValues.asString)
+      case other                             => fail(s"expected a list, got: $other")
+
+  test("prependedStringShape: the JSON schema has the prepended field first in the properties and in required") {
+    val base   = Shape.canonicalDerived[OaAnswer]
+    val schema = parsed(
+      OutputAugmentation.prependedStringShape(base, reasoningField, "reasoning", "test", "sig").jsonSchemaString
+    )
+    assertEquals(keysAt(schema, "properties"), Vector("reasoning", "answer", "score"))
+    assertEquals(at(schema, "properties", "reasoning"), Some(rec("type" -> str("string"))))
+    assertEquals(names(at(schema, "required")), Vector("reasoning", "answer", "score"))
+    assertEquals(at(schema, "properties", "score"), at(parsed(base.jsonSchemaString), "properties", "score"))
+  }
+
+  test("prependedStringShape: an optional field or a field with a default value is not in required") {
+    val base = Shape.canonicalDerived[OaAnswer]
+    for field <- Vector(reasoningField.copy(optional = true), reasoningField.copy(defaultValue = Some(str("none"))))
+    do
+      val schema = parsed(
+        OutputAugmentation.prependedStringShape(base, field, "reasoning", "test", "sig").jsonSchemaString
+      )
+      assertEquals(keysAt(schema, "properties"), Vector("reasoning", "answer", "score"))
+      assertEquals(names(at(schema, "required")), Vector("answer", "score"))
+  }
+
+  test("prependedStringShape: a base that already has the field keeps its JSON schema") {
+    val base  = Shape.canonicalDerived[OaReasoned]
+    val shape = OutputAugmentation.prependedStringShape(base, reasoningField, "reasoning", "test", "sig")
+    assertEquals(shape.jsonSchemaString, base.jsonSchemaString)
+  }
+
+  test("prependedStringShape: for a recursive base type, the definition replaces the root $ref and $defs stays") {
+    val base   = Shape.canonicalDerived[OaNode]
+    val schema = parsed(
+      OutputAugmentation.prependedStringShape(base, reasoningField, "reasoning", "test", "sig").jsonSchemaString
+    )
+    assertEquals(at(schema, "$ref"), None)
+    assertEquals(keysAt(schema, "properties"), Vector("reasoning", "label", "children"))
+    assertEquals(names(at(schema, "required")), Vector("reasoning", "label"))
+    assertEquals(at(schema, "properties", "children", "items"), Some(rec("$ref" -> str("#/$defs/OaNode"))))
+    assertEquals(keysAt(schema, "$defs", "OaNode", "properties"), Vector("label", "children"))
+  }
+
+  test("prependedStringShape: a base with no JSON schema gives no JSON schema") {
+    val shape = OutputAugmentation.prependedStringShape(answerShape, reasoningField, "reasoning", "test", "sig")
+    assertEquals(shape.jsonSchemaString, None)
   }

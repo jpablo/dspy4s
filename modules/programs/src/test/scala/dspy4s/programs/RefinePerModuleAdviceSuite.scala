@@ -9,6 +9,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmMode
@@ -21,6 +22,8 @@ import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.Prediction
+import dspy4s.programs.optimization.optimizableView
+import dspy4s.signatures.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
@@ -88,6 +91,15 @@ class RefinePerModuleAdviceSuite extends FunSuite:
       }
       Right(ParsedOutput(values = DynamicValues.recordFromEntries(entries)))
 
+    /** The invocations of the parse calls that have an invocation. */
+    val parsed: mutable.ArrayBuffer[AdapterInvocation] = mutable.ArrayBuffer.empty
+
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
+        RuntimeContext
+    ): Either[DspyError, ParsedOutput] =
+      parsed += invocation
+      parse(invocation.layout, output)
+
   /** One LM that plays both task and reflection roles, routed by the prompt's OUTPUTS tag:
     *   - `advice` -> returns a per-module JSON advice dict telling each predictor its own secret token.
     *   - `hint` -> emits "good" iff the hinter's prompt carries the hinter token (via injected `hint_`).
@@ -140,6 +152,43 @@ class RefinePerModuleAdviceSuite extends FunSuite:
       assert(answererPrompt.contains(AnswererToken), s"answerer must see its own token; got:\n$answererPrompt")
       assert(!answererPrompt.contains(HinterToken), s"answerer must NOT see the hinter's token; got:\n$answererPrompt")
     }
+  }
+
+  // The view of a ChainOfThought has the instructions of its base signature (none here). Its inner predict has the
+  // effective instructions of the base signature (upstream `prepend` keeps them). The match ignores the instructions.
+  test("the hint adapter finds the advice of a ChainOfThought whose base signature has no instructions") {
+    val signature = Signature.fromString("q -> answer")
+    val view      = ChainOfThought(signature).optimizableView
+    val inner     = ChainOfThought.augmentLayout(signature.layout)
+    assertEquals(view.layout.instructions, None)
+    assert(inner.instructions.nonEmpty)
+    val adapter          = RecordingAdapter()
+    val hint             = Refine.HintInjectingAdapter(adapter, Map(view.layout -> "Use the map."))
+    given RuntimeContext = RuntimeContext()
+    val invocation       = AdapterInvocation(
+      layout = inner,
+      demos = Vector.empty,
+      inputs = Example(values = rec("q" := "Where?"), inputKeys = Set("q")),
+      request = LmRequest(model = "m")
+    )
+    assert(hint.format(invocation).isRight)
+    assert(adapter.prompts("reasoning,answer").contains("hint_: Use the map."), adapter.prompts.toString)
+  }
+
+  test("the hint adapter gives the invocation of the request to the parse of its base adapter") {
+    // `TwoStepAdapter` takes the output schema of the invocation for its extraction prompt.
+    val adapter          = RecordingAdapter()
+    val hint             = Refine.HintInjectingAdapter(adapter, Map.empty)
+    given RuntimeContext = RuntimeContext()
+    val invocation       = AdapterInvocation(
+      layout = Signature.fromString("q -> answer").layout,
+      demos = Vector.empty,
+      inputs = Example(values = rec("q" := "Where?"), inputKeys = Set("q")),
+      request = LmRequest(model = "m"),
+      outputJsonSchema = Some("""{"type": "object"}""")
+    )
+    assert(hint.parse(invocation, LmOutput(text = "")).isRight)
+    assertEquals(adapter.parsed.toVector, Vector(invocation))
   }
 
   test("parseAdvice decodes a JSON dict and falls back to uniform advice for non-JSON") {

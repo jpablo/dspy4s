@@ -30,18 +30,21 @@ Unlike `BootstrapFewShot*`/`COPRO`/`MIPROv2` (which take a plain `Metric`), GEPA
 ## Minimal usage
 
 ```scala
-import dspy4s.gepa.{Gepa, GepaConfig}
+import dspy4s.gepa.{Gepa, GepaBudget, GepaConfig, MetricCallCount, MinibatchSize}
 import dspy4s.gepa.contracts.{FeedbackMetric, ScoreWithFeedback}
 
 val gepa = new Gepa[DynamicPredict](
   metric,                  // a FeedbackMetric (score + feedback)
   reflectionLm = lm,       // the model that rewrites instructions
-  GepaConfig(maxMetricCalls = 60, reflectionMinibatchSize = 3, seed = 0L)
+  GepaConfig(budget = GepaBudget.MetricCalls(MetricCallCount(60)), reflectionMinibatchSize = MinibatchSize(3), seed = 0L)
 )
-val result = gepa.compile(student, trainset = trainset, valset = valset)
-// result.bestProgram     — the program with the evolved instructions
-// result.bestCandidate   — Map[OptimizableId, Option[String]]
-// result.bestScore       — mean validation score
+// Either[DspyError, GepaResult[DynamicPredict]]. A Left is a program in which GEPA cannot find the calls of each
+// predictor: two predictors with the same name and signature, or a predictor type that records no trace key.
+gepa.compile(student, trainset = trainset, valset = valset).map { result =>
+  // result.bestProgram     — the program with the evolved instructions
+  // result.bestCandidate   — Map[OptimizableId, Option[String]]
+  // result.bestScore       — mean validation score
+}
 ```
 
 ## Runnable end-to-end example

@@ -26,7 +26,7 @@ import dspy4s.core.data.{RawPrediction, Example}
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
-import dspy4s.gepa.{Gepa, GepaConfig, MetricCallCount, MinibatchSize}
+import dspy4s.gepa.{Gepa, GepaBudget, GepaConfig, MetricCallCount, MinibatchSize}
 import dspy4s.gepa.contracts.{FeedbackMetric, ScoreWithFeedback}
 import dspy4s.lm.providers.OpenAiLanguageModel
 import dspy4s.programs.strategies.DynamicPredict
@@ -133,7 +133,7 @@ object GepaSmokeTest:
           metric,
           reflectionLm = lm,
           GepaConfig(
-            maxMetricCalls = MetricCallCount.applyUnsafe(metricCalls),
+            budget = GepaBudget.MetricCalls(MetricCallCount.applyUnsafe(metricCalls)),
             reflectionMinibatchSize = MinibatchSize.applyUnsafe(minibatchSize),
             stopOnPerfectScore = true,
             seed = 0L
@@ -144,11 +144,14 @@ object GepaSmokeTest:
         println(s"""[gepa-smoke] task: HAS_NUM/NO_NUM   baseline instruction: "$vagueBaselineInstruction"""")
         println(s"[gepa-smoke] train=${trainset.size}, val=${valset.size}   (one '.' per LM call)\n")
 
-        val result = gepa.compile(student, trainset = trainset, valset = valset)
-
-        println(s"\n\n[gepa-smoke] ${progress.count} LM calls; ${result.numCandidates} candidates explored.")
-        println(f"[gepa-smoke] best validation score: ${result.bestScore}%.3f / 1.0 (${result.bestScore * 100}%.1f%%)")
-        val discovered = result.bestCandidate.get(OptimizableId(0)).flatten.getOrElse("(none)")
-        println(s"""[gepa-smoke] discovered instruction:\n    "$discovered"""")
-        println("[gepa-smoke] done — GEPA ran end-to-end against a live model.")
+        gepa.compile(student, trainset = trainset, valset = valset) match
+          case Left(error)   => println(s"\n\n[gepa-smoke] GEPA stopped with an error: ${error.message}")
+          case Right(result) =>
+            println(s"\n\n[gepa-smoke] ${progress.count} LM calls; ${result.numCandidates} candidates explored.")
+            println(
+              f"[gepa-smoke] best validation score: ${result.bestScore}%.3f / 1.0 (${result.bestScore * 100}%.1f%%)"
+            )
+            val discovered = result.bestCandidate.get(OptimizableId(0)).flatten.getOrElse("(none)")
+            println(s"""[gepa-smoke] discovered instruction:\n    "$discovered"""")
+            println("[gepa-smoke] done — GEPA ran end-to-end against a live model.")
       }

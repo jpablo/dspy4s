@@ -48,6 +48,22 @@ class ProviderLanguageModelSuite extends FunSuite:
     assertEquals(messages.last("content"), "Hello": Any)
   }
 
+  test("a null option removes the option, also a default option of the model") {
+    // Upstream `_canonical` (`dspy/clients/execution.py`) drops each option whose value is `None` after the merge.
+    val request = LmRequest(
+      model = "openai/test",
+      options = DynamicValues.record("reasoning_effort" -> DynamicValue.Null, "max_tokens" := 8)
+    )
+    val defaults = DynamicValues.record("reasoning_effort" := "high", "temperature" := 0.1)
+
+    assertEquals(
+      ProviderRequestNormalizer.effectiveOptions(request, defaults),
+      DynamicValues.record("temperature" := 0.1, "max_tokens" := 8)
+    )
+    val wire = DynamicValues.recordKeys(ProviderRequestNormalizer.normalize(request, defaults))
+    assert(!wire.contains("reasoning_effort"), wire.toString)
+  }
+
   test("normalizer never serializes the framework-only rolloutId into the provider body") {
     val request = LmRequest(
       model = "openai/test",
@@ -177,7 +193,10 @@ class ProviderLanguageModelSuite extends FunSuite:
       "output" -> Vector(
         Map(
           "type"    -> "message",
-          "content" -> Vector(Map("type" -> "output_text", "text" -> "First line"), Map("text" -> "Second line"))
+          "content" -> Vector(
+            Map("type" -> "output_text", "text" -> "First line"),
+            Map("type" -> "output_text", "text" -> "Second line")
+          )
         )
       ),
       "usage" -> Map("input_tokens" -> 3, "output_tokens" -> 4, "total_tokens" -> 7)
@@ -200,9 +219,45 @@ class ProviderLanguageModelSuite extends FunSuite:
 
     assert(result.isRight)
     val response = result.toOption.get
-    assertEquals(response.outputs.head.text, "First line\nSecond line")
+    // Upstream `responses_outputs` reads only the typed text parts, and joins them with no separator.
+    assertEquals(response.outputs.head.text, "First lineSecond line")
     assertEquals(response.usage.get.promptTokens, 3L)
     assertEquals(response.usage.get.completionTokens, 4L)
+  }
+
+  test("the mode of the provider selects the payload mode and the parse, not the mode of the request") {
+    // Upstream `LM.model_type` is fixed when the LM is built. `OpenAiLanguageModel` follows the same rule.
+    val chatBody = DynamicValues.fromAny(Map(
+      "choices" -> Vector(Map("message" -> Map("role" -> "assistant", "content" -> "From chat.")))
+    ))
+    val responsesBody = DynamicValues.fromAny(Map(
+      "output" ->
+        Vector(Map("type" -> "message", "content" -> Vector(Map("type" -> "output_text", "text" -> "From responses."))))
+    ))
+    val cases = Vector(
+      (LmMode.Chat, LmMode.Responses, chatBody, "chat", "From chat."),
+      (LmMode.Responses, LmMode.Chat, responsesBody, "responses", "From responses.")
+    )
+    given RuntimeContext = RuntimeEnvironment.current
+    cases.foreach { (providerMode, requestMode, body, wireMode, text) =>
+      var seenMode: Option[String] = None
+      val lm                       = ProviderLanguageModel(
+        id = "openai/test",
+        mode = providerMode,
+        invoke = payload =>
+          seenMode = DynamicJson.field(payload, "mode").flatMap(DynamicJson.asString)
+          Right(body)
+      )
+      val request = LmRequest(
+        model = "openai/test",
+        mode = requestMode,
+        messages = Vector(Message(role = MessageRole.User, text = Some("Q?")))
+      )
+      lm.call(request) match
+        case Right(response) => assertEquals(response.outputs.map(_.text), Vector(text), providerMode.toString)
+        case Left(error)     => fail(s"the $providerMode provider failed on a $requestMode request: $error")
+      assertEquals(seenMode, Some(wireMode), providerMode.toString)
+    }
   }
 
   test("provider language model returns parse error when provider output is empty") {

@@ -10,10 +10,9 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** A module that gathers a trajectory and then extracts its user-visible result.
   *
-  * `ReAct` and `CodeAct` share this execution shape even though their transitions are different: ReAct chooses and
-  * invokes a tool, while CodeAct generates and executes code. Implementations provide that domain-specific
-  * [[trajectoryStep]], plus a renderer and extractor; this trait owns the common module boundary and guarantees that
-  * the complete trajectory is attached to the extractor's preserved raw prediction.
+  * `ReAct` has this execution shape: in each transition, ReAct chooses and invokes a tool. Implementations provide that
+  * domain-specific [[trajectoryStep]], plus a renderer and extractor; this trait owns the common module boundary and
+  * guarantees that the complete trajectory is attached to the extractor's preserved raw prediction.
   *
   * Because [[forward]] is final, every implementation has the same orchestration guarantees: extraction runs exactly
   * once after either `Done` or budget exhaustion, never after a failed transition; the extractor's complete prediction
@@ -38,30 +37,36 @@ trait TrajectoryAgent[I, O, S] extends Module[I, O]:
   /** Raw-prediction field under which the complete rendered trajectory is exposed. */
   protected def trajectoryKey: String
 
-  /** Render the trajectory for both the iterative policy and final extractor. */
-  protected def renderTrajectory(trajectory: Vector[S]): String
+  /** Render the trajectory for both the iterative policy and final extractor. The text can depend on the runtime
+    * context, for example on its adapter (upstream `ReAct._format_trajectory`).
+    */
+  protected def renderTrajectory(trajectory: Vector[S])(using RuntimeContext): String
 
   /** One domain-specific transition: act, append an entry, and decide whether the trajectory is complete. */
   protected def trajectoryStep(call: ProgramCall[I])(using
       RuntimeContext
   ): (Vector[S], Int) => Either[DspyError, TrajectoryAgent.Step[S]]
 
+  /** The LM usage of the result is the total of the usage scope of the call, which `Module.apply` opens: each model
+    * call of the transitions, of the tools, and of the extractor (upstream `Module.__call__` puts the total usage of
+    * the call on the result, `dspy/primitives/module.py`).
+    */
   final override protected def forward(call: ProgramCall[I])(using
       RuntimeContext
   ): Either[DspyError, Prediction[O]] =
     TrajectoryAgent.runAndExtractPrediction[S, O](
       maxIterations,
-      renderTrajectory,
+      trajectory => renderTrajectory(trajectory),
       trajectoryKey
     )(trajectoryStep(call)) {
       rendered =>
         extractorPredict(call.mapInput(input => (input, rendered)))
     }
 
-/** The shared "gather a trajectory, then extract the answer from it" agent shape behind `ReAct` and `CodeAct` (the
-  * trajectory-and-extractor flavor of `agentLoop`; see `docs/refactor/algebra-2-program-composition.md`).
+/** The "gather a trajectory, then extract the answer from it" agent shape behind `ReAct` (the trajectory-and-extractor
+  * flavor of `agentLoop`; see `docs/refactor/algebra-2-program-composition.md`).
   *
-  * Both run a bounded loop building a `Vector[S]` of trajectory steps (via [[AgentLoop.run]]), then feed the rendered
+  * It runs a bounded loop building a `Vector[S]` of trajectory steps (via [[AgentLoop.run]]), then feeds the rendered
   * trajectory to a reasoning-augmented extractor predict, truncating the OLDEST step and retrying on a context-window
   * overflow (Python's `_call_with_potential_trajectory_truncation`). The generic helpers remain available separately
   * from the [[TrajectoryAgent]] module template so non-module runtimes can reuse the same loop mechanics.

@@ -1,6 +1,6 @@
 package dspy4s.signatures.internal
 
-import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.{History, SignatureLayout}
 import dspy4s.signatures.{Shape, Signature as TypedSig}
 import zio.blocks.schema.Schema
 import scala.deriving.Mirror
@@ -268,8 +268,9 @@ private[signatures] object FunctionMacro:
 
   /** Implementation of `Signature.fromString("a -> b")`. The DSL string must be a compile-time literal; it is parsed at
     * compile time (reusing the runtime `SignatureLayout.parse`) and each field becomes a named-tuple element — fields
-    * without an annotation default to `String`; `int` / `float` / `bool` map to the matching scalar. An invalid DSL
-    * string, or a field type the `Signature` API doesn't support, is a compile error.
+    * without an annotation default to `String`; `int` / `float` / `bool` map to the matching scalar. An input field
+    * with the type `History` becomes a `dspy4s.core.contracts.History` element. An invalid DSL string, or a field type
+    * the `Signature` API doesn't support, is a compile error.
     */
   def fromStringImpl(dsl: Expr[String], instructions: Expr[String])(using Quotes): Expr[Any] =
     import quotes.reflect.*
@@ -285,20 +286,21 @@ private[signatures] object FunctionMacro:
       case Right(parsed) => parsed
       case Left(err)     => report.errorAndAbort(s"""Invalid signature DSL "$literal": ${err.message}""")
 
-    def scalaType(field: dspy4s.core.contracts.FieldSpec): TypeRepr =
+    def scalaType(field: dspy4s.core.contracts.FieldSpec, isInput: Boolean): TypeRepr =
       field.typeRef.repr match
-        case "string" => TypeRepr.of[String]
-        case "int"    => TypeRepr.of[Int]
-        case "double" => TypeRepr.of[Double]
-        case "bool"   => TypeRepr.of[Boolean]
-        case other    => report.errorAndAbort(
+        case "string"             => TypeRepr.of[String]
+        case "int"                => TypeRepr.of[Int]
+        case "double"             => TypeRepr.of[Double]
+        case "bool"               => TypeRepr.of[Boolean]
+        case "history" if isInput => TypeRepr.of[History]
+        case other                => report.errorAndAbort(
             s"Signature.fromString: field '${field.name}' has type '$other', which the string DSL does " +
-              "not support (supported: str, int, float, bool). For richer field types use Signature.of[Spec], a " +
-              "case class, or Signature.fromStringDynamic."
+              "not support (supported: str, int, float, bool, and History for an input field). For richer field " +
+              "types use Signature.of[Spec], a case class, or Signature.fromStringDynamic."
           )
 
-    val inputItems  = layout.inputFields.toList.map(field => field.name -> scalaType(field))
-    val outputItems = layout.outputFields.toList.map(field => field.name -> scalaType(field))
+    val inputItems  = layout.inputFields.toList.map(field => field.name -> scalaType(field, isInput = true))
+    val outputItems = layout.outputFields.toList.map(field => field.name -> scalaType(field, isInput = false))
     if inputItems.isEmpty then
       report.errorAndAbort(s"""Signature.fromString "$literal" declares no input fields""")
     if outputItems.isEmpty then

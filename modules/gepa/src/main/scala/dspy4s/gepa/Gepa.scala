@@ -1,9 +1,11 @@
 package dspy4s.gepa
 
+import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.gepa.contracts.FeedbackMetric
 import dspy4s.lm.contracts.LanguageModel
+import dspy4s.optimize.contracts.Teleprompter
 import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.ProgramRunner
 
@@ -19,18 +21,65 @@ import dspy4s.programs.ProgramRunner
   *   the (usually stronger) model that rewrites instructions from reflective feedback
   * @param config
   *   budget + search settings ([[GepaConfig]])
+  * @param instructionProposer
+  *   writes the new instruction text of each iteration. The default is the built-in proposer
+  *   ([[DefaultInstructionProposer]]); give one with options, or an implementation of your own.
+  *
+  * Each `compile` call is a compile scope (upstream `_with_compile_callbacks`) with the inputs `trainset_size`, and
+  * `valset_size` for the call with a validation set.
   */
 final class Gepa[P](
-    metric      : FeedbackMetric,
-    reflectionLm: LanguageModel,
-    config      : GepaConfig
+    metric             : FeedbackMetric,
+    reflectionLm       : LanguageModel,
+    config             : GepaConfig,
+    instructionProposer: InstructionProposer = InstructionProposer.default
 )(using OptimizableStructure[P], ProgramRunner[P]):
 
   val name: String = "gepa"
 
-  /** Optimize `student`'s predictor instructions over `trainset` (reflective minibatches) and `valset` (Pareto frontier
-    * scoring), returning the best candidate and the program it yields.
+  /** Optimize `student`'s predictor instructions over `trainset`, returning the best candidate and the program it
+    * yields. The trainset gives the reflective minibatches and also the Pareto scores (dspy's `compile` with no
+    * `valset`). The budget of [[GepaConfig.budget]] resolves with no validation set ([[GepaBudget.resolve]]).
+    *
+    * `Left(ConfigurationError)` before any LM call when the trainset is empty, or when the budget cannot hold the seed
+    * evaluation. `Left` when the checkpoint in [[GepaConfig.runDir]] cannot be read or does not agree with the program,
+    * the validation set, or the configuration; the file then stays unchanged.
+    *
+    * `Left` when GEPA cannot find the trace entries of each predictor (UPGRADE-3.2.1-to-3.4.0, decision D2):
+    *   - Two predictors have the same module name and the same signature structure. The check runs before any LM call.
+    *     Give each predictor a name.
+    *   - A predictor type records no predictor key in its trace entries.
+    *
+    * `Left` also when `instructionProposer` gives a text for a component that the program does not hold.
+    *
+    * `Left` also when [[GepaConfig.frontierType]] is not `Instance` and the metric gives the seed candidate no
+    * objective score. The run stops after the seed evaluation.
     */
-  def compile(student: P, trainset: Vector[Example], valset: Vector[Example])(using RuntimeContext): GepaResult[P] =
-    val adapter = new GepaAdapter(student, metric, config.failureScore)
-    new GepaEngine(adapter, reflectionLm, config).optimize(Candidate.seed(student), trainset, valset)
+  def compile(student: P, trainset: Vector[Example])(using RuntimeContext): Either[DspyError, GepaResult[P]] =
+    Teleprompter.withCompileCallbacks(this, trainset)(run(student, trainset, trainset, valsetSize = None))
+
+  /** As the other `compile`, with `valset` for the Pareto scores. An empty `valset` selects the trainset, as upstream
+    * (`valset or trainset`).
+    *
+    * The budget of [[GepaConfig.budget]] resolves with the size of `valset` ([[GepaBudget.resolve]]), also when
+    * `valset` is empty.
+    */
+  def compile(student: P, trainset: Vector[Example], valset: Vector[Example])(using
+      RuntimeContext
+  ): Either[DspyError, GepaResult[P]] =
+    Teleprompter.withCompileCallbacks(this, trainset, Some(valset)) {
+      run(student, trainset, if valset.isEmpty then trainset else valset, valsetSize = Some(valset.size))
+    }
+
+  /** Run the engine on `valset` with the budget that [[GepaBudget.resolve]] gives for `valsetSize`, the size of the
+    * validation set that the caller gave. The engine gets the resolved number of metric calls, so it does not resolve
+    * the budget again with `valset`. The engine checks the trainset before any LM call.
+    */
+  private def run(student: P, trainset: Vector[Example], valset: Vector[Example], valsetSize: Option[Int])(using
+      RuntimeContext
+  ): Either[DspyError, GepaResult[P]] =
+    val seed    = Candidate.seed(student)
+    val budget  = GepaBudget.MetricCalls(config.budget.resolve(seed.size, trainset.size, valsetSize))
+    val adapter = new GepaAdapter(student, metric, config.failureScore, config.addFormatFailureAsFeedback, config.seed)
+    val engine  = new GepaEngine(adapter, reflectionLm, config.copy(budget = budget), instructionProposer)
+    engine.optimize(seed, trainset, valset)

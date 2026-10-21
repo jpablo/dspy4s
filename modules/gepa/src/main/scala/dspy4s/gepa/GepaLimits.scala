@@ -29,6 +29,26 @@ type MergeSubsampleSize = MergeSubsampleSize.T
 
 object MergeSubsampleSize extends RefinedSubtype[Int, Positive]
 
+/** A non-negative floor on the validation examples that the two candidates of a merge share. */
+type MergeOverlapFloor = MergeOverlapFloor.T
+
+object MergeOverlapFloor extends RefinedSubtype[Int, Positive0]
+
+/** A strictly positive limit on the number of Unicode code points of a proposed instruction. */
+type InstructionCharLimit = InstructionCharLimit.T
+
+object InstructionCharLimit extends RefinedSubtype[Int, Positive]
+
+/** A strictly positive number of full evaluations of the trainset and the validation set ([[GepaBudget.FullEvals]]). */
+type FullEvalCount = FullEvalCount.T
+
+object FullEvalCount extends RefinedSubtype[Int, Positive]
+
+/** A strictly positive number of proposals, parents, or mutations of one reflective iteration. */
+type ProposalCount = ProposalCount.T
+
+object ProposalCount extends RefinedSubtype[Int, Positive]
+
 /** A candidate pool containing at least the seed candidate. */
 type CandidatePool = CandidatePool.T
 

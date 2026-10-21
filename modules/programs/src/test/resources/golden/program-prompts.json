@@ -1,0 +1,208 @@
+{
+  "upstream": "f1260ff14",
+  "generator": "scripts/golden/program_prompts.py",
+  "cases": [
+    {
+      "id": "cot_basic",
+      "calls": [
+        {
+          "messages": [
+            {
+              "role": "system",
+              "content": "Your input fields are:\n1. `question` (str):\nYour output fields are:\n1. `reasoning` (str): \n2. `answer` (str):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## question ## ]]\n{question}\n\n[[ ## reasoning ## ]]\n{reasoning}\n\n[[ ## answer ## ]]\n{answer}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `answer`."
+            },
+            {
+              "role": "user",
+              "content": "[[ ## question ## ]]\nWhat is 2+2?\n\nRespond with the corresponding output fields, starting with the field `[[ ## reasoning ## ]]`, then `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."
+            }
+          ],
+          "output": "[[ ## reasoning ## ]]\nTwo plus two is four.\n\n[[ ## answer ## ]]\n4"
+        }
+      ]
+    },
+    {
+      "id": "cot_instructions",
+      "calls": [
+        {
+          "messages": [
+            {
+              "role": "system",
+              "content": "Your input fields are:\n1. `question` (str):\nYour output fields are:\n1. `reasoning` (str): \n2. `answer` (str):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## question ## ]]\n{question}\n\n[[ ## reasoning ## ]]\n{reasoning}\n\n[[ ## answer ## ]]\n{answer}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Answer in one word."
+            },
+            {
+              "role": "user",
+              "content": "[[ ## question ## ]]\nWhat color is the sky?\n\nRespond with the corresponding output fields, starting with the field `[[ ## reasoning ## ]]`, then `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."
+            }
+          ],
+          "output": "[[ ## reasoning ## ]]\nIt is a color.\n\n[[ ## answer ## ]]\nBlue"
+        }
+      ]
+    },
+    {
+      "id": "react",
+      "calls": [
+        {
+          "messages": [
+            {
+              "role": "system",
+              "content": "Your input fields are:\n1. `question` (str): \n2. `trajectory` (str):\nYour output fields are:\n1. `next_thought` (str): \n2. `next_tool_name` (str): \n3. `next_tool_args` (dict):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## question ## ]]\n{question}\n\n[[ ## trajectory ## ]]\n{trajectory}\n\n[[ ## next_thought ## ]]\n{next_thought}\n\n[[ ## next_tool_name ## ]]\n{next_tool_name}        # note: the value you produce must exactly match (no extra characters) one of: search; add; finish\n\n[[ ## next_tool_args ## ]]\n{next_tool_args}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"object\", \"additionalProperties\": true}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `answer`.\n        \n        You are an Agent. In each episode, you will be given the fields `question` as input. And you can see your past trajectory so far.\n        Your goal is to use one or more of the supplied tools to collect any necessary information for producing `answer`.\n        \n        To do this, you will interleave next_thought, next_tool_name, and next_tool_args in each turn, and also when finishing the task.\n        After each tool call, you receive a resulting observation, which gets appended to your trajectory.\n        \n        When writing next_thought, you may reason about the current situation and plan for future steps.\n        When selecting the next_tool_name and its next_tool_args, the tool must be one of:\n        \n        (1) search, whose description is <desc>Search the web for a query.</desc>. It takes arguments {\"query\": {\"type\": \"string\"}}.\n        (2) add. It takes arguments {\"a\": {\"type\": \"integer\"}, \"b\": {\"type\": \"integer\"}}.\n        (3) finish, whose description is <desc>Marks the task as complete. That is, signals that all information for producing the outputs, i.e. `answer`, are now available to be extracted.</desc>. It takes arguments {}.\n        When providing `next_tool_args`, the value inside the field must be in JSON format"
+            },
+            {
+              "role": "user",
+              "content": "[[ ## question ## ]]\nHow many cats?\n\n[[ ## trajectory ## ]]\n\n\nRespond with the corresponding output fields, starting with the field `[[ ## next_thought ## ]]`, then `[[ ## next_tool_name ## ]]`, then `[[ ## next_tool_args ## ]]` (must be formatted as a valid Python dict), and then ending with the marker for `[[ ## completed ## ]]`."
+            }
+          ],
+          "output": "[[ ## next_thought ## ]]\nI should search.\n\n[[ ## next_tool_name ## ]]\nsearch\n\n[[ ## next_tool_args ## ]]\n{\"query\": \"cats\"}"
+        },
+        {
+          "messages": [
+            {
+              "role": "system",
+              "content": "Your input fields are:\n1. `question` (str): \n2. `trajectory` (str):\nYour output fields are:\n1. `next_thought` (str): \n2. `next_tool_name` (str): \n3. `next_tool_args` (dict):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## question ## ]]\n{question}\n\n[[ ## trajectory ## ]]\n{trajectory}\n\n[[ ## next_thought ## ]]\n{next_thought}\n\n[[ ## next_tool_name ## ]]\n{next_tool_name}        # note: the value you produce must exactly match (no extra characters) one of: search; add; finish\n\n[[ ## next_tool_args ## ]]\n{next_tool_args}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"object\", \"additionalProperties\": true}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `answer`.\n        \n        You are an Agent. In each episode, you will be given the fields `question` as input. And you can see your past trajectory so far.\n        Your goal is to use one or more of the supplied tools to collect any necessary information for producing `answer`.\n        \n        To do this, you will interleave next_thought, next_tool_name, and next_tool_args in each turn, and also when finishing the task.\n        After each tool call, you receive a resulting observation, which gets appended to your trajectory.\n        \n        When writing next_thought, you may reason about the current situation and plan for future steps.\n        When selecting the next_tool_name and its next_tool_args, the tool must be one of:\n        \n        (1) search, whose description is <desc>Search the web for a query.</desc>. It takes arguments {\"query\": {\"type\": \"string\"}}.\n        (2) add. It takes arguments {\"a\": {\"type\": \"integer\"}, \"b\": {\"type\": \"integer\"}}.\n        (3) finish, whose description is <desc>Marks the task as complete. That is, signals that all information for producing the outputs, i.e. `answer`, are now available to be extracted.</desc>. It takes arguments {}.\n        When providing `next_tool_args`, the value inside the field must be in JSON format"
+            },
+            {
+              "role": "user",
+              "content": "[[ ## question ## ]]\nHow many cats?\n\n[[ ## trajectory ## ]]\n[[ ## thought_0 ## ]]\nI should search.\n\n[[ ## tool_name_0 ## ]]\nsearch\n\n[[ ## tool_args_0 ## ]]\n{\"query\": \"cats\"}\n\n[[ ## observation_0 ## ]]\n3 results for cats\n\nRespond with the corresponding output fields, starting with the field `[[ ## next_thought ## ]]`, then `[[ ## next_tool_name ## ]]`, then `[[ ## next_tool_args ## ]]` (must be formatted as a valid Python dict), and then ending with the marker for `[[ ## completed ## ]]`."
+            }
+          ],
+          "output": "[[ ## next_thought ## ]]\nNow add.\n\n[[ ## next_tool_name ## ]]\nadd\n\n[[ ## next_tool_args ## ]]\n{\"a\": 2, \"b\": 3}"
+        },
+        {
+          "messages": [
+            {
+              "role": "system",
+              "content": "Your input fields are:\n1. `question` (str): \n2. `trajectory` (str):\nYour output fields are:\n1. `next_thought` (str): \n2. `next_tool_name` (str): \n3. `next_tool_args` (dict):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## question ## ]]\n{question}\n\n[[ ## trajectory ## ]]\n{trajectory}\n\n[[ ## next_thought ## ]]\n{next_thought}\n\n[[ ## next_tool_name ## ]]\n{next_tool_name}        # note: the value you produce must exactly match (no extra characters) one of: search; add; finish\n\n[[ ## next_tool_args ## ]]\n{next_tool_args}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"object\", \"additionalProperties\": true}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `answer`.\n        \n        You are an Agent. In each episode, you will be given the fields `question` as input. And you can see your past trajectory so far.\n        Your goal is to use one or more of the supplied tools to collect any necessary information for producing `answer`.\n        \n        To do this, you will interleave next_thought, next_tool_name, and next_tool_args in each turn, and also when finishing the task.\n        After each tool call, you receive a resulting observation, which gets appended to your trajectory.\n        \n        When writing next_thought, you may reason about the current situation and plan for future steps.\n        When selecting the next_tool_name and its next_tool_args, the tool must be one of:\n        \n        (1) search, whose description is <desc>Search the web for a query.</desc>. It takes arguments {\"query\": {\"type\": \"string\"}}.\n        (2) add. It takes arguments {\"a\": {\"type\": \"integer\"}, \"b\": {\"type\": \"integer\"}}.\n        (3) finish, whose description is <desc>Marks the task as complete. That is, signals that all information for producing the outputs, i.e. `answer`, are now available to be extracted.</desc>. It takes arguments {}.\n        When providing `next_tool_args`, the value inside the field must be in JSON format"
+            },
+            {
+              "role": "user",
+              "content": "[[ ## question ## ]]\nHow many cats?\n\n[[ ## trajectory ## ]]\n[[ ## thought_0 ## ]]\nI should search.\n\n[[ ## tool_name_0 ## ]]\nsearch\n\n[[ ## tool_args_0 ## ]]\n{\"query\": \"cats\"}\n\n[[ ## observation_0 ## ]]\n3 results for cats\n\n[[ ## thought_1 ## ]]\nNow add.\n\n[[ ## tool_name_1 ## ]]\nadd\n\n[[ ## tool_args_1 ## ]]\n{\"a\": 2, \"b\": 3}\n\n[[ ## observation_1 ## ]]\n5\n\nRespond with the corresponding output fields, starting with the field `[[ ## next_thought ## ]]`, then `[[ ## next_tool_name ## ]]`, then `[[ ## next_tool_args ## ]]` (must be formatted as a valid Python dict), and then ending with the marker for `[[ ## completed ## ]]`."
+            }
+          ],
+          "output": "[[ ## next_thought ## ]]\nDone.\n\n[[ ## next_tool_name ## ]]\nfinish\n\n[[ ## next_tool_args ## ]]\n{}"
+        },
+        {
+          "messages": [
+            {
+              "role": "system",
+              "content": "Your input fields are:\n1. `question` (str): \n2. `trajectory` (str):\nYour output fields are:\n1. `reasoning` (str): \n2. `answer` (str):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## question ## ]]\n{question}\n\n[[ ## trajectory ## ]]\n{trajectory}\n\n[[ ## reasoning ## ]]\n{reasoning}\n\n[[ ## answer ## ]]\n{answer}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Given the fields `question`, produce the fields `answer`."
+            },
+            {
+              "role": "user",
+              "content": "[[ ## question ## ]]\nHow many cats?\n\n[[ ## trajectory ## ]]\n[[ ## thought_0 ## ]]\nI should search.\n\n[[ ## tool_name_0 ## ]]\nsearch\n\n[[ ## tool_args_0 ## ]]\n{\"query\": \"cats\"}\n\n[[ ## observation_0 ## ]]\n3 results for cats\n\n[[ ## thought_1 ## ]]\nNow add.\n\n[[ ## tool_name_1 ## ]]\nadd\n\n[[ ## tool_args_1 ## ]]\n{\"a\": 2, \"b\": 3}\n\n[[ ## observation_1 ## ]]\n5\n\n[[ ## thought_2 ## ]]\nDone.\n\n[[ ## tool_name_2 ## ]]\nfinish\n\n[[ ## tool_args_2 ## ]]\n{}\n\n[[ ## observation_2 ## ]]\nCompleted.\n\nRespond with the corresponding output fields, starting with the field `[[ ## reasoning ## ]]`, then `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."
+            }
+          ],
+          "output": "[[ ## reasoning ## ]]\nI found it.\n\n[[ ## answer ## ]]\n5 cats"
+        }
+      ],
+      "answer": "5 cats"
+    },
+    {
+      "id": "react_v2",
+      "calls": [
+        {
+          "messages": [
+            {
+              "role": "system",
+              "content": "Your input fields are:\n1. `question` (str): \n2. `history` (History): \n3. `tools` (list[Tool]):\nYour output fields are:\n1. `next_thought` (str): \n2. `tool_calls` (ToolCalls): \n    Type description of ToolCalls: Tool calls must be a JSON object with `tool_calls`, a list of calls. Each call must include `name` and `args`. Example: {\"tool_calls\": [{\"name\": \"search\", \"args\": {\"query\": \"cats\"}}]}\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## question ## ]]\n{question}\n\n[[ ## history ## ]]\n{history}\n\n[[ ## tools ## ]]\n{tools}\n\n[[ ## next_thought ## ]]\n{next_thought}\n\n[[ ## tool_calls ## ]]\n{tool_calls}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"object\", \"$defs\": {\"ToolCall\": {\"type\": \"object\", \"properties\": {\"args\": {\"type\": \"object\", \"additionalProperties\": true, \"title\": \"Args\"}, \"name\": {\"type\": \"string\", \"title\": \"Name\"}}, \"required\": [\"name\", \"args\"], \"title\": \"ToolCall\"}}, \"properties\": {\"tool_calls\": {\"type\": \"array\", \"items\": {\"$ref\": \"#/$defs/ToolCall\"}, \"title\": \"Tool Calls\"}}, \"required\": [\"tool_calls\"], \"title\": \"ToolCalls\"}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Count the cats.\n        You are an Agent. Use the supplied tools to produce `answer`, `count` from `question`.\n        Call tools when more information is needed.\n        When the final answer is ready, call `submit` with `answer`, `count`.\n        The available tools are: `search`, `add`, `submit`."
+            },
+            {
+              "role": "user",
+              "content": "[[ ## question ## ]]\nHow many cats?\n\n[[ ## tools ## ]]\n[\"search, whose description is <desc>Search the web for a query.</desc>. It takes arguments {\\\"query\\\": {\\\"type\\\": \\\"string\\\"}}.\", \"add. It takes arguments {\\\"a\\\": {\\\"type\\\": \\\"integer\\\"}, \\\"b\\\": {\\\"type\\\": \\\"integer\\\"}}.\", \"submit, whose description is <desc>Submit the final outputs for the task.</desc>. It takes arguments {\\\"answer\\\": {\\\"type\\\": \\\"string\\\"}, \\\"count\\\": {\\\"type\\\": \\\"integer\\\"}}.\"]\n\nRespond with the corresponding output fields, starting with the field `[[ ## next_thought ## ]]`, then `[[ ## tool_calls ## ]]` (must be a JSON object like {\"tool_calls\": [{\"name\": \"...\", \"args\": {...}}]}), and then ending with the marker for `[[ ## completed ## ]]`."
+            }
+          ],
+          "output": "[[ ## next_thought ## ]]\nI should search and add.\n\n[[ ## tool_calls ## ]]\n{\"tool_calls\": [{\"name\": \"search\", \"args\": {\"query\": \"cats\"}}, {\"name\": \"add\", \"args\": {\"a\": 2, \"b\": 3}}]}"
+        },
+        {
+          "messages": [
+            {
+              "role": "system",
+              "content": "Your input fields are:\n1. `question` (str): \n2. `history` (History): \n3. `tools` (list[Tool]):\nYour output fields are:\n1. `next_thought` (str): \n2. `tool_calls` (ToolCalls): \n    Type description of ToolCalls: Tool calls must be a JSON object with `tool_calls`, a list of calls. Each call must include `name` and `args`. Example: {\"tool_calls\": [{\"name\": \"search\", \"args\": {\"query\": \"cats\"}}]}\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## question ## ]]\n{question}\n\n[[ ## history ## ]]\n{history}\n\n[[ ## tools ## ]]\n{tools}\n\n[[ ## next_thought ## ]]\n{next_thought}\n\n[[ ## tool_calls ## ]]\n{tool_calls}        # note: the value you produce must adhere to the JSON schema: {\"type\": \"object\", \"$defs\": {\"ToolCall\": {\"type\": \"object\", \"properties\": {\"args\": {\"type\": \"object\", \"additionalProperties\": true, \"title\": \"Args\"}, \"name\": {\"type\": \"string\", \"title\": \"Name\"}}, \"required\": [\"name\", \"args\"], \"title\": \"ToolCall\"}}, \"properties\": {\"tool_calls\": {\"type\": \"array\", \"items\": {\"$ref\": \"#/$defs/ToolCall\"}, \"title\": \"Tool Calls\"}}, \"required\": [\"tool_calls\"], \"title\": \"ToolCalls\"}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Count the cats.\n        You are an Agent. Use the supplied tools to produce `answer`, `count` from `question`.\n        Call tools when more information is needed.\n        When the final answer is ready, call `submit` with `answer`, `count`.\n        The available tools are: `search`, `add`, `submit`."
+            },
+            {
+              "role": "user",
+              "content": "[[ ## question ## ]]\nHow many cats?\n\nRespond with the corresponding output fields, starting with the field `[[ ## next_thought ## ]]`, then `[[ ## tool_calls ## ]]` (must be a JSON object like {\"tool_calls\": [{\"name\": \"...\", \"args\": {...}}]}), and then ending with the marker for `[[ ## completed ## ]]`."
+            },
+            {
+              "role": "assistant",
+              "content": "[[ ## next_thought ## ]]\nI should search and add.\n\n[[ ## tool_calls ## ]]\n{\"tool_calls\": [{\"name\": \"search\", \"args\": {\"query\": \"cats\"}}, {\"name\": \"add\", \"args\": {\"a\": 2, \"b\": 3}}]}\n\n[[ ## completed ## ]]\n"
+            },
+            {
+              "role": "user",
+              "content": "[[ ## tool_call_results ## ]]\n{\"tool_call_results\": [{\"call_id\": \"call_0_0\", \"name\": \"search\", \"value\": \"3 results for cats\", \"is_error\": false}, {\"call_id\": \"call_0_1\", \"name\": \"add\", \"value\": 5, \"is_error\": false}]}"
+            },
+            {
+              "role": "user",
+              "content": "[[ ## tools ## ]]\n[\"search, whose description is <desc>Search the web for a query.</desc>. It takes arguments {\\\"query\\\": {\\\"type\\\": \\\"string\\\"}}.\", \"add. It takes arguments {\\\"a\\\": {\\\"type\\\": \\\"integer\\\"}, \\\"b\\\": {\\\"type\\\": \\\"integer\\\"}}.\", \"submit, whose description is <desc>Submit the final outputs for the task.</desc>. It takes arguments {\\\"answer\\\": {\\\"type\\\": \\\"string\\\"}, \\\"count\\\": {\\\"type\\\": \\\"integer\\\"}}.\"]\n\nRespond with the corresponding output fields, starting with the field `[[ ## next_thought ## ]]`, then `[[ ## tool_calls ## ]]` (must be a JSON object like {\"tool_calls\": [{\"name\": \"...\", \"args\": {...}}]}), and then ending with the marker for `[[ ## completed ## ]]`."
+            }
+          ],
+          "output": "[[ ## next_thought ## ]]\nI can answer now.\n\n[[ ## tool_calls ## ]]\n{\"tool_calls\": [{\"name\": \"submit\", \"args\": {\"answer\": \"5 cats\", \"count\": 5}}]}"
+        }
+      ],
+      "answer": "5 cats"
+    },
+    {
+      "id": "rlm_submit",
+      "calls": [
+        {
+          "messages": [
+            {
+              "role": "system",
+              "content": "Your input fields are:\n1. `variables_info` (str): Metadata about the variables available in the REPL\n2. `repl_history` (REPLHistory): Previous REPL code executions and their outputs\n3. `iteration` (str): Current iteration number (1-indexed) out of max_iters\nYour output fields are:\n1. `reasoning` (str): Think step-by-step: what do you know? What remains? Plan your next action.\n2. `code` (str): Python code to execute. Use markdown code block format: ```python\\n<code>\\n```\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## variables_info ## ]]\n{variables_info}\n\n[[ ## repl_history ## ]]\n{repl_history}\n\n[[ ## iteration ## ]]\n{iteration}\n\n[[ ## reasoning ## ]]\n{reasoning}\n\n[[ ## code ## ]]\n{code}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Given the fields `context`, `query`, produce the fields `answer`.\n        \n        You are tasked with producing the following outputs given the inputs `context`, `query`:\n        - {answer}\n        \n        You have access to a Python REPL environment. Write Python code and it will be executed. You will see the output, then write more code based on what you learned. This is an iterative process.\n        \n        Execution environment:\n        Code runs as Python in a persistent local subprocess. State, imports, functions, and JSON-compatible variables persist for this session. Host tools and SUBMIT are available as global functions. All threads must finish before each code execution returns; use context-managed executors for parallel work.\n        \n        Available:\n        - Variables: `context`, `query` (your input data)\n        - `llm_query(prompt)` - query a sub-LLM (~500K char capacity) for semantic analysis\n        - `llm_query_batched(prompts)` - query multiple prompts concurrently (much faster for multiple queries)\n        - `print()` - ALWAYS print to see results\n        - `SUBMIT(answer)` - submit final output when done\n        \n        IMPORTANT: This is ITERATIVE. Each code block you write will execute, you'll see the output, then you decide what to do next. Do NOT try to solve everything in one step.\n        \n        1. EXPLORE FIRST - Look at your data before processing it. Print samples, check types/lengths, understand the structure.\n        2. ITERATE - Write small code snippets, observe outputs, then decide next steps. State persists between iterations.\n        3. VERIFY BEFORE SUBMITTING - If results seem wrong (zeros, empty, unexpected), reconsider your approach.\n        4. USE llm_query FOR SEMANTICS - String matching finds WHERE things are; llm_query understands WHAT things mean.\n        5. MINIMIZE RETYPING (INPUTS & OUTPUTS) - When values are long, precise, or error-prone (IDs, numbers, code, quotes), re-access them via variables and parse/compute in code instead of retyping. Use small, targeted prints to sanity-check, but avoid manual copying when variables can carry the exact value.\n        6. SUBMIT ONLY AFTER SEEING OUTPUTS - SUBMIT ends the current run immediately. If you need to inspect printed output, run it in one step, review the result, then call SUBMIT in a later step.\n        \n        You have max 50 sub-LLM calls. When done, call SUBMIT() with your output."
+            },
+            {
+              "role": "user",
+              "content": "[[ ## variables_info ## ]]\n[1] «««\n    Variable: `context` (access it in your code)\n    Type: str\n    Total length: 11 characters\n    Preview:\n    ```\n    hello world\n    ```\n»»»\n[2] «««\n    Variable: `query` (access it in your code)\n    Type: str\n    Total length: 24 characters\n    Preview:\n    ```\n    How long is the context?\n    ```\n»»»\n\n[[ ## repl_history ## ]]\nYou have not interacted with the REPL environment yet.\n\n[[ ## iteration ## ]]\n1/5\n\nRespond with the corresponding output fields, starting with the field `[[ ## reasoning ## ]]`, then `[[ ## code ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."
+            }
+          ],
+          "output": "[[ ## reasoning ## ]]\nLook at the data.\n\n[[ ## code ## ]]\n```python\nprint(len(context))\n```"
+        },
+        {
+          "messages": [
+            {
+              "role": "system",
+              "content": "Your input fields are:\n1. `variables_info` (str): Metadata about the variables available in the REPL\n2. `repl_history` (REPLHistory): Previous REPL code executions and their outputs\n3. `iteration` (str): Current iteration number (1-indexed) out of max_iters\nYour output fields are:\n1. `reasoning` (str): Think step-by-step: what do you know? What remains? Plan your next action.\n2. `code` (str): Python code to execute. Use markdown code block format: ```python\\n<code>\\n```\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## variables_info ## ]]\n{variables_info}\n\n[[ ## repl_history ## ]]\n{repl_history}\n\n[[ ## iteration ## ]]\n{iteration}\n\n[[ ## reasoning ## ]]\n{reasoning}\n\n[[ ## code ## ]]\n{code}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Given the fields `context`, `query`, produce the fields `answer`.\n        \n        You are tasked with producing the following outputs given the inputs `context`, `query`:\n        - {answer}\n        \n        You have access to a Python REPL environment. Write Python code and it will be executed. You will see the output, then write more code based on what you learned. This is an iterative process.\n        \n        Execution environment:\n        Code runs as Python in a persistent local subprocess. State, imports, functions, and JSON-compatible variables persist for this session. Host tools and SUBMIT are available as global functions. All threads must finish before each code execution returns; use context-managed executors for parallel work.\n        \n        Available:\n        - Variables: `context`, `query` (your input data)\n        - `llm_query(prompt)` - query a sub-LLM (~500K char capacity) for semantic analysis\n        - `llm_query_batched(prompts)` - query multiple prompts concurrently (much faster for multiple queries)\n        - `print()` - ALWAYS print to see results\n        - `SUBMIT(answer)` - submit final output when done\n        \n        IMPORTANT: This is ITERATIVE. Each code block you write will execute, you'll see the output, then you decide what to do next. Do NOT try to solve everything in one step.\n        \n        1. EXPLORE FIRST - Look at your data before processing it. Print samples, check types/lengths, understand the structure.\n        2. ITERATE - Write small code snippets, observe outputs, then decide next steps. State persists between iterations.\n        3. VERIFY BEFORE SUBMITTING - If results seem wrong (zeros, empty, unexpected), reconsider your approach.\n        4. USE llm_query FOR SEMANTICS - String matching finds WHERE things are; llm_query understands WHAT things mean.\n        5. MINIMIZE RETYPING (INPUTS & OUTPUTS) - When values are long, precise, or error-prone (IDs, numbers, code, quotes), re-access them via variables and parse/compute in code instead of retyping. Use small, targeted prints to sanity-check, but avoid manual copying when variables can carry the exact value.\n        6. SUBMIT ONLY AFTER SEEING OUTPUTS - SUBMIT ends the current run immediately. If you need to inspect printed output, run it in one step, review the result, then call SUBMIT in a later step.\n        \n        You have max 50 sub-LLM calls. When done, call SUBMIT() with your output."
+            },
+            {
+              "role": "user",
+              "content": "[[ ## variables_info ## ]]\n[1] «««\n    Variable: `context` (access it in your code)\n    Type: str\n    Total length: 11 characters\n    Preview:\n    ```\n    hello world\n    ```\n»»»\n[2] «««\n    Variable: `query` (access it in your code)\n    Type: str\n    Total length: 24 characters\n    Preview:\n    ```\n    How long is the context?\n    ```\n»»»\n\n[[ ## repl_history ## ]]\n=== Step 1 ===\nReasoning: Look at the data.\nCode:\n```python\nprint(len(context))\n```\nOutput (2 chars):\n11\n\n[[ ## iteration ## ]]\n2/5\n\nRespond with the corresponding output fields, starting with the field `[[ ## reasoning ## ]]`, then `[[ ## code ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."
+            }
+          ],
+          "output": "[[ ## reasoning ## ]]\nSubmit the length.\n\n[[ ## code ## ]]\n```python\nSUBMIT(answer='eleven')\n```"
+        }
+      ],
+      "answer": "eleven"
+    },
+    {
+      "id": "rlm_extract",
+      "calls": [
+        {
+          "messages": [
+            {
+              "role": "system",
+              "content": "Your input fields are:\n1. `variables_info` (str): Metadata about the variables available in the REPL\n2. `repl_history` (REPLHistory): Previous REPL code executions and their outputs\n3. `iteration` (str): Current iteration number (1-indexed) out of max_iters\nYour output fields are:\n1. `reasoning` (str): Think step-by-step: what do you know? What remains? Plan your next action.\n2. `code` (str): Python code to execute. Use markdown code block format: ```python\\n<code>\\n```\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## variables_info ## ]]\n{variables_info}\n\n[[ ## repl_history ## ]]\n{repl_history}\n\n[[ ## iteration ## ]]\n{iteration}\n\n[[ ## reasoning ## ]]\n{reasoning}\n\n[[ ## code ## ]]\n{code}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        Given the fields `context`, `query`, produce the fields `answer`.\n        \n        You are tasked with producing the following outputs given the inputs `context`, `query`:\n        - {answer}\n        \n        You have access to a Python REPL environment. Write Python code and it will be executed. You will see the output, then write more code based on what you learned. This is an iterative process.\n        \n        Execution environment:\n        Code runs as Python in a persistent local subprocess. State, imports, functions, and JSON-compatible variables persist for this session. Host tools and SUBMIT are available as global functions. All threads must finish before each code execution returns; use context-managed executors for parallel work.\n        \n        Available:\n        - Variables: `context`, `query` (your input data)\n        - `llm_query(prompt)` - query a sub-LLM (~500K char capacity) for semantic analysis\n        - `llm_query_batched(prompts)` - query multiple prompts concurrently (much faster for multiple queries)\n        - `print()` - ALWAYS print to see results\n        - `SUBMIT(answer)` - submit final output when done\n        \n        IMPORTANT: This is ITERATIVE. Each code block you write will execute, you'll see the output, then you decide what to do next. Do NOT try to solve everything in one step.\n        \n        1. EXPLORE FIRST - Look at your data before processing it. Print samples, check types/lengths, understand the structure.\n        2. ITERATE - Write small code snippets, observe outputs, then decide next steps. State persists between iterations.\n        3. VERIFY BEFORE SUBMITTING - If results seem wrong (zeros, empty, unexpected), reconsider your approach.\n        4. USE llm_query FOR SEMANTICS - String matching finds WHERE things are; llm_query understands WHAT things mean.\n        5. MINIMIZE RETYPING (INPUTS & OUTPUTS) - When values are long, precise, or error-prone (IDs, numbers, code, quotes), re-access them via variables and parse/compute in code instead of retyping. Use small, targeted prints to sanity-check, but avoid manual copying when variables can carry the exact value.\n        6. SUBMIT ONLY AFTER SEEING OUTPUTS - SUBMIT ends the current run immediately. If you need to inspect printed output, run it in one step, review the result, then call SUBMIT in a later step.\n        \n        You have max 50 sub-LLM calls. When done, call SUBMIT() with your output."
+            },
+            {
+              "role": "user",
+              "content": "[[ ## variables_info ## ]]\n[1] «««\n    Variable: `context` (access it in your code)\n    Type: str\n    Total length: 11 characters\n    Preview:\n    ```\n    hello world\n    ```\n»»»\n[2] «««\n    Variable: `query` (access it in your code)\n    Type: str\n    Total length: 34 characters\n    Preview:\n    ```\n    What is the context in upper case?\n    ```\n»»»\n\n[[ ## repl_history ## ]]\nYou have not interacted with the REPL environment yet.\n\n[[ ## iteration ## ]]\n1/1\n\nRespond with the corresponding output fields, starting with the field `[[ ## reasoning ## ]]`, then `[[ ## code ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."
+            }
+          ],
+          "output": "[[ ## reasoning ## ]]\nLook at the data.\n\n[[ ## code ## ]]\n```python\nprint(context.upper())\n```"
+        },
+        {
+          "messages": [
+            {
+              "role": "system",
+              "content": "Your input fields are:\n1. `variables_info` (str): Metadata about the variables available in the REPL\n2. `repl_history` (REPLHistory): Your REPL interactions so far\nYour output fields are:\n1. `answer` (str):\nAll interactions will be structured in the following way, with the appropriate values filled in.\n\n[[ ## variables_info ## ]]\n{variables_info}\n\n[[ ## repl_history ## ]]\n{repl_history}\n\n[[ ## answer ## ]]\n{answer}\n\n[[ ## completed ## ]]\nIn adhering to this structure, your objective is: \n        The trajectory was generated with the following objective: \n        Given the fields `context`, `query`, produce the fields `answer`.\n        \n        \n        Based on the REPL trajectory, extract the final outputs now.\n        \n                    Review your trajectory to see what information you gathered and what values you computed, then provide the final outputs."
+            },
+            {
+              "role": "user",
+              "content": "[[ ## variables_info ## ]]\n[1] «««\n    Variable: `context` (access it in your code)\n    Type: str\n    Total length: 11 characters\n    Preview:\n    ```\n    hello world\n    ```\n»»»\n[2] «««\n    Variable: `query` (access it in your code)\n    Type: str\n    Total length: 34 characters\n    Preview:\n    ```\n    What is the context in upper case?\n    ```\n»»»\n\n[[ ## repl_history ## ]]\n=== Step 1 ===\nReasoning: Look at the data.\nCode:\n```python\nprint(context.upper())\n```\nOutput (11 chars):\nHELLO WORLD\n\nRespond with the corresponding output fields, starting with the field `[[ ## answer ## ]]`, and then ending with the marker for `[[ ## completed ## ]]`."
+            }
+          ],
+          "output": "[[ ## answer ## ]]\nHELLO WORLD"
+        }
+      ],
+      "answer": "HELLO WORLD"
+    }
+  ]
+}

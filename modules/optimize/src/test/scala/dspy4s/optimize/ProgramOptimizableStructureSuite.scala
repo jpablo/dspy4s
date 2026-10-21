@@ -5,12 +5,9 @@ import dspy4s.programs.optimization.optimizableParameters
 import dspy4s.programs.optimization.OptimizableStructure
 
 import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.CodeInterpreter
-import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
 import dspy4s.programs.AttemptCount
-import dspy4s.programs.strategies.CodeAct
 import dspy4s.programs.strategies.MultiChainComparison
 import dspy4s.programs.strategies.ReAct
 import dspy4s.core.contracts.RuntimeContext
@@ -35,10 +32,6 @@ class ProgramOptimizableStructureSuite extends FunSuite:
     override val description: String                                                                      = "look something up"
     override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
       Right(ToolFunction.result("ok"))
-
-  private object NoopInterpreter extends CodeInterpreter:
-    def execute(code: String): Either[DspyError, CodeResult] = Right(CodeResult("", "", 0))
-    override def close(): Unit                               = ()
 
   private val demo = Vector(Example(rec("question" := "q", "answer" := "x")))
 
@@ -79,37 +72,16 @@ class ProgramOptimizableStructureSuite extends FunSuite:
     assertEquals(ps.read(out)(0).demos, demo)
   }
 
-  // ── CodeAct ────────────────────────────────────────────────────────────
-
-  test("CodeAct: inspect returns the two hoisted predictor views in stable order") {
-    val codeAct = CodeAct(baseSignature = qaSignature, interpreter = NoopInterpreter)
-    val ps      = predictorsOf(codeAct)
-    val views   = ps.inspect(codeAct)
-    assertEquals(views.size, 2)
-    assertEquals(views(0).moduleName, "codeact")
-    assertEquals(views(1).moduleName, "codeact_extract")
-    assertEquals(views(0).parameters, codeAct.codeActPredict.optimizableParameters)
-    assertEquals(views(1).parameters, codeAct.extractorPredict.optimizableParameters)
-  }
-
-  test("CodeAct: replace(p, read(p)) round-trips to identity") {
-    val codeAct = CodeAct(baseSignature = qaSignature, interpreter = NoopInterpreter)
-    val ps      = predictorsOf(codeAct)
-    val back    = ps.replace(codeAct, ps.read(codeAct))
-    assertEquals(back.codeActPredictOverride, None)
-    assertEquals(back.extractorPredictOverride, None)
-    assertEquals(back, codeAct)
-  }
-
-  test("CodeAct: replace with demo-edited predicts is reflected via the override fields") {
-    val codeAct = CodeAct(baseSignature = qaSignature, interpreter = NoopInterpreter)
-    val ps      = predictorsOf(codeAct)
-    val read    = ps.read(codeAct)
+  test("ReAct: replace with a demo-edited extractor is reflected via the extractor override field") {
+    val react   = ReAct(baseSignature = qaSignature, tools = Vector(search))
+    val ps      = predictorsOf(react)
+    val read    = ps.read(react)
     val edited1 = read(1).copy(demos = demo)
-    val out     = ps.replace(codeAct, Vector(read(0), edited1))
+    val out     = ps.replace(react, Vector(read(0), edited1))
+    // the extractor carries the new demos; the react predict is untouched (still None override)
     assertEquals(out.extractorPredict.demos, demo)
-    assertEquals(out.codeActPredictOverride, None)
-    assertEquals(out.codeActPredict.demos, Vector.empty[Example])
+    assertEquals(out.reactPredictOverride, None)
+    assertEquals(out.reactPredict.demos, Vector.empty[Example])
     assertEquals(ps.read(out)(1).demos, demo)
   }
 

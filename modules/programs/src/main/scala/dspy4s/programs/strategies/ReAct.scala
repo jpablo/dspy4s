@@ -3,7 +3,6 @@ package dspy4s.programs.strategies
 import dspy4s.programs.IterationLimit
 import dspy4s.core.contracts.ContextWindowExceededError
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -13,6 +12,7 @@ import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolCallRequest
 import dspy4s.programs.contracts.ToolFunction
+import dspy4s.programs.internal.ToolText
 import dspy4s.programs.runtime.InterpretedTrajectoryAgent
 import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{ActionDecision, ActionPreparation, StepGeneration}
 import dspy4s.programs.runtime.ToolExecutor
@@ -32,17 +32,25 @@ import zio.blocks.schema.DynamicValue
   *
   * `ReAct[I, O]` is a `Module[I, WithReasoning[O]]`: the input is encoded from `I`, and the extractor's reply is
   * decoded into the base outputs `O` with a `reasoning: String` prepended (always a named tuple; see
-  * [[OutputAugmentation]]). The full rendered `trajectory` is kept on `.raw` for inspection. The loop's tool protocol
-  * runs internally over the data-bag layer (a `Streamable[ReAct[I, O]]` instance lets it stream).
+  * [[OutputAugmentation]]). The full rendered `trajectory` is kept on `.raw` for inspection, and the LM usage on `.raw`
+  * is the total of each model call of the call: the react calls, the model calls of the tools, and the extractor call
+  * (upstream `Module.__call__`; `Module.apply` opens the usage scope). The loop's tool protocol runs internally over
+  * the data-bag layer (a `Streamable[ReAct[I, O]]` instance lets it stream).
   *
   * Tool selection is via output fields (the canonical DSPy mechanism) — not provider-native function-calling. Tool
-  * failures (unknown tool, invocation error) are recorded as trajectory observations rather than failing the program,
-  * mirroring Python; an LM-call failure in the react or extract step propagates as `Left`.
+  * failures (invocation error, non-fatal exception of a tool) are recorded as trajectory observations rather than
+  * failing the program, mirroring Python; an LM-call failure in the react or extract step propagates as `Left`.
+  *
+  * The tool names are the allowed values of `next_tool_name` (upstream `Literal[tuple(tools.keys())]`). The adapters of
+  * the port reject a name that is not a tool, and an empty name, as upstream `parse_value` does (decision D7). That
+  * parse error of the step gives the JSON fallback of the chat adapter, and when that also fails, the error goes up:
+  * the whole call fails, with no extract step. Upstream does the same: `AdapterParseError` is a `DSPyError`, not a
+  * `ValueError`, so the `except ValueError` of `ReAct.forward` (`dspy/predict/react.py:104`) does not catch it.
   */
 final case class ReAct[I, O](
     baseSignature             : Signature[I, O],
     tools                     : Vector[ToolFunction],
-    override val maxIterations: IterationLimit = IterationLimit(5),
+    override val maxIterations: IterationLimit = IterationLimit(20),
     reactProgramName          : String         = ReActKeys.reactModule,
     extractorProgramName      : String         = ReActKeys.extractModule,
     /** Optional override for the per-iteration react predict — a `Predict` over the base input plus the rendered
@@ -69,12 +77,27 @@ final case class ReAct[I, O](
   override val moduleName: String         = ReActKeys.reactModule
   private val baseLayout: SignatureLayout = baseSignature.layout
 
-  /** The supplied tools plus the injected `finish` tool the LM selects to end the loop. */
-  private val allTools: Vector[ToolFunction]         = tools :+ ReAct.finishTool(baseLayout)
+  /** The supplied tools plus the injected `finish` tool the LM selects to end the loop. The list has one tool for each
+    * name, as the dict of upstream `ReAct.__init__`: a later tool with a name takes the place of the earlier one, so a
+    * user tool named `finish` gives its place to the injected tool.
+    */
+  private val allTools
+      : Vector[ToolFunction] = (tools :+ ReAct.finishTool(baseLayout)).foldLeft(Vector.empty[ToolFunction]) {
+    (unique, tool) =>
+      unique.indexWhere(_.name == tool.name) match
+        case -1    => unique :+ tool
+        case index => unique.updated(index, tool)
+  }
   private val toolsByName: Map[String, ToolFunction] = allTools.map(tool => tool.name -> tool).toMap
 
   /** Interpreter for ReAct's small action language: one named tool call with a record of arguments. Tool selection and
-    * invocation failures are recoverable observations, so the LM can react to them on its next turn.
+    * invocation failures are recoverable observations, so the LM can react to them on its next turn. The observation of
+    * a result is its text in the trajectory, and an error of a tool gives `Execution error in <name>: <message>`
+    * (upstream `ReAct.forward`). An error of a tool is a `Left` of the tool or a non-fatal exception of the tool
+    * (upstream `except Exception`; see [[ToolExecutor.run]]). A fatal error of a tool goes up to the caller.
+    *
+    * The parsers of the port reject an empty name and a name that is not a tool (decision D7), so the observations for
+    * these names come only from an adapter that does not check the allowed values of `next_tool_name`.
     */
   override protected val actionInterpreter: ActionInterpreter[ToolCallRequest, String] =
     new ActionInterpreter[ToolCallRequest, String]:
@@ -88,20 +111,27 @@ final case class ReAct[I, O](
         else
           ToolExecutor.invoke(request, allTools).map { callResult =>
             callResult.result match
-              case Right(value) => ActionOutcome.Succeeded(DynamicValues.renderText(value))
-              case Left(error)  => ActionOutcome.Failed(s"Execution error in `${request.name}`: ${error.message}")
+              case Right(value) => ActionOutcome.Succeeded(ReActProtocol.observationText(value))
+              case Left(error)  => ActionOutcome.Failed(s"Execution error in ${request.name}: ${error.message}")
           }
 
   /** Per-iteration signature: base inputs + `trajectory` -> `next_thought` / `next_tool_name` / `next_tool_args`. The
-    * base output fields are intentionally dropped here — they are produced by the extractor, not the loop.
+    * base output fields are intentionally dropped here — they are produced by the extractor, not the loop. The values
+    * of `next_tool_name` are the names of the tools (upstream `Literal[tuple(tools.keys())]`).
     */
   val reactSignature: SignatureLayout = baseLayout
-    .appendInput(ReAct.loopTrajectoryField)
-    .replaceOutputs(Vector(ReAct.nextThoughtField, ReAct.nextToolNameField, ReAct.nextToolArgsField))
+    .appendInput(ReAct.trajectoryField)
+    .replaceOutputs(Vector(
+      ReAct.nextThoughtField,
+      ReActProtocol.nextToolNameField(allTools.map(_.name)),
+      ReAct.nextToolArgsField
+    ))
     .withInstructions(Some(buildInstructions))
 
-  /** Final extractor signature: base inputs + base outputs + `trajectory`; reasoning is added by ChainOfThought. */
-  val extractorSignature: SignatureLayout = baseLayout.appendInput(ReAct.extractTrajectoryField)
+  /** Final extractor signature: base inputs + base outputs + `trajectory`; reasoning is added by ChainOfThought. It
+    * keeps the effective instructions of the base signature (upstream `fallback_signature`).
+    */
+  val extractorSignature: SignatureLayout = baseLayout.appendInput(ReAct.trajectoryField)
 
   /** The per-iteration react predict, built once from [[reactSignature]] (mirrors Python's `self.react = Predict(...)`
     * in `__init__`) — a `Predict[(I, String), ReactStep]`: the base input plus the rendered trajectory in, a
@@ -113,7 +143,7 @@ final case class ReAct[I, O](
     signature = Signature(
       name = baseSignature.name,
       layout = reactSignature,
-      inputShape = InputAugmentation.appendedStringInput(baseSignature.inputShape, ReAct.loopTrajectoryField, "ReAct"),
+      inputShape = InputAugmentation.appendedStringInput(baseSignature.inputShape, ReAct.trajectoryField, "ReAct"),
       outputShape = ReAct.reactStepShape
     ),
     name = Some(reactProgramName)
@@ -129,7 +159,7 @@ final case class ReAct[I, O](
         name = baseSignature.name,
         layout = ChainOfThought.augmentLayout(extractorSignature),
         inputShape = InputAugmentation
-          .appendedStringInput(baseSignature.inputShape, ReAct.extractTrajectoryField, "ReAct extractor"),
+          .appendedStringInput(baseSignature.inputShape, ReAct.trajectoryField, "ReAct extractor"),
         outputShape = OutputAugmentation.prependedStringShape(
           baseSignature.outputShape,
           ChainOfThought.reasoningField,
@@ -141,34 +171,33 @@ final case class ReAct[I, O](
       name = Some(extractorProgramName)
     ))
 
-  /** System-prompt instructions for the react step. Mirrors Python's shape: states the task I/O, explains the
-    * next_thought / next_tool_name / next_tool_args protocol, and lists the selectable tools (name + description).
+  /** The instructions of the react step (upstream `ReAct.__init__`): the effective instructions of the base signature,
+    * the protocol of `next_thought`, `next_tool_name`, and `next_tool_args`, and the numbered list of the tools in the
+    * text of [[ToolText.describe]] (upstream `Tool.__str__`).
     */
   private def buildInstructions: String =
-    val inputs      = baseLayout.inputFields.map(field => s"`${field.name}`").mkString(", ")
-    val outputs     = baseLayout.outputFields.map(field => s"`${field.name}`").mkString(", ")
-    val taskPrelude = baseLayout.instructions.fold("")(_ + "\n")
-    val toolList    = allTools.zipWithIndex.map { case (tool, idx) =>
-      val args =
-        if tool.argSchema.nonEmpty then
-          tool.argSchema.map((argName, typeRef) => s"$argName: ${typeRef.repr}").mkString("(", ", ", ")")
-        else ""
-      val desc = if tool.description.nonEmpty then s": ${tool.description}" else ""
-      s"(${idx + 1}) `${tool.name}`$args$desc"
-    }.mkString("\n")
-    s"""${taskPrelude}You are an Agent. In each episode you receive the fields $inputs as input, along with your past trajectory.
-       |Your goal is to use one or more of the supplied tools to collect the information needed to produce $outputs.
-       |Each turn, emit next_thought (your reasoning), next_tool_name (the tool to call), and next_tool_args (its arguments as a JSON object).
-       |After each tool call you receive an observation, which is appended to your trajectory.
-       |Select `finish` as next_tool_name once you have everything needed to produce the outputs.
-       |next_tool_name must be one of:
-       |$toolList""".stripMargin
+    val inputs  = baseLayout.inputFields.map(field => s"`${field.name}`").mkString(", ")
+    val outputs = baseLayout.outputFields.map(field => s"`${field.name}`").mkString(", ")
+    val task    = Option(baseLayout.effectiveInstructions).filter(_.nonEmpty).map(text => s"$text\n").toVector
+    val lines   = task ++ Vector(
+      s"You are an Agent. In each episode, you will be given the fields $inputs as input. And you can see your past " +
+        "trajectory so far.",
+      s"Your goal is to use one or more of the supplied tools to collect any necessary information for producing " +
+        s"$outputs.\n",
+      "To do this, you will interleave next_thought, next_tool_name, and next_tool_args in each turn, and also when " +
+        "finishing the task.",
+      "After each tool call, you receive a resulting observation, which gets appended to your trajectory.\n",
+      "When writing next_thought, you may reason about the current situation and plan for future steps.",
+      "When selecting the next_tool_name and its next_tool_args, the tool must be one of:\n"
+    ) ++ allTools.zipWithIndex.map((tool, index) => s"(${index + 1}) ${ToolText.describe(tool)}") :+
+      "When providing `next_tool_args`, the value inside the field must be in JSON format"
+    lines.mkString("\n")
 
   override protected val lifecycle: ModuleLifecycle[I, Out] = ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected val trajectoryKey: String = ReActKeys.trajectory
 
-  override protected def renderTrajectory(trajectory: Vector[ReAct.TrajectoryEntry]): String =
+  override protected def renderTrajectory(trajectory: Vector[ReAct.TrajectoryEntry])(using RuntimeContext): String =
     ReAct.renderTrajectory(trajectory)
 
   /** Generate one ReAct step, durably truncating the oldest trajectory entry on a context-window overflow. A persistent
@@ -226,19 +255,20 @@ final case class ReAct[I, O](
       outcome.observation
     )
 
-  /** Run the react predict over the trajectory, truncating the OLDEST step and retrying (up to `remaining` attempts
-    * total) on a context-window overflow — Python's `_call_with_potential_trajectory_truncation` around `self.react`.
-    * Returns the step plus the (possibly truncated) view: truncation is DURABLE — later iterations and the extractor
-    * build on the truncated trajectory, as upstream mutates the shared dict. `(None, view)` means the overflow
-    * persisted (attempts exhausted, or nothing left to drop) — upstream's `ValueError` path, which the loop converts
-    * into a break rather than a failure.
+  /** Run the react predict over the trajectory. On a context-window overflow, remove the oldest step and try again, up
+    * to `remaining` attempts in total (upstream `_call_with_potential_trajectory_truncation` around `self.react`). The
+    * result is the step and the view, which can be shorter. The removal is durable: later iterations and the extractor
+    * use the shorter trajectory, as upstream changes the shared dict. `(None, view)` means that the overflow stayed (no
+    * attempts are left, or no step can go). This is the upstream `ValueError` path, which the loop changes into a
+    * break, not a failure. The last entry always stays, so the react predict never runs again on an empty view, and the
+    * extractor keeps that entry as evidence.
     */
   private def reactWithTruncation(
       call     : ProgramCall[I],
       view     : Vector[ReAct.TrajectoryEntry],
       remaining: Int
   )(using RuntimeContext): Either[DspyError, (Option[ReAct.ReactStep], Vector[ReAct.TrajectoryEntry])] =
-    val (result, used) = truncateOnOverflow(view, remaining)(ReAct.renderTrajectory) { rendered =>
+    val (result, used) = truncateOnOverflow(view, remaining)(entries => ReAct.renderTrajectory(entries)) { rendered =>
       reactPredict(call.mapInput(input => (input, rendered)))
     }
     result match
@@ -253,11 +283,9 @@ object ReAct:
   type WithReasoning[O] = ChainOfThought.WithReasoning[O]
 
   // ── The loop signature's hand-declared fields (static; hoisted so the shapes and the layout share them) ──
-  private[programs] val loopTrajectoryField: FieldSpec    = ReActProtocol.loopTrajectoryField
-  private[programs] val extractTrajectoryField: FieldSpec = ReActProtocol.extractTrajectoryField
-  private[programs] val nextThoughtField: FieldSpec       = ReActProtocol.nextThoughtField
-  private[programs] val nextToolNameField: FieldSpec      = ReActProtocol.nextToolNameField
-  private[programs] val nextToolArgsField: FieldSpec      = ReActProtocol.nextToolArgsField
+  private[programs] val trajectoryField: FieldSpec   = ReActProtocol.trajectoryField
+  private[programs] val nextThoughtField: FieldSpec  = ReActProtocol.nextThoughtField
+  private[programs] val nextToolArgsField: FieldSpec = ReActProtocol.nextToolArgsField
 
   /** The output of one react loop step. */
   final case class ReactStep(
@@ -270,7 +298,8 @@ object ReAct:
     * `next_tool_name` renders as "" (a step that names no tool ends the loop rather than failing the call), and
     * `next_tool_args` accepts a JSON object (JSONAdapter), a JSON-object string (ChatAdapter has no `json` coercion),
     * or nothing (empty record). Decode never fails; `jsonSchemaString` stays `None` for parity with the prior direct
-    * `DynamicPredict` construction.
+    * `DynamicPredict` construction. The parsers of the port give a parse error before this decode for an empty or an
+    * unknown tool name (decision D7).
     */
   private[programs] val reactStepShape: Shape[ReactStep] = ReActProtocol.reactStepShape
 
@@ -280,7 +309,9 @@ object ReAct:
   private def finishTool(baseLayout: SignatureLayout): ToolFunction =
     ReActProtocol.finishTool(baseLayout)
 
-  /** One step of the agent's trajectory: its thought, the tool it chose with arguments, and the observation. */
+  /** One step of the agent's trajectory: its thought, the tool it chose with arguments, and the observation. The
+    * observation is the text that the trajectory shows.
+    */
   final case class TrajectoryEntry(
       iteration  : Int,
       thought    : String,
@@ -289,5 +320,6 @@ object ReAct:
       observation: String
   )
 
-  private[programs] def renderTrajectory(entries: Vector[TrajectoryEntry]): String =
+  /** The trajectory text (upstream `ReAct._format_trajectory`). See [[ReActProtocol.renderTrajectory]]. */
+  private[programs] def renderTrajectory(entries: Vector[TrajectoryEntry])(using RuntimeContext): String =
     ReActProtocol.renderTrajectory(entries)

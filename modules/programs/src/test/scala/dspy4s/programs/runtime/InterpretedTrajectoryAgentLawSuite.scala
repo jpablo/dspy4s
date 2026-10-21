@@ -11,8 +11,8 @@ import munit.FunSuite
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
 
-/** Executes the branch laws documented on [[InterpretedTrajectoryAgent]] against a synthetic action language. ReAct and
-  * CodeAct only supply the protected generation/lowering/recording operations; the tested transition is final.
+/** Executes the branch laws documented on [[InterpretedTrajectoryAgent]] against a synthetic action language. ReAct
+  * only supplies the protected generation/lowering/recording operations; the tested transition is final.
   */
 final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
 
@@ -50,7 +50,8 @@ final class InterpretedTrajectoryAgentLawSuite extends FunSuite:
     override protected val trajectoryKey: String                                = "trajectory"
     override protected val actionInterpreter: ActionInterpreter[String, String] = interpreterValue
 
-    override protected def renderTrajectory(trajectory: Vector[String]): String = trajectory.mkString(" -> ")
+    override protected def renderTrajectory(trajectory: Vector[String])(using RuntimeContext): String =
+      trajectory.mkString(" -> ")
 
     override protected def generateStep(
         call      : ProgramCall[String],

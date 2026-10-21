@@ -1,7 +1,7 @@
 /*
  * Real-LM smoke / efficacy harness for the optimizer stack (COPRO + MIPROv2).
  *
- * Status:   verification harness — NOT a doc port. Runs the G-1 -> spine -> optimizer tower
+ * Status:   verification harness — NOT a doc port. Runs the G-1 -> program capabilities -> optimizer tower
  *           end-to-end against a REAL model and prints baseline vs optimized metric score,
  *           the chosen instruction, and demo count.
  *

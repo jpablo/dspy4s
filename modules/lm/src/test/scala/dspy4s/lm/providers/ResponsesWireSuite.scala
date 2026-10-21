@@ -1,0 +1,204 @@
+package dspy4s.lm.providers
+
+import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.ParseError
+import dspy4s.core.contracts.ToolCall
+import dspy4s.lm.contracts.LmMode
+import dspy4s.lm.runtime.ProviderResponseParser
+import munit.FunSuite
+import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.PrimitiveValue
+
+/** The Responses wire shapes (upstream `chat_to_responses` in `dspy/clients/legacy_requests.py` and `responses_outputs`
+  * in `dspy/clients/legacy_outputs.py`; PORT_GAPS G-26, upgrade item L7).
+  */
+class ResponsesWireSuite extends FunSuite:
+
+  private def record(json: String): DynamicValue.Record =
+    DynamicJson.decode(json) match
+      case Right(value: DynamicValue.Record) => value
+      case other                             => fail(s"not a JSON object: $other")
+
+  /** A JSON value as plain Scala data: an object is an unordered map, and a number is a `BigDecimal`. */
+  private def plain(value: DynamicValue): Any =
+    value match
+      case rec: DynamicValue.Record                              => DynamicValues.recordEntries(rec).map((name, item) => name -> plain(item)).toMap
+      case sequence: DynamicValue.Sequence                       => sequence.elements.toVector.map(plain)
+      case DynamicValue.Primitive(PrimitiveValue.String(text))   => text
+      case DynamicValue.Primitive(PrimitiveValue.Boolean(flag))  => flag
+      case DynamicValue.Primitive(PrimitiveValue.Int(number))    => BigDecimal(number)
+      case DynamicValue.Primitive(PrimitiveValue.Long(number))   => BigDecimal(number)
+      case DynamicValue.Primitive(PrimitiveValue.Double(number)) => BigDecimal(number)
+      case _: DynamicValue.Null.type                             => None
+      case other                                                 => other.toString
+
+  private def translated(chat: String): Any = plain(ResponsesWire.request(record(chat)))
+
+  private def same(chat: String, responses: String): Unit =
+    assertEquals(translated(chat), plain(record(responses)))
+
+  // ── The request ─────────────────────────────────────────────────────────────────────────────────────────────
+
+  test("messages become input items with text blocks, and the role sets the block type") {
+    same(
+      """{"model": "m", "messages": [
+        |  {"role": "system", "content": "Be terse."},
+        |  {"role": "user", "content": "Hi", "name": "ann"},
+        |  {"role": "assistant", "content": "Hello."}
+        |]}""".stripMargin,
+      """{"model": "m", "input": [
+        |  {"role": "system", "content": [{"type": "input_text", "text": "Be terse."}]},
+        |  {"role": "user", "content": [{"type": "input_text", "text": "Hi"}], "name": "ann"},
+        |  {"role": "assistant", "content": [{"type": "output_text", "text": "Hello."}]}
+        |]}""".stripMargin
+    )
+  }
+
+  test("tool calls become function_call items, and a tool message becomes a function_call_output item") {
+    same(
+      """{"model": "m", "messages": [
+        |  {"role": "assistant", "content": null, "tool_calls": [
+        |    {"id": "c1", "type": "function", "function": {"name": "search", "arguments": "{\"q\":\"cats\"}"}}
+        |  ]},
+        |  {"role": "tool", "content": "3 cats", "tool_call_id": "c1", "name": "search"},
+        |  {"role": "assistant", "content": "Next.", "tool_calls": [
+        |    {"type": "function", "function": {"name": "lookup", "arguments": "{}"}}
+        |  ]}
+        |]}""".stripMargin,
+      """{"model": "m", "input": [
+        |  {"type": "function_call", "name": "search", "arguments": "{\"q\":\"cats\"}", "call_id": "c1"},
+        |  {"type": "function_call_output", "output": "3 cats", "call_id": "c1"},
+        |  {"role": "assistant", "content": [{"type": "output_text", "text": "Next."}]},
+        |  {"type": "function_call", "name": "lookup", "arguments": "{}"}
+        |]}""".stripMargin
+    )
+  }
+
+  test("content parts become blocks: text blocks change type, an image becomes input_image, others stay") {
+    same(
+      """{"model": "m", "messages": [{"role": "user", "content": [
+        |  {"type": "text", "text": "Describe."},
+        |  {"type": "image_url", "image_url": {"url": "https://x/cat.png"}},
+        |  {"type": "image_url", "text": "https://x/dog.png"},
+        |  {"type": "input_audio", "data": "abc"}
+        |]}]}""".stripMargin,
+      """{"model": "m", "input": [{"role": "user", "content": [
+        |  {"type": "input_text", "text": "Describe."},
+        |  {"type": "input_image", "image_url": "https://x/cat.png"},
+        |  {"type": "input_image", "image_url": "https://x/dog.png"},
+        |  {"type": "input_audio", "data": "abc"}
+        |]}]}""".stripMargin
+    )
+  }
+
+  test("token limits, reasoning effort, and null options get the upstream names") {
+    same(
+      """{"model": "m", "messages": [], "max_completion_tokens": 50, "reasoning_effort": "low",
+        |  "temperature": null, "stop": [], "top_p": 0.5}""".stripMargin,
+      """{"model": "m", "input": [], "max_output_tokens": 50, "reasoning": {"effort": "low", "summary": "auto"},
+        |  "top_p": 0.5}""".stripMargin
+    )
+    same("""{"model": "m", "messages": [], "max_tokens": null}""", """{"model": "m", "input": []}""")
+    same(
+      """{"model": "m", "messages": [], "reasoning_effort": "high", "reasoning": {"effort": "low"}}""",
+      """{"model": "m", "input": [], "reasoning": {"effort": "low"}}"""
+    )
+  }
+
+  test("tools and the tool choice are flattened") {
+    same(
+      """{"model": "m", "messages": [], "tools": [
+        |  {"type": "function", "function": {"name": "search", "description": "Find.", "parameters": {"type": "object"}}},
+        |  {"type": "function", "function": {"name": "lookup", "description": null, "parameters": {}}}
+        |], "tool_choice": {"type": "function", "function": {"name": "search"}}}""".stripMargin,
+      """{"model": "m", "input": [], "tools": [
+        |  {"type": "function", "name": "search", "description": "Find.", "parameters": {"type": "object"}},
+        |  {"type": "function", "name": "lookup", "parameters": {}}
+        |], "tool_choice": {"type": "function", "name": "search"}}""".stripMargin
+    )
+  }
+
+  test("response_format moves to text.format, and a json_schema format is flattened") {
+    same(
+      """{"model": "m", "messages": [], "response_format": {"type": "json_schema",
+        |  "json_schema": {"name": "DSPyProgramOutputs", "schema": {"type": "object"}, "strict": true}}}""".stripMargin,
+      """{"model": "m", "input": [], "text": {"format": {"type": "json_schema", "name": "DSPyProgramOutputs",
+        |  "schema": {"type": "object"}, "strict": true}}}""".stripMargin
+    )
+    same(
+      """{"model": "m", "messages": [], "response_format": {"type": "json_object"}}""",
+      """{"model": "m", "input": [], "text": {"format": {"type": "json_object"}}}"""
+    )
+  }
+
+  test("a body that has input already loses its messages and stays as it is") {
+    same(
+      """{"model": "m", "input": "Hi", "messages": [{"role": "user", "content": "x"}], "max_tokens": 5}""",
+      """{"model": "m", "input": "Hi", "max_tokens": 5}"""
+    )
+  }
+
+  // ── The outputs ─────────────────────────────────────────────────────────────────────────────────────────────
+
+  test("a Responses body gives one output with the joined text, the tool calls, the reasoning, and the citations") {
+    val body = record(
+      """{"model": "m", "output": [
+        |  {"type": "reasoning", "id": "r1", "summary": [{"type": "summary_text", "text": "Think. "}, {"text": "Done."}]},
+        |  {"type": "message", "role": "assistant", "content": [
+        |    {"type": "output_text", "text": "Paris is ", "annotations": [
+        |      {"type": "url_citation", "url": "https://x", "title": "X", "start_index": 0}
+        |    ]},
+        |    {"type": "output_text", "text": "the capital."}
+        |  ]},
+        |  {"type": "function_call", "id": "fc1", "call_id": "call_1", "name": "search", "arguments": "{\"q\":\"x\"}"}
+        |]}""".stripMargin
+    )
+    ResponsesWire.outputs(body) match
+      case Right(Vector(output)) =>
+        assertEquals(output.text, "Paris is the capital.")
+        assertEquals(
+          output.toolCalls,
+          Vector(ToolCall(name = "search", args = record("""{"q":"x"}"""), id = Some("call_1")))
+        )
+        assertEquals(DynamicValues.recordGet(output.metadata, "reasoning_content").map(plain), Some("Think. Done."))
+        assertEquals(
+          DynamicValues.recordGet(output.metadata, "citations").map(plain),
+          Some(Vector(Map(
+            "type"     -> "citation",
+            "title"    -> "X",
+            "url"      -> "https://x",
+            "metadata" -> Map("type" -> "url_citation", "start_index" -> BigDecimal(0))
+          )))
+        )
+      case other => fail(s"expected one output, got $other")
+  }
+
+  test("function-call arguments that are not JSON give an empty record, and the chat path keeps its rule") {
+    // Upstream `responses_outputs` (`dspy/clients/legacy_outputs.py`): `json.loads` fails, and the arguments are `{}`.
+    val body = record(
+      """{"output": [{"type": "function_call", "call_id": "call_1", "name": "search", "arguments": "not json"}]}"""
+    )
+    ResponsesWire.outputs(body) match
+      case Right(Vector(output)) => assertEquals(
+          output.toolCalls,
+          Vector(ToolCall(name = "search", args = DynamicValue.Record.empty, id = Some("call_1")))
+        )
+      case other => fail(s"expected one output, got $other")
+    val chat = record(
+      """{"choices": [{"message": {"role": "assistant", "content": null, "tool_calls": [
+        |  {"id": "call_1", "type": "function", "function": {"name": "search", "arguments": "not json"}}
+        |]}}]}""".stripMargin
+    )
+    ProviderResponseParser.parse(chat, LmMode.Chat) match
+      case Right(response) =>
+        assertEquals(response.outputs.flatMap(_.toolCalls).map(_.args), Vector(record("""{"input": "not json"}""")))
+      case Left(error) => fail(s"the chat parse failed: $error")
+  }
+
+  test("a Responses body with no text and no tool call gives no output, and a body with no output array is an error") {
+    assertEquals(
+      ResponsesWire.outputs(record("""{"output": [{"type": "reasoning", "summary": []}]}""")),
+      Right(Vector.empty)
+    )
+    assert(ResponsesWire.outputs(record("""{"output": "x"}""")).left.exists(_.isInstanceOf[ParseError]))
+  }

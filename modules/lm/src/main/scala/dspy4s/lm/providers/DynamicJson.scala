@@ -1,10 +1,11 @@
 package dspy4s.lm.providers
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, ParseError}
+import dspy4s.core.contracts.{DspyError, DynamicValues, ParseError, ValidationError}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, Schema}
 
 import java.nio.charset.StandardCharsets
+import scala.util.control.NonFatal
 
 /** JSON (de)serialization and navigation for the provider layer, on `DynamicValue` — the principled replacement for the
   * hand-rolled `Any`-based `JsonCodec`. Serialization delegates to zio-blocks' total `DynamicValue` JSON codec;
@@ -18,10 +19,33 @@ private[lm] object DynamicJson:
   def encode(value: DynamicValue): String =
     new String(codec.encode(stripNull(value)), StandardCharsets.UTF_8)
 
+  /** Render a `DynamicValue` to a JSON string and keep each `Null` field. Use it for a value that must keep its exact
+    * content, for example the arguments of a tool call.
+    */
+  def encodeExact(value: DynamicValue): String =
+    new String(codec.encode(value), StandardCharsets.UTF_8)
+
+  /** Render a value like [[encodeExact]], or give a `ValidationError` when the value has no JSON text. The codec is
+    * recursive, so a value that is nested too deep for the stack of the thread gives the error, as in [[decode]]. A
+    * value that the codec rejects, for example a NaN, gives the error too.
+    */
+  def encodeExactChecked(value: DynamicValue): Either[DspyError, String] =
+    try Right(encodeExact(value))
+    catch
+      case _: StackOverflowError => Left(ValidationError("The value has no JSON text: the value is nested too deep"))
+      case NonFatal(error)       =>
+        Left(ValidationError(s"The value has no JSON text: ${Option(error.getMessage).getOrElse(error.toString)}"))
+
+  /** Parse a JSON string. Text that is not JSON gives a `ParseError`. The codec is recursive, so a value that is nested
+    * too deep for the stack of the thread gives a `ParseError` too: a body from the network must not stop the caller
+    * with a `StackOverflowError`.
+    */
   def decode(json: String): Either[DspyError, DynamicValue] =
-    codec.decode(json.getBytes(StandardCharsets.UTF_8)) match
-      case Right(dv) => Right(dv)
-      case Left(err) => Left(ParseError("json", s"Invalid JSON: ${err.toString.take(200)}"))
+    try
+      codec.decode(json.getBytes(StandardCharsets.UTF_8)) match
+        case Right(dv) => Right(dv)
+        case Left(err) => Left(ParseError("json", s"Invalid JSON: ${err.toString.take(200)}"))
+    catch case _: StackOverflowError => Left(ParseError("json", "Invalid JSON: the value is nested too deep"))
 
   /** Recursively drop record fields whose value is `Null`. */
   def stripNull(value: DynamicValue): DynamicValue =

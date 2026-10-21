@@ -6,9 +6,9 @@ import munit.FunSuite
 
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Laws for the bounded agentic-iteration primitive [[AgentLoop.run]] (Algebra 2; the shared core of
-  * ReAct/CodeAct/RLM/PoT). The end-to-end agent behavior is covered by their own suites; this pins the control-flow
-  * primitive with pure synthetic steps.
+/** Laws for the bounded agentic-iteration primitive [[AgentLoop.run]] (Algebra 2; the shared core of ReAct/RLM). The
+  * end-to-end agent behavior is covered by their own suites; this pins the control-flow primitive with pure synthetic
+  * steps.
   */
 class AgentLoopLawSuite extends FunSuite:
 

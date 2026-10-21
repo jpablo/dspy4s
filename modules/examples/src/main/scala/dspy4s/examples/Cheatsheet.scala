@@ -1,7 +1,7 @@
 /** DSPy Cheatsheet
   *
   * Source: docs/docs/cheatsheet.md Upstream: https://github.com/stanfordnlp/dspy/blob/main/docs/docs/cheatsheet.md
-  * Status: translated (the portable snippets: modules 1–5/7/8, metrics/eval 9/11, retrieval 6, optimizers
+  * Status: translated (the portable snippets: modules 1–3/5/8, metrics/eval 9/11, retrieval 6, optimizers
   * 12/13/18/19/21/22/23/24, save/load 16/17, tools 27, streaming 28, usage 30, cache 31, refinement 32–35). The few
   * that remain depend on subsystems dspy4s doesn't have and are marked inline:
   *   - LLM-as-judge metric (10): now expressible (G-6) — see learn/evaluation/Metrics + `SemanticF1`
@@ -14,7 +14,6 @@ package dspy4s.examples
 
 import dspy4s.core.contracts.{:=, DspyError, DynamicValues, ErrorLimit, RuntimeContext, ThreadCount}
 import dspy4s.core.data.{RawPrediction, Example}
-import dspy4s.core.runtime.SubprocessPythonInterpreter
 import dspy4s.evaluate.{Evaluate, EvaluateConfig}
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.evaluate.metrics.FunctionMetric
@@ -42,12 +41,10 @@ import dspy4s.programs.{
   AttemptCount,
   BestOfN,
   ChainOfThought,
-  CodeAct,
   DynamicPredict,
   FailureCount,
   Parallel,
   Predict,
-  ProgramOfThought,
   ReAct,
   Refine
 }
@@ -82,12 +79,8 @@ object Cheatsheet:
   def chainOfThought(question: String)(using RuntimeContext): Either[DspyError, String] =
     ChainOfThought(Signature.of[BasicQA])((question = question)).map(_.output.answer)
 
-  // ── Snippet 4 (lines 44–52) — ProgramOfThought ──
-  // | pot = dspy.ProgramOfThought(BasicQA); pot(question="Sarah has 5 apples...")
-  // dspy4s PoT executes generated Python via a `CodeInterpreter` (here a python3 subprocess).
-  def programOfThought(question: String)(using RuntimeContext): Either[DspyError, String] =
-    val program = ProgramOfThought(Signature.of[BasicQA], interpreter = new SubprocessPythonInterpreter())
-    program((question = question)).map(_.output.answer)
+  // ── Snippets 4 (lines 44–52) and 7 (lines 86–98): ProgramOfThought and CodeAct ──
+  // Not ported. Upstream deprecated the two modules in DSPy 3.4. `RLM` is the replacement.
 
   // ── Snippet 5 (lines 56–64) — ReAct ──
   // | react_module = dspy.ReAct(BasicQA); react_module(question="Sarah has 5 apples...")
@@ -101,17 +94,6 @@ object Cheatsheet:
   // (programs.retrievers), `KNNFewShot` (optimize). A KNN retriever over a trainset, given an embedder:
   def knnRetriever(trainset: NonEmptyTrainset, embedder: Embedder)(using RuntimeContext): Either[DspyError, KNN] =
     KNN.create(k = NeighborCount(3), trainset = trainset, embedder = embedder)
-
-  // ── Snippet 7 (lines 86–98) — CodeAct ──
-  // | def factorial(n): ...; act = CodeAct("n -> factorial", tools=[factorial]); act(n=5)  # 120
-  // dspy4s CodeAct generates+runs Python through a `CodeInterpreter`. `tools` exist too: pass ToolFunctions
-  // (listed in the prompt) and, on a sandboxed DenoPyodideInterpreter, wire `program.sandboxTools` into the
-  // interpreter so generated Python can call them. Here the model just writes the factorial itself.
-  // --8<-- [start:code-act]
-  def codeAct(n: Int)(using RuntimeContext): Either[DspyError, String] =
-    val program = CodeAct(Signature.fromString("n: int -> factorial"), interpreter = new SubprocessPythonInterpreter())
-    program((n = n)).map(_.output.factorial)
-  // --8<-- [end:code-act]
 
   // ── Snippet 8 (lines 102–114) — Parallel ──
   // | parallel = dspy.Parallel(num_threads=2); parallel([(predict, ex1), (predict, ex2)])

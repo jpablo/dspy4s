@@ -1,7 +1,9 @@
 package dspy4s.signatures
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, ValidationError}
-import zio.blocks.schema.DynamicValue
+import zio.blocks.chunk.Chunk
+import zio.blocks.schema.json.Json
+import zio.blocks.schema.{DynamicValue, Schema}
 
 import scala.NamedTuple
 import scala.deriving.Mirror
@@ -119,8 +121,7 @@ object OutputAugmentation:
     yield augmented
 
   /** The shared decode for an opening-`String` output augmentation: the `T = String`, identity-hook instance of
-    * [[decodeAugmented]]. The value-level body shared by `ChainOfThought` / `ReAct` / `CodeAct` /
-    * `MultiChainComparison` / `ProgramOfThought`.
+    * [[decodeAugmented]]. The value-level body shared by `ChainOfThought` / `ReAct` / `MultiChainComparison`.
     */
   def decodePrepended[O, Name <: String & Singleton, Out](
       raw          : DynamicValue.Record,
@@ -139,12 +140,16 @@ object OutputAugmentation:
     )
 
   /** The reusable output [[Shape]] for an opening-position `String` augmentation — the shape a composite hands its
-    * inner `Predict` (`ChainOfThought`'s `reasoning`, the extractor passes of `ReAct` / `CodeAct`, and
-    * `ProgramOfThought`'s CoT-augmented steps). `field` is prepended to `base`'s specs idempotently by name (matching
-    * the type-level [[WithField]] and the layout's `prependOutput` — an unconditional prepend would desync `encode`'s
-    * `fieldSpecs.zip(values)`); decode runs [[decodePrepended]]; the base JSON schema passes through so structured
-    * base-field shapes still reach the adapter (the prepended field is a plain `String` already covered by the
-    * adapter's field markers).
+    * inner `Predict` (`ChainOfThought`'s `reasoning` and the extractor pass of `ReAct`). `field` is prepended to
+    * `base`'s specs idempotently by name (matching the type-level [[WithField]] and the layout's `prependOutput` — an
+    * unconditional prepend would desync `encode`'s `fieldSpecs.zip(values)`); decode runs [[decodePrepended]].
+    *
+    * The JSON schema is the schema of `base` with the property of `field` first, in the order of the layout (upstream
+    * builds the schema from the augmented signature). The name of `field` is first in `required` when the layout
+    * requires the field. The JSON adapter sends this schema as a strict `response_format`. If the schema does not have
+    * the property, a model in strict mode cannot write the field. When `base` already has the field, its schema stays
+    * as it is. When the schema of `base` has no root `properties`, the shape has no schema, and the adapter builds one
+    * from the layout.
     */
   def prependedStringShape[Name <: String & Singleton, O, Out](
       base         : Shape[O],
@@ -158,7 +163,14 @@ object OutputAugmentation:
         if base.fieldSpecs.exists(_.name == field.name) then base.fieldSpecs
         else field +: base.fieldSpecs
 
-      override lazy val jsonSchemaString: Option[String] = base.jsonSchemaString
+      override lazy val jsonSchemaString: Option[String] =
+        if base.fieldSpecs.exists(_.name == field.name) then base.jsonSchemaString
+        else
+          base.jsonSchemaString.flatMap(
+            withLeadingProperty(_, field.name, StringProperty, field.defaultValue.isEmpty && !field.optional)
+          )
+
+      override def nestedDecisionFields: Vector[String] = base.nestedDecisionFields
 
       def encode(value: Out): DynamicValue.Record =
         val product: Product = value match
@@ -175,6 +187,56 @@ object OutputAugmentation:
 
       def decode(raw: DynamicValue.Record): Either[DspyError, Out] =
         decodePrepended[O, Name, Out](raw, base, fieldName, label, signatureName)(using prepend)
+
+  /** The JSON schema of a `String` field, as zio-blocks writes it for the field of a record. */
+  private lazy val StringProperty: Json = Schema.string.toJsonSchema.toJson
+
+  private val DefsPrefix: String = "#/$defs/"
+
+  /** The JSON schema text `schema` with the property `name: property` first in `properties`. When `required` is true,
+    * `name` is also first in `required`. A root `$ref` to an entry of `$defs` (the schema of a recursive type) becomes
+    * that entry, and `$defs` stays: the augmented output is not the recursive type. The text has the form of
+    * [[ZioSchemaCodec.jsonSchemaForModel]]. The result is `None` when `schema` is not a JSON object with `properties`.
+    */
+  private def withLeadingProperty(schema: String, name: String, property: Json, required: Boolean): Option[String] =
+    for
+      root       <- Json.parse(schema).toOption.collect { case root: Json.Object => inlinedRoot(root) }
+      properties <- member(root, "properties").collect { case properties: Json.Object => properties }
+    yield
+      val others       = properties.value.filterNot((key, _) => key == name)
+      val withProperty = updated(root, "properties", Json.Object((name -> property) +: others))
+      val augmented    =
+        if !required then withProperty
+        else
+          val names = member(root, "required").collect { case names: Json.Array => names.value }
+            .getOrElse(Chunk.empty)
+            .filterNot {
+              case Json.String(other) => other == name
+              case _                  => false
+            }
+          updated(withProperty, "required", Json.Array(Json.String(name) +: names))
+      augmented.toString
+
+  /** `root` with the entry of `$defs` that its `$ref` names in place of the `$ref`. Each other key of `root` comes
+    * after the keys of the entry. A root with no such `$ref` stays as it is.
+    */
+  private def inlinedRoot(root: Json.Object): Json.Object =
+    val entry =
+      for
+        ref         <- member(root, "$ref").collect { case Json.String(ref) if ref.startsWith(DefsPrefix) => ref }
+        definitions <- member(root, "$defs").collect { case definitions: Json.Object => definitions }
+        found       <- member(definitions, ref.stripPrefix(DefsPrefix)).collect { case found: Json.Object => found }
+      yield found
+    entry.fold(root)(found => Json.Object(found.value ++ root.value.filterNot((key, _) => key == "$ref")))
+
+  private def member(obj: Json.Object, key: String): Option[Json] =
+    obj.value.find((name, _) => name == key).map((_, value) => value)
+
+  /** `obj` with `value` at `key`. An existing key keeps its position, and a new key goes at the end. */
+  private def updated(obj: Json.Object, key: String, value: Json): Json.Object =
+    if obj.value.exists((name, _) => name == key) then
+      Json.Object(obj.value.map((name, old) => if name == key then name -> value else name -> old))
+    else Json.Object(obj.value :+ (key -> value))
 
   /** The fieldless-output error shared by [[decodePrepended]]'s call sites: a `Signature` whose output has no static
     * fields (the `DynamicValue.Record` output of `Signature.fromStringDynamic`) cannot carry a prepended field, so the

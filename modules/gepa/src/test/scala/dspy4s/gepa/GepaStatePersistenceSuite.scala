@@ -53,6 +53,27 @@ class GepaStatePersistenceSuite extends FunSuite:
     assert(GepaStatePersistence.fromJson(malformed).isLeft)
   }
 
+  test("fromJson rejects pointers that are negative or not aligned with the candidates") {
+    def snapshot(pointers: String): String =
+      s"""{"candidates":[{"optimizable-0":"x"}],"valSubscores":[[1.0]],"parents":[[]],"totalMetricCalls":1,"nextComponent":$pointers}"""
+    assertEquals(GepaStatePersistence.fromJson(snapshot("[1]")).map(_.pointerOf(0)), Right(1))
+    assert(GepaStatePersistence.fromJson(snapshot("[-1]")).isLeft)
+    assert(GepaStatePersistence.fromJson(snapshot("[0,0]")).isLeft)
+  }
+
+  test("fromJson rejects a merge triplet with two indices, a negative iteration, and unaligned discovery counts") {
+    def snapshot(fields: String): String =
+      s"""{"candidates":[{"optimizable-0":"x"}],"valSubscores":[[1.0]],"parents":[[]],"totalMetricCalls":1,$fields}"""
+    val merge = """"merge":{"mergesDue":1,"totalMergesTested":0,"lastIterFoundNewProgram":true,"performedTriplets":"""
+    assertEquals(
+      GepaStatePersistence.fromJson(snapshot(merge + "[[1,2,0]]}")).map(_.merge.performedTriplets),
+      Right(Set((1, 2, 0)))
+    )
+    assert(GepaStatePersistence.fromJson(snapshot(merge + "[[1,2]]}")).isLeft)
+    assert(GepaStatePersistence.fromJson(snapshot(""""iteration":-1""")).isLeft)
+    assert(GepaStatePersistence.fromJson(snapshot(""""discoveryCalls":[0,4]""")).isLeft)
+  }
+
   test("load distinguishes an absent checkpoint from a corrupt checkpoint") {
     val dir = Files.createTempDirectory("gepa-state-load")
     try

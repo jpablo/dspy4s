@@ -20,10 +20,10 @@ import zio.blocks.schema.DynamicValue
   * closed by construction (see Invariants) rather than relying on a runtime precondition.
   *
   * '''Field mutation.''' The `withInputFields` / `withOutputFields` methods are `private[dspy4s]`. They exist because
-  * composite programs (`ChainOfThought`, `CodeAct`, `MultiChainComparison`, `ProgramOfThought`) need to augment a base
-  * layout with auxiliary fields (e.g. prepending a `reasoning` output) before handing it to a `DynamicPredict`. User
-  * code should use the `Signature` API (a different `Spec` trait, a different `Signature.derived[I, O]`, etc.) rather
-  * than reaching into the layout directly.
+  * composite programs (`ChainOfThought`, `MultiChainComparison`) need to augment a base layout with auxiliary fields
+  * (e.g. prepending a `reasoning` output) before handing it to a `DynamicPredict`. User code should use the `Signature`
+  * API (a different `Spec` trait, a different `Signature.derived[I, O]`, etc.) rather than reaching into the layout
+  * directly.
   *
   * '''Invariants.''' A field's role is represented exactly once by cohort membership. Name uniqueness across both
   * cohorts is maintained by construction, not by a precondition: the primary constructor is `private`, so every layout
@@ -58,9 +58,23 @@ final case class SignatureLayout private (
   def withInstructions(text: String): SignatureLayout =
     if text.isEmpty then this else withInstructions(Some(text))
 
+  /** The same fields, with `text` after the instructions, and a blank line between them (dspy's
+    * `Signature.append_instructions`). When the layout has no instructions, `text` comes after the default instructions
+    * of the layout (dspy's `_default_instructions`), as [[dspy4s.core.signatures.SignatureDsl.defaultInstructions]]
+    * writes them.
+    */
+  def appendInstructions(text: String): SignatureLayout =
+    withInstructions(Some(s"$effectiveInstructions\n\n$text"))
+
+  /** The instructions, else the default instructions of the fields of this layout (dspy's `_default_instructions`).
+    * Upstream computes the default instructions when it makes a signature, so they name the fields of that signature.
+    */
+  private[dspy4s] def effectiveInstructions: String =
+    instructions.getOrElse(dspy4s.core.signatures.SignatureDsl.defaultInstructions(this))
+
   // ── Field-mutation helpers ──────────────────────────────────────────
-  // Narrowed to `private[dspy4s]`: composite programs (CodeAct,
-  // MultiChainComparison, ProgramOfThought, ChainOfThought)
+  // Narrowed to `private[dspy4s]`: composite programs
+  // (MultiChainComparison, ChainOfThought)
   // augment a base layout by appending / prepending / inserting fields
   // before handing it to a `DynamicPredict`. User code should use the
   // `Signature` API (`derived`, `fromType`, `of[Spec]`,
@@ -98,7 +112,7 @@ final case class SignatureLayout private (
       inputFields.sameElements(other.inputFields) &&
       outputFields.sameElements(other.outputFields)
 
-  /** Serialize this standalone layout to a [[zio.blocks.schema.DynamicValue.Record]] -- the same codec-spine type
+  /** Serialize this standalone layout to a [[zio.blocks.schema.DynamicValue.Record]] -- the same interchange format
     * carried elsewhere in dspy4s. Round-trips with [[SignatureLayout.fromState]] and serializes to clean JSON via
     * [[dumpJson]]. `Option` fields (`instructions`, and per-field `description` / `prefix` / `defaultValue`) encode as
     * `DynamicValue.Null` when empty. The higher-level program persistence API deliberately uses its smaller

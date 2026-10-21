@@ -23,6 +23,11 @@ import scala.concurrent.Future
   *
   * Scope: the [[RuntimeContext]] plus every registered [[Carrier]] travels (e.g. the usage-tracker stack registered by
   * the lm module). The [[ActivePredictContext]] stack lives in a separate thread-local and is not copied here.
+  *
+  * A capture reads the installed context, not a `using RuntimeContext` value. Each public entry point installs the
+  * context that it gets before work hops threads ([[RuntimeEnvironment.withInstalled]], decision D8 of
+  * UPGRADE-3.2.1-to-3.4.0). Thus a capture in a program call, a `compile`, an `evaluate`, a parallel run, or a stream
+  * takes the given context of that call. A caller that uses these helpers directly installs the context first.
   */
 object ContextPropagation:
 

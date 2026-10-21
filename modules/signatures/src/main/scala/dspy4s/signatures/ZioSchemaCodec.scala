@@ -1,8 +1,33 @@
 package dspy4s.signatures
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, NotFoundError, TypeRef, ValidationError}
-import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveType, PrimitiveValue, Reflect, Schema}
+import dspy4s.core.contracts.{
+  DspyError,
+  DynamicValues,
+  FieldSpec,
+  History,
+  NotFoundError,
+  ToolCall,
+  TypeRef,
+  ValidationError
+}
+import dspy4s.core.decisions.{Choice, Noul, Score}
+import zio.blocks.chunk.{Chunk, ChunkMap, NonEmptyChunk}
+import zio.blocks.docs.Doc
+import zio.blocks.schema.binding.{Binding, BindingType}
+import zio.blocks.schema.json.{JsonCodec, JsonFormat, JsonReader, JsonSchema, JsonWriter}
+import zio.blocks.schema.{
+  DynamicOptic,
+  DynamicValue,
+  Lazy,
+  Modifier,
+  PrimitiveType,
+  PrimitiveValue,
+  Reflect,
+  ReflectTransformer,
+  Schema,
+  Term
+}
+import zio.blocks.typeid.{Owner, TypeId}
 
 /** Bridge between zio-blocks `Schema[A]` and dspy4s's `Shape[A]`.
   *
@@ -12,8 +37,10 @@ import zio.blocks.schema.{DynamicValue, PrimitiveType, PrimitiveValue, Reflect, 
   *   - [[fieldSpecsFromReflect]] -- derive `FieldSpec` list from a `Reflect.Record`.
   *   - [[normalize]] -- DynamicValue → DynamicValue coercion guided by a target `Reflect`. Public for the rare caller
   *     that needs to pre-coerce a record before decoding.
+  *   - [[jsonSchemaForModel]] -- the JSON schema of a `Schema[A]` for a prompt, with no `id` in a `ToolCall`, and with
+  *     `$defs` for a recursive type.
   *
-  * No `Map[String, Any]` round-trip: the spine is `DynamicValue.Record` end-to-end.
+  * No `Map[String, Any]` round-trip: the interchange format is `DynamicValue.Record` end-to-end.
   */
 private[signatures] object ZioSchemaCodec:
 
@@ -27,9 +54,14 @@ private[signatures] object ZioSchemaCodec:
     * Records are walked recursively against the target's field list (fields not present in the target are dropped);
     * sequences are walked element-wise. Everything else (and values whose target shape doesn't match the dispatch
     * above) passes through unchanged.
+    *
+    * A record gets `None` for each `Option` field of the target that it lacks, at each level of nesting. A required
+    * field that is absent stays absent, so the decode fails.
     */
   def normalize(dv: DynamicValue, target: Reflect[?, ?]): DynamicValue =
     (dv, target) match
+      // zio-blocks defers the reflect of some nested fields. The coercion needs the reflect behind it.
+      case (value, deferred: Reflect.Deferred[?, ?])                      => normalize(value, deferred.value)
       case (prim @ DynamicValue.Primitive(_), p: Reflect.Primitive[?, ?]) => coercePrimitive(prim, p.primitiveType)
       // Option-shaped variant: wrap bare/Null/string values into Some/None before the generic rules below.
       case (value, variant: Reflect.Variant[?, ?]) if optionSomeValueReflect(variant).isDefined =>
@@ -57,7 +89,6 @@ private[signatures] object ZioSchemaCodec:
     * and inherits the usual LM-shaped coercion (e.g. `"2399.0"` string → Double).
     */
   private def normalizeOption(value: DynamicValue, valueReflect: Reflect[?, ?]): DynamicValue =
-    def none: DynamicValue                  = DynamicValue.Variant("None", DynamicValue.Record.empty)
     def some(v: DynamicValue): DynamicValue =
       DynamicValue.Variant("Some", DynamicValue.Record(Chunk.single("value" -> normalize(v, valueReflect))))
     value match
@@ -70,6 +101,9 @@ private[signatures] object ZioSchemaCodec:
             || s.trim.equalsIgnoreCase("n/a") => none
       case other => some(other)
 
+  /** The `None` case of an `Option`, in the Variant shape that zio-blocks expects. */
+  private def none: DynamicValue = DynamicValue.Variant("None", DynamicValue.Record.empty)
+
   private def mapRecordFields(rec: DynamicValue.Record, target: Reflect.Record[?, ?]): DynamicValue.Record =
     val targetByName = target.fields.iterator.map(t => t.name -> t.value).toMap
     val out          = rec.fields.iterator.map { (name, value) =>
@@ -77,7 +111,14 @@ private[signatures] object ZioSchemaCodec:
         case Some(fieldReflect) => name -> normalize(value, fieldReflect)
         case None               => name -> value
     }.toSeq
-    DynamicValue.Record(Chunk.from(out))
+    // An Option field is not required on the wire: a record that omits the key means None, the same as an
+    // explicit null/"none".
+    val present         = rec.fields.iterator.map(_._1).toSet
+    val absentOptionals = target.fields.iterator
+      .filter(term => !present.contains(term.name) && optionSomeValueReflect(term.value).isDefined)
+      .map(_.name -> none)
+      .toSeq
+    DynamicValue.Record(Chunk.from(out ++ absentOptionals))
 
   private def coercePrimitive(dv: DynamicValue, prim: PrimitiveType[?]): DynamicValue =
     dv match
@@ -100,10 +141,18 @@ private[signatures] object ZioSchemaCodec:
           case _: PrimitiveType.Double => DynamicValue.Primitive(PrimitiveValue.Double(i.toDouble))
           case _: PrimitiveType.Float  => DynamicValue.Primitive(PrimitiveValue.Float(i.toFloat))
           case _                       => dv
-      case DynamicValue.Primitive(PrimitiveValue.Long(l)) if isInt(l) =>
-        prim match
-          case _: PrimitiveType.Int => DynamicValue.Primitive(PrimitiveValue.Int(l.toInt))
-          case _                    => dv
+      case DynamicValue.Primitive(PrimitiveValue.Long(l)) => prim match
+          case _: PrimitiveType.Int if isInt(l) => DynamicValue.Primitive(PrimitiveValue.Int(l.toInt))
+          case _: PrimitiveType.Double          => DynamicValue.Primitive(PrimitiveValue.Double(l.toDouble))
+          case _: PrimitiveType.Float           => DynamicValue.Primitive(PrimitiveValue.Float(l.toFloat))
+          case _                                => dv
+      // The dynamic JSON codec of zio-blocks gives a `BigDecimal` for each number that is not an integer.
+      case DynamicValue.Primitive(PrimitiveValue.BigDecimal(n)) => prim match
+          case _: PrimitiveType.Double                => DynamicValue.Primitive(PrimitiveValue.Double(n.toDouble))
+          case _: PrimitiveType.Float                 => DynamicValue.Primitive(PrimitiveValue.Float(n.toFloat))
+          case _: PrimitiveType.Int if n.isValidInt   => DynamicValue.Primitive(PrimitiveValue.Int(n.toInt))
+          case _: PrimitiveType.Long if n.isValidLong => DynamicValue.Primitive(PrimitiveValue.Long(n.toLong))
+          case _                                      => dv
       case _ => dv
 
   private def isInt(l: Long): Boolean = l >= Int.MinValue && l <= Int.MaxValue
@@ -119,24 +168,33 @@ private[signatures] object ZioSchemaCodec:
     val noSign   = if noSymbol.startsWith("+") then noSymbol.tail else noSymbol
     noSign.filter(_ != ',')
 
-  /** Walk a `Reflect.Record` and produce its role-free field metadata. */
+  /** Walk a `Reflect.Record` and produce its role-free field metadata. An `Option` field is an optional field, with the
+    * type and the enum values of its element.
+    */
   def fieldSpecsFromReflect(reflect: Reflect[?, ?]): Vector[FieldSpec] =
     reflect match
       case rec: Reflect.Record[?, ?] => rec.fields.toVector.map(term =>
           FieldSpec(
             name = term.name,
             typeRef = typeRefFor(term.value),
-            enumValues = enumValuesOf(term.value)
+            enumValues = enumValuesOf(term.value),
+            optional = optionSomeValueReflect(term.value).isDefined
           )
         )
       case _ => Vector.empty
 
   /** Allowed case names for an enum field, i.e. a `Reflect.Variant`'s cases. Empty for any non-variant reflect. The
     * wire `typeRef` for a variant stays `TypeRef.string` (the LM sees a flat label); these values ride alongside so
-    * adapters can tell the LM which labels are valid.
+    * adapters can tell the LM which labels are valid. An `Option` has the enum values of its element. A `Score` field
+    * has its levels, and a `Choice` field has its option labels (see [[decisionField]]).
     */
   private def enumValuesOf(reflect: Reflect[?, ?]): Vector[String] =
-    reflect match
+    optionSomeValueReflect(reflect) match
+      case Some(element) => enumValuesOf(element)
+      case None          => decisionField(reflect).fold(caseNamesOf(reflect))(_._2)
+
+  private def caseNamesOf(reflect: Reflect[?, ?]): Vector[String] =
+    withoutDeferred(reflect) match
       case variant: Reflect.Variant[?, ?] =>
         val cases            = variant.cases.toVector
         val allParameterless = cases.forall { term =>
@@ -153,7 +211,8 @@ private[signatures] object ZioSchemaCodec:
     */
   private def optionSomeValueReflect(reflect: Reflect[?, ?]): Option[Reflect[?, ?]] =
     reflect match
-      case variant: Reflect.Variant[?, ?] =>
+      case deferred: Reflect.Deferred[?, ?] => optionSomeValueReflect(deferred.value)
+      case variant: Reflect.Variant[?, ?]   =>
         val cases = variant.cases.toVector
         if cases.size != 2 then None
         else
@@ -178,14 +237,260 @@ private[signatures] object ZioSchemaCodec:
     */
   def typeRefForSchema[A](using schema: Schema[A]): TypeRef = typeRefFor(schema.reflect)
 
+  /** `true` when `A` is an `Option` type. A field of such a type is an optional field, as in [[fieldSpecsFromReflect]].
+    */
+  def isOptionSchema[A](using schema: Schema[A]): Boolean = optionSomeValueReflect(schema.reflect).isDefined
+
+  /** The enum values of a field of type `A`, as in [[fieldSpecsFromReflect]]: the case names of an enum, or of the
+    * element of an `Option` of an enum. Empty for each other type.
+    */
+  def enumValuesForSchema[A](using schema: Schema[A]): Vector[String] = enumValuesOf(schema.reflect)
+
+  /** The wire type of a reflect. An `Option` has the type of its element: an `Option[Int]` field is an optional int
+    * field.
+    */
   private def typeRefFor(reflect: Reflect[?, ?]): TypeRef =
+    optionSomeValueReflect(reflect) match
+      case Some(element) => typeRefFor(element)
+      case None          => decisionField(reflect).fold(typeRefOfValue(reflect))(_._1)
+
+  /** The names of the fields of a `Reflect.Record` whose type holds a decision type inside an `Option`, a collection,
+    * or a map (experimental, upstream `resolve_adapter` and `extract_custom_type_from_annotation`). A field of a
+    * decision type is a decision output, thus it is not in the result. The walk does not go into the fields of a
+    * record, as upstream does not go into the fields of a model.
+    */
+  def nestedDecisionFieldsOf(reflect: Reflect[?, ?]): Vector[String] =
+    withoutDeferred(reflect) match
+      case rec: Reflect.Record[?, ?] => rec.fields.toVector.collect {
+          case term if decisionField(term.value).isEmpty && holdsDecision(term.value) => term.name
+        }
+      case _ => Vector.empty
+
+  /** `true` when `reflect` is a decision type, or an `Option`, a collection, or a map that holds one. */
+  private def holdsDecision(reflect: Reflect[?, ?]): Boolean =
+    optionSomeValueReflect(reflect) match
+      case Some(element) => holdsDecision(element)
+      case None          => withoutDeferred(reflect) match
+          case found if decisionField(found).isDefined => true
+          case seq: Reflect.Sequence[?, ?, ?]          => holdsDecision(seq.element)
+          case map: Reflect.Map[?, ?, ?, ?]            => holdsDecision(map.key) || holdsDecision(map.value)
+          case _                                       => false
+
+  /** The type and the enum values of a decision field (experimental, upstream `dspy.experimental`): a [[Noul]] has no
+    * enum values, a [[Score]] has its levels (the cases of `L`, which the schema of `Score[L]` holds), and a [[Choice]]
+    * has its option labels (the cases of the reflect of its `value` field). `None` for each other reflect. The
+    * derivation knows the three types by their type id, not by their structure.
+    */
+  private def decisionField(reflect: Reflect[?, ?]): Option[(TypeRef, Vector[String])] =
+    withoutDeferred(reflect) match
+      case rec: Reflect.Record[?, ?] if isType(rec.typeId, noulTypeId)   => Some(TypeRef.noul -> Vector.empty)
+      case rec: Reflect.Record[?, ?] if isType(rec.typeId, scoreTypeId)  => Some(TypeRef.score -> Score.levelsOf(rec))
+      case rec: Reflect.Record[?, ?] if isType(rec.typeId, choiceTypeId) =>
+        val options = rec.fields.find(_.name == "value").fold(Vector.empty[String])(term => caseNamesOf(term.value))
+        Some(TypeRef.choice -> options)
+      case _ => None
+
+  /** The reflect behind a deferred reflect. zio-blocks defers the reflect of a field with a default value, and of a
+    * field whose type can be recursive.
+    */
+  private def withoutDeferred(reflect: Reflect[?, ?]): Reflect[?, ?] =
     reflect match
-      case prim: Reflect.Primitive[?, ?] => primitiveTypeRef(prim.primitiveType)
-      case _: Reflect.Variant[?, ?]      => TypeRef.string
-      case _: Reflect.Record[?, ?]       => TypeRef.json
-      case _: Reflect.Sequence[?, ?, ?]  => TypeRef.list
-      case _: Reflect.Map[?, ?, ?, ?]    => TypeRef.json
-      case _                             => TypeRef.json
+      case deferred: Reflect.Deferred[?, ?] => withoutDeferred(deferred.value)
+      case other                            => other
+
+  private def typeRefOfValue(reflect: Reflect[?, ?]): TypeRef =
+    withoutDeferred(reflect) match
+      case prim: Reflect.Primitive[?, ?]                                  => primitiveTypeRef(prim.primitiveType)
+      case _: Reflect.Variant[?, ?]                                       => TypeRef.string
+      case rec: Reflect.Record[?, ?] if isType(rec.typeId, historyTypeId) => TypeRef.history
+      case _: Reflect.Record[?, ?]                                        => TypeRef.json
+      case _: Reflect.Sequence[?, ?, ?]                                   => TypeRef.list
+      case _: Reflect.Map[?, ?, ?, ?]                                     => TypeRef.json
+      case _                                                              => TypeRef.json
+
+  // The framework types that the derivation knows by their identity (the type name of the record reflect), not by
+  // their structure.
+  private val historyTypeId: TypeId[History]   = summon[Schema[History]].reflect.typeId
+  private val toolCallTypeId: TypeId[ToolCall] = summon[Schema[ToolCall]].reflect.typeId
+  private val noulTypeId: TypeId[Noul]         = summon[Schema[Noul]].reflect.typeId
+  // `Score` and `Choice` are generic. The full name of a type id does not include the type arguments.
+  private val scoreTypeId: TypeId[Score]   = TypeId.of[Score]
+  private val choiceTypeId: TypeId[Choice] = TypeId.of[Choice]
+
+  private def isType(typeId: TypeId[?], known: TypeId[?]): Boolean = typeId.fullName == known.fullName
+
+  /** Marks the `id` field of each [[ToolCall]] record as transient, so the JSON schema does not show that field. Each
+    * other part of the reflect stays as it is.
+    */
+  private object HideToolCallId extends ReflectTransformer.OnlyMetadata[Binding, Binding]:
+    override def transformMetadata[K, A](f: Binding[K, A]): Lazy[Binding[K, A]] = Lazy(f)
+
+    override def transformRecord[A](
+        path              : DynamicOptic,
+        fields            : IndexedSeq[Term[Binding, A, ?]],
+        typeId            : TypeId[A],
+        metadata          : Binding[BindingType.Record, A],
+        doc               : Doc,
+        modifiers         : Seq[Modifier.Reflect],
+        storedDefaultValue: Option[DynamicValue],
+        storedExamples    : collection.immutable.Seq[DynamicValue]
+    ): Lazy[Reflect.Record[Binding, A]] =
+      val shown =
+        if !isType(typeId, toolCallTypeId) then fields
+        else
+          fields.map { term =>
+            if term.name == "id" then term.copy(modifiers = term.modifiers :+ Modifier.transient()) else term
+          }
+      super.transformRecord(path, shown, typeId, metadata, doc, modifiers, storedDefaultValue, storedExamples)
+
+  /** The JSON schema of `schema` as a model sees it. The schema does not ask for the `id` of a [[ToolCall]] (upstream
+    * removes `id` from the JSON schema of `ToolCalls.ToolCall`): the id comes from the provider, and a model that
+    * writes a tool call as text does not supply it.
+    *
+    * A recursive type has its schema in `$defs`, and each reference to it is a `$ref` (upstream pydantic does the
+    * same). zio-blocks writes no `$ref`. It puts the schema of each field in the schema of its record, so for a
+    * recursive type its `toJsonSchema` (a `lazy val`) reads itself and waits forever. Thus this function cuts each
+    * cycle before zio-blocks makes the schema. When the root type is recursive, the root is a `$ref` to its definition.
+    */
+  def jsonSchemaForModel[A](schema: Schema[A]): String =
+    val shown     = schema.reflect.transform(DynamicOptic.root, HideToolCallId).force
+    val recursive = recursiveTypes(shown)
+    if recursive.isEmpty then Schema(shown).toJsonSchema.toJson.toString
+    else withDefinitions(shown, recursive).toJson.toString
+
+  /** The JSON schema of `root`, with a definition in `$defs` for each type in `recursive`. In each schema, each
+    * reference to a type in `recursive` is a placeholder whose JSON schema is a `$ref` ([[RefSchemaCodec]]).
+    */
+  private def withDefinitions(root: Reflect.Bound[?], recursive: Vector[Reflect.Bound[?]]): JsonSchema =
+    val names = definitionNames(recursive)
+    val cut   = CutCycles(names)
+
+    def jsonSchemaOf[B](reflect: Reflect.Bound[B]): JsonSchema =
+      val builder = Schema(reflect.transform(DynamicOptic.root, cut).force).deriving(JsonFormat.deriver)
+      names.valuesIterator
+        .foldLeft(builder)((acc, name) => acc.instance(refTypeId[Any](name), RefSchemaCodec(name)))
+        .derive
+        .toJsonSchema
+
+    val definitions = ChunkMap.from(recursive.map(reflect => names(reflect.typeId) -> jsonSchemaOf(reflect)))
+    names.get(root.typeId).fold(jsonSchemaOf(root))(name => JsonSchema.refString(refOf(name))) match
+      case obj: JsonSchema.Object => obj.copy($defs = Some(definitions))
+      case other                  => JsonSchema.Object(allOf = Some(NonEmptyChunk.single(other)), $defs = Some(definitions))
+
+  /** The types that occur again in themselves, in the order that the walk from `root` finds them. A type here is a
+    * record, a variant, or a wrapper. A sequence, a map, and an `Option` are not types here: the walk goes into them.
+    * Thus for `next: Option[Node]` the recursive type is `Node`, not `Option[Node]`.
+    *
+    * The type id identifies a type, as in zio-blocks. zio-blocks gives one type id to each instance of a generic type
+    * (for example `Tree[Int]` and `Tree[String]`), so these instances share one definition. zio-blocks cannot encode a
+    * value of such a type either.
+    */
+  private def recursiveTypes(root: Reflect.Bound[?]): Vector[Reflect.Bound[?]] =
+    def visit(
+        reflect: Reflect.Bound[?],
+        path   : Set[TypeId[?]],
+        found  : Vector[Reflect.Bound[?]]
+    ): Vector[Reflect.Bound[?]] =
+      def node(children: Iterable[Reflect.Bound[?]]): Vector[Reflect.Bound[?]] =
+        if !path.contains(reflect.typeId) then
+          children.foldLeft(found)((acc, child) => visit(child, path + reflect.typeId, acc))
+        else if found.iterator.map(_.typeId).contains(reflect.typeId) then found
+        else found :+ reflect
+      reflect match
+        case deferred: Reflect.Deferred[Binding, ?] => visit(deferred.value, path, found)
+        case seq: Reflect.Sequence[Binding, ?, ?]   => visit(seq.element, path, found)
+        case map: Reflect.Map[Binding, ?, ?, ?]     => visit(map.value, path, visit(map.key, path, found))
+        // The `Some` and `None` records of an `Option` are not types here: the walk goes to the value in `Some`.
+        case variant: Reflect.Variant[Binding, ?] if variant.typeId.isOption || variant.typeId.isMaybe =>
+          variant.cases.foldLeft(found)((acc, term) =>
+            term.value match
+              case rec: Reflect.Record[Binding, ?] =>
+                rec.fields.foldLeft(acc)((a, field) => visit(field.value, path, a))
+              case other => visit(other, path, acc)
+          )
+        case rec: Reflect.Record[Binding, ?]         => node(rec.fields.map(_.value))
+        case variant: Reflect.Variant[Binding, ?]    => node(variant.cases.map(_.value))
+        case wrapper: Reflect.Wrapper[Binding, ?, ?] => node(Vector(wrapper.wrapped))
+        case _                                       => found
+    visit(root, Set.empty, Vector.empty)
+
+  /** A name in `$defs` for each type in `types`: the simple name of the type, with a number when two types have the
+    * same simple name.
+    */
+  private def definitionNames(types: Vector[Reflect.Bound[?]]): Map[TypeId[?], String] =
+    types.foldLeft(Map.empty[TypeId[?], String]) { (names, reflect) =>
+      val base  = reflect.typeId.name.map(c => if c.isLetterOrDigit || c == '_' then c else '_')
+      val taken = names.valuesIterator.toSet
+      val name  = if !taken.contains(base) then base else Iterator.from(2).map(n => s"$base$n").filterNot(taken).next()
+      names.updated(reflect.typeId, name)
+    }
+
+  private def refOf(name: String): String = s"#/$$defs/$name"
+
+  /** The type id of a placeholder for the type with the definition `name`. */
+  private def refTypeId[A](name: String): TypeId[A] = TypeId.nominal[A](refOf(name), Owner.Root)
+
+  /** Gives each type in `names` the type id of its placeholder ([[refTypeId]]), except at the root. Thus the reflect of
+    * a recursive type is the root with its fields, and each reference to a type in `names` is a placeholder.
+    */
+  private final class CutCycles(names: Map[TypeId[?], String])
+      extends ReflectTransformer.OnlyMetadata[Binding, Binding]:
+    override def transformMetadata[K, A](f: Binding[K, A]): Lazy[Binding[K, A]] = Lazy(f)
+
+    private def shownTypeId[A](path: DynamicOptic, typeId: TypeId[A]): TypeId[A] =
+      names.get(typeId) match
+        case Some(name) if path.nodes.nonEmpty => refTypeId[A](name)
+        case _                                 => typeId
+
+    override def transformRecord[A](
+        path              : DynamicOptic,
+        fields            : IndexedSeq[Term[Binding, A, ?]],
+        typeId            : TypeId[A],
+        metadata          : Binding[BindingType.Record, A],
+        doc               : Doc,
+        modifiers         : Seq[Modifier.Reflect],
+        storedDefaultValue: Option[DynamicValue],
+        storedExamples    : collection.immutable.Seq[DynamicValue]
+    ): Lazy[Reflect.Record[Binding, A]] =
+      val shown = shownTypeId(path, typeId)
+      super.transformRecord(path, fields, shown, metadata, doc, modifiers, storedDefaultValue, storedExamples)
+
+    override def transformVariant[A](
+        path              : DynamicOptic,
+        cases             : IndexedSeq[Term[Binding, A, ? <: A]],
+        typeId            : TypeId[A],
+        metadata          : Binding[BindingType.Variant, A],
+        doc               : Doc,
+        modifiers         : Seq[Modifier.Reflect],
+        storedDefaultValue: Option[DynamicValue],
+        storedExamples    : collection.immutable.Seq[DynamicValue]
+    ): Lazy[Reflect.Variant[Binding, A]] =
+      val shown = shownTypeId(path, typeId)
+      super.transformVariant(path, cases, shown, metadata, doc, modifiers, storedDefaultValue, storedExamples)
+
+    override def transformWrapper[A, B](
+        path              : DynamicOptic,
+        wrapped           : Reflect[Binding, B],
+        typeId            : TypeId[A],
+        metadata          : Binding[BindingType.Wrapper[A, B], A],
+        doc               : Doc,
+        modifiers         : Seq[Modifier.Reflect],
+        storedDefaultValue: Option[DynamicValue],
+        storedExamples    : collection.immutable.Seq[DynamicValue]
+    ): Lazy[Reflect.Wrapper[Binding, A, B]] =
+      val shown = shownTypeId(path, typeId)
+      super.transformWrapper(path, wrapped, shown, metadata, doc, modifiers, storedDefaultValue, storedExamples)
+
+  /** The JSON codec of a placeholder: its JSON schema is a `$ref` to the definition `name`. The codec is only for the
+    * JSON schema, so its encoder and its decoder fail.
+    */
+  private final class RefSchemaCodec(name: String) extends JsonCodec[Any]:
+    override def decodeValue(in: JsonReader): Any = error(s"The placeholder of '${refOf(name)}' has no decoder")
+
+    override def encodeValue(x: Any, out: JsonWriter): Unit =
+      error(s"The placeholder of '${refOf(name)}' has no encoder")
+
+    override def toJsonSchema: JsonSchema = JsonSchema.refString(refOf(name))
 
   private def primitiveTypeRef(prim: PrimitiveType[?]): TypeRef =
     prim match
@@ -210,15 +515,14 @@ private[signatures] object ZioSchemaCodec:
     val specs       = fieldSpecsFromReflect(rootReflect)
     // Option-fields are not required on the wire: an LM that omits the key entirely means None, the
     // same as an explicit null/"none". Collected once so decode can exempt them from the missing-field check.
-    val optionalFieldNames: Set[String] = rootReflect match
-      case rec: Reflect.Record[?, ?] =>
-        rec.fields.iterator.filter(term => optionSomeValueReflect(term.value).isDefined).map(_.name).toSet
-      case _ => Set.empty
+    val optionalFieldNames: Set[String] = specs.filter(_.optional).map(_.name).toSet
 
     new RoundTripShape[A]:
       override val fieldSpecs: Vector[FieldSpec] = specs
 
-      override lazy val jsonSchemaString: Option[String] = Some(schema.toJsonSchema.toJson.toString)
+      override lazy val jsonSchemaString: Option[String] = Some(jsonSchemaForModel(schema))
+
+      override lazy val nestedDecisionFields: Vector[String] = nestedDecisionFieldsOf(rootReflect)
 
       override def encode(value: A): DynamicValue.Record =
         schema.toDynamicValue(value) match
@@ -240,14 +544,6 @@ private[signatures] object ZioSchemaCodec:
             message = s"Missing required fields: ${missing.mkString(", ")}"
           ))
         else
-          // Fill absent optional fields with Null so normalize's Option handling maps them to None.
-          val absentOptionals = fieldSpecs.iterator
-            .map(_.name)
-            .filter(name => optionalFieldNames.contains(name) && !present.contains(name))
-            .toSeq
-          val filled =
-            if absentOptionals.isEmpty then raw
-            else
-              DynamicValue.Record(raw.fields ++ Chunk.from(absentOptionals.map(_ -> (DynamicValue.Null: DynamicValue))))
-          val normalized = normalize(filled, rootReflect)
+          // `normalize` gives None to each absent optional field, at each level of nesting.
+          val normalized = normalize(raw, rootReflect)
           schema.fromDynamicValue(normalized).left.map(err => ValidationError(err.toString))

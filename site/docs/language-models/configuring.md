@@ -51,7 +51,13 @@ call:
 ## Errors
 
 dspy4s never throws on a model failure. Every call returns an `Either`, and
-`DspyError` carries a stable `code` and `message`:
+`DspyError` carries a stable `code` and `message`.
+
+A language model failure is an `LmError`. Its class tells the kind of the
+failure: `LmRateLimitError`, `LmAuthError`, `LmTimeoutError`,
+`ContextWindowExceededError`, and others. Its `details` hold the model, the
+provider, the HTTP status, the request id, and the delay that the provider asked
+for:
 
 ```scala
 --8<-- "learn/programming/LanguageModels.scala:lm-errors"

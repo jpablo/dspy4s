@@ -18,6 +18,12 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /** Builds the sandbox functions that let generated RLM code call a subordinate language model. */
 private[programs] object RLMSandboxTools:
+
+  /** The tools `llm_query` and `llm_query_batched`. The usage of each sub-LM call goes to the usage scope of the RLM
+    * call ([[LanguageModel.callAndRecordUsage]]). The batched calls run on worker threads, and the scope travels to
+    * them. Upstream counts these calls in the usage of the RLM call, because they run in the context of the call
+    * (`dspy/predict/rlm.py`, `_make_llm_tools`, with `contextvars.copy_context` for the batched calls).
+    */
   def build(
       maxLlmCalls: LlmCallLimit,
       subLm      : Option[LanguageModel],
@@ -40,11 +46,11 @@ private[programs] object RLMSandboxTools:
       val lm = subLm.orElse(ctx.lm.collect { case m: LanguageModel => m })
       lm match
         case None        => Left(RuntimeError("rlm", "No LM configured. Configure an ambient LM or pass subLm to RLM."))
-        case Some(model) => model
-            .call(LmRequest(
-              model = model.id,
-              messages = Vector(Message(role = MessageRole.User, text = Some(prompt)))
-            ))(using ctx)
+        case Some(model) => LanguageModel
+            .callAndRecordUsage(
+              model,
+              LmRequest(model = model.id, messages = Vector(Message(role = MessageRole.User, text = Some(prompt))))
+            )(using ctx)
             .map(_.outputs.headOption.map(_.text).getOrElse(""))
 
     val llmQuery = SandboxTool(

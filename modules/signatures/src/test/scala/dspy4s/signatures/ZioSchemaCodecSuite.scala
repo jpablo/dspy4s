@@ -1,8 +1,12 @@
 package dspy4s.signatures
 
-import dspy4s.core.contracts.{:=, DynamicValues, TypeRef}
+import dspy4s.core.contracts.{:=, DynamicValues, NotFoundError, ToolCall, TypeRef, ValidationError}
 import munit.FunSuite
+import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
+
+import scala.concurrent.duration.*
+import scala.concurrent.{Await, ExecutionContext, Future, TimeoutException}
 
 // Top-level fixtures (Mirror derivation needs them outside the suite).
 enum ZsSentiment:
@@ -32,8 +36,23 @@ case class ZsOptionProbe(amount: Option[Double], note: String)
 object ZsOptionProbe:
   given Schema[ZsOptionProbe] = Schema.derived
 
-/** The spine is now `DynamicValue.Record` end-to-end -- there is no `Map[String, Any]` intermediate -- so the
-  * historical tests that exercised the `dynamicToAny` / `anyToDynamic` converters are gone (those helpers were
+// Three levels of nesting: a record, a sequence of records, and a record of that sequence.
+final case class ZsStep(action: String, comment: Option[String]) derives Schema
+final case class ZsStage(label: String, steps: Vector[ZsStep], owner: Option[String]) derives Schema
+final case class ZsPipeline(stage: ZsStage, summary: Option[String]) derives Schema
+
+final case class ZsToolPlan(thought: String, toolCalls: Vector[ToolCall], last: Option[ToolCall]) derives Schema
+
+// Recursive types: through a list, through an `Option`, and through a sealed trait.
+final case class ZsNode(label: String, children: List[ZsNode]) derives Schema
+final case class ZsChain(label: String, next: Option[ZsChain]) derives Schema
+sealed trait ZsExpr derives Schema
+final case class ZsNum(value: Int)                  extends ZsExpr derives Schema
+final case class ZsAdd(left: ZsExpr, right: ZsExpr) extends ZsExpr derives Schema
+final case class ZsHolder(node: ZsNode, chain: Option[ZsChain], expr: ZsExpr) derives Schema
+
+/** The interchange format is now `DynamicValue.Record` end-to-end -- there is no `Map[String, Any]` intermediate -- so
+  * the historical tests that exercised the `dynamicToAny` / `anyToDynamic` converters are gone (those helpers were
   * deleted). What remains exercises `fieldSpecsFromReflect`, `normalize`, and the native `encode` / `decode` round-trip
   * through `DynamicValue.Record`.
   */
@@ -159,4 +178,135 @@ class ZioSchemaCodecSuite extends FunSuite:
     val encoded = shape.encode(value)
     val decoded = shape.decode(encoded)
     assertEquals(decoded, Right(value))
+  }
+
+  // ── Absent fields (PORT_GAPS G-28) ──────────────────────────────────────────────────────────────────────────
+
+  private def step(entries: (String, DynamicValue)*): DynamicValue = DynamicValues.recordFromEntries(entries)
+
+  private def stage(entries: (String, DynamicValue)*): DynamicValue.Record =
+    DynamicValues.record("stage" -> DynamicValues.recordFromEntries(entries))
+
+  test("decode gives None for an optional field that is absent, at each level of nesting") {
+    val shape  = Shape.derived[ZsPipeline]
+    val record = stage(
+      "label" := "build",
+      "steps" ->
+        DynamicValue.Sequence(Chunk(step("action" := "compile"), step("action" := "test", "comment" := "slow")))
+    )
+    assertEquals(
+      shape.decode(record),
+      Right(ZsPipeline(
+        ZsStage("build", Vector(ZsStep("compile", None), ZsStep("test", Some("slow"))), owner = None),
+        summary = None
+      ))
+    )
+  }
+
+  test("decode fails for a required field that is absent at the top level") {
+    val shape = Shape.derived[ZsPipeline]
+    shape.decode(DynamicValues.record("summary" := "done")) match
+      case Left(error: NotFoundError) => assert(error.message.contains("stage"), error.message)
+      case other                      => fail(s"expected NotFoundError, got: $other")
+  }
+
+  test("decode fails for a required field that is absent from a nested record") {
+    val shape = Shape.derived[ZsPipeline]
+    // The stage has no `label`.
+    val noLabel = stage("steps" -> DynamicValue.Sequence(Chunk(step("action" := "compile"))))
+    // One step of the sequence has no `action`.
+    val noAction = stage("label" := "build", "steps" -> DynamicValue.Sequence(Chunk(step("comment" := "slow"))))
+    Vector("label" -> noLabel, "action" -> noAction).foreach { (field, record) =>
+      shape.decode(record) match
+        case Left(error: ValidationError) => assert(error.message.contains(field), error.message)
+        case other                        => fail(s"expected ValidationError for '$field', got: $other")
+    }
+  }
+
+  // ── JSON schema of a tool call (PORT_GAPS G-28) ─────────────────────────────────────────────────────────────
+
+  private def get(record: DynamicValue.Record, path: String*): Option[DynamicValue] =
+    path.foldLeft(Option[DynamicValue](record)) {
+      case (Some(current: DynamicValue.Record), key) => DynamicValues.recordGet(current, key)
+      case _                                         => None
+    }
+
+  private def keys(value: Option[DynamicValue]): Set[String] =
+    value match
+      case Some(record: DynamicValue.Record) => DynamicValues.recordKeys(record).toSet
+      case other                             => fail(s"expected a record, got: $other")
+
+  test("the JSON schema of an output type does not ask for the id of a tool call") {
+    val schema = Shape.derived[ZsToolPlan].jsonSchemaString.flatMap(DynamicValues.parseJsonRecord).get
+    assertEquals(keys(get(schema, "properties")), Set("thought", "toolCalls", "last"))
+    assertEquals(keys(get(schema, "properties", "toolCalls", "items", "properties")), Set("name", "args"))
+    assertEquals(keys(get(schema, "properties", "last", "properties")), Set("name", "args"))
+    // The canonical derivation of `Signature.derived` gives the same schema.
+    assertEquals(Shape.canonicalDerived[ZsToolPlan].jsonSchemaString, Shape.derived[ZsToolPlan].jsonSchemaString)
+  }
+
+  test("the JSON schema of a type with no tool call is the JSON schema of its Schema") {
+    assertEquals(
+      Shape.derived[ZsPipeline].jsonSchemaString,
+      Some(summon[Schema[ZsPipeline]].toJsonSchema.toJson.toString)
+    )
+    import ZsClassifyOutput.given
+    assertEquals(
+      ZioSchemaCodec.derivedFromZioSchema[ZsClassifyOutput].jsonSchemaString,
+      Some(summon[Schema[ZsClassifyOutput]].toJsonSchema.toJson.toString)
+    )
+  }
+
+  test("a tool call with an id still encodes and decodes with that id") {
+    val shape = Shape.derived[ZsToolPlan]
+    val call  = ToolCall("search", DynamicValues.record("query" := "cats"), id = Some("call_1"))
+    val plan  = ZsToolPlan("I search.", Vector(call), last = Some(call.copy(id = None)))
+    assertEquals(shape.decode(shape.encode(plan)), Right(plan))
+  }
+
+  // ── JSON schema of a recursive type ─────────────────────────────────────────────────────────────────────────
+
+  /** Runs `body` on a different thread. The test fails if `body` does not return in `limit`, so a hang becomes a
+    * failure.
+    */
+  private def withinTimeLimit[A](limit: FiniteDuration)(body: => A): A =
+    try Await.result(Future(body)(using ExecutionContext.global), limit)
+    catch case _: TimeoutException => fail(s"the call did not return in $limit")
+
+  private def jsonSchemaOf[A](using schema: Schema[A]): DynamicValue.Record =
+    val json = withinTimeLimit(10.seconds)(ZioSchemaCodec.jsonSchemaForModel(schema))
+    DynamicValues.parseJsonRecord(json).getOrElse(fail(s"not a JSON object: $json"))
+
+  private def refTo(name: String): DynamicValue = DynamicValues.record("$ref" := s"#/$$defs/$name")
+
+  private def elements(value: Option[DynamicValue]): Vector[DynamicValue] =
+    value match
+      case Some(sequence: DynamicValue.Sequence) => sequence.elements.toVector
+      case other                                 => fail(s"expected a sequence, got: $other")
+
+  test("the JSON schema of a recursive type returns and refers to the type by $ref") {
+    val schema = jsonSchemaOf[ZsNode]
+    // The root is a `$ref` to the definition of the type, as in upstream pydantic.
+    assertEquals(get(schema, "$ref"), Some(DynamicValue.Primitive(PrimitiveValue.String("#/$defs/ZsNode"))))
+    assertEquals(keys(get(schema, "$defs")), Set("ZsNode"))
+    assertEquals(keys(get(schema, "$defs", "ZsNode", "properties")), Set("label", "children"))
+    assertEquals(get(schema, "$defs", "ZsNode", "properties", "children", "items"), Some(refTo("ZsNode")))
+  }
+
+  test("each recursive type in an output type has a definition, through an Option and through a sealed trait") {
+    val schema = jsonSchemaOf[ZsHolder]
+    // The output type is not recursive, so its schema is the root.
+    assertEquals(get(schema, "$ref"), None)
+    assertEquals(keys(get(schema, "$defs")), Set("ZsNode", "ZsChain", "ZsExpr"))
+    assertEquals(get(schema, "properties", "node"), Some(refTo("ZsNode")))
+    assertEquals(get(schema, "properties", "expr"), Some(refTo("ZsExpr")))
+    // The definition is for the type in the `Option`, not for the `Option`.
+    assert(elements(get(schema, "properties", "chain", "anyOf")).contains(refTo("ZsChain")))
+    assert(elements(get(schema, "$defs", "ZsChain", "properties", "next", "anyOf")).contains(refTo("ZsChain")))
+    // A case of the sealed trait refers to the sealed trait.
+    val add = elements(get(schema, "$defs", "ZsExpr", "oneOf")).collectFirst {
+      case option: DynamicValue.Record if get(option, "properties", "ZsAdd").isDefined => option
+    }.getOrElse(fail("no ZsAdd case in the definition of ZsExpr"))
+    assertEquals(keys(get(add, "properties", "ZsAdd", "properties")), Set("left", "right"))
+    assertEquals(get(add, "properties", "ZsAdd", "properties", "left"), Some(refTo("ZsExpr")))
   }

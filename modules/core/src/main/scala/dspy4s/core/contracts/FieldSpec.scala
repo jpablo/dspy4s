@@ -12,10 +12,15 @@ import scala.util.matching.Regex
   *     [[FieldSpec.normalize]] defaults it to a placeholder like `"${question}"` so the prompt always names the slot.
   *   - [[prefix]] is the section header in adapter prompts (e.g. `"Question:"`); inferred from `name` by
   *     [[FieldSpec.inferPrefix]] when `None`.
-  *   - [[defaultValue]] is the fallback value rendered into demos by Chat / JSON / XML adapters when a demo example
-  *     omits this field. (Not used for live-call inputs.) Carried as a `DynamicValue` — the codec spine's value type —
-  *     so adapters render it through the same path as live values; lift plain Scala values via `Schema.toDynamicValue`
-  *     (the `:=` machinery).
+  *   - [[defaultValue]] is the default of the field (dspy's `default=` of a field). For an input field, an adapter
+  *     renders it when the live call has no value for the field (dspy's `Predict` fills input defaults). For an output
+  *     field, it is the value of the field when the response of the model does not have the field (dspy's
+  *     `apply_output_field_defaults`). A demo does not use it: a demo with no value for a field is an incomplete demo.
+  *     Carried as a `DynamicValue`, the value type of the interchange format, so adapters render it through the same
+  *     path as live values; lift plain Scala values via `Schema.toDynamicValue` (the `:=` machinery).
+  *   - [[optional]] is `true` for a field whose type permits no value (dspy's `Optional[T]` or `T | None`, an
+  *     `Option[T]` field of a typed signature). An output field that the response does not have takes its
+  *     [[defaultValue]], else a null when the field is optional. Else the response is a parse error.
   *   - [[constraints]] are human-readable constraint hints (e.g. `"greater than: 0"`, `"maximum length: 10"`) surfaced
   *     after the field description in prose adapters. Build them with [[FieldConstraints]] so the text matches Python
   *     DSPy's `PYDANTIC_CONSTRAINT_MAP`. Empty by default; only emitted when non-empty.
@@ -32,7 +37,8 @@ final case class FieldSpec(
     prefix      : Option[String]       = None,
     defaultValue: Option[DynamicValue] = None,
     enumValues  : Vector[String]       = Vector.empty,
-    constraints : Vector[Constraint]   = Vector.empty
+    constraints : Vector[Constraint]   = Vector.empty,
+    optional    : Boolean              = false
 ) derives CanEqual
 
 object FieldSpec:

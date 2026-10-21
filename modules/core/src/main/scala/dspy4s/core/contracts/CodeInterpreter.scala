@@ -38,7 +38,7 @@ object CodeInterpreterErrors:
   *   - `close()` releases any held resources (long-lived subprocesses, REPL handles). Idempotent. After `close()`,
   *     behavior of further `execute` calls is implementation-defined — most impls should fail fast.
   *
-  * Used by [[dspy4s.programs.strategies.CodeAct]], `ProgramOfThought`, and `RLM`.
+  * Used by `RLM`.
   */
 trait CodeInterpreter extends AutoCloseable:
   def execute(code: String): Either[DspyError, CodeResult]
@@ -55,6 +55,26 @@ trait ReplCodeInterpreter extends CodeInterpreter:
       code     : String,
       variables: Map[String, zio.blocks.schema.DynamicValue]
   ): Either[DspyError, CodeResult]
+
+/** An output field of the `SUBMIT(...)` signature of a sandbox (Python DSPy's `output_fields`): the name, and the
+  * Python type when it is known.
+  */
+final case class SandboxOutputField(name: String, pythonType: Option[String] = None)
+
+/** Builds one [[ReplCodeInterpreter]] for one program call, from the host tools and the output fields of `SUBMIT`. The
+  * caller closes the interpreter. A factory can run on more than one thread at the same time, so it must give a new
+  * interpreter for each call.
+  *
+  * A function literal `(tools, outputFields) => ...` converts to a factory with no execution instructions.
+  */
+trait ReplInterpreterFactory:
+  def apply(tools: Vector[SandboxTool], outputFields: Vector[SandboxOutputField]): ReplCodeInterpreter
+
+  /** The text that tells the model how the code of this interpreter runs (upgrade item I7, upstream
+    * `execution_instructions`). `RLM` puts it in its action prompt under "Execution environment:". An empty text gives
+    * no such part.
+    */
+  def executionInstructions: String = ""
 
 /** A host-side function callable BY NAME from inside a sandboxed interpreter (Python DSPy's
   * `PythonInterpreter(tools=...)`): sandboxed code calls `name(kwarg=...)`, the sandbox bridges the call back to the

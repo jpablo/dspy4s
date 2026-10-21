@@ -5,9 +5,9 @@
   * setup, direct calls, use-with-modules, multiple LMs, generation config, usage/errors). dspy4s ships a single
   * OpenAI-compatible provider ([[OpenAiLanguageModel]]), so the LiteLLM provider matrix collapses: OpenAI and any
   * OpenAI-compatible endpoint (Azure / Ollama / vLLM / SGLang / OpenRouter) are supported via the `baseUrl` overload;
-  * Gemini / Anthropic / Vertex / Databricks (LiteLLM-only) are out of scope. Also out of scope: the Responses API
-  * (`model_type= "responses"` — dspy4s only has `LmMode.Chat`), and custom-LM save/load (`dump_state`/`load_state`/
-  * `copy`, since dspy4s has no program persistence).
+  * Gemini / Anthropic / Vertex / Databricks (LiteLLM-only) are out of scope. The Responses API
+  * (`model_type="responses"`) is `OpenAiLanguageModel(mode = LmMode.Responses)`. Out of scope: custom-LM save/load
+  * (`dump_state`/`load_state`/`copy`, since dspy4s has no program persistence).
   *
   * Key shape differences:
   *   - `dspy.configure(lm=…)` → `RuntimeEnvironment.configure(RuntimeContext(lm = Some(lm), adapter = Some(…)))`; `with
@@ -19,12 +19,21 @@
 package dspy4s.examples.learn.programming
 
 import dspy4s.adapters.ChatAdapter
-import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, :=}
+import dspy4s.core.contracts.{
+  ContextWindowExceededError,
+  DspyError,
+  DynamicValues,
+  LmError,
+  LmRateLimitError,
+  RuntimeContext,
+  :=
+}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
 import dspy4s.core.contracts.LmUsage
 import dspy4s.lm.contracts.{LanguageModel, LmRequest, Message, MessageRole}
-import dspy4s.lm.providers.{JdkHttpTransport, OpenAiLanguageModel}
+import dspy4s.lm.providers.{HttpTimeouts, JdkHttpTransport, OpenAiLanguageModel}
+import scala.concurrent.duration.DurationInt
 import dspy4s.programs.strategies.ChainOfThought
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.signatures.Signature
@@ -56,7 +65,7 @@ object LanguageModels:
   // | # Local (Ollama / vLLM / SGLang) and other OpenAI-compatible providers: point base_url elsewhere.
   // | lm = dspy.LM("openai/meta-llama/Meta-Llama-3-8B-Instruct", api_base="http://localhost:7501/v1", api_key="")
   def openAiCompatible(model: String, apiKey: String, baseUrl: String): LanguageModel =
-    OpenAiLanguageModel(model, apiKey, baseUrl, new JdkHttpTransport(timeoutMillis = 60000))
+    OpenAiLanguageModel(model, apiKey, baseUrl, new JdkHttpTransport(HttpTimeouts(read = 60.seconds)))
 
   // Local servers that don't check credentials get a dedicated no-key constructor (a placeholder bearer token is
   // still sent — the wire format requires the header). Common base URLs: Ollama http://localhost:11434/v1, vLLM
@@ -156,21 +165,34 @@ object LanguageModels:
 
   // ── Handling LM errors (lines 253–269) ──
   // | try: answer = qa(question="…")
-  // | except dspy.ContextWindowExceededError / dspy.LMRateLimitError / dspy.LMError as e: …
-  // dspy4s never throws for an LM failure — every call returns `Either[DspyError, …]`, and `DspyError` carries a
-  // stable `code` + `message`. (There are no dedicated rate-limit / context-window subclasses yet; provider
-  // failures surface as `RuntimeError`.) Handle by matching the `Left`:
+  // | except dspy.ContextWindowExceededError: raise  # reduce the prompt size, the passages, or the demos
+  // | except dspy.LMRateLimitError as e: print(f"Rate limited by {e.provider}; retry after {e.retry_after} seconds")
+  // | except dspy.LMError as e: print(f"LM failed: code={e.code}, model={e.model}, request_id={e.request_id}")
+  // dspy4s does not throw for an LM failure. Each call returns `Either[DspyError, …]`. An LM failure is an `LmError`:
+  // its class tells the kind of the failure, and `details` holds the model, the provider, the HTTP status, the
+  // request id, and the retry hint. Match the `Left`:
   // --8<-- [start:lm-errors]
   def askHandlingErrors(question: String)(using RuntimeContext): String =
     ask(question) match
-      case Right(answer) => answer
-      case Left(err)     => s"LM failed: code=${err.code}, message=${err.message}"
+      case Right(answer)                       => answer
+      case Left(_: ContextWindowExceededError) => "Reduce the prompt, the retrieved passages, or the demos."
+      case Left(e: LmRateLimitError)           =>
+        val provider = e.details.provider.getOrElse("the provider")
+        val delay    = e.details.retryAfter.fold("an unknown delay")(_.toString)
+        s"Rate limited by $provider; retry after $delay"
+      case Left(e: LmError) =>
+        val model     = e.details.model.getOrElse("unknown")
+        val requestId = e.details.requestId.getOrElse("unknown")
+        s"LM failed: code=${e.code}, model=$model, request_id=$requestId"
+      case Left(err) => s"Failed: code=${err.code}, message=${err.message}"
   // --8<-- [end:lm-errors]
 
   // ── Responses API (lines 271–298) / Advanced custom LMs (lines 301–345) ──
-  // Out of scope: dspy4s has only `LmMode.Chat` (no `model_type="responses"`). You can write a custom provider
-  // by implementing the `LanguageModel` trait, but there is no `dump_state`/`load_state`/`copy` persistence —
-  // dspy4s programs aren't serialized.
+  // The Responses API is `OpenAiLanguageModel(mode = LmMode.Responses)`: the request goes to `/responses`, and the
+  // reply gives one output with its tool calls and its reasoning. A streamed call in that mode reads the events of the
+  // Responses stream.
+  // You can write a custom provider by implementing the `LanguageModel` trait, but there is no
+  // `dump_state`/`load_state`/`copy` persistence — dspy4s programs aren't serialized.
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.languageModelsMain"
 @main def languageModelsMain(): Unit =

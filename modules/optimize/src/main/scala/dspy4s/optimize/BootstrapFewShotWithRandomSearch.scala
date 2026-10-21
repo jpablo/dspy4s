@@ -43,11 +43,32 @@ final class BootstrapFewShotWithRandomSearch[P: {OptimizableStructure, ProgramRu
       trainset: Vector[Example],
       teacher : Option[P]               = None,
       valset  : Option[Vector[Example]] = None
+  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
+    Teleprompter.withCompileCallbacks(this, trainset, valset)(compileInScope(student, trainset, teacher, valset))
+
+  /** The work of [[compile]], inside its compile scope. */
+  private def compileInScope(
+      student : P,
+      trainset: Vector[Example],
+      teacher : Option[P],
+      valset  : Option[Vector[Example]]
   )(using ctx: RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    val ps                               = summon[OptimizableStructure[P]]
-    val effectiveValset: Vector[Example] = valset.getOrElse(trainset)
+    val ps = summon[OptimizableStructure[P]]
+    // No valset or an empty valset selects the trainset (upstream `self.valset = valset or trainset`,
+    // `dspy/teleprompt/random_search.py`).
+    val effectiveValset: Vector[Example] = valset.filter(_.nonEmpty).getOrElse(trainset)
+    // Each candidate gets its score from `Evaluate`, which rejects an empty devset. Stop before the bootstrap work.
+    if effectiveValset.isEmpty then return Left(OptimizerSupport.emptyEvalsetError(name))
+    // Two leaves with the same predictor key are a configuration error (decision D2). Stop before any run.
+    OptimizerSupport.requireDistinctKeys(student, teacher) match
+      case Left(error) => return Left(error)
+      case Right(())   => ()
 
     val candidates = mutable.ArrayBuffer.empty[(Int, P)]
+
+    // A configuration error of a bootstrap run stops the compile. Each other failure gives no candidate.
+    def addBootstrapped(seed: Int, result: Either[DspyError, OptimizationReport[P]]): Either[DspyError, Unit] =
+      OptimizerSupport.bootstrapCandidate(result).map(_.foreach(program => candidates += ((seed, program))))
 
     // seed -3: zero-shot (no demos)
     candidates += ((-3, ps.replace(student, ps.read(student).map(_.copy(demos = Vector.empty)))))
@@ -72,36 +93,37 @@ final class BootstrapFewShotWithRandomSearch[P: {OptimizableStructure, ProgramRu
       seed = config.seed
     )
     val bootstrapSeedMinus1 = new BootstrapFewShot[P](bootstrapConfig)
-    bootstrapSeedMinus1.compile(student, trainset, teacher) match
-      case Right(report) => candidates += ((-1, report.bestProgram))
-      case Left(_)       => ()
+    val unshuffled          = addBootstrapped(-1, bootstrapSeedMinus1.compile(student, trainset, teacher))
 
     // seeds 0..numCandidates-1: bootstrap with shuffled subset
-    (0 until config.numCandidates).foreach { seed =>
-      val subsetRng  = new scala.util.Random((config.seed + seed).toLong)
-      val shuffled   = Vector.from(subsetRng.shuffle(trainset))
-      val minSamples = 1
-      val maxSamples = math.max(minSamples, config.maxBootstrappedDemos)
-      val targetSize =
-        if maxSamples == minSamples then minSamples
-        else minSamples + subsetRng.nextInt(maxSamples - minSamples + 1)
-      val subset = shuffled.take(targetSize)
+    val bootstrapped = (0 until config.numCandidates).foldLeft(unshuffled) { (added, seed) =>
+      added.flatMap { _ =>
+        val subsetRng  = new scala.util.Random((config.seed + seed).toLong)
+        val shuffled   = Vector.from(subsetRng.shuffle(trainset))
+        val minSamples = 1
+        val maxSamples = math.max(minSamples, config.maxBootstrappedDemos)
+        val targetSize =
+          if maxSamples == minSamples then minSamples
+          else minSamples + subsetRng.nextInt(maxSamples - minSamples + 1)
+        val subset = shuffled.take(targetSize)
 
-      val candidateBootstrap = new BootstrapFewShot[P](
-        BootstrapFewShotConfig(
-          metric = Some(config.metric),
-          metricThreshold = config.metricThreshold,
-          maxBootstrappedDemos = config.maxBootstrappedDemos,
-          maxLabeledDemos = config.maxLabeledDemos,
-          maxRounds = config.maxRounds,
-          maxErrors = config.maxErrors,
-          seed = seed.toLong
+        val candidateBootstrap = new BootstrapFewShot[P](
+          BootstrapFewShotConfig(
+            metric = Some(config.metric),
+            metricThreshold = config.metricThreshold,
+            maxBootstrappedDemos = config.maxBootstrappedDemos,
+            maxLabeledDemos = config.maxLabeledDemos,
+            maxRounds = config.maxRounds,
+            maxErrors = config.maxErrors,
+            seed = seed.toLong
+          )
         )
-      )
-      candidateBootstrap.compile(student, subset, teacher) match
-        case Right(report) => candidates += ((seed, report.bestProgram))
-        case Left(_)       => ()
+        addBootstrapped(seed, candidateBootstrap.compile(student, subset, teacher))
+      }
     }
+    bootstrapped match
+      case Left(error) => return Left(error)
+      case Right(())   => ()
 
     var bestScore: Option[Double]                  = None
     var bestCandidate: Option[CandidateProgram[P]] = None

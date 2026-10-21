@@ -15,18 +15,43 @@ import java.time.Instant
   * records `failure = None`. A FAILED call is recorded only when [[RuntimeContext.captureFailureTraces]] is set (e.g.
   * by GEPA's reflective evaluation): `failure` carries the error message and `outputs` carries the raw model response
   * (`raw_response`) when the error is a parse failure. See PORT_GAPS G-12 (P-a).
+  *
+  * `predictor` is the [[PredictorKey]] of the predictor that recorded the entry. It is `None` for a module that is not
+  * a predictor (a composite such as `ReAct`), and for a module that ran inside a predictor (the `Predict` inside
+  * `ChainOfThought`). One call of a predictor thus gives exactly one entry with a key. `withinPredictor` is `true` for
+  * an entry of that second kind, so a reader can tell it apart from a module that declares no key.
   */
 final case class TraceEntry(
-    component: String,
-    inputs   : DynamicValue.Record,
-    outputs  : DynamicValue.Record,
-    failure  : Option[String] = None,
-    timestamp: Instant        = Instant.now()
+    component      : String,
+    inputs         : DynamicValue.Record,
+    outputs        : DynamicValue.Record,
+    failure        : Option[String]       = None,
+    timestamp      : Instant              = Instant.now(),
+    predictor      : Option[PredictorKey] = None,
+    withinPredictor: Boolean              = false
 )
 
+/** The identity of a predictor in a trace: its module name and the structure of its signature.
+  *
+  * A predictor writes this key into each [[TraceEntry]] that it records. An optimizer reads the key to find the entries
+  * of one optimizable leaf. `structure` never holds instructions, because an optimizer rewrites them, so the key is the
+  * same for each candidate of one program. Build a key with [[PredictorKey.from]].
+  *
+  * The key is not an object identity. Two predictors with the same module name and the same signature structure have
+  * the same key, and an optimizer rejects such a program.
+  */
+final case class PredictorKey(moduleName: String, structure: SignatureLayout) derives CanEqual:
+  require(structure.instructions.isEmpty, "PredictorKey.structure must not contain instructions")
+
+object PredictorKey:
+  /** The key of a predictor with this module name and this layout. The instructions of `layout` are dropped. */
+  def from(moduleName: String, layout: SignatureLayout): PredictorKey =
+    PredictorKey(moduleName, layout.withInstructions(None))
+
 /** A single observed LM (or module) call's payload, kept in [[RuntimeContext.history]] for inspection and -- for LM
-  * entries -- usage accounting. `component` is the module name or LM id; `payload` is the caller-defined snapshot. The
-  * history ring is capped by [[RuntimeContext.maxHistorySize]] in `RuntimeEnvironment.appendHistory`.
+  * entries -- usage accounting. `component` is the module name, or `lm:<id>` for an LM call; `payload` is the
+  * caller-defined snapshot. The history ring is capped by [[RuntimeContext.maxHistorySize]] in
+  * `RuntimeEnvironment.appendHistory`.
   */
 final case class HistoryEntry(component: String, payload: DynamicValue.Record, timestamp: Instant = Instant.now())
 

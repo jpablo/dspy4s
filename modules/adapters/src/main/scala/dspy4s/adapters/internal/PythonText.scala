@@ -1,0 +1,457 @@
+package dspy4s.adapters.internal
+
+import dspy4s.core.contracts.DynamicValues
+import upickle.core.BufferedValue
+import zio.blocks.chunk.Chunk
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+
+import scala.util.Try
+import scala.util.matching.Regex
+
+/** The text forms of Python that the prompts of upstream use: `str()` and `repr()` of a value, `json.dumps` with
+  * `ensure_ascii=False` and with ASCII escapes, `str.strip`, `str.splitlines`, and `textwrap.dedent`. The adapters use
+  * these forms so that a prompt is equal to the upstream prompt, character for character (decision D3). The parsers
+  * also read a JSON string and a Python string literal, as upstream `parse_value` reads them.
+  *
+  * A value is a `DynamicValue`. An `Option` value of a typed record (the `Some` and `None` variants) prints as its
+  * element or as `None`. An enum case with no fields prints as its case name.
+  */
+private[adapters] object PythonText:
+
+  /** Python `str.strip()`: no whitespace at the start and at the end. Python whitespace is `str.isspace`. Java
+    * `String.strip` is different: it keeps U+0085, U+00A0, U+2007, and U+202F.
+    */
+  def strip(text: String): String =
+    val start = text.indexWhere(char => !isSpace(char))
+    if start < 0 then ""
+    else text.substring(start, text.lastIndexWhere(char => !isSpace(char)) + 1)
+
+  /** Python `str.lstrip()`: no whitespace at the start. */
+  def lstrip(text: String): String =
+    val start = text.indexWhere(char => !isSpace(char))
+    if start < 0 then "" else text.substring(start)
+
+  /** Python `str.rstrip()`: no whitespace at the end. */
+  def rstrip(text: String): String =
+    text.substring(0, text.lastIndexWhere(char => !isSpace(char)) + 1)
+
+  /** The characters for which Python `str.isspace` is true (the list of the dspy venv, Python 3.12). Each one is in the
+    * Basic Multilingual Plane, so a test of each `Char` is a test of each code point.
+    */
+  def isSpace(char: Char): Boolean =
+    char match
+      case ' ' | '\t' | '\n' | '\u000b' | '\u000c' | '\r' | '\u001c' | '\u001d' | '\u001e' | '\u001f' | '\u0085' |
+          ' ' | ' ' | ' ' | ' ' | ' ' | ' ' | '　' => true
+      case other => other >= ' ' && other <= ' '
+
+  /** Python `str.splitlines()`: the lines of `text` with no line break. `\r\n` is one line break. There is no empty
+    * last line for a line break at the end.
+    */
+  def splitLines(text: String): Vector[String] =
+    val lines = Vector.newBuilder[String]
+    var start = 0
+    var index = 0
+    while index < text.length do
+      val char = text.charAt(index)
+      if isLineBreak(char) then
+        lines += text.substring(start, index)
+        if char == '\r' && index + 1 < text.length && text.charAt(index + 1) == '\n' then index += 1
+        start = index + 1
+      index += 1
+    if start < text.length then lines += text.substring(start)
+    lines.result()
+
+  /** The line breaks of Python `str.splitlines`. Each one is also whitespace ([[isSpace]]). */
+  def isLineBreak(char: Char): Boolean =
+    char match
+      case '\n' | '\u000b' | '\u000c' | '\r' | '\u001c' | '\u001d' | '\u001e' | '\u0085' | ' ' | ' ' => true
+      case _                                                                                         => false
+
+  /** The text of the JSON string `text`: the text between the double quotes at its two ends, with each JSON escape
+    * decoded (`json_repair.loads` of a JSON string). `None` when `text` is not one JSON string: it has no double quote
+    * at each end, it has a double quote or a line break inside, or it has an escape that JSON does not have.
+    */
+  def jsonString(text: String): Option[String] =
+    quotedBody(text, '"').flatMap(body => unescape(body, '"', jsonEscape))
+
+  /** The text of the Python string literal `text` (`ast.literal_eval` of a `str` literal): the text between the quotes
+    * (`'` or `"`) at its two ends, after an optional prefix `u`, `U`, `r`, or `R`. Each Python escape is decoded,
+    * except in a raw literal (`r` or `R`). An escape that Python does not know keeps its backslash. `None` when `text`
+    * is not one such literal: another prefix, a quote of the literal or a line break inside, a bad escape, or a
+    * `\N{...}` escape. A literal in triple quotes, two literals in sequence, and a literal in parentheses are not read.
+    */
+  def stringLiteral(text: String): Option[String] =
+    val (prefix, literal) = text.span(_.isLetter)
+    val raw               = prefix == "r" || prefix == "R"
+    Option
+      .when(prefix.isEmpty || prefix == "u" || prefix == "U" || raw)(literal)
+      .flatMap(_.headOption)
+      .filter(quote => quote == '\'' || quote == '"')
+      .flatMap(quote =>
+        quotedBody(literal, quote).flatMap(body => unescape(body, quote, if raw then rawEscape else pythonEscape))
+      )
+
+  /** The text between the two `quote` characters at the ends of `text`, or `None`. */
+  private def quotedBody(text: String, quote: Char): Option[String] =
+    Option.when(text.length > 1 && text.head == quote && text.last == quote)(text.substring(1, text.length - 1))
+
+  /** The text of the body `body` of a string in `quote` characters, with each escape that `escape` decodes. `escape`
+    * gets the body and the index after a backslash, and gives the decoded text and the next index, or `None` for a bad
+    * escape. `None` when the body has a bad escape, a `quote` character, or a line break that is not in an escape.
+    */
+  private def unescape(body: String, quote: Char, escape: (String, Int) => Option[(String, Int)]): Option[String] =
+    val out   = new StringBuilder
+    var index = 0
+    var valid = true
+    while valid && index < body.length do
+      val char = body.charAt(index)
+      if char == '\\' then
+        escape(body, index + 1) match
+          case Some((decoded, next)) =>
+            out.append(decoded)
+            index = next
+          case None => valid = false
+      else if char == quote || char == '\n' || char == '\r' then valid = false
+      else
+        out.append(char)
+        index += 1
+    Option.when(valid)(out.toString)
+
+  /** A JSON escape: `\"`, `\\`, `\/`, `\b`, `\f`, `\n`, `\r`, `\t`, or `\u` and four hexadecimal digits. */
+  private def jsonEscape(body: String, index: Int): Option[(String, Int)] =
+    charAt(body, index).flatMap {
+      case 'u'  => hexCode(body, index + 1, 4).map(code => (code.toChar.toString, index + 5))
+      case char => JsonEscapes.get(char).map(decoded => (decoded, index + 1))
+    }
+
+  private val JsonEscapes: Map[Char, String] =
+    Map('"' -> "\"", '\\' -> "\\", '/' -> "/", 'b' -> "\b", 'f' -> "\f", 'n' -> "\n", 'r' -> "\r", 't' -> "\t")
+
+  /** A Python escape of a `str` literal: a line break (a line continuation, which gives no text), a simple escape, one
+    * to three octal digits, or `\x`, `\u`, and `\U` with two, four, and eight hexadecimal digits. Each other character
+    * keeps the backslash. `\N{...}` is not read.
+    */
+  private def pythonEscape(body: String, index: Int): Option[(String, Int)] =
+    charAt(body, index).flatMap {
+      case '\n' => Some(("", index + 1))
+      case '\r' => Some(("", if charAt(body, index + 1).contains('\n') then index + 2 else index + 1))
+      case 'x'  => hexCode(body, index + 1, 2).map(code => (Character.toString(code), index + 3))
+      case 'u'  => hexCode(body, index + 1, 4).map(code => (Character.toString(code), index + 5))
+      case 'U'  => hexCode(body, index + 1, 8).filter(Character.isValidCodePoint).map(code =>
+          (Character.toString(code), index + 9)
+        )
+      case 'N'                     => None
+      case octal if isOctal(octal) =>
+        val digits = body.substring(index, math.min(index + 3, body.length)).takeWhile(isOctal)
+        Some((Character.toString(Integer.parseInt(digits, 8)), index + digits.length))
+      case char => Some((PythonEscapes.getOrElse(char, s"\\$char"), index + 1))
+    }
+
+  private val PythonEscapes: Map[Char, String] = Map(
+    '\\' -> "\\",
+    '\'' -> "'",
+    '"'  -> "\"",
+    'a'  -> "\u0007",
+    'b'  -> "\b",
+    'f'  -> "\f",
+    'n'  -> "\n",
+    'r'  -> "\r",
+    't'  -> "\t",
+    'v'  -> "\u000b"
+  )
+
+  /** An escape of a raw Python literal: the backslash and the next character stay. */
+  private def rawEscape(body: String, index: Int): Option[(String, Int)] =
+    charAt(body, index).map(char => (s"\\$char", index + 1))
+
+  private def isOctal(char: Char): Boolean = char >= '0' && char <= '7'
+
+  /** The character at `index` of `text`, or `None` after the end. */
+  private def charAt(text: String, index: Int): Option[Char] =
+    Option.when(index < text.length)(text.charAt(index))
+
+  /** The number of the `count` hexadecimal digits at `index` of `text`, or `None`. */
+  private def hexCode(text: String, index: Int, count: Int): Option[Int] =
+    Option
+      .when(index + count <= text.length)(text.substring(index, index + count))
+      .filter(digits => digits.forall(char => Character.digit(char, 16) >= 0))
+      .map(digits => Integer.parseUnsignedInt(digits, 16))
+
+  /** Python `textwrap.dedent`: the text with no common leading spaces and tabs. A line of spaces and tabs only becomes
+    * an empty line.
+    */
+  def dedent(text: String): String =
+    val cleaned = WhitespaceOnlyLine.replaceAllIn(text, "")
+    val indents = LeadingWhitespace.findAllMatchIn(cleaned).map(_.group(1)).toVector
+    val margin  = indents.headOption.map { first =>
+      indents.tail.foldLeft(first) { (margin, indent) =>
+        if indent.startsWith(margin) then margin
+        else if margin.startsWith(indent) then indent
+        else margin.zip(indent).takeWhile(_ == _).map(_._1).mkString
+      }
+    }
+    margin.filter(_.nonEmpty).fold(cleaned)(prefix => s"(?m)^${Regex.quote(prefix)}".r.replaceAllIn(cleaned, ""))
+
+  // The patterns of `textwrap`. The flag `d` makes `\n` the only line break, as in Python.
+  private val WhitespaceOnlyLine: Regex = "(?md)^[ \t]+$".r
+  private val LeadingWhitespace: Regex  = "(?md)(^[ \t]*)(?:[^ \t\n])".r
+
+  /** Python `str(value)`. A string is the text itself. A list, a dict, or a record is the JSON text of [[json]]. */
+  def str(value: DynamicValue): String =
+    unwrap(value) match
+      case DynamicValue.Primitive(PrimitiveValue.String(text))  => text
+      case DynamicValue.Primitive(PrimitiveValue.Boolean(flag)) => if flag then "True" else "False"
+      case DynamicValue.Primitive(PrimitiveValue.Char(char))    => char.toString
+      case DynamicValue.Primitive(_: PrimitiveValue.Unit.type)  => "None"
+      case _: DynamicValue.Null.type                            => "None"
+      case EnumCase(name)                                       => name
+      case NumberText(text)                                     => text
+      case primitive: DynamicValue.Primitive                    => DynamicValues.renderText(primitive)
+      case other                                                => json(other)
+
+  /** Python `json.dumps(value, ensure_ascii=False)`, with the separators `", "` and `": "`. With `indent`, the form of
+    * `json.dumps(value, indent=indent, ensure_ascii=False)`.
+    */
+  def json(value: DynamicValue, indent: Option[Int] = None): String =
+    val out = new StringBuilder
+    writeJson(value, JsonStyle(indent, ascii = false), 0, out)
+    out.toString
+
+  /** Python `json.dumps(value)` with the default `ensure_ascii=True`: as [[json]], but each character that is not a
+    * printable ASCII character is an escape (a backslash, `u`, and four hexadecimal digits). A character above U+FFFF
+    * is two escapes (a surrogate pair).
+    */
+  def jsonAscii(value: DynamicValue): String =
+    val out = new StringBuilder
+    writeJson(value, JsonStyle(indent = None, ascii = true), 0, out)
+    out.toString
+
+  /** The options of `json.dumps`: `indent`, and `ascii` for `ensure_ascii=True`. */
+  private final case class JsonStyle(indent: Option[Int], ascii: Boolean)
+
+  private def writeJson(value: DynamicValue, style: JsonStyle, level: Int, out: StringBuilder): Unit =
+    def writeFields(fields: Vector[(String, DynamicValue)]): Unit = writeObject(fields, style, level, out)
+    def writeText(text    : String): Unit                         = quote(text, style.ascii, out)
+    unwrap(value) match
+      case _: DynamicValue.Null.type                             => out ++= "null"
+      case DynamicValue.Primitive(PrimitiveValue.String(text))   => writeText(text)
+      case DynamicValue.Primitive(PrimitiveValue.Char(char))     => writeText(char.toString)
+      case DynamicValue.Primitive(PrimitiveValue.Boolean(flag))  => out ++= (if flag then "true" else "false")
+      case DynamicValue.Primitive(_: PrimitiveValue.Unit.type)   => out ++= "null"
+      case DynamicValue.Primitive(PrimitiveValue.Double(number)) => out ++= jsonFloat(number, float(number))
+      case DynamicValue.Primitive(PrimitiveValue.Float(number))  => out ++= jsonFloat(number.toDouble, float32(number))
+      case NumberText(text)                                      => out ++= text
+      case primitive: DynamicValue.Primitive                     => writeText(DynamicValues.renderText(primitive))
+      case EnumCase(name)                                        => writeText(name)
+      case DynamicValue.Variant(caseName, inner)                 => writeFields(Vector(caseName -> inner))
+      case record: DynamicValue.Record                           => writeFields(record.fields.toVector)
+      case map: DynamicValue.Map                                 => writeFields(entriesOf(map))
+      case sequence: DynamicValue.Sequence                       =>
+        writeContainer(sequence.elements.toVector, "[", "]", style.indent, level, out)((item, nested) =>
+          writeJson(item, style, nested, out)
+        )
+
+  private def writeObject(
+      fields: Vector[(String, DynamicValue)],
+      style : JsonStyle,
+      level : Int,
+      out   : StringBuilder
+  ): Unit =
+    writeContainer(fields, "{", "}", style.indent, level, out) { (field, nested) =>
+      quote(field._1, style.ascii, out)
+      out ++= ": "
+      writeJson(field._2, style, nested, out)
+    }
+
+  /** The items between `open` and `close`. With no indent, the separator is `", "`. With an indent, each item is on a
+    * line of its own, and the separator is `","`. An empty container is `open` and `close` only.
+    */
+  private def writeContainer[A](
+      items : Vector[A],
+      open  : String,
+      close : String,
+      indent: Option[Int],
+      level : Int,
+      out   : StringBuilder
+  )(writeItem: (A, Int) => Unit): Unit =
+    out ++= open
+    if items.nonEmpty then
+      indent match
+        case Some(width) =>
+          val inner = "\n" + " " * (width * (level + 1))
+          items.zipWithIndex.foreach { (item, index) =>
+            if index > 0 then out += ','
+            out ++= inner
+            writeItem(item, level + 1)
+          }
+          out ++= "\n" + " " * (width * level)
+        case None => items.zipWithIndex.foreach { (item, index) =>
+            if index > 0 then out ++= ", "
+            writeItem(item, level)
+          }
+    out ++= close
+
+  private def entriesOf(map: DynamicValue.Map): Vector[(String, DynamicValue)] =
+    map.entries.toVector.map((key, item) => keyText(key) -> item)
+
+  /** The key of a map entry: Python `json.dumps` writes a bool, a number, and a null key as its JSON text. */
+  private def keyText(key: DynamicValue): String =
+    unwrap(key) match
+      case DynamicValue.Primitive(PrimitiveValue.String(text))  => text
+      case DynamicValue.Primitive(PrimitiveValue.Boolean(flag)) => if flag then "true" else "false"
+      case _: DynamicValue.Null.type                            => "null"
+      case NumberText(text)                                     => text
+      case other                                                => DynamicValues.renderText(other)
+
+  /** The JSON string of `text` (Python `encode_basestring`): `"` and `\` escaped, a control character escaped, and each
+    * other character as it is. With `ascii` (Python `encode_basestring_ascii`), each character that is not in the range
+    * from a space to `~` is also an escape.
+    */
+  private def quote(text: String, ascii: Boolean, out: StringBuilder): Unit =
+    out += '"'
+    text.foreach {
+      case '"'                                         => out ++= "\\\""
+      case '\\'                                        => out ++= "\\\\"
+      case '\n'                                        => out ++= "\\n"
+      case '\r'                                        => out ++= "\\r"
+      case '\t'                                        => out ++= "\\t"
+      case '\b'                                        => out ++= "\\b"
+      case '\f'                                        => out ++= "\\f"
+      case char if char < ' ' || (ascii && char > '~') => out ++= f"\\u${char.toInt}%04x"
+      case char                                        => out += char
+    }
+    out += '"'
+
+  /** The Python text of an integer, a float, or a decimal value. */
+  private object NumberText:
+    def unapply(value: DynamicValue): Option[String] =
+      value match
+        case DynamicValue.Primitive(PrimitiveValue.Int(number))        => Some(number.toString)
+        case DynamicValue.Primitive(PrimitiveValue.Long(number))       => Some(number.toString)
+        case DynamicValue.Primitive(PrimitiveValue.Short(number))      => Some(number.toString)
+        case DynamicValue.Primitive(PrimitiveValue.Byte(number))       => Some(number.toString)
+        case DynamicValue.Primitive(PrimitiveValue.BigInt(number))     => Some(number.toString)
+        case DynamicValue.Primitive(PrimitiveValue.BigDecimal(number)) => Some(number.toString)
+        case DynamicValue.Primitive(PrimitiveValue.Double(number))     => Some(float(number))
+        case DynamicValue.Primitive(PrimitiveValue.Float(number))      => Some(float32(number))
+        case _                                                         => None
+
+  /** An enum case with no fields: its case name. */
+  private object EnumCase:
+    def unapply(value: DynamicValue): Option[String] =
+      value match
+        case DynamicValue.Variant(caseName, DynamicValue.Record(fields)) if fields.isEmpty => Some(caseName)
+        case _                                                                             => None
+
+  /** A float in a JSON text: `NaN`, `Infinity`, and `-Infinity` for the values that are not finite, as Python
+    * `json.dumps`. Each other value is `text`.
+    */
+  private def jsonFloat(number: Double, text: String): String =
+    if number.isNaN then "NaN"
+    else if number.isPosInfinity then "Infinity"
+    else if number.isNegInfinity then "-Infinity"
+    else text
+
+  /** The element of an `Option` value (the `Some` variant), and a null for the `None` variant. Each other value stays
+    * as it is.
+    */
+  private def unwrap(value: DynamicValue): DynamicValue =
+    value match
+      case DynamicValue.Variant("None", DynamicValue.Record(fields)) if fields.isEmpty => DynamicValue.Null
+      case DynamicValue.Variant("Some", DynamicValue.Record(fields))
+          if fields.size == 1 && fields.headOption.exists(_._1 == "value") =>
+        fields.headOption.fold(value)(field => unwrap(field._2))
+      case other => other
+
+  /** Python `repr(number)`: the shortest digits that give the same float, a fixed point form for an exponent from -4 to
+    * 15 (with `.0` for an integral value), and else the exponent form, for example `1e-05` and `1e+16`.
+    */
+  def float(number: Double): String =
+    if number.isNaN then "nan"
+    else if number.isInfinite then (if number > 0 then "inf" else "-inf")
+    else
+      val sign            = if java.lang.Double.compare(number, 0.0) < 0 then "-" else ""
+      val magnitude       = math.abs(number)
+      val (digits, point) = shortest(java.lang.Double.toString(magnitude), text => text.toDouble == magnitude)
+      sign + layout(digits, point)
+
+  /** [[float]] for a 32-bit float: the shortest digits that give the same 32-bit float. */
+  private def float32(number: Float): String =
+    if number.isNaN then "nan"
+    else if number.isInfinite then (if number > 0 then "inf" else "-inf")
+    else
+      val sign            = if java.lang.Float.compare(number, 0.0f) < 0 then "-" else ""
+      val magnitude       = math.abs(number)
+      val (digits, point) = shortest(java.lang.Float.toString(magnitude), text => text.toFloat == magnitude)
+      sign + layout(digits, point)
+
+  /** The digits and the decimal point of the Java text of a positive number: the number is `0.<digits> × 10^point`.
+    * Java gives the shortest digits, but it can give two digits where one digit also gives the same number. Python then
+    * uses the one digit, so this function checks the one-digit forms. `same` tells if a decimal text gives the same
+    * number.
+    */
+  private def shortest(javaText: String, same: String => Boolean): (String, Int) =
+    val (mantissa, exponent) = javaText.indexOf('E') match
+      case -1 => (javaText, 0)
+      case at => (javaText.substring(0, at), javaText.substring(at + 1).toInt)
+    val dot     = mantissa.indexOf('.')
+    val whole   = if dot < 0 then mantissa else mantissa.substring(0, dot)
+    val all     = if dot < 0 then mantissa else whole + mantissa.substring(dot + 1)
+    val leading = all.indexWhere(_ != '0')
+    if leading < 0 then ("0", 1)
+    else
+      val digits = all.substring(leading).reverse.dropWhile(_ == '0').reverse
+      val point  = whole.length + exponent - leading
+      if digits.length != 2 then (digits, point)
+      else
+        val first      = digits.head.asDigit
+        val candidates =
+          Vector((first.toString, point), (if first == 9 then ("1", point + 1) else ((first + 1).toString, point)))
+            .filter((digit, at) => same(s"0.${digit}E$at"))
+        val exact = BigDecimal(s"0.${digits}E$point")
+        candidates.minByOption((digit, at) => (BigDecimal(s"0.${digit}E$at") - exact).abs).getOrElse((digits, point))
+
+  /** The Python `repr` layout of `0.<digits> × 10^point` (`format_float_short` with the mode `r`). */
+  private def layout(digits: String, point: Int): String =
+    if point <= -4 || point > 16 then
+      val exponent = point - 1
+      val mantissa = if digits.length > 1 then s"${digits.head}.${digits.tail}" else digits
+      f"${mantissa}e${if exponent < 0 then "-" else "+"}${math.abs(exponent)}%02d"
+    else if point <= 0 then "0." + "0" * -point + digits
+    else if point >= digits.length then digits + "0" * (point - digits.length) + ".0"
+    else s"${digits.substring(0, point)}.${digits.substring(point)}"
+
+  /** The value of a JSON text, or `None` when the text is not JSON. A number with a decimal point or an exponent is a
+    * float, and each other number is an integer, so [[json]] writes the number again as the text has it.
+    */
+  def parseJson(text: String): Option[DynamicValue] =
+    Try(ujson.transform(ujson.Readable.fromString(text), BufferedValue.Builder)).toOption.flatMap(fromBuffered)
+
+  private def fromBuffered(value: BufferedValue): Option[DynamicValue] =
+    value match
+      case BufferedValue.Str(text, _)                     => Some(primitive(PrimitiveValue.String(text.toString)))
+      case BufferedValue.Num(text, decIndex, expIndex, _) => Some(number(text.toString, decIndex < 0 && expIndex < 0))
+      case BufferedValue.True(_)                          => Some(primitive(PrimitiveValue.Boolean(true)))
+      case BufferedValue.False(_)                         => Some(primitive(PrimitiveValue.Boolean(false)))
+      case BufferedValue.Null(_)                          => Some(DynamicValue.Null)
+      case BufferedValue.Arr(items, _)                    =>
+        val values = items.toVector.map(fromBuffered)
+        Option.when(values.forall(_.isDefined))(DynamicValue.Sequence(Chunk.from(values.flatten)))
+      case BufferedValue.Obj(items, _, _) =>
+        val fields = items.toVector.map {
+          case (BufferedValue.Str(key, _), item) => fromBuffered(item).map(key.toString -> _)
+          case _                                 => None
+        }
+        Option.when(fields.forall(_.isDefined))(DynamicValue.Record(Chunk.from(fields.flatten)))
+      case _ => None
+
+  private def primitive(value: PrimitiveValue): DynamicValue = DynamicValue.Primitive(value)
+
+  private def number(text: String, integral: Boolean): DynamicValue =
+    if integral then
+      primitive(
+        text.toIntOption.map(PrimitiveValue.Int(_))
+          .orElse(text.toLongOption.map(PrimitiveValue.Long(_)))
+          .getOrElse(PrimitiveValue.BigInt(BigInt(text)))
+      )
+    else primitive(PrimitiveValue.Double(text.toDouble))

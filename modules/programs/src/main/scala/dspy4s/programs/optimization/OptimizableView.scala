@@ -1,6 +1,6 @@
 package dspy4s.programs.optimization
 
-import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.{PredictorKey, SignatureLayout}
 
 /** Read-only information about one optimizable leaf.
   *
@@ -10,6 +10,11 @@ import dspy4s.core.contracts.SignatureLayout
   */
 final case class OptimizableMetadata(structure: SignatureLayout, moduleName: String) derives CanEqual:
   require(structure.instructions.isEmpty, "OptimizableMetadata.structure must not contain writable instructions")
+
+  /** The key that the predictor of this leaf writes into its trace entries. `replace` cannot change the metadata (the
+    * `frame` law of [[OptimizableLeaf]]), so the key is the same for each candidate of one program.
+    */
+  def key: PredictorKey = PredictorKey(moduleName, structure)
 
 object OptimizableMetadata:
   /** Capture a layout's read-only structure, stripping its writable instructions. */

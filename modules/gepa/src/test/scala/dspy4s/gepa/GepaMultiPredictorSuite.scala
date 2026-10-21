@@ -26,6 +26,8 @@ import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
+import scala.collection.mutable.ArrayBuffer
+
 /** Two-predictor pipeline: `hinter` produces a hint, `answerer` answers using it. Top-level so
   * `OptimizableStructure.derived` sees its Mirror field labels ("hinter", "answerer").
   */
@@ -73,7 +75,7 @@ class GepaMultiPredictorSuite extends FunSuite:
       val instr  =
         if prompt.contains("Stage one") || prompt.contains("TOKEN1") then "Use TOKEN1 to produce a good_hint."
         else "Use TOKEN2 with the good_hint to answer."
-      Right(LmResponse(outputs = Vector(LmOutput(text = s"```\n$instr\n```"))))
+      Right(LmResponse(outputs = Vector(LmOutput(text = ReflectionFixtures.reply(instr)))))
 
   private val metric: FeedbackMetric = new FeedbackMetric:
     override def name: String = "exact_answer"
@@ -115,7 +117,7 @@ class GepaMultiPredictorSuite extends FunSuite:
       metric,
       new ReflectionLm,
       GepaConfig(
-        maxMetricCalls = MetricCallCount(30),
+        budget = GepaBudget.MetricCalls(MetricCallCount(30)),
         reflectionMinibatchSize = MinibatchSize(2),
         componentSelector = ComponentSelector.All,
         seed = 1L
@@ -124,7 +126,8 @@ class GepaMultiPredictorSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result           = gepa.compile(pipeline, trainset = dataset, valset = dataset)
+      val result           =
+        gepa.compile(pipeline, trainset = dataset, valset = dataset).fold(error => fail(error.message), identity)
 
       assertEquals(result.bestScore, 1.0)
       // Both components were evolved to carry their required token (per-component reflection + association worked).
@@ -136,5 +139,53 @@ class GepaMultiPredictorSuite extends FunSuite:
         result.bestCandidate(OptimizableId(1)).exists(_.contains("TOKEN2")),
         result.bestCandidate(OptimizableId(1))
       )
+    }
+  }
+
+  // ── The round-robin pointer after an iteration that adds no candidate (PORT_GAPS G-44) ──────────────────────────
+  // gepa runs its component selector in each iteration that passes the skip checks. The pointer of the parent then
+  // moves, also when the iteration adds no candidate.
+
+  /** Records the component of each request. A request with an index in `silent` gets a response with no output. A new
+    * text holds the token of its stage and not the text `good_hint`, so one new text does not change the answer.
+    */
+  private final class RecordingReflectionLm(silent: Set[Int]) extends LanguageModel:
+    val components: ArrayBuffer[String]                                                        = ArrayBuffer.empty
+    override val id: String                                                                    = "reflect"
+    override val mode: LmMode                                                                  = LmMode.Chat
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      val prompt             = request.messages.flatMap(_.text).mkString("\n")
+      val (component, instr) =
+        if prompt.contains("Stage one") then ("hinter", "Use TOKEN1.") else ("answerer", "Use TOKEN2.")
+      val index = components.synchronized {
+        components += component
+        components.size - 1
+      }
+      val outputs = if silent(index) then Vector.empty else Vector(LmOutput(text = ReflectionFixtures.reply(instr)))
+      Right(LmResponse(outputs = outputs))
+
+  test("an iteration that adds no candidate moves the round-robin pointer of its parent") {
+    // The engine calls the proposer two times for an iteration that fails. The two requests of iteration 1 get no new
+    // text, so iteration 1 makes no proposal. One fix does not change the answer, so iterations 2 and 3 reject their
+    // candidates. The seed is the parent of each iteration.
+    val reflection = new RecordingReflectionLm(silent = Set(0, 1))
+    // The seed validation costs 4 calls. The budget then holds three iterations of 2, 4, and 4 calls.
+    val gepa = new Gepa[Pipeline](
+      metric,
+      reflection,
+      GepaConfig(
+        budget = GepaBudget.MetricCalls(MetricCallCount(20)),
+        reflectionMinibatchSize = MinibatchSize(2),
+        seed = 1L
+      )
+    )
+
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result           =
+        gepa.compile(pipeline, trainset = dataset, valset = dataset).fold(error => fail(error.message), identity)
+
+      assertEquals(result.numCandidates.toInt, 1)
+      assertEquals(reflection.components.toVector, Vector("hinter", "hinter", "answerer", "hinter"))
     }
   }
