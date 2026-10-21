@@ -1,6 +1,7 @@
 # Code harness: analysis and design proposals
 
-Status: proposal, 2026-10-19. Nothing in this document exists in the code yet.
+Status: proposal, 2026-10-19, with section 7 added on 2026-10-21. Nothing in this document exists in the code
+yet.
 
 ## Summary
 
@@ -17,8 +18,11 @@ Status: proposal, 2026-10-19. Nothing in this document exists in the code yet.
 - Design A makes the harness an RLM configuration. Design B makes a session algebra in which RLM is the
   meaning of a code step. Design C keeps the kernel of design B and replaces its compaction with the
   uniichat memory tree.
-- The recommendation is design C, built in phases on the kernel of design B, after a short experiment with the
-  embedded REPL.
+- Section 7 extends design C. Work sessions have a pluggable context strategy, and the memory tree is one of
+  the strategies. One controller conversation that never ends uses the memory tree, starts the sessions, and
+  sees each session through a ledger, a knowledge graph with time and a pluggable ontology, and probes.
+- The recommendation is design C with the sessions and the controller of section 7. It is built in phases on
+  the kernel of design B, after a short experiment with the embedded REPL.
 
 ## 1. Goal
 
@@ -34,8 +38,9 @@ The `harness` module gives a coding agent with these properties:
   laws.
 
 Section 2 analyzes the three reference harnesses and the dspy4s components. Section 3 gives the foundation
-that all designs share. Sections 4, 5 and 6 give the three designs, and section 7 compares them. Section 8
-describes the optimization. Section 9 gives a recommendation, the phases, and the open questions.
+that all designs share. Sections 4, 5 and 6 give the three designs. Section 7 extends design C with work
+sessions and a controller. Section 8 compares the designs, and section 9 describes the optimization. Section 10
+gives a recommendation, the phases, and the open questions. Section 11 lists the alternatives.
 
 ## 2. Analysis
 
@@ -579,7 +584,7 @@ turn waits until the nodes that its view needs are built (uniichat `settle`).
 - The full log is an RLM input: a REPL value with a summary in the prompt, and the view is that summary. The
   RLM rule "large inputs stay in the REPL" and the uniichat rule "the view is the memory" are the same rule.
 - Code can call `llmQuery` on the lines of a subtree, for example to find a past decision. uniichat forbids a
-  search of the memory. Section 9 lists this as an open question.
+  search of the memory. Section 10 lists this as an open question.
 
 ### Two kinds of subagents
 
@@ -611,7 +616,289 @@ harness adds a "keep working" message and runs one more turn. ReAnchor can calib
 - Each message costs one compaction call on the cheaper model.
 - `LmRequest` has no prompt-cache marks (gap 6). An Anthropic provider needs them.
 
-## 7. Comparison
+## 7. Sessions and the controller
+
+This section extends design C. It adds work sessions with a pluggable context strategy, and one controller
+conversation above them.
+
+### 7.1 Two kinds of conversation
+
+- **Work sessions.** Each session has a scope: a directory, a worktree with a branch, or a scratch directory.
+  The user opens a session and talks to it directly. Each session has its own context strategy (7.2).
+- **The controller.** One conversation that never ends, as in uniichat. Its strategy is always the memory tree.
+  It starts sessions, makes their scopes, and knows about all sessions.
+
+The user goes to the controller to start or steer work. Then the user zooms into a session and does the work
+there. A project with a repository already has a natural scope. For work with no such structure, the controller
+makes the directories, the worktrees and the branches as necessary.
+
+The uniichat subagents are not sessions in this sense:
+
+| Property | uniichat subagent | Work session |
+|---|---|---|
+| The user can send it a message | No. The user commands are `stop`, `goal`, `go`, `guess`, `pick` and `out`. Only Unii can use `tell`. | Yes |
+| Compaction | None. Each call gets the main view and the full log of the subagent (`Tools.ask`). | A context strategy (7.2) |
+| Scope | `<work>/<Name>` on a device | A directory, a worktree with a branch, or a scratch directory |
+
+A subagent is a short worker. A new UI page does not make it a session.
+
+### 7.2 Context strategies
+
+All strategies obey one rule: the session keeps its full log, and a strategy never changes the log. A strategy
+owns only its derived data and its projection.
+
+```scala
+// Data that a log gives, kept up to date as the log grows.
+trait Derivation[D]:
+  def empty: D
+  def update(log: Log, d: D)(using RuntimeContext): Either[DspyError, D]  // can call Predict leaves
+
+// A derivation that also makes the LM context.
+trait ContextStrategy[D] extends Derivation[D]:
+  def project(log: Log, d: D, budget: Int): Context                       // pure
+  def guestApi: GuestApi                                                 // for example `zoom`
+```
+
+| Strategy | Derived data | Projection |
+|---|---|---|
+| Window | None | The last messages that fit |
+| Prefix summary (atc, pi) | Summary entries | The last summary, then the messages after it |
+| Memory tree (uniichat, design C) | The summary nodes | A cut through the tree, and `zoom` in the guest API |
+
+- The memory tree keeps the full log, so it compacts only the prompt. It is the only strategy that adds a guest
+  function.
+- The log does not change, so a session can change its strategy later. The new strategy derives its data from
+  the same log.
+- One builder runs all derivations of a log in the background: the context strategy, and the graph of 7.5.
+
+Laws:
+
+- `project` depends only on the log and the derived data.
+- `update` never changes the log.
+- Two updates give the same structure as one update on the full log. For the memory tree, the structure is the
+  set of nodes. The text of a node can differ, because an LM writes it.
+
+### 7.3 The controller API
+
+The controller gets its own set of handlers (F2). It can manage work, but it cannot do the work:
+
+```scala
+enum Scope:
+  case Directory(path: Path)
+  case Worktree(repo: Path, branch: String, base: String)
+  case Scratch(name: String)
+
+trait Sessions:
+  def start(goal: String, scope: Scope, strategy: StrategyName): SessionRef
+  def list(): Vector[SessionCard]
+  def tell(session: SessionRef, message: String): Unit
+  def observe(session: SessionRef, question: String): String  // a probe (7.4)
+  def zoom(session: SessionRef, ref: String): String
+```
+
+The controller can also get a read-only `Files`, so that it can answer questions about a project. It gets no
+`write`, `edit` or `exec`. Code that calls them does not compile, because the controller API does not have
+them. The controller instructions tell the model to start a session for such work.
+
+The other option is a nudge: a classifier finds "real work" in the controller and tells the user to start a
+session. The classifier can be wrong in both directions, and it needs its own tests. A restriction is a fact of
+the type system, and a test can check it.
+
+### 7.4 What the controller sees
+
+The model has no state between calls. The state of a session is its log, plus the REPL and the workspace. So:
+
+- **A session is an unfold.** It starts from a seed (the request). Each step reads inputs (user messages, and
+  data from sources) and adds entries to the log. Strictly, it is a stream transducer,
+  `(State, Input) => (State, Output)`, because inputs arrive during the run. The log is its trace.
+- **An observation is a fold over the log.** "The decisions", "the actors" and "the ingredients of a recipe" are
+  functions `Log => A`. In dspy4s, an observation is a program with a typed output, for example
+  `Signature[SessionLog, Ingredients]`. The log is a large input, so RLM fits it: the log stays in the REPL,
+  the view is its summary, and code can zoom.
+
+A session has two kinds of output. External outputs (files, commits, rows) go through tools, so the harness can
+record them exactly. Internal outputs (conclusions, decisions, ideas) stay in the conversation, so an LM must
+extract them. The controller sees three layers:
+
+| Layer | Source | LM | Content |
+|---|---|---|---|
+| Ledger | The `recorded` handler (F2) | No | The sources that the session read, and the artifacts that it made |
+| Fixed observations | The ontology extraction (7.5) at the end of each turn | Yes | Goals, decisions, findings, questions, concepts, and their links |
+| Probes | `observe(session, question)`: an RLM call on the session log | Yes | Any question |
+
+In code mode the ledger is exact. One cell can read 50 files, and the handler still records each read.
+
+The controller log gets an event only when layer 1 or layer 2 changes in a way that matters: a session starts
+or ends, a decision is made, or an artifact is added. The raw messages of a session stay out of the controller
+log. With all messages, the controller memory tree would grow with the work of every session, and the old
+summaries would lose the important items. A `SessionCard` shows the goal, the scope, the status, the
+artifacts, the decisions, and the open questions of a session.
+
+### 7.5 The ontology
+
+An ontology is a value, and it is pluggable, as a context strategy is. The mechanism stays the same for all
+ontologies: typed facts, typed links, a source for each fact, and time (7.6). An ontology gives only the kinds
+of facts and the kinds of links.
+
+```scala
+final case class Kind(name: String, description: String) derives Schema
+final case class Ontology(name: String, facts: Vector[Kind], links: Vector[Kind]) derives Schema
+```
+
+- The extraction leaf gets the ontology as data. The kinds become the allowed values of the `kind` fields of
+  its output (`FieldSpec.enumValues`). So the adapter tells the model the kinds, and a check with no LM call
+  rejects an unknown kind.
+- Each session has one ontology. The default comes from the controller configuration. A project can give its
+  own ontology, for example one for recipes with the kind `Ingredient`.
+- The graph is a derivation of the log (7.2). So when a session changes its ontology, it derives a new graph
+  from the same log.
+
+The default ontology is small and general. A large ontology costs more, and its extractions are less precise.
+The default kinds of facts:
+
+| Kind | Example |
+|---|---|
+| Goal | "Add a code harness module" |
+| Decision | "Use the memory tree for the controller", with its reason and a status: proposed, accepted, or replaced |
+| Finding | "uniichat subagents have no compaction" |
+| Question | "Who ends a session?", open or answered |
+| Artifact | `docs/CODE_HARNESS.md`, a commit (from the ledger) |
+| Source | `uniichat/Memory.ts` (from the ledger) |
+| Concept | "memory tree", "controller", "context strategy" |
+
+The default kinds of links are `comes from`, `answers`, `refines`, `contradicts`, `replaces`, `decides`,
+`depends on`, `produces`, `uses`, and `mentions`.
+
+Rules:
+
+- **Each fact keeps its source.** Each node and each link keeps its session id and its message ids. The
+  controller can zoom from a fact to the messages that support it.
+- **Replacement.** A new decision `replaces` an old one, and the old one stays in the graph. uniichat uses the
+  same rule: "its latest word on a thing is the truth".
+- **Explicit marks.** The agent or the user can call `decide(text)` or `note(finding)`. These marks are more
+  precise than an extraction. The extraction only has to find what the marks do not cover.
+- **One graph for each session.** The most difficult part of a knowledge graph is to find where two sessions
+  use two names for the same concept. So the first version keeps one graph for each session. A merge across
+  sessions comes later.
+
+### 7.6 Time
+
+The questions "where did this concept first appear?" and "how did we get to this decision?" need time on each
+fact. The log index is a clock: message 120 comes after message 80. Each fact keeps the first message that
+mentions it, all the messages that mention it, and their dates.
+
+The extractor sees each line with its message id (`id+n|text`, as in uniichat). It must cite the ids in its
+output:
+
+```scala
+opaque type KindName = String  // a kind of the ontology of the session (7.5)
+final case class Fact(kind: KindName, text: String, at: Vector[MsgId]) derives Schema
+final case class Link(from: FactId, to: FactId, kind: KindName, at: MsgId) derives Schema
+```
+
+A check with no LM call rejects each id that is not in the part of the log that the extractor saw.
+
+The graph is a log of assertions, each one with a message id. For example:
+
+- at m12: the concept "controller" appears
+- at m40: decision D is proposed
+- at m45: D is accepted
+- at m90: D2 replaces D
+
+The graph at time `t` is a fold of the assertions up to `t`. This is the same pattern as the session log: the
+log is the truth, and the graph is a derivation (7.2). The queries:
+
+| Query | Result |
+|---|---|
+| `firstMention(c)` | The first assertion about `c` |
+| `timeline(c)` | All the assertions about `c`, in order |
+| `stateAt(t)` | What the session knew at message `t` |
+| `lineage(f)` | The facts that led to `f`: the links `comes from`, `answers`, `refines`, `contradicts` and `replaces`, followed back and sorted by time |
+
+The discussion that added this section is an example. The lineage of "time on each fact" is:
+
+1. Sessions have pluggable compaction, and one controller uses the memory tree.
+2. A question: what does the controller see of a session?
+3. All messages would make the controller memory too large, so the controller must see only the important
+   information.
+4. A session is an unfold, and an observation is a fold over its log.
+5. A small ontology, as a knowledge graph, is a standard set of observations.
+6. Facts need time, so that you can ask where a concept appeared and how you got there.
+
+Each step comes from the step before it. An extractor that writes `comes from` links with message ids can make
+this list again.
+
+Time and the memory tree work together. A message id is a leaf of the tree, so the answer to "where was X
+introduced?" is a leaf. The nodes above that leaf give its context with less detail. When one subtree has many
+mentions of a concept, that subtree is a phase of the conversation about the concept.
+
+The difficult part is to connect new facts to old ones at the end of a turn, for example: "this decision comes
+from that question in an earlier turn". So the extractor gets the current concepts with their ids as an input,
+and its instructions tell it to use the old id for the same concept.
+
+A later option: extract a small graph for each leaf of the memory tree, and merge two graphs at each node.
+Graph union is associative when the names agree, but a text summary is not associative. So the tree shape suits
+the graph well.
+
+### 7.7 Graph access and the flow of information
+
+By default, information goes from the sessions to the controller. A session writes only its own graph, through
+its extraction and its explicit marks. The controller sees the changes as events (7.4).
+
+Read access is wider. The main way to use the graph is a chat in a session: the user asks a question, and the
+agent queries the graph with code. So each session gets a read-only guest API:
+
+```scala
+enum GraphScope:
+  case ThisSession
+  case Session(ref: SessionRef)
+  case Controller
+  case AllSessions  // the results of each session, with no merge of names (7.5)
+
+trait Graph:
+  def ontology: Ontology                                      // the kinds that the session can query
+  def concepts(scope: GraphScope): Vector[FactRef]
+  def find(text: String, scope: GraphScope): Vector[FactRef]
+  def firstMention(fact: FactRef): Assertion
+  def timeline(fact: FactRef): Vector[Assertion]
+  def stateAt(session: SessionRef, at: MsgId): Vector[FactRef]
+  def lineage(fact: FactRef): Vector[Assertion]
+```
+
+- Each result keeps its session id and its message ids, so the agent can zoom to the source.
+- The controller has a graph of its own log too. A session can read it with `GraphScope.Controller`.
+- A query over all sessions gives the results of each session separately. The agent or the user decides when
+  two names are the same concept.
+- The controller gets the same API, and the functions of 7.3.
+
+### 7.8 Optimization of the controller
+
+- The extraction leaves are `Predict` leaves with typed outputs, so the optimizers can tune them.
+- A metric for the graph: ask "where was X introduced?" and "what led to D?". Compare the answer from the graph
+  with the answer from a probe on the full log.
+- The cited message ids make part of this check exact. A first mention is correct or wrong.
+- The controller has its own leaves: its policy, and the leaf that writes a `SessionCard`.
+
+### 7.9 Decisions and open questions
+
+Decisions, 2026-10-21:
+
+1. The ontology is pluggable (7.5). The default kinds are an example. The mechanism is the important part.
+2. By default, information goes from the sessions to the controller. Each session can read the ontology and
+   query the graphs (7.7).
+3. The first version keeps one graph for each session.
+
+Open questions:
+
+1. Can a user start a session directly in a repository, outside the controller? If yes, does the session still
+   send its events to the controller?
+2. Who ends a session, and what does the end do: merge the branch, remove the worktree, or only mark the session
+   as closed?
+3. Is there one controller for each user, or one for each machine?
+4. Can the controller send a decision to the sessions, for example a rule for all sessions? Or do the sessions
+   only read the controller graph?
+
+## 8. Comparison
 
 | Criterion | Design A | Design B | Design C |
 |---|---|---|---|
@@ -628,7 +915,7 @@ harness adds a "keep working" message and runs one more turn. ReAnchor can calib
 | Laws | The current RLM and loop laws | Log, projection, middleware, handlers | The laws of B, and the memory laws |
 | Change to the current code | RLM changes (`ReplLanguage`, `subQuery`) | No change to RLM in the first version | No change to RLM in the first version |
 
-## 8. Optimization
+## 9. Optimization
 
 What the optimizers tune:
 
@@ -655,17 +942,22 @@ What the optimizers tune:
 - **Cost.** Each rollout is a full agent run. Use a small task set and the metric-call budget of GEPA.
 - **Decision types (D6).** The goal check of design C is a `Noul` leaf. ReAnchor can calibrate its threshold
   against the metric. Designs A and B do not need decision types in their first version.
+- **Controller leaves (section 7).** The extraction leaves and the controller policy have their own metric
+  (7.7): the answers from the graph must agree with probes on the full log.
 
 A source of tasks is the history of this repository. A commit that makes a test pass gives a task (the parent
 commit and the test) and a metric (the test passes).
 
-## 9. Recommendation and phases
+## 10. Recommendation and phases
 
-The recommendation is design C as the target, built on the kernel of design B. Design C agrees with the
-functional style of dspy4s: the memory is a persistent value, the view is a pure function with laws, and only
-the builder has an effect. It loses no detail, it keeps the prompt prefix stable by a law, and it gives the
-optimizers the most leaves. The phases build design B first with a simple projection, so a harness for one task
-works before the memory tree exists. Design A stays available as an early check of the foundation.
+The recommendation is design C as the target, built on the kernel of design B, with the sessions and the
+controller of section 7. Design C agrees with the functional style of dspy4s: the memory is a persistent value,
+the view is a pure function with laws, and only the builder has an effect. It loses no detail, it keeps the
+prompt prefix stable by a law, and it gives the optimizers the most leaves. Section 7 keeps these properties for
+the controller, and it lets each work session choose its context strategy.
+
+The phases build design B first with a simple projection, so a harness for one task works before the memory
+tree exists. Design A stays available as an early check of the foundation.
 
 | Phase | Work | Result |
 |---|---|---|
@@ -675,7 +967,8 @@ works before the memory tree exists. Design A stays available as an early check 
 | 3. RLM | F4, F5: variables, `llmQuery` through `subQuery`, `rlm(...)` children, the shared budget, the depth limit. | RLM in the harness. |
 | 4. Memory tree | `Memory`, `View`, the memory laws, the `compress` and `merge` leaves, the builder, `zoom` and `date` as guest functions. The projection of design C. | A memory that loses no detail. |
 | 5. Optimization | A `FeedbackMetric` from tests, the memory metric, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
-| 6. Interactive shell | A CLI on one log that never ends, `spawn` and `tell`, the goal check, steering. | A coding agent for daily use. |
+| 6. Work sessions | `Derivation`, `ContextStrategy` (window, prefix summary, memory tree), scopes (directory, worktree, scratch), a CLI that opens one session, steering, the goal check. | A coding agent for daily use, one session at a time. |
+| 7. Controller | The controller API (7.3), the ledger events, pluggable ontologies, the extraction at the end of each turn, the time queries (7.6), the `Graph` guest API in sessions (7.7), probes, `SessionCard`, the graph metric. | One controller above all sessions. |
 | Later | A forked JVM with the nightly compiler and capture checking. MCP tools as guest functions (`McpTools`). A policy variant with `run_scala` as a native tool through the adapter. Prompt-cache marks in `LmRequest`. RLM on the kernel. | |
 
 ### Open questions
@@ -685,16 +978,18 @@ works before the memory tree exists. Design A stays available as an early check 
 2. **End signal.** Only `submit(...)`, as in RLM? Or also a reply with no code, as in atc and uniichat? For
    interactive turns, a reply with no code is natural.
 3. **RLM.** Does the current `RLM` move onto the kernel later, so that dspy4s has one code program?
-4. **Log shape.** One log that never ends (uniichat), or a session for each task (pi)? In both cases, an episode
-   for the optimizer is a fork and one task.
-5. **Subagents.** `rlm(...)` only, `spawn(...)` only, or both?
+4. **Log shape.** Section 7 answers this question with both shapes: a session for each task, and one controller
+   log that never ends. For the optimizer, an episode is a fork and one task.
+5. **Subagents.** `rlm(...)` stays. With the sessions of section 7, is `spawn(...)` still necessary, or does the
+   controller `start` replace it?
 6. **Memory access.** Is `zoom` the only way to read the memory, as in uniichat? Or can code also search the
    memory, for example with `llmQuery` over a subtree?
 7. **Permissions.** No checks (pi: use a container), or a `guarded` handler with a policy (atc)?
 8. **Tasks.** Where do the evaluation tasks come from: the history of this repository, a public benchmark, or
    both?
+9. **Controller.** Section 7.9 lists the decisions and the open questions about the sessions and the controller.
 
-## 10. Alternatives considered
+## 11. Alternatives considered
 
 - **A free monad that the model writes.** The model writes `for` comprehensions over an operation type, and the
   host interprets the program value. This permits an inspection before the run. But models write direct-style
