@@ -261,7 +261,7 @@ The full suite passes: 1,537 tests, 0 failures, 6 live tests skipped.
   - `Streamify` builds its stream state from the configured adapter, so a JSON fallback call streams through the
     chat stream state.
   - The extraction step of `TwoStepAdapter` gets no JSON fallback. Upstream gets one through `ChatAdapter.__call__`.
-  - `Adapter.execute` does not use the fallback. No main code calls it.
+  - `Adapter.execute` does not use the fallback. No main code calls it. (Removed in b33.)
   - The JSON string `"3"` for an `int` field is a parse error. Upstream `parse_value` accepts it.
   - An incomplete demo does not show its null inputs, and a null output shows the "Not supplied" text. Upstream
     shows `None`.
@@ -515,7 +515,7 @@ The full suite passes: 1,655 tests, 0 failures, 6 live tests skipped.
   - A `json_schema` response format is flattened into `text.format`, the form that the Responses API takes. Upstream
     builds that form from a pydantic model; the port sends a record.
   - A streamed call in the Responses mode gives one final chunk from a plain call: the port has no parser for the
-    Responses stream events yet.
+    Responses stream events yet. (b38 added the parser.)
 - **Changes in behavior.**
   - A Responses reply gives one output. Before, each output item gave one output (a reasoning item, a message, and a
     function call gave three outputs).
@@ -917,12 +917,101 @@ The full suite passes: 1,962 tests, 0 failures, 6 live tests skipped.
     exception into an error result. A fatal error still goes up to the caller.
   - The result has no total LM usage of the run, as `RLM`.
 
+### Batches 33 to 41 (2026-10-20 to 2026-10-21): the open points of batches 1 to 32
+
+A read-only check compared each open point of batches 1 to 32 with the code: 12 points were closed by later batches
+(B1.3, B6.2, B10.1, B10.2, B10.3, B10.7, B10.8, B12.1, B15.1, B18.2, B21.1, B32.2), B1.2 no longer applies (`CodeAct`
+is removed), and 55 points were open. The owner asked Claude to decide each point with one clear answer, and to ask
+about the points that need a policy: those became decisions D7 and D8. Each fix started with a failing test. The full
+suite passes: 2,113 tests, 0 failures, 6 live tests skipped.
+
+- **Fixed.**
+  - Adapters (b33, `f01c15aa`): X.1 (the JSON parser reads a JSON array for a string-signature `list[T]` field), X.4
+    (CRLF replies, as Python `splitlines`), B10.5 (the JSON fallback of the two-step extraction), B10.6
+    (`Adapter.execute` removed), B12.2 (the warning when the JSON adapter goes back to JSON mode), B25.1 (the history
+    replay shows each output, with `None` for a missing one), B25.2 (the two-step extraction gets the output schema,
+    through the new overload `Adapter.parse(invocation, output)`).
+  - Streaming (b34, `a972a8ce`): X.3 (no configured adapter gives the chat rules), B13.2 and B13.3 (the stream gives
+    what the parser gives), B3.1 and X.5 (`Streamable` instances for `RLM` and `ReActV2`).
+  - LM runtime (b35, `4d2b19c2`): B11.4 (an inner cache hit is a hit of the outer model), B11.6 (the wrapper stream
+    forwards `close`), B11.7 (a model that throws gives `LmUnexpectedError`), B17.1 (a time limit on the body of
+    `sendJson`), B22.1 (`close` stops the connections in use), B1.4 (the new `ForwardingLanguageModel` trait), B30.3
+    (the new `LanguageModel.cacheIdentity`; TypeSafe gives its base URL), B32.1 (a null option removes a default;
+    the forced submit of ReActV2 clears `reasoning_effort`).
+  - GEPA (b36, `c1352888`): B6.3 (a proposer that throws gets one more call), B7.1 (the upstream error limit), B8.1
+    (one context for the run), B8.2 (no batch time limit; `ParallelExecutor` takes `Duration.Inf`).
+  - Cache, history, wrapper (b37, `1c3f6c05`): B14.1 (a count of the entries, so a put does not list the folder),
+    B14.2 (a value nested too deep gives a `Left`), B15.2 (the history drops the `api_*` options), and two wrapper
+    points of b34 and b35 (the stream flushes at the end; an exception gives `LmUnexpectedError`).
+  - OpenAI wire (b38, `36947da5`): B11.5 (a chunk with one bad field keeps its other fields), B20.1 (a parser of the
+    Responses stream events), B20.2 (Responses arguments that are not JSON give `{}`), B20.4 (`ProviderLanguageModel`
+    parses with the mode of the provider).
+  - Programs (b39, `bdf60092`): B27.3 (a copy of an RLM keeps its execution text), B32.3 (ReActV2, ReAct, and RLM give
+    the total usage of their model calls), B21.3 (a check of the Python version), B1.1 (an empty valset uses the
+    trainset).
+  - Decision D7 (b40, `b2c14a8f`): X.2 and B27.1.
+  - Decision D8 (b41, `6bebdb97`): G-50 and B8.1.
+- **Kept as intended differences.** B6.1 (a JSON `null` for a `str` gives `"null"`; upstream gives `"None"`), B9.1,
+  B10.4, B11.1, B11.2, B11.3, B13.1, B14.3, B17.2, B18.1, B21.2, B22.2, B26.1, B26.2, B27.2, B30.1, B30.2 (the
+  `rolloutId` is a typed control field of the port), B30.4, B31.1, and the three public items with no user (B3.2
+  `SubprocessPythonInterpreter`, B3.3 the plain `CodeInterpreter` trait, B3.4 `ActionPreparation.Rejected`). Most of
+  them act as upstream in practice.
+- **Wait.** B20.3 (the Responses content blocks that are not text) waits for the file type of G-32.
+- **The "Decided by Claude, review" items** of batches 12 to 32 stay as recorded. B15.D1 changed in batch 24: the
+  history entry has the `cost` and `cost_details` keys.
+- **Corrections to the text of earlier batches.** B1.3 was closed in batch 4. B6.1: upstream gives `"None"`, it does
+  not fail. B21.3: Python 3.9 starts the worker, and the failure is a `TypeError` at `SUBMIT`. B22.1: closing the open
+  streams first is the upstream rule, not a difference. B27.1: upstream fails the whole call, it does not end the
+  loop. B30.4: `TypeSafeModel` is a case class, so it has `copy`.
+- **Open points from these batches.**
+  - Streaming: with native tool calls and a reply with no header, the parser gives `next_thought` but the stream
+    gives no token. With one output field and no header, the stream sends the value in one chunk at the end. Java
+    `strip` keeps U+00A0, U+2007, and U+202F; Python `str.strip` removes them. The parser accepts each character up
+    to U+0020 before a header; the stream accepts only spaces and tabs.
+  - Stream wrapper: on the `stream()` path, an exception of the delegate still goes to the caller, a flush needs a
+    last `hasNext`, and an error of the wrapper code in the middle of a stream closes the managed stream early (no
+    history entry, no usage). Programs use `call()`, so they do not see these points.
+  - Usage: a call that fails loses its usage (upstream counts it, `execution.py:556-559`); the port counts a cache hit
+    (upstream does not, `execution.py:730`); the model calls inside a tool are not in the sum; `BestOfN` and `Refine`
+    give the usage of the selected attempt only; upstream gives one usage record for each model, on the top call only.
+  - Allowed values (D7): a typed Scala enum uses the `Literal` steps (upstream `Enum` takes the exact value only); an
+    optional field uses the `Literal` steps (upstream takes the `Union` path); the JSON escapes and the Python `u'...'`
+    form of `json_repair` are not ported; the values of the RLM `SUBMIT` are not checked (upstream `rlm.py:702`).
+  - Parsing: `tuple[...]`, `set[...]`, and `frozenset[...]` stay a string; the single-output fallback of the chat
+    parser keeps a CRLF; a null input of a replayed history message is dropped (upstream shows `None`); the two-step
+    extraction errors have no upstream wrapper text; a wrapper adapter that overrides only `parse(layout, output)`
+    loses the schema for an inner `TwoStepAdapter`; with decision outputs, an opaque field gives JSON mode with no
+    warning.
+  - OpenAI wire: the Responses usage loses its cached and reasoning token counts (`input_tokens_details`,
+    `output_tokens_details`); the Responses stream skips the reasoning, citation, audio, and image events; streamed
+    Responses arguments that are not JSON give `{input: raw}` (upstream `{"partial_json": raw}`); a chat usage count
+    of the wrong type empties the usage block (upstream raises `TypeError`); the lenient chunk reader takes `id`,
+    `name`, and `arguments` only as strings.
+  - Cache: at the cap, each put of a new key still lists the folder; a second writer of the folder can pass the cap
+    for a time; `RequestHash` can overflow the stack on a deep value; an inner cache hit does not warm the outer cache;
+    TypeSafe entries from before the cache identity miss one time.
+  - Other: a failed GEPA example has no error message (`Trajectory` has no field for it); `Evaluate` and the other
+    users of `ParallelExecutor` keep the 120 s batch limit (G-41); RLM writes its decision-output warning again at each
+    `copy`; the Python version check keeps the checked executables for the life of the JVM.
+- **Changes of the public API.** `Adapter.parse(invocation, output)` (new overload with a default);
+  `Adapter.execute` removed; `LanguageModel.cacheIdentity` and `LmRequest.cacheIdentity` (new, empty by default);
+  `ForwardingLanguageModel` (new trait); `ParallelExecutor` takes a `Duration` and shows its settings as `val`s; `RLM`
+  has a new last constructor parameter; `StepGeneration.Generated` has a third field (a user pattern match on two
+  fields does not compile); `RuntimeEnvironment.withInstalled` (new); `Teleprompter.withCompileCallbacks` takes a
+  `using RuntimeContext` and a context-function body.
+- **Changes of behavior.** A value outside the allowed values of an output is a parse error (D7), and ReAct fails on
+  an invented tool name. Each entry point installs the given context, filled from the installed one (D8); before,
+  `Evaluate` and GEPA replaced the whole context. A model that throws gives `LmUnexpectedError`. A null option
+  removes a default option. `close` of the transport stops the connections in use.
+
 Open points from batch 1, for the owner:
 
-- The random search rejects an explicit empty validation set. Upstream uses the trainset.
+- Fixed in b39 (`bdf60092`): the random search rejected an explicit empty validation set. Upstream uses the
+  trainset.
 - A `SubprocessPythonInterpreter` timeout ended a CodeAct run. This point is closed: batch 3 removed `CodeAct`.
-- The sandbox setup read still skips a response with a different id. Upstream stops.
-- A custom `LanguageModel` wrapper must forward `defaultOptions` and the capability flags by hand.
+- Closed in batch 4 (`a679d18a`): the sandbox setup read skipped a response with a different id. Upstream stops.
+- Fixed in b35 (`4d2b19c2`): a custom `LanguageModel` wrapper had to forward `defaultOptions` and the capability
+  flags by hand. A wrapper now extends `ForwardingLanguageModel`.
 
 ## TL;DR
 

@@ -375,7 +375,7 @@ Thread `RuntimeContext` (or an LM handle) into the metric scoring path. Tier 1.
 
 **Resolution (response_format / structured outputs).** Added the request-influence seam
 `FormattedPrompt.requestOptions` (+ `FormattedPrompt.mergeOptions`); `PredictEngine` and
-`Adapter.execute` merge it under the per-call/module options. `JSONAdapter`, when the
+`Adapter.execute` (removed in b33) merge it under the per-call/module options. `JSONAdapter`, when the
 ambient LM `supportsResponseSchema` and an `outputJsonSchema` is present, emits
 `response_format: {type:"json_schema", json_schema:{name, schema, strict:false}}` (prose
 schema kept as fallback; malformed schema → prose only).
@@ -1206,7 +1206,8 @@ connection that fails during a stream ends it with an `LmTransportError` (`HttpS
 **Resolution (Responses, batch 20).** `OpenAiLanguageModel(mode = LmMode.Responses)` calls `/responses` with the
 body of upstream `chat_to_responses` and reads one output with `responses_outputs` (text, tool calls with `call_id`,
 `reasoning_content`, `citations`). Tests: `ResponsesWireSuite`, `ResponsesModeSuite`. Open: no parser for the
-Responses stream events (a stream is one final chunk from a plain call).
+Responses stream events (a stream is one final chunk from a plain call). b38 added the parser of the Responses
+stream events.
 
 **Resolution (capabilities, batch 23).** `LmCapabilities` is the data behind the capability flags (upstream
 `Capabilities`), and an undeclared capability is `false`. `OpenAiLanguageModel` has the OpenAI capabilities at the
@@ -1370,7 +1371,7 @@ the key.
 **Open points (batch 10).** The XML `tool_calls` field, a type with a comma such as `Union[int, None]`, and the JSON
 string `"3"` for an `int` field are resolved in batch 18. A typed `Option[Int]` field has the prompt type `str`. A JSON fallback call
 streams through the chat stream state. The extraction step of `TwoStepAdapter` and `Adapter.execute` get no
-fallback. An incomplete demo hides its null inputs, and a
+fallback (b33 added the fallback and removed `Adapter.execute`). An incomplete demo hides its null inputs, and a
 null output shows the "Not supplied" text, where upstream shows `None`. The UPGRADE file lists the details.
 
 ---
@@ -1732,7 +1733,8 @@ Open after the removal:
 
 ## G-41 — Parallel execution differences
 
-**Status:** Open · **Verification:** R
+**Status:** Open · **Verification:** R. The GEPA evaluation has no batch time limit since b36 (`c1352888`):
+`ParallelExecutor` takes `Duration.Inf`. The other callers keep the 120 s limit.
 
 - **Timeout.** `ParallelExecutor` fails the full batch if no task completes in the limit
   (`modules/programs/.../runtime/ParallelExecutor.scala:98-100,121-122`). Upstream submits the slow task again and
