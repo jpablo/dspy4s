@@ -50,6 +50,11 @@ import scala.compiletime.ops.int.+
   * Like [[BestOfN]], the winning attempt's isolated trace/history are propagated to the caller; `failCount` bounds
   * tolerated failures before giving up (defaults to `n`).
   *
+  * The LM usage of the result is the total of each attempt, of each OfferFeedback call, and of the model calls of
+  * `rewardFn`, not only of the selected attempt (decision D9 of UPGRADE-3.2.1-to-3.4.0; `Module.apply` opens the usage
+  * scope). Upstream runs all of them in the usage tracker of the `Refine` call (`dspy/predict/refine.py`,
+  * `dspy/primitives/module.py`).
+  *
   * ==Deltas from Python==
   *   - '''Trace-grounded, not source-grounded.''' Grounding is the runtime TRACE + I/O, not the program's / reward
   *     function's SOURCE CODE: dspy4s has no source introspection, so Python's `program_code`, `reward_code`, and

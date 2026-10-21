@@ -98,7 +98,6 @@ private[dspy4s] final case class PredictEngine(
             _           = answer.parsed.foreach(parsed => recordEvidence(parsed.evidence))
             prediction <- buildPrediction(
                             answer.parsed.map(_.values),
-                            answer.response,
                             answer.response.outputs.headOption.map(_.toolCalls).getOrElse(Vector.empty)
                           )
           yield prediction
@@ -118,9 +117,9 @@ private[dspy4s] final case class PredictEngine(
     * of [[DecisionAdapter.systemOneQuestions]], and the `rolloutId` of the call (it changes only the cache key). The
     * call dispatches the LM callback events. The answers of the reply give the evidence
     * ([[DecisionAdapter.systemOneEvidence]]), which goes to the evidence log before the decode, as upstream. The decode
-    * gives the output values, and the prediction keeps the usage of the reply. Each nested decision output fails the
-    * plan first, so a System One call gives no warning for it (upstream `resolve_adapter` makes the `DecisionState`
-    * before the warnings).
+    * gives the output values. The usage of the reply goes to the usage scope of the call
+    * ([[LanguageModel.callAndRecordUsage]]). Each nested decision output fails the plan first, so a System One call
+    * gives no warning for it (upstream `resolve_adapter` makes the `DecisionState` before the warnings).
     */
   private def decide(call: ProgramCall[DynamicValue.Record], model: LanguageModel)(using
       RuntimeContext
@@ -140,13 +139,13 @@ private[dspy4s] final case class PredictEngine(
                     modelId = model.id,
                     request = DynamicValues.record("model" := model.id, "mode" := model.mode.toString)
                   ) {
-                    model.call(request)
+                    LanguageModel.callAndRecordUsage(model, request)
                   }
       answers    <- DecisionRequests.answers(response)
       evidence   <- DecisionAdapter.systemOneEvidence(plan, answers)
       _           = recordEvidence(evidence)
       values     <- plan.decode(evidence.toMap)
-      prediction <- buildPrediction(Vector(values), response, Vector.empty)
+      prediction <- buildPrediction(Vector(values), Vector.empty)
     yield prediction
 
   /** Add the decision evidence of one completion to the evidence log (upstream `DecisionAdapter._decode` with
@@ -208,7 +207,9 @@ private[dspy4s] final case class PredictEngine(
     }
 
   /** Format with `adapter`, call the model, and parse. The result keeps the result of the parse step apart, so the
-    * caller can tell a parse error from an error of the other steps.
+    * caller can tell a parse error from an error of the other steps. The usage of the reply goes to the usage scope of
+    * the call before the parse ([[LanguageModel.callAndRecordUsage]]), so an attempt whose reply fails to parse counts
+    * too (upstream records the usage of each LM call, `dspy/clients/execution.py`, `finalize`).
     */
   private def callModel(adapter: Adapter, model: LanguageModel, invocation: AdapterInvocation)(using
       RuntimeContext
@@ -228,7 +229,10 @@ private[dspy4s] final case class PredictEngine(
                     // request options, so explicit per-call/module config wins on key collision. The options that the
                     // adapter removes (`FormattedPrompt.removedOptions`) go first.
                     val mergedOptions = prompt.options(invocation.request.options)
-                    model.call(invocation.request.copy(messages = prompt.messages, options = mergedOptions))
+                    LanguageModel.callAndRecordUsage(
+                      model,
+                      invocation.request.copy(messages = prompt.messages, options = mergedOptions)
+                    )
                   }
     yield PredictEngine.Attempt(response, parseOutputs(adapter, invocation, response.outputs))
 
@@ -292,19 +296,20 @@ private[dspy4s] final case class PredictEngine(
       yield soFar :+ parsed
     }
 
-  /** The prediction of the output `rows` (one row for each completion), with the usage of `response`. */
+  /** The prediction of the output `rows` (one row for each completion). It has no usage: `Module.apply` gives the
+    * result the total of the usage scope of the call, thus each model call of the call counts, also a call whose reply
+    * failed to parse before the JSON fallback (decision D9 of UPGRADE-3.2.1-to-3.4.0).
+    */
   private def buildPrediction(
       rows     : Vector[DynamicValue.Record],
-      response : LmResponse,
       toolCalls: Vector[ToolCall]
   ): Either[DspyError, RawPrediction] =
     for
       completions <- Completions.fromRows(rows)
       first       <- RawPrediction.fromCompletions(completions)
-      withUsage    = first.copy(lmUsage = response.usage)
       prediction   =
-        if toolCalls.isEmpty then withUsage
-        else withUsage.withValue(PredictEngine.ToolCallsKey, NativeFunctionCalling.encodeToolCalls(toolCalls))
+        if toolCalls.isEmpty then first
+        else first.withValue(PredictEngine.ToolCallsKey, NativeFunctionCalling.encodeToolCalls(toolCalls))
     yield prediction
 
 private[dspy4s] object PredictEngine:

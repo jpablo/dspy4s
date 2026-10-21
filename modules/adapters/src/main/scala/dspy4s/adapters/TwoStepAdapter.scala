@@ -125,7 +125,9 @@ final case class TwoStepAdapter(
   /** Format with `adapter`, call the extraction model, and parse. The inner result is the result of the parse step, so
     * that the caller can tell a parse error from an error of the other steps. The format step sees the extraction model
     * as the model of the context: the JSON adapter asks that model for response schema support (upstream
-    * `JSONAdapter._prepare_response_format` gets the extraction model).
+    * `JSONAdapter._prepare_response_format` gets the extraction model). The usage of the reply goes to the usage scope
+    * of the program call ([[LanguageModel.callAndRecordUsage]]), as upstream records the usage of the extraction LM in
+    * the tracker of the call.
     */
   private def attempt(adapter: Adapter, invocation: AdapterInvocation)(using
       context: RuntimeContext
@@ -134,7 +136,8 @@ final case class TwoStepAdapter(
     for
       prompt   <- adapter.format(invocation)(using formatContext)
       response <-
-        extractionModel.call(
+        LanguageModel.callAndRecordUsage(
+          extractionModel,
           invocation.request.copy(messages = prompt.messages, options = prompt.options(invocation.request.options))
         )
       lmOutput <- response.outputs.headOption.toRight(ParseError(name, "Extraction model returned no output"))

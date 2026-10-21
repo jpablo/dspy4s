@@ -9,7 +9,6 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.{ActionInterpreter, ActionOutcome}
 import dspy4s.programs.contracts.ModuleLifecycle
-import dspy4s.programs.contracts.Prediction
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolCallRequest
 import dspy4s.programs.contracts.ToolFunction
@@ -34,8 +33,9 @@ import zio.blocks.schema.DynamicValue
   * `ReAct[I, O]` is a `Module[I, WithReasoning[O]]`: the input is encoded from `I`, and the extractor's reply is
   * decoded into the base outputs `O` with a `reasoning: String` prepended (always a named tuple; see
   * [[OutputAugmentation]]). The full rendered `trajectory` is kept on `.raw` for inspection, and the LM usage on `.raw`
-  * is the sum of the usage of each react call and of the extractor call (upstream `Module.__call__`). The loop's tool
-  * protocol runs internally over the data-bag layer (a `Streamable[ReAct[I, O]]` instance lets it stream).
+  * is the total of each model call of the call: the react calls, the model calls of the tools, and the extractor call
+  * (upstream `Module.__call__`; `Module.apply` opens the usage scope). The loop's tool protocol runs internally over
+  * the data-bag layer (a `Streamable[ReAct[I, O]]` instance lets it stream).
   *
   * Tool selection is via output fields (the canonical DSPy mechanism) — not provider-native function-calling. Tool
   * failures (invocation error, non-fatal exception of a tool) are recorded as trajectory observations rather than
@@ -208,8 +208,8 @@ final case class ReAct[I, O](
       trajectory: Vector[ReAct.TrajectoryEntry]
   )(using RuntimeContext): Either[DspyError, StepGeneration[ReAct.ReactStep, ReAct.TrajectoryEntry]] =
     reactWithTruncation(call, trajectory, remaining = 3).map {
-      case (Some(prediction), used) => StepGeneration.Generated(prediction.output, used, prediction.raw.lmUsage)
-      case (None, used)             => StepGeneration.Halted(used)
+      case (Some(step), used) => StepGeneration.Generated(step, used)
+      case (None, used)       => StepGeneration.Halted(used)
     }
 
   /** Lower ReAct's model step to its small tool-call language. */
@@ -257,24 +257,22 @@ final case class ReAct[I, O](
 
   /** Run the react predict over the trajectory. On a context-window overflow, remove the oldest step and try again, up
     * to `remaining` attempts in total (upstream `_call_with_potential_trajectory_truncation` around `self.react`). The
-    * result is the prediction of the step (its output and its LM usage) and the view, which can be shorter. The removal
-    * is durable: later iterations and the extractor use the shorter trajectory, as upstream changes the shared dict.
-    * `(None, view)` means that the overflow stayed (no attempts are left, or no step can go). This is the upstream
-    * `ValueError` path, which the loop changes into a break, not a failure. The last entry always stays, so the react
-    * predict never runs again on an empty view, and the extractor keeps that entry as evidence.
+    * result is the step and the view, which can be shorter. The removal is durable: later iterations and the extractor
+    * use the shorter trajectory, as upstream changes the shared dict. `(None, view)` means that the overflow stayed (no
+    * attempts are left, or no step can go). This is the upstream `ValueError` path, which the loop changes into a
+    * break, not a failure. The last entry always stays, so the react predict never runs again on an empty view, and the
+    * extractor keeps that entry as evidence.
     */
   private def reactWithTruncation(
       call     : ProgramCall[I],
       view     : Vector[ReAct.TrajectoryEntry],
       remaining: Int
-  )(using
-      RuntimeContext
-  ): Either[DspyError, (Option[Prediction[ReAct.ReactStep]], Vector[ReAct.TrajectoryEntry])] =
+  )(using RuntimeContext): Either[DspyError, (Option[ReAct.ReactStep], Vector[ReAct.TrajectoryEntry])] =
     val (result, used) = truncateOnOverflow(view, remaining)(entries => ReAct.renderTrajectory(entries)) { rendered =>
       reactPredict(call.mapInput(input => (input, rendered)))
     }
     result match
-      case Right(prediction)                   => Right((Some(prediction), used))
+      case Right(prediction)                   => Right((Some(prediction.output), used))
       case Left(_: ContextWindowExceededError) => Right((None, used))
       case Left(error)                         => Left(error)
 

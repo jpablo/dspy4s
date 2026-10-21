@@ -21,6 +21,11 @@ import dspy4s.programs.contracts.Prediction
   * [[dspy4s.programs.runtime.AttemptSelection.bestOf]] (generic over the attempt result), shared with [[Refine]];
   * `BestOfN` is its independent-samples instance (no inter-attempt feedback).
   *
+  * The LM usage of the result is the total of each attempt, not only of the selected attempt, and of the model calls of
+  * `rewardFn` (decision D9 of UPGRADE-3.2.1-to-3.4.0; `Module.apply` opens the usage scope). Upstream runs each attempt
+  * in the usage tracker of the `BestOfN` call (`dspy/predict/best_of_n.py`, `dspy/primitives/module.py`). The result of
+  * each attempt keeps the total of its own calls.
+  *
   * @tparam P
   *   the CONCRETE inner program type (mirroring [[Refine]]), so `I`/`O` infer from it and the pass-through
   *   `OptimizableStructure` instance ([[BestOfN.bestOfNOptimizableStructure]]) can delegate to the inner program's own

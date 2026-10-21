@@ -121,6 +121,11 @@ final class UsageTracker:
       data.view.mapValues(_.foldLeft(LmUsage.empty)(_.combine(_))).toMap
     }
 
+/** The usage trackers of the user (upstream `dspy.track_usage`, `dspy/utils/usage_tracker.py`).
+  * [[ManagedLanguageModel]] records the usage of each call that its delegate answers into each open tracker, per model,
+  * when `trackUsage` is not `false`. The LM usage of a program result does not come from these trackers. It comes from
+  * the usage scope of the program call ([[dspy4s.core.runtime.UsageScope]], decision D9 of UPGRADE-3.2.1-to-3.4.0).
+  */
 object UsageTracking:
   private val activeTrackers = new ThreadLocal[Vector[UsageTracker]]:
     override def initialValue(): Vector[UsageTracker] = Vector.empty

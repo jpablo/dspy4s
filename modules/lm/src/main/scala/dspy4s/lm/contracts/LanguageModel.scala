@@ -1,7 +1,7 @@
 package dspy4s.lm.contracts
 
 import dspy4s.core.contracts.{DspyError, Executed, LanguageModelRef, RuntimeContext}
-import dspy4s.core.runtime.ContextPropagation
+import dspy4s.core.runtime.{ContextPropagation, UsageScope}
 import zio.blocks.schema.DynamicValue
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -63,3 +63,28 @@ trait LanguageModel extends LanguageModelRef:
       ExecutionContext
   ): Future[Executed[Either[DspyError, LmResponse]]] =
     ContextPropagation.futureExecuted(call(request))
+
+object LanguageModel:
+
+  /** One model call for a program call: `model.call(request)`, then the usage of the reply goes to each open usage
+    * scope ([[UsageScope.record]], decision D9 of UPGRADE-3.2.1-to-3.4.0). This function is the one record point of the
+    * usage of a program result. Upstream records the usage of each LM call into the tracker of the call
+    * (`dspy/clients/execution.py`, `finalize`).
+    *
+    * Each part of the framework that calls a model for a program uses this function. These parts are `Predict` (each
+    * attempt, also an attempt whose reply then fails to parse), the extraction step of `TwoStepAdapter`, and the sub-LM
+    * tools of `RLM`. A tool or a program of the user that calls a model directly must also use it, else the call does
+    * not count.
+    *
+    * A `Left` gives no record: a call that fails at the provider has no reply, thus no usage. A cache hit of
+    * [[dspy4s.lm.runtime.ManagedLanguageModel]] has no usage, thus no record (upstream `finalize` skips a cache hit).
+    * The usage tracker of the user (`UsageTracking`) does not get this record, because the managed model records into
+    * it.
+    */
+  def callAndRecordUsage(model: LanguageModel, request: LmRequest)(using
+      RuntimeContext
+  ): Either[DspyError, LmResponse] =
+    model.call(request).map { response =>
+      UsageScope.record(response.usage)
+      response
+    }

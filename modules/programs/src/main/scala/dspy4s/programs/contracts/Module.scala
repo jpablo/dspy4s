@@ -12,6 +12,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.core.runtime.UsageScope
 import zio.blocks.schema.DynamicValue
 
 import scala.concurrent.ExecutionContext
@@ -50,6 +51,18 @@ import scala.concurrent.Future
   * resolves its model and its adapter from the same context. The trace and the history of the call reach the installed
   * context of the caller as before. A nested call that gets the effective context of its caller installs nothing.
   * [[applyAsync]] runs [[apply]] on the worker, so it installs the given context there.
+  *
+  * [[apply]] opens one usage scope for the call ([[UsageScope.measure]], decision D9 of UPGRADE-3.2.1-to-3.4.0). The LM
+  * usage of a successful result (`raw.lmUsage`) is the total of each model call that the call made. This includes a
+  * call whose reply failed to parse, a call inside a tool, a call on a worker thread, and each attempt of `BestOfN` and
+  * `Refine`. A cache hit and a call that failed at the provider add nothing.
+  *
+  * The total replaces the usage that [[forward]] gave. It is `None` when no model call gave a usage. A nested call has
+  * the total of its own calls, and the outer total has them one time. The callbacks of the module end see the total.
+  *
+  * Upstream `Module.__call__` also opens a usage tracker and sets its total on the result (`dspy/primitives/module.py`,
+  * `track_usage` and `_set_lm_usage`). But upstream does this only when `track_usage` is on, and only on the outermost
+  * call. Its usage has one entry for each model. The port sets one total on each result, always.
   */
 trait Module[I, O]:
   def moduleName: String
@@ -68,7 +81,7 @@ trait Module[I, O]:
   /** The module lifecycle around [[forward]], with the effective context of the call. */
   private def runLifecycle(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     lifecycle match
-      case ModuleLifecycle.Transparent()         => forward(call)
+      case ModuleLifecycle.Transparent()         => measured(forward(call))
       case ModuleLifecycle.Observed(observation) =>
         val inputBag = observation.inputs(call)
         // The outermost predictor on the call path owns the key. A module that runs inside a predictor (the `Predict`
@@ -77,9 +90,11 @@ trait Module[I, O]:
         val nested       = RuntimeEnvironment.withinPredictor
         val predictorKey = observation.predictor.filterNot(_ => nested)
         CallbackDispatcher.withModule(moduleName, inputBag) {
-          val result = predictorKey match
-            case Some(key) => RuntimeEnvironment.withinPredictor(key)(forward(call))
-            case None      => forward(call)
+          val result = measured {
+            predictorKey match
+              case Some(key) => RuntimeEnvironment.withinPredictor(key)(forward(call))
+              case None      => forward(call)
+          }
           if observation.traceEnabled(call) then
             result match
               case Right(output) =>
@@ -119,6 +134,11 @@ trait Module[I, O]:
                   )
           result
         }
+
+  /** The result of `body` with the total of its usage scope as its LM usage (see [[apply]]). */
+  private def measured(body: => Either[DspyError, Prediction[O]]): Either[DspyError, Prediction[O]] =
+    val (result, usage) = UsageScope.measure(body)
+    result.map(prediction => prediction.copy(raw = prediction.raw.copy(lmUsage = usage)))
 
   /** Convenience entry for an ordinary input. Constructs the uniform [[ProgramCall]] envelope and dispatches through
     * the lifecycle-wrapped [[apply]]. Call the envelope overload directly when setting controls such as `rolloutId`

@@ -20,6 +20,10 @@ import scala.util.control.NonFatal
   * trace/history are propagated to the caller. The reducer keeps the highest-reward attempt, short-circuits at
   * `threshold`, and tolerates up to `failCount` failures.
   *
+  * The usage scope of the call is not isolated: the model calls of each attempt, of each reward, and of each feedback
+  * count in the usage of the result of the caller (decision D9 of UPGRADE-3.2.1-to-3.4.0). The reducer does not change
+  * the usage of the result that it keeps; `Module.apply` of the caller sets the total.
+  *
   * The two combinators differ in the state carried between attempts:
   *
   *   - '''selectBest''' (= [[dspy4s.programs.strategies.BestOfN]]) passes no `feedback`: attempts vary only by

@@ -21,7 +21,6 @@ import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.contracts.Prediction
 import dspy4s.programs.internal.ToolText
-import dspy4s.programs.runtime.RunUsage
 import dspy4s.signatures.{Shape, Signature}
 import zio.blocks.schema.DynamicValue
 
@@ -416,12 +415,11 @@ object RLM:
   /** Build `llm_query` / `llm_query_batched` as [[SandboxTool]]s with a SHARED call counter capped at `maxLlmCalls`
     * (upstream `_make_llm_tools`). The sub-LM is `subLm` or the captured context's LM; failures surface as in-sandbox
     * exceptions (`llm_query`) or per-item `[ERROR] …` strings (`llm_query_batched`). The usage of each sub-LM call goes
-    * to `usage`.
+    * to the usage scope of the RLM call.
     */
   private[programs] def makeLlmTools(
       maxLlmCalls: LlmCallLimit,
       subLm      : Option[LanguageModel],
-      ctx        : RuntimeContext,
-      usage      : RunUsage = RunUsage()
+      ctx        : RuntimeContext
   ): Vector[SandboxTool] =
-    RLMSandboxTools.build(maxLlmCalls, subLm, ctx, usage)
+    RLMSandboxTools.build(maxLlmCalls, subLm, ctx)
