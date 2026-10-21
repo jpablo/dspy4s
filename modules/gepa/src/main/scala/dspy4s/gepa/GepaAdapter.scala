@@ -5,6 +5,7 @@ import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -29,6 +30,7 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
+import scala.concurrent.duration.Duration
 import scala.util.Random
 
 /** Bridges a dspy4s program into the GEPA engine — the analogue of Python's `DspyAdapter`. The engine drives the search
@@ -80,16 +82,17 @@ final class GepaAdapter[P](
 
   /** Apply `candidate` to the program and evaluate it over `batch`, returning per-example outputs + scores.
     *
-    * Each example runs in an ISOLATED context with a fresh trace ([[TracedRun]]), through the [[ParallelExecutor]]. A
-    * run that fails is a result and not an error of the executor. Thus each run that passes keeps its score, for any
-    * number of runs that fail. Upstream gets the same result with an error limit of 100 times the batch size. Only an
-    * exception from a run or from the metric counts for the error limit of the executor.
+    * Each example runs in an ISOLATED context with a fresh trace ([[TracedRun]]), through the executor of
+    * [[GepaAdapter.evaluationExecutor]]. A run that fails is a result and not an error of the executor. A non-fatal
+    * exception from a run or from the metric is an error of the executor for its example only, because the batch cannot
+    * reach the error limit. The executor has no time limit. Thus each run that passes keeps its score, for any number
+    * of runs that fail or throw, and for any duration of a run.
     *
     * The program-level feedback of the metric gives the score and the objective scores of an example. The metric gets
-    * one call for each run that passes. A run that fails, or a metric that gives a `Left`, has `failureScore` and no
-    * objective score. A failure of the whole batch (for example a timeout) gives each example `failureScore`.
-    * [[EvaluationBatch.objectiveScores]] is `None` when no example of the batch has an objective score. The adapter
-    * does not read the objective scores of a component-level feedback.
+    * one call for each run that passes. A run that fails, a metric that gives a `Left`, or an exception has
+    * `failureScore` and no objective score. A failure of the whole executor (for example a fatal error in a worker
+    * thread) gives each example `failureScore`. [[EvaluationBatch.objectiveScores]] is `None` when no example of the
+    * batch has an objective score. The adapter does not read the objective scores of a component-level feedback.
     *
     * With `captureTraces` (the reflective path), [[RuntimeContext.captureFailureTraces]] is on, so a parse failure
     * stays in the trace with the raw response (G-12 P-a/P-b). `addFormatFailureAsFeedback` decides if that failure
@@ -106,13 +109,14 @@ final class GepaAdapter[P](
     val prog = applyCandidate(candidate)
     // The runs are independent, because `runOne` isolates the trace context of each example. They go through the
     // parallel executor. `runOne` gives a result for a run that fails, so only an exception counts as an error there.
-    val runs = ParallelExecutor.fromSettings()
+    val runs = GepaAdapter.evaluationExecutor(batch.size)
       .execute(
         task = (example: Example) => runOne(prog, example, captureTraces)(using RuntimeEnvironment.current),
         data = batch
       ) match
+      // An example that threw has no result, and it gets the failure score.
       case Right(outcome) => batch.indices.toVector.map(i => outcome.results(i).getOrElse(failedRun(batch(i))))
-      // A failure of the whole batch (a timeout, or too many exceptions): each example gets the failure score.
+      // A failure of the whole executor: each example gets the failure score.
       case Left(_) => batch.map(failedRun)
     EvaluationBatch(
       outputs = runs.map(_.prediction),
@@ -347,6 +351,21 @@ final class GepaAdapter[P](
     Trajectory(example, RawPrediction.empty, Vector.empty, failureScore, failed = true)
 
 object GepaAdapter:
+
+  /** The executor of one evaluation of `batchSize` examples ([[GepaAdapter.evaluate]]). The number of threads comes
+    * from the context, or else it is [[ParallelExecutor.DefaultNumThreads]].
+    *
+    * The error limit is 100 times the batch size, as upstream (`max_errors=len(batch) * 100` in dspy `gepa_utils.py`
+    * `DspyAdapter.evaluate`). The error limit of the context does not apply. Each example gives one error at most, so
+    * the batch cannot reach the limit.
+    *
+    * The executor has no time limit (`Duration.Inf`). The `timeout` of upstream never fails the batch: it only submits
+    * a slow example again (dspy `utils/parallelizer.py`).
+    */
+  private[gepa] def evaluationExecutor(batchSize: Int)(using RuntimeContext): ParallelExecutor =
+    // The limit stays in the range of an `Int`.
+    val maxErrors = math.min(math.max(batchSize, 1).toLong * 100L, Int.MaxValue.toLong).toInt
+    ParallelExecutor.fromSettings(timeout = Duration.Inf, maxErrors = Some(ErrorLimit.applyUnsafe(maxErrors)))
 
   /** The number of threads of each of `items` evaluations that share `total` threads (dspy's `batch_evaluate`). At most
     * `total` evaluations run at the same time. With `workers = min(items, total)`, each evaluation gets `total /

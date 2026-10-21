@@ -8,6 +8,8 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.runtime.ParallelExecutor
 import munit.FunSuite
 import java.util.concurrent.atomic.AtomicInteger
+import scala.concurrent.duration.Duration
+import scala.concurrent.duration.DurationInt
 
 class ParallelExecutorSuite extends FunSuite:
 
@@ -107,4 +109,20 @@ class ParallelExecutorSuite extends FunSuite:
 
     assert(result.isLeft)
     assert(started.get() <= 2)
+  }
+
+  test("an executor with no time limit waits for a slow task, and each task keeps its result") {
+    given RuntimeContext = RuntimeEnvironment.current
+    // The task of the item 2 takes 2 seconds. The other tasks complete at once.
+    val task = (item: Int) =>
+      if item == 2 then Thread.sleep(2000L)
+      item
+    val data = Vector(1, 2, 3)
+
+    // With a limit of 500 ms, the executor stops the wait for the slow task, and the batch is a `Left`.
+    val limited = ParallelExecutor(numThreads = ThreadCount(3), timeout = 500.millis).execute(task, data)
+    assert(limited.left.exists(_.message.startsWith("Execution timed out")), limited.toString)
+
+    val unlimited = ParallelExecutor(numThreads = ThreadCount(3), timeout = Duration.Inf).execute(task, data)
+    assertEquals(unlimited.map(_.results), Right(Vector(Some(1), Some(2), Some(3))))
   }

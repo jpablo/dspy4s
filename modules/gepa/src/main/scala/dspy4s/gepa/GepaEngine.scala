@@ -4,6 +4,7 @@ import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.RuntimeDelta
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -14,6 +15,7 @@ import java.nio.file.Path
 import scala.annotation.tailrec
 import scala.util.Random
 import scala.util.Try
+import scala.util.control.NonFatal
 
 /** Configuration for a GEPA run. Covers the reflective-mutation loop, merge crossover, the evaluation cache, the
   * objective-aware Pareto fronts ([[frontierType]]), and the proposals of one iteration ([[proposalSampling]],
@@ -191,13 +193,30 @@ final class GepaEngine[P](
       trainset     : Vector[Example],
       valset       : Vector[Example]
   )(using
-      RuntimeContext
+      ctx: RuntimeContext
   ): Either[DspyError, GepaResult[P]] =
-    for
-      _      <- requireTrainset(trainset)
-      _      <- adapter.distinctKeys
-      result <- search(seedCandidate, trainset, valset)
-    yield result
+    withInstalled(ctx) {
+      for
+        _      <- requireTrainset(trainset)
+        _      <- adapter.distinctKeys
+        result <- search(seedCandidate, trainset, valset)
+      yield result
+    }
+
+  /** Run `body` with `context` as the installed context, as `Evaluate` does. The evaluations read the installed
+    * context, and the proposer gets the given context, so the two use the same language model and the same callbacks
+    * (upstream has one ambient context, `dspy.settings`). The run keeps the open call scopes of this thread, for
+    * example a compile scope. The trace and the history of the run go to the context of the caller at the end, also
+    * when `body` throws.
+    */
+  private def withInstalled[A](context: RuntimeContext)(body: RuntimeContext ?=> A): A =
+    val installed = context.withScope(RuntimeEnvironment.current.scope).withDelta(RuntimeDelta.empty)
+    var delta     = RuntimeDelta.empty
+    try RuntimeEnvironment.withContext(installed) {
+        try body(using RuntimeEnvironment.current)
+        finally delta = RuntimeEnvironment.current.delta
+      }
+    finally RuntimeEnvironment.propagate(delta)
 
   private def search(
       seedCandidate: Candidate,
@@ -460,12 +479,12 @@ final class GepaEngine[P](
     * does not hold.
     *
     * The proposer gets one call, with the parent, the selected components, and the records of each selected component
-    * that has one record at least. After a `Left`, the proposer gets one more call.
+    * that has one record at least. After a `Left` or a non-fatal exception, the proposer gets one more call.
     *
     * The task has no child in each of these cases, and it then costs the minibatch evaluation of its parent only:
     *   - The selected components have no reflective record. The proposer then gets no call.
     *   - The proposer gives no text.
-    *   - The proposer gives a `Left` two times. The outcome is then [[Outcome.Failed]].
+    *   - The proposer fails two times, with a `Left` or a non-fatal exception. The outcome is then [[Outcome.Failed]].
     */
   private def proposeChild(reflection: Reflection)(using RuntimeContext): Either[DspyError, Outcome] =
     val parent = reflection.task.parent
@@ -507,9 +526,9 @@ final class GepaEngine[P](
     }
     (proposals, children.map(_.task.minibatch.size).sum)
 
-  /** The new texts of the proposer for one task. `None` when the proposal failed two times: after a `Left`, the engine
-    * calls the proposer one more time (gepa's `_propose_texts_batch_safe`). A `Right` gets no second call, also when it
-    * holds no text.
+  /** The new texts of the proposer for one task. `None` when the proposal failed two times: after a `Left` or a
+    * non-fatal exception ([[proposeInReflectionContext]]), the engine calls the proposer one more time (gepa's
+    * `_propose_texts_batch_safe`). A `Right` gets no second call, also when it holds no text.
     */
   private def proposeTexts(
       parent    : Candidate,
@@ -523,8 +542,12 @@ final class GepaEngine[P](
     * `dspy.context(lm=reflection_lm)`). The context that the proposer gets and [[RuntimeEnvironment.current]] are the
     * same in the call.
     *
+    * A non-fatal exception of the proposer gives a `Left` with a [[RuntimeError]], so [[proposeTexts]] calls the
+    * proposer one more time (gepa's `_propose_texts_batch_safe` catches each exception of the reflection). A fatal
+    * error, for example an `InterruptedException`, goes up to the caller.
+    *
     * The call has a trace and a history of its own. The trace entries do not reach the caller. The history entries go
-    * to the context of the caller, also for a call that gives a `Left`.
+    * to the context of the caller, also for a call that gives a `Left` or that throws a non-fatal exception.
     */
   private def proposeInReflectionContext(
       parent    : Candidate,
@@ -532,7 +555,12 @@ final class GepaEngine[P](
       components: Vector[OptimizableId]
   )(using ctx: RuntimeContext): Either[DspyError, Map[OptimizableId, String]] =
     val reflection = ctx.withServices(ctx.services.copy(lm = Some(reflectionLm)))
-    val executed   = RuntimeEnvironment.isolatedAttempt(reflection)(proposer.propose(parent, reflective, components))
+    val executed   = RuntimeEnvironment.isolatedAttempt(reflection) {
+      try proposer.propose(parent, reflective, components)
+      catch
+        case NonFatal(error) =>
+          Left(RuntimeError("instruction_proposer", Option(error.getMessage).getOrElse(error.getClass.getSimpleName)))
+    }
     RuntimeEnvironment.propagate(executed.delta.copy(trace = Vector.empty))
     executed.value
 

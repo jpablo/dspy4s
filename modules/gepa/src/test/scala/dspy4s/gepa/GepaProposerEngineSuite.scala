@@ -25,6 +25,7 @@ import dspy4s.programs.strategies.DynamicPredict
 import munit.FunSuite
 import zio.blocks.schema.{DynamicValue, Schema}
 
+import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
 
 /** The instruction proposer in the GEPA engine, and the reflective records that the adapter gives to it (PORT_GAPS
@@ -345,4 +346,94 @@ class GepaProposerEngineSuite extends FunSuite:
 
     assertEquals(proposer.calls.size, 1)
     assertEquals(result.bestCandidate(first), Some(improved))
+  }
+
+  // ── An exception of the proposer ────────────────────────────────────────────────────────────────────────────
+  // Upstream catches each exception of the reflection, calls the proposer one more time, and continues with no
+  // proposal after a second exception (gepa `proposer/reflective_mutation/reflective_mutation.py`,
+  // `_propose_texts_batch_safe`).
+
+  /** Throws `error` in the first `failures` calls, and then gives the improved text. Each call first writes one history
+    * entry.
+    */
+  private final class ThrowingProposer(failures: Int, error: () => Throwable) extends InstructionProposer:
+    val calls: AtomicInteger = AtomicInteger(0)
+    override def propose(
+        candidate : Candidate,
+        reflective: Map[OptimizableId, Vector[ReflectiveRecord]],
+        components: Vector[OptimizableId]
+    )(using RuntimeContext): Either[DspyError, Map[OptimizableId, String]] =
+      RuntimeEnvironment.appendHistory(HistoryEntry("throwing", DynamicValue.Record.empty))
+      if calls.incrementAndGet() <= failures then throw error()
+      else Right(Map(first -> improved))
+
+  test("an exception of the proposer is a failure, and the engine calls the proposer one more time") {
+    val reflection = new ScriptedReflectionLm(reply("not used"))
+    val proposer   = new ThrowingProposer(1, () => IllegalStateException("the proposer failed"))
+    val result     = withTaskLm(new TaskLm)(optimize(reflection, proposer)).fold(error => fail(error.message), identity)
+
+    assertEquals(proposer.calls.get, 2)
+    assertEquals(result.numCandidates.toInt, 2)
+    assertEquals(result.bestCandidate(first), Some(improved))
+    assertEquals(result.state.failedProposals, 0)
+  }
+
+  test("after two exceptions of the proposer, the run continues with no proposal") {
+    val reflection = new ScriptedReflectionLm(reply("not used"))
+    val proposer   = new ThrowingProposer(Int.MaxValue, () => IllegalStateException("the proposer failed"))
+    withTaskLm(new TaskLm) {
+      val result = optimize(reflection, proposer).fold(error => fail(error.message), identity)
+
+      assertEquals(proposer.calls.get, 2)
+      assertEquals(result.numCandidates.toInt, 1)
+      // 4 for the seed and 2 for the minibatch of the parent. No child evaluation ran.
+      assertEquals(result.totalMetricCalls.toInt, 6)
+      assertEquals(result.state.failedProposals, 1)
+      // The history of a call that throws goes to the caller, as the history of a call that gives a `Left`.
+      assertEquals(RuntimeEnvironment.current.history.count(_.component == "throwing"), 2)
+    }
+  }
+
+  test("a fatal error of the proposer goes to the caller") {
+    val reflection = new ScriptedReflectionLm(reply("not used"))
+    val proposer   = new ThrowingProposer(Int.MaxValue, () => InterruptedException("stop"))
+    // `intercept` catches only non-fatal errors, so the test catches the fatal error itself.
+    val thrown =
+      try
+        val _ = withTaskLm(new TaskLm)(optimize(reflection, proposer))
+        None
+      catch case error: InterruptedException => Some(error.getMessage)
+    assertEquals(thrown, Some("stop"))
+    assertEquals(proposer.calls.get, 1)
+  }
+
+  // ── A given context that is not installed ───────────────────────────────────────────────────────────────────
+  // Upstream has one ambient context (`dspy.settings`, `dspy.context`) for the evaluations and for the proposer.
+
+  test("the evaluations use the given context also when that context is not installed") {
+    val reflection = new ScriptedReflectionLm(reply(improved))
+    // The task LM is in the given context only. The installed context has no language model.
+    given RuntimeContext = RuntimeContext(lm = Some(new TaskLm), adapter = Some(ChatAdapter()))
+    val result           = optimize(reflection).fold(error => fail(error.message), identity)
+
+    assertEquals(reflection.requests.size, 1)
+    assertEquals(result.bestCandidate(first), Some(improved))
+    assertEquals(result.bestScore, 1.0)
+    // The run does not change the installed context.
+    assertEquals(RuntimeEnvironment.current.lm, None)
+  }
+
+  test("Gepa.compile evaluates with the given context also when that context is not installed") {
+    val reflection       = new ScriptedReflectionLm(reply("not used"))
+    val proposer         = new ProbeProposer(Right(Map(first -> improved)))
+    given RuntimeContext = RuntimeContext(lm = Some(new TaskLm), adapter = Some(ChatAdapter()))
+    val result           = new Gepa[DynamicPredict](metric, reflection, oneIteration, instructionProposer = proposer)
+      .compile(program, dataset, dataset)
+      .fold(error => fail(error.message), identity)
+
+    assertEquals(result.bestScore, 1.0)
+    // The proposer gets the reflection LM in its given context and in the installed context.
+    val call = proposer.calls.headOption.getOrElse(fail("the proposer got no call"))
+    assert(call.givenLm.exists(_ eq reflection), call.givenLm.toString)
+    assert(call.overlayLm.exists(_ eq reflection), call.overlayLm.toString)
   }

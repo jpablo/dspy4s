@@ -13,6 +13,7 @@ import java.util.concurrent.ExecutorCompletionService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import scala.concurrent.duration.Duration
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.duration.FiniteDuration
 import scala.util.control.NonFatal
@@ -23,10 +24,19 @@ final case class ParallelExecutionResult[+A](
     errors       : Map[Int, DspyError]
 )
 
+/** Runs a task for each item of a batch on a pool of `numThreads` threads (upstream `dspy/utils/parallelizer.py`).
+  *
+  * @param maxErrors
+  *   the number of tasks that can fail before the executor cancels the batch and gives a `Left`
+  * @param timeout
+  *   the longest wait for the next task that completes. When no task completes in this time, the batch is a `Left`.
+  *   Upstream submits a slow task again and never fails the batch. `Duration.Inf` gives no time limit: the executor
+  *   then waits for each task.
+  */
 final class ParallelExecutor(
-    numThreads: ThreadCount    = ParallelExecutor.DefaultNumThreads,
-    maxErrors : ErrorLimit     = ErrorLimit(10),
-    timeout   : FiniteDuration = 120.seconds
+    val numThreads: ThreadCount = ParallelExecutor.DefaultNumThreads,
+    val maxErrors : ErrorLimit  = ErrorLimit(10),
+    val timeout   : Duration    = 120.seconds
 ):
 
   // The public entry points declare `using RuntimeContext` as an API contract (workers run under the caller's
@@ -95,7 +105,9 @@ final class ParallelExecutor(
       var timedOut          = false
 
       while completed < submitted && !cancelledByErrors && !timedOut do
-        val completedFuture = completion.poll(timeout.toMillis, TimeUnit.MILLISECONDS)
+        val completedFuture = timeout match
+          case limit: FiniteDuration => completion.poll(limit.toMillis, TimeUnit.MILLISECONDS)
+          case _: Duration.Infinite  => completion.take()
         if completedFuture == null then
           timedOut = true
         else
@@ -150,7 +162,7 @@ object ParallelExecutor:
     * uses); the fallback constants live only here.
     */
   def fromSettings(
-      timeout   : FiniteDuration      = 120.seconds,
+      timeout   : Duration            = 120.seconds,
       numThreads: Option[ThreadCount] = None,
       maxErrors : Option[ErrorLimit]  = None
   )(using RuntimeContext): ParallelExecutor =

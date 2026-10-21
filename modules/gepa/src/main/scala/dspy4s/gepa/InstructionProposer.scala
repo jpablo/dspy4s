@@ -36,8 +36,9 @@ trait InstructionProposer:
     * @return
     *   the new text of each component. A component that `candidate` or `reflective` does not hold has no entry. An
     *   empty map gives no proposal. A `Left` is a proposal that failed: the engine calls [[propose]] one more time, and
-    *   a second `Left` gives no proposal for the iteration. A text for a component that `candidate` does not hold is an
-    *   error of the proposer: the engine stops the run with a `Left`.
+    *   a second `Left` gives no proposal for the iteration. The engine changes a non-fatal exception into a `Left`
+    *   (gepa catches each exception of the reflection). A fatal error goes up to the caller of the engine. A text for a
+    *   component that `candidate` does not hold is an error of the proposer: the engine stops the run with a `Left`.
     */
   def propose(
       candidate : Candidate,
