@@ -90,13 +90,66 @@ private[adapters] object AdapterTextSupport:
     else coerceOutputText(field, raw)
 
   /** Coerce the raw text of the output field `field` (upstream `parse_value`). The text `null` or `None` of an optional
-    * field is a null, when the type of the field is not a string. Each other text goes to [[coerceText]].
+    * field is a null, when the type of the field is not a string. A field with allowed values takes the text of
+    * [[allowedValue]]. Each other text goes to [[coerceText]].
     *
     * An optional field also takes the lenient forms of [[optionalFallback]].
     */
   def coerceOutputText(field: FieldSpec, raw: String): Either[DspyError, DynamicValue] =
     if isNullText(field, raw) then Right(DynamicValue.Null)
-    else optionalFallback(field, raw, coerceText(field.typeRef, raw))
+    else
+      val value = if hasAllowedValues(field) then allowedValue(field, raw) else coerceText(field.typeRef, raw)
+      optionalFallback(field, raw, value)
+
+  /** `true` when the output field `field` takes only its allowed values: a string field with [[FieldSpec.enumValues]],
+    * as a `Literal[...]` of a string signature or a Scala enum of a typed signature gives it (decision D7). The enum
+    * values of a decision type (`TypeRef.noul`, `score`, and `choice`) are its levels or its options, so these fields
+    * do not take this rule.
+    */
+  def hasAllowedValues(field: FieldSpec): Boolean =
+    field.typeRef == TypeRef.string && field.enumValues.nonEmpty
+
+  /** The allowed value of the output field `field` that the text `raw` gives (upstream `parse_value` with a `Literal`
+    * annotation, decision D7). The comparison is case-sensitive. When `raw` is not an allowed value, these steps of
+    * upstream come before one more comparison:
+    *   1. Remove the whitespace at the two ends (Python `str.strip`).
+    *   2. Remove a `Literal[...]` or a `str[...]` wrapper.
+    *   3. Remove one pair of quotes (`'` or `"`).
+    *
+    * Then upstream reads the text with `json_repair`, so the last comparison removes one more pair of quotes, with
+    * whitespace around it. A text that gives no allowed value is an error, thus a parse error of the parser, and the
+    * chat adapter then tries its JSON fallback.
+    *
+    * A Scala enum output has the same rule. Upstream `find_enum_member` compares the text of an `Enum` with no step.
+    */
+  def allowedValue(field: FieldSpec, raw: String): Either[DspyError, DynamicValue] =
+    val allowed   = field.enumValues
+    val stripped  = PythonText.strip(raw)
+    val unwrapped = withoutQuotes(
+      if AllowedValueWrappers.exists(stripped.startsWith) && stripped.endsWith("]") then
+        stripped.substring(stripped.indexOf('[') + 1, stripped.length - 1)
+      else stripped
+    )
+    val repaired = Some(PythonText.strip(unwrapped)).filter(isQuoted).map(withoutQuotes)
+    (Iterator(raw, unwrapped) ++ repaired.iterator)
+      .find(allowed.contains)
+      .map(text => DynamicValue.Primitive(PrimitiveValue.String(text)))
+      .toRight(notAllowedValue(field, raw))
+
+  /** The error of the text or the JSON text `text` that is not an allowed value of the output field `field`. */
+  def notAllowedValue(field: FieldSpec, text: String): DspyError =
+    ValidationError(s"Value '$text' is not one of the allowed values: ${field.enumValues.mkString("; ")}")
+
+  /** The prefixes of a wrapper that upstream `parse_value` removes from a `Literal` value. */
+  private val AllowedValueWrappers: Vector[String] = Vector("Literal[", "str[")
+
+  /** `true` when `text` has two or more characters, and the same quote (`'` or `"`) at the two ends. */
+  private def isQuoted(text: String): Boolean =
+    text.length > 1 && text.head == text.last && (text.head == '\'' || text.head == '"')
+
+  /** `text` with no quotes at the two ends when [[isQuoted]] is `true`, else `text`. */
+  private def withoutQuotes(text: String): String =
+    if isQuoted(text) then text.substring(1, text.length - 1) else text
 
   /** `result`, else, for an optional field, the value of the lenient forms of the typed decode
     * (`ZioSchemaCodec.normalize`): the texts `""`, `null`, `none`, and `n/a` in any case are a null, and a number can
@@ -212,7 +265,9 @@ private[adapters] object AdapterTextSupport:
 
   /** Single-output plain-text fallback shared by the JSON and XML adapters: when structured parsing failed at the
     * DOCUMENT level and the signature has exactly one output field, treat the whole (trimmed, non-empty) reply as that
-    * field's value. Callers gate on their `allowTextFallbackForSingleOutput` flag and field count before invoking.
+    * field's value. Callers gate on their `allowTextFallbackForSingleOutput` flag and field count before invoking. A
+    * field with allowed values takes the value of [[allowedValue]], so a text outside the allowed values is a parse
+    * error, as in the other parse paths (decision D7).
     */
   def singleOutputTextFallback(
       adapterName: String,
@@ -222,10 +277,10 @@ private[adapters] object AdapterTextSupport:
     val field   = layout.outputFields.head
     val trimmed = output.text.trim
     if trimmed.nonEmpty then
-      Right(parsedOutput(
-        adapterName,
-        output,
-        Vector(field.name -> DynamicValue.Primitive(PrimitiveValue.String(trimmed))),
-        metadata = Map("fallback" -> "text")
-      ))
+      val value =
+        if hasAllowedValues(field) then allowedValue(field, trimmed).left.map(fieldError(field, output.text, _))
+        else Right(DynamicValue.Primitive(PrimitiveValue.String(trimmed)))
+      value.map(text =>
+        parsedOutput(adapterName, output, Vector(field.name -> text), metadata = Map("fallback" -> "text"))
+      )
     else Left(ParseError("adapter", "Cannot fallback from empty model output", raw = Some(output.text)))

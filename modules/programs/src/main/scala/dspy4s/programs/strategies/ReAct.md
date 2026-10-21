@@ -101,6 +101,10 @@ The decoder for this step is deliberately lenient. Missing thought or tool-name 
 arguments may arrive as a record or as JSON text; malformed, missing, or non-object arguments become an empty record.
 This lets the control loop decide how to proceed instead of turning a slightly malformed action into a decoding failure.
 
+The adapter parser comes before this decoder. The tool names are the allowed values of `next_tool_name`, so the
+parsers of the port reject an empty name and a name that is not a tool, as upstream `parse_value` rejects a value
+outside a `Literal` (decision D7). See "What happens when things go wrong?".
+
 ## One loop iteration
 
 The trajectory is a `Vector[TrajectoryEntry]`. Each iteration reads the current vector and either returns an updated
@@ -147,7 +151,9 @@ The instructions are the upstream text of `ReAct.__init__`. Each tool has the li
 <desc>...</desc>. It takes arguments {...}.` (upstream `Tool.__str__`). A tool with no description has the line
 `(n) <name>. It takes arguments {...}.`. The arguments are JSON text: the `properties` of `ToolFunction.inputSchema`
 when the tool has one, else one `{"type": ...}` for each entry of `argSchema`. The field `next_tool_name` has the tool
-names as enum values, and `next_tool_args` is a `dict` field.
+names as enum values, and `next_tool_args` is a `dict` field. The parser accepts a tool name in the forms of upstream
+`parse_value`: the comparison is case-sensitive, after the parser removes the whitespace at the two ends, a
+`Literal[...]` or `str[...]` wrapper, and the quotes around the name.
 
 The model does **not** use provider-native function calling here. It emits the ordinary signature fields
 `next_tool_name` and `next_tool_args`. ReAct resolves that name and invokes the corresponding `ToolFunction` locally.
@@ -243,11 +249,12 @@ prediction machinery.
 
 | Situation | Behavior |
 |---|---|
-| Unknown tool name | Append an `Execution error: tool ... does not exist` observation and continue |
+| Unknown tool name | A parse error of the react step (decision D7). The chat adapter tries its JSON fallback. When that also fails, the call returns `Left(ParseError)` with no extract step, as upstream: `AdapterParseError` is not a `ValueError`, so `ReAct.forward` does not catch it |
 | Tool returns an error | Append the observation `Execution error in <name>: <message>` and continue |
 | Tool throws a non-fatal exception | Append the observation `Execution error in <name>: <ClassName>: <message>` (the class name alone when the exception has no message) and continue |
 | Tool throws a fatal error, for example an `InterruptedException` | The error goes up to the caller of the program |
-| Empty tool name | Append `No tool was selected.` and run the extractor |
+| Empty tool name | The same parse error as an unknown tool name |
+| Unknown or empty tool name from an adapter that does not check the allowed values | Append `Execution error: tool ... does not exist` and continue, or append `No tool was selected.` and run the extractor |
 | Model selects `finish` | Append the finish entry and run the extractor |
 | `maxIterations` reached | Run the extractor over the trajectory gathered so far |
 | React-step context overflow | Drop the oldest trajectory entry and retry, up to three attempts; the last entry is never dropped |

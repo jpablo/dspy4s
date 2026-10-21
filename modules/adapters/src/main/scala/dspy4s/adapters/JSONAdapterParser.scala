@@ -79,6 +79,10 @@ private[adapters] object JSONAdapterParser:
     * upstream `parse_value` reads a string with `json_repair`: `"3"` for an `int` field is `3`, and `"[1, 2]"` for a
     * `list` field is a list. A JSON value for a `list[T]` field of a string signature must be a list, as in the chat
     * format. An optional field also takes the lenient forms of `AdapterTextSupport.optionalFallback`.
+    *
+    * A field with allowed values takes a JSON string only, with the rule of `AdapterTextSupport.allowedValue` (decision
+    * D7). Each other JSON value is an error: upstream `parse_value` validates a value that is not a string against the
+    * `Literal`, whose members are strings.
     */
   private def decode(field: FieldSpec, value: Value): Either[DspyError, DynamicValue] =
     value match
@@ -86,6 +90,8 @@ private[adapters] object JSONAdapterParser:
       case ujson.Str(text)                                        => AdapterTextSupport.outputTextValue(field, text)
       case other if NativeFunctionCalling.isToolCallsField(field) =>
         AdapterTextSupport.toolCallsValue(JsonDynamic.fromUjson(other))
+      case other if AdapterTextSupport.hasAllowedValues(field) =>
+        Left(AdapterTextSupport.notAllowedValue(field, renderJson(other)))
       case other => AdapterTextSupport.optionalFallback(field, renderJson(other), coerce(field.typeRef, other))
 
   private def extractJson(text: String): Either[DspyError, String] =

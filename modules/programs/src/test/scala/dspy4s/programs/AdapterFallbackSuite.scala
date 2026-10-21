@@ -106,6 +106,38 @@ class AdapterFallbackSuite extends FunSuite:
     assertEquals(lm.requests.size, 2)
   }
 
+  test("a value outside the allowed values of the chat format gives one more call in the JSON format") {
+    // Decision D7: upstream `parse_value` rejects a value outside a `Literal`, so `ChatAdapter.parse` raises
+    // `AdapterParseError`, and `ChatAdapter.__call__` tries `JSONAdapter`.
+    val labelled =
+      DynamicPredict(layout = SignatureLayout.parse("question -> label: Literal['pos', 'neg'], reason").toOption.get)
+    val lm = scripted(
+      "[[ ## label ## ]]\nmaybe\n\n[[ ## reason ## ]]\nx\n\n[[ ## completed ## ]]",
+      """{"label": "neg", "reason": "x"}"""
+    )
+    val result = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      labelled(ProgramCall(DynamicValues.record("question" := "Is it good?"))).map(_.output)
+    }
+    assertEquals(result.toOption.flatMap(DynamicValues.recordGet(_, "label")), Some(DynamicValues.fromAny("neg")))
+    assertEquals(lm.requests.size, 2)
+  }
+
+  test("a value outside the allowed values in the chat format and in the JSON fallback fails the call") {
+    val labelled =
+      DynamicPredict(layout = SignatureLayout.parse("question -> label: Literal['pos', 'neg'], reason").toOption.get)
+    val lm = scripted(
+      "[[ ## label ## ]]\nmaybe\n\n[[ ## reason ## ]]\nx\n\n[[ ## completed ## ]]",
+      """{"label": "maybe", "reason": "x"}"""
+    )
+    val result = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      labelled(ProgramCall(DynamicValues.record("question" := "Is it good?"))).map(_.output)
+    }
+    assert(result.left.exists(_.isInstanceOf[ParseError]), result.toString)
+    assertEquals(lm.requests.size, 2)
+  }
+
   test("an error of the model gives no second call") {
     val lm     = new ScriptedLm(Left(LmServerError("the server failed")), Right(json))
     val result = run(lm, ChatAdapter())

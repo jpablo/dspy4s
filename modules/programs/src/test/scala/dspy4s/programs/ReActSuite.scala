@@ -1,5 +1,6 @@
 package dspy4s.programs
 
+import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt
@@ -8,6 +9,7 @@ import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ModuleStartEvent
+import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ToolEndEvent
@@ -78,6 +80,15 @@ class ReActSuite extends FunSuite:
     }
 
   private val qaSignature = Signature.fromString("question -> answer")
+
+  /** A react step in the chat format, with the tool name `toolName` and the arguments `args` (JSON text). */
+  private def chatStep(toolName: String, args: String = "{}"): String =
+    s"[[ ## next_thought ## ]]\nthink\n\n[[ ## next_tool_name ## ]]\n$toolName\n\n" +
+      s"[[ ## next_tool_args ## ]]\n$args\n\n[[ ## completed ## ]]"
+
+  /** An extract reply in the chat format. */
+  private val chatExtract: String =
+    "[[ ## reasoning ## ]]\nThe tool said so.\n\n[[ ## answer ## ]]\nBrussels\n\n[[ ## completed ## ]]"
 
   test("react runs a tool, finishes, and extracts the answer from the trajectory") {
     val search = new SearchTool
@@ -375,5 +386,48 @@ class ReActSuite extends FunSuite:
         probe.extractorTrajectories.head.contains("[[ ## tool_name_0 ## ]]\nfinish"),
         probe.extractorTrajectories.head
       )
+    }
+  }
+
+  test("with a ChatAdapter, an invented tool name is a parse error of the step, and the call fails as upstream") {
+    // Decision D7. Upstream `next_tool_name` is `Literal[<tool names>]` (`dspy/predict/react.py:77`), so the chat parse
+    // and its JSON fallback raise `AdapterParseError`. That is a `DSPyError`, not a `ValueError`, so the
+    // `except ValueError` of `ReAct.forward` (`react.py:104`) does not catch it: the whole call raises, after two calls
+    // of the model and with no extract call.
+    val search = new SearchTool
+    val lm     = new ScriptedLm(Vector(chatStep("lookup"), chatStep("finish"), chatExtract))
+    val react  = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
+
+    withLmAndAdapter(lm, ChatAdapter()) {
+      val result = react((question = "capital?"))
+      assert(result.left.exists(_.isInstanceOf[ParseError]), result.toString)
+      assertEquals(lm.calls.get(), 2, "the chat step and its JSON fallback")
+      assertEquals(search.calls.get(), 0)
+    }
+  }
+
+  test("with a ChatAdapter, an empty tool name is a parse error of the step, as upstream") {
+    val search = new SearchTool
+    val lm     = new ScriptedLm(Vector(chatStep(""), chatStep("finish"), chatExtract))
+    val react  = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
+
+    withLmAndAdapter(lm, ChatAdapter()) {
+      val result = react((question = "capital?"))
+      assert(result.left.exists(_.isInstanceOf[ParseError]), result.toString)
+      assertEquals(lm.calls.get(), 2, "the chat step and its JSON fallback")
+    }
+  }
+
+  test("with a ChatAdapter, a quoted tool name is the tool, after the normalization of upstream parse_value") {
+    val search = new SearchTool
+    val lm     = new ScriptedLm(Vector(chatStep("'search'", """{"query": "capital"}"""), chatStep("finish"), chatExtract))
+    val react  = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
+
+    withLmAndAdapter(lm, ChatAdapter()) {
+      val result = react((question = "capital?"))
+      assertEquals(result.map(_.output.answer), Right("Brussels"))
+      assertEquals(search.calls.get(), 1)
+      val traj = result.map(prediction => lookupString(prediction.raw.values, "trajectory")).getOrElse("")
+      assert(traj.contains("[[ ## tool_name_0 ## ]]\nsearch"), traj)
     }
   }

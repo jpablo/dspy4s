@@ -20,7 +20,7 @@ private[programs] object ReActProtocol:
   val nextThoughtField: FieldSpec = FieldSpec(name = ReActKeys.nextThought, typeRef = TypeRef.string)
 
   /** The tool name of the step. Upstream gives it the type `Literal[<tool names>]`, so the port gives it the tool names
-    * as enum values.
+    * as enum values. The parsers thus reject a name that is not a tool, and an empty name (decision D7).
     */
   def nextToolNameField(toolNames: Vector[String]): FieldSpec =
     FieldSpec(name = ReActKeys.nextToolName, typeRef = TypeRef.string, enumValues = toolNames)

@@ -38,9 +38,14 @@ import zio.blocks.schema.DynamicValue
   * protocol runs internally over the data-bag layer (a `Streamable[ReAct[I, O]]` instance lets it stream).
   *
   * Tool selection is via output fields (the canonical DSPy mechanism) — not provider-native function-calling. Tool
-  * failures (unknown tool, invocation error, non-fatal exception of a tool) are recorded as trajectory observations
-  * rather than failing the program, mirroring Python; an LM-call failure in the react or extract step propagates as
-  * `Left`.
+  * failures (invocation error, non-fatal exception of a tool) are recorded as trajectory observations rather than
+  * failing the program, mirroring Python; an LM-call failure in the react or extract step propagates as `Left`.
+  *
+  * The tool names are the allowed values of `next_tool_name` (upstream `Literal[tuple(tools.keys())]`). The adapters of
+  * the port reject a name that is not a tool, and an empty name, as upstream `parse_value` does (decision D7). That
+  * parse error of the step gives the JSON fallback of the chat adapter, and when that also fails, the error goes up:
+  * the whole call fails, with no extract step. Upstream does the same: `AdapterParseError` is a `DSPyError`, not a
+  * `ValueError`, so the `except ValueError` of `ReAct.forward` (`dspy/predict/react.py:104`) does not catch it.
   */
 final case class ReAct[I, O](
     baseSignature             : Signature[I, O],
@@ -90,6 +95,9 @@ final case class ReAct[I, O](
     * a result is its text in the trajectory, and an error of a tool gives `Execution error in <name>: <message>`
     * (upstream `ReAct.forward`). An error of a tool is a `Left` of the tool or a non-fatal exception of the tool
     * (upstream `except Exception`; see [[ToolExecutor.run]]). A fatal error of a tool goes up to the caller.
+    *
+    * The parsers of the port reject an empty name and a name that is not a tool (decision D7), so the observations for
+    * these names come only from an adapter that does not check the allowed values of `next_tool_name`.
     */
   override protected val actionInterpreter: ActionInterpreter[ToolCallRequest, String] =
     new ActionInterpreter[ToolCallRequest, String]:
@@ -292,7 +300,8 @@ object ReAct:
     * `next_tool_name` renders as "" (a step that names no tool ends the loop rather than failing the call), and
     * `next_tool_args` accepts a JSON object (JSONAdapter), a JSON-object string (ChatAdapter has no `json` coercion),
     * or nothing (empty record). Decode never fails; `jsonSchemaString` stays `None` for parity with the prior direct
-    * `DynamicPredict` construction.
+    * `DynamicPredict` construction. The parsers of the port give a parse error before this decode for an empty or an
+    * unknown tool name (decision D7).
     */
   private[programs] val reactStepShape: Shape[ReactStep] = ReActProtocol.reactStepShape
 
