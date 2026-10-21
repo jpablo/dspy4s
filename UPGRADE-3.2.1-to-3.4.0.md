@@ -1004,6 +1004,66 @@ suite passes: 2,113 tests, 0 failures, 6 live tests skipped.
   `Evaluate` and GEPA replaced the whole context. A model that throws gives `LmUnexpectedError`. A null option
   removes a default option. `close` of the transport stops the connections in use.
 
+### Batches 42 to 45 (2026-10-21): the small points of batches 33 to 41
+
+The owner asked Claude to fix the small open points of batches 33 to 41. Each fix started with a failing test. The
+full suite passes: 2,157 tests, 0 failures, 6 live tests skipped.
+
+- **Fixed.**
+  - Stream (b42, `c74928c6`): with native tool calls, the stream gets the text fields of the parser (S1); the parser
+    and the stream strip as Python `str.strip` does (S3); a header starts a line after Python whitespace only, in the
+    parser and in the stream (S4); on the `stream()` path of the wrapper, an exception of the delegate is a failure
+    chunk (W1), and a caller that uses only `next()` gets the flush (W2).
+  - OpenAI wire (b44, `9460e5ea`): the cached and the reasoning token counts of the Responses usage (O1); the reasoning
+    and the citations of a Responses stream, in two new `LmChunk` fields and a shared `StreamAccumulator` (O2);
+    `partial_json` for streamed Responses arguments that are not JSON (O3); the Python text of a chunk field that is
+    not a string (O5).
+  - Parsing (b43, `745da1cf`): `tuple[...]`, `set[...]`, and `frozenset[...]` give a list (P1); the single-output
+    fallback has the line ends of a section (P2); a null input of a history message shows `None` (P3); the upstream
+    text of a two-step extraction error (P4); the JSON-mode warning with decision outputs (P6); JSON escapes and the
+    Python `u'...'` and `r'...'` forms in the allowed-value check (A3).
+  - Cache and programs (b45, `3a7f0f1e`): the disk cache evicts down to 90% of its cap (C1); a request too deep for a
+    cache key is a miss (C3); a failed GEPA example carries its failure text, `Trajectory.failure` (X1); no batch time
+    limit by default for `ParallelExecutor`, `Evaluate`, and `Parallel` (X2, G-41); RLM warns once for a construction
+    (X3); RLM checks the `SUBMIT` values against the allowed values and gives the upstream `[Type Error]` text (A4).
+- **Kept, with the reason.** An error of the wrapper code in a stream gives no history entry and no usage, as an early
+  close (B11.1). A typed Scala enum and an optional field accept the normalized forms of the `Literal` rule; the value
+  is still in the allowed set, and the core contracts do not record the source of the values. A wrapper adapter that
+  overrides only `parse(layout, output)` loses the schema of an inner `TwoStepAdapter`; the scaladoc tells it to
+  override the new overload. A usage count of the wrong type empties the usage block, where upstream raises an error
+  that ends the stream. A second writer can pass the cap of the disk cache for a time; an inner cache hit does not
+  fill the outer cache (`CompositeLmCache` does); old TypeSafe entries miss one time; the Python version check keeps
+  its result for the life of the JVM.
+- **Waiting for the owner.** The form of the usage of a result (U1 to U5: failed calls, cache hits, the calls inside
+  tools, the attempts of `BestOfN` and `Refine`, one record for each model), and the single-output fallback of the
+  chat parser, a port rule that upstream does not have (S2).
+- **Changes of the public API.** `Adapter.streamingState` takes a `using RuntimeContext`; `LmChunk` has two new fields
+  (`reasoning`, `citations`); `ToolCallAssembler.assemble` takes a mode; `StreamAccumulator`,
+  `RequestHash.forRequestChecked`, and `RLM.WarningLatch` are new; `Trajectory.failure` replaces the field `failed`
+  (`failed` is now a method); the time limits of `EvaluateConfig`, `Evaluate.apply`, and `Parallel` are a `Duration`,
+  `Duration.Inf` by default; `RLM` has a new last constructor parameter.
+- **Open points from these batches.**
+  - Stream: with native calling not active but provider tool calls in the reply, the parser removes the tool calls
+    field and the stream does not; the stream sends line breaks other than `\n` as they are; the XML parser and
+    stream, the JSON stream, and parts of `AdapterTextSupport` still use Java `trim` or `strip`; on the `stream()`
+    path, an error of the wrapper code goes to the caller, and a fatal error leaves the delegate open until the caller
+    closes the result; with a stream state, a direct caller of `stream()` gets each chunk after the delegate has the
+    next one.
+  - Values: the JSON decoder reads a whole number in the range of a `Long` as an integer (`1.0` prints as `1`); the
+    port has three Python float formatters (adapters, gepa, lm), and one shared formatter could replace them; the
+    allowed-value check does not take triple quotes, two literals in sequence, parentheses, or comments; the items of
+    a tuple or a set are not checked, and such a field gets no strict schema.
+  - OpenAI wire: the Responses stream reads `delta`, `call_id`, `name`, and `arguments` only as strings; an empty
+    `name` in a chat chunk gives `""` (upstream `None`); empty arguments of a plain Responses call give
+    `{value: ""}` (upstream `{}`); annotations with no url, title, or text stay (upstream drops them); the listeners of
+    `streamify` get no reasoning tokens; `cache_write_tokens` is dropped, and the port adds the detail counts of the
+    input and the output sides.
+  - Cache: `RequestHash.forRequest` still throws on a deep value; a custom `LmCache` must use `forRequestChecked`.
+  - GEPA: the failed record has the inputs of the predictor (upstream: the inputs of the program) and stripped message
+    texts; the flex-path text `FailedPrediction: ...` is not ported.
+  - Other: a finite time limit that a caller gives still fails the whole batch (the resubmission of a slow task stays
+    in PORT_BACKLOG); the RLM history entry shows `FINAL: <json>` (upstream shows the parsed values).
+
 Open points from batch 1, for the owner:
 
 - Fixed in b39 (`bdf60092`): the random search rejected an explicit empty validation set. Upstream uses the

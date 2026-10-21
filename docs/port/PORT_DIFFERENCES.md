@@ -404,6 +404,9 @@ constraints. The port has no model of Python types, so a few places of a prompt 
 - A value of an input or a demo prints as upstream prints it: `True`, `False`, `None`, the Python form of a float,
   and JSON with the separators `", "` and `": "`.
 - ReAct and ReActV2 write the arguments of a tool as JSON text. Upstream writes the Python text of a dict.
+- After whitespace before a chat header, upstream `ChatAdapter.parse` keeps a part of the header in the value, because
+  it cuts the rest of the line with the offset of the stripped line (`line[match.end():]`). The port cuts the rest of
+  the stripped line, so the value is the text after the header.
 - ReActV2 (experimental) types `next_thought` as a `str` field, so the output reminder has no type hint for it.
   Upstream types it as `dspy.Reasoning`, which the port does not have.
 - The RLM action prompt has no text about the sub-agents of the sandbox `dspy` facade, because the port has no facade
