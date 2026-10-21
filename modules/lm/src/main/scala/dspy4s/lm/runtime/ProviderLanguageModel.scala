@@ -27,13 +27,26 @@ final case class ProviderLanguageModel(
     invoke                     : DynamicValue => Either[DspyError, DynamicValue],
     override val defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
 ) extends LanguageModel:
+
+  /** Normalize, invoke, and parse. The mode of the provider ([[mode]]) selects the mode of the payload and the parse,
+    * not the mode of the request ([[ProviderRequestNormalizer.withProviderMode]]), as in `OpenAiLanguageModel`.
+    */
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-    val effectiveMode     = request.mode
-    val normalizedRequest = ProviderRequestNormalizer.normalize(request, defaultOptions = defaultOptions)
-    invoke(normalizedRequest).flatMap(raw => ProviderResponseParser.parse(raw, effectiveMode))
+    val routed = ProviderRequestNormalizer.withProviderMode(request, mode)
+    invoke(ProviderRequestNormalizer.normalize(routed, defaultOptions)).flatMap(ProviderResponseParser.parse(_, mode))
 
 object ProviderRequestNormalizer:
   private def str(s: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(s))
+
+  /** `request` with the mode that a provider in the mode `providerMode` sends (upstream: `LM.model_type` is fixed when
+    * the LM is built). A provider in the Responses mode sends each request in the Responses mode. A provider in an
+    * other mode sends a Responses request in the chat mode, and each other request as it is.
+    */
+  def withProviderMode(request: LmRequest, providerMode: LmMode): LmRequest =
+    (providerMode, request.mode) match
+      case (LmMode.Responses, _) => request.copy(mode = LmMode.Responses)
+      case (_, LmMode.Responses) => request.copy(mode = LmMode.Chat)
+      case _                     => request
 
   /** The `type` value of a tool call on the wire. Each tool call is a function call. */
   private val functionCallType = "function"

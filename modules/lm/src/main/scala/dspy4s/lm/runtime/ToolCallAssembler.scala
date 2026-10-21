@@ -68,26 +68,40 @@ object ToolCallAssembler:
   /** The arguments of a provider tool call (the `arguments` value of a chat tool call or of a Responses `function_call`
     * item) as a record. An object stays as it is. A text that is not blank goes through [[parseArguments]], as on the
     * stream path. Each other value gives `{value: <value>}`. No value gives an empty record.
+    *
+    * @param notJson
+    *   the record of a text that is not JSON. The default is the chat rule, `{input: <text>}`. The Responses path gives
+    *   an empty record (upstream `responses_outputs` in `dspy/clients/legacy_outputs.py`).
     */
-  private[lm] def decodeArguments(raw: Option[DynamicValue]): DynamicValue.Record =
+  private[lm] def decodeArguments(
+      raw    : Option[DynamicValue],
+      notJson: String => DynamicValue.Record = inputRecord
+  ): DynamicValue.Record =
     raw match
       case Some(rec: DynamicValue.Record) => rec
       case Some(other)                    => DynamicJson.asString(other).filter(_.trim.nonEmpty) match
           // OpenAI sends `arguments` as a JSON STRING; decode it into a Record (the ToolCall contract: args are decoded
-          // at the parse boundary). Text that is not JSON falls back to `{input: raw}` in parseArguments.
-          case Some(text) => parseArguments(text)
+          // at the parse boundary). Text that is not JSON goes to `notJson` in parseArguments.
+          case Some(text) => parseArguments(text, notJson)
           case None       => DynamicValues.recordFromEntries(Seq(WireKeys.value -> other))
       case None => DynamicValue.Record.empty
 
-  /** JSON-decode a tool-call `arguments` string into a `DynamicValue.Record`; `{input: raw}` when it is not valid JSON,
-    * `{value: json}` when it parses to a non-object. [[decodeArguments]] uses it for a response, so the stream path and
-    * the response path decode identically.
+  /** JSON-decode a tool-call `arguments` string into a `DynamicValue.Record`; `notJson` of the trimmed text when it is
+    * not valid JSON (`{input: raw}` by default), `{value: json}` when it parses to a non-object. [[decodeArguments]]
+    * uses it for a response, so the stream path and the response path decode identically.
     */
-  private[runtime] def parseArguments(raw: String): DynamicValue.Record =
+  private[runtime] def parseArguments(
+      raw    : String,
+      notJson: String => DynamicValue.Record = inputRecord
+  ): DynamicValue.Record =
     val trimmed = raw.trim
     if trimmed.isEmpty then DynamicValue.Record.empty
     else
       DynamicJson.decode(trimmed) match
         case Right(rec: DynamicValue.Record) => rec
         case Right(other)                    => DynamicValues.recordFromEntries(Seq("value" -> other))
-        case Left(_)                         => DynamicValues.recordFromEntries(Seq("input" := trimmed))
+        case Left(_)                         => notJson(trimmed)
+
+  /** The chat rule for arguments that are not JSON: `{input: <text>}`. */
+  private def inputRecord(text: String): DynamicValue.Record =
+    DynamicValues.recordFromEntries(Seq(WireKeys.input := text))

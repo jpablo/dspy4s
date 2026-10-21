@@ -6,6 +6,7 @@ import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmToolCallDelta
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.NameMapper
+import zio.blocks.schema.PrimitiveValue
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodecDeriver
 
@@ -13,7 +14,8 @@ import zio.blocks.schema.json.JsonCodecDeriver
   * `data:` JSON by a derived `JsonCodec` — no by-hand `DynamicValue` navigation. The case classes mirror the wire shape
   * (camelCase fields bridged to the JSON's snake_case by the `SnakeCase` name mapper); the codec is lenient exactly
   * where provider chunks are loose: `Option`/defaulted fields decode from absent or `null`, and unknown fields (`id`,
-  * `object`, `role`, `type`, …) are ignored.
+  * `object`, `role`, `type`, …) are ignored. A chunk that the codec cannot read, for example a chunk with one field of
+  * the wrong type, goes through [[OpenAiStreamChunk.lenient]], which reads the fields one at a time.
   *
   * The domain mapping to `LmChunk` lives on the DTO, reading fields only.
   *
@@ -80,8 +82,67 @@ private[providers] final case class OpenAiStreamFunction(
 private[providers] object OpenAiStreamChunk:
   private val codec = Schema[OpenAiStreamChunk].derive(JsonCodecDeriver.withFieldNameMapper(NameMapper.SnakeCase))
 
+  /** The finish reason that [[lenient]] gives for a `finish_reason` value that is not a string. */
+  private val stop = "stop"
+
   /** Parse one SSE `data:` JSON object into an `OpenAiStreamChunk`. */
   def decode(json: String): Either[DspyError, OpenAiStreamChunk] =
     codec.decode(json) match
       case Right(chunk) => Right(chunk)
       case Left(err)    => Left(ParseError("json", s"Invalid OpenAI stream chunk: ${err.toString.take(200)}"))
+
+  /** The chunk of a JSON object that [[decode]] cannot read. Each field of the wrong type is dropped, and the other
+    * fields stay (upstream `parse_stream_events` in `dspy/_vendor/lm15/providers/openai_chat.py` reads each field with
+    * an `isinstance` check):
+    *
+    *   - The choice is the first element of `choices` when `choices` is an array and the element is an object.
+    *   - `delta` must be an object, and `content` a string.
+    *   - Each element of `tool_calls` that is an object gives a tool call. An `index` that is not a number (or the text
+    *     of a number) gives the position of the call in the array, as in [[decode]]. `id`, `function.name`, and
+    *     `function.arguments` must be strings.
+    *   - A string `finish_reason` stays. Each other value that is not null and not `false` gives `stop` (upstream gives
+    *     `stop` for a finish reason that is not in `_FINISH_REASON_MAP`).
+    *   - `usage` must be an object. Its counts follow [[OpenAiUsage.fromDynamic]].
+    *
+    * The `error` object is not read here: the stream parser reads it first.
+    */
+  def lenient(chunk: DynamicValue.Record): OpenAiStreamChunk =
+    val choice = DynamicJson.field(chunk, WireKeys.choices).map(DynamicJson.asSequence).flatMap(_.headOption)
+      .flatMap(DynamicJson.asRecord)
+    OpenAiStreamChunk(
+      choices = choice.map(lenientChoice).toVector,
+      usage = DynamicJson.field(chunk, WireKeys.usage).flatMap(DynamicJson.asRecord).map(OpenAiUsage.fromDynamic)
+    )
+
+  private def lenientChoice(choice: DynamicValue.Record): OpenAiStreamChoice =
+    OpenAiStreamChoice(
+      delta = DynamicJson.field(choice, WireKeys.delta).flatMap(DynamicJson.asRecord).map(lenientDelta),
+      finishReason = DynamicJson.field(choice, WireKeys.finishReason).flatMap(finishReasonOf)
+    )
+
+  private def lenientDelta(delta: DynamicValue.Record): OpenAiStreamDelta =
+    val calls = DynamicJson.field(delta, WireKeys.toolCalls).map(DynamicJson.asSequence).getOrElse(Vector.empty)
+    OpenAiStreamDelta(
+      content = textOf(delta, WireKeys.content),
+      toolCalls =
+        calls.zipWithIndex.flatMap((call, position) => DynamicJson.asRecord(call).map(lenientCall(_, position)))
+    )
+
+  private def lenientCall(call: DynamicValue.Record, position: Int): OpenAiStreamToolCall =
+    val function = DynamicJson.field(call, WireKeys.function).flatMap(DynamicJson.asRecord)
+    OpenAiStreamToolCall(
+      index = Some(DynamicJson.field(call, WireKeys.index).flatMap(DynamicJson.asLong).fold(position)(_.toInt)),
+      id = textOf(call, WireKeys.id),
+      function = function.map(f =>
+        OpenAiStreamFunction(name = textOf(f, WireKeys.name), arguments = textOf(f, WireKeys.arguments))
+      )
+    )
+
+  private def finishReasonOf(value: DynamicValue): Option[String] =
+    value match
+      case _: DynamicValue.Null.type                             => None
+      case DynamicValue.Primitive(PrimitiveValue.Boolean(false)) => None
+      case other                                                 => DynamicJson.asString(other).orElse(Some(stop))
+
+  private def textOf(record: DynamicValue.Record, key: String): Option[String] =
+    DynamicJson.field(record, key).flatMap(DynamicJson.asString)

@@ -3,6 +3,8 @@ package dspy4s.lm.providers
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.ToolCall
+import dspy4s.lm.contracts.LmMode
+import dspy4s.lm.runtime.ProviderResponseParser
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.PrimitiveValue
@@ -169,6 +171,28 @@ class ResponsesWireSuite extends FunSuite:
           )))
         )
       case other => fail(s"expected one output, got $other")
+  }
+
+  test("function-call arguments that are not JSON give an empty record, and the chat path keeps its rule") {
+    // Upstream `responses_outputs` (`dspy/clients/legacy_outputs.py`): `json.loads` fails, and the arguments are `{}`.
+    val body = record(
+      """{"output": [{"type": "function_call", "call_id": "call_1", "name": "search", "arguments": "not json"}]}"""
+    )
+    ResponsesWire.outputs(body) match
+      case Right(Vector(output)) => assertEquals(
+          output.toolCalls,
+          Vector(ToolCall(name = "search", args = DynamicValue.Record.empty, id = Some("call_1")))
+        )
+      case other => fail(s"expected one output, got $other")
+    val chat = record(
+      """{"choices": [{"message": {"role": "assistant", "content": null, "tool_calls": [
+        |  {"id": "call_1", "type": "function", "function": {"name": "search", "arguments": "not json"}}
+        |]}}]}""".stripMargin
+    )
+    ProviderResponseParser.parse(chat, LmMode.Chat) match
+      case Right(response) =>
+        assertEquals(response.outputs.flatMap(_.toolCalls).map(_.args), Vector(record("""{"input": "not json"}""")))
+      case Left(error) => fail(s"the chat parse failed: $error")
   }
 
   test("a Responses body with no text and no tool call gives no output, and a body with no output array is an error") {

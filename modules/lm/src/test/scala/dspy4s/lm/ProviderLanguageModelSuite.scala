@@ -225,6 +225,41 @@ class ProviderLanguageModelSuite extends FunSuite:
     assertEquals(response.usage.get.completionTokens, 4L)
   }
 
+  test("the mode of the provider selects the payload mode and the parse, not the mode of the request") {
+    // Upstream `LM.model_type` is fixed when the LM is built. `OpenAiLanguageModel` follows the same rule.
+    val chatBody = DynamicValues.fromAny(Map(
+      "choices" -> Vector(Map("message" -> Map("role" -> "assistant", "content" -> "From chat.")))
+    ))
+    val responsesBody = DynamicValues.fromAny(Map(
+      "output" ->
+        Vector(Map("type" -> "message", "content" -> Vector(Map("type" -> "output_text", "text" -> "From responses."))))
+    ))
+    val cases = Vector(
+      (LmMode.Chat, LmMode.Responses, chatBody, "chat", "From chat."),
+      (LmMode.Responses, LmMode.Chat, responsesBody, "responses", "From responses.")
+    )
+    given RuntimeContext = RuntimeEnvironment.current
+    cases.foreach { (providerMode, requestMode, body, wireMode, text) =>
+      var seenMode: Option[String] = None
+      val lm                       = ProviderLanguageModel(
+        id = "openai/test",
+        mode = providerMode,
+        invoke = payload =>
+          seenMode = DynamicJson.field(payload, "mode").flatMap(DynamicJson.asString)
+          Right(body)
+      )
+      val request = LmRequest(
+        model = "openai/test",
+        mode = requestMode,
+        messages = Vector(Message(role = MessageRole.User, text = Some("Q?")))
+      )
+      lm.call(request) match
+        case Right(response) => assertEquals(response.outputs.map(_.text), Vector(text), providerMode.toString)
+        case Left(error)     => fail(s"the $providerMode provider failed on a $requestMode request: $error")
+      assertEquals(seenMode, Some(wireMode), providerMode.toString)
+    }
+  }
+
   test("provider language model returns parse error when provider output is empty") {
     val lm = ProviderLanguageModel(
       id = "openai/empty",

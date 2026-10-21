@@ -22,6 +22,12 @@ private[lm] object WireKeys:
   final val streamOptions = "stream_options"
   final val includeUsage  = "include_usage"
 
+  // Stream chunks. The chunk codec of `OpenAiStreamChunk` derives these keys, and its lenient reader names them.
+  final val delta        = "delta"
+  final val finishReason = "finish_reason"
+  final val index        = "index"
+  final val error        = "error"
+
   // Response / shared structure
   final val choices   = "choices"
   final val output    = "output"

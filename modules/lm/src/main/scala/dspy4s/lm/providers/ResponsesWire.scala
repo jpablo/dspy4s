@@ -5,14 +5,17 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.ToolCall
 import dspy4s.core.contracts.updated
+import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmOutput
+import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.lm.runtime.ToolCallAssembler
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.PrimitiveValue
 
-/** The wire shapes of the OpenAI Responses API (upstream `chat_to_responses` in `dspy/clients/legacy_requests.py`, and
-  * `responses_outputs` in `dspy/clients/legacy_outputs.py`).
+/** The wire shapes of the OpenAI Responses API (upstream `chat_to_responses` in `dspy/clients/legacy_requests.py`,
+  * `responses_outputs` in `dspy/clients/legacy_outputs.py`, and the stream events of lm15 `OpenAILM` in
+  * `dspy/_vendor/lm15/providers/openai.py`).
   */
 private[lm] object ResponsesWire:
 
@@ -43,6 +46,9 @@ private[lm] object ResponsesWire:
     final val title               = "title"
     final val reasoningContent    = "reasoning_content"
     final val citations           = "citations"
+    final val outputIndex         = "output_index"
+    final val item                = "item"
+    final val response            = "response"
 
     /** The options that the Responses body does not send as null (upstream: the former config serializer omitted them).
       */
@@ -70,6 +76,21 @@ private[lm] object ResponsesWire:
 
     /** The block types of a tool message whose text goes into the output of the call. */
     val toolTextBlocks: Set[String] = Set(text, inputText)
+
+  /** The `type` values of the events of a Responses stream that the stream parser reads. */
+  private object Events:
+    final val textDelta      = "response.output_text.delta"
+    final val refusalDelta   = "response.refusal.delta"
+    final val itemAdded      = "response.output_item.added"
+    final val argumentsDelta = "response.function_call_arguments.delta"
+    final val completed      = "response.completed"
+    final val error          = "error"
+    final val responseError  = "response.error"
+
+  /** The finish reasons of the end chunk of a Responses stream (upstream lm15 `StreamEndEvent`). */
+  private object Finish:
+    final val toolCall = "tool_call"
+    final val stop     = "stop"
 
   /** The Responses body for the chat body `chat` (the payload of `ProviderRequestNormalizer.normalize`, with no
     * internal key). The rules of upstream `chat_to_responses`:
@@ -114,7 +135,7 @@ private[lm] object ResponsesWire:
     *
     *   - `text` is the joined text of the `text`, `output_text`, and `input_text` parts of each `message` item.
     *   - Each `function_call` item gives a tool call with its `name`, its `arguments` (a JSON text, decoded as for the
-    *     chat path), and the id `call_id`.
+    *     chat path, except that a text that is not JSON gives an empty record), and the id `call_id`.
     *   - The texts of the `content` (else the `summary`) parts of each `reasoning` item, joined, go to the metadata key
     *     `reasoning_content`.
     *   - Each annotation of a message part gives a citation in the metadata key `citations`:
@@ -145,6 +166,51 @@ private[lm] object ResponsesWire:
           else Vector(LmOutput(text = text, toolCalls = toolCalls, metadata = metadata))
         )
       case _ => Left(ParseError("lm", "The Responses body has no output array"))
+
+  /** The chunk of one event of a Responses stream (upstream lm15 `OpenAILM.parse_stream_events` and
+    * `_parse_single_stream_event` in `dspy/_vendor/lm15/providers/openai.py`). The `type` of the event selects the
+    * rule:
+    *
+    *   - `response.output_text.delta` and `response.refusal.delta` give a chunk with the text `delta`.
+    *   - `response.output_item.added` of a `function_call` item gives a chunk with one tool-call delta: the index is
+    *     `output_index`, the id is the `call_id` (else the `id`) of the item, and the delta has the `name` and the
+    *     `arguments` (else an empty text) of the item.
+    *   - `response.function_call_arguments.delta` gives a chunk with one tool-call delta: the index is `output_index`,
+    *     and the arguments fragment is `delta`.
+    *   - `response.completed` gives the end chunk. Its finish reason is `tool_call` when the `output` of the response
+    *     has a `function_call` item, else `stop`. Its usage is the `usage` of the response.
+    *   - `error` and `response.error` give a `Left` with the error of [[OpenAiErrors.fromResponsesStreamError]].
+    *   - Each other event gives no chunk. The port has no chunk field for reasoning, citations, audio, or images, so it
+    *     skips their events.
+    *
+    * An `output_index` that is not a number gives the index 0, and a `delta` that is not a string gives an empty text.
+    * An empty id or name counts as no id or name.
+    */
+  def streamChunk(event: DynamicValue.Record, model: Option[String]): Either[DspyError, Option[LmChunk]] =
+    val index = DynamicValues.recordGet(event, Keys.outputIndex).flatMap(DynamicJson.asLong).fold(0)(_.toInt)
+    def delta = stringOf(event, WireKeys.delta).getOrElse("")
+    stringOf(event, WireKeys.`type`).getOrElse("") match
+      case Events.textDelta | Events.refusalDelta => Right(Some(LmChunk(text = delta)))
+      case Events.itemAdded                       =>
+        val call =
+          DynamicValues.recordGet(event, Keys.item).flatMap(DynamicJson.asRecord).filter(isKind(_, Kinds.functionCall))
+        Right(call.map { item =>
+          val arguments = stringOf(item, WireKeys.arguments).getOrElse("")
+          toolCallChunk(LmToolCallDelta(index, idOf(item), nonEmpty(item, WireKeys.name), Some(arguments)))
+        })
+      case Events.argumentsDelta =>
+        Right(Some(toolCallChunk(LmToolCallDelta(index, idOf(event), nonEmpty(event, WireKeys.name), Some(delta)))))
+      case Events.completed =>
+        val response = DynamicValues.recordGet(event, Keys.response).flatMap(DynamicJson.asRecord)
+        val usage    = response.flatMap(DynamicJson.field(_, WireKeys.usage)).flatMap(DynamicJson.asRecord)
+        val hasTool  = response.toVector.flatMap(listOf(_, WireKeys.output)).flatMap(DynamicJson.asRecord)
+          .exists(isKind(_, Kinds.functionCall))
+        Right(Some(LmChunk(
+          finishReason = Some(if hasTool then Finish.toolCall else Finish.stop),
+          usage = usage.map(OpenAiUsage.fromDynamic(_).toLmUsage)
+        )))
+      case Events.error | Events.responseError => Left(OpenAiErrors.fromResponsesStreamError(event, model))
+      case _                                   => Right(None)
 
   // ── The request ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -300,10 +366,17 @@ private[lm] object ResponsesWire:
 
   // ── The outputs ─────────────────────────────────────────────────────────────────────────────────────────────
 
+  /** The tool call of a `function_call` item. A text of arguments that is not JSON gives an empty record (upstream
+    * `responses_outputs`: `json.loads` fails, and the arguments are `{}`). The chat path keeps its own rule for such a
+    * text.
+    */
   private def toolCall(item: DynamicValue.Record): ToolCall =
     ToolCall(
       name = stringOf(item, WireKeys.name).getOrElse(""),
-      args = ToolCallAssembler.decodeArguments(DynamicValues.recordGet(item, WireKeys.arguments)),
+      args = ToolCallAssembler.decodeArguments(
+        DynamicValues.recordGet(item, WireKeys.arguments),
+        notJson = _ => DynamicValue.Record.empty
+      ),
       id = stringOf(item, WireKeys.callId).filter(_.nonEmpty)
     )
 
@@ -372,6 +445,16 @@ private[lm] object ResponsesWire:
 
   private def stringOf(rec: DynamicValue.Record, key: String): Option[String] =
     DynamicValues.recordGet(rec, key).flatMap(DynamicJson.asString)
+
+  /** The string at `key` when it is not empty. */
+  private def nonEmpty(rec: DynamicValue.Record, key: String): Option[String] =
+    stringOf(rec, key).filter(_.nonEmpty)
+
+  /** The id of a tool call in a stream event or item: the `call_id`, else the `id`. */
+  private def idOf(rec: DynamicValue.Record): Option[String] =
+    nonEmpty(rec, WireKeys.callId).orElse(nonEmpty(rec, WireKeys.id))
+
+  private def toolCallChunk(delta: LmToolCallDelta): LmChunk = LmChunk(toolCalls = Vector(delta))
 
   private def isKind(rec: DynamicValue.Record, kind: String): Boolean =
     stringOf(rec, WireKeys.`type`).contains(kind)

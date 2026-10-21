@@ -71,9 +71,8 @@ final case class OpenAiLanguageModel(
 
   /** Open an SSE stream against the same endpoint and yield decoded [[dspy4s.lm.contracts.LmChunk]]s.
     *
-    * In the Responses mode, the port has no parser for the Responses stream events: the stream is one final chunk from
-    * [[call]] (the text and the tool calls of the first output, the finish reason `stop`, and the usage), or one
-    * failure chunk.
+    * In the Responses mode, the stream goes to the Responses endpoint, and the client reads the events of the Responses
+    * stream (see [[OpenAiClient.stream]]).
     *
     * Errors are reified into the stream rather than thrown: if the client can't open the connection, the result is a
     * single terminal chunk with `finishReason = "error"`, the message under `raw`, and the typed failure in `error`
@@ -81,25 +80,18 @@ final case class OpenAiLanguageModel(
     * that throws on first read.
     */
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
-    mode match
-      case LmMode.Responses => call(request) match
-          case Right(response) => Iterator.single(LmChunk.fromResponse(response).copy(usage = response.usage))
-          case Left(error)     => Iterator.single(LmChunk.failure(error))
-      case LmMode.Chat | LmMode.Text => client.stream(payload(request)) match
-          case Right(iterator) => iterator
-          case Left(error)     => Iterator.single(LmChunk.failure(error))
+    client.stream(payload(request)) match
+      case Right(iterator) => iterator
+      case Left(error)     => Iterator.single(LmChunk.failure(error))
 
-  /** The provider payload of `request`. Its internal `mode` key selects the endpoint in [[OpenAiClient.invoke]], so the
-    * mode of the provider decides it: with [[dspy4s.lm.contracts.LmMode.Responses]], the request gets the Responses
-    * mode (the normalizer then writes the messages). In each other mode, a request in the Responses mode gets the chat
-    * mode, and each other request stays as it is.
+  /** The provider payload of `request`. Its internal `mode` key selects the endpoint in [[OpenAiClient.invoke]] and
+    * [[OpenAiClient.stream]], so the mode of the provider decides it: with [[dspy4s.lm.contracts.LmMode.Responses]],
+    * the request gets the Responses mode (the normalizer then writes the messages). In each other mode, a request in
+    * the Responses mode gets the chat mode, and each other request stays as it is
+    * ([[ProviderRequestNormalizer.withProviderMode]]).
     */
   private def payload(request: LmRequest): DynamicValue.Record =
-    val routed = (mode, request.mode) match
-      case (LmMode.Responses, _) => request.copy(mode = LmMode.Responses)
-      case (_, LmMode.Responses) => request.copy(mode = LmMode.Chat)
-      case _                     => request
-    ProviderRequestNormalizer.normalize(routed, defaultOptions)
+    ProviderRequestNormalizer.normalize(ProviderRequestNormalizer.withProviderMode(request, mode), defaultOptions)
 
   /** Close the client (see [[dspy4s.lm.contracts.LanguageModel.close]]). */
   override def close(): Unit = client.close()

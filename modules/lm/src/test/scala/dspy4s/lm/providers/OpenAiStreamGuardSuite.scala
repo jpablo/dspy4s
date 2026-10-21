@@ -12,6 +12,7 @@ import dspy4s.core.contracts.LmServerError
 import dspy4s.core.contracts.LmStreamAssemblyError
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.lm.contracts.LmChunk
+import dspy4s.lm.contracts.LmToolCallDelta
 import munit.FunSuite
 
 /** The stream rules of the OpenAI client (upstream `parse_stream_events` in
@@ -106,10 +107,53 @@ class OpenAiStreamGuardSuite extends FunSuite:
     assertEquals(chunks.map(_.text), Vector("ok"))
   }
 
-  test("a JSON object that the chunk codec cannot read is skipped, because upstream reads it leniently") {
+  test("a JSON object that the chunk codec cannot read does not end the stream, because upstream reads it leniently") {
     val (chunks, _) = chunksOf("""data: {"choices":"x"}""", content("ok", finish = "stop"), "data: [DONE]")
     assertEquals(failures(chunks), Vector.empty)
-    assertEquals(chunks.map(_.text), Vector("ok"))
+    assertEquals(chunks.map(_.text).filter(_.nonEmpty), Vector("ok"))
+  }
+
+  // Upstream `parse_stream_events` (`dspy/_vendor/lm15/providers/openai_chat.py`) reads each field of a chunk with an
+  // `isinstance` check, and drops only a field of the wrong type. The streams of these tests have no [DONE] line, so
+  // a chunk that the parser skips leaves the stream with no end event.
+
+  test("a chunk whose usage or choices has the wrong type keeps its other fields") {
+    val (badUsage, _) =
+      chunksOf("""data: {"choices":[{"delta":{"content":"Hi"},"finish_reason":"stop"}],"usage":"x"}""", "")
+    assertEquals(failures(badUsage), Vector.empty)
+    assertEquals(badUsage.map(_.text), Vector("Hi"))
+    assertEquals(badUsage.map(_.finishReason), Vector(Some("stop")))
+    assertEquals(badUsage.flatMap(_.usage), Vector.empty)
+
+    val (badChoices, _) =
+      chunksOf("""data: {"choices":"x","usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}""", "")
+    assertEquals(failures(badChoices), Vector.empty)
+    assertEquals(badChoices.flatMap(_.usage).map(_.totalTokens), Vector(5L))
+  }
+
+  test("a chunk whose content or finish reason has the wrong type keeps its other fields") {
+    val (badContent, _) = chunksOf("""data: {"choices":[{"delta":{"content":5},"finish_reason":"length"}]}""", "")
+    assertEquals(failures(badContent), Vector.empty)
+    assertEquals(badContent.map(_.text), Vector(""))
+    assertEquals(badContent.flatMap(_.finishReason), Vector("length"))
+
+    // Upstream maps a finish reason that is not in `_FINISH_REASON_MAP` to `stop`.
+    val (oddReason, _) = chunksOf("""data: {"choices":[{"delta":{"content":"Hi"},"finish_reason":1}]}""", "")
+    assertEquals(failures(oddReason), Vector.empty)
+    assertEquals(oddReason.map(_.text), Vector("Hi"))
+    assertEquals(oddReason.flatMap(_.finishReason), Vector("stop"))
+  }
+
+  test("a tool call that is not an object is dropped, and the other tool calls of the chunk stay") {
+    val (badCall, _) = chunksOf(
+      """data: {"choices":[{"delta":{"tool_calls":[7,{"index":1,"id":"c1","function":{"name":"f","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}""",
+      ""
+    )
+    assertEquals(failures(badCall), Vector.empty)
+    assertEquals(
+      badCall.flatMap(_.toolCalls),
+      Vector(LmToolCallDelta(index = 1, id = Some("c1"), name = Some("f"), argumentsFragment = Some("{}")))
+    )
   }
 
   // ── Error events in the stream ──────────────────────────────────────────────────────────────────────────────

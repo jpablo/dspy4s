@@ -1,20 +1,28 @@
 package dspy4s.lm.providers
 
+import dspy4s.core.contracts.ClosableIterator
+import dspy4s.core.contracts.ContextWindowExceededError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.LmProviderResponseError
+import dspy4s.core.contracts.LmRateLimitError
+import dspy4s.core.contracts.LmStreamAssemblyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
+import dspy4s.core.contracts.ToolCall
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
+import dspy4s.lm.runtime.ToolCallAssembler
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable.ArrayBuffer
 
 /** An OpenAI provider in the Responses mode calls the Responses endpoint with the Responses body, and reads the one
-  * output of the response (PORT_GAPS G-26, upgrade item L7).
+  * output of the response (PORT_GAPS G-26, upgrade item L7). A stream in that mode reads the events of the Responses
+  * stream.
   */
 class ResponsesModeSuite extends FunSuite:
 
@@ -30,6 +38,35 @@ class ResponsesModeSuite extends FunSuite:
         payload: String
     ): Either[DspyError, HttpStreamResponse] =
       Left(RuntimeError("test", "the stream endpoint is not used"))
+
+  /** A transport that gives one stream with `lines` to each stream request, and records the request. A plain request
+    * gets the Responses body [[responsesBody]], and is recorded too.
+    */
+  private final class Streaming(lines: Vector[String]) extends HttpTransport:
+    val sent: ArrayBuffer[(String, String)]                                                                            = ArrayBuffer.empty
+    val streamed: ArrayBuffer[(String, String)]                                                                        = ArrayBuffer.empty
+    override def sendJson(url: String, headers: Map[String, String], payload: String): Either[DspyError, HttpResponse] =
+      sent += ((url, payload))
+      Right(HttpResponse(200, Map.empty, responsesBody))
+    override def streamSse(
+        url    : String,
+        headers: Map[String, String],
+        payload: String
+    ): Either[DspyError, HttpStreamResponse] =
+      streamed += ((url, payload))
+      val source = lines.iterator
+      Right(HttpStreamResponse(
+        status = 200,
+        headers = Map.empty,
+        dataLines = new ClosableIterator[String]:
+          override def hasNext: Boolean = source.hasNext
+          override def next(): String   = source.next()
+          override def close(): Unit    = ()
+      ))
+
+  /** The end event of a Responses stream with text only. */
+  private val completed: String =
+    """data: {"type":"response.completed","response":{"output":[{"type":"message"}],"usage":{"input_tokens":4,"output_tokens":2,"total_tokens":6}}}"""
 
   private val responsesBody: String = """{"model": "gpt-test", "output": [
       |  {"type": "reasoning", "summary": [{"text": "Think."}]},
@@ -84,14 +121,108 @@ class ResponsesModeSuite extends FunSuite:
       case Left(error) => fail(s"the call failed: $error")
   }
 
-  test("a stream in the Responses mode gives one final chunk from a plain call") {
-    val transport        = Recording(responsesBody)
+  test("a stream in the Responses mode posts the Responses body with stream true to the Responses endpoint") {
+    // Upstream lm15 `OpenAILM._payload` and `build_request` (`dspy/_vendor/lm15/providers/openai.py`): the body has
+    // `"stream": true` and no `stream_options`.
+    val transport        = Streaming(Vector(completed, ""))
     given RuntimeContext = RuntimeContext()
-    val chunks           = model(transport).stream(request).toVector
-    assertEquals(chunks.map(_.text), Vector("Paris"))
-    assertEquals(chunks.map(_.finishReason), Vector(Some("stop")))
-    assertEquals(chunks.flatMap(_.usage).map(_.totalTokens), Vector(6L))
-    assertEquals(transport.sent.map(_._1).toVector, Vector("https://api.test/v1/responses"))
+    val _                = model(transport).stream(request).toVector
+    assertEquals(transport.sent.toVector, Vector.empty)
+    val (url, payload) = transport.streamed.headOption.getOrElse(fail("no stream request"))
+    assertEquals(url, "https://api.test/v1/responses")
+    val body = json(payload)
+    assert(DynamicValues.recordGet(body, "input").isDefined, payload)
+    assertEquals(DynamicValues.recordGet(body, "stream"), Some(DynamicValues.fromAny(true)))
+    assertEquals(DynamicValues.recordGet(body, "messages"), None)
+    assertEquals(DynamicValues.recordGet(body, "stream_options"), None)
+    assertEquals(DynamicValues.recordGet(body, "mode"), None)
+  }
+
+  test("a Responses stream gives the text deltas, the function-call argument deltas, and the usage of the end event") {
+    // Upstream lm15 `OpenAILM.parse_stream_events` (`dspy/_vendor/lm15/providers/openai.py`).
+    val lines = Vector(
+      """event: response.created""",
+      """data: {"type":"response.created","response":{"id":"resp_1","model":"gpt-test"}}""",
+      """data: {"type":"response.output_item.added","output_index":0,"item":{"type":"message","id":"msg_1"}}""",
+      """data: {"type":"response.output_text.delta","output_index":0,"item_id":"msg_1","delta":"Par"}""",
+      """data: {"type":"response.output_text.delta","output_index":0,"item_id":"msg_1","delta":"is"}""",
+      """data: {"type":"response.output_text.done","output_index":0,"item_id":"msg_1","text":"Paris"}""",
+      """data: {"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"search","arguments":""}}""",
+      """data: {"type":"response.function_call_arguments.delta","output_index":1,"item_id":"fc_1","delta":"{\"q\":"}""",
+      """data: {"type":"response.function_call_arguments.delta","output_index":1,"item_id":"fc_1","delta":"\"x\"}"}""",
+      """data: {"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"search","arguments":"{\"q\":\"x\"}"}}""",
+      """data: {"type":"response.completed","response":{"output":[{"type":"message"},{"type":"function_call","call_id":"call_1"}],"usage":{"input_tokens":4,"output_tokens":2,"total_tokens":6}}}""",
+      ""
+    )
+    given RuntimeContext = RuntimeContext()
+    val chunks           = model(Streaming(lines)).stream(request).toVector
+    assertEquals(chunks.flatMap(_.error), Vector.empty)
+    assertEquals(chunks.map(_.text).mkString, "Paris")
+    assertEquals(chunks.map(_.text).filter(_.nonEmpty), Vector("Par", "is"))
+    assertEquals(
+      ToolCallAssembler.assemble(chunks.flatMap(_.toolCalls)),
+      Vector(ToolCall(name = "search", args = json("""{"q":"x"}"""), id = Some("call_1")))
+    )
+    assertEquals(chunks.flatMap(_.finishReason), Vector("tool_call"))
+    assertEquals(
+      chunks.flatMap(_.usage).map(u => (u.promptTokens, u.completionTokens, u.totalTokens)),
+      Vector((4L, 2L, 6L))
+    )
+  }
+
+  test("a Responses stream with only text ends with the finish reason stop") {
+    val lines = Vector(
+      """data: {"type":"response.output_text.delta","output_index":0,"delta":"Par"}""",
+      """data: {"type":"response.output_text.delta","output_index":0,"delta":"is"}""",
+      completed,
+      ""
+    )
+    given RuntimeContext = RuntimeContext()
+    val chunks           = model(Streaming(lines)).stream(request).toVector
+    assertEquals(chunks.flatMap(_.error), Vector.empty)
+    assertEquals(chunks.map(_.text).filter(_.nonEmpty), Vector("Par", "is"))
+    assertEquals(chunks.flatMap(_.finishReason), Vector("stop"))
+  }
+
+  test("an error event of a Responses stream gives the typed error of its code, and the stream ends") {
+    // Upstream `parse_stream_events`: the code and the message of an `error` object, else of the event.
+    val cases: Vector[(String, DspyError => Boolean, String)] = Vector(
+      (
+        """{"type":"error","code":"rate_limit_exceeded","message":"slow down"}""",
+        _.isInstanceOf[LmRateLimitError],
+        "slow down"
+      ),
+      (
+        """{"type":"response.error","error":{"code":"context_length_exceeded","message":"too long"}}""",
+        _.isInstanceOf[ContextWindowExceededError],
+        "too long"
+      ),
+      ("""{"type":"error","code":"something_new"}""", _.isInstanceOf[LmProviderResponseError], "something_new")
+    )
+    cases.foreach { (event, hasClass, message) =>
+      val lines = Vector(
+        """data: {"type":"response.output_text.delta","output_index":0,"delta":"Hi"}""",
+        s"data: $event",
+        """data: {"type":"response.output_text.delta","output_index":0,"delta":"late"}""",
+        completed,
+        ""
+      )
+      given RuntimeContext = RuntimeContext()
+      val chunks           = model(Streaming(lines)).stream(request).toVector
+      assertEquals(chunks.map(_.text).filter(_.nonEmpty), Vector("Hi"), event)
+      val errors = chunks.flatMap(_.error)
+      assertEquals(errors.size, 1, event)
+      assert(hasClass(errors.head), s"$event gave ${errors.head}")
+      assert(errors.head.message.contains(message), s"$event gave the message ${errors.head.message}")
+      assertEquals(chunks.last.finishReason, Some("error"), event)
+    }
+  }
+
+  test("a Responses stream with no end event ends with a stream assembly error") {
+    val lines            = Vector("""data: {"type":"response.output_text.delta","output_index":0,"delta":"Hi"}""", "")
+    given RuntimeContext = RuntimeContext()
+    val chunks           = model(Streaming(lines)).stream(request).toVector
+    assert(chunks.last.error.exists(_.isInstanceOf[LmStreamAssemblyError]), chunks.toString)
   }
 
   test("a call in the chat mode still goes to the chat endpoint with messages") {

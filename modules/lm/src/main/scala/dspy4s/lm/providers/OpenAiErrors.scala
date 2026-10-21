@@ -179,11 +179,33 @@ private[lm] object OpenAiErrors:
     * details hold the model, the provider, and the provider code.
     */
   def fromStreamError(error: DynamicValue.Record, model: Option[String]): LmProviderError =
-    val envelope     = envelopeOf(error)
-    val providerCode = envelope.code.orElse(envelope.kind).getOrElse("provider")
+    val envelope = envelopeOf(error)
+    streamError(envelope.code.orElse(envelope.kind), envelope.message, model)
+
+  /** The error for an `error` or `response.error` event of a Responses stream (upstream `_parse_single_stream_event` in
+    * `dspy/_vendor/lm15/providers/openai.py`). When the event has an `error` object, the provider code is its `code`,
+    * else its `type`, else the `code` of the event, and the message is its `message`, else the `message` of the event.
+    * Else the provider code is the `code` of the event, else its `error_type`, and the message is the `message` of the
+    * event. The class and the details follow [[fromStreamError]].
+    */
+  def fromResponsesStreamError(event: DynamicValue.Record, model: Option[String]): LmProviderError =
+    val outer = envelopeOf(event)
+    DynamicValues.recordGet(event, WireKeys.error).flatMap(DynamicJson.asRecord) match
+      case Some(error) =>
+        val inner = envelopeOf(error)
+        streamError(inner.code.orElse(inner.kind).orElse(outer.code), inner.message.orElse(outer.message), model)
+      case None =>
+        val errorType = DynamicValues.recordGet(event, "error_type").flatMap(scalarText)
+        streamError(outer.code.orElse(errorType), outer.message, model)
+
+  /** The error of a stream error event with `code` and `message`. No code gives the provider code `provider`. The class
+    * comes from the provider code, and no message gives the provider code as the message.
+    */
+  private def streamError(code: Option[String], message: Option[String], model: Option[String]): LmProviderError =
+    val providerCode = code.getOrElse("provider")
     val details      = LmErrorDetails(model = model, provider = Some(provider), providerCode = Some(providerCode))
     val errorClass   = streamErrorClasses.getOrElse(providerCode, LmProviderResponseError(_, _))
-    errorClass(envelope.message.getOrElse(providerCode), details)
+    errorClass(message.getOrElse(providerCode), details)
 
   /** The error for a stream that is not complete or not valid. */
   def streamAssembly(message: String, model: Option[String]): LmStreamAssemblyError =

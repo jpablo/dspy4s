@@ -189,7 +189,8 @@ object LanguageModels:
 
   // ── Responses API (lines 271–298) / Advanced custom LMs (lines 301–345) ──
   // The Responses API is `OpenAiLanguageModel(mode = LmMode.Responses)`: the request goes to `/responses`, and the
-  // reply gives one output with its tool calls and its reasoning. A streamed call in that mode gives one final chunk.
+  // reply gives one output with its tool calls and its reasoning. A streamed call in that mode reads the events of the
+  // Responses stream.
   // You can write a custom provider by implementing the `LanguageModel` trait, but there is no
   // `dump_state`/`load_state`/`copy` persistence — dspy4s programs aren't serialized.
 
