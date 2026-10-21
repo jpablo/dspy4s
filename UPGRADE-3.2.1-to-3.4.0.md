@@ -971,9 +971,9 @@ suite passes: 2,113 tests, 0 failures, 6 live tests skipped.
   - Stream wrapper: on the `stream()` path, an exception of the delegate still goes to the caller, a flush needs a
     last `hasNext`, and an error of the wrapper code in the middle of a stream closes the managed stream early (no
     history entry, no usage). Programs use `call()`, so they do not see these points.
-  - Usage: a call that fails loses its usage (upstream counts it, `execution.py:556-559`); the port counts a cache hit
-    (upstream does not, `execution.py:730`); the model calls inside a tool are not in the sum; `BestOfN` and `Refine`
-    give the usage of the selected attempt only; upstream gives one usage record for each model, on the top call only.
+  - Usage: closed by decision D9 (b46, `ef957742`). A call whose reply fails to parse, the model calls inside a tool,
+    and each attempt of `BestOfN` and `Refine` now count. The claim that the port counted a cache hit was wrong: the
+    managed model removes the usage of a hit since batch 24.
   - Allowed values (D7): a typed Scala enum uses the `Literal` steps (upstream `Enum` takes the exact value only); an
     optional field uses the `Literal` steps (upstream takes the `Union` path); the JSON escapes and the Python `u'...'`
     form of `json_repair` are not ported; the values of the RLM `SUBMIT` are not checked (upstream `rlm.py:702`).
@@ -996,8 +996,8 @@ suite passes: 2,113 tests, 0 failures, 6 live tests skipped.
 - **Changes of the public API.** `Adapter.parse(invocation, output)` (new overload with a default);
   `Adapter.execute` removed; `LanguageModel.cacheIdentity` and `LmRequest.cacheIdentity` (new, empty by default);
   `ForwardingLanguageModel` (new trait); `ParallelExecutor` takes a `Duration` and shows its settings as `val`s; `RLM`
-  has a new last constructor parameter; `StepGeneration.Generated` has a third field (a user pattern match on two
-  fields does not compile); `RuntimeEnvironment.withInstalled` (new); `Teleprompter.withCompileCallbacks` takes a
+  has a new last constructor parameter; `StepGeneration.Generated` had a third field (b46 removed it again);
+  `RuntimeEnvironment.withInstalled` (new); `Teleprompter.withCompileCallbacks` takes a
   `using RuntimeContext` and a context-function body.
 - **Changes of behavior.** A value outside the allowed values of an output is a parse error (D7), and ReAct fails on
   an invented tool name. Each entry point installs the given context, filled from the installed one (D8); before,
@@ -1166,6 +1166,13 @@ Open points from batch 1, for the owner:
       each LM call of the call: also a failed call, a call inside a tool, and each attempt of `BestOfN` and `Refine`,
       but not a cache hit (open points U1 to U5). **Decided 2026-10-21: keep one usage on each result, and count as
       upstream.** A usage scope for each program call gives the total of the model calls in that call.
+      Done in b46 (`ef957742`): `UsageScope` in `Module.apply`, and one record point,
+      `LanguageModel.callAndRecordUsage`, which the framework code that calls a model uses. The differences that stay:
+      the port always gives a usage, on each result, as one `LmUsage` (the owner's choice); the calls of parallel
+      workers add to the caller's total (upstream copies the tracker for each worker); a stream that fails after its
+      usage chunk adds nothing; user code that calls `model.call` directly does not count (it must use
+      `callAndRecordUsage`); a record from async work that outlives the call still adds to the outer scopes that are
+      open; a hit or a call with no usage gives `None` (upstream `{}`).
 - [x] **D10. The single-output fallback of the chat parser.** With one output field and no header in the reply, the
       port takes the whole text as the value; upstream has no such rule and goes to the JSON fallback (open point
       S2). **Decided 2026-10-21: keep the fallback.** It saves a model call; the stream holds such a reply and sends
