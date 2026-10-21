@@ -12,13 +12,19 @@ final case class RuntimeServices(
       */
     interpreterFactory: Option[ReplInterpreterFactory] = None
 ) derives CanEqual:
+  /** Fill each unset field from `defaults`. When `defaults` fills no field, the result is this value itself. */
   def fillFrom(defaults: RuntimeServices): RuntimeServices =
-    RuntimeServices(
-      lm = lm.orElse(defaults.lm),
-      adapter = adapter.orElse(defaults.adapter),
-      callbacks = if callbacks.nonEmpty then callbacks else defaults.callbacks,
-      interpreterFactory = interpreterFactory.orElse(defaults.interpreterFactory)
-    )
+    val complete = (lm.isDefined || defaults.lm.isEmpty) && (adapter.isDefined || defaults.adapter.isEmpty) &&
+      (callbacks.nonEmpty || defaults.callbacks.isEmpty) &&
+      (interpreterFactory.isDefined || defaults.interpreterFactory.isEmpty)
+    if complete then this
+    else
+      RuntimeServices(
+        lm = lm.orElse(defaults.lm),
+        adapter = adapter.orElse(defaults.adapter),
+        callbacks = if callbacks.nonEmpty then callbacks else defaults.callbacks,
+        interpreterFactory = interpreterFactory.orElse(defaults.interpreterFactory)
+      )
 
 /** Immutable runtime policy and tuning values. Unlike [[RuntimeServices]], these fields contain no executable
   * dependencies; unlike [[RuntimeDelta]], they are inputs to execution rather than outputs accumulated by it.
@@ -32,16 +38,27 @@ final case class RuntimeConfig(
     callbackMetadata    : DynamicValue.Record  = DynamicValue.Record.empty,
     captureFailureTraces: Boolean              = false
 ) derives CanEqual:
+  /** Fill each unset field from `defaults`. When `defaults` fills no field, the result is this value itself. */
   def fillFrom(defaults: RuntimeConfig): RuntimeConfig =
-    RuntimeConfig(
-      numThreads = numThreads.orElse(defaults.numThreads),
-      maxErrors = maxErrors.orElse(defaults.maxErrors),
-      maxHistorySize = maxHistorySize.orElse(defaults.maxHistorySize),
-      disableHistory = disableHistory.orElse(defaults.disableHistory),
-      trackUsage = trackUsage.orElse(defaults.trackUsage),
-      callbackMetadata = if callbackMetadata.fields.isEmpty then defaults.callbackMetadata else callbackMetadata,
-      captureFailureTraces = captureFailureTraces || defaults.captureFailureTraces
-    )
+    val complete =
+      (numThreads.isDefined || defaults.numThreads.isEmpty) &&
+        (maxErrors.isDefined || defaults.maxErrors.isEmpty) &&
+        (maxHistorySize.isDefined || defaults.maxHistorySize.isEmpty) &&
+        (disableHistory.isDefined || defaults.disableHistory.isEmpty) &&
+        (trackUsage.isDefined || defaults.trackUsage.isEmpty) &&
+        (callbackMetadata.fields.nonEmpty || defaults.callbackMetadata.fields.isEmpty) &&
+        (captureFailureTraces || !defaults.captureFailureTraces)
+    if complete then this
+    else
+      RuntimeConfig(
+        numThreads = numThreads.orElse(defaults.numThreads),
+        maxErrors = maxErrors.orElse(defaults.maxErrors),
+        maxHistorySize = maxHistorySize.orElse(defaults.maxHistorySize),
+        disableHistory = disableHistory.orElse(defaults.disableHistory),
+        trackUsage = trackUsage.orElse(defaults.trackUsage),
+        callbackMetadata = if callbackMetadata.fields.isEmpty then defaults.callbackMetadata else callbackMetadata,
+        captureFailureTraces = captureFailureTraces || defaults.captureFailureTraces
+      )
 
 /** Dynamic correlation scope for the current execution. Scope is restored when a `with*` boundary exits; it is not part
   * of the observable execution output captured by [[RuntimeDelta]].
@@ -61,12 +78,17 @@ final case class RuntimeScope(
   /** `true` while a predictor that owns a [[PredictorKey]] runs. */
   def withinPredictor: Boolean = predictor.isDefined
 
+  /** Fill each unset field from `defaults`. When `defaults` fills no field, the result is this value itself. */
   def fillFrom(defaults: RuntimeScope): RuntimeScope =
-    RuntimeScope(
-      asyncTaskId = asyncTaskId.orElse(defaults.asyncTaskId),
-      callStack = if callStack.nonEmpty then callStack else defaults.callStack,
-      predictor = predictor.orElse(defaults.predictor)
-    )
+    val complete = (asyncTaskId.isDefined || defaults.asyncTaskId.isEmpty) &&
+      (callStack.nonEmpty || defaults.callStack.isEmpty) && (predictor.isDefined || defaults.predictor.isEmpty)
+    if complete then this
+    else
+      RuntimeScope(
+        asyncTaskId = asyncTaskId.orElse(defaults.asyncTaskId),
+        callStack = if callStack.nonEmpty then callStack else defaults.callStack,
+        predictor = predictor.orElse(defaults.predictor)
+      )
 
 /** The unit of execution context, partitioned into services, configuration, dynamic scope, and accumulated delta. It is
   * threaded as `using RuntimeContext` through modules, adapters, language models, and callbacks.
@@ -145,14 +167,17 @@ final class RuntimeContext private (
 
   /** Fill unset services/config/scope fields from `defaults`. The accumulated delta is intentionally never inherited:
     * it belongs to this execution overlay.
+    *
+    * When `defaults` fills no field, the result is this context itself. Thus [[dspy4s.core.runtime.RuntimeEnvironment]]
+    * gives the installed context itself when the global default adds nothing, and the reference check of
+    * `RuntimeEnvironment.withInstalled` finds it.
     */
   def fillFrom(defaults: RuntimeContext): RuntimeContext =
-    RuntimeContext.fromParts(
-      services.fillFrom(defaults.services),
-      config.fillFrom(defaults.config),
-      scope.fillFrom(defaults.scope),
-      delta
-    )
+    val filledServices = services.fillFrom(defaults.services)
+    val filledConfig   = config.fillFrom(defaults.config)
+    val filledScope    = scope.fillFrom(defaults.scope)
+    if (filledServices eq services) && (filledConfig eq config) && (filledScope eq scope) then this
+    else RuntimeContext.fromParts(filledServices, filledConfig, filledScope, delta)
 
   override def equals(other: Any): Boolean =
     other match

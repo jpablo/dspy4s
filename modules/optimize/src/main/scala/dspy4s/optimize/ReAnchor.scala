@@ -491,21 +491,19 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
   ): Either[DspyError, Vector[Double]] =
     val failure  = new AtomicReference[Option[DspyError]](None)
     val executor = ParallelExecutor(numThreads = threads, maxErrors = ErrorLimit(1))
-    // As `Evaluate`: the workers get the given context with the dynamic scope of this thread.
-    val run = RuntimeEnvironment.withContext(context.withScope(RuntimeEnvironment.current.scope)) {
-      executor.executeEither[Example, Double](
-        task = example =>
-          given RuntimeContext = RuntimeEnvironment.current
-          val scored           =
-            try runner.run(program, example.inputs).flatMap(prediction => metric.score(example, prediction))
-            catch
-              case NonFatal(error) => Left(RuntimeError("reanchor", Option(error.getMessage).getOrElse(error.toString)))
-          scored.left.foreach(error => failure.compareAndSet(None, Some(error)))
-          scored
-        ,
-        data = examples
-      )(using RuntimeEnvironment.current)
-    }
+    // The executor installs the given context, so the workers get it with the dynamic scope of this thread.
+    val run = executor.executeEither[Example, Double](
+      task = example =>
+        given RuntimeContext = RuntimeEnvironment.current
+        val scored           =
+          try runner.run(program, example.inputs).flatMap(prediction => metric.score(example, prediction))
+          catch
+            case NonFatal(error) => Left(RuntimeError("reanchor", Option(error.getMessage).getOrElse(error.toString)))
+        scored.left.foreach(error => failure.compareAndSet(None, Some(error)))
+        scored
+      ,
+      data = examples
+    )(using context)
     run.left.map(error => failure.get.getOrElse(error)).flatMap { result =>
       val values = result.results.flatten
       if values.size != examples.size then

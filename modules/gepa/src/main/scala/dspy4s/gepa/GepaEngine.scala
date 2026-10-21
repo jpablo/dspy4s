@@ -4,7 +4,6 @@ import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.RuntimeDelta
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -195,28 +194,19 @@ final class GepaEngine[P](
   )(using
       ctx: RuntimeContext
   ): Either[DspyError, GepaResult[P]] =
-    withInstalled(ctx) {
+    // The run installs the given context (decision D8: the given context wins), as `Evaluate` does. The evaluations
+    // read the installed context, and the proposer gets the given context, so the two use the same language model and
+    // the same callbacks (upstream has one ambient context, `dspy.settings`). The run keeps the open call scopes of
+    // this thread, for example a compile scope. The trace and the history of the run reach the context of the
+    // caller, also when the run throws.
+    RuntimeEnvironment.withInstalled(ctx) { effective ?=>
+      given RuntimeContext = effective
       for
         _      <- requireTrainset(trainset)
         _      <- adapter.distinctKeys
         result <- search(seedCandidate, trainset, valset)
       yield result
     }
-
-  /** Run `body` with `context` as the installed context, as `Evaluate` does. The evaluations read the installed
-    * context, and the proposer gets the given context, so the two use the same language model and the same callbacks
-    * (upstream has one ambient context, `dspy.settings`). The run keeps the open call scopes of this thread, for
-    * example a compile scope. The trace and the history of the run go to the context of the caller at the end, also
-    * when `body` throws.
-    */
-  private def withInstalled[A](context: RuntimeContext)(body: RuntimeContext ?=> A): A =
-    val installed = context.withScope(RuntimeEnvironment.current.scope).withDelta(RuntimeDelta.empty)
-    var delta     = RuntimeDelta.empty
-    try RuntimeEnvironment.withContext(installed) {
-        try body(using RuntimeEnvironment.current)
-        finally delta = RuntimeEnvironment.current.delta
-      }
-    finally RuntimeEnvironment.propagate(delta)
 
   private def search(
       seedCandidate: Candidate,

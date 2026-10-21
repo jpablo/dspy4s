@@ -138,9 +138,16 @@ final class GepaAdapter[P](
     * each worker is a thread that gets the context of the caller. With one worker, the thread of the caller evaluates
     * the pairs in order, and no thread starts. An exception from [[evaluate]] goes to the caller.
     *
-    * The engine uses this for the parents, the children, and the selected candidates of one iteration.
+    * The engine uses this for the parents, the children, and the selected candidates of one iteration. The call
+    * installs the context that it gets (UPGRADE-3.2.1-to-3.4.0, decision D8: the given context wins).
     */
   def batchEvaluate(
+      items        : Vector[(Candidate, Vector[Example])],
+      captureTraces: Boolean
+  )(using ctx: RuntimeContext): Vector[EvaluationBatch] =
+    RuntimeEnvironment.withInstalled(ctx)(effective ?=> batchEvaluateInstalled(items, captureTraces)(using effective))
+
+  private def batchEvaluateInstalled(
       items        : Vector[(Candidate, Vector[Example])],
       captureTraces: Boolean
   )(using ctx: RuntimeContext): Vector[EvaluationBatch] =

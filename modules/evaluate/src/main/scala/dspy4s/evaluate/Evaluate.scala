@@ -45,6 +45,9 @@ final case class EvaluateConfig(
   * Each run is an evaluate scope (upstream `on_evaluate_start` and `on_evaluate_end`) with the `evaluatorName`
   * `Evaluate`. The inputs are `devset_size` and `num_threads` (the thread count of the run), and the output is the
   * [[EvaluationResult]] or the failure. The scope runs in the context of the run, so it sees the `callbackMetadata`.
+  *
+  * The run installs the context that it gets (UPGRADE-3.2.1-to-3.4.0, decision D8: the given context wins), so the
+  * callbacks and the parallel workers use the settings of that context.
   */
 final class Evaluate(config: EvaluateConfig) extends Evaluator:
 
@@ -81,20 +84,21 @@ final class Evaluate(config: EvaluateConfig) extends Evaluator:
   )(using RuntimeContext): Either[DspyError, EvaluationResult] =
     // Carry the configured callbackMetadata into the evaluation scope so callbacks firing during the run can read
     // it (Python's `Evaluate(callback_metadata=…)`). Empty metadata leaves the ambient context untouched.
-    // The run keeps the dynamic scope of this thread (the open call scopes), so the evaluate scope nests under the
-    // scope that calls it, for example a compile scope, also when the given context is older than that scope.
     val baseCtx      = summon[RuntimeContext]
     val withMetadata =
       if cfg.callbackMetadata.fields.isEmpty then baseCtx
       else baseCtx.withConfig(baseCtx.config.copy(callbackMetadata = cfg.callbackMetadata))
-    val evalCtx                     = withMetadata.withScope(RuntimeEnvironment.current.scope)
-    val inputs: DynamicValue.Record = DynamicValues.record(
-      "devset_size" := cfg.devset.size,
-      "num_threads" := (resolvedNumThreads(cfg)(using evalCtx): Int)
-    )
-    // The scope opens in the context of the run, so the parallel workers capture its call id as their parent.
-    RuntimeEnvironment.withContext(evalCtx) {
-      CallbackDispatcher.withEvaluate("Evaluate", inputs)(runEvaluation(fn, cfg)(using evalCtx))
+    // The run installs the given context (decision D8: the given context wins), and the run uses the effective context
+    // of the call, also for the thread count of the inputs. It keeps the dynamic scope of this thread (the open call
+    // scopes), so the evaluate scope nests under the scope that calls it, for example a compile scope, also when the
+    // given context is older than that scope. The scope opens in the context of the run, so the parallel workers
+    // capture its call id as their parent.
+    RuntimeEnvironment.withInstalled(withMetadata) { effective ?=>
+      val inputs: DynamicValue.Record = DynamicValues.record(
+        "devset_size" := cfg.devset.size,
+        "num_threads" := (resolvedNumThreads(cfg)(using effective): Int)
+      )
+      CallbackDispatcher.withEvaluate("Evaluate", inputs)(runEvaluation(fn, cfg)(using effective))
     }
 
   private def runEvaluation(

@@ -42,6 +42,14 @@ import scala.concurrent.Future
   * trace entries, and stream-listener routing. [[applyAsync]] is the value-only async entry; [[applyAsyncExecuted]]
   * additionally returns the worker's trace/history delta. Both propagate runtime services, configuration, scope, and
   * registered carriers across the thread boundary.
+  *
+  * [[apply]] installs the context that it gets for the duration of the call (UPGRADE-3.2.1-to-3.4.0, decision D8: the
+  * given context wins). Thus the callbacks, the workers, and the other parts that read the installed context see the
+  * settings of the given context, also when the caller did not install it. Each field that the given context does not
+  * set comes from the installed context. [[forward]] gets this effective context as its `using` value, so the program
+  * resolves its model and its adapter from the same context. The trace and the history of the call reach the installed
+  * context of the caller as before. A nested call that gets the effective context of its caller installs nothing.
+  * [[applyAsync]] runs [[apply]] on the worker, so it installs the given context there.
   */
 trait Module[I, O]:
   def moduleName: String
@@ -54,7 +62,11 @@ trait Module[I, O]:
     */
   protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]]
 
-  final def apply(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
+  final def apply(call: ProgramCall[I])(using context: RuntimeContext): Either[DspyError, Prediction[O]] =
+    RuntimeEnvironment.withInstalled(context)(effective ?=> runLifecycle(call)(using effective))
+
+  /** The module lifecycle around [[forward]], with the effective context of the call. */
+  private def runLifecycle(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     lifecycle match
       case ModuleLifecycle.Transparent()         => forward(call)
       case ModuleLifecycle.Observed(observation) =>

@@ -2051,14 +2051,49 @@ evidence log (batch 31, `dspy4s.optimize.ReAnchor`). ·
 
 ## G-50 — The runtime context has two sources of truth
 
-**Status:** Open. Decision D8 (2026-10-21): the given context wins; each public entry point installs it for the
-duration of the call. · **Verification:** R
+**Status:** Resolved (2026-10-21, batch 41, after decision D8: the given context wins; each public entry point
+installs it for the duration of the call) · **Verification:** C (tests with a context that is not installed)
 
 This item is a dspy4s design point, not an upstream difference. `RuntimeEnvironment` has a process-wide default and
 a `ThreadLocal` (`modules/core/.../runtime/RuntimeEnvironment.scala:41,51`). The LM comes from the `using` context
 (`modules/programs/.../runtime/SettingsProgramRuntime.scala:12-13`), but callbacks and workers read the ambient one
 (`CallbackDispatcher.scala:36-37`, `ParallelExecutor.scala:32-38`). The two can differ when a caller passes a context
 that is not installed.
+
+**Resolution.** One helper, `RuntimeEnvironment.withInstalled`, installs the given context for the call. The given
+context wins for each service and each configuration field that it sets. Each field that it does not set comes from
+the installed context, as `withSettings` fills a context (upstream `dspy.context(**kwargs)` overrides only the given
+settings and keeps the others). Thus a context that a caller captured before a `withCallbacks` block keeps the
+callbacks of the block, and its own language model wins over the installed one. The helper keeps the dynamic scope
+of the thread, and the trace and the history of the call stay with the caller, also after an exception.
+
+The work of the entry point gets the effective context as its `using` value: the context that
+`RuntimeEnvironment.current` gives in the call. Thus the program resolves its model and its adapter from the same
+context as the callbacks and the workers. For example, a given context with only a model gets the adapter of the
+installed context, and a `Predict` call does not fail with "Missing 'adapter'".
+
+The helper does nothing in two cases: the given context is the current one (a reference check), or each field that
+the given context sets already has its value in the current context (the same object for a service, the callback
+list, or the callback metadata; an equal value for a number or a flag). Thus a nested call costs no more than
+before. `fillFrom` gives the same value when the global default fills no field, so `RuntimeEnvironment.current`
+passes the reference check. These entry points call the helper and run their work with the effective context:
+
+- `Module.apply` (each program call; `applyAsync` runs `apply` on the worker, and `ProgramRunner` runs `apply`).
+- `Teleprompter.withCompileCallbacks`, thus the `compile` of each optimizer and `Gepa.compile`. Its body is a context
+  function, so the body of each `compile` gets the effective context with no change at the call site.
+- `Evaluate`, `GepaEngine.optimize`, and `GepaAdapter.batchEvaluate`, in place of their own installs.
+- `ParallelExecutor.execute` and `executeEither`, thus `Parallel`, `GepaAdapter.evaluate`, and `ReAnchor`. A task
+  reads `RuntimeEnvironment.current` on its worker for the effective context.
+- `Streamify.streamify` (the producer thread, and the model and the adapter of the stream) and `ToolExecutor.run`.
+
+The code interpreters take no `using` context. RLM runs them in its program call, so they see the given context.
+Tests: `GivenContextSuite`, `GivenContextFillSuite`, `EffectiveContextSuite`, `GivenContextCompileSuite`,
+`GepaGivenContextSuite`, `StreamifyGivenContextSuite`, `InstalledContextSuite`.
+
+**Differences that stay.** An empty callback list counts as a field with no value, so a given context cannot remove
+the installed callbacks. Code that reads a `using` context outside an entry point sees that context as it is, with
+no fill. `LanguageModel.call` and `acall` install nothing: the model reads the history flag from the given context,
+and `RuntimeEnvironment.appendHistory` reads the history limit from the installed context.
 
 ---
 

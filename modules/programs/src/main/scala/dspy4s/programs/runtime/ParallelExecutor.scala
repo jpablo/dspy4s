@@ -39,22 +39,23 @@ final class ParallelExecutor(
     val timeout   : Duration    = 120.seconds
 ):
 
-  // The public entry points declare `using RuntimeContext` as an API contract (workers run under the caller's
-  // context), but propagation happens via `ContextPropagation.captureAll` reading the ambient environment, so the
-  // parameter itself is unused.
+  // The workers run in the effective context of the call: the given context, filled from the installed one (decision
+  // D8 of UPGRADE-3.2.1-to-3.4.0: the given context wins). `ContextPropagation.captureAll` reads the installed
+  // context, so each entry point installs the given context first. A task reads `RuntimeEnvironment.current` on its
+  // worker to get that context.
   def execute[A, B](
       task: A => B,
       data: Vector[A]
-  )(using @annotation.unused ctx: RuntimeContext): Either[DspyError, ParallelExecutionResult[B]] =
+  )(using ctx: RuntimeContext): Either[DspyError, ParallelExecutionResult[B]] =
     // executeInternal already wraps each task call in a try/catch that turns a throw into the same
     // `RuntimeError`, so a total `task` only needs lifting into `Right` — no second catch here.
-    executeInternal(task = (item: A) => Right(task(item)), data = data)
+    RuntimeEnvironment.withInstalled(ctx)(executeInternal(task = (item: A) => Right(task(item)), data = data))
 
   def executeEither[A, B](
       task: A => Either[DspyError, B],
       data: Vector[A]
-  )(using @annotation.unused ctx: RuntimeContext): Either[DspyError, ParallelExecutionResult[B]] =
-    executeInternal(task = task, data = data)
+  )(using ctx: RuntimeContext): Either[DspyError, ParallelExecutionResult[B]] =
+    RuntimeEnvironment.withInstalled(ctx)(executeInternal(task = task, data = data))
 
   private def executeInternal[A, B](
       task: A => Either[DspyError, B],
