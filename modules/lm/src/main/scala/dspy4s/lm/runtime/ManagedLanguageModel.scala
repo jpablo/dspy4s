@@ -6,9 +6,11 @@ import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.LmError
 import dspy4s.core.contracts.LmErrorDetails
 import dspy4s.core.contracts.LmStreamAssemblyError
+import dspy4s.core.contracts.LmUnexpectedError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.lm.contracts.ForwardingLanguageModel
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmCache
 import dspy4s.lm.contracts.LmChunk
@@ -22,10 +24,10 @@ import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.core.contracts.LmUsage
 import dspy4s.lm.contracts.RetryPolicy
 import dspy4s.lm.contracts.StreamingLanguageModel
-import zio.blocks.schema.DynamicValue
 
 import scala.annotation.tailrec
 import scala.collection.mutable
+import scala.util.control.NonFatal
 import java.util.concurrent.ThreadLocalRandom
 
 /** The retry policies of [[ManagedLanguageModel]].
@@ -151,6 +153,18 @@ object UsageTracking:
   def record(model: String, usage: LmUsage): Unit =
     activeTrackers.get().foreach(_.addUsage(model, usage))
 
+/** A model with a cache, retries, the history, and the usage record over `delegate`. The capability flags, the default
+  * options, the cache identity, and `close` come from the delegate ([[ForwardingLanguageModel]]). A close closes the
+  * delegate, and the cache stays.
+  *
+  * A delegate that throws a non-fatal exception gives an [[dspy4s.core.contracts.LmUnexpectedError]] with the message
+  * of the exception, on the call path and on the stream path (upstream `error_boundary(..., unexpected=True)` in
+  * `dspy/clients/errors.py`). The retry policy decides on that error as on each other error, and the call gets the
+  * failure entry. A fatal error, for example an `InterruptedException`, goes up to the caller.
+  *
+  * The delegate can be a second managed model. A cache hit of that model is a hit of this model too: this model does
+  * not store it, records no usage for it, and writes the history entry of a hit.
+  */
 final case class ManagedLanguageModel(
     delegate   : LanguageModel,
     cache      : Option[LmCache] = None,
@@ -160,21 +174,10 @@ final case class ManagedLanguageModel(
       * ([[dspy4s.lm.contracts.LmCost]]). With `None`, the cost is unknown (decision L10).
       */
     price: Option[LmPrice] = None
-) extends StreamingLanguageModel:
+) extends StreamingLanguageModel
+    with ForwardingLanguageModel:
   override val id: String   = delegate.id
   override val mode: LmMode = delegate.mode
-  // Capability flags pass through — wrapping must not hide what the delegate supports (adapters consult
-  // these to decide e.g. whether to emit `response_format` or native tools).
-  override def supportsFunctionCalling: Boolean = delegate.supportsFunctionCalling
-  override def supportsResponseSchema: Boolean  = delegate.supportsResponseSchema
-  override def supportsReasoning: Boolean       = delegate.supportsReasoning
-  // `Predict` reads this flag to send a decision request to a System One model, so the wrapper must not hide it.
-  override def supportsDecisionRequests: Boolean = delegate.supportsDecisionRequests
-  // The default options pass through too: the cache key below reads them, and an outer wrapper must see them.
-  override def defaultOptions: DynamicValue.Record = delegate.defaultOptions
-
-  /** Close the delegate. The cache stays. */
-  override def close(): Unit = delegate.close()
 
   /** A streamed call with the rules of [[call]] (upstream `execute`: one call path for streamed calls).
     *
@@ -209,11 +212,15 @@ final case class ManagedLanguageModel(
           case Left(error)                          => Iterator.single(LmChunk.failure(error))
 
   /** The request that the cache keys on. The provider merges its default options into each request, so the key must
-    * cover the merged options: two models with one id and different defaults get different entries. `rolloutId` and all
-    * other fields stay as they are. The delegate still receives the original request.
+    * cover the merged options: two models with one id and different defaults get different entries. The key also has
+    * the cache identity of the delegate ([[LanguageModel.cacheIdentity]]), for example the endpoint of a TypeSafe
+    * model. `rolloutId` and all other fields stay as they are. The delegate still receives the original request.
     */
   private def cacheKey(request: LmRequest): LmRequest =
-    request.copy(options = ProviderRequestNormalizer.effectiveOptions(request, defaultOptions))
+    request.copy(
+      options = ProviderRequestNormalizer.effectiveOptions(request, defaultOptions),
+      cacheIdentity = cacheIdentity
+    )
 
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
     lazy val key = cacheKey(request)
@@ -227,18 +234,22 @@ final case class ManagedLanguageModel(
           case Left(error) =>
             appendFailureHistory(request, error)
             Left(error)
-          case Right(response) => Right(acceptResponse(request, key, response))
+          // A hit of a delegate that is a managed model too.
+          case Right(response) if response.cacheHit => Right(acceptHit(request, response))
+          case Right(response)                      => Right(acceptResponse(request, key, response))
 
-  /** The cached response of `request`, with `cacheHit = true` and no usage: a hit bills no tokens, as upstream. A hit
-    * appends the history entry of a cache hit. The cost of that entry comes from the usage that the cache keeps
-    * (upstream keeps the cost of the cached result), at the current [[price]].
-    */
+  /** The cached response of `request` (see [[acceptHit]]). */
   private def cacheHit(request: LmRequest, key: => LmRequest)(using RuntimeContext): Option[LmResponse] =
-    cache.flatMap(_.get(key)).map { stored =>
-      val hit = stored.copy(cacheHit = true, usage = None)
-      appendHistory(request, hit, cacheHit = true, LmCost.of(request.model, price, stored.usage))
-      hit
-    }
+    cache.flatMap(_.get(key)).map(acceptHit(request, _))
+
+  /** The response of a cache hit, `stored`, with `cacheHit = true` and no usage: a hit bills no tokens, as upstream. A
+    * hit appends the history entry of a cache hit, and is not stored again. The cost of that entry comes from the usage
+    * of `stored` (upstream keeps the cost of the cached result), at the current [[price]].
+    */
+  private def acceptHit(request: LmRequest, stored: LmResponse)(using RuntimeContext): LmResponse =
+    val hit = stored.copy(cacheHit = true, usage = None)
+    appendHistory(request, hit, cacheHit = true, LmCost.of(request.model, price, stored.usage))
+    hit
 
   /** Store the response that the delegate gave, append its history entry, and record its usage. */
   private def acceptResponse(request: LmRequest, key: => LmRequest, response: LmResponse)(using
@@ -250,9 +261,14 @@ final case class ManagedLanguageModel(
     trackUsage(request, uncached.usage)
     uncached
 
+  /** One call of the delegate. A non-fatal exception gives an [[dspy4s.core.contracts.LmUnexpectedError]]. */
+  private def callDelegate(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+    try delegate.call(request)
+    catch case NonFatal(error) => Left(ManagedLanguageModel.unexpected(error, request))
+
   private def executeWithRetry(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
     @tailrec def loop(attempt: Int): Either[DspyError, LmResponse] =
-      delegate.call(request) match
+      callDelegate(request) match
         case ok @ Right(_)                                          => ok
         case Left(error) if retryPolicy.shouldRetry(attempt, error) =>
           val delay = retryPolicy.delayBeforeNextAttemptMillis(attempt, error)
@@ -299,21 +315,26 @@ final case class ManagedLanguageModel(
     * visible attempt ends the stream.
     *
     * The history entry, the usage record, and the cache store occur at the end of the stream. A caller that closes the
-    * stream before its end gets none of them.
+    * stream before its end gets none of them. A stream with a [[LmChunk.cached]] chunk is a cache hit of the delegate:
+    * it gets the history entry of a hit, and no store.
+    *
+    * A non-fatal exception of the delegate, when it opens the stream or during a read, is a failure of the attempt with
+    * an [[dspy4s.core.contracts.LmUnexpectedError]].
     */
   private final class ManagedStream(streaming: StreamingLanguageModel, request: LmRequest, key: () => LmRequest)(using
       RuntimeContext
   ) extends ClosableIterator[LmChunk]:
-    private val ready                  = mutable.Queue.empty[LmChunk]
-    private val held                   = mutable.ArrayBuffer.empty[LmChunk]
-    private val text                   = new StringBuilder
-    private val toolDeltas             = mutable.ArrayBuffer.empty[LmToolCallDelta]
-    private var usage: Option[LmUsage] = None
-    private var attempt                = 0
-    private var visible                = false
-    private var complete               = false
-    private var finished               = false
-    private var source                 = streaming.stream(request)
+    private val ready                      = mutable.Queue.empty[LmChunk]
+    private val held                       = mutable.ArrayBuffer.empty[LmChunk]
+    private val text                       = new StringBuilder
+    private val toolDeltas                 = mutable.ArrayBuffer.empty[LmToolCallDelta]
+    private var usage: Option[LmUsage]     = None
+    private var cached: Option[LmResponse] = None
+    private var attempt                    = 0
+    private var visible                    = false
+    private var complete                   = false
+    private var finished                   = false
+    private var source: Iterator[LmChunk]  = open()
 
     override def hasNext: Boolean =
       while ready.isEmpty && !finished do step()
@@ -329,26 +350,37 @@ final case class ManagedLanguageModel(
       held.clear()
       release()
 
+    /** Open a stream of the delegate. A non-fatal exception gives a stream of one failure chunk. */
+    private def open(): Iterator[LmChunk] =
+      try streaming.stream(request)
+      catch case NonFatal(error) => Iterator.single(LmChunk.failure(ManagedLanguageModel.unexpected(error, request)))
+
+    /** The next chunk of the delegate, `None` at the end, or the error of a non-fatal exception of the read. */
+    private def read(): Either[DspyError, Option[LmChunk]] =
+      try Right(Option.when(source.hasNext)(source.next()))
+      catch case NonFatal(error) => Left(ManagedLanguageModel.unexpected(error, request))
+
     /** Read one chunk of the delegate, or end the attempt when the delegate has no more chunks. */
     private def step(): Unit =
-      if source.hasNext then
-        val chunk = source.next()
-        chunk.reportedFailure match
-          case Some(error) => fail(error, chunk)
-          case None        => accept(chunk)
-      else if complete then succeed()
-      else
-        // The stream guard (upstream `checked_stream`): a stream with no completion chunk is not complete.
-        val error = LmStreamAssemblyError(
-          "The LM stream ended with no chunk that has a finish reason",
-          LmErrorDetails(model = Some(request.model))
-        )
-        fail(error, LmChunk.failure(error))
+      read() match
+        case Left(error)        => fail(error, LmChunk.failure(error))
+        case Right(Some(chunk)) => chunk.reportedFailure match
+            case Some(error) => fail(error, chunk)
+            case None        => accept(chunk)
+        case Right(None) if complete => succeed()
+        case Right(None)             =>
+          // The stream guard (upstream `checked_stream`): a stream with no completion chunk is not complete.
+          val error = LmStreamAssemblyError(
+            "The LM stream ended with no chunk that has a finish reason",
+            LmErrorDetails(model = Some(request.model))
+          )
+          fail(error, LmChunk.failure(error))
 
     private def accept(chunk: LmChunk): Unit =
       text.append(chunk.text)
       toolDeltas ++= chunk.toolCalls
       chunk.usage.foreach(value => usage = Some(value))
+      chunk.cachedResponse.foreach(response => cached = Some(response))
       if chunk.isFinal then complete = true
       if visible then ready += chunk
       else
@@ -372,8 +404,9 @@ final case class ManagedLanguageModel(
         text.clear()
         toolDeltas.clear()
         usage = None
+        cached = None
         complete = false
-        source = streaming.stream(request)
+        source = open()
       else
         // The caller gets no held chunk of the attempt. It gets only the failure chunk.
         held.clear()
@@ -385,16 +418,32 @@ final case class ManagedLanguageModel(
     private def succeed(): Unit =
       release()
       finished = true
-      val output = LmOutput(text = text.toString, toolCalls = ToolCallAssembler.assemble(toolDeltas))
-      val _      = acceptResponse(request, key(), LmResponse(outputs = Vector(output), usage = usage))
+      cached match
+        case Some(response) => val _ = acceptHit(request, response)
+        case None           =>
+          val output = LmOutput(text = text.toString, toolCalls = ToolCallAssembler.assemble(toolDeltas))
+          val _      = acceptResponse(request, key(), LmResponse(outputs = Vector(output), usage = usage))
 
-    /** Close the stream of the delegate, so that the connection does not stay open. */
+    /** Close the stream of the delegate, so that the connection does not stay open. A non-fatal exception of the close
+      * does not change the result: the attempt ends in each case.
+      */
     private def release(): Unit =
       source match
-        case closable: ClosableIterator[?] => closable.close()
-        case _                             => ()
+        case closable: ClosableIterator[?] =>
+          try closable.close()
+          catch case NonFatal(_) => ()
+        case _ => ()
       source = Iterator.empty
 
 object ManagedLanguageModel:
   private def defaultSleep(millis: Long): Unit =
     Thread.sleep(millis)
+
+  /** The error of a non-fatal exception of the delegate (upstream `wrap_error`: `LMUnexpectedError(str(exc))` with the
+    * model). The message is the message of the exception, or the simple class name when the message is empty or null.
+    * An anonymous class has no simple name. For an anonymous class, the name is the full class name.
+    */
+  private def unexpected(error: Throwable, request: LmRequest): LmUnexpectedError =
+    val name    = Some(error.getClass.getSimpleName).filter(_.nonEmpty).getOrElse(error.getClass.getName)
+    val message = Option(error.getMessage).filter(_.nonEmpty).getOrElse(name)
+    LmUnexpectedError(message, LmErrorDetails(model = Some(request.model)))

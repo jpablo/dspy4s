@@ -48,6 +48,22 @@ class ProviderLanguageModelSuite extends FunSuite:
     assertEquals(messages.last("content"), "Hello": Any)
   }
 
+  test("a null option removes the option, also a default option of the model") {
+    // Upstream `_canonical` (`dspy/clients/execution.py`) drops each option whose value is `None` after the merge.
+    val request = LmRequest(
+      model = "openai/test",
+      options = DynamicValues.record("reasoning_effort" -> DynamicValue.Null, "max_tokens" := 8)
+    )
+    val defaults = DynamicValues.record("reasoning_effort" := "high", "temperature" := 0.1)
+
+    assertEquals(
+      ProviderRequestNormalizer.effectiveOptions(request, defaults),
+      DynamicValues.record("temperature" := 0.1, "max_tokens" := 8)
+    )
+    val wire = DynamicValues.recordKeys(ProviderRequestNormalizer.normalize(request, defaults))
+    assert(!wire.contains("reasoning_effort"), wire.toString)
+  }
+
   test("normalizer never serializes the framework-only rolloutId into the provider body") {
     val request = LmRequest(
       model = "openai/test",

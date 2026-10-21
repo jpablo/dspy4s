@@ -195,6 +195,22 @@ class TypeSafeModelSuite extends FunSuite:
     dspy4s.core.runtime.RuntimeEnvironment.resetForTests()
   }
 
+  test("two models with one Jev model and different base URLs do not share a cache entry") {
+    // Upstream `_request` puts `base_url` in the key, and strips each slash at its end (`tests/clients/test_typesafe.py`
+    // `test_cache_identity_and_controls`).
+    val cache                                                      = Some(new dspy4s.lm.runtime.InMemoryLmCache(dspy4s.lm.runtime.CacheCapacity(8)))
+    def managed(baseUrl: String, stub: Stub): ManagedLanguageModel =
+      ManagedLanguageModel(TypeSafeModel("jev-test", apiKey = "k", baseUrl = baseUrl, transport = stub), cache = cache)
+    val (first, second, third) = (Stub(ok()), Stub(ok()), Stub(ok()))
+    dspy4s.core.runtime.RuntimeEnvironment.resetForTests()
+    assertEquals(managed("https://a.test", first).call(request).map(_.cacheHit), Right(false))
+    assertEquals(managed("https://b.test", second).call(request).map(_.cacheHit), Right(false))
+    assertEquals(second.requests.size, 1, "the model with the other base URL must reach its endpoint")
+    assertEquals(managed("https://a.test/", third).call(request).map(_.cacheHit), Right(true))
+    assertEquals(third.requests.size, 0)
+    dspy4s.core.runtime.RuntimeEnvironment.resetForTests()
+  }
+
   test("the parts of a decision request, and a request with messages has none") {
     assertEquals(DecisionRequests.parts(request), Right((state, questions)))
     assertEquals(DynamicValues.recordKeys(request.options), Vector("state", "questions"))

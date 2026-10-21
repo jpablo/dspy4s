@@ -18,7 +18,16 @@ object RequestHash:
     val rolloutId = request.rolloutId.map(_.toString).getOrElse("null")
     s"""{"model":${quote(request.model)},"mode":${quote(
         request.mode.toString
-      )},"messages":$messages,"options":$options,"request_id":$requestId,"rollout_id":$rolloutId}"""
+      )},"messages":$messages,"options":$options,"request_id":$requestId,"rollout_id":$rolloutId${encodeIdentity(
+        request.cacheIdentity
+      )}}"""
+
+  /** The cache identity of the model for the hashed text (upstream TypeSafe `_request` has `provider` and `base_url`).
+    * The text has it only when it is not empty. Thus a request with no identity keeps the key that it had before this
+    * field existed, and each entry of a disk cache stays valid.
+    */
+  private def encodeIdentity(identity: DynamicValue.Record): String =
+    if identity.fields.isEmpty then "" else s""","cache_identity":${normalizeDynamic(identity)}"""
 
   private def encodeMessage(message: Message): String =
     val parts      = message.parts.map(encodePart).mkString("[", ",", "]")

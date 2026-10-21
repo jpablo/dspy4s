@@ -85,6 +85,12 @@ final case class TypeSafeModel(
   override val mode: LmMode                      = LmMode.Chat
   override def supportsDecisionRequests: Boolean = true
 
+  /** The provider and the base URL with no slash at its end. Upstream puts both in the cache key (`_request` in
+    * `dspy/clients/typesafe.py`), so two models with one Jev model and different endpoints do not share an entry.
+    */
+  override def cacheIdentity: DynamicValue.Record =
+    DynamicValues.record("provider" := TypeSafeModel.Provider, "base_url" := root)
+
   /** Check the decision request, send it, and read the reply with the rules of the wire above. Each failure is a
     * `Left`, never an exception.
     */
@@ -101,8 +107,11 @@ final case class TypeSafeModel(
   private def send(body: String, request: LmRequest): Either[DspyError, HttpResponse] =
     transport.sendJson(endpoint, headers, body).left.map(TypeSafeModel.withRequestDetails(_, request))
 
-  /** The URL of the System One API. The base URL loses each slash at its end (upstream `base_url.rstrip("/")`). */
-  private def endpoint: String = s"${baseUrl.reverse.dropWhile(_ == '/').reverse}/v1/systemone"
+  /** The base URL with no slash at its end (upstream `base_url.rstrip("/")`). */
+  private def root: String = baseUrl.reverse.dropWhile(_ == '/').reverse
+
+  /** The URL of the System One API. */
+  private def endpoint: String = s"$root/v1/systemone"
 
   private def headers: Map[String, String] =
     Map("Authorization" -> s"Bearer $apiKey", "Content-Type" -> "application/json")
@@ -146,7 +155,7 @@ object TypeSafeModel:
 
   private val ApiKeyVariable: String = "TYPESAFE_API_KEY"
 
-  /** The provider name of the errors (upstream `provider = "typesafe"`). */
+  /** The provider name of the errors and of the cache identity (upstream `provider = "typesafe"`). */
   private val Provider: String = "typesafe"
 
   /** The longest body excerpt in an error message (upstream `body.strip()[:500]`). */

@@ -15,12 +15,14 @@ import dspy4s.core.contracts.{
 }
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, MessageRole}
+import dspy4s.lm.runtime.ProviderLanguageModel
 import dspy4s.programs.contracts.{Prediction, ProgramCall, ToolFunction}
 import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.strategies.ReActV2
 import dspy4s.programs.strategies.ReActV2.TerminationReason
 import dspy4s.signatures.Signature
 import munit.FunSuite
+import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 import java.util.concurrent.atomic.AtomicReference
@@ -398,6 +400,46 @@ class ReActV2Suite extends FunSuite:
       DynamicValues.recordGet(lm.requests(1).options, "tool_choice"),
       Some(rec("type" := "function", "function" -> rec("name" := "submit")))
     )
+  }
+
+  test("the forced submit sets reasoning_effort to null in the call config") {
+    // Upstream `_forced_submit` sets `"reasoning_effort": None` (`dspy/predict/react_v2.py`).
+    val lm = Script(Vector(
+      chat("No action.", """{"tool_calls": []}"""),
+      chat("Forced final.", calls("submit" -> """{"answer": "forced"}"""))
+    ))
+    val result = run(lm)(ReActV2(qa, Vector.empty)((question = "cats"))).fold(error => fail(error.message), identity)
+    assertEquals(result.output.answer, "forced")
+    assert(!options(lm.requests(0)).contains("reasoning_effort"), options(lm.requests(0)).toString)
+    assertEquals(DynamicValues.recordGet(lm.requests(1).options, "reasoning_effort"), Some(DynamicValue.Null))
+  }
+
+  test("the forced submit sends no reasoning effort, also when the model has one by default") {
+    // Upstream: the call config replaces the arguments of the LM (`dspy/clients/base_lm.py`), and `_canonical` drops
+    // each `None` (`dspy/clients/execution.py`), so the forced call has no reasoning effort.
+    val replies = Vector(
+      "[[ ## next_thought ## ]]\nNo action.\n\n[[ ## tool_calls ## ]]\n{\"tool_calls\": []}\n\n[[ ## completed ## ]]",
+      s"[[ ## next_thought ## ]]\nForced final.\n\n[[ ## tool_calls ## ]]\n${calls("submit" ->
+          """{"answer": "forced"}""")}\n\n[[ ## completed ## ]]"
+    )
+    val sent  = AtomicReference(Vector.empty[DynamicValue])
+    val model = ProviderLanguageModel(
+      id = "provider",
+      mode = LmMode.Chat,
+      invoke = payload =>
+        val index = sent.updateAndGet(_ :+ payload).size - 1
+        val reply = rec("role" := "assistant", "content" := replies.lift(index).getOrElse(""))
+        Right(rec("choices" -> DynamicValue.Sequence(Chunk(rec("message" -> reply)))))
+      ,
+      defaultOptions = rec("reasoning_effort" := "high")
+    )
+    val result = run(model)(ReActV2(qa, Vector.empty)((question = "cats"))).fold(error => fail(error.message), identity)
+    assertEquals(result.output.answer, "forced")
+    val effort = sent.get().map {
+      case payload: DynamicValue.Record => DynamicValues.recordGet(payload, "reasoning_effort").map(text)
+      case other                        => fail(s"the payload is not a record: $other")
+    }
+    assertEquals(effort, Vector(Some("high"), None))
   }
 
   test("the step predictor is the one optimizable part, and the program runs from a record") {

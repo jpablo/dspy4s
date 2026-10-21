@@ -58,10 +58,11 @@ import scala.annotation.tailrec
   *   - The final outputs end the run with the termination reason [[ReActV2.TerminationReason.Submit]].
   *
   * The forced submit (upstream `_forced_submit`), after `maxIterations` turns (the reason `max_iters`) or a break:
-  *   - Run the step predictor once more with the call config `tool_choice` set to the function `submit`. The adapter
-  *     drops `tool_choice`, `tools`, and `parallel_tool_calls` from the request when native function calling is not
-  *     active (upstream `Adapter._call_preprocess`). Each error of this step is the result of the call, also a parse
-  *     error.
+  *   - Run the step predictor once more with the call config `tool_choice` set to the function `submit` and
+  *     `reasoning_effort` set to null. The adapter drops `tool_choice`, `tools`, and `parallel_tool_calls` from the
+  *     request when native function calling is not active (upstream `Adapter._call_preprocess`). The null removes a
+  *     default reasoning effort of the model from the request (upstream `"reasoning_effort": None`, which `_canonical`
+  *     drops). Each error of this step is the result of the call, also a parse error.
   *   - The tool calls get the ids `call_<maxIterations>_<index>`, with the index in the list of the model. Only the
   *     `submit` calls stay, and only they run.
   *   - No `submit` call is the error "ReActV2 failed to produce final outputs after <reason>: no submit call.".
@@ -251,7 +252,8 @@ final case class ReActV2[I, O](
   private def forcedSubmit(call: ProgramCall[I], history: History, pending: DynamicValue.Record, reason: String)(using
       RuntimeContext
   ): Either[DspyError, Prediction[O]] =
-    step(call, history, pending, call.config.updated("tool_choice", SubmitToolChoice)) match
+    val config = call.config.updated("tool_choice", SubmitToolChoice).updated("reasoning_effort", DynamicValue.Null)
+    step(call, history, pending, config) match
       case Left(error) =>
         error match
           case _: ParseError | _: ContextWindowExceededError =>

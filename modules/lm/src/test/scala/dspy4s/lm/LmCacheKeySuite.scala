@@ -1,9 +1,9 @@
 package dspy4s.lm
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, :=}
+import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, RuntimeError, :=}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
-import dspy4s.lm.providers.DynamicJson
+import dspy4s.lm.providers.{DynamicJson, HttpResponse, HttpStreamResponse, HttpTransport, OpenAiLanguageModel}
 import dspy4s.lm.runtime.{CacheCapacity, InMemoryLmCache, ManagedLanguageModel, ProviderLanguageModel}
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
@@ -55,6 +55,32 @@ class LmCacheKeySuite extends FunSuite:
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       calls += request
       Right(LmResponse(outputs = Vector(LmOutput(text = "ok"))))
+
+  /** A transport that answers each plain call with a chat reply, and counts the calls. */
+  private final class ChatTransport extends HttpTransport:
+    var calls                                                                                                       = 0
+    override def sendJson(url: String, headers: Map[String, String], body: String): Either[DspyError, HttpResponse] =
+      calls += 1
+      Right(HttpResponse(200, Map.empty, """{"choices":[{"message":{"role":"assistant","content":"ok"}}]}"""))
+    override def streamSse(
+        url    : String,
+        headers: Map[String, String],
+        body   : String
+    ): Either[DspyError, HttpStreamResponse] =
+      Left(RuntimeError("test", "the stream path is not used"))
+
+  test("two OpenAI models with different base URLs share a cache entry, as upstream dspy.LM") {
+    // Upstream `dspy.LM` leaves the base URL out of its key. Only TypeSafe puts it in (`dspy/clients/typesafe.py`).
+    given RuntimeContext                                                         = RuntimeEnvironment.current
+    val cache                                                                    = new InMemoryLmCache(CacheCapacity(16))
+    val (first, second)                                                          = (ChatTransport(), ChatTransport())
+    def managed(baseUrl: String, transport: HttpTransport): ManagedLanguageModel =
+      ManagedLanguageModel(OpenAiLanguageModel("shared-model", "x", baseUrl, transport), cache = Some(cache))
+
+    assertEquals(managed("https://a.test/v1", first).call(request).map(_.cacheHit), Right(false))
+    assertEquals(managed("https://b.test/v1", second).call(request).map(_.cacheHit), Right(true))
+    assertEquals((first.calls, second.calls), (1, 0))
+  }
 
   test("two models with different default options do not share a cache entry") {
     given RuntimeContext = RuntimeEnvironment.current

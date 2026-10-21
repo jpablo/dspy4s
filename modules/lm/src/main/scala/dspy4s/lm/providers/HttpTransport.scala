@@ -31,10 +31,11 @@ final case class HttpStreamResponse(
   * @param connect
   *   the time to open the connection. The upstream default is 10 seconds.
   * @param read
-  *   the time to wait for the next data of the reply: the status and the headers, then each line of a stream. The
-  *   upstream default is 600 seconds. A stream that gives no new line in this time ends, and its
-  *   [[HttpStreamResponse.failure]] is an [[dspy4s.core.contracts.LmTimeoutError]]. The limit is for each wait, not for
-  *   the whole reply.
+  *   the time to wait for the next data of the reply: the status and the headers, then each next part of the body of a
+  *   plain reply, or each line of a stream. The upstream default is 600 seconds. A plain reply that gives no new part
+  *   in this time is an [[dspy4s.core.contracts.LmTimeoutError]]. A stream that gives no new line in this time ends,
+  *   and its [[HttpStreamResponse.failure]] is an [[dspy4s.core.contracts.LmTimeoutError]]. The limit is for each wait,
+  *   not for the whole reply.
   */
 final case class HttpTimeouts(connect: FiniteDuration = 10.seconds, read: FiniteDuration = 600.seconds):
   require(connect.toNanos > 0L, s"The connect limit must be positive, not $connect")

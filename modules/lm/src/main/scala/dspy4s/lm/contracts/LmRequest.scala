@@ -38,6 +38,13 @@ final case class Message(
     name      : Option[String]      = None
 )
 
+/** One request to a model.
+  *
+  * @param cacheIdentity
+  *   the cache identity of the model ([[LanguageModel.cacheIdentity]]). It is a field of the cache key only:
+  *   `ManagedLanguageModel` sets it on the key from its delegate, and the provider never sends it. The key text has it
+  *   only when it is not empty, so each other key stays as it was.
+  */
 final case class LmRequest(
     model    : String,
     mode     : LmMode              = LmMode.Chat,
@@ -47,5 +54,6 @@ final case class LmRequest(
     // Framework-only control field (cache-busting for repeated samples), NOT a provider parameter: it is folded
     // into the cache key but never serialized into the request body. Contrast `options`, which is spread verbatim
     // to the provider. See `RequestHash` / `ProviderRequestNormalizer`.
-    rolloutId: Option[Int] = None
+    rolloutId    : Option[Int]         = None,
+    cacheIdentity: DynamicValue.Record = DynamicValue.Record.empty
 )

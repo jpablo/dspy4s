@@ -37,6 +37,15 @@ trait LanguageModel extends LanguageModelRef:
     */
   def defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
 
+  /** The settings of this model that change its answer but that the request does not have, for example the endpoint.
+    * The cache key covers them ([[LmRequest.cacheIdentity]]), so two models with one id and different identities get
+    * different entries. A wrapper must forward the value of its delegate. Defaults to an empty record.
+    *
+    * Upstream puts the base URL in the key of TypeSafe only (`_request` in `dspy/clients/typesafe.py`). `dspy.LM`
+    * leaves the base URL out of its key, so the OpenAI model keeps the empty default.
+    */
+  def cacheIdentity: DynamicValue.Record = DynamicValue.Record.empty
+
   def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse]
 
   /** Release the resources that this model owns, for example the HTTP client of a provider (upstream `LM.close`). The

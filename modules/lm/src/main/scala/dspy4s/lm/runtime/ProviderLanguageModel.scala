@@ -38,11 +38,17 @@ object ProviderRequestNormalizer:
   /** The `type` value of a tool call on the wire. Each tool call is a function call. */
   private val functionCallType = "function"
 
-  /** The option bag that the provider sends: `defaultOptions` overlaid by the options of the request. [[normalize]] and
-    * the cache key of `ManagedLanguageModel` share this merge, so the key covers the options on the wire.
+  /** The option bag that the provider sends: `defaultOptions` overlaid by the options of the request, with no option
+    * whose value is null. Thus a null option of the request removes a default option (upstream `_canonical` in
+    * `dspy/clients/execution.py` drops each `None` after the merge). [[normalize]] and the cache key of
+    * `ManagedLanguageModel` share this merge, so the key covers the options on the wire.
     */
   def effectiveOptions(request: LmRequest, defaultOptions: DynamicValue.Record): DynamicValue.Record =
-    DynamicValues.mergeRecords(defaultOptions, request.options)
+    val merged = DynamicValues.mergeRecords(defaultOptions, request.options)
+    DynamicValue.Record(merged.fields.filter {
+      case (_, _: DynamicValue.Null.type) => false
+      case _                              => true
+    })
 
   /** Build the provider request payload as a `DynamicValue.Record`: the merged option bag (defaults overlaid by the
     * request's options), plus model / mode / request_id and the encoded messages or prompt.

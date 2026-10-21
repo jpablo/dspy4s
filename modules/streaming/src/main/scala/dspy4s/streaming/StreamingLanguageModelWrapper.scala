@@ -10,6 +10,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.runtime.ActivePredictContext
 import dspy4s.core.runtime.StreamProgress
+import dspy4s.lm.contracts.ForwardingLanguageModel
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
@@ -21,7 +22,6 @@ import dspy4s.lm.runtime.ToolCallAssembler
 import dspy4s.streaming.contracts.StreamEvent
 import dspy4s.streaming.contracts.StreamListener
 import dspy4s.streaming.contracts.TokenEvent
-import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable
 import scala.util.control.NonFatal
@@ -46,11 +46,12 @@ import scala.util.control.NonFatal
   * invocation. The mutable set [[firedListeners]] holds the indices that have closed at least one field cycle.
   */
 final class StreamingLanguageModelWrapper private (
-    delegate : StreamingLanguageModel,
-    queue    : StreamingQueue[StreamEvent],
-    adapter  : Option[Adapter],
-    listeners: Vector[StreamListener]
-) extends StreamingLanguageModel:
+    val delegate: StreamingLanguageModel,
+    queue       : StreamingQueue[StreamEvent],
+    adapter     : Option[Adapter],
+    listeners   : Vector[StreamListener]
+) extends StreamingLanguageModel
+    with ForwardingLanguageModel:
 
   private val firedListeners: mutable.Set[Int] = mutable.Set.empty
 
@@ -58,12 +59,8 @@ final class StreamingLanguageModelWrapper private (
   override val mode: LmMode = delegate.mode
   // This wrapper is the active LM during `streamify`, so it must not hide what the delegate supports (adapters
   // consult the flags to decide e.g. whether to emit `response_format` or native tools, and `Predict` reads
-  // `supportsDecisionRequests` to choose a decision request) or its default options.
-  override def supportsFunctionCalling: Boolean    = delegate.supportsFunctionCalling
-  override def supportsResponseSchema: Boolean     = delegate.supportsResponseSchema
-  override def supportsReasoning: Boolean          = delegate.supportsReasoning
-  override def supportsDecisionRequests: Boolean   = delegate.supportsDecisionRequests
-  override def defaultOptions: DynamicValue.Record = delegate.defaultOptions
+  // `supportsDecisionRequests` to choose a decision request), its default options, or its cache identity.
+  // ForwardingLanguageModel forwards them.
 
   /** Does nothing. The delegate is the model of the configuration, and this wrapper does not own it: the wrapper is the
     * active model for one `streamify` call only. Thus the wrapper does not close the delegate.
@@ -126,13 +123,24 @@ final class StreamingLanguageModelWrapper private (
         case closable: ClosableIterator[?] => closable.close()
         case _                             => ()
 
-  /** The chunks of the delegate. Each chunk goes to the listeners, except a [[LmChunk.cached]] chunk. */
+  /** The chunks of the delegate. Each chunk goes to the listeners, except a [[LmChunk.cached]] chunk. A close of the
+    * result closes the stream of the delegate, so a caller that stops early releases the connection.
+    */
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
-    val ctx = activeContext()
-    delegate.stream(request).map { chunk =>
-      if chunk.cachedResponse.isEmpty then emit(ctx, chunk)
-      chunk
-    }
+    val ctx    = activeContext()
+    val chunks = delegate.stream(request)
+    new ClosableIterator[LmChunk]:
+      override def hasNext: Boolean = chunks.hasNext
+
+      override def next(): LmChunk =
+        val chunk = chunks.next()
+        if chunk.cachedResponse.isEmpty then emit(ctx, chunk)
+        chunk
+
+      override def close(): Unit =
+        chunks match
+          case closable: ClosableIterator[?] => closable.close()
+          case _                             => ()
 
   /** Bundles per-LM-call state. Resolved once at the start of each `call()` / `stream()` so the same predict context
     * governs every chunk in that invocation, even if nested context pushes happen meanwhile.

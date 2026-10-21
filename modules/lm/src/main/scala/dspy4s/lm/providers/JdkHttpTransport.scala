@@ -12,22 +12,28 @@ import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse as JHttpResponse
+import java.nio.ByteBuffer
 import java.time.Duration
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.BlockingQueue
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionStage
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.Flow
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
+import scala.annotation.tailrec
 import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters.*
 import scala.util.control.NonFatal
 
-/** An [[HttpTransport]] on the JDK HTTP client. The client starts at the first request. [[close]] closes it (JDK
-  * `HttpClient.close`, which waits for the requests that run), and the next request starts a new client. The connect
-  * limit of `timeouts` bounds the connection. The read limit bounds the wait for the status and the headers, and, for a
-  * stream, the wait for each next line (see [[HttpTimeouts]] and [[HttpStreamResponse.failure]]).
-  *
-  * The read limit of [[sendJson]] bounds only the wait for the status and the headers (the JDK request timeout). The
-  * JDK client then reads the body with no limit.
+/** An [[HttpTransport]] on the JDK HTTP client. The client starts at the first request. [[close]] stops it with no wait
+  * (JDK `HttpClient.shutdownNow`), and the next request starts a new client. The connect limit of `timeouts` bounds the
+  * connection. The read limit bounds the wait for the status and the headers, then each wait for the next part of the
+  * body of [[sendJson]], and each wait for the next line of a stream (see [[HttpTimeouts]] and
+  * [[HttpStreamResponse.failure]]).
   */
 final class JdkHttpTransport(timeouts: HttpTimeouts) extends HttpTransport:
   import JdkHttpTransport.describe
@@ -52,10 +58,12 @@ final class JdkHttpTransport(timeouts: HttpTimeouts) extends HttpTransport:
   /** `true` when this transport has a JDK client now: after a request and before [[close]]. For tests. */
   private[providers] def isOpen: Boolean = this.synchronized(current.isDefined)
 
-  /** Remove the client from this transport, then close it (upstream `LM.close`). The JDK close waits for the requests
-    * that run, and for each stream until it ends. A request that starts during this call can get the old client, and
-    * then fails with an [[dspy4s.core.contracts.LmTransportError]]. A stream that is open can end with a failure of the
-    * transport. A request after this call starts a new client. When the transport has no client, `close` does nothing.
+  /** Remove the client from this transport, then stop it with no wait (upstream `LM.close`). The JDK `shutdownNow`
+    * closes the connections in use, as upstream `StdlibTransport.close` does (`_pool.close_all()` in
+    * `dspy/_vendor/lm15/transports/_sync.py`). Thus a request that runs fails with an
+    * [[dspy4s.core.contracts.LmTransportError]], and a stream that is open ends with that failure, also when nobody
+    * reads it. A request that starts during this call can get the old client, and then fails in the same way. A request
+    * after this call starts a new client. When the transport has no client, `close` does nothing.
     */
   override def close(): Unit =
     val removed = this.synchronized {
@@ -63,8 +71,13 @@ final class JdkHttpTransport(timeouts: HttpTimeouts) extends HttpTransport:
       current = None
       previous
     }
-    removed.foreach(_.close())
+    removed.foreach(_.shutdownNow())
 
+  /** Send a request, and read the reply. The JDK request timeout (the read limit) bounds the wait for the status and
+    * the headers. Then [[JdkHttpTransport.TimedBody]] reads the body, and the read limit bounds each wait for the next
+    * part (upstream lm15: the read limit applies to each read, also in the body). No part in the read limit is an
+    * [[dspy4s.core.contracts.LmTimeoutError]], and the transport closes the connection.
+    */
   override def sendJson(
       url    : String,
       headers: Map[String, String],
@@ -72,12 +85,10 @@ final class JdkHttpTransport(timeouts: HttpTimeouts) extends HttpTransport:
   ): Either[DspyError, HttpResponse] =
     runWithErrorMap {
       val request  = buildRequest(url, headers, body)
-      val response = client.send(request, JHttpResponse.BodyHandlers.ofString())
-      HttpResponse(
-        status = response.statusCode(),
-        headers = flattenHeaders(response),
-        body = response.body()
-      )
+      val response = client.send(request, JdkHttpTransport.TimedBody.handler)
+      (response.statusCode(), flattenHeaders(response), response.body())
+    }.flatMap { (status, flat, timed) =>
+      timed.await(timeouts.read).map(text => HttpResponse(status = status, headers = flat, body = text))
     }
 
   /** Open a stream. The JDK request timeout (the read limit) bounds the wait for the status and the headers. A reader
@@ -144,6 +155,91 @@ object JdkHttpTransport:
   private def rootCause(error: Throwable): Throwable =
     val cause = error.getCause
     if (cause eq null) || (cause eq error) then error else rootCause(cause)
+
+  /** The body of a plain reply, with the read limit on each wait for the next part (upstream lm15: the read limit
+    * applies to each read, also in the body, `dspy/_vendor/lm15/transports/_limits.py`).
+    *
+    * The JDK string subscriber of the reply (`BodyHandlers.ofString`, with the charset of the reply) reads the body.
+    * This subscriber gives its body at once, so `HttpClient.send` returns after the headers, and [[await]] waits for
+    * the text. The wait ends in these cases:
+    *   - The body ends. The result is the text.
+    *   - No part comes in the read limit after the headers or after the last part. The result is an
+    *     [[dspy4s.core.contracts.LmTimeoutError]]. The subscription stops, and the JDK client closes the connection.
+    *   - The JDK client fails during the body, for example when the connection closes in the middle of the body. The
+    *     result is an [[dspy4s.core.contracts.LmTransportError]] for an IO failure, else an
+    *     [[dspy4s.core.contracts.LmUnexpectedError]].
+    *   - The thread gets an interrupt during the wait. The result is an [[dspy4s.core.contracts.LmUnexpectedError]].
+    *     The subscription stops, and the interrupt status of the thread stays set.
+    */
+  private[providers] final class TimedBody private (text: JHttpResponse.BodySubscriber[String])
+      extends JHttpResponse.BodySubscriber[TimedBody]:
+
+    /** The time of the headers or of the last part, from `System.nanoTime`. */
+    @volatile private var lastPart: Long = System.nanoTime()
+
+    private val subscription = new AtomicReference[Flow.Subscription | Null](null)
+    private val cancelled    = new AtomicBoolean(false)
+
+    override def getBody: CompletionStage[TimedBody] = CompletableFuture.completedFuture(this)
+
+    override def onSubscribe(started: Flow.Subscription): Unit =
+      subscription.set(started)
+      if cancelled.get() then started.cancel() else text.onSubscribe(started)
+
+    override def onNext(item: java.util.List[ByteBuffer]): Unit =
+      lastPart = System.nanoTime()
+      text.onNext(item)
+
+    override def onError(error: Throwable): Unit = text.onError(error)
+
+    override def onComplete(): Unit = text.onComplete()
+
+    /** Wait for the text of the body, with the read limit `readLimit` on each wait for the next part. */
+    def await(readLimit: FiniteDuration): Either[DspyError, String] =
+      val body                                       = text.getBody.toCompletableFuture
+      val limit                                      = readLimit.toNanos
+      @tailrec def loop(): Either[DspyError, String] =
+        waitFor(body, math.max(lastPart + limit - System.nanoTime(), 0L)) match
+          case Some(result)                                 => result
+          case None if System.nanoTime() - lastPart < limit => loop()
+          case None                                         =>
+            cancel()
+            Left(LmTimeoutError(
+              s"No part of the body came in the read limit of $readLimit. This is the read limit of the client, not " +
+                "a failure of the server: increase HttpTimeouts.read if the model needs more time"
+            ))
+      loop()
+
+    /** The result of `body` when it comes in `nanos`, else `None`. */
+    private def waitFor(body: CompletableFuture[String], nanos: Long): Option[Either[DspyError, String]] =
+      try Some(Right(body.get(nanos, TimeUnit.NANOSECONDS)))
+      catch
+        case _: TimeoutException       => None
+        case error: ExecutionException => Some(Left(bodyFailure(Option(error.getCause).getOrElse(error))))
+        case _: InterruptedException   =>
+          Thread.currentThread().interrupt()
+          cancel()
+          Some(Left(LmUnexpectedError("The thread got an interrupt during the wait for the body")))
+
+    /** The error of a failure of the JDK client during the body. A fatal error goes up to the caller. */
+    private def bodyFailure(error: Throwable): DspyError =
+      error match
+        case timeout: java.net.http.HttpTimeoutException => LmTimeoutError(s"HTTP timeout: ${describe(timeout)}")
+        case io: IOException                             => LmTransportError(s"IO error: ${describe(io)}")
+        case NonFatal(other)                             => LmUnexpectedError(describe(other))
+        case fatal                                       => throw fatal
+
+    /** Stop the subscription, so that the JDK client closes the connection. */
+    private def cancel(): Unit =
+      cancelled.set(true)
+      val started = subscription.get()
+      if started ne null then started.cancel()
+
+  private[providers] object TimedBody:
+    /** The body handler of [[JdkHttpTransport.sendJson]]: a [[TimedBody]] over the JDK string subscriber of the reply.
+      */
+    val handler: JHttpResponse.BodyHandler[TimedBody] =
+      info => new TimedBody(JHttpResponse.BodyHandlers.ofString().apply(info))
 
   /** A message from the reader thread to the consumer of [[LimitedLines]]. */
   private enum Signal derives CanEqual:

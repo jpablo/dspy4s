@@ -160,6 +160,49 @@ class HttpTimeoutsSuite extends FunSuite:
     }
   }
 
+  // ── Plain calls ─────────────────────────────────────────────────────────────────────────────────────────────
+
+  /** The head of a plain reply with a body of `length` bytes. */
+  private def plainHead(length: Int): String =
+    s"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: $length\r\n\r\n"
+
+  test("a plain call whose body stops after the headers ends after the read limit with an LmTimeoutError") {
+    withServer { out =>
+      write(out, plainHead(100) + """{"choices":""")
+      Thread.sleep(3000)
+    } { port =>
+      val started = System.nanoTime()
+      val result  = HttpTransport.jdk(shortLimits).sendJson(url(port), Map.empty, "{}")
+      val millis  = (System.nanoTime() - started) / 1_000_000L
+      assert(result.left.exists(_.isInstanceOf[LmTimeoutError]), result.toString)
+      assert(millis < 2500L, s"the transport must end the call after the read limit, not after $millis ms")
+    }
+  }
+
+  test("a plain call whose body comes in parts inside the read limit gets the whole body") {
+    val parts = Vector("""{"text": """, "\"caf", "é", " au", " lait\"", ", ", """"n": 1""", "}")
+    withServer { out =>
+      write(out, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n")
+      parts.foreach { part =>
+        Thread.sleep(100)
+        write(out, chunk(part))
+      }
+      write(out, "0\r\n\r\n")
+    } { port =>
+      val result = HttpTransport.jdk(shortLimits).sendJson(url(port), Map.empty, "{}")
+      assertEquals(result.map(response => (response.status, response.body)), Right((200, parts.mkString)))
+    }
+  }
+
+  test("a plain call whose connection closes in the middle of the body is an LmTransportError") {
+    withServer { out =>
+      write(out, plainHead(100) + """{"choices":""")
+    } { port =>
+      val result = HttpTransport.jdk(shortLimits).sendJson(url(port), Map.empty, "{}")
+      assert(result.left.exists(_.isInstanceOf[LmTransportError]), result.toString)
+    }
+  }
+
   // ── The release of the resources ───────────────────────────────────────────────────────────────────────────
 
   /** Run `use` with the port of a server that sends `head` and then no more data, and with a latch that the server
@@ -216,6 +259,35 @@ class HttpTimeoutsSuite extends FunSuite:
           assertEquals(response.failure(), None)
           assert(released.await(2, TimeUnit.SECONDS), "the connection stayed open after close")
           assert(readerThreadsEnd(), "the reader thread is alive after close")
+        case Left(error) => fail(s"the stream did not open: $error")
+    }
+  }
+
+  test("after the timeout of a plain call, the transport closes the connection") {
+    withStalledServer(plainHead(100) + """{"choices":""") { (port, released) =>
+      val result = HttpTransport.jdk(shortLimits).sendJson(url(port), Map.empty, "{}")
+      assert(result.left.exists(_.isInstanceOf[LmTimeoutError]), result.toString)
+      assert(released.await(2, TimeUnit.SECONDS), "the connection stayed open after the timeout")
+    }
+  }
+
+  test("close does not wait for an open stream that nobody reads, and the stream then fails") {
+    // Upstream `StdlibTransport.close` closes the connections in use (`dspy/_vendor/lm15/transports/_sync.py`).
+    withStalledServer(streamHead + chunk(content("Hi"))) { (port, released) =>
+      val transport = HttpTransport.jdk(HttpTimeouts(connect = 2.seconds, read = 10.seconds))
+      transport.streamSse(url(port), Map.empty, "{}") match
+        case Right(response) =>
+          try
+            val closer = new Thread(() => transport.close())
+            closer.setDaemon(true)
+            closer.start()
+            closer.join(2000)
+            assert(!closer.isAlive, "close waits for the open stream")
+            val (_, failure, millis) = readAll(response)
+            assert(failure.exists(_.isInstanceOf[LmTransportError]), failure.toString)
+            assert(millis < 2000L, s"the stream must fail after close, not after $millis ms")
+            assert(released.await(2, TimeUnit.SECONDS), "the connection stayed open after close")
+          finally response.dataLines.close() // A failed check must not leave the reader thread for the next test.
         case Left(error) => fail(s"the stream did not open: $error")
     }
   }
