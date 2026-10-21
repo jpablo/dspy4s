@@ -12,12 +12,12 @@ Status: proposal, 2026-10-19. Nothing in this document exists in the code yet.
   the log.
 - uniichat shows a memory that loses no detail: one log that never ends, a binary tree of summaries over the
   log, and a view that is a cut through the tree. The agent zooms into any line to get the detail back.
-- dspy4s has most of the parts: `Predict` leaves, `AgentLoop`, the interpreter seam, `History`, RLM, and the
+- dspy4s has most of the parts: `Predict` leaves, `AgentLoop`, the interpreter contract, `History`, RLM, and the
   optimizers. It has no Scala interpreter. Also, RLM sub-calls write no trace entry.
 - Design A makes the harness an RLM configuration. Design B makes a session algebra in which RLM is the
   meaning of a code step. Design C keeps the kernel of design B and replaces its compaction with the
   uniichat memory tree.
-- The recommendation is design C, built in phases on the kernel of design B, after a short spike on the
+- The recommendation is design C, built in phases on the kernel of design B, after a short experiment with the
   embedded REPL.
 
 ## 1. Goal
@@ -25,7 +25,7 @@ Status: proposal, 2026-10-19. Nothing in this document exists in the code yet.
 The `harness` module gives a coding agent with these properties:
 
 - **Code mode only.** The model acts only through Scala code that it writes. A Scala REPL runs the code.
-- **Reuse.** The harness uses the current modules: signatures, `Predict`, `AgentLoop`, the interpreter seam,
+- **Reuse.** The harness uses the current modules: signatures, `Predict`, `AgentLoop`, the interpreter contract,
   `History`, and the optimizers.
 - **Optimizable.** BootstrapFewShot, COPRO, MIPROv2 and GEPA can tune the harness as they tune any other program.
 - **RLM in the first version.** Large inputs stay in the REPL. Code can call the LM, and code can start a child
@@ -64,7 +64,7 @@ Ideas to use:
 - The source text of the API trait is the API reference for the model.
 - Compiler errors are observations. The model learns the limits of its mode from the type errors.
 - The REPL state is part of the agent memory.
-- A seam for tests: the loop runs against a scripted model and a recorded tool runner, with no REPL.
+- A trait for tests (`ToolRunner`): the loop runs against a scripted model and a recorded tool runner, with no REPL.
 
 Ideas to change:
 
@@ -164,7 +164,7 @@ Ideas to change:
 | `OptimizableStructure`, `ProgramRunner` | `programs/optimization`, `programs/ProgramRunner.scala` | All optimizers need these two instances. |
 | `AgentLoop.run` | `programs/runtime/AgentLoop.scala` | The bounded loop: `Continue`, `Done`, or the `onExhausted` result. |
 | `ActionInterpreter`, `ActionOutcome` | `programs/contracts/ActionInterpreter.scala` | A recoverable failure is an observation. A fatal failure is a `Left`. |
-| `ReplCodeInterpreter`, `ReplInterpreterFactory`, `SandboxTool` | `core/contracts/CodeInterpreter.scala` | The RLM interpreter seam. All three implementations run Python. |
+| `ReplCodeInterpreter`, `ReplInterpreterFactory`, `SandboxTool` | `core/contracts/CodeInterpreter.scala` | The RLM interpreter contract. All three implementations run Python. |
 | `RLM[I, O]` | `programs/strategies/RLM*.scala` | The action leaf (`variables_info, repl_history, iteration -> reasoning, code`), the extract leaf, `SUBMIT`, `llm_query`, the budgets. |
 | `History` | `core/contracts/History.scala` | The adapter replays each message as earlier turns. The policy can see its trajectory as chat turns. |
 | `TracedRun`, `captureFailureTraces` | `programs/optimization/TracedRun.scala` | The optimizers read the leaf calls from the trace. |
@@ -305,7 +305,7 @@ run the tests. Without forks, parallel rollouts write the same files.
 
 ### Idea
 
-Make the RLM interpreter seam independent of the language, and add a Scala implementation. The harness is then
+Make the RLM interpreter contract independent of the language, and add a Scala implementation. The harness is then
 an `RLM[I, O]` value with the Scala REPL and the workspace API.
 
 ### Changes
@@ -352,8 +352,8 @@ field, and the step number. The output has `reasoning` and `code`.
 - One call is one task. There is no conversation, no steering, and no compaction. The history grows until the
   output limit cuts it.
 - The REPL state ends with the call.
-- `SandboxTool` passes `DynamicValue` records. The typed API (F2) must go around this seam, so the harness uses
-  only part of the seam.
+- `SandboxTool` passes `DynamicValue` records. The typed API (F2) must go around this contract, so the harness uses
+  only part of it.
 - The trajectory is one text field. The model does not see its steps as chat turns.
 
 ## 5. Design B: a session algebra
@@ -387,7 +387,7 @@ type Projection = Session => PolicyInput
 //    task, variables, observation, history -> reasoning, code
 val policy: Predict[PolicyInput, PolicyStep]
 
-// 4. The interpreter: the REPL behind the current ActionInterpreter seam.
+// 4. The interpreter: the REPL behind the current ActionInterpreter contract.
 val interpreter: ActionInterpreter[Cell, CellResult]
 ```
 
@@ -451,7 +451,7 @@ Two entry points use the same kernel:
 
 - `harness(input)`: one task in one session. The optimizers use this entry point.
 - `Harness.turn(session, repl, message)`: one interactive turn. A CLI keeps the `Session` value and the live
-  REPL. The CLI is a thin shell outside the module.
+  REPL. The CLI is a small program outside the module.
 
 ### RLM in design B
 
@@ -626,7 +626,7 @@ harness adds a "keep working" message and runs one more turn. ReAnchor can calib
 | Trajectory form | One text field | Chat turns through `History` | View lines, then chat turns through `History` |
 | Prompt cache | A prefix of the history field | A stable prefix until a compaction | A stable prefix by the prefix law |
 | Laws | The current RLM and loop laws | Log, projection, middleware, handlers | The laws of B, and the memory laws |
-| Change to the current code | RLM changes (language seam, `subQuery`) | No change to RLM in the first version | No change to RLM in the first version |
+| Change to the current code | RLM changes (`ReplLanguage`, `subQuery`) | No change to RLM in the first version | No change to RLM in the first version |
 
 ## 8. Optimization
 
@@ -669,7 +669,7 @@ works before the memory tree exists. Design A stays available as an early check 
 
 | Phase | Work | Result |
 |---|---|---|
-| 0. Spike | Embed `ReplDriver` 3.8.4 in a test. Check the persistent state, the interrupt at a timeout, a separate output for each REPL, and two REPLs on parallel threads. Measure the start time and the memory of one REPL. | A decision: a REPL in the same JVM, or a forked JVM. |
+| 0. Experiment | Embed `ReplDriver` 3.8.4 in a test. Check the persistent state, the interrupt at a timeout, a separate output for each REPL, and two REPLs on parallel threads. Measure the start time and the memory of one REPL. | A decision: a REPL in the same JVM, or a forked JVM. |
 | 1. Foundation | F1, F2 (`read`, `write`, `edit`, `exec`), F3, F6. | A REPL that runs model code against the guest API. |
 | 2. Kernel | The log, the policy leaf, `Harness` on `AgentLoop`, a simple projection (the full log as `History`), the laws, `OptimizableStructure`, `ProgramRunner`. | A harness for one task that the optimizers accept. |
 | 3. RLM | F4, F5: variables, `llmQuery` through `subQuery`, `rlm(...)` children, the shared budget, the depth limit. | RLM in the harness. |
