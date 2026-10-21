@@ -1034,9 +1034,8 @@ full suite passes: 2,157 tests, 0 failures, 6 live tests skipped.
   that ends the stream. A second writer can pass the cap of the disk cache for a time; an inner cache hit does not
   fill the outer cache (`CompositeLmCache` does); old TypeSafe entries miss one time; the Python version check keeps
   its result for the life of the JVM.
-- **Waiting for the owner.** The form of the usage of a result (U1 to U5: failed calls, cache hits, the calls inside
-  tools, the attempts of `BestOfN` and `Refine`, one record for each model), and the single-output fallback of the
-  chat parser, a port rule that upstream does not have (S2).
+- **Decided by the owner.** The form of the usage of a result (U1 to U5): decision D9. The single-output fallback of
+  the chat parser (S2): decision D10, keep it.
 - **Changes of the public API.** `Adapter.streamingState` takes a `using RuntimeContext`; `LmChunk` has two new fields
   (`reasoning`, `citations`); `ToolCallAssembler.assemble` takes a mode; `StreamAccumulator`,
   `RequestHash.forRequestChecked`, and `RLM.WarningLatch` are new; `Trajectory.failure` replaces the field `failed`
@@ -1162,6 +1161,15 @@ Open points from batch 1, for the owner:
       (G-50). **Decided 2026-10-21: the given context wins.** Each public entry point (a program call, `compile`,
       `evaluate`) installs the context that it gets for the duration of the call, as `Evaluate` and GEPA (b36)
       already do. The API does not change.
+- [x] **D9. The usage of a result.** Each program result has one `LmUsage` (`RawPrediction.lmUsage`). Upstream fills
+      the usage only when `track_usage` is on, on the top call only, with one record for each model, and it counts
+      each LM call of the call: also a failed call, a call inside a tool, and each attempt of `BestOfN` and `Refine`,
+      but not a cache hit (open points U1 to U5). **Decided 2026-10-21: keep one usage on each result, and count as
+      upstream.** A usage scope for each program call gives the total of the model calls in that call.
+- [x] **D10. The single-output fallback of the chat parser.** With one output field and no header in the reply, the
+      port takes the whole text as the value; upstream has no such rule and goes to the JSON fallback (open point
+      S2). **Decided 2026-10-21: keep the fallback.** It saves a model call; the stream holds such a reply and sends
+      it in one chunk at the end.
 
 ## Phase 1: lm / clients
 
