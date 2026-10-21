@@ -23,6 +23,7 @@ import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
+import dspy4s.streaming.contracts.PredictionEvent
 import dspy4s.streaming.contracts.StreamEvent
 import dspy4s.streaming.contracts.StreamListener
 import dspy4s.streaming.contracts.TokenEvent
@@ -531,6 +532,43 @@ class StreamListenerSuite extends FunSuite:
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
       assertEquals(tokens.map(_.predictName).toSet, Set("p1", "p2"))
     }
+  }
+
+  /** The tokens and the parsed `answer` of one streamed `question -> answer` call with the chat adapter. */
+  private def streamAnswer(chunks: Vector[LmChunk], listener: StreamListener): (Vector[TokenEvent], String) =
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ScriptedLm(chunks)), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val signature        = SignatureDsl.parse("question -> answer").toOption.get
+      val stream           = Streamify.streamify(DynamicPredict(layout = signature), streamListeners = Vector(listener))
+      val events           = collectStream(stream(rec("question" := "x")))
+      val answers          = events.collect { case e: PredictionEvent => lookupString(e.prediction.values, "answer") }
+      assertEquals(answers.size, 1, events.toString)
+      (events.collect { case e: TokenEvent => e }, answers.head)
+    }
+
+  test("allowReuse=false: with one output field, the text before the header does not use up the listener") {
+    // The listener of upstream `StreamListener.receive` streams only after the start header.
+    val chunks = Vector(
+      LmChunk(text = "Sure, here it is.\n"),
+      LmChunk(text = "[[ ## answer ## ]]\n"),
+      LmChunk(text = "42\n\n"),
+      LmChunk(text = "[[ ## completed ## ]]", finishReason = Some("stop"))
+    )
+    val (tokens, answer) = streamAnswer(chunks, StreamListener("answer", allowReuse = false))
+    assertEquals(answer, "42")
+    assertEquals(tokens.map(_.chunk).mkString, answer)
+    assertEquals(tokens.map(_.isLastChunk).count(identity), 1, tokens.toString)
+  }
+
+  test("a repeated header of the listened field streams the first section only, as the parser keeps the first") {
+    val chunks = Vector(
+      LmChunk(text = "[[ ## answer ## ]]\n42\n"),
+      LmChunk(text = "[[ ## answer ## ]]\n43\n"),
+      LmChunk(text = "[[ ## completed ## ]]", finishReason = Some("stop"))
+    )
+    val (tokens, answer) = streamAnswer(chunks, StreamListener("answer"))
+    assertEquals(answer, "42")
+    assertEquals(tokens.map(_.chunk).mkString, answer)
   }
 
   test("validation: listener for an unknown field emits a warning") {

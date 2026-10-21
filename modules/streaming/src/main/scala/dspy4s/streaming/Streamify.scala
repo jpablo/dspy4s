@@ -1,5 +1,6 @@
 package dspy4s.streaming
 
+import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.RuntimeContext
@@ -53,7 +54,12 @@ object Streamify:
       val callback = new StatusStreamingCallback(provider, queue)
 
       val currentLm = outerContext.lm
-      val adapter   = outerContext.adapter.collect { case a: Adapter => a }
+      // The stream rules come from the configured adapter. With no configured adapter, they are the chat rules
+      // (upstream `StreamListener.receive` and `flush` in `dspy/streaming/streaming_listener.py`).
+      val adapter = outerContext.adapter match
+        case Some(configured: Adapter) => Some(configured)
+        case Some(_)                   => None
+        case None                      => Some(ChatAdapter())
 
       val wrappedLm = currentLm.collect { case slm: StreamingLanguageModel =>
         StreamingLanguageModelWrapper(

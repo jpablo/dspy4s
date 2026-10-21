@@ -8,7 +8,9 @@ import dspy4s.programs.strategies.ChainOfThought
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.strategies.Predict
 import dspy4s.programs.ProgramRunner
+import dspy4s.programs.strategies.RLM
 import dspy4s.programs.strategies.ReAct
+import dspy4s.programs.strategies.ReActV2
 import dspy4s.programs.contracts.DynamicModule
 import zio.blocks.schema.DynamicValue
 
@@ -70,3 +72,19 @@ object Streamable:
         (program.extractorProgramName, program.extractorPredict.signature.layout)
       )
     }
+
+  /** `RLM`: the action predictor of each iteration and the extract predictor of the fallback are the stream-listener
+    * targets (upstream `RLM.generate_action` and `RLM.extract`). A call can change the instructions of the action
+    * predictor, but not its name or its output fields.
+    */
+  given rlm[I, O](using ProgramRunner[RLM[I, O]]): Streamable[RLM[I, O]] =
+    from { program =>
+      Vector(
+        program.actionPredict.moduleName  -> program.actionPredict.signature.layout,
+        program.extractPredict.moduleName -> program.extractPredict.signature.layout
+      )
+    }
+
+  /** `ReActV2`: the step predictor is the one stream-listener target (upstream `ReActV2.react`). */
+  given reActV2[I, O](using ProgramRunner[ReActV2[I, O]]): Streamable[ReActV2[I, O]] =
+    from(program => Vector(program.reactPredict.moduleName -> program.reactPredict.layout))

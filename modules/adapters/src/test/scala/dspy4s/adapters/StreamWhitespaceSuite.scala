@@ -80,6 +80,43 @@ class StreamWhitespaceSuite extends FunSuite:
     }
   }
 
+  test("with one output field and no header, the parser and the chunks strip the same whitespace") {
+    val text   = "\u2003 just the value \u2003\n"
+    val parsed = parsedText(ChatAdapter(), layoutOf(answerOnly), text)
+    assertEquals(parsed, Map("answer" -> "just the value"))
+    twoPartSplits(text).foreach { parts =>
+      val (joined, _) = stream(ChatStreamingState(answerOnly), parts)
+      assertEquals(joined, parsed, parts.toString)
+    }
+  }
+
+  test("with one output field, the text before the header is not a chunk of the field, as in the parser") {
+    val text   = "Sure, here it is.\n[[ ## answer ## ]]\n42\n\n[[ ## completed ## ]]"
+    val parsed = parsedText(ChatAdapter(), layoutOf(answerOnly), text)
+    assertEquals(parsed, Map("answer" -> "42"))
+    twoPartSplits(text).foreach { parts =>
+      val (joined, chunks) = stream(ChatStreamingState(answerOnly), parts)
+      assertEquals(joined, parsed, parts.toString)
+      assertEquals(chunks.count(_.isLast), 1, s"$parts: one field gives one last chunk: $chunks")
+    }
+  }
+
+  test("a repeated chat header streams only the first section of the field, as the parser keeps the first") {
+    val repeatedAnswer    = "[[ ## answer ## ]]\n42\n[[ ## answer ## ]]\n43\n[[ ## completed ## ]]"
+    val repeatedReasoning =
+      "[[ ## reasoning ## ]]\nfirst\n[[ ## answer ## ]]\n42\n[[ ## reasoning ## ]]\nsecond\n[[ ## completed ## ]]"
+    val twoOutputs = Vector(FieldSpec("reasoning"), FieldSpec("answer"))
+    Vector(answerOnly -> repeatedAnswer, twoOutputs -> repeatedReasoning).foreach { (outputs, text) =>
+      val parsed = parsedText(ChatAdapter(), layoutOf(outputs), text)
+      assertEquals(parsed.get("answer"), Some("42"))
+      twoPartSplits(text).foreach { parts =>
+        val (joined, chunks) = stream(ChatStreamingState(outputs), parts)
+        assertEquals(joined, parsed, parts.toString)
+        assertEquals(chunks.count(_.isLast), outputs.size, s"$parts: each field gives one last chunk: $chunks")
+      }
+    }
+  }
+
   // ── XML ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
   test("for each split point, the joined XML chunks of each field are the parsed values") {

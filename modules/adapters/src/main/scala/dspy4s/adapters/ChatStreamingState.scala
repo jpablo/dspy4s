@@ -18,8 +18,12 @@ import scala.collection.mutable
   *     window is the longest possible marker, which guarantees a partial `[[ ## foo` prefix is never emitted as
   *     content.
   *   - On `finish()`, anything held back is flushed to the current field and the last chunk is marked `isLast = true`.
-  *   - When the model never emits any marker and the signature has a single output field, all received text is
-  *     attributed to that field (matches the parser's single-output fallback).
+  *   - The first header of a field wins, as in the parser (upstream `ChatAdapter.parse`). A later header of the same
+  *     field starts a section that the stream drops.
+  *   - The single-output fallback of the parser (a port rule): with one output field, the state holds the text until
+  *     the first header of that field, and drops the held text at that header. When the field has no header at the end,
+  *     the whole text, stripped, is the value of the field, in one last chunk. Upstream streams only the text after the
+  *     start header (`StreamListener.receive`).
   *   - Boundary whitespace (upstream `_default_handle_stream_chunk`): the parser strips each field value, so the chunks
   *     of a field do too. The leading whitespace of a field is dropped. A run of whitespace is held until more text of
   *     the same field arrives, and is dropped at the end of the field. Thus the text of the chunks of a field, joined,
@@ -39,18 +43,34 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
   private val markerMaxLen: Int =
     (outputFields.map(f => s"[[ ## ${f.name} ## ]]".length) :+ ChatAdapter.CompletedMarker.length).max
 
-  private val buffer                                                        = new StringBuilder
-  private val whitespace                                                    = new ChatStreamingState.BoundaryWhitespace
-  private var currentField: Option[String]                                  = None
-  private var sawAnyMarker: Boolean                                         = false
+  private val buffer                       = new StringBuilder
+  private val whitespace                   = new ChatStreamingState.BoundaryWhitespace
+  private var currentField: Option[String] = None
+
+  /** The output fields that had a header. */
+  private val openedFields: mutable.Set[String] = mutable.Set.empty
+
+  /** The whole text of the response while the single-output fallback can apply. */
+  private val fallbackText = new StringBuilder
+
+  /** True while no output field had a header, with one output field. */
+  private def fallbackOpen: Boolean = singleFieldFallback.isDefined && openedFields.isEmpty
+
   override protected def receiveOpen(textDelta: String): Vector[FieldChunk] =
+    if fallbackOpen then fallbackText.append(textDelta)
     buffer.append(textDelta)
     drain(forceFlush = false)
 
   override protected def finishOpen(): Vector[FieldChunk] =
-    val flushed = drain(forceFlush = true)
+    val flushed = drain(forceFlush = true) ++ fallbackValue
     if flushed.isEmpty then Vector.empty
     else flushed.init :+ flushed.last.copy(isLast = true)
+
+  /** The value of the single-output fallback at the end: the whole text, when the one output field had no header. */
+  private def fallbackValue: Vector[FieldChunk] =
+    val out = mutable.ArrayBuffer.empty[FieldChunk]
+    if fallbackOpen then singleFieldFallback.foreach(field => closeField(field.name, fallbackText.toString, out))
+    out.toVector
 
   private def drain(forceFlush: Boolean): Vector[FieldChunk] =
     val out  = mutable.ArrayBuffer.empty[FieldChunk]
@@ -59,17 +79,20 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
       findMarker(buffer.toString) match
         case Some(MarkerHit(field, markerStart, markerEnd)) =>
           // The content before the marker is the end of the current field.
-          effectiveActiveField.foreach(name => closeField(name, buffer.substring(0, markerStart), out))
+          currentField.foreach(name => closeField(name, buffer.substring(0, markerStart), out))
           buffer.delete(0, markerEnd)
-          sawAnyMarker = true
-          currentField = Some(field).filter(outputNames.contains)
+          currentField = Option.when(outputNames.contains(field) && !openedFields.contains(field))(field)
+          currentField.foreach { name =>
+            openedFields += name
+            fallbackText.clear()
+          }
           // Loop — there may be another marker already in the buffer.
         case None =>
-          effectiveActiveField match
+          currentField match
             case None =>
-              // We haven't entered any tracked field yet. Discard any safe
-              // prefix (text before a possible marker start) and hold the
-              // tail that might still become one.
+              // No tracked field is open. Discard any safe prefix (text
+              // before a possible marker start) and hold the tail that
+              // might still become one.
               val emittable = safeEmittablePrefixLength(buffer.toString, forceFlush)
               if emittable > 0 then buffer.delete(0, emittable)
             case Some(name) =>
@@ -93,12 +116,6 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
     val emitted = whitespace.accept(content)
     if whitespace.started then out += FieldChunk(name, emitted, isLast = true)
     whitespace.reset()
-
-  /** What's the active output field, taking the single-output fallback into account when the model has not yet emitted
-    * any marker. Once any marker has been seen we trust the marker stream exclusively — no fallback.
-    */
-  private def effectiveActiveField: Option[String] =
-    currentField.orElse(if sawAnyMarker then None else singleFieldFallback.map(_.name))
 
   /** Returns the length of the prefix of `text` that is safe to emit (or discard) without risking truncation of a
     * partial marker. When `forceFlush` is true, the whole buffer is safe. Otherwise, we must hold back any tail that

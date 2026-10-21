@@ -27,9 +27,12 @@ private[adapters] object ChatAdapterParser:
     val outputNames = textFields.map(_.name).toSet
     val values      = extractSections(output.text, outputNames)
 
+    // The single-output fallback is a port rule: upstream `ChatAdapter.parse` has none. It strips the text with
+    // `String.strip`, as for the other values. Thus the joined stream chunks of the field are this value
+    // (`ChatStreamingState`).
     val resolved =
-      if values.isEmpty && textFields.size == 1 && output.text.trim.nonEmpty then
-        Map(textFields.head.name -> output.text.trim)
+      if values.isEmpty && textFields.size == 1 && output.text.strip.nonEmpty then
+        Map(textFields.head.name -> output.text.strip)
       else
         values
 
