@@ -42,21 +42,31 @@ trait TrajectoryAgent[I, O, S] extends Module[I, O]:
     */
   protected def renderTrajectory(trajectory: Vector[S])(using RuntimeContext): String
 
-  /** One domain-specific transition: act, append an entry, and decide whether the trajectory is complete. */
-  protected def trajectoryStep(call: ProgramCall[I])(using
+  /** One domain-specific transition: act, append an entry, and decide whether the trajectory is complete. The
+    * transition adds the LM usage of its model calls to `usage`. The default `usage` is a new sum that nobody reads.
+    */
+  protected def trajectoryStep(call: ProgramCall[I], usage: RunUsage = RunUsage())(using
       RuntimeContext
   ): (Vector[S], Int) => Either[DspyError, TrajectoryAgent.Step[S]]
 
+  /** The LM usage of the result is the sum of the usage of each model call of the run: the transitions and the
+    * extractor (upstream `Module.__call__` puts the total usage of the call on the result,
+    * `dspy/primitives/module.py`).
+    */
   final override protected def forward(call: ProgramCall[I])(using
       RuntimeContext
   ): Either[DspyError, Prediction[O]] =
+    val usage = RunUsage()
     TrajectoryAgent.runAndExtractPrediction[S, O](
       maxIterations,
       trajectory => renderTrajectory(trajectory),
       trajectoryKey
-    )(trajectoryStep(call)) {
+    )(trajectoryStep(call, usage)) {
       rendered =>
         extractorPredict(call.mapInput(input => (input, rendered)))
+    }.map { prediction =>
+      usage.add(prediction.raw.lmUsage)
+      prediction.copy(raw = prediction.raw.copy(lmUsage = usage.total))
     }
 
 /** The "gather a trajectory, then extract the answer from it" agent shape behind `ReAct` (the trajectory-and-extractor

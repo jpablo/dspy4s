@@ -90,6 +90,8 @@ class OptimizerEmptyEvalsetSuite extends FunSuite:
     assertRejected(infer, trainset = examples, valset = Some(Vector.empty))
   }
 
-  test("BootstrapFewShotWithRandomSearch rejects an empty valset") {
-    assertRejected(randomSrc, trainset = examples, valset = Some(Vector.empty))
+  // An empty valset selects the trainset (upstream `valset or trainset`, `dspy/teleprompt/random_search.py`), so only
+  // an empty trainset too leaves no evaluation set. `BootstrapFewShotWithRandomSearchSuite` checks the non-empty case.
+  test("BootstrapFewShotWithRandomSearch rejects an empty valset when the trainset is empty too") {
+    assertRejected(randomSrc, trainset = Vector.empty, valset = Some(Vector.empty))
   }

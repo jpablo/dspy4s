@@ -4,18 +4,23 @@ import dspy4s.core.contracts.{DspyError, DynamicValues, ReplCodeInterpreter, Run
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.{ActionInterpreter, ActionOutcome, Prediction, ProgramCall}
-import dspy4s.programs.runtime.{AgentLoop, SandboxToolBridge}
+import dspy4s.programs.runtime.{AgentLoop, RunUsage, SandboxToolBridge}
 import zio.blocks.schema.DynamicValue
 
 /** Executes one [[RLM]] invocation.
   *
   * Configuration and addressable predictor leaves remain on `RLM`; this class owns the per-call interpreter lifecycle,
   * persistent REPL history, loop transitions, validated SUBMIT handling, and exhausted-budget extraction fallback.
+  *
+  * The LM usage of the result is the sum of the usage of each model call of the run: the action calls, the sub-LM calls
+  * of `llm_query` and `llm_query_batched`, and the extract call (upstream `Module.__call__` puts the total usage of the
+  * call on the result, `dspy/primitives/module.py`). An instance serves one call.
   */
 private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
   private val baseSignature    = rlm.baseSignature
   private val baseLayout       = baseSignature.layout
   private val outputFieldNames = baseLayout.outputFields.map(_.name)
+  private val usage            = RunUsage()
 
   def run(call: ProgramCall[I])(using ctx: RuntimeContext): Either[DspyError, Prediction[O]] =
     val inputs                               = call.encodedInput(baseSignature.inputShape)
@@ -28,7 +33,7 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
       RLM.ReplVariable.fromValue(field.name, inputVars(field.name), Some(field)).format
     }
 
-    val sandboxTools = RLM.makeLlmTools(rlm.maxLlmCalls, rlm.subLm, ctx) ++
+    val sandboxTools = RLM.makeLlmTools(rlm.maxLlmCalls, rlm.subLm, ctx, usage) ++
       SandboxToolBridge.fromToolFunctions(rlm.tools)
     val outputFields = baseLayout.outputFields.map { field =>
       SandboxOutputField(field.name, field.typeRef.pythonTypeName)
@@ -66,6 +71,7 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
         iteration = s"${iteration + 1}/${rlm.maxIterations}"
       )
       actionPredict(call.mapInput(_ => actionInputs)).flatMap { action =>
+        usage.add(action.raw.lmUsage)
         val reasoning = action.output.reasoning
         val rawCode   = action.output.code
         if rlm.verbose then
@@ -139,7 +145,7 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
   ): Prediction[O] =
     Prediction(
       output = output,
-      raw = RawPrediction(values = outputsRecord)
+      raw = RawPrediction(values = outputsRecord, lmUsage = usage.total)
         .withRawValue("trajectory", RLM.renderHistory(history, rlm.maxOutputChars))
         .withRawValue("final_reasoning", finalReasoning)
     )
@@ -156,11 +162,13 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
       repl_history = renderedHistory
     )
     rlm.extractPredict(call.mapInput(_ => extractInputs)).map { extracted =>
+      usage.add(extracted.raw.lmUsage)
       Prediction(
         output = extracted.output,
-        // withRawValue on the extractor's raw envelope preserves its completions / LM usage (same rationale as
-        // TrajectoryAgent.runAndExtractPrediction).
+        // withRawValue on the extractor's raw envelope preserves its completions (same rationale as
+        // TrajectoryAgent.runAndExtractPrediction). The usage is the sum of the run.
         raw = extracted.raw
+          .copy(lmUsage = usage.total)
           .withRawValue("trajectory", renderedHistory)
           .withRawValue("final_reasoning", "Extract forced final output")
       )

@@ -11,17 +11,23 @@ import dspy4s.core.contracts.{
 }
 import dspy4s.lm.contracts.{LanguageModel, LmRequest, Message, MessageRole}
 import dspy4s.programs.LlmCallLimit
-import dspy4s.programs.runtime.ParallelExecutor
+import dspy4s.programs.runtime.{ParallelExecutor, RunUsage}
 import zio.blocks.schema.DynamicValue
 
 import java.util.concurrent.atomic.AtomicInteger
 
 /** Builds the sandbox functions that let generated RLM code call a subordinate language model. */
 private[programs] object RLMSandboxTools:
+
+  /** The tools `llm_query` and `llm_query_batched`. The usage of each sub-LM call goes to `usage`: upstream counts
+    * these calls in the usage of the RLM call, because they run in the context of the call (`dspy/predict/rlm.py`,
+    * `_make_llm_tools`, with `contextvars.copy_context` for the batched calls).
+    */
   def build(
       maxLlmCalls: LlmCallLimit,
       subLm      : Option[LanguageModel],
-      ctx        : RuntimeContext
+      ctx        : RuntimeContext,
+      usage      : RunUsage
   ): Vector[SandboxTool] =
     val counter = new AtomicInteger(0)
 
@@ -45,7 +51,10 @@ private[programs] object RLMSandboxTools:
               model = model.id,
               messages = Vector(Message(role = MessageRole.User, text = Some(prompt)))
             ))(using ctx)
-            .map(_.outputs.headOption.map(_.text).getOrElse(""))
+            .map { response =>
+              usage.add(response.usage)
+              response.outputs.headOption.map(_.text).getOrElse("")
+            }
 
     val llmQuery = SandboxTool(
       name = "llm_query",

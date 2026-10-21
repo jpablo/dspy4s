@@ -53,8 +53,10 @@ final class BootstrapFewShotWithRandomSearch[P: {OptimizableStructure, ProgramRu
       teacher : Option[P],
       valset  : Option[Vector[Example]]
   )(using ctx: RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    val ps                               = summon[OptimizableStructure[P]]
-    val effectiveValset: Vector[Example] = valset.getOrElse(trainset)
+    val ps = summon[OptimizableStructure[P]]
+    // No valset or an empty valset selects the trainset (upstream `self.valset = valset or trainset`,
+    // `dspy/teleprompt/random_search.py`).
+    val effectiveValset: Vector[Example] = valset.filter(_.nonEmpty).getOrElse(trainset)
     // Each candidate gets its score from `Evaluate`, which rejects an empty devset. Stop before the bootstrap work.
     if effectiveValset.isEmpty then return Left(OptimizerSupport.emptyEvalsetError(name))
     // Two leaves with the same predictor key are a configuration error (decision D2). Stop before any run.

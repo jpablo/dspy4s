@@ -96,3 +96,25 @@ class BootstrapFewShotWithRandomSearchSuite extends FunSuite:
       case Left(error: ValidationError) => assert(error.message.contains("empty"), error.message)
       case other                        => fail(s"expected a ValidationError, got $other")
   }
+
+  // Upstream `self.valset = valset or trainset` (`dspy/teleprompt/random_search.py:59`): an empty valset selects the
+  // trainset as the evaluation set.
+  test("BootstrapFewShotWithRandomSearch scores the candidates on the trainset when the valset is empty") {
+    val trainset = (1 to 3).map(i =>
+      Example(rec("question" := s"q$i", "answer" := s"a$i"), inputKeys = Set("question"))
+    ).toVector
+    val optimizer = new BootstrapFewShotWithRandomSearch[DemoAwarePredictProgram](
+      RandomSearchConfig(metric = new ExactMatch(answerField = "answer"), numCandidates = SearchCandidateCount(1))
+    )
+    given RuntimeContext = RuntimeEnvironment.current
+
+    optimizer.compile(zeroShotStudent, trainset, teacher = Some(oracleTeacher), valset = Some(Vector.empty)) match
+      case Right(report) =>
+        assert(report.candidates.nonEmpty, s"no candidate: ${report.metadata}")
+        report.candidates.foreach { candidate =>
+          candidate.metadata.get("per_example") match
+            case Some(scores: Vector[?]) => assertEquals(scores.size, trainset.size)
+            case other                   => fail(s"no per-example scores: $other")
+        }
+      case Left(error) => fail(s"expected a report, got $error")
+  }

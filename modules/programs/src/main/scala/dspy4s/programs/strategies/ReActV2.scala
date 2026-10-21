@@ -24,7 +24,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.IterationLimit
 import dspy4s.programs.contracts.{ModuleLifecycle, Prediction, ProgramCall, ToolFunction}
 import dspy4s.programs.internal.ToolText
-import dspy4s.programs.runtime.ToolExecutor
+import dspy4s.programs.runtime.{RunUsage, ToolExecutor}
 import dspy4s.signatures.Signature
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
@@ -74,7 +74,9 @@ import scala.annotation.tailrec
   * The result is a `Prediction[O]`: the output is the decode of the final outputs with the output shape of
   * `baseSignature`. The raw values have the final outputs, then [[ReActV2.HistoryKey]] (the encoded [[History]]) and
   * [[ReActV2.TerminationReasonKey]] (the wire name of the reason). [[ReActV2.history]] and
-  * [[ReActV2.terminationReason]] read them.
+  * [[ReActV2.terminationReason]] read them. The LM usage of the result is the sum of the usage of each step call of the
+  * run, the forced submit included (upstream `Module.__call__` puts the total usage of the call on the result,
+  * `dspy/primitives/module.py`).
   *
   * The start history (point 5): an input field of `baseSignature` with the type
   * [[dspy4s.core.contracts.TypeRef.history]] gives the history at the start of the run (upstream: the `history`
@@ -211,7 +213,7 @@ final case class ReActV2[I, O](
       val pending = DynamicValues.recordFromEntries(
         taskInputs.flatMap(field => DynamicValues.recordGet(inputs, field.name).map(field.name -> _))
       )
-      loop(call, history, pending, turn = 0)
+      loop(call, history, pending, turn = 0, RunUsage())
     }
 
   /** The history at the start of the run (point 5; upstream `_coerce_history`): the value of the start-history field,
@@ -226,34 +228,42 @@ final case class ReActV2[I, O](
 
   /** The turns of the loop (upstream `ReActV2.forward`). See the rules of the loop in the class documentation. */
   @tailrec
-  private def loop(call: ProgramCall[I], history: History, pending: DynamicValue.Record, turn: Int)(using
-      RuntimeContext
-  ): Either[DspyError, Prediction[O]] =
-    if turn >= maxIterations then forcedSubmit(call, history, pending, "max_iters")
+  private def loop(
+      call   : ProgramCall[I],
+      history: History,
+      pending: DynamicValue.Record,
+      turn   : Int,
+      usage  : RunUsage
+  )(using RuntimeContext): Either[DspyError, Prediction[O]] =
+    if turn >= maxIterations then forcedSubmit(call, history, pending, "max_iters", usage)
     else
-      step(call, history, pending, call.config) match
+      step(call, history, pending, call.config, usage) match
         case Left(error: ParseError) =>
           RuntimeEnvironment.warn(ModuleName, s"Ending ReActV2 loop after parse failure: ${error.message}")
-          forcedSubmit(call, history, pending, "parse_error")
+          forcedSubmit(call, history, pending, "parse_error", usage)
         case Left(_: ContextWindowExceededError) =>
           RuntimeEnvironment.warn(ModuleName, "Ending ReActV2 loop after context window exceeded.")
-          forcedSubmit(call, history, pending, "context_window_exceeded")
+          forcedSubmit(call, history, pending, "context_window_exceeded", usage)
         case Left(error)                         => Left(error)
-        case Right(found) if found.calls.isEmpty => forcedSubmit(call, history, pending, "empty_tool_calls")
+        case Right(found) if found.calls.isEmpty => forcedSubmit(call, history, pending, "empty_tool_calls", usage)
         case Right(found)                        =>
           val calls              = withIds(found.calls, turn)
           val (results, outputs) = execute(calls)
           val next               = append(history, event(pending, found.thought, calls, results, outputs))
           outputs match
-            case Some(values) => finish(values, next, TerminationReason.Submit)
-            case None         => loop(call, next, DynamicValue.Record.empty, turn + 1)
+            case Some(values) => finish(values, next, TerminationReason.Submit, usage)
+            case None         => loop(call, next, DynamicValue.Record.empty, turn + 1, usage)
 
   /** The forced submit after the loop (upstream `_forced_submit`). See the rules in the class documentation. */
-  private def forcedSubmit(call: ProgramCall[I], history: History, pending: DynamicValue.Record, reason: String)(using
-      RuntimeContext
-  ): Either[DspyError, Prediction[O]] =
+  private def forcedSubmit(
+      call   : ProgramCall[I],
+      history: History,
+      pending: DynamicValue.Record,
+      reason : String,
+      usage  : RunUsage
+  )(using RuntimeContext): Either[DspyError, Prediction[O]] =
     val config = call.config.updated("tool_choice", SubmitToolChoice).updated("reasoning_effort", DynamicValue.Null)
-    step(call, history, pending, config) match
+    step(call, history, pending, config, usage) match
       case Left(error) =>
         error match
           case _: ParseError | _: ContextWindowExceededError =>
@@ -269,7 +279,7 @@ final case class ReActV2[I, O](
           outputs match
             case Some(values) =>
               val next = append(history, event(pending, found.thought, calls, results, outputs))
-              finish(values, next, TerminationReason.ForcedSubmit)
+              finish(values, next, TerminationReason.ForcedSubmit, usage)
             case None =>
               val errors = results.filter(_.isError).map(result => textOf(result.value)).mkString("\n")
               Left(RuntimeError(
@@ -277,17 +287,21 @@ final case class ReActV2[I, O](
                 s"ReActV2 failed to produce final outputs after $reason: submit failed.\n$errors"
               ))
 
-  /** One run of the step predictor with the history and the tools, and the tool calls of its answer. */
+  /** One run of the step predictor with the history and the tools, and the tool calls of its answer. The usage of the
+    * call goes to `usage`.
+    */
   private def step(
       call   : ProgramCall[I],
       history: History,
       pending: DynamicValue.Record,
-      config : DynamicValue.Record
+      config : DynamicValue.Record,
+      usage  : RunUsage
   )(using RuntimeContext): Either[DspyError, Step] =
     val input = pending
       .updated(HistoryField.name, summon[Schema[History]].toDynamicValue(history))
       .updated(ToolsField.name, toolTexts)
     reactPredict(ProgramCall(input, config, call.traceEnabled, call.rolloutId)).flatMap { prediction =>
+      usage.add(prediction.raw.lmUsage)
       val thought = DynamicValues.recordGet(prediction.output, NextThoughtField.name).filter {
         case _: DynamicValue.Null.type => false
         case _                         => true
@@ -316,16 +330,19 @@ final case class ReActV2[I, O](
               (results :+ errorResult(request, s"Execution error in ${request.name}: ${error.message}"), outputs)
     }
 
-  /** The prediction of the final outputs, with the history and the termination reason as raw values. */
+  /** The prediction of the final outputs, with the history and the termination reason as raw values. Its LM usage is
+    * the sum of the usage of each step call of the run (upstream `Module.__call__` with `track_usage`).
+    */
   private def finish(
       outputs: DynamicValue.Record,
       history: History,
-      reason : TerminationReason
+      reason : TerminationReason,
+      usage  : RunUsage
   ): Either[DspyError, Prediction[O]] =
     baseSignature.outputShape.decode(outputs).map { output =>
       Prediction(
         output,
-        RawPrediction(values = outputs)
+        RawPrediction(values = outputs, lmUsage = usage.total)
           .withValue(HistoryKey, summon[Schema[History]].toDynamicValue(history))
           .withValue(TerminationReasonKey, text(reason.wireName))
       )

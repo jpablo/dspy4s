@@ -23,6 +23,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.LinkedBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
@@ -90,6 +91,9 @@ import scala.util.control.NonFatal
   *     each locale.
   *   - An interrupt of the thread of `execute` while it waits for the worker ends the session. The result is a `Left`,
   *     and the thread keeps its interrupt state.
+  *   - Before the worker starts, the first `execute` checks that the executable is Python 3.10 or later, with a time
+  *     limit of 10 seconds. An older Python is a `Left` that names the version found and the version needed, and the
+  *     session ends. Upstream has no check, because it starts its own Python (see `PythonVersion`).
   *
   * @param tools
   *   the host tools that the code can call by name
@@ -98,7 +102,7 @@ import scala.util.control.NonFatal
   * @param executionTimeout
   *   the limit of one `execute`, or `None` for no limit
   * @param python
-  *   the Python executable
+  *   the Python executable, Python 3.10 or later
   */
 final class LocalPythonInterpreter(
     tools           : Vector[SandboxTool]                = Vector.empty,
@@ -208,9 +212,9 @@ final class LocalPythonInterpreter(
         )
       case Session.Ended => sessionEnded()
 
-  /** Start the worker and wait for its `ready` message. Each failure ends the session. */
+  /** Check the Python version, start the worker, and wait for its `ready` message. Each failure ends the session. */
   private def startWorker(): Either[DspyError, Worker] =
-    WorkerScript.path() match
+    WorkerScript.path().flatMap(script => PythonVersion.check(python).map(_ => script)) match
       case Left(message) => terminal(message)
       case Right(script) =>
         val builder                          = new ProcessBuilder(python, "-I", script.toString)
@@ -584,6 +588,125 @@ object LocalPythonInterpreter:
     private def closeStdin(): Unit =
       try stdin.close()
       catch case NonFatal(_) => ()
+
+  /** The check of the version of the Python executable before the worker starts. The vendored worker needs Python 3.10
+    * or later: it calls `zip(..., strict=False)`, so on Python 3.9 the worker starts, and a positional `SUBMIT` fails
+    * with "TypeError: zip() takes no keyword arguments". Upstream starts the worker with `sys.executable`
+    * (`dspy/primitives/local_interpreter.py`), and dspy needs Python 3.10 or later (`pyproject.toml`,
+    * `requires-python`), so upstream has no such check. The port starts `python3` from `PATH`, which can be older, for
+    * example the macOS `/usr/bin/python3` (3.9.6).
+    *
+    * The check runs `<python> -I -c <Probe>`. The output and the standard error of the process go to a temporary file.
+    * The results:
+    *   - an executable that does not start: "Unable to start the Python worker '<python>': <error>";
+    *   - no exit in 10 seconds: the check kills the process and its descendants, and the message names the time limit;
+    *   - an exit code that is not 0: the message has the exit code and the output;
+    *   - no output line with `<major>.<minor>.<micro>`: the message has the output;
+    *   - a version before 3.10: the message names the version found and the version needed.
+    *
+    * The check keeps each executable name that passed, for the life of the JVM. Thus the next interpreters on that
+    * executable (one for each RLM call) do not start a second process.
+    */
+  private object PythonVersion:
+    private val NeededMajor = 3
+    private val NeededMinor = 10
+
+    /** The Python code that prints `<major>.<minor>.<micro>`. */
+    private val Probe = "import sys; print('.'.join(str(n) for n in sys.version_info[:3]))"
+
+    private val VersionLine = """(\d{1,9})\.(\d{1,9})\.(\d{1,9})""".r
+
+    /** The largest part of the output that the check reads. */
+    private val MaxOutputBytes = 4096
+
+    private val passed = ConcurrentHashMap.newKeySet[String]()
+
+    /** `Right` when `python` is Python 3.10 or later, else the message of the failure. */
+    def check(python: String): Either[String, Unit] =
+      if passed.contains(python) then Right(())
+      else
+        val result = output(python).flatMap(text => accept(python, text))
+        if result.isRight then
+          val _ = passed.add(python)
+        result
+
+    private def accept(python: String, text: String): Either[String, Unit] =
+      text.linesIterator.map(_.trim).collectFirst { case VersionLine(major, minor, micro) =>
+        (major.toInt, minor.toInt, micro.toInt)
+      } match
+        case None                        => Left(s"Unable to read the version of the Python executable '$python': ${clip(text)}")
+        case Some((major, minor, micro)) =>
+          if major > NeededMajor || (major == NeededMajor && minor >= NeededMinor) then Right(())
+          else
+            Left(
+              s"The Python executable '$python' is Python $major.$minor.$micro. " +
+                s"LocalPythonInterpreter needs Python $NeededMajor.$NeededMinor or later."
+            )
+
+    /** The output of the probe, with its standard error, when the process exits with the code 0. */
+    private def output(python: String): Either[String, String] =
+      val file: Either[String, Path] =
+        try Right(Files.createTempFile("dspy4s-python-version", ".txt"))
+        catch case NonFatal(error) => Left(s"Unable to check the version of '$python': ${describe(error)}")
+      file.flatMap { path =>
+        try
+          for
+            code <- run(python, path)
+            text <- read(python, path)
+            _    <- Either.cond(
+                   code == 0,
+                   (),
+                   s"The version check of the Python executable '$python' failed with the exit code $code: " +
+                     clip(text)
+                 )
+          yield text
+        finally
+          try
+            val _ = Files.deleteIfExists(path)
+          catch case NonFatal(_) => ()
+      }
+
+    /** Run the probe with its output in `path`, and give its exit code. */
+    private def run(python: String, path: Path): Either[String, Int] =
+      val builder                          = new ProcessBuilder(python, "-I", "-c", Probe).redirectErrorStream(true).redirectOutput(path.toFile)
+      val started: Either[String, Process] =
+        try Right(builder.start())
+        catch case NonFatal(error) => Left(s"Unable to start the Python worker '$python': ${describe(error)}")
+      started.flatMap { process =>
+        // The probe reads no input.
+        try process.getOutputStream.close()
+        catch case NonFatal(_) => ()
+        val exited: Either[String, Boolean] =
+          try Right(process.waitFor(StartupTimeout.toMillis, TimeUnit.MILLISECONDS))
+          catch
+            case _: InterruptedException =>
+              Thread.currentThread().interrupt()
+              Left("The thread was interrupted while it waited for the Python worker.")
+        exited match
+          case Right(true)  => Right(process.exitValue())
+          case Right(false) =>
+            kill(process)
+            Left(s"The Python executable '$python' did not report its version within $StartupTimeout.")
+          case Left(message) =>
+            kill(process)
+            Left(message)
+      }
+
+    /** The start of the output in `path`, with no white space at the two ends. */
+    private def read(python: String, path: Path): Either[String, String] =
+      try
+        val stream = Files.newInputStream(path)
+        try Right(new String(stream.readNBytes(MaxOutputBytes), StandardCharsets.UTF_8).trim)
+        finally stream.close()
+      catch case NonFatal(error) => Left(s"Unable to read the version of '$python': ${describe(error)}")
+
+    private def kill(process: Process): Unit =
+      try
+        process.descendants().forEach { child =>
+          val _ = child.destroyForcibly()
+        }
+      catch case NonFatal(_) => ()
+      val _ = process.destroyForcibly()
 
   /** The vendored worker script as a file. The script is written once per JVM, and again when the file was removed. */
   private object WorkerScript:

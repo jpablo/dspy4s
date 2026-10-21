@@ -16,6 +16,8 @@ import dspy4s.core.contracts.ValidationError
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
+import java.nio.file.Files
+import java.nio.file.Path
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.DurationInt
 import scala.util.control.NonFatal
@@ -212,4 +214,61 @@ class LocalPythonInterpreterSuite extends FunSuite:
     )
     val starts = events.toVector.collect { case start: InterpreterStartEvent => start }
     assertEquals(starts.map(_.interpreterName).distinct, Vector("LocalPythonInterpreter"))
+  }
+
+  // ── The Python version ──────────────────────────────────────────────────────────────────────────────────────
+
+  /** An executable shell script in place of a Python executable. For each argument list, it writes `output` and exits
+    * with `exitCode`. The tests thus do not need an old Python.
+    */
+  private def fakePython(output: String, exitCode: Int = 0): Path =
+    val directory = Files.createTempDirectory("dspy4s-fake-python")
+    val script    = directory.resolve("python3")
+    val _         = Files.writeString(script, s"#!/bin/sh\necho '$output'\nexit $exitCode\n")
+    val _         = script.toFile.setExecutable(true)
+    directory.toFile.deleteOnExit()
+    script.toFile.deleteOnExit()
+    script
+
+  /** The message of the `Left` of a first `execute` on `python`. The session then has ended. */
+  private def startFailure(python: Path): String =
+    val interpreter = LocalPythonInterpreter(python = python.toString)
+    try interpreter.execute("print(1)") match
+        case Left(RuntimeError(component, message)) =>
+          assertEquals(component, CodeInterpreterErrors.Interpreter)
+          assert(interpreter.execute("print(1)").left.exists(_.message.contains("session has ended")))
+          message
+        case other => fail(s"expected a Left, got $other")
+    finally interpreter.close()
+
+  // `3.9.6` is the output of the version check with the macOS `/usr/bin/python3`. On Python 3.9 the worker starts,
+  // and a positional `SUBMIT` fails later with "TypeError: zip() takes no keyword arguments". Upstream starts
+  // `sys.executable`, and dspy needs Python 3.10 or later (`pyproject.toml`, `requires-python`).
+  test("a Python older than 3.10 is a Left that names the version found and the version needed") {
+    val python = fakePython("3.9.6")
+    assertEquals(
+      startFailure(python),
+      s"The Python executable '$python' is Python 3.9.6. LocalPythonInterpreter needs Python 3.10 or later."
+    )
+  }
+
+  test("a Python executable whose version output is not a version is a Left") {
+    val python = fakePython("not a version")
+    assertEquals(
+      startFailure(python),
+      s"Unable to read the version of the Python executable '$python': not a version"
+    )
+  }
+
+  test("a Python executable that fails the version check is a Left with its exit code and its output") {
+    val python = fakePython("broken", exitCode = 3)
+    assertEquals(
+      startFailure(python),
+      s"The version check of the Python executable '$python' failed with the exit code 3: broken"
+    )
+  }
+
+  test("a Python executable that does not exist is a Left") {
+    val python = Files.createTempDirectory("dspy4s-no-python").resolve("python3")
+    assert(startFailure(python).startsWith(s"Unable to start the Python worker '$python': "))
   }

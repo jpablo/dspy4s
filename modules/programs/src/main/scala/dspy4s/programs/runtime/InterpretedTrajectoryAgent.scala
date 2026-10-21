@@ -1,6 +1,6 @@
 package dspy4s.programs.runtime
 
-import dspy4s.core.contracts.{DspyError, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, LmUsage, RuntimeContext}
 import dspy4s.programs.contracts.{ActionInterpreter, ActionOutcome, ProgramCall}
 import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{ActionDecision, ActionPreparation, State, StepGeneration}
 
@@ -72,14 +72,18 @@ trait InterpretedTrajectoryAgent[I, O, Entry] extends TrajectoryAgent[I, O, Entr
       outcome  : ActionOutcome[Observation]
   ): Entry
 
+  /** The usage of a generated step goes to `usage`. */
   private final def transitionGeneration(
       call   : ProgramCall[I],
-      current: State.Generating[Entry]
+      current: State.Generating[Entry],
+      usage  : RunUsage
   )(using RuntimeContext): State.Failed | State.Completed[Entry] | State.Preparing[ModelStep, Entry] =
     generateStep(call, current.trajectory) match
-      case Left(error)                                 => State.Failed(error)
-      case Right(StepGeneration.Halted(used))          => State.Completed(used)
-      case Right(StepGeneration.Generated(step, used)) => State.Preparing(step, used, current.iteration)
+      case Left(error)                                            => State.Failed(error)
+      case Right(StepGeneration.Halted(used))                     => State.Completed(used)
+      case Right(StepGeneration.Generated(step, used, stepUsage)) =>
+        usage.add(stepUsage)
+        State.Preparing(step, used, current.iteration)
 
   private final def transitionPreparation(
       current: State.Preparing[ModelStep, Entry]
@@ -119,9 +123,10 @@ trait InterpretedTrajectoryAgent[I, O, Entry] extends TrajectoryAgent[I, O, Entr
 
   private final def runStateMachine(
       call   : ProgramCall[I],
-      initial: State.Generating[Entry]
+      initial: State.Generating[Entry],
+      usage  : RunUsage
   )(using RuntimeContext): State.Terminal[Entry] =
-    transitionGeneration(call, initial) match
+    transitionGeneration(call, initial, usage) match
       case failed: State.Failed                 => failed
       case completed @ State.Completed(_)       => completed
       case preparing @ State.Preparing(_, _, _) => transitionPreparation(preparing) match
@@ -131,11 +136,11 @@ trait InterpretedTrajectoryAgent[I, O, Entry] extends TrajectoryAgent[I, O, Entr
               case recording @ State.RecordingOutcome(_, _, _, _, _) =>
                 transitionDecision(transitionOutcomeRecording(recording))
 
-  final override protected def trajectoryStep(call: ProgramCall[I])(using
+  final override protected def trajectoryStep(call: ProgramCall[I], usage: RunUsage)(using
       RuntimeContext
   ): (Vector[Entry], Int) => Either[DspyError, TrajectoryAgent.Step[Entry]] =
     (trajectory, iteration) =>
-      runStateMachine(call, State.Generating(trajectory, iteration)) match
+      runStateMachine(call, State.Generating(trajectory, iteration), usage) match
         case State.Continuing(updated) => Right(AgentLoop.Step.Continue(updated))
         case State.Completed(updated)  => Right(AgentLoop.Step.Done(updated))
         case State.Failed(error)       => Left(error)
@@ -188,9 +193,11 @@ object InterpretedTrajectoryAgent:
     final case class Completed[+Entry](trajectory: Vector[Entry])  extends Terminal[Entry]
     final case class Failed(error: DspyError)                      extends Terminal[Nothing]
 
-  /** Result of the model-generation phase for one iteration. */
+  /** Result of the model-generation phase for one iteration. `usage` is the LM usage of the model calls that gave the
+    * step. It goes into the usage of the result of the run.
+    */
   enum StepGeneration[+ModelStep, +Entry]:
-    case Generated(step: ModelStep, trajectory: Vector[Entry])
+    case Generated(step: ModelStep, trajectory: Vector[Entry], usage: Option[LmUsage] = None)
     case Halted(trajectory: Vector[Entry])
 
   /** Result of lowering a model step into the action language. */

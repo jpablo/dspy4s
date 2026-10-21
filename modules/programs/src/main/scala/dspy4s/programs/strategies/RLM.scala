@@ -21,6 +21,7 @@ import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.contracts.Prediction
 import dspy4s.programs.internal.ToolText
+import dspy4s.programs.runtime.RunUsage
 import dspy4s.signatures.{Shape, Signature}
 import zio.blocks.schema.DynamicValue
 
@@ -96,7 +97,14 @@ final case class RLM[I, O](
     /** Optional override for the max-iterations extract-fallback predict — a `Predict` over the two declared meta
       * inputs, producing the base outputs `O` directly (the base output shape's decode, as before).
       */
-    extractPredictOverride: Option[Predict[RLM.ExtractInputs, O]] = None
+    extractPredictOverride: Option[Predict[RLM.ExtractInputs, O]] = None,
+    /** The execution text of the factory of the runtime context at the first construction, or of
+      * [[RLM.defaultInterpreterFactory]] when that context has no factory. The default value reads the context once,
+      * and a `copy` keeps the value. Thus a copy in a context with another factory keeps the action instructions of the
+      * first construction (upstream sets `_initial_execution_instructions` in `__init__`, and a deep copy keeps it,
+      * `dspy/predict/rlm.py`). When [[interpreterFactory]] is set, its execution text wins over this text.
+      */
+    contextExecutionInstructions: String = RLM.contextExecutionInstructions
 ) extends Module[I, O]:
 
   override val moduleName: String = "rlm"
@@ -108,13 +116,14 @@ final case class RLM[I, O](
   private val baseLayout: SignatureLayout      = baseSignature.layout
   private val outputFieldNames: Vector[String] = baseLayout.outputFields.map(_.name)
 
-  /** The execution text of the factory that RLM resolves at construction: the factory of the program, then the factory
-    * of the ambient runtime context, then [[RLM.defaultInterpreterFactory]] (upstream `_build_signatures`). The action
-    * instructions hold its interpreter rules. A call on a factory with a different text changes these rules for that
-    * call (see [[actionPredictFor]]).
+  /** The execution text of the factory that RLM resolves at the first construction: the factory of the program, then
+    * the factory of the ambient runtime context, then [[RLM.defaultInterpreterFactory]] (upstream `_build_signatures`).
+    * The text of the context comes from [[contextExecutionInstructions]], so a `copy` does not resolve it again. The
+    * action instructions hold its interpreter rules. A call on a factory with a different text changes these rules for
+    * that call (see [[actionPredictFor]]).
     */
   private val initialExecutionInstructions: String =
-    RLM.resolveInterpreterFactory(interpreterFactory)(using RuntimeEnvironment.current).executionInstructions
+    interpreterFactory.fold(contextExecutionInstructions)(_.executionInstructions)
 
   private val initialInterpreterRules: String = RLMReplProtocol.interpreterRules(initialExecutionInstructions)
 
@@ -274,6 +283,12 @@ object RLM:
   def resolveInterpreterFactory(own: Option[InterpreterFactory])(using ctx: RuntimeContext): InterpreterFactory =
     own.orElse(ctx.interpreterFactory).getOrElse(defaultInterpreterFactory)
 
+  /** The execution text of the factory of the current runtime context, or of [[defaultInterpreterFactory]] when the
+    * context has no factory. It is the default value of the parameter `contextExecutionInstructions` of [[RLM]].
+    */
+  def contextExecutionInstructions: String =
+    resolveInterpreterFactory(None)(using RuntimeEnvironment.current).executionInstructions
+
   /** Names of the built-in sandbox functions. A tool or an input field must not use them (upstream
     * `_RESERVED_SANDBOX_NAMES`).
     */
@@ -371,11 +386,13 @@ object RLM:
 
   /** Build `llm_query` / `llm_query_batched` as [[SandboxTool]]s with a SHARED call counter capped at `maxLlmCalls`
     * (upstream `_make_llm_tools`). The sub-LM is `subLm` or the captured context's LM; failures surface as in-sandbox
-    * exceptions (`llm_query`) or per-item `[ERROR] …` strings (`llm_query_batched`).
+    * exceptions (`llm_query`) or per-item `[ERROR] …` strings (`llm_query_batched`). The usage of each sub-LM call goes
+    * to `usage`.
     */
   private[programs] def makeLlmTools(
       maxLlmCalls: LlmCallLimit,
       subLm      : Option[LanguageModel],
-      ctx        : RuntimeContext
+      ctx        : RuntimeContext,
+      usage      : RunUsage = RunUsage()
   ): Vector[SandboxTool] =
-    RLMSandboxTools.build(maxLlmCalls, subLm, ctx)
+    RLMSandboxTools.build(maxLlmCalls, subLm, ctx, usage)

@@ -131,3 +131,27 @@ class RLMInstructionsSuite extends FunSuite:
     assert(!text.contains("Execution environment:"), text)
     assert(text.contains("This is an iterative process.\n\nAvailable:\n"), text)
   }
+
+  // Upstream `_build_signatures` sets `_initial_execution_instructions` once in `__init__`, and a deep copy keeps it
+  // and the action signature (`dspy/predict/rlm.py`). A copy in a context with another factory thus keeps the rules of
+  // the first construction.
+  test("a copy in a context with another factory keeps the execution text of the first construction") {
+    val contextA = RuntimeContext(interpreterFactory = Some(factoryWith("Text A.")))
+    val contextB = RuntimeContext(interpreterFactory = Some(factoryWith("Text B.")))
+    val base     = RuntimeEnvironment.withSettings(contextA)(RLM(baseSignature = signature))
+    val copied   = RuntimeEnvironment.withSettings(contextB)(base.copy(verbose = true))
+    assertEquals(instructionsOf(copied.actionPredict), instructionsOf(base.actionPredict))
+    assert(instructionsOf(copied.actionPredict).contains("\nExecution environment:\nText A.\n"))
+  }
+
+  test("an optimizer copy in a context with another factory gets the rules of that factory at the call") {
+    val contextA = RuntimeContext(interpreterFactory = Some(factoryWith("Text A.")))
+    val contextB = RuntimeContext(interpreterFactory = Some(factoryWith("Text B.")))
+    val base     = RuntimeEnvironment.withSettings(contextA)(RLM(baseSignature = signature))
+    val tuned    = instructionsOf(base.actionPredict).replace("You are tasked", "Be careful. You are tasked")
+    val rlm      = RuntimeEnvironment.withSettings(contextB)(withInstructions(base, tuned))
+    assertEquals(
+      instructionsOf(rlm.actionPredictFor(factoryWith("Text B."))),
+      tuned.replace("\nExecution environment:\nText A.\n", "\nExecution environment:\nText B.\n")
+    )
+  }
