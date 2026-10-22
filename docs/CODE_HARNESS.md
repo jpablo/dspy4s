@@ -1,7 +1,7 @@
 # Code harness: analysis and design proposals
 
-Status: proposal, 2026-10-19, with sections 7 and 8 added on 2026-10-21. Nothing in this document exists in
-the code yet.
+Status: proposal, 2026-10-19, with sections 7 and 8 added on 2026-10-21 and the Phase 0 results (section 11)
+added on 2026-10-22. Nothing in this document exists in the code of dspy4s yet.
 
 ## Summary
 
@@ -25,7 +25,9 @@ the code yet.
   in a cell is an event. A replay of the journal can rebuild the REPL state. The first runtime uses direct
   style, and distribution comes later.
 - The recommendation is design C with the sessions and the controller of section 7, on the runtime of section
-  8. It is built in phases on the kernel of design B, after a short experiment with the embedded REPL.
+  8. It is built in phases on the kernel of design B.
+- The Phase 0 experiment (section 11) recommends a REPL in the same JVM, with five guards. Two of the guards
+  need the replay of section 8.
 
 ## 1. Goal
 
@@ -219,8 +221,12 @@ enum CellOutcome:
   nightly). Scala 3.8.0 added `-Xrepl-interrupt-instrumentation`, so a cell timeout can stop a loop.
 - In the `true` mode of that flag, each REPL class loader has its own copy of the stop flag (`StopRepl`). So
   a timeout in one REPL does not stop another REPL.
-- Give each REPL its own output stream. Send the guest `println` through `Console.withOut`, which has a value
-  for each thread. Then parallel sessions do not share a lock.
+- Give each REPL its own output stream. Set `redirectOutput` of the driver to `false`, because otherwise
+  `ReplDriver` calls `System.setOut` around each run. Run each cell on its own thread in `Console.withOut`, which
+  has a value for each thread. Forward `System.out` and `System.err` to `Console` one time, at the start of the
+  host. Then parallel sessions do not share a lock. Phase 0 confirmed this setup (section 11).
+- Bind an `ExecutionContext` for each REPL in the preamble. A thread of the global pool keeps the output stream of
+  the thread that made it, so the global pool sends output to the wrong REPL.
 - Bind the handlers (F2) in the preamble of each REPL through a registry key for that session. Do not use one
   global slot.
 - Share only `scala.*` and the guest API package with the REPL class loader, as atc does. Hide the class
@@ -228,7 +234,8 @@ enum CellOutcome:
 - Keep the current error split: a failure of the REPL is a `Left`, and a failure of the user code is a `Right`
   with an outcome.
 - A later variant runs the REPL in a forked JVM. That variant isolates memory and crashes. Capture checking
-  does not need it, because the build already uses the nightly compiler.
+  does not need it, because the build already uses the nightly compiler. Phase 0 recommends the REPL in the same
+  JVM, with five guards (section 11).
 
 ### F2. The guest API as effect signatures with handlers
 
@@ -1130,7 +1137,8 @@ live code needs.
 - Storage: the journal must hold each result that the code saw. Small results (`write`, `llmQuery`) cost little.
   Large `read` and `exec` results cost the most. A content store can keep each content one time only. Decision
   10 of section 7 records no content for writes; replay needs the content of reads.
-- Time: each cell compiles again, from 0.1 to 1 second for each cell. A long session takes some minutes.
+- Time: each cell compiles again. Phase 0 measured 12 ms to 55 ms (median) for a cell in a warm REPL, and 73 ms
+  for the replay of three cells (section 11). A long session with complex cells can take some minutes.
 
 **Other uses.**
 
@@ -1209,7 +1217,9 @@ Recommendations that are not decisions yet:
 Open questions:
 
 1. Is REPL replay a first-version feature, with the stored results of reads? Or is it a later feature, with the
-   three preparations of 8.4 in the first version?
+   three preparations of 8.4 in the first version? Data from Phase 0 (section 11): replay worked with a small
+   amount of code (one handler that records and one that replays), and two guards of the REPL in the same JVM
+   need it. One guard restarts an unclean host. The other guard limits a REPL to about 300 cells.
 
 ## 9. Comparison
 
@@ -1274,8 +1284,8 @@ tree exists. Design A stays available as an early check of the foundation.
 
 | Phase | Work | Result |
 |---|---|---|
-| 0. Experiment | Embed the `ReplDriver` of the build (the 3.10 nightly) in a test. Check the persistent state, the interrupt at a timeout, a separate output for each REPL, and two REPLs on parallel threads. Measure the start time and the memory of one REPL. | A decision: a REPL in the same JVM, or a forked JVM. |
-| 1. Foundation | F1, F2 (`read`, `write`, `edit`, `exec`), F3, F6. | A REPL that runs model code against the guest API. |
+| 0. Experiment | Embed the `ReplDriver` of the build (the 3.10 nightly) in a test. Check the persistent state, the interrupt at a timeout, a separate output for each REPL, and two REPLs on parallel threads. Measure the start time and the memory of one REPL. | Done on 2026-10-21: a REPL in the same JVM, with guards (see the Phase 0 results). |
+| 1. Foundation | F1, F2 (`read`, `write`, `edit`, `exec`), F3, F6. The guards of the Phase 0 results. | A REPL that runs model code against the guest API. |
 | 2. Kernel | The log, the policy leaf, `Harness` on `AgentLoop`, a simple projection (the full log as `History`), the laws, `OptimizableStructure`, `ProgramRunner`. The session decider and the cell events with metadata (8.3, 8.5). `Clock` and `Random` handlers. | A harness for one task that the optimizers accept. |
 | 3. RLM | F4, F5: variables, `llmQuery` through `subQuery`, `rlm(...)` children, the shared budget, the depth limit. | RLM in the harness. |
 | 4. Memory tree | `Memory`, `View`, the memory laws, the `compress` and `merge` leaves, the builder, `zoom` and `date` as guest functions. The projection of design C. | A memory that loses no detail. |
@@ -1284,10 +1294,58 @@ tree exists. Design A stays available as an early check of the foundation.
 | 7. Controller | The controller API (7.3), the ledger events, pluggable ontologies, the extraction at the end of each turn, the time queries (7.6), the `Graph` guest API in sessions (7.7), probes, `SessionCard`, the graph metric. | One controller above all sessions. |
 | Later | Capture checking for the guest API (the build already uses the nightly). A forked JVM for isolation. MCP tools as guest functions (`McpTools`). A policy variant with `run_scala` as a native tool through the adapter. Prompt-cache marks in `LmRequest`. RLM on the kernel. REPL replay with stored results (8.4), if it is not in the first version. A Pekko interpreter of the decider, and distribution (8.6). | |
 
+### Phase 0 results
+
+The experiment ran on 2026-10-21, with the 3.10 nightly and JDK 21 on an Apple M4 Pro. Its code and its full
+report (`RESULTS.md`) are in `tmp/repl-experiment/` of the main checkout. They are not committed.
+
+| Check | Result |
+|---|---|
+| Persistent state | Pass. The definitions stay after a compile error and after a failure at run time. |
+| Timeout | Pass for loops in guest code. A loop stops 0 to 3 ms after the stop flag, the earlier output comes back, and later cells run. |
+| Output for each REPL | Pass, with no lock. Two REPLs printed 2,000 lines each at the same time, each into its own buffer. |
+| Parallel REPLs | Pass. A timeout in one REPL does not stop another REPL. 8 REPLs compile about 5.8 times as many cells per second as one REPL. |
+| Host API | Pass. The preamble takes its handlers from a registry by a key for that REPL. A guest call is a direct method call (115 ns). |
+| Replay (8.4) | Pass. Three cells replayed with 0 real effects, and the next cell worked. The replay took 73 ms, and the live run took 187 ms. |
+| Cost | The first REPL in a JVM: 787 ms. Each more REPL: 85 ms and about 6 MiB of heap. A forked JVM: about 1 s and about 200 MiB of resident memory for each REPL. |
+
+Problems:
+
+1. A loop inside library code that calls no guest code cannot be stopped. Its thread uses one CPU core until
+   the JVM ends, because JDK 21 cannot stop a thread from outside.
+2. A guest that fills the heap makes the other REPLs fail. With `-Xmx4g`, it also stopped the host JVM in 4 of 4
+   runs.
+3. The memory of a REPL grows with the square of the number of cells: 348 MiB after 600 cells. Each new cell
+   keeps one import context for each earlier cell. A forked JVM has the same problem.
+4. `ExecutionContext.global` sends output to the wrong REPL, because a thread of the global pool keeps the
+   `Console.out` of the thread that made it.
+5. A guest `System.out` goes to the output of the host, unless the host forwards it.
+6. The timeout includes the compile time of the cell.
+7. The setup uses internal names of the REPL (`private[repl]`), which a new nightly can change.
+8. A guest `System.exit` stops the host. The experiment did not test this.
+
+The recommendation is a REPL in the same JVM, behind the `ScalaRepl` contract (F1), with five guards:
+
+1. Set `redirectOutput` to `false`. Run each cell on its own thread in `Console.withOut` and `Console.withErr`.
+   Forward `System.out` and `System.err` to them one time, at the start of the host.
+2. Bind an `ExecutionContext` for each REPL in the preamble. Reject `ExecutionContext.global`, `new Thread`,
+   `System.exit` and `Runtime` in guest code, with safe mode or a validator, as atc does.
+3. When a worker thread does not end after a stop, mark the host process as unclean. Restart the host at the
+   next safe point, for example after a batch of rollouts, and rebuild each REPL with replay.
+4. Monitor the heap. Above a limit, close the REPL whose cell thread allocated the most memory. The experiment
+   did not test this guard.
+5. Limit a REPL to about 300 cells. Then start a new REPL and replay the cells into it.
+
+Guards 3 and 5 need replay (8.4). A forked JVM stays the fallback: use it if unclean restarts occur often, or if
+the harness must run code from a source that it does not trust.
+
+The experiment did not test a journal on disk, the order of `parallel` results in a replay, capture checking in
+guest code, a forked JVM with a protocol for the guest calls, guard 4, Linux, or Windows.
+
 ### Open questions
 
-1. **REPL host.** A REPL in the same JVM (fast start, simple), or a forked JVM (isolation of memory and crashes)?
-   Phase 0 gives the data.
+1. **REPL host.** Phase 0 recommends a REPL in the same JVM, with the guards of the Phase 0 results. A forked
+   JVM is the fallback.
 2. **End signal.** Only `submit(...)`, as in RLM? Or also a reply with no code, as in atc and uniichat? For
    interactive turns, a reply with no code is natural.
 3. **RLM.** Does the current `RLM` move onto the kernel later, so that dspy4s has one code program?
