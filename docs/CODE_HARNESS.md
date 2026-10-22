@@ -1,7 +1,7 @@
 # Code harness: analysis and design proposals
 
-Status: proposal, 2026-10-19, with section 7 added on 2026-10-21. Nothing in this document exists in the code
-yet.
+Status: proposal, 2026-10-19, with sections 7 and 8 added on 2026-10-21. Nothing in this document exists in
+the code yet.
 
 ## Summary
 
@@ -21,8 +21,11 @@ yet.
 - Section 7 extends design C. Work sessions have a pluggable context strategy, and the memory tree is one of
   the strategies. One controller conversation that never ends uses the memory tree, starts the sessions, and
   sees each session through a ledger, a knowledge graph with time and a pluggable ontology, and probes.
-- The recommendation is design C with the sessions and the controller of section 7. It is built in phases on
-  the kernel of design B, after a short experiment with the embedded REPL.
+- Section 8 describes the runtime. A session is an actor, its log is an event journal, and each guest API call
+  in a cell is an event. A replay of the journal can rebuild the REPL state. The first runtime uses direct
+  style, and distribution comes later.
+- The recommendation is design C with the sessions and the controller of section 7, on the runtime of section
+  8. It is built in phases on the kernel of design B, after a short experiment with the embedded REPL.
 
 ## 1. Goal
 
@@ -39,8 +42,9 @@ The `harness` module gives a coding agent with these properties:
 
 Section 2 analyzes the three reference harnesses and the dspy4s components. Section 3 gives the foundation
 that all designs share. Sections 4, 5 and 6 give the three designs. Section 7 extends design C with work
-sessions and a controller. Section 8 compares the designs, and section 9 describes the optimization. Section 10
-gives a recommendation, the phases, and the open questions. Section 11 lists the alternatives.
+sessions and a controller, and section 8 describes the runtime of a session. Section 9 compares the designs, and
+section 10 describes the optimization. Section 11 gives a recommendation, the phases, and the open questions.
+Section 12 lists the alternatives.
 
 ## 2. Analysis
 
@@ -472,6 +476,7 @@ Two entry points use the same kernel:
 
 The log is plain data with a `Schema`, so a JSONL file can hold it. The REPL state is not in the log. On a
 resume, the harness adds a note: the REPL restarted, and the earlier definitions are gone. atc does the same.
+Section 8.4 describes replay, which can rebuild the REPL state from the journal.
 
 ### Laws
 
@@ -584,7 +589,7 @@ turn waits until the nodes that its view needs are built (uniichat `settle`).
 - The full log is an RLM input: a REPL value with a summary in the prompt, and the view is that summary. The
   RLM rule "large inputs stay in the REPL" and the uniichat rule "the view is the memory" are the same rule.
 - Code can call `llmQuery` on the lines of a subtree, for example to find a past decision. uniichat forbids a
-  search of the memory. Section 10 lists this as an open question.
+  search of the memory. Section 11 lists this as an open question.
 
 ### Two kinds of subagents
 
@@ -906,7 +911,7 @@ A session holds different resources, and an end means something different for ea
 |---|---|
 | The log | No. The memory tree, the graph, and the links from the controller come from it. |
 | Derived data (memory tree, graph) | Yes, from the log. |
-| The live REPL | Partly. The definitions are lost, but the log still has the cells. |
+| The live REPL | Partly. The definitions are lost, but the log still has the cells. Replay (8.4) can rebuild them. |
 | A worktree with no changes | Yes, from the branch. |
 | A worktree with uncommitted changes | No. |
 | A merged branch | Yes. The base branch has the commits. |
@@ -1000,7 +1005,211 @@ Decisions, 2026-10-21:
 
 Section 7 has no open questions now.
 
-## 8. Comparison
+## 8. Runtime: actors, events, and replay
+
+This section describes how a session runs. It adds three ideas to section 7: a session is an actor, its log is
+an event journal, and a replay of the journal can rebuild the REPL state.
+
+### 8.1 A session is an actor
+
+The design of section 7 already works with messages:
+
+| Section 7 | Actor term |
+|---|---|
+| A user message, or a `tell` from the controller | A message in the mailbox |
+| One turn at a time. A message that arrives during a turn goes in between two steps. | The actor handles one message at a time |
+| The log, the REPL, the scope | Private state |
+| `observe(session, question)` | A request and a reply (`ask`) on a read model |
+| Events from the session to the controller | Publish and subscribe |
+
+kyo-ai also models agents as long-lived actors (`docs/refactor/kyo-ai-comparison.md`).
+
+### 8.2 The log is an event journal
+
+| Section 7 | Event sourcing term |
+|---|---|
+| The log is the truth, and it is append-only | The event journal |
+| `Entry` (`Input`, `Acted`, `Observed`, `Ended`, `Reopened`, `ScopeSnapshot`) | Events |
+| Derivations: the memory tree, the graph, `SessionCard` | Projections (read models) |
+| Reopen a session | Recover the state by replay |
+
+There is one difference from standard event sourcing. An LM makes the memory tree and the graph. To derive them
+again costs money, and the result is not the same. So the harness stores the derived data too, in a journal of
+its own. uniichat also keeps its messages (`main/`) and its summary nodes (`tree/`) in separate files.
+
+### 8.3 Events inside a cell
+
+An `Acted(code)` entry holds the full cell, and one cell can do many actions. But each action of a cell goes
+through a handler (F2). So the `recorded` handler writes one event for each guest API call, at the time of the
+call:
+
+```scala
+enum CellEvent:
+  case CellStarted(code: String)
+  case EffectStarted(id: EffectId, op: String, args: DynamicValue.Record)
+  case EffectDone(id: EffectId, result: EffectResult)
+  case CellEnded(output: String, outcome: CellOutcome)
+```
+
+- The unit of an event is a guest API call, not a line of code.
+- The pure computation between two calls needs no event. The code and the recorded results give the same output
+  again.
+- This is the model of durable execution, as in Temporal: the cell is the workflow function, and each guest API
+  call is an activity.
+
+A write needs one more rule. `EffectStarted` goes into the journal before the effect, and `EffectDone` goes in
+after it. After a crash, a start with no done marks an effect whose result is unknown. The harness then asks the
+user, or it uses an idempotent operation. uniichat has the same rule for its acts.
+
+### 8.4 REPL replay
+
+**The problem.** The REPL state is the set of definitions that the earlier cells made (`val`, `def`, `class`,
+`import`), and the objects that those definitions hold in memory. A restart removes all of it: a crash, a
+session that reopens the next day, or a session that moves to another machine. The agent uses these definitions
+in later cells, so its next cell fails with an error such as `Not found: counts`. atc adds the note "the REPL
+restarted", and the model must do the work again. With a memory tree, the code of an old cell is a one-line
+summary, so the model cannot see the exact code that it must run again.
+
+**The mechanism.** Replay starts a new REPL and runs each recorded cell again, in order. The cell code is the
+same, but the `replayed` handler takes the place of each real handler. When a cell calls the guest API, the
+handler gives the recorded result, and it does not do the effect. An example:
+
+```scala
+// Cell 1
+val build = read("build.sbt")
+val modules = "lazy val (\\w+)".r.findAllMatchIn(build).map(_.group(1)).toVector
+
+// Cell 2
+def testsOf(m: String): Vector[String] =
+  exec(s"rg --files modules/$m/src/test").stdout.linesIterator.toVector
+val counts = modules.map(m => m -> testsOf(m).size).toMap
+
+// The session restarts. Then the model writes cell 3:
+counts.filter(_._2 == 0).keys
+```
+
+Without replay, cell 3 fails, because `counts` does not exist. With replay, the harness first runs cells 1 and 2
+again:
+
+- `read("build.sbt")` gives the recorded content. The disk is not read.
+- Each `exec` gives the recorded output. No process starts.
+- `llmQuery` gives the recorded answer. No LM call occurs, so the replay costs nothing.
+- `write` gives its recorded result. The file already has that content, so no write occurs.
+
+After the replay, `build`, `modules`, `testsOf` and `counts` exist again, and cell 3 works. The REPL state after
+replay is a function of the journal only, not of the files now. So replay restores the REPL to its exact state
+at the end of the last cell. If another session changed the files since then, `counts` can be old. That is also
+true when no restart occurs.
+
+**How a call finds its recorded result.** Inside one cell, the handler finds the recorded effects by order, and
+it checks that the operation and the arguments are the same. With `parallel`, the order of the calls can change,
+so the handler finds an effect by its operation and its arguments in the cell.
+
+**Divergence.** The replay can find that a cell does not do what the journal says:
+
+| Cause | How the harness finds it |
+|---|---|
+| The code reads time, a random number, or an environment value that no handler records | A call has other arguments than the recorded call, or the output is different |
+| The cell calls an effect that the journal does not have | No recorded effect agrees with the call |
+| The compiler or the guest API changed since the session ran | A compile error, or a different output. The journal records both versions, and the harness can skip replay when they differ. |
+| A value is a handle to a live resource, for example a process | Replay cannot make the resource again. The handle becomes a stale handle that fails with a clear message. |
+
+At the first divergence, the replay stops. The REPL keeps the definitions of the cells before that point. The
+harness tells the model which cells it replayed and which names exist. Temporal has the same check.
+
+**Which cells replay.** A cell that did not compile defined nothing, so the replay skips it. A cell that failed
+at run time has an invalid wrapper in the Scala REPL (atc calls `skipInvalidWrapper`), so the replay skips it
+too. The other cells stay consistent, because the replay never reads the real world. A later improvement: the
+compiler knows which names each cell defines and uses, so the harness can replay only the cells whose names the
+live code needs.
+
+**The cost.**
+
+- Storage: the journal must hold each result that the code saw. Small results (`write`, `llmQuery`) cost little.
+  Large `read` and `exec` results cost the most. A content store can keep each content one time only. Decision
+  10 of section 7 records no content for writes; replay needs the content of reads.
+- Time: each cell compiles again, from 0.1 to 1 second for each cell. A long session takes some minutes.
+
+**Other uses.**
+
+1. Fork at cell `k`: replay cells 1 to `k` into a new REPL, and continue on another path with the REPL state of
+   that point.
+2. Optimization with no effects: replay a recorded run up to step `k`, and test a new instruction for the later
+   steps only. The earlier steps cost no LM calls and no tool runs.
+3. Tests: a recorded session is a deterministic test with no network and no files.
+4. Debug: run a session again, exactly as it ran.
+
+Replay also tests the F2 law "`replayed(log)` gives the same results as the handler from which `recorded` wrote
+`log`" on full cells.
+
+**Preparation in the first version.** If replay comes later, three steps in the first version make it a small
+change:
+
+1. Send all nondeterminism through handlers: a `Clock`, a `Random`, and a fixed order for `parallel` results.
+   This also helps the tests.
+2. Write the cell events of 8.3, with the metadata of each effect.
+3. Record the compiler version and the guest API version in the journal.
+
+The later change is then to store the results, and to add the replay of cells.
+
+### 8.5 The decider and the runtime
+
+The algebra of a session is a pure decider. A runtime is an interpreter of it:
+
+```scala
+trait Decider[C, E, S]:
+  def initial: S
+  def decide(command: C, state: S): Either[Rejection, Vector[E]]  // pure
+  def evolve(state: S, event: E): S                                // pure
+```
+
+Laws:
+
+- The state is `events.foldLeft(initial)(evolve)`.
+- Two deciders compose into one decider.
+
+The decider owns the state machine of the session (idle, in a turn, ended, reopened) and the release plan of
+7.9. The long turn (the LM calls and the REPL) runs in a worker outside the decider. The worker sends its events
+back as messages.
+
+| Runtime | What it gives | Cost |
+|---|---|---|
+| Direct style: one virtual thread and one queue for each session (or Ox actors) | It agrees with the current dspy4s style: `Either`, direct calls, `RuntimeContext` | Persistence and distribution are new code |
+| Pekko Typed, with Pekko Persistence (`EventSourcedBehavior`) and Cluster Sharding | Journal plugins, snapshots, projections, one entity for each session id across machines | A large runtime. A turn blocks, so it must run outside the actor (`pipeToSelf`). The thread-local `RuntimeContext` needs `ContextPropagation`. |
+| An effect system (ZIO, kyo, or Cats Effect): a fiber, a queue, and a fold | Typed effects and cancellation | The project evaluated kyo-compat, but it did not adopt it (`docs/refactor/composite-primitives.md`) |
+
+`decide` maps directly to the command handler of `EventSourcedBehavior`, and `evolve` maps to its event handler.
+So a Pekko interpreter is a small adapter.
+
+### 8.6 Distribution
+
+A session is tied to one machine: its worktree is on one disk, and its REPL is in one JVM. When a Pekko cluster
+changes, Cluster Sharding moves an entity to another node, and the scope cannot move with it. Distribution is
+useful in two places:
+
+- **Optimizer rollouts.** Each rollout has everything that it needs: a workspace fork, a REPL, and one task. So
+  rollouts on many machines give more runs in parallel.
+- **Remote devices.** uniichat runs tools on each computer that has its terminal open. A session can stay in one
+  place while its tools run on a device.
+
+### 8.7 Decisions and open questions
+
+Decisions, 2026-10-21:
+
+1. The first runtime uses direct style (8.5). A Pekko interpreter can come later.
+2. Distribution is an advanced feature for a later version (8.6).
+
+Recommendations that are not decisions yet:
+
+- Model the session as a pure decider with laws (8.5).
+- Write the cell events of 8.3 from the first version.
+
+Open questions:
+
+1. Is REPL replay a first-version feature, with the stored results of reads? Or is it a later feature, with the
+   three preparations of 8.4 in the first version?
+
+## 9. Comparison
 
 | Criterion | Design A | Design B | Design C |
 |---|---|---|---|
@@ -1017,7 +1226,7 @@ Section 7 has no open questions now.
 | Laws | The current RLM and loop laws | Log, projection, middleware, handlers | The laws of B, and the memory laws |
 | Change to the current code | RLM changes (`ReplLanguage`, `subQuery`) | No change to RLM in the first version | No change to RLM in the first version |
 
-## 9. Optimization
+## 10. Optimization
 
 What the optimizers tune:
 
@@ -1050,10 +1259,10 @@ What the optimizers tune:
 A source of tasks is the history of this repository. A commit that makes a test pass gives a task (the parent
 commit and the test) and a metric (the test passes).
 
-## 10. Recommendation and phases
+## 11. Recommendation and phases
 
 The recommendation is design C as the target, built on the kernel of design B, with the sessions and the
-controller of section 7. Design C agrees with the functional style of dspy4s: the memory is a persistent value,
+controller of section 7 and the runtime of section 8. Design C agrees with the functional style of dspy4s: the memory is a persistent value,
 the view is a pure function with laws, and only the builder has an effect. It loses no detail, it keeps the
 prompt prefix stable by a law, and it gives the optimizers the most leaves. Section 7 keeps these properties for
 the controller, and it lets each work session choose its context strategy.
@@ -1065,13 +1274,13 @@ tree exists. Design A stays available as an early check of the foundation.
 |---|---|---|
 | 0. Experiment | Embed `ReplDriver` 3.8.4 in a test. Check the persistent state, the interrupt at a timeout, a separate output for each REPL, and two REPLs on parallel threads. Measure the start time and the memory of one REPL. | A decision: a REPL in the same JVM, or a forked JVM. |
 | 1. Foundation | F1, F2 (`read`, `write`, `edit`, `exec`), F3, F6. | A REPL that runs model code against the guest API. |
-| 2. Kernel | The log, the policy leaf, `Harness` on `AgentLoop`, a simple projection (the full log as `History`), the laws, `OptimizableStructure`, `ProgramRunner`. | A harness for one task that the optimizers accept. |
+| 2. Kernel | The log, the policy leaf, `Harness` on `AgentLoop`, a simple projection (the full log as `History`), the laws, `OptimizableStructure`, `ProgramRunner`. The session decider and the cell events with metadata (8.3, 8.5). `Clock` and `Random` handlers. | A harness for one task that the optimizers accept. |
 | 3. RLM | F4, F5: variables, `llmQuery` through `subQuery`, `rlm(...)` children, the shared budget, the depth limit. | RLM in the harness. |
 | 4. Memory tree | `Memory`, `View`, the memory laws, the `compress` and `merge` leaves, the builder, `zoom` and `date` as guest functions. The projection of design C. | A memory that loses no detail. |
 | 5. Optimization | A `FeedbackMetric` from tests, the memory metric, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
-| 6. Work sessions | `Derivation`, `ContextStrategy` (window, prefix summary, memory tree), scopes (directory, worktree, scratch), a CLI that opens one session, steering, the goal check, `ScopeSnapshot`, the end of a session and its release plans (7.9). | A coding agent for daily use, one session at a time. |
+| 6. Work sessions | `Derivation`, `ContextStrategy` (window, prefix summary, memory tree), scopes (directory, worktree, scratch), a CLI that opens one session, steering, the goal check, `ScopeSnapshot`, the end of a session and its release plans (7.9). The direct-style runtime: one virtual thread and one queue for each session (8.5). | A coding agent for daily use, one session at a time. |
 | 7. Controller | The controller API (7.3), the ledger events, pluggable ontologies, the extraction at the end of each turn, the time queries (7.6), the `Graph` guest API in sessions (7.7), probes, `SessionCard`, the graph metric. | One controller above all sessions. |
-| Later | A forked JVM with the nightly compiler and capture checking. MCP tools as guest functions (`McpTools`). A policy variant with `run_scala` as a native tool through the adapter. Prompt-cache marks in `LmRequest`. RLM on the kernel. | |
+| Later | A forked JVM with the nightly compiler and capture checking. MCP tools as guest functions (`McpTools`). A policy variant with `run_scala` as a native tool through the adapter. Prompt-cache marks in `LmRequest`. RLM on the kernel. REPL replay with stored results (8.4), if it is not in the first version. A Pekko interpreter of the decider, and distribution (8.6). | |
 
 ### Open questions
 
@@ -1090,8 +1299,9 @@ tree exists. Design A stays available as an early check of the foundation.
 8. **Tasks.** Where do the evaluation tasks come from: the history of this repository, a public benchmark, or
    both?
 9. **Controller.** Section 7.10 lists the decisions and the open questions about the sessions and the controller.
+10. **Runtime.** Section 8.7 lists the decisions and the open questions about the runtime.
 
-## 11. Alternatives considered
+## 12. Alternatives considered
 
 - **A free monad that the model writes.** The model writes `for` comprehensions over an operation type, and the
   host interprets the program value. This permits an inspection before the run. But models write direct-style
