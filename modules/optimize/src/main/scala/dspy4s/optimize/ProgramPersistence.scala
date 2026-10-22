@@ -14,6 +14,7 @@ import zio.blocks.schema.{DynamicValue, Schema}
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Paths
+import scala.util.control.NonFatal
 
 /** Program-level state save / load (PORT_GAPS G-4) — the analogue of Python's `BaseModule.dump_state` / `load_state`
   * and `save` / `load`.
@@ -115,7 +116,7 @@ object ProgramPersistence:
       Files.write(Paths.get(path), dumpJson(program).getBytes(StandardCharsets.UTF_8))
       Right(())
     catch
-      case error: Throwable =>
+      case NonFatal(error) =>
         Left(RuntimeError("program_save", Option(error.getMessage).getOrElse(error.getClass.getSimpleName)))
 
   /** Read a program's state JSON from `path` and rebuild it. IO failures are wrapped into a [[RuntimeError]]; malformed
@@ -125,6 +126,6 @@ object ProgramPersistence:
     val read: Either[DspyError, String] =
       try Right(new String(Files.readAllBytes(Paths.get(path)), StandardCharsets.UTF_8))
       catch
-        case error: Throwable =>
+        case NonFatal(error) =>
           Left(RuntimeError("program_load", Option(error.getMessage).getOrElse(error.getClass.getSimpleName)))
     read.flatMap(json => loadJson(program, json))

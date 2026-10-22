@@ -30,6 +30,7 @@ import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
+import scala.annotation.nowarn
 import scala.annotation.tailrec
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.duration.FiniteDuration
@@ -318,7 +319,10 @@ final class LocalPythonInterpreter(
       request : DynamicValue.Record,
       captured: ContextPropagation.Captured
   ): CompletableFuture[ToolOutcome] =
-    val outcome      = new CompletableFuture[ToolOutcome]()
+    val outcome = new CompletableFuture[ToolOutcome]()
+    // The catch takes each Throwable, also a fatal one: the waiting `execute` must wake, or the session hangs. A
+    // fatal error ends the session, and `execute` throws it again (see the class doc). So warning E235 is off here.
+    @nowarn("id=E235")
     def body(): Unit =
       try
         val delta = captured.run {

@@ -80,7 +80,8 @@ Ideas to change:
 - atc swaps `System.out` under a lock for the full JVM, and it installs the host in one global slot. Then
   parallel sessions wait for each other. The optimizers need many parallel rollouts.
 - `chat()` is one completion. atc has no RLM.
-- Capture checking needs the nightly compiler. dspy4s builds on 3.8.4.
+- Capture checking needs the nightly compiler. Since 2026-10-21, dspy4s builds on the same nightly as atc
+  (`3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY`), so the harness can use capture checking too.
 
 ### 2.2 pi (`/Users/jpablo/GitHub/pi-mono`)
 
@@ -214,8 +215,8 @@ enum CellOutcome:
   case Submitted(value: DynamicValue.Record)
 ```
 
-- Use `dotty.tools.repl.ReplDriver` from `scala3-repl_3:3.8.4`. Scala 3.8.0 added
-  `-Xrepl-interrupt-instrumentation`, so a cell timeout can stop a loop.
+- Use `dotty.tools.repl.ReplDriver` from `scala3-repl_3`, with the Scala version of the build (the 3.10
+  nightly). Scala 3.8.0 added `-Xrepl-interrupt-instrumentation`, so a cell timeout can stop a loop.
 - In the `true` mode of that flag, each REPL class loader has its own copy of the stop flag (`StopRepl`). So
   a timeout in one REPL does not stop another REPL.
 - Give each REPL its own output stream. Send the guest `println` through `Console.withOut`, which has a value
@@ -226,8 +227,8 @@ enum CellOutcome:
   resources of the shared classes, so that the instrumentation does not define a second copy of them.
 - Keep the current error split: a failure of the REPL is a `Left`, and a failure of the user code is a `Right`
   with an outcome.
-- A later variant runs the REPL in a forked JVM. That variant isolates memory and crashes, and it can use the
-  nightly compiler for capture checking.
+- A later variant runs the REPL in a forked JVM. That variant isolates memory and crashes. Capture checking
+  does not need it, because the build already uses the nightly compiler.
 
 ### F2. The guest API as effect signatures with handlers
 
@@ -270,8 +271,9 @@ Laws:
 - `guarded(p)(guarded(q)(h))` behaves as `guarded(p and q)(h)`.
 - For the calls in `log`, `replayed(log)` gives the same results as the handler from which `recorded` wrote `log`.
 
-The read-only mode is a choice of handlers. On 3.8.4, the handler checks the mode at run time. On the nightly
-compiler, capture checking can check the mode at compile time, as in atc.
+The read-only mode is a choice of handlers. Without capture checking, the handler checks the mode at run time.
+With capture checking, the compiler checks the mode, as in atc. The build uses the nightly compiler, so both
+options are available.
 
 ### F3. A typed submit
 
@@ -1272,7 +1274,7 @@ tree exists. Design A stays available as an early check of the foundation.
 
 | Phase | Work | Result |
 |---|---|---|
-| 0. Experiment | Embed `ReplDriver` 3.8.4 in a test. Check the persistent state, the interrupt at a timeout, a separate output for each REPL, and two REPLs on parallel threads. Measure the start time and the memory of one REPL. | A decision: a REPL in the same JVM, or a forked JVM. |
+| 0. Experiment | Embed the `ReplDriver` of the build (the 3.10 nightly) in a test. Check the persistent state, the interrupt at a timeout, a separate output for each REPL, and two REPLs on parallel threads. Measure the start time and the memory of one REPL. | A decision: a REPL in the same JVM, or a forked JVM. |
 | 1. Foundation | F1, F2 (`read`, `write`, `edit`, `exec`), F3, F6. | A REPL that runs model code against the guest API. |
 | 2. Kernel | The log, the policy leaf, `Harness` on `AgentLoop`, a simple projection (the full log as `History`), the laws, `OptimizableStructure`, `ProgramRunner`. The session decider and the cell events with metadata (8.3, 8.5). `Clock` and `Random` handlers. | A harness for one task that the optimizers accept. |
 | 3. RLM | F4, F5: variables, `llmQuery` through `subQuery`, `rlm(...)` children, the shared budget, the depth limit. | RLM in the harness. |
@@ -1280,11 +1282,11 @@ tree exists. Design A stays available as an early check of the foundation.
 | 5. Optimization | A `FeedbackMetric` from tests, the memory metric, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
 | 6. Work sessions | `Derivation`, `ContextStrategy` (window, prefix summary, memory tree), scopes (directory, worktree, scratch), a CLI that opens one session, steering, the goal check, `ScopeSnapshot`, the end of a session and its release plans (7.9). The direct-style runtime: one virtual thread and one queue for each session (8.5). | A coding agent for daily use, one session at a time. |
 | 7. Controller | The controller API (7.3), the ledger events, pluggable ontologies, the extraction at the end of each turn, the time queries (7.6), the `Graph` guest API in sessions (7.7), probes, `SessionCard`, the graph metric. | One controller above all sessions. |
-| Later | A forked JVM with the nightly compiler and capture checking. MCP tools as guest functions (`McpTools`). A policy variant with `run_scala` as a native tool through the adapter. Prompt-cache marks in `LmRequest`. RLM on the kernel. REPL replay with stored results (8.4), if it is not in the first version. A Pekko interpreter of the decider, and distribution (8.6). | |
+| Later | Capture checking for the guest API (the build already uses the nightly). A forked JVM for isolation. MCP tools as guest functions (`McpTools`). A policy variant with `run_scala` as a native tool through the adapter. Prompt-cache marks in `LmRequest`. RLM on the kernel. REPL replay with stored results (8.4), if it is not in the first version. A Pekko interpreter of the decider, and distribution (8.6). | |
 
 ### Open questions
 
-1. **REPL host.** A REPL in the same JVM (fast start, simple), or a forked JVM (isolation, nightly compiler)?
+1. **REPL host.** A REPL in the same JVM (fast start, simple), or a forked JVM (isolation of memory and crashes)?
    Phase 0 gives the data.
 2. **End signal.** Only `submit(...)`, as in RLM? Or also a reply with no code, as in atc and uniichat? For
    interactive turns, a reply with no code is natural.

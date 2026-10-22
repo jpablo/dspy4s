@@ -21,11 +21,10 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Comparator
 import java.util.concurrent.atomic.AtomicBoolean
-import scala.annotation.unused
 
 /** A class that records each time that Java serialization reads it. A legacy disk entry must not read it. */
 final class UnexpectedPayload(val note: String) extends Serializable:
-  @unused private def readObject(in: ObjectInputStream): Unit =
+  private def readObject(in: ObjectInputStream): Unit =
     UnexpectedPayload.read.set(true)
     in.defaultReadObject()
 

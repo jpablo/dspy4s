@@ -111,10 +111,8 @@ class ProgramAlgebraLawSuite extends FunSuite:
   /** Package a Step independently of record-boundary decoding. */
   private def pack[I, O](m: Step[I, O]): Program[I, O, 1] = Program.of(m)
 
-  // Fixture for the Record-input compile gate below (suite-level so compileErrors snippets can reference
-  // it; referenced only inside the snippet, which the unused checker cannot see).
-  private val recordLayout = SignatureLayout.parse("question -> s").toOption.get
-  @annotation.unused
+  // Fixture for the Record-input compile gate below (suite-level so compileErrors snippets can reference it).
+  private val recordLayout    = SignatureLayout.parse("question -> s").toOption.get
   private val recordSignature = Signature[DynamicValue.Record, Wrapped](
     name = "RecordInput",
     layout = recordLayout,

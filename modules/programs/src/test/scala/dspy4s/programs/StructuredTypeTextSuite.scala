@@ -37,7 +37,7 @@ class StructuredTypeTextSuite extends FunSuite:
 
   private val signature = Signature.derived[StQuestion, StAnswer]("Structured")
 
-  private val (system, user): (String, String) =
+  private val (system, user) =
     given RuntimeContext = RuntimeContext(lm = Some(StubLm()))
     val invocation       = AdapterInvocation(
       layout = signature.layout,

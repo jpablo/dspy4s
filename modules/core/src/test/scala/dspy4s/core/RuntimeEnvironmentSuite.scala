@@ -14,6 +14,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import munit.FunSuite
 
 import scala.collection.mutable.ArrayBuffer
+import scala.util.control.NonFatal
 
 class RuntimeEnvironmentSuite extends FunSuite:
 
@@ -94,7 +95,7 @@ class RuntimeEnvironmentSuite extends FunSuite:
           try
             threadResult += Right(RuntimeEnvironment.configure(RuntimeContext(asyncTaskId = Some("other"))))
           catch
-            case error: Throwable => threadResult += Left(error)
+            case NonFatal(error) => threadResult += Left(error)
     )
 
     worker.start()

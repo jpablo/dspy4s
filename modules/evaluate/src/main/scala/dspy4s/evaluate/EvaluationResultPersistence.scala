@@ -7,6 +7,7 @@ import java.io.PrintWriter
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Paths
+import scala.util.control.NonFatal
 
 object EvaluationResultPersistence:
 
@@ -31,7 +32,7 @@ object EvaluationResultPersistence:
       finally writer.close()
       Right(())
     catch
-      case error: Throwable => Left(Option(error.getMessage).getOrElse(error.getClass.getSimpleName))
+      case NonFatal(error) => Left(Option(error.getMessage).getOrElse(error.getClass.getSimpleName))
 
   def saveAsCsv(result: EvaluationResult, path: String): Either[String, Unit] =
     try
@@ -67,7 +68,7 @@ object EvaluationResultPersistence:
         Right(())
       finally writer.close()
     catch
-      case error: Throwable => Left(Option(error.getMessage).getOrElse(error.getClass.getSimpleName))
+      case NonFatal(error) => Left(Option(error.getMessage).getOrElse(error.getClass.getSimpleName))
 
   private def toJson(value: Any): ujson.Value =
     value match

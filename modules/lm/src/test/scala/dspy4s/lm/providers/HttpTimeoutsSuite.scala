@@ -89,7 +89,7 @@ class HttpTimeoutsSuite extends FunSuite:
 
   test("a limit that is not positive is rejected") {
     val _ = intercept[IllegalArgumentException](HttpTimeouts(connect = 0.seconds))
-    val _ = intercept[IllegalArgumentException](HttpTimeouts(read = -1.seconds))
+    val _ = intercept[IllegalArgumentException](HttpTimeouts(read = (-1).seconds))
   }
 
   // ── Streams ─────────────────────────────────────────────────────────────────────────────────────────────────
