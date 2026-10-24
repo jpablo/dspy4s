@@ -1,7 +1,8 @@
 # Code harness: analysis and design proposals
 
-Status: proposal, 2026-10-19, with sections 7 and 8 added on 2026-10-21 and the Phase 0 results (section 11)
-added on 2026-10-22. Nothing in this document exists in the code of dspy4s yet.
+Status: proposal, 2026-10-19. Sections 7 and 8 were added on 2026-10-21, the Phase 0 results (section 12) on
+2026-10-22, and sections 2.4 to 2.6 and section 9 on 2026-10-24. Nothing in this document exists in the code of
+dspy4s yet.
 
 ## Summary
 
@@ -26,8 +27,11 @@ added on 2026-10-22. Nothing in this document exists in the code of dspy4s yet.
   style, and distribution comes later.
 - The recommendation is design C with the sessions and the controller of section 7, on the runtime of section
   8. It is built in phases on the kernel of design B.
-- The Phase 0 experiment (section 11) recommends a REPL in the same JVM, with five guards. Two of the guards
+- The Phase 0 experiment (section 12) recommends a REPL in the same JVM, with five guards. Two of the guards
   need the replay of section 8.
+- deepseek-harness, Codex and tacit confirm the main choices (section 9). tacit reports that agents that write
+  capability-safe Scala match the tool-call baselines. The three harnesses also challenge three choices: REPL
+  state with no explicit store, cells that stop at a timeout, and a journal with only rendered results.
 
 ## 1. Goal
 
@@ -42,11 +46,12 @@ The `harness` module gives a coding agent with these properties:
 - **Functional design.** The state is a value. The effects go through handler values. The important parts have
   laws.
 
-Section 2 analyzes the three reference harnesses and the dspy4s components. Section 3 gives the foundation
-that all designs share. Sections 4, 5 and 6 give the three designs. Section 7 extends design C with work
-sessions and a controller, and section 8 describes the runtime of a session. Section 9 compares the designs, and
-section 10 describes the optimization. Section 11 gives a recommendation, the phases, and the open questions.
-Section 12 lists the alternatives.
+Section 2 analyzes six reference harnesses and the dspy4s components. Section 3 gives the foundation that all
+designs share. Sections 4, 5 and 6 give the three designs. Section 7 extends design C with work sessions and a
+controller, and section 8 describes the runtime of a session. Section 9 lists the findings from three of the
+reference harnesses: deepseek-harness, Codex and tacit. Section 10 compares the designs, and section 11 describes
+the optimization. Section 12 gives a recommendation, the phases, and the open questions. Section 13 lists the
+alternatives.
 
 ## 2. Analysis
 
@@ -155,7 +160,124 @@ Ideas to change:
 - The memory record is mutable. In dspy4s, the memory is a persistent value, so a rollout can fork it at
   almost no cost.
 
-### 2.4 The three harnesses side by side
+### 2.4 deepseek-harness (`/Users/jpablo/GitHub/deepseek-harness`)
+
+deepseek-harness (`dsh`) is an agent harness in TypeScript from DeepSeek AI. Every feature is a plugin on the
+Cordis framework. The English docs under `docs/` describe each subsystem in detail.
+
+| Topic | What deepseek-harness does |
+|---|---|
+| Plugins | A plugin registers services and effects in a context. Each registration is reversible, and its lifetime is the lifetime of its context. A plugin waits until the services that it needs exist, and it unloads when one of them goes away. |
+| Session log | Typed events, for example `turn/start`, `tool/call`, `assistant/message` and `compaction/summary`. An event is required unless it is marked `ignorable`. A reader that finds an unknown required event refuses to rebuild the session. |
+| Surface | The model sees a "surface" of the log. An event can `replace` a range of earlier events, and it must cite each event that it hides (`sourceEventSeqs`). |
+| Projections | Pure folds: `init`, `apply`, an optional `view`, and a version. A snapshot is a consistent cut with an `asOfSeq` mark. The docs say: "Projection is the only read and compute path". |
+| Requests | "Model-visible means logged". The system prompt is node 0 of the surface, and the tools and the configuration are a logged header. Dynamic context is a user-role snapshot, appended only when it changes. |
+| Crash repair | The writer appends end events (`turn/end{interrupted}`), and an error result for each tool call with no result. It never cuts the log. An interrupted tool call has an unknown outcome, and the harness never retries it automatically. |
+| Code mode | The PTC executor. Only `run_code` is callable, and the other tools are a generated TypeScript SDK, sorted by name. Each program runs in a new Node process in a sandbox. A persistent REPL is opt-in, and it is never durable. |
+| Typed tool output | Each tool declares an output schema and a pure `render`. Code gets the typed value, and the model gets the rendered text. Only the rendered text is stored, so "replay reproduces presentation but cannot reconstruct canonical intermediate values". |
+| Compaction | First, cuts of large tool outputs with no LM call. Then a summary, only if the context is still too large. A summary that is not smaller than its source is rejected. The summary call sends the same prefix byte for byte, so it uses the prompt cache. |
+| Subagents | Providers (spawn, fork, Codex, Claude Code, ACP) return data, never a capability. A subagent result has its own message kind, separate from an agent message. Agent teams share a task graph with advisory write scopes. |
+| Inbox | `send(message, target: next-turn \| next-step, wake)`, with the presets follow-up, steer and inject. Each message has a kind (who wrote it) and a form (`instructions \| catalog \| snapshot \| notice \| relay \| recall`). |
+| Goals | The armed state of a goal is local to the process and is never stored, so a human must arm it again after a resume. A goal is "blocked" only after three rounds with the same blocker. |
+| Safety | A tool pipeline with guards that can only deny, approval that fails closed, and an optional LLM reviewer that trusts only text from the user. |
+| Tests | Recorded session logs replay as model streams (`dsh-llm-replay`), so tests need no API key. |
+
+Ideas to use:
+
+- The surface: an append-only log in which an event can replace a range and must cite what it hides. The
+  memory-tree view is this kind of surface.
+- An unknown required event stops a rebuild. This protects the journal when its schema changes.
+- Crash repair by append, and the rule "unknown outcome, never an automatic retry".
+- Projections as pure folds with a version and a cut mark. This is our `Derivation` (7.2).
+- Cheap compaction steps first, and a check that a summary shrinks.
+- The inbox algebra, and the message kind and form, for `tell` (7.3).
+- Goals that a human must arm again after a restart.
+
+Ideas to change:
+
+- Store the typed value of each tool result too. Without it, replay cannot rebuild the values that code saw.
+- deepseek-harness records the nested calls of a program under the checkpoint of the outer call. The cell
+  events of 8.3 record each nested call.
+
+### 2.5 Codex (`/Users/jpablo/GitHub/codex`)
+
+Codex is the coding agent of OpenAI, in Rust (`codex-rs/`). It has a code mode, a typed protocol between the
+agent and its clients, and many safety components.
+
+| Topic | What Codex does |
+|---|---|
+| Code mode | JavaScript in an embedded V8, with a new isolate for each cell. `ToolMode::CodeModeOnly` hides all tools except `exec` and `wait`. Code calls `tools.<name>(args)`, and each tool appears as a generated TypeScript declaration, with a size limit. Code finds deferred tools with `tools.tool_search({query})`. |
+| Cell state | Codex removed its persistent JavaScript REPL (`js_repl` has `Stage::Removed`). State goes from cell to cell only through `store(key, value)` and `load(key)`. A cell sees a snapshot of the store, and its writes are committed only if the cell completes (`commit_completion`). |
+| Long cells | `exec` returns after `yield_time_ms` (10 s by default) with a cell id and the output so far, and the cell continues to run. The model calls `wait(cell_id)` later. Inside a cell, the tool call ids are deterministic (`tool-1`, `tool-2`, and so on). |
+| Nested calls | Each call from code goes through the same tool runtime as a direct call, tagged with `ToolCallSource::CodeMode { cell_id, runtime_tool_call_id }`. So approval, the sandbox, hooks and the reviewer apply to it. |
+| Protocol | A submission queue and an event queue. A thread has one serial loop and a mailbox, so it is an actor. Turn input has modes: `StartOrSteer`, `StartIfIdle`, `ContinueIfIdle(expectedTurn)` and `Steer(expectedTurn)`. The result is `Started`, `Steered` or `NotSubmitted(reason)`. |
+| Rollouts | JSONL logs. A fork points into the immutable log of its parent (`HistoryPosition`). A revert writes a new file and moves one pointer. Each item has an envelope with metadata that the model never sees. |
+| World state | Context sections (permissions, environment, AGENTS.md, tools), each with a snapshot type and `render_diff(previous)`. Later turns send only the changes, and the snapshots go into the log as merge patches. |
+| Compaction | Speculative compaction: a background summary of a prefix, installed only if the history generation did not change. A token-budget mode opens fresh windows with no summary. It gives the model tools to read its earlier windows, and a private store for notes. |
+| Memories | Phase 1 extracts memories from each rollout ("Write task history, not a user profile"). Phase 2 consolidates them in a git repository, driven by the diff since the last good state. Each citation in an answer increases a use count, which decides the rank and the decay of each memory. A thread that read external content is "polluted" and stays out of memory. |
+| Multi-agent | Agent paths (`/root/...`), a mailbox with `QueueOnly` or `TriggerTurn` delivery, a graph of spawn edges, roles that can only reduce authority, and a message board that never wakes a finished agent. An idle child thread unloads, and it loads again when necessary. |
+| Probes | `thread/sample` gives one model answer on a temporary fork that cannot run tools and that shares the prompt cache. |
+| File edits | `apply_patch`: file operations and `@@` context anchors with no line numbers, a fuzzy match in four passes, the full diff before any write, and a report of a partial application. |
+| Safety | The guardian: an LLM reviewer with a fixed JSON output, a circuit breaker, and a one-token classifier that decides when the full review runs. Starlark command rules with `match` and `not_match` examples that the loader checks. A network proxy that puts the real secrets in place of dummy credentials. |
+| Turn time | The critical-path time of each turn, split into inference, review, user wait, tools and overhead. |
+
+Ideas to use:
+
+- `store`/`load` with commit-on-success, next to the persistent REPL state (9.2).
+- The yield protocol: a cell can run longer than one model step (9.2).
+- Deterministic effect ids inside a cell, as replay keys (9.2).
+- Typed world-state sections that render only their changes.
+- Fresh windows with history tools as a context strategy, and speculative compaction for the prefix-summary
+  strategy.
+- Typed turn input with expected turn ids, for `tell` (7.3).
+- A probe on a fork with no tools, for `observe` (7.4).
+- The two-phase memory pipeline, citation counts, and taint, for the graph of the controller (7.5).
+- The guardian as a `Predict` leaf, policy rules with examples, and dummy credentials.
+
+Ideas to change:
+
+- Codex shows its tools as TypeScript declarations. In our harness, they are Scala signatures with Scaladoc.
+- Codex removed its persistent REPL. Phase 0 shows that a persistent Scala REPL works, so our harness keeps it
+  and adds an explicit store (9.2).
+
+### 2.6 tacit (`/Users/jpablo/GitHub/tacit`)
+
+tacit (Tracked Agent Capabilities In Types) is the research project that atc came from. Its core is the same as
+the core of atc: a Scala 3 REPL, capture checking in safe mode, and one typed `Interface`. tacit is not an agent
+loop. It is an MCP server that other agents use.
+
+| Topic | What tacit does |
+|---|---|
+| Results | The README reports the results of its paper. On τ²-bench and SWE-bench Lite, agents that write capability-safe Scala "match or slightly exceed" the tool-call baselines, with gpt-oss-120b, MiniMax M2.5 and DeepSeek V3.2. With secrets in `Classified[String]`, the type system blocked each injection and each malicious task in all 131 trials. |
+| Deployment | An MCP server. The README tells the user to disable the built-in tools of the host agent (`--disallowedTools "Bash,Read,Write,Edit,WebFetch"`), so the host agent works in code mode only. |
+| Execution | Two kinds. `execute_scala` runs a cell in a fresh REPL. `create_repl_session` and `execute_in_session` keep the state. The model chooses. |
+| API reference | The tool `show_interface` gives the API reference on demand ("Call this first"), because an MCP server cannot set the system prompt. |
+| Timeout | `-Xrepl-interrupt-instrumentation:local` instruments only the classes that the REPL defines. On a timeout, the session keeps its earlier REPL state: "the abandoned statement has no observable effect". |
+| `Classified` | `secretHeaders` send a classified value to an allowlisted host, and code never sees the value. `httpPostClassified` sends a classified body and gives back a classified response. `secureOutput` writes each `println`, with the classified values unwrapped, to a file that only the user can read. `classifiedWrite = false` makes the classified paths read-only, because `Classified` protects confidentiality, not integrity. |
+| Files | `VirtualFileSystem` is an in-memory file system for tests. `allowedRoots` fails closed, and symlinks are resolved before each containment check. A command must be in two allowlists: the configuration and the scope. |
+| Validator tests | `CodeValidatorEvasionSuite` tests ways around the regex validator: names split across lines, interpolation, character literals, `sys.process`. |
+
+The README lists sub-agents among the things that code can use, but the current `Interface` has only `chat`.
+
+Ideas to use:
+
+- The results are the best evidence so far for code mode only, in Scala.
+- An MCP server for our REPL and guest API, so that another agent can test them before our own loop
+  exists.
+- A fresh-cell mode next to the persistent REPL, for probes and `rlm(...)` children.
+- The REPL state changes only if a cell completes.
+- The recipe for a capture-checked guest API: a capability class with a private constructor that extends
+  `caps.SharedCapability`, a `request*` method that takes a block `Cap^ ?=> T`, and operations that take the
+  capability as a `using` parameter. dspy4s builds on the nightly, so this recipe is available now.
+- `secretHeaders`, the secure output file, and `classifiedWrite`.
+
+Ideas to change:
+
+- tacit holds a lock on output for the full process. Phase 0 removed that lock (F1).
+- With the `local` mode, a loop inside library or JDK code cannot stop. F1 keeps the `true` mode, with the
+  class resources hidden.
+
+### 2.7 The harnesses side by side
 
 | Topic | atc | pi | uniichat |
 |---|---|---|---|
@@ -170,7 +292,17 @@ Ideas to change:
 The row "LM calls from model code" shows if a REPL cell can call an LM and keep the answer in a variable, not in
 the LM context.
 
-### 2.5 dspy4s components
+| Topic | deepseek-harness | Codex | tacit |
+|---|---|---|---|
+| Action language | JSON tools, or one `run_code` tool (PTC) | JSON tools, or code mode (`exec` and `wait`) | Scala code through MCP tools |
+| State | A typed event log with a surface | JSONL rollouts and SQLite projections | The REPL state of each session |
+| LM context | A projection of the surface | Typed world-state diffs and the history | The context of the host agent |
+| Detail after compaction | Lost in the prompt, kept in the log | Lost in the prompt; fresh windows can read the old windows | Not applicable |
+| Sub-agents | Several providers, and agent teams with a task graph | Agent paths, mailboxes, a message board | None (`chat` only) |
+| LM calls from model code | `agent(prompt, {schema})` in workflow scripts | Only through tools | `chat()`, one completion |
+| Prompt cache | Prompts that are the same byte for byte, and snapshots only on change | World-state diffs, speculative compaction | The host agent decides |
+
+### 2.8 dspy4s components
 
 | Component | Where | Use in the harness |
 |---|---|---|
@@ -226,7 +358,7 @@ enum CellOutcome:
 - Give each REPL its own output stream. Set `redirectOutput` of the driver to `false`, because otherwise
   `ReplDriver` calls `System.setOut` around each run. Run each cell on its own thread in `Console.withOut`, which
   has a value for each thread. Forward `System.out` and `System.err` to `Console` one time, at the start of the
-  host. Then parallel sessions do not share a lock. Phase 0 confirmed this setup (section 11).
+  host. Then parallel sessions do not share a lock. Phase 0 confirmed this setup (section 12).
 - Bind an `ExecutionContext` for each REPL in the preamble. A thread of the global pool keeps the output stream of
   the thread that made it, so the global pool sends output to the wrong REPL.
 - Bind the handlers (F2) in the preamble of each REPL through a registry key for that session. Do not use one
@@ -237,7 +369,7 @@ enum CellOutcome:
   with an outcome.
 - A later variant runs the REPL in a forked JVM. That variant isolates memory and crashes. Capture checking
   does not need it, because the build already uses the nightly compiler. Phase 0 recommends the REPL in the same
-  JVM, with five guards (section 11).
+  JVM, with five guards (section 12).
 
 ### F2. The guest API as effect signatures with handlers
 
@@ -600,7 +732,7 @@ turn waits until the nodes that its view needs are built (uniichat `settle`).
 - The full log is an RLM input: a REPL value with a summary in the prompt, and the view is that summary. The
   RLM rule "large inputs stay in the REPL" and the uniichat rule "the view is the memory" are the same rule.
 - Code can call `llmQuery` on the lines of a subtree, for example to find a past decision. uniichat forbids a
-  search of the memory. Section 11 lists this as an open question.
+  search of the memory. Section 12 lists this as an open question.
 
 ### Two kinds of subagents
 
@@ -1140,7 +1272,7 @@ live code needs.
   Large `read` and `exec` results cost the most. A content store can keep each content one time only. Decision
   10 of section 7 records no content for writes; replay needs the content of reads.
 - Time: each cell compiles again. Phase 0 measured 12 ms to 55 ms (median) for a cell in a warm REPL, and 73 ms
-  for the replay of three cells (section 11). A long session with complex cells can take some minutes.
+  for the replay of three cells (section 12). A long session with complex cells can take some minutes.
 
 **Other uses.**
 
@@ -1219,11 +1351,101 @@ Recommendations that are not decisions yet:
 Open questions:
 
 1. Is REPL replay a first-version feature, with the stored results of reads? Or is it a later feature, with the
-   three preparations of 8.4 in the first version? Data from Phase 0 (section 11): replay worked with a small
+   three preparations of 8.4 in the first version? Data from Phase 0 (section 12): replay worked with a small
    amount of code (one handler that records and one that replays), and two guards of the REPL in the same JVM
    need it. One guard restarts an unclean host. The other guard limits a REPL to about 300 cells.
 
-## 9. Comparison
+## 9. Findings from deepseek-harness, Codex and tacit
+
+This section lists what the three harnesses of 2.4 to 2.6 mean for the design. The proposals are not decisions
+yet. 9.4 lists the questions.
+
+### 9.1 What they confirm
+
+- Code mode only is a real mode in Codex (`ToolMode::CodeModeOnly`) and in deepseek-harness (the PTC executor).
+  tacit gives the first measured results for code mode in Scala (2.6).
+- Codex and deepseek-harness show the tools as generated type declarations. deepseek-harness sorts them by
+  name, so the prompt is the same byte for byte. F2 does the same with Scala signatures.
+- Both send each call from code through the same guarded path as a direct call, tagged with its source. This is
+  the handler design of F2.
+- Codex threads are actors with one serial loop and a mailbox, and an idle child unloads (8.1).
+- deepseek-harness projections are pure folds (7.2). Its surface is the same kind of view as the cut through the
+  memory tree (section 6).
+- deepseek-harness records the nested calls of a program under the checkpoint of the outer call. The cell events
+  of 8.3 fill this gap.
+
+### 9.2 What they challenge
+
+**Persistent REPL state.** Codex removed its persistent REPL, and deepseek-harness makes it opt-in and never
+durable. Both give explicit state instead. Codex commits the `store` writes of a cell only if the cell
+completes. tacit applies the same rule to the REPL state: a cell that times out leaves the earlier state. The
+proposal combines these ideas:
+
+- Keep the persistent REPL.
+- A cell changes the REPL state only if it completes.
+- Add a typed `store(key, value)` and `load(key)` with `Schema` values, committed only if the cell completes.
+  This store is the durable state of a session.
+- Then REPL replay (8.4) is useful, but not necessary. After a restart, `load` gives the important state back at
+  once.
+
+**Cells that run longer than a step.** Codex returns from `exec` after a time budget, with a cell id and the
+output so far, and the model calls `wait(cellId)` later. F1 now stops a cell at its timeout. The proposal adds
+`CellOutcome.Running(cellId, partialOutput)` and a guest function `wait(cellId)`. Then a turn can have cells that
+still run, and the decider of 8.5 must know about them.
+
+**Typed values for replay.** deepseek-harness stores only the rendered text of a result, so its replay cannot
+rebuild the values that code saw. For the replay of 8.4, the journal must store the typed value of each result,
+with its `Schema`, and also the rendered text. Each effect gets a deterministic id `(cell, n)`, as in Codex, and
+replay finds a recorded result by that id.
+
+### 9.3 Proposals by area
+
+| Area | Proposal | Source | Changes |
+|---|---|---|---|
+| REPL | A fresh-cell mode next to the persistent REPL, for probes and `rlm(...)` children | tacit, Codex | F1, F5 |
+| REPL | Options for each cell in a pragma on the first line, with unknown keys rejected | Codex | F1 |
+| Guest API | `applyPatch(patch)` with the Codex patch format and its fuzzy match in four passes, next to `edit` | Codex | F2 |
+| Guest API | Deferred tools that code finds by search, and the API reference on demand for a large tool set | Codex, tacit | F2 |
+| Guest API | A capture-checked guest API with the tacit recipe | tacit | F2 |
+| Guest API | `secretHeaders` and dummy credentials, so that real secrets never enter the code or the journal | tacit, Codex | F2, 8.3 |
+| Context | Typed world-state sections that render only their changes | Codex, deepseek-harness | 5, 6 (projection) |
+| Context | A fourth strategy: fresh windows, with tools that read the earlier windows | Codex | 7.2 |
+| Context | Speculative compaction with a generation check, for the prefix-summary strategy | Codex | 7.2 |
+| Context | Cheap steps first: cut tool outputs with no LM call, then summarize; reject a summary that does not shrink | deepseek-harness | 7.2 |
+| Journal | An unknown required event stops a rebuild, and optional events carry a mark | deepseek-harness | 8.2 |
+| Journal | Crash repair by append. An effect with no end has an unknown outcome and never retries automatically. | deepseek-harness | 8.3 |
+| Journal | A fork points into the immutable log of its parent | Codex | 5, 8.2 |
+| Journal | Raw events first, a deterministic reducer later; edges between sessions carry item ids | Codex | 7.4 |
+| Journal | Metadata on each item that the model never sees: source and taint | Codex | 7.5 |
+| Controller | Typed `tell` modes with an expected turn id, and typed rejection reasons | Codex | 7.3 |
+| Controller | The inbox algebra (target and wake), and the message kind and form | deepseek-harness | 7.3 |
+| Controller | `observe` as one answer on a fork with no tools, next to the RLM probe | Codex | 7.4 |
+| Controller | Advisory write scopes when two sessions work in one repository | deepseek-harness | 7.3 |
+| Controller | A human arms automatic work again after a restart. A goal is "blocked" only after three turns with the same blocker. | deepseek-harness, Codex | 6 (goal check), 7.3 |
+| Graph | Extraction for each session, then a consolidation driven by a diff for the merge across sessions | Codex | 7.5 |
+| Graph | Citation counts as a use signal for the rank and the decay of facts, and as a reward for the optimizers | Codex | 7.5, 7.8 |
+| Graph | Taint: facts from external content carry a mark, and the controller does not trust them | Codex | 7.5 |
+| Graph | The derivations (the compactor and the extractor) see only masked `Classified` values. A trusted LM can process the classified parts. | tacit | 7.4, 7.5, 8.3 |
+| Safety | A reviewer `Predict` leaf in the `guarded` handler, with a fixed output, a circuit breaker, and a cheap classifier first | Codex, deepseek-harness | F2 |
+| Safety | Guard policies as data, with examples that the loader checks | Codex | F2 |
+| Safety | A validator, if there is one, gets an evasion test suite. The compiler and the class loader are the real check. | tacit | F1 |
+| Evaluation | Recorded sessions as model streams, for tests with no API key | deepseek-harness | 8.4 |
+| Evaluation | Critical-path time (inference, review, tools, user wait) as objective scores for GEPA | Codex | 11 |
+| Evaluation | Best-of-N attempts of one task, each with its own diff | Codex | 11 |
+| Phases | An MCP server for the REPL and the guest API, so that another agent can test them early | tacit | 12 |
+
+### 9.4 Decisions and open questions
+
+There are no decisions yet. Open questions:
+
+1. Does the harness add a typed `store`/`load` with commit-on-success, next to the persistent REPL (9.2)?
+2. Does the first version have the yield protocol, with `Running` and `wait` (9.2)?
+3. Does the journal store the typed value of each result, which replay needs, or only the rendered text (9.2)?
+4. Does the harness expose the REPL and the guest API as an MCP server early, before its own loop exists (9.3)?
+5. Do the derivations see only masked `Classified` values, with an optional trusted LM for the classified parts
+   (9.3)?
+
+## 10. Comparison
 
 | Criterion | Design A | Design B | Design C |
 |---|---|---|---|
@@ -1240,7 +1462,7 @@ Open questions:
 | Laws | The current RLM and loop laws | Log, projection, middleware, handlers | The laws of B, and the memory laws |
 | Change to the current code | RLM changes (`ReplLanguage`, `subQuery`) | No change to RLM in the first version | No change to RLM in the first version |
 
-## 10. Optimization
+## 11. Optimization
 
 What the optimizers tune:
 
@@ -1273,7 +1495,7 @@ What the optimizers tune:
 A source of tasks is the history of this repository. A commit that makes a test pass gives a task (the parent
 commit and the test) and a metric (the test passes).
 
-## 11. Recommendation and phases
+## 12. Recommendation and phases
 
 The recommendation is design C as the target, built on the kernel of design B, with the sessions and the
 controller of section 7 and the runtime of section 8. Design C agrees with the functional style of dspy4s: the memory is a persistent value,
@@ -1363,8 +1585,9 @@ guest code, a forked JVM with a protocol for the guest calls, guard 4, Linux, or
    both?
 9. **Controller.** Section 7.10 lists the decisions and the open questions about the sessions and the controller.
 10. **Runtime.** Section 8.7 lists the decisions and the open questions about the runtime.
+11. **Findings.** Section 9.4 lists the open questions from deepseek-harness, Codex and tacit.
 
-## 12. Alternatives considered
+## 13. Alternatives considered
 
 - **A free monad that the model writes.** The model writes `for` comprehensions over an operation type, and the
   host interprets the program value. This permits an inspection before the run. But models write direct-style
