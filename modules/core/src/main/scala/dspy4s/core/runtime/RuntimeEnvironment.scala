@@ -151,8 +151,9 @@ object RuntimeEnvironment:
     * scope that `thunk` left and the scope before the call. Unlike [[withContext]], the trace and the history that
     * `thunk` accumulates stay, also when `thunk` throws.
     */
-  private def withScopeChange[A](enter: RuntimeScope => RuntimeScope)(
-      exit: (RuntimeScope, RuntimeScope) => RuntimeScope
+  // `inline`, so the two functions of each call site allocate no closure on this hot path.
+  private inline def withScopeChange[A](inline enter: RuntimeScope => RuntimeScope)(
+      inline exit: (RuntimeScope, RuntimeScope) => RuntimeScope
   )(thunk: => A): A =
     val previous = localContext
     contextRef.set(previous.withScope(enter(previous.scope)))

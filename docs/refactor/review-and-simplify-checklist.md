@@ -74,7 +74,7 @@ Simplify 6 (rank 3). Code-review 7 (rank 1). 6352 main lines, 4494 test lines.
   - [x] /code-review
 - (b) The context and the callbacks, about 1300 lines: `runtime/RuntimeEnvironment.scala`, `runtime/ContextPropagation.scala`, `runtime/CallbackDispatcher.scala`, `runtime/UsageScope.scala`, `runtime/StreamProgress.scala`, `runtime/ActivePredictContext.scala`, `contracts/RuntimeContext.scala`, `contracts/Callbacks.scala`. The simplify pass added `runtime/ScopedLocal.scala`.
   - [x] /simplify
-  - [ ] /code-review
+  - [x] /code-review
 - (c) The decisions, about 800 lines: `decisions/`.
   - [ ] /simplify
   - [ ] /code-review
@@ -121,6 +121,9 @@ Findings of the group (a) simplify pass that the pass did not fix:
 - [x] A value with a lone UTF-16 surrogate made the JSON writer throw out of `execute` (LocalPython and the Deno prelude). Fixed: `InterpreterSupport.tryEncodeJson` and a `Left` that names the variable.
 - [ ] Gaps of the lone-surrogate fix: in DenoPyodideInterpreter, code text with a lone surrogate still throws from `DenoPyodideProtocol.encodeRequest`, and a tool exception with a lone surrogate in its message throws from `encodeError` in `handleToolCall`.
 - [ ] `runtime/DenoPyodideLaunch.scala`, `denoCacheDir`: when `deno info --json` gives no directory, one launch probes again two times, each with a 10-second limit. Skipped: a new probe on each launch is deliberate, so that a Deno that the user installs later is found.
+- [ ] Group (b) review, a decision for the owner: `contracts/RuntimeContext.scala`, `fillFrom`, treats an empty callback list, an empty callback metadata record, and `captureFailureTraces = false` as "not set". Thus `withCallbacks(Vector.empty)` cannot turn off the callbacks of the global context, as upstream `dspy.context(callbacks=[])` does. A fix changes the type of these fields (for example to `Option`).
+- [ ] Group (b) review, a decision for the owner: `RuntimeEnvironment.withSettings`, `withCallbacks`, `withSetting`, and `withAsyncTask` restore the overlay wholesale, so the trace and the history of the block are gone after it. `withInstalled` keeps them, and upstream `dspy.context` keeps them too.
+- [ ] Group (b) review, skipped: `UsageScope.measure` reads its total when `body` returns, so a worker that runs after the return adds usage that no result shows. `configure` ownership stays with the first thread for the life of the process, as upstream.
 
 ## signatures
 
