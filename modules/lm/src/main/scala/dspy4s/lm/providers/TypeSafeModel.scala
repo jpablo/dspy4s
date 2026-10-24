@@ -238,7 +238,7 @@ object TypeSafeModel:
 
     def probability(value: Option[DynamicValue], path: String): Either[DspyError, Unit] =
       Either.cond(
-        value.flatMap(numberOf).exists(p => p >= 0 && p <= 1),
+        value.flatMap(DynamicValues.asDouble).exists(p => p >= 0 && p <= 1),
         (),
         invalid(path, "expected a finite number in [0, 1]")
       )
@@ -353,19 +353,6 @@ object TypeSafeModel:
   /** The text of a JSON value, as Python `str` gives it for a string or a number. */
   private def pythonText(value: DynamicValue): String =
     DynamicJson.asString(value).getOrElse(DynamicValues.renderText(value))
-
-  /** The value of a JSON number. A Boolean is not a number. */
-  private def numberOf(value: DynamicValue): Option[Double] =
-    value match
-      case DynamicValue.Primitive(primitive) => primitive match
-          case PrimitiveValue.Int(n)        => Some(n.toDouble)
-          case PrimitiveValue.Long(n)       => Some(n.toDouble)
-          case PrimitiveValue.Double(n)     => Some(n)
-          case PrimitiveValue.Float(n)      => Some(n.toDouble)
-          case PrimitiveValue.BigDecimal(n) => Some(n.toDouble)
-          case PrimitiveValue.BigInt(n)     => Some(n.toDouble)
-          case _                            => None
-      case _ => None
 
   /** The details of an error before the wire. */
   private def details(request: LmRequest): LmErrorDetails =

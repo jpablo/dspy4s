@@ -118,6 +118,23 @@ object DynamicValues:
           case _                            => None
       case _ => None
 
+  /** Strict `Double` projection: any numeric primitive. The dynamic JSON codec of zio-blocks gives an `Int`, a `Long`,
+    * or a `BigDecimal`, and the other sources can give each other number type. A string or a Boolean is not a number.
+    */
+  def asDouble(dv: DynamicValue): Option[Double] =
+    dv match
+      case DynamicValue.Primitive(p) => p match
+          case PrimitiveValue.Int(n)        => Some(n.toDouble)
+          case PrimitiveValue.Long(n)       => Some(n.toDouble)
+          case PrimitiveValue.Double(n)     => Some(n)
+          case PrimitiveValue.Float(n)      => Some(n.toDouble)
+          case PrimitiveValue.BigDecimal(n) => Some(n.toDouble)
+          case PrimitiveValue.BigInt(n)     => Some(n.toDouble)
+          case PrimitiveValue.Short(n)      => Some(n.toDouble)
+          case PrimitiveValue.Byte(n)       => Some(n.toDouble)
+          case _                            => None
+      case _ => None
+
   /** Read a required `String` field from a record, with structured errors: a non-String value is a [[ValidationError]],
     * a missing field a [[NotFoundError]] on the `prediction_field` resource. `label` names the producing component in
     * both messages. The shared body of the `extractReasoning` / `extractRationale` helpers across the composite

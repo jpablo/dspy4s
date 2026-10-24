@@ -76,7 +76,7 @@ Simplify 6 (rank 3). Code-review 7 (rank 1). 6352 main lines, 4494 test lines.
   - [x] /simplify
   - [x] /code-review
 - (c) The decisions, about 800 lines: `decisions/`.
-  - [ ] /simplify
+  - [x] /simplify
   - [ ] /code-review
 - (d) The other contracts and the data, about 2200 lines: the other files in `contracts/`, and `data/`, `signatures/`, `collections/`.
   - [ ] /simplify
@@ -88,9 +88,17 @@ Simplify 6 (rank 3). Code-review 7 (rank 1). 6352 main lines, 4494 test lines.
 - [x] Two copies of the probe with a temp file and a time limit, in LocalPython and in the Deno launcher. Fixed: `InterpreterSupport.probe`.
 - [x] `runtime/DenoPyodideProtocol.scala`: `field`, `asString`, and `asLong` only called DynamicValues, and `isNull` had two copies. LocalPython got its JSON helpers from an object with a Deno name. Fixed: `DynamicValues.encodeJson` and `DynamicValues.isNull`, and the protocol object keeps only the JSON-RPC code.
 - [x] `contracts/RuntimeContext.scala`: the doc called the flat `apply`, `copy`, and the accessors a compatibility surface. Each part has callers (the flat `apply` has about 350), so the pass kept them and fixed the doc.
-- [ ] `contracts/SignatureLayoutStateCodec.scala` and `Constraint.dumpState`/`fromState` are hand-written codecs that only tests call. The number read occurs three times: `DynamicValues.asLong`, `decisions/Decisions.scala:683`, and `contracts/Constraint.scala:106`.
+- [ ] `contracts/SignatureLayoutStateCodec.scala` and `Constraint.dumpState`/`fromState` are hand-written codecs that only tests call. The tolerant number read of Decisions is now `DynamicValues.asDouble` (group (c) pass); `contracts/Constraint.scala:106` still has its own narrow copy.
 - [x] Five copies of the ThreadLocal set-and-restore pattern, and two copies of the carrier code, in UsageScope, DecisionEvidenceLog, StreamProgress, ActivePredictContext, and CallbackDispatcher. Fixed: `ScopedLocal`.
 - [x] `RuntimeEnvironment.emit` did not use its own `warn`. Fixed: a callback failure is now a `WARN [dspy4s] callback: ...` line.
+
+Findings of the group (c) simplify pass that the pass did not fix:
+
+- [ ] `decisions/Decisions.scala`, `DecisionSettings`: a hand-written codec of about 70 lines, against the one-codec rule. A derived Schema can replace it. Skipped: the change can alter the number widening, the order of the weight keys, and the error messages.
+- [ ] `decisions/Decisions.scala`: the parameter names "threshold", "cuts", and "weights" are string keys, also in optimize `ReAnchor.scala`. A typed `DecisionParameter` enum can replace them. Skipped: do it in the optimize pass.
+- [ ] `decisions/Decisions.scala`: `evidence` and `decodeOne` check the same distribution rules with different messages. One shared validation changes the messages. Skipped.
+- [ ] `decisions/Decisions.scala`, `Score.caseNames`: a copy of `ZioSchemaCodec.caseNamesOf` in signatures. Skipped: do it in the signatures pass.
+- [ ] A `traverse` helper for `Either` has private copies in optimize `ReAnchor.scala`, `propose/GroundedProposer.scala`, adapters `internal/StrictJsonSchema.scala`, and lm `runtime/DiskLmCache.scala`. Skipped: one shared helper in core can serve them in the later passes.
 
 Findings of the group (b) simplify pass that the pass did not fix:
 
@@ -174,6 +182,7 @@ Simplify 5 (rank 5). Code-review 5 (rank 8). 4966 main lines, 6422 test lines.
 
 - [ ] Private copies of the `string`, `sequence`, `record`, and `isNull` helpers: `providers/ResponsesWire.scala:445-498`, `runtime/DiskLmCache.scala:444-475`, `runtime/ProviderLanguageModel.scala:39`, `runtime/LmHistoryRecord.scala:125`. Core now has `DynamicValues.isNull` and `DynamicValues.encodeJson`; `providers/DynamicJson.scala:59` also has an `isNull`.
 - [ ] `runtime/DiskLmCache.scala:16-151`, `:263-279`: a reader for the old Java-serialization cache format, about 150 lines.
+- [ ] `providers/OpenAiEmbedder.scala`, `asFloat`: the same tolerant number read as the new `DynamicValues.asDouble` in core.
 - [ ] `runtime/ManagedLanguageModel.scala`, `UsageTracking`: it writes its thread-local scope and its carrier by hand. Core now has `ScopedLocal` (`private[dspy4s]`) for this job.
 - [ ] `runtime/DiskLmCache.scala:370-475`: a hand-written JSON codec. A DTO with a derived Schema (JsonCodecDeriver) can replace it.
 - [ ] `runtime/ProviderLanguageModel.scala:75` writes a magic `mode` key, and `providers/OpenAiClient.scala:24-39`, `:103-113` read it and remove it. Pass the mode as a typed value.
@@ -298,7 +307,7 @@ Simplify 7 (rank 2). Code-review 6 (rank 5). 2954 main lines, 4945 test lines.
 ### Simplify findings
 
 - [ ] `BootstrapFewShotWithRandomSearch.scala:56-198` uses `return`, `var`, `boundary/break`, and mutable buffers. The `BootstrapFewShotConfig` at `:86` and `:111` is written two times, and only the seed is different.
-- [ ] The same Either `traverse` helper: `ReAnchor.scala:566`, `propose/GroundedProposer.scala:251`, and adapters `internal/StrictJsonSchema.scala:328`.
+- [ ] The same Either `traverse` helper: `ReAnchor.scala:562`, `propose/GroundedProposer.scala:251`, and adapters `internal/StrictJsonSchema.scala:328`.
 - [ ] `COPRO.scala:213`, `propose/GroundedProposer.scala:188`, and `InferRules.scala:158` repeat one pattern: a DynamicPredict call loop with a rolloutId window, a temperature bag, and `recordGet`/`renderText`/`trim`. The window offsets (64, 100, 10000) are magic numbers.
 - [ ] `var` and `ArrayBuffer` accumulation where a fold fits: `MIPROv2.scala:202-223`, `COPRO.scala:111-117`, `InferRules.scala:124-138`.
 - [ ] `ReAnchor.scala:97-144` builds the report JSON by hand, not with a derived Schema. `Ensemble.scala:77` keeps a mutable `Random` in a module instance.

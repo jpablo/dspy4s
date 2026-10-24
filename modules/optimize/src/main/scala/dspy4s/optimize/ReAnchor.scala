@@ -275,7 +275,7 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
       threads : ThreadCount
   )(using RuntimeContext): Either[DspyError, (P, Vector[ReAnchorRow])] =
     found.foldLeft[Either[DspyError, (P, Vector[ReAnchorRow])]](Right((student, Vector.empty))) { (done, leaf) =>
-      ReAnchor.decisionOutputs(leaf.layout).foldLeft(done) { case (acc, (field, kind)) =>
+      DecisionKind.outputsOf(leaf.layout).foldLeft(done) { case (acc, (field, kind)) =>
         acc.flatMap((program, rows) =>
           OutputFit(leaf, field, trainset, threads).run(program, kind).map((next, row) => (next, rows :+ row))
         )
@@ -541,11 +541,7 @@ object ReAnchor:
   private[optimize] def predictors[P](program: P)(using
       structure: OptimizableStructure[P]
   ): Vector[IdentifiedOptimizable] =
-    structure.readIdentified(program).filter(leaf => decisionOutputs(leaf.layout).nonEmpty)
-
-  /** The outputs of `layout` that a decision parameter can apply to, with their kinds (upstream `decision_outputs`). */
-  private def decisionOutputs(layout: SignatureLayout): Vector[(String, DecisionKind)] =
-    layout.outputFields.flatMap(field => DecisionKind.of(field).map(field.name -> _))
+    structure.readIdentified(program).filter(leaf => DecisionKind.outputsOf(leaf.layout).nonEmpty)
 
   /** The effective settings of the output `field` (upstream `effective`): its entry, with the defaults of its kind. An
     * output with no entry gets an empty entry first, so that a native output is a decision output.
