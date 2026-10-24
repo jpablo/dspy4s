@@ -64,7 +64,7 @@ functions inside the REPL.
 | Capabilities | Each method with an effect takes a capability as a `using` parameter. The preamble of the REPL binds the capabilities. Capture checking and safe mode make a forbidden operation a compile error. |
 | Observation | Compiler diagnostics, REPL echoes and printed output, in order. A hint for each frequent error. A long output loses its middle part. |
 | End of a turn | A model reply with no tool call. |
-| LM from code | `chat(message)`: one completion, with no tools and no history. atc has no sub-agents and no recursion. |
+| LM calls from model code | `chat(message)`: one completion, with no tools and no history. atc has no sub-agents and no recursion. |
 | Context | It drops old exchanges at user boundaries. At 80 % of the window, an LM call compacts the history. |
 | Style | Direct-style, imperative Scala 3. Mutable shell classes (`Agent`, `Conversation`, `ReplSession`) contain pure cores (`CompletionPolicy`, `ContextManager.prepare`). |
 | Compiler | A 3.10 nightly, because capture checking and safe mode need it. |
@@ -164,8 +164,11 @@ Ideas to change:
 | LM context | Old exchanges dropped, or a summary of the prefix | A projection; a compaction replaces a prefix | A cut through a summary tree |
 | Detail after compaction | Lost | Lost in the prompt, kept in the file | Kept: `zoom` gives it back |
 | Sub-agents | None | None (an example extension) | Background, one level, report as a message |
-| LM from code | `chat()`, one completion | None | None |
+| LM calls from model code | `chat()`, one completion | None | None |
 | Prompt cache | A stable system prompt | System messages in the middle of the conversation | The view changes only at its end; block marks |
+
+The row "LM calls from model code" shows if a REPL cell can call an LM and keep the answer in a variable, not in
+the LM context.
 
 ### 2.5 dspy4s components
 
