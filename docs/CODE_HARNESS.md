@@ -1296,8 +1296,9 @@ tree exists. Design A stays available as an early check of the foundation.
 
 ### Phase 0 results
 
-The experiment ran on 2026-10-21, with the 3.10 nightly and JDK 21 on an Apple M4 Pro. Its code and its full
-report (`RESULTS.md`) are in `tmp/repl-experiment/` of the main checkout. They are not committed.
+The experiment ran on 2026-10-21, with the 3.10 nightly and JDK 21 on an Apple M4 Pro. The full report is
+`docs/CODE_HARNESS_PHASE0.md`. The code of the experiment is in `tmp/repl-experiment/` of the main checkout, and
+it is not committed.
 
 | Check | Result |
 |---|---|
