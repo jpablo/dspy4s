@@ -5,8 +5,8 @@ import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
 
-/** Test helpers for code that can block. A test that uses them fails, and does not block the suite, when the code
-  * under test hangs.
+/** Test helpers for code that can block. A test that uses them fails, and does not block the suite, when the code under
+  * test hangs.
   */
 object BoundedWait:
 
@@ -20,8 +20,7 @@ object BoundedWait:
         try
           val _ = result.complete(body)
         catch
-          case error: Throwable =>
-            val _ = result.completeExceptionally(error)
+          case error: Throwable => val _ = result.completeExceptionally(error)
       ,
       "dspy4s-bounded-wait"
     )
@@ -29,7 +28,7 @@ object BoundedWait:
     thread.start()
     try Some(result.get(seconds, TimeUnit.SECONDS))
     catch
-      case _: TimeoutException     => None
+      case _: TimeoutException       => None
       case error: ExecutionException => throw error.getCause
 
   /** True when the process `pid` does not run, or stops in `seconds`. */
