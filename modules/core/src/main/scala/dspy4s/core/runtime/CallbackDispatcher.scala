@@ -22,7 +22,7 @@ import zio.blocks.schema.DynamicValue
 
 import scala.util.control.NonFatal
 
-/** Opens and closes callback scopes around the units of work a program runs -- module executions, LM calls, adapter
+/** Opens and closes callback scopes around the units of work a program runs: module executions, LM calls, adapter
   * format/parse passes, tool invocations, evaluation runs, optimizer compiles, and code-interpreter operations. Each
   * `with*` helper emits a `*StartEvent` before the wrapped thunk and the matching `*EndEvent` after, correlated by a
   * shared `callId`, so handlers observe a properly nested call tree (see [[dspy4s.core.contracts.CallbackEvent]] for
@@ -30,7 +30,7 @@ import scala.util.control.NonFatal
   *
   * Two guarantees hold for every scope whose start event was emitted successfully:
   *
-  *   - The dispatcher attempts exactly one end emission -- on success, on a `Left(DspyError)`, and even when the thunk
+  *   - The dispatcher attempts exactly one end emission: on success, on a `Left(DspyError)`, and even when the thunk
   *     throws. A thrown body exception is reported as a `Left(RuntimeError("callback_dispatch", ...))` end event and
   *     then rethrown. If an end observer itself throws, that end is not emitted a second time.
   *   - The scope's `callId` is installed as the active call for the duration of the thunk, so any scope opened inside
@@ -39,10 +39,6 @@ import scala.util.control.NonFatal
   * Events reach the registered handlers through [[RuntimeEnvironment.emit]].
   */
 object CallbackDispatcher:
-
-  /** Deliver one event to every callback handler registered on the active runtime context. */
-  def emit(event: CallbackEvent): Unit =
-    RuntimeEnvironment.emit(event)
 
   /** Wrap a module execution in a `ModuleStartEvent` / `ModuleEndEvent` pair. */
   def withModule[A](
@@ -102,15 +98,15 @@ object CallbackDispatcher:
       optimizerName: String,
       inputs       : DynamicValue.Record
   )(thunk: => Either[DspyError, A]): Either[DspyError, A] =
-    val active = activeCompiles.get()
+    val active = activeCompiles.get
     if active.exists(_ eq optimizer) then thunk
     else
-      activeCompiles.set(optimizer :: active)
-      try withEvents[A](prefix = "compile")(
+      activeCompiles.within(optimizer :: active) {
+        withEvents[A](prefix = "compile")(
           start = (callId, parentCallId) => CompileStartEvent(optimizerName, inputs, callId, parentCallId),
           end = (output, callId, parentCallId) => CompileEndEvent(optimizerName, output, callId, parentCallId)
         )(thunk)
-      finally activeCompiles.set(active)
+      }
 
   /** Wrap one interpreter operation in an `InterpreterStartEvent` / `InterpreterEndEvent` pair (call ids
     * `interpreter-N`).
@@ -131,8 +127,7 @@ object CallbackDispatcher:
     * thread starts with no active instances, so a `compile` on another thread opens its own scope (the upstream key
     * holds the thread id).
     */
-  private val activeCompiles = new ThreadLocal[List[AnyRef]]:
-    override def initialValue(): List[AnyRef] = Nil
+  private val activeCompiles = ScopedLocal[List[AnyRef]](Nil, travels = false)
 
   /** The shared scope discipline behind every `with*` helper: allocate a fresh `prefix`-tagged `callId`, capture the
     * enclosing scope's id as the parent, install the new id as the active call for the duration of `thunk` (so nested
@@ -146,8 +141,8 @@ object CallbackDispatcher:
     val parentCallId = RuntimeEnvironment.activeCallId
     val callId       = RuntimeEnvironment.nextCallId(prefix)
     RuntimeEnvironment.withActiveCall(callId) {
-      emit(start(callId, parentCallId))
-      runWithEnd(thunk)(output => emit(end(output, callId, parentCallId)))
+      RuntimeEnvironment.emit(start(callId, parentCallId))
+      runWithEnd(thunk)(output => RuntimeEnvironment.emit(end(output, callId, parentCallId)))
     }
 
   /** Run `thunk` and attempt `emitEnd` exactly once with its outcome. If the body throws, an end carrying a

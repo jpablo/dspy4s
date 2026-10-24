@@ -2,16 +2,15 @@ package dspy4s.core.runtime
 
 import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.RuntimeDelta
 
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 
 /** Carries the active [[RuntimeContext]] across thread boundaries.
   *
-  * '''Why this is needed.''' [[RuntimeEnvironment]] keeps the active context -- the configured LM / adapter / callbacks
-  * plus the accumulated trace, history, and call stack -- in a `ThreadLocal`. Thread-locals do not follow work that
-  * hops to another thread, so when a program runs on a pool thread (a `Future`, a parallel executor worker, a streaming
+  * '''Why this is needed.''' [[RuntimeEnvironment]] keeps the active context (the configured LM / adapter / callbacks
+  * plus the accumulated trace, history, and call stack) in a `ThreadLocal`. Thread-locals do not follow work that hops
+  * to another thread, so when a program runs on a pool thread (a `Future`, a parallel executor worker, a streaming
   * consumer thread) that worker starts with a fresh, empty context. Without propagation, a predictor call executed
   * there would find no LM configured and fire no callbacks.
   *
@@ -22,7 +21,8 @@ import scala.concurrent.Future
   * equivalent of DSPy's context propagation into parallel and async execution.
   *
   * Scope: the [[RuntimeContext]] plus every registered [[Carrier]] travels (e.g. the usage-tracker stack registered by
-  * the lm module). The [[ActivePredictContext]] stack lives in a separate thread-local and is not copied here.
+  * the lm module, and each [[ScopedLocal]] that travels). The [[ActivePredictContext]] stack lives in a separate
+  * thread-local and is not copied here.
   *
   * A capture reads the installed context, not a `using RuntimeContext` value. Each public entry point installs the
   * context that it gets before work hops threads ([[RuntimeEnvironment.withInstalled]], decision D8 of
@@ -54,45 +54,37 @@ object ContextPropagation:
   /** Everything that must travel to a worker thread: the [[RuntimeContext]] plus a snapshot of every registered
     * carrier.
     */
-  final class Captured private[ContextPropagation] (
-      val context: RuntimeContext,
-      snapshots  : Vector[Snapshot]
-  ):
+  final class Captured private[ContextPropagation] (context: RuntimeContext, snapshots: List[Snapshot]):
     /** Run `thunk` with the captured context and every carrier snapshot installed, restoring on exit. */
     def run[A](thunk: => A): A =
       def installAll(remaining: List[Snapshot]): A =
         remaining match
           case Nil          => thunk
           case head :: tail => head.restore(installAll(tail))
-      RuntimeEnvironment.withContext(context)(installAll(snapshots.toList))
+      RuntimeEnvironment.withContext(context)(installAll(snapshots))
 
-  private def captureSnapshots(): Vector[Snapshot] =
-    val out = Vector.newBuilder[Snapshot]
-    carriers.forEach(carrier => out += carrier.capture())
-    out.result()
+    /** [[run]] as a new async task with a generated `"$prefix-N"` id ([[RuntimeEnvironment.withGeneratedAsyncTask]]).
+      * Each task of a worker pool is thus a distinct async task for [[RuntimeEnvironment.configure]] ownership.
+      */
+    def runAsTask[A](prefix: String)(thunk: => A): A =
+      run(RuntimeEnvironment.withGeneratedAsyncTask(prefix)(thunk))
 
   /** Snapshot the calling thread's active context AND every registered carrier's state. */
-  def captureAll: Captured = new Captured(RuntimeEnvironment.current, captureSnapshots())
+  def captureAll: Captured =
+    val snapshots = List.newBuilder[Snapshot]
+    carriers.forEach(carrier => snapshots += carrier.capture())
+    new Captured(RuntimeEnvironment.current, snapshots.result())
 
-  /** Wrap `base` so every `Runnable` it runs executes under `captured` (plus the carrier snapshots taken at wrap time)
-    * and a fresh generated async-task id. `Future`s submitted to the returned `ExecutionContext` therefore inherit the
-    * captured configuration and accumulated state; the per-task id makes each future a distinct async task for
-    * [[RuntimeEnvironment.configure]] ownership purposes.
+  /** Wrap `base` so every `Runnable` it runs executes under the context and the carrier snapshots of the calling
+    * thread, taken at wrap time, and a fresh generated async-task id. `Future`s submitted to the returned
+    * `ExecutionContext` therefore inherit the captured configuration and accumulated state; the per-task id makes each
+    * future a distinct async task for [[RuntimeEnvironment.configure]] ownership purposes.
     */
-  def wrapExecutionContext(
-      base    : ExecutionContext,
-      captured: RuntimeContext = RuntimeEnvironment.current
-  ): ExecutionContext =
-    val capturedAll = new Captured(captured, captureSnapshots())
+  def wrapExecutionContext(base: ExecutionContext): ExecutionContext =
+    val captured = captureAll
     new ExecutionContext:
       override def execute(runnable: Runnable): Unit =
-        base.execute(() =>
-          capturedAll.run {
-            RuntimeEnvironment.withGeneratedAsyncTask("future") {
-              runnable.run()
-            }
-          }
-        )
+        base.execute(() => captured.runAsTask("future")(runnable.run()))
 
       override def reportFailure(cause: Throwable): Unit =
         base.reportFailure(cause)
@@ -113,14 +105,4 @@ object ContextPropagation:
   def futureExecuted[A](
       body: => A
   )(using base: ExecutionContext): Future[Executed[A]] =
-    val captured = captureAll
-    Future(
-      captured.run {
-        RuntimeEnvironment.withGeneratedAsyncTask("future") {
-          RuntimeEnvironment.withContext(RuntimeEnvironment.current.withDelta(RuntimeDelta.empty)) {
-            val value = body
-            Executed(value, RuntimeEnvironment.current.delta)
-          }
-        }
-      }
-    )(using base)
+    future(RuntimeEnvironment.isolatedAttempt(RuntimeEnvironment.current)(body))

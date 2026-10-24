@@ -73,21 +73,19 @@ final class ParallelExecutor(
       def submit(index: Int): Unit =
         val _ = completion.submit(new Callable[(Int, Option[Either[DspyError, B]])]:
           override def call(): (Int, Option[Either[DspyError, B]]) =
-            captured.run {
-              RuntimeEnvironment.withGeneratedAsyncTask("parallel-task") {
-                if cancelRequested.get() then index -> None
-                else
-                  val value: Either[DspyError, B] =
-                    try task(data(index))
-                    catch
-                      case NonFatal(error) => Left(
-                          RuntimeError(
-                            component = "parallel_executor",
-                            message = Option(error.getMessage).getOrElse(error.getClass.getSimpleName)
-                          )
+            captured.runAsTask("parallel-task") {
+              if cancelRequested.get() then index -> None
+              else
+                val value: Either[DspyError, B] =
+                  try task(data(index))
+                  catch
+                    case NonFatal(error) => Left(
+                        RuntimeError(
+                          component = "parallel_executor",
+                          message = Option(error.getMessage).getOrElse(error.getClass.getSimpleName)
                         )
-                  index -> Some(value)
-              }
+                      )
+                index -> Some(value)
             })
 
       var submitted = 0

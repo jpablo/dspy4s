@@ -177,7 +177,7 @@ final class GepaAdapter[P](
       val captured                                    = ContextPropagation.captureAll
       def task(index: Int): Callable[EvaluationBatch] =
         () =>
-          captured.run(RuntimeEnvironment.withGeneratedAsyncTask("gepa-batch-evaluate")(evaluatePair(index)))
+          captured.runAsTask("gepa-batch-evaluate")(evaluatePair(index))
       val pool = Executors.newFixedThreadPool(workers)
       try
         val pending = items.indices.toVector.map(index => pool.submit(task(index)))

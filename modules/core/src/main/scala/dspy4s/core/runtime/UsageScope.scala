@@ -35,35 +35,21 @@ object UsageScope:
 
     def value: Option[LmUsage] = sum.get
 
-  /** The open scopes of this thread, the outermost first. */
-  private val active: ThreadLocal[Vector[Total]] = ThreadLocal.withInitial(() => Vector.empty)
-
-  // The open scopes must travel with the runtime context to the worker threads, as the usage tracker of the lm module
-  // does. The object registers the carrier when it starts, and `measure` starts the object, so the carrier is there
-  // before a scope can be captured.
-  ContextPropagation.registerCarrier(new ContextPropagation.Carrier:
-    override def capture(): ContextPropagation.Snapshot =
-      val captured = active.get()
-      new ContextPropagation.Snapshot:
-        override def restore[A](thunk: => A): A = within(captured)(thunk))
+  /** The open scopes of this thread, the outermost first. They travel with the runtime context to the worker threads,
+    * as the usage tracker of the lm module does.
+    */
+  private val active = ScopedLocal[Vector[Total]](Vector.empty, travels = true)
 
   /** The result of `body` and the total usage of the model calls that `body` made, also on the worker threads that it
     * started. The total is `None` when no model call gave a usage.
     */
   def measure[A](body: => A): (A, Option[LmUsage]) =
     val total = new Total
-    val value = within(active.get() :+ total)(body)
+    val value = active.within(active.get :+ total)(body)
     (value, total.value)
 
   /** Add the usage of one model call to each open scope of this thread. `None` (a reply with no usage) changes nothing.
     * With no open scope, the usage goes nowhere.
     */
   def record(usage: Option[LmUsage]): Unit =
-    usage.foreach(value => active.get().foreach(_.add(value)))
-
-  /** Run `thunk` with `scopes` as the open scopes of this thread, then put back the previous scopes. */
-  private def within[A](scopes: Vector[Total])(thunk: => A): A =
-    val previous = active.get()
-    active.set(scopes)
-    try thunk
-    finally active.set(previous)
+    usage.foreach(value => active.get.foreach(_.add(value)))

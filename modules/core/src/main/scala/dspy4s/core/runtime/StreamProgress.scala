@@ -23,15 +23,13 @@ object StreamProgress:
 
     private[StreamProgress] def mark(): Unit = flag.set(true)
 
-  private val tl: ThreadLocal[List[Scope]] = ThreadLocal.withInitial(() => Nil)
+  /** The open scopes of this thread, the innermost first. */
+  private val open = ScopedLocal[List[Scope]](Nil, travels = false)
 
   /** Run `body` with a new open scope, and close the scope after `body`. */
   def withScope[A](body: Scope => A): A =
-    val scope    = new Scope()
-    val previous = tl.get
-    tl.set(scope :: previous)
-    try body(scope)
-    finally tl.set(previous)
+    val scope = new Scope()
+    open.within(scope :: open.get)(body(scope))
 
   /** Record that a listener got stream output. Each open scope of the thread gets the mark. */
-  def markEmitted(): Unit = tl.get.foreach(_.mark())
+  def markEmitted(): Unit = open.get.foreach(_.mark())

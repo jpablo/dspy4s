@@ -72,7 +72,7 @@ final case class RuntimeScope(
       */
     predictor: Option[PredictorKey] = None
 ) derives CanEqual:
-  /** The innermost open call scope's id -- always the top of [[callStack]]. */
+  /** The innermost open call scope's id: always the top of [[callStack]]. */
   def activeCallId: Option[String] = callStack.lastOption
 
   /** `true` while a predictor that owns a [[PredictorKey]] runs. */
@@ -93,8 +93,9 @@ final case class RuntimeScope(
 /** The unit of execution context, partitioned into services, configuration, dynamic scope, and accumulated delta. It is
   * threaded as `using RuntimeContext` through modules, adapters, language models, and callbacks.
   *
-  * The flat constructor, field accessors, and `copy` method are retained as a compatibility surface. New runtime code
-  * should update one partition explicitly with [[withServices]], [[withConfig]], [[withScope]], or [[withDelta]].
+  * Use the flat constructor to build a context and the field accessors to read one. The flat `copy` changes fields of
+  * more than one partition. Runtime code updates one partition with [[withServices]], [[withConfig]], [[withScope]], or
+  * [[withDelta]].
   */
 final class RuntimeContext private (
     val services: RuntimeServices,
@@ -190,7 +191,7 @@ final class RuntimeContext private (
   override def toString: String = s"RuntimeContext($services,$config,$scope,$delta)"
 
 object RuntimeContext:
-  /** Flat compatibility constructor. */
+  /** The flat constructor: one parameter for each field of the four partitions. */
   def apply(
       lm                  : Option[LanguageModelRef]       = None,
       adapter             : Option[AdapterRef]             = None,

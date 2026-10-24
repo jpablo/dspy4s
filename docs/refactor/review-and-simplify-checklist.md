@@ -72,8 +72,8 @@ Simplify 6 (rank 3). Code-review 7 (rank 1). 6352 main lines, 4494 test lines.
 - (a) The interpreters, about 2030 lines: `runtime/LocalPythonInterpreter.scala`, `runtime/DenoPyodideInterpreter.scala`, `runtime/DenoPyodideLaunch.scala`, `runtime/DenoPyodideProtocol.scala`, `runtime/DenoPyodideVariables.scala`, `runtime/SubprocessPythonInterpreter.scala`, `runtime/PythonNames.scala`, `contracts/CodeInterpreter.scala`. The simplify pass added `runtime/InterpreterSupport.scala`.
   - [x] /simplify
   - [x] /code-review
-- (b) The context and the callbacks, about 1300 lines: `runtime/RuntimeEnvironment.scala`, `runtime/ContextPropagation.scala`, `runtime/CallbackDispatcher.scala`, `runtime/UsageScope.scala`, `runtime/StreamProgress.scala`, `runtime/ActivePredictContext.scala`, `contracts/RuntimeContext.scala`, `contracts/Callbacks.scala`.
-  - [ ] /simplify
+- (b) The context and the callbacks, about 1300 lines: `runtime/RuntimeEnvironment.scala`, `runtime/ContextPropagation.scala`, `runtime/CallbackDispatcher.scala`, `runtime/UsageScope.scala`, `runtime/StreamProgress.scala`, `runtime/ActivePredictContext.scala`, `contracts/RuntimeContext.scala`, `contracts/Callbacks.scala`. The simplify pass added `runtime/ScopedLocal.scala`.
+  - [x] /simplify
   - [ ] /code-review
 - (c) The decisions, about 800 lines: `decisions/`.
   - [ ] /simplify
@@ -87,10 +87,19 @@ Simplify 6 (rank 3). Code-review 7 (rank 1). 6352 main lines, 4494 test lines.
 - [x] Three copies of the code that kills a process and its descendants, in LocalPython and in the Deno launcher. Fixed: `InterpreterSupport.killTree`.
 - [x] Two copies of the probe with a temp file and a time limit, in LocalPython and in the Deno launcher. Fixed: `InterpreterSupport.probe`.
 - [x] `runtime/DenoPyodideProtocol.scala`: `field`, `asString`, and `asLong` only called DynamicValues, and `isNull` had two copies. LocalPython got its JSON helpers from an object with a Deno name. Fixed: `DynamicValues.encodeJson` and `DynamicValues.isNull`, and the protocol object keeps only the JSON-RPC code.
-- [ ] `contracts/RuntimeContext.scala:96`, `:134`, `:193`: a compatibility surface (a flat `apply`, `copy`, and 16 accessors).
+- [x] `contracts/RuntimeContext.scala`: the doc called the flat `apply`, `copy`, and the accessors a compatibility surface. Each part has callers (the flat `apply` has about 350), so the pass kept them and fixed the doc.
 - [ ] `contracts/SignatureLayoutStateCodec.scala` and `Constraint.dumpState`/`fromState` are hand-written codecs that only tests call. The number read occurs three times: `DynamicValues.asLong`, `decisions/Decisions.scala:683`, and `contracts/Constraint.scala:106`.
-- [ ] Five copies of the ThreadLocal set-and-restore pattern: `runtime/UsageScope.scala:65`, `decisions/DecisionEvidenceLog.scala:54`, `runtime/StreamProgress.scala:29`, `runtime/ActivePredictContext.scala:49`, `runtime/CallbackDispatcher.scala:134`.
-- [ ] `runtime/RuntimeEnvironment.scala:336` does not use its own `warn`.
+- [x] Five copies of the ThreadLocal set-and-restore pattern, and two copies of the carrier code, in UsageScope, DecisionEvidenceLog, StreamProgress, ActivePredictContext, and CallbackDispatcher. Fixed: `ScopedLocal`.
+- [x] `RuntimeEnvironment.emit` did not use its own `warn`. Fixed: a callback failure is now a `WARN [dspy4s] callback: ...` line.
+
+Findings of the group (b) simplify pass that the pass did not fix:
+
+- [ ] Efficiency, skipped until a JMH benchmark shows the cost (each fix adds code to the hot path):
+  - `RuntimeEnvironment.current` merges the overlay with the global context on each read, about 15 times for each Predict call. A cache of the merged context in the thread-local slot can remove this work.
+  - `CallbackDispatcher` builds each event and its input record when no handler listens. A lazy event can remove this work.
+  - The restore of `withScopeChange` and `withInstalled` allocates a new scope and a new context also when `thunk` changed nothing.
+- [ ] `runtime/RuntimeEnvironment.scala`, `servicesKept` and `configKept`: they list each field of `RuntimeServices` and `RuntimeConfig` again, in a different file from `fillFrom`. A new field that they miss makes `withInstalled` skip an install. Skipped: move them next to `fillFrom` in the contracts pass, group (d).
+- [ ] `contracts/RuntimeContext.scala`, the flat `copy`: only the examples and three tests call it. Skipped: to remove it changes the public API, and `ctx.copy(adapter = ...)` is easier to read than the partition form.
 
 Findings of the group (a) simplify pass that the pass did not fix:
 
@@ -162,6 +171,7 @@ Simplify 5 (rank 5). Code-review 5 (rank 8). 4966 main lines, 6422 test lines.
 
 - [ ] Private copies of the `string`, `sequence`, `record`, and `isNull` helpers: `providers/ResponsesWire.scala:445-498`, `runtime/DiskLmCache.scala:444-475`, `runtime/ProviderLanguageModel.scala:39`, `runtime/LmHistoryRecord.scala:125`. Core now has `DynamicValues.isNull` and `DynamicValues.encodeJson`; `providers/DynamicJson.scala:59` also has an `isNull`.
 - [ ] `runtime/DiskLmCache.scala:16-151`, `:263-279`: a reader for the old Java-serialization cache format, about 150 lines.
+- [ ] `runtime/ManagedLanguageModel.scala`, `UsageTracking`: it writes its thread-local scope and its carrier by hand. Core now has `ScopedLocal` (`private[dspy4s]`) for this job.
 - [ ] `runtime/DiskLmCache.scala:370-475`: a hand-written JSON codec. A DTO with a derived Schema (JsonCodecDeriver) can replace it.
 - [ ] `runtime/ProviderLanguageModel.scala:75` writes a magic `mode` key, and `providers/OpenAiClient.scala:24-39`, `:103-113` read it and remove it. Pass the mode as a typed value.
 - [ ] `providers/PythonStr.scala:100-116` copies the Python float repr of adapters `internal/PythonText.scala:369-422`, with a different algorithm. `providers/OpenAiLanguageModel.scala:69-94` copies the pipeline of `runtime/ProviderLanguageModel.scala:34-36`.

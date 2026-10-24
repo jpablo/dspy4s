@@ -336,11 +336,10 @@ final class LocalPythonInterpreter(
     val _       = InterpreterSupport.startDaemon("dspy4s-local-python-tool") {
       try
         val delta = captured.run {
-          RuntimeEnvironment.withContext(RuntimeEnvironment.current.withDelta(RuntimeDelta.empty)) {
+          RuntimeEnvironment.isolatedAttempt(RuntimeEnvironment.current) {
             // A reply that the worker does not get blocks the code, so the session ends (upstream `_send`).
             if !toolReply(request).exists(worker.send) then endSession()
-            RuntimeEnvironment.current.delta
-          }
+          }.delta
         }
         val _ = outcome.complete(ToolOutcome.Done(delta))
       catch
