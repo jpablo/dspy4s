@@ -53,8 +53,8 @@ final case class Score[L](
     level        : Option[Int]              = None
 ):
 
-  /** The level as a case of `L`, for example `score.levelIn(Severity.values)`. */
-  def levelIn[C >: L](cases: IndexedSeq[C]): Option[C] = level.flatMap(cases.lift)
+  /** The level as a case of `L`, for example `score.levelIn(Severity.values.toIndexedSeq)`. */
+  def levelIn(cases: IndexedSeq[L]): Option[L] = level.flatMap(cases.lift)
 
 object Score:
 

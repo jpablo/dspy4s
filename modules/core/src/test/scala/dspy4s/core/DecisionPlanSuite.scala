@@ -1,7 +1,7 @@
 package dspy4s.core
 
 import dspy4s.core.contracts.{FieldSpec, SignatureLayout, TypeRef}
-import dspy4s.core.decisions.{DecisionEvidence, DecisionKind, DecisionPlan, DecisionSettings}
+import dspy4s.core.decisions.{DecisionEvidence, DecisionKind, DecisionPlan, DecisionSettings, Score}
 import munit.FunSuite
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
@@ -10,6 +10,14 @@ import java.nio.charset.StandardCharsets
 /** The rules of the decision outputs (experimental; upstream `DecisionState` in `dspy/adapters/decision_state.py`, with
   * the cases of `tests/predict/test_decision_parameters.py`).
   */
+/** The levels of a test score. */
+enum DpSeverity derives CanEqual:
+  case Low, High
+
+/** An enum that is not the level enum of the test score. */
+enum DpPriority derives CanEqual:
+  case First, Second
+
 class DecisionPlanSuite extends FunSuite:
 
   private def json(text: String): DynamicValue =
@@ -423,4 +431,13 @@ class DecisionPlanSuite extends FunSuite:
     assert(DecisionSettings.fromDynamic(json("""{"threshold": "high"}""")).isLeft)
     assert(DecisionSettings.fromDynamic(json("""{"weights": [1, 2]}""")).isLeft)
     assert(DecisionSettings.fromDynamic(json("""{"threshold": true}""")).isLeft)
+  }
+
+  test("levelIn takes only the cases of the level enum") {
+    val score = Score[DpSeverity](value = 1.0, confidence = 0.9, level = Some(1))
+    assertEquals(score.levelIn(DpSeverity.values.toIndexedSeq), Some(DpSeverity.High))
+    assert(
+      compileErrors("score.levelIn(DpPriority.values.toIndexedSeq)").nonEmpty,
+      "levelIn accepted the cases of an unrelated enum"
+    )
   }

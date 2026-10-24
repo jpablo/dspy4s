@@ -77,7 +77,7 @@ Simplify 6 (rank 3). Code-review 7 (rank 1). 6352 main lines, 4494 test lines.
   - [x] /code-review
 - (c) The decisions, about 800 lines: `decisions/`.
   - [x] /simplify
-  - [ ] /code-review
+  - [x] /code-review
 - (d) The other contracts and the data, about 2200 lines: the other files in `contracts/`, and `data/`, `signatures/`, `collections/`.
   - [ ] /simplify
   - [ ] /code-review
@@ -132,6 +132,8 @@ Findings of the group (a) simplify pass that the pass did not fix:
 - [ ] Group (b) review, a decision for the owner: `contracts/RuntimeContext.scala`, `fillFrom`, treats an empty callback list, an empty callback metadata record, and `captureFailureTraces = false` as "not set". Thus `withCallbacks(Vector.empty)` cannot turn off the callbacks of the global context, as upstream `dspy.context(callbacks=[])` does. A fix changes the type of these fields (for example to `Option`).
 - [ ] Group (b) review, a decision for the owner: `RuntimeEnvironment.withSettings`, `withCallbacks`, `withSetting`, and `withAsyncTask` restore the overlay wholesale, so the trace and the history of the block are gone after it. `withInstalled` keeps them, and upstream `dspy.context` keeps them too.
 - [ ] Group (b) review, skipped: `UsageScope.measure` reads its total when `body` returns, so a worker that runs after the return adds usage that no result shows. `configure` ownership stays with the first thread for the life of the process, as upstream.
+- [x] Group (c) review: `Score.levelIn` accepted the cases of an unrelated enum. Fixed: it takes only `IndexedSeq[L]`.
+- [ ] Group (c) review, skipped: `DecisionEvidenceLog.recording` takes its snapshot when `body` returns, so a worker that records later is lost (the same rule as `UsageScope`). `DecisionSettings.fromDynamic` keeps the last value of a key that occurs two times.
 
 ## signatures
 
