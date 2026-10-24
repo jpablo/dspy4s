@@ -268,6 +268,16 @@ class LocalPythonInterpreterSuite extends FunSuite:
     )
   }
 
+  test("a variable with a lone surrogate is a Left, not an exception") {
+    assumePython()
+    val interpreter = LocalPythonInterpreter()
+    try
+      // The first half of an emoji, for example from a text that was cut at a fixed length.
+      val cut = DynamicValue.Primitive(zio.blocks.schema.PrimitiveValue.String("cut \uD83D"))
+      assert(interpreter.execute("ctx", Map("ctx" -> cut)).isLeft)
+    finally interpreter.close()
+  }
+
   test("a Python executable that does not exist is a Left") {
     val python = Files.createTempDirectory("dspy4s-no-python").resolve("python3")
     assert(startFailure(python).startsWith(s"Unable to start the Python worker '$python': "))

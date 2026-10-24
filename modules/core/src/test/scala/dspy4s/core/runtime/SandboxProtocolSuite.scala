@@ -92,6 +92,11 @@ class SandboxProtocolSuite extends FunSuite:
       |    elif code == "user_error":
       |        data = {"type": "NameError", "args": ["name 'x' is not defined"]}
       |        send({"jsonrpc": "2.0", "error": {"code": -32001, "message": "boom", "data": data}, "id": request_id})
+      |    elif code == "stderr_flood":
+      |        # More text than an operating-system pipe holds (about 64 KB).
+      |        sys.stderr.write("x" * 1000000)
+      |        sys.stderr.flush()
+      |        result("after flood\n", request_id)
       |    elif code.startswith("flood "):
       |        for _ in range(int(code.split()[1])):
       |            send({"jsonrpc": "2.0", "method": "unhandled_error", "params": {"message": "boom"}})
@@ -118,6 +123,36 @@ class SandboxProtocolSuite extends FunSuite:
       new DenoPyodideInterpreter(tools = tools, denoCommand = Some(Vector("python3", script.toString) ++ scriptArgs))
     try body(interpreter)
     finally interpreter.close()
+
+  test("a sandbox that writes much text to its standard error does not block the session") {
+    withSandbox() { interpreter =>
+      val result = BoundedWait.within(20)(interpreter.execute("stderr_flood").map(_.stdout.trim))
+      assertEquals(result, Some(Right("after flood")))
+    }
+  }
+
+  test("a write path in a directory that does not exist gives a Left") {
+    assume(pythonAvailable, "python3 not installed: the scripted sandbox cannot run")
+    val missing     = Files.createTempDirectory("dspy4s-mount").resolve("absent").resolve("out.txt")
+    val interpreter = new DenoPyodideInterpreter(
+      enableWritePaths = Vector(missing.toString),
+      denoCommand = Some(Vector("python3", script.toString))
+    )
+    try
+      val result = BoundedWait.within(20)(interpreter.execute("hello"))
+      assert(result.exists(_.isLeft), s"expected a Left, got $result")
+    finally interpreter.close()
+  }
+
+  test("a launch command that cannot run gives the cause of the failure") {
+    // A new temporary file has no execute permission.
+    val command     = Files.createTempFile("dspy4s-not-executable", ".sh")
+    val interpreter = new DenoPyodideInterpreter(denoCommand = Some(Vector(command.toString)))
+    try interpreter.execute("hello") match
+        case Left(error)  => assert(error.message.contains("Permission denied"), error.message)
+        case Right(other) => fail(s"expected a Left, got $other")
+    finally interpreter.close()
+  }
 
   test("the scripted sandbox answers an ordinary execute request") {
     withSandbox() { interpreter =>

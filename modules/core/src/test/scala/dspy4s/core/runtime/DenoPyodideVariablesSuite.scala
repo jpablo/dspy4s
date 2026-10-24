@@ -4,6 +4,7 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.:=
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.PrimitiveValue
 
 /** Pure unit tests for the variable-assignment prelude (no sandbox needed; the live behavior is covered by
   * [[DenoPyodideInterpreterSuite]]).
@@ -39,4 +40,10 @@ class DenoPyodideVariablesSuite extends FunSuite:
     assert(DenoPyodideVariables.prelude(Map("not-an-identifier" -> DynamicValues.fromAny(1))).isLeft)
     assert(DenoPyodideVariables.prelude(Map("lambda" -> DynamicValues.fromAny(1))).isLeft)
     assert(DenoPyodideVariables.prelude(Map("json" -> DynamicValues.fromAny(1))).isLeft)
+  }
+
+  test("a text value with a lone surrogate is a Left, not an exception") {
+    // The first half of an emoji, for example from a text that was cut at a fixed length.
+    val cut = DynamicValue.Primitive(PrimitiveValue.String("cut \uD83D"))
+    assert(DenoPyodideVariables.prelude(Map("ctx" -> cut)).isLeft)
   }

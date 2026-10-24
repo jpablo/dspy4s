@@ -19,9 +19,9 @@ import dspy4s.core.contracts.SandboxTool
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.InterpreterSupport.ProbeFailure
 import dspy4s.core.runtime.InterpreterSupport.ProbeRun
+import dspy4s.core.runtime.InterpreterSupport.describe
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
-import zio.blocks.schema.Schema
 import zio.blocks.schema.json.WriterConfig
 
 import java.io.BufferedReader
@@ -29,7 +29,6 @@ import java.io.BufferedWriter
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.nio.charset.StandardCharsets
-import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
@@ -57,7 +56,8 @@ import scala.util.control.NonFatal
   *   - State, imports, functions, and variables persist from one `execute` to the next.
   *   - `execute(code, variables)` first defines `variables` (JSON values) in the namespace. A variable name that is not
   *     a Python identifier, that is a keyword, that is `SUBMIT` or `__builtins__`, or that is the name of a tool is a
-  *     `Left` with no effect on the session.
+  *     `Left` with no effect on the session. A value that the JSON writer cannot encode, for example a text with a lone
+  *     UTF-16 surrogate, is also a `Left` with no effect on the session.
   *   - The `stdout` of the result is the text of the value of the last expression of the code when that value is not
   *     `None` (a string value as its text, each other value as JSON), else the captured output (stdout and stderr of
   *     the code). Upstream returns the value in place of the output in the same way.
@@ -67,7 +67,8 @@ import scala.util.control.NonFatal
   *   - An exception of the code, or a syntax error, is a `Right` with a non-zero `exitCode` and the text
   *     `<Type>: <message>` in `stderr`. The session continues.
   *   - A host tool runs when the code calls it. Positional arguments take the names of the tool parameters in order. A
-  *     tool `Left` raises a `RuntimeError` in the code with its message.
+  *     tool `Left` raises a `RuntimeError` in the code with its message. A tool result that the JSON writer cannot
+  *     encode also raises a `RuntimeError`, with the cause.
   *   - `executionTimeout` bounds one `execute`, the host tool calls included. When the time is over, the interpreter
   *     kills the worker and its descendants (see the process below), the result is a `Left` with the component
   *     [[dspy4s.core.contracts.CodeInterpreterErrors.Timeout]], and the session ends.
@@ -139,11 +140,12 @@ final class LocalPythonInterpreter(
       else
         try
           for
-            _      <- checkSessionActive()
-            _      <- configCheck
-            _      <- checkVariables(variables)
-            worker <- ensureWorker()
-            result <- run(worker, executeRequest(code, variables))
+            _       <- checkSessionActive()
+            _       <- configCheck
+            _       <- checkVariables(variables)
+            request <- executeRequest(code, variables)
+            worker  <- ensureWorker()
+            result  <- run(worker, request)
           yield result
         finally active.set(false)
     }
@@ -245,18 +247,30 @@ final class LocalPythonInterpreter(
 
   // ── The execute request ─────────────────────────────────────────────────────────────────────────────────────
 
-  /** The `execute` request: the code, the variables, the tool names, and the output fields (or `null`). */
-  private def executeRequest(code: String, variables: Map[String, DynamicValue]): String =
+  /** The `execute` request: the code, the variables, the tool names, and the output fields (or `null`). A request that
+    * the JSON writer cannot encode is a `Left` with no effect on the session. The message names the first variable that
+    * the writer cannot encode, when there is one.
+    */
+  private def executeRequest(code: String, variables: Map[String, DynamicValue]): Either[DspyError, String] =
     val fields = outputFields.fold[DynamicValue](DynamicValue.Null) { all =>
       DynamicValue.Sequence(Chunk.from(all.map(f => InterpreterSupport.nameAndType(f.name, f.pythonType))))
     }
-    encode(DynamicValues.record(
+    val request = DynamicValues.record(
       "type"          := "execute",
       "code"          := code,
       "variables"     -> DynamicValues.recordFromEntries(variables.toVector),
       "tools"         := toolNames,
       "output_fields" -> fields
-    ))
+    )
+    encode(request) match
+      case Right(line) => Right(line)
+      case Left(cause) =>
+        // The search runs only after a failure. Thus a call that passes encodes each value one time.
+        val variable =
+          variables.toVector.sortBy(_._1).collectFirst { case (name, value) if encode(value).isLeft => name }
+        failure(variable.fold(s"Unable to encode the execute request as JSON: $cause") { name =>
+          s"Unable to encode the variable '$name' as JSON: $cause"
+        })
 
   /** Send the request, serve the tool requests, wait for the tool calls, and decode the reply (upstream `execute`). */
   private def run(worker: Worker, request: String): Either[DspyError, CodeResult] =
@@ -324,7 +338,7 @@ final class LocalPythonInterpreter(
         val delta = captured.run {
           RuntimeEnvironment.withContext(RuntimeEnvironment.current.withDelta(RuntimeDelta.empty)) {
             // A reply that the worker does not get blocks the code, so the session ends (upstream `_send`).
-            if !worker.send(toolReply(request)) then endSession()
+            if !toolReply(request).exists(worker.send) then endSession()
             RuntimeEnvironment.current.delta
           }
         }
@@ -340,8 +354,12 @@ final class LocalPythonInterpreter(
   /** The `tool_result` or `tool_error` reply to one tool request (upstream `_handle_tool`). Each call is a `ToolCall`
     * scope (upstream `invoke_tool`), also for an unknown tool. The scope holds the `ToolStartEvent` / `ToolEndEvent`
     * pair of the tool. The inputs are `tool` and `args`, and `args` has the keyword record of the call.
+    *
+    * A tool result or an error message that the JSON writer cannot encode gives a `tool_error` reply with the cause.
+    * `None` when the writer cannot encode a reply with the `id` of the request. Thus no encode failure leaves the tool
+    * thread as an exception.
     */
-  private def toolReply(request: DynamicValue.Record): String =
+  private def toolReply(request: DynamicValue.Record): Option[String] =
     val id   = field(request, "id").getOrElse(DynamicValue.Null)
     val name = field(request, "name").flatMap(asString).getOrElse("")
     val args = field(request, "args").collect { case s: DynamicValue.Sequence => s.elements.toVector }
@@ -354,9 +372,19 @@ final class LocalPythonInterpreter(
       try
         InterpreterSupport.invokeTool(interpreterName, tools, name, bound.getOrElse(kwargs), bound).left.map(_.message)
       catch case NonFatal(error) => Left(describe(error))
-    result match
-      case Right(value)  => encode(DynamicValues.record("type" := "tool_result", "id" -> id, "value" -> value))
-      case Left(message) => encode(DynamicValues.record("type" := "tool_error", "id" -> id, "error" := message))
+    val reply = result.flatMap { value =>
+      encode(DynamicValues.record("type" := "tool_result", "id" -> id, "value" -> value)).left.map { cause =>
+        s"Unable to encode the tool result as JSON: $cause"
+      }
+    }
+    reply.fold(toolError(id, _), Some(_))
+
+  /** The `tool_error` reply with `message`. A message that the JSON writer cannot encode gives a reply with the cause
+    * of the failure. `None` when the writer cannot encode the two replies.
+    */
+  private def toolError(id: DynamicValue, message: String): Option[String] =
+    def line(text: String) = encode(DynamicValues.record("type" := "tool_error", "id" -> id, "error" := text))
+    line(message).left.flatMap(cause => line(s"Unable to encode the tool error as JSON: $cause")).toOption
 
   /** The keyword record of a tool call: each positional argument takes the name of the tool parameter at its position.
     */
@@ -655,45 +683,23 @@ object LocalPythonInterpreter:
       }
 
   /** The vendored worker script as a file. The script is written once per JVM, and again when the file was removed. */
-  private object WorkerScript:
-    private val Resource             = "/dspy4s/core/runtime/local_interpreter_worker.py"
-    private var cached: Option[Path] = None
-
-    def path(): Either[String, Path] =
-      synchronized {
-        cached.filter(Files.isRegularFile(_)) match
-          case Some(file) => Right(file)
-          case None       => extract().map { file =>
-              cached = Some(file)
-              file
-            }
-      }
-
-    private def extract(): Either[String, Path] =
-      InterpreterSupport.extractResource(
-        Resource,
-        "dspy4s-local-interpreter-worker",
-        ".py",
-        error => s"Unable to write the Python worker script: ${describe(error)}"
-      )
+  private val WorkerScript = InterpreterSupport.ResourceFile(
+    "/dspy4s/core/runtime/local_interpreter_worker.py",
+    "dspy4s-local-interpreter-worker",
+    ".py",
+    error => s"Unable to write the Python worker script: ${describe(error)}"
+  )
 
   /** The text of a value: a string as its text, each other value as JSON. */
   private def text(value: DynamicValue): String = asString(value).getOrElse(encodeJson(value))
-
-  private val jsonCodec = Schema.dynamic.jsonCodec
 
   /** The JSON writer option that escapes each character that is not ASCII. */
   private val AsciiOnly: WriterConfig = WriterConfig.withEscapeUnicode(true)
 
   /** The JSON text of `value`, with a JSON escape for each character that is not ASCII. Such a character can only occur
-    * in a JSON string, so the escape keeps the value.
+    * in a JSON string, so the escape keeps the value. `Left` has the cause when the JSON writer cannot write the value.
     */
-  private def encode(value: DynamicValue): String = jsonCodec.encodeToString(value, AsciiOnly)
-
-  /** `<Type>: <message>` (upstream `describe`). */
-  private def describe(error: Throwable): String =
-    val name = error.getClass.getSimpleName
-    Option(error.getMessage).filter(_.nonEmpty).fold(name)(message => s"$name: $message")
+  private def encode(value: DynamicValue): Either[String, String] = InterpreterSupport.tryEncodeJson(value, AsciiOnly)
 
   private def clip(line: String): String = line.take(DiagnosticLength)
 

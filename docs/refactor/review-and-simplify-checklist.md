@@ -71,7 +71,7 @@ Simplify 6 (rank 3). Code-review 7 (rank 1). 6352 main lines, 4494 test lines.
 
 - (a) The interpreters, about 2030 lines: `runtime/LocalPythonInterpreter.scala`, `runtime/DenoPyodideInterpreter.scala`, `runtime/DenoPyodideLaunch.scala`, `runtime/DenoPyodideProtocol.scala`, `runtime/DenoPyodideVariables.scala`, `runtime/SubprocessPythonInterpreter.scala`, `runtime/PythonNames.scala`, `contracts/CodeInterpreter.scala`. The simplify pass added `runtime/InterpreterSupport.scala`.
   - [x] /simplify
-  - [ ] /code-review
+  - [x] /code-review
 - (b) The context and the callbacks, about 1300 lines: `runtime/RuntimeEnvironment.scala`, `runtime/ContextPropagation.scala`, `runtime/CallbackDispatcher.scala`, `runtime/UsageScope.scala`, `runtime/StreamProgress.scala`, `runtime/ActivePredictContext.scala`, `contracts/RuntimeContext.scala`, `contracts/Callbacks.scala`.
   - [ ] /simplify
   - [ ] /code-review
@@ -103,11 +103,15 @@ Findings of the group (a) simplify pass that the pass did not fix:
 
 ### Code-review findings
 
-- [ ] `runtime/DenoPyodideInterpreter.scala:255`, `:538`: nothing reads the stderr pipe until a failure. More than about 64 KB of stderr can stop the sandbox forever. `readLine` (`:520`) has no time limit, so a `while True` in user code hangs `execute`.
-- [ ] `runtime/SubprocessPythonInterpreter.scala:95-96`: after a normal exit, `join()` has no limit. A child process that keeps stdout open hangs the call. `destroyForcibly` (`:87`) does not kill descendants. `InterruptedException` is not `NonFatal`, so it escapes and the Python process can stay alive.
+- [x] DenoPyodideInterpreter: nothing read the stderr pipe until a failure, so more than about 64 KB of stderr stopped the sandbox forever. Fixed: a daemon thread reads the standard error into a bounded tail.
+- [ ] `runtime/DenoPyodideInterpreter.scala`, `readLine`: no time limit, so a `while True` in user code hangs `execute`. Skipped: the interpreter has no execution timeout, as upstream. A timeout is a new feature.
+- [x] SubprocessPythonInterpreter: after a normal exit, `join()` had no limit, a timeout did not kill descendants, and an interrupt escaped and left the process alive. Fixed: a 1-second limit after the exit, `killTree` on a timeout, and a `Left` on an interrupt.
 - [ ] `contracts/Constraint.scala:106-111`: `numberOf` ignores `BigDecimal`, but the JSON codec decodes decimals as `BigDecimal` (`decisions/Decisions.scala:680`). `SignatureLayout.fromJson` then drops `gt(0.5)` with no error. The tests use only whole numbers.
-- [ ] `runtime/LocalPythonInterpreter.scala:316-430`: no test covers the tool threads, the fatal rethrow, a timeout in a tool call, an interrupt, or `close` from another thread. The inbound queue is not cleared between calls, so a stray stdout line can become the reply of the next call.
-- [ ] `runtime/DenoPyodideInterpreter.scala:290` (`Files.createFile`) and `runtime/DenoPyodideLaunch.scala:171` (`runnerPath`) throw an exception and do not return a `Left`. A /tmp cleanup can remove `runnerPath`, and the code does not write it again. `spawn` (`:263`) reports each IOException as "Deno not found".
+- [ ] `runtime/LocalPythonInterpreter.scala`, the tool threads: no test covers the fatal rethrow, a timeout in a tool call, an interrupt, or `close` from another thread. The inbound queue is not cleared between calls, so a line that arrives after a reply can become the reply of the next call. Skipped: only code that breaks the documented rule (all threads finish before the code returns) sends such a line.
+- [x] DenoPyodideInterpreter and DenoPyodideLaunch: `Files.createFile` threw out of `execute`, the runner script was never written again after a removal, and `spawn` reported each IOException as "Deno not found". Fixed: a `Left` with the cause, `InterpreterSupport.ResourceFile`, and the cause in the message.
+- [x] A value with a lone UTF-16 surrogate made the JSON writer throw out of `execute` (LocalPython and the Deno prelude). Fixed: `InterpreterSupport.tryEncodeJson` and a `Left` that names the variable.
+- [ ] Gaps of the lone-surrogate fix: in DenoPyodideInterpreter, code text with a lone surrogate still throws from `DenoPyodideProtocol.encodeRequest`, and a tool exception with a lone surrogate in its message throws from `encodeError` in `handleToolCall`.
+- [ ] `runtime/DenoPyodideLaunch.scala`, `denoCacheDir`: when `deno info --json` gives no directory, one launch probes again two times, each with a 10-second limit. Skipped: a new probe on each launch is deliberate, so that a Deno that the user installs later is found.
 
 ## signatures
 

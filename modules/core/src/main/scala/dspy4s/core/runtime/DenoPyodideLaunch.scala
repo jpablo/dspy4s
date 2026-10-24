@@ -26,7 +26,20 @@ private[runtime] object DenoPyodideLaunch:
   private val InstallHint       =
     "Install a compatible Deno (https://docs.deno.com/runtime/getting_started/installation/), e.g. `brew install deno`, or pass a custom `denoCommand`."
 
+  /** The default launch command. The call writes the runner script when the file is absent. A runner script that cannot
+    * be written throws an `IllegalStateException`. [[defaultProcess]] gives a `Left` for that failure.
+    */
   def command(
+      enableReadPaths    : Vector[String],
+      enableWritePaths   : Vector[String],
+      enableEnvVars      : Vector[String],
+      enableNetworkAccess: Vector[String]
+  ): Vector[String] =
+    val runner = Runner.path().fold(message => throw new IllegalStateException(message), identity)
+    launchCommand(runner, enableReadPaths, enableWritePaths, enableEnvVars, enableNetworkAccess)
+
+  private def launchCommand(
+      runnerPath         : Path,
       enableReadPaths    : Vector[String],
       enableWritePaths   : Vector[String],
       enableEnvVars      : Vector[String],
@@ -54,8 +67,8 @@ private[runtime] object DenoPyodideLaunch:
     cacheDir.foreach(dir => args += s"--dspy-deno-dir=${canonical(dir)}")
     args.result()
 
-  /** The process of the default launch command, not started. `Left` when a write path overlaps a runtime file, or when
-    * the Deno version is not supported.
+  /** The process of the default launch command, not started. `Left` when the runner script cannot be written, when a
+    * write path overlaps a runtime file, or when the Deno version is not supported.
     */
   def defaultProcess(
       enableReadPaths    : Vector[String],
@@ -64,10 +77,17 @@ private[runtime] object DenoPyodideLaunch:
       enableNetworkAccess: Vector[String]
   ): Either[DspyError, ProcessBuilder] =
     for
-      _ <- checkWritePaths(enableWritePaths)
-      _ <- checkDefaultVersion()
+      runner <- runnerFile()
+      _      <- checkOverlaps(enableWritePaths, runner)
+      _      <- checkDefaultVersion()
     yield
-      val builder = new ProcessBuilder(command(enableReadPaths, enableWritePaths, enableEnvVars, enableNetworkAccess)*)
+      val builder = new ProcessBuilder(launchCommand(
+        runner,
+        enableReadPaths,
+        enableWritePaths,
+        enableEnvVars,
+        enableNetworkAccess
+      )*)
       isolate(builder)
       builder
 
@@ -152,10 +172,15 @@ private[runtime] object DenoPyodideLaunch:
     else Right(())
 
   /** `Left` when a write path overlaps a runtime file of the sandbox: the runner file or the Deno cache directory
-    * (upstream ab8a7658d). Sandboxed code that can write such a file can change code that runs with no sandbox.
+    * (upstream ab8a7658d). Sandboxed code that can write such a file can change code that runs with no sandbox. `Left`
+    * also when the runner script cannot be written.
     */
   def checkWritePaths(enableWritePaths: Vector[String]): Either[DspyError, Unit] =
-    val runtimeFiles = (Vector(runnerPath.toString) ++ denoCacheDir.toVector).map(canonical)
+    runnerFile().flatMap(checkOverlaps(enableWritePaths, _))
+
+  /** [[checkWritePaths]] with the runner script at `runner`. */
+  private def checkOverlaps(enableWritePaths: Vector[String], runner: Path): Either[DspyError, Unit] =
+    val runtimeFiles = (Vector(runner.toString) ++ denoCacheDir.toVector).map(canonical)
     enableWritePaths.find(path => runtimeFiles.exists(pathsOverlap(canonical(path), _))) match
       case Some(path) => CodeInterpreterErrors.failure(
           s"Write paths cannot overlap the runtime files of DenoPyodideInterpreter (the runner file and the Deno cache directory): $path"
@@ -167,13 +192,18 @@ private[runtime] object DenoPyodideLaunch:
     val (a, b) = (Paths.get(first), Paths.get(second))
     a.startsWith(b) || b.startsWith(a)
 
-  /** Extract the vendored `runner.js` to a temp file once per JVM (Deno needs a real path it can --allow-read). */
-  private lazy val runnerPath: Path = InterpreterSupport.extractResource(
+  /** The vendored `runner.js` as a temporary file (Deno needs a real path it can --allow-read). The script is written
+    * once per JVM, and again when the file was removed.
+    */
+  private val Runner = InterpreterSupport.ResourceFile(
     "/dspy4s/core/runtime/runner.js",
     "dspy4s-runner",
     ".js",
     error => s"Unable to write the Deno runner script: ${error.getMessage}"
-  ).fold(message => throw new IllegalStateException(message), identity)
+  )
+
+  /** The path of the runner script. `Left` when the script cannot be written. */
+  private def runnerFile(): Either[DspyError, Path] = Runner.path().fold(CodeInterpreterErrors.failure[Path], Right(_))
 
   // One answer of `deno info --json` serves the JVM. A query that gave no directory runs again on the next call.
   @volatile private var queriedCacheDir: Option[String] = None

@@ -13,6 +13,7 @@ import dspy4s.core.contracts.InterpreterOperation
 import dspy4s.core.contracts.SandboxOutputField
 import dspy4s.core.contracts.SandboxTool
 import dspy4s.core.contracts.:=
+import dspy4s.core.runtime.InterpreterSupport.describe
 import dspy4s.core.runtime.InterpreterSupport.exitedIn
 import dspy4s.core.runtime.InterpreterSupport.nameAndType
 import zio.blocks.chunk.Chunk
@@ -21,11 +22,15 @@ import zio.blocks.schema.PrimitiveValue
 
 import java.io.BufferedReader
 import java.io.BufferedWriter
+import java.io.IOException
+import java.io.InputStream
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Paths
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
 import scala.annotation.tailrec
@@ -56,8 +61,11 @@ import scala.util.control.NonFatal
   * when the process or the protocol fails (upstream `_raise_terminal_error`). Such a failure stops the process. The
   * process holds the REPL state, so a session does not start again: each later [[execute]] gives a `Left` that tells
   * the caller to create a new interpreter. These failures do not end the session: a user-code error, a tool error, an
-  * invalid variable name, a mount file that is absent, a mount collision, a recursive call, and a Deno version that is
-  * not supported.
+  * invalid variable name, a variable value that the JSON writer cannot encode, a mount file that is absent, a write
+  * path that the client cannot create, a mount collision, a recursive call, and a Deno version that is not supported.
+  *
+  * A thread reads the standard error of the process all the time and keeps its last characters for the failure
+  * messages. Thus a process that writes much text to its standard error does not stop when the pipe is full.
   *
   * ==Deltas from Python==
   *   - Variables are injected uniformly as `name = json.loads("<json>")` rather than upstream's Python-literal
@@ -245,14 +253,19 @@ final class DenoPyodideInterpreter(
       case None          =>
         DenoPyodideLaunch.defaultProcess(enableReadPaths, enableWritePaths, enableEnvVars, enableNetworkAccess)
 
+  /** Start the process and the thread that reads its standard error. A launch command that cannot run gives a `Left`
+    * with the cause.
+    */
   private def spawn(builder: ProcessBuilder): Either[DspyError, Unit] =
     try
       val p       = builder.start()
+      val stderr  = new StderrTail(DiagnosticLength)
+      val _       = InterpreterSupport.startDaemon(s"dspy4s-deno-stderr-${p.pid()}")(stderr.readAll(p.getErrorStream))
       val running = new Session.Running(
         process = p,
         stdin = new BufferedWriter(new OutputStreamWriter(p.getOutputStream, StandardCharsets.UTF_8)),
         stdout = new BufferedReader(new InputStreamReader(p.getInputStream, StandardCharsets.UTF_8)),
-        stderr = new BufferedReader(new InputStreamReader(p.getErrorStream, StandardCharsets.UTF_8))
+        stderr = stderr
       )
       if session.compareAndSet(Session.NotStarted, running) then Right(())
       else
@@ -260,9 +273,8 @@ final class DenoPyodideInterpreter(
         stop(running, shutdown = false)
         checkSessionActive()
     catch
-      case _: java.io.IOException => failure(
-          "Deno executable not found. Install Deno (https://docs.deno.com/runtime/getting_started/installation/), e.g. `brew install deno`."
-        )
+      case error: IOException => failure(startFailure(error))
+      case NonFatal(error)    => failure(s"Unable to start the sandbox process: ${describe(error)}")
 
   /** Upstream `_health_check`: a setup request, so an error response ends the session and no file sync follows. */
   private def healthCheck(): Either[DspyError, Unit] =
@@ -286,10 +298,20 @@ final class DenoPyodideInterpreter(
     val missing = !Files.exists(Paths.get(path))
     if missing && !enableWritePaths.contains(path) then failure(s"Cannot mount non-existent file: $path")
     else
-      if missing then
-        val _ = Files.createFile(Paths.get(path))
-      val params = DynamicValues.record("host_path" := canonical(path), "virtual_path" := sandboxPath(path))
-      sendRequest("mount_file", params).map(_ => ())
+      val created = if missing then createWriteFile(path) else Right(())
+      created.flatMap { _ =>
+        val params = DynamicValues.record("host_path" := canonical(path), "virtual_path" := sandboxPath(path))
+        sendRequest("mount_file", params).map(_ => ())
+      }
+
+  /** Create the absent file of a write path before the mount. A file that the client cannot create, for example in a
+    * directory that does not exist, gives a `Left` with the cause. The session continues.
+    */
+  private def createWriteFile(path: String): Either[DspyError, Unit] =
+    try
+      val _ = Files.createFile(Paths.get(path))
+      Right(())
+    catch case NonFatal(error) => failure(s"Cannot create the write path $path: ${describe(error)}")
 
   private def registerTools(): Either[DspyError, Unit] =
     if toolsRegistered || (tools.isEmpty && outputFields.isEmpty) then
@@ -525,30 +547,25 @@ final class DenoPyodideInterpreter(
 
   /** The failure text after the end of the sandbox output or after a write that failed. The pipes of a process close a
     * short time before the process state changes, so the check waits `ExitGraceMillis` for the exit. A process that
-    * exited gives its exit code and the end of its standard error. The text ends with the last out-of-band message of
-    * the request, when one arrived (upstream `_read_response_line`).
+    * exited gives its exit code and the end of its standard error. The check waits `ExitGraceMillis` again at most for
+    * the end of the standard error. The text ends with the last out-of-band message of the request, when one arrived
+    * (upstream `_read_response_line`).
     */
   private def ioFailure(running: Session.Running, otherwise: String): String =
     val diagnostic = lastDiagnostic.fold("")(text => s" (last sandbox diagnostic: ${text.take(DiagnosticLength)})")
     if exitedIn(running.process, ExitGraceMillis) then
-      val stderr = drainStderr(running).takeRight(DiagnosticLength)
+      val stderr = running.stderr.end(ExitGraceMillis)
       s"Deno exited (code ${running.process.exitValue()}): $stderr$diagnostic"
     else s"$otherwise$diagnostic"
-
-  private def drainStderr(running: Session.Running): String =
-    val sb = new StringBuilder
-    try
-      while running.stderr.ready() do
-        val _ = sb.append(running.stderr.readLine()).append('\n')
-    catch case NonFatal(_) => ()
-    sb.toString
 
 private object DenoPyodideInterpreter:
 
   /** The time for a process to exit after the request to stop. After this time the client kills the process. */
   private val StopTimeoutMillis = 5000L
 
-  /** The time for a process to exit after its output ended or after a write failed. */
+  /** The time for a process to exit after its output ended or after a write failed. After the exit, the same time limit
+    * applies to the end of the standard error.
+    */
   private val ExitGraceMillis = 1000L
 
   /** The length limit for text from the sandbox in a failure message. */
@@ -559,10 +576,60 @@ private object DenoPyodideInterpreter:
 
   private def snippet(text: String): String = text.take(SnippetLength)
 
+  /** The number of characters of one read of the standard error. */
+  private val ReadSize = 4096
+
+  /** The failure text of a launch command that cannot run. The text has the message of the `IOException`, for example
+    * "error=13, Permission denied". An executable that does not exist (`error=2`) also gets the install hint.
+    */
+  private def startFailure(error: IOException): String =
+    val cause = describe(error)
+    if cause.contains("error=2,") then
+      s"Deno executable not found ($cause). Install Deno (https://docs.deno.com/runtime/getting_started/installation/), e.g. `brew install deno`."
+    else s"Unable to start the sandbox process: $cause"
+
+  /** The last characters of the standard error of a process. [[readAll]] reads the stream to its end on a daemon
+    * thread. Thus a process that writes much text to its standard error does not stop when the pipe is full. The tail
+    * keeps the last `limit` characters of the text, and not more than `2 * limit + ReadSize` characters in memory.
+    */
+  private final class StderrTail(limit: Int):
+    // The holder of the monitor of this object reads and changes `text`.
+    private val text = new java.lang.StringBuilder()
+    private val done = new CountDownLatch(1)
+
+    /** Read `stream` to its end and keep its last characters. The call closes the stream. */
+    def readAll(stream: InputStream): Unit =
+      val reader = new InputStreamReader(stream, StandardCharsets.UTF_8)
+      val buffer = new Array[Char](ReadSize)
+      try Iterator.continually(reader.read(buffer)).takeWhile(_ >= 0).foreach(count => append(buffer, count))
+      catch case NonFatal(_) => ()
+      finally
+        try reader.close()
+        catch case NonFatal(_) => ()
+        done.countDown()
+
+    private def append(buffer: Array[Char], count: Int): Unit =
+      synchronized {
+        val _ = text.append(buffer, 0, count)
+        if text.length > 2 * limit then
+          val _ = text.delete(0, text.length - limit)
+      }
+
+    /** The last `limit` characters of the stream. The call waits `millis` at most for the end of the stream. An
+      * interrupt stops the wait, and the thread keeps its interrupt state. The text does not start with the second half
+      * of a UTF-16 surrogate pair.
+      */
+    def end(millis: Long): String =
+      try
+        val _ = done.await(millis, TimeUnit.MILLISECONDS)
+      catch case _: InterruptedException => Thread.currentThread().interrupt()
+      val tail = synchronized(text.toString).takeRight(limit)
+      if tail.headOption.exists(_.isLowSurrogate) then tail.drop(1) else tail
+
   /** The life of one sandbox session. A session goes from `NotStarted` to `Running` to `Ended`, or from `NotStarted` to
     * `Ended`. It does not go back.
     */
   private enum Session derives CanEqual:
     case NotStarted
-    case Running(process: Process, stdin: BufferedWriter, stdout: BufferedReader, stderr: BufferedReader)
+    case Running(process: Process, stdin: BufferedWriter, stdout: BufferedReader, stderr: StderrTail)
     case Ended

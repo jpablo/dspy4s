@@ -7,6 +7,8 @@ import dspy4s.core.contracts.InterpreterOperation
 import dspy4s.core.contracts.SandboxTool
 import dspy4s.core.contracts.:=
 import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.Schema
+import zio.blocks.schema.json.WriterConfig
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -90,10 +92,31 @@ private[runtime] object InterpreterSupport:
       finally stream.close()
     catch case NonFatal(error) => Left(ProbeFailure.NotRead(error))
 
+  /** A class-path resource as a temporary file. The first call of [[path]] writes the file. A later call writes the
+    * file again when the file was removed, for example by a cleanup of the temporary directory. The JVM deletes each
+    * file that it wrote when it exits. One instance is thread-safe.
+    *
+    * @param writeFailure
+    *   gives the message when the file cannot be written
+    */
+  final class ResourceFile(resource: String, prefix: String, suffix: String, writeFailure: Throwable => String):
+    private var cached: Option[Path] = None
+
+    /** The path of the file. `Left` has the message of the failure. */
+    def path(): Either[String, Path] =
+      synchronized {
+        cached.filter(Files.isRegularFile(_)) match
+          case Some(file) => Right(file)
+          case None       => extractResource(resource, prefix, suffix, writeFailure).map { file =>
+              cached = Some(file)
+              file
+            }
+      }
+
   /** Write the class-path resource `resource` to a new temporary file that the JVM deletes when it exits. `Left` has
     * the message of the failure. `writeFailure` gives the message when the file cannot be written.
     */
-  def extractResource(
+  private def extractResource(
       resource    : String,
       prefix      : String,
       suffix      : String,
@@ -110,6 +133,23 @@ private[runtime] object InterpreterSupport:
           finally stream.close()
           Right(file)
         catch case NonFatal(error) => Left(writeFailure(error))
+
+  /** `<Type>: <message>` (upstream `describe`), or `<Type>` when the error has no message. */
+  def describe(error: Throwable): String =
+    val name = error.getClass.getSimpleName
+    Option(error.getMessage).filter(_.nonEmpty).fold(name)(message => s"$name: $message")
+
+  // ── JSON text ───────────────────────────────────────────────────────────────────────────────────────────────
+
+  private val jsonCodec = Schema.dynamic.jsonCodec
+
+  /** The JSON text of `value`, written with `config`. `Left` has the cause when the JSON writer cannot write the value.
+    * The JSON writer of zio-blocks throws on a text with a lone UTF-16 surrogate, for example the first half of an
+    * emoji in a text that was cut at a fixed length.
+    */
+  def tryEncodeJson(value: DynamicValue, config: WriterConfig = WriterConfig): Either[String, String] =
+    try Right(jsonCodec.encodeToString(value, config))
+    catch case NonFatal(error) => Left(describe(error))
 
   // ── Callback scopes and request records ─────────────────────────────────────────────────────────────────────
 
