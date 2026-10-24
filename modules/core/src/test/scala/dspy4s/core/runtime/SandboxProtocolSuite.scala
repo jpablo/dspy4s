@@ -12,7 +12,6 @@ import dspy4s.core.contracts.ToolEndEvent
 import dspy4s.core.contracts.ToolStartEvent
 import dspy4s.core.runtime.DenoPyodideProtocol.OutOfBand
 import munit.FunSuite
-import zio.blocks.schema.DynamicValue
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -265,9 +264,9 @@ class SandboxProtocolSuite extends FunSuite:
   }
 
   private def classify(json: String): OutOfBand =
-    DenoPyodideProtocol.decodeJson(json) match
-      case Some(msg: DynamicValue.Record) => DenoPyodideProtocol.outOfBand(msg)
-      case other                          => fail(s"expected a JSON object, got $other")
+    DenoPyodideProtocol.decodeRecord(json) match
+      case Some(msg) => DenoPyodideProtocol.outOfBand(msg)
+      case None      => fail(s"expected a JSON object, got $json")
 
   test("outOfBand: a notification and an error without an id are out of band") {
     assertEquals(

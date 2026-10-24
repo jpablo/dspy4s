@@ -16,8 +16,8 @@ final case class CodeResult(
     finalOutput: Option[String] = None
 )
 
-/** Conventional component strings for [[RuntimeError]]s that originate from a [[CodeInterpreter]]. User code errors —
-  * `NameError`, `SyntaxError`, etc. — surface as a successful [[CodeResult]] with non-zero `exitCode` and the traceback
+/** Conventional component strings for [[RuntimeError]]s that originate from a [[CodeInterpreter]]. User code errors
+  * (`NameError`, `SyntaxError`, etc.) surface as a successful [[CodeResult]] with non-zero `exitCode` and the traceback
   * in `stderr`, *not* as a [[DspyError]]. This split mirrors Python DSPy's `CodeInterpreterError` vs language
   * exceptions.
   *
@@ -28,6 +28,9 @@ object CodeInterpreterErrors:
   val Interpreter: String = "code_interpreter"
   val Timeout: String     = "code_interpreter_timeout"
 
+  /** A failure of the interpreter itself: a [[RuntimeError]] with the component [[Interpreter]]. */
+  def failure[A](message: String): Either[DspyError, A] = Left(RuntimeError(Interpreter, message))
+
 /** Code execution primitive. Implementations execute a code string in some sandbox and return structured output.
   *
   * Lifecycle:
@@ -36,7 +39,7 @@ object CodeInterpreterErrors:
   *   - `execute(code)` may be called many times. Whether state persists across calls is implementation-specific (see
   *     each impl's docstring).
   *   - `close()` releases any held resources (long-lived subprocesses, REPL handles). Idempotent. After `close()`,
-  *     behavior of further `execute` calls is implementation-defined — most impls should fail fast.
+  *     behavior of further `execute` calls is implementation-defined. Most impls should fail fast.
   *
   * Used by `RLM`.
   */
@@ -46,10 +49,13 @@ trait CodeInterpreter extends AutoCloseable:
 
 /** A [[CodeInterpreter]] with the REPL surface `RLM` drives: executing code with host VARIABLES defined first (long
   * contexts enter the sandbox as variables, never the prompt). Implementations are expected to be stateful across
-  * `execute` calls and to support the `SUBMIT(...)` convention ([[CodeResult.finalOutput]]) plus host [[SandboxTool]]s
-  * — [[dspy4s.core.runtime.DenoPyodideInterpreter]] is the canonical one.
+  * `execute` calls and to support the `SUBMIT(...)` convention ([[CodeResult.finalOutput]]) plus host [[SandboxTool]]s.
+  * [[dspy4s.core.runtime.DenoPyodideInterpreter]] is the canonical one.
   */
 trait ReplCodeInterpreter extends CodeInterpreter:
+  /** `execute(code, Map.empty)`: the code with no variables. */
+  override def execute(code: String): Either[DspyError, CodeResult] = execute(code, Map.empty)
+
   /** Like `execute(code)`, but first defines each of `variables` as a variable in the sandbox. */
   def execute(
       code     : String,
@@ -78,8 +84,8 @@ trait ReplInterpreterFactory:
 
 /** A host-side function callable BY NAME from inside a sandboxed interpreter (Python DSPy's
   * `PythonInterpreter(tools=...)`): sandboxed code calls `name(kwarg=...)`, the sandbox bridges the call back to the
-  * host, [[invoke]] runs, and its result returns into the sandbox. This is the seam RLM's `llm_query` /
-  * `llm_query_batched` use — sub-LM calls made from inside generated code.
+  * host, [[invoke]] runs, and its result returns into the sandbox. RLM's `llm_query` / `llm_query_batched` use this
+  * mechanism for the sub-LM calls of the generated code.
   *
   * @param name
   *   the Python identifier the sandbox exposes

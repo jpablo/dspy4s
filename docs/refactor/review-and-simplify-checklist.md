@@ -69,8 +69,8 @@ Simplify 6 (rank 3). Code-review 7 (rank 1). 6352 main lines, 4494 test lines.
 
 ### Passes
 
-- (a) The interpreters, about 2030 lines: `runtime/LocalPythonInterpreter.scala`, `runtime/DenoPyodideInterpreter.scala`, `runtime/DenoPyodideLaunch.scala`, `runtime/DenoPyodideProtocol.scala`, `runtime/DenoPyodideVariables.scala`, `runtime/SubprocessPythonInterpreter.scala`, `runtime/PythonNames.scala`, `contracts/CodeInterpreter.scala`.
-  - [ ] /simplify
+- (a) The interpreters, about 2030 lines: `runtime/LocalPythonInterpreter.scala`, `runtime/DenoPyodideInterpreter.scala`, `runtime/DenoPyodideLaunch.scala`, `runtime/DenoPyodideProtocol.scala`, `runtime/DenoPyodideVariables.scala`, `runtime/SubprocessPythonInterpreter.scala`, `runtime/PythonNames.scala`, `contracts/CodeInterpreter.scala`. The simplify pass added `runtime/InterpreterSupport.scala`.
+  - [x] /simplify
   - [ ] /code-review
 - (b) The context and the callbacks, about 1300 lines: `runtime/RuntimeEnvironment.scala`, `runtime/ContextPropagation.scala`, `runtime/CallbackDispatcher.scala`, `runtime/UsageScope.scala`, `runtime/StreamProgress.scala`, `runtime/ActivePredictContext.scala`, `contracts/RuntimeContext.scala`, `contracts/Callbacks.scala`.
   - [ ] /simplify
@@ -84,21 +84,30 @@ Simplify 6 (rank 3). Code-review 7 (rank 1). 6352 main lines, 4494 test lines.
 
 ### Simplify findings
 
-- [ ] `runtime/LocalPythonInterpreter.scala:573`, `:703`, and `runtime/DenoPyodideLaunch.scala:145`: three copies of the code that kills a process and its descendants.
-- [ ] `runtime/LocalPythonInterpreter.scala:647-701` and `runtime/DenoPyodideLaunch.scala:126-143`: two copies of the probe with a temp file and a time limit.
-- [ ] `runtime/DenoPyodideProtocol.scala:113-124`: `field`, `asString`, and `asLong` only call DynamicValues. `isNull` is also at `runtime/LocalPythonInterpreter.scala:747`. LocalPython gets its JSON helpers from an object with a Deno name.
+- [x] Three copies of the code that kills a process and its descendants, in LocalPython and in the Deno launcher. Fixed: `InterpreterSupport.killTree`.
+- [x] Two copies of the probe with a temp file and a time limit, in LocalPython and in the Deno launcher. Fixed: `InterpreterSupport.probe`.
+- [x] `runtime/DenoPyodideProtocol.scala`: `field`, `asString`, and `asLong` only called DynamicValues, and `isNull` had two copies. LocalPython got its JSON helpers from an object with a Deno name. Fixed: `DynamicValues.encodeJson` and `DynamicValues.isNull`, and the protocol object keeps only the JSON-RPC code.
 - [ ] `contracts/RuntimeContext.scala:96`, `:134`, `:193`: a compatibility surface (a flat `apply`, `copy`, and 16 accessors).
 - [ ] `contracts/SignatureLayoutStateCodec.scala` and `Constraint.dumpState`/`fromState` are hand-written codecs that only tests call. The number read occurs three times: `DynamicValues.asLong`, `decisions/Decisions.scala:683`, and `contracts/Constraint.scala:106`.
 - [ ] Five copies of the ThreadLocal set-and-restore pattern: `runtime/UsageScope.scala:65`, `decisions/DecisionEvidenceLog.scala:54`, `runtime/StreamProgress.scala:29`, `runtime/ActivePredictContext.scala:49`, `runtime/CallbackDispatcher.scala:134`.
 - [ ] `runtime/RuntimeEnvironment.scala:336` does not use its own `warn`.
 
+Findings of the group (a) simplify pass that the pass did not fix:
+
+- [ ] LocalPython and Deno each have their own line transport (the process, the reader, the time limit) and their own session state machine. A shared `LineProcess` and `InterpreterSession` can replace them. Skipped: it is a design change, and it changes how Deno reads its output. Look at it with the Deno hang findings in the group (a) code review.
+- [ ] Efficiency, skipped because each fix adds more code than it removes:
+  - Deno copies and JSON-escapes the cached variable prelude again on each `execute`. A cache of the escaped prelude can remove this work.
+  - LocalPython has no cache for the variables, so each `execute` encodes them again.
+  - Deno computes the canonical paths again on each startup and on each file sync, and it runs its two Deno probes one after the other.
+- [ ] `runtime/DenoPyodideVariables.scala:10` accepts ASCII names only, but `PythonNames.isBindable` accepts Unicode names, as upstream `str.isidentifier` does. Skipped: a change of behavior.
+
 ### Code-review findings
 
-- [ ] `runtime/DenoPyodideInterpreter.scala:263`, `:560`: nothing reads the stderr pipe until a failure. More than about 64 KB of stderr can stop the sandbox forever. `readLine` (`:542`) has no time limit, so a `while True` in user code hangs `execute`.
-- [ ] `runtime/SubprocessPythonInterpreter.scala:96-97`: after a normal exit, `join()` has no limit. A child process that keeps stdout open hangs the call. `destroyForcibly` (`:88`) does not kill descendants. `InterruptedException` is not `NonFatal`, so it escapes and the Python process can stay alive.
+- [ ] `runtime/DenoPyodideInterpreter.scala:255`, `:538`: nothing reads the stderr pipe until a failure. More than about 64 KB of stderr can stop the sandbox forever. `readLine` (`:520`) has no time limit, so a `while True` in user code hangs `execute`.
+- [ ] `runtime/SubprocessPythonInterpreter.scala:95-96`: after a normal exit, `join()` has no limit. A child process that keeps stdout open hangs the call. `destroyForcibly` (`:87`) does not kill descendants. `InterruptedException` is not `NonFatal`, so it escapes and the Python process can stay alive.
 - [ ] `contracts/Constraint.scala:106-111`: `numberOf` ignores `BigDecimal`, but the JSON codec decodes decimals as `BigDecimal` (`decisions/Decisions.scala:680`). `SignatureLayout.fromJson` then drops `gt(0.5)` with no error. The tests use only whole numbers.
-- [ ] `runtime/LocalPythonInterpreter.scala:316-438`: no test covers the tool threads, the fatal rethrow, a timeout in a tool call, an interrupt, or `close` from another thread. The inbound queue is not cleared between calls, so a stray stdout line can become the reply of the next call.
-- [ ] `runtime/DenoPyodideInterpreter.scala:298` (`Files.createFile`) and `runtime/DenoPyodideLaunch.scala:198` (`runnerPath`) throw an exception and do not return a `Left`. A /tmp cleanup can remove `runnerPath`, and the code does not write it again. `spawn` (`:271`) reports each IOException as "Deno not found".
+- [ ] `runtime/LocalPythonInterpreter.scala:316-430`: no test covers the tool threads, the fatal rethrow, a timeout in a tool call, an interrupt, or `close` from another thread. The inbound queue is not cleared between calls, so a stray stdout line can become the reply of the next call.
+- [ ] `runtime/DenoPyodideInterpreter.scala:290` (`Files.createFile`) and `runtime/DenoPyodideLaunch.scala:171` (`runnerPath`) throw an exception and do not return a `Left`. A /tmp cleanup can remove `runnerPath`, and the code does not write it again. `spawn` (`:263`) reports each IOException as "Deno not found".
 
 ## signatures
 
@@ -147,7 +156,7 @@ Simplify 5 (rank 5). Code-review 5 (rank 8). 4966 main lines, 6422 test lines.
 
 ### Simplify findings
 
-- [ ] Private copies of the `string`, `sequence`, `record`, and `isNull` helpers: `providers/ResponsesWire.scala:445-498`, `runtime/DiskLmCache.scala:444-475`, `runtime/ProviderLanguageModel.scala:39`, `runtime/LmHistoryRecord.scala:125`.
+- [ ] Private copies of the `string`, `sequence`, `record`, and `isNull` helpers: `providers/ResponsesWire.scala:445-498`, `runtime/DiskLmCache.scala:444-475`, `runtime/ProviderLanguageModel.scala:39`, `runtime/LmHistoryRecord.scala:125`. Core now has `DynamicValues.isNull` and `DynamicValues.encodeJson`; `providers/DynamicJson.scala:59` also has an `isNull`.
 - [ ] `runtime/DiskLmCache.scala:16-151`, `:263-279`: a reader for the old Java-serialization cache format, about 150 lines.
 - [ ] `runtime/DiskLmCache.scala:370-475`: a hand-written JSON codec. A DTO with a derived Schema (JsonCodecDeriver) can replace it.
 - [ ] `runtime/ProviderLanguageModel.scala:75` writes a magic `mode` key, and `providers/OpenAiClient.scala:24-39`, `:103-113` read it and remove it. Pass the mode as a typed value.

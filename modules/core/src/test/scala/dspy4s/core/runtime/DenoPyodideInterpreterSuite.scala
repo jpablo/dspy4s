@@ -47,8 +47,8 @@ class DenoPyodideInterpreterSuite extends FunSuite:
       val output  = new String(process.getInputStream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8)
       if process.waitFor() != 0 then None
       else
-        DenoPyodideProtocol.decodeJson(output).collect { case record: DynamicValue.Record => record }
-          .flatMap(DenoPyodideProtocol.field(_, "denoDir")).flatMap(DenoPyodideProtocol.asString)
+        DenoPyodideProtocol.decodeRecord(output).flatMap(DynamicValues.recordGet(_, "denoDir"))
+          .flatMap(DynamicValues.asString)
     catch case NonFatal(_) => None
 
   test("executes code in the sandbox and captures stdout") {

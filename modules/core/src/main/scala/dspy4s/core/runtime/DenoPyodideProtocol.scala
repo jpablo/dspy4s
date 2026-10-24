@@ -1,11 +1,16 @@
 package dspy4s.core.runtime
 
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.DynamicValues.asLong
+import dspy4s.core.contracts.DynamicValues.asString
+import dspy4s.core.contracts.DynamicValues.encodeJson
+import dspy4s.core.contracts.DynamicValues.isNull
+import dspy4s.core.contracts.DynamicValues.recordGet as field
 import dspy4s.core.contracts.:=
-import zio.blocks.schema.{DynamicValue, Schema}
+import zio.blocks.schema.DynamicValue
 
-import java.nio.charset.StandardCharsets
 import java.security.SecureRandom
+import java.util.HexFormat
 
 /** JSON-RPC wire format shared by the Deno/Pyodide process and its Scala client. */
 private[runtime] object DenoPyodideProtocol:
@@ -23,11 +28,6 @@ private[runtime] object DenoPyodideProtocol:
     */
   def isApplicationError(code: Long): Boolean = code >= UnknownErrorCode && code <= -32000L
 
-  enum ExecuteOutcome:
-    case Output(text: String)
-    case Submitted(json: String)
-    case UserError(message: String)
-
   /** The class of a sandbox message that is not the response to a request (see [[outOfBand]]). */
   enum OutOfBand derives CanEqual:
     /** The message is a request or a response. The caller handles it. */
@@ -44,8 +44,7 @@ private[runtime] object DenoPyodideProtocol:
       */
     case ProtocolError(message: String)
 
-  private lazy val jsonCodec = Schema.dynamic.jsonCodec
-  private lazy val random    = new SecureRandom()
+  private lazy val random = new SecureRandom()
 
   /** A new request id: 32 lower-case hexadecimal characters from a secure random source (upstream
     * `secrets.token_hex(16)`). Sandboxed code can write a line to the output of the process. With a random id, the code
@@ -54,15 +53,14 @@ private[runtime] object DenoPyodideProtocol:
   def newRequestId(): String =
     val bytes = new Array[Byte](16)
     random.nextBytes(bytes)
-    bytes.map(byte => f"$byte%02x").mkString
+    HexFormat.of().formatHex(bytes)
 
-  def encodeJson(value: DynamicValue): String =
-    new String(jsonCodec.encode(value), StandardCharsets.UTF_8)
-
-  def decodeJson(line: String): Option[DynamicValue] =
+  /** The JSON object on one line of the process, or `None` for a line that is not a JSON object (for example a
+    * diagnostic line of Pyodide).
+    */
+  def decodeRecord(line: String): Option[DynamicValue.Record] =
     val trimmed = line.trim
-    if !trimmed.startsWith("{") then None
-    else jsonCodec.decode(trimmed.getBytes(StandardCharsets.UTF_8)).toOption
+    if trimmed.startsWith("{") then DynamicValues.parseJsonRecord(trimmed) else None
 
   def encodeRequest(method: String, params: DynamicValue.Record, id: String): String =
     encodeJson(DynamicValues.record("jsonrpc" := "2.0", "method" := method, "params" -> params, "id" := id))
@@ -73,18 +71,14 @@ private[runtime] object DenoPyodideProtocol:
     encodeJson(DynamicValues.recordFromEntries(entries))
 
   def encodeResult(id: DynamicValue, result: DynamicValue.Record): String =
-    encodeJson(DynamicValues.recordFromEntries(Vector[(String, DynamicValue)](
-      "jsonrpc" := "2.0",
-      "result"  -> result,
-      "id"      -> id
-    )))
+    encodeJson(DynamicValues.record("jsonrpc" := "2.0", "result" -> result, "id" -> id))
 
   def encodeError(id: DynamicValue, code: Int, message: String): String =
-    encodeJson(DynamicValues.recordFromEntries(Vector[(String, DynamicValue)](
+    encodeJson(DynamicValues.record(
       "jsonrpc" := "2.0",
       "error"   -> DynamicValues.record("code" := code, "message" := message),
       "id"      -> id
-    )))
+    ))
 
   /** Classify a message that no request waits for (upstream `_handle_out_of_band_message`). A notification has a
     * `method` and no `id` member. An error is out of band when its `id` is absent or null: the runner reports an
@@ -109,16 +103,3 @@ private[runtime] object DenoPyodideProtocol:
   def notificationMessage(msg: DynamicValue.Record): String =
     field(msg, "params").collect { case r: DynamicValue.Record => r }.flatMap(field(_, "message")).flatMap(asString)
       .getOrElse(encodeJson(msg))
-
-  private def isNull(dv: DynamicValue): Boolean =
-    dv match
-      case _: DynamicValue.Null.type => true
-      case _                         => false
-
-  def field(record: DynamicValue.Record, name: String): Option[DynamicValue] =
-    DynamicValues.recordGet(record, name)
-
-  def asString(dv: DynamicValue): Option[String] = DynamicValues.asString(dv)
-
-  /** Tolerant number extraction: the dynamic JSON codec may decode numbers as Int/Long/Double/BigDecimal. */
-  def asLong(dv: DynamicValue): Option[Long] = DynamicValues.asLong(dv)

@@ -4,15 +4,16 @@ import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.CodeInterpreterErrors
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.InterpreterOperation
 import dspy4s.core.contracts.RuntimeError
-import dspy4s.core.contracts.:=
 import zio.blocks.schema.DynamicValue
 
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.InputStream
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
+import scala.util.Using
 import scala.util.control.NonFatal
 
 /** Plain-`python3` [[CodeInterpreter]]: each `execute(code)` spawns a fresh `python3 -c "<code>"` subprocess, captures
@@ -27,9 +28,9 @@ import scala.util.control.NonFatal
   * For untrusted LM output, use [[DenoPyodideInterpreter]] (sandboxed via WASM, ports Python DSPy's `PythonInterpreter`
   * 1:1) or supply your own sandboxed [[CodeInterpreter]] implementation.
   *
-  * '''No REPL state across calls.''' Each `execute` is independent — variables defined in one call vanish before the
-  * next. [[DenoPyodideInterpreter]] provides a stateful alternative without a long-lived unrestricted `python3 -i`
-  * subprocess.
+  * '''No REPL state across calls.''' Each `execute` is independent: variables defined in one call vanish before the
+  * next. [[DenoPyodideInterpreter]] (sandboxed) and [[LocalPythonInterpreter]] (a persistent local subprocess, not
+  * sandboxed) keep the state from one call to the next.
   *
   * '''Callback events.''' Each `execute` call is an `Execute` interpreter scope (its `variables` input is empty), and
   * each `close` call is a `Shutdown` interpreter scope. There is no long-lived process, so there are no `Startup`
@@ -52,7 +53,7 @@ final class SubprocessPythonInterpreter(
   @volatile private var closed = false
 
   override def execute(code: String): Either[DspyError, CodeResult] =
-    val inputs = DynamicValues.record("code" := code, "variables" -> DynamicValue.Record.empty)
+    val inputs = InterpreterSupport.executeInputs(code, Map.empty)
     CallbackDispatcher.withInterpreter(interpreterName, InterpreterOperation.Execute, inputs)(run(code))
 
   override def close(): Unit =
@@ -63,12 +64,10 @@ final class SubprocessPythonInterpreter(
       }
 
   private def run(code: String): Either[DspyError, CodeResult] =
-    if closed then Left(RuntimeError(CodeInterpreterErrors.Interpreter, "Interpreter is closed"))
+    if closed then CodeInterpreterErrors.failure("Interpreter is closed")
     else
       try
-        val pb = new ProcessBuilder(pythonCommand, "-c", code)
-        pb.redirectErrorStream(false)
-        val process = pb.start()
+        val process = new ProcessBuilder(pythonCommand, "-c", code).start()
         process.getOutputStream.close() // we don't write to stdin
 
         val stdoutBuf = new ByteArrayOutputStream()
@@ -96,44 +95,24 @@ final class SubprocessPythonInterpreter(
           stdoutThread.join()
           stderrThread.join()
           Right(CodeResult(
-            stdout = stdoutBuf.toString("UTF-8"),
-            stderr = stderrBuf.toString("UTF-8"),
+            stdout = stdoutBuf.toString(StandardCharsets.UTF_8),
+            stderr = stderrBuf.toString(StandardCharsets.UTF_8),
             exitCode = process.exitValue()
           ))
       catch
-        case e: IOException => Left(RuntimeError(
-            CodeInterpreterErrors.Interpreter,
+        case e: IOException => CodeInterpreterErrors.failure(
             s"Failed to spawn '$pythonCommand': ${e.getMessage}. Is Python installed and on PATH?"
-          ))
-        case NonFatal(other) => Left(RuntimeError(
-            CodeInterpreterErrors.Interpreter,
-            Option(other.getMessage).getOrElse(other.getClass.getSimpleName)
-          ))
+          )
+        case NonFatal(other) =>
+          CodeInterpreterErrors.failure(Option(other.getMessage).getOrElse(other.getClass.getSimpleName))
 
-  /** Spawn a daemon pump thread that copies bytes from `in` into `out` until EOF. Returns immediately; caller
-    * `.join()`s when ready.
+  /** Start a daemon pump thread that copies the bytes of `in` to `out` until the end of the stream, then closes `in`.
+    * The call returns at once; the caller joins the thread when it needs the bytes.
     */
-  private def drainTo(in: java.io.InputStream, out: ByteArrayOutputStream, name: String): Thread =
-    val thread = new Thread(
-      () =>
-        val buf = new Array[Byte](4096)
-        try
-          var n = in.read(buf)
-          while n >= 0 do
-            out.write(buf, 0, n)
-            n = in.read(buf)
-        catch case NonFatal(_) => ()
-        finally
-          try in.close()
-          catch
-            case NonFatal(_) =>
-              ()
-      ,
-      name
-    )
-    thread.setDaemon(true)
-    thread.start()
-    thread
+  private def drainTo(in: InputStream, out: ByteArrayOutputStream, name: String): Thread =
+    InterpreterSupport.startDaemon(name) {
+      val _ = Using(in)(_.transferTo(out))
+    }
 
 object SubprocessPythonInterpreter:
   /** Cheap "does `python3` exist on PATH?" probe. Useful for tests to skip when no interpreter is available.

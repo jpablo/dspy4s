@@ -1,15 +1,21 @@
 package dspy4s.core.runtime
 
-import dspy4s.core.contracts.CodeInterpreterErrors
+import dspy4s.core.contracts.CodeInterpreterErrors.failure
 import dspy4s.core.contracts.ReplCodeInterpreter
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.DynamicValues.asLong
+import dspy4s.core.contracts.DynamicValues.asString
+import dspy4s.core.contracts.DynamicValues.encodeJson
+import dspy4s.core.contracts.DynamicValues.recordGet as field
 import dspy4s.core.contracts.InterpreterOperation
-import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SandboxOutputField
 import dspy4s.core.contracts.SandboxTool
 import dspy4s.core.contracts.:=
+import dspy4s.core.runtime.InterpreterSupport.exitedIn
+import dspy4s.core.runtime.InterpreterSupport.nameAndType
+import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.PrimitiveValue
 
@@ -20,12 +26,12 @@ import java.io.OutputStreamWriter
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Paths
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
+import scala.annotation.tailrec
 import scala.util.control.NonFatal
 
-/** Sandboxed [[CodeInterpreter]]: Python via Pyodide (WASM) inside a Deno subprocess — a port of Python DSPy's
+/** Sandboxed [[CodeInterpreter]]: Python via Pyodide (WASM) inside a Deno subprocess. It is a port of Python DSPy's
   * `PythonInterpreter` (`dspy/primitives/python_interpreter.py`). The sandbox side is upstream's `runner.js`, vendored
   * as a resource with three changed comment lines (`dspy4s/core/runtime/runner.js`, MIT, adapted by upstream from Simon
   * Willison's Pyodide-in-Deno TIL); this class is the JSON-RPC 2.0 client speaking to it over the subprocess's
@@ -37,12 +43,12 @@ import scala.util.control.NonFatal
   *   - '''Stateful REPL''': globals persist across [[execute]] calls (one long-lived Pyodide instance).
   *   - '''Variable injection''': `execute(code, variables)` defines host values as Python variables first.
   *   - '''Host tools''': [[SandboxTool]]s are callable BY NAME from sandboxed code; the call bridges back to the host
-  *     mid-execution (the seam RLM's `llm_query` uses).
+  *     mid-execution (RLM's `llm_query` uses this mechanism).
   *   - '''SUBMIT''': sandboxed code calls `SUBMIT(field=value, ...)` to terminate with a structured result, surfaced as
   *     [[CodeResult.finalOutput]] (the submitted object as JSON).
   *
   * Error split (per [[CodeInterpreterErrors]]): user-code errors (`NameError`, `SyntaxError`, …) come back as a
-  * `Right(CodeResult)` with `exitCode = 1` and the message in `stderr` — the interpreter stays usable. A
+  * `Right(CodeResult)` with `exitCode = 1` and the message in `stderr`. The interpreter stays usable. A
   * `Left(RuntimeError)` means the interpreter ITSELF failed (Deno missing, process died, protocol breakdown).
   *
   * ==The session==
@@ -55,7 +61,7 @@ import scala.util.control.NonFatal
   *
   * ==Deltas from Python==
   *   - Variables are injected uniformly as `name = json.loads("<json>")` rather than upstream's Python-literal
-  *     assignments + a >100MB file path — same semantics (JSON-compatible values), one mechanism.
+  *     assignments + a >100MB file path. The semantics are the same (JSON-compatible values), with one mechanism.
   *   - Not thread-safe: one [[execute]] runs at a time. A call from a different thread while a call is in progress
   *     gives a `Left`, and so does a tool that calls [[execute]] on its interpreter. Upstream binds an interpreter to
   *     the thread of its first call until `shutdown`. dspy4s permits calls from different threads when they do not
@@ -120,11 +126,9 @@ final class DenoPyodideInterpreter(
   private var lastDiagnostic: Option[String] = None
   // Single-entry, identity-keyed cache of the variable-assignment prelude. The prelude depends only on the
   // `variables` map, and RLM's iteration loop passes the SAME immutable map on every execute while the values can
-  // be an entire long context -- caching makes the serialization once per map instance instead of once per call.
+  // be an entire long context. With the cache, the serialization runs once per map instance instead of once per call.
   // The prelude is still prepended to (and re-run with) every code block, so re-assignment semantics are unchanged.
   private var cachedPrelude: Option[(Map[String, DynamicValue], String)] = None
-
-  override def execute(code: String): Either[DspyError, CodeResult] = execute(code, Map.empty)
 
   /** Like [[execute]], but first defines each of `variables` as a Python variable in the sandbox (JSON-compatible
     * values only). Variable names must be plain Python identifiers (and not `json`, which the injection uses).
@@ -135,8 +139,7 @@ final class DenoPyodideInterpreter(
     * continues. A call from a different thread while a call is in progress gets a `Left` too.
     */
   override def execute(code: String, variables: Map[String, DynamicValue]): Either[DspyError, CodeResult] =
-    val inputs =
-      DynamicValues.record("code" := code, "variables" -> DynamicValues.recordFromEntries(variables.toVector))
+    val inputs = InterpreterSupport.executeInputs(code, variables)
     CallbackDispatcher.withInterpreter(interpreterName, InterpreterOperation.Execute, inputs) {
       if executeLock.isHeldByCurrentThread then
         failure("DenoPyodideInterpreter cannot execute recursively from one of its tools.")
@@ -178,9 +181,6 @@ final class DenoPyodideInterpreter(
 
   // ── Session lifecycle ───────────────────────────────────────────────────────────────────────────────────────
 
-  private def failure[A](message: String): Either[DspyError, A] =
-    Left(RuntimeError(CodeInterpreterErrors.Interpreter, message))
-
   /** End the session and give the failure (upstream `_raise_terminal_error`). The process or the protocol failed, so
     * the REPL state is lost or not known.
     */
@@ -213,14 +213,6 @@ final class DenoPyodideInterpreter(
     else running.process.destroy()
     if !exitedIn(running.process, StopTimeoutMillis) then
       val _ = running.process.destroyForcibly()
-
-  /** `Process.waitFor` with a time limit. An interrupt gives `false`, and the thread keeps its interrupt state. */
-  private def exitedIn(process: Process, millis: Long): Boolean =
-    try process.waitFor(millis, TimeUnit.MILLISECONDS)
-    catch
-      case _: InterruptedException =>
-        Thread.currentThread().interrupt()
-        false
 
   // ── Process lifecycle ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -276,7 +268,7 @@ final class DenoPyodideInterpreter(
   private def healthCheck(): Either[DspyError, Unit] =
     sendRequest("execute", DynamicValues.record("code" := "print(1+1)")).flatMap { result =>
       if field(result, "output").flatMap(asString).exists(_.trim == "2") then Right(())
-      else terminal(s"Sandbox health check failed: ${encodeJson(result).take(200)}")
+      else terminal(s"Sandbox health check failed: ${snippet(encodeJson(result))}")
     }
 
   // ── Setup requests (mounts, tool/output registration) ──────────────────────────────────────────────────────
@@ -307,21 +299,13 @@ final class DenoPyodideInterpreter(
       val toolsInfo = tools.map { tool =>
         DynamicValues.record(
           "name"       := tool.name,
-          "parameters" -> DynamicValue.Sequence(zio.blocks.chunk.Chunk.from(tool.parameters.map { p =>
-            val fields = Vector("name" := p.name) ++ p.pythonType.map(t => "type" := t).toVector
-            DynamicValues.recordFromEntries(fields): DynamicValue
-          }))
-        )
+          "parameters" -> DynamicValue.Sequence(Chunk.from(tool.parameters.map(p => nameAndType(p.name, p.pythonType))))
+        ): DynamicValue
       }
-      val outputsInfo = outputFields.map { f =>
-        val fields = Vector("name" := f.name) ++ f.pythonType.map(t => "type" := t).toVector
-        DynamicValues.recordFromEntries(fields): DynamicValue
-      }
-      val entries = Vector.newBuilder[(String, DynamicValue)]
-      if tools.nonEmpty then entries += ("tools" -> DynamicValue.Sequence(zio.blocks.chunk.Chunk.from(toolsInfo)))
-      if outputFields.nonEmpty then
-        entries += ("outputs" -> DynamicValue.Sequence(zio.blocks.chunk.Chunk.from(outputsInfo)))
-      sendRequest("register", DynamicValues.recordFromEntries(entries.result())).map { _ =>
+      val outputsInfo = outputFields.map(f => nameAndType(f.name, f.pythonType))
+      val entries     = Option.when(tools.nonEmpty)("tools" -> DynamicValue.Sequence(Chunk.from(toolsInfo))).toVector ++
+        Option.when(outputFields.nonEmpty)("outputs" -> DynamicValue.Sequence(Chunk.from(outputsInfo))).toVector
+      sendRequest("register", DynamicValues.recordFromEntries(entries)).map { _ =>
         toolsRegistered = true
       }
 
@@ -330,14 +314,13 @@ final class DenoPyodideInterpreter(
   private def executeRequest(code: String): Either[DspyError, CodeResult] =
     val id = nextRequestId()
     for
-      _       <- writeLine(encodeRequest("execute", DynamicValues.record("code" := code), id))
-      outcome <- readLoop(id)
-      _       <- syncWriteFiles()
-    yield outcome match
-      case ExecuteOutcome.Output(text)    => CodeResult(stdout = text, stderr = "", exitCode = 0)
-      case ExecuteOutcome.Submitted(json) =>
-        CodeResult(stdout = "", stderr = "", exitCode = 0, finalOutput = Some(json))
-      case ExecuteOutcome.UserError(message) => CodeResult(stdout = "", stderr = message, exitCode = 1)
+      _      <- writeLine(encodeRequest("execute", DynamicValues.record("code" := code), id))
+      result <- nextMessage(serveTools = true).flatMap {
+                  case Some((msg, line)) => executeOutcome(msg, id, line)
+                  case None              => terminal(s"Too many skipped lines from sandbox (> $MaxSkippedLines)")
+                }
+      _ <- syncWriteFiles()
+    yield result
 
   /** A new random id for a request (upstream `_next_request_id`). The diagnostic of the request before it is no longer
     * current.
@@ -346,29 +329,34 @@ final class DenoPyodideInterpreter(
     lastDiagnostic = None
     newRequestId()
 
-  /** Read JSON-RPC lines until the response for `expectedId` arrives, servicing `tool_call` requests from the sandbox
-    * along the way. Non-JSON noise (Pyodide package-loading messages) and out-of-band messages are skipped. Each
-    * skipped line counts against one `MaxSkippedLines` bound per request, so a flood cannot block the read forever. A
-    * tool call does not count.
+  /** Read JSON-RPC lines until a message arrives that is not out of band: the response to a request, or a request of
+    * the sandbox. With `serveTools`, the reader serves each `tool_call` request along the way. Non-JSON noise (Pyodide
+    * package-loading messages) and out-of-band messages are skipped. Each skipped line counts against one
+    * `MaxSkippedLines` bound per request, so a flood cannot block the read forever. A tool call does not count. `None`
+    * when the bound is exceeded.
     */
-  private def readLoop(expectedId: String): Either[DspyError, ExecuteOutcome] =
-    var skipped = 0
-    while skipped <= MaxSkippedLines do
+  @tailrec
+  private def nextMessage(
+      serveTools: Boolean,
+      skipped   : Int = 0
+  ): Either[DspyError, Option[(DynamicValue.Record, String)]] =
+    if skipped > MaxSkippedLines then Right(None)
+    else
       readLine() match
-        case Left(err)   => return Left(err)
-        case Right(line) => decodeJson(line) match
-            case Some(msg: DynamicValue.Record) =>
-              if field(msg, "method").flatMap(asString).contains("tool_call") then
-                handleToolCall(msg) match
-                  case Left(err) => return Left(err)
-                  case Right(()) => ()
-              else
-                skipOutOfBand(msg) match
-                  case Left(err)    => return Left(err)
-                  case Right(true)  => skipped += 1
-                  case Right(false) => return executeOutcome(msg, expectedId, line)
-            case _ => skipped += 1
-    terminal(s"Too many skipped lines from sandbox (> $MaxSkippedLines)")
+        case Left(err)   => Left(err)
+        case Right(line) => decodeRecord(line) match
+            case None                                       => nextMessage(serveTools, skipped + 1)
+            case Some(msg) if serveTools && isToolCall(msg) =>
+              handleToolCall(msg) match
+                case Left(err) => Left(err)
+                case Right(()) => nextMessage(serveTools, skipped)
+            case Some(msg) => skipOutOfBand(msg) match
+                case Left(err)    => Left(err)
+                case Right(true)  => nextMessage(serveTools, skipped + 1)
+                case Right(false) => Right(Some((msg, line)))
+
+  private def isToolCall(msg: DynamicValue.Record): Boolean =
+    field(msg, "method").flatMap(asString).contains("tool_call")
 
   /** Decode the response to the execute request `expectedId`. `msg` is not a tool call and is not out of band. A
     * response with a different id is a protocol breakdown, and so is a result or an error that is not an object.
@@ -377,35 +365,38 @@ final class DenoPyodideInterpreter(
       msg       : DynamicValue.Record,
       expectedId: String,
       line      : String
-  ): Either[DspyError, ExecuteOutcome] =
+  ): Either[DspyError, CodeResult] =
     field(msg, "method").flatMap(asString) match
       case Some(other) => terminal(s"Unexpected sandbox request: $other")
       case None        => (field(msg, "result"), field(msg, "error")) match
-          case (None, None)                           => terminal(s"Unexpected sandbox message: ${line.take(200)}")
+          case (None, None)                           => terminal(s"Unexpected sandbox message: ${snippet(line)}")
           case _ if !hasId(msg, expectedId)           => terminal(idMismatch(msg, expectedId))
           case (Some(result: DynamicValue.Record), _) => field(result, "final") match
-              case Some(finalValue) => Right(ExecuteOutcome.Submitted(encodeJson(finalValue)))
-              case None             => Right(ExecuteOutcome.Output(field(result, "output").flatMap(asString).getOrElse("")))
-          case (Some(_), _)                             => terminal(s"Malformed execution result: ${line.take(200)}")
+              case Some(finalValue) =>
+                Right(CodeResult(stdout = "", stderr = "", exitCode = 0, finalOutput = Some(encodeJson(finalValue))))
+              case None =>
+                val output = field(result, "output").flatMap(asString).getOrElse("")
+                Right(CodeResult(stdout = output, stderr = "", exitCode = 0))
+          case (Some(_), _)                             => terminal(s"Malformed execution result: ${snippet(line)}")
           case (None, Some(error: DynamicValue.Record)) => executionError(error, line)
-          case (None, Some(_))                          => terminal(s"Malformed execution error: ${line.take(200)}")
+          case (None, Some(_))                          => terminal(s"Malformed execution error: ${snippet(line)}")
 
   /** Decode an error response to the execute request. A code in the application range is a USER-CODE error: the
     * message/args carry the Python exception. Each other code is a failure of the sandbox, so the session ends. An
     * error without a code gets the code for an unknown application error, as upstream.
     */
-  private def executionError(error: DynamicValue.Record, line: String): Either[DspyError, ExecuteOutcome] =
+  private def executionError(error: DynamicValue.Record, line: String): Either[DspyError, CodeResult] =
     val data = field(error, "data") match
       case None                              => Right(DynamicValue.Record.empty)
       case Some(record: DynamicValue.Record) => Right(record)
-      case Some(_)                           => terminal(s"Malformed execution error data: ${line.take(200)}")
+      case Some(_)                           => terminal(s"Malformed execution error data: ${snippet(line)}")
     data.flatMap { record =>
       val errType = field(record, "type").flatMap(asString).getOrElse("Error")
       val args    = field(record, "args").map(DynamicValues.renderText)
       val message = field(error, "message").flatMap(asString).filter(_.nonEmpty)
       val text    = s"$errType: ${args.orElse(message).getOrElse("Unknown error")}"
       val code    = field(error, "code").fold(Option(UnknownErrorCode))(asLong)
-      if code.exists(isApplicationError) then Right(ExecuteOutcome.UserError(text))
+      if code.exists(isApplicationError) then Right(CodeResult(stdout = "", stderr = text, exitCode = 1))
       else terminal(s"Sandbox error: $text")
     }
 
@@ -432,10 +423,10 @@ final class DenoPyodideInterpreter(
         Right(true)
       case OutOfBand.ProtocolError(message) => terminal(s"Sandbox protocol error: $message")
 
-  /** Service one `tool_call` request: invoke the host tool and reply with its result (or an app error). The request
-    * `id` is echoed VERBATIM — the sandbox uses string ids (`"tc_…"`) for tool calls. A tool that throws also gets an
-    * error reply (upstream `_handle_tool_call`): the sandbox waits for a reply to each tool call, so an exception that
-    * leaves `execute` here blocks the session.
+  /** Service one `tool_call` request: invoke the host tool and reply with its result (or an app error). The reply
+    * echoes the request `id` VERBATIM, because the sandbox uses string ids (`"tc_…"`) for tool calls. A tool that
+    * throws also gets an error reply (upstream `_handle_tool_call`): the sandbox waits for a reply to each tool call,
+    * so an exception that leaves `execute` here blocks the session.
     *
     * Each tool call is a `ToolCall` interpreter scope (upstream `invoke_tool`), also for an unknown tool. The inputs
     * are `tool` and `args`, and the output is the tool result.
@@ -451,14 +442,9 @@ final class DenoPyodideInterpreter(
     // a ToolStart/ToolEnd scope, inside the `ToolCall` interpreter scope. handleToolCall runs on the thread that
     // called `execute`, so the events land on (and nest under) the `Execute` scope. The dispatcher emits the end
     // events before it rethrows a tool exception, so the catch stays outside the scopes.
-    val toolInputs = DynamicValues.record("tool" := name, "args" -> kwargs)
-    val reply      =
+    val reply =
       try
-        CallbackDispatcher.withInterpreter[DynamicValue](interpreterName, InterpreterOperation.ToolCall, toolInputs) {
-          tools.find(_.name == name) match
-            case None       => failure(s"Unknown tool: $name")
-            case Some(tool) => CallbackDispatcher.withTool(toolName = name, args = kwargs)(tool.invoke(kwargs))
-        } match
+        InterpreterSupport.invokeTool(interpreterName, tools, name, kwargs, Right(kwargs)) match
           case Left(err)                                               => encodeError(callId, ToolErrorCode, err.message)
           case Right(DynamicValue.Primitive(PrimitiveValue.String(s))) =>
             encodeResult(callId, DynamicValues.record("value" := s, "type" := "string"))
@@ -481,25 +467,17 @@ final class DenoPyodideInterpreter(
       }
 
   /** Send a setup request (mount/register/health check) and wait for its response, skipping noise. Tool calls cannot
-    * occur during setup, so a plain matching-id read suffices. Each skipped line counts against `MaxSkippedLines`, as
-    * in [[readLoop]].
+    * occur during setup, so a plain matching-id read suffices.
     */
   private def sendRequest(method: String, params: DynamicValue.Record): Either[DspyError, DynamicValue.Record] =
     val id = nextRequestId()
-    writeLine(encodeRequest(method, params, id)).flatMap(_ => readSetupResponse(method, id))
-
-  private def readSetupResponse(method: String, id: String): Either[DspyError, DynamicValue.Record] =
-    var skipped = 0
-    while skipped <= MaxSkippedLines do
-      readLine() match
-        case Left(err)   => return Left(err)
-        case Right(line) => decodeJson(line) match
-            case Some(msg: DynamicValue.Record) => skipOutOfBand(msg) match
-                case Left(err)    => return Left(err)
-                case Right(true)  => skipped += 1
-                case Right(false) => return setupOutcome(msg, method, id, line)
-            case _ => skipped += 1
-    terminal(s"No response to '$method'")
+    for
+      _      <- writeLine(encodeRequest(method, params, id))
+      result <- nextMessage(serveTools = false).flatMap {
+                  case Some((msg, line)) => setupOutcome(msg, method, id, line)
+                  case None              => terminal(s"No response to '$method'")
+                }
+    yield result
 
   /** Decode the response to the setup request `id` (upstream `_send_request`). `msg` is not out of band. Each response
     * that is not a result with the expected id ends the session: the state of the sandbox is not known after it.
@@ -516,10 +494,10 @@ final class DenoPyodideInterpreter(
         case Some(error: DynamicValue.Record) =>
           val message = field(error, "message").flatMap(asString).filter(_.nonEmpty).getOrElse(encodeJson(error))
           terminal(s"Sandbox '$method' failed: ${message.take(DiagnosticLength)}")
-        case Some(_) => terminal(s"Malformed error response to '$method': ${line.take(200)}")
+        case Some(_) => terminal(s"Malformed error response to '$method': ${snippet(line)}")
         case None    => field(msg, "result") match
             case Some(result: DynamicValue.Record) => Right(result)
-            case _                                 => terminal(s"Unexpected response to '$method': ${line.take(200)}")
+            case _                                 => terminal(s"Unexpected response to '$method': ${snippet(line)}")
 
   // ── Low-level IO ────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -575,6 +553,11 @@ private object DenoPyodideInterpreter:
 
   /** The length limit for text from the sandbox in a failure message. */
   private val DiagnosticLength = 500
+
+  /** The length limit for a sandbox line or a result in a protocol failure message. */
+  private val SnippetLength = 200
+
+  private def snippet(text: String): String = text.take(SnippetLength)
 
   /** The life of one sandbox session. A session goes from `NotStarted` to `Running` to `Ended`, or from `NotStarted` to
     * `Ended`. It does not go back.

@@ -85,6 +85,15 @@ object DynamicValues:
       case Right(record: DynamicValue.Record) => Some(record)
       case _                                  => None
 
+  /** The compact JSON text of `value`, from the dynamic JSON codec of zio-blocks. */
+  def encodeJson(value: DynamicValue): String = dynamicJsonCodec.encodeToString(value)
+
+  /** True for the JSON `null`. */
+  def isNull(dv: DynamicValue): Boolean =
+    dv match
+      case _: DynamicValue.Null.type => true
+      case _                         => false
+
   /** Project a `String` primitive; `None` for anything else. */
   def asString(dv: DynamicValue): Option[String] =
     dv match

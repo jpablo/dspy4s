@@ -52,4 +52,7 @@ private[dspy4s] object PythonNames:
     (Character.isLetter(codePoints(0)) || codePoints(0) == Underscore) &&
     codePoints.iterator.drop(1).forall(c => Character.isLetterOrDigit(c) || c == Underscore)
 
+  /** True when Python code can bind `name`: an identifier that is not a keyword. */
+  def isBindable(name: String): Boolean = isIdentifier(name) && !Keywords.contains(name)
+
   private val Underscore: Int = '_'.toInt

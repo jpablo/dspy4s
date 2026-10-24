@@ -353,7 +353,7 @@ object RLM:
     require(duplicates.isEmpty, s"Duplicate tool name '${duplicates.head}'")
     toolNames.foreach { name =>
       require(
-        PythonNames.isIdentifier(name) && !PythonNames.Keywords.contains(name),
+        PythonNames.isBindable(name),
         s"Invalid tool name '$name': must be a valid Python identifier and not a keyword"
       )
       require(!isReservedSandboxName(name), s"Tool name '$name' conflicts with a built-in sandbox function")
