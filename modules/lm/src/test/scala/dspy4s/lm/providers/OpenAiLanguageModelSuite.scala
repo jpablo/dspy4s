@@ -284,7 +284,7 @@ class OpenAiLanguageModelSuite extends FunSuite:
     assertEquals(get(transport.lastBody, "reasoning_effort"), None)
   }
 
-  test("a model in the text mode sends a prompt to the chat endpoint, and reads the text of the reply") {
+  test("a model in the text mode sends a prompt to the completions endpoint, and reads the text of the reply") {
     val (model, transport) = recordingModel("""{"text": " A line. "}""", mode = LmMode.Text)
     given RuntimeContext   = RuntimeEnvironment.current
     val request            = LmRequest(
@@ -295,7 +295,7 @@ class OpenAiLanguageModelSuite extends FunSuite:
       )
     )
     assertEquals(model.call(request).map(_.outputs.map(_.text)), Right(Vector("A line.")))
-    assertEquals(transport.sent.map(_._1).toVector, Vector("https://api.test/v1/chat/completions"))
+    assertEquals(transport.sent.map(_._1).toVector, Vector("https://api.test/v1/completions"))
     assertEquals(get(transport.lastBody, "prompt"), Some(json("\"Line one\\nLine two\"")))
     assertEquals(get(transport.lastBody, "messages"), None)
   }
@@ -353,7 +353,7 @@ class OpenAiLanguageModelSuite extends FunSuite:
       (LmMode.Chat, LmMode.Responses, chatReply, "/chat/completions", "messages", "From chat."),
       (LmMode.Chat, LmMode.Text, chatReply, "/chat/completions", "messages", "From chat."),
       (LmMode.Responses, LmMode.Chat, responsesReply, "/responses", "input", "From responses."),
-      (LmMode.Text, LmMode.Chat, chatReply, "/chat/completions", "prompt", "From chat.")
+      (LmMode.Text, LmMode.Chat, chatReply, "/completions", "prompt", "From chat.")
     )
     given RuntimeContext = RuntimeEnvironment.current
     cases.foreach { (modelMode, requestMode, reply, endpoint, key, text) =>

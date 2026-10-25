@@ -5,8 +5,9 @@ package dspy4s.lm.providers
   * code.
   *
   * The records of this package ([[OpenAiUsage]], [[OpenAiStreamChunk]]) get their keys from the field names of their
-  * `Schema`, with a name mapper. Thus their keys are not here. Only the keys that the code reads or writes by hand are
-  * here.
+  * `Schema`, with a name mapper. Thus their keys are not here. The reader of a usage record
+  * ([[OpenAiUsage.fromDynamic]]) has the usage keys next to it. Only the other keys that the code reads or writes by
+  * hand are here.
   */
 private[lm] object WireKeys:
   // The request body.

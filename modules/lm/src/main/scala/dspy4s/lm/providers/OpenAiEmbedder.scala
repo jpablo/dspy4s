@@ -60,15 +60,23 @@ object OpenAiEmbedder:
   /** The rows of the reply `body`, in the order of their `index`: the reply can give the rows in another order. A reply
     * that the codec cannot read, for example one with a row with no `index` or with an `embedding` that is not an array
     * of numbers, is a `ParseError` with the error of the codec. A reply with a count of rows other than `expected` is a
-    * `ParseError` too.
+    * `ParseError` too. So is a reply whose indexes are not exactly 0 to `expected - 1`, for example with a duplicate
+    * index: such a reply cannot give one row for each text.
     */
   private def rows(body: String, expected: Int): Either[DspyError, Vector[Vector[Float]]] =
     replyCodec.decode(body) match
       case Left(error)  => Left(ParseError("openai_embeddings", s"Invalid embeddings reply: ${error.message.take(200)}"))
       case Right(reply) =>
-        val rows = reply.data.sortBy(_.index).map(_.embedding)
-        if rows.size == expected then Right(rows)
-        else Left(ParseError("openai_embeddings", s"Expected $expected embedding rows, got ${rows.size}"))
+        val sorted  = reply.data.sortBy(_.index)
+        val indexes = sorted.map(_.index)
+        if sorted.size != expected then
+          Left(ParseError("openai_embeddings", s"Expected $expected embedding rows, got ${sorted.size}"))
+        else if indexes != Vector.range(0, expected) then
+          Left(ParseError(
+            "openai_embeddings",
+            s"Expected the embedding indexes 0 to ${expected - 1}, got ${indexes.mkString(", ")}"
+          ))
+        else Right(sorted.map(_.embedding))
 
   /** An embedder with the API key from the environment variable `envVar` (by default `OPENAI_API_KEY`), as
     * [[OpenAiLanguageModel.fromEnv]]. `baseUrl` selects the OpenAI-compatible server. An `envVar` that is absent or

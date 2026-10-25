@@ -105,8 +105,8 @@ final case class TypeSafeModel(
     transport.sendJson(endpoint, headers, body)
       .left.map(OpenAiErrors.withRequestDetails(_, Some(request.model), TypeSafeModel.Provider))
 
-  /** The base URL with no slash at its end (upstream `base_url.rstrip("/")`). */
-  private val root: String = baseUrl.reverse.dropWhile(_ == '/').reverse
+  /** The base URL with no slash at its end ([[BaseUrl.root]]). */
+  private val root: String = BaseUrl.root(baseUrl)
 
   /** The URL of the System One API. */
   private val endpoint: String = s"$root/v1/systemone"

@@ -17,6 +17,7 @@ import java.net.http.HttpTimeoutException
 import java.net.http.HttpResponse as JHttpResponse
 import java.nio.ByteBuffer
 import java.time.Duration
+import java.util.Locale
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.BlockingQueue
 import java.util.concurrent.CompletableFuture
@@ -37,6 +38,11 @@ import scala.util.control.NonFatal
   * connection. The read limit bounds the wait for the status and the headers, then each wait for the next part of the
   * body of [[sendJson]], and each wait for the next line of a stream (see [[HttpTimeouts]] and
   * [[HttpStreamResponse.failure]]).
+  *
+  * An interrupt of the thread during a wait does not throw. Before the headers, [[sendJson]] and [[streamSse]] give a
+  * `Left` with an [[dspy4s.core.contracts.LmUnexpectedError]]. During the body of [[sendJson]], the result is the same
+  * `Left`. During a stream, the lines end, and [[HttpStreamResponse.failure]] is that error. In each case the interrupt
+  * status of the thread stays set.
   */
 final class JdkHttpTransport(timeouts: HttpTimeouts) extends HttpTransport:
   import JdkHttpTransport.failure
@@ -129,13 +135,20 @@ final class JdkHttpTransport(timeouts: HttpTimeouts) extends HttpTransport:
 
   private def flattenHeaders(response: JHttpResponse[?]): Map[String, String] =
     response.headers().map().entrySet().iterator().asScala.map { entry =>
-      entry.getKey.toLowerCase -> entry.getValue.asScala.mkString(", ")
+      entry.getKey.toLowerCase(Locale.ROOT) -> entry.getValue.asScala.mkString(", ")
     }.toMap
 
-  /** `thunk`, with a non-fatal exception as the `Left` of [[JdkHttpTransport.failure]]. */
+  /** `thunk`, with a non-fatal exception as the `Left` of [[JdkHttpTransport.failure]]. An interrupt of the thread
+    * during the wait for the status and the headers is an [[dspy4s.core.contracts.LmUnexpectedError]], and the
+    * interrupt status of the thread stays set.
+    */
   private def runWithErrorMap[A](thunk: => A): Either[DspyError, A] =
     try Right(thunk)
-    catch case NonFatal(error) => Left(failure(error))
+    catch
+      case _: InterruptedException =>
+        Thread.currentThread().interrupt()
+        Left(LmUnexpectedError("The thread got an interrupt during the wait for the status and the headers"))
+      case NonFatal(error) => Left(failure(error))
 
 object JdkHttpTransport:
 

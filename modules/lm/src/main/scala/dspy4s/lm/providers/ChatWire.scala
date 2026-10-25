@@ -14,9 +14,9 @@ import zio.blocks.schema.DynamicValue
 
 import java.util.Locale
 
-/** The wire of the OpenAI chat-completions API: the body of a request in the chat mode and in the text mode, and the
-  * outputs of a reply. [[OpenAiLanguageModel]] uses this wire in these two modes, and [[ResponsesWire]] in the
-  * Responses mode.
+/** The wire of the OpenAI chat-completions API and of the completions API: the body of a request in the chat mode and
+  * in the text mode, and the outputs of a reply. [[OpenAiLanguageModel]] uses this wire in these two modes, and
+  * [[ResponsesWire]] in the Responses mode.
   */
 private[lm] object ChatWire:
   import DynamicValues.{asRecord, asSequence, asString, recordFromEntries, recordGet, sequence, string}
@@ -37,7 +37,8 @@ private[lm] object ChatWire:
       .updated(WireKeys.messages, sequence(request.messages.map(encodeMessage)))
 
   /** The body of `request` in the text mode: the option bag and the model as in [[request]], and the prompt. The prompt
-    * is the text of each message ([[messageText]]), one line for each message.
+    * is the text of each message ([[messageText]]), one line for each message. The body goes to the completions
+    * endpoint ([[OpenAiClient.completionsEndpoint]]), not to the chat endpoint.
     */
   def textRequest(
       request       : LmRequest,
@@ -114,8 +115,17 @@ private[lm] object ChatWire:
   /** The outputs of a chat reply: one output for each choice that has text or tool calls. A function-calling reply
     * usually has `content: null` and only a `tool_calls` array, so a choice with tool calls and no text gives an output
     * too. The metadata of an output has the keys of its choice other than `message` and `text`.
+    *
+    * A reply with an `error` object is the error of [[OpenAiErrors.fromReplyError]], also with a success status
+    * (upstream `_response_from_chat_body`).
+    *
+    * @param model
+    *   the model of the request, for the details of an error
     */
-  def outputs(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
+  def outputs(raw: DynamicValue, model: Option[String] = None): Either[DspyError, Vector[LmOutput]] =
+    OpenAiErrors.fromReplyError(raw, model).toLeft(()).flatMap(_ => choiceOutputs(raw))
+
+  private def choiceOutputs(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
     seqField(raw, WireKeys.choices).map { choices =>
       choices.flatMap { choice =>
         val rec             = asRecord(choice)
@@ -133,11 +143,15 @@ private[lm] object ChatWire:
       }
     }
 
-  /** The outputs of a reply in the text mode: the top-level `text`, else the outputs of the choices ([[outputs]]). */
-  def textOutputs(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
-    recordGet(raw, WireKeys.text).flatMap(asString).map(_.trim).filter(_.nonEmpty) match
-      case Some(text) => Right(Vector(LmOutput(text = text)))
-      case None       => outputs(raw)
+  /** The outputs of a reply in the text mode: the top-level `text`, else the outputs of the choices ([[outputs]]). A
+    * reply with an `error` object is an error, as in [[outputs]].
+    */
+  def textOutputs(raw: DynamicValue, model: Option[String] = None): Either[DspyError, Vector[LmOutput]] =
+    OpenAiErrors.fromReplyError(raw, model).toLeft(()).flatMap { _ =>
+      recordGet(raw, WireKeys.text).flatMap(asString).map(_.trim).filter(_.nonEmpty) match
+        case Some(text) => Right(Vector(LmOutput(text = text)))
+        case None       => choiceOutputs(raw)
+    }
 
   private def parseToolCalls(message: DynamicValue.Record): Vector[ToolCall] =
     seqField(message, WireKeys.toolCalls) match

@@ -51,18 +51,15 @@ private[lm] object OpenAiErrors:
   /** The class of an error: a function from the message and the details to the error. */
   private[providers] type ErrorClass = (String, LmErrorDetails) => LmProviderError
 
-  /** The class of each code of an error event in a stream (upstream `_stream_error_code_map`, which extends
-    * `_response_error_code_map`). A code that is not in the table gives an [[LmProviderResponseError]].
+  /** The class of each code of an `error` object in a reply with a success status (upstream
+    * `_response_error_code_map`). A code that is not in the table gives an [[LmServerError]] ([[fromReplyError]]).
     */
-  private val streamErrorClasses: Map[String, ErrorClass] =
+  private val responseErrorClasses: Map[String, ErrorClass] =
     val server: ErrorClass      = LmServerError(_, _)
     val rateLimit: ErrorClass   = LmRateLimitError(_, _)
     val timeout: ErrorClass     = LmTimeoutError(_, _)
     val invalid: ErrorClass     = LmInvalidRequestError(_, _)
     val unsupported: ErrorClass = LmUnsupportedModelError(_, _)
-    val context: ErrorClass     = ContextWindowExceededError(_, _)
-    val auth: ErrorClass        = LmAuthError(_, _)
-    val billing: ErrorClass     = LmBillingError(_, _)
     val invalidCodes            = Seq(
       "invalid_prompt",
       "invalid_image",
@@ -81,19 +78,30 @@ private[lm] object OpenAiErrors:
       "image_file_not_found"
     )
     Map(
-      "server_error"                 -> server,
-      "rate_limit_exceeded"          -> rateLimit,
-      "no_capacity"                  -> rateLimit,
-      "too_many_requests"            -> rateLimit,
-      "rate_limit_error"             -> rateLimit,
-      "vector_store_timeout"         -> timeout,
+      "server_error"         -> server,
+      "rate_limit_exceeded"  -> rateLimit,
+      "no_capacity"          -> rateLimit,
+      "too_many_requests"    -> rateLimit,
+      "vector_store_timeout" -> timeout
+    ) ++ invalidCodes.map(_ -> invalid) ++ modelErrorCodes.map(_ -> unsupported)
+
+  /** The class of each code of an error event in a stream (upstream `_stream_error_code_map`): the table of
+    * [[responseErrorClasses]] and more codes. A code that is not in the table gives an [[LmProviderResponseError]].
+    */
+  private val streamErrorClasses: Map[String, ErrorClass] =
+    val context: ErrorClass   = ContextWindowExceededError(_, _)
+    val auth: ErrorClass      = LmAuthError(_, _)
+    val billing: ErrorClass   = LmBillingError(_, _)
+    val rateLimit: ErrorClass = LmRateLimitError(_, _)
+    responseErrorClasses ++ Map(
       "context_length_exceeded"      -> context,
       "invalid_api_key"              -> auth,
       "authentication_error"         -> auth,
+      "rate_limit_error"             -> rateLimit,
       "insufficient_quota"           -> billing,
       "1113"                         -> billing, // Z.AI: insufficient balance
       "exceeded_current_quota_error" -> billing  // Moonshot: balance or quota
-    ) ++ invalidCodes.map(_ -> invalid) ++ modelErrorCodes.map(_ -> unsupported)
+    )
 
   /** The headers that can hold the request id, in the order of preference ([[requestId]]). */
   private val requestIdHeaders: Seq[String] =
@@ -233,6 +241,22 @@ private[lm] object OpenAiErrors:
     val details      = LmErrorDetails(model = model, provider = Some(provider), providerCode = Some(providerCode))
     val errorClass   = streamErrorClasses.getOrElse(providerCode, LmProviderResponseError(_, _))
     errorClass(message.getOrElse(providerCode), details)
+
+  /** The error for an `error` object in a reply with a success status (upstream `_response_error` in
+    * `dspy/_vendor/lm15/providers/openai.py`, which the chat reader and the Responses reader use). `None` when the
+    * reply has no `error` object. An `error` value that is not an object does not make an error.
+    *
+    * The class comes from the `code` of the error. A code that is not in the table of upstream
+    * `_response_error_code_map` gives an [[LmServerError]]. The message is the `message` of the error, else the JSON
+    * text of the error object. The details hold the model, the provider, and the code.
+    */
+  def fromReplyError(reply: DynamicValue, model: Option[String]): Option[LmProviderError] =
+    DynamicValues.recordGet(reply, WireKeys.error).flatMap(DynamicValues.asRecord).map { error =>
+      val envelope   = envelopeOf(error)
+      val details    = LmErrorDetails(model = model, provider = Some(provider), providerCode = envelope.code)
+      val errorClass = envelope.code.flatMap(responseErrorClasses.get).getOrElse[ErrorClass](LmServerError(_, _))
+      errorClass(envelope.message.getOrElse(DynamicValues.encodeJson(error)), details)
+    }
 
   /** The error for a stream that is not complete or not valid. */
   def streamAssembly(message: String, model: Option[String]): LmStreamAssemblyError =

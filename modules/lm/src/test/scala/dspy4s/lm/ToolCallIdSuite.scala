@@ -260,12 +260,12 @@ class ToolCallIdSuite extends FunSuite:
 
     val messages = sequence(get(record(json(transport.bodies.head)), "messages"))
     assertEquals(messages.size, 3)
-    // `DynamicJson.encode` removes each null field, so the null `content` of the assistant message is not in the body.
-    // The OpenAI chat format accepts an assistant message with tool calls and no `content` key.
+    // `DynamicJson.encode` removes only the null fields of the top level, so the assistant message keeps its null
+    // `content` (the OpenAI chat format for an assistant message with tool calls and no text).
     assertEquals(
       messages(1),
       json(
-        """{"role":"assistant","tool_calls":[
+        """{"role":"assistant","content":null,"tool_calls":[
           |  {"id":"call_1","type":"function","function":{"name":"search","arguments":"{\"query\":\"cats\"}"}}
           |]}""".stripMargin
       )

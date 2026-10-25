@@ -1,16 +1,15 @@
 package dspy4s.lm.providers
 
-import dspy4s.core.contracts.{LmUsage, TokenCategory}
+import dspy4s.core.contracts.{DynamicValues, LmUsage, TokenCategory}
 import zio.blocks.schema.DynamicValue
-import zio.blocks.schema.NameMapper
 import zio.blocks.schema.Schema
-import zio.blocks.schema.json.JsonCodecDeriver
 
-/** The token usage of an OpenAI reply. The parser of the stream chunks and the parser of a plain reply use it. A
-  * derived `JsonCodec` decodes it: an absent field or a `null` gives `None`, and the codec ignores the keys that it
-  * does not know. The record has the names of the chat usage (`prompt_tokens`, `completion_tokens`) and of the
-  * Responses usage (`input_tokens`, `output_tokens`). The `*_tokens_details` blocks hold the extra counts of the
-  * provider. [[toLmUsage]] gives the `LmUsage` of all these fields.
+/** The token usage of an OpenAI reply. The parser of the stream chunks and the parser of a plain reply use it. The
+  * typed codec of a stream chunk ([[OpenAiStreamChunk]]) decodes it with the derived `Schema`, and
+  * [[OpenAiUsage.fromDynamic]] reads it from a decoded record. The record has the names of the chat usage
+  * (`prompt_tokens`, `completion_tokens`) and of the Responses usage (`input_tokens`, `output_tokens`). The
+  * `*_tokens_details` blocks hold the extra counts of the provider. [[toLmUsage]] gives the `LmUsage` of all these
+  * fields.
   *
   * The chat usage has the blocks `prompt_tokens_details` and `completion_tokens_details` (upstream `_usage_from_chat`
   * in `dspy/_vendor/lm15/providers/openai_chat.py`). The Responses usage has the blocks `input_tokens_details` and
@@ -75,10 +74,41 @@ private[lm] final case class OpenAiTokenDetails(
     ).collect { case (category, Some(value)) => category -> value }.toMap
 
 private[lm] object OpenAiUsage:
-  private val codec = Schema[OpenAiUsage].derive(JsonCodecDeriver.withFieldNameMapper(NameMapper.SnakeCase))
 
-  /** The usage of a usage record of a decoded reply or chunk. A record that does not decode gives an empty
-    * `OpenAiUsage`, so that the reply does not fail.
+  /** The usage of a usage record of a decoded reply or chunk. The function reads each count field by itself, so a field
+    * of the wrong type gives no count for that field only, and the other counts stay. A count is a JSON number. A
+    * string, also the text of a number, is not a count, because the wire sends a count as a number. A value that is not
+    * an object gives an empty `OpenAiUsage`, and the reply does not fail.
     */
   def fromDynamic(usage: DynamicValue): OpenAiUsage =
-    codec.decode(usage.toJson).getOrElse(OpenAiUsage())
+    def details(key: String): Option[OpenAiTokenDetails] =
+      DynamicValues.recordGet(usage, key).flatMap(DynamicValues.asRecord).map(OpenAiTokenDetails.fromDynamic)
+    OpenAiUsage(
+      promptTokens = count(usage, "prompt_tokens"),
+      completionTokens = count(usage, "completion_tokens"),
+      totalTokens = count(usage, "total_tokens"),
+      inputTokens = count(usage, "input_tokens"),
+      outputTokens = count(usage, "output_tokens"),
+      promptTokensDetails = details("prompt_tokens_details"),
+      completionTokensDetails = details("completion_tokens_details"),
+      inputTokensDetails = details("input_tokens_details"),
+      outputTokensDetails = details("output_tokens_details")
+    )
+
+  /** The count at `key` of `record`: a JSON number, as a `Long`. An absent key, a null, a string, and each other value
+    * that is not a number give `None`.
+    */
+  private[providers] def count(record: DynamicValue, key: String): Option[Long] =
+    DynamicValues.recordGet(record, key).filter(DynamicValues.asString(_).isEmpty).flatMap(DynamicValues.asLong)
+
+private[lm] object OpenAiTokenDetails:
+
+  /** The details of a details record, with the count rule of [[OpenAiUsage.fromDynamic]]. */
+  def fromDynamic(details: DynamicValue): OpenAiTokenDetails =
+    OpenAiTokenDetails(
+      cachedTokens = OpenAiUsage.count(details, "cached_tokens"),
+      audioTokens = OpenAiUsage.count(details, "audio_tokens"),
+      reasoningTokens = OpenAiUsage.count(details, "reasoning_tokens"),
+      acceptedPredictionTokens = OpenAiUsage.count(details, "accepted_prediction_tokens"),
+      rejectedPredictionTokens = OpenAiUsage.count(details, "rejected_prediction_tokens")
+    )

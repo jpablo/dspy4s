@@ -53,10 +53,6 @@ private[lm] object ResponsesWire:
     final val response            = "response"
     final val annotation          = "annotation"
 
-    /** The options that the Responses body does not send as null (upstream: the former config serializer omitted them).
-      */
-    val nullableOptions: Vector[String] = Vector("temperature", "top_p", "n", "logprobs", reasoning, toolChoice)
-
   /** The values of the `type` and `role` keys that the translation reads or writes. */
   private object Kinds:
     final val function           = "function"
@@ -117,8 +113,8 @@ private[lm] object ResponsesWire:
     *     - After the item of an assistant message, each of its tool calls gives
     *       `{"type": "function_call", "name", "arguments", "call_id"?}` (`arguments` is the JSON text of the arguments,
     *       and `call_id` is the id of the call).
-    *   - `max_completion_tokens` becomes `max_tokens` when `max_tokens` is absent. A `max_tokens` that is not null
-    *     becomes `max_output_tokens`; a null `max_tokens` is removed.
+    *   - `max_completion_tokens` becomes `max_tokens` when `max_tokens` is absent. Then `max_tokens` becomes
+    *     `max_output_tokens`.
     *   - `reasoning_effort` becomes `reasoning: {"effort": <value>, "summary": "auto"}`, unless `reasoning` is set.
     *   - A tool `{"type": "function", "function": {...}}` becomes `{"type": "function", ...<the keys of function>}`. A
     *     function tool with a null `description` loses the key. The other keys of the tool stay.
@@ -126,8 +122,10 @@ private[lm] object ResponsesWire:
     *   - `response_format` moves to `text.format`. A `{"type": "json_schema", "json_schema": {...}}` format is
     *     flattened to `{"type": "json_schema", ...<the keys of json_schema>}`, the form that the Responses API takes
     *     (upstream builds this form from a pydantic model; the port sends a record).
-    *   - A null `temperature`, `top_p`, `n`, `logprobs`, `reasoning`, or `tool_choice` is removed, and so is an empty
-    *     or null `stop`.
+    *   - An empty `stop` is removed. Each top-level field with a null value is removed too
+    *     ([[DynamicJson.withoutNullFields]], the rule of [[DynamicJson.encode]]). Upstream removes a null
+    *     `temperature`, `top_p`, `n`, `logprobs`, `reasoning`, and `tool_choice`, and the encode removes each other
+    *     null option.
     */
   def request(
       request       : LmRequest,
@@ -140,8 +138,8 @@ private[lm] object ResponsesWire:
     if recordGet(options, Keys.input).isDefined then options
     else
       val body  = options.updated(Keys.input, sequence(request.messages.flatMap(inputItems)))
-      val steps = Vector(withTokenLimit, withReasoning, withTools, withToolChoice, withTextFormat, withoutEmptyOptions)
-      steps.foldLeft(body)((current, step) => step(current))
+      val steps = Vector(withTokenLimit, withReasoning, withTools, withToolChoice, withTextFormat, withoutEmptyStop)
+      DynamicJson.withoutNullFields(steps.foldLeft(body)((current, step) => step(current)))
 
   /** The outputs of a Responses body (upstream `responses_outputs`): one output for the whole response.
     *
@@ -156,9 +154,16 @@ private[lm] object ResponsesWire:
     *     the other keys of the annotation that are not null).
     *
     * The result is an empty vector when the response has no text (or only white space) and no tool call. A body with no
-    * `output` array is a `ParseError`.
+    * `output` array is a `ParseError`. A body with an `error` object is the error of [[OpenAiErrors.fromReplyError]],
+    * also with a success status (upstream `OpenAILM.parse_response`).
+    *
+    * @param model
+    *   the model of the request, for the details of an error
     */
-  def outputs(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
+  def outputs(raw: DynamicValue, model: Option[String] = None): Either[DspyError, Vector[LmOutput]] =
+    OpenAiErrors.fromReplyError(raw, model).toLeft(()).flatMap(_ => outputItems(raw))
+
+  private def outputItems(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
     recordGet(raw, WireKeys.output) match
       case Some(items: DynamicValue.Sequence) =>
         val records   = items.elements.iterator.flatMap(asRecord).toVector
@@ -310,9 +315,9 @@ private[lm] object ResponsesWire:
     val moved = (recordGet(body, Keys.maxCompletionTokens), recordGet(body, Keys.maxTokens)) match
       case (Some(limit), None) => without(body, Keys.maxCompletionTokens).updated(Keys.maxTokens, limit)
       case _                   => body
-    present(moved, Keys.maxTokens) match
+    recordGet(moved, Keys.maxTokens) match
       case Some(limit) => without(moved, Keys.maxTokens).updated(Keys.maxOutputTokens, limit)
-      case None        => without(moved, Keys.maxTokens)
+      case None        => moved
 
   private def withReasoning(body: DynamicValue.Record): DynamicValue.Record =
     recordGet(body, Keys.reasoningEffort) match
@@ -370,10 +375,11 @@ private[lm] object ResponsesWire:
           case None         => rec
       case _ => format
 
-  private def withoutEmptyOptions(body: DynamicValue.Record): DynamicValue.Record =
-    val nulls   = Keys.nullableOptions.filter(key => recordGet(body, key).exists(isNull))
-    val cleared = without(body, nulls*)
-    if recordGet(cleared, Keys.stop).exists(filled) then cleared else without(cleared, Keys.stop)
+  /** `body` with no `stop` when `stop` is empty (upstream `if not data.get("stop")`). A null `stop` goes with the other
+    * null fields.
+    */
+  private def withoutEmptyStop(body: DynamicValue.Record): DynamicValue.Record =
+    if recordGet(body, Keys.stop).forall(filled) then body else without(body, Keys.stop)
 
   // ── The outputs ─────────────────────────────────────────────────────────────────────────────────────────────
 

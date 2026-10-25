@@ -200,7 +200,7 @@ Simplify 5 (rank 5). Code-review 5 (rank 8). 4966 main lines, 6422 test lines.
 
 - (a) The providers, about 2600 lines: `providers/`.
   - [x] /simplify
-  - [ ] /code-review
+  - [x] /code-review
 - (b) The runtime and the contracts, about 2360 lines: `runtime/`, `contracts/`.
   - [ ] /simplify
   - [ ] /code-review
@@ -219,10 +219,17 @@ Simplify 5 (rank 5). Code-review 5 (rank 8). 4966 main lines, 6422 test lines.
 ### Code-review findings
 
 - [x] ProviderLanguageModel (removed) puts `request_id` in the payload. `providers/OpenAiClient.scala:24` removes only `mode`, so `request_id` goes into the OpenAI request body. The only test checks `mode` (`OpenAiClientSuite.scala:91`). (checked) Fixed: `LmRequest.requestId` had no producer and is removed. The cache key keeps the text `"request_id":null`.
-- [ ] `providers/OpenAiClient.scala:53-55` sends the `prompt` body to `/chat/completions` in Text mode. The stream reads only `delta.content`. No test covers Text mode on the real client.
+- [x] `providers/OpenAiClient.scala` sent the `prompt` body to `/chat/completions` in Text mode. The stream read only `delta.content`. Fixed: the text mode goes to `completionsEndpoint` (`/completions`), and its stream reads `choices[0].text`.
 - [ ] `runtime/ManagedLanguageModel.scala:236`, `:417`: no upper limit on `Retry-After`. A bad header can block a thread for hours.
 - [ ] `runtime/DiskLmCache.scala:295-304`: a failed write leaves `<key>.json.tmp`, and `clear` never removes it. The eviction (`:329-336`) lists up to 200000 files while it holds the lock.
-- [ ] `providers/JdkHttpTransport.scala:128` calls `toLowerCase` with no `Locale.ROOT`. In a Turkish locale, the `X-Request-Id` lookup fails.
+- [x] `providers/JdkHttpTransport.scala` called `toLowerCase` with no `Locale.ROOT`. Not a real bug: the JDK client gives lower-case header names, and a test shows it. The call uses `Locale.ROOT` now.
+- [x] (code-review (a)) An `error` object in a reply with status 200 gave the ParseError "no outputs". Fixed: `OpenAiErrors.fromReplyError` gives the typed error of the code (upstream `_response_error`), on the chat path and on the Responses path.
+- [x] (code-review (a)) An empty `finish_reason` in a stream chunk counted as an end event. Fixed: it is no finish reason (upstream `if finish_raw:`).
+- [x] (code-review (a)) An interrupt before the headers threw `InterruptedException` out of the transport. Fixed: it is a `Left(LmUnexpectedError)`, as during the body.
+- [x] (code-review (a)) `DynamicJson.encode` removed each null field at each depth, so `content: null` and a schema `"default": null` did not reach the provider. Fixed: only the top-level option bag loses its null fields.
+- [x] (code-review (a)) The embedder did not check the row indexes. Fixed: the indexes must be exactly 0 to n-1.
+- [x] (code-review (a)) `OpenAiUsage.fromDynamic` encoded the usage to text and decoded it again, and one bad field gave an empty usage. Fixed: each count is read directly.
+- [x] (code-review (a)) `ResponsesWire` repeated the null-option rule, and the two clients had two base-URL rules. Fixed: `DynamicJson.withoutNullFields` and `BaseUrl.root`.
 
 ## adapters
 

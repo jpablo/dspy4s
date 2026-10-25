@@ -16,7 +16,11 @@ final case class OpenAiClient(
     transport   : HttpTransport = HttpTransport.jdk(),
     chatEndpoint: String        = "/chat/completions",
     /** The path of the Responses API. A request in the mode `LmMode.Responses` goes here (see [[invoke]]). */
-    responsesEndpoint: String = "/responses"
+    responsesEndpoint: String = "/responses",
+    /** The path of the completions API. A request in the mode `LmMode.Text` goes here (see [[invoke]], upstream
+      * `litellm_text_completion` in `dspy/clients/lm.py`).
+      */
+    completionsEndpoint: String = "/completions"
 ):
   private val headers: Map[String, String] = Map(
     "Authorization" -> s"Bearer $apiKey"
@@ -25,8 +29,8 @@ final case class OpenAiClient(
   /** The value of the `stream` key of a stream body. */
   private val streamOn: DynamicValue = Schema[Boolean].toDynamicValue(true)
 
-  /** [[baseUrl]] with no slash at its end. */
-  private val root: String = baseUrl.stripSuffix("/")
+  /** [[baseUrl]] with no slash at its end ([[BaseUrl.root]]). */
+  private val root: String = BaseUrl.root(baseUrl)
 
   /** POST `body` to `endpoint` (a path under [[baseUrl]]), and give the body text of a reply with a success status.
     *
@@ -48,8 +52,9 @@ final case class OpenAiClient(
   /** POST the body of a model call in `mode`, and decode the JSON reply.
     *
     * In the mode `LmMode.Responses`, the request goes to [[responsesEndpoint]]: `body` is then the Responses body
-    * (`ResponsesWire.request`). In each other mode, it goes to [[chatEndpoint]]. The body goes as it is. The errors are
-    * the errors of [[post]], and a reply that is not JSON is a `ParseError`.
+    * (`ResponsesWire.request`). In the mode `LmMode.Text`, it goes to [[completionsEndpoint]]: `body` is then the
+    * prompt body (`ChatWire.textRequest`). In the mode `LmMode.Chat`, it goes to [[chatEndpoint]]. The body goes as it
+    * is. The errors are the errors of [[post]], and a reply that is not JSON is a `ParseError`.
     */
   def invoke(mode: LmMode, body: DynamicValue.Record): Either[DspyError, DynamicValue] =
     post(endpointOf(mode), body, modelOf(body)).flatMap(DynamicJson.decode)
@@ -62,9 +67,11 @@ final case class OpenAiClient(
     *
     * In the mode `LmMode.Responses`, the stream goes to [[responsesEndpoint]]. The body is the Responses body with
     * `"stream": true` and no `stream_options` (upstream lm15 `OpenAILM._payload` in
-    * `dspy/_vendor/lm15/providers/openai.py`), and each event gives the chunk of `ResponsesWire.streamChunk`. In each
-    * other mode, the stream goes to [[chatEndpoint]] with the body, `"stream": true`, and
-    * `stream_options.include_usage`.
+    * `dspy/_vendor/lm15/providers/openai.py`), and each event gives the chunk of `ResponsesWire.streamChunk`. In the
+    * chat mode, the stream goes to [[chatEndpoint]] with the body, `"stream": true`, and
+    * `stream_options.include_usage`, and the text of a chunk is `choices[0].delta.content`. In the text mode, the
+    * stream goes to [[completionsEndpoint]] with the same keys (the completions API accepts `stream_options` too), and
+    * the text of a chunk is `choices[0].text`, the shape of a completions chunk.
     *
     * The stream rules of upstream `parse_stream_events` and `checked_stream`:
     *   - A chunk with a finish reason, a chunk with usage, or the line `[DONE]` is an end event. `[DONE]` ends the
@@ -73,14 +80,14 @@ final case class OpenAiClient(
     *     `response.completed` event.
     *   - A `data:` line that is not valid JSON gives an [[LmChunk.failure]] with an `LmStreamAssemblyError`, and the
     *     stream ends.
-    *   - Chat mode: a JSON value that is not an object is skipped. An object that the chunk codec cannot read gives the
-    *     fields that have the right type (`OpenAiStreamChunk.lenient`, upstream reads each field with an `isinstance`
-    *     check).
-    *   - Chat mode: an object with an `error` object gives an [[LmChunk.failure]] with the typed error of the error
-    *     code (`code`, else `type`), and the stream ends. The table is upstream `_stream_error_code_map`: for example
-    *     `context_length_exceeded` gives a [[dspy4s.core.contracts.ContextWindowExceededError]], and a code that is not
-    *     in the table gives an [[dspy4s.core.contracts.LmProviderResponseError]]. The message is the `message` of the
-    *     error, else the code. The details have the model, the provider, and the code.
+    *   - Chat mode and text mode: a JSON value that is not an object is skipped. An object that the chunk codec cannot
+    *     read gives the fields that have the right type (`OpenAiStreamChunk.lenient`, upstream reads each field with an
+    *     `isinstance` check).
+    *   - Chat mode and text mode: an object with an `error` object gives an [[LmChunk.failure]] with the typed error of
+    *     the error code (`code`, else `type`), and the stream ends. The table is upstream `_stream_error_code_map`: for
+    *     example `context_length_exceeded` gives a [[dspy4s.core.contracts.ContextWindowExceededError]], and a code
+    *     that is not in the table gives an [[dspy4s.core.contracts.LmProviderResponseError]]. The message is the
+    *     `message` of the error, else the code. The details have the model, the provider, and the code.
     *   - Responses mode: an `error` or `response.error` event gives an [[LmChunk.failure]] with the typed error of the
     *     same table, and the stream ends. A JSON value that is not an object gives an [[LmChunk.failure]] with an
     *     `LmStreamAssemblyError` (upstream reads the `type` of the event, and fails on a value that is not an object).
@@ -93,10 +100,9 @@ final case class OpenAiClient(
   def stream(mode: LmMode, body: DynamicValue.Record): Either[DspyError, ClosableIterator[LmChunk]] =
     val model              = modelOf(body)
     val (streamBody, read) = mode match
-      case LmMode.Responses          => (body.updated(WireKeys.stream, streamOn), responsesEvent(model))
-      case LmMode.Chat | LmMode.Text =>
-        val streamOptions = DynamicValues.record(WireKeys.includeUsage := true)
-        (body.updated(WireKeys.stream, streamOn).updated(WireKeys.streamOptions, streamOptions), chatChunk(model))
+      case LmMode.Responses => (body.updated(WireKeys.stream, streamOn), responsesEvent(model))
+      case LmMode.Chat      => (withStreamOptions(body), chatChunk(model, _.toLmChunk))
+      case LmMode.Text      => (withStreamOptions(body), chatChunk(model, _.toTextLmChunk))
     transport.streamSse(url(endpointOf(mode)), headers, DynamicJson.encode(streamBody))
       .left.map(OpenAiErrors.withRequestDetails(_, model))
       .flatMap { response =>
@@ -105,14 +111,22 @@ final case class OpenAiClient(
           Left(OpenAiErrors.fromResponse(response.status, response.headers, drain(response.dataLines), model))
       }
 
+  /** `body` with `"stream": true` and `stream_options.include_usage`: the stream body of the chat mode and of the text
+    * mode.
+    */
+  private def withStreamOptions(body: DynamicValue.Record): DynamicValue.Record =
+    val streamOptions = DynamicValues.record(WireKeys.includeUsage := true)
+    body.updated(WireKeys.stream, streamOn).updated(WireKeys.streamOptions, streamOptions)
+
   /** The URL of `endpoint`: [[baseUrl]] with no slash at its end, then `endpoint`. */
   private def url(endpoint: String): String = s"$root$endpoint"
 
   /** The endpoint of a model call in `mode`. */
   private def endpointOf(mode: LmMode): String =
     mode match
-      case LmMode.Responses          => responsesEndpoint
-      case LmMode.Chat | LmMode.Text => chatEndpoint
+      case LmMode.Responses => responsesEndpoint
+      case LmMode.Text      => completionsEndpoint
+      case LmMode.Chat      => chatEndpoint
 
   /** The text of all `lines`, one line each, for the error of a stream reply. The lines are closed after. */
   private def drain(lines: ClosableIterator[String]): String =
@@ -122,17 +136,22 @@ final case class OpenAiClient(
     finally lines.close()
     buffered.toString
 
-  /** The chunk of one `data:` JSON text of a chat stream: `Right(None)` for a text that gives no chunk, and a `Left`
-    * for a failure that ends the stream (the rules of [[stream]]). The typed codec and the lenient reader give the same
-    * chunk type, so this function has the one check of the error object.
+  /** The chunk of one `data:` JSON text of a chat stream or of a completions stream: `Right(None)` for a text that
+    * gives no chunk, and a `Left` for a failure that ends the stream (the rules of [[stream]]). The typed codec and the
+    * lenient reader give the same chunk type, so this function has the one check of the error object.
+    *
+    * @param toChunk
+    *   the `LmChunk` of a chunk: `toLmChunk` for the chat mode, and `toTextLmChunk` for the text mode
     */
-  private def chatChunk(model: Option[String])(data: String): Either[DspyError, Option[LmChunk]] =
+  private def chatChunk(model: Option[String], toChunk: OpenAiStreamChunk => LmChunk)(
+      data: String
+  ): Either[DspyError, Option[LmChunk]] =
     OpenAiStreamChunk.parse(data) match
       case Left(_)            => Left(notJson(model))
       case Right(None)        => Right(None)
       case Right(Some(chunk)) => chunk.errorObject match
           case Some(error) => Left(OpenAiErrors.fromStreamError(error, model))
-          case None        => Right(Some(chunk.toLmChunk))
+          case None        => Right(Some(toChunk(chunk)))
 
   /** The chunk of one `data:` JSON text of a Responses stream (the rules of [[stream]]). */
   private def responsesEvent(model: Option[String])(data: String): Either[DspyError, Option[LmChunk]] =

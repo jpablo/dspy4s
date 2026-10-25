@@ -14,10 +14,10 @@ import dspy4s.lm.contracts.StreamingLanguageModel
 import zio.blocks.schema.DynamicValue
 
 /** The OpenAI-compatible HTTP provider: a [[dspy4s.lm.contracts.StreamingLanguageModel]] that sends each request
-  * through an [[OpenAiClient]]. [[mode]] selects the endpoint: the chat-completions endpoint in the chat mode and in
-  * the text mode, and the Responses endpoint in the Responses mode. `call` and `stream` follow the same steps: they
-  * build the body of the request on the wire of [[mode]] ([[ChatWire]] or [[ResponsesWire]]), send it with the client,
-  * and read the reply into the `LmResponse` and `LmChunk` contracts.
+  * through an [[OpenAiClient]]. [[mode]] selects the endpoint: the chat-completions endpoint in the chat mode, the
+  * completions endpoint in the text mode, and the Responses endpoint in the Responses mode. `call` and `stream` follow
+  * the same steps: they build the body of the request on the wire of [[mode]] ([[ChatWire]] or [[ResponsesWire]]), send
+  * it with the client, and read the reply into the `LmResponse` and `LmChunk` contracts.
   *
   * The [[OpenAiClient]] holds the base URL and the transport. Thus this type can call each server that has the shape of
   * the OpenAI API, for example Azure OpenAI, Ollama, vLLM, LM Studio, and OpenRouter. Use the
@@ -65,7 +65,7 @@ final case class OpenAiLanguageModel(
     * output (`ResponsesWire.outputs`, upstream `responses_outputs`).
     */
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-    client.invoke(mode, body(request)).flatMap(response)
+    client.invoke(mode, body(request)).flatMap(response(_, request.model))
 
   /** Open an SSE stream to the endpoint of [[mode]], and give the decoded [[dspy4s.lm.contracts.LmChunk]]s.
     *
@@ -92,14 +92,18 @@ final case class OpenAiLanguageModel(
       case LmMode.Text      => ChatWire.textRequest(request, defaultOptions)
       case LmMode.Responses => ResponsesWire.request(request, defaultOptions)
 
-  /** The response of the reply body `raw` on the wire of [[mode]]. A reply with no output (no text and no tool call) is
-    * a `ParseError`. The usage and the model name come from the `usage` and `model` keys of the reply.
+  /** The response of the reply body `raw` on the wire of [[mode]]. A reply with an `error` object is the typed error of
+    * its code, also with a success status ([[OpenAiErrors.fromReplyError]]). A reply with no output (no text and no
+    * tool call) is a `ParseError`. The usage and the model name come from the `usage` and `model` keys of the reply.
+    *
+    * @param requestModel
+    *   the model of the request, for the details of an error
     */
-  private def response(raw: DynamicValue): Either[DspyError, LmResponse] =
+  private def response(raw: DynamicValue, requestModel: String): Either[DspyError, LmResponse] =
     val outputs: Either[DspyError, Vector[LmOutput]] = mode match
-      case LmMode.Chat      => ChatWire.outputs(raw)
-      case LmMode.Text      => ChatWire.textOutputs(raw)
-      case LmMode.Responses => ResponsesWire.outputs(raw)
+      case LmMode.Chat      => ChatWire.outputs(raw, Some(requestModel))
+      case LmMode.Text      => ChatWire.textOutputs(raw, Some(requestModel))
+      case LmMode.Responses => ResponsesWire.outputs(raw, Some(requestModel))
     outputs.flatMap { entries =>
       if entries.isEmpty then Left(ParseError("lm", "Provider response does not contain any outputs"))
       else

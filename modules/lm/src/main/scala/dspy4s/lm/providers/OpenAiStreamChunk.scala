@@ -10,15 +10,18 @@ import zio.blocks.schema.PrimitiveValue
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodecDeriver
 
-/** One chunk of an OpenAI Chat Completions stream (`chat.completion.chunk`). A derived `JsonCodec` reads the chunk from
-  * the JSON text of the SSE `data:` line. The case classes have the shape of the wire, and the `SnakeCase` name mapper
+/** One chunk of an OpenAI Chat Completions stream (`chat.completion.chunk`), or of a completions stream
+  * (`text_completion`), where each choice has a `text` and no `delta`. A derived `JsonCodec` reads the chunk from the
+  * JSON text of the SSE `data:` line. The case classes have the shape of the wire, and the `SnakeCase` name mapper
   * gives the snake_case keys of their camelCase fields. The codec accepts the loose parts of a provider chunk: an
   * `Option` field or a field with a default decodes from an absent key or from `null`, and the codec ignores the keys
   * that it does not know (`id`, `object`, `role`, `type`, and others). [[OpenAiStreamChunk.parse]] reads a chunk that
   * the codec cannot read with [[OpenAiStreamChunk.lenient]], which reads the fields one at a time. An example of such a
   * chunk is a chunk with one field of the wrong type.
   *
-  * [[toLmChunk]] gives the `LmChunk` of the chunk. It only reads the fields.
+  * [[toLmChunk]] gives the `LmChunk` of a chat chunk, and [[toTextLmChunk]] the `LmChunk` of a completions chunk. They
+  * only read the fields. An empty finish reason counts as no finish reason (upstream `if finish_raw:` in
+  * `parse_stream_events`).
   *
   * @param error
   *   the `error` value of an error event. It stays JSON, because the providers do not agree on its shape: a code can be
@@ -39,17 +42,24 @@ private[providers] final case class OpenAiStreamChunk(
   /** The text, the finish reason, and the tool-call deltas come from the first choice: OpenAI sends one choice in each
     * chunk. The usage comes in the last chunk, which has no choice.
     */
-  def toLmChunk: LmChunk =
+  def toLmChunk: LmChunk = lmChunk(choices.headOption.flatMap(_.delta).flatMap(_.content))
+
+  /** The `LmChunk` of a completions chunk: as [[toLmChunk]], but the text is the `text` of the first choice. */
+  def toTextLmChunk: LmChunk = lmChunk(choices.headOption.flatMap(_.text))
+
+  private def lmChunk(text: Option[String]): LmChunk =
     val choice = choices.headOption
     LmChunk(
-      text = choice.flatMap(_.delta).flatMap(_.content).getOrElse(""),
-      finishReason = choice.flatMap(_.finishReason),
+      text = text.getOrElse(""),
+      finishReason = choice.flatMap(_.finishReason).filter(_.nonEmpty),
       usage = usage.map(_.toLmUsage),
       toolCalls = choice.flatMap(_.delta).map(_.toLmToolCallDeltas).getOrElse(Vector.empty)
     )
 
+/** One choice of a stream chunk. A chat choice has a `delta`, and a completions choice has a `text`. */
 private[providers] final case class OpenAiStreamChoice(
     delta       : Option[OpenAiStreamDelta] = None,
+    text        : Option[String]            = None,
     finishReason: Option[String]            = None
 ) derives Schema
 
@@ -104,13 +114,13 @@ private[providers] object OpenAiStreamChunk:
     * with an `isinstance` check):
     *
     *   - The choice is the first element of `choices` when `choices` is an array and the element is an object.
-    *   - `delta` must be an object, and `content` a string.
+    *   - `delta` must be an object, and `content` a string. The `text` of the choice must be a string.
     *   - Each element of `tool_calls` that is an object gives a tool call. An `index` that is not a number (or the text
     *     of a number) gives the position of the call in the array, as the typed codec does. `id`, `function.name`, and
     *     `function.arguments` follow `str(value or "")` ([[PythonStr.orEmpty]]): a string stays, a value that is false
     *     in Python gives no value, and each other value gives the text of Python `str`, for example `True` or `1.5`.
-    *   - A string `finish_reason` stays. Each other value that is not null and not `false` gives `stop` (upstream gives
-    *     `stop` for a finish reason that is not in `_FINISH_REASON_MAP`).
+    *   - A string `finish_reason` that is not empty stays. An empty string, null, and `false` give no finish reason.
+    *     Each other value gives `stop` (upstream gives `stop` for a finish reason that is not in `_FINISH_REASON_MAP`).
     *   - `usage` must be an object. Its counts follow [[OpenAiUsage.fromDynamic]].
     *   - `error` stays as it is, as in the typed codec.
     */
@@ -126,6 +136,7 @@ private[providers] object OpenAiStreamChunk:
   private def lenientChoice(choice: DynamicValue.Record): OpenAiStreamChoice =
     OpenAiStreamChoice(
       delta = DynamicValues.recordGet(choice, WireKeys.delta).flatMap(DynamicValues.asRecord).map(lenientDelta),
+      text = textOf(choice, WireKeys.text),
       finishReason = DynamicValues.recordGet(choice, WireKeys.finishReason).flatMap(finishReasonOf)
     )
 
@@ -151,7 +162,7 @@ private[providers] object OpenAiStreamChunk:
     value match
       case _: DynamicValue.Null.type                             => None
       case DynamicValue.Primitive(PrimitiveValue.Boolean(false)) => None
-      case other                                                 => DynamicValues.asString(other).orElse(Some(stop))
+      case other                                                 => DynamicValues.asString(other).fold(Some(stop))(reason => Option.when(reason.nonEmpty)(reason))
 
   private def textOf(record: DynamicValue.Record, key: String): Option[String] =
     DynamicValues.recordGet(record, key).flatMap(DynamicValues.asString)
