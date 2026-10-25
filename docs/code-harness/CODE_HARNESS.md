@@ -255,7 +255,7 @@ loop. It is an MCP server that other agents use.
 | Deployment | An MCP server. The README tells the user to disable the built-in tools of the host agent (`--disallowedTools "Bash,Read,Write,Edit,WebFetch"`), so the host agent works in code mode only. |
 | Execution | Two kinds. `execute_scala` runs a cell in a fresh REPL. `create_repl_session` and `execute_in_session` keep the state. The model chooses. |
 | API reference | The tool `show_interface` gives the API reference on demand ("Call this first"), because an MCP server cannot set the system prompt. |
-| Timeout | `-Xrepl-interrupt-instrumentation:local` instruments only the classes that the REPL defines. On a timeout, the session keeps its earlier REPL state: "the abandoned statement has no observable effect". |
+| Timeout | `-Xrepl-interrupt-instrumentation:local` instruments only the classes that the REPL defines. On a timeout, tacit interrupts the worker thread, and the session keeps its earlier REPL state: "the abandoned statement has no observable effect". But tacit never sets the stop flag (`setStopFlag` occurs nowhere in its source), so the instrumentation never stops a loop. Only blocking calls react to the interrupt. |
 | `Classified` | `secretHeaders` send a classified value to an allowlisted host, and code never sees the value. `httpPostClassified` sends a classified body and gives back a classified response. `secureOutput` writes each `println`, with the classified values unwrapped, to a file that only the user can read. `classifiedWrite = false` makes the classified paths read-only, because `Classified` protects confidentiality, not integrity. |
 | Files | `VirtualFileSystem` is an in-memory file system for tests. `allowedRoots` fails closed, and symlinks are resolved before each containment check. A command must be in two allowlists: the configuration and the scope. |
 | Validator tests | `CodeValidatorEvasionSuite` tests ways around the regex validator: names split across lines, interpolation, character literals, `sys.process`. |
@@ -279,8 +279,9 @@ Ideas to use:
 Ideas to change:
 
 - tacit holds a lock on output for the full process. Phase 0 removed that lock (F1).
-- With the `local` mode, a loop inside library or JDK code cannot stop. F1 keeps the `true` mode, with the
-  class resources hidden.
+- tacit never sets the stop flag, so a CPU loop in model code does not stop at a timeout, and the abandoned
+  worker keeps its lock. Also, with the `local` mode, a loop inside library or JDK code cannot stop. F1 keeps
+  the `true` mode, with the class resources hidden, and it sets the stop flag on a timeout, as atc does.
 
 ### 2.7 The harnesses side by side
 
