@@ -103,7 +103,7 @@ model), `agent` (the loop), and `coding-agent` (the tools, the sessions and the 
 | Session | An append-only JSONL file. The entries make a tree by parent id. A branch or a fork moves a leaf pointer. |
 | Context | A pure projection of the entries on the path from the root to the leaf. A compaction entry replaces a prefix in the projection. The file keeps the original entries. |
 | Output limits | 2000 lines or 50 KB. The cut text tells the model how to continue, for example `Use offset=K`. |
-| Code mode | The `codemode` package runs model JavaScript in QuickJS. The only capability is a call to an injected tool. The nested tool calls do not go into the LM context. |
+| Code mode | The `codemode` package runs model JavaScript in QuickJS. Code can call the injected tools. It can also call a classifier model (`models.classify()`) or an image model (`models.generateImages()`), but not a chat model. The nested tool calls do not go into the LM context. |
 | Left out on purpose | Sub-agents, plan mode, permission prompts, to-do tools, background shells. |
 | Style | Data first: all messages, events and entries are plain JSON values. But the loop mutates the context, and the session class composes hooks by a change of mutable fields. |
 
@@ -286,7 +286,7 @@ Ideas to change:
 | LM context | Old exchanges dropped, or a summary of the prefix | A projection; a compaction replaces a prefix | A cut through a summary tree |
 | Detail after compaction | Lost | Lost in the prompt, kept in the file | Kept: `zoom` gives it back |
 | Sub-agents | None | None (an example extension) | Background, one level, report as a message |
-| LM calls from model code | `chat()`, one completion | None | None |
+| LM calls from model code | `chat()`, one completion | In code mode, a classifier model or an image model, but no chat model | None |
 | Prompt cache | A stable system prompt | System messages in the middle of the conversation | The view changes only at its end; block marks |
 
 The row "LM calls from model code" shows if a REPL cell can call an LM and keep the answer in a variable, not in
