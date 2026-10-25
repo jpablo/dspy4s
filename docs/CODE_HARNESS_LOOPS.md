@@ -81,6 +81,65 @@ def run[St, R](state: St, iteration: Int, maxIterations: Int)(
 That trait makes each step a state machine: generate the step, prepare the action, interpret the action, record
 the outcome, and decide. `ReActV2` (`strategies/ReActV2.scala`) is experimental, and it has its own loop.
 
+The two sketches use `AgentLoop.run` of 2.1. The real `ReActV2` has its own tail-recursive loop, with the same
+shape.
+
+```scala
+final case class ReactStep(nextThought: String, nextToolName: String, nextToolArgs: String)
+final case class Entry(step: ReactStep, observation: String)
+
+/** `ReAct`: one tool call in each step. `finish` ends the loop, and the extract leaf always runs. */
+def react[O](
+    reactPredict : Vector[Entry] => Either[DspyError, ReactStep],
+    tools        : Map[String, String => Either[String, String]], // includes the injected `finish`
+    extract      : Vector[Entry] => Either[DspyError, O],
+    maxIterations: Int
+): Either[DspyError, O] =
+  AgentLoop
+    .run[Vector[Entry], Vector[Entry]](Vector.empty, 0, maxIterations)(onExhausted = Right(_)) { (trajectory, _) =>
+      reactPredict(trajectory).map { step =>
+        val name        = step.nextToolName
+        val observation = tools.get(name) match
+          case None       => s"Execution error: tool `$name` does not exist."
+          case Some(tool) => tool(step.nextToolArgs).fold(error => s"Execution error in $name: $error", identity)
+        val next = trajectory :+ Entry(step, observation)
+        if name == "finish" then AgentLoop.Step.Done(next) else AgentLoop.Step.Continue(next)
+      }
+    }
+    .flatMap(extract)
+```
+
+```scala
+final case class V2Step(nextThought: String, toolCalls: List[(String, String)]) // (name, args)
+final case class Event(step: V2Step, results: List[Either[String, String]])
+
+/** `ReActV2`: many tool calls in each step. A `submit` call that decodes ends the run. */
+def reactV2[O](
+    stepPredict  : Vector[Event] => Either[DspyError, V2Step],
+    tools        : Map[String, String => Either[String, String]],
+    submit       : String => Either[String, O],
+    forcedSubmit : Vector[Event] => Either[DspyError, O], // one more step, with `tool_choice` set to `submit`
+    maxIterations: Int
+): Either[DspyError, O] =
+  AgentLoop.run[Vector[Event], O](Vector.empty, 0, maxIterations)(onExhausted = forcedSubmit) { (history, _) =>
+    stepPredict(history) match
+      case Left(_: ParseError | _: ContextWindowExceededError) => forcedSubmit(history).map(AgentLoop.Step.Done(_))
+      case Left(error)                                         => Left(error)
+      case Right(step) if step.toolCalls.isEmpty               => forcedSubmit(history).map(AgentLoop.Step.Done(_))
+      case Right(step)                                         =>
+        val results = step.toolCalls.map { (name, args) => // in order
+          if name == "submit" then submit(args).map(_ => "submitted")
+          else tools.get(name).fold(Left(s"Unknown tool: $name"))(tool => tool(args))
+        }
+        val outputs = step.toolCalls.iterator.collect { case ("submit", args) => submit(args) }.collectFirst {
+          case Right(output) => output
+        }
+        outputs match
+          case Some(output) => Right(AgentLoop.Step.Done(output))
+          case None         => Right(AgentLoop.Step.Continue(history :+ Event(step, results)))
+  }
+```
+
 | Topic | `ReAct` | `ReActV2` |
 |---|---|---|
 | Thought | The output field `next_thought`. | The output field `next_thought`. |
@@ -94,6 +153,42 @@ the outcome, and decide. `ReActV2` (`strategies/ReActV2.scala`) is experimental,
 ### 2.3 `RLM`
 
 `RLM` (`strategies/RLM.scala`) is the code loop of dspy4s. Its step is in `strategies/RLMExecution.scala`.
+
+```scala
+final case class Action(reasoning: String, code: String)
+final case class ReplEntry(action: Action, output: String)
+
+enum Execution:
+  case Observed(output: String)               // stdout, or "[Error] ..." after a code error
+  case Submitted(record: Map[String, String]) // a `SUBMIT(...)` call
+
+trait Interpreter:
+  /** Defines `inputs` as variables, then runs `code`. The state stays from call to call. A `Left` is a failure of
+    * the interpreter itself, and it ends the run.
+    */
+  def execute(code: String, inputs: Map[String, String]): Either[DspyError, Execution]
+
+/** `RLM`: one code cell in each step. A `SUBMIT` value that decodes ends the run. */
+def rlm[O](
+    actionPredict: Vector[ReplEntry] => Either[DspyError, Action], // variables_info, repl_history, iteration
+    interpreter  : Interpreter,
+    inputs       : Map[String, String],
+    decode       : Map[String, String] => Either[String, O],
+    extract      : Vector[ReplEntry] => Either[DspyError, O],
+    maxIterations: Int
+): Either[DspyError, O] =
+  AgentLoop.run[Vector[ReplEntry], O](Vector.empty, 0, maxIterations)(onExhausted = extract) { (history, _) =>
+    for
+      action    <- actionPredict(history)
+      execution <- interpreter.execute(action.code, inputs)
+    yield execution match
+      case Execution.Observed(output)  => AgentLoop.Step.Continue(history :+ ReplEntry(action, output))
+      case Execution.Submitted(record) =>
+        decode(record) match
+          case Right(output) => AgentLoop.Step.Done(output)
+          case Left(error)   => AgentLoop.Step.Continue(history :+ ReplEntry(action, s"[Type Error] $error"))
+  }
+```
 
 | Topic | What RLM does |
 |---|---|
@@ -111,9 +206,66 @@ The three programs have no outer loop, no input during the loop, and no compacti
 
 ## 3. The harnesses
 
-Each table uses the same topics. The `file:line` references are relative to the path in the heading.
+Each subsection starts with a sketch of the loop in Scala. A table with the same topics for each harness follows
+the sketch. The `file:line` references are relative to the path in the heading.
+
+The sketches keep only the core of each loop. They leave out the imports, the streams, the errors, the hooks, the
+retries and the events. They compile with Scala 3.8. All the harness sketches use these types:
+
+```scala
+/** A tool call that the model asks for. */
+final case class ToolCall(id: String, name: String, args: String)
+
+/** The result of one tool call. */
+final case class ToolResult(id: String, output: String, isError: Boolean)
+
+/** One message of the conversation. */
+enum Msg:
+  case User(text: String)
+  case Assistant(text: String, calls: List[ToolCall])
+  case Results(results: List[ToolResult])
+
+/** One reply of the model: text, and zero or more tool calls. */
+final case class Reply(text: String, calls: List[ToolCall])
+
+trait Model:
+  def complete(context: List[Msg]): Reply
+```
 
 ### 3.1 atc (`/Users/jpablo/GitHub/atc/app/src/atc`)
+
+```scala
+enum Next:
+  case RunTools(calls: List[ToolCall])
+  case Finish(answer: String)
+
+/** `CompletionPolicy`: a pure function of the reply. */
+def completionPolicy(reply: Reply): Next =
+  if reply.calls.isEmpty then Next.Finish(reply.text) else Next.RunTools(reply.calls)
+
+/** One user turn: `Turn.run`, a tail-recursive loop over `round()`. */
+def turn(
+    model   : Model,
+    runScala: ToolCall => ToolResult, // runs a cell in the REPL of the session
+    queued  : () => List[Msg],        // user input that arrived during the turn
+    prepare : List[Msg] => List[Msg], // drops old exchanges, and summarizes at 80 % of the window
+    start   : List[Msg],
+    budget  : Int = 200
+): String =
+  @tailrec def round(history: List[Msg], used: Int, rejections: Int): String =
+    val context = prepare(history ++ queued())
+    val reply   = model.complete(context)
+    completionPolicy(reply) match
+      case Next.Finish(answer)  => answer
+      case Next.RunTools(calls) =>
+        val (allowed, refused) = calls.splitAt((budget - used).max(0))
+        val results            = allowed.map(runScala) ++ // in order
+          refused.map(call => ToolResult(call.id, "…exhausted; answer the user now.", isError = true))
+        val next               = context :+ Msg.Assistant(reply.text, calls) :+ Msg.Results(results)
+        val rejected           = if refused.isEmpty then rejections else rejections + 1
+        if rejected >= 2 then "LimitReached" else round(next, used + allowed.size, rejected)
+  round(start, 0, 0)
+```
 
 | Topic | What atc does |
 |---|---|
@@ -123,7 +275,7 @@ Each table uses the same topics. The `file:line` references are relative to the 
 | Action | Native tool calls to `run_scala(code)`. A reply can have many calls, and they run in order (:376). A cancel, queued user input, or a `Revise` permission decision skips the remaining calls with an error result. |
 | Observation | `ToolOutput.renderForModel` (`agent/ToolOutput.scala:57`) adds hints for frequent errors. Above 40000 characters, it keeps the first two thirds and the last third. Compile errors, exceptions, validator errors and timeouts are observations. Other exceptions end the turn as `Failed`. |
 | Stop | A complete reply with no tool call (`Next.Finish`). The prompt says: `Ending without a tool call means "finished".` The text of that reply is the answer. The other ends are `Blocked`, `Interrupted` and `LimitReached`. |
-| Limits | 200 tool calls in a turn (`maxToolCalls`). In interactive mode, the user can add 200 more. After the limit, each call gets the result "…exhausted; answer the user now.", and the model has 2 more rounds. A cell has 300 s. There is no step limit and no token budget for a turn. |
+| Limits | 200 tool calls in a turn (`maxToolCalls`). In interactive mode, the user can add 200 more. After the limit, each call gets the result "…exhausted; answer the user now." The turn stops at the second round with a refused call, so the model has one reply in which it can answer. A cell has 300 s. There is no step limit and no token budget for a turn. |
 | State | `Conversation` holds a mutable list of immutable messages. The REPL state is in `ReplSession` (`sandbox/ReplSession.scala`), and it stays from turn to turn. |
 | Context | Before each request, `ContextManager.prepare` removes old exchanges to fit the window. At 80 % of the window, an LM call summarizes the history, but only between rounds. |
 | Input during a turn | New input goes into a queue, and it cancels the model request in progress (:89). The next round takes it. A tool call in progress finishes first. |
@@ -132,6 +284,33 @@ Each table uses the same topics. The `file:line` references are relative to the 
 | Tests | `ScriptedModel` gives scripted replies, and an in-memory `ToolRunner` takes the place of the REPL (`app/test/src/atc/AgentCoreLoopSuite.scala`). |
 
 ### 3.2 pi (`/Users/jpablo/GitHub/pi-mono/packages`)
+
+```scala
+/** One `prompt()`: `runLoop`, with its inner tool loop and its outer follow-up loop. There is no step limit. */
+def runLoop(
+    model   : Model,
+    tools   : ToolCall => ToolResult,
+    project : List[Msg] => List[Msg], // `prepareRequest`: the session projection
+    steer   : () => List[Msg],        // steer messages: they enter after the current tool batch
+    followUp: () => List[Msg],        // follow-up messages: they wait until the agent would stop
+    start   : List[Msg]
+)(using ExecutionContext): List[Msg] =
+  @tailrec def inner(context: List[Msg], pending: List[Msg]): List[Msg] =
+    val reply   = model.complete(project(context ++ pending))
+    val batch   = Future.traverse(reply.calls)(call => Future(tools(call))) // in parallel by default
+    val results = Await.result(batch, Duration.Inf)
+    val next    = context ++ pending :+ Msg.Assistant(reply.text, reply.calls) :+ Msg.Results(results)
+    val steered = steer()
+    if reply.calls.isEmpty && steered.isEmpty then next else inner(next, steered)
+
+  @tailrec def outer(context: List[Msg], pending: List[Msg]): List[Msg] =
+    val done = inner(context, pending)
+    followUp() match
+      case Nil       => done
+      case followUps => outer(done, followUps)
+
+  outer(start, steer())
+```
 
 | Topic | What pi does |
 |---|---|
@@ -157,6 +336,42 @@ Code cannot call a chat model.
 
 ### 3.3 uniichat (`/Users/jpablo/GitHub/uniichat`)
 
+```scala
+/** The log that never ends, with its tree of summaries. */
+trait Memory:
+  def view(): List[Msg] // a cut through the tree: old parts have less detail
+  def append(messages: List[Msg]): Unit
+
+/** `Agent.loop`: one call. The view stays the same for the whole call, and only the items grow. */
+def call(model: Model, tools: ToolCall => ToolResult, sent: () => List[Msg])(view: List[Msg], start: List[Msg]): String =
+  @tailrec def loop(items: List[Msg]): String =
+    val reply   = model.complete(view ++ items)
+    val results = reply.calls.map(tools) // in order, through MCP `tools/call`
+    val says    = sent()                 // messages that the user sent during the call
+    if reply.calls.isEmpty && says.isEmpty then reply.text
+    else loop(items :+ Msg.Assistant(reply.text, reply.calls) :+ Msg.Results(results) :++ says)
+  loop(start)
+
+/** `Chat.turn`: one more call while messages wait. A failed goal check starts one more turn. */
+@tailrec def turn(
+    model    : Model,
+    tools    : ToolCall => ToolResult,
+    sent     : () => List[Msg],
+    memory   : Memory,
+    waiting  : () => List[Msg],         // user messages and `work` reports of subagents
+    goalCheck: () => Option[Boolean]    // `None` when no goal is set; one LM call with no tools
+)(messages: List[Msg]): Unit =
+  val view   = memory.view()
+  memory.append(messages)
+  val answer = call(model, tools, sent)(view, messages)
+  memory.append(List(Msg.Assistant(answer, Nil)))
+  waiting() match
+    case Nil if goalCheck().contains(false) =>
+      turn(model, tools, sent, memory, waiting, goalCheck)(List(Msg.User("The goal isn't satisfied yet: keep working.")))
+    case Nil  => ()
+    case next => turn(model, tools, sent, memory, waiting, goalCheck)(next)
+```
+
 | Topic | What uniichat does |
 |---|---|
 | Loop | `Agent.loop` (`Agent.ts:167`). `Chat.turn` (`Server.ts:498`) calls it through `Chat.call`. |
@@ -173,6 +388,58 @@ Code cannot call a chat model.
 | Tests | No model interface. Tests put a fake Anthropic server in the place of `globalThis.fetch`. |
 
 ### 3.4 deepseek-harness (`/Users/jpablo/GitHub/deepseek-harness/packages`)
+
+```scala
+enum Event:
+  case TurnStart, StepStart, StepEnd, TurnEnd
+  case Message(msg: Msg)
+
+/** The append-only session log. The model sees only a projection of it (the surface). */
+trait Session:
+  def append(event: Event): Unit
+  def deriveMessages(): List[Msg]
+
+trait Inbox:
+  def nextTurn(): Option[Msg] // `followup`
+  def nextStep(): List[Msg]   // `steer` and `inject`
+
+final case class Outcome(result: ToolResult, concludeTurn: Boolean)
+final case class Tool(run: ToolCall => Outcome, concurrencySafe: Boolean)
+
+/** Safe calls run in parallel (a pool of 10 by default). Each other call runs alone. Results keep the model order. */
+def schedule(calls: List[ToolCall], tool: ToolCall => Tool)(using ExecutionContext): List[Outcome] =
+  calls match
+    case Nil                                         => Nil
+    case call :: rest if !tool(call).concurrencySafe => tool(call).run(call) :: schedule(rest, tool)
+    case _                                           =>
+      val (safe, rest) = calls.span(call => tool(call).concurrencySafe)
+      Await.result(Future.traverse(safe)(call => Future(tool(call).run(call))), Duration.Inf) ++ schedule(rest, tool)
+
+/** `turn()`: false when the inbox has no input for a new turn. */
+def turn(model: Model, tool: ToolCall => Tool, session: Session, inbox: Inbox)(using ExecutionContext): Boolean =
+  inbox.nextTurn() match
+    case None        => false
+    case Some(first) =>
+      session.append(Event.TurnStart)
+      @tailrec def step(claimed: List[Msg]): Unit =
+        session.append(Event.StepStart)
+        claimed.foreach(msg => session.append(Event.Message(msg)))
+        val reply    = model.complete(session.deriveMessages())
+        session.append(Event.Message(Msg.Assistant(reply.text, reply.calls)))
+        val outcomes = schedule(reply.calls, tool)
+        session.append(Event.Message(Msg.Results(outcomes.map(_.result))))
+        session.append(Event.StepEnd)
+        val stop = reply.calls.isEmpty || outcomes.exists(_.concludeTurn)
+        val next = inbox.nextStep()
+        if !stop || next.nonEmpty then step(next)
+      step(first :: inbox.nextStep())
+      session.append(Event.TurnEnd)
+      true
+
+/** `kick()`. When the agent is idle, the goal driver puts a `<goal_round>` follow-up into the inbox. */
+def kick(model: Model, tool: ToolCall => Tool, session: Session, inbox: Inbox)(using ExecutionContext): Unit =
+  while turn(model, tool, session, inbox) do ()
+```
 
 | Topic | What deepseek-harness does |
 |---|---|
@@ -191,6 +458,49 @@ Code cannot call a chat model.
 
 ### 3.5 Codex (`/Users/jpablo/GitHub/codex/codex-rs`)
 
+```scala
+/** One reply of the Responses API. `endTurn = Some(false)` asks for one more step. */
+final case class Response(text: String, calls: List[ToolCall], endTurn: Option[Boolean])
+
+trait StreamingModel:
+  /** Streams one reply, and calls `onCall` when each tool call item is complete in the stream. */
+  def stream(prompt: List[Msg])(onCall: ToolCall => Unit): Response
+
+trait History:
+  def record(items: List[Msg]): Unit
+  def forPrompt: List[Msg] // a normalized copy of the full history
+  def overLimit: Boolean   // the token limit of auto-compaction
+  def compact(): Unit
+
+trait Mailbox:
+  def drain(): List[Msg]
+  def nonEmpty: Boolean
+
+/** `run_turn`: one LM call and its tool calls in each step. There is no step limit. */
+def runTurn(model: StreamingModel, tools: ToolCall => ToolResult, steer: Mailbox, history: History)(using
+    ExecutionContext
+): String =
+  @tailrec def step(): String =
+    history.record(steer.drain()) // steer input enters at the top of each step
+    val started  = List.newBuilder[Future[ToolResult]]
+    val response = model.stream(history.forPrompt)(call => started += Future(tools(call))) // starts during the stream
+    val results  = started.result().map(Await.result(_, Duration.Inf))                     // in model order
+    history.record(List(Msg.Assistant(response.text, response.calls), Msg.Results(results)))
+    val needsFollowUp = response.calls.nonEmpty || steer.nonEmpty || response.endTurn.contains(false)
+    if !needsFollowUp then response.text
+    else
+      if history.overLimit then history.compact() // compaction inside the turn
+      step()
+  step()
+
+/** `RegularTask::run`: the turn again, while input waits. `submission_loop` starts a task for each operation. */
+@tailrec def regularTask(model: StreamingModel, tools: ToolCall => ToolResult, input: Mailbox, history: History)(using
+    ExecutionContext
+): String =
+  val answer = runTurn(model, tools, input, history)
+  if input.nonEmpty then regularTask(model, tools, input, history) else answer
+```
+
 | Topic | What Codex does |
 |---|---|
 | Loop | `run_turn` (`core/src/session/turn.rs:174`), with the step loop at :473. |
@@ -207,6 +517,42 @@ Code cannot call a chat model.
 | Tests | A wiremock server plays prepared SSE responses (`core/tests/common/responses.rs`). |
 
 ### 3.6 tacit (`/Users/jpablo/GitHub/tacit/src/main/scala`)
+
+tacit has no loop. The sketch shows the action that tacit gives to the loop of the host agent.
+
+```scala
+/** The state of one REPL: the definitions of the cells that completed. */
+final case class ReplState(definitions: List[String])
+
+object ReplState:
+  val empty: ReplState = ReplState(Nil)
+
+trait Repl:
+  /** Validates, compiles and runs `code`. A `Left` is a validator error, a compile error, or a timeout. A runtime
+    * exception is a `Right`, with the stack trace in the output.
+    */
+  def run(state: ReplState, code: String): Either[String, (String, ReplState)]
+
+final case class CallToolResult(text: String, isError: Boolean)
+
+/** `execute_scala`: a new REPL for each call. */
+def executeScala(repl: Repl, code: String): CallToolResult =
+  render(repl.run(ReplState.empty, code).map(_._1))
+
+/** `execute_in_session`: a kept REPL. The state changes only if the cell completes. */
+def executeInSession(repl: Repl, sessions: TrieMap[String, ReplState], id: String, code: String): CallToolResult =
+  sessions.get(id) match
+    case None        => CallToolResult(s"Error: unknown session $id", isError = true)
+    case Some(state) =>
+      val result = repl.run(state, code)
+      result.foreach((_, next) => sessions.update(id, next))
+      render(result.map(_._1))
+
+/** Each failure is a normal tool result with `isError`. The host agent decides what to do next. */
+def render(result: Either[String, String]): CallToolResult = result match
+  case Right(output) => CallToolResult(if output.isEmpty then "(no output)" else output, isError = false)
+  case Left(error)   => CallToolResult(s"Error: $error", isError = true)
+```
 
 | Topic | What tacit does |
 |---|---|
@@ -232,7 +578,7 @@ tacit is not in this table, because it has no loop.
 | Actions in a step | Many, in order | Many, in parallel | Many, in order | Many, in a pool of 10 | Many, started during the stream | One cell |
 | Stop | No tool call | No tool call | No tool call and no new message | No tool call, or `concludeTurn()` | No follow-up needed | `SUBMIT` |
 | Step limit | None (200 tool calls) | None | None | None | None | `maxIterations` |
-| At the limit | "answer the user now", 2 more rounds | No limit | No limit | No limit | No limit | The extract leaf |
+| At the limit | "answer the user now", then one more reply | No limit | No limit | No limit | No limit | The extract leaf |
 | Input during a turn | At the next round | After the tool batch | After the tool results | At the next step | At the next step, or a preempt | None |
 | Compaction in a turn | Between rounds, at 80 % | Before a reply | None: the view is fixed for a call | Before a step, and on an overflow | Before, during and after a turn | None |
 | Outer loop | A read-line loop | The follow-up loop and `AgentSession` | `Chat.turn` and the goal check | `kick` and the goal rounds | `submission_loop` and `RegularTask` | None |
@@ -257,7 +603,7 @@ ends the loop. dspy4s has the same rule in `ActionOutcome`.
 ### 5.3 Limits and fallbacks
 
 No interactive harness has a step limit. atc limits the tool calls of a turn, and the other harnesses limit
-tokens, time or retries. At its limit, atc tells the model to answer, and it gives the model two more rounds.
+tokens, time or retries. At its limit, atc tells the model to answer, and it gives the model one more reply.
 
 The dspy4s programs have a step limit and a fallback. `ReAct` and `RLM` run an extract leaf, and `ReActV2` runs a
 forced submit. The atc fallback and the forced submit use the same idea: one last step in which the model must
