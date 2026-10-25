@@ -73,9 +73,28 @@ object Signature:
     *   when the layout is not valid, for example when an input and an output have the same name
     */
   def fromShapes[I, O](name: String, instructions: String, in: Shape[I], out: Shape[O]): Signature[I, O] =
-    Signature(layoutOf(name, instructions, in.fieldSpecs, out.fieldSpecs), in, out)
+    fromFieldSpecs(name, instructions, in.fieldSpecs, out.fieldSpecs, in, out)
 
-  /** The layout `name` with `inputs`, `outputs`, and `instructions`, as [[fromShapes]] makes it. */
+  /** The signature `name` with the layout fields `inputs` and `outputs`, and the codec of `in` and `out`. The layout
+    * comes from `SignatureLayout.create`, as in [[fromShapes]]. `Signature.fromString` expands to a call of this
+    * function: the layout keeps the field specs of the DSL text (for example the enum values of a `Literal` field), and
+    * the shapes only encode and decode. Each spec in `inputs` and `outputs` must agree with the field of the same name
+    * in the shape (the same name, type, and optional flag).
+    *
+    * @throws IllegalArgumentException
+    *   when the layout is not valid
+    */
+  def fromFieldSpecs[I, O](
+      name        : String,
+      instructions: String,
+      inputs      : Vector[FieldSpec],
+      outputs     : Vector[FieldSpec],
+      in          : Shape[I],
+      out         : Shape[O]
+  ): Signature[I, O] =
+    Signature(layoutOf(name, instructions, inputs, outputs), in, out)
+
+  /** The layout `name` with `inputs`, `outputs`, and `instructions`, as [[fromFieldSpecs]] makes it. */
   private[signatures] def layoutOf(
       name        : String,
       instructions: String,
@@ -96,7 +115,10 @@ object Signature:
     * becomes a named-tuple element: fields without an annotation default to `String`; `int` / `float` / `bool` map to
     * the matching scalar. So `Signature.fromString("question -> answer: bool")` is a
     * `Signature[(question: String), (answer: Boolean)]` with direct dot access on predictions. An input field with the
-    * type `History` (`"question, history: History -> answer"`) is a `dspy4s.core.contracts.History` element.
+    * type `History` (`"question, history: History -> answer"`) is a `dspy4s.core.contracts.History` element. An
+    * optional field (`"note: Optional[str]"` or `"note: str | None"`) is an `Option` element, and a `Literal['a', 'b']`
+    * field is a `String` element. The layout keeps the attributes of the DSL, for example the enum values of a
+    * `Literal`.
     *
     * The DSL must be a compile-time literal and is validated at compile time (an invalid string, or a field type
     * outside `str` / `int` / `float` / `bool` and `History` for an input field, is a compile error). For a signature
@@ -126,7 +148,10 @@ object Signature:
     * Output rules:
     *   - named tuple returns keep their names, e.g. `(sentiment: Emotion)`
     *   - case-class / product returns keep their product field names
-    *   - scalar returns become a single output field named `result`
+    *   - scalar returns, decision types (`Noul`, `Score`, `Choice`), and `History` become a single output field named
+    *     `result`
+    *
+    * An input and an output with the same name are a compile error.
     */
   transparent inline def from[F](inline fn: F) =
     ${ internal.FunctionMacro.fromImpl[F]('fn) }

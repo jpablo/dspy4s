@@ -16,6 +16,9 @@ package dspy4s.signatures
   * The macro behind `Signature.of` validates the trait at compile time: each member must return `InputField[A]` or
   * `OutputField[A]`, each field name must be unique, and the structural derivation must give a schema for each `A`. The
   * derivation does not need a `Schema[A]` given, as for `Signature.derived`.
+  *
+  * A spec trait can extend another spec trait. The fields of the parent come first, then the fields of the subtrait,
+  * each in source order.
   */
 trait Spec
 

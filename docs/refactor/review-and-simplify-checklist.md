@@ -163,7 +163,7 @@ One simplify pass fits the module. Split the review in two.
 - (a) The codec, about 1120 lines: `ZioSchemaCodec.scala`, `Shape.scala`, `OutputAugmentation.scala`, `InputAugmentation.scala`, `SchemaInterop.scala`.
   - [x] /code-review
 - (b) The macros, about 850 lines: `internal/`, `Signature.scala`, `SignatureBuilder.scala`, `Spec.scala`.
-  - [ ] /code-review
+  - [x] /code-review
 
 ### Simplify findings
 
@@ -182,11 +182,14 @@ Findings of the simplify pass that the pass did not fix:
 
 - [x] `OutputAugmentation.scala:183-185`: `encode` uses `DynamicValues.fromAny`, not the Schema of the base type. An `Option` becomes the text `"Some(3)"`, and a nested case class becomes its `toString`. In programs, `DynamicSignature.scala:146` gives this encode to the next program. No test covers it, and it breaks the single-codec rule. (checked: the `fromAny` call is there) Fixed: `PrependField.split` gives the base value back, and `base.encode` encodes it. The fallback has `Out = Nothing`, and `ReAct` and `MultiChainComparison` keep their evidence in a `copy`.
 - [x] `ZioSchemaCodec.scala:174-184`, `:535-545`: the derived FieldSpecs never carry a case-class default as `defaultValue`. A response without the field `count: Int = 3` fails with `NotFoundError`. This is against the FieldSpec contract (core `contracts/FieldSpec.scala:15-23`). Fixed: `fieldSpecOf` reads the default from the reflect, `requiredFieldsCheck` skips a field with a default, and `normalize` gives the default to an absent field.
-- [ ] `internal/SpecMacro.scala:40`: `declaredMethods` does not see the fields of a parent Spec trait. A Spec that inherits fields loses them with no error. No test covers inheritance.
-- [ ] `internal/FunctionMacro.scala:149-157`, `:259-265`: `Noul`, `Score`, `Choice`, and `History` are case classes. A method that returns one of these types gets one output field for each of their fields (`value`, `confidence`, and so on). It does not get one `result` decision field.
+- [x] `internal/SpecMacro.scala:40`: `declaredMethods` does not see the fields of a parent Spec trait. A Spec that inherits fields loses them with no error. No test covers inheritance. Fixed: the macro reads each trait of the linearization that extends `Spec`. The fields of the parents come first, and the fields of one trait are in source order. A field that a subtrait declares again with the same role and type is one field. `MacroReviewSuite` covers it.
+- [x] `internal/FunctionMacro.scala:149-157`, `:259-265`: `Noul`, `Score`, `Choice`, and `History` are case classes. A method that returns one of these types gets one output field for each of their fields (`value`, `confidence`, and so on). It does not get one `result` decision field. Fixed: `MacroSignatureSupport.isSingleValue` is a set of these four type symbols, and such a return type is one `result` output.
+- [x] `internal/FunctionMacro.scala`, `fromStringImpl`: the layout came from the canonical shapes, thus a `Literal['a', 'b']` field lost its enum values, and an `Optional[T]` field was a required `T`. Fixed: an optional field is an `Option[T]` element, and the layout comes from the parsed DSL through the new public `Signature.fromFieldSpecs`. The shapes give only the codec.
+- [x] The macros did not check a clash between an input name and an output name, thus `SignatureLayout.create` threw an `IllegalArgumentException` at run time. Fixed: `requireUniqueNames` takes the inputs and the outputs, and `from`, `fromType`, and `of` give the compile error "duplicate field names".
 - [ ] `ZioSchemaCodec.scala:123-156`: the coercion has gaps. It does not change an Int or a Long to a BigDecimal or a BigInt, text to a Short, a Byte, or a BigDecimal, or a Double to an Int. The match on an enum label is case-sensitive (`:70`). (The numeric gaps are fixed: one rule in core `contracts/LenientValues.scala` for the codec, the adapters, and `RawPrediction`. The enum label match stays case-sensitive.)
 
 - [ ] Codec review, skipped: `normalizeOption` turns the texts "null", "none", "n/a", and blank into `None`, also for an `Option[String]` answer. A text value for a variant target must match the case name exactly (upstream matches exactly too). A missing input field gives `NotFoundError` with the resource `prediction_field`.
+- [ ] Macro review, skipped: for a lambda such as `x => classify(x).trim`, `Signature.from` takes the method of the outer call (`trim`). The usual form is a method reference.
 
 ## lm
 

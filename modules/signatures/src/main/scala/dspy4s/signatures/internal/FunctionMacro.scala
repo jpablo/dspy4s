@@ -1,8 +1,9 @@
 package dspy4s.signatures.internal
 
-import dspy4s.core.contracts.{FieldSpec, History, SignatureLayout}
+import dspy4s.core.contracts.{FieldSpec, History, SignatureLayout, TypeRef}
+import dspy4s.signatures.{Shape, Signature}
 import scala.quoted.*
-import MacroSignatureSupport.{functionSignatureExpr, signatureExpr}
+import MacroSignatureSupport.functionSignatureExpr
 import MacroTypeSupport.namedTupleType
 
 private[signatures] object FunctionMacro:
@@ -123,9 +124,13 @@ private[signatures] object FunctionMacro:
 
   /** Implementation of `Signature.fromString("a -> b")`. The DSL text must be a literal that the compiler knows. The
     * macro parses it with the runtime `SignatureLayout.parse`, and each field becomes an element of a named tuple. A
-    * field with no type is a `String`, and `int`, `float`, and `bool` give the matching scalar. An input field with the
-    * type `History` becomes a `dspy4s.core.contracts.History` element. An invalid DSL text, or a field type that the
+    * field with no type is a `String`, and `int`, `float`, and `bool` give the matching scalar. A `Literal[...]` field
+    * is a `String`. An optional field (`Optional[T]` or `T | None`) is an `Option[T]`. An input field with the type
+    * `History` becomes a `dspy4s.core.contracts.History` element. An invalid DSL text, or a field type that the
     * `Signature` API does not support, is a compile error.
+    *
+    * The layout comes from the parsed DSL, thus it keeps the attributes of the text, for example the enum values of a
+    * `Literal` field. The canonical shapes of the named tuples give only the codec.
     */
   def fromStringImpl(dsl: Expr[String], instructions: Expr[String])(using Quotes): Expr[Any] =
     import quotes.reflect.*
@@ -141,7 +146,7 @@ private[signatures] object FunctionMacro:
       case Right(parsed) => parsed
       case Left(err)     => report.errorAndAbort(s"""Invalid signature DSL "$literal": ${err.message}""")
 
-    def scalaType(field: FieldSpec, isInput: Boolean): TypeRepr =
+    def valueType(field: FieldSpec, isInput: Boolean): TypeRepr =
       field.typeRef.repr match
         case "string"             => TypeRepr.of[String]
         case "int"                => TypeRepr.of[Int]
@@ -154,6 +159,10 @@ private[signatures] object FunctionMacro:
               "types use Signature.of[Spec], a case class, or Signature.fromStringDynamic."
           )
 
+    def scalaType(field: FieldSpec, isInput: Boolean): TypeRepr =
+      val value = valueType(field, isInput)
+      if field.optional then TypeRepr.of[Option].appliedTo(value) else value
+
     val inputItems  = layout.inputFields.toList.map(field => field.name -> scalaType(field, isInput = true))
     val outputItems = layout.outputFields.toList.map(field => field.name -> scalaType(field, isInput = false))
     if inputItems.isEmpty then
@@ -161,4 +170,45 @@ private[signatures] object FunctionMacro:
     if outputItems.isEmpty then
       report.errorAndAbort(s"""Signature.fromString "$literal" declares no output fields""")
 
-    signatureExpr(Expr(layout.name), instructions, namedTupleType(inputItems), namedTupleType(outputItems))
+    layoutSignatureExpr(layout, instructions, namedTupleType(inputItems).asType, namedTupleType(outputItems).asType)
+
+  /** A call of `Signature.fromFieldSpecs` with the field specs of `layout` and the canonical shapes of `inputType` and
+    * `outputType`.
+    */
+  private def layoutSignatureExpr(
+      layout      : SignatureLayout,
+      instructions: Expr[String],
+      inputType   : Type[?],
+      outputType  : Type[?]
+  )(using Quotes): Expr[Any] =
+    inputType match
+      case '[i] => outputType match
+          case '[o] => '{
+              Signature.fromFieldSpecs[i, o](
+                ${ Expr(layout.name) },
+                $instructions,
+                ${ fieldSpecsExpr(layout.inputFields) },
+                ${ fieldSpecsExpr(layout.outputFields) },
+                Shape.canonicalDerived[i],
+                Shape.canonicalDerived[o]
+              )
+            }
+
+  /** The code that makes the field specs `fields` again at run time. It keeps each attribute that the DSL parse gives:
+    * the name, the type, the description, the prefix, the enum values, and the optional flag. The parse gives no
+    * default value and no constraint.
+    */
+  private def fieldSpecsExpr(fields: Vector[FieldSpec])(using Quotes): Expr[Vector[FieldSpec]] =
+    val specs = fields.toList.map { field =>
+      '{
+        FieldSpec(
+          name = ${ Expr(field.name) },
+          typeRef = TypeRef(${ Expr(field.typeRef.repr) }),
+          description = ${ Expr(field.description) },
+          prefix = ${ Expr(field.prefix) },
+          enumValues = Vector(${ Varargs(field.enumValues.map(Expr(_))) }*),
+          optional = ${ Expr(field.optional) }
+        )
+      }
+    }
+    '{ Vector(${ Varargs(specs) }*) }

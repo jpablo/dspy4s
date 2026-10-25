@@ -207,7 +207,8 @@ extra wire fields, so encoding the decoded value may canonicalize the record.
 
 The case-class, method, function-type, trait-spec, and literal `fromString` forms expose their concrete I/O types at
 compile time. `fromString` parses its literal DSL into `NamedTuple` I/O (fields without an annotation default to
-`String`; `int`/`float`/`bool` map to scalars). The builder returns a runtime `SignatureLayout`, while
+`String`; `int`/`float`/`bool` map to scalars; `Optional[T]` maps to `Option[T]`; the layout keeps the DSL attributes,
+such as the enum values of a `Literal`). The builder returns a runtime `SignatureLayout`, while
 `fromStringDynamic` is the escape hatch for a DSL string only known at runtime.
 
 ## Canonical `Predict` call flow

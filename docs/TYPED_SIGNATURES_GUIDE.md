@@ -76,6 +76,9 @@ validation catches methods not wrapped in the marker types, methods
 with parameters, missing `FieldCodec[X]`, duplicate field names,
 concrete methods, and empty spec traits.
 
+A spec trait can extend another spec trait. The fields of the parent
+come first, then the fields of the subtrait, each in source order.
+
 See [`modules/examples/.../signatures/SpecExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/signatures/SpecExample.scala).
 
 ### 2. Function signatures — `Signature.fromType[F]`
@@ -87,6 +90,9 @@ types. Output fields come from the return type:
 - scalar return values become one output field named `result`
 - named-tuple return values keep their labels
 - case-class / product return values keep their product field names
+- the decision types (`Noul`, `Score`, `Choice`) and `History` are one
+  value, thus they become one output field named `result`
+- an input and an output with the same name are a compile error
 
 The nicest form uses named function parameters and named-tuple outputs:
 
