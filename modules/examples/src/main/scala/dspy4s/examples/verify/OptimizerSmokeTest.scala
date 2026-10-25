@@ -143,7 +143,7 @@ object OptimizerSmokeTest:
 
       val progress = new ProgressLmCallback
       RuntimeEnvironment.withSettings(
-        RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()), callbacks = Vector(progress))
+        RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()), callbacks = Some(Vector(progress)))
       ) {
         given RuntimeContext = RuntimeEnvironment.current
 

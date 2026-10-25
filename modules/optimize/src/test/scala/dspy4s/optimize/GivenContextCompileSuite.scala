@@ -99,7 +99,7 @@ class GivenContextCompileSuite extends FunSuite:
 
   test("compile sends its compile scope to the callbacks of the given context") {
     val recorder         = Recorder()
-    given RuntimeContext = RuntimeContext(callbacks = Vector(recorder))
+    given RuntimeContext = RuntimeContext(callbacks = Some(Vector(recorder)))
     val optimizer        = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = DemoCount(2), seed = 1L))
 
     val result = optimizer.compile(DynamicPredict(layout = signature), trainset)
@@ -138,7 +138,7 @@ class GivenContextCompileSuite extends FunSuite:
     val installed        = RuntimeContext(
       lm = Some(FixedLm(answer = "wrong", id = "installed")),
       adapter = Some(ChatAdapter()),
-      callbacks = Vector(recorder)
+      callbacks = Some(Vector(recorder))
     )
 
     val result = RuntimeEnvironment.withSettings(installed) {

@@ -66,7 +66,7 @@ class StreamifyGivenContextSuite extends FunSuite:
       RuntimeContext(
         lm = Some(OneChunkLm("Paris")),
         adapter = Some(PassthroughAdapter),
-        callbacks = Vector(recorder)
+        callbacks = Some(Vector(recorder))
       )
     val program = DynamicPredict(layout = SignatureDsl.parse("question -> answer").toOption.get)
 

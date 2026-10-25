@@ -63,3 +63,21 @@ class SignatureParserSuite extends FunSuite:
     assertEquals(inputThenOutput.fields, bothInputs.fields)
     assert(!inputThenOutput.equalsByStructure(bothInputs))
   }
+
+  test("an arrow inside a quoted Literal member is part of the type") {
+    val layout = SignatureParser.parse("step: Literal['a->b', 'c'] -> result")
+    assertEquals(layout.map(_.inputFields.flatMap(_.enumValues)), Right(Vector("a->b", "c")))
+  }
+
+  test("a bracket or a comma inside a quoted Literal member is part of the member") {
+    val layout = SignatureParser.parse("step: Literal['[', 'x, y'], note -> result")
+    assertEquals(layout.map(_.inputFields.map(_.name)), Right(Vector("step", "note")))
+    assertEquals(layout.map(_.inputFields.flatMap(_.enumValues)), Right(Vector("[", "x, y")))
+  }
+
+  test("a text with no arrow or with two arrows outside quotes and brackets gives the arrow error") {
+    for text <- Vector("question, answer", "a -> b -> c", "step: Literal['a->b'] -> b -> c") do
+      SignatureParser.parse(text) match
+        case Left(error)  => assert(error.message.contains("Must contain exactly one '->'"), error.message)
+        case Right(other) => fail(s"expected a Left for '$text', got $other")
+  }

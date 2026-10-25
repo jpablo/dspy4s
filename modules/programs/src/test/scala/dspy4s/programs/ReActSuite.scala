@@ -220,7 +220,7 @@ class ReActSuite extends FunSuite:
     val react  = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
     RuntimeEnvironment.withSettings(
-      RuntimeContext(lm = Some(lm), adapter = Some(ScriptedAdapter), callbacks = Vector(callback))
+      RuntimeContext(lm = Some(lm), adapter = Some(ScriptedAdapter), callbacks = Some(Vector(callback)))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       assert(react((question = "x")).isRight)

@@ -31,9 +31,8 @@ private[dspy4s] object TracedRun:
   def runWith[P, A](program: P, call: ProgramCall[DynamicValue.Record], captureFailures: Boolean = false)(
       use: (Either[DspyError, RawPrediction], Vector[TraceEntry]) => RuntimeContext ?=> A
   )(using runner: ProgramRunner[P], ctx: RuntimeContext): A =
-    val isolated = ctx
-      .withConfig(ctx.config.copy(captureFailureTraces = captureFailures || ctx.config.captureFailureTraces))
-      .withDelta(ctx.delta.copy(trace = Vector.empty))
+    val config   = if captureFailures then ctx.config.copy(captureFailureTraces = Some(true)) else ctx.config
+    val isolated = ctx.withConfig(config).withDelta(ctx.delta.copy(trace = Vector.empty))
     RuntimeEnvironment.withContext(isolated) {
       given RuntimeContext = RuntimeEnvironment.current
       val result           = runner.run(program, call)

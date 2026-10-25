@@ -135,8 +135,8 @@ class ExecutionAlgebraLawSuite extends munit.ScalaCheckSuite:
     val delta    = RuntimeDelta(Vector(trace("step")), Vector(history("lm")))
     val context  = RuntimeContext(
       numThreads = Some(ThreadCount(4)),
-      callbackMetadata = metadata,
-      captureFailureTraces = true,
+      callbackMetadata = Some(metadata),
+      captureFailureTraces = Some(true),
       asyncTaskId = Some("task"),
       trace = delta.trace,
       history = delta.history
@@ -144,7 +144,11 @@ class ExecutionAlgebraLawSuite extends munit.ScalaCheckSuite:
 
     assertEquals(
       context.config,
-      RuntimeConfig(numThreads = Some(ThreadCount(4)), callbackMetadata = metadata, captureFailureTraces = true)
+      RuntimeConfig(
+        numThreads = Some(ThreadCount(4)),
+        callbackMetadata = Some(metadata),
+        captureFailureTraces = Some(true)
+      )
     )
     assertEquals(context.scope, RuntimeScope(asyncTaskId = Some("task")))
     assertEquals(context.delta, delta)

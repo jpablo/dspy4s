@@ -7,6 +7,7 @@ import dspy4s.core.contracts.DynamicValues.encodeJson
 import dspy4s.core.contracts.DynamicValues.isNull
 import dspy4s.core.contracts.DynamicValues.recordGet as field
 import dspy4s.core.contracts.:=
+import dspy4s.core.runtime.InterpreterSupport.tryEncodeJson
 import zio.blocks.schema.DynamicValue
 
 import java.security.SecureRandom
@@ -62,19 +63,23 @@ private[runtime] object DenoPyodideProtocol:
     val trimmed = line.trim
     if trimmed.startsWith("{") then DynamicValues.parseJsonRecord(trimmed) else None
 
-  def encodeRequest(method: String, params: DynamicValue.Record, id: String): String =
-    encodeJson(DynamicValues.record("jsonrpc" := "2.0", "method" := method, "params" -> params, "id" := id))
+  // Each encoder gives the JSON line of a message. `Left` has the cause when the JSON writer cannot write the message,
+  // for example a text with a lone UTF-16 surrogate (see `InterpreterSupport.tryEncodeJson`). Such a message is not
+  // sent, so the caller decides if the session continues.
 
-  def encodeNotification(method: String, params: Option[DynamicValue.Record]): String =
+  def encodeRequest(method: String, params: DynamicValue.Record, id: String): Either[String, String] =
+    tryEncodeJson(DynamicValues.record("jsonrpc" := "2.0", "method" := method, "params" -> params, "id" := id))
+
+  def encodeNotification(method: String, params: Option[DynamicValue.Record]): Either[String, String] =
     val entries = Vector[(String, DynamicValue)]("jsonrpc" := "2.0", "method" := method) ++
       params.map(p => ("params", p: DynamicValue)).toVector
-    encodeJson(DynamicValues.recordFromEntries(entries))
+    tryEncodeJson(DynamicValues.recordFromEntries(entries))
 
-  def encodeResult(id: DynamicValue, result: DynamicValue.Record): String =
-    encodeJson(DynamicValues.record("jsonrpc" := "2.0", "result" -> result, "id" -> id))
+  def encodeResult(id: DynamicValue, result: DynamicValue.Record): Either[String, String] =
+    tryEncodeJson(DynamicValues.record("jsonrpc" := "2.0", "result" -> result, "id" -> id))
 
-  def encodeError(id: DynamicValue, code: Int, message: String): String =
-    encodeJson(DynamicValues.record(
+  def encodeError(id: DynamicValue, code: Int, message: String): Either[String, String] =
+    tryEncodeJson(DynamicValues.record(
       "jsonrpc" := "2.0",
       "error"   -> DynamicValues.record("code" := code, "message" := message),
       "id"      -> id

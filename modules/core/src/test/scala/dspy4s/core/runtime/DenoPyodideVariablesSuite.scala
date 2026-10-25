@@ -47,3 +47,7 @@ class DenoPyodideVariablesSuite extends FunSuite:
     val cut = DynamicValue.Primitive(PrimitiveValue.String("cut \uD83D"))
     assert(DenoPyodideVariables.prelude(Map("ctx" -> cut)).isLeft)
   }
+
+  test("a Unicode identifier is a valid variable name, as upstream str.isidentifier") {
+    assert(DenoPyodideVariables.prelude(Map("café" -> DynamicValues.fromAny(1))).isRight)
+  }

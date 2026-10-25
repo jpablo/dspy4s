@@ -133,7 +133,7 @@ class ToolExecutorSuite extends FunSuite:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = events += event
     val loud  = ToolFunction("loud")(_ => throw IllegalStateException("boom"))
     val quiet = ToolFunction("quiet")(_ => throw IllegalStateException())
-    RuntimeEnvironment.withSettings(RuntimeContext(callbacks = Vector(callback))) {
+    RuntimeEnvironment.withSettings(RuntimeContext(callbacks = Some(Vector(callback)))) {
       given RuntimeContext = RuntimeEnvironment.current
       val first            = ToolExecutor.invoke(ToolCallRequest("loud", DynamicValue.Record.empty), Vector(loud, quiet))
       assertEquals(first.map(_.result.left.map(_.message)), Right(Left("IllegalStateException: boom")))

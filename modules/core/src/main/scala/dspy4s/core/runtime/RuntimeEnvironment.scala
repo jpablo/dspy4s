@@ -28,8 +28,9 @@ import scala.util.control.NonFatal
   *     history / call stack) and shadows the global for the duration of a thunk.
   *
   * `current` projects the thread-local overlay onto the global, so a thread sees its own scoped overrides on top of the
-  * shared configuration. Every `with*` helper restores the prior overlay when its thunk returns, so overrides never
-  * leak past their dynamic scope.
+  * shared configuration. Every `with*` helper restores the prior settings and scope when its thunk returns, so
+  * overrides never leak past their dynamic scope. The trace and the history that the thunk adds stay, as in upstream
+  * `dspy.context`. Only [[withContext]] restores the prior overlay wholesale and thus removes them.
   *
   * The given context wins (UPGRADE-3.2.1-to-3.4.0, decision D8; PORT_GAPS G-50). A caller can give a `using
   * RuntimeContext` that is not the installed context. The callbacks ([[emit]]), the parallel workers
@@ -104,19 +105,24 @@ object RuntimeEnvironment:
       ()
     }
 
-  /** Run `thunk` with `current` transformed by `update`: a functional, thunk-scoped override of one or more context
-    * fields.
+  /** Run `thunk` with `current` transformed by `update`: a functional, thunk-scoped override of one or more settings or
+    * scope fields. On exit, the helper restores the settings and the scope of the previous overlay. The trace and the
+    * history that `thunk` adds stay, also when `thunk` throws (upstream `dspy.context`). The block adds to the trace
+    * and the history of this thread, so a change of the trace or the history in `update` has no effect.
     */
   def withSetting[A](update: RuntimeContext => RuntimeContext)(thunk: => A): A =
-    withContext(update(current))(thunk)
+    withOverlay(update(current))(thunk)
 
   /** Run `thunk` tagged with the given async-task id, used to scope [[configure]] ownership and correlate work that
-    * fans out across async tasks.
+    * fans out across async tasks. On exit, the helper restores the previous async-task id. The trace and the history
+    * that `thunk` adds stay, as in [[withSetting]].
     */
   def withAsyncTask[A](taskId: String)(thunk: => A): A =
     withSetting(ctx => ctx.withScope(ctx.scope.copy(asyncTaskId = Some(taskId))))(thunk)
 
-  /** Like [[withAsyncTask]], but mints a fresh `"$prefix-N"` id from a monotonic counter. */
+  /** Like [[withAsyncTask]], but mints a fresh `"$prefix-N"` id from a monotonic counter. The trace and the history
+    * that `thunk` adds stay, as in [[withAsyncTask]].
+    */
   def withGeneratedAsyncTask[A](prefix: String = "async-task")(thunk: => A): A =
     val taskId = s"$prefix-${asyncTaskCounter.incrementAndGet()}"
     withAsyncTask(taskId)(thunk)
@@ -173,14 +179,25 @@ object RuntimeEnvironment:
     withScopeChange(_.copy(predictor = Some(key)))((after, before) => after.copy(predictor = before.predictor))(thunk)
 
   /** Replace this thread's overlay context wholesale for the duration of `thunk`, restoring the previous overlay on
-    * exit. The low-level primitive the other `with*` helpers build on. Because the restore is wholesale, any state
-    * accumulated on the overlay inside the thunk (trace / history) does not outlive the scope.
+    * exit. The low-level primitive of [[isolatedAttempt]] and [[ContextPropagation.Captured.run]]. Because the restore
+    * is wholesale, any state accumulated on the overlay inside the thunk (trace / history) does not outlive the scope.
+    * The other `with*` helpers keep that state.
     */
   def withContext[A](context: RuntimeContext)(thunk: => A): A =
     val previous = contextRef.get()
     contextRef.set(context)
     try thunk
     finally contextRef.set(previous)
+
+  /** Run `thunk` with the settings and the scope of `context` and with the trace and the history of this thread. On
+    * exit, the helper restores the settings and the scope of the previous overlay. The trace and the history that
+    * `thunk` adds stay, also when `thunk` throws. [[withInstalled]] restores the overlay in the same way.
+    */
+  private def withOverlay[A](context: RuntimeContext)(thunk: => A): A =
+    val previous = localContext
+    contextRef.set(if context.delta eq previous.delta then context else context.withDelta(previous.delta))
+    try thunk
+    finally contextRef.set(previous.withDelta(localContext.delta))
 
   /** Run `thunk` with `context` as the installed context (decision D8: the given context wins). Each public entry point
     * that takes a `using RuntimeContext` calls this helper and runs its work with the context that `thunk` gets.
@@ -218,9 +235,9 @@ object RuntimeEnvironment:
       finally contextRef.set(previous.withDelta(localContext.delta))
 
   /** `true` when `context` filled from `installed` gives the services and the configuration of `installed`. The check
-    * is cheap: it compares the parts by reference first, and then each field that `context` sets. A service, the
-    * callback list, and the callback metadata must be the same object; a number or a flag must be equal. The check does
-    * not read the trace or the history.
+    * is cheap: it compares the parts by reference first, and then each field that `context` sets. A service and the
+    * callback metadata must be the same object. A callback list must have the same callbacks in the same order, also
+    * when it is empty. A number or a flag must be equal. The check does not read the trace or the history.
     */
   private def givesInstalledSettings(context: RuntimeContext, installed: RuntimeContext): Boolean =
     ((context.services eq installed.services) || context.services.keptBy(installed.services)) &&
@@ -229,13 +246,20 @@ object RuntimeEnvironment:
   /** Run `thunk` with `settings` overlaid on `current`: `settings` wins for every field it sets and `current` supplies
     * the rest (`RuntimeContext.fillFrom`). The cross-task-safe way to install an LM / adapter / callbacks for a scope,
     * in contrast to the process-wide [[configure]].
+    *
+    * On exit, the helper restores the previous settings and scope. The trace and the history that `thunk` adds stay, as
+    * in [[withSetting]]. The trace and the history of `settings` have no effect: the block adds to the trace and the
+    * history of this thread.
     */
   def withSettings[A](settings: RuntimeContext)(thunk: => A): A =
-    withContext(settings.fillFrom(current))(thunk)
+    withOverlay(settings.fillFrom(current))(thunk)
 
-  /** Run `thunk` with the callback handler list replaced by `callbacks`, restoring it afterward. */
+  /** Run `thunk` with the callback handler list replaced by `callbacks`, restoring it afterward. An empty list turns
+    * off the callbacks, also the callbacks of the global context (upstream `dspy.context(callbacks=[])`). The trace and
+    * the history that `thunk` adds stay, as in [[withSetting]].
+    */
   def withCallbacks[A](callbacks: Vector[CallbackHandler])(thunk: => A): A =
-    withContext(current.withCallbacks(callbacks))(thunk)
+    withOverlay(current.withCallbacks(callbacks))(thunk)
 
   /** Append a trace entry to this thread's overlay; visible to [[current]] for the rest of the enclosing scope. */
   def appendTrace(entry: TraceEntry): Unit =

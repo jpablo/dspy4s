@@ -29,7 +29,12 @@ to a block:
 
 The override applies only inside the block; outside it, the original context is
 unchanged. The same pattern swaps the adapter, adds callbacks, or changes any
-other context field.
+other context field. The trace and the history that the block adds stay after
+the block, as with DSPy's `dspy.context`.
+
+A field that a context does not set is `None`, and it comes from the installed
+context. A set value wins, also an empty one: `callbacks = Some(Vector.empty)`
+turns off the callbacks for the block, as `dspy.context(callbacks=[])` does.
 
 ## What the context carries
 

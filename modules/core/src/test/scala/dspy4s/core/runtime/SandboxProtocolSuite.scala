@@ -5,6 +5,7 @@ import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.CodeInterpreterErrors
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SandboxTool
@@ -152,6 +153,68 @@ class SandboxProtocolSuite extends FunSuite:
         case Left(error)  => assert(error.message.contains("Permission denied"), error.message)
         case Right(other) => fail(s"expected a Left, got $other")
     finally interpreter.close()
+  }
+
+  test("code text with a lone surrogate gives a Left, not an exception") {
+    withSandbox() { interpreter =>
+      // The first half of an emoji, for example from a text that was cut at a fixed length.
+      val result = BoundedWait.within(20)(interpreter.execute("cut \uD83D"))
+      assert(result.exists(_.isLeft), s"expected a Left, got $result")
+    }
+  }
+
+  test("a tool error with a lone surrogate in its message gives a tool error reply, not an exception") {
+    val tool = SandboxTool(
+      name = "explode",
+      parameters = Vector.empty,
+      invoke = _ => throw new IllegalStateException("cut \uD83D")
+    )
+    withSandbox(Vector(tool)) { interpreter =>
+      val result = BoundedWait.within(20)(interpreter.execute("call_tool"))
+      assert(result.exists(_.isRight), s"expected a Right, got $result")
+    }
+  }
+
+  test("after code text with a lone surrogate, the session continues and the Left names the cause") {
+    withSandbox() { interpreter =>
+      val results = BoundedWait.within(20) {
+        val rejected = interpreter.execute("cut \uD83D")
+        (rejected, interpreter.execute("hello").map(_.stdout.trim))
+      }
+      results match
+        case Some((Left(error), next)) =>
+          assert(error.message.contains("Unable to encode the code text as JSON"), error.message)
+          assertEquals(next, Right("echo hello"))
+        case other => fail(s"expected a Left and then a Right, got $other")
+    }
+  }
+
+  test("the tool error reply with a lone surrogate in its message has the cause of the encode failure") {
+    val tool = SandboxTool(
+      name = "explode",
+      parameters = Vector.empty,
+      invoke = _ => throw new IllegalStateException("cut \uD83D")
+    )
+    withSandbox(Vector(tool)) { interpreter =>
+      val result = BoundedWait.within(20)(interpreter.execute("call_tool").map(_.stdout.trim))
+      assert(
+        result.exists(_.exists(_.startsWith("tool error: Unable to encode the tool error as JSON"))),
+        s"expected the cause of the encode failure, got $result"
+      )
+      assertEquals(interpreter.execute("hello").map(_.stdout.trim), Right("echo hello"))
+    }
+  }
+
+  test("a tool result with a lone surrogate gives a tool error reply, not an exception") {
+    val tool =
+      SandboxTool(name = "explode", parameters = Vector.empty, invoke = _ => Right(DynamicValues.fromAny("cut \uD83D")))
+    withSandbox(Vector(tool)) { interpreter =>
+      val result = BoundedWait.within(20)(interpreter.execute("call_tool").map(_.stdout.trim))
+      assert(
+        result.exists(_.exists(_.startsWith("tool error: Unable to encode the tool result as JSON"))),
+        s"expected a tool error reply, got $result"
+      )
+    }
   }
 
   test("the scripted sandbox answers an ordinary execute request") {

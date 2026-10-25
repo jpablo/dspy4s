@@ -9,9 +9,11 @@ import dspy4s.core.contracts.HistoryLimit
 import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.ThreadCount
+import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import munit.FunSuite
+import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -49,7 +51,7 @@ class RuntimeEnvironmentSuite extends FunSuite:
       override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
         received += event
 
-    val context = RuntimeContext(callbacks = Vector(callback))
+    val context = RuntimeContext(callbacks = Some(Vector(callback)))
 
     RuntimeEnvironment.withContext(context) {
       RuntimeEnvironment.emit(ModuleStartEvent("predict", DynamicValues.record("q" := "hi")))
@@ -68,7 +70,8 @@ class RuntimeEnvironmentSuite extends FunSuite:
   test("globally-configured captureFailureTraces and callbackMetadata reach the current context (fillFrom)") {
     // Regression: fillFrom omitted these two fields, so a global `configure` of them was silently lost in `current`.
     val meta = DynamicValues.record("run" := "abc")
-    val _    = RuntimeEnvironment.configure(RuntimeContext(captureFailureTraces = true, callbackMetadata = meta))
+    val _    =
+      RuntimeEnvironment.configure(RuntimeContext(captureFailureTraces = Some(true), callbackMetadata = Some(meta)))
     assertEquals(RuntimeEnvironment.current.captureFailureTraces, true)
     assertEquals(RuntimeEnvironment.current.callbackMetadata, meta)
   }
@@ -171,9 +174,12 @@ class RuntimeEnvironmentSuite extends FunSuite:
       assertEquals(DynamicValues.recordToMap(history.last.payload)("n"), 3: Any)
     }
 
+    // The history that the first block adds stays after the block (upstream `dspy.context`).
+    val before = RuntimeEnvironment.current.history
+    assertEquals(before.size, 2)
     RuntimeEnvironment.withSettings(RuntimeContext(disableHistory = Some(true))) {
       RuntimeEnvironment.appendHistory(HistoryEntry("lm", DynamicValues.record("n" := 4)))
-      assertEquals(RuntimeEnvironment.current.history, Vector.empty)
+      assertEquals(RuntimeEnvironment.current.history, before, "a disabled history adds no entry")
     }
   }
 
@@ -196,4 +202,67 @@ class RuntimeEnvironmentSuite extends FunSuite:
       assert(RuntimeEnvironment.current.interpreterFactory.exists(_ eq factory))
     }
     assertEquals(RuntimeEnvironment.current.interpreterFactory, None)
+  }
+
+  test("withCallbacks with an empty list turns off the callbacks of the global context") {
+    val received = ArrayBuffer.empty[CallbackEvent]
+    val callback = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
+        received += event
+    val _ = RuntimeEnvironment.configure(RuntimeContext(callbacks = Some(Vector(callback))))
+    RuntimeEnvironment.withCallbacks(Vector.empty) {
+      RuntimeEnvironment.emit(ModuleStartEvent("predict", DynamicValues.record("q" := "hi")))
+    }
+    assertEquals(received.size, 0, "upstream dspy.context(callbacks=[]) turns the callbacks off")
+  }
+
+  test("withSettings, withCallbacks, and withAsyncTask keep the trace and the history of their block") {
+    val trace   = TraceEntry("component", DynamicValue.Record.empty, DynamicValue.Record.empty)
+    val history = HistoryEntry("lm:model", DynamicValue.Record.empty)
+    RuntimeEnvironment.withSettings(RuntimeContext(asyncTaskId = Some("block"))) {
+      RuntimeEnvironment.appendTrace(trace)
+      RuntimeEnvironment.appendHistory(history)
+    }
+    RuntimeEnvironment.withCallbacks(Vector.empty)(RuntimeEnvironment.appendTrace(trace))
+    RuntimeEnvironment.withAsyncTask("task")(RuntimeEnvironment.appendTrace(trace))
+    assertEquals(RuntimeEnvironment.current.trace, Vector(trace, trace, trace))
+    assertEquals(RuntimeEnvironment.current.history, Vector(history))
+  }
+
+  test("withSettings with captureFailureTraces = Some(false) turns off the failure traces of the global context") {
+    val _      = RuntimeEnvironment.configure(RuntimeContext(captureFailureTraces = Some(true)))
+    val inside = RuntimeEnvironment.withSettings(RuntimeContext(captureFailureTraces = Some(false))) {
+      RuntimeEnvironment.current.captureFailureTraces
+    }
+    assertEquals(inside, false)
+    assertEquals(RuntimeEnvironment.current.captureFailureTraces, true)
+  }
+
+  test("withSettings with an empty callbackMetadata record hides the callback metadata of the global context") {
+    val meta   = DynamicValues.record("run" := "abc")
+    val _      = RuntimeEnvironment.configure(RuntimeContext(callbackMetadata = Some(meta)))
+    val inside = RuntimeEnvironment.withSettings(RuntimeContext(callbackMetadata = Some(DynamicValue.Record.empty))) {
+      RuntimeEnvironment.current.callbackMetadata
+    }
+    assertEquals(inside, DynamicValue.Record.empty)
+    assertEquals(RuntimeEnvironment.current.callbackMetadata, meta)
+  }
+
+  test("withSettings adds the trace of its block to the trace of the caller, also when the block throws") {
+    val before = TraceEntry("before", DynamicValue.Record.empty, DynamicValue.Record.empty)
+    val inside = TraceEntry("inside", DynamicValue.Record.empty, DynamicValue.Record.empty)
+    RuntimeEnvironment.appendTrace(before)
+    val seen = RuntimeEnvironment.withSettings(RuntimeContext(asyncTaskId = Some("block"))) {
+      RuntimeEnvironment.appendTrace(inside)
+      RuntimeEnvironment.current.trace
+    }
+    val _ = intercept[IllegalStateException] {
+      RuntimeEnvironment.withSettings(RuntimeContext(asyncTaskId = Some("block"))) {
+        RuntimeEnvironment.appendTrace(inside)
+        throw new IllegalStateException("boom")
+      }
+    }
+    assertEquals(seen, Vector(before, inside), "the block sees the trace of the caller")
+    assertEquals(RuntimeEnvironment.current.trace, Vector(before, inside, inside))
+    assertEquals(RuntimeEnvironment.current.asyncTaskId, None)
   }

@@ -90,7 +90,7 @@ final class Evaluate(val config: EvaluateConfig) extends Evaluator:
     val baseCtx      = summon[RuntimeContext]
     val withMetadata =
       if cfg.callbackMetadata.fields.isEmpty then baseCtx
-      else baseCtx.withConfig(baseCtx.config.copy(callbackMetadata = cfg.callbackMetadata))
+      else baseCtx.withConfig(baseCtx.config.copy(callbackMetadata = Some(cfg.callbackMetadata)))
     // The run installs the given context (decision D8: the given context wins), and the run uses the effective context
     // of the call, also for the thread count of the inputs. It keeps the dynamic scope of this thread (the open call
     // scopes), so the evaluate scope nests under the scope that calls it, for example a compile scope, also when the

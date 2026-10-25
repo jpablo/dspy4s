@@ -19,6 +19,9 @@ Install it for a scope with `RuntimeEnvironment.withCallbacks`:
 --8<-- "tutorials/observability/Observability.scala:callback-run"
 ```
 
+`RuntimeEnvironment.withCallbacks(Vector.empty)` turns off the callbacks for a
+block, also the callbacks of the global context.
+
 Because `CallbackEvent` is a sealed type, the compiler tells you every event
 kind you could handle: `ModuleStartEvent` / `ModuleEndEvent`, the language-model
 and adapter start/end events, and `ToolStartEvent` / `ToolEndEvent`.

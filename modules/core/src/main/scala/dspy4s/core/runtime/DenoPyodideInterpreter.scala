@@ -16,6 +16,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.InterpreterSupport.describe
 import dspy4s.core.runtime.InterpreterSupport.exitedIn
 import dspy4s.core.runtime.InterpreterSupport.nameAndType
+import dspy4s.core.runtime.InterpreterSupport.tryEncodeJson
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.PrimitiveValue
@@ -61,8 +62,9 @@ import scala.util.control.NonFatal
   * when the process or the protocol fails (upstream `_raise_terminal_error`). Such a failure stops the process. The
   * process holds the REPL state, so a session does not start again: each later [[execute]] gives a `Left` that tells
   * the caller to create a new interpreter. These failures do not end the session: a user-code error, a tool error, an
-  * invalid variable name, a variable value that the JSON writer cannot encode, a mount file that is absent, a write
-  * path that the client cannot create, a mount collision, a recursive call, and a Deno version that is not supported.
+  * invalid variable name, a variable value or code text that the JSON writer cannot encode, a mount file that is
+  * absent, a write path that the client cannot create, a mount collision, a recursive call, and a Deno version that is
+  * not supported.
   *
   * A thread reads the standard error of the process all the time and keeps its last characters for the failure
   * messages. Thus a process that writes much text to its standard error does not stop when the pipe is full.
@@ -139,9 +141,10 @@ final class DenoPyodideInterpreter(
   private var cachedPrelude: Option[(Map[String, DynamicValue], String)] = None
 
   /** Like [[execute]], but first defines each of `variables` as a Python variable in the sandbox (JSON-compatible
-    * values only). Variable names must be plain Python identifiers (and not `json`, which the injection uses).
-    * Variables are re-assigned at the top of every call's code block (upstream parity), so a sandbox-side mutation of
-    * an injected variable does not survive to the next `execute`.
+    * values only). A variable name must be a Python identifier that is not a keyword (Unicode letters are valid, as in
+    * upstream `str.isidentifier`). The name `json` is not valid, because the injection uses it. Variables are
+    * re-assigned at the top of every call's code block (upstream parity), so a sandbox-side mutation of an injected
+    * variable does not survive to the next `execute`.
     *
     * One call runs at a time. A tool that calls `execute` on its interpreter gets a `Left`, and the outer call
     * continues. A call from a different thread while a call is in progress gets a `Left` too.
@@ -213,9 +216,11 @@ final class DenoPyodideInterpreter(
   private def stop(running: Session.Running, shutdown: Boolean): Unit =
     if shutdown then
       try
-        running.stdin.write(encodeNotification("shutdown", None))
-        running.stdin.newLine()
-        running.stdin.flush()
+        encodeNotification("shutdown", None).foreach { line =>
+          running.stdin.write(line)
+          running.stdin.newLine()
+          running.stdin.flush()
+        }
         running.stdin.close()
       catch case NonFatal(_) => ()
     else running.process.destroy()
@@ -336,7 +341,7 @@ final class DenoPyodideInterpreter(
   private def executeRequest(code: String): Either[DspyError, CodeResult] =
     val id = nextRequestId()
     for
-      _      <- writeLine(encodeRequest("execute", DynamicValues.record("code" := code), id))
+      _      <- writeEncoded(encodeRequest("execute", DynamicValues.record("code" := code), id), "the code text")
       result <- nextMessage(serveTools = true).flatMap {
                   case Some((msg, line)) => executeOutcome(msg, id, line)
                   case None              => terminal(s"Too many skipped lines from sandbox (> $MaxSkippedLines)")
@@ -450,6 +455,10 @@ final class DenoPyodideInterpreter(
     * throws also gets an error reply (upstream `_handle_tool_call`): the sandbox waits for a reply to each tool call,
     * so an exception that leaves `execute` here blocks the session.
     *
+    * A tool result or an error message that the JSON writer cannot encode, for example a text with a lone UTF-16
+    * surrogate, gives an error reply with the cause, as `LocalPythonInterpreter` does. When the writer cannot encode a
+    * reply with the `id` of the request, the sandbox gets no reply, so the session ends.
+    *
     * Each tool call is a `ToolCall` interpreter scope (upstream `invoke_tool`), also for an unknown tool. The inputs
     * are `tool` and `args`, and the output is the tool result.
     */
@@ -464,18 +473,29 @@ final class DenoPyodideInterpreter(
     // a ToolStart/ToolEnd scope, inside the `ToolCall` interpreter scope. handleToolCall runs on the thread that
     // called `execute`, so the events land on (and nest under) the `Execute` scope. The dispatcher emits the end
     // events before it rethrows a tool exception, so the catch stays outside the scopes.
-    val reply =
+    val result: Either[String, DynamicValue.Record] =
       try
         InterpreterSupport.invokeTool(interpreterName, tools, name, kwargs, Right(kwargs)) match
-          case Left(err)                                               => encodeError(callId, ToolErrorCode, err.message)
+          case Left(err)                                               => Left(err.message)
           case Right(DynamicValue.Primitive(PrimitiveValue.String(s))) =>
-            encodeResult(callId, DynamicValues.record("value" := s, "type" := "string"))
-          case Right(other) =>
-            encodeResult(callId, DynamicValues.record("value" := encodeJson(other), "type" := "json"))
-      catch
-        case NonFatal(error) =>
-          encodeError(callId, ToolErrorCode, Option(error.getMessage).getOrElse(error.getClass.getSimpleName))
-    writeLine(reply)
+            Right(DynamicValues.record("value" := s, "type" := "string"))
+          case Right(other) => tryEncodeJson(other).map(json => DynamicValues.record("value" := json, "type" := "json"))
+              .left.map(cause => s"Unable to encode the tool result as JSON: $cause")
+      catch case NonFatal(error) => Left(Option(error.getMessage).getOrElse(error.getClass.getSimpleName))
+    val reply = result.flatMap { value =>
+      encodeResult(callId, value).left.map(cause => s"Unable to encode the tool result as JSON: $cause")
+    }
+    reply.fold(toolError(callId, _), Some(_)) match
+      case Some(line) => writeLine(line)
+      case None       => terminal(s"Unable to encode a reply to the tool call '${snippet(name)}' as JSON")
+
+  /** The error reply to a tool call with `message`. A message that the JSON writer cannot encode gives a reply with the
+    * cause of the failure. `None` when the writer cannot encode the two replies.
+    */
+  private def toolError(callId: DynamicValue, message: String): Option[String] =
+    encodeError(callId, ToolErrorCode, message).left
+      .flatMap(cause => encodeError(callId, ToolErrorCode, s"Unable to encode the tool error as JSON: $cause"))
+      .toOption
 
   /** Tell the runner to copy each write path from the sandbox to the host. A write that fails ends the session. */
   private def syncWriteFiles(): Either[DspyError, Unit] =
@@ -484,7 +504,7 @@ final class DenoPyodideInterpreter(
       enableWritePaths.foldLeft[Either[DspyError, Unit]](Right(())) { (acc, path) =>
         acc.flatMap { _ =>
           val params = DynamicValues.record("virtual_path" := sandboxPath(path), "host_path" := canonical(path))
-          writeLine(encodeNotification("sync_file", Some(params)))
+          writeEncoded(encodeNotification("sync_file", Some(params)), s"the sync of $path")
         }
       }
 
@@ -494,7 +514,7 @@ final class DenoPyodideInterpreter(
   private def sendRequest(method: String, params: DynamicValue.Record): Either[DspyError, DynamicValue.Record] =
     val id = nextRequestId()
     for
-      _      <- writeLine(encodeRequest(method, params, id))
+      _      <- writeEncoded(encodeRequest(method, params, id), s"the '$method' request")
       result <- nextMessage(serveTools = false).flatMap {
                   case Some((msg, line)) => setupOutcome(msg, method, id, line)
                   case None              => terminal(s"No response to '$method'")
@@ -522,6 +542,14 @@ final class DenoPyodideInterpreter(
             case _                                 => terminal(s"Unexpected response to '$method': ${snippet(line)}")
 
   // ── Low-level IO ────────────────────────────────────────────────────────────────────────────────────────────
+
+  /** Write the line of an encoded message. A message that the JSON writer cannot encode gives a `Left` that names
+    * `subject` and the cause. The client did not send the message, so the session continues.
+    */
+  private def writeEncoded(encoded: Either[String, String], subject: => String): Either[DspyError, Unit] =
+    encoded match
+      case Right(line) => writeLine(line)
+      case Left(cause) => failure(s"Unable to encode $subject as JSON: $cause")
 
   private def writeLine(line: String): Either[DspyError, Unit] =
     session.get() match

@@ -82,7 +82,7 @@ class GivenContextFillSuite extends FunSuite:
   test("a parallel worker in a withSettings block uses the LM of the given context and the handler of the block") {
     val recorder = Recorder()
 
-    val result = RuntimeEnvironment.withSettings(RuntimeContext(callbacks = Vector(recorder))) {
+    val result = RuntimeEnvironment.withSettings(RuntimeContext(callbacks = Some(Vector(recorder)))) {
       ParallelExecutor(numThreads = ThreadCount(2)).execute(
         task = (_: Int) =>
           val installed = RuntimeEnvironment.current
@@ -116,9 +116,10 @@ class GivenContextFillSuite extends FunSuite:
   test("the LM of the given context wins over the installed LM in a program call") {
     val recorder = Recorder()
 
-    val result = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(installedLm), callbacks = Vector(recorder))) {
-      DynamicPredict(signature)(ProgramCall(question))
-    }
+    val result =
+      RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(installedLm), callbacks = Some(Vector(recorder)))) {
+        DynamicPredict(signature)(ProgramCall(question))
+      }
 
     assertEquals(answerOf(result), Right("Paris"))
     assertEquals(recorder.lmStarts, Vector("given"))
