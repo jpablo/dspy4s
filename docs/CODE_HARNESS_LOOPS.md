@@ -14,6 +14,8 @@ source code of each project on 2026-10-24.
   action (`finish`, `submit` or `SUBMIT`), and they have a fallback when the step limit is reached.
 - No interactive harness has a step limit. They limit tool calls, tokens, time or retries.
 - All five harnesses use the native reasoning of the model. Only the dspy4s programs have a thought field.
+- Most code modes run each cell in a new process or isolate (pi, deepseek-harness, Codex). Only atc, the sessions
+  of tacit, and `RLM` keep a REPL from cell to cell. pi and Codex keep state between cells in an explicit store.
 - All five harnesses accept a user message during a turn, and they add it between two steps. `AgentLoop.run`
   has no input of this kind.
 - tacit has no loop. It supplies the action language to the loop of another agent.
@@ -29,7 +31,7 @@ Yes. A ReAct loop repeats one step until a stop rule holds:
 3. The observation goes into the trajectory.
 4. A rule decides if the loop continues.
 
-In a code harness, the action is a code cell, and the observation is the output of the REPL. Each loop in this
+In a code harness, the action is a code cell, and the observation is the output of the cell. Each loop in this
 document has this step. Section 2 gives the dspy4s form of the step, and section 3 gives the form of each harness.
 
 But the ReAct step does not describe all of a code harness. Four parts around the step make the differences
@@ -37,7 +39,7 @@ between the harnesses:
 
 | Part | What it decides | Sections |
 |---|---|---|
-| State between steps | What the next step can use. In ReAct, the trajectory is the only state. In a code harness, the REPL holds a second state: the values and definitions of earlier cells. | 2.3, 3.1, 3.6 |
+| State between steps | What the next step can use. In ReAct, the trajectory is the only state. Most code modes run each cell in a new process or isolate, so the log and the files are the only state. Some add a second state: a persistent REPL that keeps the values and definitions of earlier cells (atc, the sessions of tacit, `RLM` in one call), or an explicit store (pi, Codex). | 5.8 |
 | Context of each step | Which part of the log the model sees, and when compaction runs. This decides the cost of each step and the use of the prompt cache. | 5.7 |
 | Stop rule | What ends the loop, what the result is, and what occurs when a limit is reached. | 5.2, 5.3 |
 | Outer loop | What starts a turn: a user message, a queued message, a subagent report, or a goal check. ReAct describes only the loop inside one turn. | 5.6 |
@@ -226,6 +228,7 @@ tacit is not in this table, because it has no loop.
 |---|---|---|---|---|---|---|
 | Thought | Native | Native | Native | Native | Native | The `reasoning` field |
 | Action | `run_scala` code | JSON tools | JSON tools (MCP) | JSON tools, or `run_code` | JSON tools, or `exec` | The `code` field |
+| State between cells | A persistent REPL | A store (code mode) | No code mode | None by default | A store (code mode) | A persistent REPL in one call |
 | Actions in a step | Many, in order | Many, in parallel | Many, in order | Many, in a pool of 10 | Many, started during the stream | One cell |
 | Stop | No tool call | No tool call | No tool call and no new message | No tool call, or `concludeTurn()` | No follow-up needed | `SUBMIT` |
 | Step limit | None (200 tool calls) | None | None | None | None | `maxIterations` |
@@ -298,7 +301,28 @@ once for each call, and it does not change the view inside the call. This keeps 
 The dspy4s programs render the full trajectory for each step. Only `ReAct` removes old entries, and only on a
 context overflow.
 
-### 5.8 Tests
+### 5.8 State between cells
+
+| Code runtime | Where a cell runs | State between cells |
+|---|---|---|
+| atc | One `ReplDriver` for the session | The REPL state stays from cell to cell and from turn to turn. |
+| tacit | `execute_scala`: a new REPL. `execute_in_session`: a kept REPL. The model chooses. | Only in a kept REPL. After a timeout or a compile error, the session keeps its earlier state. |
+| pi code mode | A new QuickJS sandbox for each call | `store(key, value)` and `load(key)`. A write stays only if the script succeeds, and the session log keeps it. |
+| deepseek-harness PTC | A new Node process for each call, by default. The `persistent-in-memory` mode is opt-in. | None by default. The opt-in REPL is never in the session log. |
+| Codex code mode | A new V8 isolate for each cell | `store(key, value)` and `load(key)`. A cell sees a snapshot, and its writes commit only if the cell completes. Codex removed its persistent JavaScript REPL. |
+| dspy4s `RLM` | One interpreter for each program call, closed at the end of the call | The interpreter state stays from iteration to iteration. The inputs go into the REPL again before each cell. |
+
+uniichat has no code mode.
+
+A persistent REPL is the less common choice. Three of the six code runtimes start each cell fresh by default
+(pi, deepseek-harness, Codex), and two of them give an explicit store with commit on success (pi, Codex). With a
+fresh cell, no state stays in a process between cells. The log, the files, and the store hold all of it.
+
+The harness of CODE_HARNESS.md keeps a persistent REPL (F1). Then the REPL state is a second state next to the log.
+A replay must rebuild it (CODE_HARNESS.md, 8.4), and 9.2 of CODE_HARNESS.md asks if an explicit store goes next to
+it.
+
+### 5.9 Tests
 
 Each loop can run with a scripted model, except uniichat, which puts a fake server in the place of `fetch`. tacit
 tests its executor with no model.
@@ -318,4 +342,4 @@ tests its executor with no model.
   the outputs of the leaf, and only the field is an output (5.4).
 - Keep one cell in each step. One cell can make many guest API calls, so a step can do much work (5.5).
 - Use `ScriptedLm` and a recorded interpreter to test the loop with no model and no REPL, as atc does with
-  `ScriptedModel` and `ToolRunner` (5.8).
+  `ScriptedModel` and `ToolRunner` (5.9).
