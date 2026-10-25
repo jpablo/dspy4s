@@ -200,7 +200,6 @@ class ToolCallIdSuite extends FunSuite:
   test("the prompt of the text mode takes the text of a tool message, and no tool field") {
     val request = LmRequest(
       model = "gpt-test",
-      mode = LmMode.Text,
       messages = Vector(
         Message(role = MessageRole.User, text = Some("Q1")),
         Message(role = MessageRole.Assistant, text = Some("I should search."), toolCalls = Vector(search)),

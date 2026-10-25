@@ -50,7 +50,6 @@ class LmRuntimeSuite extends FunSuite:
 
   private val baseRequest = LmRequest(
     model = "test-model",
-    mode = LmMode.Chat,
     options = DynamicValues.record("temperature" := 0.7)
   )
 

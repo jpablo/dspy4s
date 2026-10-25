@@ -8,7 +8,6 @@ import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
-import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.MessageRole
@@ -38,7 +37,7 @@ class JSONAdapterSuite extends FunSuite:
         )
       ),
       inputs = Example(values = rec("question" := "Capital of Belgium?"), inputKeys = Set("question")),
-      request = LmRequest(model = "openai/test", mode = LmMode.Chat)
+      request = LmRequest(model = "openai/test")
     )
 
     given RuntimeContext = RuntimeEnvironment.current
@@ -60,7 +59,7 @@ class JSONAdapterSuite extends FunSuite:
       layout = signature,
       demos = Vector.empty,
       inputs = Example(values = rec("question" := "x"), inputKeys = Set("question")),
-      request = LmRequest(model = "openai/test", mode = LmMode.Chat),
+      request = LmRequest(model = "openai/test"),
       outputJsonSchema = Some(schemaString)
     )
 
@@ -79,7 +78,7 @@ class JSONAdapterSuite extends FunSuite:
       layout = signature,
       demos = Vector.empty,
       inputs = Example(values = rec("question" := "x"), inputKeys = Set("question")),
-      request = LmRequest(model = "openai/test", mode = LmMode.Chat)
+      request = LmRequest(model = "openai/test")
       // outputJsonSchema defaults to None
     )
 
@@ -223,7 +222,7 @@ class JSONAdapterSuite extends FunSuite:
         )
       ),
       inputs = Example(values = rec("question" := "x"), inputKeys = Set("question")),
-      request = LmRequest(model = "openai/test", mode = LmMode.Chat)
+      request = LmRequest(model = "openai/test")
     )
     given RuntimeContext = RuntimeEnvironment.current
     val all              = JSONAdapter().format(invocation).toOption.get.messages.flatMap(_.text).mkString("\n")

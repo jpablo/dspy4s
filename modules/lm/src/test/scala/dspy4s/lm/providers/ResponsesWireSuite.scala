@@ -207,16 +207,17 @@ class ResponsesWireSuite extends FunSuite:
           output.toolCalls,
           Vector(ToolCall(name = "search", args = record("""{"q":"x"}"""), id = Some("call_1")))
         )
-        assertEquals(DynamicValues.recordGet(output.metadata, "reasoning_content").map(plain), Some("Think. Done."))
+        assertEquals(output.reasoning, "Think. Done.")
         assertEquals(
-          DynamicValues.recordGet(output.metadata, "citations").map(plain),
-          Some(Vector(Map(
+          output.citations.map(plain),
+          Vector(Map(
             "type"     -> "citation",
             "title"    -> "X",
             "url"      -> "https://x",
             "metadata" -> Map("type" -> "url_citation", "start_index" -> BigDecimal(0))
-          )))
+          ))
         )
+        assertEquals(output.metadata, DynamicValue.Record.empty)
       case other => fail(s"expected one output, got $other")
   }
 

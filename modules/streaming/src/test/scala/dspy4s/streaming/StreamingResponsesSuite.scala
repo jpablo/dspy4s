@@ -73,7 +73,6 @@ class StreamingResponsesSuite extends FunSuite:
 
   private val request = LmRequest(
     model = "gpt-test",
-    mode = LmMode.Responses,
     messages = Vector(Message(role = MessageRole.User, text = Some("Capital of France?")))
   )
 
@@ -107,6 +106,8 @@ class StreamingResponsesSuite extends FunSuite:
     val plain            = plainCall(openAi(Scripted(body, Vector.empty)))
     val streamed         = wrapped(openAi(Scripted(body, lines)))
     assertEquals(streamed.outputs.map(_.text), plain.outputs.map(_.text))
+    assertEquals(streamed.outputs.map(_.reasoning), plain.outputs.map(_.reasoning))
+    assertEquals(streamed.outputs.map(_.citations), plain.outputs.map(_.citations))
     assertEquals(streamed.outputs.map(_.metadata), plain.outputs.map(_.metadata))
     // Upstream lm15 `_parse_json_best_effort`: streamed arguments that are not JSON give `{"partial_json": raw}`.
     assertEquals(
@@ -119,12 +120,14 @@ class StreamingResponsesSuite extends FunSuite:
     given RuntimeContext = RuntimeEnvironment.current
     val provider         = PlainOnly(openAi(Scripted(body, Vector.empty)))
     val plain            = plainCall(provider)
-    assert(plain.outputs.exists(_.metadata.fields.nonEmpty), plain.toString)
+    assert(plain.outputs.exists(output => output.reasoning.nonEmpty && output.citations.nonEmpty), plain.toString)
     val streamed = wrapped(ManagedLanguageModel(delegate = provider))
+    assertEquals(streamed.outputs.map(_.reasoning), plain.outputs.map(_.reasoning))
+    assertEquals(streamed.outputs.map(_.citations), plain.outputs.map(_.citations))
     assertEquals(streamed.outputs.map(_.metadata), plain.outputs.map(_.metadata))
   }
 
-  test("a stream with no reasoning and no citation keeps an empty metadata") {
+  test("a stream with no reasoning and no citation gives an empty reasoning, no citation, and an empty metadata") {
     given RuntimeContext = RuntimeEnvironment.current
     val textOnly         = Vector(
       """data: {"type":"response.output_text.delta","output_index":0,"delta":"Paris"}""",
@@ -133,5 +136,7 @@ class StreamingResponsesSuite extends FunSuite:
     )
     val streamed = wrapped(openAi(Scripted(body, textOnly)))
     assertEquals(streamed.outputs.map(_.text), Vector("Paris"))
+    assertEquals(streamed.outputs.map(_.reasoning), Vector(""))
+    assertEquals(streamed.outputs.map(_.citations), Vector(Vector.empty))
     assertEquals(streamed.outputs.map(_.metadata), Vector(DynamicValue.Record.empty))
   }

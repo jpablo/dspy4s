@@ -288,7 +288,7 @@ object TypeSafeModel:
           DynamicValues.asString(value).filter(_.nonEmpty).toRight(invalid("model", "expected a non-empty string"))
 
     for
-      data    <- DynamicJson.decode(reply.body).left.map(_ => invalid("$", "the reply is not JSON"))
+      data    <- DynamicValues.decodeJson(reply.body).toRight(invalid("$", "the reply is not JSON"))
       _       <- DynamicValues.asRecord(data).toRight(invalid("$", "expected an object"))
       answers <- DynamicValues.recordGet(data, "answers").flatMap(DynamicValues.asRecord)
                    .toRight(invalid("answers", "expected an object containing every declared judgment"))
@@ -322,7 +322,7 @@ object TypeSafeModel:
   private def errorText(status: Int, body: String): (String, Option[String]) =
     val excerpt  = body.strip().take(ExcerptLength)
     val fallback = if excerpt.isEmpty then s"HTTP $status" else excerpt
-    DynamicJson.decode(body).toOption.flatMap(DynamicValues.recordGet(_, "detail")) match
+    DynamicValues.decodeJson(body).flatMap(DynamicValues.recordGet(_, "detail")) match
       case Some(detail: DynamicValue.Record) =>
         val message = DynamicValues.recordGet(detail, "message").flatMap(DynamicValues.asString).getOrElse(fallback)
         (message, DynamicValues.recordGet(detail, "error_type").flatMap(DynamicValues.asString))

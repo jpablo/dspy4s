@@ -70,7 +70,7 @@ class StructuredOutputSuite extends FunSuite:
       layout = signature.layout,
       demos = Vector.empty,
       inputs = Example(values = DynamicValues.recordFromEntries(Seq("text" := "x")), inputKeys = Set("text")),
-      request = LmRequest(model = "openai/test", mode = LmMode.Chat),
+      request = LmRequest(model = "openai/test"),
       outputJsonSchema = signature.outputShape.jsonSchemaString
     )
     given RuntimeContext = RuntimeEnvironment.current

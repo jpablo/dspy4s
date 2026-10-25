@@ -296,7 +296,7 @@ private[lm] object OpenAiErrors:
     * not JSON. This function does not fail for a body that it cannot read.
     */
   private def parseEnvelope(body: String): Envelope =
-    DynamicJson.decode(body).toOption.flatMap(DynamicValues.recordGet(_, "error")) match
+    DynamicValues.decodeJson(body).flatMap(DynamicValues.recordGet(_, "error")) match
       case Some(error: DynamicValue.Record) => envelopeOf(error)
       case Some(other)                      => Envelope(message = scalarText(other))
       case None                             => Envelope()

@@ -22,7 +22,6 @@ class LmCacheKeySuite extends FunSuite:
 
   private val request = LmRequest(
     model = "shared-model",
-    mode = LmMode.Chat,
     messages = Vector(Message(role = MessageRole.User, text = Some("What is the capital of Belgium?")))
   )
 
@@ -58,10 +57,12 @@ class LmCacheKeySuite extends FunSuite:
     )
 
   /** A model that declares default options and records each request that it receives. */
-  private final class RecordingLm(override val defaultOptions: DynamicValue.Record) extends LanguageModel:
+  private final class RecordingLm(
+      override val defaultOptions: DynamicValue.Record,
+      override val mode          : LmMode = LmMode.Chat
+  ) extends LanguageModel:
     val calls: ArrayBuffer[LmRequest] = ArrayBuffer.empty
     override val id: String           = "shared-model"
-    override val mode: LmMode         = LmMode.Chat
 
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       calls += request
@@ -224,9 +225,9 @@ class LmCacheKeySuite extends FunSuite:
     val model            = ManagedLanguageModel(
       delegate = new RecordingLm(DynamicValue.Record.empty),
       cache = Some(CompositeLmCache(InMemoryLmCache(CacheCapacity(16)), InMemoryLmCache(CacheCapacity(16)))),
-      cacheKey = (keyRequest, identity) =>
+      cacheKey = (keyRequest, mode, identity) =>
         keys += 1
-        RequestHash.forRequest(keyRequest, identity)
+        RequestHash.forRequest(keyRequest, mode, identity)
     )
 
     assertEquals(model.call(request).map(_.cacheHit), Right(false))
@@ -235,12 +236,14 @@ class LmCacheKeySuite extends FunSuite:
     assertEquals(keys, 2, "a hit uses one key")
   }
 
-  test("the key has the mode of the model, not the mode of the request") {
+  test("the key has the mode of the model, so two models with one id and different modes do not share an entry") {
     given RuntimeContext = RuntimeEnvironment.current
-    val delegate         = new RecordingLm(DynamicValue.Record.empty)
-    val model            = ManagedLanguageModel(delegate = delegate, cache = Some(new InMemoryLmCache(CacheCapacity(16))))
+    val cache            = Some(new InMemoryLmCache(CacheCapacity(16)))
+    val chat             = new RecordingLm(DynamicValue.Record.empty)
+    val text             = new RecordingLm(DynamicValue.Record.empty, LmMode.Text)
 
-    assertEquals(model.call(request).map(_.cacheHit), Right(false))
-    assertEquals(model.call(request.copy(mode = LmMode.Text)).map(_.cacheHit), Right(true))
-    assertEquals(delegate.calls.size, 1)
+    assertEquals(ManagedLanguageModel(delegate = chat, cache = cache).call(request).map(_.cacheHit), Right(false))
+    assertEquals(ManagedLanguageModel(delegate = text, cache = cache).call(request).map(_.cacheHit), Right(false))
+    assertEquals(ManagedLanguageModel(delegate = chat, cache = cache).call(request).map(_.cacheHit), Right(true))
+    assertEquals((chat.calls.size, text.calls.size), (1, 1))
   }

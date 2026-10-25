@@ -47,8 +47,8 @@ private[lm] object ChatWire:
     val prompt = request.messages.map(messageText).mkString("\n").trim
     options(request, defaultOptions).updated(WireKeys.prompt, string(prompt))
 
-  /** The name of `role` on the wire, in lower case. The Responses wire uses it too. */
-  private[providers] def roleName(role: MessageRole): String = role.toString.toLowerCase(Locale.ROOT)
+  /** The name of `role` on the wire, in lower case. The Responses wire and the history entry use it too. */
+  private[lm] def roleName(role: MessageRole): String = role.toString.toLowerCase(Locale.ROOT)
 
   /** The wire form of one content part: `{"type": <kind>, "text": <payload>}`, and `metadata` when the part has it. The
     * Responses wire sends a part that it does not change in this form too.

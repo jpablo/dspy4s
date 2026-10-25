@@ -269,3 +269,11 @@ class DataSuite extends FunSuite:
     assertEquals(prediction.asInt("count"), Right(1200))
     assertEquals(prediction.asDouble("ratio"), Right(3.5))
   }
+
+  test("a JSON text that is nested too deep for the stack gives no value, and the next decode works") {
+    val deep = "[" * 100000
+    assert(DynamicValues.tryDecodeJson(deep).left.exists(_.contains("nested too deep")))
+    assertEquals(DynamicValues.decodeJson(deep), None)
+    assertEquals(DynamicValues.parseJsonRecord("""{"a":""" + deep), None)
+    assertEquals(DynamicValues.parseJsonRecord("""{"ok":"yes"}"""), Some(DynamicValues.record("ok" := "yes")))
+  }

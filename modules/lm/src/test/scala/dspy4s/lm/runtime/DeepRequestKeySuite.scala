@@ -61,11 +61,11 @@ class DeepRequestKeySuite extends FunSuite:
       Right(response)
 
   test("the key of a request with no key is a ValidationError, and the next key works") {
-    RequestHash.forRequest(deep) match
+    RequestHash.forRequest(deep, LmMode.Chat) match
       case Left(error: ValidationError) => assert(error.message.contains("nested too deep"), error.message)
       case Left(other)                  => fail(s"expected a ValidationError, got $other")
       case Right(key)                   => fail(s"expected a ValidationError, got the key $key")
-    assert(RequestHash.forRequest(plain).isRight)
+    assert(RequestHash.forRequest(plain, LmMode.Chat).isRight)
   }
 
   test("the managed model calls the model for each call of a request with no key, with no cache read or write") {

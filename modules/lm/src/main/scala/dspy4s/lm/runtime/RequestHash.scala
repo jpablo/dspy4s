@@ -24,18 +24,19 @@ object RequestHash:
       cacheIdentity: DynamicValue.Record
   ) derives Schema
 
-  /** The cache key of `request` for a model with the cache identity `cacheIdentity`, or a `ValidationError` when the
-    * request has no key. A value with no JSON text gives no key: a number that is not finite, a text with a lone UTF-16
-    * surrogate, or a value that is nested too deep for the stack of the thread, as the arguments of a tool call in a
-    * message can be (the rule of `DynamicValues.tryEncodeJson`). A cache stores and reads nothing for such a request,
-    * so the model gets the call (upstream `Cache.get` and `Cache.put` catch the exception of `cache_key`, log it, and
-    * go on with no cache).
+  /** The cache key of `request` for a model with the mode `mode` and the cache identity `cacheIdentity`, or a
+    * `ValidationError` when the request has no key. A value with no JSON text gives no key: a number that is not
+    * finite, a text with a lone UTF-16 surrogate, or a value that is nested too deep for the stack of the thread, as
+    * the arguments of a tool call in a message can be (the rule of `DynamicValues.tryEncodeJson`). A cache stores and
+    * reads nothing for such a request, so the model gets the call (upstream `Cache.get` and `Cache.put` catch the
+    * exception of `cache_key`, log it, and go on with no cache).
     */
   def forRequest(
       request      : LmRequest,
+      mode         : LmMode,
       cacheIdentity: DynamicValue.Record = DynamicValue.Record.empty
   ): Either[DspyError, CacheKey] =
-    val data = KeyData(request.model, request.mode, request.messages, request.options, request.rolloutId, cacheIdentity)
+    val data = KeyData(request.model, mode, request.messages, request.options, request.rolloutId, cacheIdentity)
     try
       DynamicValues.tryEncodeJson(Schema[KeyData].toDynamicValue(data).sortFields.sortMapKeys) match
         case Right(json) => Right(CacheKey.of(json))

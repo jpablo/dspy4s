@@ -8,8 +8,8 @@ import dspy4s.core.contracts.LmErrorDetails
 import dspy4s.core.contracts.LmStreamAssemblyError
 import dspy4s.core.contracts.LmUnexpectedError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.core.runtime.ScopedLocal
 import dspy4s.lm.contracts.CacheKey
 import dspy4s.lm.contracts.ForwardingLanguageModel
 import dspy4s.lm.contracts.LanguageModel
@@ -129,34 +129,21 @@ final class UsageTracker:
   * the usage scope of the program call ([[dspy4s.core.runtime.UsageScope]], decision D9 of UPGRADE-3.2.1-to-3.4.0).
   */
 object UsageTracking:
-  private val activeTrackers = new ThreadLocal[Vector[UsageTracker]]:
-    override def initialValue(): Vector[UsageTracker] = Vector.empty
 
-  // The tracker stack must travel with the RuntimeContext to worker threads (ParallelExecutor, futures,
-  // the streamify producer) — otherwise usage recorded there is silently dropped. Registered once at object
-  // init; installing a tracker touches this object, so registration always precedes any capture that matters.
-  ContextPropagation.registerCarrier(new ContextPropagation.Carrier:
-    override def capture(): ContextPropagation.Snapshot =
-      val captured = activeTrackers.get()
-      new ContextPropagation.Snapshot:
-        override def restore[A](thunk: => A): A =
-          val previous = activeTrackers.get()
-          activeTrackers.set(captured)
-          try thunk
-          finally activeTrackers.set(previous))
+  /** The open trackers of this thread, the outermost first. They travel with the runtime context to the worker threads
+    * (`ParallelExecutor`, the futures, the producer of `streamify`), so the usage of a call there goes into them.
+    */
+  private val activeTrackers = ScopedLocal[Vector[UsageTracker]](Vector.empty, travels = true)
 
   def withTracker[A](tracker: UsageTracker)(thunk: => A): A =
-    val previous = activeTrackers.get()
-    activeTrackers.set(previous :+ tracker)
-    try thunk
-    finally activeTrackers.set(previous)
+    activeTrackers.within(activeTrackers.get :+ tracker)(thunk)
 
   def withNewTracker[A](thunk: UsageTracker => A): A =
     val tracker = new UsageTracker
     withTracker(tracker)(thunk(tracker))
 
   def record(model: String, usage: LmUsage): Unit =
-    activeTrackers.get().foreach(_.addUsage(model, usage))
+    activeTrackers.get.foreach(_.addUsage(model, usage))
 
 /** A model with a cache, retries, the history, and the usage record over `delegate`. The capability flags, the default
   * options, the cache identity, and `close` come from the delegate ([[ForwardingLanguageModel]]). A close closes the
@@ -183,15 +170,18 @@ final case class ManagedLanguageModel(
       * ([[dspy4s.lm.contracts.LmCost]]). With `None`, the cost is unknown (decision L10).
       */
     price: Option[LmPrice] = None,
-    /** The cache key of a request. The model gives it the request with the mode of the delegate and the merged options,
+    /** The cache key of a request. The model gives it the request with the merged options, the mode of the delegate,
       * and the cache identity of the delegate. A `Left` gives no key. A different function changes the data that the
       * cache keys on (upstream: a `Cache` subclass that overrides `cache_key`).
       */
-    cacheKey: (LmRequest, DynamicValue.Record) => Either[DspyError, CacheKey] = RequestHash.forRequest
+    cacheKey: (LmRequest, LmMode, DynamicValue.Record) => Either[DspyError, CacheKey] = RequestHash.forRequest
 ) extends StreamingLanguageModel
     with ForwardingLanguageModel:
   override val id: String   = delegate.id
   override val mode: LmMode = delegate.mode
+
+  /** The component of the history entries of this model. */
+  private val historyComponent: String = s"lm:$id"
 
   /** A streamed call with the rules of [[call]] (upstream `execute`: one call path for streamed calls).
     *
@@ -228,14 +218,14 @@ final case class ManagedLanguageModel(
           case Left(error)                          => Iterator.single(LmChunk.failure(error))
 
   /** The cache key of `request`, or `None` when the model has no cache or the request has no key. The key request has
-    * the mode of the delegate and the merged options: the provider merges its default options into each request, so two
-    * models with one id and different defaults get different entries. The key also has the cache identity of the
+    * the merged options: the provider merges its default options into each request, so two models with one id and
+    * different defaults get different entries. The key also has the mode of the delegate and the cache identity of the
     * delegate ([[dspy4s.lm.contracts.LanguageModel.cacheIdentity]]), for example the endpoint of a TypeSafe model.
     * `rolloutId` and all other fields stay as they are. The delegate still receives the original request.
     */
   private def keyOf(request: LmRequest): Option[CacheKey] =
     if cache.isEmpty then None
-    else cacheKey(request.copy(mode = mode, options = request.effectiveOptions(defaultOptions)), cacheIdentity).toOption
+    else cacheKey(request.copy(options = request.effectiveOptions(defaultOptions)), mode, cacheIdentity).toOption
 
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
     val key = keyOf(request)
@@ -266,7 +256,7 @@ final case class ManagedLanguageModel(
     */
   private def acceptHit(request: LmRequest, stored: LmResponse)(using RuntimeContext): LmResponse =
     val hit = stored.copy(cacheHit = true, usage = None)
-    appendHistory(request, hit, cacheHit = true, LmCost.of(request.model, price, stored.usage))
+    appendHistory(request, hit, cacheHit = true, stored.usage)
     hit
 
   /** Store the response that the delegate gave, append its history entry, and record its usage. */
@@ -275,7 +265,7 @@ final case class ManagedLanguageModel(
   ): LmResponse =
     val uncached = response.copy(cacheHit = false)
     for store <- cache; found <- key do store.put(found, uncached)
-    appendHistory(request, uncached, cacheHit = false, LmCost.of(request.model, price, uncached.usage))
+    appendHistory(request, uncached, cacheHit = false, uncached.usage)
     trackUsage(request, uncached.usage)
     uncached
 
@@ -287,31 +277,36 @@ final case class ManagedLanguageModel(
   private def executeWithRetry(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
     @tailrec def loop(attempt: Int): Either[DspyError, LmResponse] =
       callDelegate(request) match
-        case ok @ Right(_)                                          => ok
-        case Left(error) if retryPolicy.shouldRetry(attempt, error) =>
-          val delay = retryPolicy.delayBeforeNextAttemptMillis(attempt, error)
-          if delay > 0L then sleep(delay)
-          loop(attempt + 1)
-        case failed @ Left(_) => failed
+        case Left(error) if retryAfter(attempt, error) => loop(attempt + 1)
+        case result                                    => result
     loop(0)
 
-  /** Append the history entry of a success or a cache hit, with the cost estimate `cost`. [[LmHistoryRecord.success]]
-    * gives the payload.
+  /** `true` when the retry policy gives a new attempt after the failure `error` of the attempt `attempt`. The function
+    * then waits for the delay of the policy before it gives `true`. The call path and the stream path use it.
     */
-  private def appendHistory(request: LmRequest, response: LmResponse, cacheHit: Boolean, cost: LmCost)(using
+  private def retryAfter(attempt: Int, error: DspyError): Boolean =
+    val retry = retryPolicy.shouldRetry(attempt, error)
+    if retry then
+      val delay = retryPolicy.delayBeforeNextAttemptMillis(attempt, error)
+      if delay > 0L then sleep(delay)
+    retry
+
+  /** Append the history entry of a success or a cache hit. The cost estimate of the entry comes from `usage`, at the
+    * current [[price]]. [[LmHistoryRecord.success]] gives the payload.
+    */
+  private def appendHistory(request: LmRequest, response: LmResponse, cacheHit: Boolean, usage: Option[LmUsage])(using
       RuntimeContext
   ): Unit =
     if historyEnabled then
+      val cost = LmCost.of(request.model, price, usage)
       RuntimeEnvironment.appendHistory(
-        HistoryEntry(component = s"lm:$id", payload = LmHistoryRecord.success(request, response, cacheHit, cost))
+        HistoryEntry(historyComponent, LmHistoryRecord.success(request, mode, response, cacheHit, cost))
       )
 
   /** Append the history entry of a failure. [[LmHistoryRecord.failure]] gives the payload. */
   private def appendFailureHistory(request: LmRequest, error: DspyError)(using RuntimeContext): Unit =
     if historyEnabled then
-      RuntimeEnvironment.appendHistory(
-        HistoryEntry(component = s"lm:$id", payload = LmHistoryRecord.failure(request, error))
-      )
+      RuntimeEnvironment.appendHistory(HistoryEntry(historyComponent, LmHistoryRecord.failure(request, mode, error)))
 
   private def historyEnabled(using RuntimeContext): Boolean =
     !summon[RuntimeContext].disableHistory.getOrElse(false)
@@ -415,9 +410,7 @@ final case class ManagedLanguageModel(
     /** End the attempt with `error`. The caller gets `chunk`, the failure chunk, when no retry occurs. */
     private def fail(error: DspyError, chunk: LmChunk): Unit =
       release()
-      if !visible && retryPolicy.shouldRetry(attempt, error) then
-        val delay = retryPolicy.delayBeforeNextAttemptMillis(attempt, error)
-        if delay > 0L then sleep(delay)
+      if !visible && retryAfter(attempt, error) then
         attempt += 1
         held.clear()
         parts.clear()

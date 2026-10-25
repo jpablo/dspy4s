@@ -126,7 +126,6 @@ class OpenAiLanguageModelSuite extends FunSuite:
     given RuntimeContext = RuntimeEnvironment.current
     val request          = LmRequest(
       model = "gpt-4o-mini",
-      mode = LmMode.Chat,
       messages = Vector(Message(role = MessageRole.User, text = Some("Capital?")))
     )
     val result = lm.call(request)
@@ -155,7 +154,6 @@ class OpenAiLanguageModelSuite extends FunSuite:
     given RuntimeContext = RuntimeEnvironment.current
     val request          = LmRequest(
       model = "gpt-4o-mini",
-      mode = LmMode.Chat,
       messages = Vector(Message(role = MessageRole.User, text = Some("hi")))
     )
     val chunks = lm.stream(request)
@@ -195,12 +193,12 @@ class OpenAiLanguageModelSuite extends FunSuite:
 
     assertEquals(chunks.size, 1)
     val chunk = chunks.head
-    // The typed error is new. The finish reason and the `raw` message stay for existing consumers.
+    // The chunk has the typed error and the finish reason `error`, and it reports the typed error.
     chunk.error match
       case Some(error: LmRateLimitError) => assertEquals(error.details.status, Some(429))
       case other                         => fail(s"expected LmRateLimitError, got $other")
     assertEquals(chunk.finishReason, Some("error"))
-    assertEquals(chunk.raw, Some(Map("error" -> chunk.error.map(_.message).getOrElse(""))))
+    assertEquals(chunk.reportedFailure, chunk.error)
   }
 
   test("defaultOptions override request option keys") {
@@ -345,25 +343,23 @@ class OpenAiLanguageModelSuite extends FunSuite:
       case Left(error) => fail(s"the call failed: $error")
   }
 
-  test("the mode of the model selects the endpoint, the body, and the parse, not the mode of the request") {
-    // Upstream `LM.model_type` is fixed when the LM is built.
+  test("the mode of the model selects the endpoint, the body, and the parse") {
+    // Upstream `LM.model_type` is fixed when the LM is built. The request has no mode.
     val responsesReply =
       """{"output": [{"type": "message", "content": [{"type": "output_text", "text": "From responses."}]}]}"""
     val cases = Vector(
-      (LmMode.Chat, LmMode.Responses, chatReply, "/chat/completions", "messages", "From chat."),
-      (LmMode.Chat, LmMode.Text, chatReply, "/chat/completions", "messages", "From chat."),
-      (LmMode.Responses, LmMode.Chat, responsesReply, "/responses", "input", "From responses."),
-      (LmMode.Text, LmMode.Chat, chatReply, "/completions", "prompt", "From chat.")
+      (LmMode.Chat, chatReply, "/chat/completions", "messages", "From chat."),
+      (LmMode.Responses, responsesReply, "/responses", "input", "From responses."),
+      (LmMode.Text, chatReply, "/completions", "prompt", "From chat.")
     )
     given RuntimeContext = RuntimeEnvironment.current
-    cases.foreach { (modelMode, requestMode, reply, endpoint, key, text) =>
+    cases.foreach { (modelMode, reply, endpoint, key, text) =>
       val (model, transport) = recordingModel(reply, mode = modelMode)
       val request            = LmRequest(
         model = "openai/test",
-        mode = requestMode,
         messages = Vector(Message(role = MessageRole.User, text = Some("Q?")))
       )
-      val label = s"$modelMode model, $requestMode request"
+      val label = s"$modelMode model"
       assertEquals(model.call(request).map(_.outputs.map(_.text)), Right(Vector(text)), label)
       assertEquals(transport.sent.map(_._1).toVector, Vector(s"https://api.test/v1$endpoint"), label)
       assert(get(transport.lastBody, key).isDefined, s"$label: ${transport.lastBody}")

@@ -17,7 +17,7 @@ import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
 import dspy4s.core.contracts.LmUsage
-import dspy4s.lm.contracts.{CacheKey, LanguageModel, LmRequest, NoopLmCache}
+import dspy4s.lm.contracts.{CacheKey, LanguageModel, LmMode, LmRequest, NoopLmCache}
 import dspy4s.lm.runtime.{DiskLmCache, InMemoryLmCache, ManagedLanguageModel, RequestHash, UsageTracking}
 import dspy4s.programs.strategies.Predict
 import dspy4s.signatures.Signature
@@ -73,9 +73,10 @@ object Cache:
   // |     def cache_key(self, request, ...): return sha256(orjson.dumps(request["messages"], sort_keys)).hexdigest()
   // | dspy.cache = CustomCache(...)
   // The dspy4s analogue is the `cacheKey` function of `ManagedLanguageModel`. This one keys *only on the messages*
-  // (ignoring model and sampling options), so the same prompt to a different model still hits the cache.
-  val messagesOnlyKey: (LmRequest, DynamicValue.Record) => Either[DspyError, CacheKey] =
-    (request, _) => RequestHash.forRequest(LmRequest(model = "", messages = request.messages))
+  // and the mode of the model (ignoring model and sampling options), so the same prompt to a different model still
+  // hits the cache.
+  val messagesOnlyKey: (LmRequest, LmMode, DynamicValue.Record) => Either[DspyError, CacheKey] =
+    (request, mode, _) => RequestHash.forRequest(LmRequest(model = "", messages = request.messages), mode)
 
   def customCached(lm: LanguageModel): LanguageModel =
     ManagedLanguageModel(lm, cache = Some(new InMemoryLmCache()), cacheKey = messagesOnlyKey)

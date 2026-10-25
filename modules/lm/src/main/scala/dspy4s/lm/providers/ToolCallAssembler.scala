@@ -125,10 +125,10 @@ object ToolCallAssembler:
     * JSON gives `notJson`.
     */
   private def jsonArguments(text: String, notJson: => DynamicValue.Record): DynamicValue.Record =
-    DynamicJson.decode(text) match
-      case Right(rec: DynamicValue.Record) => rec
-      case Right(other)                    => DynamicValues.record(Keys.value -> other)
-      case Left(_)                         => notJson
+    DynamicValues.decodeJson(text) match
+      case Some(rec: DynamicValue.Record) => rec
+      case Some(other)                    => DynamicValues.record(Keys.value -> other)
+      case None                           => notJson
 
   /** The chat rule for arguments that are not JSON: `{input: <text>}`. */
   private def inputRecord(text: String): DynamicValue.Record =

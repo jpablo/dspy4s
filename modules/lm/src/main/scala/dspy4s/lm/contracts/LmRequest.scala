@@ -40,12 +40,9 @@ final case class Message(
     name      : Option[String]      = None
 ) derives Schema
 
-/** One request to a model.
+/** One request to a model. The request has no mode: the mode of the model ([[LanguageModel.mode]]) selects the wire,
+  * and the cache key and the history entry of `ManagedLanguageModel` take the mode of its delegate.
   *
-  * @param mode
-  *   the mode of the model that gets the request. `Predict` copies [[LanguageModel.mode]] into it. The history entry
-  *   reads it. The cache key uses the mode of the model, not this field. A provider does not read it: the mode of the
-  *   provider selects its wire.
   * @param options
   *   the provider parameters (for example `temperature`). The provider sends them as they are.
   * @param rolloutId
@@ -54,7 +51,6 @@ final case class Message(
   */
 final case class LmRequest(
     model    : String,
-    mode     : LmMode              = LmMode.Chat,
     messages : Vector[Message]     = Vector.empty,
     options  : DynamicValue.Record = DynamicValue.Record.empty,
     rolloutId: Option[Int]         = None
@@ -67,7 +63,4 @@ final case class LmRequest(
     */
   def effectiveOptions(defaultOptions: DynamicValue.Record): DynamicValue.Record =
     val merged = DynamicValues.mergeRecords(defaultOptions, options)
-    DynamicValue.Record(merged.fields.filter {
-      case (_, _: DynamicValue.Null.type) => false
-      case _                              => true
-    })
+    DynamicValue.Record(merged.fields.filterNot((_, value) => DynamicValues.isNull(value)))

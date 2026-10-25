@@ -194,7 +194,7 @@ is collapsed into thematic files (`StreamingContracts.scala` holds
 | Python | dspy4s |
 |---|---|
 | Optional type hints (`def foo(x: int) -> str:`) | Mandatory for every signature; checked by the compiler. |
-| `Any` as escape hatch | Used in dspy4s for the genuinely dynamic surfaces: `Map[String, Any]` for user inputs/outputs, `Any` for raw LM payloads in `LmChunk.raw`. |
+| `Any` as escape hatch | Used in dspy4s for the genuinely dynamic surfaces: `Map[String, Any]` for user inputs/outputs. |
 | `Optional[T]` / `T \| None` | `Option[T]`. |
 | `Union[A, B]` | Scala 3 union types `A \| B` are available; we mostly use sealed ADTs instead for closed cases. |
 | `pydantic.BaseModel` for schema-validated JSON | Currently `Map[String, Any]` + `ujson`. Pydantic-style inputs would require a per-signature codegen step (long-term TODO; not on the roadmap). |

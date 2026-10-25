@@ -155,10 +155,10 @@ final case class OpenAiClient(
 
   /** The chunk of one `data:` JSON text of a Responses stream (the rules of [[stream]]). */
   private def responsesEvent(model: Option[String])(data: String): Either[DspyError, Option[LmChunk]] =
-    DynamicJson.decode(data) match
-      case Left(_)                           => Left(notJson(model))
-      case Right(event: DynamicValue.Record) => ResponsesWire.streamChunk(event, model)
-      case Right(_)                          => Left(notObject(model))
+    DynamicValues.decodeJson(data) match
+      case None                             => Left(notJson(model))
+      case Some(event: DynamicValue.Record) => ResponsesWire.streamChunk(event, model)
+      case Some(_)                          => Left(notObject(model))
 
   private def notJson(model: Option[String]): DspyError =
     OpenAiErrors.streamAssembly("An OpenAI stream line is not valid JSON", model)

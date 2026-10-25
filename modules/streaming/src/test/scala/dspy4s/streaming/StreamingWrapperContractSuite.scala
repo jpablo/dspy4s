@@ -238,11 +238,11 @@ class StreamingWrapperContractSuite extends FunSuite:
   }
 
   test("a failure chunk without a typed error still gives the streaming_lm error") {
-    val lm      = new ScriptedLm(Vector(LmChunk(finishReason = Some("error"), raw = Some(Map("error" -> "boom")))))
+    val lm      = new ScriptedLm(Vector(LmChunk(finishReason = Some("error"))))
     val wrapper = StreamingLanguageModelWrapper(lm, StreamingQueue[StreamEvent]())
 
     given RuntimeContext = RuntimeEnvironment.current
-    assertEquals(wrapper.call(request), Left(RuntimeError("streaming_lm", "boom")))
+    assertEquals(wrapper.call(request), Left(RuntimeError("streaming_lm", "LM stream terminated with an error")))
   }
 
   test("a failure of a non-stream model behind ManagedLanguageModel keeps its type") {

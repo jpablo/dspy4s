@@ -38,9 +38,9 @@ class LmHistoryEntrySuite extends FunSuite:
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
-  private final class Fixed(result: Either[DspyError, LmResponse]) extends LanguageModel:
+  private final class Fixed(result: Either[DspyError, LmResponse], override val mode: LmMode = LmMode.Chat)
+      extends LanguageModel:
     override val id: String                                                                    = "fixed"
-    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] = result
 
   private final class Streams(chunks: Vector[LmChunk]) extends StreamingLanguageModel:
@@ -54,7 +54,6 @@ class LmHistoryEntrySuite extends FunSuite:
 
   private val request = LmRequest(
     model = "gpt-test",
-    mode = LmMode.Chat,
     messages = Vector(
       Message(role = MessageRole.System, text = Some("Be terse.")),
       Message(
@@ -165,6 +164,18 @@ class LmHistoryEntrySuite extends FunSuite:
     value(entry, "uuid") match
       case text: String => assertEquals(UUID.fromString(text).toString, text)
       case other        => fail(s"the uuid is not a string: $other")
+  }
+
+  test("the model_type of an entry is the mode of the model, for a success and for a failure") {
+    given RuntimeContext = RuntimeEnvironment.current
+    Vector(LmMode.Chat, LmMode.Text, LmMode.Responses).foreach { mode =>
+      assert(ManagedLanguageModel(delegate = Fixed(Right(response), mode)).call(request).isRight)
+      assert(ManagedLanguageModel(delegate = Fixed(Left(LmAuthError("bad key")), mode)).call(request).isLeft)
+    }
+    assertEquals(
+      lmEntries.map(value(_, "model_type")),
+      Vector("chat", "chat", "text", "text", "responses", "responses")
+    )
   }
 
   test("the entry of a cache hit has cache_hit, and two entries have different uuids") {

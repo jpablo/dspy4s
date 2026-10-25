@@ -84,7 +84,6 @@ class ResponsesModeSuite extends FunSuite:
 
   private val request = LmRequest(
     model = "gpt-test",
-    mode = LmMode.Responses,
     messages = Vector(
       Message(role = MessageRole.System, text = Some("Be terse.")),
       Message(role = MessageRole.User, text = Some("Capital of France?"))
@@ -173,10 +172,7 @@ class ResponsesModeSuite extends FunSuite:
     model(Recording(responsesBody)).call(request) match
       case Right(response) =>
         assertEquals(response.outputs.map(_.text), Vector("Paris"))
-        assertEquals(
-          DynamicValues.recordGet(response.outputs.head.metadata, "reasoning_content"),
-          Some(DynamicValues.fromAny("Think."))
-        )
+        assertEquals(response.outputs.map(_.reasoning), Vector("Think."))
         assertEquals(response.usage.map(_.totalTokens), Some(6L))
       case Left(error) => fail(s"the call failed: $error")
   }
@@ -330,9 +326,11 @@ class ResponsesModeSuite extends FunSuite:
       val plain            = model(Recording(body)).call(request) match
         case Right(response) => response
         case Left(error)     => fail(s"the call failed: $error")
-      assert(plain.outputs.exists(_.metadata.fields.nonEmpty), plain.toString)
+      assert(plain.outputs.exists(output => output.reasoning.nonEmpty || output.citations.nonEmpty), plain.toString)
       val streamed = assembled(lines)
       assertEquals(streamed.outputs.map(_.text), plain.outputs.map(_.text))
+      assertEquals(streamed.outputs.map(_.reasoning), plain.outputs.map(_.reasoning))
+      assertEquals(streamed.outputs.map(_.citations), plain.outputs.map(_.citations))
       assertEquals(streamed.outputs.map(_.metadata), plain.outputs.map(_.metadata))
     }
   }
@@ -398,7 +396,7 @@ class ResponsesModeSuite extends FunSuite:
       model = "gpt-test",
       client = OpenAiClient(apiKey = "x", baseUrl = "https://api.test/v1", transport = transport)
     )
-    assert(chat.call(request.copy(mode = LmMode.Chat)).isRight)
+    assert(chat.call(request).isRight)
     val (url, payload) = transport.sent.headOption.getOrElse(fail("no request"))
     assertEquals(url, "https://api.test/v1/chat/completions")
     assert(DynamicValues.recordGet(json(payload), "messages").isDefined, payload)

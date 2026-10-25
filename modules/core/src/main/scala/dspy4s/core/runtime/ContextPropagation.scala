@@ -20,9 +20,9 @@ import scala.concurrent.Future
   * [[futureExecuted]] returns trace/history explicitly for callers that need to join that output. It is dspy4s's
   * equivalent of DSPy's context propagation into parallel and async execution.
   *
-  * Scope: the [[RuntimeContext]] plus every registered [[Carrier]] travels (e.g. the usage-tracker stack registered by
-  * the lm module, and each [[ScopedLocal]] that travels). The [[ActivePredictContext]] stack lives in a separate
-  * thread-local and is not copied here.
+  * Scope: the [[RuntimeContext]] plus every registered [[Carrier]] travels (each [[ScopedLocal]] that travels, e.g. the
+  * usage-tracker stack of the lm module). The [[ActivePredictContext]] stack lives in a separate thread-local and is
+  * not copied here.
   *
   * A capture reads the installed context, not a `using RuntimeContext` value. Each public entry point installs the
   * context that it gets before work hops threads ([[RuntimeEnvironment.withInstalled]], decision D8 of

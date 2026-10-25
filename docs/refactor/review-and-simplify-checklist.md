@@ -202,7 +202,7 @@ Simplify 5 (rank 5). Code-review 5 (rank 8). 4966 main lines, 6422 test lines.
   - [x] /simplify
   - [x] /code-review
 - (b) The runtime and the contracts, about 2360 lines: `runtime/`, `contracts/`.
-  - [ ] /simplify
+  - [x] /simplify
   - [ ] /code-review
 
 ### Simplify findings
@@ -210,7 +210,17 @@ Simplify 5 (rank 5). Code-review 5 (rank 8). 4966 main lines, 6422 test lines.
 - [x] Private copies of the `string`, `sequence`, `record`, and `isNull` helpers: `providers/ResponsesWire.scala` (the helpers at its end), `runtime/DiskLmCache.scala` (the helpers at its end), `providers/ChatWire.scala` (`string`), `runtime/LmHistoryRecord.scala:125`. Core now has `DynamicValues.isNull` and `DynamicValues.encodeJson`; `providers/DynamicJson.scala` also had an `isNull`. Fixed: `DynamicValues.string`, `sequence`, `sequenceAt`, `asRecord`, `asSequence`, and `tryEncodeJson` in core; `recordGet` takes each `DynamicValue`. `DynamicJson` keeps only the provider encode (with no null field) and the guarded decode.
 - [x] `runtime/DiskLmCache.scala`: a reader for the old Java-serialization cache format, about 175 lines. Fixed: deleted, with its tests.
 - [x] `providers/OpenAiEmbedder.scala`, `asFloat`: the same tolerant number read as the new `DynamicValues.asDouble` in core. Fixed: a derived lenient codec reads the reply (`EmbeddingsReply`), and `floatRow`, `asFloat`, and `asInt` are gone.
-- [ ] `runtime/ManagedLanguageModel.scala`, `UsageTracking`: it writes its thread-local scope and its carrier by hand. Core now has `ScopedLocal` (`private[dspy4s]`) for this job.
+- [x] `runtime/ManagedLanguageModel.scala`, `UsageTracking`: it writes its thread-local scope and its carrier by hand. Core now has `ScopedLocal` (`private[dspy4s]`) for this job. Fixed: `UsageTracking` uses `ScopedLocal`.
+- [x] (simplify (b)) `contracts` imported `providers` (`DecisionRequests` for the guarded decode, `LmStreaming` for the metadata keys). Fixed: core `DynamicValues.tryDecodeJson` has the `StackOverflowError` guard, and `contracts` has no import of `providers`.
+- [x] (simplify (b)) `LmOutput` carried the reasoning and the citations in the metadata keys `reasoning_content` and `citations`. Fixed: typed `LmOutput.reasoning` and `citations`.
+- [x] (simplify (b)) `LmChunk.raw: Option[Any]` repeated `error`. Fixed: removed.
+- [x] (simplify (b)) `LmRequest.mode` was set only by `PredictEngine`, so the history `model_type` was `chat` for a Responses model on the other paths. Fixed: removed; the key and the history take the mode of the delegate.
+- [x] (simplify (b)) The retry step was written two times (call and stream), and the history cost was computed when the history was off. Fixed: `retryAfter`, and the cost is computed only for a record. `LmHistoryRecord` uses `ToolCall.toRecord` and `ChatWire.roleName`.
+- [ ] (simplify (b), skipped) The disk put runs on the caller thread (`ManagedLanguageModel` `acceptResponse`). A background writer is faster, but a crash can lose writes. Skipped: a behavior change with a small gain.
+- [ ] (simplify (b), skipped) A stream does work that no consumer needs: `LmChunk.cached` encodes each tool call, and `ManagedStream` assembles the response when there is no cache and no history. Skipped: small gain.
+- [ ] (simplify (b), design) Usage has two sinks with different rules: `UsageTracking` in `ManagedLanguageModel`, and `UsageScope` only at the callers of `LanguageModel.callAndRecordUsage`. One sink at the model-call boundary is simpler.
+- [ ] (simplify (b), design) `contracts/DecisionRequests.scala` puts the decision payload (`state`, `questions`) in the option bag under magic keys, against the rule "framework control values are typed fields". A typed input of the request is simpler. `TypeSafeModel` and `PredictEngine` each check that no other option is present.
+- [ ] (simplify (b), skipped) The `RetryPolicy` trait has one implementation, `RetryPolicies`, and `maxRetries` is `exponentialBackoff` with no delay. One case class can replace them. Skipped: many test changes for a small gain.
 - [x] `runtime/DiskLmCache.scala`: a hand-written JSON codec. Fixed: private DTOs with a derived codec (format `dspy4s-lm-result-v2`), guarded against `StackOverflowError`.
 - [x] (simplify (b)) Each cache layer hashed the request again: a composite miss hashed the prompt four times. Fixed: `CacheKey` in `contracts/LmCache.scala`; `ManagedLanguageModel` builds it once with the mode of the delegate; `LmCache` takes the key; `LmRequest.cacheIdentity` is gone. A custom key is the `cacheKey` parameter of `ManagedLanguageModel`.
 - [x] (simplify (b)) The caches set `cacheHit` again at each layer. Fixed: the caches are plain stores, and only `ManagedLanguageModel` marks a hit.
@@ -224,7 +234,8 @@ Simplify 5 (rank 5). Code-review 5 (rank 8). 4966 main lines, 6422 test lines.
 
 - [x] ProviderLanguageModel (removed) puts `request_id` in the payload. `providers/OpenAiClient.scala:24` removes only `mode`, so `request_id` goes into the OpenAI request body. The only test checks `mode` (`OpenAiClientSuite.scala:91`). (checked) Fixed: `LmRequest.requestId` had no producer and is removed.
 - [x] `providers/OpenAiClient.scala` sent the `prompt` body to `/chat/completions` in Text mode. The stream read only `delta.content`. Fixed: the text mode goes to `completionsEndpoint` (`/completions`), and its stream reads `choices[0].text`.
-- [ ] `runtime/ManagedLanguageModel.scala:236`, `:417`: no upper limit on `Retry-After`. A bad header can block a thread for hours.
+- [ ] `runtime/ManagedLanguageModel.scala`: no upper limit on `Retry-After`. A bad header can block a thread for hours.
+- [ ] (from simplify (b)) A managed model over a managed delegate runs `acceptResponse` two times on a miss: two history entries, two usage records, two stores. Check `ManagedDelegateSuite` for the intended rule.
 - [x] `runtime/DiskLmCache.scala`: a failed write left `<key>.json.tmp`, and `clear` never removed it. The eviction listed up to 200000 files while it held the lock. Fixed in the simplify (b) pass: a unique temp file that a `finally` removes, `get` with no lock, and one evicting thread outside the lock.
 - [x] `providers/JdkHttpTransport.scala` called `toLowerCase` with no `Locale.ROOT`. Not a real bug: the JDK client gives lower-case header names, and a test shows it. The call uses `Locale.ROOT` now.
 - [x] (code-review (a)) An `error` object in a reply with status 200 gave the ParseError "no outputs". Fixed: `OpenAiErrors.fromReplyError` gives the typed error of the code (upstream `_response_error`), on the chat path and on the Responses path.
@@ -405,6 +416,7 @@ Simplify 4 (rank 10). Code-review 6 (rank 7). 689 main lines, 3378 test lines.
 
 ### Simplify findings
 
+- [ ] (from lm simplify (b)) `StreamingLanguageModelWrapper.scala` (about lines 83-123) folds the chunks into an `LmResponse` again, with no guard for a stream with no finish reason. Over a raw provider, a stream cut before its finish chunk becomes a partial success, not an `LmStreamAssemblyError`. Share one fold with `ManagedStream`.
 - [ ] `StreamingQueue.scala:8-66`: a queue of `Option` with `None` as the end marker, a nullable `pending: Option[A] | Null`, and three flags. A simpler design is possible.
 - [ ] `Streamify.scala:68-71` repeats the adapter type test of programs `runtime/SettingsProgramRuntime.scala:25`, `:44`.
 - [ ] `StreamingLanguageModelWrapper.scala:97-123`, `:164-198`: `call` and `stream` each repeat the chunk sort (cached, failure, emit) and the safe-close block.

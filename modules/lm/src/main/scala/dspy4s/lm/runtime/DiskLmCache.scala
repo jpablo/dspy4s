@@ -20,14 +20,21 @@ import scala.util.control.NonFatal
   * {{{
   * {
   *   "_dspy4s_format": "dspy4s-lm-result-v2",
-  *   "outputs": [{"text": "...", "tool_calls": [{"name": "...", "args": {...}, "id": "..."}], "metadata": {...}}],
+  *   "outputs": [{
+  *     "text": "...",
+  *     "tool_calls": [{"name": "...", "args": {...}, "id": "..."}],
+  *     "reasoning": "...",
+  *     "citations": [{...}],
+  *     "metadata": {...}
+  *   }],
   *   "usage": {"total_tokens": 9, "prompt_tokens": 4, "completion_tokens": 5, "extras": {"cached_tokens": 3}},
   *   "model_name": "..."
   * }
   * }}}
   * The record has no key for a value that the response does not have: no `id` for a tool call with no id, no
-  * `tool_calls` for an output with no tool call, and no `usage` or `model_name` for a response with none. The `args`
-  * and the `metadata` keep their JSON types.
+  * `tool_calls` for an output with no tool call, no `reasoning` for an output with an empty reasoning, no `citations`
+  * for an output with no citation, and no `usage` or `model_name` for a response with none. An absent key reads as that
+  * value. The `args`, the `citations`, and the `metadata` keep their JSON types.
   *
   * A file that is not a record of [[DiskLmCache.RecordFormat]] is a miss, and `get` removes it: a file that is not
   * JSON, a record with another `_dspy4s_format`, or a record with a value of the wrong JSON type.
@@ -193,8 +200,9 @@ object DiskLmCache:
         case _: IOException => None
 
   /** The JSON record of a response (upstream `CallResult.dump`). The `SnakeCase` name mapper gives the snake_case keys
-    * of the camelCase fields. The codec writes no key for a `None` or an empty collection, and it reads an absent key
-    * as `None` or as an empty collection. It ignores the keys that it does not know.
+    * of the camelCase fields. The codec writes no key for a `None`, an empty collection, or a field with its default
+    * value, and it reads an absent key as `None`, as an empty collection, or as the default value. It ignores the keys
+    * that it does not know.
     */
   private final case class DiskRecord(
       @Modifier.rename("_dspy4s_format")
@@ -204,8 +212,13 @@ object DiskLmCache:
       modelName: Option[String]
   ) derives Schema
 
-  private final case class DiskOutput(text: String, toolCalls: Vector[ToolCall], metadata: DynamicValue.Record)
-      derives Schema
+  private final case class DiskOutput(
+      text     : String,
+      toolCalls: Vector[ToolCall],
+      reasoning: String                      = "",
+      citations: Vector[DynamicValue.Record] = Vector.empty,
+      metadata : DynamicValue.Record
+  ) derives Schema
 
   /** The usage of a record. The keys of `extras` are the wire names of the token categories. */
   private final case class DiskUsage(
@@ -233,7 +246,9 @@ object DiskLmCache:
     }
     val record = DiskRecord(
       format = RecordFormat,
-      outputs = response.outputs.map(output => DiskOutput(output.text, output.toolCalls, output.metadata)),
+      outputs = response.outputs.map { output =>
+        DiskOutput(output.text, output.toolCalls, output.reasoning, output.citations, output.metadata)
+      },
       usage = usage,
       modelName = response.modelName
     )
@@ -252,7 +267,9 @@ object DiskLmCache:
       catch case _: StackOverflowError => None
     record.filter(_.format == RecordFormat).map { found =>
       LmResponse(
-        outputs = found.outputs.map(output => LmOutput(output.text, output.toolCalls, output.metadata)),
+        outputs = found.outputs.map { output =>
+          LmOutput(output.text, output.toolCalls, output.reasoning, output.citations, output.metadata)
+        },
         usage = found.usage.map { value =>
           LmUsage(
             totalTokens = value.totalTokens,

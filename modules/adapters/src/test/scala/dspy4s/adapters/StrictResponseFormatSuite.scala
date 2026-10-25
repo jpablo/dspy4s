@@ -64,7 +64,7 @@ class StrictResponseFormatSuite extends FunSuite:
       layout = layout,
       demos = Vector.empty,
       inputs = Example(values = DynamicValues.record("question" := "x"), inputKeys = Set("question")),
-      request = LmRequest(model = "stub", mode = LmMode.Chat),
+      request = LmRequest(model = "stub"),
       outputJsonSchema = schema
     )
     val options = JSONAdapter(useNativeFunctionCalling = native).format(invocation)

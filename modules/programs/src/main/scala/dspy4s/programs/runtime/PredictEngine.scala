@@ -246,7 +246,6 @@ private[dspy4s] final case class PredictEngine(
       tools = tools,
       request = LmRequest(
         model = model.id,
-        mode = model.mode,
         options = mergeConfig(config, call.config),
         rolloutId = call.rolloutId
       )

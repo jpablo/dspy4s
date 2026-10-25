@@ -21,7 +21,7 @@ import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, RuntimeE
 import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
-import dspy4s.lm.contracts.{LanguageModel, LmMode, LmRequest}
+import dspy4s.lm.contracts.{LanguageModel, LmRequest}
 import dspy4s.lm.runtime.ManagedLanguageModel
 import dspy4s.programs.strategies.Predict
 import dspy4s.signatures.{InputField, OutputField, Signature, Spec}
@@ -57,7 +57,7 @@ object Adapters:
       layout = Signature.fromString("question -> answer").layout,
       demos = Vector(Example(values = rec("question" := "What is 1+1?", "answer" := "2"), inputKeys = Set("question"))),
       inputs = Example(values = rec("question" := "What is 2+2?"), inputKeys = Set("question")),
-      request = LmRequest(model = "openai/demo", mode = LmMode.Chat)
+      request = LmRequest(model = "openai/demo")
     )
     ChatAdapter().format(invocation).map { prompt =>
       prompt.messages.map(m => s"[${m.role}] ${m.text.getOrElse("")}").mkString("\n\n")
@@ -71,7 +71,7 @@ object Adapters:
       layout = Signature.fromString("question -> answer").layout,
       demos = Vector.empty,
       inputs = Example(values = rec("question" := ""), inputKeys = Set("question")),
-      request = LmRequest(model = "openai/demo", mode = LmMode.Chat)
+      request = LmRequest(model = "openai/demo")
     )
     ChatAdapter().format(invocation).map(_.messages.headOption.flatMap(_.text).getOrElse(""))
 

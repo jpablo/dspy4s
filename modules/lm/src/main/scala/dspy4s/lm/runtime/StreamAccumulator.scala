@@ -4,7 +4,6 @@ import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmToolCallDelta
-import dspy4s.lm.providers.ResponsesWire
 import dspy4s.lm.providers.ToolCallAssembler
 import zio.blocks.schema.DynamicValue
 
@@ -16,8 +15,8 @@ import scala.collection.mutable
   *   - The text is the joined text of the chunks.
   *   - The tool calls come from the tool-call deltas of the chunks, with the rule of `mode`
   *     ([[ToolCallAssembler.assemble]]).
-  *   - The metadata has the joined reasoning of the chunks under `reasoning_content`, and the citations of the chunks
-  *     under `citations`, as the metadata of a plain call in the Responses mode. A key without a value is absent.
+  *   - The reasoning is the joined reasoning of the chunks, and the citations are the citations of the chunks in order,
+  *     as the output of a plain call in the Responses mode.
   *
   * [[ManagedLanguageModel]] and the stream wrapper of `streamify` use this class, so the two give the same output.
   *
@@ -49,5 +48,6 @@ final class StreamAccumulator(mode: LmMode):
     LmOutput(
       text = text.toString,
       toolCalls = ToolCallAssembler.assemble(toolDeltas, mode),
-      metadata = ResponsesWire.outputMetadata(reasoning.toString, citations.toVector)
+      reasoning = reasoning.toString,
+      citations = citations.toVector
     )

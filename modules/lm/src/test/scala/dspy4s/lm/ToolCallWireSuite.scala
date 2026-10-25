@@ -4,6 +4,7 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ToolCall
 import dspy4s.core.contracts.:=
 import dspy4s.lm.contracts.CacheKey
+import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
@@ -166,7 +167,7 @@ class ToolCallWireSuite extends FunSuite:
       toolCalls = Vector(search.copy(args = DynamicValues.record("query" := "dogs")))
     ))
     val none = requestWith(Message(role = MessageRole.Assistant))
-    assertEquals(Set(first, second, third, none).flatMap(RequestHash.forRequest(_).toOption).size, 4)
+    assertEquals(Set(first, second, third, none).flatMap(RequestHash.forRequest(_, LmMode.Chat).toOption).size, 4)
   }
 
   test("the cache key covers the call id and the name of a tool message") {
@@ -176,7 +177,7 @@ class ToolCallWireSuite extends FunSuite:
       requestWith(base.copy(toolCallId = Some("call_2"))),
       requestWith(base.copy(name = Some("lookup"))),
       requestWith(base.copy(toolCallId = None, name = None))
-    ).flatMap(RequestHash.forRequest(_).toOption)
+    ).flatMap(RequestHash.forRequest(_, LmMode.Chat).toOption)
     assertEquals(hashes.size, 4)
   }
 

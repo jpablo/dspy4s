@@ -11,7 +11,6 @@ import scala.jdk.CollectionConverters.*
 class LmCacheSuite extends FunSuite:
   private val baseRequest = LmRequest(
     model = "test-model",
-    mode = LmMode.Chat,
     options = DynamicValues.record("temperature" := 0.7)
   )
 
@@ -31,24 +30,24 @@ class LmCacheSuite extends FunSuite:
       options = DynamicValues.record("items" := Vector(1, 2, 3), "nested" := Map("y" -> 2, "x" -> 1), "a" := 1)
     )
 
-    val keyA = RequestHash.forRequest(requestA)
+    val keyA = RequestHash.forRequest(requestA, LmMode.Chat)
     assert(keyA.isRight, keyA)
-    assertEquals(keyA, RequestHash.forRequest(requestB))
+    assertEquals(keyA, RequestHash.forRequest(requestB, LmMode.Chat))
   }
 
   test("request hash distinguishes primitive types with equal text") {
     val asInt    = baseRequest.copy(options = DynamicValues.record("v" := 1))
     val asString = baseRequest.copy(options = DynamicValues.record("v" := "1"))
 
-    assertNotEquals(RequestHash.forRequest(asInt), RequestHash.forRequest(asString))
+    assertNotEquals(RequestHash.forRequest(asInt, LmMode.Chat), RequestHash.forRequest(asString, LmMode.Chat))
   }
 
   test("request hash gives no key for a value with no JSON text") {
     val notFinite = baseRequest.copy(options = DynamicValues.record("temperature" := Double.NaN))
     val surrogate = baseRequest.copy(options = DynamicValues.record("stop" := "\uD83D"))
-    assert(RequestHash.forRequest(notFinite).isLeft)
-    assert(RequestHash.forRequest(surrogate).isLeft)
-    assert(RequestHash.forRequest(baseRequest).isRight)
+    assert(RequestHash.forRequest(notFinite, LmMode.Chat).isLeft)
+    assert(RequestHash.forRequest(surrogate, LmMode.Chat).isLeft)
+    assert(RequestHash.forRequest(baseRequest, LmMode.Chat).isRight)
   }
 
   test("in-memory cache returns the stored response with its usage") {

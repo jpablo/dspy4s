@@ -104,13 +104,24 @@ object DynamicValues:
   /** The dynamic JSON codec of zio-blocks. */
   private val dynamicJsonCodec = Schema.dynamic.jsonCodec
 
-  /** The value of a JSON text, from the dynamic JSON codec of zio-blocks. `None` for invalid JSON. */
-  def decodeJson(text: String): Option[DynamicValue] =
-    dynamicJsonCodec.decode(text.getBytes(StandardCharsets.UTF_8)).toOption
+  /** The value of a JSON text, from the dynamic JSON codec of zio-blocks, or a `Left` with the cause when the text is
+    * not JSON. The reader is recursive, so a value that is nested too deep for the stack of the thread gives a `Left`
+    * too. Thus a text from the network or from a file cannot stop the caller with a `StackOverflowError`.
+    */
+  def tryDecodeJson(text: String): Either[String, DynamicValue] =
+    try dynamicJsonCodec.decode(text.getBytes(StandardCharsets.UTF_8)).left.map(_.toString)
+    catch case _: StackOverflowError => Left("the value is nested too deep")
 
-  /** Decode a JSON text and keep it only when it is a JSON object, as a `DynamicValue.Record`. `None` for invalid JSON
-    * or a non-object payload. The shared "loose JSON text -> record" boundary used by the strategy protocols (ReAct
-    * tool args, RLM SUBMIT payloads, Refine advice maps); each caller supplies its own fallback semantics.
+  /** The value of a JSON text, from the dynamic JSON codec of zio-blocks. `None` for invalid JSON, and for a value that
+    * is nested too deep for the stack ([[tryDecodeJson]]).
+    */
+  def decodeJson(text: String): Option[DynamicValue] =
+    tryDecodeJson(text).toOption
+
+  /** Decode a JSON text and keep it only when it is a JSON object, as a `DynamicValue.Record`. `None` for invalid JSON,
+    * a value that is nested too deep for the stack, or a non-object payload. The shared "loose JSON text -> record"
+    * boundary used by the strategy protocols (ReAct tool args, RLM SUBMIT payloads, Refine advice maps); each caller
+    * supplies its own fallback semantics.
     */
   def parseJsonRecord(text: String): Option[DynamicValue.Record] =
     decodeJson(text).collect { case record: DynamicValue.Record => record }

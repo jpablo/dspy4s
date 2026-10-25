@@ -117,6 +117,31 @@ class DiskCacheRecordSuite extends FunSuite:
     }
   }
 
+  test("the reasoning and the citations round trip, and absent keys read as no reasoning and no citation") {
+    val citation = DynamicValues.record("type" := "citation", "url" := "https://x.test", "title" := "X")
+    val reasoned =
+      LmResponse(outputs = Vector(LmOutput(text = "x", reasoning = "Think.", citations = Vector(citation))))
+    withDirectory { directory =>
+      DiskLmCache(directory).put(key, reasoned)
+      val outputs = objectOf(readJson(jsonFile(directory))).get("outputs")
+      assertEquals(
+        outputs,
+        Some(Vector(Map(
+          "text"      -> "x",
+          "reasoning" -> "Think.",
+          "citations" -> Vector(Map("type" -> "citation", "url" -> "https://x.test", "title" -> "X")),
+          "metadata"  -> Map.empty[String, Any]
+        )))
+      )
+      assertEquals(DiskLmCache(directory).get(key), Some(reasoned))
+    }
+    withDirectory { directory =>
+      val text = """{"_dspy4s_format": "dspy4s-lm-result-v2", "outputs": [{"text": "x", "metadata": {}}]}"""
+      val _    = Files.writeString(jsonFile(directory), text)
+      assertEquals(DiskLmCache(directory).get(key), Some(LmResponse(outputs = Vector(LmOutput(text = "x")))))
+    }
+  }
+
   test("a JSON record round trips across cache instances") {
     withDirectory { directory =>
       DiskLmCache(directory).put(key, response)

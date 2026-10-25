@@ -8,8 +8,8 @@ OpenAI-compatible servers, and a wrapper that adds a cache, retries, and usage r
 
 - **One wire for each mode.** The mode of an `OpenAiLanguageModel` selects its wire: `ChatWire` makes the body of
   the chat mode and of the text mode from an `LmRequest`, and `ResponsesWire` makes the body of the Responses mode.
-  Each wire also reads the reply into the outputs of an `LmResponse`. The bodies are `DynamicValue.Record` values. The
-  mode of a request does not select the wire.
+  Each wire also reads the reply into the outputs of an `LmResponse`. The bodies are `DynamicValue.Record` values. A
+  request has no mode.
 - **Provider options and control values.** `LmRequest.options` holds the provider options, for example `temperature`
   and `max_tokens`. The provider gets these options with no change. A framework value such as `rolloutId` is a
   separate field. It changes the cache key, and it does not go to the provider.
@@ -24,8 +24,8 @@ OpenAI-compatible servers, and a wrapper that adds a cache, retries, and usage r
 | Type | Description |
 |------|-------------|
 | `LanguageModel` / `StreamingLanguageModel` | The interface of a model: `call(request): Either[DspyError, LmResponse]`, the capability flags, and `close`. `StreamingLanguageModel` adds `stream(request): Iterator[LmChunk]`. |
-| `LmRequest` / `LmMode` | The model name, the mode (`Chat`, `Text`, or `Responses`), the messages, the provider `options`, and an optional `rolloutId`. |
-| `LmResponse` / `LmOutput` | The outputs, the usage, the model name, and the cache-hit flag. An output has a text, the tool calls, and the metadata. |
+| `LmRequest` / `LmMode` | The model name, the messages, the provider `options`, and an optional `rolloutId`. `LmMode` (`Chat`, `Text`, or `Responses`) is the mode of a model, not of a request. |
+| `LmResponse` / `LmOutput` | The outputs, the usage, the model name, and the cache-hit flag. An output has a text, the tool calls, the reasoning, the citations, and the metadata. |
 | `Message` / `MessageRole` | A chat message with a text or multimodal `parts`. An assistant message can have tool calls, and a `Tool` message names the call that it answers. |
 | `LmCapabilities` | What a model can do: native tool calls, a response schema, and `reasoning` output. |
 | `LmPrice` / `LmCost` | The price of the tokens of a model, and the cost estimate of one call. You declare the price, because the module has no price list. |
@@ -54,7 +54,7 @@ OpenAI-compatible servers, and a wrapper that adds a cache, retries, and usage r
 
 - **The cache key.** `ManagedLanguageModel` computes the key of each call one time, and the caches get only that
   `CacheKey`. The key is a SHA-256 hash of the request (`RequestHash`), with the default options, the mode, and the
-  cache identity of the model. The key includes the `rolloutId`, so two samples with different `rolloutId` values get
+  cache identity of the model. The history entry also has the mode of the model (`model_type`). The key includes the `rolloutId`, so two samples with different `rolloutId` values get
   different entries. A `cacheKey` function changes the data of the key. A cache hit bills no tokens.
 - **The disk record.** `DiskLmCache` writes one `<key>.json` file for each entry.
 - **Streams.** A failure comes as the last chunk of the stream, with a typed error. A stream is complete when a chunk

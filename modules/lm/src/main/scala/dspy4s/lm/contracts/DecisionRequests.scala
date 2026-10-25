@@ -1,7 +1,6 @@
 package dspy4s.lm.contracts
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, ParseError, ValidationError}
-import dspy4s.lm.providers.DynamicJson
 import zio.blocks.schema.DynamicValue
 
 /** Experimental. The request and the reply of a System One model ([[LanguageModel.supportsDecisionRequests]]), as an
@@ -59,9 +58,9 @@ object DecisionRequests:
   def answers(response: LmResponse): Either[DspyError, DynamicValue.Record] =
     response.outputs.headOption match
       case None         => Left(ParseError(Component, "The reply of the System One model has no output"))
-      case Some(output) => DynamicJson.decode(output.text) match
-          case Right(record: DynamicValue.Record) => Right(record)
-          case _                                  => Left(ParseError(
+      case Some(output) => DynamicValues.parseJsonRecord(output.text) match
+          case Some(record) => Right(record)
+          case None         => Left(ParseError(
               Component,
               "The reply of the System One model is not a JSON object of answers",
               raw = Some(output.text)
@@ -82,4 +81,4 @@ object DecisionRequests:
 
   /** The JSON form of `value`, or `value` itself when it has no JSON text. */
   private def jsonForm(value: DynamicValue): DynamicValue =
-    DynamicValues.tryEncodeJson(value).toOption.flatMap(DynamicJson.decode(_).toOption).getOrElse(value)
+    DynamicValues.tryEncodeJson(value).toOption.flatMap(DynamicValues.decodeJson).getOrElse(value)

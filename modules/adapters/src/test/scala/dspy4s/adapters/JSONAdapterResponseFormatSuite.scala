@@ -55,7 +55,7 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
       layout = signature,
       demos = Vector.empty,
       inputs = Example(values = rec("question" := "x"), inputKeys = Set("question")),
-      request = LmRequest(model = "openai/test", mode = LmMode.Chat),
+      request = LmRequest(model = "openai/test"),
       outputJsonSchema = schema
     )
 
@@ -100,7 +100,7 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
       layout = layout,
       demos = Vector.empty,
       inputs = Example(values = rec("question" := "x"), inputKeys = Set("question")),
-      request = LmRequest(model = "openai/test", mode = LmMode.Chat),
+      request = LmRequest(model = "openai/test"),
       outputJsonSchema = Some(schema)
     )
 

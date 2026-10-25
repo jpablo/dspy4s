@@ -46,8 +46,6 @@ private[lm] object ResponsesWire:
     final val supportedText       = "supported_text"
     final val documentTitle       = "document_title"
     final val title               = "title"
-    final val reasoningContent    = "reasoning_content"
-    final val citations           = "citations"
     final val outputIndex         = "output_index"
     final val item                = "item"
     final val response            = "response"
@@ -146,9 +144,9 @@ private[lm] object ResponsesWire:
     *   - `text` is the joined text of the `text`, `output_text`, and `input_text` parts of each `message` item.
     *   - Each `function_call` item gives a tool call with its `name`, its `arguments` (a JSON text, decoded as for the
     *     chat path, except that a text that is not JSON gives an empty record), and the id `call_id`.
-    *   - The texts of the `content` (else the `summary`) parts of each `reasoning` item, joined, go to the metadata key
-    *     `reasoning_content`.
-    *   - Each annotation of a message part gives a citation in the metadata key `citations`:
+    *   - The texts of the `content` (else the `summary`) parts of each `reasoning` item, joined, give the `reasoning`
+    *     of the output (upstream `reasoning_content`).
+    *   - Each annotation of a message part gives a citation in the `citations` of the output:
     *     `{"type": "citation", "text", "title", "url", "metadata"}`, with no key for a null value (`text` is
     *     `cited_text`, else `text`, else `supported_text`; `title` is `document_title`, else `title`; `metadata` has
     *     the other keys of the annotation that are not null).
@@ -175,30 +173,9 @@ private[lm] object ResponsesWire:
         val citations = parts.flatMap(part => sequenceAt(part, Keys.annotations)).flatMap(asRecord).map(citation)
         Right(
           if text.trim.isEmpty && toolCalls.isEmpty then Vector.empty
-          else Vector(LmOutput(text = text, toolCalls = toolCalls, metadata = outputMetadata(reasoning, citations)))
+          else Vector(LmOutput(text = text, toolCalls = toolCalls, reasoning = reasoning, citations = citations))
         )
       case _ => Left(ParseError("lm", "The Responses body has no output array"))
-
-  /** The metadata of an output with the reasoning text `reasoning` and the citations `citations`: the key
-    * `reasoning_content` when the text is not empty, and the key `citations` when there is a citation. The plain path
-    * ([[outputs]]) and the assembly of a stream ([[dspy4s.lm.runtime.StreamAccumulator]]) use it, so the two give the
-    * same metadata.
-    */
-  def outputMetadata(reasoning: String, citations: Vector[DynamicValue.Record]): DynamicValue.Record =
-    recordFromEntries(
-      Option.when(reasoning.nonEmpty)(Keys.reasoningContent -> string(reasoning)).toVector ++
-        Option.when(citations.nonEmpty)(Keys.citations -> sequence(citations))
-    )
-
-  /** The reasoning text of an output metadata (the inverse of [[outputMetadata]]): the `reasoning_content` string, else
-    * an empty text.
-    */
-  def reasoningOf(metadata: DynamicValue.Record): String =
-    stringOf(metadata, Keys.reasoningContent).getOrElse("")
-
-  /** The citations of an output metadata (the inverse of [[outputMetadata]]): the objects of the `citations` array. */
-  def citationsOf(metadata: DynamicValue.Record): Vector[DynamicValue.Record] =
-    sequenceAt(metadata, Keys.citations).flatMap(asRecord)
 
   /** The chunk of one event of a Responses stream (upstream lm15 `OpenAILM.parse_stream_events` and
     * `_parse_single_stream_event` in `dspy/_vendor/lm15/providers/openai.py`). The `type` of the event selects the
