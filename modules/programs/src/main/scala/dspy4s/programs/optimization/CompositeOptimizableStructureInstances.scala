@@ -9,6 +9,9 @@ import dspy4s.programs.strategies.{MultiChainComparison, ReAct, ReActV2, RLM}
   * `replace` writes parameters through each current executable predictor. Unchanged parameters preserve the existing
   * override field exactly; changed parameters create an override with the same signature structure and execution
   * bindings. Thus optimizer replacement cannot swap runtimes, LMs, schemas, tools, or names.
+  *
+  * A `copy` of `ReAct` or `MultiChainComparison` gets the `PrependField` evidence of the program. These instances do
+  * not know `O`, thus a new search for the evidence finds only the fallback, which makes no augmented output.
   */
 private[optimization] trait CompositeOptimizableStructureInstances:
   given reactOptimizableStructure[I, O]: OptimizableStructure.Of[ReAct[I, O], 2] =
@@ -17,7 +20,8 @@ private[optimization] trait CompositeOptimizableStructureInstances:
       _.reactPredictOverride,
       _.extractorPredict,
       _.extractorPredictOverride,
-      (program, nextA, nextB) => program.copy(reactPredictOverride = nextA, extractorPredictOverride = nextB)
+      (program, nextA, nextB) =>
+        program.copy(reactPredictOverride = nextA, extractorPredictOverride = nextB)(using program.prepend)
     )
 
   given rlmOptimizableStructure[I, O]: OptimizableStructure.Of[RLM[I, O], 2] =
@@ -65,7 +69,7 @@ private[optimization] trait CompositeOptimizableStructureInstances:
     ): MultiChainComparison[I, O] =
       require(updates.size == 1, s"MultiChainComparison expects exactly 1 update (compare), got ${updates.size}")
       if updates.head == program.comparePredict.optimizableParameters then program
-      else program.copy(comparePredictParametersOverride = Some(updates.head))
+      else program.copy(comparePredictParametersOverride = Some(updates.head))(using program.prepend)
 
   /** The shared shape of a two-predict composite instance (ReAct / RLM): two addressable predicts, two `copy`-reachable
     * override fields, and a rebuild via `copy`. The no-op guard (return the SAME program when the updates equal the

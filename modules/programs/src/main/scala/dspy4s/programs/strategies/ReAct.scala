@@ -65,7 +65,8 @@ final case class ReAct[I, O](
       */
     extractorPredictOverride: Option[Predict[(I, String), ReAct.WithReasoning[O]]] = None
 )(using
-    prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O]
+    // A `val`, so that a `copy` keeps this evidence (see `CompositeOptimizableStructureInstances`).
+    private[programs] val prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O]
 ) extends InterpretedTrajectoryAgent[I, ReAct.WithReasoning[O], ReAct.TrajectoryEntry]:
 
   /** The output type — `reasoning: String` prepended to the base outputs `O` (always a named tuple). */

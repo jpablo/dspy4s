@@ -262,3 +262,10 @@ class DataSuite extends FunSuite:
     assertEquals(prediction.asInt("count"), Right(5))
     assertEquals(prediction.asString("score"), Right("0.8"))
   }
+
+  test("the accessors of a prediction use the lenient coercion of the typed decode") {
+    // The typed decode (signatures ZioSchemaCodec) reads these texts; a prediction read by name must read them too.
+    val prediction = RawPrediction(values = DynamicValues.record("count" := "$1,200", "ratio" := "+3.5"))
+    assertEquals(prediction.asInt("count"), Right(1200))
+    assertEquals(prediction.asDouble("ratio"), Right(3.5))
+  }

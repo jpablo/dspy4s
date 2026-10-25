@@ -3,6 +3,7 @@ package dspy4s.signatures
 import dspy4s.core.contracts.{DspyError, FieldSpec, NotFoundError}
 import dspy4s.algebra.{IsEq, Law, <->}
 import dspy4s.core.decisions.Score
+import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, Schema}
 
 /** A schema-aware view of a user type `A`, used as the input or output of a `Signature`. Lists fields in declaration
@@ -168,9 +169,10 @@ object Shape:
     ZioSchemaCodec.derivedFromZioSchema[A](using canonicalSchema[A])
 
   /** A `Shape[DynamicValue.Record]` for the dynamic path (`Signature.fromStringDynamic`). The DSL has no static schema,
-    * thus the value stays a record. `encode` gives the value as it is. `decode` only checks that the record has each
-    * field of `fieldSpecs` that is not optional. It does not coerce a field: for a shape with a schema, the adapter and
-    * `ZioSchemaCodec.normalize` do that.
+    * thus the value stays a record. `encode` gives the value as it is. `decode` checks that the record has each
+    * required field of `fieldSpecs` (see [[requiredFieldsCheck]]), and adds the default value of each absent field that
+    * has one. It does not coerce a field: for a shape with a schema, the adapter and `ZioSchemaCodec.normalize` do
+    * that.
     */
   final class MapShape(
       override val fieldSpecs: Vector[FieldSpec]
@@ -180,7 +182,12 @@ object Shape:
     def encode(value: DynamicValue.Record): DynamicValue.Record = value
 
     def decode(raw: DynamicValue.Record): Either[DspyError, DynamicValue.Record] =
-      requireFields(raw).map(_ => raw)
+      requireFields(raw).map { _ =>
+        val absent = fieldSpecs.flatMap { field =>
+          field.defaultValue.filter(_ => !raw.fields.exists(_._1 == field.name)).map(field.name -> _)
+        }
+        if absent.isEmpty then raw else DynamicValue.Record(raw.fields ++ Chunk.from(absent))
+      }
 
   /** Derives a `Shape[A]` from a case class or another product type with a `zio.blocks.schema.Schema[A]` in scope.
     * zio-blocks encodes and decodes the product. dspy4s gets the field specs from the same `Reflect` (see
@@ -189,14 +196,15 @@ object Shape:
   inline def derived[A <: Product](using schema: Schema[A]): RoundTripShape[A] =
     ZioSchemaCodec.derivedFromZioSchema[A]
 
-  /** The check that a record has each field of `fieldSpecs` that is not optional. The wire does not require an optional
-    * field. The check finds the names of the required fields one time, before it reads a record. For a missing field,
-    * the result is a `NotFoundError` that names each missing field.
+  /** The check that a record has each required field of `fieldSpecs`. The wire does not require an optional field or a
+    * field with a default value: the decode gives the default to such an absent field. The check finds the names of the
+    * required fields one time, before it reads a record. For a missing field, the result is a `NotFoundError` that
+    * names each missing field.
     */
   private[signatures] def requiredFieldsCheck(
       fieldSpecs: Vector[FieldSpec]
   ): DynamicValue.Record => Either[DspyError, Unit] =
-    val required = fieldSpecs.filterNot(_.optional).map(_.name)
+    val required = fieldSpecs.filterNot(field => field.optional || field.defaultValue.isDefined).map(_.name)
     raw =>
       val present = raw.fields.iterator.map(_._1).toSet
       val missing = required.filterNot(present.contains)

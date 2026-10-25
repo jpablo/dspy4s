@@ -1,6 +1,6 @@
 package dspy4s.core.data
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, NotFoundError, ValidationError}
+import dspy4s.core.contracts.{DspyError, DynamicValues, LenientValues, LmUsage, NotFoundError, ValidationError}
 import dspy4s.core.contracts.updated
 import dspy4s.algebra.Monoid
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
@@ -15,18 +15,19 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
   * Every module result retains a `RawPrediction` on [[dspy4s.programs.contracts.Prediction.raw]]. Dynamic modules also
   * use [[values]] directly as their semantic `DynamicValue.Record` output.
   *
-  * The `as*` coercive accessors apply the same lenient string-to-primitive parsing that `Shape`'s Schema-backed decode
-  * performs (`dspy4s.signatures.ZioSchemaCodec`), and are the standard escape hatch when consuming a prediction without
-  * a `Signature[I, O]`.
+  * The `as*` accessors read a field of a prediction when no `Signature[I, O]` is available. [[asInt]], [[asDouble]],
+  * and [[asBoolean]] use the lenient rules of [[dspy4s.core.contracts.LenientValues]]. The typed decode of a `Shape`
+  * (`dspy4s.signatures.ZioSchemaCodec`) uses the same rules, thus a value has the same meaning on the two paths.
   *
-  * Coercion rules (deliberately strict to avoid silent surprises):
+  * The rules:
   *
   *   - [[asString]]: accepts `String`, `Boolean`, and numeric primitives (including `BigDecimal` and `BigInt`).
-  *     Variants render as their case name. Everything else is a [[ValidationError]].
-  *   - [[asInt]]: accepts `Int`, `Short`, and `Byte`; `Long` and `BigInt` only when they fit in `Int` range (rejects
-  *     out-of-range, no silent truncation); strings via `String.toIntOption`. `Double`/`Float`/`BigDecimal` are
-  *     rejected (no silent rounding).
-  *   - [[asDouble]]: accepts any numeric primitive and clean numeric strings.
+  *     Variants render as their case name. Everything else is a [[ValidationError]]. This accessor does not use the
+  *     lenient rules.
+  *   - [[asInt]]: accepts a whole number of each numeric type in the `Int` range. A number that is not whole (`1.5`) or
+  *     that is out of the range is an error: the accessor does not round a number and does not cut it. A text can have
+  *     spaces, a currency symbol, a `+`, and thousands commas (`"$1,200"`), and must be an integer text.
+  *   - [[asDouble]]: accepts each numeric primitive, and a number text in the same lenient form (`"+3.5"`).
   *   - [[asBoolean]]: accepts `Boolean`, or the case-insensitive strings `"true"`/`"false"`. `"yes"`/`"1"`/`0` etc. are
   *     rejected.
   *
@@ -122,28 +123,13 @@ object RawPrediction:
       case other => Left(ValidationError(s"Prediction field '$key' cannot be converted to String: $other"))
 
   private def asInt(key: String, dv: DynamicValue): Either[DspyError, Int] =
-    dv match
-      case DynamicValue.Primitive(PrimitiveValue.Int(n))                                            => Right(n)
-      case DynamicValue.Primitive(PrimitiveValue.Long(n)) if n >= Int.MinValue && n <= Int.MaxValue => Right(n.toInt)
-      case DynamicValue.Primitive(PrimitiveValue.Short(n))                                          => Right(n.toInt)
-      case DynamicValue.Primitive(PrimitiveValue.Byte(n))                                           => Right(n.toInt)
-      case DynamicValue.Primitive(PrimitiveValue.BigInt(n)) if n.isValidInt                         => Right(n.toInt)
-      case DynamicValue.Primitive(PrimitiveValue.String(s))                                         =>
-        s.trim.toIntOption.toRight(ValidationError(s"Prediction field '$key' is not a valid Int: $s"))
-      case other => Left(ValidationError(s"Prediction field '$key' is not an integer: $other"))
+    LenientValues.toInt(dv).toRight(notA(key, "an Int", dv))
 
   private def asDouble(key: String, dv: DynamicValue): Either[DspyError, Double] =
-    dv match
-      case DynamicValue.Primitive(PrimitiveValue.String(s)) =>
-        s.trim.toDoubleOption.toRight(ValidationError(s"Prediction field '$key' is not a valid Double: $s"))
-      case other =>
-        DynamicValues.asDouble(other).toRight(ValidationError(s"Prediction field '$key' is not numeric: $other"))
+    LenientValues.toDouble(dv).toRight(notA(key, "a Double", dv))
 
   private def asBoolean(key: String, dv: DynamicValue): Either[DspyError, Boolean] =
-    dv match
-      case DynamicValue.Primitive(PrimitiveValue.Boolean(b)) => Right(b)
-      case DynamicValue.Primitive(PrimitiveValue.String(s))  => s.trim.toLowerCase match
-          case "true"  => Right(true)
-          case "false" => Right(false)
-          case _       => Left(ValidationError(s"Prediction field '$key' is not a valid Boolean: $s"))
-      case other => Left(ValidationError(s"Prediction field '$key' is not a boolean: $other"))
+    LenientValues.toBoolean(dv).toRight(notA(key, "a Boolean", dv))
+
+  private def notA(key: String, kind: String, dv: DynamicValue): DspyError =
+    ValidationError(s"Prediction field '$key' is not $kind: ${DynamicValues.renderText(dv)}")

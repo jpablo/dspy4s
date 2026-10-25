@@ -6,6 +6,7 @@ import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.LenientValues
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ToolCall
@@ -164,8 +165,9 @@ private[adapters] object AdapterTextSupport:
     if isQuoted(text) then text.substring(1, text.length - 1) else text
 
   /** `result`, else, for an optional field, the value of the lenient forms of the typed decode
-    * (`ZioSchemaCodec.normalize`): the texts `""`, `null`, `none`, and `n/a` in any case are a null, and a number can
-    * have a currency symbol, a `+`, and thousands commas (`"$2,399.00"`). An integer can be out of the `Int` range.
+    * ([[dspy4s.core.contracts.LenientValues]]): the texts `""`, `null`, `none`, and `n/a` in any case are a null, and a
+    * number can have a currency symbol, a `+`, and thousands commas (`"$2,399.00"`). An integer can be out of the `Int`
+    * range.
     *
     * An `Option` field of a typed signature has the type of its element. Before, it was a text field, and the typed
     * decode read these forms. This rule keeps them for an optional field. A text that does not fit the type, also in a
@@ -184,27 +186,17 @@ private[adapters] object AdapterTextSupport:
       case other                         => other
 
   private def lenientOptional(typeRef: TypeRef, text: String): Option[DynamicValue] =
-    if LenientNullTexts.exists(_.equalsIgnoreCase(text)) then Some(DynamicValue.Null)
+    if LenientValues.isNullText(text) then Some(DynamicValue.Null)
     else
-      val number = cleanNumeric(text)
+      val value = DynamicValue.Primitive(PrimitiveValue.String(text))
       typeRef match
-        case TypeRef.int => number.toLongOption.map { whole =>
+        case TypeRef.int => LenientValues.toLong(value).map { whole =>
             if whole.isValidInt then DynamicValue.Primitive(PrimitiveValue.Int(whole.toInt))
             else DynamicValue.Primitive(PrimitiveValue.Long(whole))
           }
-        case TypeRef.double => number.toDoubleOption.map(value => DynamicValue.Primitive(PrimitiveValue.Double(value)))
-        case _              => None
-
-  /** The texts that are a null for the typed decode of an `Option` field (`ZioSchemaCodec.normalizeOption`). */
-  private val LenientNullTexts: Vector[String] = Vector("", "null", "none", "n/a")
-
-  /** A number text with no leading currency symbol (`$ € £ ¥`), no leading `+`, and no comma
-    * (`ZioSchemaCodec.cleanNumeric`).
-    */
-  private def cleanNumeric(text: String): String =
-    val noSymbol = if text.nonEmpty && "$€£¥".contains(text.head) then text.tail.trim else text
-    val noSign   = if noSymbol.startsWith("+") then noSymbol.tail else noSymbol
-    noSign.filter(_ != ',')
+        case TypeRef.double =>
+          LenientValues.toDouble(value).map(number => DynamicValue.Primitive(PrimitiveValue.Double(number)))
+        case _ => None
 
   /** `true` when `raw` is a null text of the optional field `field` whose type is not a string. */
   private def isNullText(field: FieldSpec, raw: String): Boolean =

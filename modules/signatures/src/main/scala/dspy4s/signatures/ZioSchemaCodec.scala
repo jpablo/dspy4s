@@ -1,6 +1,6 @@
 package dspy4s.signatures
 
-import dspy4s.core.contracts.{DspyError, FieldSpec, History, ToolCall, TypeRef, ValidationError}
+import dspy4s.core.contracts.{DspyError, FieldSpec, History, LenientValues, ToolCall, TypeRef, ValidationError}
 import dspy4s.core.contracts.Reflects.{caseNames, withoutDeferred}
 import dspy4s.core.decisions.{Choice, Noul, Score}
 import zio.blocks.chunk.{Chunk, ChunkMap, NonEmptyChunk}
@@ -37,8 +37,8 @@ private[signatures] object ZioSchemaCodec:
 
   /** Coerce a `DynamicValue` to the form that the target `Reflect` expects. These are the two important coercions:
     *
-    *   - LM text: `Primitive(String("true"))` becomes `Primitive(Boolean(true))` when the target field is `Boolean`.
-    *     The same rule applies to `Int`, `Long`, `Double`, and `Float`.
+    *   - A primitive: the lenient rules of [[LenientValues]] apply. For example, the LM text `"true"` becomes
+    *     `Primitive(Boolean(true))` when the target field is `Boolean`, and the text `"$1,200"` becomes an `Int`.
     *   - A variant field: a bare `Primitive(String("joy"))` becomes `Variant("joy", Record.empty)`, so that
     *     `Schema.fromDynamicValue` can select the correct case.
     *
@@ -46,24 +46,25 @@ private[signatures] object ZioSchemaCodec:
     * it is. The coercion also goes into each element of a sequence and each entry of a map. Each other value, and a
     * value that does not agree with its target, stays as it is.
     *
-    * A record gets `None` for each `Option` field of the target that it does not have, at each level. A required field
-    * that is absent stays absent, thus the decode fails.
+    * At each level, a record gets the default value of each field of the target that it does not have, and `None` for
+    * each `Option` field with no default. A required field that is absent stays absent, thus the decode fails.
     */
-  def normalize(dv: DynamicValue, target: Reflect[?, ?]): DynamicValue =
+  def normalize(dv: DynamicValue, target: Reflect.Bound[?]): DynamicValue =
     // zio-blocks defers the reflect of some nested fields. The coercion needs the reflect behind it.
     (dv, withoutDeferred(target)) match
-      case (prim @ DynamicValue.Primitive(_), p: Reflect.Primitive[?, ?]) => coercePrimitive(prim, p.primitiveType)
+      case (prim @ DynamicValue.Primitive(_), p: Reflect.Primitive[Binding, ?]) =>
+        LenientValues.coerce(prim, p.primitiveType)
       // An `Option` field: put a bare value, a null, or a text into `Some` or `None` before the general rules below.
       case (value, OptionOf(element))                                                   => normalizeOption(value, element)
       case (_: DynamicValue.Null.type, _)                                               => DynamicValue.Null
       case (DynamicValue.Primitive(PrimitiveValue.String(s)), _: Reflect.Variant[?, ?]) =>
         DynamicValue.Variant(s, DynamicValue.Record.empty)
-      case (rec: DynamicValue.Record, recTarget: Reflect.Record[?, ?])        => mapRecordFields(rec, recTarget)
-      case (seq: DynamicValue.Sequence, seqTarget: Reflect.Sequence[?, ?, ?]) =>
+      case (rec: DynamicValue.Record, recTarget: Reflect.Record[Binding, ?])        => mapRecordFields(rec, recTarget)
+      case (seq: DynamicValue.Sequence, seqTarget: Reflect.Sequence[Binding, ?, ?]) =>
         DynamicValue.Sequence(seq.elements.map(normalize(_, seqTarget.element)))
-      case (m: DynamicValue.Map, mapTarget: Reflect.Map[?, ?, ?, ?]) =>
+      case (m: DynamicValue.Map, mapTarget: Reflect.Map[Binding, ?, ?, ?]) =>
         DynamicValue.Map(m.entries.map((k, v) => normalize(k, mapTarget.key) -> normalize(v, mapTarget.value)))
-      case (rec: DynamicValue.Record, mapTarget: Reflect.Map[?, ?, ?, ?]) =>
+      case (rec: DynamicValue.Record, mapTarget: Reflect.Map[Binding, ?, ?, ?]) =>
         // dspy4s keeps a map with text keys as a `DynamicValue.Record` (see `DynamicValues.fromAny`), but the zio-blocks
         // `Schema[Map[K, V]]` reads a `DynamicValue.Map`. Each field becomes an entry.
         DynamicValue.Map(rec.fields.map { (k, v) =>
@@ -73,99 +74,70 @@ private[signatures] object ZioSchemaCodec:
 
   /** Coerce a value to the `Some` or `None` variant that zio-blocks expects for an `Option` field. `valueReflect` is
     * the reflect of the `value` field of `Some`. Thus a value in `Some` goes through [[normalize]] again and gets the
-    * usual coercion (for example, the text `"2399.0"` becomes a `Double`).
+    * usual coercion (for example, the text `"2399.0"` becomes a `Double`). A null, and a null text of
+    * [[LenientValues.NullTexts]], become `None`.
     */
-  private def normalizeOption(value: DynamicValue, valueReflect: Reflect[?, ?]): DynamicValue =
+  private def normalizeOption(value: DynamicValue, valueReflect: Reflect.Bound[?]): DynamicValue =
     def some(v: DynamicValue): DynamicValue =
       DynamicValue.Variant("Some", DynamicValue.Record(Chunk.single("value" -> normalize(v, valueReflect))))
     value match
-      case _: DynamicValue.Null.type     => none
-      case variant: DynamicValue.Variant => variant
-      case DynamicValue.Primitive(PrimitiveValue.String(s))
-          if s.trim.isEmpty
-            || s.trim.equalsIgnoreCase("null")
-            || s.trim.equalsIgnoreCase("none")
-            || s.trim.equalsIgnoreCase("n/a") => none
-      case other => some(other)
+      case _: DynamicValue.Null.type                                                       => none
+      case variant: DynamicValue.Variant                                                   => variant
+      case DynamicValue.Primitive(PrimitiveValue.String(s)) if LenientValues.isNullText(s) => none
+      case other                                                                           => some(other)
 
   /** The `None` case of an `Option`, in the Variant shape that zio-blocks expects. */
   private def none: DynamicValue = DynamicValue.Variant("None", DynamicValue.Record.empty)
 
-  private def mapRecordFields(rec: DynamicValue.Record, target: Reflect.Record[?, ?]): DynamicValue.Record =
+  private def mapRecordFields(rec: DynamicValue.Record, target: Reflect.Record[Binding, ?]): DynamicValue.Record =
     val fields = rec.fields.map { (name, value) =>
       name -> target.fieldByName(name).fold(value)(term => normalize(value, term.value))
     }
-    // The wire does not require an `Option` field: a record with no such key means `None`, the same as an explicit
-    // null or "none".
-    val absentOptionals = target.fields.collect {
-      case term if isOption(term.value) && !rec.fields.exists(_._1 == term.name) => term.name -> none
+    // The wire does not require a field with a default value or an `Option` field. A record with no such key gets the
+    // default value. For an `Option` field with no default, it gets `None`, the same as an explicit null or "none".
+    val absent = target.fields.filterNot(term => rec.fields.exists(_._1 == term.name)).flatMap { term =>
+      wireDefault(term.value)
+        .map(default => term.name -> normalize(default, term.value))
+        .orElse(Option.when(isOption(term.value))(term.name -> none))
     }
-    if absentOptionals.isEmpty then DynamicValue.Record(fields)
-    else DynamicValue.Record(fields ++ Chunk.from(absentOptionals))
+    if absent.isEmpty then DynamicValue.Record(fields)
+    else DynamicValue.Record(fields ++ Chunk.from(absent))
 
-  private def coercePrimitive(dv: DynamicValue, prim: PrimitiveType[?]): DynamicValue =
-    dv match
-      case DynamicValue.Primitive(PrimitiveValue.String(s)) => prim match
-          case _: PrimitiveType.Boolean => s.trim.toLowerCase match
-              case "true"  => DynamicValue.Primitive(PrimitiveValue.Boolean(true))
-              case "false" => DynamicValue.Primitive(PrimitiveValue.Boolean(false))
-              case _       => dv
-          case _: PrimitiveType.Int =>
-            cleanNumeric(s).toIntOption.fold(dv)(i => DynamicValue.Primitive(PrimitiveValue.Int(i)))
-          case _: PrimitiveType.Long =>
-            cleanNumeric(s).toLongOption.fold(dv)(l => DynamicValue.Primitive(PrimitiveValue.Long(l)))
-          case _: PrimitiveType.Double =>
-            cleanNumeric(s).toDoubleOption.fold(dv)(d => DynamicValue.Primitive(PrimitiveValue.Double(d)))
-          case _: PrimitiveType.Float =>
-            cleanNumeric(s).toFloatOption.fold(dv)(f => DynamicValue.Primitive(PrimitiveValue.Float(f)))
-          case _ => dv
-      case DynamicValue.Primitive(PrimitiveValue.Int(i)) => prim match
-          case _: PrimitiveType.Long   => DynamicValue.Primitive(PrimitiveValue.Long(i.toLong))
-          case _: PrimitiveType.Double => DynamicValue.Primitive(PrimitiveValue.Double(i.toDouble))
-          case _: PrimitiveType.Float  => DynamicValue.Primitive(PrimitiveValue.Float(i.toFloat))
-          case _                       => dv
-      case DynamicValue.Primitive(PrimitiveValue.Long(l)) => prim match
-          case _: PrimitiveType.Int if isInt(l) => DynamicValue.Primitive(PrimitiveValue.Int(l.toInt))
-          case _: PrimitiveType.Double          => DynamicValue.Primitive(PrimitiveValue.Double(l.toDouble))
-          case _: PrimitiveType.Float           => DynamicValue.Primitive(PrimitiveValue.Float(l.toFloat))
-          case _                                => dv
-      // The dynamic JSON codec of zio-blocks gives a `BigDecimal` for each number that is not an integer.
-      case DynamicValue.Primitive(PrimitiveValue.BigDecimal(n)) => prim match
-          case _: PrimitiveType.Double                => DynamicValue.Primitive(PrimitiveValue.Double(n.toDouble))
-          case _: PrimitiveType.Float                 => DynamicValue.Primitive(PrimitiveValue.Float(n.toFloat))
-          case _: PrimitiveType.Int if n.isValidInt   => DynamicValue.Primitive(PrimitiveValue.Int(n.toInt))
-          case _: PrimitiveType.Long if n.isValidLong => DynamicValue.Primitive(PrimitiveValue.Long(n.toLong))
-          case _                                      => dv
-      case _ => dv
-
-  private def isInt(l: Long): Boolean = l >= Int.MinValue && l <= Int.MaxValue
-
-  /** Remove the LM text around a number, so that `toIntOption`, `toDoubleOption`, and the other parsers can read it.
-    * The function removes the spaces at the two ends, a currency symbol (`$ € £ ¥`) and a `+` at the start, and each
-    * comma that separates the thousands. It keeps the decimal point and a `-` at the start. When a parser cannot read
-    * the result, the caller keeps the original `DynamicValue`.
+  /** The default value of a field in the wire form, from the reflect of the field: zio-blocks keeps the default value
+    * of a case-class parameter there. The wire form of an `Option` is its element, thus a default `Some(x)` is `x`, and
+    * a default `None` is no default (an absent `Option` field is `None`).
     */
-  private def cleanNumeric(s: String): String =
-    val trimmed  = s.trim
-    val noSymbol = if trimmed.nonEmpty && "$€£¥".contains(trimmed.head) then trimmed.tail.trim else trimmed
-    val noSign   = if noSymbol.startsWith("+") then noSymbol.tail else noSymbol
-    noSign.filter(_ != ',')
+  private def wireDefault(reflect: Reflect.Bound[?]): Option[DynamicValue] =
+    storedDefault(reflect).flatMap { default =>
+      if !isOption(reflect) then Some(default)
+      else
+        default match
+          case DynamicValue.Variant("Some", DynamicValue.Record(fields)) => fields.collectFirst {
+              case ("value", value) => value
+            }
+          case _ => None
+    }
+
+  private def storedDefault[A](reflect: Reflect.Bound[A]): Option[DynamicValue] =
+    reflect.getDefaultValue.map(reflect.toDynamicValue)
 
   /** The field specs of a `Reflect.Record`, in the order of its fields, with no input or output role. Empty for each
     * other reflect.
     */
-  def fieldSpecsFromReflect(reflect: Reflect[?, ?]): Vector[FieldSpec] =
+  def fieldSpecsFromReflect(reflect: Reflect.Bound[?]): Vector[FieldSpec] =
     reflect match
-      case rec: Reflect.Record[?, ?] => rec.fields.toVector.map(term => fieldSpecOf(term.name, term.value))
-      case _                         => Vector.empty
+      case rec: Reflect.Record[Binding, ?] => rec.fields.toVector.map(term => fieldSpecOf(term.name, term.value))
+      case _                               => Vector.empty
 
   /** The field spec of the field `name` with the reflect `reflect`. An `Option` field is an optional field, with the
-    * type and the enum values of its element.
+    * type and the enum values of its element. A field with a default value (a case-class parameter with a default) has
+    * that value in the wire form as its `defaultValue` (see [[wireDefault]]).
     */
-  def fieldSpecOf(name: String, reflect: Reflect[?, ?]): FieldSpec =
+  def fieldSpecOf(name: String, reflect: Reflect.Bound[?]): FieldSpec =
     FieldSpec(
       name = name,
       typeRef = typeRefFor(reflect),
+      defaultValue = wireDefault(reflect),
       enumValues = enumValuesOf(reflect),
       optional = isOption(reflect)
     )
@@ -175,7 +147,7 @@ private[signatures] object ZioSchemaCodec:
     * use these values to tell the LM which labels are valid. An `Option` has the enum values of its element. A `Score`
     * field has its levels, and a `Choice` field has its option labels (see [[decisionField]]).
     */
-  private def enumValuesOf(reflect: Reflect[?, ?]): Vector[String] =
+  private def enumValuesOf(reflect: Reflect.Bound[?]): Vector[String] =
     reflect match
       case OptionOf(element) => enumValuesOf(element)
       case _                 => decisionField(reflect).fold(caseNames(reflect))(_._2)
@@ -185,14 +157,14 @@ private[signatures] object ZioSchemaCodec:
     * coerce the value in `Some` to the correct target.
     */
   private object OptionOf:
-    def unapply(reflect: Reflect[?, ?]): Option[Reflect[?, ?]] =
+    def unapply(reflect: Reflect.Bound[?]): Option[Reflect.Bound[?]] =
       withoutDeferred(reflect) match
-        case variant: Reflect.Variant[?, ?] if variant.cases.size == 2 =>
+        case variant: Reflect.Variant[Binding, ?] if variant.cases.size == 2 =>
           val hasNone = variant.caseByName("None").exists(term => isEmptyRecord(term.value))
           val value   = variant.caseByName("Some").flatMap { term =>
             term.value match
-              case rec: Reflect.Record[?, ?] if rec.fields.size == 1 => rec.fieldByName("value").map(_.value)
-              case _                                                 => None
+              case rec: Reflect.Record[Binding, ?] if rec.fields.size == 1 => rec.fieldByName("value").map(_.value)
+              case _                                                       => None
           }
           if hasNone then value else None
         case _ => None
@@ -202,7 +174,7 @@ private[signatures] object ZioSchemaCodec:
         case rec: Reflect.Record[?, ?] => rec.fields.isEmpty
         case _                         => false
 
-  private def isOption(reflect: Reflect[?, ?]): Boolean = OptionOf.unapply(reflect).isDefined
+  private def isOption(reflect: Reflect.Bound[?]): Boolean = OptionOf.unapply(reflect).isDefined
 
   /** The wire `TypeRef` of a value type, from its `Schema`. [[fieldSpecsFromReflect]] uses the same rules for each
     * field of a record. `SchemaInterop` gives it to the callers outside this module.
@@ -212,7 +184,7 @@ private[signatures] object ZioSchemaCodec:
   /** The wire type of a reflect. An `Option` has the type of its element: an `Option[Int]` field is an optional int
     * field.
     */
-  private def typeRefFor(reflect: Reflect[?, ?]): TypeRef =
+  private def typeRefFor(reflect: Reflect.Bound[?]): TypeRef =
     reflect match
       case OptionOf(element) => typeRefFor(element)
       case _                 => decisionField(reflect).fold(typeRefOfValue(reflect))(_._1)
@@ -222,21 +194,27 @@ private[signatures] object ZioSchemaCodec:
     * decision type is a decision output, thus it is not in the result. The walk does not go into the fields of a
     * record, as upstream does not go into the fields of a model.
     */
-  def nestedDecisionFieldsOf(reflect: Reflect[?, ?]): Vector[String] =
+  def nestedDecisionFieldsOf(reflect: Reflect.Bound[?]): Vector[String] =
     withoutDeferred(reflect) match
-      case rec: Reflect.Record[?, ?] => rec.fields.toVector.collect {
+      case rec: Reflect.Record[Binding, ?] => rec.fields.toVector.collect {
           case term if decisionField(term.value).isEmpty && holdsDecision(term.value) => term.name
         }
       case _ => Vector.empty
 
   /** `true` when `reflect` is a decision type, or an `Option`, a collection, or a map that holds one. */
-  private def holdsDecision(reflect: Reflect[?, ?]): Boolean =
-    withoutDeferred(reflect) match
+  private def holdsDecision(reflect: Reflect.Bound[?]): Boolean =
+    unwrapped(reflect) match
       case OptionOf(element)                       => holdsDecision(element)
       case found if decisionField(found).isDefined => true
-      case seq: Reflect.Sequence[?, ?, ?]          => holdsDecision(seq.element)
-      case map: Reflect.Map[?, ?, ?, ?]            => holdsDecision(map.key) || holdsDecision(map.value)
+      case seq: Reflect.Sequence[Binding, ?, ?]    => holdsDecision(seq.element)
+      case map: Reflect.Map[Binding, ?, ?, ?]      => holdsDecision(map.key) || holdsDecision(map.value)
       case _                                       => false
+
+  /** The reflect behind a deferred reflect, with a wildcard value type. A match on the result of `withoutDeferred`
+    * itself has the captured value type of `reflect`, and with it the compiler finds a sequence case or a map case
+    * unreachable.
+    */
+  private def unwrapped(reflect: Reflect.Bound[?]): Reflect.Bound[?] = withoutDeferred(reflect)
 
   /** The type and the enum values of a decision field (experimental, upstream `dspy.experimental`): a [[Noul]] has no
     * enum values, a [[Score]] has its levels (the cases of `L`, which the schema of `Score[L]` holds), and a [[Choice]]

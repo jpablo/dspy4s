@@ -62,7 +62,8 @@ final case class MultiChainComparison[I, O](
       */
     comparePredictParametersOverride: Option[OptimizableParameters] = None
 )(using
-    prepend: PrependField.Of["rationale", String, O]
+    // A `val`, so that a `copy` keeps this evidence (see `CompositeOptimizableStructureInstances`).
+    private[programs] val prepend: PrependField.Of["rationale", String, O]
 ) extends Module[MultiChainInput[I], MultiChainComparison.WithRationale[O]]:
 
   /** The output type — `rationale: String` prepended to `O`'s named-tuple view (always a named tuple). */

@@ -3,7 +3,7 @@ package dspy4s.signatures
 import dspy4s.core.contracts.{DspyError, DynamicValues, ValidationError}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.json.Json
-import zio.blocks.schema.{DynamicValue, Schema}
+import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 import scala.NamedTuple
 import scala.deriving.Mirror
@@ -37,25 +37,31 @@ object OutputAugmentation:
         case true  => NamedTuple.NamedTuple[n, v]
         case false => NamedTuple.NamedTuple[Name *: n, T *: v]
 
-  /** Makes a [[WithField]] value from a base output value, from the types and with no `asInstanceOf`. With the abstract
-    * `Out` member, each instance gives the exact type that it makes, thus the match type and the `Mirror` do not have
-    * to agree. A caller sets it with `WithOutput[Name, T, O, WithField[O, Name, T]]`. The compiler finds an instance
-    * where `O` is concrete (the call site of the program). For an abstract `O`, only the fallback matches.
+  /** Makes a [[WithField]] value from a base output value, and gets the base output value back, from the types and with
+    * no `asInstanceOf`. With the abstract `Out` member, each instance gives the exact type that it makes, thus the
+    * match type and the `Mirror` do not have to agree. A caller sets it with `WithOutput[Name, T, O, WithField[O, Name,
+    * T]]`. The compiler finds an instance where `O` is concrete (the call site of the program). For an abstract `O`,
+    * only the fallback matches, and its `Out` is `Nothing`. Thus code with an abstract `O` must get the evidence from
+    * its caller.
     */
   trait PrependField[Name <: String & Singleton, T, O]:
     type Out
     def prepend(value: T, base: O): Option[Out]
 
-  trait LowPriorityPrependField:
-    /** The fallback for an `O` that is not a named tuple and not a product, for example the `DynamicValue.Record`
-      * output of `Signature.fromStringDynamic`, which has no static fields. Such an `O` is not supported: the result is
-      * `None`.
+    /** The inverse of [[prepend]]: the prepended value and the base value of `out`. The prepended value is `None` when
+      * `O` already has the field, because then the base value holds it.
       */
-    given fallback[Name <: String & Singleton, T, O]
-        : (PrependField[Name, T, O] { type Out = WithField[O, Name, T] }) =
+    def split(out: Out): (Option[T], O)
+
+  trait LowPriorityPrependField:
+    /** The fallback for an `O` that is not a named tuple and not a product. Such an `O` is not supported: [[prepend]]
+      * gives `None`. Thus no augmented value exists, and `Out` is `Nothing`.
+      */
+    given fallback[Name <: String & Singleton, T, O]: (PrependField[Name, T, O] { type Out = Nothing }) =
       new PrependField[Name, T, O]:
-        type Out = WithField[O, Name, T]
+        type Out = Nothing
         def prepend(value: T, base: O): Option[Out] = None
+        def split(out    : Out): (Option[T], O)     = out
 
   object PrependField extends LowPriorityPrependField:
     type WithOutput[Name <: String & Singleton, T, O, O2] = PrependField[Name, T, O] { type Out = O2 }
@@ -75,6 +81,9 @@ object OutputAugmentation:
         type Out = NamedTuple.NamedTuple[Name *: N, T *: V]
         def prepend(value: T, base: NamedTuple.NamedTuple[N, V]): Option[Out] =
           Some(NamedTuple.build[Name *: N]()(value *: NamedTuple.toTuple(base)))
+        def split(out: Out): (Option[T], NamedTuple.NamedTuple[N, V]) =
+          val values = NamedTuple.toTuple(out)
+          (Some(values.head), NamedTuple.build[N]()(values.tail))
 
     /** A named-tuple output that already has a `Name` field: the output stays the same. */
     given ntPresent[Name <: String & Singleton, T, N <: Tuple, V <: Tuple](using
@@ -83,6 +92,7 @@ object OutputAugmentation:
       new PrependField[Name, T, NamedTuple.NamedTuple[N, V]]:
         type Out = NamedTuple.NamedTuple[N, V]
         def prepend(value: T, base: NamedTuple.NamedTuple[N, V]): Option[Out] = Some(base)
+        def split(out    : Out): (Option[T], NamedTuple.NamedTuple[N, V])     = (None, out)
 
     /** A product (a case class): the `Mirror` gives its named-tuple view, and the named-tuple instances do the rest.
       * Thus a case-class output is supported, and the result is always a named tuple.
@@ -95,12 +105,17 @@ object OutputAugmentation:
         type Out = inner.Out
         def prepend(value: T, base: O): Option[Out] =
           inner.prepend(value, NamedTuple.build[N]()(Tuple.fromProductTyped(base)(using m)))
+        def split(out: Out): (Option[T], O) =
+          val (value, fields) = inner.split(out)
+          (value, m.fromTuple(NamedTuple.toTuple(fields)))
 
   /** The output [[Shape]] of an augmentation with a `String` field in the first position. A composite gives this shape
     * to its inner `Predict` (the `reasoning` of `ChainOfThought`, and the extractor of `ReAct`). The shape puts `field`
     * before the specs of `base` only when `base` has no field with that name, as the type-level [[WithField]] and the
-    * `prependOutput` of the layout do. A prepend with no condition makes the `fieldSpecs.zip(values)` of `encode`
-    * wrong.
+    * `prependOutput` of the layout do.
+    *
+    * The encode gets the base value back with [[PrependField.split]], encodes it with `base`, and puts the `String`
+    * field first. Thus each base field has the encoding of its schema (an `Option`, a nested record).
     *
     * The decode reads `fieldName` as a `String`, decodes the base output with `base`, and puts the field first. When
     * the output of `base` has no static fields (the `DynamicValue.Record` output of `Signature.fromStringDynamic`), the
@@ -135,18 +150,16 @@ object OutputAugmentation:
 
       override def nestedDecisionFields: Vector[String] = base.nestedDecisionFields
 
+      // `base` encodes the base value with its schema. When `base` has the field, the base value holds it.
       def encode(value: Out): DynamicValue.Record =
-        val product: Product = value match
-          case p: Product => p
-          case _          => throw new IllegalArgumentException(
-              s"$label output must be a named-tuple value (a Product); got a non-Product. " +
-                "This shape is built only from an augmented Signature, which supplies named tuples."
-            )
-        val values  = product.productIterator.toVector
-        val entries = fieldSpecs.zip(values).map { (spec, raw) =>
-          spec.name -> DynamicValues.fromAny(raw)
+        val (prepended, baseValue) = prepend.split(value)
+        val baseRecord             = base.encode(baseValue)
+        prepended.fold(baseRecord) { text =>
+          DynamicValues.mergeRecords(
+            DynamicValues.record(field.name -> DynamicValue.Primitive(PrimitiveValue.String(text))),
+            baseRecord
+          )
         }
-        DynamicValue.Record(zio.blocks.chunk.Chunk.from(entries))
 
       def decode(raw: DynamicValue.Record): Either[DspyError, Out] =
         for

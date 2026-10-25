@@ -8,9 +8,9 @@ private[dspy4s] object Reflects:
   /** The reflect behind a deferred reflect. zio-blocks defers the reflect of a field with a default value, and of a
     * field whose type can be recursive.
     */
-  def withoutDeferred(reflect: Reflect[?, ?]): Reflect[?, ?] =
+  def withoutDeferred[F[_, _], A](reflect: Reflect[F, A]): Reflect[F, A] =
     reflect match
-      case deferred: Reflect.Deferred[?, ?] => withoutDeferred(deferred.value)
+      case deferred: Reflect.Deferred[F, A] => withoutDeferred(deferred.value)
       case other                            => other
 
   /** The case names of an enum with no parameters. Empty for each other type. */
