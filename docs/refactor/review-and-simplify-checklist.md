@@ -80,7 +80,7 @@ Simplify 6 (rank 3). Code-review 7 (rank 1). 6352 main lines, 4494 test lines.
   - [x] /code-review
 - (d) The other contracts and the data, about 2200 lines: the other files in `contracts/`, and `data/`, `signatures/`, `collections/`. The simplify pass added `collections/Traverse.scala`.
   - [x] /simplify
-  - [ ] /code-review
+  - [x] /code-review
 
 ### Simplify findings
 
@@ -132,7 +132,7 @@ Findings of the group (a) simplify pass that the pass did not fix:
 - [x] DenoPyodideInterpreter: nothing read the stderr pipe until a failure, so more than about 64 KB of stderr stopped the sandbox forever. Fixed: a daemon thread reads the standard error into a bounded tail.
 - [ ] `runtime/DenoPyodideInterpreter.scala`, `readLine`: no time limit, so a `while True` in user code hangs `execute`. Skipped: the interpreter has no execution timeout, as upstream. A timeout is a new feature.
 - [x] SubprocessPythonInterpreter: after a normal exit, `join()` had no limit, a timeout did not kill descendants, and an interrupt escaped and left the process alive. Fixed: a 1-second limit after the exit, `killTree` on a timeout, and a `Left` on an interrupt.
-- [ ] `contracts/Constraint.scala:106-111`: `numberOf` ignores `BigDecimal`, but the JSON codec decodes decimals as `BigDecimal` (`decisions/Decisions.scala:680`). `SignatureLayout.fromJson` then drops `gt(0.5)` with no error. The tests use only whole numbers.
+- [x] (fixed in the group (d) review: `fromState` uses `DynamicValues.asDouble`) `contracts/Constraint.scala:106-111`: `numberOf` ignored `BigDecimal`, but the JSON codec decodes decimals as `BigDecimal` (`decisions/Decisions.scala:680`). `SignatureLayout.fromJson` then drops `gt(0.5)` with no error. The tests use only whole numbers.
 - [ ] `runtime/LocalPythonInterpreter.scala`, the tool threads: no test covers the fatal rethrow, a timeout in a tool call, an interrupt, or `close` from another thread. The inbound queue is not cleared between calls, so a line that arrives after a reply can become the reply of the next call. Skipped: only code that breaks the documented rule (all threads finish before the code returns) sends such a line.
 - [x] DenoPyodideInterpreter and DenoPyodideLaunch: `Files.createFile` threw out of `execute`, the runner script was never written again after a removal, and `spawn` reported each IOException as "Deno not found". Fixed: a `Left` with the cause, `InterpreterSupport.ResourceFile`, and the cause in the message.
 - [x] A value with a lone UTF-16 surrogate made the JSON writer throw out of `execute` (LocalPython and the Deno prelude). Fixed: `InterpreterSupport.tryEncodeJson` and a `Left` that names the variable.
@@ -143,6 +143,8 @@ Findings of the group (a) simplify pass that the pass did not fix:
 - [ ] Group (b) review, skipped: `UsageScope.measure` reads its total when `body` returns, so a worker that runs after the return adds usage that no result shows. `configure` ownership stays with the first thread for the life of the process, as upstream.
 - [x] Group (c) review: `Score.levelIn` accepted the cases of an unrelated enum. Fixed: it takes only `IndexedSeq[L]`.
 - [ ] Group (c) review, skipped: `DecisionEvidenceLog.recording` takes its snapshot when `body` returns, so a worker that records later is lost (the same rule as `UsageScope`). `DecisionSettings.fromDynamic` keeps the last value of a key that occurs two times.
+- [x] Group (d) review: `Completions.fromRows` gave the fields of a row in a hash order, `RawPrediction.asDouble`, `asInt`, and `asString` rejected `BigDecimal` and `BigInt`, and `Constraint` rendered a whole bound at or above 2^63 as `Long.MaxValue`. Fixed, each with a test.
+- [ ] Group (d) review, skipped: the narrowing of `contracts/ToolCall.scala`, `recordSchema`, throws for a value that is not a record (check how zio-blocks reports an exception of a transform). `Constraint.fromState` turns a length value into an Int with `toInt`. `SignatureParser` counts a `->` inside a quoted `Literal` member.
 
 ## signatures
 

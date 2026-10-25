@@ -1,10 +1,12 @@
 package dspy4s.core
 
+import dspy4s.core.contracts.Constraint
 import dspy4s.core.contracts.FieldConstraints
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import munit.FunSuite
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 class FieldConstraintsSuite extends FunSuite:
 
@@ -84,4 +86,29 @@ class FieldConstraintsSuite extends FunSuite:
       .get
     val rebuilt = SignatureLayout.fromState(layout.dumpState).toOption.get
     assert(rebuilt.fields.forall(_.constraints.isEmpty))
+  }
+
+  test("SignatureLayout dumpJson/fromJson keeps a constraint with a decimal bound") {
+    val layout = SignatureLayout
+      .create(
+        name = "Decimal",
+        inputFields = Vector(FieldSpec(name = "question")),
+        outputFields = Vector(
+          FieldSpec(name = "score", typeRef = TypeRef.double, constraints = Vector(FieldConstraints.gt(0.5)))
+        )
+      )
+      .toOption
+      .get
+    // The JSON codec of zio-blocks decodes 0.5 as a BigDecimal.
+    val rebuilt = SignatureLayout.fromJson(layout.dumpJson).toOption.get
+    assertEquals(rebuilt.fields.flatMap(_.constraints.map(_.render)), Vector("greater than: 0.5"))
+  }
+
+  test("a whole bound at or above 2^63 renders and serializes with all its digits") {
+    assertEquals(FieldConstraints.lt(1e20).render, "less than: 100000000000000000000")
+    assertEquals(
+      Constraint.Lt(1e20).schemaValue,
+      DynamicValue.Primitive(PrimitiveValue.BigInt(BigInt("100000000000000000000")))
+    )
+    assertEquals(FieldConstraints.ge(-1e20).render, "greater than or equal to: -100000000000000000000")
   }

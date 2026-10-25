@@ -79,20 +79,35 @@ enum Constraint derives CanEqual:
       case Constraint.MultipleOf(n) => n
 
 object Constraint:
+  /** The value 2^63. `toLong` saturates at this value, so a whole value at or above it needs a `BigInt`. */
+  private val LongBound: Double = Math.pow(2, 63)
+
+  private def isWhole(n: Double): Boolean = n == Math.rint(n) && !n.isInfinite
+
+  private def inLongRange(n: Double): Boolean = n >= -LongBound && n < LongBound
+
+  /** All the digits of a whole value. Use it only for a whole value outside the `Long` range. */
+  private def bigIntOf(n: Double): BigInt = BigDecimal(n).toBigInt
+
   /** Render a numeric bound: drop the `.0` for whole numbers, keep the fractional part otherwise. */
   private def num(n: Double): String =
-    if n == Math.rint(n) && !n.isInfinite then n.toLong.toString else n.toString
+    if !isWhole(n) then n.toString
+    else if inLongRange(n) then n.toLong.toString
+    else bigIntOf(n).toString
 
-  /** A DynamicValue number: a `Long` for whole values (so JSON shows `0`, not `0.0`), else a `Double`. */
+  /** A DynamicValue number: a `Long` for whole values (so JSON shows `0`, not `0.0`), else a `Double`. A whole value
+    * outside the `Long` range is a `BigInt`.
+    */
   private def numValue(n: Double): DynamicValue =
-    if n == Math.rint(n) && !n.isInfinite then DynamicValue.Primitive(PrimitiveValue.Long(n.toLong))
-    else DynamicValue.Primitive(PrimitiveValue.Double(n))
+    if !isWhole(n) then DynamicValue.Primitive(PrimitiveValue.Double(n))
+    else if inLongRange(n) then DynamicValue.Primitive(PrimitiveValue.Long(n.toLong))
+    else DynamicValue.Primitive(PrimitiveValue.BigInt(bigIntOf(n)))
 
   /** Rebuild from the persisted `{op, value}` record; `None` for an unrecognized op (forward-compat / corruption). */
   def fromState(rec: DynamicValue.Record): Option[Constraint] =
     for
       op         <- DynamicValues.recordGet(rec, "op").collect { case DynamicValue.Primitive(PrimitiveValue.String(s)) => s }
-      value      <- DynamicValues.recordGet(rec, "value").flatMap(numberOf)
+      value      <- DynamicValues.recordGet(rec, "value").flatMap(DynamicValues.asDouble)
       constraint <- op match
                       case "gt"          => Some(Gt(value))
                       case "ge"          => Some(Ge(value))
@@ -103,13 +118,6 @@ object Constraint:
                       case "multiple_of" => Some(MultipleOf(value))
                       case _             => None
     yield constraint
-
-  private def numberOf(dv: DynamicValue): Option[Double] =
-    dv match
-      case DynamicValue.Primitive(PrimitiveValue.Long(n))   => Some(n.toDouble)
-      case DynamicValue.Primitive(PrimitiveValue.Int(n))    => Some(n.toDouble)
-      case DynamicValue.Primitive(PrimitiveValue.Double(n)) => Some(n)
-      case _                                                => None
 
 /** Builders for field [[Constraint]]s. Mirrors Python DSPy's `PYDANTIC_CONSTRAINT_MAP` (`dspy/signatures/field.py`) so
   * dspy4s prompts match upstream byte-for-byte: `gt(0).render == "greater than: 0"`, etc. Numeric helpers accept

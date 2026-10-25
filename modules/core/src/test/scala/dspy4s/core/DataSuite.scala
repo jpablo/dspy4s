@@ -241,3 +241,24 @@ class DataSuite extends FunSuite:
     assert(prediction.isLeft)
     assert(prediction.left.toOption.get.isInstanceOf[ValidationError])
   }
+
+  test("completion rows keep the order of their fields") {
+    val names = Vector("question", "context", "reasoning", "answer", "confidence", "citations", "notes")
+    val row   = DynamicValues.recordFromEntries(names.map(name => name := name))
+    val first = Completions.fromRows(Vector(row, row)).flatMap(_.at(0)).toOption.get
+    assertEquals(DynamicValues.recordKeys(first.values), names)
+  }
+
+  test("the numeric accessors of a prediction accept BigDecimal and BigInt values") {
+    // The JSON codec of zio-blocks decodes a decimal number as a BigDecimal, for example in an RLM SUBMIT payload.
+    val prediction = RawPrediction(values =
+      DynamicValues.record(
+        "score" -> DynamicValue.Primitive(PrimitiveValue.BigDecimal(BigDecimal("0.8"))),
+        "count" -> DynamicValue.Primitive(PrimitiveValue.BigInt(BigInt(5)))
+      )
+    )
+    assertEquals(prediction.score, Right(0.8))
+    assertEquals(prediction.asDouble("count"), Right(5.0))
+    assertEquals(prediction.asInt("count"), Right(5))
+    assertEquals(prediction.asString("score"), Right("0.8"))
+  }

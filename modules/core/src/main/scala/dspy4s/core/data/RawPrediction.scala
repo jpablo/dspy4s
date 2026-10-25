@@ -21,10 +21,11 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
   *
   * Coercion rules (deliberately strict to avoid silent surprises):
   *
-  *   - [[asString]]: accepts `String`, `Boolean`, and numeric primitives. Variants render as their case name.
-  *     Everything else is a [[ValidationError]].
-  *   - [[asInt]]: accepts `Int`; `Long` only when it fits in `Int` range (rejects out-of-range, no silent truncation);
-  *     strings via `String.toIntOption`. `Double`/`Float` are rejected (no silent rounding).
+  *   - [[asString]]: accepts `String`, `Boolean`, and numeric primitives (including `BigDecimal` and `BigInt`).
+  *     Variants render as their case name. Everything else is a [[ValidationError]].
+  *   - [[asInt]]: accepts `Int`, `Short`, and `Byte`; `Long` and `BigInt` only when they fit in `Int` range (rejects
+  *     out-of-range, no silent truncation); strings via `String.toIntOption`. `Double`/`Float`/`BigDecimal` are
+  *     rejected (no silent rounding).
   *   - [[asDouble]]: accepts any numeric primitive and clean numeric strings.
   *   - [[asBoolean]]: accepts `Boolean`, or the case-insensitive strings `"true"`/`"false"`. `"yes"`/`"1"`/`0` etc. are
   *     rejected.
@@ -105,13 +106,17 @@ object RawPrediction:
 
   private def asString(key: String, dv: DynamicValue): Either[DspyError, String] =
     dv match
-      case DynamicValue.Primitive(PrimitiveValue.String(s))  => Right(s)
-      case DynamicValue.Primitive(PrimitiveValue.Boolean(b)) => Right(b.toString)
-      case DynamicValue.Primitive(PrimitiveValue.Int(n))     => Right(n.toString)
-      case DynamicValue.Primitive(PrimitiveValue.Long(n))    => Right(n.toString)
-      case DynamicValue.Primitive(PrimitiveValue.Float(n))   => Right(n.toString)
-      case DynamicValue.Primitive(PrimitiveValue.Double(n))  => Right(n.toString)
-      case variant: DynamicValue.Variant                     => variant.caseName.toRight(ValidationError(
+      case DynamicValue.Primitive(PrimitiveValue.String(s))     => Right(s)
+      case DynamicValue.Primitive(PrimitiveValue.Boolean(b))    => Right(b.toString)
+      case DynamicValue.Primitive(PrimitiveValue.Int(n))        => Right(n.toString)
+      case DynamicValue.Primitive(PrimitiveValue.Long(n))       => Right(n.toString)
+      case DynamicValue.Primitive(PrimitiveValue.Float(n))      => Right(n.toString)
+      case DynamicValue.Primitive(PrimitiveValue.Double(n))     => Right(n.toString)
+      case DynamicValue.Primitive(PrimitiveValue.Short(n))      => Right(n.toString)
+      case DynamicValue.Primitive(PrimitiveValue.Byte(n))       => Right(n.toString)
+      case DynamicValue.Primitive(PrimitiveValue.BigDecimal(n)) => Right(n.toString)
+      case DynamicValue.Primitive(PrimitiveValue.BigInt(n))     => Right(n.toString)
+      case variant: DynamicValue.Variant                        => variant.caseName.toRight(ValidationError(
           s"Prediction field '$key' is a variant without a case name"
         ))
       case other => Left(ValidationError(s"Prediction field '$key' cannot be converted to String: $other"))
@@ -120,19 +125,19 @@ object RawPrediction:
     dv match
       case DynamicValue.Primitive(PrimitiveValue.Int(n))                                            => Right(n)
       case DynamicValue.Primitive(PrimitiveValue.Long(n)) if n >= Int.MinValue && n <= Int.MaxValue => Right(n.toInt)
+      case DynamicValue.Primitive(PrimitiveValue.Short(n))                                          => Right(n.toInt)
+      case DynamicValue.Primitive(PrimitiveValue.Byte(n))                                           => Right(n.toInt)
+      case DynamicValue.Primitive(PrimitiveValue.BigInt(n)) if n.isValidInt                         => Right(n.toInt)
       case DynamicValue.Primitive(PrimitiveValue.String(s))                                         =>
         s.trim.toIntOption.toRight(ValidationError(s"Prediction field '$key' is not a valid Int: $s"))
       case other => Left(ValidationError(s"Prediction field '$key' is not an integer: $other"))
 
   private def asDouble(key: String, dv: DynamicValue): Either[DspyError, Double] =
     dv match
-      case DynamicValue.Primitive(PrimitiveValue.Int(n))    => Right(n.toDouble)
-      case DynamicValue.Primitive(PrimitiveValue.Long(n))   => Right(n.toDouble)
-      case DynamicValue.Primitive(PrimitiveValue.Float(n))  => Right(n.toDouble)
-      case DynamicValue.Primitive(PrimitiveValue.Double(n)) => Right(n)
       case DynamicValue.Primitive(PrimitiveValue.String(s)) =>
         s.trim.toDoubleOption.toRight(ValidationError(s"Prediction field '$key' is not a valid Double: $s"))
-      case other => Left(ValidationError(s"Prediction field '$key' is not numeric: $other"))
+      case other =>
+        DynamicValues.asDouble(other).toRight(ValidationError(s"Prediction field '$key' is not numeric: $other"))
 
   private def asBoolean(key: String, dv: DynamicValue): Either[DspyError, Boolean] =
     dv match
