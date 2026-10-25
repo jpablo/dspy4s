@@ -62,26 +62,37 @@ object LmChunk:
   def failure(error: DspyError): LmChunk =
     LmChunk(finishReason = Some("error"), error = Some(error))
 
+  /** The metadata key of the finish reason of an output (see [[LmOutput.metadata]]). */
+  private val FinishReasonKey = "finish_reason"
+
   /** The failure of a chunk with the finish reason `error` and no typed `error`. */
   private val UnknownFailure: DspyError = RuntimeError("streaming_lm", "LM stream terminated with an error")
 
   /** The only chunk of a stream that the cache answered. `response` is the stored response, with `cacheHit = true`. The
-    * chunk has the finish reason `stop`, no usage, and the text, the reasoning, the citations, and the tool calls of
-    * the first output of `response`. Each tool call is one complete delta, so `ToolCallAssembler.assemble` gives the
-    * call back with its id.
+    * chunk has the finish reason of [[fromResponse]], no usage, and the text, the reasoning, the citations, and the
+    * tool calls of the first output of `response`. Each tool call is one complete delta, so
+    * `ToolCallAssembler.assemble` gives the call back with its id.
     */
   def cached(response: LmResponse): LmChunk =
     fromResponse(response).copy(cachedResponse = Some(response.copy(cacheHit = true)))
 
   /** One terminal chunk for a whole response: the text, the reasoning, the citations, and the tool calls of the first
-    * output of `response`, and the finish reason `stop`. The chunk has no usage. Each tool call is one complete delta,
-    * so `ToolCallAssembler.assemble` gives the call back with its id.
+    * output of `response`. The chunk has no usage. Each tool call is one complete delta, so
+    * `ToolCallAssembler.assemble` gives the call back with its id.
+    *
+    * The finish reason is the `finish_reason` text of the metadata of the first output, for example `length` for a chat
+    * reply that the token limit stopped. When the metadata has no such text, the finish reason is `stop`. The text
+    * `error` also gives `stop`, because the chunk of a response is not a failure.
     */
   private[lm] def fromResponse(response: LmResponse): LmChunk =
     val output = response.outputs.headOption
+    val reason = output
+      .flatMap(found => DynamicValues.recordGet(found.metadata, FinishReasonKey))
+      .flatMap(DynamicValues.asString)
+      .filter(text => text.nonEmpty && text != "error")
     LmChunk(
       text = output.map(_.text).getOrElse(""),
-      finishReason = Some("stop"),
+      finishReason = Some(reason.getOrElse("stop")),
       toolCalls = output.map(_.toolCalls).getOrElse(Vector.empty).zipWithIndex.map(toolCallDelta),
       reasoning = output.map(_.reasoning).getOrElse(""),
       citations = output.map(_.citations).getOrElse(Vector.empty)

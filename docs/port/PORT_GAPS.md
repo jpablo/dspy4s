@@ -1059,7 +1059,7 @@ transient classes only and obey the `Retry-After` hint (`dspy/clients/execution.
   `LmUnexpectedError` for each other failure. The client adds the model and the provider.
 - **Retry.** The default predicate of `RetryPolicies.maxRetries` and `RetryPolicies.exponentialBackoff` is
   `LmError.isRetryable`: a rate limit, a timeout, a server failure, and a transport failure. The delay is the retry
-  hint when the error carries one (upstream `_delay`).
+  hint when the error carries one (upstream `_delay`), limited to `maxHintMillis` (60 seconds by default).
 - **Missing key.** `fromEnv` gives `LmNotConfiguredError`.
 
 Tests: `ErrorsSuite`, `OpenAiErrorMappingSuite`, `OpenAiErrorEdgeCasesSuite`, `JdkHttpTransportErrorSuite`,
@@ -1078,6 +1078,8 @@ Changes in behavior to know:
 
 Deliberate differences from upstream:
 
+- The retry policies limit the retry hint to `maxHintMillis` (60 seconds by default). Upstream waits for the full
+  `Retry-After` time, so a hint of one day stops the thread for one day.
 - `ContextWindowExceededError` and `LmUnsupportedModelError` are siblings of `LmInvalidRequestError`, not
   subclasses, because a case class cannot extend a case class.
 - `LmProviderResponseError` takes the place of a direct `LMProviderError` instance.
@@ -1088,7 +1090,6 @@ Deliberate differences from upstream:
 
 Open:
 
-- No policy limits the retry hint. A large `Retry-After` makes the caller wait for that time, as upstream.
 - A streamed call that fails after the first chunk still gives `RuntimeError("streaming_lm", …)` (G-25).
 - The adapter fallback (G-29) can now use the taxonomy.
 - `JdkHttpTransport` joins duplicate headers with a comma, so a duplicate `Retry-After` gives no hint.

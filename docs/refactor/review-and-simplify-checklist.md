@@ -203,7 +203,7 @@ Simplify 5 (rank 5). Code-review 5 (rank 8). 4966 main lines, 6422 test lines.
   - [x] /code-review
 - (b) The runtime and the contracts, about 2360 lines: `runtime/`, `contracts/`.
   - [x] /simplify
-  - [ ] /code-review
+  - [x] /code-review
 
 ### Simplify findings
 
@@ -234,8 +234,15 @@ Simplify 5 (rank 5). Code-review 5 (rank 8). 4966 main lines, 6422 test lines.
 
 - [x] ProviderLanguageModel (removed) puts `request_id` in the payload. `providers/OpenAiClient.scala:24` removes only `mode`, so `request_id` goes into the OpenAI request body. The only test checks `mode` (`OpenAiClientSuite.scala:91`). (checked) Fixed: `LmRequest.requestId` had no producer and is removed.
 - [x] `providers/OpenAiClient.scala` sent the `prompt` body to `/chat/completions` in Text mode. The stream read only `delta.content`. Fixed: the text mode goes to `completionsEndpoint` (`/completions`), and its stream reads `choices[0].text`.
-- [ ] `runtime/ManagedLanguageModel.scala`: no upper limit on `Retry-After`. A bad header can block a thread for hours.
-- [ ] (from simplify (b)) A managed model over a managed delegate runs `acceptResponse` two times on a miss: two history entries, two usage records, two stores. Check `ManagedDelegateSuite` for the intended rule.
+- [x] `runtime/ManagedLanguageModel.scala`: no upper limit on `Retry-After`. A bad header can block a thread for hours. Fixed: the retry policies limit the hint to `maxHintMillis` (default 60 seconds). Upstream uses the full hint (PORT_GAPS, deliberate differences).
+- [x] (from simplify (b)) A managed model over a managed delegate runs `acceptResponse` two times on a miss: two history entries, two usage records, two stores. Fixed: an outer model over a managed delegate writes no history and records no usage for the calls of the delegate; its cache still stores a miss. With a retry policy on the outer model, the inner model writes one failure entry for each attempt.
+- [x] (code-review (b)) `DiskLmCache.get` removed the file for each read error, also a transient one. Fixed: only bytes that do not decode remove the file.
+- [x] (code-review (b)) The eviction and `get` removed a path with no check, so a record that a concurrent `put` wrote in between was lost. Fixed: the remove checks under the lock that the file did not change.
+- [x] (code-review (b)) A killed process left `.tmp` files that `clear` did not remove. Fixed: `clear` removes them, and a listing removes a `.tmp` file older than 10 minutes.
+- [x] (code-review (b)) A delegate that cannot stream always gave the finish reason `stop`. Fixed: `LmChunk.fromResponse` takes the `finish_reason` of the metadata of the first output.
+- [x] (code-review (b)) The history payload was built when the global settings or the cap then dropped it. Fixed: core `RuntimeEnvironment.historyEnabled` is the one check.
+- [ ] (code-review (b), skipped) The first count of `DiskLmCache` lists the directory with no lock, so a put in that window is not counted. The count is an estimate by design, and the next eviction lists the directory again.
+- [ ] (code-review (b), skipped) `LmChunk.cached` encodes the arguments of each tool call for a consumer that assembles the chunks, although most consumers read `cachedResponse`. Small cost, and the chunk contract needs the deltas.
 - [x] `runtime/DiskLmCache.scala`: a failed write left `<key>.json.tmp`, and `clear` never removed it. The eviction listed up to 200000 files while it held the lock. Fixed in the simplify (b) pass: a unique temp file that a `finally` removes, `get` with no lock, and one evicting thread outside the lock.
 - [x] `providers/JdkHttpTransport.scala` called `toLowerCase` with no `Locale.ROOT`. Not a real bug: the JDK client gives lower-case header names, and a test shows it. The call uses `Locale.ROOT` now.
 - [x] (code-review (a)) An `error` object in a reply with status 200 gave the ParseError "no outputs". Fixed: `OpenAiErrors.fromReplyError` gives the typed error of the code (upstream `_response_error`), on the chat path and on the Responses path.

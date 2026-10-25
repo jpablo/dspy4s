@@ -264,14 +264,28 @@ object RuntimeEnvironment:
     */
   def appendHistory(entry: HistoryEntry): Unit = appendHistoryEntries(Vector(entry))
 
+  /** `true` when [[appendHistory]] keeps an entry, and the given context does not turn off the history. A caller checks
+    * it before it builds the payload of an entry, so that it does not build a payload that [[appendHistory]] drops. The
+    * check of [[appendHistory]] uses the settings of this thread with the global settings: the `disableHistory` flag
+    * and the `maxHistorySize` cap. The `disableHistory` flag of the given context also turns off the history.
+    */
+  def historyEnabled(using context: RuntimeContext): Boolean =
+    !context.disableHistory.getOrElse(false) && keepsHistory(current)
+
+  /** `true` when `effective` lets [[appendHistory]] keep an entry: the history is on, and the cap is above 0. */
+  private def keepsHistory(effective: RuntimeContext): Boolean =
+    !effective.disableHistory.getOrElse(false) && historyCap(effective) > 0
+
+  /** The `maxHistorySize` cap of `effective` (10000 by default). */
+  private def historyCap(effective: RuntimeContext): Int =
+    effective.maxHistorySize.getOrElse(HistoryLimit(10000))
+
   /** [[appendHistory]] for each of `entries`, in order, with one write of the overlay. */
   private def appendHistoryEntries(entries: Vector[HistoryEntry]): Unit =
-    val base            = localContext
-    val effective       = base.fillFrom(globalRef.get())
-    val historyDisabled = effective.disableHistory.getOrElse(false)
-    val cap             = effective.maxHistorySize.getOrElse(HistoryLimit(10000))
-    if entries.nonEmpty && !historyDisabled && cap > 0 then
-      contextRef.set(base.withHistory((base.history ++ entries).takeRight(cap)))
+    val base      = localContext
+    val effective = base.fillFrom(globalRef.get())
+    if entries.nonEmpty && keepsHistory(effective) then
+      contextRef.set(base.withHistory((base.history ++ entries).takeRight(historyCap(effective))))
 
   /** Run `body` under a fresh [[RuntimeDelta]] derived from `base`, returning the body's result and accumulated output
     * as an [[Executed]]. Used by the BestOfN / Refine attempt loops, which isolate each attempt (applying any

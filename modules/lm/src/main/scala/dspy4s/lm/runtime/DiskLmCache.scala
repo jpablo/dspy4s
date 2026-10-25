@@ -7,7 +7,8 @@ import zio.blocks.schema.json.{JsonCodec, JsonCodecDeriver}
 
 import java.io.IOException
 import java.nio.file.attribute.BasicFileAttributes
-import java.nio.file.{AtomicMoveNotSupportedException, Files, NoSuchFileException, Path, StandardCopyOption}
+import java.nio.file.{AtomicMoveNotSupportedException, Files, Path, StandardCopyOption}
+import java.util.{Arrays, Objects}
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.jdk.CollectionConverters.*
 import scala.util.control.NonFatal
@@ -37,14 +38,21 @@ import scala.util.control.NonFatal
   * value. The `args`, the `citations`, and the `metadata` keep their JSON types.
   *
   * A file that is not a record of [[DiskLmCache.RecordFormat]] is a miss, and `get` removes it: a file that is not
-  * JSON, a record with another `_dspy4s_format`, or a record with a value of the wrong JSON type.
+  * JSON, a record with another `_dspy4s_format`, or a record with a value of the wrong JSON type. A file that `get`
+  * cannot read, for example a directory at the path of a record, is a miss too, and `get` keeps it.
   *
   * A response with no JSON text, for example one with tool-call arguments that are nested too deep for the stack, is
   * not stored: `put` writes no file and does not throw (upstream `Cache.put` logs the failure and continues).
   *
-  * `put` encodes the record and writes it to a new temporary file in `directory` with no lock. Then it moves the file
-  * into place. The move is atomic where the file system supports it, so `get` reads a complete file and takes no lock.
-  * A failed write or move leaves no temporary file. The lock of the cache covers only the move and the count.
+  * `put` encodes the record and writes it to a new temporary file `<key><random>.tmp` in `directory` with no lock. Then
+  * it moves the file into place. The move is atomic where the file system supports it, so `get` reads a complete file
+  * and takes no lock. A failed write or move leaves no temporary file. A process that stops during a `put` can leave a
+  * temporary file. `clear` removes each temporary file, and each list of the directory for the count or the eviction
+  * removes each temporary file that is older than 10 minutes. `size` and the count include only the records.
+  *
+  * The lock of the cache covers the move, the count, and each remove. A remove checks under the lock that the file is
+  * still the file that the cache read or listed, and keeps a file that a `put` moved into place after that. Thus a
+  * remove does not delete a newer record.
   *
   * The cache keeps a count of its entries (upstream `diskcache` keeps the count in its index). The first `put` lists
   * the directory to set the count. Each file that the cache writes or removes changes the count, so a `put` below
@@ -76,20 +84,20 @@ final class DiskLmCache private[runtime] (directory: Path, maxEntries: CacheCapa
     */
   private val evictionTarget: Int = math.max(1, (maxEntries.toLong * 9L / 10L).toInt)
 
-  /** The response of the record of `key`. A file that is not a record of [[RecordFormat]] is a miss, and the function
-    * removes it.
+  /** The response of the record of `key`. A file that the function cannot read is a miss, and the file stays. A file
+    * whose bytes are not a record of [[RecordFormat]] is a miss, and the function removes it, when the file still has
+    * these bytes.
     */
   override def get(key: CacheKey): Option[LmResponse] =
     val path = recordPath(key)
-    try
-      val response = decode(Files.readAllBytes(path))
-      if response.isEmpty then remove(path)
+    val read =
+      try Some(Files.readAllBytes(path))
+      catch case NonFatal(_) => None
+    read.flatMap { bytes =>
+      val response = decode(bytes)
+      if response.isEmpty then removeIf(path)(current => Arrays.equals(Files.readAllBytes(current), bytes))
       response
-    catch
-      case _: NoSuchFileException => None
-      case NonFatal(_)            =>
-        remove(path)
-        None
+    }
 
   /** Store the record of `response` for `key`. A response with no JSON text writes no file. A failure of the file
     * system writes no record, and the function does not throw.
@@ -108,9 +116,11 @@ final class DiskLmCache private[runtime] (directory: Path, maxEntries: CacheCapa
         case NonFatal(_) => ()
     }
 
+  /** The number of records in `directory`. A temporary file is not a record. */
   def size: Int =
-    files.list(directory).size
+    files.list(directory).count(_.isRecord)
 
+  /** Remove each record and each temporary file in `directory`. */
   def clear(): Unit =
     files.list(directory).foreach(entry => Files.deleteIfExists(entry.path))
     this.synchronized {
@@ -123,10 +133,24 @@ final class DiskLmCache private[runtime] (directory: Path, maxEntries: CacheCapa
   /** Set the count from a list of the directory when the count is not known. The list takes no lock. */
   private def countEntries(): Unit =
     if this.synchronized(entryCount.isEmpty) then
-      val listed = files.list(directory).size
+      val listed = records(files.list(directory)).size
       this.synchronized {
         if entryCount.isEmpty then entryCount = Some(listed)
       }
+
+  /** The records of `entries`. The function removes each temporary file of `entries` that is older than
+    * [[StaleTempMillis]]: the `put` of that file stopped, for example because its process stopped.
+    */
+  private def records(entries: Vector[Entry]): Vector[Entry] =
+    val (found, temporary) = entries.partition(_.isRecord)
+    val oldest             = System.currentTimeMillis() - StaleTempMillis
+    temporary.filter(_.modifiedMillis < oldest).foreach { entry =>
+      try
+        val _ = Files.deleteIfExists(entry.path)
+      catch
+        case NonFatal(_) => ()
+    }
+    found
 
   /** Move `temp` to `target`, and add the record to the count when it is a new file. `true` when the count passes
     * `maxEntries`. A failure of the file system throws.
@@ -142,11 +166,14 @@ final class DiskLmCache private[runtime] (directory: Path, maxEntries: CacheCapa
       entryCount.exists(_ > maxEntries)
     }
 
-  /** Remove the file at `path`, and remove it from the count when the file was there. */
-  private def remove(path: Path): Unit =
+  /** Remove the file at `path` when `unchanged` gives `true` for it, and remove it from the count when the file was
+    * there. The check and the remove occur under the lock of the cache, and [[moveIntoPlace]] takes the same lock, so
+    * no `put` moves a new record to `path` between them. A failure of the file system keeps the file.
+    */
+  private def removeIf(path: Path)(unchanged: Path => Boolean): Unit =
     try
       this.synchronized {
-        if Files.deleteIfExists(path) then changeCount(-1)
+        if unchanged(path) && Files.deleteIfExists(path) then changeCount(-1)
       }
     catch
       case NonFatal(_) => ()
@@ -155,17 +182,21 @@ final class DiskLmCache private[runtime] (directory: Path, maxEntries: CacheCapa
     entryCount = entryCount.map(count => math.max(0, count + delta))
 
   /** List the directory, set the count from the list, and remove the oldest entries above [[evictionTarget]]. When a
-    * second thread runs the eviction, the function does nothing.
+    * second thread runs the eviction, the function does nothing. The function keeps an entry whose file changed after
+    * the list, for example a record that a `put` moved into place.
     */
   private def evictOverflow(): Unit =
     if evicting.compareAndSet(false, true) then
       try
-        val entries = files.list(directory)
+        val entries = records(files.list(directory))
         this.synchronized {
           entryCount = Some(entries.size)
         }
         val overflow = entries.size - evictionTarget
-        if overflow > 0 then entries.sortBy(_.modifiedMillis).take(overflow).foreach(entry => remove(entry.path))
+        if overflow > 0 then
+          entries.sortBy(_.modifiedMillis).take(overflow).foreach { entry =>
+            removeIf(entry.path)(current => entryOf(current).exists(_.sameFile(entry)))
+          }
       finally evicting.set(false)
 
 object DiskLmCache:
@@ -175,13 +206,27 @@ object DiskLmCache:
   private val RecordSuffix = ".json"
   private val TempSuffix   = ".tmp"
 
-  /** One entry file: its path, and the time of its last change in milliseconds. */
-  private[runtime] final case class Entry(path: Path, modifiedMillis: Long)
+  /** The age in milliseconds after which a list of the directory removes a temporary file: 10 minutes. */
+  private val StaleTempMillis = 10L * 60L * 1000L
 
-  /** The list of the entry files, for the size, the count, and the eviction. A test can count the lists. */
+  /** One entry file: its path, the time of its last change in milliseconds, and the key of the file system for the file
+    * (`fileKey` of `BasicFileAttributes`, `None` when the file system has no key). An entry is a record or a temporary
+    * file of a `put`.
+    */
+  private[runtime] final case class Entry(path: Path, modifiedMillis: Long, fileKey: Option[AnyRef]):
+    def isRecord: Boolean = path.getFileName.toString.endsWith(RecordSuffix)
+
+    /** `true` when `other` has the time of the last change and the file key of this entry. A file that a `put` moved
+      * into place or wrote again after the list gives `false`.
+      */
+    def sameFile(other: Entry): Boolean =
+      modifiedMillis == other.modifiedMillis && Objects.equals(fileKey.orNull, other.fileKey.orNull)
+
+  /** The list of the entry files, for the size, the count, the eviction, and `clear`. A test can count the lists. */
   private[runtime] trait EntryFiles:
-    /** The entries in `directory`: each regular file with the suffix of a record. The function reads the attributes of
-      * each file one time. A file that goes away before the function reads its attributes is not an entry.
+    /** The entries in `directory`: each regular file with the suffix of a record or of a temporary file. The function
+      * reads the attributes of each file one time. A file that goes away before the function reads its attributes is
+      * not an entry.
       */
     def list(directory: Path): Vector[Entry]
 
@@ -189,15 +234,22 @@ object DiskLmCache:
     /** The list that reads the file system. */
     val system: EntryFiles = directory =>
       val stream = Files.list(directory)
-      try stream.iterator().asScala.filter(_.getFileName.toString.endsWith(RecordSuffix)).flatMap(entryOf).toVector
+      try stream.iterator().asScala.filter(isEntryName).flatMap(entryOf).toVector
       finally stream.close()
 
-    private def entryOf(path: Path): Option[Entry] =
-      try
-        val attributes = Files.readAttributes(path, classOf[BasicFileAttributes])
-        Option.when(attributes.isRegularFile)(Entry(path, attributes.lastModifiedTime.toMillis))
-      catch
-        case _: IOException => None
+    private def isEntryName(path: Path): Boolean =
+      val name = path.getFileName.toString
+      name.endsWith(RecordSuffix) || name.endsWith(TempSuffix)
+
+  /** The entry of the regular file at `path`, or `None` when no regular file is there. */
+  private def entryOf(path: Path): Option[Entry] =
+    try
+      val attributes = Files.readAttributes(path, classOf[BasicFileAttributes])
+      Option.when(attributes.isRegularFile)(
+        Entry(path, attributes.lastModifiedTime.toMillis, Option(attributes.fileKey))
+      )
+    catch
+      case _: IOException => None
 
   /** The JSON record of a response (upstream `CallResult.dump`). The `SnakeCase` name mapper gives the snake_case keys
     * of the camelCase fields. The codec writes no key for a `None`, an empty collection, or a field with its default

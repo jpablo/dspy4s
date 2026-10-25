@@ -39,43 +39,53 @@ import java.util.concurrent.ThreadLocalRandom
   *     failure, a billing failure, a context-window failure, and each error that is not an LM error stop the call
   *     immediately. A caller can pass a different predicate.
   *   - When the error carries the retry hint of the provider (`details.retryAfter`, from the `Retry-After` header), the
-  *     delay before the next attempt is that hint. Upstream `_delay` (`dspy/clients/execution.py`) does the same. No
-  *     policy limits the hint, so a large hint makes the caller wait for that time.
+  *     delay before the next attempt is that hint, limited to `maxHintMillis` (60 seconds by default). Upstream
+  *     `_delay` (`dspy/clients/execution.py`) uses the hint with no limit. The port sets a limit, so that a hint of one
+  *     day does not stop the thread for one day.
   */
 object RetryPolicies:
   val never: RetryPolicy = new RetryPolicy:
     override def shouldRetry(attempt: Int, error: DspyError): Boolean = false
 
   /** Retries a failure that `retryOn` accepts, `maxRetries` times at most. The delay is the retry hint of the provider
-    * when the error carries one. Without a hint, the next attempt starts immediately.
+    * when the error carries one, limited to `maxHintMillis`. Without a hint, the next attempt starts immediately.
     */
-  def maxRetries(maxRetries: RetryCount, retryOn: DspyError => Boolean = LmError.isRetryable): RetryPolicy =
+  def maxRetries(
+      maxRetries   : RetryCount,
+      retryOn      : DspyError => Boolean = LmError.isRetryable,
+      maxHintMillis: RetryDelayMillis     = DefaultMaxHintMillis
+  ): RetryPolicy =
     new RetryPolicy:
       override def shouldRetry(attempt: Int, error: DspyError): Boolean =
         attempt < maxRetries && retryOn(error)
 
       override def delayBeforeNextAttemptMillis(attempt: Int, error: DspyError): Long =
-        retryHintMillis(error).getOrElse(0L)
+        retryHintMillis(error, maxHintMillis).getOrElse(0L)
 
   /** Like [[maxRetries]], and retries only an error whose `code` is in `retryableCodes`. The codes of the LM errors are
     * the upstream codes, for example `rate_limit`, `timeout`, `server`, and `transport`.
     */
-  def maxRetriesOnCodes(maxRetries: RetryCount, retryableCodes: Set[String]): RetryPolicy =
-    this.maxRetries(maxRetries, error => retryableCodes.contains(error.code))
+  def maxRetriesOnCodes(
+      maxRetries    : RetryCount,
+      retryableCodes: Set[String],
+      maxHintMillis : RetryDelayMillis = DefaultMaxHintMillis
+  ): RetryPolicy =
+    this.maxRetries(maxRetries, error => retryableCodes.contains(error.code), maxHintMillis)
 
   /** Retries a failure that `retryOn` accepts, `maxRetries` times at most, with a delay that grows.
     *
-    * When the error carries the retry hint of the provider, the delay is the hint, exactly: the hint gets no jitter,
-    * and `maxDelayMillis` does not limit it. Without a hint, the delay is `baseDelayMillis * 2^attempt`, limited to
-    * `maxDelayMillis`, plus a random part of `jitterFactor` of that delay at most. The jitter does not move the delay
-    * above `maxDelayMillis`.
+    * When the error carries the retry hint of the provider, the delay is the hint, limited to `maxHintMillis`: the hint
+    * gets no jitter, and `maxDelayMillis` does not limit it. Without a hint, the delay is
+    * `baseDelayMillis * 2^attempt`, limited to `maxDelayMillis`, plus a random part of `jitterFactor` of that delay at
+    * most. The jitter does not move the delay above `maxDelayMillis`.
     */
   def exponentialBackoff(
       maxRetries     : RetryCount,
       baseDelayMillis: RetryDelayMillis     = RetryDelayMillis(200L),
       maxDelayMillis : RetryDelayMillis     = RetryDelayMillis(4000L),
       jitterFactor   : JitterFactor         = JitterFactor(0.0),
-      retryOn        : DspyError => Boolean = LmError.isRetryable
+      retryOn        : DspyError => Boolean = LmError.isRetryable,
+      maxHintMillis  : RetryDelayMillis     = DefaultMaxHintMillis
   ): RetryPolicy =
     require(maxDelayMillis >= baseDelayMillis, "maxDelayMillis must be >= baseDelayMillis")
 
@@ -84,7 +94,7 @@ object RetryPolicies:
         attempt < maxRetries && retryOn(error)
 
       override def delayBeforeNextAttemptMillis(attempt: Int, error: DspyError): Long =
-        retryHintMillis(error).getOrElse(computedDelayMillis(attempt))
+        retryHintMillis(error, maxHintMillis).getOrElse(computedDelayMillis(attempt))
 
       private def computedDelayMillis(attempt: Int): Long =
         val exponent = if attempt <= 0 then 0 else attempt
@@ -100,9 +110,12 @@ object RetryPolicies:
           val jitter    = if maxJitter == 0L then 0L else ThreadLocalRandom.current().nextLong(maxJitter + 1L)
           bounded + jitter
 
-  /** The retry hint of the provider in milliseconds, if `error` carries one. */
-  private def retryHintMillis(error: DspyError): Option[Long] =
-    LmError.retryAfter(error).map(_.toMillis)
+  /** The default upper limit of the retry hint of the provider: 60 seconds. */
+  val DefaultMaxHintMillis: RetryDelayMillis = RetryDelayMillis(60000L)
+
+  /** The retry hint of the provider in milliseconds, limited to `maxHintMillis`, if `error` carries one. */
+  private def retryHintMillis(error: DspyError, maxHintMillis: RetryDelayMillis): Option[Long] =
+    LmError.retryAfter(error).map(hint => math.min(hint.toMillis, maxHintMillis))
 
 final class UsageTracker:
   private val data = mutable.Map.empty[String, Vector[LmUsage]]
@@ -154,8 +167,13 @@ object UsageTracking:
   * `dspy/clients/errors.py`). The retry policy decides on that error as on each other error, and the call gets the
   * failure entry. A fatal error, for example an `InterruptedException`, goes up to the caller.
   *
-  * The delegate can be a second managed model. A cache hit of that model is a hit of this model too: this model does
-  * not store it, records no usage for it, and writes the history entry of a hit.
+  * The delegate can be a second managed model, the inner model. One call of this model then gives one history entry and
+  * one usage record: the inner model writes the history entry and records the usage of each call that it gets, and this
+  * model writes no history entry and records no usage for these calls. The entry has the cost estimate at the price of
+  * the inner model. This model still stores a response of the inner model that is not a cache hit. A cache hit of the
+  * inner model is a hit of this model too, and this model does not store it. A cache hit of this model does not call
+  * the inner model, so this model writes the history entry of that hit. When this model retries a failure, the inner
+  * model writes a failure entry for each attempt.
   *
   * The model computes the cache key of a call one time, with `cacheKey`. A request with no cache key, for example one
   * with a value nested too deep for the stack, is a miss, and the cache stores nothing for it. The delegate thus gets
@@ -182,6 +200,13 @@ final case class ManagedLanguageModel(
 
   /** The component of the history entries of this model. */
   private val historyComponent: String = s"lm:$id"
+
+  /** `false` when the delegate is a managed model: that model writes the history entry and records the usage of each
+    * call that it gets, so this model does not do it again.
+    */
+  private val recordsDelegateCalls: Boolean = delegate match
+    case _: ManagedLanguageModel => false
+    case _                       => true
 
   /** A streamed call with the rules of [[call]] (upstream `execute`: one call path for streamed calls).
     *
@@ -238,8 +263,7 @@ final case class ManagedLanguageModel(
           case Left(error) =>
             appendFailureHistory(request, error)
             Left(error)
-          // A hit of a delegate that is a managed model too.
-          case Right(response) if response.cacheHit => Right(acceptHit(request, response))
+          case Right(response) if response.cacheHit => Right(acceptDelegateHit(request, response))
           case Right(response)                      => Right(acceptResponse(request, key, response))
 
   /** The cached response of `request` (see [[acceptHit]]). */
@@ -259,13 +283,19 @@ final case class ManagedLanguageModel(
     appendHistory(request, hit, cacheHit = true, stored.usage)
     hit
 
+  /** A cache hit of a delegate that is a managed model too. That model wrote the history entry of the hit, so this
+    * model writes none (see [[recordsDelegateCalls]]).
+    */
+  private def acceptDelegateHit(request: LmRequest, response: LmResponse)(using RuntimeContext): LmResponse =
+    if recordsDelegateCalls then acceptHit(request, response) else response.copy(cacheHit = true, usage = None)
+
   /** Store the response that the delegate gave, append its history entry, and record its usage. */
   private def acceptResponse(request: LmRequest, key: Option[CacheKey], response: LmResponse)(using
       RuntimeContext
   ): LmResponse =
     val uncached = response.copy(cacheHit = false)
     for store <- cache; found <- key do store.put(found, uncached)
-    appendHistory(request, uncached, cacheHit = false, uncached.usage)
+    if recordsDelegateCalls then appendHistory(request, uncached, cacheHit = false, uncached.usage)
     trackUsage(request, uncached.usage)
     uncached
 
@@ -292,29 +322,31 @@ final case class ManagedLanguageModel(
     retry
 
   /** Append the history entry of a success or a cache hit. The cost estimate of the entry comes from `usage`, at the
-    * current [[price]]. [[LmHistoryRecord.success]] gives the payload.
+    * current [[price]]. [[LmHistoryRecord.success]] gives the payload. The function builds the payload only when
+    * [[dspy4s.core.runtime.RuntimeEnvironment.historyEnabled]] is `true`.
     */
   private def appendHistory(request: LmRequest, response: LmResponse, cacheHit: Boolean, usage: Option[LmUsage])(using
       RuntimeContext
   ): Unit =
-    if historyEnabled then
+    if RuntimeEnvironment.historyEnabled then
       val cost = LmCost.of(request.model, price, usage)
       RuntimeEnvironment.appendHistory(
         HistoryEntry(historyComponent, LmHistoryRecord.success(request, mode, response, cacheHit, cost))
       )
 
-  /** Append the history entry of a failure. [[LmHistoryRecord.failure]] gives the payload. */
+  /** Append the history entry of a failure of the delegate. [[LmHistoryRecord.failure]] gives the payload. A delegate
+    * that is a managed model wrote the entry, so this model writes none (see [[recordsDelegateCalls]]).
+    */
   private def appendFailureHistory(request: LmRequest, error: DspyError)(using RuntimeContext): Unit =
-    if historyEnabled then
+    if recordsDelegateCalls && RuntimeEnvironment.historyEnabled then
       RuntimeEnvironment.appendHistory(HistoryEntry(historyComponent, LmHistoryRecord.failure(request, mode, error)))
 
-  private def historyEnabled(using RuntimeContext): Boolean =
-    !summon[RuntimeContext].disableHistory.getOrElse(false)
-
-  /** Record the usage of a call that the delegate answered. A cache hit does not come here, so it records no usage. */
+  /** Record the usage of a call that the delegate answered. A cache hit does not come here, so it records no usage. A
+    * delegate that is a managed model recorded the usage, so this model records none (see [[recordsDelegateCalls]]).
+    */
   private def trackUsage(request: LmRequest, usage: Option[LmUsage])(using RuntimeContext): Unit =
     val usageEnabled = summon[RuntimeContext].trackUsage.getOrElse(true)
-    if usageEnabled then
+    if recordsDelegateCalls && usageEnabled then
       usage.foreach { value =>
         UsageTracking.record(request.model, value)
       }
@@ -329,7 +361,8 @@ final case class ManagedLanguageModel(
     *
     * The history entry, the usage record, and the cache store occur at the end of the stream. A caller that closes the
     * stream before its end gets none of them. A stream with a [[LmChunk.cached]] chunk is a cache hit of the delegate:
-    * it gets the history entry of a hit, and no store.
+    * it gets the history entry of a hit, and no store. A delegate that is a managed model writes the history entry and
+    * records the usage itself, so this stream does neither (see [[recordsDelegateCalls]]).
     *
     * A non-fatal exception of the delegate, when it opens the stream or during a read, is a failure of the attempt with
     * an [[dspy4s.core.contracts.LmUnexpectedError]].
@@ -430,7 +463,7 @@ final case class ManagedLanguageModel(
       release()
       finished = true
       cached match
-        case Some(response) => val _ = acceptHit(request, response)
+        case Some(response) => val _ = acceptDelegateHit(request, response)
         case None           =>
           val response = LmResponse(outputs = Vector(parts.output), usage = usage)
           val _        = acceptResponse(request, key, response)
