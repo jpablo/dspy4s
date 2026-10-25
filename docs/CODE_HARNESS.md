@@ -1,8 +1,8 @@
 # Code harness: analysis and design proposals
 
-Status: proposal, 2026-10-19. Sections 7 and 8 were added on 2026-10-21, the Phase 0 results (section 12) on
-2026-10-22, and sections 2.4 to 2.6 and section 9 on 2026-10-24. Nothing in this document exists in the code of
-dspy4s yet.
+Status: proposal, 2026-10-19. Sections 7 and 8 were added on 2026-10-21, the Phase 0 results (section 11) on
+2026-10-22, and sections 2.4 to 2.6 and section 9 on 2026-10-24. On 2026-10-24 the document was also put in a new
+order around one recommended design (section 4). Nothing in this document exists in the code of dspy4s yet.
 
 ## Summary
 
@@ -16,18 +16,18 @@ dspy4s yet.
   log, and a view that is a cut through the tree. The agent zooms into any line to get the detail back.
 - dspy4s has most of the parts: `Predict` leaves, `AgentLoop`, the interpreter contract, `History`, RLM, and the
   optimizers. It has no Scala interpreter. Also, RLM sub-calls write no trace entry.
-- Design A makes the harness an RLM configuration. Design B makes a session algebra in which RLM is the
-  meaning of a code step. Design C keeps the kernel of design B and replaces its compaction with the
-  uniichat memory tree.
-- Section 7 extends design C. Work sessions have a pluggable context strategy, and the memory tree is one of
-  the strategies. One controller conversation that never ends uses the memory tree, starts the sessions, and
-  sees each session through a ledger, a knowledge graph with time and a pluggable ontology, and probes.
+- dspy4s builds on the same 3.10 nightly as atc, so the guest API uses capture checking (F2). A mode is a set of
+  givens, and the compiler checks it. A handler decides what each call does.
+- Section 4 shows the recommended design in one place. A session is a log, a scope, a mode, a context strategy,
+  and a REPL, with a pure decider and a `Predict` leaf for each LM step. Section 5 keeps a short history of the
+  three earlier designs (A, B and C) that led to it.
+- Each work session has a pluggable context strategy: a window, a prefix summary, or the memory tree of
+  section 6. One controller conversation that never ends uses the memory tree, starts the sessions, and sees
+  each session through a ledger, a knowledge graph with time and a pluggable ontology, and probes (section 7).
 - Section 8 describes the runtime. A session is an actor, its log is an event journal, and each guest API call
   in a cell is an event. A replay of the journal can rebuild the REPL state. The first runtime uses direct
   style, and distribution comes later.
-- The recommendation is design C with the sessions and the controller of section 7, on the runtime of section
-  8. It is built in phases on the kernel of design B.
-- The Phase 0 experiment (section 12) recommends a REPL in the same JVM, with five guards. Two of the guards
+- The Phase 0 experiment (section 11) recommends a REPL in the same JVM, with five guards. Two of the guards
   need the replay of section 8.
 - deepseek-harness, Codex and tacit confirm the main choices (section 9). tacit reports that agents that write
   capability-safe Scala match the tool-call baselines. The three harnesses also challenge three choices: REPL
@@ -46,12 +46,12 @@ The `harness` module gives a coding agent with these properties:
 - **Functional design.** The state is a value. The effects go through handler values. The important parts have
   laws.
 
-Section 2 analyzes six reference harnesses and the dspy4s components. Section 3 gives the foundation that all
-designs share. Sections 4, 5 and 6 give the three designs. Section 7 extends design C with work sessions and a
-controller, and section 8 describes the runtime of a session. Section 9 lists the findings from three of the
-reference harnesses: deepseek-harness, Codex and tacit. Section 10 compares the designs, and section 11 describes
-the optimization. Section 12 gives a recommendation, the phases, and the open questions. Section 13 lists the
-alternatives.
+Section 2 analyzes six reference harnesses and the dspy4s components. Section 3 gives the foundation of the
+design. Section 4 shows the recommended design, and section 5 tells how it came from three earlier designs.
+Section 6 describes the memory tree. Section 7 describes the work sessions and the controller, and section 8
+describes the runtime of a session. Section 9 lists the findings from three of the reference harnesses:
+deepseek-harness, Codex and tacit. Section 10 describes the optimization. Section 11 gives the phases, the
+Phase 0 results, and the open questions. Section 12 lists the alternatives.
 
 ## 2. Analysis
 
@@ -268,7 +268,9 @@ Ideas to use:
 - The REPL state changes only if a cell completes.
 - The recipe for a capture-checked guest API: a capability class with a private constructor that extends
   `caps.SharedCapability`, a `request*` method that takes a block `Cap^ ?=> T`, and operations that take the
-  capability as a `using` parameter. dspy4s builds on the nightly, so this recipe is available now.
+  capability as a `using` parameter. atc uses a newer model of the nightly: `caps.ExclusiveCapability`, and
+  `caps.Stateful` with read-only views and `update def`. F2 uses the model of atc, and the `request*` blocks of
+  tacit stay an option for a narrower scope inside a cell.
 - `secretHeaders`, the secure output file, and `classifiedWrite`.
 
 Ideas to change:
@@ -333,7 +335,8 @@ The gaps for a code harness:
 
 ## 3. Shared foundation
 
-All three designs need the six parts in this section.
+The recommended design (section 4) needs the six parts in this section. The three earlier designs of section 5
+needed them too.
 
 ### F1. An embedded Scala REPL
 
@@ -359,43 +362,149 @@ enum CellOutcome:
 - Give each REPL its own output stream. Set `redirectOutput` of the driver to `false`, because otherwise
   `ReplDriver` calls `System.setOut` around each run. Run each cell on its own thread in `Console.withOut`, which
   has a value for each thread. Forward `System.out` and `System.err` to `Console` one time, at the start of the
-  host. Then parallel sessions do not share a lock. Phase 0 confirmed this setup (section 12).
+  host. Then parallel sessions do not share a lock. Phase 0 confirmed this setup (section 11).
 - Bind an `ExecutionContext` for each REPL in the preamble. A thread of the global pool keeps the output stream of
   the thread that made it, so the global pool sends output to the wrong REPL.
 - Bind the handlers (F2) in the preamble of each REPL through a registry key for that session. Do not use one
   global slot.
 - Share only `scala.*` and the guest API package with the REPL class loader, as atc does. Hide the class
   resources of the shared classes, so that the instrumentation does not define a second copy of them.
+- Compile each cell with the options of the guest API: `-language:experimental.captureChecking` and
+  `-Yexplicit-nulls`. Import `language.experimental.safe` last in the preamble, as atc does, so that model code
+  cannot name the host internals or use `caps.unsafe`. A regex validator can give early errors, but the evasion
+  tests of tacit show that such a validator can be bypassed (2.6). Safe mode and the class loader are the real
+  checks.
 - Keep the current error split: a failure of the REPL is a `Left`, and a failure of the user code is a `Right`
   with an outcome.
 - A later variant runs the REPL in a forked JVM. That variant isolates memory and crashes. Capture checking
   does not need it, because the build already uses the nightly compiler. Phase 0 recommends the REPL in the same
-  JVM, with five guards (section 12).
+  JVM, with five guards (section 11).
 
-### F2. The guest API as effect signatures with handlers
+### F2. The guest API: effects, views, modes and handlers
 
-The guest API is a small set of traits. Each trait is an effect signature. The model calls direct-style
-functions, and a `using` parameter selects the handler. This gives the algebraic structure (operations and
-interpreters) without monadic syntax in the model code.
+The guest API is a small set of traits, one for each effect. Each trait is an effect signature and a
+capability. The model calls direct-style functions, and a `using` parameter selects the capability. This gives
+the algebraic structure (operations and interpreters) without monadic syntax in the model code. The build uses
+the 3.10 nightly, so capture checking tracks which capabilities each cell uses.
 
-Start with the four operations of pi, as typed Scala functions:
+Two separate axes decide what a cell can do:
+
+| Axis | Chosen by | Checked | Examples |
+|---|---|---|---|
+| Mode | The givens of the REPL preamble: which capabilities exist, and in which view | At compile time | full, local, read-only, controller |
+| Handler | The value behind each given: what a call does | At run time | `Files.local`, `overlay`, `memory`, `recorded`, `replayed`, `guarded` |
+
+The two axes combine freely. For example, read-only mode can run with an overlay handler, and full mode can run
+with a replay handler.
+
+atc has one `Interface` trait with all the operations, separate capability types, and one host class made of
+parts (`HostFiles`, `HostProcesses`, `HostNetwork`). F2 makes the split public. Each effect gets its own handler,
+and each role gets its own set of capabilities. The model still reads one API reference: the sources of the
+traits of its session, in a fixed order.
+
+#### Effects and views
+
+Start with the four operations of pi, as typed Scala functions. This is a sketch:
 
 ```scala
 // The guest side. This source text, with its doc comments, is the API reference in the prompt.
-trait Files:
+trait Cap extends caps.Stateful, caps.ExclusiveCapability
+
+/** The files of the workspace. The bare `Files` can only read, and `Files^` can also write. */
+trait Files extends Cap:
   /** The lines `from` to `to` of `path`, with line numbers. */
   def read(path: String, from: Int, to: Int): String
   /** Writes `content` to `path`. Makes the parent directories. */
-  def write(path: String, content: String): Unit
+  update def write(path: String, content: String): Unit
   /** Replaces the one occurrence of `oldText`. Fails when `oldText` occurs zero times or more than one time. */
-  def edit(path: String, oldText: String, newText: String): Unit
+  update def edit(path: String, oldText: String, newText: String): Unit
 
-trait Shell:
-  /** Runs `command` in the workspace. Stops it after `timeoutSeconds`. */
-  def exec(command: String, timeoutSeconds: Int): ExecResult
+/** Commands in the workspace. A session has this capability, or it has none. */
+trait Shell extends caps.ExclusiveCapability:
+  /** Runs `command` and stops it after `timeoutSeconds`. A command can change files, so it needs `Files^`. */
+  def exec(command: String, timeoutSeconds: Int)(using Files^): ExecResult
+
+// The functions that the model calls.
+object api:
+  def read(path: String)(using f: Files): String = f.read(path, 1, Int.MaxValue)
+  def read(path: String, from: Int, to: Int)(using f: Files): String = f.read(path, from, to)
+  def write(path: String, content: String)(using f: Files^): Unit = f.write(path, content)
+  def edit(path: String, oldText: String, newText: String)(using f: Files^): Unit = f.edit(path, oldText, newText)
+  def exec(command: String)(using s: Shell^, f: Files^): ExecResult = s.exec(command, 120)
+  def exec(command: String, timeoutSeconds: Int)(using s: Shell^, f: Files^): ExecResult =
+    s.exec(command, timeoutSeconds)
 ```
 
-The host gives a handler value for each trait. Handler transformers compose:
+The rules:
+
+- **Two views for state.** A trait that extends `caps.Stateful` has two views. The bare type is the read-only
+  view, and `T^` is the full view. A method marked `update def` compiles only through the full view. A full
+  capability can go where a read-only one is expected, but a read-only capability cannot go where a full one is
+  expected.
+- **One view for an exclusive capability.** `Shell` and `Network` have one view. A session has the capability,
+  or it has none.
+- **An operation lists every capability that its effects can reach.** A command can change files, so `exec`
+  needs `Shell^` and also `Files^`. Then a read-only session cannot write a file through a shell, even if it has
+  a `Shell`. atc has the same rule: `def exec(command: String)(using Exec^, FileSystem^)`. The rule also holds on
+  the trait itself, so code that calls `shell.exec` directly needs `Files^` too.
+- **Overloads, not default arguments.** A function that takes a capability uses overloads for its optional
+  parameters. atc gives this rule for capture checking.
+- **Top-level functions.** The model calls `read("build.sbt")`, not `files.read(...)`. The functions of `api`
+  take the capability as a `using` parameter.
+
+#### Modes as sets of givens
+
+The preamble of each REPL declares the givens, through a registry key for that session (F1). The mode decides
+which givens exist, and in which view:
+
+| Mode | Givens in the preamble |
+|---|---|
+| Full | `files: Files^`, `shell: Shell^`, `net: Network^`, `llm: Llm^`, `agents: Agents^` |
+| Local | `files: Files^`, `shell: Shell^`, `llm: Llm^`, `agents: Agents^` |
+| Read-only | `files: Files` (the read-only view), `llm: Llm^` |
+| Controller (7.3) | `sessions: Sessions^`, `files: Files` (the read-only view) |
+
+`Llm` (F4) and `Agents` (F5) are exclusive capabilities too. An LM call costs money and sends data to a provider,
+and a child agent can use each capability that it gets, so both need a capability.
+
+The results:
+
+- In local mode, `httpGet(url)` needs a `Network^`. No given has that type, so the cell does not compile.
+- In read-only mode, `write(path, text)` needs a `Files^`. The given `files` is the read-only view, so the cell
+  does not compile. `exec` does not compile either, because there is no `Shell` and no `Files^`.
+- The model gets the compile error as an observation. It learns the limits of its mode from the error.
+- A mode change needs a new REPL, because the preamble changes. atc does the same. A replay into a stricter mode
+  can fail to compile, and replay (8.4) counts that as a divergence.
+
+A root capability can add one more rule. In atc, `FileSystem^{io}` comes from a root `io: IOCap^`, and a callback
+of `Classified.map` can capture only read-only views. A root capability gives F2 the same rule for `Classified`
+values (question 5 of 9.4).
+
+#### The notation header
+
+The model must learn the notation. So the API reference starts with a short header, as atc does at the top of
+`Interface.scala` ("Reading this file"):
+
+```scala
+// How to read this file. Read the capture-checking types as permission bits:
+//   - `T^` is the full view of a capability, and the bare `T` is its read-only view. `Files^` can write,
+//     and `Files` can only read. A full capability can go where a read-only one is expected. A read-only
+//     capability cannot go where a full one is expected.
+//   - `update def` marks an operation that changes state. It compiles only through a full view. On a
+//     read-only view, the error is "Cannot call update method ...".
+//   - A function lists each capability that it needs as a `using` parameter. `exec` needs `Shell^` and
+//     `Files^`, because a command can change files.
+//   - When a compile error names a capability that you do not have, your mode does not permit the operation.
+```
+
+The harness also adds a hint after each frequent capture-checking error, as atc does in `ToolOutput`. For
+example, after "Cannot call update method" the hint says that the session is read-only. In the controller, the
+hint says to start a work session for that operation.
+
+#### Handlers
+
+The value behind each given is a handler. The host composes the handler for each session, for example
+`recorded(guarded(Files.overlay(base), policy))`. Handler transformers compose:
 
 | Handler | Purpose |
 |---|---|
@@ -413,9 +522,8 @@ Laws:
 - `guarded(p)(guarded(q)(h))` behaves as `guarded(p and q)(h)`.
 - For the calls in `log`, `replayed(log)` gives the same results as the handler from which `recorded` wrote `log`.
 
-The read-only mode is a choice of handlers. Without capture checking, the handler checks the mode at run time.
-With capture checking, the compiler checks the mode, as in atc. The build uses the nightly compiler, so both
-options are available.
+A mode does not replace the `guarded` handler. The type says that code can write. The guard says where: which
+paths, which commands, and which hosts. atc also checks its policy at run time, on each call.
 
 ### F3. A typed submit
 
@@ -436,6 +544,18 @@ submitted record with the output shape, as RLM does.
 entry with the key of the leaf. Then the optimizers see the leaf, and GEPA can tune its instructions. One counter
 (`LlmCallLimit`) holds for the full call tree, as in RLM.
 
+The LM is a capability of F2:
+
+```scala
+trait Llm extends caps.ExclusiveCapability
+
+def llmQuery(prompt: String)(using Llm^): String
+def llmQueryBatched(prompts: Seq[String])(using Llm^): Vector[String]
+```
+
+The handler of `Llm` runs the `subQuery` leaf and counts the budget, so a mode with no `Llm` given cannot call an
+LM. An overload for `Classified` values, as in atc and tacit, depends on question 5 of 9.4.
+
 ### F5. RLM semantics
 
 - The inputs of the base signature enter the REPL as typed values. Strings, numbers, booleans and collections
@@ -445,6 +565,9 @@ entry with the key of the leaf. Then the optimizers see the leaf, and GEPA can t
 - `rlm(task, inputs)` is a recursive call of the same program. The child gets a new REPL, a depth limit that is
   one less than the limit of the parent, and the shared LM call budget. The child gives its submitted value to
   the parent code.
+- `rlm` takes the capability `Agents^` (F2). The mode of the child is at most the mode of the parent: the child
+  can get fewer capabilities or read-only views, but never more. Codex roles and deepseek-harness providers have
+  the same rule (2.4, 2.5).
 - The budgets are Iron types: the current `IterationLimit`, `LlmCallLimit` and `OutputCharLimit`, and two new
   types, `DepthLimit` and `CellTimeout`.
 
@@ -454,93 +577,61 @@ A `Workspace` value has `fork(): Either[DspyError, Workspace]`. A fork is a git 
 an overlay (F2). Each rollout of an optimizer runs in its own fork. The metric reads that fork, for example to
 run the tests. Without forks, parallel rollouts write the same files.
 
-## 4. Design A: the harness is an RLM configuration
+## 4. The recommended design
 
-### Idea
+This section shows the full design in one place. Each part links to the section with its details. Section 5
+tells how the design came from three earlier designs.
 
-Make the RLM interpreter contract independent of the language, and add a Scala implementation. The harness is then
-an `RLM[I, O]` value with the Scala REPL and the workspace API.
+### 4.1 The parts
 
-### Changes
+| Part | What it is | Details |
+|---|---|---|
+| Guest API | One trait for each effect. A mode is a set of givens that the compiler checks. A handler decides what each call does. | F2 |
+| REPL | One embedded `ReplDriver` for each session, in the same JVM, with capture checking and safe mode | F1, 11 (Phase 0) |
+| Session | A log, a scope, a mode, a context strategy, and a REPL. A pure decider owns the state machine of the session. | 4.2, 7, 8 |
+| Policy | A `Predict` leaf that writes the next cell | 4.2 |
+| Context strategy | A window, a prefix summary, or the memory tree. It derives data from the log, and it makes the policy input. | 7.2, 6 |
+| RLM | Inputs as REPL values, `llmQuery` through a `Predict` leaf, and `rlm(...)` children with at most the mode of the parent | F4, F5, 4.4 |
+| Controller | One session that never ends, with the memory tree and the controller mode. It starts the work sessions, and it sees them through a ledger, a graph, and probes. | 7 |
+| Runtime | An actor for each session. The log is an event journal, and each guest API call in a cell is an event. | 8 |
+| Optimization | `Harness` is a `Module` with `Predict` leaves, so the current optimizers can tune it. | 4.3, 10 |
 
-| Module | Change |
-|---|---|
-| programs | Add `ReplLanguage`: the prompt text, the fence tags, the identifier rule, and the type names. Move the Python text from `RLMReplProtocol` into `ReplLanguage.python`. Python stays the default. |
-| programs | Send `llm_query` through a `subQuery` leaf (F4). The arity of the RLM `OptimizableStructure` changes from 2 to 3. |
-| harness (new) | `ScalaReplInterpreter` (an implementation of `ReplCodeInterpreter`), its factory, the guest API (F2), the typed submit (F3), `Workspace` (F6), and the constructor `CodeHarness.apply`. |
+A turn, in short:
 
-### Sketch
+1. A message arrives in the mailbox of a session. It comes from the user, from the controller (`tell`), or from
+   a child.
+2. The decider of the session accepts the message and starts a turn (8.5).
+3. In each step of the turn, the context strategy updates its derived data and makes the policy input. The
+   policy writes a cell, and the REPL runs the cell with the givens of the mode.
+4. Each guest API call of the cell goes through its handler, and the `recorded` handler writes an event (8.3).
+5. The turn ends at `submit(...)` or at the end of the budget. Open question 2 of section 11 asks if a reply
+   with no code also ends a turn. The goal check can start one more turn (4.4).
+6. The session sends its events to the controller (7.4).
 
-```scala
-final case class Task(request: String) derives Schema
-final case class Report(summary: String, changedFiles: List[String]) derives Schema
+### 4.2 The session kernel
 
-val harness: RLM[Task, Report] =
-  CodeHarness(
-    signature = Signature.derived[Task, Report]("code_task", "Do the task in the workspace."),
-    workspace = Workspace.local(Path.of(".")),
-    limits    = HarnessLimits(iterations = 30, llmCalls = 50)
-  )
-
-val report = harness(Task("Fix the failed test in modules/lm"))
-
-// The current optimizers accept the harness with no change.
-val result = Gepa[RLM[Task, Report]](metric = TestsPass(), reflectionLm = lm, config = GepaConfig())
-  .compile(harness, trainset)
-```
-
-### What the model sees
-
-One `Predict` call for each step. The input has the instructions, `variables_info`, `repl_history` as one text
-field, and the step number. The output has `reasoning` and `code`.
-
-### Good points
-
-- Little new code. The loop, the budgets, the extract fallback and the optimizer instances exist now.
-- RLM from the start, because the harness is RLM.
-- The change to `llm_query` (F4) also helps the current Python RLM.
-
-### Weak points
-
-- One call is one task. There is no conversation, no steering, and no compaction. The history grows until the
-  output limit cuts it.
-- The REPL state ends with the call.
-- `SandboxTool` passes `DynamicValue` records. The typed API (F2) must go around this contract, so the harness uses
-  only part of it.
-- The trajectory is one text field. The model does not see its steps as chat turns.
-
-## 5. Design B: a session algebra
-
-### Idea
-
-A small kernel of four values and one fold, as in pi. The log is the state. A pure projection makes the policy
-input. Each LM step is a `Predict` leaf. The REPL is a handler. RLM is the meaning of a code step, not a
-separate program.
-
-### Kernel
+The kernel comes from design B (5.2). It has four values and one fold.
 
 ```scala
-// 1. The log: append-only, a tree by parent id. Plain data, kept in a JSONL file through its Schema.
+// 1. The log: append-only, plain data with a Schema. It is the event journal of the session (8.2).
 enum Entry derives Schema:
-  case Input(text: String)                             // a task or a user message
+  case Input(text: String, sender: Sender)             // the user, the controller (7.3), or a child
   case Acted(reasoning: String, code: String)          // a policy output
-  case Observed(output: String, outcome: CellOutcome)  // a REPL result
-  case Compacted(summary: String, firstKept: EntryId)  // replaces a prefix in the projection
+  case Observed(output: String, outcome: CellOutcome)  // a REPL result; the cell events of 8.3 add the detail
   case Child(task: String, session: SessionId, result: Either[String, DynamicValue.Record])
   case Submitted(value: DynamicValue.Record)
+  case Ended(outcome: Outcome, reason: String)         // 7.9
+  case Reopened                                        // 7.9
+  case ScopeSnapshot(head: Sha, clean: Boolean)        // at the end of each turn (7.9)
 
-final case class Node(id: EntryId, parent: Option[EntryId], entry: Entry) derives Schema
-final case class Session(nodes: Vector[Node], leaf: Option[EntryId]) derives Schema
-
-// 2. The projection: a pure function from the log to the policy input.
+// 2. The context: a strategy (7.2) derives data from the log, and it makes the policy input.
 final case class PolicyInput(task: String, variables: Vector[String], observation: String, history: History)
-type Projection = Session => PolicyInput
 
 // 3. The policy: a Predict leaf. The optimizers find it by its key.
 //    task, variables, observation, history -> reasoning, code
 val policy: Predict[PolicyInput, PolicyStep]
 
-// 4. The interpreter: the REPL behind the current ActionInterpreter contract.
+// 4. The interpreter: the REPL of the session, with the givens of its mode (F2).
 val interpreter: ActionInterpreter[Cell, CellResult]
 ```
 
@@ -548,17 +639,17 @@ History message `k` holds the observation before step `k` as its input, and step
 replays these messages as chat turns. Each step adds turns at the end, so the prompt prefix stays the same, and
 the provider prompt cache can hold it.
 
-### The loop
+The steps of a turn:
 
 ```scala
-def step(session: Session, i: Int)(using RuntimeContext)
-    : Either[DspyError, AgentLoop.Step[Session, Outcome]] =
+def step(s: SessionState, i: Int)(using RuntimeContext)
+    : Either[DspyError, AgentLoop.Step[SessionState, Outcome]] =
   for
-    prepared <- middleware(session)                   // compaction, output limits
-    action   <- policy(projection(prepared))
-    result   <- interpreter.execute(Cell(action.output.code))
+    derived <- s.strategy.update(s.log, s.derived)                     // 7.2
+    action  <- policy(s.strategy.project(s.log, derived, limits.contextBudget))
+    result  <- interpreter.execute(Cell(action.output.code))
   yield
-    val next = prepared
+    val next = s.withDerived(derived)
       .append(Entry.Acted(action.output.reasoning, action.output.code))
       .append(Entry.Observed(result.observation.output, result.observation.outcome))
     result.observation.outcome match
@@ -568,99 +659,191 @@ def step(session: Session, i: Int)(using RuntimeContext)
 AgentLoop.run(start, 0, limits.iterations)(onExhausted = finish)(step)
 ```
 
-### Hooks as values
+The worker of a turn runs this loop outside the decider, and it sends its events back as messages (8.5).
 
-A middleware is a `Session => Either[DspyError, Session]`. The middlewares make a monoid: the identity, and
-composition from left to right. The pi hooks become values of this type:
+The projection cuts long observations, and it adds a note that tells the model how to read the remainder. The
+log keeps the full output.
 
-- `compactWhen(threshold)(compactor)`: when the projection is too large, it adds a `Compacted` entry. The
-  `compactor` is a `Predict` leaf.
-- `limitOutput(chars)`: it cuts long observations, and it adds a note that tells the model how to read the
-  remainder.
+Laws:
 
-The laws: the monoid laws. A compaction does nothing below the threshold. After a compaction, the projection
-keeps every entry from `firstKept` without a change.
+| Law | Statement |
+|---|---|
+| Projection | `project` depends only on the log and the derived data (7.2). |
+| Log | No part of the harness changes or removes an entry of the log. |
+| Fork | A fork at entry `k` starts with the first `k` entries of the parent log. |
+| Loop | At most `limits.iterations` policy calls in one turn (the current `AgentLoop` laws). |
+| Handlers | The laws of F2. |
+| Mode | The mode of a child is at most the mode of its parent (F5). |
+| Budget | The `subQuery` calls of one call tree, with the children, are at most `LlmCallLimit`. |
+| Decider | The state of a session is `events.foldLeft(initial)(evolve)` (8.5). |
 
-### The module
+### 4.3 The module
 
 ```scala
+enum Strategy:
+  case Window
+  case PrefixSummary(compactor: Predict[CompactInput, Summary])
+  case MemoryTree(compress: Predict[CompressInput, Line], merge: Predict[MergeInput, Line])  // section 6
+
 final case class Harness[I, O](
     signature: Signature[I, O],
     policy   : Predict[PolicyInput, PolicyStep],  // the step
     finisher : Predict[FinishInput, O],           // the RLM extract fallback when the budget ends
-    compactor: Predict[CompactInput, Summary],
-    subQuery : Predict[Query, Answer],
-    env      : HarnessEnv,                         // handlers, workspace, REPL factory; not optimizable
-    limits   : HarnessLimits                       // not optimizable
+    subQuery : Predict[Query, Answer],            // F4
+    goal     : Predict[GoalInput, GoalVerdict],   // the goal check (4.4)
+    strategy : Strategy,                          // its leaves join the leaves of the harness
+    env      : HarnessEnv,                        // handlers, workspace, REPL factory, mode; not optimizable
+    limits   : HarnessLimits                      // not optimizable
 ) extends Module[I, O]
 ```
 
-- The `OptimizableStructure` instance has arity 4. It is derived, or hand-written as for RLM. The fields
-  without leaves need `OptimizableStructure.empty` instances.
+- The `OptimizableStructure` instance has arity 4, plus the leaves of the strategy: none for a window, one for a
+  prefix summary, and two for the memory tree. `arity(p)` is a function of the value, so a sum type works. The
+  fields with no leaves need `OptimizableStructure.empty` instances.
 - The `ProgramRunner` instance comes from the input shape of `signature`, as for RLM.
-- `forward` makes a REPL, runs the loop, and closes the REPL in a `finally`, as RLM does.
+- `forward` makes a REPL with the givens of the mode, runs one session to its end, and closes the REPL in a
+  `finally`, as RLM does.
 
 Two entry points use the same kernel:
 
-- `harness(input)`: one task in one session. The optimizers use this entry point.
-- `Harness.turn(session, repl, message)`: one interactive turn. A CLI keeps the `Session` value and the live
-  REPL. The CLI is a small program outside the module.
+- `harness(input)`: one task in one session, in a workspace fork (F6). The optimizers use this entry point.
+- The session actor (8.5): interactive turns, the controller, and `tell`.
 
-### RLM in design B
+### 4.4 RLM, subagents and the goal check
 
-- The inputs of `I` enter the REPL as values (F5).
-- `llmQuery` uses the `subQuery` leaf (F4).
-- `rlm(task, inputs)` starts a child session with the same `Harness` value. The child uses the same leaves, so
-  its calls have the same keys. The parent log gets one `Child` entry with the result. The child log is a
-  separate session, so the parent context stays small.
+- The inputs of `I` enter the REPL as typed values, and the prompt shows a summary of each value (F5).
+- `llmQuery` and `llmQueryBatched` take `Llm^` and run the `subQuery` leaf (F4).
+- `rlm(task, inputs)` takes `Agents^`. It starts a child session with the same `Harness` value, a new REPL, and a
+  mode that is at most the mode of the parent. The child uses the same leaves, so its calls have the same keys.
+  The parent log gets one `Child` entry with the result. The child log stays separate, so the parent context
+  stays small.
 - Later, the current `RLM` program can become a `Harness` with the Python REPL handler and the RLM prompt. Then
   dspy4s has one code program, as decision D1 intends.
 
-### Session files
+There are two kinds of subagents:
 
-The log is plain data with a `Schema`, so a JSONL file can hold it. The REPL state is not in the log. On a
-resume, the harness adds a note: the REPL restarted, and the earlier definitions are gone. atc does the same.
-Section 8.4 describes replay, which can rebuild the REPL state from the journal.
+| Function | Semantics | Use |
+|---|---|---|
+| `rlm(task, inputs): A` | Synchronous. The child runs inside the cell and gives a typed value. It has a depth limit and the shared budget. | A part of a computation (RLM). |
+| `spawn(task): AgentRef` | Asynchronous. The child runs in the background with the view of the parent and its own log. Its report comes back as an `Input` entry from the child, which starts a turn. `tell(ref, message)` sends it a message. | Long work in the interactive shell. |
 
-### Laws
+For the optimizer entry point (one task), the harness waits for all spawned agents before it ends, or it turns
+`spawn` off. Then each rollout is closed.
 
-| Law | Statement |
-|---|---|
-| Projection | `projection(s)` depends only on the entries on the path from the root to the leaf. |
-| Fork | After `fork(s, id)`, the path is the prefix of the old path up to `id`. |
-| Compaction | After a compaction, the projection keeps every entry from `firstKept` without a change. |
-| Middleware | Identity and associativity. |
-| Loop | At most `limits.iterations` policy calls (the current `AgentLoop` laws). |
-| Handlers | For the calls in `log`, `replayed(log)` gives the same results as the handler from which `recorded` wrote `log`. |
-| Budget | The `subQuery` calls of one call tree, with the children, are at most `LlmCallLimit`. |
+A work session that the controller starts (7.3) is not a child. It has its own scope, the user can talk to it,
+and its events go to the controller. Open question 5 of section 11 asks if `spawn(...)` is still necessary next
+to these sessions.
 
-### Good points
+The goal check is a `Predict` leaf with a `Noul` output (decision D6): "is the goal met now?". On `false`, the
+harness adds a "keep working" message and runs one more turn. ReAnchor can calibrate its threshold later. 9.3
+proposes two rules for this automatic work: a human must arm it again after a restart, and a goal is "blocked"
+only after three turns with the same blocker.
 
-- The design is functional. The session is a value, the projection is pure, and the effects go through handlers.
-- Conversation, fork, resume and compaction come from the log.
-- The policy sees its trajectory as chat turns through `History`, and the prompt cache holds the prefix.
-- Four leaves are open to the optimizers, and all LM calls from code are in the trace.
-- Each part has a law, so the tests can use the style of the current law suites.
+### 4.5 Why this design
 
-### Weak points
+- **It is functional.** The log is a value, the projection is pure, and the decider is pure. The effects go
+  through handlers. Only the handlers, the builder of the derived data, and the REPL have effects.
+- **No entry of a log is lost.** A context strategy changes only what the model sees. The memory tree can give
+  back each detail with `zoom`.
+- **The compiler checks the authority of each session.** Its mode is a set of givens (F2).
+- **The optimizers see each LM call.** The leaves are the policy, the finisher, `subQuery`, the goal check, the
+  leaves of the strategy, and the leaves of the controller (7.8).
+- **The prompt prefix stays stable.** The history grows at its end, and the memory tree has a prefix law (6.2).
+- **One design serves the optimizer and daily use.** For the optimizer, an episode is a workspace fork and one
+  task. For daily use, sessions and the controller run as actors.
 
-- More new code than design A.
-- Two code programs (RLM and `Harness`) exist until RLM moves onto the kernel.
-- The `History` projection of a long trajectory needs care with the context size, so compaction is necessary
-  early.
-- A compaction removes detail from the prompt. The agent cannot get it back, because the projection has no
-  zoom.
+The costs:
 
-## 6. Design C: one log with a memory tree
+- There is more new code than in an RLM configuration (5.1).
+- The builder of the derived data runs in the background, so it adds concurrency.
+- In a session with the memory tree, each message costs one compaction call on a cheaper model (6.5).
+- `LmRequest` has no prompt-cache marks (gap 6). An Anthropic provider needs them.
 
-### Idea
+### 4.6 What is open
 
-Keep the kernel of design B: the policy leaf, the REPL handler, the loop, the middleware and the handlers.
-Replace the session tree and its compaction with the uniichat memory: one append-only log, a binary tree of
-summaries over the log, and a view that is a cut through the tree. The compactor becomes two `Predict` leaves.
-`zoom` becomes a guest function.
+The decisions so far are in 7.10 and 8.7. The open questions are in 9.4 and in section 11.
 
-### Memory algebra
+## 5. Design history
+
+The recommended design came from three earlier designs. This section keeps a short record of each design, and
+of the comparison between them.
+
+### 5.1 Design A: the harness is an RLM configuration
+
+The idea: make the RLM interpreter contract independent of the language, and add a Scala implementation. The
+harness is then an `RLM[I, O]` value with the Scala REPL and the workspace API. The changes were a
+`ReplLanguage` in `programs` (the Python text of `RLMReplProtocol` moves into `ReplLanguage.python`), `llm_query`
+through a `subQuery` leaf, and a `ScalaReplInterpreter` in the new module:
+
+```scala
+val harness: RLM[Task, Report] =
+  CodeHarness(
+    signature = Signature.derived[Task, Report]("code_task", "Do the task in the workspace."),
+    workspace = Workspace.local(Path.of(".")),
+    limits    = HarnessLimits(iterations = 30, llmCalls = 50)
+  )
+```
+
+Why it changed:
+
+- One call is one task. There is no conversation, no steering, and no compaction.
+- The REPL state ends with the call, and the trajectory is one text field.
+- `SandboxTool` passes `DynamicValue` records, and the RLM interpreter contract has no capabilities and no
+  modes.
+
+What stays: the change of `llm_query` to a `subQuery` leaf (F4) also helps the current Python RLM. Design A
+stays available as a cheap first check of the foundation.
+
+### 5.2 Design B: a session algebra
+
+The idea: a small kernel of four values and one fold, as in pi. The log is the state, a pure projection makes
+the policy input, each LM step is a `Predict` leaf, and the REPL is a handler. RLM is the meaning of a code step,
+not a separate program. The log was a tree by parent id. A compaction was a middleware that added a `Compacted`
+entry, and that entry replaced a prefix in the projection.
+
+Why it changed:
+
+- A compaction removed detail from the prompt, and the agent could not get it back.
+- A `Compacted` entry was a change of the log for a concern of the context.
+
+What stays: the kernel (4.2), the module (4.3), RLM as a child session (4.4), and the laws. The context
+strategies of 7.2 replace the compaction middleware, because a strategy never changes the log.
+
+### 5.3 Design C: one log with a memory tree
+
+The idea: keep the kernel of design B, and replace its compaction with the uniichat memory. There is one log that
+never ends, a binary tree of summaries over the log, and a view that is a cut through the tree.
+
+Why it changed: one log for the full harness gives no isolated session for a narrow task. Section 7 kept the
+memory tree for the controller, and it made each work session a separate log with its own context strategy.
+
+What stays: the memory tree, as one context strategy and as the strategy of the controller (section 6), the
+two compaction leaves, and the goal check (4.4).
+
+### 5.4 The comparison of the three designs
+
+| Criterion | Design A | Design B | Design C |
+|---|---|---|---|
+| New code | Small | Medium | Large |
+| Reuse of the current RLM | Full | The RLM loop parts | The RLM loop parts |
+| Conversation and resume | No | Yes, from the session log | Yes, one log that never ends |
+| Compaction | No | Replaces a prefix in the projection | Adds summary nodes; nothing is lost |
+| Detail after compaction | Not applicable | Lost in the prompt | Available through `zoom` |
+| Optimizable leaves | 3 (action, extract, subQuery) | 4 (policy, finisher, compactor, subQuery) | 6 (policy, finisher, compress, merge, subQuery, goal) |
+| LM calls from code in the trace | Yes, after F4 | Yes | Yes |
+| Subagents | `rlm(...)` as a sandbox tool | `rlm(...)` as a child session | `rlm(...)` and `spawn(...)` |
+| Trajectory form | One text field | Chat turns through `History` | View lines, then chat turns through `History` |
+| Prompt cache | A prefix of the history field | A stable prefix until a compaction | A stable prefix by the prefix law |
+| Laws | The current RLM and loop laws | Log, projection, middleware, handlers | The laws of B, and the memory laws |
+| Change to the current code | RLM changes (`ReplLanguage`, `subQuery`) | No change to RLM in the first version | No change to RLM in the first version |
+
+## 6. The memory tree
+
+The memory tree is one context strategy of 7.2, and it is always the strategy of the controller (7.1). It comes
+from uniichat (2.3). The algebra below is pure. Only the builder, which runs the two compaction leaves, has an
+effect.
+
+### 6.1 Memory algebra
 
 ```scala
 opaque type MsgId = Long
@@ -703,7 +886,7 @@ A source of 512 bytes or less is its own line, with no LM call. A builder runs t
 `ParallelExecutor`, in message order, and adds each line with `build`. The builder is the only part with an
 effect. `Memory` and `View` are pure.
 
-### Laws
+### 6.2 Laws
 
 | Law | Statement |
 |---|---|
@@ -715,9 +898,9 @@ effect. `Memory` and `View` are pure.
 | Size | After `fit`, the size of the view is at most `high`, when the parents that it needs are built. |
 | Roots | `roots(n)` has one node for each set bit of `n`, and their spans cover `[0, n)` in order. |
 
-### Turn and projection
+### 6.3 Turn and projection
 
-The projection of design B becomes three parts:
+With the memory tree, the projection of 4.2 has three parts:
 
 1. The view up to the first message of the turn. This part is the stable prefix.
 2. The messages of the turn in full.
@@ -726,49 +909,26 @@ The projection of design B becomes three parts:
 The cells and the outputs of a turn go into the log as messages, so later turns see them as summary lines. A
 turn waits until the nodes that its view needs are built (uniichat `settle`).
 
-### Code mode and RLM
+### 6.4 Code mode and RLM
 
 - `zoom(ref)` and `date(id)` are guest functions. Code can walk the tree in a loop. A JSON tool needs one
   model step for each zoom.
 - The full log is an RLM input: a REPL value with a summary in the prompt, and the view is that summary. The
   RLM rule "large inputs stay in the REPL" and the uniichat rule "the view is the memory" are the same rule.
 - Code can call `llmQuery` on the lines of a subtree, for example to find a past decision. uniichat forbids a
-  search of the memory. Section 12 lists this as an open question.
+  search of the memory. Section 11 lists this as an open question.
 
-### Two kinds of subagents
+### 6.5 Costs
 
-| Function | Semantics | Use |
-|---|---|---|
-| `rlm(task, inputs): A` | Synchronous. The child runs inside the cell and gives a typed value. It has a depth limit and the shared budget. | A part of a computation (RLM). |
-| `spawn(task): AgentRef` | Asynchronous. The child runs in the background with the view of the parent and its own log. Its report comes back as a `work` message, which starts a turn. `tell(ref, message)` sends it a message. | Long work in the interactive shell. |
-
-For the optimizer entry point (one task), the harness waits for all spawned agents before it ends, or it
-turns `spawn` off. Then each rollout is closed.
-
-### Goal check
-
-A goal check is a `Predict` leaf with a `Noul` output (decision D6): "is the goal met now?". On `false`, the
-harness adds a "keep working" message and runs one more turn. ReAnchor can calibrate its threshold later.
-
-### Good points
-
-- The memory loses no detail. A compaction adds nodes and deletes nothing.
-- A law keeps the prompt prefix stable, so the prompt cache is reliable.
-- Two compaction leaves and a goal leaf are open to the optimizers, in addition to the leaves of design B.
-- The memory is a persistent value, so a fork for a rollout costs almost nothing.
-- One log fits the interactive shell. For the optimizer, an episode is a fork of the memory and one task.
-
-### Weak points
-
-- The most new code of the three designs: the tree, the view, the builder, and the leaves.
-- The background builder adds concurrency. A turn must wait for the nodes that it needs.
+- The tree, the view, the builder, and the two leaves are new code.
+- The builder runs in the background, so it adds concurrency. A turn must wait for the nodes that it needs.
 - Each message costs one compaction call on the cheaper model.
 - `LmRequest` has no prompt-cache marks (gap 6). An Anthropic provider needs them.
 
 ## 7. Sessions and the controller
 
-This section extends design C. It adds work sessions with a pluggable context strategy, and one controller
-conversation above them.
+This section describes the work sessions of the recommended design (section 4), each with a pluggable context
+strategy, and one controller conversation above them.
 
 ### 7.1 Two kinds of conversation
 
@@ -812,7 +972,7 @@ trait ContextStrategy[D] extends Derivation[D]:
 |---|---|---|
 | Window | None | The last messages that fit |
 | Prefix summary (atc, pi) | Summary entries | The last summary, then the messages after it |
-| Memory tree (uniichat, design C) | The summary nodes | A cut through the tree, and `zoom` in the guest API |
+| Memory tree (uniichat, section 6) | The summary nodes | A cut through the tree, and `zoom` in the guest API |
 
 - The memory tree keeps the full log, so it compacts only the prompt. It is the only strategy that adds a guest
   function.
@@ -829,7 +989,7 @@ Laws:
 
 ### 7.3 The controller API
 
-The controller gets its own set of handlers (F2). It can manage work, but it cannot do the work:
+The controller is a mode of F2: a set of givens. It can manage work, but it cannot do the work:
 
 ```scala
 enum Scope:
@@ -837,7 +997,7 @@ enum Scope:
   case Worktree(repo: Path, branch: String, base: String)
   case Scratch(name: String)
 
-trait Sessions:
+trait Sessions extends caps.ExclusiveCapability:
   def start(goal: String, scope: Scope, strategy: StrategyName): SessionRef
   def list(): Vector[SessionCard]
   def tell(session: SessionRef, message: String): Unit
@@ -845,9 +1005,10 @@ trait Sessions:
   def zoom(session: SessionRef, ref: String): String
 ```
 
-The controller can also get a read-only `Files`, so that it can answer questions about a project. It gets no
-`write`, `edit` or `exec`. Code that calls them does not compile, because the controller API does not have
-them. The controller instructions tell the model to start a session for such work.
+The preamble of the controller declares `sessions: Sessions^` and the read-only view `files: Files`, so the
+controller can answer questions about a project. It has no `Shell` and no `Files^`. So `write` and `edit` do
+not compile, because they need `Files^`, and `exec` does not compile, because it needs `Shell^` and `Files^`.
+The hint after such an error, and the controller instructions, tell the model to start a session for that work.
 
 The other option is a nudge: a classifier finds "real work" in the controller and tells the user to start a
 session. The classifier can be wrong in both directions, and it needs its own tests. A restriction is a fact of
@@ -1112,7 +1273,7 @@ Who ends a session:
 
 - The user, in the session or through the controller. The controller sends the end to the session with `tell`
   (7.3), and the session runs the plan.
-- The session agent can propose an end. The goal check (the `Noul` leaf of design C) gives a good signal. The
+- The session agent can propose an end. The goal check (the `Noul` leaf of 4.4) gives a good signal. The
   user then confirms the outcome.
 
 The ledger after a removal: a ledger entry such as "wrote `src/Foo.scala` in worktree X" points to nothing
@@ -1273,7 +1434,7 @@ live code needs.
   Large `read` and `exec` results cost the most. A content store can keep each content one time only. Decision
   10 of section 7 records no content for writes; replay needs the content of reads.
 - Time: each cell compiles again. Phase 0 measured 12 ms to 55 ms (median) for a cell in a warm REPL, and 73 ms
-  for the replay of three cells (section 12). A long session with complex cells can take some minutes.
+  for the replay of three cells (section 11). A long session with complex cells can take some minutes.
 
 **Other uses.**
 
@@ -1352,7 +1513,7 @@ Recommendations that are not decisions yet:
 Open questions:
 
 1. Is REPL replay a first-version feature, with the stored results of reads? Or is it a later feature, with the
-   three preparations of 8.4 in the first version? Data from Phase 0 (section 12): replay worked with a small
+   three preparations of 8.4 in the first version? Data from Phase 0 (section 11): replay worked with a small
    amount of code (one handler that records and one that replays), and two guards of the REPL in the same JVM
    need it. One guard restarts an unclean host. The other guard limits a REPL to about 300 cells.
 
@@ -1407,22 +1568,22 @@ replay finds a recorded result by that id.
 | REPL | Options for each cell in a pragma on the first line, with unknown keys rejected | Codex | F1 |
 | Guest API | `applyPatch(patch)` with the Codex patch format and its fuzzy match in four passes, next to `edit` | Codex | F2 |
 | Guest API | Deferred tools that code finds by search, and the API reference on demand for a large tool set | Codex, tacit | F2 |
-| Guest API | A capture-checked guest API with the tacit recipe | tacit | F2 |
+| Guest API | A capture-checked guest API. F2 now has it, with the views of atc in place of `caps.SharedCapability`. | tacit, atc | F2 (done) |
 | Guest API | `secretHeaders` and dummy credentials, so that real secrets never enter the code or the journal | tacit, Codex | F2, 8.3 |
-| Context | Typed world-state sections that render only their changes | Codex, deepseek-harness | 5, 6 (projection) |
+| Context | Typed world-state sections that render only their changes | Codex, deepseek-harness | 4.2 (projection) |
 | Context | A fourth strategy: fresh windows, with tools that read the earlier windows | Codex | 7.2 |
 | Context | Speculative compaction with a generation check, for the prefix-summary strategy | Codex | 7.2 |
 | Context | Cheap steps first: cut tool outputs with no LM call, then summarize; reject a summary that does not shrink | deepseek-harness | 7.2 |
 | Journal | An unknown required event stops a rebuild, and optional events carry a mark | deepseek-harness | 8.2 |
 | Journal | Crash repair by append. An effect with no end has an unknown outcome and never retries automatically. | deepseek-harness | 8.3 |
-| Journal | A fork points into the immutable log of its parent | Codex | 5, 8.2 |
+| Journal | A fork points into the immutable log of its parent | Codex | 4.2, 8.2 |
 | Journal | Raw events first, a deterministic reducer later; edges between sessions carry item ids | Codex | 7.4 |
 | Journal | Metadata on each item that the model never sees: source and taint | Codex | 7.5 |
 | Controller | Typed `tell` modes with an expected turn id, and typed rejection reasons | Codex | 7.3 |
 | Controller | The inbox algebra (target and wake), and the message kind and form | deepseek-harness | 7.3 |
 | Controller | `observe` as one answer on a fork with no tools, next to the RLM probe | Codex | 7.4 |
 | Controller | Advisory write scopes when two sessions work in one repository | deepseek-harness | 7.3 |
-| Controller | A human arms automatic work again after a restart. A goal is "blocked" only after three turns with the same blocker. | deepseek-harness, Codex | 6 (goal check), 7.3 |
+| Controller | A human arms automatic work again after a restart. A goal is "blocked" only after three turns with the same blocker. | deepseek-harness, Codex | 4.4, 7.3 |
 | Graph | Extraction for each session, then a consolidation driven by a diff for the merge across sessions | Codex | 7.5 |
 | Graph | Citation counts as a use signal for the rank and the decay of facts, and as a reward for the optimizers | Codex | 7.5, 7.8 |
 | Graph | Taint: facts from external content carry a mark, and the controller does not trust them | Codex | 7.5 |
@@ -1431,9 +1592,9 @@ replay finds a recorded result by that id.
 | Safety | Guard policies as data, with examples that the loader checks | Codex | F2 |
 | Safety | A validator, if there is one, gets an evasion test suite. The compiler and the class loader are the real check. | tacit | F1 |
 | Evaluation | Recorded sessions as model streams, for tests with no API key | deepseek-harness | 8.4 |
-| Evaluation | Critical-path time (inference, review, tools, user wait) as objective scores for GEPA | Codex | 11 |
-| Evaluation | Best-of-N attempts of one task, each with its own diff | Codex | 11 |
-| Phases | An MCP server for the REPL and the guest API, so that another agent can test them early | tacit | 12 |
+| Evaluation | Critical-path time (inference, review, tools, user wait) as objective scores for GEPA | Codex | 10 |
+| Evaluation | Best-of-N attempts of one task, each with its own diff | Codex | 10 |
+| Phases | An MCP server for the REPL and the guest API, so that another agent can test them early | tacit | 11 |
 
 ### 9.4 Decisions and open questions
 
@@ -1446,24 +1607,7 @@ There are no decisions yet. Open questions:
 5. Do the derivations see only masked `Classified` values, with an optional trusted LM for the classified parts
    (9.3)?
 
-## 10. Comparison
-
-| Criterion | Design A | Design B | Design C |
-|---|---|---|---|
-| New code | Small | Medium | Large |
-| Reuse of the current RLM | Full | The RLM loop parts | The RLM loop parts |
-| Conversation and resume | No | Yes, from the session log | Yes, one log that never ends |
-| Compaction | No | Replaces a prefix in the projection | Adds summary nodes; nothing is lost |
-| Detail after compaction | Not applicable | Lost in the prompt | Available through `zoom` |
-| Optimizable leaves | 3 (action, extract, subQuery) | 4 (policy, finisher, compactor, subQuery) | 6 (policy, finisher, compress, merge, subQuery, goal) |
-| LM calls from code in the trace | Yes, after F4 | Yes | Yes |
-| Subagents | `rlm(...)` as a sandbox tool | `rlm(...)` as a child session | `rlm(...)` and `spawn(...)` |
-| Trajectory form | One text field | Chat turns through `History` | View lines, then chat turns through `History` |
-| Prompt cache | A prefix of the history field | A stable prefix until a compaction | A stable prefix by the prefix law |
-| Laws | The current RLM and loop laws | Log, projection, middleware, handlers | The laws of B, and the memory laws |
-| Change to the current code | RLM changes (`ReplLanguage`, `subQuery`) | No change to RLM in the first version | No change to RLM in the first version |
-
-## 11. Optimization
+## 10. Optimization
 
 What the optimizers tune:
 
@@ -1474,7 +1618,7 @@ What the optimizers tune:
   better. The adapters do not have this feature now.
 - **Demos.** Full trajectories are too long for demos. Use GEPA (instructions only) for the policy.
   BootstrapFewShot can collect demos for the short leaves (`subQuery`, `compactor`, `compress`, `merge`).
-- **Compaction leaves (design C).** The `compress` and `merge` instructions decide what the memory keeps. A
+- **Compaction leaves (section 6).** The `compress` and `merge` instructions decide what the memory keeps. A
   memory metric tests them with no workspace. Take a long log, and make questions whose answers are in old
   messages. The policy answers with the view and a zoom budget. The score is the share of correct answers. The
   feedback names the line that dropped the needed item. GEPA then tunes the two instructions.
@@ -1488,36 +1632,30 @@ What the optimizers tune:
 - **Rollouts.** Each rollout needs its own workspace fork (F6) and its own REPL (F1). The REPL has no global
   lock, so rollouts can run in parallel on `ParallelExecutor`.
 - **Cost.** Each rollout is a full agent run. Use a small task set and the metric-call budget of GEPA.
-- **Decision types (D6).** The goal check of design C is a `Noul` leaf. ReAnchor can calibrate its threshold
-  against the metric. Designs A and B do not need decision types in their first version.
+- **Decision types (D6).** The goal check (4.4) is a `Noul` leaf. ReAnchor can calibrate its threshold against the
+  metric.
 - **Controller leaves (section 7).** The extraction leaves and the controller policy have their own metric
   (7.7): the answers from the graph must agree with probes on the full log.
 
 A source of tasks is the history of this repository. A commit that makes a test pass gives a task (the parent
 commit and the test) and a metric (the test passes).
 
-## 12. Recommendation and phases
+## 11. Phases and open questions
 
-The recommendation is design C as the target, built on the kernel of design B, with the sessions and the
-controller of section 7 and the runtime of section 8. Design C agrees with the functional style of dspy4s: the memory is a persistent value,
-the view is a pure function with laws, and only the builder has an effect. It loses no detail, it keeps the
-prompt prefix stable by a law, and it gives the optimizers the most leaves. Section 7 keeps these properties for
-the controller, and it lets each work session choose its context strategy.
-
-The phases build design B first with a simple projection, so a harness for one task works before the memory
-tree exists. Design A stays available as an early check of the foundation.
+The phases build the kernel first, with the window strategy, so a harness for one task works before the memory
+tree exists. Design A (5.1) stays available as an early check of the foundation.
 
 | Phase | Work | Result |
 |---|---|---|
 | 0. Experiment | Embed the `ReplDriver` of the build (the 3.10 nightly) in a test. Check the persistent state, the interrupt at a timeout, a separate output for each REPL, and two REPLs on parallel threads. Measure the start time and the memory of one REPL. | Done on 2026-10-21: a REPL in the same JVM, with guards (see the Phase 0 results). |
-| 1. Foundation | F1, F2 (`read`, `write`, `edit`, `exec`), F3, F6. The guards of the Phase 0 results. | A REPL that runs model code against the guest API. |
-| 2. Kernel | The log, the policy leaf, `Harness` on `AgentLoop`, a simple projection (the full log as `History`), the laws, `OptimizableStructure`, `ProgramRunner`. The session decider and the cell events with metadata (8.3, 8.5). `Clock` and `Random` handlers. | A harness for one task that the optimizers accept. |
+| 1. Foundation | F1, F2 (`read`, `write`, `edit`, `exec`), F3, F6. The guards of the Phase 0 results. Capture checking and safe mode for guest code, the modes of F2, the notation header, and the error hints. Phase 0 did not test capture checking in guest code, so this phase tests it first. | A REPL that runs model code against the guest API, in each mode. |
+| 2. Kernel | The log, the policy leaf, `Harness` on `AgentLoop`, the window strategy (the full log as `History`), the laws, `OptimizableStructure`, `ProgramRunner`. The session decider and the cell events with metadata (8.3, 8.5). `Clock` and `Random` handlers. | A harness for one task that the optimizers accept. |
 | 3. RLM | F4, F5: variables, `llmQuery` through `subQuery`, `rlm(...)` children, the shared budget, the depth limit. | RLM in the harness. |
-| 4. Memory tree | `Memory`, `View`, the memory laws, the `compress` and `merge` leaves, the builder, `zoom` and `date` as guest functions. The projection of design C. | A memory that loses no detail. |
+| 4. Memory tree | `Memory`, `View`, the memory laws, the `compress` and `merge` leaves, the builder, `zoom` and `date` as guest functions. The memory-tree strategy (section 6). | A memory that loses no detail. |
 | 5. Optimization | A `FeedbackMetric` from tests, the memory metric, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
 | 6. Work sessions | `Derivation`, `ContextStrategy` (window, prefix summary, memory tree), scopes (directory, worktree, scratch), a CLI that opens one session, steering, the goal check, `ScopeSnapshot`, the end of a session and its release plans (7.9). The direct-style runtime: one virtual thread and one queue for each session (8.5). | A coding agent for daily use, one session at a time. |
 | 7. Controller | The controller API (7.3), the ledger events, pluggable ontologies, the extraction at the end of each turn, the time queries (7.6), the `Graph` guest API in sessions (7.7), probes, `SessionCard`, the graph metric. | One controller above all sessions. |
-| Later | Capture checking for the guest API (the build already uses the nightly). A forked JVM for isolation. MCP tools as guest functions (`McpTools`). A policy variant with `run_scala` as a native tool through the adapter. Prompt-cache marks in `LmRequest`. RLM on the kernel. REPL replay with stored results (8.4), if it is not in the first version. A Pekko interpreter of the decider, and distribution (8.6). | |
+| Later | A forked JVM for isolation. MCP tools as guest functions (`McpTools`). A policy variant with `run_scala` as a native tool through the adapter. Prompt-cache marks in `LmRequest`. RLM on the kernel. REPL replay with stored results (8.4), if it is not in the first version. A Pekko interpreter of the decider, and distribution (8.6). | |
 
 ### Phase 0 results
 
@@ -1588,7 +1726,7 @@ guest code, a forked JVM with a protocol for the guest calls, guard 4, Linux, or
 10. **Runtime.** Section 8.7 lists the decisions and the open questions about the runtime.
 11. **Findings.** Section 9.4 lists the open questions from deepseek-harness, Codex and tacit.
 
-## 13. Alternatives considered
+## 12. Alternatives considered
 
 - **A free monad that the model writes.** The model writes `for` comprehensions over an operation type, and the
   host interprets the program value. This permits an inspection before the run. But models write direct-style
@@ -1600,4 +1738,5 @@ guest code, a forked JVM with a protocol for the guest calls, guard 4, Linux, or
 - **Compaction that replaces a prefix (atc, pi).** It is simpler than the memory tree. But the agent cannot get
   the lost detail back, and each compaction changes the prompt prefix.
 - **A Python REPL with the current interpreters.** This needs no new interpreter. But the guest API is then
-  untyped, and the compile-time checks of F2 and F3 do not exist.
+  untyped, and it has no capture checking. A mode is then only a run-time check, and the compile-time checks of
+  F2 and F3 do not exist.
