@@ -1,5 +1,6 @@
 package dspy4s.core.contracts
 
+import dspy4s.core.collections.Traverse
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, Schema}
 
@@ -41,12 +42,10 @@ object History:
     */
   def toolCallResults(message: DynamicValue.Record): Vector[ToolCallResult] =
     DynamicValues.recordGet(message, ToolCallResultsKey) match
-      case Some(sequence: DynamicValue.Sequence) =>
-        val decoded = sequence.elements.toVector.map {
+      case Some(sequence: DynamicValue.Sequence) => Traverse.option(sequence.elements) {
           case record: DynamicValue.Record => ToolCallResult.fromRecord(record)
           case _                           => None
-        }
-        if decoded.forall(_.isDefined) then decoded.flatten else Vector.empty
+        }.getOrElse(Vector.empty)
       case _ => Vector.empty
 
   /** The history that an input record holds for `fieldName`: the encoded form of a [[History]] value. `None` when the

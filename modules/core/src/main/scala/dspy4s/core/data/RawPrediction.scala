@@ -21,13 +21,13 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
   *
   * Coercion rules (deliberately strict to avoid silent surprises):
   *
-  *   - [[asString]] -- accepts `String`, `Boolean`, and numeric primitives. Variants render as their case name.
+  *   - [[asString]]: accepts `String`, `Boolean`, and numeric primitives. Variants render as their case name.
   *     Everything else is a [[ValidationError]].
-  *   - [[asInt]] -- accepts `Int`; `Long` only when it fits in `Int` range (rejects out-of-range, no silent
-  *     truncation); strings via `String.toIntOption`. `Double`/`Float` are rejected (no silent rounding).
-  *   - [[asDouble]] -- accepts any numeric primitive and clean numeric strings.
-  *   - [[asBoolean]] -- accepts `Boolean`, or the case-insensitive strings `"true"`/`"false"`. `"yes"`/`"1"`/`0` etc.
-  *     are rejected.
+  *   - [[asInt]]: accepts `Int`; `Long` only when it fits in `Int` range (rejects out-of-range, no silent truncation);
+  *     strings via `String.toIntOption`. `Double`/`Float` are rejected (no silent rounding).
+  *   - [[asDouble]]: accepts any numeric primitive and clean numeric strings.
+  *   - [[asBoolean]]: accepts `Boolean`, or the case-insensitive strings `"true"`/`"false"`. `"yes"`/`"1"`/`0` etc. are
+  *     rejected.
   *
   * A field missing from [[values]] is a [[NotFoundError]] from [[value]], propagated by the coercive accessors. The
   * [[score]] helper is a thin alias for `asDouble("score")` used by metrics and optimizers.
@@ -57,15 +57,10 @@ final case class RawPrediction(
     * so sequential composition retains the complete prediction without weakening Category equality.
     */
   def followedBy(next: RawPrediction): RawPrediction =
-    val combinedUsage = (lmUsage, next.lmUsage) match
-      case (None, None)              => None
-      case (Some(left), None)        => Some(left)
-      case (None, Some(right))       => Some(right)
-      case (Some(left), Some(right)) => Some(left.combine(right))
     RawPrediction(
       values = if next.values.fields.nonEmpty then next.values else values,
       completions = next.completions.orElse(completions),
-      lmUsage = combinedUsage
+      lmUsage = (lmUsage ++ next.lmUsage).reduceOption(_.combine(_))
     )
 
   def value(key: String): Either[DspyError, DynamicValue] =

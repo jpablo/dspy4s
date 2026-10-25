@@ -1,5 +1,6 @@
 package dspy4s.core.signatures
 
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.SignatureLayout
@@ -8,8 +9,13 @@ import dspy4s.core.contracts.ValidationError
 
 import scala.util.matching.Regex
 
-final class SignatureParser:
-  def parse(signatureDsl: String, name: String = "StringSignature"): Either[DspyError, SignatureLayout] =
+/** The parser of the string DSL of a signature, for example `"question, context -> answer: int"`. */
+object SignatureParser:
+
+  /** The name of a layout that the parser makes when the caller gives no name. */
+  private[signatures] val DefaultName: String = "StringSignature"
+
+  def parse(signatureDsl: String, name: String = DefaultName): Either[DspyError, SignatureLayout] =
     val trimmed = signatureDsl.trim
     if trimmed.isEmpty then Left(ValidationError("SignatureLayout DSL cannot be empty"))
     else
@@ -27,13 +33,8 @@ final class SignatureParser:
   private def parseSegment(segment: String): Either[DspyError, Vector[FieldSpec]] =
     if segment.isEmpty then Right(Vector.empty)
     else
-      val tokens = SignatureParser.splitOutsideBrackets(segment, ',').map(_.trim).filter(_.nonEmpty)
-      tokens.foldLeft[Either[DspyError, Vector[FieldSpec]]](Right(Vector.empty)) { (acc, token) =>
-        for
-          fields <- acc
-          field  <- parseField(token)
-        yield fields :+ field
-      }
+      val tokens = splitOutsideBrackets(segment, ',').map(_.trim).filter(_.nonEmpty)
+      Traverse.either(tokens)(parseField)
 
   private def parseField(token: String): Either[DspyError, FieldSpec] =
     val parts     = token.split(":", 2).map(_.trim)
@@ -54,18 +55,14 @@ final class SignatureParser:
     * example `scores: dict[str, int]` or `note: Optional[dict[str, int]]`.
     */
   private def typeOf(token: String): (TypeRef, Vector[String], Boolean) =
-    import SignatureParser.{NoneToken, bracketArgs, splitOutsideBrackets}
     val members = bracketArgs(token, "Optional").map(inner => Vector(inner, NoneToken))
       .orElse(bracketArgs(token, "Union").map(splitOutsideBrackets(_, ',')))
       .getOrElse(splitOutsideBrackets(token, '|'))
       .map(_.trim)
-    val others = members.filterNot(_ == NoneToken)
-    if others.nonEmpty && others.size < members.size then
-      val (typeRef, enumValues) = valueType(others.mkString(" | "))
-      (typeRef, enumValues, true)
-    else
-      val (typeRef, enumValues) = valueType(token)
-      (typeRef, enumValues, false)
+    val others                = members.filterNot(_ == NoneToken)
+    val optional              = others.nonEmpty && others.size < members.size
+    val (typeRef, enumValues) = valueType(if optional then others.mkString(" | ") else token)
+    (typeRef, enumValues, optional)
 
   /** The type and the enum values of a type token with no `None`. A `Literal` with string members, for example
     * `Literal['a', "b"]`, is a string type with the members as enum values: a Python string signature gives such a
@@ -73,11 +70,10 @@ final class SignatureParser:
     * with other members is an opaque type, as each other unknown token.
     */
   private def valueType(token: String): (TypeRef, Vector[String]) =
-    SignatureParser.stringLiteralMembers(token.trim).fold((TypeRef.fromToken(token), Vector.empty[String])) { members =>
+    stringLiteralMembers(token.trim).fold((TypeRef.fromToken(token), Vector.empty[String])) { members =>
       (TypeRef.string, members)
     }
 
-object SignatureParser:
   private val NoneToken: String = "None"
 
   /** One string member of a `Literal`: a text in single quotes or in double quotes, with no quote and no backslash in

@@ -1,5 +1,6 @@
 package dspy4s.lm.runtime
 
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.{:=, DynamicValues, LmUsage, TokenCategory, ToolCall}
 import dspy4s.lm.contracts.{LmCache, LmOutput, LmRequest, LmResponse}
 import dspy4s.lm.providers.DynamicJson
@@ -407,7 +408,7 @@ object DiskLmCache:
       format <- DynamicValues.recordGet(record, FormatKey).flatMap(DynamicJson.asString)
       if format == RecordFormat
       items     <- DynamicValues.recordGet(record, "outputs").flatMap(elements)
-      outputs   <- traverse(items)(decodeOutput)
+      outputs   <- Traverse.option(items)(decodeOutput)
       usage     <- nullable(DynamicValues.recordGet(record, "usage"))(decodeUsage)
       modelName <- nullable(DynamicValues.recordGet(record, "model_name"))(DynamicJson.asString)
     yield LmResponse(outputs = outputs, usage = usage, modelName = modelName)
@@ -417,7 +418,7 @@ object DiskLmCache:
       record    <- DynamicJson.asRecord(value)
       text      <- DynamicValues.recordGet(record, "text").flatMap(DynamicJson.asString)
       items     <- DynamicValues.recordGet(record, "tool_calls").flatMap(elements)
-      toolCalls <- traverse(items)(decodeToolCall)
+      toolCalls <- Traverse.option(items)(decodeToolCall)
       metadata  <- DynamicValues.recordGet(record, "metadata").flatMap(DynamicJson.asRecord)
     yield LmOutput(text = text, toolCalls = toolCalls, metadata = metadata)
 
@@ -436,7 +437,7 @@ object DiskLmCache:
       prompt       <- DynamicValues.recordGet(record, "prompt_tokens").flatMap(wholeNumber)
       completion   <- DynamicValues.recordGet(record, "completion_tokens").flatMap(wholeNumber)
       extrasRecord <- DynamicValues.recordGet(record, "extras").flatMap(DynamicJson.asRecord)
-      extras       <- traverse(DynamicValues.recordEntries(extrasRecord)) { (name, item) =>
+      extras       <- Traverse.option(DynamicValues.recordEntries(extrasRecord)) { (name, item) =>
                   wholeNumber(item).map(number => TokenCategory.fromWire(name) -> number)
                 }
     yield LmUsage(totalTokens = total, promptTokens = prompt, completionTokens = completion, extras = extras.toMap)
@@ -467,9 +468,3 @@ object DiskLmCache:
     value match
       case None | Some(_: DynamicValue.Null.type) => Some(None)
       case Some(present)                          => decode(present).map(Some(_))
-
-  /** The decoded values, or `None` when one value does not decode. */
-  private def traverse[A, B](values: Vector[A])(decode: A => Option[B]): Option[Vector[B]] =
-    values.foldLeft(Option(Vector.empty[B])) { (decoded, value) =>
-      decoded.flatMap(done => decode(value).map(done :+ _))
-    }

@@ -2,9 +2,7 @@ package dspy4s.core.contracts
 
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.PrimitiveValue
-import zio.blocks.schema.Schema
 
-import java.nio.charset.StandardCharsets
 import java.util.Locale
 
 /** Renders LM [[HistoryEntry]] values as upstream `pretty_print_history` (`dspy/utils/inspect_history.py`), with no
@@ -25,8 +23,6 @@ import java.util.Locale
   * The line ends are the line ends of upstream: the text of each upstream `print` call is the same, with no colors.
   */
 object HistoryRenderer:
-
-  private val jsonCodec = Schema.dynamic.jsonCodec
 
   /** Render `entries` (already limited to the last n by the caller) as a single string. Empty input yields a short "no
     * history" notice rather than an empty string, so callers can print the result unconditionally.
@@ -104,16 +100,10 @@ object HistoryRenderer:
 
   /** An object or a list as JSON, and another value as text. */
   private def argumentsText(arguments: DynamicValue): String =
-    val decoded = DynamicValues.asString(arguments).flatMap(decodeJson).getOrElse(arguments)
+    val decoded = DynamicValues.asString(arguments).flatMap(DynamicValues.decodeJson).getOrElse(arguments)
     decoded match
-      case _: DynamicValue.Record | _: DynamicValue.Sequence => encodeJson(decoded)
+      case _: DynamicValue.Record | _: DynamicValue.Sequence => DynamicValues.encodeJson(decoded)
       case other                                             => DynamicValues.renderText(other)
-
-  private def decodeJson(json: String): Option[DynamicValue] =
-    jsonCodec.decode(json.getBytes(StandardCharsets.UTF_8)).toOption
-
-  private def encodeJson(value: DynamicValue): String =
-    new String(jsonCodec.encode(value), StandardCharsets.UTF_8)
 
   /** The role with its first character in upper case and the other characters in lower case (Python `capitalize`). */
   private def capitalized(role: String): String =

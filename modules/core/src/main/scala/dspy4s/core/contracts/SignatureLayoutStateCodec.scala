@@ -1,7 +1,8 @@
 package dspy4s.core.contracts
 
+import dspy4s.core.collections.Traverse
 import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import java.nio.charset.StandardCharsets
 
@@ -11,7 +12,6 @@ import java.nio.charset.StandardCharsets
   * here, keeping persistence mechanics separate from the layout's construction and invariants.
   */
 private[dspy4s] object SignatureLayoutStateCodec:
-  private lazy val dynamicJsonCodec = Schema.dynamic.jsonCodec
 
   def dumpState(layout: SignatureLayout): DynamicValue.Record =
     def str(value: String): DynamicValue            = DynamicValue.Primitive(PrimitiveValue.String(value))
@@ -36,7 +36,7 @@ private[dspy4s] object SignatureLayoutStateCodec:
     )))
 
   def dumpJson(layout: SignatureLayout): String =
-    new String(dynamicJsonCodec.encode(dumpState(layout)), StandardCharsets.UTF_8)
+    DynamicValues.encodeJson(dumpState(layout))
 
   def fromState(state: DynamicValue.Record): Either[DspyError, SignatureLayout] =
     def getString(record: DynamicValue.Record, key: String): Option[String] =
@@ -92,15 +92,8 @@ private[dspy4s] object SignatureLayoutStateCodec:
 
     def readFields(key: String): Either[DspyError, Vector[FieldSpec]] =
       DynamicValues.recordGet(state, key) match
-        case Some(sequence: DynamicValue.Sequence) =>
-          sequence.elements.iterator.foldLeft[Either[DspyError, Vector[FieldSpec]]](Right(Vector.empty)) {
-            (acc, raw) =>
-              for
-                fields <- acc
-                field  <- readField(raw)
-              yield fields :+ field
-          }
-        case _ => Left(ValidationError(s"SignatureLayout state is missing '$key'"))
+        case Some(sequence: DynamicValue.Sequence) => Traverse.either(sequence.elements)(readField)
+        case _                                     => Left(ValidationError(s"SignatureLayout state is missing '$key'"))
 
     for
       name         <- readName
@@ -116,7 +109,7 @@ private[dspy4s] object SignatureLayoutStateCodec:
     yield layout
 
   def fromJson(json: String): Either[DspyError, SignatureLayout] =
-    dynamicJsonCodec.decode(json.getBytes(StandardCharsets.UTF_8)) match
+    DynamicValues.dynamicJsonCodec.decode(json.getBytes(StandardCharsets.UTF_8)) match
       case Right(record: DynamicValue.Record) => fromState(record)
       case Right(other)                       => Left(ValidationError(s"Expected a JSON object for signature state, got: $other"))
       case Left(error)                        => Left(ValidationError(s"Invalid signature-state JSON: ${error.toString}"))

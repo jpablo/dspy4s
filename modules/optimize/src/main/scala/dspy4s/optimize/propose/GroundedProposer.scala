@@ -1,5 +1,6 @@
 package dspy4s.optimize.propose
 
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -116,7 +117,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
     val leaves = ps.inspect(program)
     for
       summary <- datasetSummary(trainset)
-      perLeaf <- traverse(leaves.zipWithIndex.toVector) { case (leaf, idx) =>
+      perLeaf <- Traverse.either(leaves.zipWithIndex.toVector) { case (leaf, idx) =>
                    val demoSet = demoCandidates.lift(idx).getOrElse(Vector.empty)
                    proposeForLeaf(leaf, idx, summary, demoSet)
                  }
@@ -202,7 +203,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
     // LM yields a distinct proposal per rolloutId.
     val base = OptimizerSupport.seedBase(config.seed) + (idx + 1) * 64
 
-    traverse((0 until config.numInstructions).toVector) { i =>
+    Traverse.either((0 until config.numInstructions).toVector) { i =>
       val withTip   = config.useTips
       val tip       = if withTip then Some(GroundedProposer.tips(i % GroundedProposer.tips.size)) else None
       val layout    = instructionGenLayout(withSummary, withDemos, withTip)
@@ -246,15 +247,6 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
     DynamicValues.recordEntries(example.values)
       .map { case (k, v) => s"$k: ${DynamicValues.renderText(v)}" }
       .mkString("\n")
-
-  /** Either-aware traversal: applies `f` left-to-right, short-circuiting on the first [[DspyError]]. */
-  private def traverse[A, B](xs: Vector[A])(f: A => Either[DspyError, B]): Either[DspyError, Vector[B]] =
-    xs.foldLeft[Either[DspyError, Vector[B]]](Right(Vector.empty)) { (acc, a) =>
-      for
-        bs <- acc
-        b  <- f(a)
-      yield bs :+ b
-    }
 
 object GroundedProposer:
 

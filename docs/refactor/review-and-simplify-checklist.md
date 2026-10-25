@@ -78,8 +78,8 @@ Simplify 6 (rank 3). Code-review 7 (rank 1). 6352 main lines, 4494 test lines.
 - (c) The decisions, about 800 lines: `decisions/`.
   - [x] /simplify
   - [x] /code-review
-- (d) The other contracts and the data, about 2200 lines: the other files in `contracts/`, and `data/`, `signatures/`, `collections/`.
-  - [ ] /simplify
+- (d) The other contracts and the data, about 2200 lines: the other files in `contracts/`, and `data/`, `signatures/`, `collections/`. The simplify pass added `collections/Traverse.scala`.
+  - [x] /simplify
   - [ ] /code-review
 
 ### Simplify findings
@@ -92,13 +92,22 @@ Simplify 6 (rank 3). Code-review 7 (rank 1). 6352 main lines, 4494 test lines.
 - [x] Five copies of the ThreadLocal set-and-restore pattern, and two copies of the carrier code, in UsageScope, DecisionEvidenceLog, StreamProgress, ActivePredictContext, and CallbackDispatcher. Fixed: `ScopedLocal`.
 - [x] `RuntimeEnvironment.emit` did not use its own `warn`. Fixed: a callback failure is now a `WARN [dspy4s] callback: ...` line.
 
+Findings of the group (d) simplify pass that the pass did not fix:
+
+- [ ] A decision for the owner: `contracts/SignatureLayoutStateCodec.scala`, the four state methods of `SignatureLayout`, and `Constraint.dumpState`/`fromState` (about 190 lines) have no caller in the main code. Only tests call them. Delete them, or keep them and replace them with a derived Schema (the one-codec rule).
+- [ ] `contracts/Constraint.scala`: four parallel matches of seven cases (`render`, `schemaKeyword`, `op`, `numericValue`). An enum with parameters can hold the values. Skipped: a change of the public enum shape.
+- [ ] `data/RawPrediction.scala`: its lenient coercion is a second copy of the coercion of signatures `ZioSchemaCodec`, and the two copies do not agree (no `BigDecimal` case). Skipped: do it in the signatures pass.
+- [ ] Members that only tests use: `SignatureOps` transforms and laws, most of `SizedVector`, `SignatureLayout.equalsByStructure`, and `FieldConstraints`. Skipped: public API.
+- [ ] The "message, else the simple class name" text has about 16 copies in the modules, in two forms. One public helper in `contracts/Errors.scala` can serve them. Skipped: do it with the module passes.
+- [ ] `DynamicValues.fromAny` gets values of a static type in lm, programs, and evaluate. Skipped: each module pass changes its own calls to `:=`.
+
 Findings of the group (c) simplify pass that the pass did not fix:
 
 - [ ] `decisions/Decisions.scala`, `DecisionSettings`: a hand-written codec of about 70 lines, against the one-codec rule. A derived Schema can replace it. Skipped: the change can alter the number widening, the order of the weight keys, and the error messages.
 - [ ] `decisions/Decisions.scala`: the parameter names "threshold", "cuts", and "weights" are string keys, also in optimize `ReAnchor.scala`. A typed `DecisionParameter` enum can replace them. Skipped: do it in the optimize pass.
 - [ ] `decisions/Decisions.scala`: `evidence` and `decodeOne` check the same distribution rules with different messages. One shared validation changes the messages. Skipped.
 - [ ] `decisions/Decisions.scala`, `Score.caseNames`: a copy of `ZioSchemaCodec.caseNamesOf` in signatures. Skipped: do it in the signatures pass.
-- [ ] A `traverse` helper for `Either` has private copies in optimize `ReAnchor.scala`, `propose/GroundedProposer.scala`, adapters `internal/StrictJsonSchema.scala`, and lm `runtime/DiskLmCache.scala`. Skipped: one shared helper in core can serve them in the later passes.
+- [x] (fixed in the group (d) pass: `collections/Traverse.scala` replaces the four copies) A `traverse` helper for `Either` had private copies in optimize `ReAnchor.scala`, `propose/GroundedProposer.scala`, adapters `internal/StrictJsonSchema.scala`, and lm `runtime/DiskLmCache.scala`. Skipped: one shared helper in core can serve them in the later passes.
 
 Findings of the group (b) simplify pass that the pass did not fix:
 
@@ -106,7 +115,7 @@ Findings of the group (b) simplify pass that the pass did not fix:
   - `RuntimeEnvironment.current` merges the overlay with the global context on each read, about 15 times for each Predict call. A cache of the merged context in the thread-local slot can remove this work.
   - `CallbackDispatcher` builds each event and its input record when no handler listens. A lazy event can remove this work.
   - The restore of `withScopeChange` and `withInstalled` allocates a new scope and a new context also when `thunk` changed nothing.
-- [ ] `runtime/RuntimeEnvironment.scala`, `servicesKept` and `configKept`: they list each field of `RuntimeServices` and `RuntimeConfig` again, in a different file from `fillFrom`. A new field that they miss makes `withInstalled` skip an install. Skipped: move them next to `fillFrom` in the contracts pass, group (d).
+- [x] (fixed in the group (d) pass: `RuntimeServices.keptBy` and `RuntimeConfig.keptBy`, next to `fillFrom`) `runtime/RuntimeEnvironment.scala`, `servicesKept` and `configKept`: they list each field of `RuntimeServices` and `RuntimeConfig` again, in a different file from `fillFrom`. A new field that they miss makes `withInstalled` skip an install. Skipped: move them next to `fillFrom` in the contracts pass, group (d).
 - [ ] `contracts/RuntimeContext.scala`, the flat `copy`: only the examples and three tests call it. Skipped: to remove it changes the public API, and `ctx.copy(adapter = ...)` is easier to read than the partition form.
 
 Findings of the group (a) simplify pass that the pass did not fix:
@@ -182,11 +191,11 @@ Simplify 5 (rank 5). Code-review 5 (rank 8). 4966 main lines, 6422 test lines.
 
 ### Simplify findings
 
-- [ ] Private copies of the `string`, `sequence`, `record`, and `isNull` helpers: `providers/ResponsesWire.scala:445-498`, `runtime/DiskLmCache.scala:444-475`, `runtime/ProviderLanguageModel.scala:39`, `runtime/LmHistoryRecord.scala:125`. Core now has `DynamicValues.isNull` and `DynamicValues.encodeJson`; `providers/DynamicJson.scala:59` also has an `isNull`.
+- [ ] Private copies of the `string`, `sequence`, `record`, and `isNull` helpers: `providers/ResponsesWire.scala:445-498`, `runtime/DiskLmCache.scala:440-470`, `runtime/ProviderLanguageModel.scala:39`, `runtime/LmHistoryRecord.scala:125`. Core now has `DynamicValues.isNull` and `DynamicValues.encodeJson`; `providers/DynamicJson.scala:59` also has an `isNull`.
 - [ ] `runtime/DiskLmCache.scala:16-151`, `:263-279`: a reader for the old Java-serialization cache format, about 150 lines.
 - [ ] `providers/OpenAiEmbedder.scala`, `asFloat`: the same tolerant number read as the new `DynamicValues.asDouble` in core.
 - [ ] `runtime/ManagedLanguageModel.scala`, `UsageTracking`: it writes its thread-local scope and its carrier by hand. Core now has `ScopedLocal` (`private[dspy4s]`) for this job.
-- [ ] `runtime/DiskLmCache.scala:370-475`: a hand-written JSON codec. A DTO with a derived Schema (JsonCodecDeriver) can replace it.
+- [ ] `runtime/DiskLmCache.scala:370-470`: a hand-written JSON codec. A DTO with a derived Schema (JsonCodecDeriver) can replace it.
 - [ ] `runtime/ProviderLanguageModel.scala:75` writes a magic `mode` key, and `providers/OpenAiClient.scala:24-39`, `:103-113` read it and remove it. Pass the mode as a typed value.
 - [ ] `providers/PythonStr.scala:100-116` copies the Python float repr of adapters `internal/PythonText.scala:369-422`, with a different algorithm. `providers/OpenAiLanguageModel.scala:69-94` copies the pipeline of `runtime/ProviderLanguageModel.scala:34-36`.
 
@@ -309,7 +318,7 @@ Simplify 7 (rank 2). Code-review 6 (rank 5). 2954 main lines, 4945 test lines.
 ### Simplify findings
 
 - [ ] `BootstrapFewShotWithRandomSearch.scala:56-198` uses `return`, `var`, `boundary/break`, and mutable buffers. The `BootstrapFewShotConfig` at `:86` and `:111` is written two times, and only the seed is different.
-- [ ] The same Either `traverse` helper: `ReAnchor.scala:562`, `propose/GroundedProposer.scala:251`, and adapters `internal/StrictJsonSchema.scala:328`.
+- [x] The same Either `traverse` helper in ReAnchor, GroundedProposer, and adapters StrictJsonSchema. Fixed in the core group (d) pass: `Traverse.either` in core.
 - [ ] `COPRO.scala:213`, `propose/GroundedProposer.scala:188`, and `InferRules.scala:158` repeat one pattern: a DynamicPredict call loop with a rolloutId window, a temperature bag, and `recordGet`/`renderText`/`trim`. The window offsets (64, 100, 10000) are magic numbers.
 - [ ] `var` and `ArrayBuffer` accumulation where a fold fits: `MIPROv2.scala:202-223`, `COPRO.scala:111-117`, `InferRules.scala:124-138`.
 - [ ] `ReAnchor.scala:97-144` builds the report JSON by hand, not with a derived Schema. `Ensemble.scala:77` keeps a mutable `Random` in a module instance.

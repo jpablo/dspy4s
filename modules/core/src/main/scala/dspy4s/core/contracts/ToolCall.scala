@@ -1,16 +1,17 @@
 package dspy4s.core.contracts
 
+import dspy4s.core.collections.Traverse
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 /** A `Schema` for the `Record` case of `DynamicValue`.
   *
-  * zio-blocks ships a bespoke `Schema[DynamicValue]` (the dynamic catch-all) but NONE for its individual subtypes, and
-  * one can't be auto-derived — `DynamicValue.Record`'s backing `Chunk[(String, DynamicValue)]` field has no matching
-  * collection `Schema` on the derivation path (it resolves to `IndexedSeq`, type-mismatching `Chunk`). We build it
-  * instead by narrowing/widening the dynamic schema via `Schema.transform` (the only such combinator — a `Schema`
-  * round-trips both ways, so there is no one-directional `map`/`contramap`). This lets a case class carry a
-  * `DynamicValue.Record` field and still `derives Schema`. The narrowing throws if a value isn't a `Record`, which is
-  * safe for the call sites here (a tool call's `args` is always a JSON object / record).
+  * zio-blocks has a `Schema[DynamicValue]` for the dynamic catch-all, but it has no schema for each subtype. The
+  * derivation cannot make one: the `Chunk[(String, DynamicValue)]` field of `DynamicValue.Record` has no matching
+  * collection `Schema` on the derivation path (it resolves to `IndexedSeq`, which is not `Chunk`). Thus this given
+  * narrows and widens the dynamic schema with `Schema.transform`. That is the only such combinator, because a `Schema`
+  * converts in the two directions and has no `map` or `contramap` for one direction. With it, a case class can have a
+  * `DynamicValue.Record` field and `derives Schema`. The narrowing throws when a value is not a `Record`. The call
+  * sites here are safe, because the `args` of a tool call is always a JSON object (a record).
   */
 given recordSchema: Schema[DynamicValue.Record] =
   Schema[DynamicValue].transform(
@@ -27,8 +28,9 @@ given recordSchema: Schema[DynamicValue.Record] =
   *
   * Single shared type across layers: the wire layer (`lm`) populates it from provider responses, the adapters read it,
   * and the decode path uses it as a `Vector[ToolCall]` output field (paired with
-  * `dspy4s.signatures.Signature.markToolCalls`). Lives in `core` so both `lm` and `signatures` — which don't depend on
-  * each other — can name it; the [[recordSchema]] given lets the `Schema` derivation keep the precise `args` type.
+  * `dspy4s.signatures.Signature.markToolCalls`). Lives in `core` so both `lm` and `signatures` can name it, because
+  * they do not depend on each other; the [[recordSchema]] given lets the `Schema` derivation keep the precise `args`
+  * type.
   *
   * `id` is the call id of the provider (upstream `ToolCalls.ToolCall.id`). A provider needs it to match a tool result
   * with its call when a conversation history replays the call (see [[History]]). It is `None` for a call that the model
@@ -74,12 +76,10 @@ object ToolCall:
     */
   def fromDynamic(value: DynamicValue): Option[Vector[ToolCall]] =
     value match
-      case sequence: DynamicValue.Sequence =>
-        val calls = sequence.elements.toVector.map {
+      case sequence: DynamicValue.Sequence => Traverse.option(sequence.elements) {
           case record: DynamicValue.Record => fromRecord(record)
           case _                           => None
         }
-        Option.when(calls.forall(_.isDefined))(calls.flatten)
       case record: DynamicValue.Record => DynamicValues.recordGet(record, ToolCallsKey) match
           case Some(calls: DynamicValue.Sequence) => fromDynamic(calls)
           case Some(_)                            => None

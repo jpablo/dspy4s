@@ -25,13 +25,13 @@ final case class Completions(fields: Map[String, Vector[DynamicValue]]):
     if index < 0 || index >= size then
       Left(ValidationError(s"Completion index $index out of bounds for size $size"))
     else
-      val row = DynamicValue.Record(Chunk.from(fields.iterator.map((k, vs) => k -> vs(index)).toSeq))
+      val row = DynamicValue.Record(Chunk.from(fields.iterator.map((k, vs) => k -> vs(index))))
       Right(RawPrediction(values = row))
 
 object Completions:
-  /** Convert N row-shaped records into the columnar layout. Fails if any row's key set differs from the first row's —
-    * since `Completions.at(i)` is supposed to return a row whose fields are uniform across all candidates, missing
-    * fields would corrupt that invariant. An empty input is the empty completion (`size == 0`).
+  /** Convert N row-shaped records into the columnar layout. Fails if any row's key set differs from the first row's.
+    * `Completions.at(i)` must return a row with the same fields for each candidate, and a missing field breaks that
+    * invariant. An empty input is the empty completion (`size == 0`).
     */
   def fromRows(rows: Vector[DynamicValue.Record]): Either[DspyError, Completions] =
     if rows.isEmpty then Right(Completions(Map.empty))

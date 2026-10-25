@@ -7,7 +7,7 @@ import zio.blocks.schema.DynamicValue
 
 import java.time.Instant
 
-/** A single observed module call -- one entry per `Module.apply` (or any other module that records itself). `component`
+/** A single observed module call: one entry per `Module.apply` (or any other module that records itself). `component`
   * is the module's `moduleName` (`"predict"`, `"chain_of_thought"`, ...), `inputs` is the encoded `ProgramCall.input`
   * record, and `outputs` is the successful result projected by the module's lifecycle observation.
   *
@@ -48,8 +48,8 @@ object PredictorKey:
   def from(moduleName: String, layout: SignatureLayout): PredictorKey =
     PredictorKey(moduleName, layout.withInstructions(None))
 
-/** A single observed LM (or module) call's payload, kept in [[RuntimeContext.history]] for inspection and -- for LM
-  * entries -- usage accounting. `component` is the module name, or `lm:<id>` for an LM call; `payload` is the
+/** A single observed LM (or module) call's payload, kept in [[RuntimeContext.history]] for inspection and, for LM
+  * entries, for usage accounting. `component` is the module name, or `lm:<id>` for an LM call; `payload` is the
   * caller-defined snapshot. The history ring is capped by [[RuntimeContext.maxHistorySize]] in
   * `RuntimeEnvironment.appendHistory`.
   */

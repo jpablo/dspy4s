@@ -21,28 +21,18 @@ private[dspy4s] object SignatureOps:
   extension (layout: SignatureLayout)
 
     /** Prepend `field` at the head of the output cohort, unless a field of the same name already exists (idempotent).
-      * This is the prior `ChainOfThought.augmentLayout` (`insert(0, _)`) and the `MultiChainComparison` guarded
-      * `prepend`, generalized off the hard-coded field: both reconstruct the layout as `inputs ++ (field +: outputs)`.
-      *
-      * Output role is established by the target cohort rather than stored redundantly on `field`.
       */
     def prependOutput(field: FieldSpec): SignatureLayout =
       if layout.fields.exists(_.name == field.name) then layout
       else keepInstructions(layout.withOutputFields(field +: layout.outputFields))
 
-    /** Append `field` to the end of the input cohort, unless an input field of the same name already exists
-      * (idempotent).
-      *
-      * Input role is established by the target cohort rather than stored redundantly on `field`.
-      */
+    /** Append `field` to the end of the input cohort, unless a field of the same name already exists (idempotent). */
     def appendInput(field: FieldSpec): SignatureLayout =
       if layout.fields.exists(_.name == field.name) then layout
       else keepInstructions(layout.withInputFields(layout.inputFields :+ field))
 
     /** Keep the inputs, replace every output field with `fields`. The loop-step signature of `ReAct` uses this to drop
       * the base outputs (which its extractor produces) in favor of the per-iteration control outputs.
-      *
-      * Output role is established by the target cohort.
       */
     def replaceOutputs(fields: Vector[FieldSpec]): SignatureLayout =
       keepInstructions(layout.withOutputFields(fields))
@@ -61,7 +51,7 @@ private[dspy4s] object SignatureOps:
     */
   private[dspy4s] object laws:
 
-    // L1 — cohort isolation: each combinator touches exactly one cohort.
+    // L1: cohort isolation: each combinator touches exactly one cohort.
     @Law("L1a cohort isolation: prependOutput preserves the inputs")
     def prependOutputKeepsInputs(s: SignatureLayout, f: FieldSpec): IsEq[Vector[FieldSpec]] =
       s.prependOutput(f).inputFields <-> s.inputFields
@@ -70,7 +60,7 @@ private[dspy4s] object SignatureOps:
     def appendInputKeepsOutputs(s: SignatureLayout, g: FieldSpec): IsEq[Vector[FieldSpec]] =
       s.appendInput(g).outputFields <-> s.outputFields
 
-    // L2 — idempotence by name.
+    // L2: idempotence by name.
     @Law("L2a prependOutput is idempotent")
     def prependOutputIdempotent(s: SignatureLayout, f: FieldSpec): IsEq[SignatureLayout] =
       s.prependOutput(f).prependOutput(f) <-> s.prependOutput(f)
@@ -79,12 +69,12 @@ private[dspy4s] object SignatureOps:
     def appendInputIdempotent(s: SignatureLayout, g: FieldSpec): IsEq[SignatureLayout] =
       s.appendInput(g).appendInput(g) <-> s.appendInput(g)
 
-    // L3 — the input and output combinators commute (disjoint cohorts).
+    // L3: the input and output combinators commute (disjoint cohorts).
     @Law("L3 appendInput and prependOutput commute")
     def crossCohortCommute(s: SignatureLayout, g: FieldSpec, f: FieldSpec): IsEq[SignatureLayout] =
       s.appendInput(g).prependOutput(f) <-> s.prependOutput(f).appendInput(g)
 
-    // L4 — replaceOutputs absorbs any prior output edit, sets the outputs, and preserves the inputs.
+    // L4: replaceOutputs absorbs any prior output edit, sets the outputs, and preserves the inputs.
     @Law("L4a replaceOutputs absorbs a prior prependOutput")
     def replaceOutputsAbsorbs(s: SignatureLayout, g: FieldSpec, fs: Vector[FieldSpec]): IsEq[SignatureLayout] =
       s.prependOutput(g).replaceOutputs(fs) <-> s.replaceOutputs(fs)
@@ -97,13 +87,13 @@ private[dspy4s] object SignatureOps:
     def replaceOutputsKeepsInputs(s: SignatureLayout, fs: Vector[FieldSpec]): IsEq[Vector[FieldSpec]] =
       s.replaceOutputs(fs).inputFields <-> s.inputFields
 
-    // L5 — the precise effect of prependOutput on the output cohort.
+    // L5: the precise effect of prependOutput on the output cohort.
     @Law("L5 prependOutput adds f at the head unless its name is already present in the layout")
     def prependOutputEffect(s: SignatureLayout, f: FieldSpec): IsEq[Vector[FieldSpec]] =
       s.prependOutput(f).outputFields <->
         (if s.fields.exists(_.name == f.name) then s.outputFields else f +: s.outputFields)
 
-    // L6 — instructions: last write wins.
+    // L6: instructions: last write wins.
     @Law("L6 withInstructions: the last write wins")
     def instructionsLastWriteWins(s: SignatureLayout, a: String, b: String): IsEq[SignatureLayout] =
       s.withInstructions(Some(b)).withInstructions(Some(a)) <-> s.withInstructions(Some(a))
@@ -121,12 +111,13 @@ private[dspy4s] object SignatureOps:
     def replaceOutputsKeepsInstructions(s: SignatureLayout, fs: Vector[FieldSpec]): IsEq[String] =
       s.replaceOutputs(fs).effectiveInstructions <-> s.effectiveInstructions
 
-// ── Algebra 1's two commuting submonoids, as explicit Monoid instances ──────────────────────────────────────
-// The signature algebra's carrier is LAYOUT ENDOMORPHISMS (`SignatureLayout => SignatureLayout`), not layouts
-// (layouts form no monoid). Its field-transform submonoid factors as InputTransform × OutputTransform — two
-// commuting submonoids of End(SignatureLayout), one per cohort (L1 keeps them disjoint, L3 makes them commute).
-// Each is wrapped as a newtype carrying a `Monoid` instance; laws hold up to OUTPUT-observational equality of
-// the wrapped transform (the same discipline as `Mode` / `SignatureOpsLawSuite`), not `==` on the function.
+// ── The two monoids of field changes, with their Monoid instances ───────────────────────────────────────────
+// The values of the signature algebra are functions from a layout to a layout (`SignatureLayout => SignatureLayout`).
+// They are not layouts, because layouts do not make a monoid. The field changes have two parts, one for each cohort:
+// `InputTransform` changes the inputs, and `OutputTransform` changes the outputs. Each part is a monoid under function
+// composition. The two parts commute, because they change different cohorts (laws L1 and L3).
+// Each type wraps a function and has a `Monoid` instance. The laws compare two functions by their outputs, as `Mode`
+// and `SignatureOpsLawSuite` do. They do not use `==` on the functions.
 
 /** The output-cohort endomorphism submonoid: `prependOutput` (idempotent by name) and `replaceOutputs` (left-absorbing)
   * under composition, identity = the no-op transform. Apply with [[runOn]].

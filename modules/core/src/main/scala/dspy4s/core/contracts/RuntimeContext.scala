@@ -26,6 +26,18 @@ final case class RuntimeServices(
         interpreterFactory = interpreterFactory.orElse(defaults.interpreterFactory)
       )
 
+  /** `true` when this value filled from `installed` gives `installed`: each service that this value sets, and each
+    * callback, is the same object as in `installed`. The check compares references only.
+    */
+  private[dspy4s] def keptBy(installed: RuntimeServices): Boolean =
+    sameObject(lm, installed.lm) && sameObject(adapter, installed.adapter) &&
+      sameObject(interpreterFactory, installed.interpreterFactory) &&
+      (callbacks.isEmpty || (callbacks eq installed.callbacks) || callbacks.corresponds(installed.callbacks)(_ eq _))
+
+  /** `true` when `requested` sets no value, or the same object as `installed`. */
+  private def sameObject[A <: AnyRef](requested: Option[A], installed: Option[A]): Boolean =
+    requested.forall(value => installed.exists(_ eq value))
+
 /** Immutable runtime policy and tuning values. Unlike [[RuntimeServices]], these fields contain no executable
   * dependencies; unlike [[RuntimeDelta]], they are inputs to execution rather than outputs accumulated by it.
   */
@@ -59,6 +71,18 @@ final case class RuntimeConfig(
         callbackMetadata = if callbackMetadata.fields.isEmpty then defaults.callbackMetadata else callbackMetadata,
         captureFailureTraces = captureFailureTraces || defaults.captureFailureTraces
       )
+
+  /** `true` when this value filled from `installed` gives `installed`: each number and each flag that this value sets
+    * is equal to the value in `installed`, and the callback metadata, when this value sets it, is the same object.
+    */
+  private[dspy4s] def keptBy(installed: RuntimeConfig): Boolean =
+    numThreads.forall(installed.numThreads.contains) &&
+      maxErrors.forall(installed.maxErrors.contains) &&
+      maxHistorySize.forall(installed.maxHistorySize.contains) &&
+      disableHistory.forall(installed.disableHistory.contains) &&
+      trackUsage.forall(installed.trackUsage.contains) &&
+      (callbackMetadata.fields.isEmpty || (callbackMetadata eq installed.callbackMetadata)) &&
+      (!captureFailureTraces || installed.captureFailureTraces)
 
 /** Dynamic correlation scope for the current execution. Scope is restored when a `with*` boundary exits; it is not part
   * of the observable execution output captured by [[RuntimeDelta]].

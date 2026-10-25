@@ -9,11 +9,9 @@ import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.HistoryLimit
 import dspy4s.core.contracts.HistoryRenderer
 import dspy4s.core.contracts.PredictorKey
-import dspy4s.core.contracts.RuntimeConfig
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeDelta
 import dspy4s.core.contracts.RuntimeScope
-import dspy4s.core.contracts.RuntimeServices
 import dspy4s.core.contracts.TraceEntry
 
 import java.util.concurrent.atomic.AtomicLong
@@ -225,27 +223,8 @@ object RuntimeEnvironment:
     * not read the trace or the history.
     */
   private def givesInstalledSettings(context: RuntimeContext, installed: RuntimeContext): Boolean =
-    ((context.services eq installed.services) || servicesKept(context.services, installed.services)) &&
-      ((context.config eq installed.config) || configKept(context.config, installed.config))
-
-  /** `true` when `requested` sets no value, or the same object as `installed`. */
-  private def sameObject[A <: AnyRef](requested: Option[A], installed: Option[A]): Boolean =
-    requested.forall(value => installed.exists(_ eq value))
-
-  private def servicesKept(requested: RuntimeServices, installed: RuntimeServices): Boolean =
-    sameObject(requested.lm, installed.lm) && sameObject(requested.adapter, installed.adapter) &&
-      sameObject(requested.interpreterFactory, installed.interpreterFactory) &&
-      (requested.callbacks.isEmpty || (requested.callbacks eq installed.callbacks) ||
-        requested.callbacks.corresponds(installed.callbacks)(_ eq _))
-
-  private def configKept(requested: RuntimeConfig, installed: RuntimeConfig): Boolean =
-    requested.numThreads.forall(installed.numThreads.contains) &&
-      requested.maxErrors.forall(installed.maxErrors.contains) &&
-      requested.maxHistorySize.forall(installed.maxHistorySize.contains) &&
-      requested.disableHistory.forall(installed.disableHistory.contains) &&
-      requested.trackUsage.forall(installed.trackUsage.contains) &&
-      (requested.callbackMetadata.fields.isEmpty || (requested.callbackMetadata eq installed.callbackMetadata)) &&
-      (!requested.captureFailureTraces || installed.captureFailureTraces)
+    ((context.services eq installed.services) || context.services.keptBy(installed.services)) &&
+      ((context.config eq installed.config) || context.config.keptBy(installed.config))
 
   /** Run `thunk` with `settings` overlaid on `current`: `settings` wins for every field it sets and `current` supplies
     * the rest (`RuntimeContext.fillFrom`). The cross-task-safe way to install an LM / adapter / callbacks for a scope,

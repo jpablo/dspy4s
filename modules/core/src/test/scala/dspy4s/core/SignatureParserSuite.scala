@@ -10,7 +10,7 @@ import munit.FunSuite
 
 class SignatureParserSuite extends FunSuite:
   test("parse a simple signature without field annotations") {
-    val parser = new SignatureParser()
+    val parser = SignatureParser
     val parsed = parser.parse("question -> answer")
 
     assert(parsed.isRight)
@@ -20,7 +20,7 @@ class SignatureParserSuite extends FunSuite:
   }
 
   test("parse signature") {
-    val parser = new SignatureParser()
+    val parser = SignatureParser
     val parsed = parser.parse("question: str, top_k: int -> answer: string, score: double")
 
     assert(parsed.isRight)
@@ -33,7 +33,7 @@ class SignatureParserSuite extends FunSuite:
   }
 
   test("invalid signature with multiple arrows fails") {
-    val parser = new SignatureParser()
+    val parser = SignatureParser
     val parsed = parser.parse("a -> b -> c")
 
     assert(parsed.isLeft)

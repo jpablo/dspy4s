@@ -8,13 +8,13 @@ import zio.blocks.schema.DynamicValue
   *
   * '''Construction paths.'''
   *
-  *   - `Signature` API (`dspy4s.signatures.Signature.of[T]`, `Signature.fromType[F]`, `Signature.derived[I, O]`) -- the
+  *   - `Signature` API (`dspy4s.signatures.Signature.of[T]`, `Signature.fromType[F]`, `Signature.derived[I, O]`): the
   *     primary path; the resulting `Signature.layout` is the value adapters see.
-  *   - [[SignatureLayout.create]] -- validating + normalizing factory for programmatic construction.
-  *   - [[SignatureLayout.parse]] -- string-DSL parser escape hatch; prefer `dspy4s.signatures.Signature.fromString`
-  *     from user code.
-  *   - [[SignatureLayout.fromState]] -- re-hydrate from the `DynamicValue.Record` produced by [[dumpState]] (or from
-  *     JSON via [[SignatureLayout.fromJson]]).
+  *   - [[SignatureLayout.create]]: validating + normalizing factory for programmatic construction.
+  *   - [[SignatureLayout.parse]]: string-DSL parser escape hatch; prefer `dspy4s.signatures.Signature.fromString` from
+  *     user code.
+  *   - [[SignatureLayout.fromState]]: re-hydrate from the `DynamicValue.Record` produced by [[dumpState]] (or from JSON
+  *     via [[SignatureLayout.fromJson]]).
   *
   * The primary constructor is `private`: every layout comes from one of the paths above. This keeps name uniqueness
   * closed by construction (see Invariants) rather than relying on a runtime precondition.
@@ -38,6 +38,10 @@ final case class SignatureLayout private (
     outputFields: Vector[FieldSpec],
     instructions: Option[String]
 ):
+
+  /** Compatibility view in canonical cohort order: all inputs followed by all outputs. */
+  val fields: Vector[FieldSpec] = inputFields ++ outputFields
+
   require(name.nonEmpty, "SignatureLayout name cannot be empty")
   require(
     fields.forall(f => FieldSpec.validateName(f.name)),
@@ -45,9 +49,6 @@ final case class SignatureLayout private (
   )
 
   // ── Stable public accessors / settings ──────────────────────────────
-
-  /** Compatibility view in canonical cohort order: all inputs followed by all outputs. */
-  def fields: Vector[FieldSpec] = inputFields ++ outputFields
 
   /** Replace signature-level instructions. */
   def withInstructions(text: Option[String]): SignatureLayout = copy(instructions = text)
@@ -69,16 +70,10 @@ final case class SignatureLayout private (
   /** The instructions, else the default instructions of the fields of this layout (dspy's `_default_instructions`).
     * Upstream computes the default instructions when it makes a signature, so they name the fields of that signature.
     */
-  private[dspy4s] def effectiveInstructions: String =
+  private[dspy4s] lazy val effectiveInstructions: String =
     instructions.getOrElse(dspy4s.core.signatures.SignatureDsl.defaultInstructions(this))
 
-  // ── Field-mutation helpers ──────────────────────────────────────────
-  // Narrowed to `private[dspy4s]`: composite programs
-  // (MultiChainComparison, ChainOfThought)
-  // augment a base layout by appending / prepending / inserting fields
-  // before handing it to a `DynamicPredict`. User code should use the
-  // `Signature` API (`derived`, `fromType`, `of[Spec]`,
-  // `builder`, `fromString`) instead of mutating layouts directly.
+  // ── Field-mutation helpers (see "Field mutation" above) ─────────────
 
   /** Replace the input cohort while keeping global field names unique (first occurrence wins). */
   private[dspy4s] def withInputFields(updated: Vector[FieldSpec]): SignatureLayout =
@@ -97,7 +92,7 @@ final case class SignatureLayout private (
   // ── Read helpers ────────────────────────────────────────────────────
 
   /** Render the DSPy-style string DSL for this layout (e.g. `"comment, lang -> toxic, confidence"`). Inverse of
-    * [[SignatureLayout.parse]] for the shape only -- types / instructions / metadata are dropped.
+    * [[SignatureLayout.parse]] for the shape only: the types, the instructions, and the metadata are dropped.
     */
   def signatureString: String =
     val inputs  = inputFields.map(_.name).mkString(", ")
@@ -112,7 +107,7 @@ final case class SignatureLayout private (
       inputFields.sameElements(other.inputFields) &&
       outputFields.sameElements(other.outputFields)
 
-  /** Serialize this standalone layout to a [[zio.blocks.schema.DynamicValue.Record]] -- the same interchange format
+  /** Serialize this standalone layout to a [[zio.blocks.schema.DynamicValue.Record]], the same interchange format
     * carried elsewhere in dspy4s. Round-trips with [[SignatureLayout.fromState]] and serializes to clean JSON via
     * [[dumpJson]]. `Option` fields (`instructions`, and per-field `description` / `prefix` / `defaultValue`) encode as
     * `DynamicValue.Null` when empty. The higher-level program persistence API deliberately uses its smaller

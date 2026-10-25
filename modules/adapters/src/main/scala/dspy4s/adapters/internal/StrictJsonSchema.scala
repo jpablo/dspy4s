@@ -1,5 +1,6 @@
 package dspy4s.adapters.internal
 
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
@@ -199,7 +200,7 @@ private[adapters] object StrictJsonSchema:
       refs  : Set[String]
   ): Either[DspyError, DynamicValue.Record] =
     DynamicValues.recordGet(schema, key) match
-      case Some(list: DynamicValue.Sequence) => traverse(list.elements.toVector)(shapeValue(_, root, refs))
+      case Some(list: DynamicValue.Sequence) => Traverse.either(list.elements.toVector)(shapeValue(_, root, refs))
           .map(shaped => schema.updated(key, DynamicValue.Sequence(Chunk.from(shaped))))
       case _ => Right(schema)
 
@@ -305,7 +306,7 @@ private[adapters] object StrictJsonSchema:
       root   : DynamicValue.Record,
       refs   : Set[String]
   ): Either[DspyError, DynamicValue.Record] =
-    traverse(entries.fields.toVector)((name, value) => shapeValue(value, root, refs).map(name -> _))
+    Traverse.either(entries.fields.toVector)((name, value) => shapeValue(value, root, refs).map(name -> _))
       .map(shaped => DynamicValue.Record(Chunk.from(shaped)))
 
   private def shapeValue(
@@ -324,11 +325,6 @@ private[adapters] object StrictJsonSchema:
 
   private def removed(schema: DynamicValue.Record, key: String): DynamicValue.Record =
     DynamicValue.Record(Chunk.from(schema.fields.toVector.filterNot((name, _) => name == key)))
-
-  private def traverse[A, B](items: Vector[A])(f: A => Either[DspyError, B]): Either[DspyError, Vector[B]] =
-    items.foldLeft[Either[DspyError, Vector[B]]](Right(Vector.empty))((acc, item) =>
-      acc.flatMap(done => f(item).map(done :+ _))
-    )
 
   // ── A schema from the field types ─────────────────────────────────────────────────────────────────────────────
 

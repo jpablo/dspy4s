@@ -4,12 +4,12 @@ import scala.util.matching.Regex
 
 /** Wire-format type tag for a field, surfaced to the LM via adapter prompts (e.g. `"answer: bool"`).
   *
-  * This is the *adapter / prompt* type, not the Scala type -- `Shape[A]` carries the static Scala-side encoding. A
-  * Scala enum, for instance, has Scala type `Sentiment` but [[TypeRef.string]] at the wire level (the LM sees a flat
-  * string like `"joy"`).
+  * This is the *adapter / prompt* type, not the Scala type: `Shape[A]` carries the static Scala-side encoding. A Scala
+  * enum, for instance, has Scala type `Sentiment` but [[TypeRef.string]] at the wire level (the LM sees a flat string
+  * like `"joy"`).
   *
-  * Six well-known refs cover the common cases. Anything outside that set passes through as an opaque token -- adapters
-  * that don't recognize it fall back to rendering it as a free-form string.
+  * The twelve well-known refs of the companion object cover the common cases. Each other token passes through as an
+  * opaque token, and an adapter that does not know the token renders it as a free-form string.
   */
 final case class TypeRef(repr: String) derives CanEqual:
 
@@ -71,8 +71,8 @@ object TypeRef:
   /** Parse a string DSL type token (e.g. the `"bool"` in `"comment -> toxic: bool"`) into the matching well-known
     * [[TypeRef]]. Accepts a handful of synonyms (`"str"`, `"integer"`, `"float"`, `"number"`, `"dict"`, `"map"`) and is
     * case-insensitive. A `dict[...]` token is [[TypeRef.json]], as `dict` is. Unknown tokens become opaque
-    * `TypeRef(other)`. An empty / missing token defaults to [[TypeRef.string]] (DSPy convention -- fields without a
-    * type annotation are strings).
+    * `TypeRef(other)`. An empty / missing token defaults to [[TypeRef.string]] (DSPy convention: fields without a type
+    * annotation are strings).
     */
   def fromToken(token: String): TypeRef =
     token.trim.toLowerCase match
@@ -82,7 +82,6 @@ object TypeRef:
       case "bool" | "boolean"            => bool
       case "json" | "dict" | "map"       => json
       case "tool_calls" | "toolcalls"    => toolCalls
-      case "history"                     => history
       case DictToken()                   => json
       case other                         => TypeRef(other)
 

@@ -1,5 +1,6 @@
 package dspy4s.optimize
 
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.{
   ConfigurationError,
   DspyError,
@@ -234,10 +235,10 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
       _         <- PredictorTraces.requireDistinctKeys(found)
       _         <- checkCache(found)
       before    <- scores(student, trainset, threads)
-      valBefore <- ReAnchor.traverse(validation.toVector)(scores(student, _, threads))
+      valBefore <- Traverse.either(validation.toVector)(scores(student, _, threads))
       fitted    <- fit(student, found, trainset, threads)
       after     <- scores(fitted._1, trainset, threads)
-      valAfter  <- ReAnchor.traverse(validation.toVector)(scores(fitted._1, _, threads))
+      valAfter  <- Traverse.either(validation.toVector)(scores(fitted._1, _, threads))
       report     = ReAnchorReport(
                  trainScoreBefore = mean(before),
                  trainScore = mean(after),
@@ -370,7 +371,7 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
     val candidates = gaps(probabilities, 0.0, 1.0) ++ adjacent ++ zero
     for
       start <- ReAnchor.parameter(effective.threshold, "threshold")
-      tried <- ReAnchor.traverse(candidates) { (t, width) =>
+      tried <- Traverse.either(candidates) { (t, width) =>
                  score(effective.copy(threshold = Some(t))).map(Tried(_, Vector(width, -math.abs(t - start), t), t))
                }
     yield
@@ -422,7 +423,7 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
                 math.min(ReAnchorSearch.WeightRange._2, flips.max * 4)
               )
           val candidates = gaps(flips, low, high, geometric = true).filterNot((w, _) => w == best.getOrElse(label, 1.0))
-          ReAnchor.traverse(candidates) { (w, width) =>
+          Traverse.either(candidates) { (w, width) =>
             val weights = best.updated(label, w)
             score(effective.copy(weights = Some(weights))).map(Tried(_, Vector(width), weights))
           }.map(tried =>
@@ -459,7 +460,7 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
           val below      = if i > 0 then best(i - 1) else 0.0
           val above      = if i + 1 < best.size then best(i + 1) else top
           val candidates = gaps(means, below, above).filterNot((c, _) => c == best(i))
-          ReAnchor.traverse(candidates) { (c, width) =>
+          Traverse.either(candidates) { (c, width) =>
             val cuts = best.updated(i, c)
             score(effective.copy(cuts = Some(cuts))).map(Tried(_, Vector(width), cuts))
           }.map(tried =>
@@ -558,8 +559,3 @@ object ReAnchor:
   /** The value of a parameter of the effective settings. The effective settings always set it. */
   private def parameter[A](value: Option[A], name: String): Either[DspyError, A] =
     value.toRight(RuntimeError("reanchor", s"The effective decision settings have no $name"))
-
-  private def traverse[A, B](items: Vector[A])(f: A => Either[DspyError, B]): Either[DspyError, Vector[B]] =
-    items.foldLeft[Either[DspyError, Vector[B]]](Right(Vector.empty))((acc, item) =>
-      acc.flatMap(done => f(item).map(done :+ _))
-    )
