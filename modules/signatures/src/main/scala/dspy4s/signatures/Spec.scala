@@ -13,20 +13,22 @@ package dspy4s.signatures
   *   val sig = Signature.of[Emotion]
   * }}}
   *
-  * The macro behind `Signature.of` validates the trait at compile time: every member must return `InputField[A]` or
-  * `OutputField[A]`, the field name must be unique, and a `Schema[A]` must be in scope.
+  * The macro behind `Signature.of` validates the trait at compile time: each member must return `InputField[A]` or
+  * `OutputField[A]`, each field name must be unique, and the structural derivation must give a schema for each `A`. The
+  * derivation does not need a `Schema[A]` given, as for `Signature.derived`.
   */
 trait Spec
 
-/** Phantom wrapper marking a method as an **input** field of the signature. `InputField[A]` erases to `A` at runtime —
-  * the marker only exists so the trait macro can classify members by role.
+/** A phantom wrapper that marks a method as an input field of the signature. `InputField[A]` erases to `A` at runtime.
+  * The marker only tells the trait macro the role of each member.
   */
 opaque type InputField[+A] = A
 
 object InputField:
   def apply[A](a: A): InputField[A] = a
 
-/** Phantom wrapper marking a method as an **output** field of the signature. `OutputField[A]` erases to `A` at runtime.
+/** A phantom wrapper that marks a method as an output field of the signature. `OutputField[A]` erases to `A` at
+  * runtime.
   */
 opaque type OutputField[+A] = A
 

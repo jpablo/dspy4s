@@ -1,6 +1,6 @@
 package dspy4s.signatures
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, NotFoundError}
+import dspy4s.core.contracts.{DspyError, FieldSpec, NotFoundError}
 import dspy4s.algebra.{IsEq, Law, <->}
 import dspy4s.core.decisions.Score
 import zio.blocks.schema.{DynamicValue, Schema}
@@ -21,10 +21,9 @@ trait Shape[A]:
   /** Decode a value from a `DynamicValue.Record` produced by an adapter or supplied by user code. */
   def decode(raw: DynamicValue.Record): Either[DspyError, A]
 
-  /** Render this shape as a JSON Schema string suitable for prompt instructions to LMs that follow structured-output
-    * hints. Returns `None` for shapes that don't have a backing `zio.blocks.schema.Schema` (e.g. `MapShape` from
-    * `Signature.fromStringDynamic`); adapters that use this fall back to their default natural-language instruction in
-    * that case.
+  /** The JSON schema of this shape, as text, for the prompt of an LM that follows a structured output. `None` for a
+    * shape that has no `zio.blocks.schema.Schema` (for example, the `MapShape` of `Signature.fromStringDynamic`). For
+    * such a shape, an adapter uses its default instruction in natural language.
     */
   def jsonSchemaString: Option[String] = None
 
@@ -161,54 +160,49 @@ object Shape:
   object StructuralSchema:
     inline given derived[A]: StructuralSchema[A] = StructuralSchema(Schema.derived[A])
 
-  /** Canonical case-class/product shape. This path ignores ambient schemas and is closed over structural derivation,
-    * making it suitable for type-indexed record-boundary objects.
+  /** The canonical shape of a case class, a tuple, or a named tuple. It ignores the ambient schemas and uses only the
+    * structural derivation, thus each type has one meaning at the record boundary. The signature macros use it for
+    * their named tuples, for example `(sentence: String)` for the inputs and `(sentiment: Emotion)` for the outputs.
     */
   inline def canonicalDerived[A]: RoundTripShape[A] =
     ZioSchemaCodec.derivedFromZioSchema[A](using canonicalSchema[A])
 
-  /** A `Shape[DynamicValue.Record]` for the dynamic path (`Signature.fromStringDynamic`), where the DSL carries no
-    * static schema, so the domain value stays a raw record. `encode` is the identity; `decode` only validates that
-    * every field listed in `fieldSpecs` is present in the raw record (no per-field coercion -- that happens upstream in
-    * the adapter / `ZioSchemaCodec.normalize` for schema-backed shapes).
+  /** A `Shape[DynamicValue.Record]` for the dynamic path (`Signature.fromStringDynamic`). The DSL has no static schema,
+    * thus the value stays a record. `encode` gives the value as it is. `decode` only checks that the record has each
+    * field of `fieldSpecs` that is not optional. It does not coerce a field: for a shape with a schema, the adapter and
+    * `ZioSchemaCodec.normalize` do that.
     */
   final class MapShape(
       override val fieldSpecs: Vector[FieldSpec]
   ) extends Shape[DynamicValue.Record]:
+    private val requireFields = requiredFieldsCheck(fieldSpecs)
 
     def encode(value: DynamicValue.Record): DynamicValue.Record = value
 
     def decode(raw: DynamicValue.Record): Either[DspyError, DynamicValue.Record] =
-      val present = DynamicValues.recordKeys(raw).toSet
-      val missing = fieldSpecs.iterator.map(_.name).filterNot(present.contains).toList
-      if missing.nonEmpty then
+      requireFields(raw).map(_ => raw)
+
+  /** Derives a `Shape[A]` from a case class or another product type with a `zio.blocks.schema.Schema[A]` in scope.
+    * zio-blocks encodes and decodes the product. dspy4s gets the field specs from the same `Reflect` (see
+    * [[ZioSchemaCodec]]).
+    */
+  inline def derived[A <: Product](using schema: Schema[A]): RoundTripShape[A] =
+    ZioSchemaCodec.derivedFromZioSchema[A]
+
+  /** The check that a record has each field of `fieldSpecs` that is not optional. The wire does not require an optional
+    * field. The check finds the names of the required fields one time, before it reads a record. For a missing field,
+    * the result is a `NotFoundError` that names each missing field.
+    */
+  private[signatures] def requiredFieldsCheck(
+      fieldSpecs: Vector[FieldSpec]
+  ): DynamicValue.Record => Either[DspyError, Unit] =
+    val required = fieldSpecs.filterNot(_.optional).map(_.name)
+    raw =>
+      val present = raw.fields.iterator.map(_._1).toSet
+      val missing = required.filterNot(present.contains)
+      if missing.isEmpty then Right(())
+      else
         Left(NotFoundError(
           resource = "prediction_field",
           message = s"Missing required fields: ${missing.mkString(", ")}"
         ))
-      else Right(raw)
-
-  /** A `Shape` for a (named-)tuple type `A`, fully backed by a zio-blocks `Schema[A]` derived for that tuple. Used by
-    * the `Signature.of[Spec]` / `from` / `fromType` macros, which hand callers a named-tuple type, e.g.
-    * `(sentence: String)` for inputs and `(sentiment: Emotion)` for outputs. zio-blocks bridges named-tuple <-> tuple
-    * internally (`NamedTuple.toTuple` + register construction), so there is no reflective `productIterator` /
-    * `Tuple.fromArray` cast. `fieldSpecs` (names and wire `typeRef`s) are derived from the schema's `Reflect`; the
-    * enclosing `SignatureLayout` determines whether they belong to its input or output cohort. The decode path reuses
-    * [[ZioSchemaCodec]]'s LM-string coercion, the same path the case-class shapes use.
-    */
-  final class SchemaTupleShape[A](
-      schema: Schema[A]
-  ) extends RoundTripShape[A]:
-    private val delegate: RoundTripShape[A]                      = ZioSchemaCodec.derivedFromZioSchema[A](using schema)
-    val fieldSpecs: Vector[FieldSpec]                            = delegate.fieldSpecs
-    def encode(value: A): DynamicValue.Record                    = delegate.encode(value)
-    def decode(raw  : DynamicValue.Record): Either[DspyError, A] = delegate.decode(raw)
-    override def jsonSchemaString: Option[String]                = delegate.jsonSchemaString
-    override def nestedDecisionFields: Vector[String]            = delegate.nestedDecisionFields
-
-  /** Derives a `Shape[A]` from any case class / product type with a `zio.blocks.schema.Schema[A]` in scope. zio-blocks
-    * owns product encode/decode; dspy4s derives the DSPy-facing field metadata from the same structural Reflect
-    * description (see [[ZioSchemaCodec]] for the metadata story).
-    */
-  inline def derived[A <: Product](using schema: Schema[A]): RoundTripShape[A] =
-    ZioSchemaCodec.derivedFromZioSchema[A]

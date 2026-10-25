@@ -110,7 +110,7 @@ Findings of the group (c) simplify pass that the pass did not fix:
 - [x] (fixed in the decisions follow-up: a derived Schema with the zio-blocks JSON codec, and a check of the JSON value at the boundary) `decisions/Decisions.scala`, `DecisionSettings`: a hand-written codec of about 70 lines, against the one-codec rule. A derived Schema can replace it. Skipped: the change can alter the number widening, the order of the weight keys, and the error messages.
 - [x] (fixed in the decisions follow-up: `DecisionParameter`, with `DecisionKind.parameter`, `valueIn`, and `jsonIn`) `decisions/Decisions.scala`: the parameter names "threshold", "cuts", and "weights" are string keys, also in optimize `ReAnchor.scala`. A typed `DecisionParameter` enum can replace them. Skipped: do it in the optimize pass.
 - [x] (fixed in the decisions follow-up: `DecisionPlan.checked`, with one message for each rule) `decisions/Decisions.scala`: `evidence` and `decodeOne` check the same distribution rules with different messages. One shared validation changes the messages. Skipped.
-- [ ] `decisions/Decisions.scala`, `Score.caseNames`: a copy of `ZioSchemaCodec.caseNamesOf` in signatures. Skipped: do it in the signatures pass.
+- [x] (fixed in the signatures pass: core `contracts/Reflects.scala`) `decisions/Decisions.scala`, `Score.caseNames`: a copy of `ZioSchemaCodec.caseNamesOf` in signatures.
 - [x] (fixed in the group (d) pass: `collections/Traverse.scala` replaces the four copies) A `traverse` helper for `Either` had private copies in optimize `ReAnchor.scala`, `propose/GroundedProposer.scala`, adapters `internal/StrictJsonSchema.scala`, and lm `runtime/DiskLmCache.scala`. Skipped: one shared helper in core can serve them in the later passes.
 
 Findings of the group (b) simplify pass that the pass did not fix:
@@ -159,7 +159,7 @@ Simplify 5 (rank 7). Code-review 7 (rank 2). 1969 main lines, 1958 test lines.
 
 One simplify pass fits the module. Split the review in two.
 
-- [ ] /simplify on the whole module, 1969 lines.
+- [x] /simplify on the whole module, 1969 lines. After the pass: 1672 lines.
 - (a) The codec, about 1120 lines: `ZioSchemaCodec.scala`, `Shape.scala`, `OutputAugmentation.scala`, `InputAugmentation.scala`, `SchemaInterop.scala`.
   - [ ] /code-review
 - (b) The macros, about 850 lines: `internal/`, `Signature.scala`, `SignatureBuilder.scala`, `Spec.scala`.
@@ -167,11 +167,16 @@ One simplify pass fits the module. Split the review in two.
 
 ### Simplify findings
 
-- [ ] `internal/FunctionMacro.scala:62-70` and `:169-177` hold the same `validateSchemas`. `internal/SpecMacro.scala:90-95` is a third copy.
-- [ ] `internal/FunctionMacro.scala:124-159` and `:238-267` repeat the choice between a scalar, a tuple, and a product output. The quote `new Shape.SchemaTupleShape[x](Shape.canonicalSchema[x])` occurs 9 times in the macros.
-- [ ] `Shape.scala:181-189` and `ZioSchemaCodec.scala:535-545` hold the same missing-field check. `Shape.scala:199-207` (`SchemaTupleShape`) only passes each call to `derivedFromZioSchema`.
-- [ ] `ZioSchemaCodec.scala:67-68` calls `optionSomeValueReflect` two times. The default case already covers `:308` and `:506`. The doc at `:54` says that the codec drops unknown fields, but `:112` keeps them.
-- [ ] `OutputAugmentation.scala:107-121`: no production code calls `decodeAugmented` with its `readField` and `hook` parameters. Only tests use them.
+- [x] Three copies of `validateSchemas`, and the scalar, tuple, and product choice in two macros. Fixed: one macro body in `internal/MacroSignatureSupport.scala`, and one public `Signature.fromShapes`. The schema check is gone: the canonical derivation gives the compile error, so `of`, `from`, and `fromType` accept a type with no `derives Schema`, as `derived` does.
+- [x] `Shape.SchemaTupleShape` only forwarded to the canonical derivation, and the missing-field check had two copies. Fixed: the class is gone, and `Shape.requiredFieldsCheck` is the one check (it skips the optional fields, also in `MapShape`).
+- [x] `ZioSchemaCodec.scala`: two calls of `optionSomeValueReflect`, dead cases, three forms of the deferred unwrap, and a stale doc about unknown fields. Fixed: the `OptionOf` extractor and core `Reflects`.
+- [x] `OutputAugmentation.scala`: `decodeAugmented` had parameters that only tests used. Fixed: the code is in the `decode` of the shape.
+- [x] Core `Score.caseNames` copied `ZioSchemaCodec.caseNamesOf`. Fixed: core `contracts/Reflects.scala`.
+
+Findings of the simplify pass that the pass did not fix:
+
+- [ ] A design proposal: augmentation as a `Signature` operation. ChainOfThought, ReAct, and MultiChainComparison each change the layout and the shape in two steps that can get out of step. `Shape.zip`, `Shape.field`, `Signature.appendInput`, and `Signature.prependOutput` can do both in one call. Do it in the programs pass.
+- [ ] A design proposal: the decision types (History, Noul, Score, Choice, ToolCall) are a table of type ids in the codec, with a side channel for the levels of a Score. A type modifier on each type, and `Score.level: Option[L]` (as `Choice.value: O`), can replace the table and the side channel. It touches core, adapters, and optimize.
 
 ### Code-review findings
 

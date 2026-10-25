@@ -2,7 +2,7 @@ package dspy4s.signatures
 
 import zio.blocks.schema.Schema
 
-import dspy4s.core.contracts.TypeRef
+import dspy4s.core.contracts.{DspyError, TypeRef}
 import dspy4s.core.contracts.:=
 import munit.FunSuite
 
@@ -12,6 +12,9 @@ enum P7Emotion derives Schema:
   case sadness, joy, love
 
 case class P7Score(sentiment: P7Emotion, confidence: Double) derives Schema
+
+// No `derives Schema`: the canonical derivation does not need a given.
+final case class P7Point(x: Int, y: Int)
 
 @nowarn("msg=unused")
 def p7ScalarEmotion(sentence: String): P7Emotion =
@@ -167,15 +170,24 @@ class Phase7FunctionMacroSuite extends FunSuite:
     assertEquals(decoded, Right(P7Score(P7Emotion.joy, 0.8)))
   }
 
-  test("compile error: missing input Schema") {
+  test("compile error: an input type with no structural schema") {
     val errors = compileErrors("""
-      class NotDecodable
+      trait NotDecodable
       def badInput(value: NotDecodable): String = ""
       val sig = dspy4s.signatures.Signature.from(badInput)
     """)
     assert(
-      errors.contains("No Schema"),
-      s"expected helpful error about missing Schema, got:\n$errors"
+      errors.contains("Cannot derive schema for 'NotDecodable'"),
+      s"expected helpful error about the schema derivation, got:\n$errors"
+    )
+  }
+
+  test("a field type needs no Schema given, the same as for Signature.derived") {
+    val sig = Signature.fromType[(point: P7Point) => (label: String)]("Label")
+    assertEquals(sig.layout.inputFields.map(f => (f.name, f.typeRef)), Vector("point" -> TypeRef.json))
+    assertEquals(
+      sig.inputShape.decode(rec("point" -> rec("x" := 1, "y" := 2))),
+      Right((point = P7Point(1, 2))): Either[DspyError, (point: P7Point)]
     )
   }
 

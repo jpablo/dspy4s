@@ -1,24 +1,23 @@
 package dspy4s.signatures.internal
 
-import dspy4s.signatures.{InputField, OutputField, Shape, Spec}
-import zio.blocks.schema.Schema
+import dspy4s.signatures.{InputField, OutputField, Spec}
 import scala.quoted.*
-import MacroSignatureSupport.materialize
+import MacroSignatureSupport.{requireUniqueNames, signatureExpr}
 import MacroTypeSupport.namedTupleType
 
 private[signatures] object SpecMacro:
 
-  /** Implementation of `Signature.of[T <: Spec]`. Inspects T's abstract methods at compile time, validates each returns
-    * `InputField[X]` or `OutputField[X]`, confirms a `Schema[X]` is in scope, and emits a `Signature[I, O]` whose `I`
-    * and `O` are named tuples carrying the spec's input and output fields. Field metadata (`TypeRef`) and the value
-    * codec are both derived from the named tuple's `Schema` -- there is no per-field `FieldCodec`.
+  /** Implementation of `Signature.of[T <: Spec]`. The macro reads the abstract methods of `T`. Each method must give
+    * `InputField[X]` or `OutputField[X]`. The macro emits a `Signature[I, O]`, where `I` and `O` are named tuples with
+    * the input fields and the output fields of the spec. The canonical schema of each named tuple gives the field specs
+    * (the `TypeRef` of each field) and the codec.
     *
-    * Compile errors:
-    *   - concrete (non-abstract) methods on the spec trait
-    *   - methods that don't return `InputField[X]` or `OutputField[X]`
-    *   - methods with parameters
-    *   - duplicate field names
-    *   - missing `Schema[X]` for any wrapped type
+    * These are compile errors:
+    *   - a concrete (not abstract) method on the spec trait
+    *   - a method that does not give `InputField[X]` or `OutputField[X]`
+    *   - a method with parameters
+    *   - two fields with the same name
+    *   - a field type with no structural schema
     */
   def ofImpl[T <: Spec: Type](
       name        : Expr[String],
@@ -34,44 +33,35 @@ private[signatures] object SpecMacro:
     val inputFieldSym  = TypeRepr.of[InputField[Any]].typeSymbol
     val outputFieldSym = TypeRepr.of[OutputField[Any]].typeSymbol
 
-    // Methods declared on the trait itself (excluding synthetic /
-    // compiler-generated ones). Inherited methods from Spec / Any are
-    // not in declaredMethods.
-    val allDeclared = typeSym.declaredMethods.filter(m => !m.flags.is(Flags.Synthetic))
+    // The methods that the trait itself declares, with no synthetic methods. `declaredMethods` does not include the
+    // methods that the trait gets from `Spec` or `Any`.
+    val methods = typeSym.declaredMethods.filter(m => !m.flags.is(Flags.Synthetic))
 
-    // Reject concrete (non-abstract) methods on the spec trait. Spec
-    // traits must be purely declarative -- every member is a field
-    // declaration.
-    val concrete = allDeclared.filterNot(_.flags.is(Flags.Deferred))
+    // A spec trait only declares fields, thus each method must be abstract.
+    val concrete = methods.filterNot(_.flags.is(Flags.Deferred))
     if concrete.nonEmpty then
       report.errorAndAbort(
         s"Spec trait '$specName' must declare only abstract field methods; " +
           s"found concrete method(s): ${concrete.map(_.name).mkString(", ")}"
       )
 
-    val methods = allDeclared // all deferred by construction
-
     if methods.isEmpty then
       report.errorAndAbort(
         s"Spec trait '$specName' must declare at least one InputField or OutputField method"
       )
 
-    // For each method: (name, isInput, inner type X from InputField[X] / OutputField[X]).
-    // Field metadata (typeRef) and the value codec are both derived later from the
-    // zio-blocks `Schema` of the input / output named tuple -- no per-field FieldCodec.
+    // For each method: the name, `true` for an input, and the type `X` of `InputField[X]` or `OutputField[X]`.
     val fieldData: List[(String, Boolean, TypeRepr)] = methods.map { m =>
       val name = m.name
 
-      // Reject methods that take parameters -- spec methods must be
-      // parameterless field declarations.
+      // A spec method declares a field, thus it has no parameters.
       if m.paramSymss.exists(_.nonEmpty) then
         report.errorAndAbort(
           s"Spec method '$specName.$name' must be parameterless (got parameters: ${m.paramSymss})"
         )
 
-      // Read the declared return type directly from the DefDef. This
-      // sidesteps the NullaryMethodType / ByNameType wrappers that
-      // `tpe.memberType(m)` produces for parameterless `def`s.
+      // Read the declared return type from the DefDef. `tpe.memberType(m)` wraps the type of a `def` with no
+      // parameters in a `NullaryMethodType` or a `ByNameType`, and the DefDef does not.
       val returnType = m.tree match
         case dd: DefDef => dd.returnTpt.tpe
         case _          => report.errorAndAbort(
@@ -85,44 +75,19 @@ private[signatures] object SpecMacro:
             s"Spec method '$specName.$name' must return InputField[X] or OutputField[X], got: ${other.show}"
           )
 
-      // Validate up front that the field type has a zio-blocks Schema, so a missing one
-      // gives a per-field error here rather than a derivation failure on the whole tuple.
-      innerType.asType match
-        case '[t] => if Expr.summon[Schema[t]].isEmpty then
-            report.errorAndAbort(
-              s"No Schema[${innerType.show}] in scope for spec field '$specName.$name'. Spec field " +
-                "types must have a zio-blocks Schema (a primitive, an enum, or a type that `derives Schema`)."
-            )
-
       (name, isInput, innerType)
     }
 
-    // Reject duplicate field names.
-    val duplicates = fieldData.groupBy(_._1).collect {
-      case (n, occurrences) if occurrences.size > 1 => n
-    }
-    if duplicates.nonEmpty then
-      report.errorAndAbort(
-        s"Spec trait '$specName' has duplicate field names: ${duplicates.mkString(", ")}"
-      )
-
-    val inputData  = fieldData.filter(_._2)
-    val outputData = fieldData.filterNot(_._2)
+    requireUniqueNames(s"Spec trait '$specName'", fieldData.map(_._1))
 
     val sigNameExpr = '{
       val explicitName = ${ name }
       if explicitName.isEmpty then ${ Expr(specName) } else explicitName
     }
 
-    val inputType  = namedTupleType(inputData.map { case (n, _, tpe) => n -> tpe })
-    val outputType = namedTupleType(outputData.map { case (n, _, tpe) => n -> tpe })
-
-    (inputType.asType, outputType.asType) match
-      case ('[i], '[o]) => materialize[i, o](
-          nameExpr = sigNameExpr,
-          instructionsExpr = instructions,
-          errorContext = s"spec trait '$specName'",
-          inputShapeExpr = '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
-          outputShapeExpr = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
-        )
-      case _ => report.errorAndAbort(s"Internal error materializing spec trait '$specName'")
+    signatureExpr(
+      sigNameExpr,
+      instructions,
+      namedTupleType(fieldData.collect { case (n, true, tpe) => n -> tpe }),
+      namedTupleType(fieldData.collect { case (n, false, tpe) => n -> tpe })
+    )

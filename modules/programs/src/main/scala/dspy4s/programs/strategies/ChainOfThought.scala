@@ -90,7 +90,6 @@ final case class ChainOfThought[I, O](
 
   private def augmentedSignature: Signature[I, Out] =
     Signature(
-      name = baseSignature.name,
       layout = augmentedLayout,
       inputShape = baseSignature.inputShape,
       outputShape = augmentedOutputShape
@@ -99,8 +98,9 @@ final case class ChainOfThought[I, O](
   private def augmentedLayout: SignatureLayout =
     ChainOfThought.augmentLayout(baseSignature.layout)
 
-  // The shared opening-position augmentation shape: an idempotent prepend, decodePrepended, and the base JSON schema
-  // with the `reasoning` property first. See [[OutputAugmentation.prependedStringShape]].
+  // The shared augmentation shape with `reasoning` in the first position: a prepend only when the base has no such
+  // field, its decode, and the base JSON schema with the `reasoning` property first. See
+  // [[OutputAugmentation.prependedStringShape]].
   private def augmentedOutputShape: Shape[Out] =
     OutputAugmentation.prependedStringShape(
       baseSignature.outputShape,

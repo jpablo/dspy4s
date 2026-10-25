@@ -7,6 +7,7 @@ import dspy4s.core.contracts.{
   DspyError,
   DynamicValues,
   FieldSpec,
+  Reflects,
   SignatureLayout,
   TypeRef,
   ValidationError
@@ -77,26 +78,11 @@ object Score:
     * with the structural schema of `L`.
     */
   private[dspy4s] def schemaOf[L](levels: Schema[L]): Schema[Score[L]] =
-    Schema.derived[Score[L]].modifiers(caseNames(levels.reflect).map(Modifier.config(levelKey, _)))
+    Schema.derived[Score[L]].modifiers(Reflects.caseNames(levels.reflect).map(Modifier.config(levelKey, _)))
 
   /** The levels that the schema of a `Score[L]` holds, in order. Empty for the reflect of each other type. */
   private[dspy4s] def levelsOf(reflect: Reflect[?, ?]): Vector[String] =
     reflect.modifiers.iterator.collect { case Modifier.config(key, level) if key == levelKey => level }.toVector
-
-  /** The case names of an enum with no parameters. Empty for each other type. */
-  private def caseNames(reflect: Reflect[?, ?]): Vector[String] =
-    reflect match
-      case deferred: Reflect.Deferred[?, ?] => caseNames(deferred.value)
-      case variant: Reflect.Variant[?, ?]   =>
-        val cases = variant.cases.toVector
-        if cases.forall(term => isEmptyRecord(term.value)) then cases.map(_.name) else Vector.empty
-      case _ => Vector.empty
-
-  private def isEmptyRecord(reflect: Reflect[?, ?]): Boolean =
-    reflect match
-      case deferred: Reflect.Deferred[?, ?] => isEmptyRecord(deferred.value)
-      case record: Reflect.Record[?, ?]     => record.fields.isEmpty
-      case _                                => false
 
 /** One option of the enum `O` (upstream `Choice`). The case names of `O` are the option labels.
   *

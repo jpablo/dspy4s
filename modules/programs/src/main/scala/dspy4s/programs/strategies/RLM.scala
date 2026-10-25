@@ -174,7 +174,6 @@ final case class RLM[I, O](
     */
   val actionPredict: Predict[RLM.ActionInputs, RLM.ActionStep] = actionPredictOverride.getOrElse(Predict(
     signature = Signature(
-      name = baseSignature.name,
       layout = actionSignature,
       inputShape = Shape.derived[RLM.ActionInputs],
       outputShape = RLM.actionStepShape
@@ -187,7 +186,6 @@ final case class RLM[I, O](
     */
   val extractPredict: Predict[RLM.ExtractInputs, O] = extractPredictOverride.getOrElse(Predict(
     signature = Signature(
-      name = baseSignature.name,
       layout = extractSignature,
       inputShape = Shape.derived[RLM.ExtractInputs],
       outputShape = baseSignature.outputShape

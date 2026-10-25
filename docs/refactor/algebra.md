@@ -220,7 +220,7 @@ Monoid, ordered fan-out) and the laws or explicit non-laws that govern each carr
 ## Already algebraic vs ad-hoc (current state)
 
 - **Clean / law-shaped:** `Either[DspyError, A]` (errors as values, a monad), `CIO` (monad),
-  `decodePrepended` (an augment with a round-trip law), `SignatureOps` (algebra 1, laws above),
+  the decode of `OutputAugmentation.prependedStringShape` (an augment with a round-trip law), `SignatureOps` (algebra 1, laws above),
   schema-backed `RoundTripShape[A]` (`decode(encode(a)) = Right(a)`), and `Aggregation.majority`
   (a semilattice-flavored reduce). Plain validating `Shape[A]` deliberately makes no round-trip claim.
 - **Ad-hoc (ADD would refactor):** `BestOfN` / `Refine` / `MultiChainComparison` sharing no middleware (no
@@ -261,7 +261,8 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `InterpretedTrajectoryAgent` and `ActionInterpreter` without erasing their action languages. `AgentLoopLawSuite`,
     `TrajectoryAgentLawSuite`, and `InterpretedTrajectoryAgentLawSuite` pin the three layers.
   - **6.4 done** (commit `31aecbd`): `decodeAugmented` (field via a pluggable reader + post-decode hook);
-    `decodePrepended` is its String/identity instance. Closing position left additive (no consumer).
+    `decodePrepended` is its String/identity instance. Closing position left additive (no consumer). The
+    signatures cleanup later moved this code into the decode of `prependedStringShape` and removed both functions.
   - **6.5 done** (commit `dca35e9`): `Mode` (the `Controls => Controls` monoid) + `Moded` + `Compose.mode`;
     `ModeLawSuite` pins the monoid + identity + pass-through. Execution-wrapping modes left additive.
   - **Algebra 2 is complete.** Remaining work is optional/additive: the CIO substrate migration (kyo-compat),
@@ -283,7 +284,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `ProgramInput` coherence law and then deleted `ProgramInput` outright): only the record-boundary runner requires
     `RecordCodec[I]`, nothing decode-related is packaged, and an
     incoherent per-program decoder is unrepresentable (compile gates pin both former vehicles). Named-tuple
-    inputs derive their codec through the same `SchemaTupleShape` path the signature macros use; bare-module
+    inputs derive their codec through the same `Shape.canonicalDerived` path the signature macros use; bare-module
     running is signature-backed `ProgramRunner` instances (no identity in sight, no coherence question);
     runtime-string signatures enter through the `DynamicSignature` bundle, whose parses mint fresh
     codec-equipped types and whose generic `stable` view preserves them across aliases (see

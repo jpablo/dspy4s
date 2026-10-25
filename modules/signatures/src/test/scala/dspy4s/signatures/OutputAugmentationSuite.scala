@@ -52,7 +52,7 @@ class OutputAugmentationSuite extends FunSuite:
     assert(result.isEmpty)
   }
 
-  // ── decodePrepended: the value-level decode shared by the composite programs ──────────────────────
+  // ── prependedStringShape: the decode that the composite programs share ──────────────────────
 
   private def str(s    : String): DynamicValue                         = DynamicValue.Primitive(PrimitiveValue.String(s))
   private def rec(pairs: (String, DynamicValue)*): DynamicValue.Record = DynamicValue.Record(Chunk.from(pairs))
@@ -65,101 +65,49 @@ class OutputAugmentationSuite extends FunSuite:
       def decode(raw: DynamicValue.Record): Either[DspyError, (answer: String)] =
         DynamicValues.requireString(raw, "answer", "test").map(a => (answer = a))
 
-  // A non-product Shape: its decoded output hits the PrependField fallback (None) inside decodePrepended.
+  // A Shape that is not a product: its decoded output gets the PrependField fallback (None).
   private def intShape: Shape[Int] =
     new Shape[Int]:
       val fieldSpecs: Vector[FieldSpec]                              = Vector.empty
       def encode(value: Int): DynamicValue.Record                    = rec()
       def decode(raw  : DynamicValue.Record): Either[DspyError, Int] = Right(0)
 
-  test("decodePrepended: reads the field, decodes the base, prepends") {
-    val r = OutputAugmentation.decodePrepended(
-      rec("reasoning" -> str("because"), "answer" -> str("Paris")),
-      answerShape,
-      "reasoning",
-      "test",
-      "sig"
-    )
+  private def reasoningShape =
+    OutputAugmentation.prependedStringShape(answerShape, reasoningField, "reasoning", "test", "sig")
+
+  test("prependedStringShape decode: reads the field, decodes the base, prepends") {
+    val r = reasoningShape.decode(rec("reasoning" -> str("because"), "answer" -> str("Paris")))
     assertEquals(r.map(NamedTuple.toTuple), Right(("because", "Paris")): Either[DspyError, (String, String)])
   }
 
-  test("decodePrepended: a missing field is a NotFoundError") {
-    val r = OutputAugmentation.decodePrepended(rec("answer" -> str("Paris")), answerShape, "reasoning", "test", "sig")
-    r match
+  test("prependedStringShape decode: the base output is recoverable (the added field is extra)") {
+    val raw = rec("reasoning" -> str("because"), "answer" -> str("Rome"))
+    assertEquals(
+      reasoningShape.decode(raw).map(o => NamedTuple.toTuple(o).tail),
+      answerShape.decode(raw).map(NamedTuple.toTuple)
+    )
+  }
+
+  test("prependedStringShape decode: a missing field is a NotFoundError") {
+    reasoningShape.decode(rec("answer" -> str("Paris"))) match
       case Left(_: NotFoundError) => ()
       case other                  => fail(s"expected NotFoundError, got $other")
   }
 
-  test("decodePrepended: a fieldless (non-product) output is a ValidationError") {
-    val r = OutputAugmentation.decodePrepended(rec("reasoning" -> str("x")), intShape, "reasoning", "test", "sig")
-    r match
+  test("prependedStringShape decode: a field that is not a String is a ValidationError") {
+    reasoningShape.decode(rec(
+      "reasoning" -> DynamicValue.Primitive(PrimitiveValue.Int(3)),
+      "answer"    -> str("Paris")
+    )) match
       case Left(_: ValidationError) => ()
       case other                    => fail(s"expected ValidationError, got $other")
   }
 
-  // ── decodeAugmented: the generalized (field + post-decode hook) augment ──────────────────────
-
-  private def int(i: Int): DynamicValue = DynamicValue.Primitive(PrimitiveValue.Int(i))
-
-  /** Read an augment field as an `Int` (proving the augment is not String-only). */
-  private def readInt(record: DynamicValue.Record, field: String, label: String): Either[DspyError, Int] =
-    DynamicValues.recordGet(record, field).collect { case DynamicValue.Primitive(PrimitiveValue.Int(i)) => i }
-      .toRight(NotFoundError("field", s"$label: missing or non-Int field '$field'"))
-
-  test("decodeAugmented: a non-String (Int) field is read and prepended (generic field support is live)") {
-    val r = OutputAugmentation.decodeAugmented[(answer: String), "confidence", Int, (confidence: Int, answer: String)](
-      rec("confidence" -> int(3), "answer" -> str("Paris")),
-      answerShape,
-      "confidence",
-      "test",
-      "sig",
-      readField = readInt
-    )
-    assertEquals(r.map(NamedTuple.toTuple), Right((3, "Paris")): Either[DspyError, (Int, String)])
-  }
-
-  test("decodeAugmented: augment round-trip — the base output is recoverable (the added field is extra)") {
-    // base(decodeAugmented(...)) == shape.decode(...): dropping the prepended field yields the base output.
-    val raw = rec("confidence" -> int(7), "answer" -> str("Rome"))
-    val aug =
-      OutputAugmentation.decodeAugmented[(answer: String), "confidence", Int, (confidence: Int, answer: String)](
-        raw,
-        answerShape,
-        "confidence",
-        "test",
-        "sig",
-        readField = readInt
-      )
-    val base = answerShape.decode(raw)
-    assertEquals(aug.map(o => NamedTuple.toTuple(o).tail), base.map(NamedTuple.toTuple))
-  }
-
-  test("decodeAugmented: the post-decode hook runs and can reject") {
-    val raw = rec("reasoning" -> str("because"), "answer" -> str("Paris"))
-    // A hook that rejects empty answers; here it passes through unchanged.
-    val pass =
-      OutputAugmentation.decodeAugmented[(answer: String), "reasoning", String, (reasoning: String, answer: String)](
-        raw,
-        answerShape,
-        "reasoning",
-        "test",
-        "sig",
-        readField = (rrec, f, l) => DynamicValues.requireString(rrec, f, l),
-        hook = out => if out.answer.isEmpty then Left(ValidationError("empty answer")) else Right(out)
-      )
-    assertEquals(pass.map(NamedTuple.toTuple), Right(("because", "Paris")): Either[DspyError, (String, String)])
-
-    val rejected =
-      OutputAugmentation.decodeAugmented[(answer: String), "reasoning", String, (reasoning: String, answer: String)](
-        rec("reasoning" -> str("because"), "answer" -> str("")),
-        answerShape,
-        "reasoning",
-        "test",
-        "sig",
-        readField = (rrec, f, l) => DynamicValues.requireString(rrec, f, l),
-        hook = out => if out.answer.isEmpty then Left(ValidationError("empty answer")) else Right(out)
-      )
-    assert(rejected.isLeft, s"hook should reject empty answer, got $rejected")
+  test("prependedStringShape decode: a fieldless (non-product) output is a ValidationError") {
+    val shape = OutputAugmentation.prependedStringShape(intShape, reasoningField, "reasoning", "test", "sig")
+    shape.decode(rec("reasoning" -> str("x"))) match
+      case Left(_: ValidationError) => ()
+      case other                    => fail(s"expected ValidationError, got $other")
   }
 
   // ── prependedStringShape: the JSON schema of the augmented output ──────────────────────

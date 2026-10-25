@@ -112,7 +112,6 @@ final case class MultiChainComparison[I, O](
   private[programs] val comparePredict: Predict[(I, Attempts), MultiChainComparison.WithRationale[O]] =
     val base = Predict(
       signature = Signature(
-        name = baseSignature.name,
         layout = augmentedSignatureLayout,
         inputShape = attemptInputs.shape,
         outputShape = OutputAugmentation.prependedStringShape(

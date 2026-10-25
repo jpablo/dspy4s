@@ -68,11 +68,11 @@ recover(policy, fallback)(p)   : Program[I, O] => Program[I, O]      // selected
 //   sub-predictions' records (second wins on collision).
 
 augment[Name, T](field)(p) : Program[I, O] => Program[I, Out]                     // Thought / CoT  [IMPLEMENTED 6.4]
-//   IMPLEMENTED (opening position) as OutputAugmentation.decodeAugmented[O, Name, T, Out]: an arbitrary T
-//   read via a pluggable readField, plus an optional post-decode hook. decodePrepended (T=String, identity hook)
-//   is the instance ChainOfThought / MultiChainComparison / the agent extractors use. Out =
-//   OutputAugmentation.WithField[O, Name, T]. CLOSING position (append, self-check) stays additive (no consumer;
-//   needs an AppendField dual).
+//   IMPLEMENTED (opening position, T = String) as the decode of OutputAugmentation.prependedStringShape, which
+//   ChainOfThought / MultiChainComparison / the agent extractors use. Out = OutputAugmentation.WithField[O, Name, T].
+//   The generic decodeAugmented (a pluggable readField and a post-decode hook) had no production caller, and the
+//   signatures cleanup removed it. CLOSING position (append, self-check) stays additive (no consumer; needs an
+//   AppendField dual).
 
 mode(m: Mode)(p)               : Program[I, O] => Program[I, O]         // Monoid middleware, NON-learnable  [IMPLEMENTED 6.5]
 //   IMPLEMENTED as Mode (Controls => Controls, monoid under ++ / Mode.id) + Moded + Compose.mode: model swap /
@@ -230,8 +230,8 @@ constructor and category constraints were removed. `Program.of` requires only `O
 Bare-module running is a separate concern with no coherence question (no identity morphism in sight):
 `ProgramRunner` carries signature-backed instances for the framework leaves and composites, plus a
 low-priority `RecordCodec` fallback for user composites. Named-tuple inputs (`fromString` / `fromType` /
-`of[Spec]`) get their codec from a `RecordCodec` derivation over the same `SchemaTupleShape` path those macros
-use, so codec and signature decode cohere definitionally. `Record`-input programs may be packaged, but the packaged
+`of[Spec]`) get their codec from a `RecordCodec` derivation over the same `Shape.canonicalDerived` path those
+macros use, so codec and signature decode cohere definitionally. `Record`-input programs may be packaged, but the packaged
 value has no generic record-boundary runner because `DynamicValue.Record` deliberately has no single canonical codec;
 `DynamicSignature` is the type-safe dynamic execution boundary.
 
@@ -348,7 +348,7 @@ plus the new combinator law suites are green:
 
 | composite | recipe |
 |---|---|
-| `ChainOfThought` | `augment["reasoning", String]` — DONE: `decodeAugmented` (the `decodePrepended` String instance) |
+| `ChainOfThought` | `augment["reasoning", String]` — DONE: the decode of `OutputAugmentation.prependedStringShape` |
 | `MultiChainComparison` | `augment["rationale", String]` over the attempt-folded signature (holds compare-predict) — DONE: same shared decode |
 | `BestOfN` | `selectBest(p, n, reward, threshold)` — DONE (6.1): `AttemptSelection.bestOf`, `feedback = None` |
 | `Refine` | `feedback(p, critic = OfferFeedback, n, reward, threshold)` — DONE (6.1): `bestOf` + advice→adapter hook |
@@ -447,6 +447,8 @@ suites as the regression net:
    (arbitrary field via a pluggable reader + optional post-decode hook); `decodePrepended` is its
    String/identity instance, so the five call sites are unchanged. Closing position stays additive (no
    consumer). `OutputAugmentationSuite` adds a generalized-field test, the round-trip law, and a hook accept/reject.
+   The signatures cleanup later removed `decodeAugmented` and `decodePrepended`, because no program used the
+   reader or the hook. Their code is now the decode of `OutputAugmentation.prependedStringShape`.
 5. **`mode`. DONE (commit `dca35e9`).** Introduced `Mode` (the `Controls => Controls` monoid) + `Moded` +
    `Compose.mode` as the home for model-swap / temperature / rolloutId; trace-transparent, OptimizableStructure
    pass-through, `ModeLawSuite` pins the monoid + identity. Execution-wrapping modes (retry / pre-post) stay

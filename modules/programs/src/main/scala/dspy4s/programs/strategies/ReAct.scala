@@ -141,7 +141,6 @@ final case class ReAct[I, O](
     */
   val reactPredict: Predict[(I, String), ReAct.ReactStep] = reactPredictOverride.getOrElse(Predict(
     signature = Signature(
-      name = baseSignature.name,
       layout = reactSignature,
       inputShape = InputAugmentation.appendedStringInput(baseSignature.inputShape, ReAct.trajectoryField, "ReAct"),
       outputShape = ReAct.reactStepShape
@@ -156,7 +155,6 @@ final case class ReAct[I, O](
   override val extractorPredict: Predict[(I, String), ReAct.WithReasoning[O]] =
     extractorPredictOverride.getOrElse(Predict(
       signature = Signature(
-        name = baseSignature.name,
         layout = ChainOfThought.augmentLayout(extractorSignature),
         inputShape = InputAugmentation
           .appendedStringInput(baseSignature.inputShape, ReAct.trajectoryField, "ReAct extractor"),

@@ -85,7 +85,6 @@ private[programs] object RefineFeedback:
 
   /** The critic signature, preserving the hand-built descriptions and lenient output decoding. */
   val signature: Signature[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice] = Signature(
-    name = "OfferFeedback",
     layout = layout,
     inputShape = Shape.derived[Refine.OfferFeedbackInputs],
     outputShape = outputShape

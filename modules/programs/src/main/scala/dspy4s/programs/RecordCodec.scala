@@ -24,17 +24,12 @@ object RecordCodec:
     */
   private[programs] def fromShape[A](shape: Shape[A]): RecordCodec[A] = ShapeBacked(shape)
 
-  /** Decode products through the same closed structural input shape used by signatures. Ambient schemas cannot change
-    * this instance's behavior; custom schema semantics need a freshly branded object type.
+  /** Decode a case class, a tuple, or a named tuple with `Shape.canonicalDerived`, the closed structural shape that the
+    * signatures use for their inputs. Thus this decode is the decode of each typed signature with the same input type.
+    * An ambient schema cannot change it. For a custom schema, use a new branded object type.
     */
-  inline given fromProduct[A <: Product](using
+  inline given fromProduct[A](using
       scala.deriving.Mirror.ProductOf[A],
       scala.util.NotGiven[A =:= DynamicValue.Record]
   ): RecordCodec[A] =
     fromShape(Shape.canonicalDerived[A])
-
-  /** Decode named tuples through the same `SchemaTupleShape` path the `fromString` / `fromType` / `of[Spec]` macros use
-    * for their input shapes, so codec-derived decoding coheres definitionally with those signatures' own decode.
-    */
-  inline given fromNamedTupleSchema[A <: scala.NamedTuple.AnyNamedTuple]: RecordCodec[A] =
-    fromShape(Shape.SchemaTupleShape[A](Shape.canonicalSchema[A]))

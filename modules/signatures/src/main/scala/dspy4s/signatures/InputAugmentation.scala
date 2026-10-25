@@ -1,21 +1,20 @@
 package dspy4s.signatures
 
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, ValidationError, updated}
+import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
-/** INPUT augmentation: the input-side dual of [[OutputAugmentation]], for the composite programs' loop signatures that
-  * extend a base input `I` with one hand-declared `String` field (`trajectory`, ...).
+/** Input augmentation, the input side of [[OutputAugmentation]]. The loop signatures of the composite programs use it
+  * to add one `String` field (`trajectory`, and others) to a base input `I`.
   *
-  * The augmented carrier is the plain pair `(I, String)` rather than a named-tuple surgery on `I`: the pair delegates
-  * the base encoding to the base [[Shape]] UNCHANGED (schema-aware — no re-derivation, no `fromAny` round-trip for
-  * structured base fields) and appends the extra field, which is exactly what the dynamic path did with
-  * `record.updated(name, value)`. Apply twice for two appended fields (`((I, String), String)`).
+  * The augmented value is the pair `(I, String)`. The base [[Shape]] encodes the base fields with its schema, and the
+  * augmentation adds the extra field at the end. For two extra fields, apply it two times (`((I, String), String)`).
   */
 object InputAugmentation:
 
-  /** `Shape[(I, String)]`: the base fields encoded by `base`, plus `field` appended LAST (matching
-    * `SignatureOps.appendInput`'s layout position). Decode requires the appended field as a `String` and delegates the
-    * rest to `base`.
+  /** `Shape[(I, String)]`: the fields that `base` encodes, and then `field` (the position of `SignatureOps.appendInput`
+    * in the layout). The decode reads the extra field as a `String`, and `base` decodes the other fields.
     */
   def appendedStringInput[I](base: Shape[I], field: FieldSpec, label: String): Shape[(I, String)] =
     new Shape[(I, String)]:
@@ -30,9 +29,8 @@ object InputAugmentation:
           s <- DynamicValues.requireString(raw, field.name, label)
         yield (i, s)
 
-  /** A runtime-sized input block whose value carrier is path-dependent on this validated shape bundle. The opaque
-    * [[Values]] type can only be obtained through [[validate]], so `shape.encode` cannot receive a short or oversized
-    * vector and its former truncating `zip` is unnecessary.
+  /** An input block with a number of extra fields that is known only at runtime. Its value type [[Values]] depends on
+    * this shape. Only [[validate]] gives a [[Values]], thus `shape.encode` always gets one value for each field.
     */
   final class AppendedStringInputs[I] private[InputAugmentation] (
       base  : Shape[I],
@@ -52,26 +50,18 @@ object InputAugmentation:
       val fieldSpecs: Vector[FieldSpec] = base.fieldSpecs ++ fields
 
       def encode(value: (I, Values)): DynamicValue.Record =
-        fields.indices.foldLeft(base.encode(value._1)) { (acc, index) =>
-          acc.updated(
-            fields(index).name,
-            DynamicValue.Primitive(PrimitiveValue.String(value._2(index)))
-          )
+        val extra = fields.lazyZip(value._2).map { (field, text) =>
+          field.name -> DynamicValue.Primitive(PrimitiveValue.String(text))
         }
+        DynamicValues.mergeRecords(base.encode(value._1), DynamicValue.Record(Chunk.from(extra)))
 
       def decode(raw: DynamicValue.Record): Either[DspyError, (I, Values)] =
-        val values = fields.foldLeft[Either[DspyError, Vector[String]]](Right(Vector.empty)) { (acc, field) =>
-          for
-            collected <- acc
-            s         <- DynamicValues.requireString(raw, field.name, label)
-          yield collected :+ s
-        }
         for
           i  <- base.decode(raw)
-          ss <- values
+          ss <- Traverse.either(fields)(field => DynamicValues.requireString(raw, field.name, label))
         yield (i, ss)
 
-  /** Build a path-branded, validated runtime-arity input block. */
+  /** Make an input block with a number of extra fields that is known only at runtime. */
   def appendedStringInputs[I](
       base  : Shape[I],
       fields: Vector[FieldSpec],

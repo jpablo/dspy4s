@@ -116,7 +116,6 @@ class ProgramAlgebraLawSuite extends FunSuite:
   private val recordLayout = SignatureLayout.parse("question -> s").toOption.get
   @annotation.unused
   private val recordSignature = Signature[DynamicValue.Record, Wrapped](
-    name = "RecordInput",
     layout = recordLayout,
     inputShape = Shape.MapShape(recordLayout.inputFields),
     outputShape = Shape.derived[Wrapped]

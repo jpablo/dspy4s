@@ -271,7 +271,6 @@ class TypedPredictSuite extends FunSuite:
     // Predict.run catches this before any LM call is dispatched.
     val specSig = Signature.of[P4QAMissingInputSpec]
     val sig     = Signature(
-      name = specSig.name,
       layout = specSig.layout,
       inputShape = new Shape.MapShape(specSig.layout.inputFields),
       outputShape = specSig.outputShape

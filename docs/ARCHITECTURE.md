@@ -340,10 +340,11 @@ For comparison with the upstream Python DSPy architecture:
 - `core/runtime/ActivePredictContext.scala` — thread-local stack.
 - `signatures/Signature.scala` — wrapper + six factory entry points.
 - `signatures/Shape.scala` — the general `Shape[A]` boundary, lawful
-  `RoundTripShape[A]`, `MapShape` for runtime string-DSL signatures,
-  `SchemaTupleShape` for named-tuple outputs, and the product shape produced
-  by `ZioSchemaCodec.derivedFromZioSchema`. All speak `DynamicValue.Record` natively in
-  `encode` / `decode` — there is no `Map[String, Any]` shim.
+  `RoundTripShape[A]`, `MapShape` for runtime string-DSL signatures, and
+  `canonicalDerived`, the product shape of `ZioSchemaCodec.derivedFromZioSchema`
+  for case classes, tuples, and the named tuples of the signature macros. Each
+  shape uses `DynamicValue.Record` in `encode` and `decode`, with no
+  `Map[String, Any]` step.
 - `signatures/ZioSchemaCodec.scala` — the `zio-blocks-schema` integration:
   the product `RoundTripShape[A]` factory (`derivedFromZioSchema`), `FieldSpec`
   derivation from `Reflect.Record`, and `normalize(dv, target)` which

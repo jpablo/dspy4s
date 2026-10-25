@@ -240,16 +240,16 @@ class Phase5SpecMacroSuite extends FunSuite:
     )
   }
 
-  test("compile error: missing Schema for inner type") {
+  test("compile error: an inner type with no structural schema") {
     val errors = compileErrors("""
-      class NotDecodable
+      trait NotDecodable
       trait BadSpec extends dspy4s.signatures.Spec:
         def field: dspy4s.signatures.OutputField[NotDecodable]
       val sig = dspy4s.signatures.Signature.of[BadSpec]
     """)
     assert(
-      errors.contains("No Schema"),
-      s"expected helpful error about missing Schema, got:\n$errors"
+      errors.contains("Cannot derive schema for 'NotDecodable'"),
+      s"expected helpful error about the schema derivation, got:\n$errors"
     )
   }
 

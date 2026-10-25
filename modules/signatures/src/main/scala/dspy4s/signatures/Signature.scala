@@ -1,21 +1,19 @@
 package dspy4s.signatures
 
-import dspy4s.core.contracts.{DspyError, SignatureLayout, TypeRef}
+import dspy4s.core.contracts.{DspyError, FieldSpec, SignatureLayout, TypeRef}
 import zio.blocks.schema.DynamicValue
 
-/** A signature with compile-time knowledge of its input (`I`) and output (`O`) shapes. Wraps a runtime
-  * `SignatureLayout` for compatibility with the existing `DynamicPredict` / adapter / runtime stack — adapters still
-  * see the runtime `fields` vector and consume it as today; this wrapper additionally carries `Shape[I]` / `Shape[O]`
-  * for input encoding and output decoding.
-  *
-  * Phase 2 supports `I <: Product` / `O <: Product` (case classes). Phase 3 adds the builder API.
+/** A signature with the static types of its input (`I`) and its output (`O`). It holds the runtime `SignatureLayout`,
+  * which the adapters and the runtime read, and the shapes that encode the input and decode the output.
   */
 final case class Signature[I, O](
-    name       : String,
     layout     : SignatureLayout,
     inputShape : Shape[I],
     outputShape: Shape[O]
 ):
+
+  /** The name of the signature: the name of its layout. */
+  def name: String = layout.name
 
   /** SignatureLayout-level instructions carried into adapter prompt formatting. This mirrors the underlying runtime
     * `SignatureLayout` API while preserving the input/output shapes.
@@ -36,14 +34,14 @@ final case class Signature[I, O](
   def appendInstructions(text: String): Signature[I, O] =
     copy(layout = layout.appendInstructions(text))
 
-  /** Mark the named OUTPUT field as the native tool-calls sink: sets its wire [[TypeRef]] to [[TypeRef.toolCalls]]. An
-    * adapter with native function-calling enabled then fills that field from the provider's `tool_calls` rather than
-    * asking the model to produce it as text. Decoding the field as a `Vector[ToolCall]` happens via `O`'s derived
-    * `Schema`, so this only adjusts the runtime layout — the shapes are untouched. No-op if no output field has the
-    * given name. See PORT_GAPS G-7b.
+  /** Mark the output field `fieldName` as the field of the native tool calls: its wire [[TypeRef]] becomes
+    * [[TypeRef.toolCalls]]. An adapter with native function calls then fills that field from the `tool_calls` of the
+    * provider, and the model does not write it as text. The derived `Schema` of `O` decodes the field as a
+    * `Vector[ToolCall]`, thus this function changes only the runtime layout, not the shapes. When no output field has
+    * the name, the signature stays the same. See PORT_GAPS G-7b.
     *
-    * Needed because signature derivation maps field types structurally (a `Vector[ToolCall]` becomes `TypeRef.list`)
-    * and does not detect the tool-calls type.
+    * The derivation gives the type of a field from its structure (a `Vector[ToolCall]` becomes `TypeRef.list`), and it
+    * does not find the type of the tool calls. Thus this function is necessary.
     */
   def markToolCalls(fieldName: String): Signature[I, O] =
     copy(layout = layout.withOutputFields(layout.outputFields.map { field =>
@@ -53,14 +51,9 @@ final case class Signature[I, O](
 
 object Signature:
 
-  /** Derives a `Signature[I, O]` from two case classes. The resulting runtime layout has all input fields followed by
-    * all output fields (matching the `inputFields ++ outputFields` ordering used everywhere else in dspy4s). Derivation
-    * is structural and closed: ambient custom `Schema[I]` / `Schema[O]` instances cannot change a type's boundary
-    * meaning.
-    *
-    * Routed through `SignatureLayout.create` so fields are normalized (inferred prefix + description) and standard
-    * validations apply. Case-class field names are always valid Scala identifiers, so the `.fold(throw _, identity)` is
-    * a defensive measure -- it should never fire for a well-formed case class.
+  /** Derives a `Signature[I, O]` from two case classes. The runtime layout has the input fields, and then the output
+    * fields. The derivation is structural and closed: an ambient `Schema[I]` or `Schema[O]` cannot change the meaning
+    * of a type at the boundary.
     */
   inline def derived[I <: Product, O <: Product](
       name        : String,
@@ -69,26 +62,32 @@ object Signature:
       mi: scala.deriving.Mirror.ProductOf[I],
       mo: scala.deriving.Mirror.ProductOf[O]
   ): Signature[I, O] =
-    val inShape  = Shape.canonicalDerived[I]
-    val outShape = Shape.canonicalDerived[O]
-    val sig      = SignatureLayout
-      .create(
-        name = name,
-        inputFields = inShape.fieldSpecs,
-        outputFields = outShape.fieldSpecs,
-        instructions = Option(instructions).filter(_.nonEmpty)
-      )
-      .fold(
-        err =>
-          throw new IllegalStateException(
-            s"Internal error: case-class-derived signature '$name' failed validation: ${err.message}"
-          ),
-        identity
-      )
-    Signature(name, sig, inShape, outShape)
+    fromShapes(name, instructions, Shape.canonicalDerived[I], Shape.canonicalDerived[O])
 
-  /** Programmatic builder for callers that don't want a case class per signature. Returns a plain `SignatureLayout` —
-    * see `SignatureBuilder`.
+  /** The signature `name` with the inputs of `in` and the outputs of `out`. An empty `instructions` means no
+    * instructions. The layout comes from `SignatureLayout.create`, which normalizes the fields (the prefix and the
+    * description) and validates them. Each signature macro expands to a call of this function in the code of the
+    * caller, thus the function is public.
+    *
+    * @throws IllegalArgumentException
+    *   when the layout is not valid, for example when an input and an output have the same name
+    */
+  def fromShapes[I, O](name: String, instructions: String, in: Shape[I], out: Shape[O]): Signature[I, O] =
+    Signature(layoutOf(name, instructions, in.fieldSpecs, out.fieldSpecs), in, out)
+
+  /** The layout `name` with `inputs`, `outputs`, and `instructions`, as [[fromShapes]] makes it. */
+  private[signatures] def layoutOf(
+      name        : String,
+      instructions: String,
+      inputs      : Vector[FieldSpec],
+      outputs     : Vector[FieldSpec]
+  ): SignatureLayout =
+    SignatureLayout
+      .create(name, inputs, outputs, Option(instructions).filter(_.nonEmpty))
+      .fold(err => throw new IllegalArgumentException(s"Invalid signature '$name': ${err.message}"), identity)
+
+  /** A builder of a runtime `SignatureLayout`, for a caller that does not want a case class for each signature. See
+    * [[SignatureBuilder]].
     */
   def builder(name: String): SignatureBuilder = SignatureBuilder(name)
 
@@ -118,9 +117,7 @@ object Signature:
       instructions: String = ""
   ): Either[DspyError, Signature[DynamicValue.Record, DynamicValue.Record]] =
     SignatureLayout.parse(dsl, instructions).map { layout =>
-      val inShape  = Shape.MapShape(layout.inputFields)
-      val outShape = Shape.MapShape(layout.outputFields)
-      Signature(layout.name, layout, inShape, outShape)
+      Signature(layout, Shape.MapShape(layout.inputFields), Shape.MapShape(layout.outputFields))
     }
 
   /** Function/method macro entry. Inspects a method reference at compile time and materializes a `Signature` whose
