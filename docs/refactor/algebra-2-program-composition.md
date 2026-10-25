@@ -68,8 +68,9 @@ recover(policy, fallback)(p)   : Program[I, O] => Program[I, O]      // selected
 //   sub-predictions' records (second wins on collision).
 
 augment[Name, T](field)(p) : Program[I, O] => Program[I, Out]                     // Thought / CoT  [IMPLEMENTED 6.4]
-//   IMPLEMENTED (opening position, T = String) as the decode of OutputAugmentation.prependedStringShape, which
-//   ChainOfThought / MultiChainComparison / the agent extractors use. Out = OutputAugmentation.WithField[O, Name, T].
+//   IMPLEMENTED (opening position, T = String) as Signature.prependOutput, which ChainOfThought /
+//   MultiChainComparison / the agent extractors use. It changes the layout and the output shape in one call.
+//   Out = OutputAugmentation.WithField[O, Name, T].
 //   The generic decodeAugmented (a pluggable readField and a post-decode hook) had no production caller, and the
 //   signatures cleanup removed it. CLOSING position (append, self-check) stays additive (no consumer; needs an
 //   AppendField dual).
@@ -104,7 +105,7 @@ TrajectoryAgent.runAndExtract[S, E](...)(step)(extract) : M[(E, String)]      //
 //   bounded loop building a Vector[S] trajectory (via AgentLoop.run), then the extract closure with
 //   overflow-truncation. E is the extractor's result: after the domain-valued inner-predict conversion, the extractors
 //   are Predicts, so E = Prediction[WithReasoning[O]] and the reasoning-prepended decode happens INSIDE
-//   the extractor (OutputAugmentation.prependedStringShape) rather than in the module. (= ReAct, CodeAct)
+//   the extractor (Signature.prependOutput) rather than in the module. (= ReAct, CodeAct)
 
 InterpretedTrajectoryAgent.trajectoryStep                                  // ReAct/CodeAct action transition [IMPLEMENTED]
 //   generate model step -> prepare action -> ActionInterpreter.execute -> record outcome -> decide -> Continue/Done.
@@ -348,7 +349,7 @@ plus the new combinator law suites are green:
 
 | composite | recipe |
 |---|---|
-| `ChainOfThought` | `augment["reasoning", String]` — DONE: the decode of `OutputAugmentation.prependedStringShape` |
+| `ChainOfThought` | `augment["reasoning", String]` — DONE: `Signature.prependOutput` |
 | `MultiChainComparison` | `augment["rationale", String]` over the attempt-folded signature (holds compare-predict) — DONE: same shared decode |
 | `BestOfN` | `selectBest(p, n, reward, threshold)` — DONE (6.1): `AttemptSelection.bestOf`, `feedback = None` |
 | `Refine` | `feedback(p, critic = OfferFeedback, n, reward, threshold)` — DONE (6.1): `bestOf` + advice→adapter hook |
@@ -448,7 +449,7 @@ suites as the regression net:
    String/identity instance, so the five call sites are unchanged. Closing position stays additive (no
    consumer). `OutputAugmentationSuite` adds a generalized-field test, the round-trip law, and a hook accept/reject.
    The signatures cleanup later removed `decodeAugmented` and `decodePrepended`, because no program used the
-   reader or the hook. Their code is now the decode of `OutputAugmentation.prependedStringShape`.
+   reader or the hook. Their code is now the decode of the output shape of `Signature.prependOutput`.
 5. **`mode`. DONE (commit `dca35e9`).** Introduced `Mode` (the `Controls => Controls` monoid) + `Moded` +
    `Compose.mode` as the home for model-swap / temperature / rolloutId; trace-transparent, OptimizableStructure
    pass-through, `ModeLawSuite` pins the monoid + identity. Execution-wrapping modes (retry / pre-post) stay
@@ -466,15 +467,16 @@ grilled design was over-decomposed (PoT is `retryUntil` not `feedback`; `fanout`
 shaped now runs inner `Predict`s instead of `DynamicPredict`s: Refine's OfferFeedback critic, ReAct's
 loop + extractor, CodeAct's generator + extractor, RLM's action + extract, and ProgramOfThought's
 generator / regenerator / answerer. The recipe is uniform: keep the hand-built layout verbatim (prompt
-rendering unchanged), pair it with `InputAugmentation.appendedStringInput` on the input side (the pair carrier
+rendering unchanged), pair it with `Signature.appendInput` on the input side (the pair carrier
 `(I, String)` delegates base encoding to the base shape, appending the declared field — apply twice for two
 fields) and either a derived shape (fully synthetic inputs: RLM, the critic) or a hand-written explicit output
 shape that models tolerant reads algebraically (`ProgramOfThought.CodeOut` uses `Option[String]`; `finished` coerces
 bool-or-"true", tool args accept record / JSON-string / nothing); reasoning-prepended extractors decode inside
-the predict via `OutputAugmentation.prependedStringShape` (extracted from ChainOfThought's hand-written shape).
+the predict via `Signature.prependOutput` (extracted from ChainOfThought's hand-written shape). Each of these
+`Signature` operations changes the layout and the shapes in one call, thus the two cannot get out of step.
 **Runtime arity rides a static carrier (the class-B bridge).** `MultiChainComparison` — whose field COUNT is the
-constructor parameter `m` — converts too: `InputAugmentation.appendedStringInputs` returns a bundle with a
-path-dependent opaque `Values` carrier and `Shape[(I, Values)]`. Its validating constructor is the only way to
+constructor parameter `m` — converts too: `Signature.appendInputs` returns a bundle with a
+path-dependent opaque `Values` carrier and the `Signature[(I, Values), O]`. Its validating constructor is the only way to
 obtain `Values`, so the per-instance shape total-encodes exactly the `m` numbered `reasoning_attempt_i` fields
 without truncation or a representable wrong-length value. The wire format is unchanged. The remaining
 `DynamicPredict` constructors in the framework are exactly the

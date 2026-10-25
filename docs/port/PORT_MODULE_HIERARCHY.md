@@ -58,9 +58,11 @@ layer internally and decode the result back to the output. `MultiChainComparison
 `forward(completions, **kwargs)` without introducing a second invocation envelope.
 
 Output-augmenting programs (`ChainOfThought`, `ReAct`, `MultiChainComparison`)
-prepend a field to the output via the shared
-[`OutputAugmentation`](../../modules/signatures/src/main/scala/dspy4s/signatures/OutputAugmentation.scala) helper
-(`WithField[O, Name, T]` + the `PrependField` typeclass — idempotent, cast-free, always a named tuple). Every
+prepend a field to the output with
+[`Signature.prependOutput`](../../modules/signatures/src/main/scala/dspy4s/signatures/Signature.scala), which changes
+the layout and the output shape in one call. Its output type comes from
+[`OutputAugmentation`](../../modules/signatures/src/main/scala/dspy4s/signatures/OutputAugmentation.scala)
+(`WithField[O, Name, T]` and the `PrependField` evidence: no second field, no cast, always a named tuple). Every
 signature surface (`of` / `fromType` / `from` / a **literal** `fromString`) yields a product type, so these
 programs uniformly carry their domain types; only the genuinely-runtime `Signature.fromStringDynamic` (Record I/O) is outside
 the `Signature` API.

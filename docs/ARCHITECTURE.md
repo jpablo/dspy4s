@@ -128,8 +128,10 @@ graph TD
      data-bag layer internally, decodes to `WithField[O,"reasoning",String]`), `MultiChainComparison[I,O]`
      (`MultiChainInput[I]` inside the uniform `ProgramCall`; `WithField[O,"rationale",String]`), and
      `BestOfN[I,O]` / `Refine[I,O]`
-     (output-preserving best-of-n over an inner program). Output-augmenting programs share the
-     `dspy4s.signatures.OutputAugmentation` helper. `DynamicPredict` is the prediction leaf for record-valued programs.
+     (output-preserving best-of-n over an inner program). Output-augmenting programs add their fields with the
+     field operations of `Signature` (`appendInput`, `appendInputs`, `prependOutput`, `withOutputs`), which change
+     the layout and the shapes in one call. `dspy4s.signatures.OutputAugmentation` gives the output type.
+     `DynamicPredict` is the prediction leaf for record-valued programs.
    - `Parallel` / `Aggregation` — batch/combinator utilities (not `Module`s).
    - `contracts/ProgramCall.scala` — generic `ProgramCall[I]` (input + `config` /
      `traceEnabled` / `rolloutId`)

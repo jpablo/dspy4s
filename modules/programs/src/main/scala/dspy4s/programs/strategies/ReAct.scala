@@ -6,7 +6,6 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
-import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.{ActionInterpreter, ActionOutcome}
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
@@ -18,7 +17,7 @@ import dspy4s.programs.runtime.InterpretedTrajectoryAgent.{ActionDecision, Actio
 import dspy4s.programs.runtime.ToolExecutor
 import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
 import dspy4s.signatures.OutputAugmentation.PrependField
-import dspy4s.signatures.{InputAugmentation, OutputAugmentation, Shape, Signature}
+import dspy4s.signatures.{Shape, Signature}
 import zio.blocks.schema.DynamicValue
 
 /** ReAct ("Reasoning and Acting"), the tool-using agent paradigm. Port of Python DSPy's `dspy.ReAct`, generalized over
@@ -32,10 +31,10 @@ import zio.blocks.schema.DynamicValue
   *
   * `ReAct[I, O]` is a `Module[I, WithReasoning[O]]`: the input is encoded from `I`, and the extractor's reply is
   * decoded into the base outputs `O` with a `reasoning: String` prepended (always a named tuple; see
-  * [[OutputAugmentation]]). The full rendered `trajectory` is kept on `.raw` for inspection, and the LM usage on `.raw`
-  * is the total of each model call of the call: the react calls, the model calls of the tools, and the extractor call
-  * (upstream `Module.__call__`; `Module.apply` opens the usage scope). The loop's tool protocol runs internally over
-  * the data-bag layer (a `Streamable[ReAct[I, O]]` instance lets it stream).
+  * [[dspy4s.signatures.OutputAugmentation]]). The full rendered `trajectory` is kept on `.raw` for inspection, and the
+  * LM usage on `.raw` is the total of each model call of the call: the react calls, the model calls of the tools, and
+  * the extractor call (upstream `Module.__call__`; `Module.apply` opens the usage scope). The loop's tool protocol runs
+  * internally over the data-bag layer (a `Streamable[ReAct[I, O]]` instance lets it stream).
   *
   * Tool selection is via output fields (the canonical DSPy mechanism) — not provider-native function-calling. Tool
   * failures (invocation error, non-fatal exception of a tool) are recorded as trajectory observations rather than
@@ -116,59 +115,42 @@ final case class ReAct[I, O](
               case Left(error)  => ActionOutcome.Failed(s"Execution error in ${request.name}: ${error.message}")
           }
 
-  /** Per-iteration signature: base inputs + `trajectory` -> `next_thought` / `next_tool_name` / `next_tool_args`. The
-    * base output fields are intentionally dropped here — they are produced by the extractor, not the loop. The values
-    * of `next_tool_name` are the names of the tools (upstream `Literal[tuple(tools.keys())]`).
+  /** The base signature with the `trajectory` input after the base inputs. The react step and the extractor read it. */
+  private val withTrajectory: Signature[(I, String), O] = baseSignature.appendInput(ReAct.trajectoryField)
+
+  /** The signature of one loop step: the base inputs and `trajectory`, and the outputs `next_thought`,
+    * `next_tool_name`, and `next_tool_args`. The step does not have the base outputs, because the extractor gives them.
+    * The values of `next_tool_name` are the names of the tools (upstream `Literal[tuple(tools.keys())]`). The output
+    * shape is the lenient [[ReAct.reactStepShape]].
     */
-  val reactSignature: SignatureLayout = baseLayout
-    .appendInput(ReAct.trajectoryField)
-    .replaceOutputs(Vector(
-      ReAct.nextThoughtField,
-      ReActProtocol.nextToolNameField(allTools.map(_.name)),
-      ReAct.nextToolArgsField
-    ))
+  val reactSignature: Signature[(I, String), ReAct.ReactStep] = withTrajectory
+    .withOutputs(
+      Vector(ReAct.nextThoughtField, ReActProtocol.nextToolNameField(allTools.map(_.name)), ReAct.nextToolArgsField),
+      ReAct.reactStepShape
+    )
     .withInstructions(Some(buildInstructions))
 
-  /** Final extractor signature: base inputs + base outputs + `trajectory`; reasoning is added by ChainOfThought. It
-    * keeps the effective instructions of the base signature (upstream `fallback_signature`).
+  /** The signature of the extractor: the base inputs and `trajectory`, and the outputs `reasoning` (as in
+    * ChainOfThought) and the base outputs. It keeps the effective instructions of the base signature (upstream
+    * `fallback_signature`).
     */
-  val extractorSignature: SignatureLayout = baseLayout.appendInput(ReAct.trajectoryField)
+  val extractorSignature: Signature[(I, String), ReAct.WithReasoning[O]] =
+    withTrajectory.prependOutput(ChainOfThought.reasoningName, ChainOfThought.reasoningField)
 
-  /** The per-iteration react predict, built once from [[reactSignature]] (mirrors Python's `self.react = Predict(...)`
-    * in `__init__`) — a `Predict[(I, String), ReactStep]`: the base input plus the rendered trajectory in, a
-    * leniently-decoded [[ReAct.ReactStep]] out (see [[ReAct.reactStepShape]]). The layout (prompt rendering, field
-    * descriptions, tool-listing instructions) is unchanged. Addressable + tunable via [[reactPredictOverride]];
-    * `forward` uses this member rather than rebuilding a local each call.
+  /** The react predict of each loop step (upstream `self.react = Predict(...)` in `__init__`). The class builds it one
+    * time from [[reactSignature]]. Its input is the base input and the trajectory text, and its output is a
+    * [[ReAct.ReactStep]] with a lenient decode (see [[ReAct.reactStepShape]]). [[reactPredictOverride]] replaces it,
+    * and `forward` uses this member.
     */
-  val reactPredict: Predict[(I, String), ReAct.ReactStep] = reactPredictOverride.getOrElse(Predict(
-    signature = Signature(
-      layout = reactSignature,
-      inputShape = InputAugmentation.appendedStringInput(baseSignature.inputShape, ReAct.trajectoryField, "ReAct"),
-      outputShape = ReAct.reactStepShape
-    ),
-    name = Some(reactProgramName)
-  ))
+  val reactPredict: Predict[(I, String), ReAct.ReactStep] =
+    reactPredictOverride.getOrElse(Predict(signature = reactSignature, name = Some(reactProgramName)))
 
-  /** The final extractor predict, built once from the CoT-augmented [[extractorSignature]] — a
-    * `Predict[(I, String), WithReasoning[O]]`, so the reasoning-prepended decode happens inside the predict (the
-    * `prepend` evidence this class already carries). Tunable via [[extractorPredictOverride]].
+  /** The extractor predict, built one time from [[extractorSignature]]. Its output is `WithReasoning[O]`, thus the
+    * predict decodes the `reasoning` output with the `prepend` evidence of this class. [[extractorPredictOverride]]
+    * replaces it.
     */
   override val extractorPredict: Predict[(I, String), ReAct.WithReasoning[O]] =
-    extractorPredictOverride.getOrElse(Predict(
-      signature = Signature(
-        layout = ChainOfThought.augmentLayout(extractorSignature),
-        inputShape = InputAugmentation
-          .appendedStringInput(baseSignature.inputShape, ReAct.trajectoryField, "ReAct extractor"),
-        outputShape = OutputAugmentation.prependedStringShape(
-          baseSignature.outputShape,
-          ChainOfThought.reasoningField,
-          ChainOfThought.reasoningName,
-          "ReAct extractor",
-          baseSignature.name
-        )
-      ),
-      name = Some(extractorProgramName)
-    ))
+    extractorPredictOverride.getOrElse(Predict(signature = extractorSignature, name = Some(extractorProgramName)))
 
   /** The instructions of the react step (upstream `ReAct.__init__`): the effective instructions of the base signature,
     * the protocol of `next_thought`, `next_tool_name`, and `next_tool_args`, and the numbered list of the tools in the

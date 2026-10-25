@@ -153,7 +153,7 @@ class MultiChainComparisonSuite extends FunSuite:
     assert(mcc.attemptInputs.validate(Vector("one", "two")).isLeft)
 
     val attempts = mcc.attemptInputs.validate(Vector("one", "two", "three")).toOption.get
-    val encoded  = mcc.attemptInputs.shape.encode(((question = "?"), attempts))
+    val encoded  = mcc.attemptInputs.signature.inputShape.encode(((question = "?"), attempts))
     val keys     = DynamicValues.recordKeys(encoded)
     assertEquals(
       keys,

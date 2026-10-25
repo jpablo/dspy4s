@@ -35,7 +35,9 @@ final case class ChainOfThought[I, O](
     name: Option[String] = None,
     config: DynamicValue.Record = DynamicValue.Record.empty
 )(using PrependField["reasoning", String, O])
-    extends Module[I, ChainOfThought.WithReasoning[O]]
+    extends Module[I, ChainOfThought.WithReasoning[O]]:
+  val signature: Signature[I, ChainOfThought.WithReasoning[O]] =
+    baseSignature.prependOutput("reasoning", reasoningField)
 ```
 
 Its fields have narrow responsibilities:
@@ -50,6 +52,9 @@ Its fields have narrow responsibilities:
 
 `PrependField` is compile-time evidence that dspy4s knows how to construct the augmented output type from `String` and
 `O`. Callers normally do not summon or pass it; Scala derives the appropriate instance from the concrete output type.
+
+`signature` is the augmented signature that the inner `Predict` runs. `Signature.prependOutput` changes the layout and
+the output shape in one call, thus the two always agree on the fields.
 
 The class also defines a convenient local alias:
 
@@ -95,8 +100,8 @@ flowchart TD
 This transformation is idempotent at all three representations used by the program:
 
 - the match type does not add a second `reasoning` label;
-- `SignatureLayout.prependOutput` does not add a second runtime field;
-- the augmented output `Shape` does not add a second field specification.
+- `Signature.prependOutput` does not add a second runtime field to the layout;
+- the output `Shape` of `Signature.prependOutput` does not add a second field specification.
 
 ## How the signature changes
 
@@ -347,7 +352,9 @@ model or emit tokens.
 A useful reading order is:
 
 1. [`ChainOfThought.scala`](ChainOfThought.scala): outer module, augmented signature, and inner predictor.
-2. [`OutputAugmentation.scala`](../../../../../../../signatures/src/main/scala/dspy4s/signatures/OutputAugmentation.scala): the match
+2. [`Signature.scala`](../../../../../../../signatures/src/main/scala/dspy4s/signatures/Signature.scala): `prependOutput`,
+   which changes the layout and the output shape in one call.
+   [`OutputAugmentation.scala`](../../../../../../../signatures/src/main/scala/dspy4s/signatures/OutputAugmentation.scala): the match
    type, `PrependField` evidence, and augmented output shape.
 3. [`SignatureOps.scala`](../../../../../../../core/src/main/scala/dspy4s/core/contracts/SignatureOps.scala): idempotent
    runtime-layout augmentation.

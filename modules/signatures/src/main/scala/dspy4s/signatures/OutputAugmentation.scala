@@ -1,9 +1,9 @@
 package dspy4s.signatures
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, ValidationError}
+import dspy4s.core.contracts.{DspyError, FieldSpec, ValidationError}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.json.Json
-import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
+import zio.blocks.schema.{DynamicValue, Schema}
 
 import scala.NamedTuple
 import scala.deriving.Mirror
@@ -18,8 +18,8 @@ import scala.deriving.Mirror
   * example, the `DynamicValue.Record` of `Signature.fromStringDynamic`). For it, the low-priority
   * [[PrependField.fallback]] gives `None`.
   *
-  * [[dspy4s.programs.strategies.ChainOfThought]] (`reasoning: String`), `ReAct`, and `MultiChainComparison`
-  * (`rationale: String`) use it.
+  * [[Signature.prependOutput]] uses it. [[dspy4s.programs.strategies.ChainOfThought]] (`reasoning: String`), `ReAct`,
+  * and `MultiChainComparison` (`rationale: String`) call that method.
   */
 object OutputAugmentation:
 
@@ -109,17 +109,16 @@ object OutputAugmentation:
           val (value, fields) = inner.split(out)
           (value, m.fromTuple(NamedTuple.toTuple(fields)))
 
-  /** The output [[Shape]] of an augmentation with a `String` field in the first position. A composite gives this shape
-    * to its inner `Predict` (the `reasoning` of `ChainOfThought`, and the extractor of `ReAct`). The shape puts `field`
-    * before the specs of `base` only when `base` has no field with that name, as the type-level [[WithField]] and the
-    * `prependOutput` of the layout do.
+  /** The output [[Shape]] of [[Signature.prependOutput]]: the `String` field `field` first, and then the fields of
+    * `base`. The shape puts `field` before the specs of `base` only when `base` has no field with that name, as the
+    * type-level [[WithField]] and the `prependOutput` of the layout do.
     *
     * The encode gets the base value back with [[PrependField.split]], encodes it with `base`, and puts the `String`
     * field first. Thus each base field has the encoding of its schema (an `Option`, a nested record).
     *
-    * The decode reads `fieldName` as a `String`, decodes the base output with `base`, and puts the field first. When
-    * the output of `base` has no static fields (the `DynamicValue.Record` output of `Signature.fromStringDynamic`), the
-    * decode gives a `ValidationError`. `label` names the component in the errors.
+    * The decode reads `field` as a `String`, decodes the base output with `base`, and puts the field first. When the
+    * output of `base` has no static fields (the `DynamicValue.Record` output of `Signature.fromStringDynamic`), the
+    * decode gives a `ValidationError`. `signatureName` names the signature in the errors.
     *
     * The JSON schema is the schema of `base` with the property of `field` first, in the order of the layout (upstream
     * builds the schema from the augmented signature). The name of `field` is first in `required` when the layout
@@ -128,18 +127,15 @@ object OutputAugmentation:
     * as it is. When the schema of `base` has no root `properties`, the shape has no schema, and the adapter builds one
     * from the layout.
     */
-  def prependedStringShape[Name <: String & Singleton, O, Out](
+  private[signatures] def prepended[Name <: String & Singleton, O, Out](
       base         : Shape[O],
-      field        : dspy4s.core.contracts.FieldSpec,
-      fieldName    : Name,
-      label        : String,
+      field        : FieldSpec,
       signatureName: String
   )(using prepend: PrependField.WithOutput[Name, String, O, Out]): Shape[Out] =
     val baseHasField = base.fieldSpecs.exists(_.name == field.name)
+    val withField    = Shape.pair(Shape.string(field, signatureName), base)
     new Shape[Out]:
-      val fieldSpecs: Vector[dspy4s.core.contracts.FieldSpec] =
-        if baseHasField then base.fieldSpecs
-        else field +: base.fieldSpecs
+      val fieldSpecs: Vector[FieldSpec] = if baseHasField then base.fieldSpecs else withField.fieldSpecs
 
       override lazy val jsonSchemaString: Option[String] =
         if baseHasField then base.jsonSchemaString
@@ -152,21 +148,14 @@ object OutputAugmentation:
 
       // `base` encodes the base value with its schema. When `base` has the field, the base value holds it.
       def encode(value: Out): DynamicValue.Record =
-        val (prepended, baseValue) = prepend.split(value)
-        val baseRecord             = base.encode(baseValue)
-        prepended.fold(baseRecord) { text =>
-          DynamicValues.mergeRecords(
-            DynamicValues.record(field.name -> DynamicValue.Primitive(PrimitiveValue.String(text))),
-            baseRecord
-          )
-        }
+        prepend.split(value) match
+          case (Some(text), baseValue) => withField.encode((text, baseValue))
+          case (None, baseValue)       => base.encode(baseValue)
 
       def decode(raw: DynamicValue.Record): Either[DspyError, Out] =
-        for
-          value     <- DynamicValues.requireString(raw, fieldName, label)
-          baseOut   <- base.decode(raw)
-          prepended <- prepend.prepend(value, baseOut).toRight(productOutputRequired(label, signatureName, baseOut))
-        yield prepended
+        withField.decode(raw).flatMap { (text, baseOut) =>
+          prepend.prepend(text, baseOut).toRight(productOutputRequired(field.name, signatureName, baseOut))
+        }
 
   /** The JSON schema of a `String` field, as zio-blocks writes it for the field of a record. */
   private lazy val StringProperty: Json = Schema.string.toJsonSchema.toJson
@@ -221,9 +210,9 @@ object OutputAugmentation:
   /** The error for an output with no static fields. The output of a `Signature` with no static fields (the
     * `DynamicValue.Record` output of `Signature.fromStringDynamic`) cannot hold a prepended field.
     */
-  private def productOutputRequired(label: String, signatureName: String, baseOut: Any): DspyError =
+  private def productOutputRequired(fieldName: String, signatureName: String, baseOut: Any): DspyError =
     ValidationError(
-      s"$label requires a product output (named tuple or case class); the signature '$signatureName' has a " +
-        s"fieldless output (got ${baseOut.getClass.getSimpleName}). Use a signature " +
+      s"The output '$fieldName' requires a product output (named tuple or case class); the signature " +
+        s"'$signatureName' has a fieldless output (got ${baseOut.getClass.getSimpleName}). Use a signature " +
         s"(Signature.of / Signature.derived / Signature.fromType)."
     )

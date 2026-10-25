@@ -1,9 +1,10 @@
 package dspy4s.signatures
 
-import dspy4s.core.contracts.{DspyError, FieldSpec, NotFoundError}
+import dspy4s.core.collections.Traverse
+import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, NotFoundError}
 import dspy4s.algebra.{IsEq, Law, <->}
 import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, Schema}
+import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 /** A schema-aware view of a user type `A`, used as the input or output of a `Signature`. Lists fields in declaration
   * order, converts each to a `FieldSpec` for the runtime `SignatureLayout`, and encodes / decodes values against the
@@ -177,6 +178,52 @@ object Shape:
     */
   inline def derived[A <: Product](using schema: Schema[A]): RoundTripShape[A] =
     ZioSchemaCodec.derivedFromZioSchema[A]
+
+  /** The shape of one `String` field. The decode reads `field` as a `String`. `label` names the signature in the
+    * errors.
+    */
+  private[signatures] def string(field: FieldSpec, label: String): Shape[String] =
+    new Shape[String]:
+      val fieldSpecs: Vector[FieldSpec] = Vector(field)
+
+      def encode(value: String): DynamicValue.Record =
+        DynamicValues.record(field.name -> DynamicValue.Primitive(PrimitiveValue.String(value)))
+
+      def decode(raw: DynamicValue.Record): Either[DspyError, String] =
+        DynamicValues.requireString(raw, field.name, label)
+
+  /** The shape of some `String` fields, with one value for each field in the order of `fields`. The encode needs
+    * exactly one value for each field. Thus only a carrier that checks the number of values can use this shape, for
+    * example [[Signature.AppendedStringInputs]].
+    */
+  private[signatures] def strings(fields: Vector[FieldSpec], label: String): Shape[Vector[String]] =
+    new Shape[Vector[String]]:
+      val fieldSpecs: Vector[FieldSpec] = fields
+
+      def encode(value: Vector[String]): DynamicValue.Record =
+        DynamicValue.Record(Chunk.from(fields.lazyZip(value).map { (field, text) =>
+          field.name -> DynamicValue.Primitive(PrimitiveValue.String(text))
+        }))
+
+      def decode(raw: DynamicValue.Record): Either[DspyError, Vector[String]] =
+        Traverse.either(fields)(field => DynamicValues.requireString(raw, field.name, label))
+
+  /** The shape of the pair `(A, B)`: the fields of `first`, and then the fields of `second`. The two shapes must have
+    * different field names. The encode joins the two records, and the decode reads the two values from one record. The
+    * pair has no JSON schema.
+    */
+  private[signatures] def pair[A, B](first: Shape[A], second: Shape[B]): Shape[(A, B)] =
+    new Shape[(A, B)]:
+      val fieldSpecs: Vector[FieldSpec] = first.fieldSpecs ++ second.fieldSpecs
+
+      def encode(value: (A, B)): DynamicValue.Record =
+        DynamicValues.mergeRecords(first.encode(value._1), second.encode(value._2))
+
+      def decode(raw: DynamicValue.Record): Either[DspyError, (A, B)] =
+        for
+          a <- first.decode(raw)
+          b <- second.decode(raw)
+        yield (a, b)
 
   /** The check that a record has each required field of `fieldSpecs`. The wire does not require an optional field or a
     * field with a default value: the decode gives the default to such an absent field. The check finds the names of the

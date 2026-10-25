@@ -16,8 +16,10 @@ class CodecReviewSuite extends FunSuite:
   private def str(text: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(text))
 
   test("the augmented output encodes the base fields with the base schema") {
-    val base    = Shape.canonicalDerived[CrAnswer]
-    val shape   = OutputAugmentation.prependedStringShape(base, FieldSpec("reasoning"), "reasoning", "test", "sig")
+    val base  = Shape.canonicalDerived[CrAnswer]
+    val shape = Signature.fromShapes("sig", "", Shape.canonicalDerived[CrWithDefault], base)
+      .prependOutput("reasoning", FieldSpec("reasoning"))
+      .outputShape
     val value   = CrAnswer(Some(3), CrDetail("x", 1))
     val raw     = DynamicValues.mergeRecords(DynamicValues.record("reasoning" := "because"), base.encode(value))
     val decoded = shape.decode(raw).fold(error => fail(error.message), identity)
@@ -61,6 +63,6 @@ class CodecReviewSuite extends FunSuite:
   }
 
   test("an appended input field cannot have the name of a base field") {
-    val base = Shape.canonicalDerived[CrDetail]
-    val _    = intercept[IllegalArgumentException](InputAugmentation.appendedStringInput(base, FieldSpec("note"), "test"))
+    val base = Signature.fromShapes("sig", "", Shape.canonicalDerived[CrDetail], Shape.canonicalDerived[CrWithDefault])
+    val _    = intercept[IllegalArgumentException](base.appendInput(FieldSpec("note")))
   }

@@ -9,14 +9,13 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.updated
-import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.optimization.{OptimizableParameters, withOptimizableParameters}
 import dspy4s.signatures.OutputAugmentation.PrependField
 import dspy4s.programs.contracts.Prediction
-import dspy4s.signatures.{InputAugmentation, OutputAugmentation, Signature}
+import dspy4s.signatures.{OutputAugmentation, Signature}
 import zio.blocks.schema.DynamicValue
 
 /** The semantic input to [[MultiChainComparison]]: the base input `I` plus the candidate completions to compare.
@@ -77,9 +76,8 @@ final case class MultiChainComparison[I, O](
   private val lastOutputName: Option[String] =
     answerFieldOverride.orElse(baseSignature.layout.outputFields.lastOption.map(_.name))
 
-  /** The `m` attempt-input fields (runtime arity: one per expected candidate, with per-instance descriptions and
-    * `Student Attempt #i:` prefixes). Shared by the layout and the input shape, which is what keeps the value-level
-    * field expansion and the prompt in lockstep.
+  /** The `m` attempt inputs, one for each expected candidate, with the descriptions of this instance and the prefixes
+    * `Student Attempt #i:`. [[Signature.appendInputs]] adds them to the layout and to the input shape in one call.
     */
   private val attemptFields: Vector[FieldSpec] = (1 to m).toVector.map { idx =>
     FieldSpec(
@@ -95,35 +93,26 @@ final case class MultiChainComparison[I, O](
     prefix = Some(rationalePrefix)
   )
 
-  /** The augmented layout: `baseSignature` plus `m` attempt-input fields appended, plus a `rationale` output field
-    * prepended (idempotent; matches Python field ordering).
-    */
-  val augmentedSignatureLayout: SignatureLayout =
-    attemptFields.foldLeft(baseSignature.layout)(_.appendInput(_)).prependOutput(rationaleField)
-
-  private[programs] val attemptInputs =
-    InputAugmentation.appendedStringInputs(baseSignature.inputShape, attemptFields, "MultiChainComparison")
+  /** The base signature with the `m` attempt inputs after the base inputs, and the type of their values. */
+  private[programs] val attemptInputs: Signature.AppendedStringInputs[I, O] = baseSignature.appendInputs(attemptFields)
 
   private[programs] type Attempts = attemptInputs.Values
 
-  /** The comparison predict, built once from [[augmentedSignatureLayout]] over this instance's opaque [[Attempts]]
-    * carrier. Only [[attemptInputs.validate]] can construct that carrier, so every input encodes exactly `m` numbered
-    * fields. Kept package-private for optimizer inspection and replacement; public execution goes through [[compare]].
+  /** The comparison signature: the base inputs and the `m` attempts, and the outputs `rationale` and the base outputs
+    * (the field order of upstream). The output keeps a base `rationale` field, and does not add a second one.
+    */
+  private val compareSignature: Signature[(I, Attempts), Out] =
+    attemptInputs.signature.prependOutput(MultiChainComparison.rationaleName, rationaleField)
+
+  /** The layout of the comparison signature. */
+  val augmentedSignatureLayout: SignatureLayout = compareSignature.layout
+
+  /** The comparison predict, built one time from the comparison signature over the opaque [[Attempts]] carrier of this
+    * instance. Only [[attemptInputs.validate]] makes that carrier, thus each input encodes exactly `m` numbered fields.
+    * The optimizers inspect and replace it, thus it is package-private. A public call goes through [[compare]].
     */
   private[programs] val comparePredict: Predict[(I, Attempts), MultiChainComparison.WithRationale[O]] =
-    val base = Predict(
-      signature = Signature(
-        layout = augmentedSignatureLayout,
-        inputShape = attemptInputs.shape,
-        outputShape = OutputAugmentation.prependedStringShape(
-          baseSignature.outputShape,
-          rationaleField,
-          MultiChainComparison.rationaleName,
-          "comparison",
-          baseSignature.name
-        )
-      )
-    )
+    val base = Predict(signature = compareSignature)
     comparePredictParametersOverride.fold(base)(base.withOptimizableParameters)
 
   override protected val lifecycle: ModuleLifecycle[MultiChainInput[I], Out] = ModuleLifecycle.observed(

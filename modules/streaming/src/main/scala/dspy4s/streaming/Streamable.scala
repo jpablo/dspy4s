@@ -55,10 +55,7 @@ object Streamable:
 
   /** `ChainOfThought` delegates to an inner `Predict` whose runtime signature contains the reasoning field. */
   given chainOfThought[I, O](using ProgramRunner[ChainOfThought[I, O]]): Streamable[ChainOfThought[I, O]] =
-    from { program =>
-      val layout = ChainOfThought.augmentLayout(program.baseSignature.layout)
-      Vector("predict" -> layout)
-    }
+    from(program => Vector("predict" -> program.signature.layout))
 
   /** `ReAct`: decode the record into the input, run it, and emit the raw prediction. Its two sub-predicts (the per-step
     * react predict and the final extractor) are the stream-listener targets.
@@ -66,9 +63,8 @@ object Streamable:
   given reAct[I, O](using ProgramRunner[ReAct[I, O]]): Streamable[ReAct[I, O]] =
     from { program =>
       Vector(
-        (program.reactProgramName, program.reactSignature),
-        // The extractor runs the CoT-AUGMENTED layout (a `reasoning` output prepended). Report that — not the
-        // un-augmented extractorSignature — so a `reasoning` stream listener isn't wrongly told it'll never fire.
+        (program.reactProgramName, program.reactSignature.layout),
+        // The extractor layout has the `reasoning` output first. Thus a `reasoning` stream listener can find its field.
         (program.extractorProgramName, program.extractorPredict.signature.layout)
       )
     }

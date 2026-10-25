@@ -84,14 +84,11 @@ object OptimizableLeaf:
   given chainOfThoughtOptimizableLeaf[I, O](using
       prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O]
   ): OptimizableLeaf[ChainOfThought[I, O]] with
-    private def augmented(program: ChainOfThought[I, O]) =
-      ChainOfThought.augmentLayout(program.baseSignature.layout)
-
     def get(program: ChainOfThought[I, O]): OptimizableParameters =
       OptimizableParameters(program.baseSignature.layout.instructions, program.demos, program.config, program.decisions)
 
     def metadata(program: ChainOfThought[I, O]): OptimizableMetadata =
-      OptimizableMetadata.from(augmented(program), program.moduleName)
+      OptimizableMetadata.from(program.signature.layout, program.moduleName)
 
     def set(program: ChainOfThought[I, O], updated: OptimizableParameters): ChainOfThought[I, O] =
       if updated == get(program) then program

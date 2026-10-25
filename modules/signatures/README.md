@@ -40,14 +40,34 @@ in a field `result`.
 
 | Type | Description |
 |------|-------------|
-| `Signature[I, O]` | A name, a `SignatureLayout`, a `Shape[I]`, and a `Shape[O]`. |
+| `Signature[I, O]` | A name, a `SignatureLayout`, a `Shape[I]`, and a `Shape[O]`. Its field operations change the layout and the shapes in one call (see below). |
 | `Shape[A]` | The `Shape` codecs of one type: `fieldSpecs`, `encode`, `decode`, and `jsonSchemaString`. |
 | `RoundTripShape[A]` | A `Shape[A]` with a law: `decode(encode(a)) == Right(a)`. Each shape that comes from a `Schema` has this type. |
 | `Shape.MapShape` | The shape of `fromStringDynamic`. Its `decode` only checks that each field of the layout is in the record. |
-| `OutputAugmentation` | Adds a field at the start of an output, for example `reasoning: String` in `ChainOfThought`. The result type `WithField[O, Name, T]` is a named tuple. |
-| `InputAugmentation` | Adds `String` fields at the end of an input, for example `trajectory` in `ReAct`. |
+| `OutputAugmentation` | The output type of `Signature.prependOutput`: `WithField[O, Name, T]` is a named tuple, and the `PrependField` evidence makes and splits its values. |
 | `SchemaInterop` | Gives other modules `decodeValue[A]` and `typeRef[A]`, for example to decode the arguments of a tool. |
 | `ZioSchemaCodec` | The internal object that makes a `RoundTripShape`, the `FieldSpec` values, and the JSON schema from a `Schema`. |
+
+## Field operations
+
+A composite program adds fields to the signature of the user. One call changes the layout and the shapes together,
+thus the layout and the shapes always agree on the names and the order of the fields. Each operation keeps the
+effective instructions of the signature.
+
+| Operation | Result | Use |
+|-----------|--------|-----|
+| `signature.appendInput(field)` | `Signature[(I, String), O]` | The `trajectory` input of `ReAct` |
+| `signature.appendInputs(fields)` | `Signature.AppendedStringInputs[I, O]` | The `reasoning_attempt_i` inputs of `MultiChainComparison` |
+| `signature.prependOutput(name, field)` | `Signature[I, WithField[O, name, String]]` | The `reasoning` output of `ChainOfThought` |
+| `signature.withOutputs(fields, shape)` | `Signature[I, O2]` | The loop step of `ReAct` |
+
+- `appendInput` and `appendInputs` reject a name that the signature has. A composite program adds the field, thus a
+  name clash is a bug of the program.
+- `appendInputs` is for a number of fields that is known only at run time. Its result holds the new `signature` and
+  the opaque type `Values`. Only `validate` gives a `Values`, thus the encode always gets one value for each field.
+- `prependOutput` changes nothing when the outputs already have the field. Else the field is first in the layout, in
+  the output shape, and in the JSON schema of the output shape.
+- `withOutputs` replaces all the outputs. The names of `shape` must be the names of `fields`, in the same order.
 
 ## The law of a shape
 
@@ -84,7 +104,7 @@ and this case.
 
 | Package | Contents |
 |---------|----------|
-| `signatures/` | `Signature`, `Shape`, `ZioSchemaCodec`, `SignatureBuilder`, `Spec`, the two augmentations, and `SchemaInterop` |
+| `signatures/` | `Signature`, `Shape`, `ZioSchemaCodec`, `SignatureBuilder`, `Spec`, `OutputAugmentation`, and `SchemaInterop` |
 | `signatures/internal/` | the macros: `FunctionMacro` (`from`, `fromType`, `fromString`), `SpecMacro` (`of`), and their helpers |
 
 ## Relation to dspy

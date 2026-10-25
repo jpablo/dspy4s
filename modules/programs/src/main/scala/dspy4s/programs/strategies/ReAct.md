@@ -87,6 +87,15 @@ extractorPredict:
   Predict[(I, String), ReAct.WithReasoning[O]]
 ```
 
+Their signatures come from the field operations of `Signature`. Each operation changes the layout and the shapes in
+one call:
+
+```scala
+val withTrajectory     = baseSignature.appendInput(trajectoryField)          // Signature[(I, String), O]
+val reactSignature     = withTrajectory.withOutputs(stepFields, reactStepShape)
+val extractorSignature = withTrajectory.prependOutput("reasoning", reasoningField)
+```
+
 `ReactStep` is the stable protocol shared by every ReAct task:
 
 ```scala

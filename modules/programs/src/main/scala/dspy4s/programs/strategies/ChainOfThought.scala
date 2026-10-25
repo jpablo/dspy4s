@@ -8,16 +8,16 @@ import dspy4s.programs.contracts.{Module, ModuleLifecycle, ProgramCall, ProgramR
 import dspy4s.programs.runtime.{PredictEngine, SettingsProgramRuntime}
 import dspy4s.signatures.OutputAugmentation.PrependField
 import dspy4s.programs.contracts.Prediction
-import dspy4s.signatures.{OutputAugmentation, Shape, Signature}
+import dspy4s.signatures.{OutputAugmentation, Signature}
 import zio.blocks.schema.DynamicValue
 
 /** ChainOfThought, defined as a small signature transformation on top of [[Predict]]. Wraps a `Signature[I, O]` and
   * produces a `Prediction[Out]` whose output is the base output with a `reasoning: String` field — **always a named
   * tuple** ([[ChainOfThought.WithReasoning]]).
   *
-  * Inputs flow through `Predict` unchanged. CoT contributes only the augmented signature: a leading `reasoning` output
-  * field in the runtime layout and an output `Shape` that decodes the underlying prediction as `(reasoning = ..., <base
-  * outputs...>)`.
+  * Inputs flow through `Predict` unchanged. CoT contributes only the augmented [[signature]]
+  * (`baseSignature.prependOutput`): a leading `reasoning` output field in the runtime layout and an output `Shape` that
+  * decodes the underlying prediction as `(reasoning = ..., <base outputs...>)`.
   *
   * **Output type.** `O` is normalized to its named-tuple view (`NamedTuple.From`: identity for named tuples, the field
   * tuple for case classes), then `reasoning` is prepended — *unless* the output already has a `reasoning` field, in
@@ -56,11 +56,17 @@ final case class ChainOfThought[I, O](
 
   override val moduleName: String = name.getOrElse("chain_of_thought")
 
+  /** The signature that the inner [[Predict]] runs: the base signature with the `reasoning` output first, when the base
+    * output has no `reasoning` field. See [[Signature.prependOutput]].
+    */
+  val signature: Signature[I, Out] =
+    baseSignature.prependOutput(ChainOfThought.reasoningName, ChainOfThought.reasoningField)
+
   // The key uses the augmented layout, as this leaf's `OptimizableMetadata` does. The inner `Predict` runs inside
   // this predictor, so it records no key of its own.
   override protected val lifecycle: ModuleLifecycle[I, Out] = ModuleLifecycle.predictor(
     baseSignature.inputShape,
-    PredictorKey.from(moduleName, ChainOfThought.augmentLayout(baseSignature.layout))
+    PredictorKey.from(moduleName, signature.layout)
   )
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[Out]] =
@@ -70,45 +76,23 @@ final case class ChainOfThought[I, O](
     * Left unnamed so it surfaces as a nested `predict` event under this program's `chain_of_thought` event.
     */
   private lazy val predict: Predict[I, Out] =
-    Predict(signature = augmentedSignature, demos = demos, runtime = runtime, config = config, decisions = decisions)
+    Predict(signature = signature, demos = demos, runtime = runtime, config = config, decisions = decisions)
 
   /** Experimental. This program with the explicit `settings` of the decision output `field`, as
     * [[Predict.withDecision]].
     */
   def withDecision(field: String, settings: DecisionSettings): Either[DspyError, ChainOfThought[I, O]] =
-    PredictEngine.withDecision(augmentedLayout, decisions, field, settings).map(updated => copy(decisions = updated))
+    PredictEngine.withDecision(signature.layout, decisions, field, settings).map(updated => copy(decisions = updated))
 
   /** Experimental. The effective criteria of the decision output `field`, as [[Predict.criteria]]. */
   def criteria(field: String): Either[DspyError, Option[DynamicValue]] =
-    PredictEngine.criteria(augmentedLayout, decisions, field)
+    PredictEngine.criteria(signature.layout, decisions, field)
 
   /** Experimental. This program with the criteria of the decision output `field` set to `criteria`, as
     * [[Predict.withCriteria]].
     */
   def withCriteria(field: String, criteria: DynamicValue): Either[DspyError, ChainOfThought[I, O]] =
-    PredictEngine.withCriteria(augmentedLayout, decisions, field, criteria).map(updated => copy(decisions = updated))
-
-  private def augmentedSignature: Signature[I, Out] =
-    Signature(
-      layout = augmentedLayout,
-      inputShape = baseSignature.inputShape,
-      outputShape = augmentedOutputShape
-    )
-
-  private def augmentedLayout: SignatureLayout =
-    ChainOfThought.augmentLayout(baseSignature.layout)
-
-  // The shared augmentation shape with `reasoning` in the first position: a prepend only when the base has no such
-  // field, its decode, and the base JSON schema with the `reasoning` property first. See
-  // [[OutputAugmentation.prependedStringShape]].
-  private def augmentedOutputShape: Shape[Out] =
-    OutputAugmentation.prependedStringShape(
-      baseSignature.outputShape,
-      ChainOfThought.reasoningField,
-      ChainOfThought.reasoningName,
-      "ChainOfThought",
-      baseSignature.name
-    )
+    PredictEngine.withCriteria(signature.layout, decisions, field, criteria).map(updated => copy(decisions = updated))
 
 object ChainOfThought:
 
@@ -124,9 +108,11 @@ object ChainOfThought:
     description = Some("${reasoning}")
   ))
 
-  /** `layout` with the `reasoning` output first (upstream `signature.prepend`). The result keeps the effective
-    * instructions of `layout`: a layout with no instructions keeps the default instructions of its own fields, which do
-    * not name `reasoning` (see [[dspy4s.core.contracts.SignatureOps]]).
+  /** `layout` with the `reasoning` output first (upstream `signature.prepend`), for a program that has only a layout,
+    * for example a `DynamicPredict`. A program with a typed signature uses [[Signature.prependOutput]], which also
+    * changes the shapes. The result keeps the effective instructions of `layout`: a layout with no instructions keeps
+    * the default instructions of its own fields, which do not name `reasoning` (see
+    * [[dspy4s.core.contracts.SignatureOps]]).
     */
   private[dspy4s] def augmentLayout(layout: SignatureLayout): SignatureLayout =
     layout.prependOutput(reasoningField)

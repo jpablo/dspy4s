@@ -220,7 +220,7 @@ Monoid, ordered fan-out) and the laws or explicit non-laws that govern each carr
 ## Already algebraic vs ad-hoc (current state)
 
 - **Clean / law-shaped:** `Either[DspyError, A]` (errors as values, a monad), `CIO` (monad),
-  the decode of `OutputAugmentation.prependedStringShape` (an augment with a round-trip law), `SignatureOps` (algebra 1, laws above),
+  the decode of `Signature.prependOutput` (an augment with a round-trip law), `SignatureOps` (algebra 1, laws above),
   schema-backed `RoundTripShape[A]` (`decode(encode(a)) = Right(a)`), and `Aggregation.majority`
   (a semilattice-flavored reduce). Plain validating `Shape[A]` deliberately makes no round-trip claim.
 - **Ad-hoc (ADD would refactor):** `BestOfN` / `Refine` / `MultiChainComparison` sharing no middleware (no
@@ -263,6 +263,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
   - **6.4 done** (commit `31aecbd`): `decodeAugmented` (field via a pluggable reader + post-decode hook);
     `decodePrepended` is its String/identity instance. Closing position left additive (no consumer). The
     signatures cleanup later moved this code into the decode of `prependedStringShape` and removed both functions.
+    Later, `Signature.prependOutput` took the place of `prependedStringShape`.
   - **6.5 done** (commit `dca35e9`): `Mode` (the `Controls => Controls` monoid) + `Moded` + `Compose.mode`;
     `ModeLawSuite` pins the monoid + identity + pass-through. Execution-wrapping modes left additive.
   - **Algebra 2 is complete.** Remaining work is optional/additive: the CIO substrate migration (kyo-compat),
@@ -347,10 +348,10 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `CopyDiscardCategorySuite`; it is intentionally not instantiated for effectful `Module`.
   - **Domain-valued inner predicts** (the class-A conversion, then the class-B bridge): every composite now runs
     inner `Predict`s — Refine's critic, ReAct, CodeAct, RLM, ProgramOfThought (statically-shaped layouts kept
-    verbatim, `InputAugmentation.appendedStringInput` for appended input fields, lenient hand-written or derived
-    shapes on the output side, `OutputAugmentation.prependedStringShape` for the reasoning-prepended extractors),
-    and `MultiChainComparison`, whose runtime-arity attempt block rides a per-instance opaque carrier
-    (`appendedStringInputs`: validation constructs the path-branded value and the shape total-encodes the `m`
-    numbered fields). Only layouts that exist purely as runtime values
+    verbatim, `Signature.appendInput` for appended input fields, lenient hand-written or derived shapes on the
+    output side, `Signature.prependOutput` for the reasoning-prepended extractors), and `MultiChainComparison`, whose
+    runtime-arity attempt block rides a per-instance opaque carrier (`Signature.appendInputs`: validation constructs
+    the path-branded value and the shape total-encodes the `m` numbered fields). Each of these `Signature` operations
+    changes the layout and the shapes in one call. Only layouts that exist purely as runtime values
     still construct a `DynamicPredict` inside the framework: the optimizers' own helper generations, the
     evaluation judge, and `Predict.erase`. See `algebra-2-program-composition.md` for the recipe.

@@ -334,8 +334,10 @@ adapter/LM/callback dance that Python has spread across
 `DynamicPredict` is the prediction leaf for record-valued programs: it executes runtime-built signatures while
 `Predict` is its sibling over the shared engine. Some agent internals construct dynamic prediction passes, but
 programs do not delegate through a universal `DynamicPredict` substrate. Three pieces made this clean:
-- **`OutputAugmentation`** (`dspy4s.signatures`) — the shared `WithField[O, Name, T]` + `PrependField` typeclass that
-  output-augmenting programs use to prepend `reasoning` / `rationale` (idempotent, cast-free, always a named tuple).
+- **`Signature.prependOutput`** (`dspy4s.signatures`), with the `WithField[O, Name, T]` type and the `PrependField`
+  evidence of `OutputAugmentation`. The output-augmenting programs use it to prepend `reasoning` or `rationale`. The
+  operation does not add a field that the output has, uses no cast, and always gives a named tuple. It changes the
+  layout and the output shape in one call, as `Signature.appendInput` does for an input.
 - **`Signature.fromString`** — a `transparent inline` macro that parses a literal DSL at compile time into
   `NamedTuple` I/O, so the string DSL is compiler-checked; `fromStringDynamic` is the runtime (`Record`) version.
 - **`Streamable[P]`** (`dspy4s.streaming`) — `Streamify` takes any program through this typeclass, so

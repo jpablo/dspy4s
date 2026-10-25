@@ -160,7 +160,7 @@ Simplify 5 (rank 7). Code-review 7 (rank 2). 1969 main lines, 1958 test lines.
 One simplify pass fits the module. Split the review in two.
 
 - [x] /simplify on the whole module, 1969 lines. After the pass: 1672 lines.
-- (a) The codec, about 1120 lines: `ZioSchemaCodec.scala`, `Shape.scala`, `OutputAugmentation.scala`, `InputAugmentation.scala`, `SchemaInterop.scala`.
+- (a) The codec, about 1120 lines: `ZioSchemaCodec.scala`, `Shape.scala`, `OutputAugmentation.scala`, InputAugmentation (removed later: its code is now `Signature.appendInput`), `SchemaInterop.scala`.
   - [x] /code-review
 - (b) The macros, about 850 lines: `internal/`, `Signature.scala`, `SignatureBuilder.scala`, `Spec.scala`.
   - [x] /code-review
@@ -175,7 +175,7 @@ One simplify pass fits the module. Split the review in two.
 
 Findings of the simplify pass that the pass did not fix:
 
-- [ ] A design proposal: augmentation as a `Signature` operation. ChainOfThought, ReAct, and MultiChainComparison each change the layout and the shape in two steps that can get out of step. `Shape.zip`, `Shape.field`, `Signature.appendInput`, and `Signature.prependOutput` can do both in one call. Do it in the programs pass.
+- [x] A design proposal: augmentation as a `Signature` operation. ChainOfThought, ReAct, and MultiChainComparison each change the layout and the shape in two steps that can get out of step. `Shape.zip`, `Shape.field`, `Signature.appendInput`, and `Signature.prependOutput` can do both in one call. Do it in the programs pass. Done: `Signature.appendInput`, `appendInputs` (with the carrier `Signature.AppendedStringInputs`), `prependOutput`, and `withOutputs` change the layout and the shapes in one call, over the private shape combinators `Shape.string`, `Shape.strings`, and `Shape.pair`. `InputAugmentation` and `OutputAugmentation.prependedStringShape` are gone, and `OutputAugmentation` keeps the output types. The four programs name each added field one time. `SignatureFieldOpsSuite` checks that the layout and the shapes agree.
 - [x] A design proposal: the decision types (History, Noul, Score, Choice, ToolCall) are a table of type ids in the codec, with a side channel for the levels of a Score. A type modifier on each type, and `Score.level: Option[L]` (as `Choice.value: O`), can replace the table and the side channel. It touches core, adapters, and optimize. Done: each type has the marker `@Modifier.config(TypeMarker.Key, ...)` (core `contracts/TypeMarker.scala`). The codec and the macros read it, and the type-id table, `isSingleValue`'s list of symbols, and `Signature.markToolCalls` are gone. `Score.level` is an `Option[L]`, and the decision decode gives the level by its name. `TypeMarkerSuite` guards the marker.
 
 ### Code-review findings
@@ -271,7 +271,7 @@ Simplify 7 (rank 1). Code-review 6 (rank 4). 8004 main lines, 11858 test lines.
 
 ### Simplify findings
 
-- [ ] `strategies/RLM.scala:246-270`, `:375-425`: a "Source-compatible facade" with type aliases and one-line forwarders to RLMModel, RLMReplProtocol, and RLMSandboxTools. `strategies/ReAct.scala:285-310`, `:323-325` and `strategies/Refine.scala:172`, `:246`, `:263`, `:271` repeat the pattern.
+- [ ] `strategies/RLM.scala:246-270`, `:375-425`: a "Source-compatible facade" with type aliases and one-line forwarders to RLMModel, RLMReplProtocol, and RLMSandboxTools. the end of `strategies/ReAct.scala` (the lines moved in the augmentation change) and `strategies/Refine.scala:172`, `:246`, `:263`, `:271` repeat the pattern.
 - [ ] `runtime/InterpretedTrajectoryAgent.scala` and `runtime/TrajectoryAgent.scala` have one implementer: ReAct. `ReAct.prepareAction` (`strategies/ReAct.scala:216-218`) always returns `Ready`, so the `Rejected` path and `recordRejection` (`:231-242`) are dead code.
 - [ ] `strategies/ReAct.scala:84-90` and `strategies/ReActV2.scala:149-154` hold the same tool dedup fold. The "Execution error in" text also occurs in both. Keep both programs: ReActV2 ports upstream `dspy.ReActV2`, and ReAct ports the text protocol.
 - [ ] `contracts/ToolCall.scala:6-7`: `ToolCallRequest` and `ToolCallResult` duplicate `core.contracts.ToolCall` and `ToolCallResult`. `ToolExecutor.invoke` (`runtime/ToolExecutor.scala:20-27`) has one caller, and its NotFound branch cannot run, because `strategies/ReAct.scala:109` checks the name first.
