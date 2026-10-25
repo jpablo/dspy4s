@@ -181,9 +181,9 @@ class LmCacheKeySuite extends FunSuite:
 
     assertEquals(sent.size, 2)
     sent.foreach { payload =>
-      assertEquals(DynamicJson.field(payload, "temperature"), Some(json("1.0")))
-      assertEquals(DynamicJson.field(payload, "rollout_id"), None)
-      assertEquals(DynamicJson.field(payload, "rolloutId"), None)
+      assertEquals(DynamicValues.recordGet(payload, "temperature"), Some(json("1.0")))
+      assertEquals(DynamicValues.recordGet(payload, "rollout_id"), None)
+      assertEquals(DynamicValues.recordGet(payload, "rolloutId"), None)
     }
   }
 

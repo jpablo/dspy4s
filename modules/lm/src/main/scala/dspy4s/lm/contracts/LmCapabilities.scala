@@ -34,7 +34,7 @@ object LmCapabilities:
   /** The capabilities that the port declares for an OpenAI-compatible server at `baseUrl` when the user declares none:
     * [[openAi]] when the host of the URL is `api.openai.com` (with no regard to case), else [[none]]. A URL that does
     * not parse gives [[none]]. A user of an other server that has these capabilities (for example Azure OpenAI, or a
-    * vLLM server with tool support) declares them with `OpenAiLanguageModel.withCapabilities`.
+    * vLLM server with tool support) declares them in the `capabilities` field of `OpenAiLanguageModel`.
     */
   def forBaseUrl(baseUrl: String): LmCapabilities =
     val host = Try(URI.create(baseUrl.trim)).toOption.flatMap(uri => Option(uri.getHost))

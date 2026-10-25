@@ -1,5 +1,6 @@
 package dspy4s.gepa
 
+import dspy4s.core.contracts.DspyError
 import dspy4s.programs.optimization.OptimizableId
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodecDeriver
@@ -142,7 +143,7 @@ object GepaStatePersistence:
                      )
                      .toEither
                      .left
-                     .map(e => s"invalid GEPA state snapshot: ${Option(e.getMessage).getOrElse(e.toString)}")
+                     .map(e => s"invalid GEPA state snapshot: ${DspyError.messageOf(e)}")
         yield state
       }
     }
@@ -192,5 +193,4 @@ object GepaStatePersistence:
     else
       try fromJson(new String(Files.readAllBytes(file), StandardCharsets.UTF_8)).map(Some(_))
       catch
-        case NonFatal(error) =>
-          Left(s"Could not read GEPA checkpoint '$file': ${Option(error.getMessage).getOrElse(error.toString)}")
+        case NonFatal(error) => Left(s"Could not read GEPA checkpoint '$file': ${DspyError.messageOf(error)}")

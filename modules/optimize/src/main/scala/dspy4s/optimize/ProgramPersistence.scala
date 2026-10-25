@@ -114,8 +114,7 @@ object ProgramPersistence:
       Files.write(Paths.get(path), dumpJson(program).getBytes(StandardCharsets.UTF_8))
       Right(())
     catch
-      case error: Throwable =>
-        Left(RuntimeError("program_save", Option(error.getMessage).getOrElse(error.getClass.getSimpleName)))
+      case error: Throwable => Left(RuntimeError("program_save", DspyError.messageOf(error)))
 
   /** Read a program's state JSON from `path` and rebuild it. IO failures are wrapped into a [[RuntimeError]]; malformed
     * JSON / state surfaces as the [[loadJson]] error.
@@ -124,6 +123,5 @@ object ProgramPersistence:
     val read: Either[DspyError, String] =
       try Right(new String(Files.readAllBytes(Paths.get(path)), StandardCharsets.UTF_8))
       catch
-        case error: Throwable =>
-          Left(RuntimeError("program_load", Option(error.getMessage).getOrElse(error.getClass.getSimpleName)))
+        case error: Throwable => Left(RuntimeError("program_load", DspyError.messageOf(error)))
     read.flatMap(json => loadJson(program, json))

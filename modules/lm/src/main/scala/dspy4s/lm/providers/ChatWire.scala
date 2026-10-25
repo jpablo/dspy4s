@@ -10,8 +10,7 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
-import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+import zio.blocks.schema.DynamicValue
 
 import java.util.Locale
 
@@ -20,7 +19,7 @@ import java.util.Locale
   * Responses mode.
   */
 private[lm] object ChatWire:
-  import DynamicJson.{field, asRecord, asString}
+  import DynamicValues.{asRecord, asSequence, asString, recordFromEntries, recordGet, sequence, string}
 
   /** The `type` value of a tool call on the wire. Each tool call is a function call. */
   private val functionCallType = "function"
@@ -35,7 +34,7 @@ private[lm] object ChatWire:
       defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
   ): DynamicValue.Record =
     options(request, defaultOptions)
-      .updated(WireKeys.messages, DynamicValue.Sequence(Chunk.from(request.messages.map(encodeMessage))))
+      .updated(WireKeys.messages, sequence(request.messages.map(encodeMessage)))
 
   /** The body of `request` in the text mode: the option bag and the model as in [[request]], and the prompt. The prompt
     * is the text of each message ([[messageText]]), one line for each message.
@@ -56,9 +55,9 @@ private[lm] object ChatWire:
   private[providers] def encodePart(part: ContentPart): DynamicValue.Record =
     val base     = Vector(WireKeys.`type` -> string(part.kind), WireKeys.text -> string(part.payload))
     val metadata = Option.when(part.metadata.nonEmpty)(
-      WireKeys.metadata -> DynamicValue.Record(Chunk.from(part.metadata.iterator.map((k, v) => k -> string(v)).toSeq))
+      WireKeys.metadata -> recordFromEntries(part.metadata.iterator.map((k, v) => k -> string(v)).toSeq)
     )
-    DynamicValue.Record(Chunk.from(base ++ metadata))
+    recordFromEntries(base ++ metadata)
 
   private def options(request: LmRequest, defaultOptions: DynamicValue.Record): DynamicValue.Record =
     request.effectiveOptions(defaultOptions).updated(WireKeys.model, string(request.model))
@@ -73,32 +72,32 @@ private[lm] object ChatWire:
     */
   private def encodeMessage(message: Message): DynamicValue =
     val content: DynamicValue =
-      if message.parts.nonEmpty then DynamicValue.Sequence(Chunk.from(message.parts.map(encodePart)))
+      if message.parts.nonEmpty then sequence(message.parts.map(encodePart))
       else if message.toolCalls.nonEmpty && !message.text.exists(_.nonEmpty) then DynamicValue.Null
       else string(message.text.getOrElse(""))
     val toolCalls = Option.when(message.toolCalls.nonEmpty)(
-      WireKeys.toolCalls -> DynamicValue.Sequence(Chunk.from(message.toolCalls.map(encodeToolCall)))
+      WireKeys.toolCalls -> sequence(message.toolCalls.map(encodeToolCall))
     )
     val toolCallId = message.toolCallId.map(callId => WireKeys.toolCallId -> string(callId))
     val name       = message.name.map(toolName => WireKeys.name -> string(toolName))
-    DynamicValue.Record(Chunk.from(
+    recordFromEntries(
       Vector(WireKeys.role -> string(roleName(message.role)), WireKeys.content -> content) ++ toolCalls ++ toolCallId ++
         name
-    ))
+    )
 
   /** A tool call in the provider form: `{"id", "type": "function", "function": {"name", "arguments"}}` (upstream
     * `_tool_call_as_openai_message_tool_call`). `arguments` is the JSON text of the arguments. A call with no id has no
     * `id` key.
     */
   private def encodeToolCall(call: ToolCall): DynamicValue =
-    val function = DynamicValue.Record(Chunk(
+    val function = DynamicValues.record(
       WireKeys.name      -> string(call.name),
-      WireKeys.arguments -> string(DynamicJson.encodeExact(call.args))
-    ))
-    DynamicValue.Record(Chunk.from(
+      WireKeys.arguments -> string(DynamicValues.encodeJson(call.args))
+    )
+    recordFromEntries(
       call.id.map(callId => WireKeys.id -> string(callId)).toVector ++
         Vector(WireKeys.`type` -> string(functionCallType), WireKeys.function -> function)
-    ))
+    )
 
   /** The text of one message for the prompt of the text mode: the text of the message, or the payloads of its parts.
     *
@@ -110,8 +109,6 @@ private[lm] object ChatWire:
   private def messageText(message: Message): String =
     message.text.getOrElse(message.parts.map(_.payload).mkString("\n"))
 
-  private def string(text: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(text))
-
   // ── The reply ───────────────────────────────────────────────────────────────────────────────────────────────
 
   /** The outputs of a chat reply: one output for each choice that has text or tool calls. A function-calling reply
@@ -122,11 +119,11 @@ private[lm] object ChatWire:
     seqField(raw, WireKeys.choices).map { choices =>
       choices.flatMap { choice =>
         val rec             = asRecord(choice)
-        val textFromMessage = rec.flatMap(r => field(r, WireKeys.message)).flatMap(extractText)
-        val textFromChoice  = rec.flatMap(r => field(r, WireKeys.text)).flatMap(asString)
+        val textFromMessage = rec.flatMap(r => recordGet(r, WireKeys.message)).flatMap(extractText)
+        val textFromChoice  = rec.flatMap(r => recordGet(r, WireKeys.text)).flatMap(asString)
         val text            = textFromMessage.orElse(textFromChoice).map(_.trim).filter(_.nonEmpty)
         val toolCalls       =
-          rec.flatMap(r => field(r, WireKeys.message)).flatMap(asRecord).map(parseToolCalls).getOrElse(Vector.empty)
+          rec.flatMap(r => recordGet(r, WireKeys.message)).flatMap(asRecord).map(parseToolCalls).getOrElse(Vector.empty)
         Option.when(text.nonEmpty || toolCalls.nonEmpty) {
           val metadata = rec
             .map(r => DynamicValues.recordFilterKeys(r, k => k != WireKeys.message && k != WireKeys.text))
@@ -138,7 +135,7 @@ private[lm] object ChatWire:
 
   /** The outputs of a reply in the text mode: the top-level `text`, else the outputs of the choices ([[outputs]]). */
   def textOutputs(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
-    field(raw, WireKeys.text).flatMap(asString).map(_.trim).filter(_.nonEmpty) match
+    recordGet(raw, WireKeys.text).flatMap(asString).map(_.trim).filter(_.nonEmpty) match
       case Some(text) => Right(Vector(LmOutput(text = text)))
       case None       => outputs(raw)
 
@@ -146,11 +143,11 @@ private[lm] object ChatWire:
     seqField(message, WireKeys.toolCalls) match
       case Right(entries) => entries.flatMap { call =>
           asRecord(call).flatMap { rec =>
-            val functionRec = field(rec, WireKeys.function).flatMap(asRecord).getOrElse(rec)
-            field(functionRec, WireKeys.name).flatMap(asString).map { name =>
+            val functionRec = recordGet(rec, WireKeys.function).flatMap(asRecord).getOrElse(rec)
+            recordGet(functionRec, WireKeys.name).flatMap(asString).map { name =>
               ToolCall(
                 name = name,
-                args = ToolCallAssembler.decodeArguments(field(functionRec, WireKeys.arguments)),
+                args = ToolCallAssembler.decodeArguments(recordGet(functionRec, WireKeys.arguments)),
                 id = toolCallId(rec)
               )
             }
@@ -163,27 +160,27 @@ private[lm] object ChatWire:
     * tool result must name. An entry with no id, or with an empty id, gives `None`.
     */
   private def toolCallId(call: DynamicValue.Record): Option[String] =
-    def text(key: String): Option[String] = field(call, key).flatMap(asString).filter(_.nonEmpty)
+    def text(key: String): Option[String] = recordGet(call, key).flatMap(asString).filter(_.nonEmpty)
     text(WireKeys.callId).orElse(text(WireKeys.id))
 
   private def extractText(node: DynamicValue): Option[String] =
-    field(node, WireKeys.content) match
+    recordGet(node, WireKeys.content) match
       case Some(content) => asString(content) match
           case Some(text) => Some(text)
           case None       =>
-            val fromParts = DynamicJson.asSequence(content).iterator
-              .flatMap(item => asRecord(item).flatMap(r => field(r, WireKeys.text)).flatMap(asString).map(_.trim))
+            val fromParts = asSequence(content).iterator
+              .flatMap(item => asRecord(item).flatMap(r => recordGet(r, WireKeys.text)).flatMap(asString).map(_.trim))
               .mkString("\n").trim
             Option
               .when(fromParts.nonEmpty)(fromParts)
-              .orElse(field(node, WireKeys.text).flatMap(asString).map(_.trim).filter(_.nonEmpty))
-      case None => field(node, WireKeys.text).flatMap(asString).map(_.trim).filter(_.nonEmpty)
+              .orElse(recordGet(node, WireKeys.text).flatMap(asString).map(_.trim).filter(_.nonEmpty))
+      case None => recordGet(node, WireKeys.text).flatMap(asString).map(_.trim).filter(_.nonEmpty)
 
   /** A reply field as an array: an absent field or a null gives no element, and a value that is not an array is a
     * `ParseError`.
     */
   private def seqField(value: DynamicValue, name: String): Either[DspyError, Vector[DynamicValue]] =
-    field(value, name) match
+    recordGet(value, name) match
       case None                             => Right(Vector.empty)
       case Some(_: DynamicValue.Null.type)  => Right(Vector.empty)
       case Some(seq: DynamicValue.Sequence) => Right(seq.elements.iterator.toVector)

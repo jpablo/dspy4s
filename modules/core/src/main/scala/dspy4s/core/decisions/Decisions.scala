@@ -288,7 +288,7 @@ final case class DecisionPlan private (
       settingsOf(name).criteria.orElse(
         kind match
           case DecisionKind.Noul           => None
-          case DecisionKind.Score(levels)  => Some(DynamicValue.Sequence(Chunk.from(levels.map(DecisionJson.string))))
+          case DecisionKind.Score(levels)  => Some(DynamicValues.sequence(levels.map(DynamicValues.string)))
           case DecisionKind.Choice(labels) => Some(DynamicValue.Record(Chunk.from(labels.map(_ -> DynamicValue.Null))))
       )
     }
@@ -317,7 +317,7 @@ final case class DecisionPlan private (
   def question(name: String): Either[DspyError, DynamicValue.Record] =
     for
       kind         <- kindOf(name).toRight(notDecision(name))
-      instructions <- settingsOf(name).instructions.orElse(description(name).map(DecisionJson.string)).toRight(
+      instructions <- settingsOf(name).instructions.orElse(description(name).map(DynamicValues.string)).toRight(
                         ConfigurationError(
                           s"Decision output '$name' requires a field description or explicit instructions"
                         )
@@ -436,7 +436,7 @@ final case class DecisionPlan private (
           _        <- positive(name, read)
           selected <- pick(name, labels, read)
         yield
-          val value = DecisionJson.string(labels(selected))
+          val value = DynamicValues.string(labels(selected))
           if !rich then value
           else
             DynamicValue.Record(
@@ -700,8 +700,6 @@ object DecisionPlan:
 
 /** The JSON rules of the decision values. */
 private object DecisionJson:
-
-  def string(text: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(text))
 
   def boolean(value: Boolean): DynamicValue = DynamicValue.Primitive(PrimitiveValue.Boolean(value))
 

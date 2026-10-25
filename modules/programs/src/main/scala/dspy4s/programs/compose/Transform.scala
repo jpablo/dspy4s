@@ -24,7 +24,7 @@ private[compose] object TransformResult:
     catch
       case NonFatal(error) => Left(RuntimeError(
           component,
-          Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getSimpleName)
+          DspyError.messageOf(error)
         ))
 
 /** Shared optimizable structure for a transparent unary wrapper. */

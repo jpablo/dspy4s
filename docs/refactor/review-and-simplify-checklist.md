@@ -139,7 +139,7 @@ Findings of the group (a) simplify pass that the pass did not fix:
 - [x] (fixed in the group (d) review, then removed with the state codec) `Constraint.numberOf` ignored `BigDecimal`, so `SignatureLayout.fromJson` dropped `gt(0.5)`.
 - [ ] `runtime/LocalPythonInterpreter.scala`, the tool threads: no test covers the fatal rethrow, a timeout in a tool call, an interrupt, or `close` from another thread. The inbound queue is not cleared between calls, so a line that arrives after a reply can become the reply of the next call. Skipped: only code that breaks the documented rule (all threads finish before the code returns) sends such a line.
 - [x] DenoPyodideInterpreter and DenoPyodideLaunch: `Files.createFile` threw out of `execute`, the runner script was never written again after a removal, and `spawn` reported each IOException as "Deno not found". Fixed: a `Left` with the cause, `InterpreterSupport.ResourceFile`, and the cause in the message.
-- [x] A value with a lone UTF-16 surrogate made the JSON writer throw out of `execute` (LocalPython and the Deno prelude). Fixed: `InterpreterSupport.tryEncodeJson` and a `Left` that names the variable.
+- [x] A value with a lone UTF-16 surrogate made the JSON writer throw out of `execute` (LocalPython and the Deno prelude). Fixed: `DynamicValues.tryEncodeJson` (first `InterpreterSupport.tryEncodeJson`) and a `Left` that names the variable.
 - [x] (fixed in the group (b) and (d) bug pass: the protocol encoders give an `Either`, code text gives a `Left` and the session continues, and a tool reply falls back to an error reply with the cause) Gaps of the lone-surrogate fix: in DenoPyodideInterpreter, code text with a lone surrogate still throws from `DenoPyodideProtocol.encodeRequest`, and a tool exception with a lone surrogate in its message throws from `encodeError` in `handleToolCall`.
 - [ ] `runtime/DenoPyodideLaunch.scala`, `denoCacheDir`: when `deno info --json` gives no directory, one launch probes again two times, each with a 10-second limit. Skipped: a new probe on each launch is deliberate, so that a Deno that the user installs later is found.
 - [x] (fixed in the group (b) and (d) bug pass: `callbacks`, `callbackMetadata`, and `captureFailureTraces` are `Option` fields, and the accessors of `RuntimeContext` give the effective values) Group (b) review, a decision for the owner: `contracts/RuntimeContext.scala`, `fillFrom`, treats an empty callback list, an empty callback metadata record, and `captureFailureTraces = false` as "not set". Thus `withCallbacks(Vector.empty)` cannot turn off the callbacks of the global context, as upstream `dspy.context(callbacks=[])` does. A fix changes the type of these fields (for example to `Option`).
@@ -199,7 +199,7 @@ Simplify 5 (rank 5). Code-review 5 (rank 8). 4966 main lines, 6422 test lines.
 ### Passes
 
 - (a) The providers, about 2600 lines: `providers/`.
-  - [ ] /simplify
+  - [x] /simplify
   - [ ] /code-review
 - (b) The runtime and the contracts, about 2360 lines: `runtime/`, `contracts/`.
   - [ ] /simplify
@@ -207,13 +207,13 @@ Simplify 5 (rank 5). Code-review 5 (rank 8). 4966 main lines, 6422 test lines.
 
 ### Simplify findings
 
-- [ ] Private copies of the `string`, `sequence`, `record`, and `isNull` helpers: `providers/ResponsesWire.scala` (the helpers at its end), `runtime/DiskLmCache.scala:440-470`, `providers/ChatWire.scala` (`string`), `runtime/LmHistoryRecord.scala:125`. Core now has `DynamicValues.isNull` and `DynamicValues.encodeJson`; `providers/DynamicJson.scala:59` also has an `isNull`.
+- [x] Private copies of the `string`, `sequence`, `record`, and `isNull` helpers: `providers/ResponsesWire.scala` (the helpers at its end), `runtime/DiskLmCache.scala` (the helpers at its end), `providers/ChatWire.scala` (`string`), `runtime/LmHistoryRecord.scala:125`. Core now has `DynamicValues.isNull` and `DynamicValues.encodeJson`; `providers/DynamicJson.scala` also had an `isNull`. Fixed: `DynamicValues.string`, `sequence`, `sequenceAt`, `asRecord`, `asSequence`, and `tryEncodeJson` in core; `recordGet` takes each `DynamicValue`. `DynamicJson` keeps only the provider encode (with no null field) and the guarded decode.
 - [ ] `runtime/DiskLmCache.scala:16-151`, `:263-279`: a reader for the old Java-serialization cache format, about 150 lines.
 - [x] `providers/OpenAiEmbedder.scala`, `asFloat`: the same tolerant number read as the new `DynamicValues.asDouble` in core. Fixed: a derived lenient codec reads the reply (`EmbeddingsReply`), and `floatRow`, `asFloat`, and `asInt` are gone.
 - [ ] `runtime/ManagedLanguageModel.scala`, `UsageTracking`: it writes its thread-local scope and its carrier by hand. Core now has `ScopedLocal` (`private[dspy4s]`) for this job.
-- [ ] `runtime/DiskLmCache.scala:370-470`: a hand-written JSON codec. A DTO with a derived Schema (JsonCodecDeriver) can replace it.
+- [ ] `runtime/DiskLmCache.scala:371-463`: a hand-written JSON codec. A DTO with a derived Schema (JsonCodecDeriver) can replace it.
 - [x] ProviderLanguageModel (removed) writes a magic `mode` key, and `providers/OpenAiClient.scala:24-39`, `:103-113` read it and remove it. Pass the mode as a typed value. Fixed: `OpenAiClient.invoke(mode, body)` and `stream(mode, body)`.
-- [ ] `providers/PythonStr.scala:100-116` copies the Python float repr of adapters `internal/PythonText.scala:369-422`, with a different algorithm.
+- [x] `providers/PythonStr.scala` copied the Python float repr of adapters `internal/PythonText.scala`, with a different algorithm. Fixed: core `contracts/PythonRepr.scala` has the algorithm of `PythonText`, and `PythonStr`, `PythonText`, and gepa `ReflectiveRecord` use it.
 - [x] `providers/OpenAiLanguageModel.scala:69-94` copies the pipeline of ProviderLanguageModel (removed). Fixed: `ProviderLanguageModel` had no user in the main code and is removed. Its encoders and its reply parser are `providers/ChatWire.scala`.
 
 ### Code-review findings
@@ -240,7 +240,8 @@ Simplify 6 (rank 4). Code-review 6 (rank 3). 4243 main lines, 4943 test lines.
 
 ### Simplify findings
 
-- [ ] Three JSON readers with different number rules: `internal/JsonDynamic.scala:55`, `internal/PythonText.scala:427` (ujson BufferedValue), and `JSONAdapterParser.scala:142`. Use one reader.
+- [ ] Private copies of `DynamicValues.string`: `DecisionAdapter.scala:353` (`text`), `contracts/ToolContracts.scala:102` (`str`), `contracts/NativeFunctionCalling.scala:111` (`str`), `internal/StrictJsonSchema.scala:360` (`str`). Use the core helper. (found in the lm pass)
+- [ ] Three JSON readers with different number rules: `internal/JsonDynamic.scala:55`, `internal/PythonText.scala:371` (ujson BufferedValue), and `JSONAdapterParser.scala:142`. Use one reader.
 - [ ] `contracts/AdapterInvocation.scala:19`: `outputJsonSchema: Option[String]` is parsed again at `DecisionAdapter.scala:132`, `JSONAdapterPrompt.scala:134`, and `internal/PromptText.scala:256`. `DecisionAdapter.scala:82` writes it back to text. A typed record removes these round trips, but the change touches other modules.
 - [ ] `contracts/ToolContracts.scala:31-65`, `:103-104`: `toOpenAiTools` (`Map[String, Any]`), `ToolCallData`, and `fromOutput`. Only tests use them.
 - [ ] `ChatAdapterPrompt.scala:14-37` repeats `JSONAdapterPrompt.scala:17-51`. Three adapters repeat the same native-tool options (the flag, `parallelToolCalls`, and `toolChoice`). Four files have their own copy of the `str` helper.
@@ -250,7 +251,7 @@ Simplify 6 (rank 4). Code-review 6 (rank 3). 4243 main lines, 4943 test lines.
 - [ ] `XMLAdapter.scala:146-149` uses `XML.loadString`. A raw `&` or `<` in a value ("AT&T", "a < b") breaks the parse. Upstream uses a tolerant regex. With one output field, the fallback returns the whole tagged text as the value. `XmlStreamingState` accepts the same text, so the stream and the parse give different results. No test covers this.
 - [ ] `internal/JsonDynamic.scala:21-26`, `:42`, and `JSONAdapterParser.scala:142`: ujson keeps numbers as Double. Integers above 2^53 in `json` and `list` fields change value. `internal/StrictJsonSchema.scala:345` does the same to defaults.
 - [ ] `JsonStreamingState.scala:91` starts at the first `{`, but the parser prefers the ```` ```json ```` fence (`JSONAdapterParser.scala:97-105`). Duplicate keys and repeated XML tags give extra chunks, but the parser keeps one value.
-- [ ] `internal/PythonText.scala:430-446` and `JsonDynamic.fromUjson` recurse on deep LM output. `Try` does not catch `StackOverflowError`.
+- [ ] `internal/PythonText.scala:374-390` and `JsonDynamic.fromUjson` recurse on deep LM output. `Try` does not catch `StackOverflowError`.
 - [ ] `JSONAdapterParser.scala:155-159` rejects an `int` above Int.MaxValue. `internal/AdapterTextSupport.scala:191` accepts a Long for an optional field.
 
 ## programs
@@ -272,6 +273,7 @@ Simplify 7 (rank 1). Code-review 6 (rank 4). 8004 main lines, 11858 test lines.
 
 ### Simplify findings
 
+- [ ] Private copies of `DynamicValues.string`: `strategies/ReActProtocol.scala:92` and `strategies/ReActV2.scala:513` (`text`). Use the core helper. (found in the lm pass)
 - [ ] `strategies/RLM.scala:246-270`, `:375-425`: a "Source-compatible facade" with type aliases and one-line forwarders to RLMModel, RLMReplProtocol, and RLMSandboxTools. the end of `strategies/ReAct.scala` (the lines moved in the augmentation change) and `strategies/Refine.scala:172`, `:246`, `:263`, `:271` repeat the pattern.
 - [ ] `runtime/InterpretedTrajectoryAgent.scala` and `runtime/TrajectoryAgent.scala` have one implementer: ReAct. `ReAct.prepareAction` (`strategies/ReAct.scala:216-218`) always returns `Ready`, so the `Rejected` path and `recordRejection` (`:231-242`) are dead code.
 - [ ] `strategies/ReAct.scala:84-90` and `strategies/ReActV2.scala:149-154` hold the same tool dedup fold. The "Execution error in" text also occurs in both. Keep both programs: ReActV2 ports upstream `dspy.ReActV2`, and ReAct ports the text protocol.
@@ -334,6 +336,7 @@ Simplify 7 (rank 2). Code-review 6 (rank 5). 2954 main lines, 4945 test lines.
 
 ### Simplify findings
 
+- [ ] Private copies of core helpers: `ReAnchor.scala:144` (`record`, the same as `DynamicValues.recordFromEntries`) and `ReAnchor.scala:151` (`text`, the same as `DynamicValues.string`). (found in the lm pass)
 - [ ] `BootstrapFewShotWithRandomSearch.scala:56-198` uses `return`, `var`, `boundary/break`, and mutable buffers. The `BootstrapFewShotConfig` at `:86` and `:111` is written two times, and only the seed is different.
 - [x] The same Either `traverse` helper in ReAnchor, GroundedProposer, and adapters StrictJsonSchema. Fixed in the core group (d) pass: `Traverse.either` in core.
 - [ ] `COPRO.scala:213`, `propose/GroundedProposer.scala:188`, and `InferRules.scala:158` repeat one pattern: a DynamicPredict call loop with a rolloutId window, a temperature bag, and `recordGet`/`renderText`/`trim`. The window offsets (64, 100, 10000) are magic numbers.
@@ -364,7 +367,8 @@ Simplify 5 (rank 8). Code-review 4 (rank 9). 3242 main lines, 6331 test lines.
 
 ### Simplify findings
 
-- [ ] `ReflectiveRecord.scala:67-160` has its own Python `json.dumps` writer. Adapters `internal/PythonText.scala:215` (`json`) already does this, but it is `private[adapters]`.
+- [ ] `GepaAdapter.scala:326` (`text`) is a private copy of `DynamicValues.string`. (found in the lm pass)
+- [ ] `ReflectiveRecord.scala:68-138` has its own Python `json.dumps` writer. Adapters `internal/PythonText.scala:216` (`json`) already does this, but it is `private[adapters]`.
 - [ ] `GepaAdapter.scala:174-190` builds its own `newFixedThreadPool` and context capture. This copies what ParallelExecutor in programs does.
 - [ ] Thin wrappers: `GepaEngine.scala:560` (`fullEval`) only calls `cache.scored`. `GepaEvalCache.scala:125` (`scores`) and the public `makeReflectiveDataset` overload (`GepaAdapter.scala:210`, with an adapter-level `rng`) are used only by tests.
 - [ ] `MergeProposer.scala:59-105`: the engine builds a mutable proposer for each iteration and copies its `MergeSchedule` back. Plain functions on the schedule are simpler. `sharedExamples` (`:203`) always equals the valset size.
@@ -417,6 +421,7 @@ Simplify 2 (rank 12). Code-review 3 (rank 10). 396 main lines, 586 test lines.
 
 ### Simplify findings
 
+- [ ] `McpTools.scala:210` (`string`) is a private copy of `DynamicValues.string`. (found in the lm pass)
 - [ ] `JavaJson.scala:90` reads `productElement(0)` by reflection for dates and UUIDs, which is fragile. Line `:88` maps `Unit` to an empty map.
 - [ ] `McpTools.scala:198-206` (`typeRefOf`) is the inverse of programs `internal/ToolText.scala:49-57` (`jsonType`). The two copies of one mapping can become different.
 - [ ] `McpTools.scala:90-99` (`convert`) uses alias vals and an anonymous `ToolFunction`.

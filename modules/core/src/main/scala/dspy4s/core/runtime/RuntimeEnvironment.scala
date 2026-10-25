@@ -334,7 +334,7 @@ object RuntimeEnvironment:
         try callback.onEvent(event)
         catch
           case NonFatal(error) =>
-            val detail = Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getSimpleName)
+            val detail = DspyError.messageOf(error)
             warn("callback", s"${callback.getClass.getName} failed for ${event.getClass.getSimpleName}: $detail")
       }
 

@@ -61,7 +61,9 @@ object Mcp:
     Using(McpClient.sync(transport).build()) { client =>
       val _ = client.initialize()
       body(client)
-    }.toEither.left.map[DspyError](error => RuntimeError("mcp", s"MCP client failed: ${error.getMessage}")).flatten
+    }.toEither.left.map[DspyError](error =>
+      RuntimeError("mcp", s"MCP client failed: ${DspyError.messageOf(error)}")
+    ).flatten
 
   // ── Snippet 1 (lines 33–44): the tools of a remote server ──
   // | import asyncio

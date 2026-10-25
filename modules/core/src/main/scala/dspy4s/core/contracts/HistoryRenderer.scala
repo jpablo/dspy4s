@@ -1,7 +1,6 @@
 package dspy4s.core.contracts
 
 import zio.blocks.schema.DynamicValue
-import zio.blocks.schema.PrimitiveValue
 
 import java.util.Locale
 
@@ -23,6 +22,7 @@ import java.util.Locale
   * The line ends are the line ends of upstream: the text of each upstream `print` call is the same, with no colors.
   */
 object HistoryRenderer:
+  import DynamicValues.{asRecord, recordGet, sequenceAt}
 
   /** Render `entries` (already limited to the last n by the caller) as a single string. Empty input yields a short "no
     * history" notice rather than an empty string, so callers can print the result unconditionally.
@@ -36,37 +36,38 @@ object HistoryRenderer:
     val payload = entry.payload
     Vector(line("\n\n\n"), label(s"[${entry.timestamp}]")) ++
       messages(payload).flatMap(message) ++
-      outputs(sequence(payload, "outputs")) ++
+      outputs(sequenceAt(payload, "outputs")) ++
       error(payload)
 
   /** The objects of `messages`. When there is none, one user message with the `prompt` of the entry. */
   private def messages(payload: DynamicValue.Record): Vector[DynamicValue.Record] =
-    val listed = records(sequence(payload, "messages"))
+    val listed = records(sequenceAt(payload, "messages"))
     if listed.nonEmpty then listed
     else
       Vector(DynamicValues.recordFromEntries(
-        Vector[(String, DynamicValue)]("role" -> text("user")) ++ field(payload, "prompt").map("content" -> _)
+        Vector[(String, DynamicValue)]("role" -> DynamicValues.string("user")) ++
+          recordGet(payload, "prompt").map("content" -> _)
       ))
 
   private def message(value: DynamicValue.Record): Vector[String] =
-    val role = string(value, "role").getOrElse("unknown")
+    val role = stringAt(value, "role").getOrElse("unknown")
     Vector(label(s"${capitalized(role)} message:")) ++
-      string(value, "content").map(content => line(content.strip())).toVector ++
-      records(sequence(value, "parts")).map(part) ++
-      toolCalls(sequence(value, "tool_calls")) :+
+      stringAt(value, "content").map(content => line(content.strip())).toVector ++
+      records(sequenceAt(value, "parts")).map(part) ++
+      toolCalls(sequenceAt(value, "tool_calls")) :+
       line("\n")
 
   /** The line of one content part: its kind and the length of its payload. */
   private def part(value: DynamicValue.Record): String =
-    val kind   = string(value, "kind").getOrElse("part")
-    val length = string(value, "payload").fold(0)(payload => payload.codePointCount(0, payload.length))
+    val kind   = stringAt(value, "kind").getOrElse("part")
+    val length = stringAt(value, "payload").fold(0)(payload => payload.codePointCount(0, payload.length))
     label(s"<$kind: $length characters>")
 
   /** The response and the tool calls of the first output, and the number of the other outputs. */
   private def outputs(values: Vector[DynamicValue]): Vector[String] =
     val first = values.headOption.toVector.flatMap {
-      case output: DynamicValue.Record => string(output, "text").filter(_.nonEmpty).toVector.flatMap(response) ++
-          toolCalls(sequence(output, "tool_calls"))
+      case output: DynamicValue.Record => stringAt(output, "text").filter(_.nonEmpty).toVector.flatMap(response) ++
+          toolCalls(sequenceAt(output, "tool_calls"))
       case other => DynamicValues.asString(other).toVector.flatMap(response)
     }
     val others = Option.when(values.size > 1)(s" \t (and ${values.size - 1} other completions)\n")
@@ -76,8 +77,8 @@ object HistoryRenderer:
     Vector(label("Response:"), answer(content.strip()))
 
   private def error(payload: DynamicValue.Record): Vector[String] =
-    string(payload, "error_code").toVector.map { code =>
-      label(s"Error ($code): ${string(payload, "error_message").getOrElse("")}")
+    stringAt(payload, "error_code").toVector.map { code =>
+      label(s"Error ($code): ${stringAt(payload, "error_message").getOrElse("")}")
     }
 
   private def toolCalls(calls: Vector[DynamicValue]): Vector[String] =
@@ -89,12 +90,12 @@ object HistoryRenderer:
     */
   private def toolCall(call: DynamicValue): String =
     val record   = asRecord(call)
-    val function = record.flatMap(field(_, "function")).flatMap(asRecord)
-    val name     = function.flatMap(string(_, "name")).filter(_.nonEmpty)
-      .orElse(record.flatMap(string(_, "name")))
+    val function = record.flatMap(recordGet(_, "function")).flatMap(asRecord)
+    val name     = function.flatMap(stringAt(_, "name")).filter(_.nonEmpty)
+      .orElse(record.flatMap(stringAt(_, "name")))
       .getOrElse("<unknown>")
-    val arguments = function.flatMap(field(_, "arguments"))
-      .orElse(record.flatMap(found => field(found, "args").orElse(field(found, "arguments"))))
+    val arguments = function.flatMap(recordGet(_, "arguments"))
+      .orElse(record.flatMap(found => recordGet(found, "args").orElse(recordGet(found, "arguments"))))
       .getOrElse(DynamicValue.Record.empty)
     s"$name: ${argumentsText(arguments)}"
 
@@ -118,24 +119,9 @@ object HistoryRenderer:
   /** The text of upstream `print(_green(text))`, with no colors. */
   private def answer(text: String): String = s"${text.stripLeading()}\n\n"
 
-  private def field(record: DynamicValue.Record, key: String): Option[DynamicValue] =
-    DynamicValues.recordGet(record, key)
-
-  private def string(record: DynamicValue.Record, key: String): Option[String] =
-    field(record, key).flatMap(DynamicValues.asString)
-
-  private def sequence(record: DynamicValue.Record, key: String): Vector[DynamicValue] =
-    field(record, key) match
-      case Some(values: DynamicValue.Sequence) => values.elements.toVector
-      case _                                   => Vector.empty
+  /** The string in the field `key` of `record`. */
+  private def stringAt(record: DynamicValue.Record, key: String): Option[String] =
+    recordGet(record, key).flatMap(DynamicValues.asString)
 
   private def records(values: Vector[DynamicValue]): Vector[DynamicValue.Record] =
     values.flatMap(asRecord)
-
-  private def asRecord(value: DynamicValue): Option[DynamicValue.Record] =
-    value match
-      case record: DynamicValue.Record => Some(record)
-      case _                           => None
-
-  private def text(value: String): DynamicValue =
-    DynamicValue.Primitive(PrimitiveValue.String(value))

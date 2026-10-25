@@ -11,7 +11,6 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.Message
-import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.PrimitiveValue
 
@@ -49,11 +48,11 @@ object LmHistoryRecord:
   def success(request: LmRequest, response: LmResponse, cacheHit: Boolean, cost: LmCost): DynamicValue.Record =
     DynamicValues.recordFromEntries(
       head(request, cacheHit) ++ Vector[(String, DynamicValue)](
-        "outputs"        -> sequence(response.outputs.map(output)),
+        "outputs"        -> DynamicValues.sequence(response.outputs.map(output)),
         "usage"          -> response.usage.fold[DynamicValue](DynamicValue.Null)(usage),
         "cost"           -> costValue(cost),
         "cost_details"   -> costDetails(cost),
-        "response_model" -> response.modelName.fold[DynamicValue](DynamicValue.Null)(text),
+        "response_model" -> response.modelName.fold[DynamicValue](DynamicValue.Null)(DynamicValues.string),
         "uuid"           := newUuid()
       )
     )
@@ -85,24 +84,24 @@ object LmHistoryRecord:
       "model"      := request.model,
       "model_type" := lowerCase(request.mode.toString),
       "cache_hit"  := cacheHit,
-      "messages"   -> sequence(request.messages.map(message)),
+      "messages"   -> DynamicValues.sequence(request.messages.map(message)),
       "kwargs"     -> DynamicValues.recordFilterKeys(request.options, key => !key.startsWith("api_"))
     )
 
   private def message(value: Message): DynamicValue =
     DynamicValues.recordFromEntries(
       Vector[(String, DynamicValue)]("role" := lowerCase(value.role.toString), "content" := value.text.getOrElse(""))
-        ++ Option.when(value.toolCalls.nonEmpty)("tool_calls" -> sequence(value.toolCalls.map(toolCall)))
+        ++ Option.when(value.toolCalls.nonEmpty)("tool_calls" -> DynamicValues.sequence(value.toolCalls.map(toolCall)))
         ++ value.toolCallId.map(id => "tool_call_id" := id)
         ++ value.name.map(name => "name" := name)
-        ++ Option.when(value.parts.nonEmpty)("parts" -> sequence(value.parts.map(part)))
+        ++ Option.when(value.parts.nonEmpty)("parts" -> DynamicValues.sequence(value.parts.map(part)))
     )
 
   private def part(value: ContentPart): DynamicValue =
     DynamicValues.record("kind" := value.kind, "payload" := value.payload)
 
   private def output(value: LmOutput): DynamicValue =
-    DynamicValues.record("text" := value.text, "tool_calls" -> sequence(value.toolCalls.map(toolCall)))
+    DynamicValues.record("text" := value.text, "tool_calls" -> DynamicValues.sequence(value.toolCalls.map(toolCall)))
 
   private def toolCall(call: ToolCall): DynamicValue =
     DynamicValues.recordFromEntries(
@@ -121,12 +120,6 @@ object LmHistoryRecord:
         "total_tokens"      := value.totalTokens
       ) ++ extras
     )
-
-  private def sequence(values: Vector[DynamicValue]): DynamicValue =
-    DynamicValue.Sequence(Chunk.from(values))
-
-  private def text(value: String): DynamicValue =
-    DynamicValue.Primitive(PrimitiveValue.String(value))
 
   private def lowerCase(value: String): String =
     value.toLowerCase(Locale.ROOT)

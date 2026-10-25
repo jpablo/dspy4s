@@ -4,7 +4,6 @@ import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.{:=, DynamicValues, LmUsage, TokenCategory, ToolCall}
 import dspy4s.lm.contracts.{LmCache, LmOutput, LmRequest, LmResponse}
 import dspy4s.lm.providers.DynamicJson
-import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import java.io.{ByteArrayInputStream, ObjectInputFilter, ObjectInputStream}
@@ -48,11 +47,11 @@ private[runtime] object DiskCacheModel:
   ) extends Serializable
 
   /** The JSON text of a record, as a legacy entry holds it. */
-  def encodeRecord(record: DynamicValue.Record): String = DynamicJson.encodeExact(record)
+  def encodeRecord(record: DynamicValue.Record): String = DynamicValues.encodeJson(record)
 
   /** The record of a JSON text that a legacy entry holds. Text that is not a JSON object gives an empty record. */
   def decodeRecord(json: String | Null): DynamicValue.Record =
-    Option(json).flatMap(text => DynamicJson.decode(text).toOption).flatMap(DynamicJson.asRecord)
+    Option(json).flatMap(text => DynamicJson.decode(text).toOption).flatMap(DynamicValues.asRecord)
       .getOrElse(DynamicValue.Record.empty)
 
   @SerialVersionUID(-3539090977201704575L)
@@ -290,7 +289,7 @@ final class DiskLmCache private[runtime] (directory: Path, maxEntries: CacheCapa
     written
 
   private def writeRecord(path: Path, response: LmResponse): Boolean =
-    DynamicJson.encodeExactChecked(encodeResponse(response)) match
+    DynamicValues.tryEncodeJson(encodeResponse(response)) match
       case Left(_)     => false
       case Right(json) =>
         val temp = path.resolveSibling(path.getFileName.toString + ".tmp")
@@ -372,15 +371,15 @@ object DiskLmCache:
   private def encodeResponse(response: LmResponse): DynamicValue.Record =
     DynamicValues.record(
       FormatKey    := RecordFormat,
-      "outputs"    -> sequence(response.outputs.map(encodeOutput)),
+      "outputs"    -> DynamicValues.sequence(response.outputs.map(encodeOutput)),
       "usage"      -> response.usage.map(encodeUsage).getOrElse(DynamicValue.Null),
-      "model_name" -> response.modelName.map(string).getOrElse(DynamicValue.Null)
+      "model_name" -> response.modelName.map(DynamicValues.string).getOrElse(DynamicValue.Null)
     )
 
   private def encodeOutput(output: LmOutput): DynamicValue.Record =
     DynamicValues.record(
       "text"       := output.text,
-      "tool_calls" -> sequence(output.toolCalls.map(encodeToolCall)),
+      "tool_calls" -> DynamicValues.sequence(output.toolCalls.map(encodeToolCall)),
       "metadata"   -> output.metadata
     )
 
@@ -404,49 +403,43 @@ object DiskLmCache:
     */
   private def decodeResponse(value: DynamicValue): Option[LmResponse] =
     for
-      record <- DynamicJson.asRecord(value)
-      format <- DynamicValues.recordGet(record, FormatKey).flatMap(DynamicJson.asString)
+      record <- DynamicValues.asRecord(value)
+      format <- DynamicValues.recordGet(record, FormatKey).flatMap(DynamicValues.asString)
       if format == RecordFormat
       items     <- DynamicValues.recordGet(record, "outputs").flatMap(elements)
       outputs   <- Traverse.option(items)(decodeOutput)
       usage     <- nullable(DynamicValues.recordGet(record, "usage"))(decodeUsage)
-      modelName <- nullable(DynamicValues.recordGet(record, "model_name"))(DynamicJson.asString)
+      modelName <- nullable(DynamicValues.recordGet(record, "model_name"))(DynamicValues.asString)
     yield LmResponse(outputs = outputs, usage = usage, modelName = modelName)
 
   private def decodeOutput(value: DynamicValue): Option[LmOutput] =
     for
-      record    <- DynamicJson.asRecord(value)
-      text      <- DynamicValues.recordGet(record, "text").flatMap(DynamicJson.asString)
+      record    <- DynamicValues.asRecord(value)
+      text      <- DynamicValues.recordGet(record, "text").flatMap(DynamicValues.asString)
       items     <- DynamicValues.recordGet(record, "tool_calls").flatMap(elements)
       toolCalls <- Traverse.option(items)(decodeToolCall)
-      metadata  <- DynamicValues.recordGet(record, "metadata").flatMap(DynamicJson.asRecord)
+      metadata  <- DynamicValues.recordGet(record, "metadata").flatMap(DynamicValues.asRecord)
     yield LmOutput(text = text, toolCalls = toolCalls, metadata = metadata)
 
   private def decodeToolCall(value: DynamicValue): Option[ToolCall] =
     for
-      record <- DynamicJson.asRecord(value)
-      name   <- DynamicValues.recordGet(record, "name").flatMap(DynamicJson.asString)
-      args   <- DynamicValues.recordGet(record, "args").flatMap(DynamicJson.asRecord)
-      id     <- nullable(DynamicValues.recordGet(record, "id"))(DynamicJson.asString)
+      record <- DynamicValues.asRecord(value)
+      name   <- DynamicValues.recordGet(record, "name").flatMap(DynamicValues.asString)
+      args   <- DynamicValues.recordGet(record, "args").flatMap(DynamicValues.asRecord)
+      id     <- nullable(DynamicValues.recordGet(record, "id"))(DynamicValues.asString)
     yield ToolCall(name = name, args = args, id = id)
 
   private def decodeUsage(value: DynamicValue): Option[LmUsage] =
     for
-      record       <- DynamicJson.asRecord(value)
+      record       <- DynamicValues.asRecord(value)
       total        <- DynamicValues.recordGet(record, "total_tokens").flatMap(wholeNumber)
       prompt       <- DynamicValues.recordGet(record, "prompt_tokens").flatMap(wholeNumber)
       completion   <- DynamicValues.recordGet(record, "completion_tokens").flatMap(wholeNumber)
-      extrasRecord <- DynamicValues.recordGet(record, "extras").flatMap(DynamicJson.asRecord)
+      extrasRecord <- DynamicValues.recordGet(record, "extras").flatMap(DynamicValues.asRecord)
       extras       <- Traverse.option(DynamicValues.recordEntries(extrasRecord)) { (name, item) =>
                   wholeNumber(item).map(number => TokenCategory.fromWire(name) -> number)
                 }
     yield LmUsage(totalTokens = total, promptTokens = prompt, completionTokens = completion, extras = extras.toMap)
-
-  private def string(text: String): DynamicValue =
-    DynamicValue.Primitive(PrimitiveValue.String(text))
-
-  private def sequence(values: Vector[DynamicValue]): DynamicValue =
-    DynamicValue.Sequence(Chunk.from(values))
 
   /** The elements of a JSON array. `None` for another value. */
   private def elements(value: DynamicValue): Option[Vector[DynamicValue]] =

@@ -12,7 +12,6 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
-import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.PrimitiveValue
 
@@ -21,6 +20,7 @@ import zio.blocks.schema.PrimitiveValue
   * `dspy/_vendor/lm15/providers/openai.py`).
   */
 private[lm] object ResponsesWire:
+  import DynamicValues.{asRecord, isNull, record, recordFromEntries, recordGet, sequence, sequenceAt, string}
 
   /** The keys of the Responses wire that the chat wire does not use. The shared keys are in [[WireKeys]]. */
   private object Keys:
@@ -137,7 +137,7 @@ private[lm] object ResponsesWire:
       request.effectiveOptions(defaultOptions),
       WireKeys.messages
     ).updated(WireKeys.model, string(request.model))
-    if DynamicValues.recordGet(options, Keys.input).isDefined then options
+    if recordGet(options, Keys.input).isDefined then options
     else
       val body  = options.updated(Keys.input, sequence(request.messages.flatMap(inputItems)))
       val steps = Vector(withTokenLimit, withReasoning, withTools, withToolChoice, withTextFormat, withoutEmptyOptions)
@@ -159,16 +159,15 @@ private[lm] object ResponsesWire:
     * `output` array is a `ParseError`.
     */
   def outputs(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
-    DynamicJson.field(raw, WireKeys.output) match
+    recordGet(raw, WireKeys.output) match
       case Some(items: DynamicValue.Sequence) =>
-        val records   = items.elements.iterator.flatMap(DynamicJson.asRecord).toVector
+        val records   = items.elements.iterator.flatMap(asRecord).toVector
         val messages  = records.filter(isKind(_, Kinds.message))
-        val parts     = messages.flatMap(item => listOf(item, WireKeys.content)).flatMap(DynamicJson.asRecord)
+        val parts     = messages.flatMap(item => sequenceAt(item, WireKeys.content)).flatMap(asRecord)
         val text      = parts.filter(isTextBlock).flatMap(part => stringOf(part, WireKeys.text)).mkString
         val toolCalls = records.filter(isKind(_, Kinds.functionCall)).map(toolCall)
         val reasoning = records.filter(isKind(_, Kinds.reasoning)).flatMap(reasoningTexts).mkString
-        val citations =
-          parts.flatMap(part => listOf(part, Keys.annotations)).flatMap(DynamicJson.asRecord).map(citation)
+        val citations = parts.flatMap(part => sequenceAt(part, Keys.annotations)).flatMap(asRecord).map(citation)
         Right(
           if text.trim.isEmpty && toolCalls.isEmpty then Vector.empty
           else Vector(LmOutput(text = text, toolCalls = toolCalls, metadata = outputMetadata(reasoning, citations)))
@@ -181,7 +180,7 @@ private[lm] object ResponsesWire:
     * same metadata.
     */
   def outputMetadata(reasoning: String, citations: Vector[DynamicValue.Record]): DynamicValue.Record =
-    DynamicValues.recordFromEntries(
+    recordFromEntries(
       Option.when(reasoning.nonEmpty)(Keys.reasoningContent -> string(reasoning)).toVector ++
         Option.when(citations.nonEmpty)(Keys.citations -> sequence(citations))
     )
@@ -194,7 +193,7 @@ private[lm] object ResponsesWire:
 
   /** The citations of an output metadata (the inverse of [[outputMetadata]]): the objects of the `citations` array. */
   def citationsOf(metadata: DynamicValue.Record): Vector[DynamicValue.Record] =
-    listOf(metadata, Keys.citations).flatMap(DynamicJson.asRecord)
+    sequenceAt(metadata, Keys.citations).flatMap(asRecord)
 
   /** The chunk of one event of a Responses stream (upstream lm15 `OpenAILM.parse_stream_events` and
     * `_parse_single_stream_event` in `dspy/_vendor/lm15/providers/openai.py`). The `type` of the event selects the
@@ -223,17 +222,17 @@ private[lm] object ResponsesWire:
     * An empty id or name counts as no id or name.
     */
   def streamChunk(event: DynamicValue.Record, model: Option[String]): Either[DspyError, Option[LmChunk]] =
-    val index = DynamicValues.recordGet(event, Keys.outputIndex).flatMap(DynamicJson.asLong).fold(0)(_.toInt)
-    def delta = stringOf(event, WireKeys.delta).getOrElse("")
+    // Only the tool-call events read the index, so the parser reads it on demand.
+    lazy val index = recordGet(event, Keys.outputIndex).flatMap(DynamicValues.asLong).fold(0)(_.toInt)
+    def delta      = stringOf(event, WireKeys.delta).getOrElse("")
     stringOf(event, WireKeys.`type`).getOrElse("") match
       case Events.textDelta | Events.refusalDelta                   => Right(Some(LmChunk(text = delta)))
       case Events.reasoningSummaryDelta | Events.reasoningTextDelta => Right(Some(LmChunk(reasoning = delta)))
       case Events.annotationAdded                                   =>
-        val annotation = DynamicValues.recordGet(event, Keys.annotation).flatMap(DynamicJson.asRecord)
+        val annotation = recordGet(event, Keys.annotation).flatMap(asRecord)
         Right(annotation.map(found => LmChunk(citations = Vector(citation(found)))))
       case Events.itemAdded =>
-        val call =
-          DynamicValues.recordGet(event, Keys.item).flatMap(DynamicJson.asRecord).filter(isKind(_, Kinds.functionCall))
+        val call = recordGet(event, Keys.item).flatMap(asRecord).filter(isKind(_, Kinds.functionCall))
         Right(call.map { item =>
           val arguments = stringOf(item, WireKeys.arguments).getOrElse("")
           toolCallChunk(LmToolCallDelta(index, idOf(item), nonEmpty(item, WireKeys.name), Some(arguments)))
@@ -241,9 +240,9 @@ private[lm] object ResponsesWire:
       case Events.argumentsDelta =>
         Right(Some(toolCallChunk(LmToolCallDelta(index, idOf(event), nonEmpty(event, WireKeys.name), Some(delta)))))
       case Events.completed =>
-        val response = DynamicValues.recordGet(event, Keys.response).flatMap(DynamicJson.asRecord)
-        val usage    = response.flatMap(DynamicJson.field(_, WireKeys.usage)).flatMap(DynamicJson.asRecord)
-        val hasTool  = response.toVector.flatMap(listOf(_, WireKeys.output)).flatMap(DynamicJson.asRecord)
+        val response = recordGet(event, Keys.response).flatMap(asRecord)
+        val usage    = response.flatMap(recordGet(_, WireKeys.usage)).flatMap(asRecord)
+        val hasTool  = response.toVector.flatMap(sequenceAt(_, WireKeys.output)).flatMap(asRecord)
           .exists(isKind(_, Kinds.functionCall))
         Right(Some(LmChunk(
           finishReason = Some(if hasTool then Finish.toolCall else Finish.stop),
@@ -262,7 +261,7 @@ private[lm] object ResponsesWire:
         val assistant = role == MessageRole.Assistant
         val blocks    = contentBlocks(message, if assistant then Kinds.outputText else Kinds.inputText)
         val item      = Option.when(blocks.nonEmpty || !assistant || message.toolCalls.isEmpty)(
-          record(
+          recordFromEntries(
             Vector(WireKeys.role -> string(ChatWire.roleName(role)), WireKeys.content -> sequence(blocks)) ++
               message.name.map(name => WireKeys.name -> string(name))
           )
@@ -277,7 +276,7 @@ private[lm] object ResponsesWire:
       if message.parts.nonEmpty then
         message.parts.filter(part => Kinds.toolTextBlocks.contains(part.kind)).map(_.payload).mkString
       else message.text.getOrElse("")
-    record(
+    recordFromEntries(
       Vector(WireKeys.`type` -> string(Kinds.functionCallOutput), WireKeys.output -> string(output)) ++
         message.toolCallId.map(callId => WireKeys.callId -> string(callId))
     )
@@ -291,41 +290,40 @@ private[lm] object ResponsesWire:
   private def contentBlock(part: ContentPart, textType: String): DynamicValue =
     if Kinds.textBlocks.contains(part.kind) then textBlock(textType, part.payload)
     else if part.kind == Kinds.imageUrl then
-      record(Vector(WireKeys.`type` -> string(Kinds.inputImage), Keys.imageUrl -> string(part.payload)))
+      record(WireKeys.`type` -> string(Kinds.inputImage), Keys.imageUrl -> string(part.payload))
     else ChatWire.encodePart(part)
 
   private def textBlock(textType: String, text: String): DynamicValue =
-    record(Vector(WireKeys.`type` -> string(textType), WireKeys.text -> string(text)))
+    record(WireKeys.`type` -> string(textType), WireKeys.text -> string(text))
 
   /** The `function_call` item of one tool call. A call with no id has no `call_id`. */
   private def functionCall(call: ToolCall): DynamicValue =
-    record(
+    recordFromEntries(
       Vector(
         WireKeys.`type`    -> string(Kinds.functionCall),
         WireKeys.name      -> string(call.name),
-        WireKeys.arguments -> string(DynamicJson.encodeExact(call.args))
+        WireKeys.arguments -> string(DynamicValues.encodeJson(call.args))
       ) ++ call.id.map(callId => WireKeys.callId -> string(callId))
     )
 
   private def withTokenLimit(body: DynamicValue.Record): DynamicValue.Record =
-    val moved =
-      (DynamicValues.recordGet(body, Keys.maxCompletionTokens), DynamicValues.recordGet(body, Keys.maxTokens)) match
-        case (Some(limit), None) => without(body, Keys.maxCompletionTokens).updated(Keys.maxTokens, limit)
-        case _                   => body
+    val moved = (recordGet(body, Keys.maxCompletionTokens), recordGet(body, Keys.maxTokens)) match
+      case (Some(limit), None) => without(body, Keys.maxCompletionTokens).updated(Keys.maxTokens, limit)
+      case _                   => body
     present(moved, Keys.maxTokens) match
       case Some(limit) => without(moved, Keys.maxTokens).updated(Keys.maxOutputTokens, limit)
       case None        => without(moved, Keys.maxTokens)
 
   private def withReasoning(body: DynamicValue.Record): DynamicValue.Record =
-    DynamicValues.recordGet(body, Keys.reasoningEffort) match
+    recordGet(body, Keys.reasoningEffort) match
       case Some(effort) =>
         val rest = without(body, Keys.reasoningEffort)
         if present(rest, Keys.reasoning).isDefined then rest
-        else rest.updated(Keys.reasoning, record(Vector(Keys.effort -> effort, Keys.summary -> string("auto"))))
+        else rest.updated(Keys.reasoning, record(Keys.effort -> effort, Keys.summary -> string("auto")))
       case None => body
 
   private def withTools(body: DynamicValue.Record): DynamicValue.Record =
-    DynamicValues.recordGet(body, Keys.tools) match
+    recordGet(body, Keys.tools) match
       case Some(entries: DynamicValue.Sequence) if entries.elements.nonEmpty =>
         body.updated(Keys.tools, sequence(entries.elements.iterator.map(tool).toVector))
       case _ => body
@@ -334,12 +332,12 @@ private[lm] object ResponsesWire:
     * no `description`, or a null one, has no `description` key.
     */
   private def tool(entry: DynamicValue): DynamicValue =
-    DynamicJson.asRecord(entry) match
+    asRecord(entry) match
       case Some(rec) =>
-        val flat = DynamicValues.recordGet(rec, WireKeys.function).flatMap(DynamicJson.asRecord) match
+        val flat = recordGet(rec, WireKeys.function).flatMap(asRecord) match
           case Some(function) =>
             val others = DynamicValues.recordFilterKeys(rec, key => key != WireKeys.`type` && key != WireKeys.function)
-            val head   = record(Vector(WireKeys.`type` -> string(Kinds.function)))
+            val head   = record(WireKeys.`type` -> string(Kinds.function))
             DynamicValues.mergeRecords(DynamicValues.mergeRecords(head, others), function)
           case None => rec
         if isKind(flat, Kinds.function) && present(flat, Keys.description).isEmpty then without(flat, Keys.description)
@@ -347,35 +345,35 @@ private[lm] object ResponsesWire:
       case None => entry
 
   private def withToolChoice(body: DynamicValue.Record): DynamicValue.Record =
-    val name = DynamicValues.recordGet(body, Keys.toolChoice)
-      .flatMap(choice => DynamicJson.field(choice, WireKeys.function))
-      .flatMap(function => DynamicJson.field(function, WireKeys.name))
+    val name = recordGet(body, Keys.toolChoice)
+      .flatMap(choice => recordGet(choice, WireKeys.function))
+      .flatMap(function => recordGet(function, WireKeys.name))
     name match
       case Some(value) =>
-        body.updated(Keys.toolChoice, record(Vector(WireKeys.`type` -> string(Kinds.function), WireKeys.name -> value)))
+        body.updated(Keys.toolChoice, record(WireKeys.`type` -> string(Kinds.function), WireKeys.name -> value))
       case None => body
 
   private def withTextFormat(body: DynamicValue.Record): DynamicValue.Record =
     val rest = without(body, Keys.responseFormat)
     present(body, Keys.responseFormat) match
       case Some(format) =>
-        val text = present(rest, WireKeys.text).flatMap(DynamicJson.asRecord).getOrElse(DynamicValue.Record.empty)
+        val text = present(rest, WireKeys.text).flatMap(asRecord).getOrElse(DynamicValue.Record.empty)
         rest.updated(WireKeys.text, text.updated(Keys.format, flatFormat(format)))
       case None => rest
 
   /** A `json_schema` format with the keys of its `json_schema` object one level up. Each other format stays. */
   private def flatFormat(format: DynamicValue): DynamicValue =
-    DynamicJson.asRecord(format) match
+    asRecord(format) match
       case Some(rec) if isKind(rec, Kinds.jsonSchema) =>
-        DynamicValues.recordGet(rec, Keys.jsonSchema).flatMap(DynamicJson.asRecord) match
+        recordGet(rec, Keys.jsonSchema).flatMap(asRecord) match
           case Some(schema) => DynamicValues.mergeRecords(without(rec, Keys.jsonSchema), schema)
           case None         => rec
       case _ => format
 
   private def withoutEmptyOptions(body: DynamicValue.Record): DynamicValue.Record =
-    val nulls   = Keys.nullableOptions.filter(key => DynamicValues.recordGet(body, key).exists(isNull))
+    val nulls   = Keys.nullableOptions.filter(key => recordGet(body, key).exists(isNull))
     val cleared = without(body, nulls*)
-    if DynamicValues.recordGet(cleared, Keys.stop).exists(filled) then cleared else without(cleared, Keys.stop)
+    if recordGet(cleared, Keys.stop).exists(filled) then cleared else without(cleared, Keys.stop)
 
   // ── The outputs ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -387,7 +385,7 @@ private[lm] object ResponsesWire:
     ToolCall(
       name = stringOf(item, WireKeys.name).getOrElse(""),
       args = ToolCallAssembler.decodeArguments(
-        DynamicValues.recordGet(item, WireKeys.arguments),
+        recordGet(item, WireKeys.arguments),
         notJson = _ => DynamicValue.Record.empty
       ),
       id = stringOf(item, WireKeys.callId).filter(_.nonEmpty)
@@ -397,50 +395,39 @@ private[lm] object ResponsesWire:
     * skipped.
     */
   private def reasoningTexts(item: DynamicValue.Record): Vector[String] =
-    val content = listOf(item, WireKeys.content)
-    val parts   = if content.nonEmpty then content else listOf(item, Keys.summary)
-    parts.flatMap(part => DynamicJson.field(part, WireKeys.text)).flatMap(DynamicJson.asString).filter(_.nonEmpty)
+    val content = sequenceAt(item, WireKeys.content)
+    val parts   = if content.nonEmpty then content else sequenceAt(item, Keys.summary)
+    parts.flatMap(part => recordGet(part, WireKeys.text)).flatMap(DynamicValues.asString).filter(_.nonEmpty)
 
   private def citation(annotation: DynamicValue.Record): DynamicValue.Record =
     val described = Set(Keys.citedText, WireKeys.text, Keys.supportedText, Keys.documentTitle, Keys.title, Keys.url)
     val metadata  = DynamicValues.recordFilterKeys(annotation, key => !described.contains(key))
     val entries   = Vector(
       WireKeys.`type`   -> Some(string(Kinds.citation)),
-      WireKeys.metadata -> Some(record(DynamicValues.recordEntries(metadata).filterNot((_, value) => isNull(value)))),
-      WireKeys.text     -> firstFilled(annotation, Keys.citedText, WireKeys.text, Keys.supportedText),
-      Keys.title        -> firstFilled(annotation, Keys.documentTitle, Keys.title),
-      Keys.url          -> present(annotation, Keys.url)
+      WireKeys.metadata ->
+        Some(recordFromEntries(DynamicValues.recordEntries(metadata).filterNot((_, value) => isNull(value)))),
+      WireKeys.text -> firstFilled(annotation, Keys.citedText, WireKeys.text, Keys.supportedText),
+      Keys.title    -> firstFilled(annotation, Keys.documentTitle, Keys.title),
+      Keys.url      -> present(annotation, Keys.url)
     )
-    record(entries.flatMap((key, value) => value.map(key -> _)))
+    recordFromEntries(entries.flatMap((key, value) => value.map(key -> _)))
 
   /** The value of the first key whose value is [[filled]], else the value of the last key. A null value gives `None`.
     * This is the rule of Python's `a or b`.
     */
   private def firstFilled(rec: DynamicValue.Record, keys: String*): Option[DynamicValue] =
-    keys.iterator.flatMap(DynamicValues.recordGet(rec, _)).find(filled)
-      .orElse(keys.lastOption.flatMap(DynamicValues.recordGet(rec, _)))
+    keys.iterator.flatMap(recordGet(rec, _)).find(filled)
+      .orElse(keys.lastOption.flatMap(recordGet(rec, _)))
       .filterNot(isNull)
 
   // ── Helpers ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-  private def string(text: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(text))
-
-  private def sequence(values: Vector[DynamicValue]): DynamicValue = DynamicValue.Sequence(Chunk.from(values))
-
-  private def record(entries: Vector[(String, DynamicValue)]): DynamicValue.Record =
-    DynamicValue.Record(Chunk.from(entries))
-
   private def without(rec: DynamicValue.Record, keys: String*): DynamicValue.Record =
     DynamicValues.recordFilterKeys(rec, key => !keys.contains(key))
 
-  private def isNull(value: DynamicValue): Boolean =
-    value match
-      case _: DynamicValue.Null.type => true
-      case _                         => false
-
   /** The value of `key` when it is present and not null. */
   private def present(rec: DynamicValue.Record, key: String): Option[DynamicValue] =
-    DynamicValues.recordGet(rec, key).filterNot(isNull)
+    recordGet(rec, key).filterNot(isNull)
 
   /** Whether a value counts as true in Python: not null, not `false`, not an empty string, array, or object. */
   private def filled(value: DynamicValue): Boolean =
@@ -452,12 +439,8 @@ private[lm] object ResponsesWire:
       case rec: DynamicValue.Record                          => rec.fields.nonEmpty
       case _                                                 => true
 
-  /** The elements of the array at `key`. An absent key, a null, or a value that is not an array gives no element. */
-  private def listOf(value: DynamicValue, key: String): Vector[DynamicValue] =
-    DynamicJson.field(value, key).map(DynamicJson.asSequence).getOrElse(Vector.empty)
-
   private def stringOf(rec: DynamicValue.Record, key: String): Option[String] =
-    DynamicValues.recordGet(rec, key).flatMap(DynamicJson.asString)
+    recordGet(rec, key).flatMap(DynamicValues.asString)
 
   /** The string at `key` when it is not empty. */
   private def nonEmpty(rec: DynamicValue.Record, key: String): Option[String] =

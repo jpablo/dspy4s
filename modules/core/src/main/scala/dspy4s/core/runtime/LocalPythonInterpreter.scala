@@ -4,6 +4,7 @@ import dspy4s.core.contracts.CodeInterpreterErrors
 import dspy4s.core.contracts.CodeInterpreterErrors.failure
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DspyError.describe
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.DynamicValues.asString
 import dspy4s.core.contracts.DynamicValues.encodeJson
@@ -19,7 +20,6 @@ import dspy4s.core.contracts.SandboxTool
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.InterpreterSupport.ProbeFailure
 import dspy4s.core.runtime.InterpreterSupport.ProbeRun
-import dspy4s.core.runtime.InterpreterSupport.describe
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.json.WriterConfig
@@ -698,7 +698,7 @@ object LocalPythonInterpreter:
   /** The JSON text of `value`, with a JSON escape for each character that is not ASCII. Such a character can only occur
     * in a JSON string, so the escape keeps the value. `Left` has the cause when the JSON writer cannot write the value.
     */
-  private def encode(value: DynamicValue): Either[String, String] = InterpreterSupport.tryEncodeJson(value, AsciiOnly)
+  private def encode(value: DynamicValue): Either[String, String] = DynamicValues.tryEncodeJson(value, AsciiOnly)
 
   private def clip(line: String): String = line.take(DiagnosticLength)
 

@@ -3,6 +3,7 @@ package dspy4s.streaming
 import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.core.contracts.ClosableIterator
+import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.runtime.ContextPropagation
@@ -104,7 +105,7 @@ object Streamify:
                       case NonFatal(error) =>
                         val runtimeError = dspy4s.core.contracts.RuntimeError(
                           "streamify",
-                          Option(error.getMessage).getOrElse(error.getClass.getSimpleName)
+                          DspyError.messageOf(error)
                         )
                         queue.offer(ErrorEvent(runtimeError))
                   }

@@ -8,6 +8,7 @@ import dspy4s.core.contracts.updated
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmMode
 import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.Schema
 
 final case class OpenAiClient(
     apiKey      : String,
@@ -22,7 +23,10 @@ final case class OpenAiClient(
   )
 
   /** The value of the `stream` key of a stream body. */
-  private val streamOn: DynamicValue = DynamicValues.fromAny(true)
+  private val streamOn: DynamicValue = Schema[Boolean].toDynamicValue(true)
+
+  /** [[baseUrl]] with no slash at its end. */
+  private val root: String = baseUrl.stripSuffix("/")
 
   /** POST `body` to `endpoint` (a path under [[baseUrl]]), and give the body text of a reply with a success status.
     *
@@ -91,7 +95,7 @@ final case class OpenAiClient(
     val (streamBody, read) = mode match
       case LmMode.Responses          => (body.updated(WireKeys.stream, streamOn), responsesEvent(model))
       case LmMode.Chat | LmMode.Text =>
-        val streamOptions = DynamicValues.recordFromEntries(Seq(WireKeys.includeUsage := true))
+        val streamOptions = DynamicValues.record(WireKeys.includeUsage := true)
         (body.updated(WireKeys.stream, streamOn).updated(WireKeys.streamOptions, streamOptions), chatChunk(model))
     transport.streamSse(url(endpointOf(mode)), headers, DynamicJson.encode(streamBody))
       .left.map(OpenAiErrors.withRequestDetails(_, model))
@@ -102,7 +106,7 @@ final case class OpenAiClient(
       }
 
   /** The URL of `endpoint`: [[baseUrl]] with no slash at its end, then `endpoint`. */
-  private def url(endpoint: String): String = s"${baseUrl.stripSuffix("/")}$endpoint"
+  private def url(endpoint: String): String = s"$root$endpoint"
 
   /** The endpoint of a model call in `mode`. */
   private def endpointOf(mode: LmMode): String =
@@ -220,7 +224,7 @@ final case class OpenAiClient(
 
   /** The model of a body, for the details of an error. */
   private def modelOf(body: DynamicValue.Record): Option[String] =
-    DynamicValues.recordGet(body, WireKeys.model).flatMap(DynamicJson.asString)
+    DynamicValues.recordGet(body, WireKeys.model).flatMap(DynamicValues.asString)
 
 object OpenAiClient:
   val defaultBaseUrl: String = "https://api.openai.com/v1"

@@ -4,19 +4,19 @@ import dspy4s.core.contracts.CodeInterpreterErrors.failure
 import dspy4s.core.contracts.ReplCodeInterpreter
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DspyError.describe
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.DynamicValues.asLong
 import dspy4s.core.contracts.DynamicValues.asString
 import dspy4s.core.contracts.DynamicValues.encodeJson
 import dspy4s.core.contracts.DynamicValues.recordGet as field
+import dspy4s.core.contracts.DynamicValues.tryEncodeJson
 import dspy4s.core.contracts.InterpreterOperation
 import dspy4s.core.contracts.SandboxOutputField
 import dspy4s.core.contracts.SandboxTool
 import dspy4s.core.contracts.:=
-import dspy4s.core.runtime.InterpreterSupport.describe
 import dspy4s.core.runtime.InterpreterSupport.exitedIn
 import dspy4s.core.runtime.InterpreterSupport.nameAndType
-import dspy4s.core.runtime.InterpreterSupport.tryEncodeJson
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.PrimitiveValue
@@ -481,7 +481,7 @@ final class DenoPyodideInterpreter(
             Right(DynamicValues.record("value" := s, "type" := "string"))
           case Right(other) => tryEncodeJson(other).map(json => DynamicValues.record("value" := json, "type" := "json"))
               .left.map(cause => s"Unable to encode the tool result as JSON: $cause")
-      catch case NonFatal(error) => Left(Option(error.getMessage).getOrElse(error.getClass.getSimpleName))
+      catch case NonFatal(error) => Left(DspyError.messageOf(error))
     val reply = result.flatMap { value =>
       encodeResult(callId, value).left.map(cause => s"Unable to encode the tool result as JSON: $cause")
     }
@@ -560,7 +560,7 @@ final class DenoPyodideInterpreter(
           running.stdin.flush()
           Right(())
         catch
-          case NonFatal(e) => terminal(ioFailure(running, s"Failed writing to sandbox: ${e.getMessage}"))
+          case NonFatal(e) => terminal(ioFailure(running, s"Failed writing to sandbox: ${DspyError.messageOf(e)}"))
       case _ => terminal("Sandbox process is not running")
 
   private def readLine(): Either[DspyError, String] =

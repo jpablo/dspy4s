@@ -1,6 +1,7 @@
 package dspy4s.gepa
 
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.PythonRepr
 import dspy4s.core.contracts.:=
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
@@ -108,36 +109,13 @@ object ReflectiveRecord:
       case PrimitiveValue.Long(number)       => Right(number.toString)
       case PrimitiveValue.BigInt(number)     => Right(number.toString)
       case PrimitiveValue.BigDecimal(number) => Right(number.toString)
-      case PrimitiveValue.Float(number)      =>
-        Right(if java.lang.Float.isFinite(number) then pythonFloat(number.toString) else number.toString)
+      // A value that is not finite has the same JSON text in the JVM and in Python `json.dumps`, for example `NaN`.
+      case PrimitiveValue.Float(number) =>
+        Right(if java.lang.Float.isFinite(number) then PythonRepr.float32(number) else number.toString)
       case PrimitiveValue.Double(number) =>
-        Right(if java.lang.Double.isFinite(number) then pythonFloat(number.toString) else number.toString)
+        Right(if java.lang.Double.isFinite(number) then PythonRepr.float(number) else number.toString)
       case _: PrimitiveValue.Unit.type => Right("null")
       case other                       => Left(DynamicValues.renderText(DynamicValue.Primitive(other)))
-
-  /** The text that Python's `repr` gives for a finite float. `shortest` is the text that the JVM gives for the same
-    * value. The two texts have the same digits. They put the point and the exponent in different positions: Python uses
-    * an exponent only for a value below `1e-4` or from `1e16`.
-    *
-    * Exception: for a few values near the smallest `Double`, the JVM gives two digits and Python gives one digit. The
-    * result keeps the two digits.
-    *
-    * `NaN` and an infinite value have the same text in the JVM and in Python, so they do not come here.
-    */
-  private def pythonFloat(shortest: String): String =
-    val decimal = new java.math.BigDecimal(shortest).stripTrailingZeros
-    val sign    = if shortest.startsWith("-") then "-" else ""
-    if decimal.signum == 0 then s"${sign}0.0"
-    else
-      val digits = decimal.unscaledValue.abs.toString
-      // The power of ten of the first digit.
-      val exponent = digits.length - decimal.scale - 1
-      if exponent < -4 || exponent >= 16 then
-        val mantissa = if digits.length == 1 then digits else s"${digits.take(1)}.${digits.drop(1)}"
-        f"$sign${mantissa}e${if exponent < 0 then "-" else "+"}${math.abs(exponent)}%02d"
-      else if exponent < 0 then s"${sign}0.${"0" * (-exponent - 1)}$digits"
-      else if digits.length <= exponent + 1 then s"$sign$digits${"0" * (exponent + 1 - digits.length)}.0"
-      else s"$sign${digits.take(exponent + 1)}.${digits.drop(exponent + 1)}"
 
   /** The key of a JSON object for the key of a `DynamicValue.Map`. */
   private def keyText(key: DynamicValue): String =

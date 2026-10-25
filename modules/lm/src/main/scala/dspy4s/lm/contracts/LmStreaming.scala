@@ -1,7 +1,6 @@
 package dspy4s.lm.contracts
 
-import dspy4s.core.contracts.{DspyError, LmUsage, RuntimeContext, RuntimeError, ToolCall}
-import dspy4s.lm.providers.DynamicJson
+import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, RuntimeContext, RuntimeError, ToolCall}
 import dspy4s.lm.providers.ResponsesWire
 import zio.blocks.schema.DynamicValue
 
@@ -97,7 +96,7 @@ object LmChunk:
       index = index,
       id = call.id,
       name = Some(call.name),
-      argumentsFragment = Some(DynamicJson.encodeExact(call.args))
+      argumentsFragment = Some(DynamicValues.encodeJson(call.args))
     )
 
   /** The error message of a failure chunk from its `raw` payload (`Map("error" -> message)` by convention). */

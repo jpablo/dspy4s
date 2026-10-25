@@ -15,7 +15,7 @@ OpenAI-compatible servers, and a wrapper that adds a cache, retries, and usage r
   separate field. It changes the cache key, and it does not go to the provider.
 - **Capabilities.** A model tells if it supports native tool calls, a response schema, and `reasoning` output. The
   adapters read these flags. `OpenAiLanguageModel` declares the OpenAI capabilities only for `api.openai.com`. For
-  another server, declare them with `withCapabilities`.
+  another server, declare them in the `capabilities` field, for example with `copy(capabilities = Some(...))`.
 
 ## Main types
 

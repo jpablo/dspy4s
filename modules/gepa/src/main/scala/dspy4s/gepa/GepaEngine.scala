@@ -548,8 +548,7 @@ final class GepaEngine[P](
     val executed   = RuntimeEnvironment.isolatedAttempt(reflection) {
       try proposer.propose(parent, reflective, components)
       catch
-        case NonFatal(error) =>
-          Left(RuntimeError("instruction_proposer", Option(error.getMessage).getOrElse(error.getClass.getSimpleName)))
+        case NonFatal(error) => Left(RuntimeError("instruction_proposer", DspyError.messageOf(error)))
     }
     RuntimeEnvironment.propagate(executed.delta.copy(trace = Vector.empty))
     executed.value
@@ -621,7 +620,7 @@ final class GepaEngine[P](
       Try(GepaStatePersistence.save(dir, state)).toEither.left.map { error =>
         RuntimeError(
           "gepa_checkpoint",
-          s"Could not write the GEPA checkpoint in '$dir': ${Option(error.getMessage).getOrElse(error.toString)}"
+          s"Could not write the GEPA checkpoint in '$dir': ${DspyError.messageOf(error)}"
         )
       }
     }

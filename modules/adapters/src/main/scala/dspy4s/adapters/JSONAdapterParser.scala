@@ -142,7 +142,7 @@ private[adapters] object JSONAdapterParser:
     Try(ujson.read(raw))
       .toEither
       .left
-      .map(error => ParseError("adapter", error.getMessage))
+      .map(error => ParseError("adapter", DspyError.messageOf(error)))
       .flatMap { value =>
         if value.objOpt.isDefined then
           Right(value)

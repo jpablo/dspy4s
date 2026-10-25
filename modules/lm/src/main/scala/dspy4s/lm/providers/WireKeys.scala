@@ -1,32 +1,33 @@
 package dspy4s.lm.providers
 
-/** JSON field names for the OpenAI-compatible chat / responses wire format, shared by the wires ([[ChatWire]],
-  * [[ResponsesWire]]), the streaming client, and the embedder, so these navigation/serialization keys are named rather
-  * than scattered string literals.
+/** The JSON keys of the OpenAI-compatible chat and Responses wires that the code reads or writes by name. The wires
+  * ([[ChatWire]], [[ResponsesWire]]), the stream client, and the embedder use them, so each key has one name in the
+  * code.
   *
-  * The DTOs in this package ([[OpenAiUsage]], [[OpenAiStreamChunk]]) derive their keys from the `Schema` field-name
-  * mapper instead, so their wire keys do not appear here — only the hand-navigated/handwritten ones do.
+  * The records of this package ([[OpenAiUsage]], [[OpenAiStreamChunk]]) get their keys from the field names of their
+  * `Schema`, with a name mapper. Thus their keys are not here. Only the keys that the code reads or writes by hand are
+  * here.
   */
 private[lm] object WireKeys:
-  // Request payload
+  // The request body.
   final val model    = "model"
   final val messages = "messages"
   final val prompt   = "prompt"
   final val role     = "role"
   final val `type`   = "type"
 
-  // Streaming controls
+  // The options of a stream.
   final val stream        = "stream"
   final val streamOptions = "stream_options"
   final val includeUsage  = "include_usage"
 
-  // Stream chunks. The chunk codec of `OpenAiStreamChunk` derives these keys, and its lenient reader names them.
+  // The keys of a stream chunk. The codec of `OpenAiStreamChunk` derives these keys, and its lenient reader uses them.
   final val delta        = "delta"
   final val finishReason = "finish_reason"
   final val index        = "index"
   final val error        = "error"
 
-  // Response / shared structure
+  // The reply, and the keys that the request and the reply share.
   final val choices   = "choices"
   final val output    = "output"
   final val message   = "message"
@@ -39,14 +40,11 @@ private[lm] object WireKeys:
   final val name      = "name"
   final val arguments = "arguments"
 
-  // Tool call identity. The Responses API names the id of a call `call_id`. A tool message names the call that it
+  // The id of a tool call. The Responses API names the id of a call `call_id`. A tool message names the call that it
   // answers with `tool_call_id`.
   final val id         = "id"
   final val callId     = "call_id"
   final val toolCallId = "tool_call_id"
 
-  // Synthetic keys used to wrap tool-call arguments that aren't a JSON object. `input` is also the key of the texts of
-  // an embeddings body.
-  final val input       = "input"
-  final val value       = "value"
-  final val partialJson = "partial_json"
+  // The key of the texts in the body of an embeddings request.
+  final val input = "input"

@@ -24,6 +24,12 @@ import scala.collection.mutable
   */
 object ToolCallAssembler:
 
+  /** The keys of the records that hold arguments that are not a JSON object. They are not keys of the wire. */
+  private object Keys:
+    final val input       = "input"
+    final val value       = "value"
+    final val partialJson = "partial_json"
+
   private final class Accumulator(val index: Int):
     var id: Option[String]       = None
     var name: Option[String]     = None
@@ -60,10 +66,10 @@ object ToolCallAssembler:
       }
     }.toVector
 
-  /** Some OpenAI-compatible servers omit `tool_calls[].index`, so consecutive DISTINCT calls all arrive at the fallback
-    * index 0. A delta carrying an `id` or `name` that CONFLICTS with the index's current accumulator therefore begins a
-    * new call (spec-compliant streams never conflict within one index, so this is a no-op for them). Fragments without
-    * id/name keep attaching to the index's most recent call.
+  /** Some OpenAI-compatible servers omit `tool_calls[].index`, so different calls that follow each other all come at
+    * the fallback index 0. Thus a delta with an `id` or a `name` that is different from the `id` or the `name` of the
+    * current call of the index starts a new call. A stream that follows the specification has no such conflict in one
+    * index, so this rule does not change it. A fragment with no id and no name goes to the last call of the index.
     */
   private def startsNewCall(current: Accumulator, delta: LmToolCallDelta): Boolean =
     idOf(delta).exists(id => current.id.exists(_ != id)) ||
@@ -88,16 +94,16 @@ object ToolCallAssembler:
   ): DynamicValue.Record =
     raw match
       case Some(rec: DynamicValue.Record) => rec
-      case Some(other)                    => DynamicJson.asString(other).filter(_.trim.nonEmpty) match
-          // OpenAI sends `arguments` as a JSON STRING; decode it into a Record (the ToolCall contract: args are decoded
-          // at the parse boundary). Text that is not JSON goes to `notJson` in parseArguments.
+      case Some(other)                    => DynamicValues.asString(other).filter(_.trim.nonEmpty) match
+          // OpenAI sends `arguments` as the text of a JSON value. The parser decodes it into a record, because the
+          // arguments of a `ToolCall` are a record. Text that is not JSON goes to `notJson` in parseArguments.
           case Some(text) => parseArguments(text, notJson)
-          case None       => DynamicValues.recordFromEntries(Seq(WireKeys.value -> other))
+          case None       => DynamicValues.record(Keys.value -> other)
       case None => DynamicValue.Record.empty
 
-  /** JSON-decode a tool-call `arguments` string into a `DynamicValue.Record`; `notJson` of the trimmed text when it is
-    * not valid JSON (`{input: raw}` by default), `{value: json}` when it parses to a non-object. [[decodeArguments]]
-    * uses it for a response, so the stream path and the response path decode identically.
+  /** The record of the `arguments` text of a tool call. A text that is not valid JSON gives `notJson` of the trimmed
+    * text (`{input: raw}` by default). A JSON value that is not an object gives `{value: json}`. [[decodeArguments]]
+    * uses it for a response, so the stream path and the response path decode in the same way.
     */
   private def parseArguments(
       raw    : String,
@@ -113,7 +119,7 @@ object ToolCallAssembler:
     */
   private def partialArguments(raw: String): DynamicValue.Record =
     if raw.isEmpty then DynamicValue.Record.empty
-    else jsonArguments(raw, DynamicValues.recordFromEntries(Seq(WireKeys.partialJson := raw)))
+    else jsonArguments(raw, DynamicValues.record(Keys.partialJson := raw))
 
   /** The record of a JSON text: an object stays, and each other JSON value gives `{value: json}`. A text that is not
     * JSON gives `notJson`.
@@ -121,9 +127,9 @@ object ToolCallAssembler:
   private def jsonArguments(text: String, notJson: => DynamicValue.Record): DynamicValue.Record =
     DynamicJson.decode(text) match
       case Right(rec: DynamicValue.Record) => rec
-      case Right(other)                    => DynamicValues.recordFromEntries(Seq(WireKeys.value -> other))
+      case Right(other)                    => DynamicValues.record(Keys.value -> other)
       case Left(_)                         => notJson
 
   /** The chat rule for arguments that are not JSON: `{input: <text>}`. */
   private def inputRecord(text: String): DynamicValue.Record =
-    DynamicValues.recordFromEntries(Seq(WireKeys.input := text))
+    DynamicValues.record(Keys.input := text)

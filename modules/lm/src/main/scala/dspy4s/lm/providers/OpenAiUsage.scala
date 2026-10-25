@@ -6,11 +6,11 @@ import zio.blocks.schema.NameMapper
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodecDeriver
 
-/** Wire model of an OpenAI token-usage block, shared by the streaming chunk parser and the (non-streaming) response
-  * parser. Decoded by a derived `JsonCodec`, so absent fields and `null`s become `None` and unknown keys are ignored —
-  * no by-hand `DynamicValue` navigation. Both the Chat (`prompt_tokens`/`completion_tokens`) and the Responses
-  * (`input_tokens`/`output_tokens`) naming conventions are modeled; the nested `*_tokens_details` blocks carry the
-  * provider-specific extras. `toLmUsage` reconciles all of this into the domain `LmUsage`.
+/** The token usage of an OpenAI reply. The parser of the stream chunks and the parser of a plain reply use it. A
+  * derived `JsonCodec` decodes it: an absent field or a `null` gives `None`, and the codec ignores the keys that it
+  * does not know. The record has the names of the chat usage (`prompt_tokens`, `completion_tokens`) and of the
+  * Responses usage (`input_tokens`, `output_tokens`). The `*_tokens_details` blocks hold the extra counts of the
+  * provider. [[toLmUsage]] gives the `LmUsage` of all these fields.
   *
   * The chat usage has the blocks `prompt_tokens_details` and `completion_tokens_details` (upstream `_usage_from_chat`
   * in `dspy/_vendor/lm15/providers/openai_chat.py`). The Responses usage has the blocks `input_tokens_details` and
@@ -29,10 +29,10 @@ private[lm] final case class OpenAiUsage(
     outputTokensDetails    : Option[OpenAiTokenDetails] = None
 ) derives Schema:
 
-  /** `totalTokens` falls back to prompt + completion when absent. `extras` is the union of the prompt- and
-    * completion-side detail breakdowns (a category appearing on both sides, e.g. `audio_tokens`, is summed). The prompt
-    * side is `prompt_tokens_details`, else `input_tokens_details`. The completion side is `completion_tokens_details`,
-    * else `output_tokens_details`.
+  /** When `totalTokens` is absent, the total is the prompt count plus the completion count. `extras` has the categories
+    * of the prompt details and of the completion details. A category that is on the two sides, for example
+    * `audio_tokens`, has the sum of the two counts. The prompt details are `prompt_tokens_details`, else
+    * `input_tokens_details`. The completion details are `completion_tokens_details`, else `output_tokens_details`.
     */
   def toLmUsage: LmUsage =
     val prompt     = promptTokens.orElse(inputTokens).getOrElse(0L)
@@ -54,8 +54,8 @@ private[lm] final case class OpenAiUsage(
   ): Map[TokenCategory, Long] =
     b.foldLeft(a) { case (acc, (category, value)) => acc.updated(category, acc.getOrElse(category, 0L) + value) }
 
-/** One of OpenAI's `prompt_tokens_details` / `completion_tokens_details` / `input_tokens_details` /
-  * `output_tokens_details` sub-objects.
+/** One details object of an OpenAI usage: `prompt_tokens_details`, `completion_tokens_details`, `input_tokens_details`,
+  * or `output_tokens_details`.
   */
 private[lm] final case class OpenAiTokenDetails(
     cachedTokens            : Option[Long] = None,
@@ -77,8 +77,8 @@ private[lm] final case class OpenAiTokenDetails(
 private[lm] object OpenAiUsage:
   private val codec = Schema[OpenAiUsage].derive(JsonCodecDeriver.withFieldNameMapper(NameMapper.SnakeCase))
 
-  /** Decode a usage record (a subtree of an already-parsed response/chunk) into `OpenAiUsage`. Lenient: a usage block
-    * that fails to decode yields an empty `OpenAiUsage` rather than failing the whole response.
+  /** The usage of a usage record of a decoded reply or chunk. A record that does not decode gives an empty
+    * `OpenAiUsage`, so that the reply does not fail.
     */
   def fromDynamic(usage: DynamicValue): OpenAiUsage =
     codec.decode(usage.toJson).getOrElse(OpenAiUsage())

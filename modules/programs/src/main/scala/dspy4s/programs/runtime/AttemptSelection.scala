@@ -130,5 +130,5 @@ object AttemptSelection:
     catch
       case NonFatal(error) => Left(RuntimeError(
           label,
-          s"Reward function failed: ${Option(error.getMessage).getOrElse(error.getClass.getSimpleName)}"
+          s"Reward function failed: ${DspyError.messageOf(error)}"
         ))

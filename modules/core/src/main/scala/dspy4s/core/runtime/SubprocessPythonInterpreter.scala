@@ -76,9 +76,9 @@ final class SubprocessPythonInterpreter(
         try Right(new ProcessBuilder(pythonCommand, "-c", code).start())
         catch
           case e: IOException => CodeInterpreterErrors.failure(
-              s"Failed to spawn '$pythonCommand': ${e.getMessage}. Is Python installed and on PATH?"
+              s"Failed to spawn '$pythonCommand': ${DspyError.messageOf(e)}. Is Python installed and on PATH?"
             )
-          case NonFatal(other) => CodeInterpreterErrors.failure(messageOf(other))
+          case NonFatal(other) => CodeInterpreterErrors.failure(DspyError.messageOf(other))
       started.flatMap(await)
 
   /** Wait for the exit of `process` and collect its output. A timeout, an interrupt, or a failure kills the process
@@ -126,14 +126,12 @@ final class SubprocessPythonInterpreter(
         CodeInterpreterErrors.failure("The thread was interrupted while it waited for the Python subprocess.")
       case NonFatal(other) =>
         InterpreterSupport.killTree(process)
-        CodeInterpreterErrors.failure(messageOf(other))
+        CodeInterpreterErrors.failure(DspyError.messageOf(other))
 
   /** Wait for the end of `thread` until the `System.nanoTime` value `deadline`. */
   private def joinBefore(thread: Thread, deadline: Long): Unit =
     val millis = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
     if millis > 0 then thread.join(millis)
-
-  private def messageOf(error: Throwable): String = Option(error.getMessage).getOrElse(error.getClass.getSimpleName)
 
   /** Start a daemon pump thread that copies the bytes of `in` to `out` until the end of the stream, then closes `in`.
     * The call returns at once; the caller joins the thread when it needs the bytes.

@@ -1,6 +1,7 @@
 package dspy4s.lm.providers
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.lm.contracts.LmCapabilities
@@ -12,32 +13,33 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.StreamingLanguageModel
 import zio.blocks.schema.DynamicValue
 
-/** The real OpenAI-compatible HTTP provider: a [[dspy4s.lm.contracts.StreamingLanguageModel]] that talks to a
-  * chat-completions endpoint through an [[OpenAiClient]]. `call` and `stream` follow the same steps: they build the
-  * body of the request on the wire of [[mode]] ([[ChatWire]] or [[ResponsesWire]]), send it with the client, and read
-  * the reply into the `LmResponse` and `LmChunk` contracts.
+/** The OpenAI-compatible HTTP provider: a [[dspy4s.lm.contracts.StreamingLanguageModel]] that sends each request
+  * through an [[OpenAiClient]]. [[mode]] selects the endpoint: the chat-completions endpoint in the chat mode and in
+  * the text mode, and the Responses endpoint in the Responses mode. `call` and `stream` follow the same steps: they
+  * build the body of the request on the wire of [[mode]] ([[ChatWire]] or [[ResponsesWire]]), send it with the client,
+  * and read the reply into the `LmResponse` and `LmChunk` contracts.
   *
-  * "OpenAI-compatible" rather than "OpenAI": because the base URL and transport are owned by the injected
-  * [[OpenAiClient]], the same type drives any server that speaks the `/chat/completions` shape (Azure OpenAI, Ollama,
-  * vLLM, LM Studio, OpenRouter, ...). Use the
+  * The [[OpenAiClient]] holds the base URL and the transport. Thus this type can call each server that has the shape of
+  * the OpenAI API, for example Azure OpenAI, Ollama, vLLM, LM Studio, and OpenRouter. Use the
   * [[OpenAiLanguageModel.apply(model:String,apiKey:String,baseUrl:String,transport:dspy4s\.lm\.providers\.HttpTransport)* baseUrl overload]]
-  * to point it elsewhere.
+  * for another server.
   *
   * @param model
-  *   the provider model id (e.g. `"gpt-4o-mini"`); also surfaced as [[id]] for history/tracing.
+  *   the model id of the provider, for example `"gpt-4o-mini"`. [[id]] has the same value, for the history and the
+  *   trace.
   * @param mode
   *   the wire of the model. This field selects the endpoint, the body, and the parse. The mode of a request does not: a
   *   model in the chat mode sends the messages of each request, a model in the text mode sends a prompt, and a model in
   *   the Responses mode calls the Responses API. The default is [[dspy4s.lm.contracts.LmMode.Chat]].
   * @param client
-  *   the HTTP client carrying the API key, base URL, transport, and endpoint path.
+  *   the HTTP client with the API key, the base URL, the transport, and the endpoint paths.
   * @param defaultOptions
-  *   provider parameters merged into every request (e.g. `temperature`, `max_tokens`). The options of a request win
-  *   over them ([[dspy4s.lm.contracts.LmRequest.effectiveOptions]]).
+  *   the provider parameters that go into each request, for example `temperature` and `max_tokens`. An option of a
+  *   request replaces the default of the same name ([[dspy4s.lm.contracts.LmRequest.effectiveOptions]]).
   * @param capabilities
   *   what the model can do. `None` gives the capabilities that the port declares for the base URL of the client
   *   ([[dspy4s.lm.contracts.LmCapabilities.forBaseUrl]]): the OpenAI capabilities for the official address, and no
-  *   capability for an other server (decision L5). Set it with [[withCapabilities]].
+  *   capability for an other server (decision L5). Set it with `copy(capabilities = Some(...))`.
   */
 final case class OpenAiLanguageModel(
     model                      : String,
@@ -50,17 +52,14 @@ final case class OpenAiLanguageModel(
   override val id: String = model
 
   /** The capabilities of this model: [[capabilities]], else the capabilities of the base URL of the client. */
-  def effectiveCapabilities: LmCapabilities = capabilities.getOrElse(LmCapabilities.forBaseUrl(client.baseUrl))
+  private val effectiveCapabilities: LmCapabilities = capabilities.getOrElse(LmCapabilities.forBaseUrl(client.baseUrl))
 
   override def supportsFunctionCalling: Boolean = effectiveCapabilities.functionCalling
   override def supportsResponseSchema: Boolean  = effectiveCapabilities.responseSchema
   override def supportsReasoning: Boolean       = effectiveCapabilities.reasoning
 
-  /** The same model with the declared `capabilities`. */
-  def withCapabilities(declared: LmCapabilities): OpenAiLanguageModel = copy(capabilities = Some(declared))
-
-  /** Build the body, POST it to the endpoint of [[mode]], and read the JSON reply into an `LmResponse`. HTTP and decode
-    * failures arrive as a `Left[DspyError]` from the [[OpenAiClient]] (never an exception).
+  /** Build the body, POST it to the endpoint of [[mode]], and read the JSON reply into an `LmResponse`. A failure of
+    * the HTTP call or of the decode is a `Left[DspyError]` from the [[OpenAiClient]], never an exception.
     *
     * With [[dspy4s.lm.contracts.LmMode.Responses]], the request goes to the Responses API, and the reply gives one
     * output (`ResponsesWire.outputs`, upstream `responses_outputs`).
@@ -68,15 +67,15 @@ final case class OpenAiLanguageModel(
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
     client.invoke(mode, body(request)).flatMap(response)
 
-  /** Open an SSE stream against the same endpoint and yield decoded [[dspy4s.lm.contracts.LmChunk]]s.
+  /** Open an SSE stream to the endpoint of [[mode]], and give the decoded [[dspy4s.lm.contracts.LmChunk]]s.
     *
     * In the Responses mode, the stream goes to the Responses endpoint, and the client reads the events of the Responses
     * stream (see [[OpenAiClient.stream]]).
     *
-    * Errors are reified into the stream rather than thrown: if the client can't open the connection, the result is a
-    * single terminal chunk with `finishReason = "error"`, the message under `raw`, and the typed failure in `error`
-    * (see [[dspy4s.lm.contracts.LmChunk.failure]]), so consumers always see a finalized stream instead of an `Iterator`
-    * that throws on first read.
+    * A failure is a chunk of the stream, not an exception. When the client cannot open the connection, the result is
+    * one last chunk with `finishReason = "error"`, the message under `raw`, and the typed failure in `error` (see
+    * [[dspy4s.lm.contracts.LmChunk.failure]]). Thus a consumer always gets a complete stream, and the first read does
+    * not throw.
     */
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
     client.stream(mode, body(request)) match
@@ -106,9 +105,9 @@ final case class OpenAiLanguageModel(
       else
         Right(LmResponse(
           outputs = entries,
-          usage = DynamicJson.field(raw, WireKeys.usage).flatMap(DynamicJson.asRecord)
+          usage = DynamicValues.recordGet(raw, WireKeys.usage).flatMap(DynamicValues.asRecord)
             .map(OpenAiUsage.fromDynamic(_).toLmUsage),
-          modelName = DynamicJson.field(raw, WireKeys.model).flatMap(DynamicJson.asString),
+          modelName = DynamicValues.recordGet(raw, WireKeys.model).flatMap(DynamicValues.asString),
           cacheHit = false
         ))
     }
@@ -118,14 +117,14 @@ final case class OpenAiLanguageModel(
 
 object OpenAiLanguageModel:
 
-  /** Construct a provider against the default OpenAI base URL (`https://api.openai.com/v1`) and JDK transport, given an
-    * explicit API key.
+  /** A provider for the default OpenAI base URL (`https://api.openai.com/v1`) with the JDK transport and the API key
+    * `apiKey`.
     */
   def apply(model: String, apiKey: String): OpenAiLanguageModel =
     OpenAiLanguageModel(model = model, client = OpenAiClient(apiKey = apiKey))
 
-  /** Construct a provider against a custom base URL and transport -- the entry point for OpenAI-compatible servers
-    * (Azure, Ollama, vLLM, ...) or for injecting a stub `HttpTransport` in tests.
+  /** A provider for the base URL `baseUrl` with the transport `transport`. Use it for an OpenAI-compatible server (for
+    * example Azure, Ollama, or vLLM), or for a stub `HttpTransport` in a test.
     */
   def apply(
       model    : String,
@@ -138,12 +137,12 @@ object OpenAiLanguageModel:
       client = OpenAiClient(apiKey = apiKey, baseUrl = baseUrl, transport = transport)
     )
 
-  /** Construct a provider by reading the API key from the environment. Returns a `Left(LmNotConfiguredError(...))` when
-    * `envVar` is unset or empty, so callers fail fast with a clear message instead of a 401 at first call.
+  /** A provider with the API key from the environment. The result is a `Left(LmNotConfiguredError(...))` when `envVar`
+    * is not set or is empty. Thus the caller gets a clear message at once, and not an HTTP 401 at the first call.
     *
-    * `baseUrl` points the provider at any OpenAI-compatible server (Azure, Ollama, vLLM, LM Studio, OpenRouter, …); the
-    * default is the real OpenAI API. For local servers that don't check credentials the env var still must be set to
-    * SOMETHING non-empty (e.g. `OPENAI_API_KEY=local`) — or skip the environment entirely with [[local]].
+    * `baseUrl` selects the OpenAI-compatible server, for example Azure, Ollama, vLLM, LM Studio, or OpenRouter. The
+    * default is the OpenAI API. A local server that does not check credentials still needs a value in `envVar` that is
+    * not empty, for example `OPENAI_API_KEY=local`. To use no environment variable, use [[local]].
     */
   def fromEnv(
       model  : String,
@@ -154,10 +153,10 @@ object OpenAiLanguageModel:
       OpenAiLanguageModel(model = model, client = client)
     )
 
-  /** Construct a provider for a LOCAL OpenAI-compatible server that does not check credentials — the no-environment,
-    * no-key route. Common base URLs: Ollama `http://localhost:11434/v1`, vLLM `http://localhost:8000/v1`, LM Studio
-    * `http://localhost:1234/v1`. A placeholder bearer token is still sent (the wire format requires the header);
-    * servers that DO check credentials need [[apply]] / [[fromEnv]] with a real key.
+  /** A provider for a local OpenAI-compatible server that does not check credentials. It needs no environment variable
+    * and no key. Usual base URLs: Ollama `http://localhost:11434/v1`, vLLM `http://localhost:8000/v1`, LM Studio
+    * `http://localhost:1234/v1`. The request still has a bearer token with the value `apiKey`, because the wire format
+    * needs the header. A server that checks credentials needs [[apply]] or [[fromEnv]] with a real key.
     */
   def local(model: String, baseUrl: String, apiKey: String = "local"): OpenAiLanguageModel =
     OpenAiLanguageModel(model = model, client = OpenAiClient(apiKey = apiKey, baseUrl = baseUrl))

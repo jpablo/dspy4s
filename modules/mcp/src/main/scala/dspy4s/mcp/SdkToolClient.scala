@@ -81,7 +81,7 @@ private[mcp] final class SdkToolClient(client: McpSyncClient) extends McpToolCli
 
   /** The message of `error`, with the data of a JSON-RPC error when the server sends one. */
   private def describe(error: Throwable): String =
-    val message = Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getSimpleName)
+    val message = DspyError.messageOf(error)
     error match
       case mcp: McpError =>
         Option(mcp.getJsonRpcError).flatMap(rpc => Option(rpc.data())).fold(message)(data => s"$message ($data)")

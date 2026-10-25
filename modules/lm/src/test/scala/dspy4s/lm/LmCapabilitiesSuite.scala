@@ -39,7 +39,7 @@ class LmCapabilitiesSuite extends FunSuite:
 
   test("an undeclared capability is false") {
     assertEquals(
-      flags(OpenAiLanguageModel(model = "m", apiKey = "k").withCapabilities(LmCapabilities())),
+      flags(OpenAiLanguageModel(model = "m", apiKey = "k").copy(capabilities = Some(LmCapabilities()))),
       (false, false, false)
     )
     assertEquals(
@@ -65,14 +65,17 @@ class LmCapabilitiesSuite extends FunSuite:
 
   test("declared capabilities win over the capabilities of the address") {
     val local = OpenAiLanguageModel.local("llama3", baseUrl = "http://localhost:8000/v1")
-    assertEquals(flags(local.withCapabilities(LmCapabilities(functionCalling = true))), (true, false, false))
-    assertEquals(flags(local.withCapabilities(LmCapabilities.openAi.copy(reasoning = true))), (true, true, true))
+    assertEquals(flags(local.copy(capabilities = Some(LmCapabilities(functionCalling = true)))), (true, false, false))
+    assertEquals(
+      flags(local.copy(capabilities = Some(LmCapabilities.openAi.copy(reasoning = true)))),
+      (true, true, true)
+    )
     val official = OpenAiLanguageModel(model = "gpt-4o-mini", apiKey = "k")
-    assertEquals(flags(official.withCapabilities(LmCapabilities.none)), (false, false, false))
+    assertEquals(flags(official.copy(capabilities = Some(LmCapabilities.none))), (false, false, false))
   }
 
   test("a managed model reports the capabilities of its delegate") {
     val local   = OpenAiLanguageModel.local("llama3", baseUrl = "http://localhost:8000/v1")
-    val managed = ManagedLanguageModel(local.withCapabilities(LmCapabilities(responseSchema = true)))
+    val managed = ManagedLanguageModel(local.copy(capabilities = Some(LmCapabilities(responseSchema = true))))
     assertEquals((managed.supportsFunctionCalling, managed.supportsResponseSchema), (false, true))
   }

@@ -54,5 +54,5 @@ private[adapters] object JsonDynamic:
   /** Parse raw text as JSON and convert it to a `DynamicValue`. Parse failures map to a `ParseError`. */
   def parse(text: String): Either[DspyError, DynamicValue] =
     Try(ujson.read(text)).toEither.left
-      .map(error => ParseError("adapter", error.getMessage))
+      .map(error => ParseError("adapter", DspyError.messageOf(error)))
       .map(fromUjson)

@@ -7,8 +7,6 @@ import dspy4s.core.contracts.InterpreterOperation
 import dspy4s.core.contracts.SandboxTool
 import dspy4s.core.contracts.:=
 import zio.blocks.schema.DynamicValue
-import zio.blocks.schema.Schema
-import zio.blocks.schema.json.WriterConfig
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -133,23 +131,6 @@ private[runtime] object InterpreterSupport:
           finally stream.close()
           Right(file)
         catch case NonFatal(error) => Left(writeFailure(error))
-
-  /** `<Type>: <message>` (upstream `describe`), or `<Type>` when the error has no message. */
-  def describe(error: Throwable): String =
-    val name = error.getClass.getSimpleName
-    Option(error.getMessage).filter(_.nonEmpty).fold(name)(message => s"$name: $message")
-
-  // ── JSON text ───────────────────────────────────────────────────────────────────────────────────────────────
-
-  private val jsonCodec = Schema.dynamic.jsonCodec
-
-  /** The JSON text of `value`, written with `config`. `Left` has the cause when the JSON writer cannot write the value.
-    * The JSON writer of zio-blocks throws on a text with a lone UTF-16 surrogate, for example the first half of an
-    * emoji in a text that was cut at a fixed length.
-    */
-  def tryEncodeJson(value: DynamicValue, config: WriterConfig = WriterConfig): Either[String, String] =
-    try Right(jsonCodec.encodeToString(value, config))
-    catch case NonFatal(error) => Left(describe(error))
 
   // ── Callback scopes and request records ─────────────────────────────────────────────────────────────────────
 

@@ -3,12 +3,10 @@ package dspy4s.lm.runtime
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ToolCall
-import dspy4s.core.contracts.ValidationError
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
-import dspy4s.lm.providers.DynamicJson
 import munit.FunSuite
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
@@ -209,12 +207,9 @@ class DiskLmCachePutSuite extends FunSuite:
     }
   }
 
-  test(
-    "the checked encoder gives a ValidationError for a value nested 100,000 levels deep, and the next encode works"
-  ) {
-    DynamicJson.encodeExactChecked(nested(100000)) match
-      case Left(error: ValidationError) => assert(error.message.contains("nested too deep"), error.message)
-      case Left(other)                  => fail(s"expected a ValidationError, got $other")
-      case Right(json)                  => fail(s"expected a ValidationError, got ${json.length} characters")
-    assertEquals(DynamicJson.encodeExactChecked(nested(3)), Right("""{"a":{"a":{"leaf":1}}}"""))
+  test("the checked encoder gives a Left for a value nested 100,000 levels deep, and the next encode works") {
+    DynamicValues.tryEncodeJson(nested(100000)) match
+      case Left(cause) => assert(cause.contains("nested too deep"), cause)
+      case Right(json) => fail(s"expected a Left, got ${json.length} characters")
+    assertEquals(DynamicValues.tryEncodeJson(nested(3)), Right("""{"a":{"a":{"leaf":1}}}"""))
   }

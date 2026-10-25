@@ -45,13 +45,6 @@ object ToolExecutor:
     RuntimeEnvironment.withInstalled(context) { effective ?=>
       CallbackDispatcher.withTool(toolName = tool.name, args = args) {
         try tool.invoke(args)(using effective)
-        catch case NonFatal(error) => Left(RuntimeError(tool.name, describe(error)))
+        catch case NonFatal(error) => Left(RuntimeError(tool.name, DspyError.describe(error)))
       }
     }
-
-  /** `<ClassName>: <message>`, or the class name alone when the message is empty or null. An anonymous class has no
-    * simple name. For an anonymous class, the name is the full class name.
-    */
-  private def describe(error: Throwable): String =
-    val name = Some(error.getClass.getSimpleName).filter(_.nonEmpty).getOrElse(error.getClass.getName)
-    Option(error.getMessage).filter(_.nonEmpty).fold(name)(message => s"$name: $message")

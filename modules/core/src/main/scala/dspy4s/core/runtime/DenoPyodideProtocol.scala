@@ -6,8 +6,8 @@ import dspy4s.core.contracts.DynamicValues.asString
 import dspy4s.core.contracts.DynamicValues.encodeJson
 import dspy4s.core.contracts.DynamicValues.isNull
 import dspy4s.core.contracts.DynamicValues.recordGet as field
+import dspy4s.core.contracts.DynamicValues.tryEncodeJson
 import dspy4s.core.contracts.:=
-import dspy4s.core.runtime.InterpreterSupport.tryEncodeJson
 import zio.blocks.schema.DynamicValue
 
 import java.security.SecureRandom
@@ -64,7 +64,7 @@ private[runtime] object DenoPyodideProtocol:
     if trimmed.startsWith("{") then DynamicValues.parseJsonRecord(trimmed) else None
 
   // Each encoder gives the JSON line of a message. `Left` has the cause when the JSON writer cannot write the message,
-  // for example a text with a lone UTF-16 surrogate (see `InterpreterSupport.tryEncodeJson`). Such a message is not
+  // for example a text with a lone UTF-16 surrogate (see `DynamicValues.tryEncodeJson`). Such a message is not
   // sent, so the caller decides if the session continues.
 
   def encodeRequest(method: String, params: DynamicValue.Record, id: String): Either[String, String] =

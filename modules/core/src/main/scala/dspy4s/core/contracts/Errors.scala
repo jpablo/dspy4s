@@ -6,6 +6,27 @@ sealed trait DspyError extends Product with Serializable:
   def code: String
   def message: String
 
+/** The text of an exception, for the message of an error. Each module uses these rules, so one exception gives one
+  * text.
+  */
+object DspyError:
+
+  /** The message of `error` when it is not null and not empty, else the name of its class ([[className]]). */
+  def messageOf(error: Throwable): String =
+    Option(error.getMessage).filter(_.nonEmpty).getOrElse(className(error))
+
+  /** `<Type>: <message>` (upstream `describe`), or `<Type>` when the message is null or empty. `<Type>` is the name of
+    * the class of `error` ([[className]]).
+    */
+  def describe(error: Throwable): String =
+    val name = className(error)
+    Option(error.getMessage).filter(_.nonEmpty).fold(name)(message => s"$name: $message")
+
+  /** The simple name of the class of `error`. An anonymous class has no simple name, so it gives the full class name.
+    */
+  private def className(error: Throwable): String =
+    Some(error.getClass.getSimpleName).filter(_.nonEmpty).getOrElse(error.getClass.getName)
+
 final case class ConfigurationError(message: String) extends DspyError:
   val code: String = "configuration_error"
 

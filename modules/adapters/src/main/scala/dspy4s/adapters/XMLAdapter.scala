@@ -146,7 +146,7 @@ final case class XMLAdapter(
   private def parseXml(raw: String): Either[DspyError, Elem] =
     Try(XML.loadString(raw))
       .orElse(Try(XML.loadString(s"<${XMLAdapter.RootTag}>$raw</${XMLAdapter.RootTag}>")))
-      .toEither.left.map(error => ParseError("adapter", error.getMessage))
+      .toEither.left.map(error => ParseError("adapter", DspyError.messageOf(error)))
 
   /** A present-but-empty tag is a PRESENT field with an empty value (`Some("")`), not a missing field — treating it as
     * missing used to route single-output signatures into the text fallback, which returned the whole raw XML document

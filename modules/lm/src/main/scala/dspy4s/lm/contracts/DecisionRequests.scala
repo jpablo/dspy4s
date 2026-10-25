@@ -4,8 +4,6 @@ import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, ParseError, Val
 import dspy4s.lm.providers.DynamicJson
 import zio.blocks.schema.DynamicValue
 
-import scala.util.control.NonFatal
-
 /** Experimental. The request and the reply of a System One model ([[LanguageModel.supportsDecisionRequests]]), as an
   * [[LmRequest]] and an [[LmResponse]], so that the cache, the retries, the history, and the usage of
   * `ManagedLanguageModel` apply with no new code (decision 4 of D6; upstream `TypeSafe.__call__(state, questions)` in
@@ -50,7 +48,7 @@ object DecisionRequests:
   /** The reply of a decision request: one output whose text is the JSON object of the answers, by question name. */
   def response(answers: DynamicValue.Record, usage: Option[LmUsage], modelName: Option[String]): LmResponse =
     LmResponse(
-      outputs = Vector(LmOutput(text = DynamicJson.encodeExact(answers))),
+      outputs = Vector(LmOutput(text = DynamicValues.encodeJson(answers))),
       usage = usage,
       modelName = modelName
     )
@@ -84,5 +82,4 @@ object DecisionRequests:
 
   /** The JSON form of `value`, or `value` itself when it has no JSON text. */
   private def jsonForm(value: DynamicValue): DynamicValue =
-    try DynamicJson.decode(DynamicJson.encodeExact(value)).getOrElse(value)
-    catch case NonFatal(_) => value
+    DynamicValues.tryEncodeJson(value).toOption.flatMap(DynamicJson.decode(_).toOption).getOrElse(value)

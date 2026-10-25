@@ -90,10 +90,10 @@ class OpenAiClientSuite extends FunSuite:
 
     assert(result.isRight)
     val payload = result.toOption.get
-    val choices = DynamicJson.asSequence(DynamicJson.field(payload, "choices").getOrElse(DynamicValue.Null))
+    val choices = DynamicValues.sequenceAt(payload, "choices")
     assertEquals(choices.size, 1)
-    val message = DynamicJson.field(choices(0), "message").getOrElse(DynamicValue.Null)
-    assertEquals(DynamicJson.field(message, "content").flatMap(DynamicJson.asString), Some("Paris"))
+    val message = DynamicValues.recordGet(choices(0), "message").getOrElse(DynamicValue.Null)
+    assertEquals(DynamicValues.recordGet(message, "content").flatMap(DynamicValues.asString), Some("Paris"))
 
     assertEquals(transport.sentBodies.size, 1)
     val (url, body, auth) = transport.sentBodies.head

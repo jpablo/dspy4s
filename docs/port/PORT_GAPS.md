@@ -1216,8 +1216,8 @@ stream events.
 
 **Resolution (capabilities, batch 23).** `LmCapabilities` is the data behind the capability flags (upstream
 `Capabilities`), and an undeclared capability is `false`. `OpenAiLanguageModel` has the OpenAI capabilities at the
-official address only (`LmCapabilities.forBaseUrl`); an other server has none until the user declares them with
-`withCapabilities` (decision L5, 2026-10-18). Test: `LmCapabilitiesSuite`.
+official address only (`LmCapabilities.forBaseUrl`); an other server has none until the user declares them in the
+`capabilities` field (decision L5, 2026-10-18). Test: `LmCapabilitiesSuite`.
 
 **Direction (open).** Reasoning-model parameters and custom headers remain. `close` is resolved in batch 22
 (`CloseLifecycleSuite`).

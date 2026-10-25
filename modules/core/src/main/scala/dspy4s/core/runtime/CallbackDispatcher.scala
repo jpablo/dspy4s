@@ -163,7 +163,7 @@ object CallbackDispatcher:
       catch
         case bodyError @ (NonFatal(_) | _: InterruptedException) =>
           val runtimeError: Either[DspyError, A] = Left(
-            RuntimeError("callback_dispatch", Option(bodyError.getMessage).getOrElse(bodyError.getClass.getSimpleName))
+            RuntimeError("callback_dispatch", DspyError.messageOf(bodyError))
           )
           try emitEnd(runtimeError)
           catch

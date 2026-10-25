@@ -32,14 +32,15 @@ import scala.util.matching.Regex
   * client uses the parts that do not depend on the provider: [[byStatus]], [[requestId]], [[retryAfter]],
   * [[withRequestDetails]], and [[notConfigured]].
   *
-  * The rules mirror upstream `normalize_error` (`dspy/_vendor/lm15/providers/openai.py`), `map_http_error`
+  * The rules are the rules of upstream `normalize_error` (`dspy/_vendor/lm15/providers/openai.py`), `map_http_error`
   * (`dspy/_vendor/lm15/errors.py`), and `_attach_error_metadata` (`dspy/_vendor/lm15/providers/base.py`).
   */
 private[lm] object OpenAiErrors:
-  val provider: String = "openai"
+  /** The provider name of the errors. */
+  private val provider: String = "openai"
 
-  /** Context-window overflow markers, mirroring upstream dspy `clients/lm.py` (`is_litellm_context_window_error`).
-    * Matched case-insensitively against the HTTP 400 response body.
+  /** The texts that tell that a prompt is larger than the context window (upstream `is_litellm_context_window_error` in
+    * dspy `clients/lm.py`). The check looks for them in the body of an HTTP 400 reply, with no regard to case.
     */
   private val contextWindowMarkers: Seq[String] =
     Seq("context_length_exceeded", "maximum context length", "context window", "reduce the length")
@@ -216,7 +217,7 @@ private[lm] object OpenAiErrors:
     */
   def fromResponsesStreamError(event: DynamicValue.Record, model: Option[String]): LmProviderError =
     val outer = envelopeOf(event)
-    DynamicValues.recordGet(event, WireKeys.error).flatMap(DynamicJson.asRecord) match
+    DynamicValues.recordGet(event, WireKeys.error).flatMap(DynamicValues.asRecord) match
       case Some(error) =>
         val inner = envelopeOf(error)
         streamError(inner.code.orElse(inner.kind).orElse(outer.code), inner.message.orElse(outer.message), model)
@@ -271,7 +272,7 @@ private[lm] object OpenAiErrors:
     * not JSON. This function does not fail for a body that it cannot read.
     */
   private def parseEnvelope(body: String): Envelope =
-    DynamicJson.decode(body).toOption.flatMap(DynamicJson.field(_, "error")) match
+    DynamicJson.decode(body).toOption.flatMap(DynamicValues.recordGet(_, "error")) match
       case Some(error: DynamicValue.Record) => envelopeOf(error)
       case Some(other)                      => Envelope(message = scalarText(other))
       case None                             => Envelope()
@@ -285,7 +286,7 @@ private[lm] object OpenAiErrors:
     * string, `null`, and each other value give `None`.
     */
   private def scalarText(value: DynamicValue): Option[String] =
-    DynamicJson.asString(value).orElse(DynamicJson.asLong(value).map(_.toString)).map(_.trim).filter(_.nonEmpty)
+    DynamicValues.asString(value).orElse(DynamicValues.asLong(value).map(_.toString)).map(_.trim).filter(_.nonEmpty)
 
   /** The delay that the response asked for. `Retry-After` holds decimal seconds or an HTTP date. A date gives the time
     * that remains, and a date in the past gives zero. When `Retry-After` gives no hint, `retry-after-ms` and

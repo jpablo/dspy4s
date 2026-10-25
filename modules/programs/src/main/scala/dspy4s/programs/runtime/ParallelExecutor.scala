@@ -82,7 +82,7 @@ final class ParallelExecutor(
                     case NonFatal(error) => Left(
                         RuntimeError(
                           component = "parallel_executor",
-                          message = Option(error.getMessage).getOrElse(error.getClass.getSimpleName)
+                          message = DspyError.messageOf(error)
                         )
                       )
                 index -> Some(value)
@@ -145,7 +145,7 @@ final class ParallelExecutor(
       case NonFatal(error) => Left(
           RuntimeError(
             component = "parallel_executor",
-            message = Option(error.getMessage).getOrElse(error.getClass.getSimpleName)
+            message = DspyError.messageOf(error)
           )
         )
     finally

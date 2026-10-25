@@ -1,7 +1,7 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.internal.PythonText
-import dspy4s.core.contracts.{:=, DynamicValues}
+import dspy4s.core.contracts.{:=, DynamicValues, PythonRepr}
 import munit.FunSuite
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
@@ -42,7 +42,7 @@ class PythonTextSuite extends FunSuite:
   )
 
   test("a float prints as Python repr") {
-    floats.foreach((number, expected) => assertEquals(PythonText.float(number), expected, number.toString))
+    floats.foreach((number, expected) => assertEquals(PythonRepr.float(number), expected, number.toString))
   }
 
   test("json escapes the quote, the backslash, and the control characters only") {

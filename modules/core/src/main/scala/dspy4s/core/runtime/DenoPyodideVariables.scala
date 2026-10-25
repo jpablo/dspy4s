@@ -1,8 +1,8 @@
 package dspy4s.core.runtime
 
-import dspy4s.core.contracts.{CodeInterpreterErrors, DspyError}
-import dspy4s.core.runtime.InterpreterSupport.tryEncodeJson
-import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+import dspy4s.core.contracts.{CodeInterpreterErrors, DspyError, DynamicValues}
+import dspy4s.core.contracts.DynamicValues.tryEncodeJson
+import zio.blocks.schema.DynamicValue
 
 /** Validates and serializes host values injected into the sandbox as Python variables. */
 private[runtime] object DenoPyodideVariables:
@@ -38,8 +38,7 @@ private[runtime] object DenoPyodideVariables:
   /** The line `name = json.loads("<json>")`, or a `Left` when the JSON writer cannot encode `value`. */
   private def assignment(name: String, value: DynamicValue): Either[DspyError, String] =
     // Double JSON-encoding: the inner JSON text becomes a valid Python string literal.
-    val literal =
-      tryEncodeJson(value).flatMap(json => tryEncodeJson(DynamicValue.Primitive(PrimitiveValue.String(json))))
+    val literal = tryEncodeJson(value).flatMap(json => tryEncodeJson(DynamicValues.string(json)))
     literal match
       case Right(text) => Right(s"$name = json.loads($text)")
       case Left(cause) => CodeInterpreterErrors.failure(s"Unable to encode the variable '$name' as JSON: $cause")

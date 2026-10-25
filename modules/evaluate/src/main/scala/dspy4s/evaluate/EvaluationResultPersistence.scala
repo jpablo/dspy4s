@@ -1,5 +1,6 @@
 package dspy4s.evaluate
 
+import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.evaluate.contracts.EvaluationResult
 
@@ -31,7 +32,7 @@ object EvaluationResultPersistence:
       finally writer.close()
       Right(())
     catch
-      case error: Throwable => Left(Option(error.getMessage).getOrElse(error.getClass.getSimpleName))
+      case error: Throwable => Left(DspyError.messageOf(error))
 
   def saveAsCsv(result: EvaluationResult, path: String): Either[String, Unit] =
     try
@@ -67,7 +68,7 @@ object EvaluationResultPersistence:
         Right(())
       finally writer.close()
     catch
-      case error: Throwable => Left(Option(error.getMessage).getOrElse(error.getClass.getSimpleName))
+      case error: Throwable => Left(DspyError.messageOf(error))
 
   private def toJson(value: Any): ujson.Value =
     value match

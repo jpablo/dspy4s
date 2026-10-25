@@ -505,7 +505,7 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
         val scored           =
           try runner.run(program, example.inputs).flatMap(prediction => metric.score(example, prediction))
           catch
-            case NonFatal(error) => Left(RuntimeError("reanchor", Option(error.getMessage).getOrElse(error.toString)))
+            case NonFatal(error) => Left(RuntimeError("reanchor", DspyError.messageOf(error)))
         scored.left.foreach(error => failure.compareAndSet(None, Some(error)))
         scored
       ,
@@ -533,7 +533,7 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
       catch
         case NonFatal(error) => Left(RuntimeError(
             "reanchor",
-            s"Failed to write report.json: ${Option(error.getMessage).getOrElse(error.toString)}"
+            s"Failed to write report.json: ${DspyError.messageOf(error)}"
           ))
     }
 

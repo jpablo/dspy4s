@@ -18,16 +18,15 @@ object RequestHash:
 
   /** The cache key of `request` like [[forRequest]], or a `ValidationError` when the function cannot build the key, for
     * example when a value in the request is nested too deep for the stack of the thread, as the arguments of a tool
-    * call in a message can be (the rule of `DynamicJson.encodeExactChecked`). A cache stores and reads nothing for such
-    * a request, so the model gets the call (upstream `Cache.get` and `Cache.put` catch the exception of `cache_key`,
-    * log it, and go on with no cache, `dspy/clients/cache.py`).
+    * call in a message can be (the rule of `DynamicValues.tryEncodeJson`). A cache stores and reads nothing for such a
+    * request, so the model gets the call (upstream `Cache.get` and `Cache.put` catch the exception of `cache_key`, log
+    * it, and go on with no cache, `dspy/clients/cache.py`).
     */
   def forRequestChecked(request: LmRequest): Either[DspyError, String] =
     try Right(forRequest(request))
     catch
       case _: StackOverflowError => Left(ValidationError("The request has no cache key: a value is nested too deep"))
-      case NonFatal(error)       =>
-        Left(ValidationError(s"The request has no cache key: ${Option(error.getMessage).getOrElse(error.toString)}"))
+      case NonFatal(error)       => Left(ValidationError(s"The request has no cache key: ${DspyError.messageOf(error)}"))
 
   /** The hashed text of `request`. An older `LmRequest` had a request id. The text keeps the key `"request_id":null` of
     * that version, so each entry of a disk cache stays valid.

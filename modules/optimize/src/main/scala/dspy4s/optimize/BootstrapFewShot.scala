@@ -261,7 +261,7 @@ final class BootstrapFewShot[P: {OptimizableStructure, ProgramRunner}](
         }
       }
     catch
-      case NonFatal(error) => Right(Attempt.Failed(Option(error.getMessage).getOrElse(error.toString)))
+      case NonFatal(error) => Right(Attempt.Failed(DspyError.messageOf(error)))
 
   /** The teacher must not see the example of the run as a demo (Python: `x != example`). Python compares the stores of
     * the two examples. The store holds the values and the `augmented` mark, and it does not hold the input keys.

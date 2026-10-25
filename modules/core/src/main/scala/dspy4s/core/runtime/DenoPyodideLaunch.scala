@@ -199,7 +199,7 @@ private[runtime] object DenoPyodideLaunch:
     "/dspy4s/core/runtime/runner.js",
     "dspy4s-runner",
     ".js",
-    error => s"Unable to write the Deno runner script: ${error.getMessage}"
+    error => s"Unable to write the Deno runner script: ${DspyError.messageOf(error)}"
   )
 
   /** The path of the runner script. `Left` when the script cannot be written. */

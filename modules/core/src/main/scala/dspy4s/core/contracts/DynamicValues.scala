@@ -2,10 +2,12 @@ package dspy4s.core.contracts
 
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
+import zio.blocks.schema.json.WriterConfig
 
 import java.nio.charset.StandardCharsets
 import java.util.Objects
 import scala.collection.immutable.VectorMap
+import scala.util.control.NonFatal
 
 /** `"name" := value` builds a schema-lifted `(name, DynamicValue)` entry for the data-bag constructors (`Example(...)`,
   * [[DynamicValues.recordFromEntries]], the dynamic `ProgramRuntime.run`). The value is converted with zio-blocks'
@@ -65,10 +67,39 @@ object DynamicValues:
   def record(entries: (String, DynamicValue)*): DynamicValue.Record =
     recordFromEntries(entries)
 
-  /** Lookup by field name. Returns `None` if the record has no such field. */
-  def recordGet(rec: DynamicValue.Record, name: String): Option[DynamicValue] =
-    val index = rec.fields.indexWhere(_._1 == name)
-    if index < 0 then None else Some(rec.fields(index)._2)
+  /** The JSON string `text`. */
+  def string(text: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(text))
+
+  /** The JSON array of `values`, in order. */
+  def sequence(values: Seq[DynamicValue]): DynamicValue = DynamicValue.Sequence(Chunk.from(values))
+
+  /** The value of the field `name` of a record. `None` when `value` is not a record, or when the record has no such
+    * field.
+    */
+  def recordGet(value: DynamicValue, name: String): Option[DynamicValue] =
+    value match
+      case rec: DynamicValue.Record =>
+        val index = rec.fields.indexWhere(_._1 == name)
+        if index < 0 then None else Some(rec.fields(index)._2)
+      case _ => None
+
+  /** The record in `value`. `None` for another value. */
+  def asRecord(value: DynamicValue): Option[DynamicValue.Record] =
+    value match
+      case rec: DynamicValue.Record => Some(rec)
+      case _                        => None
+
+  /** The elements of an array. Another value gives no element. */
+  def asSequence(value: DynamicValue): Vector[DynamicValue] =
+    value match
+      case seq: DynamicValue.Sequence => seq.elements.iterator.toVector
+      case _                          => Vector.empty
+
+  /** The elements of the array in the field `name` of a record. An absent field, a null, or a value that is not an
+    * array gives no element.
+    */
+  def sequenceAt(value: DynamicValue, name: String): Vector[DynamicValue] =
+    recordGet(value, name).map(asSequence).getOrElse(Vector.empty)
 
   /** The dynamic JSON codec of zio-blocks. */
   private val dynamicJsonCodec = Schema.dynamic.jsonCodec
@@ -84,8 +115,19 @@ object DynamicValues:
   def parseJsonRecord(text: String): Option[DynamicValue.Record] =
     decodeJson(text).collect { case record: DynamicValue.Record => record }
 
-  /** The compact JSON text of `value`, from the dynamic JSON codec of zio-blocks. */
+  /** The compact JSON text of `value`, from the dynamic JSON codec of zio-blocks. Each null stays. */
   def encodeJson(value: DynamicValue): String = dynamicJsonCodec.encodeToString(value)
+
+  /** The JSON text of `value`, written with `config`, or a `Left` with the cause when the value has no JSON text. The
+    * JSON writer of zio-blocks throws on a text with a lone UTF-16 surrogate (for example the first half of an emoji in
+    * a text that was cut at a fixed length) and on a number that is not finite. The writer is recursive, so a value
+    * that is nested too deep for the stack of the thread gives a `Left` too.
+    */
+  def tryEncodeJson(value: DynamicValue, config: WriterConfig = WriterConfig): Either[String, String] =
+    try Right(dynamicJsonCodec.encodeToString(value, config))
+    catch
+      case _: StackOverflowError => Left("the value is nested too deep")
+      case NonFatal(error)       => Left(DspyError.describe(error))
 
   /** True for the JSON `null`. */
   def isNull(dv: DynamicValue): Boolean =

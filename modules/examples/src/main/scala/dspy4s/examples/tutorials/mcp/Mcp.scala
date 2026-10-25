@@ -477,7 +477,9 @@ object Mcp:
     Using(McpClient.sync(transport).build()) { client =>
       val _ = client.initialize()
       McpTools.fromClient(McpToolClient.fromSync(client)).flatMap(body)
-    }.toEither.left.map[DspyError](error => RuntimeError("mcp", s"MCP client failed: ${error.getMessage}")).flatten
+    }.toEither.left.map[DspyError](error =>
+      RuntimeError("mcp", s"MCP client failed: ${DspyError.messageOf(error)}")
+    ).flatten
 
   def describeTools(classPath: String): Either[DspyError, String] =
     withAirlineTools(classPath) { tools =>

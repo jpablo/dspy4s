@@ -311,7 +311,7 @@ class ToolCallIdSuite extends FunSuite:
       )
       assertEquals(
         cached.map(_.outputs.flatMap(_.toolCalls).map(call =>
-          (call.id, call.name, DynamicJson.encodeExact(call.args))
+          (call.id, call.name, DynamicValues.encodeJson(call.args))
         )),
         Some(Vector(
           (None, "search", """{"query":"cats","top_k":3}"""),

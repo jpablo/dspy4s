@@ -1,5 +1,6 @@
 package dspy4s.lm.providers
 
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.{
   :=,
   DspyError,
@@ -105,12 +106,12 @@ final case class TypeSafeModel(
       .left.map(OpenAiErrors.withRequestDetails(_, Some(request.model), TypeSafeModel.Provider))
 
   /** The base URL with no slash at its end (upstream `base_url.rstrip("/")`). */
-  private def root: String = baseUrl.reverse.dropWhile(_ == '/').reverse
+  private val root: String = baseUrl.reverse.dropWhile(_ == '/').reverse
 
   /** The URL of the System One API. */
-  private def endpoint: String = s"$root/v1/systemone"
+  private val endpoint: String = s"$root/v1/systemone"
 
-  private def headers: Map[String, String] =
+  private val headers: Map[String, String] =
     Map("Authorization" -> s"Bearer $apiKey", "Content-Type" -> "application/json")
 
   /** Close the transport. */
@@ -191,15 +192,11 @@ object TypeSafeModel:
   private def questionsOf(questions: DynamicValue.Record): Either[String, Vector[(String, Question)]] =
     if questions.fields.isEmpty then Left("A decision request needs at least one question: Jev cannot generate values")
     else
-      DynamicValues.recordEntries(questions).foldLeft[Either[String, Vector[(String, Question)]]](Right(Vector.empty)) {
-        case (acc, (name, value)) =>
-          acc.flatMap(read => questionOf(name, value).map(question => read :+ (name -> question)))
-      }
+      Traverse.either(questions.fields)((name, value) => questionOf(name, value).map(name -> _))
 
   private def questionOf(name: String, value: DynamicValue): Either[String, Question] =
-    val record   = DynamicJson.asRecord(value)
-    val kind     = record.flatMap(DynamicJson.field(_, "type")).flatMap(DynamicJson.asString)
-    val criteria = record.flatMap(DynamicJson.field(_, "criteria"))
+    val kind     = DynamicValues.recordGet(value, "type").flatMap(DynamicValues.asString)
+    val criteria = DynamicValues.recordGet(value, "criteria")
     (kind, criteria) match
       case (Some("noul"), _)                                    => Right(Question.Noul)
       case (Some("score"), Some(levels: DynamicValue.Sequence)) =>
@@ -212,8 +209,7 @@ object TypeSafeModel:
         )
 
   /** The JSON text of the body. Each null stays: a choice criterion with no description is a JSON null. A body with no
-    * JSON text (for example one with a NaN, or one nested too deep) gives the text of the error of
-    * `DynamicJson.encodeExactChecked`.
+    * JSON text (for example one with a NaN, or one nested too deep) gives the cause of `DynamicValues.tryEncodeJson`.
     */
   private def encode(model: String, state: DynamicValue, questions: DynamicValue.Record): Either[String, String] =
     val body = DynamicValues.record(
@@ -221,7 +217,7 @@ object TypeSafeModel:
       DecisionRequests.StateKey     -> state,
       DecisionRequests.QuestionsKey -> questions
     )
-    DynamicJson.encodeExactChecked(body).left.map(_.message)
+    DynamicValues.tryEncodeJson(body).left.map(cause => s"The value has no JSON text: $cause")
 
   /** The response of a reply with a status from 200 to 299, with the reply rules of upstream `parse_response`. */
   private def parseReply(
@@ -240,29 +236,26 @@ object TypeSafeModel:
       )
 
     def distribution(answer: DynamicValue.Record, keys: Vector[String], path: String): Either[DspyError, Unit] =
-      DynamicJson.field(answer, "probabilities") match
+      DynamicValues.recordGet(answer, "probabilities") match
         case Some(probabilities: DynamicValue.Record) if DynamicValues.recordKeys(probabilities).toSet == keys.toSet =>
-          keys.foldLeft[Either[DspyError, Unit]](Right(())) { (acc, key) =>
-            acc.flatMap(_ =>
-              probability(DynamicJson.field(probabilities, key), s"$path.probabilities.$key")
-            )
-          }
+          def check(key: String) = probability(DynamicValues.recordGet(probabilities, key), s"$path.probabilities.$key")
+          Traverse.either(keys)(check).map(_ => ())
         case _ =>
           Left(invalid(s"$path.probabilities", "expected one probability for every declared key, and no other keys"))
 
     def checkAnswer(name: String, question: Question, answer: Option[DynamicValue]): Either[DspyError, Unit] =
       val path = s"answers.$name"
-      answer.flatMap(DynamicJson.asRecord) match
+      answer.flatMap(DynamicValues.asRecord) match
         case None         => Left(invalid(path, "expected an answer object"))
         case Some(record) =>
-          val kind = DynamicJson.field(record, "type").flatMap(DynamicJson.asString)
+          val kind = DynamicValues.recordGet(record, "type").flatMap(DynamicValues.asString)
           if !kind.contains(question.typeName) then Left(invalid(s"$path.type", s"expected '${question.typeName}'"))
           else
             question match
-              case Question.Noul         => probability(DynamicJson.field(record, "noul"), s"$path.noul")
+              case Question.Noul         => probability(DynamicValues.recordGet(record, "noul"), s"$path.noul")
               case Question.Score(keys)  => distribution(record, keys, path)
               case Question.Choice(keys) => distribution(record, keys, path).flatMap { _ =>
-                  val pick = DynamicJson.field(record, "choice").flatMap(DynamicJson.asString)
+                  val pick = DynamicValues.recordGet(record, "choice").flatMap(DynamicValues.asString)
                   Either.cond(
                     pick.exists(keys.contains),
                     (),
@@ -272,14 +265,14 @@ object TypeSafeModel:
 
     def tokens(usage: DynamicValue.Record, key: String): Either[DspyError, Long] =
       val wrong = invalid("usage", s"expected '$key' to be an integer that is not negative")
-      DynamicJson.field(usage, key) match
+      DynamicValues.recordGet(usage, key) match
         case None | Some(_: DynamicValue.Null.type)                         => Right(0L)
         case Some(DynamicValue.Primitive(PrimitiveValue.Int(n))) if n >= 0  => Right(n.toLong)
         case Some(DynamicValue.Primitive(PrimitiveValue.Long(n))) if n >= 0 => Right(n)
         case Some(_)                                                        => Left(wrong)
 
     def usageOf(data: DynamicValue): Either[DspyError, Option[LmUsage]] =
-      DynamicJson.field(data, "usage") match
+      DynamicValues.recordGet(data, "usage") match
         case None | Some(_: DynamicValue.Null.type) => Right(None)
         case Some(usage: DynamicValue.Record)       =>
           for
@@ -289,24 +282,24 @@ object TypeSafeModel:
         case Some(_) => Left(invalid("usage", "expected an object or null"))
 
     def modelOf(data: DynamicValue): Either[DspyError, String] =
-      DynamicJson.field(data, "model") match
+      DynamicValues.recordGet(data, "model") match
         case None | Some(_: DynamicValue.Null.type) => Right(request.model)
         case Some(value)                            =>
-          DynamicJson.asString(value).filter(_.nonEmpty).toRight(invalid("model", "expected a non-empty string"))
+          DynamicValues.asString(value).filter(_.nonEmpty).toRight(invalid("model", "expected a non-empty string"))
 
     for
       data    <- DynamicJson.decode(reply.body).left.map(_ => invalid("$", "the reply is not JSON"))
-      _       <- DynamicJson.asRecord(data).toRight(invalid("$", "expected an object"))
-      answers <- DynamicJson.field(data, "answers").flatMap(DynamicJson.asRecord)
+      _       <- DynamicValues.asRecord(data).toRight(invalid("$", "expected an object"))
+      answers <- DynamicValues.recordGet(data, "answers").flatMap(DynamicValues.asRecord)
                    .toRight(invalid("answers", "expected an object containing every declared judgment"))
       _ <- Either.cond(
              DynamicValues.recordKeys(answers).toSet == questions.map(_._1).toSet,
              (),
              invalid("answers", "keys must match the declared judgments exactly")
            )
-      _ <- questions.foldLeft[Either[DspyError, Unit]](Right(())) { case (acc, (name, question)) =>
-             acc.flatMap(_ => checkAnswer(name, question, DynamicJson.field(answers, name)))
-           }
+      _ <- Traverse.either(questions)((name, question) =>
+             checkAnswer(name, question, DynamicValues.recordGet(answers, name))
+           )
       usage     <- usageOf(data)
       modelName <- modelOf(data)
     yield DecisionRequests.response(answers, usage, Some(modelName))
@@ -329,23 +322,23 @@ object TypeSafeModel:
   private def errorText(status: Int, body: String): (String, Option[String]) =
     val excerpt  = body.strip().take(ExcerptLength)
     val fallback = if excerpt.isEmpty then s"HTTP $status" else excerpt
-    DynamicJson.decode(body).toOption.flatMap(DynamicJson.field(_, "detail")) match
+    DynamicJson.decode(body).toOption.flatMap(DynamicValues.recordGet(_, "detail")) match
       case Some(detail: DynamicValue.Record) =>
-        val message = DynamicJson.field(detail, "message").flatMap(DynamicJson.asString).getOrElse(fallback)
-        (message, DynamicJson.field(detail, "error_type").flatMap(DynamicJson.asString))
+        val message = DynamicValues.recordGet(detail, "message").flatMap(DynamicValues.asString).getOrElse(fallback)
+        (message, DynamicValues.recordGet(detail, "error_type").flatMap(DynamicValues.asString))
       case Some(detail: DynamicValue.Sequence) if detail.elements.nonEmpty =>
-        val first = detail.elements.headOption.flatMap(DynamicJson.asRecord).getOrElse(DynamicValue.Record.empty)
-        val loc   = DynamicJson.field(first, "loc").map(DynamicJson.asSequence).getOrElse(Vector.empty)
-          .filterNot(part => DynamicJson.asString(part).contains("body"))
+        val first = detail.elements.headOption.flatMap(DynamicValues.asRecord).getOrElse(DynamicValue.Record.empty)
+        val loc   = DynamicValues.sequenceAt(first, "loc")
+          .filterNot(part => DynamicValues.asString(part).contains("body"))
           .map(pythonText)
           .mkString(".")
-        val text = DynamicJson.field(first, "msg").map(pythonText)
+        val text = DynamicValues.recordGet(first, "msg").map(pythonText)
         (if loc.nonEmpty then s"$loc: ${text.getOrElse("validation error")}" else text.getOrElse(fallback), None)
       case _ => (fallback, None)
 
   /** The text of a JSON value, as Python `str` gives it for a string or a number. */
   private def pythonText(value: DynamicValue): String =
-    DynamicJson.asString(value).getOrElse(DynamicValues.renderText(value))
+    DynamicValues.asString(value).getOrElse(DynamicValues.renderText(value))
 
   /** The details of an error before the wire. */
   private def details(request: LmRequest): LmErrorDetails =
