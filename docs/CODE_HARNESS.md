@@ -2,7 +2,8 @@
 
 Status: proposal, 2026-10-19. Sections 7 and 8 were added on 2026-10-21, the Phase 0 results (section 11) on
 2026-10-22, and sections 2.4 to 2.6 and section 9 on 2026-10-24. On 2026-10-24 the document was also put in a new
-order around one recommended design (section 4). Nothing in this document exists in the code of dspy4s yet.
+order around one recommended design (section 4), and F7 and F8 were added. Nothing in this document exists in the
+code of dspy4s yet.
 
 ## Summary
 
@@ -18,6 +19,8 @@ order around one recommended design (section 4). Nothing in this document exists
   optimizers. It has no Scala interpreter. Also, RLM sub-calls write no trace entry.
 - dspy4s builds on the same 3.10 nightly as atc, so the guest API uses capture checking (F2). A mode is a set of
   givens, and the compiler checks it. A handler decides what each call does.
+- The capability checks stop at the process boundary, and a permitted command can do anything that the user can
+  do. So each command runs in an OS sandbox, with a policy from the capabilities in scope (F7, F8).
 - Section 4 shows the recommended design in one place. A session is a log, a scope, a mode, a context strategy,
   and a REPL, with a pure decider and a `Predict` leaf for each LM step. Section 5 keeps a short history of the
   three earlier designs (A, B and C) that led to it.
@@ -335,8 +338,8 @@ The gaps for a code harness:
 
 ## 3. Shared foundation
 
-The recommended design (section 4) needs the six parts in this section. The three earlier designs of section 5
-needed them too.
+The recommended design (section 4) needs the eight parts in this section. The three earlier designs of section 5
+needed F1 to F6 too.
 
 ### F1. An embedded Scala REPL
 
@@ -446,7 +449,8 @@ The rules:
 - **An operation lists every capability that its effects can reach.** A command can change files, so `exec`
   needs `Shell^` and also `Files^`. Then a read-only session cannot write a file through a shell, even if it has
   a `Shell`. atc has the same rule: `def exec(command: String)(using Exec^, FileSystem^)`. The rule also holds on
-  the trait itself, so code that calls `shell.exec` directly needs `Files^` too.
+  the trait itself, so code that calls `shell.exec` directly needs `Files^` too. For `exec`, the rule holds only
+  if a sandbox limits the command to these capabilities (F7, F8).
 - **Overloads, not default arguments.** A function that takes a capability uses overloads for its optional
   parameters. atc gives this rule for capture checking.
 - **Top-level functions.** The model calls `read("build.sbt")`, not `files.read(...)`. The functions of `api`
@@ -511,7 +515,7 @@ The value behind each given is a handler. The host composes the handler for each
 | `Files.local(root)` | The real files under `root`. |
 | `Files.overlay(base)` | Copy on write over `base`, for one rollout. |
 | `Files.memory(snapshot)` | Files in memory, for tests. |
-| `Shell.local(cwd)`, `Shell.denied` | Real commands, or no commands. |
+| `Shell.sandboxed(root, policy)`, `Shell.local(cwd)`, `Shell.denied` | Commands in an OS sandbox (F8), real commands with no sandbox (only for tests), or no commands. |
 | `recorded(h)` | Writes each call and its result into the session log. |
 | `replayed(log)` | Answers each call from a log. |
 | `guarded(h, policy)` | Checks a policy before each call. A deny rule wins, as in atc. |
@@ -577,6 +581,123 @@ A `Workspace` value has `fork(): Either[DspyError, Workspace]`. A fork is a git 
 an overlay (F2). Each rollout of an optimizer runs in its own fork. The metric reads that fork, for example to
 run the tests. Without forks, parallel rollouts write the same files.
 
+### F7. The threat model of commands
+
+The capability checks of F1 and F2 cover the code that the Scala compiler checks: the cells of the model and the
+calls into the guest API. The checks stop at the process boundary. A child process runs with all the OS
+permissions of the user. The atc README says: "An allowed command is arbitrary code, run with your privileges,
+outside the sandbox."
+
+Thus the rule of F2 "An operation lists every capability that its effects can reach" does not hold for `exec`
+with no sandbox. `exec` lists `Shell^` and `Files^`, but a command can also reach the network, the files outside
+the workspace, and the classified files. In local mode, `httpGet(url)` does not compile, but `exec("curl ...")`
+compiles and runs.
+
+Three groups of commands get around the checks:
+
+| Group | Examples | What the group gets around |
+|---|---|---|
+| Programs that run other programs or code | Shells, interpreters, `find -exec`, `xargs`, `env`, `timeout`, `awk` with `system()`, GNU `sed` with its `e` command | All the checks |
+| Programs that run code from the workspace | `make`, `sbt`, `mill`, `npm run`, `cargo build`, `pytest`, test runners, linters with plugins, git with hooks | All the checks, after a write through `Files^` |
+| Programs that read or send data | `cat`, `cp`, `curl`, `git fetch`, `npm install` | `Network`, the host list, and `Classified` |
+
+No allow list can remove the second group. A coding agent edits code and runs the tests, so it runs code that it
+wrote. The atc README gives `./mill app.test` as a narrow command to approve, but the agent can write the tests
+that this command runs. That test code compiles with no capture checks and no safe mode. So a session with
+`Shell^` and `Files^` can run arbitrary code.
+
+A deny list does not close the gap either. atc denies `bash` by name, and its docs say that this does not block
+`/bin/bash`, a wrapper, or a renamed interpreter. atc also denies `git *--output*`, because `git diff` can read
+files outside the repository.
+
+The checks still have value:
+
+- With no `Shell`, the guarantees hold, if the trusted base is correct. Many tasks need only `read`, `write`,
+  `edit`, search, the permitted hosts, and `llmQuery`.
+- With `Shell`, the mode decides if a cell can start a command at all. The `guarded` handler decides which
+  commands can run, and the `recorded` handler writes each command into the log.
+- The compile errors keep a cooperative model inside its mode. Against a prompt-injected model, only a boundary
+  at the OS level helps.
+
+The rules for the harness:
+
+1. Treat `exec` as an effect with the full authority of its sandbox. The type of `exec` gives no other
+   guarantee.
+2. Run each command in an OS sandbox with a policy from the capabilities in scope (F8). Then the rule of F2 holds
+   for `exec` too.
+3. Give guest functions in place of frequent commands, for example search, git through a library, and a `test()`
+   function. A guest function runs in the trusted base, so the checks cover it. A `test()` function still runs
+   the tests in the sandbox, because the tests are code that the agent wrote.
+4. Treat a write to a file that a permitted program runs as code as code execution. Examples are build files,
+   tests, hooks and plugin configurations. Keep `.git` read-only, as the atc project template does.
+5. Keep the allow list and the deny list of the `guarded` handler, as in atc. They prevent mistakes, but they are
+   not a boundary.
+
+### F8. Sandboxes
+
+An OS sandbox applies a policy to a process and to each process that it starts. Capture checking stops at the
+process boundary (F7), so the sandbox is the boundary for commands.
+
+The JVM has no sandbox inside the process: JDK 24 disabled the Security Manager permanently (JEP 486). So the
+checks for code in the REPL are capture checking, safe mode and the class loader (F1). The check for a child
+process is an OS sandbox.
+
+What the analyzed harnesses do:
+
+| Harness | Sandbox for commands |
+|---|---|
+| atc, tacit | None. A command must match an allow list. atc also has a deny list. |
+| pi | None built in. An example extension (`examples/extensions/sandbox`) runs `bash` through `@anthropic-ai/sandbox-runtime`, with sandbox-exec on macOS and bubblewrap on Linux. Its configuration has file rules and a list of permitted domains. |
+| uniichat | None in the source. |
+| deepseek-harness | `dsh-sandbox-local`: bubblewrap or Landlock on Linux, Seatbelt on macOS, and an ACL runner on Windows. The modes are `read-only`, `workspace-write` and `danger-full-access`. If no backend works, the call fails with `SANDBOX_UNAVAILABLE`, and the command does not run. The policy has only file effects, with no network rules, and the bwrap and Seatbelt profiles do not limit reads. PTC programs run under the same policy as Bash. |
+| Codex | Seatbelt (`/usr/bin/sandbox-exec`) on macOS, bubblewrap and seccomp on Linux, and a Windows sandbox. The modes are `read-only`, `workspace-write` and `danger-full-access`. Network access is off by default in the first two modes. A policy can make some roots unreadable. A network proxy puts the real secrets in place of dummy credentials (2.5). |
+
+#### The policy from the capabilities
+
+The handler of `Shell` makes the sandbox policy of each command from the capabilities in scope at the `exec`
+call:
+
+| Capabilities at the `exec` call | Policy of the child process |
+|---|---|
+| No `Shell` (read-only mode, the controller) | No child process. |
+| `Shell^` and `Files^` (local mode) | Writes only under the root of the workspace or its fork (F6), and in a private temporary directory. No network. |
+| `Shell^`, `Files^` and `Network^` (full mode) | The policy of local mode, plus the network through a proxy that applies the host list of the `guarded` handler. |
+| Each mode | The classified paths and the secrets of the user (for example `~/.ssh`, `~/.aws` and `.env`) are not readable. The other paths outside the workspace are read-only. |
+
+Law: the authority of a child process is at most the authority of the capabilities in scope at its `exec` call.
+With this law, the rule of F2 holds for `exec`.
+
+`Shell.sandboxed(root, policy)` is the handler for this. It makes the policy from the mode of the session and
+from the `guarded` policy, and it runs each command under that policy. `Shell.local(cwd)` stays only for tests.
+If no backend works on the host, `exec` fails, and the command does not run, as in deepseek-harness.
+
+#### Levels of isolation
+
+| Level | Examples | What it isolates |
+|---|---|---|
+| A sandbox on the same host | Seatbelt, bubblewrap, Landlock, seccomp | The files and the network of each command. The command shares the kernel and the file system of the host. |
+| A container | Docker, Podman | A file system and a network of its own. The container shares the kernel of the host. |
+| A separate kernel | gVisor (a kernel in user space), Firecracker (a microVM) | A kernel of its own. |
+| A remote executor | A cloud sandbox, a build server | A machine of its own. |
+
+The first harness uses a sandbox on the same host, because a work session changes the files of the user. A
+container or a microVM fits the rollouts of the optimizers (F6), because each rollout has its own fork.
+
+A bug in the trusted base can break the checks inside the process: in the compiler, in the capture checker, or in
+a handler. Capture checking and safe mode are experimental compiler features. So a later version can also run the
+full harness process in a sandbox: writes only in the workspace and in the session store, and network only to
+the LM provider and the permitted hosts. The forked REPL JVM of F1 can run in the sandbox of local mode.
+
+The limits:
+
+- A sandbox controls paths, the network and system calls. It cannot follow a `Classified` value. A child that can
+  read a secret, and that has an output channel back to the model, can leak the secret. Thus the classified paths
+  stay unreadable for each child process.
+- A sandbox does not prevent damage inside the workspace, for example a deleted file. The forks and the overlay
+  handler (F2, F6) cover that.
+- Apple marks `sandbox-exec` as deprecated ("The sandbox-exec command is DEPRECATED"), but Codex and
+  deepseek-harness use it on macOS.
+
 ## 4. The recommended design
 
 This section shows the full design in one place. Each part links to the section with its details. Section 5
@@ -588,6 +709,7 @@ tells how the design came from three earlier designs.
 |---|---|---|
 | Guest API | One trait for each effect. A mode is a set of givens that the compiler checks. A handler decides what each call does. | F2 |
 | REPL | One embedded `ReplDriver` for each session, in the same JVM, with capture checking and safe mode | F1, 11 (Phase 0) |
+| Sandbox | An OS sandbox for each command, with a policy from the capabilities in scope | F7, F8 |
 | Session | A log, a scope, a mode, a context strategy, and a REPL. A pure decider owns the state machine of the session. | 4.2, 7, 8 |
 | Policy | A `Predict` leaf that writes the next cell | 4.2 |
 | Context strategy | A window, a prefix summary, or the memory tree. It derives data from the log, and it makes the policy input. | 7.2, 6 |
@@ -1648,7 +1770,7 @@ tree exists. Design A (5.1) stays available as an early check of the foundation.
 | Phase | Work | Result |
 |---|---|---|
 | 0. Experiment | Embed the `ReplDriver` of the build (the 3.10 nightly) in a test. Check the persistent state, the interrupt at a timeout, a separate output for each REPL, and two REPLs on parallel threads. Measure the start time and the memory of one REPL. | Done on 2026-10-21: a REPL in the same JVM, with guards (see the Phase 0 results). |
-| 1. Foundation | F1, F2 (`read`, `write`, `edit`, `exec`), F3, F6. The guards of the Phase 0 results. Capture checking and safe mode for guest code, the modes of F2, the notation header, and the error hints. Phase 0 did not test capture checking in guest code, so this phase tests it first. | A REPL that runs model code against the guest API, in each mode. |
+| 1. Foundation | F1, F2 (`read`, `write`, `edit`, `exec`), F3, F6. F7 and F8: `exec` runs only in a sandbox. The guards of the Phase 0 results. Capture checking and safe mode for guest code, the modes of F2, the notation header, and the error hints. Phase 0 did not test capture checking in guest code, so this phase tests it first. | A REPL that runs model code against the guest API, in each mode. |
 | 2. Kernel | The log, the policy leaf, `Harness` on `AgentLoop`, the window strategy (the full log as `History`), the laws, `OptimizableStructure`, `ProgramRunner`. The session decider and the cell events with metadata (8.3, 8.5). `Clock` and `Random` handlers. | A harness for one task that the optimizers accept. |
 | 3. RLM | F4, F5: variables, `llmQuery` through `subQuery`, `rlm(...)` children, the shared budget, the depth limit. | RLM in the harness. |
 | 4. Memory tree | `Memory`, `View`, the memory laws, the `compress` and `merge` leaves, the builder, `zoom` and `date` as guest functions. The memory-tree strategy (section 6). | A memory that loses no detail. |
@@ -1719,7 +1841,8 @@ guest code, a forked JVM with a protocol for the guest calls, guard 4, Linux, or
    controller `start` replace it?
 6. **Memory access.** Is `zoom` the only way to read the memory, as in uniichat? Or can code also search the
    memory, for example with `llmQuery` over a subtree?
-7. **Permissions.** No checks (pi: use a container), or a `guarded` handler with a policy (atc)?
+7. **Permissions.** F7 and F8 answer the main part: a `guarded` handler with a policy (atc), and an OS sandbox
+   for each command. Which sandbox backends come first? Does the full harness process also run in a sandbox?
 8. **Tasks.** Where do the evaluation tasks come from: the history of this repository, a public benchmark, or
    both?
 9. **Controller.** Section 7.10 lists the decisions and the open questions about the sessions and the controller.
