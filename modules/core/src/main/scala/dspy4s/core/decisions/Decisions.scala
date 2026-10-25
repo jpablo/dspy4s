@@ -1,5 +1,6 @@
 package dspy4s.core.decisions
 
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.{
   :=,
   ConfigurationError,
@@ -11,7 +12,10 @@ import dspy4s.core.contracts.{
   ValidationError
 }
 import zio.blocks.chunk.Chunk
+import zio.blocks.schema.json.{Json, JsonCodec, JsonCodecDeriver}
 import zio.blocks.schema.{DynamicValue, Modifier, PrimitiveValue, Reflect, Schema}
+
+import scala.collection.immutable.TreeMap
 
 /** Experimental: the decision outputs of upstream `dspy.experimental` (`Noul`, `Score`, `Choice`). The API can change
   * without notice, as upstream says.
@@ -127,6 +131,22 @@ enum DecisionKind derives CanEqual:
       case DecisionKind.Score(_)  => "score"
       case DecisionKind.Choice(_) => "choice"
 
+  /** The parameter of the kind: the threshold of a Noul, the cuts of a Score, and the weights of a Choice. */
+  def parameter: DecisionParameter[?] =
+    this match
+      case DecisionKind.Noul      => DecisionParameter.Threshold
+      case DecisionKind.Score(_)  => DecisionParameter.Cuts
+      case DecisionKind.Choice(_) => DecisionParameter.Weights
+
+  /** The keys of a distribution of the kind: the level indexes `"0"` to `"N-1"` of a Score, and the labels of a Choice.
+    * A Noul has no distribution, thus no keys.
+    */
+  private[decisions] def keys: Vector[String] =
+    this match
+      case DecisionKind.Noul           => Vector.empty
+      case DecisionKind.Score(levels)  => levels.indices.map(_.toString).toVector
+      case DecisionKind.Choice(labels) => labels
+
 object DecisionKind:
 
   /** The type refs of the rich decision outputs. */
@@ -157,6 +177,35 @@ object DecisionKind:
     */
   def isRich(field: FieldSpec): Boolean = !field.optional && richTypes.contains(field.typeRef)
 
+/** A parameter of a decision output, with the type `A` of its value: the threshold of a [[DecisionKind.Noul]], the cuts
+  * of a [[DecisionKind.Score]], or the weights of a [[DecisionKind.Choice]]. ReAnchor fits it.
+  *
+  * @param name
+  *   the key of the parameter in the JSON form of [[DecisionSettings]], and its name in a message or a report
+  */
+enum DecisionParameter[A](val name: String, read: DecisionSettings => Option[A]):
+
+  /** The cut point of a [[DecisionKind.Noul]] on P(true). */
+  case Threshold extends DecisionParameter[Double]("threshold", _.threshold)
+
+  /** The boundaries of a [[DecisionKind.Score]] on the mean level index. */
+  case Cuts extends DecisionParameter[Vector[Double]]("cuts", _.cuts)
+
+  /** The multiplier of each label of a [[DecisionKind.Choice]]. */
+  case Weights extends DecisionParameter[Map[String, Double]]("weights", _.weights)
+
+  /** The value of this parameter in `settings`. `None` when `settings` do not set it. */
+  def valueIn(settings: DecisionSettings): Option[A] = read(settings)
+
+  /** The JSON form of the value of this parameter in `settings`: its entry in [[DecisionSettings.toDynamic]]. `None`
+    * when `settings` do not set it.
+    */
+  def jsonIn(settings: DecisionSettings): Option[DynamicValue] = DynamicValues.recordGet(settings.toDynamic, name)
+
+object DecisionParameter:
+
+  given CanEqual[DecisionParameter[?], DecisionParameter[?]] = CanEqual.derived
+
 /** The explicit settings of one decision output (upstream `Predict.fields[name]`). Each value that is `None` takes its
   * default.
   *
@@ -185,73 +234,54 @@ final case class DecisionSettings(
     criteria    : Option[DynamicValue]        = None
 ) derives CanEqual:
 
-  /** The JSON form of the explicit settings: the keys `threshold`, `cuts`, `weights`, `instructions`, and `criteria`,
-    * in this order, for each value that is set. An explicit null stays null. The weights are in the order of their
-    * labels, so that the JSON form of equal settings is the same text.
+  /** The JSON form of the explicit settings, from the derived schema: the keys `threshold`, `cuts`, `weights`,
+    * `instructions`, and `criteria`, in this order, for each value that is set. An explicit null stays null. The
+    * weights are in the order of their labels, so that the JSON form of equal settings is the same text. JSON has no
+    * number that is not finite, thus the codec throws an exception for such a number. [[DecisionPlan.of]] rejects such
+    * a number.
     */
   def toDynamic: DynamicValue.Record =
-    val entries = Vector(
-      threshold.map("threshold" := _),
-      cuts.map("cuts" := _),
-      weights.map(w =>
-        "weights" -> DynamicValue.Record(Chunk.from(w.toVector.sortBy(_._1).map((label, weight) => label := weight)))
-      ),
-      instructions.map("instructions" -> _),
-      criteria.map("criteria" -> _)
-    ).flatten
-    DynamicValue.Record(Chunk.from(entries))
+    // A `TreeMap` gives its entries in the order of the keys, and the codec writes a map in the order of its entries.
+    // The JSON text keeps the shortest decimal form of each number. The `Json` form of a `Double` can have one more
+    // digit, for example 0.250.
+    val text = DecisionSettings.codec.encodeToString(copy(weights = weights.map(w => TreeMap.from(w))))
+    DynamicValue.Record(Json.parseUnsafe(text).fields.map((key, entry) => key -> entry.toDynamicValue))
 
 object DecisionSettings:
 
-  /** The settings of the JSON form of [[DecisionSettings.toDynamic]]. An unknown key, or a value of the wrong JSON
-    * type, is a `Left`. A number can be an integer or a decimal number. The instructions and the criteria must be a
-    * JSON string, object, array, or null, with no number that is not finite. [[DecisionPlan.of]] checks the other
-    * rules.
+  /** The schema of the instructions and of the criteria in the JSON form. A JSON null is the explicit value null, and a
+    * key that is not in the JSON form takes the default `None`. The schema of zio-blocks for an `Option` reads a JSON
+    * null as `None`, thus it does not keep an explicit null.
+    */
+  private given questionSchema: Schema[Option[DynamicValue]] =
+    Schema[DynamicValue].transform(Some(_), _.getOrElse(DynamicValue.Null))
+
+  /** The derived schema. The instructions and the criteria use `questionSchema`. It is private:
+    * [[DecisionSettings.toDynamic]] and [[fromDynamic]] give the one form of the settings, because the `DynamicValue`
+    * path of a schema writes an `Option` as a variant.
+    */
+  private given Schema[DecisionSettings] = Schema.derived
+
+  /** The JSON codec of the derived schema. A key that is not a setting is an error. */
+  private val codec: JsonCodec[DecisionSettings] =
+    Schema[DecisionSettings].derive(JsonCodecDeriver.withRejectExtraFields(true))
+
+  /** The settings of the JSON form of [[DecisionSettings.toDynamic]], with the derived schema. Each of these is a
+    * `Left`: a value that is not JSON (also a number that is not finite, and a key that occurs two times in an object),
+    * a value that is not an object, an unknown key, and a value of the wrong JSON type. A number can be an integer or a
+    * decimal number. A JSON null for the threshold, the cuts, or the weights is no value. The instructions and the
+    * criteria must be a JSON string, object, array, or null. [[DecisionPlan.of]] checks the other rules.
     */
   def fromDynamic(value: DynamicValue): Either[DspyError, DecisionSettings] =
-    value match
-      case record: DynamicValue.Record =>
-        record.fields.foldLeft[Either[DspyError, DecisionSettings]](Right(DecisionSettings())) {
-          case (acc, (key, entry)) => acc.flatMap(withEntry(_, key, entry))
-        }
-      case other =>
-        Left(ValidationError(s"The decision settings must be a JSON object, got ${DecisionJson.describe(other)}"))
-
-  /** `settings` with the value of the JSON entry `key`. */
-  private def withEntry(
-      settings: DecisionSettings,
-      key     : String,
-      entry   : DynamicValue
-  ): Either[DspyError, DecisionSettings] =
-    key match
-      case "threshold" =>
-        DynamicValues.asDouble(entry).map(t => settings.copy(threshold = Some(t))).toRight(wrongType(key, "a number"))
-      case "cuts" =>
-        numbers(entry).map(c => settings.copy(cuts = Some(c))).toRight(wrongType(key, "an array of numbers"))
-      case "weights" =>
-        weightsOf(entry).map(w => settings.copy(weights = Some(w))).toRight(wrongType(key, "an object of numbers"))
-      case "instructions" => DecisionJson.question(key, entry).map(i => settings.copy(instructions = Some(i)))
-      case "criteria"     => DecisionJson.question(key, entry).map(c => settings.copy(criteria = Some(c)))
-      case other          => Left(ValidationError(
-          s"Unknown decision setting '$other': use threshold, cuts, weights, instructions, or criteria"
-        ))
-
-  private def wrongType(key: String, expected: String): DspyError =
-    ValidationError(s"The decision setting '$key' must be $expected")
-
-  private def numbers(value: DynamicValue): Option[Vector[Double]] =
-    value match
-      case sequence: DynamicValue.Sequence =>
-        val read = sequence.elements.toVector.map(DynamicValues.asDouble)
-        if read.forall(_.isDefined) then Some(read.flatten) else None
-      case _ => None
-
-  private def weightsOf(value: DynamicValue): Option[Map[String, Double]] =
-    value match
-      case record: DynamicValue.Record =>
-        val read = record.fields.toVector.map((label, weight) => DynamicValues.asDouble(weight).map(label -> _))
-        if read.forall(_.isDefined) then Some(read.flatten.toMap) else None
-      case _ => None
+    for
+      // A value that is not JSON has no `Json` form, and the codec keeps the last weight of a label that occurs two
+      // times. Thus this check comes first.
+      _        <- DecisionJson.json("the decision settings", value)
+      settings <- codec.decode(Json.fromDynamicValue(value)).left.map(error =>
+                    ValidationError(s"Invalid decision settings: ${error.message}")
+                  )
+      _ <- DecisionJson.questions(settings)
+    yield settings
 
 /** The evidence of one decision output: the distribution that the backend gave. */
 enum DecisionEvidence derives CanEqual:
@@ -333,50 +363,49 @@ final case class DecisionPlan private (
     * keys, in the decimal form with no leading zero), and `confidence`. A [[DecisionKind.Choice]] answer has
     * `probabilities`, keyed by exactly the labels, and `confidence`. Each probability and the confidence is a finite
     * number in [0, 1]; a Boolean is not a number. The other keys of an answer (for example `type`, `score`, or `choice`
-    * from Jev) are ignored.
+    * from Jev) are ignored. The JSON types come first, then the rules of the evidence (`checked`, the same rules as the
+    * decode).
     */
   def evidence(name: String, answer: DynamicValue): Either[DspyError, DecisionEvidence] =
-    def probabilityAt(record: DynamicValue.Record, key: String): Either[DspyError, Double] =
+    def number(record: DynamicValue.Record, key: String): Either[DspyError, Double] =
       DynamicValues.recordGet(record, key) match
         case None        => Left(ValidationError(s"The evidence of '$name' has no '$key'"))
         case Some(entry) => DynamicValues.asDouble(entry).toRight(
             ValidationError(
               s"The '$key' of the evidence of '$name' must be a number, got ${DecisionJson.describe(entry)}"
             )
-          ).flatMap(probability(name, key, _))
+          )
 
-    def distribution(record: DynamicValue.Record, labels: Vector[String]): Either[DspyError, Vector[Double]] =
+    /** The probabilities, in the order of `keys`, and the confidence. The keys of the JSON object come first: a key
+      * that occurs two times, or a key that is not in the decimal form, cannot go into the evidence.
+      */
+    def distribution(record: DynamicValue.Record, keys: Vector[String]): Either[DspyError, (Vector[Double], Double)] =
       DynamicValues.recordGet(record, "probabilities") match
         case Some(probabilities: DynamicValue.Record) =>
-          val keys = DynamicValues.recordKeys(probabilities)
-          if !DecisionJson.sameKeys(keys, labels) then
-            Left(ValidationError(
-              s"The probabilities of '$name' must have exactly the keys ${labels.mkString(", ")}, " +
-                s"got: ${keys.mkString(", ")}"
-            ))
-          else
-            labels.foldLeft[Either[DspyError, Vector[Double]]](Right(Vector.empty)) { (acc, label) =>
-              acc.flatMap(read => probabilityAt(probabilities, label).map(read :+ _))
-            }
+          for
+            _          <- DecisionPlan.keysRule(name, keys, DynamicValues.recordKeys(probabilities))
+            read       <- Traverse.either(keys)(number(probabilities, _))
+            confidence <- number(record, "confidence")
+          yield (read, confidence)
         case Some(other) => Left(
             ValidationError(s"The probabilities of '$name' must be a JSON object, got ${DecisionJson.describe(other)}")
           )
         case None => Left(ValidationError(s"The evidence of '$name' has no 'probabilities'"))
 
+    def read(kind: DecisionKind, record: DynamicValue.Record): Either[DspyError, DecisionEvidence] =
+      kind match
+        case DecisionKind.Noul     => number(record, "noul").map(DecisionEvidence.Noul(_))
+        case DecisionKind.Score(_) => distribution(record, kind.keys).map((probabilities, confidence) =>
+            DecisionEvidence.Score(probabilities.zipWithIndex.map((p, i) => i -> p).toMap, confidence)
+          )
+        case DecisionKind.Choice(labels) => distribution(record, labels).map((probabilities, confidence) =>
+            DecisionEvidence.Choice(labels.zip(probabilities).toMap, confidence)
+          )
+
     kindOf(name).toRight(notDecision(name)).flatMap { kind =>
       answer match
-        case record: DynamicValue.Record => kind match
-            case DecisionKind.Noul          => probabilityAt(record, "noul").map(DecisionEvidence.Noul(_))
-            case DecisionKind.Score(levels) =>
-              for
-                probabilities <- distribution(record, levels.indices.map(_.toString).toVector)
-                confidence    <- probabilityAt(record, "confidence")
-              yield DecisionEvidence.Score(probabilities.zipWithIndex.map((p, i) => i -> p).toMap, confidence)
-            case DecisionKind.Choice(labels) =>
-              for
-                probabilities <- distribution(record, labels)
-                confidence    <- probabilityAt(record, "confidence")
-              yield DecisionEvidence.Choice(labels.zip(probabilities).toMap, confidence)
+        case record: DynamicValue.Record =>
+          read(kind, record).flatMap(found => checked(name, kind, found).map(_ => found))
         case other =>
           Left(ValidationError(s"The evidence of '$name' must be a JSON object, got ${DecisionJson.describe(other)}"))
     }
@@ -393,8 +422,8 @@ final case class DecisionPlan private (
     * A rich output gives its result record: `{value, confidence, probability}` for a Noul, `{value, confidence,
     * probabilities, level}` for a Score (the probabilities keyed by `"0"` to `"N-1"`), and `{value, confidence,
     * probabilities}` for a Choice. A native output gives the plain value: a Boolean, or the label. Evidence that lacks
-    * a decision output is a `Left`. The evidence must obey the rules of [[evidence]]: the keys of each distribution,
-    * and a finite number in [0, 1] for each probability and each confidence.
+    * a decision output is a `Left`. The evidence must obey the rules of [[evidence]] (`checked`): the keys of each
+    * distribution, and a finite number in [0, 1] for each probability and each confidence.
     */
   def decode(answers: Map[String, DecisionEvidence]): Either[DspyError, DynamicValue.Record] =
     kinds.foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) {
@@ -409,7 +438,7 @@ final case class DecisionPlan private (
   private def decodeOne(name: String, kind: DecisionKind, answer: DecisionEvidence): Either[DspyError, DynamicValue] =
     val rich = outputFieldsByName.get(name).exists(DecisionKind.isRich)
     (kind, answer) match
-      case (DecisionKind.Noul, DecisionEvidence.Noul(p)) => probability(name, "noul", p).map { _ =>
+      case (DecisionKind.Noul, DecisionEvidence.Noul(p)) => checked(name, kind, answer).map { _ =>
           val t     = DecisionPlan.thresholdOf(settingsOf(name))
           val value = DecisionJson.boolean(p >= t)
           if !rich then value
@@ -418,9 +447,12 @@ final case class DecisionPlan private (
             DynamicValue.Record("value" -> value, "confidence" := confidence, "probability" := p)
         }
       case (DecisionKind.Score(levels), DecisionEvidence.Score(probabilities, confidence)) =>
-        val indexes    = levels.indices.toVector
-        val keyMessage = s"Invalid Score distribution for '$name': the keys must be 0 to ${levels.size - 1}"
-        validDistribution(name, "Score", indexes, probabilities, confidence, keyMessage).map { read =>
+        val indexes = levels.indices.toVector
+        for
+          _   <- checked(name, kind, answer)
+          read = indexes.map(probabilities)
+          _   <- positive(name, read)
+        yield
           val value = DecisionPlan.meanLevel(read)
           val cuts  = DecisionPlan.cutsOf(settingsOf(name), levels.size)
           DynamicValue.Record(
@@ -429,11 +461,11 @@ final case class DecisionPlan private (
             "probabilities" -> DynamicValue.Record(Chunk.from(indexes.map(i => i.toString := read(i)))),
             "level"         := cuts.count(_ <= value)
           )
-        }
       case (DecisionKind.Choice(labels), DecisionEvidence.Choice(probabilities, confidence)) =>
-        val keyMessage = s"Invalid Choice answer for '$name': the keys must be ${labels.mkString(", ")}"
         for
-          read     <- validDistribution(name, "Choice", labels, probabilities, confidence, keyMessage)
+          _        <- checked(name, kind, answer)
+          read      = labels.map(probabilities)
+          _        <- positive(name, read)
           selected <- pick(name, labels, read)
         yield
           val value = DecisionJson.string(labels(selected))
@@ -460,49 +492,41 @@ final case class DecisionPlan private (
       ValidationError(s"Choice weights for '$name' leave no positive probability mass")
     )
 
-  /** The probabilities of `keys`, in the order of `keys`. The distribution must have exactly these keys, else the
-    * `Left` has `keyMessage`. Each probability and the confidence must be a finite number in [0, 1] (`checked`), and
-    * the total must be above zero (`positive`, with `label` in the message).
+  /** The rules of the evidence `evidence` of the decision output `name`, which has the kind `kind` (upstream
+    * `Probability` and the evidence types). Each distribution has exactly the keys of the kind (`DecisionKind.keys`),
+    * and each probability and the confidence is a finite number in [0, 1]. A NaN breaks the rule. [[evidence]] and
+    * [[decode]] use this one check, thus a fault gives the same message on the two paths. The decode also needs a total
+    * probability above zero (`positive`): the evidence of a System One model goes to the evidence log before the
+    * decode, as upstream, thus the evidence can have a total of zero.
     */
-  private def validDistribution[K](
-      name         : String,
-      label        : String,
-      keys         : Vector[K],
-      probabilities: Map[K, Double],
-      confidence   : Double,
-      keyMessage   : String
-  )(using CanEqual[K, K]): Either[DspyError, Vector[Double]] =
-    for
-      _    <- Either.cond(probabilities.keySet == keys.toSet, (), ValidationError(keyMessage))
-      read <- checked(name, keys.map(probabilities), confidence)
-      _    <- positive(name, label, read)
-    yield read
-
-  /** The probabilities, when each probability and the confidence is a finite number in [0, 1]. */
-  private def checked(
-      name         : String,
-      probabilities: Vector[Double],
-      confidence   : Double
-  ): Either[DspyError, Vector[Double]] =
-    probabilities.iterator
-      .map(probability(name, "probability", _))
-      .find(_.isLeft)
-      .getOrElse(probability(name, "confidence", confidence))
-      .map(_ => probabilities)
+  private def checked(name: String, kind: DecisionKind, evidence: DecisionEvidence): Either[DspyError, Unit] =
+    def distribution(probabilities: Map[String, Double], confidence: Double): Either[DspyError, Unit] =
+      for
+        _ <- DecisionPlan.keysRule(name, kind.keys, probabilities.keys.toVector)
+        _ <- Traverse.either(kind.keys)(key => probability(name, key, probabilities(key)))
+        _ <- probability(name, "confidence", confidence)
+      yield ()
+    evidence match
+      case DecisionEvidence.Noul(p)                          => probability(name, "noul", p)
+      case DecisionEvidence.Score(probabilities, confidence) =>
+        distribution(probabilities.map((index, p) => index.toString -> p), confidence)
+      case DecisionEvidence.Choice(probabilities, confidence) => distribution(probabilities, confidence)
 
   /** A `Left` when the total of the probabilities is not above zero (upstream `DecisionState._decode`). */
-  private def positive(name: String, label: String, probabilities: Vector[Double]): Either[DspyError, Unit] =
+  private def positive(name: String, probabilities: Vector[Double]): Either[DspyError, Unit] =
     Either.cond(
       probabilities.sum > 0,
       (),
-      ValidationError(s"Invalid $label distribution for '$name': the total is not positive")
+      ValidationError(s"The probabilities of '$name' must have a total above zero")
     )
 
-  /** `p` when it is a finite number in [0, 1] (upstream `Probability`). A NaN breaks the rule. */
-  private def probability(name: String, key: String, p: Double): Either[DspyError, Double] =
+  /** A `Left` when `p` is not a finite number in [0, 1] (upstream `Probability`). A NaN breaks the rule. `key` names
+    * the probability or the confidence in the evidence.
+    */
+  private def probability(name: String, key: String, p: Double): Either[DspyError, Unit] =
     Either.cond(
       p >= 0 && p <= 1,
-      p,
+      (),
       ValidationError(s"The '$key' of the evidence of '$name' must be a finite number in [0, 1], got: $p")
     )
 
@@ -576,12 +600,24 @@ object DecisionPlan:
   private[dspy4s] def meanLevel(probabilities: Vector[Double]): Double =
     probabilities.indices.map(i => i * probabilities(i)).sum / probabilities.sum
 
+  /** A `Left` when the keys `found` of a distribution of `name` are not exactly the keys `keys`. A key that occurs two
+    * times breaks the rule.
+    */
+  private def keysRule(name: String, keys: Vector[String], found: Vector[String]): Either[DspyError, Unit] =
+    Either.cond(
+      DecisionJson.sameKeys(found, keys),
+      (),
+      ValidationError(
+        s"The probabilities of '$name' must have exactly the keys ${keys.mkString(", ")}, got: ${found.mkString(", ")}"
+      )
+    )
+
   /** The plan of `layout` with the explicit `settings`. Each rich output is a decision output. A native output is one
     * only when `settings` has an entry for it. A `Left` comes when a settings entry names an output that cannot be a
     * decision output, when a settings entry sets the parameter of another kind (for example `cuts` for a Noul), when a
     * value breaks a rule of [[DecisionSettings]], when a Score does not have 2 to 10 levels, or when a Choice has no
-    * label or two equal labels. Instructions and criteria must be JSON strings, objects, arrays, or null, with no
-    * number that is not finite.
+    * label or two equal labels. Instructions and criteria must be JSON strings, objects, arrays, or null, with JSON
+    * values in them (no number that is not finite, and no key two times in an object).
     */
   def of(
       layout  : SignatureLayout,
@@ -613,23 +649,19 @@ object DecisionPlan:
     * and `_validate_question_config`, and the `Score[...]` and `Choice[...]` declarations).
     */
   private def validate(name: String, kind: DecisionKind, settings: DecisionSettings): Either[DspyError, Unit] =
-    val (parameter, others) = kind match
-      case DecisionKind.Noul      => ("threshold", Vector("cuts" -> settings.cuts, "weights" -> settings.weights))
-      case DecisionKind.Score(_)  => ("cuts", Vector("threshold" -> settings.threshold, "weights" -> settings.weights))
-      case DecisionKind.Choice(_) => ("weights", Vector("threshold" -> settings.threshold, "cuts" -> settings.cuts))
-    val foreign = others.collect { case (key, Some(_)) => key }
+    val foreign = DecisionParameter.values.toVector.filter(other =>
+      other != kind.parameter && other.valueIn(settings).isDefined
+    )
     for
       _ <- check(
              foreign.isEmpty,
-             s"Invalid settings for '$name': require '$parameter', with optional instructions and criteria, " +
-               s"not ${foreign.mkString(", ")}"
+             s"Invalid settings for '$name': require '${kind.parameter.name}', with optional instructions and " +
+               s"criteria, not ${foreign.map(_.name).mkString(", ")}"
            )
       _ <- validateKind(name, kind)
-      _ <- settings.instructions.fold(Right(()))(DecisionJson.question("instructions", _).map(_ => ()))
+      _ <- DecisionJson.questions(settings)
       _ <- settings.criteria.fold(Right(()))(criteria =>
-             DecisionJson.question("criteria", criteria).flatMap(_ =>
-               check(validCriteria(kind, criteria), s"Invalid criteria for '$name': must match the decision type")
-             )
+             check(validCriteria(kind, criteria), s"Invalid criteria for '$name': must match the decision type")
            )
       _ <- validateParameter(name, kind, settings)
     yield ()
@@ -709,15 +741,30 @@ private object DecisionJson:
   def sameKeys(keys: Vector[String], labels: Vector[String]): Boolean =
     keys.size == labels.size && keys.toSet == labels.toSet
 
-  /** `value` when it is a JSON string, object, array, or null, with JSON values in it (upstream
+  /** The rule of [[question]] for the instructions and for the criteria of `settings`, in this order. */
+  def questions(settings: DecisionSettings): Either[DspyError, Unit] =
+    for
+      _ <- settings.instructions.fold(Right(()))(question("instructions", _))
+      _ <- settings.criteria.fold(Right(()))(question("criteria", _))
+    yield ()
+
+  /** A `Left` when `value` is not a JSON string, object, array, or null, with JSON values in it (upstream
     * `_validate_question_config`). `key` names the setting in the message of the `Left`.
     */
-  def question(key: String, value: DynamicValue): Either[DspyError, DynamicValue] =
+  def question(key: String, value: DynamicValue): Either[DspyError, Unit] =
     if !isDescription(value) then
       Left(ValidationError(s"Invalid $key: expected a JSON string, object, array, or null, got ${describe(value)}"))
-    else if !isJson(value) then
-      Left(ValidationError(s"Invalid JSON in $key: each number must be finite, and each value must be JSON"))
-    else Right(value)
+    else json(key, value)
+
+  /** A `Left` when `value` is not a JSON value ([[isJson]]). `key` names the value in the message of the `Left`. */
+  def json(key: String, value: DynamicValue): Either[DspyError, Unit] =
+    Either.cond(
+      isJson(value),
+      (),
+      ValidationError(
+        s"Invalid JSON in $key: each number must be finite, each key must occur one time, and each value must be JSON"
+      )
+    )
 
   /** The JSON type of `value` for a message. A message does not show the value: the text of a value with a number that
     * is not finite is an error in zio-blocks.
@@ -741,11 +788,14 @@ private object DecisionJson:
       case _: DynamicValue.Sequence                         => true
       case _                                                => false
 
-  /** `true` for a JSON value: a string, a Boolean, a finite number, null, or an object or an array of JSON values. */
+  /** `true` for a JSON value: a string, a Boolean, a finite number, null, an array of JSON values, or an object of JSON
+    * values with no key two times.
+    */
   def isJson(value: DynamicValue): Boolean =
     value match
-      case _: DynamicValue.Null.type         => true
-      case record: DynamicValue.Record       => record.fields.forall((_, entry) => isJson(entry))
+      case _: DynamicValue.Null.type   => true
+      case record: DynamicValue.Record => record.fields.map(_._1).distinct.size == record.fields.size &&
+        record.fields.forall((_, entry) => isJson(entry))
       case sequence: DynamicValue.Sequence   => sequence.elements.forall(isJson)
       case DynamicValue.Primitive(primitive) => primitive match
           case _: PrimitiveValue.String  => true

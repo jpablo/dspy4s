@@ -4,7 +4,6 @@ import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.{
   ConfigurationError,
   DspyError,
-  DynamicValues,
   ErrorLimit,
   RuntimeContext,
   RuntimeError,
@@ -13,7 +12,14 @@ import dspy4s.core.contracts.{
   ValidationError
 }
 import dspy4s.core.data.Example
-import dspy4s.core.decisions.{DecisionEvidence, DecisionEvidenceLog, DecisionKind, DecisionPlan, DecisionSettings}
+import dspy4s.core.decisions.{
+  DecisionEvidence,
+  DecisionEvidenceLog,
+  DecisionKind,
+  DecisionParameter,
+  DecisionPlan,
+  DecisionSettings
+}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.lm.runtime.ManagedLanguageModel
@@ -48,10 +54,10 @@ final case class ReAnchorConfig(numThreads: Int = 1, logDir: Option[Path] = None
   * @param predictor
   *   the name of the predictor in the program (the name of `OptimizableStructure.inspectNamed`)
   * @param parameter
-  *   `threshold`, `cuts`, or `weights`
+  *   the name of the fitted [[dspy4s.core.decisions.DecisionParameter]]: `threshold`, `cuts`, or `weights`
   * @param value
-  *   the fitted value in the JSON form of [[dspy4s.core.decisions.DecisionSettings]] (a number, a list, or an object),
-  *   or `None` when the fit was not kept
+  *   the fitted value in the JSON form of [[dspy4s.core.decisions.DecisionSettings]] (a number, a list, or an object;
+  *   [[dspy4s.core.decisions.DecisionParameter.jsonIn]]), or `None` when the fit was not kept
   * @param trainScore
   *   the mean metric score with the kept behavior
   * @param trainScoreAtStart
@@ -319,8 +325,8 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
         val row  = ReAnchorRow(
           predictor = leaf.displayName,
           field = field,
-          parameter = result.parameter,
-          value = Option.when(kept)(DynamicValues.recordGet(result.settings.toDynamic, result.parameter)).flatten,
+          parameter = result.parameter.name,
+          value = Option.when(kept)(result.parameter.jsonIn(result.settings)).flatten,
           trainScore = mean(if kept then result.scores else before),
           trainScoreAtStart = mean(base),
           trainScoreOriginal = mean(before),
@@ -344,7 +350,7 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
     */
   private final case class Fit(
       settings : DecisionSettings,
-      parameter: String,
+      parameter: DecisionParameter[?],
       scores   : Vector[Double],
       observed : Vector[(String, Double)],
       passed   : Int,
@@ -370,7 +376,7 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
     val zero       = Option.when(probabilities.exists(_ == 0.0))((0.0, 0.0))
     val candidates = gaps(probabilities, 0.0, 1.0) ++ adjacent ++ zero
     for
-      start <- ReAnchor.parameter(effective.threshold, "threshold")
+      start <- ReAnchor.parameter(effective, DecisionParameter.Threshold)
       tried <- Traverse.either(candidates) { (t, width) =>
                  score(effective.copy(threshold = Some(t))).map(Tried(_, Vector(width, -math.abs(t - start), t), t))
                }
@@ -379,7 +385,7 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
       val (best, values) = selection.kept.fold((start, base))(kept => (kept.setting, kept.scores))
       Fit(
         effective.copy(threshold = Some(best)),
-        "threshold",
+        DecisionParameter.Threshold,
         values,
         summary(probabilities) :+ ("candidates" -> tried.size.toDouble),
         if selection.kept.isDefined then 1 else 0,
@@ -397,10 +403,10 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
       score    : Scorer
   ): Either[DspyError, Fit] =
     val distributions = evidence.collect { case DecisionEvidence.Choice(p, _) => p }
-    ReAnchor.parameter(effective.weights, "weights").flatMap { start =>
+    ReAnchor.parameter(effective, DecisionParameter.Weights).flatMap { start =>
       val initial = Fit(
         effective.copy(weights = Some(labels.map(l => l -> start.getOrElse(l, 1.0)).toMap)),
-        "weights",
+        DecisionParameter.Weights,
         base,
         Vector.empty,
         0,
@@ -452,8 +458,8 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
     val means = evidence.collect { case DecisionEvidence.Score(p, _) =>
       DecisionPlan.meanLevel((0 until levels).toVector.map(i => p.getOrElse(i, 0.0)))
     }
-    ReAnchor.parameter(effective.cuts, "cuts").flatMap { start =>
-      val initial = Fit(effective, "cuts", base, Vector.empty, 0, 0)
+    ReAnchor.parameter(effective, DecisionParameter.Cuts).flatMap { start =>
+      val initial = Fit(effective, DecisionParameter.Cuts, base, Vector.empty, 0, 0)
       start.indices.foldLeft[Either[DspyError, (Fit, Int)]](Right((initial, 0))) { (acc, i) =>
         acc.flatMap { (current, count) =>
           val best       = current.settings.cuts.getOrElse(start)
@@ -556,6 +562,8 @@ object ReAnchor:
       .of(layout, decisions.updatedWith(field)(_.orElse(Some(DecisionSettings()))))
       .flatMap(_.effectiveSettings(field).toRight(ConfigurationError(s"'$field' is not a decision output")))
 
-  /** The value of a parameter of the effective settings. The effective settings always set it. */
-  private def parameter[A](value: Option[A], name: String): Either[DspyError, A] =
-    value.toRight(RuntimeError("reanchor", s"The effective decision settings have no $name"))
+  /** The value of `parameter` in the effective settings `effective`. The effective settings always set it. */
+  private def parameter[A](effective: DecisionSettings, parameter: DecisionParameter[A]): Either[DspyError, A] =
+    parameter.valueIn(effective).toRight(
+      RuntimeError("reanchor", s"The effective decision settings have no ${parameter.name}")
+    )

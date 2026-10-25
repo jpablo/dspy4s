@@ -101,11 +101,15 @@ Findings of the group (d) simplify pass that the pass did not fix:
 - [ ] The "message, else the simple class name" text has about 16 copies in the modules, in two forms. One public helper in `contracts/Errors.scala` can serve them. Skipped: do it with the module passes.
 - [ ] `DynamicValues.fromAny` gets values of a static type in lm, programs, and evaluate. Skipped: each module pass changes its own calls to `:=`.
 
+Notes of the core follow-up (the API change is acceptable, because the project has no users):
+
+- [ ] `DecisionSettings.toDynamic` writes the settings as JSON text with the derived codec and reads the text again, so it throws for a number that is not finite. `DecisionPlan.of` rejects such settings, and the two callers (the ReAnchor report and `OptimizableParameters`) get validated settings. A settings value that a caller builds by hand can still reach it.
+
 Findings of the group (c) simplify pass that the pass did not fix:
 
-- [ ] `decisions/Decisions.scala`, `DecisionSettings`: a hand-written codec of about 70 lines, against the one-codec rule. A derived Schema can replace it. Skipped: the change can alter the number widening, the order of the weight keys, and the error messages.
-- [ ] `decisions/Decisions.scala`: the parameter names "threshold", "cuts", and "weights" are string keys, also in optimize `ReAnchor.scala`. A typed `DecisionParameter` enum can replace them. Skipped: do it in the optimize pass.
-- [ ] `decisions/Decisions.scala`: `evidence` and `decodeOne` check the same distribution rules with different messages. One shared validation changes the messages. Skipped.
+- [x] (fixed in the decisions follow-up: a derived Schema with the zio-blocks JSON codec, and a check of the JSON value at the boundary) `decisions/Decisions.scala`, `DecisionSettings`: a hand-written codec of about 70 lines, against the one-codec rule. A derived Schema can replace it. Skipped: the change can alter the number widening, the order of the weight keys, and the error messages.
+- [x] (fixed in the decisions follow-up: `DecisionParameter`, with `DecisionKind.parameter`, `valueIn`, and `jsonIn`) `decisions/Decisions.scala`: the parameter names "threshold", "cuts", and "weights" are string keys, also in optimize `ReAnchor.scala`. A typed `DecisionParameter` enum can replace them. Skipped: do it in the optimize pass.
+- [x] (fixed in the decisions follow-up: `DecisionPlan.checked`, with one message for each rule) `decisions/Decisions.scala`: `evidence` and `decodeOne` check the same distribution rules with different messages. One shared validation changes the messages. Skipped.
 - [ ] `decisions/Decisions.scala`, `Score.caseNames`: a copy of `ZioSchemaCodec.caseNamesOf` in signatures. Skipped: do it in the signatures pass.
 - [x] (fixed in the group (d) pass: `collections/Traverse.scala` replaces the four copies) A `traverse` helper for `Either` had private copies in optimize `ReAnchor.scala`, `propose/GroundedProposer.scala`, adapters `internal/StrictJsonSchema.scala`, and lm `runtime/DiskLmCache.scala`. Skipped: one shared helper in core can serve them in the later passes.
 
@@ -142,7 +146,7 @@ Findings of the group (a) simplify pass that the pass did not fix:
 - [x] (fixed in the group (b) and (d) bug pass: the helpers restore the settings and the scope and keep the delta of the block; `withContext` stays wholesale) Group (b) review, a decision for the owner: `RuntimeEnvironment.withSettings`, `withCallbacks`, `withSetting`, and `withAsyncTask` restore the overlay wholesale, so the trace and the history of the block are gone after it. `withInstalled` keeps them, and upstream `dspy.context` keeps them too.
 - [ ] Group (b) review, skipped: `UsageScope.measure` reads its total when `body` returns, so a worker that runs after the return adds usage that no result shows. `configure` ownership stays with the first thread for the life of the process, as upstream.
 - [x] Group (c) review: `Score.levelIn` accepted the cases of an unrelated enum. Fixed: it takes only `IndexedSeq[L]`.
-- [ ] Group (c) review, skipped: `DecisionEvidenceLog.recording` takes its snapshot when `body` returns, so a worker that records later is lost (the same rule as `UsageScope`). `DecisionSettings.fromDynamic` keeps the last value of a key that occurs two times.
+- [ ] Group (c) review, skipped: `DecisionEvidenceLog.recording` takes its snapshot when `body` returns, so a worker that records later is lost (the same rule as `UsageScope`). `DecisionSettings.fromDynamic` keeps the last value of a key that occurs two times. (The `fromDynamic` part is fixed in the decisions follow-up: a key that occurs two times is a `Left`.)
 - [x] Group (d) review: `Completions.fromRows` gave the fields of a row in a hash order, `RawPrediction.asDouble`, `asInt`, and `asString` rejected `BigDecimal` and `BigInt`, and `Constraint` rendered a whole bound at or above 2^63 as `Long.MaxValue`. Fixed, each with a test.
 - [ ] Group (d) review, skipped: the narrowing of `contracts/ToolCall.scala`, `recordSchema`, throws for a value that is not a record (check how zio-blocks reports an exception of a transform). `SignatureParser` counts a `->` inside a quoted `Literal` member. (The `SignatureParser` part is fixed in the group (b) and (d) bug pass: the parser finds the arrow outside quotes and outside brackets.)
 
