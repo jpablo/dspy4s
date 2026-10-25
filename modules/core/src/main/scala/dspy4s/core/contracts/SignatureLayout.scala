@@ -1,7 +1,5 @@
 package dspy4s.core.contracts
 
-import zio.blocks.schema.DynamicValue
-
 /** The compiled runtime layout of a Signature: a name, optional instructions, and separate ordered input and output
   * cohorts. Adapters, programs, and the rest of the runtime stack consume this directly; the `Signature[I, O]` (in
   * `dspy4s.signatures`) is the user-facing wrapper around it.
@@ -13,8 +11,6 @@ import zio.blocks.schema.DynamicValue
   *   - [[SignatureLayout.create]]: validating + normalizing factory for programmatic construction.
   *   - [[SignatureLayout.parse]]: string-DSL parser escape hatch; prefer `dspy4s.signatures.Signature.fromString` from
   *     user code.
-  *   - [[SignatureLayout.fromState]]: re-hydrate from the `DynamicValue.Record` produced by [[dumpState]] (or from JSON
-  *     via [[SignatureLayout.fromJson]]).
   *
   * The primary constructor is `private`: every layout comes from one of the paths above. This keeps name uniqueness
   * closed by construction (see Invariants) rather than relying on a runtime precondition.
@@ -99,29 +95,6 @@ final case class SignatureLayout private (
     val outputs = outputFields.map(_.name).mkString(", ")
     s"$inputs -> $outputs"
 
-  /** Equality that ignores the [[name]]. Useful for comparing two layouts that describe the same shape but were
-    * constructed with different anonymous names (e.g. `"Signature"` from `fromType` vs `"X"` from a builder).
-    */
-  def equalsByStructure(other: SignatureLayout): Boolean =
-    instructions == other.instructions &&
-      inputFields.sameElements(other.inputFields) &&
-      outputFields.sameElements(other.outputFields)
-
-  /** Serialize this standalone layout to a [[zio.blocks.schema.DynamicValue.Record]], the same interchange format
-    * carried elsewhere in dspy4s. Round-trips with [[SignatureLayout.fromState]] and serializes to clean JSON via
-    * [[dumpJson]]. `Option` fields (`instructions`, and per-field `description` / `prefix` / `defaultValue`) encode as
-    * `DynamicValue.Null` when empty. The higher-level program persistence API deliberately uses its smaller
-    * `OptimizableParameters` contract instead of serializing a whole layout.
-    */
-  def dumpState: DynamicValue.Record =
-    SignatureLayoutStateCodec.dumpState(this)
-
-  /** Serialize the state to a JSON string via zio-blocks' `DynamicValue` JSON codec. Round-trips with
-    * [[SignatureLayout.fromJson]].
-    */
-  def dumpJson: String =
-    SignatureLayoutStateCodec.dumpJson(this)
-
 object SignatureLayout:
 
   /** Parse a DSPy-style string DSL (`"in1, in2 -> out1"`) into a `SignatureLayout`. Prefer
@@ -177,13 +150,3 @@ object SignatureLayout:
       instructions: Option[String]
   ): SignatureLayout =
     SignatureLayout(name, inputFields, outputFields, instructions)
-
-  /** Re-hydrate a standalone layout from the `DynamicValue.Record` produced by [[SignatureLayout.dumpState]]. Program
-    * persistence is state-only and therefore does not use this codec.
-    */
-  def fromState(state: DynamicValue.Record): Either[DspyError, SignatureLayout] =
-    SignatureLayoutStateCodec.fromState(state)
-
-  /** Re-hydrate a layout from a JSON string produced by [[SignatureLayout.dumpJson]]. */
-  def fromJson(json: String): Either[DspyError, SignatureLayout] =
-    SignatureLayoutStateCodec.fromJson(json)

@@ -61,7 +61,8 @@ class SignatureParserSuite extends FunSuite:
     ).toOption.get
 
     assertEquals(inputThenOutput.fields, bothInputs.fields)
-    assert(!inputThenOutput.equalsByStructure(bothInputs))
+    assertNotEquals(inputThenOutput.inputFields, bothInputs.inputFields)
+    assertNotEquals(inputThenOutput.outputFields, bothInputs.outputFields)
   }
 
   test("an arrow inside a quoted Literal member is part of the type") {

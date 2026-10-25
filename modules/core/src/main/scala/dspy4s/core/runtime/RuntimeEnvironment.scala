@@ -133,12 +133,6 @@ object RuntimeEnvironment:
   def nextCallId(prefix: String = "call"): String =
     s"$prefix-${callbackCallCounter.incrementAndGet()}"
 
-  /** The `callId`s of the scopes currently open on this thread, outermost first. */
-  def activeCallStack: Vector[String] = current.callStack
-
-  /** How many `with*`-call scopes enclose the current point. */
-  def activeCallDepth: Int = activeCallStack.size
-
   /** The innermost open scope's `callId`, if any: the `parentCallId` a newly-opened scope should inherit. */
   def activeCallId: Option[String] = current.activeCallId
 

@@ -109,7 +109,7 @@ final class OptimizableParametersSuite extends FunSuite:
 
   test("OptimizableParameters rejects the former signature-based executable predictor format") {
     val oldFormat = DynamicValues.record(
-      "signature" -> layout.dumpState,
+      "signature" -> DynamicValues.record("name" := "StringSignature"),
       "demos"     -> DynamicValue.Sequence(Chunk.empty),
       "config"    -> DynamicValue.Record.empty
     )

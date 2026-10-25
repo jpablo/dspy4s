@@ -8,30 +8,18 @@ import munit.FunSuite
 
 final class SizedVectorSuite extends FunSuite:
 
-  test("fromVector establishes the requested singleton length") {
-    val result = SizedVector.fromVector[String, 2](Vector("a", "b"))
-
-    assertEquals(result.map(_.unsized), Right(Vector("a", "b")))
-  }
-
-  test("fromVector rejects a vector with a different runtime length") {
-    val result = SizedVector.fromVector[String, 2](Vector("a"))
-
-    assertEquals(result, Left(SizedVector.SizeMismatch(expected = 2, actual = 1)))
-  }
-
-  test("mapSized preserves length and concat adds lengths") {
-    val left: SizedVector[Int, 1]   = SizedVector.one(1)
-    val right: SizedVector[Int, 2]  = SizedVector.fromVector[Int, 2](Vector(2, 3)).toOption.get
-    val mapped: SizedVector[Int, 1] = left.mapSized(_ + 10)
+  test("the functor map keeps the length and concatSized adds the lengths") {
+    val left: SizedVector[Int, 1]   = SizedVector.assumeSize(Vector(1))
+    val right: SizedVector[Int, 2]  = SizedVector.assumeSize(Vector(2, 3))
+    val mapped: SizedVector[Int, 1] = summon[Endofunctor[[A] =>> SizedVector[A, 1]]].map((n: Int) => n + 10)(left)
     val result: SizedVector[Int, 3] = mapped.concatSized(right)
 
     assertEquals(result.unsized, Vector(11, 2, 3))
   }
 
-  test("mapSized is a lawful functor at every fixed length") {
+  test("the map is a lawful functor at every fixed length") {
     val F       = summon[Endofunctor[[A] =>> SizedVector[A, 2]]]
-    val values  = SizedVector.fromVector[Int, 2](Vector(1, 2)).toOption.get
+    val values  = SizedVector.assumeSize[Int, 2](Vector(1, 2))
     val id      = F.identities[Int]
     val compose = F.composition((n: Int) => n.toString, (s: String) => s.length)
 
@@ -49,8 +37,8 @@ final class SizedVectorSuite extends FunSuite:
     val errors = compileErrors("""
       import dspy4s.core.collections.SizedVector
 
-      val one: SizedVector[Int, 1] = SizedVector.one(1)
-      val two: SizedVector[Int, 2] = one
+      val zero: SizedVector[Int, 0] = SizedVector.empty
+      val one: SizedVector[Int, 1]  = zero
     """)
 
     assert(errors.nonEmpty, "expected a statically known length mismatch to fail compilation")

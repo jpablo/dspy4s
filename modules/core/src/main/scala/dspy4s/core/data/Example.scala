@@ -54,7 +54,7 @@ final case class Example(
   /** Serialize to a [[zio.blocks.schema.DynamicValue.Record]], the interchange format used everywhere else in dspy4s.
     * Round-trips with [[Example.fromState]] and serializes to clean JSON via the `DynamicValue` JSON codec. The record
     * has three fields: `values` (the field-value record verbatim), `inputKeys` (a sequence of the input field-name
-    * strings), and `augmented` (a boolean). Mirrors `SignatureLayout.dumpState`.
+    * strings), and `augmented` (a boolean).
     */
   def dumpState: DynamicValue.Record =
     val keyValues: Seq[DynamicValue] =

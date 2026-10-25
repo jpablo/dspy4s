@@ -229,7 +229,8 @@ class ProgramAlgebraLawSuite extends FunSuite:
       SizedVector[OptimizableParameters, 1]
     ]]
     val current: SizedVector[OptimizableParameters, 1]            = lens.get(program)
-    val updated                                                   = SizedVector.one(current.unsized.head.copy(instructions = Some("statically sized update")))
+    val changed                                                   = current.unsized.head.copy(instructions = Some("statically sized update"))
+    val updated: SizedVector[OptimizableParameters, 1]            = SizedVector.assumeSize(Vector(changed))
     val second                                                    = Program.of(step[Wrapped, Boxed]("q", "s -> b")(_ => Boxed(2)))
     val composed: Program[Boxed, Boxed, 2]                        = program >>> second
     val composedParameters: SizedVector[OptimizableParameters, 2] = composed.sizedParams

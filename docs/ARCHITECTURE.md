@@ -329,10 +329,7 @@ For comparison with the upstream Python DSPy architecture:
 ## Where to look in the source
 
 - `core/contracts/SignatureLayout.scala` — the layout case class +
-  factories (`parse`, `create`) and persistence delegates. Mutation helpers are
-  `private[dspy4s]`.
-- `core/contracts/SignatureLayoutStateCodec.scala` — state/JSON encoding and
-  decoding behind `dumpState`, `dumpJson`, `fromState`, and `fromJson`.
+  factories (`parse`, `create`). Mutation helpers are `private[dspy4s]`.
 - `core/data/` — individual `Example`, `RawPrediction`, and `Completions`
   files. All field values live in a `DynamicValue.Record`.
 - `core/contracts/DynamicValues.scala` — boundary helpers for lifting

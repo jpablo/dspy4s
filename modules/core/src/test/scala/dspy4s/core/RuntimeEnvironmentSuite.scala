@@ -137,28 +137,23 @@ class RuntimeEnvironmentSuite extends FunSuite:
   }
 
   test("withActiveCall maintains nested call stack and restores after scope") {
-    assertEquals(RuntimeEnvironment.activeCallStack, Vector.empty)
-    assertEquals(RuntimeEnvironment.activeCallDepth, 0)
+    assertEquals(RuntimeEnvironment.current.callStack, Vector.empty)
     assertEquals(RuntimeEnvironment.activeCallId, None)
 
     RuntimeEnvironment.withActiveCall("parent") {
-      assertEquals(RuntimeEnvironment.activeCallStack, Vector("parent"))
-      assertEquals(RuntimeEnvironment.activeCallDepth, 1)
+      assertEquals(RuntimeEnvironment.current.callStack, Vector("parent"))
       assertEquals(RuntimeEnvironment.activeCallId, Some("parent"))
 
       RuntimeEnvironment.withActiveCall("child") {
-        assertEquals(RuntimeEnvironment.activeCallStack, Vector("parent", "child"))
-        assertEquals(RuntimeEnvironment.activeCallDepth, 2)
+        assertEquals(RuntimeEnvironment.current.callStack, Vector("parent", "child"))
         assertEquals(RuntimeEnvironment.activeCallId, Some("child"))
       }
 
-      assertEquals(RuntimeEnvironment.activeCallStack, Vector("parent"))
-      assertEquals(RuntimeEnvironment.activeCallDepth, 1)
+      assertEquals(RuntimeEnvironment.current.callStack, Vector("parent"))
       assertEquals(RuntimeEnvironment.activeCallId, Some("parent"))
     }
 
-    assertEquals(RuntimeEnvironment.activeCallStack, Vector.empty)
-    assertEquals(RuntimeEnvironment.activeCallDepth, 0)
+    assertEquals(RuntimeEnvironment.current.callStack, Vector.empty)
     assertEquals(RuntimeEnvironment.activeCallId, None)
   }
 

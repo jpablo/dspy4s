@@ -225,8 +225,12 @@ New primitives:
   `dumpState` / `loadState` / `dumpJson` / `loadJson` / `save` / `load`, all
   `OptimizableStructure`-based: `{ "optimizableParameters": { "optimizable-0": <OptimizableParameters>, ... } }`.
   Ordinal IDs are validated on load. JSON via
-  `Schema.dynamic.jsonCodec` (same codec as `SignatureLayout.dumpJson`); file IO wraps exceptions into
+  `Schema.dynamic.jsonCodec`; file IO wraps exceptions into
   `RuntimeError`.
+
+The standalone layout codec (`SignatureLayout.dumpState` / `fromState` / `dumpJson` / `fromJson`) had no
+caller in the main code. The review-and-simplify pass removed it. The sections "Summary (original)" and
+"dspy4s state before resolution" tell the state before that change.
 
 **Round-trip scope.** Instructions, demos, and module config round-trip for every supported leaf.
 Signature field structure and module name are read-only `OptimizableMetadata`; runtimes, output schemas,
@@ -463,8 +467,9 @@ Port `TwoStepAdapter`. Tier 1.
 helper builds the exact upstream strings (`gt`/`ge`/`lt`/`le`/`minLength`/`maxLength`/
 `multipleOf`, matching `PYDANTIC_CONSTRAINT_MAP`), `ChatAdapter` renders
 `Constraints: <joined>` after the field description (the `get_field_description_string`
-analog; unconstrained fields render byte-identically), and constraints round-trip through
-`SignatureLayout.dumpState`/`fromState`. **v1 follow-ups:** constraints are settable
+analog; unconstrained fields render byte-identically). (The constraints also had a round trip through
+`SignatureLayout.dumpState`/`fromState`. That layout codec had no caller in the main code, and the
+review-and-simplify pass removed it.) **v1 follow-ups:** constraints are settable
 programmatically only (deriving them from the `zio-blocks Schema` surface needs a
 constraint-annotation mechanism that doesn't exist yet). **Follow-ups now done:** constraints are a
 structured `Constraint` ADT (`.render` for prose + `.schemaKeyword`/`.schemaValue` for JSON Schema);

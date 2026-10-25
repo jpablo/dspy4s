@@ -235,16 +235,16 @@ class CallbackDispatcherSuite extends FunSuite:
     given ExecutionContext = ExecutionContext.global
 
     val _ = CallbackDispatcher.withModule("outer", DynamicValues.record("q" := "x")) {
-      snapshots += RuntimeEnvironment.activeCallStack
+      snapshots += RuntimeEnvironment.current.callStack
 
       Await.result(
         ContextPropagation.future {
-          snapshots += RuntimeEnvironment.activeCallStack
+          snapshots += RuntimeEnvironment.current.callStack
           val _ = CallbackDispatcher.withTool("search", DynamicValues.recordFromEntries(Seq("query" := "scala"))) {
-            snapshots += RuntimeEnvironment.activeCallStack
+            snapshots += RuntimeEnvironment.current.callStack
             Right(DynamicValues.fromAny("ok"))
           }
-          snapshots += RuntimeEnvironment.activeCallStack
+          snapshots += RuntimeEnvironment.current.callStack
           Right("done")
         },
         3.seconds
@@ -256,7 +256,7 @@ class CallbackDispatcherSuite extends FunSuite:
     assertEquals(snapshots(1).size, 1)
     assertEquals(snapshots(2).size, 2)
     assertEquals(snapshots(3).size, 1)
-    assertEquals(RuntimeEnvironment.activeCallStack, Vector.empty)
+    assertEquals(RuntimeEnvironment.current.callStack, Vector.empty)
   }
 
   // PORT_GAPS G-40: `InterruptedException` is not `NonFatal`, and the parallel executor interrupts its workers.

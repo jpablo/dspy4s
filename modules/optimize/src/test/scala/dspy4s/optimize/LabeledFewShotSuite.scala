@@ -83,7 +83,9 @@ class LabeledFewShotSuite extends FunSuite:
     given RuntimeContext = RuntimeEnvironment.current
 
     val compiled = optimizer.compile(student, trainset).toOption.get.bestProgram
-    assert(compiled.layout.equalsByStructure(signature), "signature should be preserved")
+    assertEquals(compiled.layout.inputFields, signature.inputFields)
+    assertEquals(compiled.layout.outputFields, signature.outputFields)
+    assertEquals(compiled.layout.instructions, signature.instructions)
     assertEquals(compiled.demos.size, 1)
     assertEquals(lookupString(compiled.demos.head.values, "question"), "q1")
   }

@@ -88,16 +88,16 @@ Simplify 6 (rank 3). Code-review 7 (rank 1). 6352 main lines, 4494 test lines.
 - [x] Two copies of the probe with a temp file and a time limit, in LocalPython and in the Deno launcher. Fixed: `InterpreterSupport.probe`.
 - [x] `runtime/DenoPyodideProtocol.scala`: `field`, `asString`, and `asLong` only called DynamicValues, and `isNull` had two copies. LocalPython got its JSON helpers from an object with a Deno name. Fixed: `DynamicValues.encodeJson` and `DynamicValues.isNull`, and the protocol object keeps only the JSON-RPC code.
 - [x] `contracts/RuntimeContext.scala`: the doc called the flat `apply`, `copy`, and the accessors a compatibility surface. Each part has callers (the flat `apply` has about 350), so the pass kept them and fixed the doc.
-- [ ] `contracts/SignatureLayoutStateCodec.scala` and `Constraint.dumpState`/`fromState` are hand-written codecs that only tests call. The tolerant number read of Decisions is now `DynamicValues.asDouble` (group (c) pass); `contracts/Constraint.scala:106` still has its own narrow copy.
+- [x] (fixed in the core follow-up: removed) The layout state codec and `Constraint.dumpState`/`fromState` were hand-written codecs that only tests called. The tolerant number read of Decisions is now `DynamicValues.asDouble`.
 - [x] Five copies of the ThreadLocal set-and-restore pattern, and two copies of the carrier code, in UsageScope, DecisionEvidenceLog, StreamProgress, ActivePredictContext, and CallbackDispatcher. Fixed: `ScopedLocal`.
 - [x] `RuntimeEnvironment.emit` did not use its own `warn`. Fixed: a callback failure is now a `WARN [dspy4s] callback: ...` line.
 
 Findings of the group (d) simplify pass that the pass did not fix:
 
-- [ ] A decision for the owner: `contracts/SignatureLayoutStateCodec.scala`, the four state methods of `SignatureLayout`, and `Constraint.dumpState`/`fromState` (about 190 lines) have no caller in the main code. Only tests call them. Delete them, or keep them and replace them with a derived Schema (the one-codec rule).
-- [ ] `contracts/Constraint.scala`: four parallel matches of seven cases (`render`, `schemaKeyword`, `op`, `numericValue`). An enum with parameters can hold the values. Skipped: a change of the public enum shape.
+- [x] (fixed in the core follow-up: removed) The layout state codec, the four state methods of `SignatureLayout`, and `Constraint.dumpState`/`fromState` (about 190 lines) had no caller in the main code.
+- [x] (fixed in the core follow-up: the shared data is part of the enum cases) `contracts/Constraint.scala`: four parallel matches of seven cases (`render`, `schemaKeyword`, `op`, `numericValue`). An enum with parameters can hold the values. Skipped: a change of the public enum shape.
 - [ ] `data/RawPrediction.scala`: its lenient coercion is a second copy of the coercion of signatures `ZioSchemaCodec`, and the two copies do not agree (no `BigDecimal` case). Skipped: do it in the signatures pass.
-- [ ] Members that only tests use: `SignatureOps` transforms and laws, most of `SizedVector`, `SignatureLayout.equalsByStructure`, and `FieldConstraints`. Skipped: public API.
+- [x] (fixed in the core follow-up: the transforms moved to the tests; `SizedVector.functor` and `FieldConstraints` stay, because the docs use them) Members that only tests use: `SignatureOps` transforms and laws, most of `SizedVector`, `SignatureLayout.equalsByStructure`, and `FieldConstraints`. Skipped: public API.
 - [ ] The "message, else the simple class name" text has about 16 copies in the modules, in two forms. One public helper in `contracts/Errors.scala` can serve them. Skipped: do it with the module passes.
 - [ ] `DynamicValues.fromAny` gets values of a static type in lm, programs, and evaluate. Skipped: each module pass changes its own calls to `:=`.
 
@@ -132,7 +132,7 @@ Findings of the group (a) simplify pass that the pass did not fix:
 - [x] DenoPyodideInterpreter: nothing read the stderr pipe until a failure, so more than about 64 KB of stderr stopped the sandbox forever. Fixed: a daemon thread reads the standard error into a bounded tail.
 - [ ] `runtime/DenoPyodideInterpreter.scala`, `readLine`: no time limit, so a `while True` in user code hangs `execute`. Skipped: the interpreter has no execution timeout, as upstream. A timeout is a new feature.
 - [x] SubprocessPythonInterpreter: after a normal exit, `join()` had no limit, a timeout did not kill descendants, and an interrupt escaped and left the process alive. Fixed: a 1-second limit after the exit, `killTree` on a timeout, and a `Left` on an interrupt.
-- [x] (fixed in the group (d) review: `fromState` uses `DynamicValues.asDouble`) `contracts/Constraint.scala:106-111`: `numberOf` ignored `BigDecimal`, but the JSON codec decodes decimals as `BigDecimal` (`decisions/Decisions.scala:680`). `SignatureLayout.fromJson` then drops `gt(0.5)` with no error. The tests use only whole numbers.
+- [x] (fixed in the group (d) review, then removed with the state codec) `Constraint.numberOf` ignored `BigDecimal`, so `SignatureLayout.fromJson` dropped `gt(0.5)`.
 - [ ] `runtime/LocalPythonInterpreter.scala`, the tool threads: no test covers the fatal rethrow, a timeout in a tool call, an interrupt, or `close` from another thread. The inbound queue is not cleared between calls, so a line that arrives after a reply can become the reply of the next call. Skipped: only code that breaks the documented rule (all threads finish before the code returns) sends such a line.
 - [x] DenoPyodideInterpreter and DenoPyodideLaunch: `Files.createFile` threw out of `execute`, the runner script was never written again after a removal, and `spawn` reported each IOException as "Deno not found". Fixed: a `Left` with the cause, `InterpreterSupport.ResourceFile`, and the cause in the message.
 - [x] A value with a lone UTF-16 surrogate made the JSON writer throw out of `execute` (LocalPython and the Deno prelude). Fixed: `InterpreterSupport.tryEncodeJson` and a `Left` that names the variable.
@@ -144,7 +144,7 @@ Findings of the group (a) simplify pass that the pass did not fix:
 - [x] Group (c) review: `Score.levelIn` accepted the cases of an unrelated enum. Fixed: it takes only `IndexedSeq[L]`.
 - [ ] Group (c) review, skipped: `DecisionEvidenceLog.recording` takes its snapshot when `body` returns, so a worker that records later is lost (the same rule as `UsageScope`). `DecisionSettings.fromDynamic` keeps the last value of a key that occurs two times.
 - [x] Group (d) review: `Completions.fromRows` gave the fields of a row in a hash order, `RawPrediction.asDouble`, `asInt`, and `asString` rejected `BigDecimal` and `BigInt`, and `Constraint` rendered a whole bound at or above 2^63 as `Long.MaxValue`. Fixed, each with a test.
-- [ ] Group (d) review, skipped: the narrowing of `contracts/ToolCall.scala`, `recordSchema`, throws for a value that is not a record (check how zio-blocks reports an exception of a transform). `Constraint.fromState` turns a length value into an Int with `toInt`. `SignatureParser` counts a `->` inside a quoted `Literal` member. (The `SignatureParser` part is fixed in the group (b) and (d) bug pass: the parser finds the arrow outside quotes and outside brackets.)
+- [ ] Group (d) review, skipped: the narrowing of `contracts/ToolCall.scala`, `recordSchema`, throws for a value that is not a record (check how zio-blocks reports an exception of a transform). `SignatureParser` counts a `->` inside a quoted `Literal` member. (The `SignatureParser` part is fixed in the group (b) and (d) bug pass: the parser finds the arrow outside quotes and outside brackets.)
 
 ## signatures
 

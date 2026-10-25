@@ -28,12 +28,11 @@ import java.nio.file.Paths
   * target program and are preserved during loading. Loading therefore requires the same optimizable-leaf structure and
   * order, plus a compatible architecture; ordinal IDs detect missing or extra entries, not a same-cardinality reorder.
   *
-  * The JSON is produced by zio-blocks' `DynamicValue` JSON codec (the same codec `SignatureLayout.dumpJson` uses) —
-  * clean, natural JSON with no ADT tags.
+  * The `DynamicValue` JSON codec of zio-blocks writes the JSON. The JSON is clean, and it has no ADT tags.
   */
 object ProgramPersistence:
 
-  /** JSON codec for the `DynamicValue`-shaped state, mirroring `SignatureLayout`'s private codec. */
+  /** The JSON codec for the `DynamicValue` state. */
   private lazy val dynamicJsonCodec = Schema.dynamic.jsonCodec
 
   /** Serialize a program's optimizable parameters to

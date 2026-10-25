@@ -24,11 +24,3 @@ class OptionalFieldSuite extends FunSuite:
     assertEquals(fields.map(_.optional), Vector(true, true, true, false))
     assertEquals(fields.map(_.typeRef), Vector(TypeRef.string, TypeRef.int, TypeRef.double, TypeRef.string))
   }
-
-  test("the saved state of a layout keeps the optional flag") {
-    val layout =
-      SignatureLayout.parse("question -> answer, note: Optional[str]").fold(error => fail(error.message), identity)
-    val loaded = SignatureLayout.fromState(layout.dumpState).fold(error => fail(error.message), identity)
-    assertEquals(loaded.outputFields.map(_.optional), Vector(false, true))
-    assertEquals(loaded, layout)
-  }

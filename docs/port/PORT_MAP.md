@@ -120,9 +120,9 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
   field; gated on `supportsFunctionCalling`. ReAct stays on the text protocol (upstream parity). See PORT_GAPS G-7.
 - **Field constraints (`PYDANTIC_CONSTRAINT_MAP`).** ✅ ported (v1, commit `d8c80de`) — `FieldSpec.constraints`
   + `FieldConstraints` build the upstream constraint strings (`gt`/`ge`/`lt`/`le`/`minLength`/`maxLength`/
-  `multipleOf`); `ChatAdapter` renders `Constraints: <joined>`, and they round-trip through `SignatureLayout`
-  state. **v1 follow-ups:** constraints are settable programmatically only (deriving from the `Schema`
-  needs an annotation mechanism that doesn't exist yet); `XMLAdapter`/`JSONAdapter` don't yet embed them.
+  `multipleOf`); `ChatAdapter` renders `Constraints: <joined>`. (The `SignatureLayout` state codec that
+  kept them had no caller in the main code and is removed.) **v1 follow-ups:** constraints are settable
+  programmatically only (deriving from the `Schema` needs an annotation mechanism that doesn't exist yet); `XMLAdapter`/`JSONAdapter` don't yet embed them.
   See PORT_GAPS G-9.
 
 ### Persistence & per-module bindings

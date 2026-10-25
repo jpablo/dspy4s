@@ -55,7 +55,7 @@ L6 instructions         withInstructions(a) ∘ withInstructions(b) = withInstru
 
 **Structure.** The endomorphisms under `∘` form a monoid (identity = `id`). L3 says the input-combinators
 and output-combinators are two **commuting submonoids**, now explicit `given Monoid` instances over the
-endomorphism newtypes `InputTransform` / `OutputTransform` (`SignatureOps.scala`; `empty` = the no-op
+endomorphism newtypes `InputTransform` / `OutputTransform` (test sources, `SignatureTransforms.scala`; `empty` = the no-op
 transform, `combine` = composition, generators `append` / `prepend` / `replace`), with the cross-monoid
 commuting law `SignatureTransformLaws.submonoidsCommute`. Their laws hold up to output-observational equality
 of the wrapped transform (not `==`), executed in `SignatureOpsLawSuite`. Within a cohort the generators are

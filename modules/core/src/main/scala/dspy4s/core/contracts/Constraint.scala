@@ -1,82 +1,35 @@
 package dspy4s.core.contracts
 
-import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
-/** A single field constraint. Carries BOTH the human-readable rendering prose adapters show after a field's description
-  * (matching Python DSPy's `PYDANTIC_CONSTRAINT_MAP`, `dspy/signatures/field.py`, byte-for-byte) AND a JSON-Schema
-  * keyword/value, so adapters that emit a schema can embed the constraint structurally (e.g. `exclusiveMinimum`). Build
-  * these with [[FieldConstraints]]; they round-trip through layout state as `{op, value}` records via
-  * [[Constraint.dumpState]] / [[Constraint.fromState]].
+/** A constraint on one field. [[render]] gives the prose hint that an adapter writes after the description of the
+  * field. The hint is the same as in Python DSPy (`PYDANTIC_CONSTRAINT_MAP`, `dspy/signatures/field.py`). An adapter
+  * that writes a JSON Schema uses [[schemaKeyword]] and [[schemaValue]] (for example `exclusiveMinimum`). Each case
+  * gives its JSON-Schema keyword and the start of its hint (`label`). Make a constraint with [[FieldConstraints]].
   */
-enum Constraint derives CanEqual:
-  case Gt(value: Double)
-  case Ge(value: Double)
-  case Lt(value: Double)
-  case Le(value: Double)
-  case MinLength(value: Int)
-  case MaxLength(value: Int)
-  case MultipleOf(value: Double)
+enum Constraint(val schemaKeyword: String, label: String) derives CanEqual:
+  case Gt(value: Double)         extends Constraint("exclusiveMinimum", "greater than")
+  case Ge(value: Double)         extends Constraint("minimum", "greater than or equal to")
+  case Lt(value: Double)         extends Constraint("exclusiveMaximum", "less than")
+  case Le(value: Double)         extends Constraint("maximum", "less than or equal to")
+  case MinLength(value: Int)     extends Constraint("minLength", "minimum length")
+  case MaxLength(value: Int)     extends Constraint("maxLength", "maximum length")
+  case MultipleOf(value: Double) extends Constraint("multipleOf", "a multiple of the given number")
 
-  /** The exact upstream prose hint, e.g. `"greater than: 0"`. Whole numbers render without a trailing `.0`. */
+  /** The bound of the constraint: a `Double` for a number bound, an `Int` for a length. */
+  def value: Double | Int
+
+  /** The exact upstream prose hint, for example `"greater than: 0"`. A whole number has no `.0` at the end. */
   def render: String =
-    this match
-      case Constraint.Gt(n)         => s"greater than: ${Constraint.num(n)}"
-      case Constraint.Ge(n)         => s"greater than or equal to: ${Constraint.num(n)}"
-      case Constraint.Lt(n)         => s"less than: ${Constraint.num(n)}"
-      case Constraint.Le(n)         => s"less than or equal to: ${Constraint.num(n)}"
-      case Constraint.MinLength(n)  => s"minimum length: $n"
-      case Constraint.MaxLength(n)  => s"maximum length: $n"
-      case Constraint.MultipleOf(n) => s"a multiple of the given number: ${Constraint.num(n)}"
+    value match
+      case n: Int    => s"$label: $n"
+      case n: Double => s"$label: ${Constraint.num(n)}"
 
-  /** The JSON-Schema keyword this constraint maps to (for structural embedding by schema-emitting adapters). */
-  def schemaKeyword: String =
-    this match
-      case _: Constraint.Gt         => "exclusiveMinimum"
-      case _: Constraint.Ge         => "minimum"
-      case _: Constraint.Lt         => "exclusiveMaximum"
-      case _: Constraint.Le         => "maximum"
-      case _: Constraint.MinLength  => "minLength"
-      case _: Constraint.MaxLength  => "maxLength"
-      case _: Constraint.MultipleOf => "multipleOf"
-
-  /** The JSON-Schema value (a number) paired with [[schemaKeyword]]. */
+  /** The JSON-Schema value (a number) of [[schemaKeyword]]. A length is an `Int`. */
   def schemaValue: DynamicValue =
-    this match
-      case Constraint.MinLength(n)  => DynamicValue.Primitive(PrimitiveValue.Int(n))
-      case Constraint.MaxLength(n)  => DynamicValue.Primitive(PrimitiveValue.Int(n))
-      case Constraint.Gt(n)         => Constraint.numValue(n)
-      case Constraint.Ge(n)         => Constraint.numValue(n)
-      case Constraint.Lt(n)         => Constraint.numValue(n)
-      case Constraint.Le(n)         => Constraint.numValue(n)
-      case Constraint.MultipleOf(n) => Constraint.numValue(n)
-
-  /** Persisted form: a `{op, value}` record (used by [[SignatureLayout.dumpState]]). */
-  def dumpState: DynamicValue.Record =
-    DynamicValue.Record(Chunk(
-      "op"    -> DynamicValue.Primitive(PrimitiveValue.String(op)),
-      "value" -> Constraint.numValue(numericValue)
-    ))
-
-  private def op: String =
-    this match
-      case _: Constraint.Gt         => "gt"
-      case _: Constraint.Ge         => "ge"
-      case _: Constraint.Lt         => "lt"
-      case _: Constraint.Le         => "le"
-      case _: Constraint.MinLength  => "min_length"
-      case _: Constraint.MaxLength  => "max_length"
-      case _: Constraint.MultipleOf => "multiple_of"
-
-  private def numericValue: Double =
-    this match
-      case Constraint.Gt(n)         => n
-      case Constraint.Ge(n)         => n
-      case Constraint.Lt(n)         => n
-      case Constraint.Le(n)         => n
-      case Constraint.MinLength(n)  => n.toDouble
-      case Constraint.MaxLength(n)  => n.toDouble
-      case Constraint.MultipleOf(n) => n
+    value match
+      case n: Int    => DynamicValue.Primitive(PrimitiveValue.Int(n))
+      case n: Double => Constraint.numValue(n)
 
 object Constraint:
   /** The value 2^63. `toLong` saturates at this value, so a whole value at or above it needs a `BigInt`. */
@@ -102,22 +55,6 @@ object Constraint:
     if !isWhole(n) then DynamicValue.Primitive(PrimitiveValue.Double(n))
     else if inLongRange(n) then DynamicValue.Primitive(PrimitiveValue.Long(n.toLong))
     else DynamicValue.Primitive(PrimitiveValue.BigInt(bigIntOf(n)))
-
-  /** Rebuild from the persisted `{op, value}` record; `None` for an unrecognized op (forward-compat / corruption). */
-  def fromState(rec: DynamicValue.Record): Option[Constraint] =
-    for
-      op         <- DynamicValues.recordGet(rec, "op").collect { case DynamicValue.Primitive(PrimitiveValue.String(s)) => s }
-      value      <- DynamicValues.recordGet(rec, "value").flatMap(DynamicValues.asDouble)
-      constraint <- op match
-                      case "gt"          => Some(Gt(value))
-                      case "ge"          => Some(Ge(value))
-                      case "lt"          => Some(Lt(value))
-                      case "le"          => Some(Le(value))
-                      case "min_length"  => Some(MinLength(value.toInt))
-                      case "max_length"  => Some(MaxLength(value.toInt))
-                      case "multiple_of" => Some(MultipleOf(value))
-                      case _             => None
-    yield constraint
 
 /** Builders for field [[Constraint]]s. Mirrors Python DSPy's `PYDANTIC_CONSTRAINT_MAP` (`dspy/signatures/field.py`) so
   * dspy4s prompts match upstream byte-for-byte: `gt(0).render == "greater than: 0"`, etc. Numeric helpers accept

@@ -70,9 +70,8 @@ object DynamicValues:
     val index = rec.fields.indexWhere(_._1 == name)
     if index < 0 then None else Some(rec.fields(index)._2)
 
-  /** The dynamic JSON codec of zio-blocks. [[SignatureLayoutStateCodec]] also uses it, for the text of a decode error.
-    */
-  private[contracts] val dynamicJsonCodec = Schema.dynamic.jsonCodec
+  /** The dynamic JSON codec of zio-blocks. */
+  private val dynamicJsonCodec = Schema.dynamic.jsonCodec
 
   /** The value of a JSON text, from the dynamic JSON codec of zio-blocks. `None` for invalid JSON. */
   def decodeJson(text: String): Option[DynamicValue] =
