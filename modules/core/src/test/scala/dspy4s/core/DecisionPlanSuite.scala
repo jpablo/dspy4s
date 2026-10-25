@@ -195,12 +195,17 @@ class DecisionPlanSuite extends FunSuite:
     }
   }
 
-  test("a Score value is the mean level index, and the cuts select the level") {
-    val cases = Vector(None -> 2, Some(Vector(0.5, 1.5)) -> 2, Some(Vector(0.5, 1.6)) -> 1, Some(Vector(0.5, 1.4)) -> 2)
+  test("a Score value is the mean level index, and the cuts select the level, which the decode gives by its name") {
+    val cases = Vector(
+      None                   -> "great",
+      Some(Vector(0.5, 1.5)) -> "great",
+      Some(Vector(0.5, 1.6)) -> "fair",
+      Some(Vector(0.5, 1.4)) -> "great"
+    )
     cases.foreach { (cuts, level) =>
       val out = decoded(plan("rating" -> DecisionSettings(cuts = cuts)))
       assertEqualsDouble(double(field(out, "rating", "value")), 1.5, 1e-12)
-      assertEquals(field(out, "rating", "level"), DynamicValue.Primitive(PrimitiveValue.Int(level)), s"cuts $cuts")
+      assertEquals(field(out, "rating", "level"), DynamicValue.Primitive(PrimitiveValue.String(level)), s"cuts $cuts")
       assertEqualsDouble(double(field(out, "rating", "confidence")), 0.61, 1e-12)
     }
     val scaled =
@@ -433,12 +438,12 @@ class DecisionPlanSuite extends FunSuite:
     assert(DecisionSettings.fromDynamic(json("""{"threshold": true}""")).isLeft)
   }
 
-  test("levelIn takes only the cases of the level enum") {
-    val score = Score[DpSeverity](value = 1.0, confidence = 0.9, level = Some(1))
-    assertEquals(score.levelIn(DpSeverity.values.toIndexedSeq), Some(DpSeverity.High))
+  test("the level of a Score takes only the cases of the level enum") {
+    val score = Score[DpSeverity](value = 1.0, confidence = 0.9, level = Some(DpSeverity.High))
+    assertEquals(score.level, Some(DpSeverity.High))
     assert(
-      compileErrors("score.levelIn(DpPriority.values.toIndexedSeq)").nonEmpty,
-      "levelIn accepted the cases of an unrelated enum"
+      compileErrors("Score[DpSeverity](value = 1.0, confidence = 0.9, level = Some(DpPriority.First))").nonEmpty,
+      "the level accepted a case of an unrelated enum"
     )
   }
 

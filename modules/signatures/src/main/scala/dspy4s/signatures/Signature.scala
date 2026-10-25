@@ -1,6 +1,6 @@
 package dspy4s.signatures
 
-import dspy4s.core.contracts.{DspyError, FieldSpec, SignatureLayout, TypeRef}
+import dspy4s.core.contracts.{DspyError, FieldSpec, SignatureLayout}
 import zio.blocks.schema.DynamicValue
 
 /** A signature with the static types of its input (`I`) and its output (`O`). It holds the runtime `SignatureLayout`,
@@ -33,21 +33,6 @@ final case class Signature[I, O](
   /** Add `text` after the instructions, with a blank line between them. See [[SignatureLayout.appendInstructions]]. */
   def appendInstructions(text: String): Signature[I, O] =
     copy(layout = layout.appendInstructions(text))
-
-  /** Mark the output field `fieldName` as the field of the native tool calls: its wire [[TypeRef]] becomes
-    * [[TypeRef.toolCalls]]. An adapter with native function calls then fills that field from the `tool_calls` of the
-    * provider, and the model does not write it as text. The derived `Schema` of `O` decodes the field as a
-    * `Vector[ToolCall]`, thus this function changes only the runtime layout, not the shapes. When no output field has
-    * the name, the signature stays the same. See PORT_GAPS G-7b.
-    *
-    * The derivation gives the type of a field from its structure (a `Vector[ToolCall]` becomes `TypeRef.list`), and it
-    * does not find the type of the tool calls. Thus this function is necessary.
-    */
-  def markToolCalls(fieldName: String): Signature[I, O] =
-    copy(layout = layout.withOutputFields(layout.outputFields.map { field =>
-      if field.name == fieldName then field.copy(typeRef = TypeRef.toolCalls)
-      else field
-    }))
 
 object Signature:
 

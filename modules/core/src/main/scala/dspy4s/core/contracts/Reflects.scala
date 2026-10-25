@@ -2,7 +2,7 @@ package dspy4s.core.contracts
 
 import zio.blocks.schema.Reflect
 
-/** Helpers that read a zio-blocks `Reflect`. The decision types of core and the codec of signatures use them. */
+/** Helpers that read a zio-blocks `Reflect`. The [[TypeMarker]] of core and the codec of signatures use them. */
 private[dspy4s] object Reflects:
 
   /** The reflect behind a deferred reflect. zio-blocks defers the reflect of a field with a default value, and of a

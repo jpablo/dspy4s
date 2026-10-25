@@ -82,8 +82,7 @@ class PredictHistorySuite extends FunSuite:
 
   test("a native tool call keeps its provider id in the typed output and in the raw prediction") {
     val lm      = new RecordingLm(Vector(LmOutput(text = "", toolCalls = Vector(search))))
-    val predict =
-      Predict(signature = Signature.derived[ChatTurn, AgentReply]("Agent").markToolCalls("toolCalls"), tools = tools)
+    val predict = Predict(signature = Signature.derived[ChatTurn, AgentReply]("Agent"), tools = tools)
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter(useNativeFunctionCalling = true)))
@@ -105,8 +104,7 @@ class PredictHistorySuite extends FunSuite:
       LmOutput(text = "", toolCalls = Vector(search)),
       LmOutput(text = "", toolCalls = Vector(search.copy(id = Some("call_2"))))
     ))
-    val predict =
-      Predict(signature = Signature.derived[ChatTurn, AgentReply]("Agent").markToolCalls("toolCalls"), tools = tools)
+    val predict = Predict(signature = Signature.derived[ChatTurn, AgentReply]("Agent"), tools = tools)
 
     RuntimeEnvironment.withSettings(
       RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter(useNativeFunctionCalling = true)))

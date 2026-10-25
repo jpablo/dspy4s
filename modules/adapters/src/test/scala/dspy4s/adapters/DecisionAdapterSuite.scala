@@ -355,7 +355,7 @@ class DecisionAdapterSuite extends FunSuite:
     assertEqualsDouble(number(get(values, "urgent", "confidence")), 0.125, 1e-12)
     assertEquals(get(values, "category", "value"), DynamicValue.Primitive(PrimitiveValue.String("technical")))
     assertEqualsDouble(number(get(values, "severity", "value")), 1.5, 1e-12)
-    assertEquals(get(values, "severity", "level"), DynamicValue.Primitive(PrimitiveValue.Int(1)))
+    assertEquals(get(values, "severity", "level"), DynamicValue.Primitive(PrimitiveValue.String("Disruptive")))
     assertEquals(get(values, "native_urgent"), DynamicValue.Primitive(PrimitiveValue.Boolean(true)))
     assertEquals(get(values, "native_category"), DynamicValue.Primitive(PrimitiveValue.String("billing")))
   }
@@ -368,7 +368,7 @@ class DecisionAdapterSuite extends FunSuite:
     val values = parsed(DecisionAdapter(JSONAdapter(), plan), jsonReply).fold(error => fail(error.message), _.values)
     assertEquals(get(values, "urgent", "value"), DynamicValue.Primitive(PrimitiveValue.Boolean(false)))
     assertEquals(get(values, "category", "value"), DynamicValue.Primitive(PrimitiveValue.String("billing")))
-    assertEquals(get(values, "severity", "level"), DynamicValue.Primitive(PrimitiveValue.Int(0)))
+    assertEquals(get(values, "severity", "level"), DynamicValue.Primitive(PrimitiveValue.String("Minor")))
   }
 
   test("malformed evidence is a Left") {

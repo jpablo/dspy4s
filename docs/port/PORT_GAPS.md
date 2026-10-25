@@ -1298,6 +1298,8 @@ Changes in behavior to know:
 - The typed decode gives `None` for an optional field that a record lacks, at each level. Before, it failed. A
   model that writes a tool call as text gives no id, so this rule is necessary.
 - The JSON schema of an output type does not show the id of a tool call (upstream removes it too).
+- A field that is a sequence of tool calls, for example `Vector[ToolCall]`, has the type `TypeRef.toolCalls` with no
+  extra call: the derivation finds `ToolCall` by its type marker (`TypeMarker`). `Signature.markToolCalls` is gone.
 
 Deliberate differences from upstream:
 
@@ -1318,8 +1320,6 @@ Open:
 - `DynamicValues.renderText` writes a nested value with strings that have no quotes, so the history field of a
   demo is not valid JSON.
 - An `Option[History]` field is not replayed.
-- `markToolCalls` is still necessary for a `Vector[ToolCall]` field, although the derivation can now find the type
-  by its name.
 - `PredictEngine` writes the raw calls under the fixed key `tool_calls`. A signature field with a different name
   gives two keys in the raw prediction.
 - No test covers a `History` input of `ReAct`, `RLM`, `Refine`, or `BestOfN`.

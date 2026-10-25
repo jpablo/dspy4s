@@ -1,8 +1,8 @@
 package dspy4s.signatures.internal
 
-import dspy4s.core.contracts.History
-import dspy4s.core.decisions.{Choice, Noul, Score}
+import dspy4s.core.contracts.TypeMarker
 import dspy4s.signatures.{Shape, Signature}
+import zio.blocks.schema.Modifier
 
 import scala.deriving.Mirror
 import scala.quoted.*
@@ -64,18 +64,26 @@ private[signatures] object MacroSignatureSupport:
     requireUniqueNames(owner, inputs.map(_._1), outputNames)
     signatureExpr(nameExpr, instructionsExpr, namedTupleType(inputs), outputType)
 
-  /** True for a case class that the framework reads as one value, not as a record of fields: a decision type (`Noul`,
-    * `Score`, `Choice`) or a `History`. A function that returns such a type has one `result` output.
+  /** True for a case class that the framework reads as one value, not as a record of fields: a type whose marker
+    * ([[TypeMarker]]) is in [[TypeMarker.singleValue]], for example `Noul`, `Score`, `Choice`, or `History`. The macro
+    * reads the marker from the `Modifier.config` annotations of the type symbol, as `Schema.derived` does. A function
+    * that returns such a type has one `result` output.
     */
   private def isSingleValue(using quotes: Quotes)(tpe: quotes.reflect.TypeRepr): Boolean =
+    markerOf(tpe).exists(TypeMarker.singleValue.contains)
+
+  /** The marker of the type `tpe`: the value of its `Modifier.config` annotation with the key [[TypeMarker.Key]]. */
+  private def markerOf(using quotes: Quotes)(tpe: quotes.reflect.TypeRepr): Option[String] =
     import quotes.reflect.*
-    val singleValueSymbols = List(
-      TypeRepr.of[Noul].typeSymbol,
-      TypeRepr.of[Score[?]].typeSymbol,
-      TypeRepr.of[Choice[?]].typeSymbol,
-      TypeRepr.of[History].typeSymbol
-    )
-    singleValueSymbols.contains(tpe.dealias.typeSymbol)
+    // An annotation argument is a literal, or a reference to a constant: its type is then a constant type.
+    def text(argument: Term): Option[String] =
+      argument.tpe.widenTermRefByName match
+        case ConstantType(StringConstant(value)) => Some(value)
+        case _                                   => None
+    tpe.dealias.typeSymbol.annotations
+      .filter(_.tpe <:< TypeRepr.of[Modifier.config])
+      .collectFirst { case Apply(_, List(key, value)) if text(key).contains(TypeMarker.Key) => text(value) }
+      .flatten
 
   /** Stop the compilation when two field names are the same: two inputs, two outputs, or an input and an output.
     * `owner` names the declaration in the compile error.

@@ -7,14 +7,14 @@ import dspy4s.core.contracts.{
   DspyError,
   DynamicValues,
   FieldSpec,
-  Reflects,
   SignatureLayout,
+  TypeMarker,
   TypeRef,
   ValidationError
 }
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.json.{Json, JsonCodec, JsonCodecDeriver}
-import zio.blocks.schema.{DynamicValue, Modifier, PrimitiveValue, Reflect, Schema}
+import zio.blocks.schema.{DynamicValue, Modifier, PrimitiveValue, Schema}
 
 import scala.collection.immutable.TreeMap
 
@@ -25,6 +25,9 @@ import scala.collection.immutable.TreeMap
   * TypeSafe Jev gives it directly, and a generative model writes it as a JSON object. Per-field settings
   * ([[DecisionSettings]]) then give the value: a threshold for a [[Noul]], cuts for a [[Score]], and weights for a
   * [[Choice]]. [[DecisionPlan]] holds the rules (upstream `DecisionState` in `dspy/adapters/decision_state.py`).
+  *
+  * Each decision type has its marker ([[dspy4s.core.contracts.TypeMarker]]), thus a typed signature finds a decision
+  * field by its schema.
   */
 
 /** A Boolean decision (upstream `Noul`).
@@ -37,10 +40,12 @@ import scala.collection.immutable.TreeMap
   *   the probability of `true` that the backend gave. `None` for a value that did not come from evidence, for example a
   *   demo label.
   */
+@Modifier.config(TypeMarker.Key, TypeMarker.noul)
 final case class Noul(value: Boolean, confidence: Double, probability: Option[Double] = None) derives Schema
 
 /** A continuous score over the ordered levels of the enum `L` (upstream `Score`). The cases of `L`, in order, are the
-  * levels 0 to N - 1, with 2 to 10 levels.
+  * levels 0 to N - 1, with 2 to 10 levels. The case names of `L` are the levels: the typed signature reads them from
+  * the reflect of the `level` field, as it reads the labels of a [[Choice]] from its `value` field.
   *
   * @param value
   *   the mean level index, `sum(i * p(i)) / sum(p)`. The cuts do not change it.
@@ -49,40 +54,16 @@ final case class Noul(value: Boolean, confidence: Double, probability: Option[Do
   * @param probabilities
   *   the distribution over the level indexes
   * @param level
-  *   the index of the level that the cuts select: the count of cuts that are less than or equal to `value`
+  *   the level that the cuts select: the case of `L` at the index that is the count of cuts that are less than or equal
+  *   to `value`
   */
+@Modifier.config(TypeMarker.Key, TypeMarker.score)
 final case class Score[L](
     value        : Double,
     confidence   : Double,
     probabilities: Option[Map[Int, Double]] = None,
-    level        : Option[Int]              = None
-):
-
-  /** The level as a case of `L`, for example `score.levelIn(Severity.values.toIndexedSeq)`. */
-  def levelIn(cases: IndexedSeq[L]): Option[L] = level.flatMap(cases.lift)
-
-object Score:
-
-  /** The key of the `Modifier.config` entries that hold the levels. The schema has one entry for each level, in the
-    * order of the levels, thus a level name needs no escape.
-    */
-  private val levelKey = "dspy4s.score.level"
-
-  /** The schema of a `Score[L]`. The case names of `L` are the levels: the typed signature reads them from this schema,
-    * so a field of type `Score[L]` has the levels of `L`.
-    */
-  given [L](using levels: Schema[L]): Schema[Score[L]] = schemaOf(levels)
-
-  /** The schema of a `Score[L]` with the case names of `levels` as the levels. The canonical schema of a typed
-    * signature (`dspy4s.signatures.Shape.canonicalSchema`) blocks the given of this object, thus it calls this function
-    * with the structural schema of `L`.
-    */
-  private[dspy4s] def schemaOf[L](levels: Schema[L]): Schema[Score[L]] =
-    Schema.derived[Score[L]].modifiers(Reflects.caseNames(levels.reflect).map(Modifier.config(levelKey, _)))
-
-  /** The levels that the schema of a `Score[L]` holds, in order. Empty for the reflect of each other type. */
-  private[dspy4s] def levelsOf(reflect: Reflect[?, ?]): Vector[String] =
-    reflect.modifiers.iterator.collect { case Modifier.config(key, level) if key == levelKey => level }.toVector
+    level        : Option[L]                = None
+) derives Schema
 
 /** One option of the enum `O` (upstream `Choice`). The case names of `O` are the option labels.
   *
@@ -93,6 +74,7 @@ object Score:
   * @param probabilities
   *   the distribution over the option labels
   */
+@Modifier.config(TypeMarker.Key, TypeMarker.choice)
 final case class Choice[O](value: O, confidence: Double, probabilities: Option[Map[String, Double]] = None)
     derives Schema
 
@@ -399,17 +381,17 @@ final case class DecisionPlan private (
   /** The output values of the evidence of each decision output (upstream `DecisionState._decode`):
     *   - a [[DecisionKind.Noul]] gives `value = p >= threshold`, the confidence of [[Noul]], and the probability;
     *   - a [[DecisionKind.Score]] needs a total probability above zero. It gives the mean level index, the confidence,
-    *     the distribution, and the level of the cuts;
+    *     the distribution, and the name of the level that the cuts select;
     *   - a [[DecisionKind.Choice]] needs a total probability above zero. It picks the label with the largest
     *     `probability * weight`. A weighted tie goes to the raw winner (the label with the largest probability, the
     *     first in the order of declaration on a tie), then to the order of declaration. A pick with a weighted score of
     *     zero or less is a `Left` ("no positive probability mass").
     *
     * A rich output gives its result record: `{value, confidence, probability}` for a Noul, `{value, confidence,
-    * probabilities, level}` for a Score (the probabilities keyed by `"0"` to `"N-1"`), and `{value, confidence,
-    * probabilities}` for a Choice. A native output gives the plain value: a Boolean, or the label. Evidence that lacks
-    * a decision output is a `Left`. The evidence must obey the rules of [[evidence]] (`checked`): the keys of each
-    * distribution, and a finite number in [0, 1] for each probability and each confidence.
+    * probabilities, level}` for a Score (the probabilities keyed by `"0"` to `"N-1"`, and the level as its name), and
+    * `{value, confidence, probabilities}` for a Choice. A native output gives the plain value: a Boolean, or the label.
+    * Evidence that lacks a decision output is a `Left`. The evidence must obey the rules of [[evidence]] (`checked`):
+    * the keys of each distribution, and a finite number in [0, 1] for each probability and each confidence.
     */
   def decode(answers: Map[String, DecisionEvidence]): Either[DspyError, DynamicValue.Record] =
     kinds.foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) {
@@ -445,7 +427,7 @@ final case class DecisionPlan private (
             "value"         := value,
             "confidence"    := confidence,
             "probabilities" -> DynamicValue.Record(Chunk.from(indexes.map(i => i.toString := read(i)))),
-            "level"         := cuts.count(_ <= value)
+            "level"         := levels(cuts.count(_ <= value))
           )
       case (DecisionKind.Choice(labels), DecisionEvidence.Choice(probabilities, confidence)) =>
         for

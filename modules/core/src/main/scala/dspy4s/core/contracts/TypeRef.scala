@@ -36,7 +36,9 @@ object TypeRef:
 
   /** Sentinel for the output field that receives native provider tool calls (the analogue of Python dspy's `ToolCalls`
     * output annotation). An adapter with native function-calling enabled fills this field from the provider's
-    * `tool_calls` instead of asking the model to emit it as text. See PORT_GAPS G-7b.
+    * `tool_calls` instead of asking the model to emit it as text. See PORT_GAPS G-7b. A typed field that is a sequence
+    * of [[ToolCall]] values, for example a `Vector[ToolCall]`, gets this type from the marker of `ToolCall` (see
+    * [[TypeMarker]]).
     */
   val toolCalls: TypeRef = TypeRef("tool_calls")
 

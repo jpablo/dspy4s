@@ -41,7 +41,7 @@ class TypedToolCallsSuite extends FunSuite:
       ))
 
   test("Predict decodes native tool_calls into a Vector[ToolCall] output field") {
-    val signature = Signature.derived[Ask, Plan]("QA").markToolCalls("toolCalls")
+    val signature = Signature.derived[Ask, Plan]("QA")
     val tools     = Vector(
       ToolSpec(
         "search",

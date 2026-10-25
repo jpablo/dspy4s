@@ -757,7 +757,8 @@ The full suite passes: 1,839 tests, 0 failures, 6 live tests skipped.
 - **The values** (package `dspy4s.core.decisions`, experimental). `Noul`, `Score[L]`, and `Choice[O]` hold the
   value, the confidence, and the evidence of a decision output. `L` and `O` are Scala enums: their cases are the
   levels of a Score, in order, and the options of a Choice (decision 1). `Score.levelIn(L.values)` gives the level as
-  a case of the enum.
+  a case of the enum. (Later, in the review-and-simplify pass: `levelIn` is gone, and `Score.level` is an
+  `Option[L]`.)
 - **The rules.** `DecisionPlan` holds the rules of upstream `DecisionState`: the decision outputs of a layout, the
   defaults, the validation of the settings, the criteria, the question for the backend, the evidence of an answer, and
   the decoding (the threshold of a Noul, the cuts of a Score, the weights of a Choice). `DecisionSettings` holds the
@@ -766,12 +767,14 @@ The full suite passes: 1,839 tests, 0 failures, 6 live tests skipped.
 - **The fields.** `TypeRef.noul`, `score`, and `choice` mark a rich decision output, with the levels or the options
   in `enumValues`. A typed field of type `Noul`, `Score[L]`, or `Choice[O]` gets them from its schema: the schema of
   `Score[L]` carries the case names of `L` as `Modifier.config` entries. A `Boolean` field, and a field of a Scala
-  enum, can be a native decision output.
+  enum, can be a native decision output. (Later: the codec reads the levels from the type of the `level` field, and
+  each decision type has a type marker, `TypeMarker`.)
 - **Decided by Claude, review.**
   - An optional field is not a decision output, as upstream `decision_type` gives `None` for `Optional[...]`.
   - The JSON form writes the weights in label order, because a Scala `Map` has no order.
   - The evidence of a Score answer accepts only the string keys `"0"` to `"N-1"` of a JSON object.
   - `Shape.StructuralSchema` is a new public type, so that `Signature.derived` gives a Score field its levels.
+    (Later: the type is gone, because the schema of `Score[L]` holds `L` in its `level` field.)
 - **Tests.** `DecisionPlanSuite` (20 tests: the cases of upstream `test_decision_parameters.py`) and
   `DecisionFieldSuite` (6 tests).
 - **A defect found, for the next fix.** A field with a default value (for example `count: Int = 3`) gets the type

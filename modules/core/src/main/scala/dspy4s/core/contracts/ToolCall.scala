@@ -1,7 +1,7 @@
 package dspy4s.core.contracts
 
 import dspy4s.core.collections.Traverse
-import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
+import zio.blocks.schema.{DynamicValue, Modifier, PrimitiveValue, Schema}
 
 /** A `Schema` for the `Record` case of `DynamicValue`.
   *
@@ -27,15 +27,16 @@ given recordSchema: Schema[DynamicValue.Record] =
   * structured data without a lossy `Any` round-trip).
   *
   * Single shared type across layers: the wire layer (`lm`) populates it from provider responses, the adapters read it,
-  * and the decode path uses it as a `Vector[ToolCall]` output field (paired with
-  * `dspy4s.signatures.Signature.markToolCalls`). Lives in `core` so both `lm` and `signatures` can name it, because
-  * they do not depend on each other; the [[recordSchema]] given lets the `Schema` derivation keep the precise `args`
-  * type.
+  * and the decode path uses it as a `Vector[ToolCall]` output field. The type has the marker [[TypeMarker.toolCall]],
+  * thus a field that is a sequence of tool calls has the wire type [[TypeRef.toolCalls]]. Lives in `core` so both `lm`
+  * and `signatures` can name it, because they do not depend on each other; the [[recordSchema]] given lets the `Schema`
+  * derivation keep the precise `args` type.
   *
   * `id` is the call id of the provider (upstream `ToolCalls.ToolCall.id`). A provider needs it to match a tool result
   * with its call when a conversation history replays the call (see [[History]]). It is `None` for a call that the model
   * wrote as text, and the prompt of a text-mode tool call field does not ask the model for it.
   */
+@Modifier.config(TypeMarker.Key, TypeMarker.toolCall)
 final case class ToolCall(name: String, args: DynamicValue.Record, id: Option[String] = None) derives Schema:
 
   /** The record form of this call: `name` and `args`, and `id` when the call has one. */

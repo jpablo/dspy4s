@@ -414,6 +414,9 @@ constraints. The port has no model of Python types, so a few places of a prompt 
 - The evidence request of a decision output (experimental) shows the evidence JSON schema in the form of the port.
   Upstream shows the pydantic form, with title-cased labels. A decision value prints with the field order of the
   port (`value`, `confidence`, ...); upstream prints `confidence` first.
+- The decode of a Score output (experimental) gives its `level` as the name of the level, and a typed `Score[L]`
+  has `level: Option[L]`, a case of the level enum. Upstream gives the zero-based level index. The probabilities of
+  both are keyed by the level index.
 
 ## What this means in practice
 

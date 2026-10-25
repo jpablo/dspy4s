@@ -65,7 +65,8 @@ class DecisionFieldSuite extends FunSuite:
     val shape  = ZioSchemaCodec.derivedFromZioSchema[DfAssessment]
     val record = json(
       """{"urgent": {"value": true, "confidence": 0.6, "probability": 0.8},
-        | "severity": {"value": 1.5, "confidence": 0.61, "probabilities": {"0": 0.1, "1": 0.3, "2": 0.6}, "level": 1},
+        | "severity": {"value": 1.5, "confidence": 0.61, "probabilities": {"0": 0.1, "1": 0.3, "2": 0.6},
+        |   "level": "Disruptive"},
         | "category": {"value": "technical", "confidence": 0.73, "probabilities": {"billing": 0.2, "technical": 0.8}},
         | "flag": false, "team": "billing"}""".stripMargin
     )
@@ -73,7 +74,7 @@ class DecisionFieldSuite extends FunSuite:
       shape.decode(record),
       Right(DfAssessment(
         urgent = Noul(value = true, confidence = 0.6, probability = Some(0.8)),
-        severity = Score(1.5, 0.61, Some(Map(0 -> 0.1, 1 -> 0.3, 2 -> 0.6)), Some(1)),
+        severity = Score(1.5, 0.61, Some(Map(0 -> 0.1, 1 -> 0.3, 2 -> 0.6)), Some(DfSeverity.Disruptive)),
         category = Choice(DfCategory.technical, 0.73, Some(Map("billing" -> 0.2, "technical" -> 0.8))),
         flag = false,
         team = DfCategory.billing
@@ -81,17 +82,24 @@ class DecisionFieldSuite extends FunSuite:
     )
   }
 
-  test("a Score gives its level as a case of the enum") {
-    val score = Score[DfSeverity](1.5, 0.61, None, Some(2))
-    assertEquals(score.levelIn(DfSeverity.values.toIndexedSeq), Some(DfSeverity.Blocking))
-    assertEquals(score.copy(level = None).levelIn(DfSeverity.values.toIndexedSeq), None)
+  test("the typed decode gives the level of a Score as a case of the enum, and rejects a name that is not a level") {
+    val shape = Shape.canonicalDerived[(severity: Score[DfSeverity])]
+
+    // `entry` is the JSON text of the `level` entry of the record, with its comma, or empty for no entry.
+    def decode(entry: String): Either[String, Option[DfSeverity]] =
+      shape.decode(json(s"""{"severity": {"value": 1.5, "confidence": 0.61$entry}}""")).map(_.severity.level)
+        .left.map(_.message)
+    assertEquals(decode(""", "level": "Blocking""""), Right(Some(DfSeverity.Blocking)))
+    assertEquals(decode(""), Right(None))
+    assert(decode(""", "level": "Huge"""").isLeft)
+    assert(decode(""", "level": 2""").isLeft, "a level index is not a level")
   }
 
   test("a typed decision value survives an encode and a decode, so it can be an input or a demo") {
     val shape = ZioSchemaCodec.derivedFromZioSchema[DfAssessment]
     val value = DfAssessment(
       urgent = Noul(value = false, confidence = 0.6, probability = Some(0.2)),
-      severity = Score(0.4, 0.7, Some(Map(0 -> 0.6, 1 -> 0.4, 2 -> 0.0)), Some(0)),
+      severity = Score(0.4, 0.7, Some(Map(0 -> 0.6, 1 -> 0.4, 2 -> 0.0)), Some(DfSeverity.Minor)),
       category = Choice(DfCategory.billing, 0.9, None),
       flag = true,
       team = DfCategory.technical

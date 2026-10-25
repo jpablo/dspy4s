@@ -194,9 +194,10 @@ class ReAnchorUpstreamSuite extends FunSuite:
   private val matchLayout = layoutOf("pair", matchField)
   private val kindField   = FieldSpec("kind", enumValues = Vector("x", "y"), description = Some("Which kind?"))
   private val kindLayout  = layoutOf("item", kindField)
+  private val rateLevels  = Vector("low", "mid", "high")
   private val rateLayout  = layoutOf(
     "item",
-    FieldSpec("rating", TypeRef.score, description = Some("How good is it?"), enumValues = Vector("low", "mid", "high"))
+    FieldSpec("rating", TypeRef.score, description = Some("How good is it?"), enumValues = rateLevels)
   )
   private val noteLayout = layoutOf("pair", FieldSpec("note", description = Some("A note.")))
 
@@ -217,10 +218,10 @@ class ReAnchorUpstreamSuite extends FunSuite:
       if textOf(values, field) == example.get(field).map(DynamicValues.renderText) then 1.0 else 0.0
     )
 
-  /** 1 when the level of the Score `rating` is the label. */
+  /** 1 when the level of the Score `rating` is the label, a level index. The decode gives the level by its name. */
   private val levelMetric: Metric = metricOf("level") { (example, values) =>
     val level = DynamicValues.recordGet(values, "rating").collect { case r: DynamicValue.Record => r }
-      .flatMap(textOf(_, "level"))
+      .flatMap(textOf(_, "level")).map(name => rateLevels.indexOf(name).toString)
     if level == example.get("rating").map(DynamicValues.renderText) then 1.0 else 0.0
   }
 

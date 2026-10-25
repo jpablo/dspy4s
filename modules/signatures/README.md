@@ -40,7 +40,7 @@ in a field `result`.
 
 | Type | Description |
 |------|-------------|
-| `Signature[I, O]` | A name, a `SignatureLayout`, a `Shape[I]`, and a `Shape[O]`. `markToolCalls(name)` gives an output field the type `TypeRef.toolCalls`. |
+| `Signature[I, O]` | A name, a `SignatureLayout`, a `Shape[I]`, and a `Shape[O]`. |
 | `Shape[A]` | The `Shape` codecs of one type: `fieldSpecs`, `encode`, `decode`, and `jsonSchemaString`. |
 | `RoundTripShape[A]` | A `Shape[A]` with a law: `decode(encode(a)) == Right(a)`. Each shape that comes from a `Schema` has this type. |
 | `Shape.MapShape` | The shape of `fromStringDynamic`. Its `decode` only checks that each field of the layout is in the record. |
@@ -70,6 +70,13 @@ and this case.
 - **An absent `Option` field is `None`,** also in a nested record. The values `null`, `"none"`, and `"n/a"` are also
   `None`. An absent field that is not an `Option` makes the decode fail.
 - **A `History` field gets `TypeRef.history`** from each entry point and from the builder.
+- **A sequence of `ToolCall` values gets `TypeRef.toolCalls`,** for example a `Vector[ToolCall]` output field. The
+  adapter with native tool calls fills that field from the tool calls of the provider.
+- **The framework types have a marker.** `History`, `ToolCall`, `Noul`, `Score`, and `Choice` have a type-level
+  `Modifier.config` entry with the key `TypeMarker.Key` (`dspy4s.typeRef`). The codec reads the marker from the
+  schema, and the macros read it from the annotations of the type. Neither of them keeps a list of these types.
+- **A `Score[L]` field has the cases of `L` as its levels,** from the type of its `level: Option[L]` field. A
+  `Choice[O]` field has the cases of `O` as its options, from the type of its `value: O` field.
 - **The JSON schema has no `ToolCall.id`.** `Shape.jsonSchemaString` removes the `id` of each `ToolCall` from the
   schema that a model sees. The id comes from the provider.
 

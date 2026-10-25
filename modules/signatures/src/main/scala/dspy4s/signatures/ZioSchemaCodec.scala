@@ -1,8 +1,7 @@
 package dspy4s.signatures
 
-import dspy4s.core.contracts.{DspyError, FieldSpec, History, LenientValues, ToolCall, TypeRef, ValidationError}
+import dspy4s.core.contracts.{DspyError, FieldSpec, LenientValues, TypeMarker, TypeRef, ValidationError}
 import dspy4s.core.contracts.Reflects.{caseNames, withoutDeferred}
-import dspy4s.core.decisions.{Choice, Noul, Score}
 import zio.blocks.chunk.{Chunk, ChunkMap, NonEmptyChunk}
 import zio.blocks.docs.Doc
 import zio.blocks.schema.binding.{Binding, BindingType}
@@ -30,6 +29,9 @@ import zio.blocks.typeid.{Owner, TypeId}
   *   - [[normalize]] coerces a `DynamicValue` to a target `Reflect`.
   *   - [[jsonSchemaForModel]] gives the JSON schema of a `Schema[A]` for a prompt, with no `id` in a `ToolCall`, and
   *     with `$defs` for a recursive type.
+  *
+  * The codec finds the framework types (`History`, `ToolCall`, and the decision types) by their marker ([[TypeMarker]])
+  * in the modifiers of a reflect, not by their structure or their type id.
   *
   * The interchange format is `DynamicValue.Record` from end to end. The codec does not use a `Map[String, Any]`.
   */
@@ -216,41 +218,44 @@ private[signatures] object ZioSchemaCodec:
     */
   private def unwrapped(reflect: Reflect.Bound[?]): Reflect.Bound[?] = withoutDeferred(reflect)
 
-  /** The type and the enum values of a decision field (experimental, upstream `dspy.experimental`): a [[Noul]] has no
-    * enum values, a [[Score]] has its levels (the cases of `L`, which the schema of `Score[L]` holds), and a [[Choice]]
-    * has its option labels (the cases of the reflect of its `value` field). `None` for each other reflect. The
-    * derivation knows the three types by their type id, not by their structure.
+  /** The type and the enum values of a decision field (experimental, upstream `dspy.experimental`), from the marker of
+    * its type ([[TypeMarker]]): a `Noul` has no enum values, a `Score` has its levels (the cases of the element of its
+    * `level` field), and a `Choice` has its option labels (the cases of its `value` field). `None` for each other
+    * reflect.
     */
-  private def decisionField(reflect: Reflect[?, ?]): Option[(TypeRef, Vector[String])] =
-    withoutDeferred(reflect) match
-      case rec: Reflect.Record[?, ?] if isType(rec.typeId, noulTypeId)   => Some(TypeRef.noul -> Vector.empty)
-      case rec: Reflect.Record[?, ?] if isType(rec.typeId, scoreTypeId)  => Some(TypeRef.score -> Score.levelsOf(rec))
-      case rec: Reflect.Record[?, ?] if isType(rec.typeId, choiceTypeId) =>
-        val options = rec.fieldByName("value").fold(Vector.empty[String])(term => caseNames(term.value))
-        Some(TypeRef.choice -> options)
-      case _ => None
+  private def decisionField(reflect: Reflect.Bound[?]): Option[(TypeRef, Vector[String])] =
+    TypeMarker.of(reflect) match
+      case Some(TypeMarker.noul)   => Some(TypeRef.noul -> Vector.empty)
+      case Some(TypeMarker.score)  => Some(TypeRef.score -> casesOfField(reflect, "level"))
+      case Some(TypeMarker.choice) => Some(TypeRef.choice -> casesOfField(reflect, "value"))
+      case _                       => None
 
+  /** The enum values of the field `name` of the record `reflect` (see [[enumValuesOf]]): a field of type `Option[E]`
+    * has the cases of `E`. Empty when the record has no such field.
+    */
+  private def casesOfField(reflect: Reflect.Bound[?], name: String): Vector[String] =
+    withoutDeferred(reflect) match
+      case rec: Reflect.Record[Binding, ?] =>
+        rec.fieldByName(name).fold(Vector.empty[String])(t => enumValuesOf(t.value))
+      case _ => Vector.empty
+
+  /** The wire type of a reflect that is not a decision type. A `History` record (by its marker) is [[TypeRef.history]],
+    * and a sequence whose element is a `ToolCall` (by its marker) is [[TypeRef.toolCalls]].
+    */
   private def typeRefOfValue(reflect: Reflect[?, ?]): TypeRef =
     withoutDeferred(reflect) match
-      case prim: Reflect.Primitive[?, ?]                                  => primitiveTypeRef(prim.primitiveType)
-      case _: Reflect.Variant[?, ?]                                       => TypeRef.string
-      case rec: Reflect.Record[?, ?] if isType(rec.typeId, historyTypeId) => TypeRef.history
-      case _: Reflect.Sequence[?, ?, ?]                                   => TypeRef.list
-      case _                                                              => TypeRef.json
+      case prim: Reflect.Primitive[?, ?]                                                => primitiveTypeRef(prim.primitiveType)
+      case _: Reflect.Variant[?, ?]                                                     => TypeRef.string
+      case rec: Reflect.Record[?, ?] if isMarked(rec, TypeMarker.history)               => TypeRef.history
+      case seq: Reflect.Sequence[?, ?, ?] if isMarked(seq.element, TypeMarker.toolCall) => TypeRef.toolCalls
+      case _: Reflect.Sequence[?, ?, ?]                                                 => TypeRef.list
+      case _                                                                            => TypeRef.json
 
-  // The framework types that the derivation knows by their identity (the type name of the record reflect), not by
-  // their structure.
-  private val historyTypeId: TypeId[History]   = summon[Schema[History]].reflect.typeId
-  private val toolCallTypeId: TypeId[ToolCall] = summon[Schema[ToolCall]].reflect.typeId
-  private val noulTypeId: TypeId[Noul]         = summon[Schema[Noul]].reflect.typeId
-  // `Score` and `Choice` are generic. The full name of a type id does not include the type arguments.
-  private val scoreTypeId: TypeId[Score]   = TypeId.of[Score]
-  private val choiceTypeId: TypeId[Choice] = TypeId.of[Choice]
+  /** `true` when the type of `reflect` has the marker `marker`. */
+  private def isMarked(reflect: Reflect[?, ?], marker: String): Boolean = TypeMarker.of(reflect).contains(marker)
 
-  private def isType(typeId: TypeId[?], known: TypeId[?]): Boolean = typeId.fullName == known.fullName
-
-  /** Marks the `id` field of each [[ToolCall]] record as transient, so the JSON schema does not show that field. Each
-    * other part of the reflect stays as it is.
+  /** Marks the `id` field of each `ToolCall` record (by its marker) as transient, so the JSON schema does not show that
+    * field. Each other part of the reflect stays as it is.
     */
   private object HideToolCallId extends ReflectTransformer.OnlyMetadata[Binding, Binding]:
     override def transformMetadata[K, A](f: Binding[K, A]): Lazy[Binding[K, A]] = Lazy(f)
@@ -266,14 +271,14 @@ private[signatures] object ZioSchemaCodec:
         storedExamples    : collection.immutable.Seq[DynamicValue]
     ): Lazy[Reflect.Record[Binding, A]] =
       val shown =
-        if !isType(typeId, toolCallTypeId) then fields
+        if !TypeMarker.in(modifiers).contains(TypeMarker.toolCall) then fields
         else
           fields.map { term =>
             if term.name == "id" then term.copy(modifiers = term.modifiers :+ Modifier.transient()) else term
           }
       super.transformRecord(path, shown, typeId, metadata, doc, modifiers, storedDefaultValue, storedExamples)
 
-  /** The JSON schema of `schema` as a model sees it. The schema does not ask for the `id` of a [[ToolCall]] (upstream
+  /** The JSON schema of `schema` as a model sees it. The schema does not ask for the `id` of a `ToolCall` (upstream
     * removes `id` from the JSON schema of `ToolCalls.ToolCall`): the id comes from the provider, and a model that
     * writes a tool call as text does not supply it.
     *

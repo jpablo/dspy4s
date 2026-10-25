@@ -105,7 +105,7 @@ class PredictTypeSafeSuite extends FunSuite:
     assertEqualsDouble(output.urgent.confidence, 0.125, 1e-12)
     assertEquals(output.urgent.probability, Some(0.9))
     assertEqualsDouble(output.severity.value, 1.5, 1e-12)
-    assertEquals(output.severity.levelIn(PdSeverity.values.toIndexedSeq), Some(PdSeverity.Disruptive))
+    assertEquals(output.severity.level, Some(PdSeverity.Disruptive))
     assertEquals(output.severity.probabilities, Some(Map(0 -> 0.1, 1 -> 0.3, 2 -> 0.6)))
     assertEquals(output.category.value, PdTeam.technical, "the weights apply, not the pick of the model")
     assertEquals(output.category.probabilities, Some(Map("billing" -> 0.6, "technical" -> 0.4)))
@@ -166,7 +166,7 @@ class PredictTypeSafeSuite extends FunSuite:
     assertEquals(
       DynamicValues.recordGet(values, "rating").collect { case rating: DynamicValue.Record => rating }
         .flatMap(DynamicValues.recordGet(_, "level")),
-      Some(DynamicValue.Primitive(PrimitiveValue.Int(1)))
+      Some(text("good"))
     )
     assertEquals(first.raw.lmUsage.map(usage => (usage.promptTokens, usage.completionTokens)), Some((10L, 3L)))
     val second = run(lm)(DynamicPredict(layout)(DynamicValues.record("text" := "x")))

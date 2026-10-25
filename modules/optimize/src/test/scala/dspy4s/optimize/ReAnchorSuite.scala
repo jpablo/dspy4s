@@ -71,7 +71,7 @@ class ReAnchorSuite extends FunSuite:
     FieldSpec("rating", TypeRef.score, description = Some("How good is it?"), enumValues = Vector("low", "mid", "high"))
   )
 
-  /** A metric that compares the value of `field` with the label (a level index for a Score). */
+  /** A metric that compares the value of `field` with the label (a level name for a Score). */
   private def equalOn(field: String, level: Boolean = false): Metric =
     new Metric:
       override val name: String = s"equal_$field"
@@ -180,7 +180,8 @@ class ReAnchorSuite extends FunSuite:
   test("Score cuts move to fit a metric on the level") {
     val model = FakeSystemOne((state, _) => leaningLevels(input(state, "item")))
     val train = items(
-      Seq.fill(3)(Seq("lo" -> 0, "hi" -> 2)).flatten.map((k, v) => k -> DynamicValue.Primitive(PrimitiveValue.Int(v))),
+      Seq.fill(3)(Seq("lo" -> "low", "hi" -> "high")).flatten
+        .map((k, v) => k -> DynamicValue.Primitive(PrimitiveValue.String(v))),
       "rating"
     )
     val (program, report) = calibrate(DynamicPredict(rateLayout), train, equalOn("rating", level = true), model)

@@ -2,7 +2,7 @@ package dspy4s.core.contracts
 
 import dspy4s.core.collections.Traverse
 import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, Schema}
+import zio.blocks.schema.{DynamicValue, Modifier, Schema}
 
 /** The conversation history of a signature (upstream `dspy.History`).
   *
@@ -19,7 +19,10 @@ import zio.blocks.schema.{DynamicValue, Schema}
   * val history = History.empty :+ DynamicValues.record("question" := "What is 1+1?", "answer" := "2")
   * predict((question = "What is 2+2?", history = history))
   * }}}
+  *
+  * The type has the marker [[TypeMarker.history]], thus a field of this type has the wire type [[TypeRef.history]].
   */
+@Modifier.config(TypeMarker.Key, TypeMarker.history)
 final case class History(messages: Vector[DynamicValue.Record] = Vector.empty) derives Schema:
 
   /** This history with one more message at its end. */
