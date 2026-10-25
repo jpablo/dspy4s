@@ -5,16 +5,11 @@ import dspy4s.core.contracts.{
   DspyError,
   DynamicValues,
   LmAuthError,
-  LmBillingError,
-  LmError,
   LmErrorDetails,
   LmInvalidRequestError,
-  LmNotConfiguredError,
   LmProviderError,
   LmProviderResponseError,
-  LmRateLimitError,
   LmServerError,
-  LmTimeoutError,
   LmUnsupportedModelError,
   LmUsage,
   RuntimeContext
@@ -24,7 +19,6 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import java.time.Instant
 import java.util.Locale
-import scala.util.control.NonFatal
 
 /** Experimental. The client of the TypeSafe System One API, for the Jev models (decision 4 of D6; upstream
   * `dspy.experimental.TypeSafe` in `dspy/clients/typesafe.py`, and the wire rules of the vendored lm15 provider in
@@ -61,10 +55,12 @@ import scala.util.control.NonFatal
   *     (upstream `_questions`).
   *   - A reply with no `usage` (or a null `usage`) gives no usage. A token count that the reply does not give is zero.
   *     A reply with no `model` (or a null `model`) has the model of the request (upstream `parse_response`).
-  *   - Each other error status maps as upstream `map_http_error`: 403 is an [[dspy4s.core.contracts.LmAuthError]], 402
-  *     an [[dspy4s.core.contracts.LmBillingError]], 408 an [[dspy4s.core.contracts.LmTimeoutError]], 404, 409, or 413
-  *     an [[dspy4s.core.contracts.LmInvalidRequestError]], and each other status an
-  *     [[dspy4s.core.contracts.LmProviderResponseError]].
+  *   - Each other error status maps as upstream `map_http_error` (`OpenAiErrors.byStatus`): 403 is an
+  *     [[dspy4s.core.contracts.LmAuthError]], 402 an [[dspy4s.core.contracts.LmBillingError]], 408 an
+  *     [[dspy4s.core.contracts.LmTimeoutError]], 404, 409, or 413 an [[dspy4s.core.contracts.LmInvalidRequestError]],
+  *     and each other status an [[dspy4s.core.contracts.LmProviderResponseError]]. The rule for 500 or more comes
+  *     first, so 504 and each status of 600 or more give an [[dspy4s.core.contracts.LmServerError]] here, not the class
+  *     of the shared table.
   *   - An error gets the status, the provider `typesafe`, the code `detail.error_type`, the request id (the header
   *     `x-typesafe-request-id`, else a request id header of `_attach_error_metadata`), and the retry hint of the
   *     `Retry-After` header (upstream `_attach_retry_after`).
@@ -99,13 +95,14 @@ final case class TypeSafeModel(
       wire     <- TypeSafeModel.wireRequest(request)
       reply    <- send(wire.body, request)
       response <-
-        if reply.status < 200 || reply.status >= 300 then Left(TypeSafeModel.statusError(reply, request))
-        else TypeSafeModel.parseReply(reply, wire.questions, request)
+        if reply.isSuccess then TypeSafeModel.parseReply(reply, wire.questions, request)
+        else Left(TypeSafeModel.statusError(reply, request))
     yield response
 
   /** Send `body`. A failure of the transport gets the model and the provider. */
   private def send(body: String, request: LmRequest): Either[DspyError, HttpResponse] =
-    transport.sendJson(endpoint, headers, body).left.map(TypeSafeModel.withRequestDetails(_, request))
+    transport.sendJson(endpoint, headers, body)
+      .left.map(OpenAiErrors.withRequestDetails(_, Some(request.model), TypeSafeModel.Provider))
 
   /** The base URL with no slash at its end (upstream `base_url.rstrip("/")`). */
   private def root: String = baseUrl.reverse.dropWhile(_ == '/').reverse
@@ -148,10 +145,7 @@ object TypeSafeModel:
           apiKey = key,
           baseUrl = setting("TYPESAFE_BASE_URL").getOrElse(DefaultBaseUrl)
         ))
-      case None => Left(LmNotConfiguredError(
-          s"Missing '$ApiKeyVariable' environment variable",
-          LmErrorDetails(provider = Some(Provider))
-        ))
+      case None => Left(OpenAiErrors.notConfigured(ApiKeyVariable, Provider))
 
   private val ApiKeyVariable: String = "TYPESAFE_API_KEY"
 
@@ -217,15 +211,17 @@ object TypeSafeModel:
             "question with a criteria object"
         )
 
-  /** The JSON text of the body. Each null stays: a choice criterion with no description is a JSON null. */
+  /** The JSON text of the body. Each null stays: a choice criterion with no description is a JSON null. A body with no
+    * JSON text (for example one with a NaN, or one nested too deep) gives the text of the error of
+    * `DynamicJson.encodeExactChecked`.
+    */
   private def encode(model: String, state: DynamicValue, questions: DynamicValue.Record): Either[String, String] =
     val body = DynamicValues.record(
       "model"                       := model,
       DecisionRequests.StateKey     -> state,
       DecisionRequests.QuestionsKey -> questions
     )
-    try Right(DynamicJson.encodeExact(body))
-    catch case NonFatal(_) => Left("The decision request has a value with no JSON text, for example a NaN")
+    DynamicJson.encodeExactChecked(body).left.map(_.message)
 
   /** The response of a reply with a status from 200 to 299, with the reply rules of upstream `parse_response`. */
   private def parseReply(
@@ -315,22 +311,19 @@ object TypeSafeModel:
       modelName <- modelOf(data)
     yield DecisionRequests.response(answers, usage, Some(modelName))
 
-  /** The error of a reply with a status outside 200 to 299 (upstream `normalize_error`, then `map_http_error`). */
+  /** The error of a reply with a status outside 200 to 299 (upstream `normalize_error`, then `map_http_error`). The
+    * checks of `normalize_error` come first: 401 or the code `authentication_error`, 400 with "unknown model" in the
+    * message, and 500 or more. Each other status gets the class of the shared table (`OpenAiErrors.byStatus`).
+    */
   private def statusError(reply: HttpResponse, request: LmRequest): LmProviderError =
     val (message, code) = errorText(reply.status, reply.body)
     val details         = replyDetails(reply, request).copy(providerCode = code)
-    if reply.status == 401 || code.contains("authentication_error") then LmAuthError(message, details)
-    else
-      reply.status match
-        case 429                                                               => LmRateLimitError(message, details)
-        case 400 if message.toLowerCase(Locale.ROOT).contains("unknown model") =>
-          LmUnsupportedModelError(message, details)
-        case 400 | 422 | 404 | 409 | 413 => LmInvalidRequestError(message, details)
-        case status if status >= 500     => LmServerError(message, details)
-        case 403                         => LmAuthError(message, details)
-        case 402                         => LmBillingError(message, details)
-        case 408                         => LmTimeoutError(message, details)
-        case _                           => LmProviderResponseError(message, details)
+    val status          = reply.status
+    if status == 401 || code.contains("authentication_error") then LmAuthError(message, details)
+    else if status == 400 && message.toLowerCase(Locale.ROOT).contains("unknown model") then
+      LmUnsupportedModelError(message, details)
+    else if status >= 500 then LmServerError(message, details)
+    else OpenAiErrors.byStatus(status)(message, details)
 
   /** The message and the provider code of an error body (upstream `normalize_error`). */
   private def errorText(status: Int, body: String): (String, Option[String]) =
@@ -360,19 +353,9 @@ object TypeSafeModel:
 
   /** The details of an error of a reply: the status, the request id, and the retry hint of the headers. */
   private def replyDetails(reply: HttpResponse, request: LmRequest): LmErrorDetails =
-    val lowered = reply.headers.map((name, value) => name.toLowerCase(Locale.ROOT) -> value)
+    val lowered = OpenAiErrors.lowerCase(reply.headers)
     details(request).copy(
       status = Some(reply.status),
-      requestId = ("x-typesafe-request-id" +: OpenAiErrors.requestIdHeaders).iterator.flatMap(lowered.get)
-        .map(_.trim).find(_.nonEmpty),
+      requestId = OpenAiErrors.requestId(lowered, preferred = Seq("x-typesafe-request-id")),
       retryAfter = OpenAiErrors.retryAfter(lowered, Instant.now())
     )
-
-  /** A failure of the transport, with the model and the provider. A field that is already set stays. */
-  private def withRequestDetails(error: DspyError, request: LmRequest): DspyError =
-    error match
-      case lm: LmError => lm.withDetails(lm.details.copy(
-          model = lm.details.model.orElse(Some(request.model)),
-          provider = lm.details.provider.orElse(Some(Provider))
-        ))
-      case other => other

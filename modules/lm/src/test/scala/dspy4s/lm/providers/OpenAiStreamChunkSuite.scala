@@ -5,7 +5,9 @@ import munit.FunSuite
 class OpenAiStreamChunkSuite extends FunSuite:
 
   private def decode(json: String): OpenAiStreamChunk =
-    OpenAiStreamChunk.decode(json).toOption.get
+    OpenAiStreamChunk.parse(json) match
+      case Right(Some(chunk)) => chunk
+      case other              => fail(s"no chunk: $other")
 
   test("decodes content delta, tolerating null finish_reason and unknown fields") {
     val chunk = decode(
@@ -54,5 +56,5 @@ class OpenAiStreamChunkSuite extends FunSuite:
   }
 
   test("returns Left for malformed JSON") {
-    assert(OpenAiStreamChunk.decode("{not json").isLeft)
+    assert(OpenAiStreamChunk.parse("{not json").isLeft)
   }

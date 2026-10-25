@@ -207,17 +207,18 @@ Simplify 5 (rank 5). Code-review 5 (rank 8). 4966 main lines, 6422 test lines.
 
 ### Simplify findings
 
-- [ ] Private copies of the `string`, `sequence`, `record`, and `isNull` helpers: `providers/ResponsesWire.scala:445-498`, `runtime/DiskLmCache.scala:440-470`, `runtime/ProviderLanguageModel.scala:39`, `runtime/LmHistoryRecord.scala:125`. Core now has `DynamicValues.isNull` and `DynamicValues.encodeJson`; `providers/DynamicJson.scala:59` also has an `isNull`.
+- [ ] Private copies of the `string`, `sequence`, `record`, and `isNull` helpers: `providers/ResponsesWire.scala` (the helpers at its end), `runtime/DiskLmCache.scala:440-470`, `providers/ChatWire.scala` (`string`), `runtime/LmHistoryRecord.scala:125`. Core now has `DynamicValues.isNull` and `DynamicValues.encodeJson`; `providers/DynamicJson.scala:59` also has an `isNull`.
 - [ ] `runtime/DiskLmCache.scala:16-151`, `:263-279`: a reader for the old Java-serialization cache format, about 150 lines.
-- [ ] `providers/OpenAiEmbedder.scala`, `asFloat`: the same tolerant number read as the new `DynamicValues.asDouble` in core.
+- [x] `providers/OpenAiEmbedder.scala`, `asFloat`: the same tolerant number read as the new `DynamicValues.asDouble` in core. Fixed: a derived lenient codec reads the reply (`EmbeddingsReply`), and `floatRow`, `asFloat`, and `asInt` are gone.
 - [ ] `runtime/ManagedLanguageModel.scala`, `UsageTracking`: it writes its thread-local scope and its carrier by hand. Core now has `ScopedLocal` (`private[dspy4s]`) for this job.
 - [ ] `runtime/DiskLmCache.scala:370-470`: a hand-written JSON codec. A DTO with a derived Schema (JsonCodecDeriver) can replace it.
-- [ ] `runtime/ProviderLanguageModel.scala:75` writes a magic `mode` key, and `providers/OpenAiClient.scala:24-39`, `:103-113` read it and remove it. Pass the mode as a typed value.
-- [ ] `providers/PythonStr.scala:100-116` copies the Python float repr of adapters `internal/PythonText.scala:369-422`, with a different algorithm. `providers/OpenAiLanguageModel.scala:69-94` copies the pipeline of `runtime/ProviderLanguageModel.scala:34-36`.
+- [x] ProviderLanguageModel (removed) writes a magic `mode` key, and `providers/OpenAiClient.scala:24-39`, `:103-113` read it and remove it. Pass the mode as a typed value. Fixed: `OpenAiClient.invoke(mode, body)` and `stream(mode, body)`.
+- [ ] `providers/PythonStr.scala:100-116` copies the Python float repr of adapters `internal/PythonText.scala:369-422`, with a different algorithm.
+- [x] `providers/OpenAiLanguageModel.scala:69-94` copies the pipeline of ProviderLanguageModel (removed). Fixed: `ProviderLanguageModel` had no user in the main code and is removed. Its encoders and its reply parser are `providers/ChatWire.scala`.
 
 ### Code-review findings
 
-- [ ] `runtime/ProviderLanguageModel.scala:76` puts `request_id` in the payload. `providers/OpenAiClient.scala:24` removes only `mode`, so `request_id` goes into the OpenAI request body. The only test checks `mode` (`OpenAiClientSuite.scala:91`). (checked)
+- [x] ProviderLanguageModel (removed) puts `request_id` in the payload. `providers/OpenAiClient.scala:24` removes only `mode`, so `request_id` goes into the OpenAI request body. The only test checks `mode` (`OpenAiClientSuite.scala:91`). (checked) Fixed: `LmRequest.requestId` had no producer and is removed. The cache key keeps the text `"request_id":null`.
 - [ ] `providers/OpenAiClient.scala:53-55` sends the `prompt` body to `/chat/completions` in Text mode. The stream reads only `delta.content`. No test covers Text mode on the real client.
 - [ ] `runtime/ManagedLanguageModel.scala:236`, `:417`: no upper limit on `Retry-After`. A bad header can block a thread for hours.
 - [ ] `runtime/DiskLmCache.scala:295-304`: a failed write leaves `<key>.json.tmp`, and `clear` never removes it. The eviction (`:329-336`) lists up to 200000 files while it holds the lock.

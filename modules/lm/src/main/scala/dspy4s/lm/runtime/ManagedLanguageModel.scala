@@ -227,7 +227,7 @@ final case class ManagedLanguageModel(
     */
   private def cacheKey(request: LmRequest): LmRequest =
     request.copy(
-      options = ProviderRequestNormalizer.effectiveOptions(request, defaultOptions),
+      options = request.effectiveOptions(defaultOptions),
       cacheIdentity = cacheIdentity
     )
 
@@ -236,8 +236,7 @@ final case class ManagedLanguageModel(
     cacheHit(request, key) match
       case Some(cached) => Right(cached)
       case None         =>
-        // rolloutId is a field (not in `options`) and `normalize` only spreads `options` to the wire,
-        // so there is nothing to strip before the provider call -- it cannot reach the request body.
+        // rolloutId is a field, not an option. A provider sends only the options, so the request goes as it is.
         val result = executeWithRetry(request)
         result match
           case Left(error) =>

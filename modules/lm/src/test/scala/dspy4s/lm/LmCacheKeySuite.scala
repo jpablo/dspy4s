@@ -3,8 +3,10 @@ package dspy4s.lm
 import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, RuntimeError, :=}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
-import dspy4s.lm.providers.{DynamicJson, HttpResponse, HttpStreamResponse, HttpTransport, OpenAiLanguageModel}
-import dspy4s.lm.runtime.{CacheCapacity, InMemoryLmCache, ManagedLanguageModel, ProviderLanguageModel}
+import dspy4s.lm.providers.{
+  DynamicJson, HttpResponse, HttpStreamResponse, HttpTransport, OpenAiClient, OpenAiLanguageModel
+}
+import dspy4s.lm.runtime.{CacheCapacity, InMemoryLmCache, ManagedLanguageModel}
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
@@ -24,25 +26,34 @@ class LmCacheKeySuite extends FunSuite:
     messages = Vector(Message(role = MessageRole.User, text = Some("What is the capital of Belgium?")))
   )
 
-  private def chatPayload(text: String): DynamicValue =
-    DynamicJson
-      .decode(s"""{"choices":[{"message":{"role":"assistant","content":"$text"},"finish_reason":"stop"}]}""")
-      .toOption
-      .get
+  private def json(text: String): DynamicValue =
+    DynamicJson.decode(text).fold(error => fail(s"not JSON: $error"), identity)
 
-  /** A provider that records each payload that reaches the wire. */
+  /** A transport that records the decoded body of each plain request, and answers with a chat reply of `reply`. */
+  private final class Recording(sent: ArrayBuffer[DynamicValue], reply: String) extends HttpTransport:
+    override def sendJson(url: String, headers: Map[String, String], body: String): Either[DspyError, HttpResponse] =
+      sent += json(body)
+      Right(HttpResponse(
+        200,
+        Map.empty,
+        s"""{"choices":[{"message":{"role":"assistant","content":"$reply"},"finish_reason":"stop"}]}"""
+      ))
+    override def streamSse(
+        url    : String,
+        headers: Map[String, String],
+        body   : String
+    ): Either[DspyError, HttpStreamResponse] =
+      Left(RuntimeError("test", "the stream path is not used"))
+
+  /** A provider that records each body that reaches the wire. */
   private def provider(
       sent          : ArrayBuffer[DynamicValue],
       reply         : String,
       defaultOptions: DynamicValue.Record
-  ): ProviderLanguageModel =
-    ProviderLanguageModel(
-      id = "shared-model",
-      mode = LmMode.Chat,
-      invoke = payload =>
-        sent += payload
-        Right(chatPayload(reply))
-      ,
+  ): OpenAiLanguageModel =
+    OpenAiLanguageModel(
+      model = "shared-model",
+      client = OpenAiClient(apiKey = "x", transport = Recording(sent, reply)),
       defaultOptions = defaultOptions
     )
 
@@ -170,7 +181,7 @@ class LmCacheKeySuite extends FunSuite:
 
     assertEquals(sent.size, 2)
     sent.foreach { payload =>
-      assertEquals(DynamicJson.field(payload, "temperature"), Some(DynamicValues.fromAny(1.0)))
+      assertEquals(DynamicJson.field(payload, "temperature"), Some(json("1.0")))
       assertEquals(DynamicJson.field(payload, "rollout_id"), None)
       assertEquals(DynamicJson.field(payload, "rolloutId"), None)
     }

@@ -57,7 +57,7 @@ sealed ADT. The semantic content is the same; the test shape isn't.
 | `dspy.configure(lm=..., adapter=...)` (process-global mutable state) | `RuntimeEnvironment.withSettings(SettingsData(...)) { ... }` (scoped, stack-based, ThreadLocal-backed) | `core/runtime/RuntimeEnvironment.scala` |
 | `with dspy.context(lm=...): ...` | same `withSettings` block — no `with`-statement analog needed because the block already scopes the override. | — |
 | Implicit "current LM" lookup inside `Predict.forward` | `runtime.resolveModel(using RuntimeContext)` reads the current settings | `programs/Predict.scala` |
-| Reading the active LM from anywhere | `summon[RuntimeContext].settings.entries.get(SettingKeys.languageModel.name)` | `lm/runtime/ProviderLanguageModel.scala` and similar |
+| Reading the active LM from anywhere | `summon[RuntimeContext].lm` | `programs/runtime/SettingsProgramRuntime.scala` and similar |
 
 The `RuntimeContext` value travels via Scala 3 `using` parameters
 everywhere a Python function would have read from `dspy.settings`. Tests

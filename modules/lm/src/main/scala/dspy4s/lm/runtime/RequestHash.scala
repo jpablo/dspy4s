@@ -29,14 +29,16 @@ object RequestHash:
       case NonFatal(error)       =>
         Left(ValidationError(s"The request has no cache key: ${Option(error.getMessage).getOrElse(error.toString)}"))
 
+  /** The hashed text of `request`. An older `LmRequest` had a request id. The text keeps the key `"request_id":null` of
+    * that version, so each entry of a disk cache stays valid.
+    */
   private def encodeRequest(request: LmRequest): String =
     val messages  = request.messages.map(encodeMessage).mkString("[", ",", "]")
     val options   = normalizeDynamic(request.options)
-    val requestId = request.requestId.map(quote).getOrElse("null")
     val rolloutId = request.rolloutId.map(_.toString).getOrElse("null")
     s"""{"model":${quote(request.model)},"mode":${quote(
         request.mode.toString
-      )},"messages":$messages,"options":$options,"request_id":$requestId,"rollout_id":$rolloutId${encodeIdentity(
+      )},"messages":$messages,"options":$options,"request_id":null,"rollout_id":$rolloutId${encodeIdentity(
         request.cacheIdentity
       )}}"""
 

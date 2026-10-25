@@ -14,65 +14,53 @@ final case class OpenAiClient(
     baseUrl     : String        = OpenAiClient.defaultBaseUrl,
     transport   : HttpTransport = HttpTransport.jdk(),
     chatEndpoint: String        = "/chat/completions",
-    /** The path of the Responses API. A payload whose internal `mode` key is `responses` goes here (see [[invoke]]). */
+    /** The path of the Responses API. A request in the mode `LmMode.Responses` goes here (see [[invoke]]). */
     responsesEndpoint: String = "/responses"
 ):
-  private val defaultHeaders: Map[String, String] = Map(
+  private val headers: Map[String, String] = Map(
     "Authorization" -> s"Bearer $apiKey"
   )
-
-  private val providerInternalKeys: Set[String] = Set(WireKeys.mode)
-
-  /** The value of the internal `mode` key that selects the Responses API (the normalizer writes the mode in lower
-    * case).
-    */
-  private val responsesMode: String = LmMode.Responses.toString.toLowerCase
-
-  /** The payload with no dspy4s-internal key. */
-  private def withoutInternalKeys(payload: DynamicValue): DynamicValue =
-    payload match
-      case rec: DynamicValue.Record => DynamicValues.recordFilterKeys(rec, k => !providerInternalKeys.contains(k))
-      case other                    => other
-
-  /** Whether the internal `mode` key of the payload selects the Responses API. */
-  private def isResponses(payload: DynamicValue): Boolean =
-    DynamicJson.field(payload, WireKeys.mode).flatMap(DynamicJson.asString).contains(responsesMode)
 
   /** The value of the `stream` key of a stream body. */
   private val streamOn: DynamicValue = DynamicValues.fromAny(true)
 
-  /** POST the payload and decode the JSON body.
+  /** POST `body` to `endpoint` (a path under [[baseUrl]]), and give the body text of a reply with a success status.
     *
-    * When the internal `mode` key of the payload is `responses`, the request goes to [[responsesEndpoint]], and the
-    * body is the Responses body of the payload (`ResponsesWire.request`, upstream `chat_to_responses`). Else the
-    * request goes to [[chatEndpoint]] with the chat body. The internal keys never reach the wire. A response with a
-    * status outside 200 to 299 becomes the LM error that `OpenAiErrors.fromResponse` gives. A failure of the transport
-    * keeps its class and gets the model and the provider.
+    * A reply with a status outside 200 to 299 becomes the LM error that `OpenAiErrors.fromResponse` gives. A failure of
+    * the transport keeps its class and gets the model and the provider. The chat path and the embedder use this
+    * function, so one reply gives one error on each path.
+    *
+    * @param model
+    *   the model of the request, for the details of an error
     */
-  def invoke(payload: DynamicValue): Either[DspyError, DynamicValue] =
-    val (endpoint, body) = withoutInternalKeys(payload) match
-      case chat: DynamicValue.Record if isResponses(payload) => (responsesEndpoint, ResponsesWire.request(chat))
-      case other                                             => (chatEndpoint, other)
-    val url   = s"${baseUrl.stripSuffix("/")}$endpoint"
-    val model = modelOf(payload)
-    transport.sendJson(url, defaultHeaders, DynamicJson.encode(body))
+  def post(endpoint: String, body: DynamicValue, model: Option[String]): Either[DspyError, String] =
+    transport.sendJson(url(endpoint), headers, DynamicJson.encode(body))
       .left.map(OpenAiErrors.withRequestDetails(_, model))
       .flatMap { response =>
-        if response.status < 200 || response.status >= 300 then
-          Left(OpenAiErrors.fromResponse(response.status, response.headers, response.body, model))
-        else
-          DynamicJson.decode(response.body)
+        if response.isSuccess then Right(response.body)
+        else Left(OpenAiErrors.fromResponse(response.status, response.headers, response.body, model))
       }
+
+  /** POST the body of a model call in `mode`, and decode the JSON reply.
+    *
+    * In the mode `LmMode.Responses`, the request goes to [[responsesEndpoint]]: `body` is then the Responses body
+    * (`ResponsesWire.request`). In each other mode, it goes to [[chatEndpoint]]. The body goes as it is. The errors are
+    * the errors of [[post]], and a reply that is not JSON is a `ParseError`.
+    */
+  def invoke(mode: LmMode, body: DynamicValue.Record): Either[DspyError, DynamicValue] =
+    post(endpointOf(mode), body, modelOf(body)).flatMap(DynamicJson.decode)
 
   /** Close the transport (see [[HttpTransport.close]]). The client stays usable. */
   def close(): Unit = transport.close()
 
-  /** Open an SSE stream. A failure before the first chunk gives the same LM error as [[invoke]].
+  /** Open an SSE stream for the body of a model call in `mode`. A failure before the first chunk gives the same LM
+    * error as [[invoke]].
     *
-    * When the internal `mode` key of the payload is `responses`, the stream goes to [[responsesEndpoint]]. The body is
-    * the Responses body of the payload with `"stream": true` and no `stream_options` (upstream lm15 `OpenAILM._payload`
-    * in `dspy/_vendor/lm15/providers/openai.py`), and each event gives the chunk of `ResponsesWire.streamChunk`. Else
-    * the stream goes to [[chatEndpoint]] with the chat body, `"stream": true`, and `stream_options.include_usage`.
+    * In the mode `LmMode.Responses`, the stream goes to [[responsesEndpoint]]. The body is the Responses body with
+    * `"stream": true` and no `stream_options` (upstream lm15 `OpenAILM._payload` in
+    * `dspy/_vendor/lm15/providers/openai.py`), and each event gives the chunk of `ResponsesWire.streamChunk`. In each
+    * other mode, the stream goes to [[chatEndpoint]] with the body, `"stream": true`, and
+    * `stream_options.include_usage`.
     *
     * The stream rules of upstream `parse_stream_events` and `checked_stream`:
     *   - A chunk with a finish reason, a chunk with usage, or the line `[DONE]` is an end event. `[DONE]` ends the
@@ -98,50 +86,49 @@ final case class OpenAiClient(
     * `LmStreamAssemblyError` of a stream with no end event. The error gets the model and the provider. This is also
     * true after an end event that is not `[DONE]` (upstream raises the transport error while it reads the lines).
     */
-  def stream(payload: DynamicValue): Either[DspyError, ClosableIterator[LmChunk]] =
-    val model                  = modelOf(payload)
-    val (endpoint, body, read) = withoutInternalKeys(payload) match
-      case chat: DynamicValue.Record if isResponses(payload) =>
-        (responsesEndpoint, ResponsesWire.request(chat).updated(WireKeys.stream, streamOn), responsesEvent(model))
-      case chat: DynamicValue.Record =>
+  def stream(mode: LmMode, body: DynamicValue.Record): Either[DspyError, ClosableIterator[LmChunk]] =
+    val model              = modelOf(body)
+    val (streamBody, read) = mode match
+      case LmMode.Responses          => (body.updated(WireKeys.stream, streamOn), responsesEvent(model))
+      case LmMode.Chat | LmMode.Text =>
         val streamOptions = DynamicValues.recordFromEntries(Seq(WireKeys.includeUsage := true))
-        (
-          chatEndpoint,
-          chat.updated(WireKeys.stream, streamOn).updated(WireKeys.streamOptions, streamOptions),
-          chatChunk(model)
-        )
-      case other => (chatEndpoint, other, chatChunk(model))
-    val url = s"${baseUrl.stripSuffix("/")}$endpoint"
-    transport.streamSse(url, defaultHeaders, DynamicJson.encode(body))
+        (body.updated(WireKeys.stream, streamOn).updated(WireKeys.streamOptions, streamOptions), chatChunk(model))
+    transport.streamSse(url(endpointOf(mode)), headers, DynamicJson.encode(streamBody))
       .left.map(OpenAiErrors.withRequestDetails(_, model))
       .flatMap { response =>
-        if response.status < 200 || response.status >= 300 then
-          val buffered = new StringBuilder
-          val draining = response.dataLines
-          try while draining.hasNext do
-              val _ = buffered.append(draining.next()).append('\n')
-          finally draining.close()
-          Left(OpenAiErrors.fromResponse(response.status, response.headers, buffered.toString, model))
+        if response.isSuccess then Right(parseSse(response.dataLines, response.failure, model, read))
         else
-          Right(parseSse(response.dataLines, response.failure, model, read))
+          Left(OpenAiErrors.fromResponse(response.status, response.headers, drain(response.dataLines), model))
       }
 
+  /** The URL of `endpoint`: [[baseUrl]] with no slash at its end, then `endpoint`. */
+  private def url(endpoint: String): String = s"${baseUrl.stripSuffix("/")}$endpoint"
+
+  /** The endpoint of a model call in `mode`. */
+  private def endpointOf(mode: LmMode): String =
+    mode match
+      case LmMode.Responses          => responsesEndpoint
+      case LmMode.Chat | LmMode.Text => chatEndpoint
+
+  /** The text of all `lines`, one line each, for the error of a stream reply. The lines are closed after. */
+  private def drain(lines: ClosableIterator[String]): String =
+    val buffered = new StringBuilder
+    try while lines.hasNext do
+        val _ = buffered.append(lines.next()).append('\n')
+    finally lines.close()
+    buffered.toString
+
   /** The chunk of one `data:` JSON text of a chat stream: `Right(None)` for a text that gives no chunk, and a `Left`
-    * for a failure that ends the stream (the rules of [[stream]]).
+    * for a failure that ends the stream (the rules of [[stream]]). The typed codec and the lenient reader give the same
+    * chunk type, so this function has the one check of the error object.
     */
   private def chatChunk(model: Option[String])(data: String): Either[DspyError, Option[LmChunk]] =
-    OpenAiStreamChunk.decode(data) match
-      case Right(chunk) => chunk.errorObject match
+    OpenAiStreamChunk.parse(data) match
+      case Left(_)            => Left(notJson(model))
+      case Right(None)        => Right(None)
+      case Right(Some(chunk)) => chunk.errorObject match
           case Some(error) => Left(OpenAiErrors.fromStreamError(error, model))
           case None        => Right(Some(chunk.toLmChunk))
-      case Left(_) => DynamicJson.decode(data) match
-          case Left(_)                            => Left(notJson(model))
-          case Right(record: DynamicValue.Record) =>
-            DynamicJson.field(record, WireKeys.error).flatMap(DynamicJson.asRecord) match
-              case Some(error) => Left(OpenAiErrors.fromStreamError(error, model))
-              case None        => Right(Some(OpenAiStreamChunk.lenient(record).toLmChunk))
-          // Upstream skips a JSON value that is not an object.
-          case Right(_) => Right(None)
 
   /** The chunk of one `data:` JSON text of a Responses stream (the rules of [[stream]]). */
   private def responsesEvent(model: Option[String])(data: String): Either[DspyError, Option[LmChunk]] =
@@ -231,8 +218,9 @@ final case class OpenAiClient(
           finished = true
           lines.close()
 
-  private def modelOf(payload: DynamicValue): Option[String] =
-    DynamicJson.field(payload, WireKeys.model).flatMap(DynamicJson.asString)
+  /** The model of a body, for the details of an error. */
+  private def modelOf(body: DynamicValue.Record): Option[String] =
+    DynamicValues.recordGet(body, WireKeys.model).flatMap(DynamicJson.asString)
 
 object OpenAiClient:
   val defaultBaseUrl: String = "https://api.openai.com/v1"

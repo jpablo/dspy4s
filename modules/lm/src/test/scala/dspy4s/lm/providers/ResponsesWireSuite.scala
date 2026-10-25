@@ -3,8 +3,11 @@ package dspy4s.lm.providers
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.ToolCall
-import dspy4s.lm.contracts.LmMode
-import dspy4s.lm.runtime.ProviderResponseParser
+import dspy4s.core.contracts.:=
+import dspy4s.lm.contracts.ContentPart
+import dspy4s.lm.contracts.LmRequest
+import dspy4s.lm.contracts.Message
+import dspy4s.lm.contracts.MessageRole
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.PrimitiveValue
@@ -32,20 +35,23 @@ class ResponsesWireSuite extends FunSuite:
       case _: DynamicValue.Null.type                             => None
       case other                                                 => other.toString
 
-  private def translated(chat: String): Any = plain(ResponsesWire.request(record(chat)))
+  /** The Responses body of a request for the model `m` with `messages` and the options of the JSON object `options`. */
+  private def same(messages: Vector[Message], options: String, responses: String): Unit =
+    val request = LmRequest(model = "m", messages = messages, options = record(options))
+    assertEquals(plain(ResponsesWire.request(request)), plain(record(responses)))
 
-  private def same(chat: String, responses: String): Unit =
-    assertEquals(translated(chat), plain(record(responses)))
+  private def user(text: String): Message = Message(role = MessageRole.User, text = Some(text))
 
   // ── The request ─────────────────────────────────────────────────────────────────────────────────────────────
 
   test("messages become input items with text blocks, and the role sets the block type") {
     same(
-      """{"model": "m", "messages": [
-        |  {"role": "system", "content": "Be terse."},
-        |  {"role": "user", "content": "Hi", "name": "ann"},
-        |  {"role": "assistant", "content": "Hello."}
-        |]}""".stripMargin,
+      Vector(
+        Message(role = MessageRole.System, text = Some("Be terse.")),
+        Message(role = MessageRole.User, text = Some("Hi"), name = Some("ann")),
+        Message(role = MessageRole.Assistant, text = Some("Hello."))
+      ),
+      "{}",
       """{"model": "m", "input": [
         |  {"role": "system", "content": [{"type": "input_text", "text": "Be terse."}]},
         |  {"role": "user", "content": [{"type": "input_text", "text": "Hi"}], "name": "ann"},
@@ -56,15 +62,19 @@ class ResponsesWireSuite extends FunSuite:
 
   test("tool calls become function_call items, and a tool message becomes a function_call_output item") {
     same(
-      """{"model": "m", "messages": [
-        |  {"role": "assistant", "content": null, "tool_calls": [
-        |    {"id": "c1", "type": "function", "function": {"name": "search", "arguments": "{\"q\":\"cats\"}"}}
-        |  ]},
-        |  {"role": "tool", "content": "3 cats", "tool_call_id": "c1", "name": "search"},
-        |  {"role": "assistant", "content": "Next.", "tool_calls": [
-        |    {"type": "function", "function": {"name": "lookup", "arguments": "{}"}}
-        |  ]}
-        |]}""".stripMargin,
+      Vector(
+        Message(
+          role = MessageRole.Assistant,
+          toolCalls = Vector(ToolCall(name = "search", args = DynamicValues.record("q" := "cats"), id = Some("c1")))
+        ),
+        Message(role = MessageRole.Tool, text = Some("3 cats"), toolCallId = Some("c1"), name = Some("search")),
+        Message(
+          role = MessageRole.Assistant,
+          text = Some("Next."),
+          toolCalls = Vector(ToolCall(name = "lookup", args = DynamicValue.Record.empty))
+        )
+      ),
+      "{}",
       """{"model": "m", "input": [
         |  {"type": "function_call", "name": "search", "arguments": "{\"q\":\"cats\"}", "call_id": "c1"},
         |  {"type": "function_call_output", "output": "3 cats", "call_id": "c1"},
@@ -74,40 +84,59 @@ class ResponsesWireSuite extends FunSuite:
     )
   }
 
+  test("a tool message with parts gives the joined text of its text parts") {
+    same(
+      Vector(Message(
+        role = MessageRole.Tool,
+        parts = Vector(
+          ContentPart(kind = "text", payload = "3 "),
+          ContentPart(kind = "image_url", payload = "https://x/cat.png"),
+          ContentPart(kind = "input_text", payload = "cats")
+        )
+      )),
+      "{}",
+      """{"model": "m", "input": [{"type": "function_call_output", "output": "3 cats"}]}"""
+    )
+  }
+
   test("content parts become blocks: text blocks change type, an image becomes input_image, others stay") {
     same(
-      """{"model": "m", "messages": [{"role": "user", "content": [
-        |  {"type": "text", "text": "Describe."},
-        |  {"type": "image_url", "image_url": {"url": "https://x/cat.png"}},
-        |  {"type": "image_url", "text": "https://x/dog.png"},
-        |  {"type": "input_audio", "data": "abc"}
-        |]}]}""".stripMargin,
+      Vector(Message(
+        role = MessageRole.User,
+        parts = Vector(
+          ContentPart(kind = "text", payload = "Describe."),
+          ContentPart(kind = "image_url", payload = "https://x/dog.png"),
+          ContentPart(kind = "input_audio", payload = "abc", metadata = Map("format" -> "wav"))
+        )
+      )),
+      "{}",
       """{"model": "m", "input": [{"role": "user", "content": [
         |  {"type": "input_text", "text": "Describe."},
-        |  {"type": "input_image", "image_url": "https://x/cat.png"},
         |  {"type": "input_image", "image_url": "https://x/dog.png"},
-        |  {"type": "input_audio", "data": "abc"}
+        |  {"type": "input_audio", "text": "abc", "metadata": {"format": "wav"}}
         |]}]}""".stripMargin
     )
   }
 
   test("token limits, reasoning effort, and null options get the upstream names") {
     same(
-      """{"model": "m", "messages": [], "max_completion_tokens": 50, "reasoning_effort": "low",
-        |  "temperature": null, "stop": [], "top_p": 0.5}""".stripMargin,
+      Vector.empty,
+      """{"max_completion_tokens": 50, "reasoning_effort": "low", "temperature": null, "stop": [], "top_p": 0.5}""",
       """{"model": "m", "input": [], "max_output_tokens": 50, "reasoning": {"effort": "low", "summary": "auto"},
         |  "top_p": 0.5}""".stripMargin
     )
-    same("""{"model": "m", "messages": [], "max_tokens": null}""", """{"model": "m", "input": []}""")
+    same(Vector.empty, """{"max_tokens": null}""", """{"model": "m", "input": []}""")
     same(
-      """{"model": "m", "messages": [], "reasoning_effort": "high", "reasoning": {"effort": "low"}}""",
+      Vector.empty,
+      """{"reasoning_effort": "high", "reasoning": {"effort": "low"}}""",
       """{"model": "m", "input": [], "reasoning": {"effort": "low"}}"""
     )
   }
 
   test("tools and the tool choice are flattened") {
     same(
-      """{"model": "m", "messages": [], "tools": [
+      Vector.empty,
+      """{"tools": [
         |  {"type": "function", "function": {"name": "search", "description": "Find.", "parameters": {"type": "object"}}},
         |  {"type": "function", "function": {"name": "lookup", "description": null, "parameters": {}}}
         |], "tool_choice": {"type": "function", "function": {"name": "search"}}}""".stripMargin,
@@ -120,21 +149,39 @@ class ResponsesWireSuite extends FunSuite:
 
   test("response_format moves to text.format, and a json_schema format is flattened") {
     same(
-      """{"model": "m", "messages": [], "response_format": {"type": "json_schema",
+      Vector.empty,
+      """{"response_format": {"type": "json_schema",
         |  "json_schema": {"name": "DSPyProgramOutputs", "schema": {"type": "object"}, "strict": true}}}""".stripMargin,
       """{"model": "m", "input": [], "text": {"format": {"type": "json_schema", "name": "DSPyProgramOutputs",
         |  "schema": {"type": "object"}, "strict": true}}}""".stripMargin
     )
     same(
-      """{"model": "m", "messages": [], "response_format": {"type": "json_object"}}""",
+      Vector.empty,
+      """{"response_format": {"type": "json_object"}}""",
       """{"model": "m", "input": [], "text": {"format": {"type": "json_object"}}}"""
     )
   }
 
-  test("a body that has input already loses its messages and stays as it is") {
+  test("an input option stays, and the body has no other change") {
     same(
-      """{"model": "m", "input": "Hi", "messages": [{"role": "user", "content": "x"}], "max_tokens": 5}""",
+      Vector(user("x")),
+      """{"input": "Hi", "max_tokens": 5}""",
       """{"model": "m", "input": "Hi", "max_tokens": 5}"""
+    )
+  }
+
+  test("a messages option does not go into the body, and the default options are under the request options") {
+    val request = LmRequest(
+      model = "m",
+      messages = Vector(user("Hi")),
+      options = record("""{"messages": [{"role": "user", "content": "old"}], "top_p": 0.5}""")
+    )
+    assertEquals(
+      plain(ResponsesWire.request(request, defaultOptions = record("""{"top_p": 0.1, "temperature": 0.2}"""))),
+      plain(record(
+        """{"model": "m", "top_p": 0.5, "temperature": 0.2,
+          | "input": [{"role": "user", "content": [{"type": "input_text", "text": "Hi"}]}]}""".stripMargin
+      ))
     )
   }
 
@@ -189,9 +236,9 @@ class ResponsesWireSuite extends FunSuite:
         |  {"id": "call_1", "type": "function", "function": {"name": "search", "arguments": "not json"}}
         |]}}]}""".stripMargin
     )
-    ProviderResponseParser.parse(chat, LmMode.Chat) match
-      case Right(response) =>
-        assertEquals(response.outputs.flatMap(_.toolCalls).map(_.args), Vector(record("""{"input": "not json"}""")))
+    ChatWire.outputs(chat) match
+      case Right(outputs) =>
+        assertEquals(outputs.flatMap(_.toolCalls).map(_.args), Vector(record("""{"input": "not json"}""")))
       case Left(error) => fail(s"the chat parse failed: $error")
   }
 

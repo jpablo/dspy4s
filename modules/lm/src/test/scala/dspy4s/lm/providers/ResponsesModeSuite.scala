@@ -24,7 +24,6 @@ import dspy4s.lm.runtime.InMemoryLmCache
 import dspy4s.lm.runtime.ManagedLanguageModel
 import dspy4s.lm.runtime.RetryCount
 import dspy4s.lm.runtime.RetryPolicies
-import dspy4s.lm.runtime.ToolCallAssembler
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 

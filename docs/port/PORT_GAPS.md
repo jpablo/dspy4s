@@ -1112,7 +1112,7 @@ record is versioned plain data (`dspy/clients/call_result.py:11,126-138`).
   Each `put` lists and sorts the directory (`:89,139-144`), with a limit of 200,000 entries.
 
 **Resolution (key).** `LanguageModel.defaultOptions` exposes the defaults, and each wrapper forwards it.
-`ProviderRequestNormalizer.effectiveOptions` holds the merge for the wire payload and for the cache key, so the
+`LmRequest.effectiveOptions` holds the merge for the wire payload and for the cache key, so the
 two cannot differ. Tests: `LmCacheKeySuite`. A disk cache entry of a model that has defaults misses one time,
 because its key changed.
 
@@ -1446,7 +1446,7 @@ the first.
 A6
 
 - **Custom types.** `Image`, `Audio`, `File`, `Document`, `Citations`, `Code`, and `Reasoning` have no port.
-  `ContentPart` encodes `type` and `text` only (`modules/lm/.../runtime/ProviderLanguageModel.scala:62-71`), and no
+  `ContentPart` encodes `type`, `text`, and `metadata` only (`ChatWire.encodePart` in `modules/lm/.../providers/ChatWire.scala`), and no
   adapter makes parts. `Reasoning` alone is a small item (`dspy/adapters/types/reasoning.py:46-83`).
 - **JSON mode.** Upstream can send `{"type": "json_object"}` (`dspy/adapters/json_adapter.py:58-63`). dspy4s sends
   `json_schema` or nothing.

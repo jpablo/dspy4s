@@ -6,9 +6,10 @@ OpenAI-compatible servers, and a wrapper that adds a cache, retries, and usage r
 
 ## Main concepts
 
-- **Records for the provider.** A provider gets each request as a `DynamicValue.Record` and gives back a
-  `DynamicValue`. `ProviderRequestNormalizer` makes the record from an `LmRequest`, and `ProviderResponseParser` makes
-  an `LmResponse` from the result.
+- **One wire for each mode.** The mode of an `OpenAiLanguageModel` selects its wire: `ChatWire` makes the body of
+  the chat mode and of the text mode from an `LmRequest`, and `ResponsesWire` makes the body of the Responses mode.
+  Each wire also reads the reply into the outputs of an `LmResponse`. The bodies are `DynamicValue.Record` values. The
+  mode of a request does not select the wire.
 - **Provider options and control values.** `LmRequest.options` holds the provider options, for example `temperature`
   and `max_tokens`. The provider gets these options with no change. A framework value such as `rolloutId` is a
   separate field. It changes the cache key, and it does not go to the provider.
@@ -36,20 +37,19 @@ OpenAI-compatible servers, and a wrapper that adds a cache, retries, and usage r
 | Type | Description |
 |------|-------------|
 | `OpenAiLanguageModel` | A `StreamingLanguageModel` for OpenAI-compatible servers. With `LmMode.Responses`, it uses the Responses API. Make one with `apply`, `fromEnv`, or `local`. |
-| `OpenAiEmbedder` | An `Embedder` for the embeddings endpoint. It sends the texts in batches. |
+| `OpenAiEmbedder` | An `Embedder` for the embeddings endpoint. It sends the texts in batches through an `OpenAiClient`. |
 | `OpenAiClient` / `HttpTransport` | The HTTP client (calls, SSE streams, and typed LM errors) and the transport interface. `HttpTransport.jdk()` gives the JDK transport. |
+| `ToolCallAssembler` | Joins the parts of the streamed tool calls into complete `ToolCall`s. |
 
 ### Runtime
 
 | Type | Description |
 |------|-------------|
 | `ManagedLanguageModel` | Wraps a model with a cache, a `RetryPolicy`, the history, the usage records, and a cost estimate. By default it has no cache and no retry. |
-| `ProviderLanguageModel` | A model from a function `DynamicValue => Either[DspyError, DynamicValue]`. |
 | `RetryPolicies` | `never`, `maxRetries`, `maxRetriesOnCodes`, and `exponentialBackoff` (with an optional jitter). |
 | `UsageTracker` / `UsageTracking` | Records the token usage of each model name in a block of code. |
 | `InMemoryLmCache` / `DiskLmCache` / `CompositeLmCache` | A memory cache with a size limit, and a cache with one file for each entry. `CompositeLmCache` reads the memory cache first, then the disk cache. |
 | `LmCacheRegistry` | One shared cache. `ManagedLanguageModel` does not use it on its own: give a cache as `cache = Some(...)`. |
-| `ToolCallAssembler` | Joins the parts of the streamed tool calls into complete `ToolCall`s. |
 
 ## Design notes
 
@@ -62,8 +62,8 @@ OpenAI-compatible servers, and a wrapper that adds a cache, retries, and usage r
   has a finish reason. Else the stream gives an `LmStreamAssemblyError`. `ManagedLanguageModel.stream` applies the
   rules of `call`, and the cache stores only a complete stream. The retry policy applies only before the first chunk
   with text or a tool call.
-- **Tool call ids.** The response parser and `ToolCallAssembler` keep the provider id of each tool call in
-  `ToolCall.id`. The request normalizer sends the ids back, so a request can replay a tool turn.
+- **Tool call ids.** The reply parsers of the wires and `ToolCallAssembler` keep the provider id of each tool call in
+  `ToolCall.id`. The wires send the ids back, so a request can replay a tool turn.
 - **Typed failures.** A failed provider call gives an `LmError` from `core`, for example `LmRateLimitError` or
   `ContextWindowExceededError`. By default, a retry policy retries only a transient error: a rate limit, a timeout, a
   server failure, or a transport failure. When the provider sends a `Retry-After` hint, the delay is that hint.
@@ -75,8 +75,8 @@ OpenAI-compatible servers, and a wrapper that adds a cache, retries, and usage r
 | Package | Contents |
 |---------|----------|
 | `contracts/` | the model, cache, retry, and embedder interfaces, the request, response, message, and stream types, the capabilities, and the price |
-| `providers/` | the OpenAI-compatible model, embedder, and HTTP client, the HTTP transports, the HTTP error classes, and the JSON forms of the provider APIs |
-| `runtime/` | `ManagedLanguageModel`, the retry policies, the usage trackers, the caches, the cache key, the history entry, `ProviderLanguageModel`, and `ToolCallAssembler` |
+| `providers/` | the OpenAI-compatible model, embedder, and HTTP client, the HTTP transports, the HTTP error classes, the wires of the provider APIs (`ChatWire`, `ResponsesWire`), and `ToolCallAssembler` |
+| `runtime/` | `ManagedLanguageModel`, the retry policies, the usage trackers, the caches, the cache key, the history entry, and the stream accumulator |
 
 ## Relation to dspy
 

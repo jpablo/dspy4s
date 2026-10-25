@@ -1,26 +1,26 @@
-package dspy4s.lm.runtime
+package dspy4s.lm.providers
 
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.:=
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.core.contracts.ToolCall
-import dspy4s.lm.providers.DynamicJson
-import dspy4s.lm.providers.WireKeys
 import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable
 
-/** Assembles streaming tool-call deltas into completed [[ToolCall]]s.
+/** Assembles the tool-call deltas of a stream into complete [[ToolCall]]s, and decodes the arguments of a provider tool
+  * call. The provider package holds it, because the plain reply parsers of [[ChatWire]] and [[ResponsesWire]] use the
+  * same decode ([[decodeArguments]]).
   *
-  * OpenAI emits the function `name` and call `id` once (typically on the first delta for a given `index`) and the
-  * `arguments` JSON string in fragments across subsequent deltas. We accumulate by `index`, preserving the order in
-  * which indices first appeared, and JSON-decode the concatenated arguments into a `DynamicValue.Record`. Falls back to
-  * `{input: raw}` when the arguments string is not valid JSON, as the non-streaming `parseArgs` does. A stream in the
-  * Responses mode gives `{partial_json: raw}` for such a string (see [[assemble]]).
+  * OpenAI sends the function `name` and the call `id` once (usually on the first delta of an `index`), and the
+  * `arguments` JSON text in fragments on the next deltas. The assembler joins the deltas by `index`, in the order in
+  * which each index first came, and decodes the joined arguments into a `DynamicValue.Record`. Arguments that are not
+  * valid JSON give `{input: raw}`, as on the plain path ([[decodeArguments]]). A stream in the Responses mode gives
+  * `{partial_json: raw}` for such a text (see [[assemble]]).
   *
-  * Each call keeps its `id`, because a tool result must name it. An empty id counts as no id, as in
-  * `ProviderResponseParser`.
+  * Each call keeps its `id`, because a tool result must name it. An empty id counts as no id, as in the reply parser of
+  * [[ChatWire]].
   */
 object ToolCallAssembler:
 
@@ -82,7 +82,7 @@ object ToolCallAssembler:
     *   the record of a text that is not JSON. The default is the chat rule, `{input: <text>}`. The Responses path gives
     *   an empty record (upstream `responses_outputs` in `dspy/clients/legacy_outputs.py`).
     */
-  private[lm] def decodeArguments(
+  private[providers] def decodeArguments(
       raw    : Option[DynamicValue],
       notJson: String => DynamicValue.Record = inputRecord
   ): DynamicValue.Record =
@@ -99,7 +99,7 @@ object ToolCallAssembler:
     * not valid JSON (`{input: raw}` by default), `{value: json}` when it parses to a non-object. [[decodeArguments]]
     * uses it for a response, so the stream path and the response path decode identically.
     */
-  private[runtime] def parseArguments(
+  private def parseArguments(
       raw    : String,
       notJson: String => DynamicValue.Record = inputRecord
   ): DynamicValue.Record =

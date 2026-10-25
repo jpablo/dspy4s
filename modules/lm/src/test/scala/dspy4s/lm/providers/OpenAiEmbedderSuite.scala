@@ -3,6 +3,7 @@ package dspy4s.lm.providers
 import dspy4s.core.contracts.ContextWindowExceededError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.LmServerError
+import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.lm.contracts.Embedder
@@ -33,7 +34,11 @@ class OpenAiEmbedderSuite extends FunSuite:
     s"""{"object":"list","data":[${data.mkString(",")}],"model":"text-embedding-3-small"}"""
 
   private def embedder(transport: HttpTransport, batchSize: BatchSize = BatchSize(200)): OpenAiEmbedder =
-    OpenAiEmbedder(model = "text-embedding-3-small", apiKey = "sk-test", transport = transport, batchSize = batchSize)
+    OpenAiEmbedder(
+      model = "text-embedding-3-small",
+      client = OpenAiClient(apiKey = "sk-test", transport = transport),
+      batchSize = batchSize
+    )
 
   test("embeds a batch: request carries model+input, response rows are ordered by index") {
     // Rows scripted OUT of order — the provider must sort by the response `index` field.
@@ -73,7 +78,24 @@ class OpenAiEmbedderSuite extends FunSuite:
   test("a row-count mismatch is a ParseError, not silent truncation") {
     val transport = new ScriptedTransport(Vector(Right(HttpResponse(200, Map.empty, okBody(0 -> Seq(1.0))))))
     val result    = embedder(transport).embed(Vector("a", "b"))
-    assert(result.isLeft, result.toString)
+    assertEquals(result, Left(ParseError("openai_embeddings", "Expected 2 embedding rows, got 1")))
+  }
+
+  test("a row that the codec cannot read fails the reply with the error of the codec") {
+    val badRow    = """{"data":[{"index":0,"embedding":[0.1]},{"index":1,"embedding":["x"]}]}"""
+    val noRows    = """{"object":"list"}"""
+    val transport = new ScriptedTransport(Vector(
+      Right(HttpResponse(200, Map.empty, badRow)),
+      Right(HttpResponse(200, Map.empty, noRows))
+    ))
+    embedder(transport).embed(Vector("a", "b")) match
+      case Left(error: ParseError) => assert(error.message.startsWith("Invalid embeddings reply: "), error.message)
+      case other                   => fail(s"expected a ParseError, got $other")
+    // A reply with no `data` array has no row.
+    assertEquals(
+      embedder(transport).embed(Vector("a")),
+      Left(ParseError("openai_embeddings", "Expected 1 embedding rows, got 0"))
+    )
   }
 
   test("Embedder.fromFunction lifts a batch function; Embedder.cached embeds only cache misses") {

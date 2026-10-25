@@ -13,7 +13,9 @@ import dspy4s.core.contracts.LmRateLimitError
 import dspy4s.core.contracts.LmTransportError
 import dspy4s.core.contracts.LmUnsupportedModelError
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.lm.contracts.LmMode
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
@@ -63,7 +65,7 @@ class OpenAiErrorMappingSuite extends FunSuite:
     ): Either[DspyError, HttpStreamResponse] =
       Left(error)
 
-  private val payload: DynamicValue = DynamicValues.fromAny(Map("model" -> "gpt-test"))
+  private val payload: DynamicValue.Record = DynamicValues.record("model" := "gpt-test")
 
   private def errorBody(message: String, code: Option[String] = None, kind: Option[String] = None): String =
     val fields =
@@ -71,7 +73,7 @@ class OpenAiErrorMappingSuite extends FunSuite:
     s"""{"error":{${fields.flatten.mkString(",")}}}"""
 
   private def invokeError(status: Int, body: String, headers: Map[String, String] = Map.empty): DspyError =
-    OpenAiClient(apiKey = "x", transport = new FixedTransport(status, body, headers)).invoke(payload) match
+    OpenAiClient(apiKey = "x", transport = new FixedTransport(status, body, headers)).invoke(LmMode.Chat, payload) match
       case Left(error) => error
       case Right(ok)   => fail(s"expected a failure for HTTP $status, got $ok")
 
@@ -262,7 +264,7 @@ class OpenAiErrorMappingSuite extends FunSuite:
       transport =
         new FixedTransport(429, errorBody("slow", code = Some("rate_limit_exceeded")), Map("retry-after" -> "3"))
     )
-    client.stream(payload) match
+    client.stream(LmMode.Chat, payload) match
       case Left(error: LmRateLimitError) =>
         assertEquals(error.details.retryAfter, Some(3.seconds))
         assertEquals(error.details.status, Some(429))
@@ -277,8 +279,8 @@ class OpenAiErrorMappingSuite extends FunSuite:
       "Connection failed: refused",
       LmErrorDetails(model = Some("gpt-test"), provider = Some("openai"))
     )
-    assertEquals(client.invoke(payload), Left(expected))
-    client.stream(payload) match
+    assertEquals(client.invoke(LmMode.Chat, payload), Left(expected))
+    client.stream(LmMode.Chat, payload) match
       case Left(error) => assertEquals(error, expected)
       case Right(_)    => fail("expected a failure")
   }
@@ -302,8 +304,7 @@ class OpenAiErrorMappingSuite extends FunSuite:
     def embedError(status: Int, body: String, headers: Map[String, String] = Map.empty): DspyError =
       val embedder = OpenAiEmbedder(
         model = "text-embedding-3-small",
-        apiKey = "sk-test",
-        transport = new FixedTransport(status, body, headers)
+        client = OpenAiClient(apiKey = "sk-test", transport = new FixedTransport(status, body, headers))
       )
       embedder.embed(Vector("hello")) match
         case Left(error) => error

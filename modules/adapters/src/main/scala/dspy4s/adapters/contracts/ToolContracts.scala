@@ -67,11 +67,12 @@ object ToolSchemaBridge:
     }
 
   /** Build the OpenAI `tools` array as a [[DynamicValue]] so it can be injected into a request's option bag
-    * ([[dspy4s.adapters.contracts.FormattedPrompt.requestOptions]]) and spread verbatim into the provider body by
-    * `ProviderRequestNormalizer`. Each tool becomes `{type:"function", function:{name, description, parameters}}` where
-    * `parameters` is the [[ToolSpec.inputSchema]] of the tool when it has one, else a JSON-schema object
-    * (`type:"object"`, `properties`, `required`) built from its [[ToolSpec.parameters]]. This is the
-    * DynamicValue-native counterpart of [[toOpenAiTools]] (which yields the `Map[String, Any]` form).
+    * ([[dspy4s.adapters.contracts.FormattedPrompt.requestOptions]]) and spread verbatim into the provider body by the
+    * wire of the provider (for example `ChatWire` in `lm`). Each tool becomes
+    * `{type:"function", function:{name, description, parameters}}` where `parameters` is the [[ToolSpec.inputSchema]]
+    * of the tool when it has one, else a JSON-schema object (`type:"object"`, `properties`, `required`) built from its
+    * [[ToolSpec.parameters]]. This is the DynamicValue-native counterpart of [[toOpenAiTools]] (which yields the
+    * `Map[String, Any]` form).
     */
   def toOpenAiToolsDynamic(tools: Vector[ToolSpec]): DynamicValue =
     DynamicValue.Sequence(Chunk.from(tools.map(toolToDynamic)))

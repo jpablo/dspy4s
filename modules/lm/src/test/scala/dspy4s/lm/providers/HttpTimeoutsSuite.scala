@@ -4,6 +4,8 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.LmStreamAssemblyError
 import dspy4s.core.contracts.LmTimeoutError
 import dspy4s.core.contracts.LmTransportError
+import dspy4s.core.contracts.:=
+import dspy4s.lm.contracts.LmMode
 import munit.FunSuite
 
 import java.io.InputStream
@@ -150,7 +152,7 @@ class HttpTimeoutsSuite extends FunSuite:
         baseUrl = s"http://${loopback.getHostAddress}:$port/v1",
         transport = HttpTransport.jdk(shortLimits)
       )
-      client.stream(DynamicValues.fromAny(Map("model" -> "m"))) match
+      client.stream(LmMode.Chat, DynamicValues.record("model" := "m")) match
         case Right(stream) =>
           val chunks = stream.toVector
           val error  = chunks.lastOption.flatMap(_.error)

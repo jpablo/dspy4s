@@ -1,4 +1,4 @@
-package dspy4s.lm.runtime
+package dspy4s.lm.providers
 
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.lm.contracts.LmToolCallDelta

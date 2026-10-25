@@ -1,21 +1,19 @@
 package dspy4s.lm.providers
 
-/** JSON field names for the OpenAI-compatible chat / responses wire format, shared by the request normalizer, the
-  * response parser, and the streaming client so these navigation/serialization keys are named rather than scattered
-  * string literals.
+/** JSON field names for the OpenAI-compatible chat / responses wire format, shared by the wires ([[ChatWire]],
+  * [[ResponsesWire]]), the streaming client, and the embedder, so these navigation/serialization keys are named rather
+  * than scattered string literals.
   *
   * The DTOs in this package ([[OpenAiUsage]], [[OpenAiStreamChunk]]) derive their keys from the `Schema` field-name
   * mapper instead, so their wire keys do not appear here — only the hand-navigated/handwritten ones do.
   */
 private[lm] object WireKeys:
   // Request payload
-  final val model     = "model"
-  final val mode      = "mode"
-  final val requestId = "request_id"
-  final val messages  = "messages"
-  final val prompt    = "prompt"
-  final val role      = "role"
-  final val `type`    = "type"
+  final val model    = "model"
+  final val messages = "messages"
+  final val prompt   = "prompt"
+  final val role     = "role"
+  final val `type`   = "type"
 
   // Streaming controls
   final val stream        = "stream"
@@ -47,7 +45,8 @@ private[lm] object WireKeys:
   final val callId     = "call_id"
   final val toolCallId = "tool_call_id"
 
-  // Synthetic keys used to wrap tool-call arguments that aren't a JSON object
+  // Synthetic keys used to wrap tool-call arguments that aren't a JSON object. `input` is also the key of the texts of
+  // an embeddings body.
   final val input       = "input"
   final val value       = "value"
   final val partialJson = "partial_json"

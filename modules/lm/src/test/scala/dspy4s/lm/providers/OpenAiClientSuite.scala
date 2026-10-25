@@ -8,7 +8,12 @@ import dspy4s.core.contracts.LmInvalidRequestError
 import dspy4s.core.contracts.LmRateLimitError
 import dspy4s.core.contracts.LmServerError
 import dspy4s.core.contracts.RuntimeError
+import dspy4s.core.contracts.:=
 import dspy4s.lm.contracts.LmChunk
+import dspy4s.lm.contracts.LmMode
+import dspy4s.lm.contracts.MessageRole
+import dspy4s.lm.contracts.Message
+import dspy4s.lm.contracts.LmRequest
 import zio.blocks.schema.DynamicValue
 import munit.FunSuite
 
@@ -65,16 +70,23 @@ class OpenAiClientSuite extends FunSuite:
       val v = items(idx); idx += 1; v
     override def close(): Unit = closed = true
 
+  /** A chat body with the model `model` and one user message. */
+  private def chatBody(model: String): DynamicValue.Record =
+    DynamicValues.record(
+      "model"    := model,
+      "messages" -> DynamicValues.fromAny(Vector(Map("role" -> "user", "content" -> "hi")))
+    )
+
+  /** A body with the model `model` only. */
+  private def modelOnly(model: String): DynamicValue.Record = DynamicValues.record("model" := model)
+
   test("invoke posts to chat endpoint with auth header and returns parsed map") {
     val transport = new ScriptedTransport(
       nonStreamingResponses = Vector(Right(HttpResponse(200, Map.empty, sampleOkBody)))
     )
     val client = OpenAiClient(apiKey = "sk-test", baseUrl = "https://api.example.com/v1", transport = transport)
 
-    val result = client.invoke(DynamicValues.fromAny(Map(
-      "model"    -> "gpt-4o-mini",
-      "messages" -> Vector(Map("role" -> "user", "content" -> "hi"))
-    )))
+    val result = client.invoke(LmMode.Chat, chatBody("gpt-4o-mini"))
 
     assert(result.isRight)
     val payload = result.toOption.get
@@ -88,7 +100,7 @@ class OpenAiClientSuite extends FunSuite:
     assertEquals(url, "https://api.example.com/v1/chat/completions")
     assertEquals(auth, "Bearer sk-test")
     assert(body.contains("\"model\":\"gpt-4o-mini\""))
-    assert(!body.contains("\"mode\""), s"payload should not include dspy4s-internal 'mode': $body")
+    assert(!body.contains("\"mode\""), s"the body must not carry mode: $body")
   }
 
   test("invoke gives LmRateLimitError for HTTP 429") {
@@ -97,7 +109,7 @@ class OpenAiClientSuite extends FunSuite:
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
 
-    client.invoke(DynamicValues.fromAny(Map("model" -> "m"))) match
+    client.invoke(LmMode.Chat, modelOnly("m")) match
       case Left(error: LmRateLimitError) =>
         assertEquals(error.details.status, Some(429))
         assert(error.message.contains("429"), error.message)
@@ -114,7 +126,7 @@ class OpenAiClientSuite extends FunSuite:
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
 
-    val result = client.invoke(DynamicValues.fromAny(Map("model" -> "gpt-4o-mini")))
+    val result = client.invoke(LmMode.Chat, modelOnly("gpt-4o-mini"))
     assert(result.isLeft)
     result.left.toOption.get match
       case err: ContextWindowExceededError => assertEquals(err.details.model, Some("gpt-4o-mini"))
@@ -131,7 +143,7 @@ class OpenAiClientSuite extends FunSuite:
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
 
-    client.invoke(DynamicValues.fromAny(Map("model" -> "gpt-4o-mini"))) match
+    client.invoke(LmMode.Chat, modelOnly("gpt-4o-mini")) match
       case Left(error: LmInvalidRequestError) =>
         assertEquals(error.details.providerCode, Some("invalid_request_error"))
         assert(error.message.contains("400"), error.message)
@@ -143,7 +155,7 @@ class OpenAiClientSuite extends FunSuite:
       nonStreamingResponses = Vector(Right(HttpResponse(200, Map.empty, "not valid json{{{")))
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
-    val result = client.invoke(DynamicValues.fromAny(Map("model" -> "m")))
+    val result = client.invoke(LmMode.Chat, modelOnly("m"))
     assert(result.isLeft)
   }
 
@@ -157,10 +169,7 @@ class OpenAiClientSuite extends FunSuite:
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
 
-    val result = client.stream(DynamicValues.fromAny(Map(
-      "model"    -> "gpt-4o-mini",
-      "messages" -> Vector(Map("role" -> "user", "content" -> "hi"))
-    )))
+    val result = client.stream(LmMode.Chat, chatBody("gpt-4o-mini"))
     assert(result.isRight)
     val iter = result.toOption.get
 
@@ -189,7 +198,7 @@ class OpenAiClientSuite extends FunSuite:
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
 
-    val iter = client.stream(DynamicValues.fromAny(Map("model" -> "m"))).toOption.get
+    val iter = client.stream(LmMode.Chat, modelOnly("m")).toOption.get
     while iter.hasNext do
       val _ = iter.next()
 
@@ -205,7 +214,7 @@ class OpenAiClientSuite extends FunSuite:
       )))
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
-    val _      = client.stream(DynamicValues.fromAny(Map("model" -> "m")))
+    val _      = client.stream(LmMode.Chat, modelOnly("m"))
 
     val (_, body, _) = transport.sentStreamBodies.head
     assert(body.contains("\"stream\":true"))
@@ -222,7 +231,7 @@ class OpenAiClientSuite extends FunSuite:
       )))
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
-    client.stream(DynamicValues.fromAny(Map("model" -> "m"))) match
+    client.stream(LmMode.Chat, modelOnly("m")) match
       case Left(error: LmServerError) => assert(error.message.contains("something bad"), error.message)
       case Left(other)                => fail(s"expected LmServerError, got: $other")
       case Right(_)                   => fail("expected a failure")
@@ -244,7 +253,7 @@ class OpenAiClientSuite extends FunSuite:
       )))
     )
     val client = OpenAiClient(apiKey = "x", transport = transport)
-    val iter   = client.stream(DynamicValues.fromAny(Map("model" -> "m"))).toOption.get
+    val iter   = client.stream(LmMode.Chat, modelOnly("m")).toOption.get
     val chunks = scala.collection.mutable.ArrayBuffer.empty[LmChunk]
     while iter.hasNext do chunks += iter.next()
 
@@ -258,4 +267,16 @@ class OpenAiClientSuite extends FunSuite:
     assertEquals(chunks(1).toolCalls.head.argumentsFragment, Some("{\"loc"))
     assertEquals(chunks(2).toolCalls.head.argumentsFragment, Some("ation\":\"Paris\"}"))
     assertEquals(chunks(2).finishReason, Some("tool_calls"))
+  }
+
+  test("the request body of a model call has no framework control key") {
+    val transport = new ScriptedTransport(
+      nonStreamingResponses = Vector(Right(HttpResponse(200, Map.empty, sampleOkBody)))
+    )
+    val model                                  = OpenAiLanguageModel(model = "gpt-test", client = OpenAiClient(apiKey = "x", transport = transport))
+    given dspy4s.core.contracts.RuntimeContext = dspy4s.core.contracts.RuntimeContext()
+    val _                                      = model.call(LmRequest(model = "gpt-test", messages = Vector(Message(MessageRole.User, Some("hi")))))
+    val body                                   = transport.sentBodies.head._2
+    assert(!body.contains("request_id"), s"the body must not carry request_id: $body")
+    assert(!body.contains("\"mode\""), s"the body must not carry mode: $body")
   }

@@ -5,10 +5,13 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.ToolCall
 import dspy4s.core.contracts.updated
+import dspy4s.lm.contracts.ContentPart
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmOutput
+import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmToolCallDelta
-import dspy4s.lm.runtime.ToolCallAssembler
+import dspy4s.lm.contracts.Message
+import dspy4s.lm.contracts.MessageRole
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.PrimitiveValue
@@ -37,7 +40,6 @@ private[lm] object ResponsesWire:
     final val jsonSchema          = "json_schema"
     final val imageUrl            = "image_url"
     final val url                 = "url"
-    final val detail              = "detail"
     final val stop                = "stop"
     final val annotations         = "annotations"
     final val citedText           = "cited_text"
@@ -57,8 +59,6 @@ private[lm] object ResponsesWire:
 
   /** The values of the `type` and `role` keys that the translation reads or writes. */
   private object Kinds:
-    final val assistant          = "assistant"
-    final val tool               = "tool"
     final val function           = "function"
     final val functionCall       = "function_call"
     final val functionCallOutput = "function_call_output"
@@ -75,7 +75,7 @@ private[lm] object ResponsesWire:
     /** The block types that hold text, in a request and in a response. */
     val textBlocks: Set[String] = Set(text, inputText, outputText)
 
-    /** The block types of a tool message whose text goes into the output of the call. */
+    /** The part kinds of a tool message whose text goes into the output of the call. */
     val toolTextBlocks: Set[String] = Set(text, inputText)
 
   /** The `type` values of the events of a Responses stream that the stream parser reads. */
@@ -96,24 +96,27 @@ private[lm] object ResponsesWire:
     final val toolCall = "tool_call"
     final val stop     = "stop"
 
-  /** The Responses body for the chat body `chat` (the payload of `ProviderRequestNormalizer.normalize`, with no
-    * internal key). The rules of upstream `chat_to_responses`:
+  /** The Responses body of `request`: the option bag of the request over `defaultOptions`
+    * ([[dspy4s.lm.contracts.LmRequest.effectiveOptions]]), the model, and the input items of the typed messages. The
+    * rules of upstream `chat_to_responses`:
     *
-    *   - A body that has `input` already loses `messages` and is otherwise unchanged.
-    *   - `messages` becomes `input`, one item or more for each message, in order:
-    *     - A `tool` message gives `{"type": "function_call_output", "output": <the text>, "call_id": <tool_call_id>}`.
-    *       The text of a list content is the joined `text` of its text blocks. `call_id` is absent when the message has
-    *       no `tool_call_id`.
-    *     - Each other message gives `{"role", "content": <blocks>, "name"?}`, except an `assistant` message that has
-    *       tool calls and no blocks. The blocks of a string content are one `{"type": <t>, "text"}` block, where `<t>`
-    *       is `output_text` for an `assistant` message and `input_text` for each other role. A null content gives no
-    *       block. In a list content, a `text`, `input_text`, or `output_text` block becomes a `<t>` block; an
-    *       `image_url` block becomes `{"type": "input_image", "image_url": <url>}` (the url is the `url` of an object,
-    *       else the value itself, else the `text` of the port's part; the `detail` of an object that is not null stays
-    *       too); each other block stays.
-    *     - After the item of an `assistant` message, each of its tool calls gives
-    *       `{"type": "function_call", "name", "arguments", "call_id"?}` (`arguments` is the JSON text; `call_id` is the
-    *       `call_id`, else the `id` of the call).
+    *   - An `input` option stays, and the body then has no other change. A `messages` option is removed: the messages
+    *     of the request take its place, as on the chat wire.
+    *   - The messages become `input`, one item or more for each message, in order:
+    *     - A tool message gives
+    *       `{"type": "function_call_output", "output": <the text>, "call_id": <the tool call id>}`. The text of a
+    *       message with parts is the joined payload of its `text` and `input_text` parts. `call_id` is absent when the
+    *       message has no tool call id.
+    *     - Each other message gives `{"role", "content": <blocks>, "name"?}`, except an assistant message that has tool
+    *       calls and no blocks. The text of a message with no parts gives one `{"type": <t>, "text"}` block, where
+    *       `<t>` is `output_text` for an assistant message and `input_text` for each other role. An assistant message
+    *       with tool calls and no text has no block (the chat wire sends a null content). A `text`, `input_text`, or
+    *       `output_text` part becomes a `<t>` block, and an `image_url` part becomes
+    *       `{"type": "input_image", "image_url": <the payload>}`. Each other part has its chat form
+    *       (`ChatWire.encodePart`).
+    *     - After the item of an assistant message, each of its tool calls gives
+    *       `{"type": "function_call", "name", "arguments", "call_id"?}` (`arguments` is the JSON text of the arguments,
+    *       and `call_id` is the id of the call).
     *   - `max_completion_tokens` becomes `max_tokens` when `max_tokens` is absent. A `max_tokens` that is not null
     *     becomes `max_output_tokens`; a null `max_tokens` is removed.
     *   - `reasoning_effort` becomes `reasoning: {"effort": <value>, "summary": "auto"}`, unless `reasoning` is set.
@@ -126,12 +129,17 @@ private[lm] object ResponsesWire:
     *   - A null `temperature`, `top_p`, `n`, `logprobs`, `reasoning`, or `tool_choice` is removed, and so is an empty
     *     or null `stop`.
     */
-  def request(chat: DynamicValue.Record): DynamicValue.Record =
-    if DynamicValues.recordGet(chat, Keys.input).isDefined then without(chat, WireKeys.messages)
+  def request(
+      request       : LmRequest,
+      defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
+  ): DynamicValue.Record =
+    val options = without(
+      request.effectiveOptions(defaultOptions),
+      WireKeys.messages
+    ).updated(WireKeys.model, string(request.model))
+    if DynamicValues.recordGet(options, Keys.input).isDefined then options
     else
-      val messages =
-        DynamicValues.recordGet(chat, WireKeys.messages).map(DynamicJson.asSequence).getOrElse(Vector.empty)
-      val body  = without(chat, WireKeys.messages).updated(Keys.input, sequence(messages.flatMap(inputItems)))
+      val body  = options.updated(Keys.input, sequence(request.messages.flatMap(inputItems)))
       val steps = Vector(withTokenLimit, withReasoning, withTools, withToolChoice, withTextFormat, withoutEmptyOptions)
       steps.foldLeft(body)((current, step) => step(current))
 
@@ -246,85 +254,58 @@ private[lm] object ResponsesWire:
 
   // ── The request ─────────────────────────────────────────────────────────────────────────────────────────────
 
-  /** The input items of one chat message, in order. A message that is not an object gives no item. */
-  private def inputItems(message: DynamicValue): Vector[DynamicValue] =
-    DynamicJson.asRecord(message).toVector.flatMap { rec =>
-      val role    = DynamicValues.recordGet(rec, WireKeys.role)
-      val content = DynamicValues.recordGet(rec, WireKeys.content)
-      val kind    = role.flatMap(DynamicJson.asString)
-      if kind.contains(Kinds.tool) then Vector(functionCallOutput(rec, content))
-      else
-        val assistant = kind.contains(Kinds.assistant)
-        val calls     = listOf(rec, WireKeys.toolCalls)
-        val blocks    = contentBlocks(content, if assistant then Kinds.outputText else Kinds.inputText)
-        val item      = Option.when(blocks.nonEmpty || !assistant || calls.isEmpty)(
+  /** The input items of one message, in order (the rules of [[request]]). */
+  private def inputItems(message: Message): Vector[DynamicValue] =
+    message.role match
+      case MessageRole.Tool => Vector(functionCallOutput(message))
+      case role             =>
+        val assistant = role == MessageRole.Assistant
+        val blocks    = contentBlocks(message, if assistant then Kinds.outputText else Kinds.inputText)
+        val item      = Option.when(blocks.nonEmpty || !assistant || message.toolCalls.isEmpty)(
           record(
-            Vector(WireKeys.role -> role.getOrElse(DynamicValue.Null), WireKeys.content -> sequence(blocks)) ++
-              present(rec, WireKeys.name).map(WireKeys.name -> _)
+            Vector(WireKeys.role -> string(ChatWire.roleName(role)), WireKeys.content -> sequence(blocks)) ++
+              message.name.map(name => WireKeys.name -> string(name))
           )
         )
-        item.toVector ++ (if assistant then calls.flatMap(functionCall) else Vector.empty)
-    }
+        item.toVector ++ (if assistant then message.toolCalls.map(functionCall) else Vector.empty)
 
-  /** The `function_call_output` item of a tool message. The output of a list content is the joined text of its text
-    * blocks. A null content or no content gives an empty output.
+  /** The `function_call_output` item of a tool message. The output of a message with parts is the joined payload of its
+    * text parts. A message with no text gives an empty output.
     */
-  private def functionCallOutput(message: DynamicValue.Record, content: Option[DynamicValue]): DynamicValue =
-    val output = content match
-      case Some(blocks: DynamicValue.Sequence) =>
-        string(blocks.elements.iterator.flatMap(DynamicJson.asRecord).filter(isToolTextBlock).map { block =>
-          stringOf(block, WireKeys.text).getOrElse("")
-        }.mkString)
-      case Some(value) if filled(value) => value
-      case _                            => string("")
+  private def functionCallOutput(message: Message): DynamicValue =
+    val output =
+      if message.parts.nonEmpty then
+        message.parts.filter(part => Kinds.toolTextBlocks.contains(part.kind)).map(_.payload).mkString
+      else message.text.getOrElse("")
     record(
-      Vector(WireKeys.`type` -> string(Kinds.functionCallOutput), WireKeys.output -> output) ++
-        present(message, WireKeys.toolCallId).map(WireKeys.callId -> _)
+      Vector(WireKeys.`type` -> string(Kinds.functionCallOutput), WireKeys.output -> string(output)) ++
+        message.toolCallId.map(callId => WireKeys.callId -> string(callId))
     )
 
-  /** The blocks of a content (upstream `_content`). `textType` is the type of a text block. */
-  private def contentBlocks(content: Option[DynamicValue], textType: String): Vector[DynamicValue] =
-    content match
-      case Some(DynamicValue.Primitive(PrimitiveValue.String(text))) => Vector(textBlock(textType, string(text)))
-      case Some(blocks: DynamicValue.Sequence)                       =>
-        blocks.elements.iterator.map(block => contentBlock(block, textType)).toVector
-      case _ => Vector.empty
+  /** The blocks of the content of a message (upstream `_content`). `textType` is the type of a text block. */
+  private def contentBlocks(message: Message, textType: String): Vector[DynamicValue] =
+    if message.parts.nonEmpty then message.parts.map(part => contentBlock(part, textType))
+    else if message.toolCalls.nonEmpty && !message.text.exists(_.nonEmpty) then Vector.empty
+    else Vector(textBlock(textType, message.text.getOrElse("")))
 
-  private def contentBlock(block: DynamicValue, textType: String): DynamicValue =
-    DynamicJson.asRecord(block) match
-      case Some(rec) if isTextBlock(rec) =>
-        textBlock(textType, DynamicValues.recordGet(rec, WireKeys.text).getOrElse(string("")))
-      case Some(rec) if isKind(rec, Kinds.imageUrl) => inputImage(rec)
-      case _                                        => block
+  private def contentBlock(part: ContentPart, textType: String): DynamicValue =
+    if Kinds.textBlocks.contains(part.kind) then textBlock(textType, part.payload)
+    else if part.kind == Kinds.imageUrl then
+      record(Vector(WireKeys.`type` -> string(Kinds.inputImage), Keys.imageUrl -> string(part.payload)))
+    else ChatWire.encodePart(part)
 
-  private def textBlock(textType: String, text: DynamicValue): DynamicValue =
-    record(Vector(WireKeys.`type` -> string(textType), WireKeys.text -> text))
+  private def textBlock(textType: String, text: String): DynamicValue =
+    record(Vector(WireKeys.`type` -> string(textType), WireKeys.text -> string(text)))
 
-  /** The `input_image` block of an `image_url` block. The port writes the url of its part under `text`. */
-  private def inputImage(block: DynamicValue.Record): DynamicValue =
-    val image         = present(block, Keys.imageUrl).orElse(DynamicValues.recordGet(block, WireKeys.text))
-    val (url, detail) = image.flatMap(DynamicJson.asRecord) match
-      case Some(rec) => (DynamicValues.recordGet(rec, Keys.url).getOrElse(string("")), present(rec, Keys.detail))
-      case None      => (image.getOrElse(string("")), None)
+  /** The `function_call` item of one tool call. A call with no id has no `call_id`. */
+  private def functionCall(call: ToolCall): DynamicValue =
     record(
-      Vector(WireKeys.`type` -> string(Kinds.inputImage), Keys.imageUrl -> url) ++ detail.map(Keys.detail -> _)
+      Vector(
+        WireKeys.`type`    -> string(Kinds.functionCall),
+        WireKeys.name      -> string(call.name),
+        WireKeys.arguments -> string(DynamicJson.encodeExact(call.args))
+      ) ++ call.id.map(callId => WireKeys.callId -> string(callId))
     )
-
-  /** The `function_call` item of one chat tool call. A tool call that is not an object gives no item. */
-  private def functionCall(call: DynamicValue): Option[DynamicValue] =
-    DynamicJson.asRecord(call).map { rec =>
-      val function = DynamicValues.recordGet(rec, WireKeys.function).flatMap(DynamicJson.asRecord).filter(filled)
-        .getOrElse(rec)
-      val callId = DynamicValues.recordGet(rec, WireKeys.callId).filter(filled)
-        .orElse(present(rec, WireKeys.id))
-      record(
-        Vector(
-          WireKeys.`type`    -> string(Kinds.functionCall),
-          WireKeys.name      -> DynamicValues.recordGet(function, WireKeys.name).getOrElse(string("")),
-          WireKeys.arguments -> DynamicValues.recordGet(function, WireKeys.arguments).getOrElse(string("{}"))
-        ) ++ callId.map(WireKeys.callId -> _)
-      )
-    }
 
   private def withTokenLimit(body: DynamicValue.Record): DynamicValue.Record =
     val moved =
@@ -493,6 +474,3 @@ private[lm] object ResponsesWire:
 
   private def isTextBlock(rec: DynamicValue.Record): Boolean =
     stringOf(rec, WireKeys.`type`).exists(Kinds.textBlocks.contains)
-
-  private def isToolTextBlock(rec: DynamicValue.Record): Boolean =
-    stringOf(rec, WireKeys.`type`).exists(Kinds.toolTextBlocks.contains)

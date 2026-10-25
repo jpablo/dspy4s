@@ -280,7 +280,7 @@ ordinary function composition.
 When the LM returns tool-call `arguments` that aren't a JSON object,
 Python keeps the raw string under the `arguments` key. dspy4s wraps
 the raw value as `Map("input" -> raw)` for uniformity with the
-non-streaming path's `ProviderResponseParser.parseArgs`. Documented
+non-streaming path (`ToolCallAssembler.decodeArguments` in `ChatWire`). Documented
 in [PORT_MAP §4](PORT_MAP.md#4-behavioral-deltas).
 
 ## 11. `Aggregation.majority` normalizer

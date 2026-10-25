@@ -20,14 +20,13 @@ import dspy4s.lm.providers.HttpResponse
 import dspy4s.lm.providers.HttpStreamResponse
 import dspy4s.lm.providers.HttpTransport
 import dspy4s.lm.providers.OpenAiClient
+import dspy4s.lm.providers.ChatWire
 import dspy4s.lm.providers.OpenAiLanguageModel
+import dspy4s.lm.providers.ToolCallAssembler
 import dspy4s.lm.runtime.CacheCapacity
 import dspy4s.lm.runtime.DiskLmCache
 import dspy4s.lm.runtime.ManagedLanguageModel
-import dspy4s.lm.runtime.ProviderRequestNormalizer
-import dspy4s.lm.runtime.ProviderResponseParser
 import dspy4s.lm.runtime.RequestHash
-import dspy4s.lm.runtime.ToolCallAssembler
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
@@ -123,7 +122,7 @@ class ToolCallIdSuite extends FunSuite:
 
   private def wireMessages(messages: Vector[Message]): Vector[DynamicValue.Record] =
     val request = LmRequest(model = "gpt-test", messages = messages)
-    sequence(get(ProviderRequestNormalizer.normalize(request), "messages")).map(record)
+    sequence(get(ChatWire.request(request), "messages")).map(record)
 
   private def withDirectory(body: Path => Unit): Unit =
     val directory = Files.createTempDirectory("dspy4s-lm-tool-call-id")
@@ -143,7 +142,7 @@ class ToolCallIdSuite extends FunSuite:
         |]}}]}""".stripMargin
     )
     assertEquals(
-      ProviderResponseParser.parse(raw, LmMode.Chat).map(_.outputs.flatMap(_.toolCalls)),
+      ChatWire.outputs(raw).map(_.flatMap(_.toolCalls)),
       Right(Vector(search.copy(id = None), search))
     )
   }
@@ -231,7 +230,7 @@ class ToolCallIdSuite extends FunSuite:
         Message(role = MessageRole.Tool, text = Some("cat"), toolCallId = Some("call_1"), name = Some("search"))
       )
     )
-    val wire = ProviderRequestNormalizer.normalize(request)
+    val wire = ChatWire.textRequest(request)
     assertEquals(text(wire, "prompt"), Some("Q1\nI should search.\ncat"))
     assertEquals(get(wire, "messages"), None)
 
@@ -239,7 +238,7 @@ class ToolCallIdSuite extends FunSuite:
     val toolOnly = Message(role = MessageRole.Assistant, toolCalls = Vector(search))
     assertEquals(
       text(
-        ProviderRequestNormalizer.normalize(request.copy(messages = request.messages.updated(1, toolOnly))),
+        ChatWire.textRequest(request.copy(messages = request.messages.updated(1, toolOnly))),
         "prompt"
       ),
       Some("Q1\n\ncat")
@@ -291,12 +290,11 @@ class ToolCallIdSuite extends FunSuite:
         Message(role = MessageRole.Assistant, text = Some("Brussels"))
       ),
       options = DynamicValues.record("temperature" := 0.2, "max_tokens" := 64),
-      requestId = Some("req-1"),
       rolloutId = Some(3)
     )
-    // The value comes from the code before the tool fields existed. A different value makes each disk cache entry of
-    // an earlier version a miss.
-    assertEquals(RequestHash.forRequest(request), "48c3364b6965fc739e3c5d1eb94f1fb4af892660e56dc5f557cd0287cbdd4914")
+    // The value comes from the code before the tool fields existed, for this request with no request id (that code
+    // wrote `"request_id":null` for it). A different value makes each disk cache entry of an earlier version a miss.
+    assertEquals(RequestHash.forRequest(request), "a8aa2ec0c98a3cc803586de7890186d6ff410d57cb06f6c20d08165822421104")
   }
 
   test("the disk cache reads an entry that a version without the id field wrote") {

@@ -5,6 +5,7 @@ import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.lm.providers.ResponsesWire
+import dspy4s.lm.providers.ToolCallAssembler
 import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable

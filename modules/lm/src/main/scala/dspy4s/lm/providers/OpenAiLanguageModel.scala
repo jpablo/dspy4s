@@ -1,21 +1,21 @@
 package dspy4s.lm.providers
 
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.lm.contracts.LmCapabilities
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmMode
+import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.StreamingLanguageModel
-import dspy4s.lm.runtime.ProviderRequestNormalizer
-import dspy4s.lm.runtime.ProviderResponseParser
 import zio.blocks.schema.DynamicValue
 
 /** The real OpenAI-compatible HTTP provider: a [[dspy4s.lm.contracts.StreamingLanguageModel]] that talks to a
-  * chat-completions endpoint through an [[OpenAiClient]]. Both `call` and `stream` follow the same pipeline --
-  * normalize the request into a provider payload, hand it to the client over HTTP, then parse the result back into
-  * dspy4s's `LmResponse` / `LmChunk` contracts.
+  * chat-completions endpoint through an [[OpenAiClient]]. `call` and `stream` follow the same steps: they build the
+  * body of the request on the wire of [[mode]] ([[ChatWire]] or [[ResponsesWire]]), send it with the client, and read
+  * the reply into the `LmResponse` and `LmChunk` contracts.
   *
   * "OpenAI-compatible" rather than "OpenAI": because the base URL and transport are owned by the injected
   * [[OpenAiClient]], the same type drives any server that speaks the `/chat/completions` shape (Azure OpenAI, Ollama,
@@ -26,14 +26,14 @@ import zio.blocks.schema.DynamicValue
   * @param model
   *   the provider model id (e.g. `"gpt-4o-mini"`); also surfaced as [[id]] for history/tracing.
   * @param mode
-  *   the request/response shape. THIS field (not `request.mode`) selects the endpoint, the body, and the parse, so a
-  *   provider configured for `Chat` always parses as chat, and one configured for `Responses` always calls the
-  *   Responses API. Defaults to [[dspy4s.lm.contracts.LmMode.Chat]].
+  *   the wire of the model. This field selects the endpoint, the body, and the parse. The mode of a request does not: a
+  *   model in the chat mode sends the messages of each request, a model in the text mode sends a prompt, and a model in
+  *   the Responses mode calls the Responses API. The default is [[dspy4s.lm.contracts.LmMode.Chat]].
   * @param client
   *   the HTTP client carrying the API key, base URL, transport, and endpoint path.
   * @param defaultOptions
-  *   provider parameters merged into every request (e.g. `temperature`, `max_tokens`). Per-request `LmRequest.options`
-  *   take precedence -- see [[ProviderRequestNormalizer]].
+  *   provider parameters merged into every request (e.g. `temperature`, `max_tokens`). The options of a request win
+  *   over them ([[dspy4s.lm.contracts.LmRequest.effectiveOptions]]).
   * @param capabilities
   *   what the model can do. `None` gives the capabilities that the port declares for the base URL of the client
   *   ([[dspy4s.lm.contracts.LmCapabilities.forBaseUrl]]): the OpenAI capabilities for the official address, and no
@@ -59,15 +59,14 @@ final case class OpenAiLanguageModel(
   /** The same model with the declared `capabilities`. */
   def withCapabilities(declared: LmCapabilities): OpenAiLanguageModel = copy(capabilities = Some(declared))
 
-  /** Normalize, POST to the endpoint of [[mode]], and parse the JSON response into an `LmResponse`. HTTP and decode
+  /** Build the body, POST it to the endpoint of [[mode]], and read the JSON reply into an `LmResponse`. HTTP and decode
     * failures arrive as a `Left[DspyError]` from the [[OpenAiClient]] (never an exception).
     *
-    * The mode of the provider ([[mode]]) selects the endpoint, the body, and the parse, not the mode of the request:
-    * with [[dspy4s.lm.contracts.LmMode.Responses]], the request goes to the Responses API, and the response gives one
+    * With [[dspy4s.lm.contracts.LmMode.Responses]], the request goes to the Responses API, and the reply gives one
     * output (`ResponsesWire.outputs`, upstream `responses_outputs`).
     */
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-    client.invoke(payload(request)).flatMap(ProviderResponseParser.parse(_, mode))
+    client.invoke(mode, body(request)).flatMap(response)
 
   /** Open an SSE stream against the same endpoint and yield decoded [[dspy4s.lm.contracts.LmChunk]]s.
     *
@@ -80,18 +79,39 @@ final case class OpenAiLanguageModel(
     * that throws on first read.
     */
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
-    client.stream(payload(request)) match
+    client.stream(mode, body(request)) match
       case Right(iterator) => iterator
       case Left(error)     => Iterator.single(LmChunk.failure(error))
 
-  /** The provider payload of `request`. Its internal `mode` key selects the endpoint in [[OpenAiClient.invoke]] and
-    * [[OpenAiClient.stream]], so the mode of the provider decides it: with [[dspy4s.lm.contracts.LmMode.Responses]],
-    * the request gets the Responses mode (the normalizer then writes the messages). In each other mode, a request in
-    * the Responses mode gets the chat mode, and each other request stays as it is
-    * ([[ProviderRequestNormalizer.withProviderMode]]).
+  /** The body of `request` on the wire of [[mode]]: the chat body, the prompt body of the text mode, or the Responses
+    * body. Each body has the option bag of the request over [[defaultOptions]] and the model. The framework fields of
+    * the request (the mode, `rolloutId`, and the cache identity) do not go into the body.
     */
-  private def payload(request: LmRequest): DynamicValue.Record =
-    ProviderRequestNormalizer.normalize(ProviderRequestNormalizer.withProviderMode(request, mode), defaultOptions)
+  private def body(request: LmRequest): DynamicValue.Record =
+    mode match
+      case LmMode.Chat      => ChatWire.request(request, defaultOptions)
+      case LmMode.Text      => ChatWire.textRequest(request, defaultOptions)
+      case LmMode.Responses => ResponsesWire.request(request, defaultOptions)
+
+  /** The response of the reply body `raw` on the wire of [[mode]]. A reply with no output (no text and no tool call) is
+    * a `ParseError`. The usage and the model name come from the `usage` and `model` keys of the reply.
+    */
+  private def response(raw: DynamicValue): Either[DspyError, LmResponse] =
+    val outputs: Either[DspyError, Vector[LmOutput]] = mode match
+      case LmMode.Chat      => ChatWire.outputs(raw)
+      case LmMode.Text      => ChatWire.textOutputs(raw)
+      case LmMode.Responses => ResponsesWire.outputs(raw)
+    outputs.flatMap { entries =>
+      if entries.isEmpty then Left(ParseError("lm", "Provider response does not contain any outputs"))
+      else
+        Right(LmResponse(
+          outputs = entries,
+          usage = DynamicJson.field(raw, WireKeys.usage).flatMap(DynamicJson.asRecord)
+            .map(OpenAiUsage.fromDynamic(_).toLmUsage),
+          modelName = DynamicJson.field(raw, WireKeys.model).flatMap(DynamicJson.asString),
+          cacheHit = false
+        ))
+    }
 
   /** Close the client (see [[dspy4s.lm.contracts.LanguageModel.close]]). */
   override def close(): Unit = client.close()

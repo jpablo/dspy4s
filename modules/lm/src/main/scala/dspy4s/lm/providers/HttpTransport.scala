@@ -6,7 +6,15 @@ import dspy4s.core.contracts.DspyError
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.duration.FiniteDuration
 
-final case class HttpResponse(status: Int, headers: Map[String, String], body: String)
+final case class HttpResponse(status: Int, headers: Map[String, String], body: String):
+
+  /** Whether the status is a success status ([[HttpResponse.isSuccess]]). */
+  def isSuccess: Boolean = HttpResponse.isSuccess(status)
+
+object HttpResponse:
+
+  /** Whether `status` is a success status: a status from 200 to 299. */
+  def isSuccess(status: Int): Boolean = status >= 200 && status < 300
 
 /** The reply of a stream request.
   *
@@ -23,7 +31,10 @@ final case class HttpStreamResponse(
     headers  : Map[String, String],
     dataLines: ClosableIterator[String],
     failure  : () => Option[DspyError] = () => None
-)
+):
+
+  /** Whether the status is a success status ([[HttpResponse.isSuccess]]). */
+  def isSuccess: Boolean = HttpResponse.isSuccess(status)
 
 /** The time limits of an HTTP transport (upstream lm15 `Timeouts` in `dspy/_vendor/lm15/transports/_limits.py`). Each
   * limit must be positive: a limit of zero or less is a configuration error, not "no limit".

@@ -80,7 +80,7 @@ class CloseLifecycleSuite extends FunSuite:
 
   test("closing an OpenAI embedder closes its transport") {
     val transport = Counting()
-    OpenAiEmbedder(model = "e", apiKey = "x", transport = transport).close()
+    OpenAiEmbedder(model = "e", client = OpenAiClient(apiKey = "x", transport = transport)).close()
     assertEquals(transport.closes.get(), 1)
   }
 
