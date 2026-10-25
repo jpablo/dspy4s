@@ -169,7 +169,7 @@ Cordis framework. The English docs under `docs/` describe each subsystem in deta
 |---|---|
 | Plugins | A plugin registers services and effects in a context. Each registration is reversible, and its lifetime is the lifetime of its context. A plugin waits until the services that it needs exist, and it unloads when one of them goes away. |
 | Session log | Typed events, for example `turn/start`, `tool/call`, `assistant/message` and `compaction/summary`. An event is required unless it is marked `ignorable`. A reader that finds an unknown required event refuses to rebuild the session. |
-| Surface | The model sees a "surface" of the log. An event can `replace` a range of earlier events, and it must cite each event that it hides (`sourceEventSeqs`). |
+| Surface | The model sees a projection of the log (the surface). Each surface event appends or replaces a range, and it must cite each event that it hides (`sourceEventSeqs`). |
 | Projections | Pure folds: `init`, `apply`, an optional `view`, and a version. A snapshot is a consistent cut with an `asOfSeq` mark. The docs say: "Projection is the only read and compute path". |
 | Requests | "Model-visible means logged". The system prompt is node 0 of the surface, and the tools and the configuration are a logged header. Dynamic context is a user-role snapshot, appended only when it changes. |
 | Crash repair | The writer appends end events (`turn/end{interrupted}`), and an error result for each tool call with no result. It never cuts the log. An interrupted tool call has an unknown outcome, and the harness never retries it automatically. |
