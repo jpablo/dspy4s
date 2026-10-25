@@ -208,20 +208,24 @@ Simplify 5 (rank 5). Code-review 5 (rank 8). 4966 main lines, 6422 test lines.
 ### Simplify findings
 
 - [x] Private copies of the `string`, `sequence`, `record`, and `isNull` helpers: `providers/ResponsesWire.scala` (the helpers at its end), `runtime/DiskLmCache.scala` (the helpers at its end), `providers/ChatWire.scala` (`string`), `runtime/LmHistoryRecord.scala:125`. Core now has `DynamicValues.isNull` and `DynamicValues.encodeJson`; `providers/DynamicJson.scala` also had an `isNull`. Fixed: `DynamicValues.string`, `sequence`, `sequenceAt`, `asRecord`, `asSequence`, and `tryEncodeJson` in core; `recordGet` takes each `DynamicValue`. `DynamicJson` keeps only the provider encode (with no null field) and the guarded decode.
-- [ ] `runtime/DiskLmCache.scala:16-151`, `:263-279`: a reader for the old Java-serialization cache format, about 150 lines.
+- [x] `runtime/DiskLmCache.scala`: a reader for the old Java-serialization cache format, about 175 lines. Fixed: deleted, with its tests.
 - [x] `providers/OpenAiEmbedder.scala`, `asFloat`: the same tolerant number read as the new `DynamicValues.asDouble` in core. Fixed: a derived lenient codec reads the reply (`EmbeddingsReply`), and `floatRow`, `asFloat`, and `asInt` are gone.
 - [ ] `runtime/ManagedLanguageModel.scala`, `UsageTracking`: it writes its thread-local scope and its carrier by hand. Core now has `ScopedLocal` (`private[dspy4s]`) for this job.
-- [ ] `runtime/DiskLmCache.scala:371-463`: a hand-written JSON codec. A DTO with a derived Schema (JsonCodecDeriver) can replace it.
+- [x] `runtime/DiskLmCache.scala`: a hand-written JSON codec. Fixed: private DTOs with a derived codec (format `dspy4s-lm-result-v2`), guarded against `StackOverflowError`.
+- [x] (simplify (b)) Each cache layer hashed the request again: a composite miss hashed the prompt four times. Fixed: `CacheKey` in `contracts/LmCache.scala`; `ManagedLanguageModel` builds it once with the mode of the delegate; `LmCache` takes the key; `LmRequest.cacheIdentity` is gone. A custom key is the `cacheKey` parameter of `ManagedLanguageModel`.
+- [x] (simplify (b)) The caches set `cacheHit` again at each layer. Fixed: the caches are plain stores, and only `ManagedLanguageModel` marks a hit.
+- [x] (simplify (b)) `runtime/RequestHash.scala` built the key text by hand, with three branches for old disk keys. Fixed: a derived `KeyData` record, sorted, encoded, and hashed (120 to 45 lines). A non-finite number or a lone surrogate gives no key.
+- [x] (simplify (b)) runtime/LmCacheConfiguration.scala (removed): a global registry with no reader, which made a disk cache in the home directory in seven test suites. Fixed: deleted; `NoopLmCache` is in `contracts/LmCache.scala`, and `CompositeLmCache` takes two plain caches.
 - [x] ProviderLanguageModel (removed) writes a magic `mode` key, and `providers/OpenAiClient.scala:24-39`, `:103-113` read it and remove it. Pass the mode as a typed value. Fixed: `OpenAiClient.invoke(mode, body)` and `stream(mode, body)`.
 - [x] `providers/PythonStr.scala` copied the Python float repr of adapters `internal/PythonText.scala`, with a different algorithm. Fixed: core `contracts/PythonRepr.scala` has the algorithm of `PythonText`, and `PythonStr`, `PythonText`, and gepa `ReflectiveRecord` use it.
 - [x] `providers/OpenAiLanguageModel.scala:69-94` copies the pipeline of ProviderLanguageModel (removed). Fixed: `ProviderLanguageModel` had no user in the main code and is removed. Its encoders and its reply parser are `providers/ChatWire.scala`.
 
 ### Code-review findings
 
-- [x] ProviderLanguageModel (removed) puts `request_id` in the payload. `providers/OpenAiClient.scala:24` removes only `mode`, so `request_id` goes into the OpenAI request body. The only test checks `mode` (`OpenAiClientSuite.scala:91`). (checked) Fixed: `LmRequest.requestId` had no producer and is removed. The cache key keeps the text `"request_id":null`.
+- [x] ProviderLanguageModel (removed) puts `request_id` in the payload. `providers/OpenAiClient.scala:24` removes only `mode`, so `request_id` goes into the OpenAI request body. The only test checks `mode` (`OpenAiClientSuite.scala:91`). (checked) Fixed: `LmRequest.requestId` had no producer and is removed.
 - [x] `providers/OpenAiClient.scala` sent the `prompt` body to `/chat/completions` in Text mode. The stream read only `delta.content`. Fixed: the text mode goes to `completionsEndpoint` (`/completions`), and its stream reads `choices[0].text`.
 - [ ] `runtime/ManagedLanguageModel.scala:236`, `:417`: no upper limit on `Retry-After`. A bad header can block a thread for hours.
-- [ ] `runtime/DiskLmCache.scala:295-304`: a failed write leaves `<key>.json.tmp`, and `clear` never removes it. The eviction (`:329-336`) lists up to 200000 files while it holds the lock.
+- [x] `runtime/DiskLmCache.scala`: a failed write left `<key>.json.tmp`, and `clear` never removed it. The eviction listed up to 200000 files while it held the lock. Fixed in the simplify (b) pass: a unique temp file that a `finally` removes, `get` with no lock, and one evicting thread outside the lock.
 - [x] `providers/JdkHttpTransport.scala` called `toLowerCase` with no `Locale.ROOT`. Not a real bug: the JDK client gives lower-case header names, and a test shows it. The call uses `Locale.ROOT` now.
 - [x] (code-review (a)) An `error` object in a reply with status 200 gave the ParseError "no outputs". Fixed: `OpenAiErrors.fromReplyError` gives the typed error of the code (upstream `_response_error`), on the chat path and on the Responses path.
 - [x] (code-review (a)) An empty `finish_reason` in a stream chunk counted as an end event. Fixed: it is no finish reason (upstream `if finish_raw:`).

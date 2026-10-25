@@ -1,17 +1,8 @@
 package dspy4s.lm
 
 import dspy4s.core.contracts.{DynamicValues, LmUsage, TokenCategory, ToolCall, :=}
-import dspy4s.lm.contracts.{LmMode, LmOutput, LmRequest, LmResponse}
-import dspy4s.lm.runtime.{
-  CacheCapacity,
-  CompositeLmCache,
-  DiskLmCache,
-  InMemoryLmCache,
-  LmCacheConfig,
-  LmCacheRegistry,
-  NoopLmCache,
-  RequestHash
-}
+import dspy4s.lm.contracts.{CacheKey, LmMode, LmOutput, LmRequest, LmResponse}
+import dspy4s.lm.runtime.{CacheCapacity, CompositeLmCache, DiskLmCache, InMemoryLmCache, RequestHash}
 import munit.FunSuite
 
 import java.nio.file.{Files, Path}
@@ -24,17 +15,13 @@ class LmCacheSuite extends FunSuite:
     options = DynamicValues.record("temperature" := 0.7)
   )
 
+  private val key = CacheKey.of("test-model")
+
   private val baseResponse = LmResponse(
     outputs = Vector(LmOutput(text = "hello")),
     usage =
       Some(LmUsage(totalTokens = 9, promptTokens = 4, completionTokens = 5, extras = Map(TokenCategory.Cached -> 3L)))
   )
-
-  override def beforeEach(context: BeforeEach): Unit =
-    LmCacheRegistry.resetDefault()
-
-  override def afterEach(context: AfterEach): Unit =
-    LmCacheRegistry.resetDefault()
 
   test("request hash is stable for equivalent map orderings") {
     val requestA = baseRequest.copy(
@@ -44,7 +31,9 @@ class LmCacheSuite extends FunSuite:
       options = DynamicValues.record("items" := Vector(1, 2, 3), "nested" := Map("y" -> 2, "x" -> 1), "a" := 1)
     )
 
-    assertEquals(RequestHash.forRequest(requestA), RequestHash.forRequest(requestB))
+    val keyA = RequestHash.forRequest(requestA)
+    assert(keyA.isRight, keyA)
+    assertEquals(keyA, RequestHash.forRequest(requestB))
   }
 
   test("request hash distinguishes primitive types with equal text") {
@@ -54,28 +43,30 @@ class LmCacheSuite extends FunSuite:
     assertNotEquals(RequestHash.forRequest(asInt), RequestHash.forRequest(asString))
   }
 
-  test("in-memory cache returns a cache hit with the stored usage") {
-    val cache = new InMemoryLmCache(maxEntries = CacheCapacity(8))
-    cache.put(baseRequest, baseResponse)
+  test("request hash gives no key for a value with no JSON text") {
+    val notFinite = baseRequest.copy(options = DynamicValues.record("temperature" := Double.NaN))
+    val surrogate = baseRequest.copy(options = DynamicValues.record("stop" := "\uD83D"))
+    assert(RequestHash.forRequest(notFinite).isLeft)
+    assert(RequestHash.forRequest(surrogate).isLeft)
+    assert(RequestHash.forRequest(baseRequest).isRight)
+  }
 
-    val cached = cache.get(baseRequest)
-    assert(cached.isDefined)
-    assertEquals(cached.get.cacheHit, true)
-    assertEquals(cached.get.usage, baseResponse.usage)
+  test("in-memory cache returns the stored response with its usage") {
+    val cache = new InMemoryLmCache(maxEntries = CacheCapacity(8))
+    cache.put(key, baseResponse)
+
+    assertEquals(cache.get(key), Some(baseResponse))
   }
 
   test("disk cache persists values across cache instances") {
     val tempDir = Files.createTempDirectory("dspy4s-lm-disk-cache")
     try
       val first = new DiskLmCache(tempDir, maxEntries = CacheCapacity(8))
-      first.put(baseRequest, baseResponse)
+      first.put(key, baseResponse)
       assertEquals(first.size, 1)
 
       val second = new DiskLmCache(tempDir, maxEntries = CacheCapacity(8))
-      val cached = second.get(baseRequest)
-      assert(cached.isDefined)
-      assertEquals(cached.get.cacheHit, true)
-      assertEquals(cached.get.usage, baseResponse.usage)
+      assertEquals(second.get(key), Some(baseResponse))
     finally deleteRecursively(tempDir)
   }
 
@@ -92,10 +83,10 @@ class LmCacheSuite extends FunSuite:
         ))
       )
       val first = new DiskLmCache(tempDir, maxEntries = CacheCapacity(8))
-      first.put(baseRequest, toolResponse)
+      first.put(key, toolResponse)
 
       val second = new DiskLmCache(tempDir, maxEntries = CacheCapacity(8))
-      val args   = DynamicValues.recordToMap(second.get(baseRequest).get.outputs.head.toolCalls.head.args)
+      val args   = DynamicValues.recordToMap(second.get(key).get.outputs.head.toolCalls.head.args)
 
       assertEquals(args("query"), "belgium": Any)
       // Before the DynamicValue migration the disk cache flattened args via String.valueOf,
@@ -112,33 +103,16 @@ class LmCacheSuite extends FunSuite:
     try
       val disk   = new DiskLmCache(tempDir, maxEntries = CacheCapacity(8))
       val memory = new InMemoryLmCache(maxEntries = CacheCapacity(8))
-      disk.put(baseRequest, baseResponse)
+      disk.put(key, baseResponse)
 
-      val composite = CompositeLmCache(memory = Some(memory), disk = Some(disk))
-      val first     = composite.get(baseRequest)
-      val second    = composite.get(baseRequest)
+      val composite = CompositeLmCache(memory = memory, disk = disk)
+      val first     = composite.get(key)
+      val second    = composite.get(key)
 
-      assert(first.isDefined)
-      assert(second.isDefined)
+      assertEquals(first, Some(baseResponse))
+      assertEquals(second, Some(baseResponse))
       assertEquals(memory.size, 1)
-      assertEquals(second.get.cacheHit, true)
     finally deleteRecursively(tempDir)
-  }
-
-  test("cache registry configure supports disabled and memory-only modes") {
-    val disabled = LmCacheRegistry.configure(
-      LmCacheConfig(enableDiskCache = false, enableMemoryCache = false)
-    )
-    assert(disabled eq NoopLmCache)
-    assertEquals(disabled.get(baseRequest), None)
-
-    val memoryOnly = LmCacheRegistry.configure(
-      LmCacheConfig(enableDiskCache = false, enableMemoryCache = true, memoryMaxEntries = CacheCapacity(4))
-    )
-    memoryOnly.put(baseRequest, baseResponse)
-    val cached = memoryOnly.get(baseRequest)
-    assert(cached.isDefined)
-    assertEquals(cached.get.cacheHit, true)
   }
 
   private def deleteRecursively(path: Path): Unit =

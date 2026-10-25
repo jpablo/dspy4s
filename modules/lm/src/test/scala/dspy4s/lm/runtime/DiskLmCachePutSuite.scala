@@ -1,11 +1,9 @@
 package dspy4s.lm.runtime
 
-import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ToolCall
-import dspy4s.lm.contracts.LmMode
+import dspy4s.lm.contracts.CacheKey
 import dspy4s.lm.contracts.LmOutput
-import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import munit.FunSuite
 import zio.blocks.chunk.Chunk
@@ -25,27 +23,26 @@ import scala.jdk.CollectionConverters.*
   */
 class DiskLmCachePutSuite extends FunSuite:
 
-  /** The operations of the file system, with a count of each directory listing and of each time read. */
+  /** The list of the file system, with a count of each directory listing and of the entries that the listings read. A
+    * listing reads the attributes of each entry one time.
+    */
   private final class CountingFiles extends DiskLmCache.EntryFiles:
-    val listings: AtomicInteger  = AtomicInteger(0)
-    val timeReads: AtomicInteger = AtomicInteger(0)
+    val listings: AtomicInteger       = AtomicInteger(0)
+    val attributeReads: AtomicInteger = AtomicInteger(0)
 
-    override def list(directory: Path): Vector[Path] =
-      val _ = listings.incrementAndGet()
-      DiskLmCache.EntryFiles.system.list(directory)
-
-    override def modifiedMillis(path: Path): Long =
-      val _ = timeReads.incrementAndGet()
-      DiskLmCache.EntryFiles.system.modifiedMillis(path)
+    override def list(directory: Path): Vector[DiskLmCache.Entry] =
+      val _       = listings.incrementAndGet()
+      val entries = DiskLmCache.EntryFiles.system.list(directory)
+      val _       = attributeReads.addAndGet(entries.size)
+      entries
 
     def reset(): Unit =
       listings.set(0)
-      timeReads.set(0)
+      attributeReads.set(0)
 
   private val response = LmResponse(outputs = Vector(LmOutput(text = "Paris")), modelName = Some("gpt-test"))
 
-  private def requestOf(index: Int): LmRequest =
-    LmRequest(model = "gpt-test", mode = LmMode.Chat, options = DynamicValues.record("n" := index))
+  private def keyOf(index: Int): CacheKey = CacheKey.of(s"request-$index")
 
   private def withDirectory[A](body: Path => A): A =
     val directory = Files.createTempDirectory("dspy4s-disk-put")
@@ -61,9 +58,9 @@ class DiskLmCachePutSuite extends FunSuite:
     try stream.iterator().asScala.map(_.getFileName.toString).toVector
     finally stream.close()
 
-  /** Set the time of the last change of the record of `requestOf(index)` to `index` seconds after the epoch. */
+  /** Set the time of the last change of the record of `keyOf(index)` to `index` seconds after the epoch. */
   private def age(directory: Path, index: Int): Unit =
-    val path = directory.resolve(s"${RequestHash.forRequest(requestOf(index))}.json")
+    val path = directory.resolve(s"${keyOf(index).hex}.json")
     val _    = Files.setLastModifiedTime(path, FileTime.fromMillis(index * 1000L))
 
   /** A record nested `depth` levels deep. The function builds it with a loop, so it does not use the stack. */
@@ -74,32 +71,32 @@ class DiskLmCachePutSuite extends FunSuite:
 
   // ── The count and the eviction (B14.1) ─────────────────────────────────────────────────────────────────────
 
-  test("a put below the cap lists the directory one time at most, and reads no time") {
+  test("a put below the cap lists the directory one time at most, and reads the attributes of no entry") {
     withDirectory { directory =>
       val files = CountingFiles()
       val cache = new DiskLmCache(directory, CacheCapacity(100), files)
-      (1 to 20).foreach(index => cache.put(requestOf(index), response))
+      (1 to 20).foreach(index => cache.put(keyOf(index), response))
       assert(files.listings.get() <= 1, s"20 puts listed the directory ${files.listings.get()} times")
-      assertEquals(files.timeReads.get(), 0, "a put with no overflow must not read the time of an entry")
+      assertEquals(files.attributeReads.get(), 0, "a put with no overflow must not read the attributes of an entry")
       assertEquals(cache.size, 20)
     }
   }
 
-  test("an eviction reads the time of each entry one time, and removes the oldest entries down to 90% of the cap") {
+  test("an eviction reads each entry one time, and removes the oldest entries down to 90% of the cap") {
     withDirectory { directory =>
       val files = CountingFiles()
       val cache = new DiskLmCache(directory, CacheCapacity(10), files)
       (1 to 10).foreach { index =>
-        cache.put(requestOf(index), response)
+        cache.put(keyOf(index), response)
         age(directory, index)
       }
       files.reset()
-      cache.put(requestOf(11), response)
+      cache.put(keyOf(11), response)
       assertEquals(files.listings.get(), 1)
-      assertEquals(files.timeReads.get(), 11, "the eviction must read the time of each of the 11 entries one time")
+      assertEquals(files.attributeReads.get(), 11, "the eviction must read the attributes of each of the 11 entries")
       assertEquals(cache.size, 9)
-      (1 to 2).foreach(index => assert(cache.get(requestOf(index)).isEmpty, s"the old entry $index must go"))
-      (3 to 11).foreach(index => assert(cache.get(requestOf(index)).isDefined, s"entry $index must stay"))
+      (1 to 2).foreach(index => assert(cache.get(keyOf(index)).isEmpty, s"the old entry $index must go"))
+      (3 to 11).foreach(index => assert(cache.get(keyOf(index)).isDefined, s"entry $index must stay"))
     }
   }
 
@@ -110,29 +107,29 @@ class DiskLmCachePutSuite extends FunSuite:
       val files = CountingFiles()
       val cache = new DiskLmCache(directory, CacheCapacity(10), files)
       (1 to 11).foreach { index =>
-        cache.put(requestOf(index), response)
+        cache.put(keyOf(index), response)
         age(directory, index)
       }
       files.reset()
-      cache.put(requestOf(12), response)
+      cache.put(keyOf(12), response)
       assertEquals(files.listings.get(), 0, "the cache has 10 entries after the put, so it must not list")
-      assertEquals(files.timeReads.get(), 0)
+      assertEquals(files.attributeReads.get(), 0)
       age(directory, 12)
-      cache.put(requestOf(13), response)
+      cache.put(keyOf(13), response)
       assertEquals(files.listings.get(), 1, "the cache has 11 entries after the put, so it must evict")
       assertEquals(cache.size, 9)
-      assertEquals((1 to 13).filter(index => cache.get(requestOf(index)).isDefined).toVector, (5 to 13).toVector)
+      assertEquals((1 to 13).filter(index => cache.get(keyOf(index)).isDefined).toVector, (5 to 13).toVector)
     }
   }
 
   test("the eviction of a cap of 1 keeps the entry of the put") {
     withDirectory { directory =>
       val cache = new DiskLmCache(directory, CacheCapacity(1), CountingFiles())
-      cache.put(requestOf(1), response)
+      cache.put(keyOf(1), response)
       age(directory, 1)
-      cache.put(requestOf(2), response)
+      cache.put(keyOf(2), response)
       assertEquals(cache.size, 1)
-      assert(cache.get(requestOf(2)).isDefined, "the entry of the put must stay")
+      assert(cache.get(keyOf(2)).isDefined, "the entry of the put must stay")
     }
   }
 
@@ -142,29 +139,29 @@ class DiskLmCachePutSuite extends FunSuite:
     withDirectory { directory =>
       val other = DiskLmCache(directory)
       (1 to 3).foreach { index =>
-        other.put(requestOf(index), response)
+        other.put(keyOf(index), response)
         age(directory, index)
       }
       // The cap is 3, so an eviction keeps 2 entries (90% of the cap, rounded down).
       val cache = new DiskLmCache(directory, CacheCapacity(3), CountingFiles())
-      cache.put(requestOf(4), response)
+      cache.put(keyOf(4), response)
       age(directory, 4)
       assertEquals(cache.size, 2)
-      assertEquals((1 to 4).filter(index => cache.get(requestOf(index)).isDefined).toVector, Vector(3, 4))
+      assertEquals((1 to 4).filter(index => cache.get(keyOf(index)).isDefined).toVector, Vector(3, 4))
 
       // The second cache writes two entries. The count of the first cache does not include them, so the directory can
       // hold more entries than the cap, until a put of the first cache passes the cap. That put counts the directory
       // again and removes the oldest entries.
       (5 to 6).foreach { index =>
-        other.put(requestOf(index), response)
+        other.put(keyOf(index), response)
         age(directory, index)
       }
-      cache.put(requestOf(7), response)
+      cache.put(keyOf(7), response)
       age(directory, 7)
       assertEquals(cache.size, 5)
-      cache.put(requestOf(8), response)
+      cache.put(keyOf(8), response)
       assertEquals(cache.size, 2)
-      assertEquals((3 to 8).filter(index => cache.get(requestOf(index)).isDefined).toVector, Vector(7, 8))
+      assertEquals((3 to 8).filter(index => cache.get(keyOf(index)).isDefined).toVector, Vector(7, 8))
     }
   }
 
@@ -172,16 +169,55 @@ class DiskLmCachePutSuite extends FunSuite:
     withDirectory { directory =>
       val files = CountingFiles()
       val cache = new DiskLmCache(directory, CacheCapacity(2), files)
-      cache.put(requestOf(1), response)
+      cache.put(keyOf(1), response)
       age(directory, 1)
-      cache.put(requestOf(2), response)
+      cache.put(keyOf(2), response)
       age(directory, 2)
-      val _ = Files.writeString(directory.resolve(s"${RequestHash.forRequest(requestOf(2))}.json"), "not json")
-      assert(cache.get(requestOf(2)).isEmpty)
+      val _ = Files.writeString(directory.resolve(s"${keyOf(2).hex}.json"), "not json")
+      assert(cache.get(keyOf(2)).isEmpty)
       files.reset()
-      cache.put(requestOf(3), response)
-      assertEquals(files.timeReads.get(), 0, "the cache has 2 entries after the put, so it must not evict")
+      cache.put(keyOf(3), response)
+      assertEquals(files.attributeReads.get(), 0, "the cache has 2 entries after the put, so it must not evict")
       assertEquals(cache.size, 2)
+    }
+  }
+
+  // ── The write of a record ──────────────────────────────────────────────────────────────────────────────────
+
+  test("a put whose move fails does not throw, and leaves no temporary file") {
+    withDirectory { directory =>
+      val cache  = DiskLmCache(directory)
+      val target = directory.resolve(s"${keyOf(1).hex}.json")
+      // A directory with a file in it at the path of the record: the move cannot replace it.
+      val _ = Files.createDirectories(target.resolve("inside"))
+      cache.put(keyOf(1), response)
+      assertEquals(fileNames(directory), Vector(target.getFileName.toString))
+      assertEquals(cache.size, 0, "a directory is not an entry")
+      assertEquals(cache.get(keyOf(1)), None)
+    }
+  }
+
+  test("parallel puts and gets of the same keys read only complete records") {
+    withDirectory { directory =>
+      val cache     = new DiskLmCache(directory, CacheCapacity(5), CountingFiles())
+      val responses = (0 until 4).map(index => LmResponse(outputs = Vector(LmOutput(text = s"text-$index" * 200))))
+      val failures  = java.util.concurrent.ConcurrentLinkedQueue[String]()
+      val threads   = (0 until 4).map { worker =>
+        Thread(() =>
+          (1 to 100).foreach { round =>
+            val key = keyOf(round % 8)
+            cache.put(key, responses(worker))
+            cache.get(key).foreach { found =>
+              if !responses.contains(found) then
+                val _ = failures.add(s"a partial record: ${found.outputs.map(_.text.take(20))}")
+            }
+          }
+        )
+      }
+      threads.foreach(_.start())
+      threads.foreach(_.join())
+      assertEquals(failures.asScala.toVector, Vector.empty)
+      assert(fileNames(directory).forall(_.endsWith(".json")), fileNames(directory).toString)
     }
   }
 
@@ -195,15 +231,15 @@ class DiskLmCachePutSuite extends FunSuite:
       // `intercept` catches only non-fatal errors, so the test catches the StackOverflowError itself.
       val thrown =
         try
-          cache.put(requestOf(1), deep)
+          cache.put(keyOf(1), deep)
           None
         catch case error: StackOverflowError => Some(error.getClass.getSimpleName)
       assertEquals(thrown, None)
-      assert(cache.get(requestOf(1)).isEmpty, "the cache must not store a response that it cannot encode")
+      assert(cache.get(keyOf(1)).isEmpty, "the cache must not store a response that it cannot encode")
       assertEquals(fileNames(directory), Vector.empty, "the failed put must leave no file")
 
-      cache.put(requestOf(2), response)
-      assertEquals(cache.get(requestOf(2)), Some(response.copy(cacheHit = true)))
+      cache.put(keyOf(2), response)
+      assertEquals(cache.get(keyOf(2)), Some(response))
     }
   }
 

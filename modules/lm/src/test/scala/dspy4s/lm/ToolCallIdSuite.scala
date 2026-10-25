@@ -7,6 +7,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.ToolCall
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.lm.contracts.CacheKey
 import dspy4s.lm.contracts.ContentPart
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmMode
@@ -26,19 +27,16 @@ import dspy4s.lm.providers.ToolCallAssembler
 import dspy4s.lm.runtime.CacheCapacity
 import dspy4s.lm.runtime.DiskLmCache
 import dspy4s.lm.runtime.ManagedLanguageModel
-import dspy4s.lm.runtime.RequestHash
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
-import java.util.Base64
 import scala.collection.mutable.ArrayBuffer
 
 /** The cases of the tool call id that `ToolCallWireSuite` does not cover (PORT_GAPS G-28): the paths that copy a tool
-  * call, the absent keys on the wire, the prompt of the text mode, the cache key of a request with no tool field, and a
-  * disk cache entry that an older version wrote.
+  * call, the absent keys on the wire, the prompt of the text mode, and a disk cache entry that the cache cannot read.
   */
 class ToolCallIdSuite extends FunSuite:
 
@@ -50,27 +48,6 @@ class ToolCallIdSuite extends FunSuite:
 
   private val okBody: String =
     """{"choices":[{"message":{"role":"assistant","content":"cat"},"finish_reason":"stop"}]}"""
-
-  /** A disk cache entry for [[question]] that the code wrote before `PersistedToolCall` had the `id` field, in Base64.
-    * The response has the text "I should search.", the metadata `{"finish_reason":"tool_calls"}`, the model name
-    * "gpt-test", and two tool calls: `search` with `{"query":"cats","top_k":3}` and `lookup` with `{"key":"dogs"}`.
-    */
-  private val entryWithoutIds: String =
-    """rO0ABXNyADJkc3B5NHMubG0ucnVudGltZS5EaXNrQ2FjaGVNb2RlbCRQZXJzaXN0ZWRSZXNwb25zZZBUDnGShiW4AgADTAAJbW9k
-      |ZWxOYW1ldAASTGphdmEvbGFuZy9TdHJpbmc7WwAHb3V0cHV0c3QAM1tMZHNweTRzL2xtL3J1bnRpbWUvRGlza0NhY2hlTW9kZWwk
-      |UGVyc2lzdGVkT3V0cHV0O0wABXVzYWdldAAxTGRzcHk0cy9sbS9ydW50aW1lL0Rpc2tDYWNoZU1vZGVsJFBlcnNpc3RlZFVzYWdl
-      |O3hwdAAIZ3B0LXRlc3R1cgAzW0xkc3B5NHMubG0ucnVudGltZS5EaXNrQ2FjaGVNb2RlbCRQZXJzaXN0ZWRPdXRwdXQ7U2DVU9sn
-      |ajsCAAB4cAAAAAFzcgAwZHNweTRzLmxtLnJ1bnRpbWUuRGlza0NhY2hlTW9kZWwkUGVyc2lzdGVkT3V0cHV0oNGu6rfE7U4CAANM
-      |AAxtZXRhZGF0YUpzb25xAH4AAUwABHRleHRxAH4AAVsACXRvb2xDYWxsc3QANVtMZHNweTRzL2xtL3J1bnRpbWUvRGlza0NhY2hl
-      |TW9kZWwkUGVyc2lzdGVkVG9vbENhbGw7eHB0AB57ImZpbmlzaF9yZWFzb24iOiJ0b29sX2NhbGxzIn10ABBJIHNob3VsZCBzZWFy
-      |Y2gudXIANVtMZHNweTRzLmxtLnJ1bnRpbWUuRGlza0NhY2hlTW9kZWwkUGVyc2lzdGVkVG9vbENhbGw7uNUb8AZPVQcCAAB4cAAA
-      |AAJzcgAyZHNweTRzLmxtLnJ1bnRpbWUuRGlza0NhY2hlTW9kZWwkUGVyc2lzdGVkVG9vbENhbGw1RDuoMUTtvAIAAkwACGFyZ3NK
-      |c29ucQB+AAFMAARuYW1lcQB+AAF4cHQAGnsicXVlcnkiOiJjYXRzIiwidG9wX2siOjN9dAAGc2VhcmNoc3EAfgAPdAAOeyJrZXki
-      |OiJkb2dzIn10AAZsb29rdXBzcgAvZHNweTRzLmxtLnJ1bnRpbWUuRGlza0NhY2hlTW9kZWwkUGVyc2lzdGVkVXNhZ2XO4p+B1Box
-      |gQIABEoAEGNvbXBsZXRpb25Ub2tlbnNKAAxwcm9tcHRUb2tlbnNKAAt0b3RhbFRva2Vuc0wAB2RldGFpbHN0AA9MamF2YS91dGls
-      |L01hcDt4cAAAAAAAAAAFAAAAAAAAAAQAAAAAAAAACXNyABFqYXZhLnV0aWwuSGFzaE1hcAUH2sHDFmDRAwACRgAKbG9hZEZhY3Rv
-      |ckkACXRocmVzaG9sZHhwP0AAAAAAAAx3CAAAABAAAAABdAANY2FjaGVkX3Rva2Vuc3NyAA5qYXZhLmxhbmcuTG9uZzuL5JDMjyPf
-      |AgABSgAFdmFsdWV4cgAQamF2YS5sYW5nLk51bWJlcoaslR0LlOCLAgAAeHAAAAAAAAAAA3g=""".stripMargin.filterNot(_.isWhitespace)
 
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
@@ -275,63 +252,18 @@ class ToolCallIdSuite extends FunSuite:
 
   // ── Caches ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-  test("a request with no tool field keeps the cache key that it had before the tool fields existed") {
-    val request = LmRequest(
-      model = "gpt-test",
-      mode = LmMode.Chat,
-      messages = Vector(
-        Message(role = MessageRole.System, text = Some("You are helpful.")),
-        Message(
-          role = MessageRole.User,
-          text = Some("What is the capital of Belgium?"),
-          parts = Vector(ContentPart(kind = "text", payload = "A part", metadata = Map("source" -> "test"))),
-          metadata = Map("turn" -> "1")
-        ),
-        Message(role = MessageRole.Assistant, text = Some("Brussels"))
-      ),
-      options = DynamicValues.record("temperature" := 0.2, "max_tokens" := 64),
-      rolloutId = Some(3)
-    )
-    // The value comes from the code before the tool fields existed, for this request with no request id (that code
-    // wrote `"request_id":null` for it). A different value makes each disk cache entry of an earlier version a miss.
-    assertEquals(RequestHash.forRequest(request), "a8aa2ec0c98a3cc803586de7890186d6ff410d57cb06f6c20d08165822421104")
-  }
-
-  test("the disk cache reads an entry that a version without the id field wrote") {
-    withDirectory { directory =>
-      val path = directory.resolve(s"${RequestHash.forRequest(question)}.bin")
-      val _    = Files.write(path, Base64.getDecoder.decode(entryWithoutIds))
-
-      val cached = new DiskLmCache(directory, maxEntries = CacheCapacity(8)).get(question)
-      assertEquals(cached.map(_.outputs.map(_.text)), Some(Vector("I should search.")))
-      assertEquals(cached.flatMap(_.modelName), Some("gpt-test"))
-      assertEquals(
-        cached.map(_.outputs.map(_.metadata)),
-        Some(Vector(DynamicValues.record("finish_reason" := "tool_calls")))
-      )
-      assertEquals(
-        cached.map(_.outputs.flatMap(_.toolCalls).map(call =>
-          (call.id, call.name, DynamicValues.encodeJson(call.args))
-        )),
-        Some(Vector(
-          (None, "search", """{"query":"cats","top_k":3}"""),
-          (None, "lookup", """{"key":"dogs"}""")
-        ))
-      )
-    }
-  }
-
   test("the disk cache counts an entry that it cannot read as a miss") {
     withDirectory { directory =>
-      val path  = directory.resolve(s"${RequestHash.forRequest(question)}.bin")
-      val _     = Files.write(path, "not a serialized entry".getBytes(StandardCharsets.UTF_8))
+      val key   = CacheKey.of("question")
+      val path  = directory.resolve(s"${key.hex}.json")
+      val _     = Files.write(path, "not a JSON record".getBytes(StandardCharsets.UTF_8))
       val cache = new DiskLmCache(directory, maxEntries = CacheCapacity(8))
 
-      assertEquals(cache.get(question), None)
+      assertEquals(cache.get(key), None)
       assert(!Files.exists(path), "the cache must remove the entry that it cannot read")
 
       // The key is usable again.
-      cache.put(question, LmResponse(outputs = Vector(LmOutput(text = "", toolCalls = Vector(search)))))
-      assertEquals(cache.get(question).map(_.outputs.flatMap(_.toolCalls)), Some(Vector(search)))
+      cache.put(key, LmResponse(outputs = Vector(LmOutput(text = "", toolCalls = Vector(search)))))
+      assertEquals(cache.get(key).map(_.outputs.flatMap(_.toolCalls)), Some(Vector(search)))
     }
   }

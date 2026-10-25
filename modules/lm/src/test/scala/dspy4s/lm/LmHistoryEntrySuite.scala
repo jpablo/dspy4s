@@ -23,7 +23,6 @@ import dspy4s.lm.contracts.MessageRole
 import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.lm.runtime.CacheCapacity
 import dspy4s.lm.runtime.InMemoryLmCache
-import dspy4s.lm.runtime.LmCacheRegistry
 import dspy4s.lm.runtime.ManagedLanguageModel
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
@@ -36,13 +35,8 @@ import java.util.UUID
   */
 class LmHistoryEntrySuite extends FunSuite:
 
-  override def beforeEach(context: BeforeEach): Unit =
-    RuntimeEnvironment.resetForTests()
-    LmCacheRegistry.resetDefault()
-
-  override def afterEach(context: AfterEach): Unit =
-    RuntimeEnvironment.resetForTests()
-    LmCacheRegistry.resetDefault()
+  override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private final class Fixed(result: Either[DspyError, LmResponse]) extends LanguageModel:
     override val id: String                                                                    = "fixed"

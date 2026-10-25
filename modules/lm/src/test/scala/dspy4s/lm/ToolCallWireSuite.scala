@@ -3,6 +3,7 @@ package dspy4s.lm
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ToolCall
 import dspy4s.core.contracts.:=
+import dspy4s.lm.contracts.CacheKey
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
@@ -165,7 +166,7 @@ class ToolCallWireSuite extends FunSuite:
       toolCalls = Vector(search.copy(args = DynamicValues.record("query" := "dogs")))
     ))
     val none = requestWith(Message(role = MessageRole.Assistant))
-    assertEquals(Set(first, second, third, none).map(RequestHash.forRequest).size, 4)
+    assertEquals(Set(first, second, third, none).flatMap(RequestHash.forRequest(_).toOption).size, 4)
   }
 
   test("the cache key covers the call id and the name of a tool message") {
@@ -175,20 +176,19 @@ class ToolCallWireSuite extends FunSuite:
       requestWith(base.copy(toolCallId = Some("call_2"))),
       requestWith(base.copy(name = Some("lookup"))),
       requestWith(base.copy(toolCallId = None, name = None))
-    ).map(RequestHash.forRequest)
+    ).flatMap(RequestHash.forRequest(_).toOption)
     assertEquals(hashes.size, 4)
   }
 
   test("the disk cache keeps the id of a tool call") {
     val directory = Files.createTempDirectory("dspy4s-lm-disk-cache-tool-id")
     try
-      val request =
-        LmRequest(model = "gpt-test", messages = Vector(Message(role = MessageRole.User, text = Some("Q1"))))
+      val key      = CacheKey.of("gpt-test")
       val response =
         LmResponse(outputs = Vector(LmOutput(text = "", toolCalls = Vector(search, search.copy(id = None)))))
-      new DiskLmCache(directory, maxEntries = CacheCapacity(8)).put(request, response)
+      new DiskLmCache(directory, maxEntries = CacheCapacity(8)).put(key, response)
 
-      val cached = new DiskLmCache(directory, maxEntries = CacheCapacity(8)).get(request)
+      val cached = new DiskLmCache(directory, maxEntries = CacheCapacity(8)).get(key)
       assertEquals(cached.map(_.outputs.flatMap(_.toolCalls)), Some(Vector(search, search.copy(id = None))))
     finally
       Files.walk(directory).sorted(java.util.Comparator.reverseOrder()).forEach { path =>

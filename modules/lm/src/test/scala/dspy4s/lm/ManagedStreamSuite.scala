@@ -21,7 +21,6 @@ import dspy4s.lm.contracts.RetryPolicy
 import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.lm.runtime.CacheCapacity
 import dspy4s.lm.runtime.InMemoryLmCache
-import dspy4s.lm.runtime.LmCacheRegistry
 import dspy4s.lm.runtime.ManagedLanguageModel
 import dspy4s.lm.runtime.RetryCount
 import dspy4s.lm.runtime.RetryPolicies
@@ -39,13 +38,8 @@ import scala.concurrent.duration.DurationInt
   */
 class ManagedStreamSuite extends FunSuite:
 
-  override def beforeEach(context: BeforeEach): Unit =
-    RuntimeEnvironment.resetForTests()
-    LmCacheRegistry.resetDefault()
-
-  override def afterEach(context: AfterEach): Unit =
-    RuntimeEnvironment.resetForTests()
-    LmCacheRegistry.resetDefault()
+  override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   /** A stream model that gives the chunks of the next attempt for each stream request. */
   private final class ScriptedStreams(attempts: Vector[Vector[LmChunk]]) extends StreamingLanguageModel:

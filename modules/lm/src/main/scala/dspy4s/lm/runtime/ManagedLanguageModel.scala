@@ -10,6 +10,7 @@ import dspy4s.core.contracts.LmUnexpectedError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.lm.contracts.CacheKey
 import dspy4s.lm.contracts.ForwardingLanguageModel
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmCache
@@ -22,6 +23,7 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.core.contracts.LmUsage
 import dspy4s.lm.contracts.RetryPolicy
 import dspy4s.lm.contracts.StreamingLanguageModel
+import zio.blocks.schema.DynamicValue
 
 import scala.annotation.tailrec
 import scala.collection.mutable
@@ -168,9 +170,9 @@ object UsageTracking:
   * The delegate can be a second managed model. A cache hit of that model is a hit of this model too: this model does
   * not store it, records no usage for it, and writes the history entry of a hit.
   *
-  * A request with no cache key ([[RequestHash.forRequestChecked]]), for example one with a value nested too deep for
-  * the stack, is a miss of [[InMemoryLmCache]] and [[DiskLmCache]], and they store nothing for it. The delegate thus
-  * gets each call of that request (upstream `Cache.get` and `Cache.put` go on with no cache, `dspy/clients/cache.py`).
+  * The model computes the cache key of a call one time, with `cacheKey`. A request with no cache key, for example one
+  * with a value nested too deep for the stack, is a miss, and the cache stores nothing for it. The delegate thus gets
+  * each call of that request (upstream `Cache.get` and `Cache.put` go on with no cache, `dspy/clients/cache.py`).
   */
 final case class ManagedLanguageModel(
     delegate   : LanguageModel,
@@ -180,7 +182,12 @@ final case class ManagedLanguageModel(
     /** The price of the tokens of the delegate. The history entry of each call then has the cost estimate
       * ([[dspy4s.lm.contracts.LmCost]]). With `None`, the cost is unknown (decision L10).
       */
-    price: Option[LmPrice] = None
+    price: Option[LmPrice] = None,
+    /** The cache key of a request. The model gives it the request with the mode of the delegate and the merged options,
+      * and the cache identity of the delegate. A `Left` gives no key. A different function changes the data that the
+      * cache keys on (upstream: a `Cache` subclass that overrides `cache_key`).
+      */
+    cacheKey: (LmRequest, DynamicValue.Record) => Either[DspyError, CacheKey] = RequestHash.forRequest
 ) extends StreamingLanguageModel
     with ForwardingLanguageModel:
   override val id: String   = delegate.id
@@ -211,28 +218,27 @@ final case class ManagedLanguageModel(
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
     delegate match
       case streaming: StreamingLanguageModel =>
-        lazy val key = cacheKey(request)
+        val key = keyOf(request)
         cacheHit(request, key) match
           case Some(cached) => Iterator.single(LmChunk.cached(cached))
-          case None         => ManagedStream(streaming, request, () => key)
+          case None         => ManagedStream(streaming, request, key)
       case _ => call(request) match
           case Right(response) if response.cacheHit => Iterator.single(LmChunk.cached(response))
           case Right(response)                      => Iterator.single(LmChunk.fromResponse(response).copy(usage = response.usage))
           case Left(error)                          => Iterator.single(LmChunk.failure(error))
 
-  /** The request that the cache keys on. The provider merges its default options into each request, so the key must
-    * cover the merged options: two models with one id and different defaults get different entries. The key also has
-    * the cache identity of the delegate ([[LanguageModel.cacheIdentity]]), for example the endpoint of a TypeSafe
-    * model. `rolloutId` and all other fields stay as they are. The delegate still receives the original request.
+  /** The cache key of `request`, or `None` when the model has no cache or the request has no key. The key request has
+    * the mode of the delegate and the merged options: the provider merges its default options into each request, so two
+    * models with one id and different defaults get different entries. The key also has the cache identity of the
+    * delegate ([[dspy4s.lm.contracts.LanguageModel.cacheIdentity]]), for example the endpoint of a TypeSafe model.
+    * `rolloutId` and all other fields stay as they are. The delegate still receives the original request.
     */
-  private def cacheKey(request: LmRequest): LmRequest =
-    request.copy(
-      options = request.effectiveOptions(defaultOptions),
-      cacheIdentity = cacheIdentity
-    )
+  private def keyOf(request: LmRequest): Option[CacheKey] =
+    if cache.isEmpty then None
+    else cacheKey(request.copy(mode = mode, options = request.effectiveOptions(defaultOptions)), cacheIdentity).toOption
 
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-    lazy val key = cacheKey(request)
+    val key = keyOf(request)
     cacheHit(request, key) match
       case Some(cached) => Right(cached)
       case None         =>
@@ -247,8 +253,12 @@ final case class ManagedLanguageModel(
           case Right(response)                      => Right(acceptResponse(request, key, response))
 
   /** The cached response of `request` (see [[acceptHit]]). */
-  private def cacheHit(request: LmRequest, key: => LmRequest)(using RuntimeContext): Option[LmResponse] =
-    cache.flatMap(_.get(key)).map(acceptHit(request, _))
+  private def cacheHit(request: LmRequest, key: Option[CacheKey])(using RuntimeContext): Option[LmResponse] =
+    for
+      store  <- cache
+      found  <- key
+      stored <- store.get(found)
+    yield acceptHit(request, stored)
 
   /** The response of a cache hit, `stored`, with `cacheHit = true` and no usage: a hit bills no tokens, as upstream. A
     * hit appends the history entry of a cache hit, and is not stored again. The cost of that entry comes from the usage
@@ -260,11 +270,11 @@ final case class ManagedLanguageModel(
     hit
 
   /** Store the response that the delegate gave, append its history entry, and record its usage. */
-  private def acceptResponse(request: LmRequest, key: => LmRequest, response: LmResponse)(using
+  private def acceptResponse(request: LmRequest, key: Option[CacheKey], response: LmResponse)(using
       RuntimeContext
   ): LmResponse =
     val uncached = response.copy(cacheHit = false)
-    cache.foreach(_.put(key, uncached))
+    for store <- cache; found <- key do store.put(found, uncached)
     appendHistory(request, uncached, cacheHit = false, LmCost.of(request.model, price, uncached.usage))
     trackUsage(request, uncached.usage)
     uncached
@@ -329,7 +339,7 @@ final case class ManagedLanguageModel(
     * A non-fatal exception of the delegate, when it opens the stream or during a read, is a failure of the attempt with
     * an [[dspy4s.core.contracts.LmUnexpectedError]].
     */
-  private final class ManagedStream(streaming: StreamingLanguageModel, request: LmRequest, key: () => LmRequest)(using
+  private final class ManagedStream(streaming: StreamingLanguageModel, request: LmRequest, key: Option[CacheKey])(using
       RuntimeContext
   ) extends ClosableIterator[LmChunk]:
     private val ready                      = mutable.Queue.empty[LmChunk]
@@ -430,7 +440,7 @@ final case class ManagedLanguageModel(
         case Some(response) => val _ = acceptHit(request, response)
         case None           =>
           val response = LmResponse(outputs = Vector(parts.output), usage = usage)
-          val _        = acceptResponse(request, key(), response)
+          val _        = acceptResponse(request, key, response)
 
     /** Close the stream of the delegate, so that the connection does not stay open. A non-fatal exception of the close
       * does not change the result: the attempt ends in each case.

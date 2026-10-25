@@ -48,16 +48,15 @@ OpenAI-compatible servers, and a wrapper that adds a cache, retries, and usage r
 | `ManagedLanguageModel` | Wraps a model with a cache, a `RetryPolicy`, the history, the usage records, and a cost estimate. By default it has no cache and no retry. |
 | `RetryPolicies` | `never`, `maxRetries`, `maxRetriesOnCodes`, and `exponentialBackoff` (with an optional jitter). |
 | `UsageTracker` / `UsageTracking` | Records the token usage of each model name in a block of code. |
-| `InMemoryLmCache` / `DiskLmCache` / `CompositeLmCache` | A memory cache with a size limit, and a cache with one file for each entry. `CompositeLmCache` reads the memory cache first, then the disk cache. |
-| `LmCacheRegistry` | One shared cache. `ManagedLanguageModel` does not use it on its own: give a cache as `cache = Some(...)`. |
+| `InMemoryLmCache` / `DiskLmCache` / `CompositeLmCache` | A memory cache with a size limit, and a cache with one file for each entry. `CompositeLmCache` reads the memory cache first, then the disk cache. Give a cache to `ManagedLanguageModel` as `cache = Some(...)`. `NoopLmCache` (in `contracts`) stores nothing. |
 
 ## Design notes
 
-- **The cache key.** The key is a SHA-256 hash of the request (`RequestHash`), with the default options of the model.
-  The key includes the `rolloutId`, so two samples with different `rolloutId` values get different entries. A cache
-  hit bills no tokens.
-- **The disk record.** `DiskLmCache` writes one `<key>.json` file for each entry. It reads an old `<key>.bin` entry
-  through a strict `ObjectInputFilter`, and writes it again as JSON.
+- **The cache key.** `ManagedLanguageModel` computes the key of each call one time, and the caches get only that
+  `CacheKey`. The key is a SHA-256 hash of the request (`RequestHash`), with the default options, the mode, and the
+  cache identity of the model. The key includes the `rolloutId`, so two samples with different `rolloutId` values get
+  different entries. A `cacheKey` function changes the data of the key. A cache hit bills no tokens.
+- **The disk record.** `DiskLmCache` writes one `<key>.json` file for each entry.
 - **Streams.** A failure comes as the last chunk of the stream, with a typed error. A stream is complete when a chunk
   has a finish reason. Else the stream gives an `LmStreamAssemblyError`. `ManagedLanguageModel.stream` applies the
   rules of `call`, and the cache stores only a complete stream. The retry policy applies only before the first chunk

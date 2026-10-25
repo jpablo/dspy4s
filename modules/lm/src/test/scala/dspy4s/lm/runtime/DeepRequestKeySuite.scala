@@ -17,9 +17,6 @@ import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.PrimitiveValue
 
-import java.nio.file.Files
-import java.nio.file.Path
-import java.util.Comparator
 import java.util.concurrent.atomic.AtomicInteger
 
 /** A request whose cache key the cache cannot build: a value in the request is nested too deep for the stack of the
@@ -53,14 +50,6 @@ class DeepRequestKeySuite extends FunSuite:
     try Right(body)
     catch case error: StackOverflowError => Left(error.getClass.getSimpleName)
 
-  private def withDirectory[A](body: Path => A): A =
-    val directory = Files.createTempDirectory("dspy4s-deep-key")
-    try body(directory)
-    finally
-      val paths = Files.walk(directory)
-      try paths.sorted(Comparator.reverseOrder()).forEach(path => Files.deleteIfExists(path): Unit)
-      finally paths.close()
-
   /** Answers each call with `response`, and counts the calls. */
   private final class Counting extends LanguageModel:
     val calls: AtomicInteger  = AtomicInteger(0)
@@ -71,32 +60,12 @@ class DeepRequestKeySuite extends FunSuite:
       val _ = calls.incrementAndGet()
       Right(response)
 
-  test("the checked key gives a ValidationError for a request with no key, and the next key works") {
-    RequestHash.forRequestChecked(deep) match
+  test("the key of a request with no key is a ValidationError, and the next key works") {
+    RequestHash.forRequest(deep) match
       case Left(error: ValidationError) => assert(error.message.contains("nested too deep"), error.message)
       case Left(other)                  => fail(s"expected a ValidationError, got $other")
       case Right(key)                   => fail(s"expected a ValidationError, got the key $key")
-    assertEquals(RequestHash.forRequestChecked(plain), Right(RequestHash.forRequest(plain)))
-  }
-
-  test("the in-memory cache does not throw for a request with no key, and stores and reads nothing for it") {
-    val cache = new InMemoryLmCache(CacheCapacity(8))
-    assertEquals(noOverflow(cache.put(deep, response)), Right(()))
-    assertEquals(cache.size, 0, "the cache must not store a response for a request with no key")
-    assertEquals(noOverflow(cache.get(deep)), Right(None))
-    cache.put(plain, response)
-    assertEquals(cache.get(plain).map(_.outputs.map(_.text)), Some(Vector("Paris")))
-  }
-
-  test("the disk cache does not throw for a request with no key, and stores and reads nothing for it") {
-    withDirectory { directory =>
-      val cache = DiskLmCache(directory)
-      assertEquals(noOverflow(cache.put(deep, response)), Right(()))
-      assertEquals(cache.size, 0, "the cache must not store a response for a request with no key")
-      assertEquals(noOverflow(cache.get(deep)), Right(None))
-      cache.put(plain, response)
-      assertEquals(cache.get(plain).map(_.outputs.map(_.text)), Some(Vector("Paris")))
-    }
+    assert(RequestHash.forRequest(plain).isRight)
   }
 
   test("the managed model calls the model for each call of a request with no key, with no cache read or write") {

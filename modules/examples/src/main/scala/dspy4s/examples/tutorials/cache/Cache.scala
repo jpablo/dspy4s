@@ -5,10 +5,10 @@
   * usage-tracking model, snippets 1/3/4/5/6/7/9). The key shape difference: dspy4s has no global
   * `dspy.configure_cache(...)` / `dspy.cache` — caching is a *per-LM composition*. You wrap a `LanguageModel` in
   * `ManagedLanguageModel(delegate, cache = Some(...))`, choosing the cache implementation: `NoopLmCache` (disable),
-  * `InMemoryLmCache` (memory), `DiskLmCache(dir)` (disk), or your own `LmCache`. Usage tracking (snippet 1's
-  * `track_usage=True`) is `RuntimeContext(trackUsage = Some(true))` read inside a `UsageTracking.withNewTracker`. The
-  * Anthropic `cache_control_injection_points` (snippet 2) is a provider-specific prompt-caching hint with no dspy4s
-  * surface and is out of scope.
+  * `InMemoryLmCache` (memory), `DiskLmCache(dir)` (disk), or your own `LmCache`; and a custom key with the `cacheKey`
+  * function. Usage tracking (snippet 1's `track_usage=True`) is `RuntimeContext(trackUsage = Some(true))` read inside a
+  * `UsageTracking.withNewTracker`. The Anthropic `cache_control_injection_points` (snippet 2) is a provider-specific
+  * prompt-caching hint with no dspy4s surface and is out of scope.
   */
 package dspy4s.examples.tutorials.cache
 
@@ -17,13 +17,13 @@ import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
 import dspy4s.core.contracts.LmUsage
-import dspy4s.lm.contracts.{LanguageModel, LmCache, LmRequest, LmResponse}
-import dspy4s.lm.runtime.{DiskLmCache, InMemoryLmCache, ManagedLanguageModel, NoopLmCache, RequestHash, UsageTracking}
+import dspy4s.lm.contracts.{CacheKey, LanguageModel, LmRequest, NoopLmCache}
+import dspy4s.lm.runtime.{DiskLmCache, InMemoryLmCache, ManagedLanguageModel, RequestHash, UsageTracking}
 import dspy4s.programs.strategies.Predict
 import dspy4s.signatures.Signature
+import zio.blocks.schema.DynamicValue
 
 import java.nio.file.Path
-import scala.collection.concurrent.TrieMap
 
 object Cache:
 
@@ -72,17 +72,13 @@ object Cache:
   // | class CustomCache(dspy.clients.Cache):
   // |     def cache_key(self, request, ...): return sha256(orjson.dumps(request["messages"], sort_keys)).hexdigest()
   // | dspy.cache = CustomCache(...)
-  // The dspy4s analogue is implementing `LmCache`. This one keys *only on the messages* (ignoring model and
-  // sampling options), so the same prompt to a different model still hits the cache.
-  final class MessagesOnlyCache extends LmCache:
-    private val store                           = TrieMap.empty[String, LmResponse]
-    private def key(request: LmRequest): String =
-      RequestHash.forRequest(LmRequest(model = "", messages = request.messages))
-    override def get(request: LmRequest): Option[LmResponse]         = store.get(key(request))
-    override def put(request: LmRequest, response: LmResponse): Unit =
-      store.update(key(request), response); ()
+  // The dspy4s analogue is the `cacheKey` function of `ManagedLanguageModel`. This one keys *only on the messages*
+  // (ignoring model and sampling options), so the same prompt to a different model still hits the cache.
+  val messagesOnlyKey: (LmRequest, DynamicValue.Record) => Either[DspyError, CacheKey] =
+    (request, _) => RequestHash.forRequest(LmRequest(model = "", messages = request.messages))
 
-  def customCached(lm: LanguageModel): LanguageModel = ManagedLanguageModel(lm, cache = Some(new MessagesOnlyCache))
+  def customCached(lm: LanguageModel): LanguageModel =
+    ManagedLanguageModel(lm, cache = Some(new InMemoryLmCache()), cacheKey = messagesOnlyKey)
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.cache.cacheMain"
 @main def cacheMain(): Unit =

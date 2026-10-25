@@ -18,7 +18,6 @@ import dspy4s.lm.runtime.{
   CacheCapacity,
   InMemoryLmCache,
   JitterFactor,
-  LmCacheRegistry,
   ManagedLanguageModel,
   RetryCount,
   RetryDelayMillis,
@@ -61,13 +60,8 @@ class LmRuntimeSuite extends FunSuite:
       Some(LmUsage(totalTokens = 9, promptTokens = 4, completionTokens = 5, extras = Map(TokenCategory.Cached -> 3L)))
   )
 
-  override def beforeEach(context: BeforeEach): Unit =
-    RuntimeEnvironment.resetForTests()
-    LmCacheRegistry.resetDefault()
-
-  override def afterEach(context: AfterEach): Unit =
-    RuntimeEnvironment.resetForTests()
-    LmCacheRegistry.resetDefault()
+  override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   test("LanguageModel.acall suspends the call on the supplied execution context") {
     val pending            = ArrayBuffer.empty[Runnable]

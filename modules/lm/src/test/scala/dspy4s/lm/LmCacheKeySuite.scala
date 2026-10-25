@@ -6,7 +6,7 @@ import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmRespon
 import dspy4s.lm.providers.{
   DynamicJson, HttpResponse, HttpStreamResponse, HttpTransport, OpenAiClient, OpenAiLanguageModel
 }
-import dspy4s.lm.runtime.{CacheCapacity, InMemoryLmCache, ManagedLanguageModel}
+import dspy4s.lm.runtime.{CacheCapacity, CompositeLmCache, InMemoryLmCache, ManagedLanguageModel, RequestHash}
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
@@ -216,4 +216,31 @@ class LmCacheKeySuite extends FunSuite:
     assertEquals(cold.call(request).map(_.cacheHit), Right(false))
     assertEquals(hot.call(request).map(_.cacheHit), Right(false))
     assertEquals(sent.size, 2)
+  }
+
+  test("the managed model computes the key one time for each call, also over a composite cache") {
+    given RuntimeContext = RuntimeEnvironment.current
+    var keys             = 0
+    val model            = ManagedLanguageModel(
+      delegate = new RecordingLm(DynamicValue.Record.empty),
+      cache = Some(CompositeLmCache(InMemoryLmCache(CacheCapacity(16)), InMemoryLmCache(CacheCapacity(16)))),
+      cacheKey = (keyRequest, identity) =>
+        keys += 1
+        RequestHash.forRequest(keyRequest, identity)
+    )
+
+    assertEquals(model.call(request).map(_.cacheHit), Right(false))
+    assertEquals(keys, 1, "a miss and its store use one key")
+    assertEquals(model.call(request).map(_.cacheHit), Right(true))
+    assertEquals(keys, 2, "a hit uses one key")
+  }
+
+  test("the key has the mode of the model, not the mode of the request") {
+    given RuntimeContext = RuntimeEnvironment.current
+    val delegate         = new RecordingLm(DynamicValue.Record.empty)
+    val model            = ManagedLanguageModel(delegate = delegate, cache = Some(new InMemoryLmCache(CacheCapacity(16))))
+
+    assertEquals(model.call(request).map(_.cacheHit), Right(false))
+    assertEquals(model.call(request.copy(mode = LmMode.Text)).map(_.cacheHit), Right(true))
+    assertEquals(delegate.calls.size, 1)
   }

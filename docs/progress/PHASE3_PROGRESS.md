@@ -56,6 +56,7 @@ Phase 3 focuses on LM runtime semantics (cache, retry, history, and usage tracki
   - `LmCacheConfig`
   - `LmCaches.build(...)`
   - `LmCacheRegistry` (`current`, `configure`, `resetDefault`)
+  - Later removed: no main code read the registry. Give a cache to `ManagedLanguageModel` as `cache = Some(...)`.
 - Added memory-only/noop configuration behavior for disabled cache modes
 
 8. Retry policy expansion

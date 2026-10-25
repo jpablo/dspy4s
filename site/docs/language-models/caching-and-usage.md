@@ -17,8 +17,10 @@ results should live:
 - `InMemoryLmCache` caches for the life of the process.
 - `DiskLmCache(dir)` persists results to a directory.
 
-You can also implement `LmCache` yourself to control the cache key, for example
-to key only on the messages and ignore the model name.
+You can also give `ManagedLanguageModel` a `cacheKey` function to control the
+cache key, for example to key only on the messages and ignore the model name.
+To keep the results in another store, implement `LmCache` yourself: it gets and
+puts a response for a `CacheKey`.
 
 ## Tracking usage
 
