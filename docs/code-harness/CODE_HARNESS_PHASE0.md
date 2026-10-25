@@ -1,7 +1,8 @@
 # Code harness, Phase 0: an embedded Scala REPL
 
-This document is the full report of "Phase 0. Experiment" in `docs/CODE_HARNESS.md`. The section "Phase 0 results"
-of that document gives a summary. Section numbers such as 8.4 refer to `docs/CODE_HARNESS.md`.
+This document is the full report of "Phase 0. Experiment" in `docs/code-harness/CODE_HARNESS.md`. The section
+"Phase 0 results" of that document gives a summary. Section numbers such as 8.4 refer to
+`docs/code-harness/CODE_HARNESS.md`.
 
 The experiment embeds `dotty.tools.repl.ReplDriver` in a JVM, and it measures seven properties. The data answers
 open question 1 of section 11: a REPL in the same JVM, or a forked JVM.

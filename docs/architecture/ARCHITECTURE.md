@@ -331,10 +331,10 @@ code:
 
 For comparison with the upstream Python DSPy architecture:
 
-- [`port/PORT_SIMILARITIES.md`](port/PORT_SIMILARITIES.md) — what stayed the same (module decomposition, call path, composite programs, optimizer pattern, cache/retry/history semantics).
-- [`port/PORT_DIFFERENCES.md`](port/PORT_DIFFERENCES.md) — what changed shape and why (signature definition, I/O layer, parameter discovery, error handling, save/load, streaming).
-- [`port/PORT_MAP.md`](port/PORT_MAP.md) — per-symbol rename + behavioral-delta ledger.
-- [`port/PORT_LANGUAGE_NOTES.md`](port/PORT_LANGUAGE_NOTES.md) — Python→Scala idiom mechanics with code samples.
+- [`port/PORT_SIMILARITIES.md`](../port/PORT_SIMILARITIES.md) — what stayed the same (module decomposition, call path, composite programs, optimizer pattern, cache/retry/history semantics).
+- [`port/PORT_DIFFERENCES.md`](../port/PORT_DIFFERENCES.md) — what changed shape and why (signature definition, I/O layer, parameter discovery, error handling, save/load, streaming).
+- [`port/PORT_MAP.md`](../port/PORT_MAP.md) — per-symbol rename + behavioral-delta ledger.
+- [`port/PORT_LANGUAGE_NOTES.md`](../port/PORT_LANGUAGE_NOTES.md) — Python→Scala idiom mechanics with code samples.
 
 ## Where to look in the source
 

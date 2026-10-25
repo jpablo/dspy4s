@@ -1,7 +1,7 @@
 # Phase 1 Progress
 
 > **Historical snapshot.** Captures what shipped in this phase. For the current
-> API see [ARCHITECTURE.md](../ARCHITECTURE.md) and [TYPED_SIGNATURES_GUIDE.md](../TYPED_SIGNATURES_GUIDE.md);
+> API see [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) and [TYPED_SIGNATURES_GUIDE.md](../signatures/TYPED_SIGNATURES_GUIDE.md);
 > for the running per-feature ledger see [PORT_MAP.md](../port/PORT_MAP.md) and
 > [PORT_BACKLOG.md](../port/PORT_BACKLOG.md). Symbols referenced below may have been
 > renamed since (e.g. the original `Signature` is now `SignatureLayout` and the

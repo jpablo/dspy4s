@@ -211,7 +211,7 @@ The minimum-viable streaming surface ports:
 The deltas (async-iterator vs producer-thread, per-token vs
 per-field chunk granularity) are in
 `PORT_DIFFERENCES.md` §5 and the Python parity gap in
-[STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md).
+[STREAMING_POSTPONED.md](../streaming/STREAMING_POSTPONED.md).
 
 ## Error contracts
 
@@ -253,4 +253,4 @@ If you've used Python DSPy, the dspy4s API will feel familiar:
 What you have to learn separately is the **Scala-shaped surface for
 defining signatures** (six factories instead of one class form) and
 the **I/O layer** (which Python doesn't have at all). Both are
-covered in [TYPED_SIGNATURES_GUIDE.md](../TYPED_SIGNATURES_GUIDE.md).
+covered in [TYPED_SIGNATURES_GUIDE.md](../signatures/TYPED_SIGNATURES_GUIDE.md).

@@ -251,7 +251,7 @@ Now `OutputField[UserId]` works in a trait spec or builder, and the LM sees a pl
 
 ## Where to look next
 
-- [TYPED_SIGNATURES_GUIDE.md](TYPED_SIGNATURES_GUIDE.md) — the user-facing guide to defining signatures.
+- [TYPED_SIGNATURES_GUIDE.md](../signatures/TYPED_SIGNATURES_GUIDE.md) — the user-facing guide to defining signatures.
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how the domain-valued and record-valued layers fit together at the module level.
 - `modules/signatures/src/main/scala/dspy4s/signatures/Shape.scala` — the three `Shape` implementations
   (`KyoProductShape`, `TupleShape`, `MapShape`).

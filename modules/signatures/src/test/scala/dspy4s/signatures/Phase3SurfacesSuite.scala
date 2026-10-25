@@ -15,7 +15,7 @@ enum P3Tone derives Schema:
 
 case class P3ToneOutput(tone: P3Tone) derives Schema
 
-/** Phase 3 surfaces per docs/TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md.
+/** Phase 3 surfaces per docs/signatures/TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md.
   *
   * The case-class API is already in Phase 2 (`Signature.derived`); these tests round out coverage and add the new
   * SignatureBuilder surface.

@@ -79,7 +79,7 @@ concrete methods, and empty spec traits.
 A spec trait can extend another spec trait. The fields of the parent
 come first, then the fields of the subtrait, each in source order.
 
-See [`modules/examples/.../signatures/SpecExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/signatures/SpecExample.scala).
+See [`modules/examples/.../signatures/SpecExample.scala`](../../modules/examples/src/main/scala/dspy4s/examples/signatures/SpecExample.scala).
 
 ### 2. Function signatures — `Signature.fromType[F]`
 
@@ -143,7 +143,7 @@ Use this when a compact local function type is the clearest description
 of the program boundary. Reach for trait specs when you want the most
 DSPy-like surface or a dedicated named declaration.
 
-See [`modules/examples/.../signatures/FunctionExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/signatures/FunctionExample.scala).
+See [`modules/examples/.../signatures/FunctionExample.scala`](../../modules/examples/src/main/scala/dspy4s/examples/signatures/FunctionExample.scala).
 
 ### 3. Case classes — `Signature.derived[I, O]`
 
@@ -172,7 +172,7 @@ already have a `Schema` (primitives, `FieldCodec.FlatEnum`-companion
 enums, standard collections). `derives Schema` on the case class is
 the one-line way to make that derivation explicit.
 
-See [`modules/examples/.../signatures/CaseClassExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/signatures/CaseClassExample.scala).
+See [`modules/examples/.../signatures/CaseClassExample.scala`](../../modules/examples/src/main/scala/dspy4s/examples/signatures/CaseClassExample.scala).
 
 ### 4. Programmatic builder — `Signature.builder(name)`
 
@@ -199,7 +199,7 @@ to run it. Per-field types come from the `FieldCodec[T]` typeclass,
 so enum metadata (allowed cases, display name) flows through
 automatically.
 
-See [`modules/examples/.../signatures/BuilderExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/signatures/BuilderExample.scala).
+See [`modules/examples/.../signatures/BuilderExample.scala`](../../modules/examples/src/main/scala/dspy4s/examples/signatures/BuilderExample.scala).
 
 ### 5. String DSL — `Signature.fromString("inputs -> outputs")`
 
@@ -456,11 +456,11 @@ These are documented gaps, surfaced so you can plan around them:
 
 ## Where to go from here
 
-- **Examples**: [`modules/examples/.../signatures/`](../modules/examples/src/main/scala/dspy4s/examples/signatures/)
+- **Examples**: [`modules/examples/.../signatures/`](../../modules/examples/src/main/scala/dspy4s/examples/signatures/)
 - **Type bridge** (how Scala types translate to LM-visible types,
   why the wire vocabulary is small, what you can put on the Scala
-  side): [TYPE_BRIDGE.md](TYPE_BRIDGE.md)
-- **Architecture**: [ARCHITECTURE.md](ARCHITECTURE.md)
+  side): [TYPE_BRIDGE.md](../architecture/TYPE_BRIDGE.md)
+- **Architecture**: [ARCHITECTURE.md](../architecture/ARCHITECTURE.md)
 - **Design doc**: [TYPED_SIGNATURES.md](TYPED_SIGNATURES.md)
 - **Implementation arc** (phase-by-phase outcomes, design deviations,
   open questions): [TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md](TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md)
