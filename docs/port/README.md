@@ -24,6 +24,6 @@ The actionable 3.2.1 changes are ported. The analysis of **3.4.0** is in
 
 ## Related (outside this directory)
 
-- [../ARCHITECTURE.md](../ARCHITECTURE.md) — dspy4s on its own terms (not framed against Python).
-- [../STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md) — streaming-specific deferred work and shipped slices.
+- [../architecture/ARCHITECTURE.md](../architecture/ARCHITECTURE.md) — dspy4s on its own terms (not framed against Python).
+- [../streaming/STREAMING_POSTPONED.md](../streaming/STREAMING_POSTPONED.md) — streaming-specific deferred work and shipped slices.
 - [../progress/](../progress/) — per-phase historical snapshots.

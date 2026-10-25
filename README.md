@@ -112,7 +112,7 @@ It is published at <https://jpablo.github.io/dspy4s/>.
   and run it end to end.
 - [Signatures](site/docs/programs/signatures.md): the full set of ways
   to declare inputs and outputs (inline, traits, enums, custom types).
-- [Architecture](docs/ARCHITECTURE.md): the design choices, module graph, and
+- [Architecture](docs/architecture/ARCHITECTURE.md): the design choices, module graph, and
   the static and runtime-defined stacks.
 
 To preview the docs locally:

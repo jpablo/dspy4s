@@ -127,7 +127,7 @@ as authoritative for current status.
 The original Slice A used `prefix: value` line framing and was documented
 as a deliberate behavioral delta. That delta was closed when we rewrote
 `ChatAdapter` + `ChatStreamingState` to use the full `[[ ## field ## ]]`
-+ `[[ ## completed ## ]]` framing — see [`port/PORT_MAP.md`](port/PORT_MAP.md) §4
++ `[[ ## completed ## ]]` framing — see [`port/PORT_MAP.md`](../port/PORT_MAP.md) §4
 for the small residual chunk-emission delta that remains
 (no sentinel chunk on `completed`).
 

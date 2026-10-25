@@ -1213,7 +1213,7 @@ The default kinds of facts:
 | Decision | "Use the memory tree for the controller", with its reason and a status: proposed, accepted, or replaced |
 | Finding | "uniichat subagents have no compaction" |
 | Question | "Who ends a session?", open or answered |
-| Artifact | `docs/CODE_HARNESS.md`, a commit (from the ledger) |
+| Artifact | `docs/code-harness/CODE_HARNESS.md`, a commit (from the ledger) |
 | Source | `uniichat/Memory.ts` (from the ledger) |
 | Concept | "memory tree", "controller", "context strategy" |
 
@@ -1782,8 +1782,8 @@ tree exists. Design A (5.1) stays available as an early check of the foundation.
 ### Phase 0 results
 
 The experiment ran on 2026-10-21, with the 3.10 nightly and JDK 21 on an Apple M4 Pro. The full report is
-`docs/CODE_HARNESS_PHASE0.md`. The code of the experiment is in `tmp/repl-experiment/` of the main checkout, and
-it is not committed.
+`docs/code-harness/CODE_HARNESS_PHASE0.md`. The code of the experiment is in `tmp/repl-experiment/` of the main
+checkout, and it is not committed.
 
 | Check | Result |
 |---|---|

@@ -18,7 +18,7 @@ case class P2EnumOutput(sentiment: P2Sentiment) derives Schema
 case class P2TwoInputs(question: String, context: String) derives Schema
 case class P2TwoOutputs(answer: String, score: Double) derives Schema
 
-/** Phase 2 signature-core suite per docs/TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md.
+/** Phase 2 signature-core suite per docs/signatures/TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md.
   *
   * Maps 1:1 to the plan's Phase 2 test list.
   */

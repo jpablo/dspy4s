@@ -7,8 +7,8 @@ have been renamed since (notably the original `Signature` is now
 
 For current state, see:
 
-- [../ARCHITECTURE.md](../ARCHITECTURE.md) — overall architecture
-- [../TYPED_SIGNATURES_GUIDE.md](../TYPED_SIGNATURES_GUIDE.md) — user-facing API
+- [../architecture/ARCHITECTURE.md](../architecture/ARCHITECTURE.md) — overall architecture
+- [../signatures/TYPED_SIGNATURES_GUIDE.md](../signatures/TYPED_SIGNATURES_GUIDE.md) — user-facing API
 - [../port/PORT_MAP.md](../port/PORT_MAP.md) — per-symbol mapping ledger
 - [../port/PORT_BACKLOG.md](../port/PORT_BACKLOG.md) — phase plan + status
 

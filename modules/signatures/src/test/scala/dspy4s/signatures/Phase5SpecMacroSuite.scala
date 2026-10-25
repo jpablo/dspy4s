@@ -41,7 +41,7 @@ trait P5CollectionSpec extends Spec:
   def question: InputField[String]
   def evidence: OutputField[Map[String, List[String]]]
 
-/** Phase 5 trait-as-spec macro per docs/TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md. */
+/** Phase 5 trait-as-spec macro per docs/signatures/TYPED_SIGNATURES_IMPLEMENTATION_PLAN.md. */
 class Phase5SpecMacroSuite extends FunSuite:
 
   // ── Spec → SignatureLayout derivation ─────────────────────────────────────────

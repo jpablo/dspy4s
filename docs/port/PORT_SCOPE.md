@@ -22,7 +22,7 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
 - Programmatic / class-like signature construction (`SignatureBuilder`, `SignatureLayout.create`)
 - **signatures layer** (`dspy4s.signatures.Signature[I, O]` with case-class
   derivation, function-type macro, trait-spec macro, builder, and string
-  DSL surfaces; see [TYPED_SIGNATURES_GUIDE.md](../TYPED_SIGNATURES_GUIDE.md))
+  DSL surfaces; see [TYPED_SIGNATURES_GUIDE.md](../signatures/TYPED_SIGNATURES_GUIDE.md))
 - Input/Output field metadata (`description`, `prefix`, constraints, defaults)
 - Signature mutation APIs (`append`, `prepend`, `insert`, `delete`,
   `withInstructions`, `withUpdatedField*`) — now `private[dspy4s]` so

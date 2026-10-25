@@ -171,7 +171,7 @@ dspy4s:
    persistence, and long-lived entities. Use the `ai-compaction` branch as the reference for long sessions
    if it merges.
 
-   The code harness proposal ([CODE_HARNESS.md](../CODE_HARNESS.md)) covers most of this gap for a coding
+   The code harness proposal ([CODE_HARNESS.md](../code-harness/CODE_HARNESS.md)) covers most of this gap for a coding
    agent. The newest version, with section 7 "Sessions and the controller", is on branch `code-harness`.
    - A session is an append-only log, kept as a value and in a JSONL file. A pure projection makes the
      `History` of each turn.
