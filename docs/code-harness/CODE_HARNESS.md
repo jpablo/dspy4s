@@ -140,7 +140,7 @@ comment of each file, mainly `Memory.ts`, `Server.ts`, `Agent.ts`, `Tools.ts` an
 | Subagents | `spawn(tasks)` starts one subagent for each task in the background, and it returns their names at once. Each subagent gets the view, its task, and its own flat log. Its report comes back as a `work` message, which starts a new turn. `tell(name, message)` sends a message to an agent that runs or waits. A subagent cannot spawn. |
 | Goal | `/goal` sets a goal. After each turn, a call with no tools answers "yes" or "no" for the goal. On "no", the harness sends "keep working" as a user message. |
 | Tools | JSON tools over MCP: `zoom`, `date`, `spawn`, `tell`, `computer`, and `shell`, `read`, `write`, `edit` on a named device (a computer with the `unii` terminal open). It is not code mode. |
-| Acts | The log records each act, for example a tool job. After a crash, the server reads the log and does not do a recorded act again. |
+| Acts | An act is an action of a client, for example `say`, `import` or `stop`. An act that would change the chat again if done again goes into the log before any effect off the log. After a crash, the server reads the log and does not do a recorded act again. A tool job and its output are not recorded acts. |
 | Style | Namespaces of free functions over plain records. The records are mutable (`Memory` holds maps and counters), but the files are append-only. |
 
 Ideas to use:
@@ -175,7 +175,7 @@ Cordis framework. The English docs under `docs/` describe each subsystem in deta
 | Surface | The model sees a projection of the log (the surface). Each surface event appends or replaces a range, and it must cite each event that it hides (`sourceEventSeqs`). |
 | Projections | Pure folds: `init`, `apply`, an optional `view`, and a version. A snapshot is a consistent cut with an `asOfSeq` mark. The docs say: "Projection is the only read and compute path". |
 | Requests | "Model-visible means logged". The system prompt is node 0 of the surface, and the tools and the configuration are a logged header. Dynamic context is a user-role snapshot, appended only when it changes. |
-| Crash repair | The writer appends end events (`turn/end{interrupted}`), and an error result for each tool call with no result. It never cuts the log. An interrupted tool call has an unknown outcome, and the harness never retries it automatically. |
+| Crash repair | The writer appends end events (`turn/end{interrupted}`), and an error result for each tool call with no result. It never removes a whole event, but it removes a torn or invalid last row before its first new append. An interrupted tool call has an unknown outcome, and the harness never retries it automatically. |
 | Code mode | The PTC executor. Only `run_code` is callable, and the other tools are a generated TypeScript SDK, sorted by name. Each program runs in a new Node process in a sandbox. A persistent REPL is opt-in, and it is never durable. |
 | Typed tool output | Each tool declares an output schema and a pure `render`. Code gets the typed value, and the model gets the rendered text. Only the rendered text is stored, so "replay reproduces presentation but cannot reconstruct canonical intermediate values". |
 | Compaction | First, cuts of large tool outputs with no LM call. Then a summary, only if the context is still too large. A summary that is not smaller than its source is rejected. The summary call sends the same prefix byte for byte, so it uses the prompt cache. |
