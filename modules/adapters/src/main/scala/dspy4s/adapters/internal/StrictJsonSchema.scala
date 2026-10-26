@@ -1,6 +1,7 @@
 package dspy4s.adapters.internal
 
 import dspy4s.core.collections.Traverse
+import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
@@ -13,7 +14,7 @@ import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.PrimitiveValue
 
-import scala.util.matching.Regex
+import scala.collection.mutable
 
 /** The JSON schema of the outputs as OpenAI strict structured outputs take it. The rules come from upstream
   * `_strict_json_schema` (`dspy/clients/legacy_requests.py`) and `_get_structured_outputs_response_format`
@@ -52,7 +53,7 @@ private[adapters] object StrictJsonSchema:
       schema        : DynamicValue.Record,
       optionalFields: Set[String] = Set.empty
   ): Either[DspyError, DynamicValue.Record] =
-    shapeAt(schema, root = schema, refs = Set.empty).map(permitNull(_, optionalFields))
+    shapeAt(schema, Shaping(schema), refs = Set.empty).map(permitNull(_, optionalFields))
 
   /** The JSON schema of the output fields `fields` of a signature that has no typed schema (upstream builds a pydantic
     * model from the annotations). The schema is an object with one property for each field, in the order of `fields`.
@@ -76,51 +77,54 @@ private[adapters] object StrictJsonSchema:
       fields: Vector[FieldSpec],
       known : Map[String, DynamicValue.Record] = Map.empty
   ): Option[DynamicValue.Record] =
-    val properties = fields.foldLeft(Option(Vector.empty[(String, DynamicValue)])) { (acc, field) =>
-      for
-        done     <- acc
-        property <- known.get(field.name).orElse(fieldSchema(field))
-      yield done :+ (field.name -> property)
-    }
-    properties.map(entries =>
-      DynamicValue.Record(Chunk("type" -> str("object"), "properties" -> DynamicValue.Record(Chunk.from(entries))))
-    )
+    Traverse
+      .option(fields)(field => known.get(field.name).orElse(fieldSchema(field)).map(field.name -> _))
+      .map(entries =>
+        DynamicValues.record("type" := "object", "properties" -> DynamicValues.recordFromEntries(entries))
+      )
 
   // ── Strict shape ──────────────────────────────────────────────────────────────────────────────────────────────
 
   /** The keys whose value is a record of named schemas. */
   private val DefinitionKeys: Vector[String] = Vector("$defs", "definitions")
 
-  /** `schema` in strict shape, in the order of upstream `_strict_json_schema`. `root` is the schema that a `$ref` names
-    * a path in. `refs` are the references that the call resolves now: a reference to one of them is a cycle.
+  /** The state of one [[shape]] call: `root` is the schema that a `$ref` names a path in, and `resolved` holds the
+    * target of each `$ref` with other keys in strict shape, by its reference, after the first use of the reference. A
+    * target in strict shape does not change with the place of its use, so the call shapes each target one time.
+    */
+  private final class Shaping(val root: DynamicValue.Record):
+    val resolved: mutable.Map[String, DynamicValue.Record] = mutable.Map.empty
+
+  /** `schema` in strict shape, in the order of upstream `_strict_json_schema`. `refs` are the references that the call
+    * resolves now: a reference to one of them is a cycle.
     */
   private def shapeAt(
-      schema: DynamicValue.Record,
-      root  : DynamicValue.Record,
-      refs  : Set[String]
+      schema : DynamicValue.Record,
+      shaping: Shaping,
+      refs   : Set[String]
   ): Either[DspyError, DynamicValue.Record] =
     for
       defined <- DefinitionKeys.foldLeft[Either[DspyError, DynamicValue.Record]](Right(schema))((acc, key) =>
-                   acc.flatMap(shapeNamed(_, key, root, refs))
+                   acc.flatMap(shapeNamed(_, key, shaping, refs))
                  )
       closed    <- close(defined)
-      withProps <- shapeProperties(closed, root, refs)
-      withItems <- shapeItems(withProps, root, refs)
-      withAnyOf <- shapeEach(oneOfAsAnyOf(withItems), "anyOf", root, refs)
-      withAllOf <- mergeAllOf(withAnyOf, root, refs)
-      resolved  <- resolveRef(dropNullDefault(withAllOf), root, refs)
+      withProps <- shapeProperties(closed, shaping, refs)
+      withItems <- shapeItems(withProps, shaping, refs)
+      withAnyOf <- shapeEach(oneOfAsAnyOf(withItems), "anyOf", shaping, refs)
+      withAllOf <- mergeAllOf(withAnyOf, shaping, refs)
+      resolved  <- resolveRef(dropNullDefault(withAllOf), shaping, refs)
     yield resolved
 
   /** Each schema in the record under `key` (`$defs` or `definitions`) in strict shape. */
   private def shapeNamed(
-      schema: DynamicValue.Record,
-      key   : String,
-      root  : DynamicValue.Record,
-      refs  : Set[String]
+      schema : DynamicValue.Record,
+      key    : String,
+      shaping: Shaping,
+      refs   : Set[String]
   ): Either[DspyError, DynamicValue.Record] =
     DynamicValues.recordGet(schema, key) match
       case Some(named: DynamicValue.Record) =>
-        shapeEntries(named, root, refs).map(shaped => schema.updated(key, shaped))
+        shapeEntries(named, shaping, refs).map(shaped => schema.updated(key, shaped))
       case _ => Right(schema)
 
   /** An object schema with no `additionalProperties` gets `additionalProperties: false`. An open map is a `Left`. */
@@ -149,9 +153,7 @@ private[adapters] object StrictJsonSchema:
     schema.fields.exists((_, inner) => hasOpenMap(inner))
 
   /** The schema of an open map: an object with any properties (upstream `dict`). */
-  val OpenMapSchema: DynamicValue.Record = DynamicValue.Record(
-    Chunk("type" -> str("object"), "additionalProperties" -> DynamicValue.Primitive(PrimitiveValue.Boolean(true)))
-  )
+  val OpenMapSchema: DynamicValue.Record = DynamicValues.record("type" := "object", "additionalProperties" := true)
 
   /** `true` for an object schema whose `additionalProperties` is a schema or `true`. */
   private def isOpenMap(schema: DynamicValue.Record): Boolean =
@@ -162,50 +164,51 @@ private[adapters] object StrictJsonSchema:
 
   /** Each property in strict shape, and each property name in `required`. */
   private def shapeProperties(
-      schema: DynamicValue.Record,
-      root  : DynamicValue.Record,
-      refs  : Set[String]
+      schema : DynamicValue.Record,
+      shaping: Shaping,
+      refs   : Set[String]
   ): Either[DspyError, DynamicValue.Record] =
     DynamicValues.recordGet(schema, "properties") match
       case Some(properties: DynamicValue.Record) =>
-        val required = DynamicValue.Sequence(Chunk.from(properties.fields.toVector.map((name, _) => str(name))))
-        shapeEntries(properties, root, refs).map(shaped =>
+        val required = DynamicValues.sequence(DynamicValues.recordKeys(properties).map(DynamicValues.string))
+        shapeEntries(properties, shaping, refs).map(shaped =>
           schema.updated("required", required).updated("properties", shaped)
         )
       case _ => Right(schema)
 
   private def shapeItems(
-      schema: DynamicValue.Record,
-      root  : DynamicValue.Record,
-      refs  : Set[String]
+      schema : DynamicValue.Record,
+      shaping: Shaping,
+      refs   : Set[String]
   ): Either[DspyError, DynamicValue.Record] =
     DynamicValues.recordGet(schema, "items") match
-      case Some(items: DynamicValue.Record) => shapeAt(items, root, refs).map(shaped => schema.updated("items", shaped))
-      case _                                => Right(schema)
+      case Some(items: DynamicValue.Record) =>
+        shapeAt(items, shaping, refs).map(shaped => schema.updated("items", shaped))
+      case _ => Right(schema)
 
   /** Each schema in the list under `key` (`anyOf` or `allOf`) in strict shape. */
   private def shapeEach(
-      schema: DynamicValue.Record,
-      key   : String,
-      root  : DynamicValue.Record,
-      refs  : Set[String]
+      schema : DynamicValue.Record,
+      key    : String,
+      shaping: Shaping,
+      refs   : Set[String]
   ): Either[DspyError, DynamicValue.Record] =
     DynamicValues.recordGet(schema, key) match
-      case Some(list: DynamicValue.Sequence) => Traverse.either(list.elements.toVector)(shapeValue(_, root, refs))
-          .map(shaped => schema.updated(key, DynamicValue.Sequence(Chunk.from(shaped))))
+      case Some(list: DynamicValue.Sequence) => Traverse.either(list.elements)(shapeValue(_, shaping, refs))
+          .map(shaped => schema.updated(key, DynamicValues.sequence(shaped)))
       case _ => Right(schema)
 
   /** An `allOf` with one schema is merged into `schema`, and the keys of that one schema win. */
   private def mergeAllOf(
-      schema: DynamicValue.Record,
-      root  : DynamicValue.Record,
-      refs  : Set[String]
+      schema : DynamicValue.Record,
+      shaping: Shaping,
+      refs   : Set[String]
   ): Either[DspyError, DynamicValue.Record] =
     DynamicValues.recordGet(schema, "allOf") match
       case Some(list: DynamicValue.Sequence) => list.elements.toVector match
           case Vector(single: DynamicValue.Record) =>
-            shapeAt(single, root, refs).map(shaped => overlay(removed(schema, "allOf"), shaped.fields.toVector))
-          case _ => shapeEach(schema, "allOf", root, refs)
+            shapeAt(single, shaping, refs).map(shaped => DynamicValues.mergeRecords(without(schema, "allOf"), shaped))
+          case _ => shapeEach(schema, "allOf", shaping, refs)
       case _ => Right(schema)
 
   /** A `oneOf` becomes an `anyOf` (OpenAI strict mode takes `anyOf` only). The schemas of a `oneOf` come after the
@@ -217,45 +220,48 @@ private[adapters] object StrictJsonSchema:
         val before = DynamicValues.recordGet(schema, "anyOf") match
           case Some(existing: DynamicValue.Sequence) => existing.elements
           case _                                     => Chunk.empty
-        removed(schema, "oneOf").updated("anyOf", DynamicValue.Sequence(before ++ options.elements))
+        without(schema, "oneOf").updated("anyOf", DynamicValue.Sequence(before ++ options.elements))
       case _ => schema
 
   private def dropNullDefault(schema: DynamicValue.Record): DynamicValue.Record =
     DynamicValues.recordGet(schema, "default") match
-      case Some(_: DynamicValue.Null.type) => removed(schema, "default")
+      case Some(_: DynamicValue.Null.type) => without(schema, "default")
       case _                               => schema
 
-  /** A `$ref` with other keys is replaced by the schema that it names, in strict shape, and the other keys win. */
+  /** A `$ref` with other keys is replaced by the schema that it names, in strict shape, and the other keys win. The
+    * call shapes the target of a reference at its first use only ([[Shaping.resolved]]).
+    */
   private def resolveRef(
-      schema: DynamicValue.Record,
-      root  : DynamicValue.Record,
-      refs  : Set[String]
+      schema : DynamicValue.Record,
+      shaping: Shaping,
+      refs   : Set[String]
   ): Either[DspyError, DynamicValue.Record] =
     DynamicValues.recordGet(schema, "$ref") match
       case Some(DynamicValue.Primitive(PrimitiveValue.String(ref))) if schema.fields.length > 1 =>
         if refs.contains(ref) then Left(ValidationError(s"The $$ref '$ref' is in a cycle"))
         else
-          JsonSchemaRefs.lookup(root, ref).flatMap {
-            case target: DynamicValue.Record => shapeAt(target, root, refs + ref).map(shaped =>
-                overlay(shaped, schema.fields.toVector.filterNot((key, _) => key == "$ref"))
-              )
-            case _ => Right(schema)
-          }
+          val target = shaping.resolved.get(ref) match
+            case Some(shaped) => Right(Some(shaped))
+            case None         => JsonSchemaRefs.lookup(shaping.root, ref).flatMap {
+                case found: DynamicValue.Record => shapeAt(found, shaping, refs + ref).map { shaped =>
+                    shaping.resolved.update(ref, shaped)
+                    Some(shaped)
+                  }
+                case _ => Right(None)
+              }
+          target.map(_.fold(schema)(shaped => DynamicValues.mergeRecords(shaped, without(schema, "$ref"))))
       case _ => Right(schema)
 
   /** Each top-level property in `optionalFields` that does not permit `null` gets a `null` option. */
   private def permitNull(schema: DynamicValue.Record, optionalFields: Set[String]): DynamicValue.Record =
     DynamicValues.recordGet(schema, "properties") match
       case Some(properties: DynamicValue.Record) if optionalFields.nonEmpty =>
-        val widened = properties.fields.toVector.map {
+        val widened = properties.fields.map {
           case (name, property: DynamicValue.Record) if optionalFields.contains(name) && !permitsNull(property) =>
-            name -> DynamicValue.Record(Chunk.single(
-              "anyOf" ->
-                DynamicValue.Sequence(Chunk(property, DynamicValue.Record(Chunk.single("type" -> str("null")))))
-            ))
+            name -> DynamicValues.record("anyOf" -> DynamicValues.sequence(Vector(property, typed("null"))))
           case other => other
         }
-        schema.updated("properties", DynamicValue.Record(Chunk.from(widened)))
+        schema.updated("properties", DynamicValue.Record(widened))
       case _ => schema
 
   private def permitsNull(schema: DynamicValue.Record): Boolean =
@@ -280,58 +286,51 @@ private[adapters] object StrictJsonSchema:
   /** A record of schemas with each schema in strict shape. A value that is not a schema object stays. */
   private def shapeEntries(
       entries: DynamicValue.Record,
-      root   : DynamicValue.Record,
+      shaping: Shaping,
       refs   : Set[String]
   ): Either[DspyError, DynamicValue.Record] =
-    Traverse.either(entries.fields.toVector)((name, value) => shapeValue(value, root, refs).map(name -> _))
-      .map(shaped => DynamicValue.Record(Chunk.from(shaped)))
+    Traverse.either(entries.fields)((name, value) => shapeValue(value, shaping, refs).map(name -> _))
+      .map(DynamicValues.recordFromEntries)
 
   private def shapeValue(
-      value: DynamicValue,
-      root : DynamicValue.Record,
-      refs : Set[String]
+      value  : DynamicValue,
+      shaping: Shaping,
+      refs   : Set[String]
   ): Either[DspyError, DynamicValue] =
     value match
-      case schema: DynamicValue.Record => shapeAt(schema, root, refs)
+      case schema: DynamicValue.Record => shapeAt(schema, shaping, refs)
       case other                       => Right(other)
 
-  /** `base` with each entry of `entries`: a key of `base` takes the new value in place, and a new key goes at the end.
-    */
-  private def overlay(base: DynamicValue.Record, entries: Vector[(String, DynamicValue)]): DynamicValue.Record =
-    entries.foldLeft(base)((acc, entry) => acc.updated(entry._1, entry._2))
-
-  private def removed(schema: DynamicValue.Record, key: String): DynamicValue.Record =
-    DynamicValue.Record(Chunk.from(schema.fields.toVector.filterNot((name, _) => name == key)))
+  /** `schema` with no field `key`. */
+  private def without(schema: DynamicValue.Record, key: String): DynamicValue.Record =
+    DynamicValues.recordFilterKeys(schema, _ != key)
 
   // ── A schema from the field types ─────────────────────────────────────────────────────────────────────────────
-
-  /** A `list[T]` type: the group is `T`. */
-  private val ListOf: Regex = """(?i)list\[(.+)\]""".r
 
   private def fieldSchema(field: FieldSpec): Option[DynamicValue.Record] =
     typeSchema(field.typeRef).map { schema =>
       val withEnum =
         if field.enumValues.nonEmpty && field.typeRef == TypeRef.string then
-          schema.updated("enum", DynamicValue.Sequence(Chunk.from(field.enumValues.map(str))))
+          schema.updated("enum", DynamicValues.sequence(field.enumValues.map(DynamicValues.string)))
         else schema
       field.defaultValue.fold(withEnum)(value =>
         withEnum.updated("default", PythonText.parseJson(PythonText.json(value)).getOrElse(value))
       )
     }
 
+  /** The schema of a field type. `json` has no schema: it is an open map. `list` and `list[T]` give an array, and
+    * `string`, `int`, `double`, and `bool` give their JSON type ([[TypeRef.jsonType]]).
+    */
   private def typeSchema(typeRef: TypeRef): Option[DynamicValue.Record] =
     typeRef match
-      case TypeRef.string         => Some(typed("string"))
-      case TypeRef.int            => Some(typed("integer"))
-      case TypeRef.double         => Some(typed("number"))
-      case TypeRef.bool           => Some(typed("boolean"))
-      case TypeRef.list           => Some(array(DynamicValue.Record.empty))
-      case TypeRef(ListOf(inner)) => typeSchema(TypeRef.fromToken(inner)).map(array)
-      case _                      => None
+      case TypeRef.json => None
+      case TypeRef.list => Some(array(DynamicValue.Record.empty))
+      case _            => typeRef.collection match
+          case Some((TypeRef.Collection.List, item)) => typeSchema(TypeRef.fromToken(item)).map(array)
+          case Some(_)                               => None
+          case None                                  => typeRef.jsonType.map(typed)
 
-  private def typed(name: String): DynamicValue.Record = DynamicValue.Record(Chunk.single("type" -> str(name)))
+  private def typed(name: String): DynamicValue.Record = DynamicValues.record("type" := name)
 
   private def array(items: DynamicValue.Record): DynamicValue.Record =
-    DynamicValue.Record(Chunk("type" -> str("array"), "items" -> items))
-
-  private def str(value: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(value))
+    DynamicValues.record("type" := "array", "items" -> items)

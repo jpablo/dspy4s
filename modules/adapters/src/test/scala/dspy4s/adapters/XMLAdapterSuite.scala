@@ -109,5 +109,4 @@ class XMLAdapterSuite extends FunSuite:
 
     assert(parsed.isRight)
     assertEquals(lookup(parsed.toOption.get.values, "answer"), Some("Brussels": Any))
-    assertEquals(parsed.toOption.get.metadata("fallback"), "text")
   }

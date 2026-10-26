@@ -1,6 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.adapters.ChatAdapter
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.adapters.contracts.ToolParameterSpec
 import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.DspyError
@@ -85,7 +86,7 @@ class PredictHistorySuite extends FunSuite:
     val predict = Predict(signature = Signature.derived[ChatTurn, AgentReply]("Agent"), tools = tools)
 
     RuntimeEnvironment.withSettings(
-      RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter(useNativeFunctionCalling = true)))
+      RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter(native = NativeTools(enabled = true))))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val prediction       = predict(ChatTurn("Find cats.", History.empty))
@@ -107,7 +108,7 @@ class PredictHistorySuite extends FunSuite:
     val predict = Predict(signature = Signature.derived[ChatTurn, AgentReply]("Agent"), tools = tools)
 
     RuntimeEnvironment.withSettings(
-      RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter(useNativeFunctionCalling = true)))
+      RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter(native = NativeTools(enabled = true))))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val first            = predict(ChatTurn("Find cats.", History.empty)).toOption.get

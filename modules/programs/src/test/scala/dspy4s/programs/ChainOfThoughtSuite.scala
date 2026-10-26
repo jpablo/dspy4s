@@ -4,10 +4,7 @@ import zio.blocks.schema.Schema
 
 import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
-import dspy4s.core.contracts.{
-  :=, DspyError, DynamicValues, LmUsage, NotFoundError, RuntimeContext, SignatureLayout,
-  ValidationError
-}
+import dspy4s.core.contracts.{:=, DspyError, DynamicValues, LmUsage, NotFoundError, RuntimeContext, ValidationError}
 import zio.blocks.schema.DynamicValue
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
@@ -63,7 +60,7 @@ class ChainOfThoughtSuite extends FunSuite:
         )
       ))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     )
         : Either[DspyError, ParsedOutput] =
@@ -87,7 +84,7 @@ class ChainOfThoughtSuite extends FunSuite:
           Message(role = MessageRole.User, text = Some("hi"))
         )
       ))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     )
         : Either[DspyError, ParsedOutput] =
@@ -256,7 +253,7 @@ class ChainOfThoughtSuite extends FunSuite:
             Message(role = MessageRole.User, text = Some("hi"))
           )
         ))
-      def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext) =
+      def parse(invocation: AdapterInvocation, output: LmOutput)(using RuntimeContext) =
         Right(ParsedOutput(values =
           rec(
             "reasoning" := 42, // wrong type

@@ -9,7 +9,7 @@
 package dspy4s.examples.learn.programming
 
 import dspy4s.adapters.{ChatAdapter, JSONAdapter}
-import dspy4s.adapters.contracts.Adapter
+import dspy4s.adapters.contracts.{Adapter, NativeTools}
 import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext}
 import dspy4s.examples.Demo
 import dspy4s.programs.IterationLimit
@@ -82,14 +82,14 @@ object Tools:
   //
   // ── Snippet 6 — `ChatAdapter(use_native_function_calling=True)` / `JSONAdapter(...)` ──
   // Ported (PORT_GAPS G-7b): native function-calling is an adapter-level toggle, exactly as upstream. Set
-  // `useNativeFunctionCalling = true`; tools then reach the provider as a native `tools` array (built from the
+  // `native = NativeTools(enabled = true)`; tools then reach the provider as a native `tools` array (built from the
   // predictor's `ToolSpec`s, threaded via `AdapterInvocation.tools`) and the provider's `tool_calls` fill a
   // `tool_calls` output field — gated on the LM's `supportsFunctionCalling`. Per the G-7b decision, ReAct
   // itself stays on the text protocol (native calling is adapter-level, not a ReAct rewrite — matching upstream).
   object NativeFunctionCallingExample:
     // --8<-- [start:native-fc]
-    val nativeChatAdapter: Adapter = ChatAdapter(useNativeFunctionCalling = true)
-    val nativeJsonAdapter: Adapter = JSONAdapter(useNativeFunctionCalling = true)
+    val nativeChatAdapter: Adapter = ChatAdapter(native = NativeTools(enabled = true))
+    val nativeJsonAdapter: Adapter = JSONAdapter(native = NativeTools(enabled = true))
     // --8<-- [end:native-fc]
 
   // ── Snippets 7 / 8 — async tools (`tool.acall`, async→sync conversion) ──

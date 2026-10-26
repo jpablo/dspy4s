@@ -3,6 +3,7 @@ package dspy4s.adapters.internal
 import dspy4s.adapters.contracts.AdapterDemos
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.NativeFunctionCalling
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.History
@@ -10,11 +11,9 @@ import dspy4s.core.contracts.PythonText
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ToolCall
-import dspy4s.core.contracts.ToolCallResult
 import dspy4s.core.contracts.TypeRef
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
-import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 
 /** The text that one adapter gives for the turns of a conversation. [[ConversationHistory]] uses the same text for a
@@ -42,27 +41,25 @@ private[adapters] object ConversationHistory:
 
   /** The messages of one request, in this order: system, demos, history turns, current request.
     *
-    *   - A demo shows each field of `renderLayout`. A demo that has a value for the history field shows that value as a
-    *     field. The history of a demo is not replayed. [[DemoMessages]] gives the order of the demos and the text of an
-    *     incomplete demo.
-    *   - The current request, and each replayed turn, use `renderLayout` without the history field. Only the current
+    *   - The prompt shows the fields of the render layout, `native.promptLayout(invocation.layout)`
+    *     ([[NativeTools.promptLayout]]). It has the history field.
+    *   - A demo shows each field of the render layout. A demo that has a value for the history field shows that value
+    *     as a field. The history of a demo is not replayed. [[DemoMessages]] gives the order of the demos and the text
+    *     of an incomplete demo.
+    *   - The current request, and each replayed turn, use the render layout without the history field. Only the current
     *     request takes the default value of an input field that it does not have.
     *
-    * @param renderLayout
-    *   the layout that the adapter shows in a demo and in a request. It has the history field.
-    * @param useNativeFunctionCalling
-    *   the flag of the adapter. A turn with tool calls becomes an assistant message with `toolCalls` and one
-    *   [[MessageRole.Tool]] message for each result only when this flag is `true` and the model supports function
-    *   calling. Upstream checks the flag only. dspy4s also checks the model, because a model without function calling
-    *   rejects these messages.
+    * @param native
+    *   the native function calling options of the adapter. A turn with tool calls becomes an assistant message with
+    *   `toolCalls` and one [[MessageRole.Tool]] message for each result only when native function calling is active
+    *   ([[NativeTools.isActive]]).
+    * @param systemText
+    *   the text of the system message for the render layout
     */
-  def messages(
-      invocation              : AdapterInvocation,
-      renderLayout            : SignatureLayout,
-      systemText              : String,
-      useNativeFunctionCalling: Boolean,
-      turns                   : TurnText
+  def messages(invocation: AdapterInvocation, native: NativeTools, turns: TurnText)(
+      systemText: SignatureLayout => String
   )(using RuntimeContext): Vector[Message] =
+    val renderLayout  = native.promptLayout(invocation.layout)
     val historyName   = historyField(invocation.layout).map(_.name)
     val requestLayout = historyName.fold(renderLayout) { name =>
       renderLayout.withInputFields(renderLayout.inputFields.filterNot(_.name == name))
@@ -72,11 +69,11 @@ private[adapters] object ConversationHistory:
       turns.assistant(renderLayout, _)
     )
     val history     = historyName.flatMap(History.fromInput(invocation.inputs.values, _)).getOrElse(History.empty)
-    val nativeCalls = NativeFunctionCalling.isActive(useNativeFunctionCalling)
+    val nativeCalls = native.isActive
     val earlier     = history.messages.flatMap(replay(invocation.layout, requestLayout, _, nativeCalls, turns))
     val inputs      = AdapterTextSupport.withInputDefaults(requestLayout.inputFields, invocation.inputs.values)
     val current     = Message(role = MessageRole.User, text = Some(turns.user(requestLayout, inputs, mainRequest = true)))
-    (Message(role = MessageRole.System, text = Some(systemText)) +: demos) ++ earlier :+ current
+    (Message(role = MessageRole.System, text = Some(systemText(renderLayout))) +: demos) ++ earlier :+ current
 
   /** The turns of one history message. A key of the message that is not a field of the signature is ignored.
     *
@@ -93,10 +90,7 @@ private[adapters] object ConversationHistory:
       turns        : TurnText
   ): Vector[Message] =
     // An output field with a null value is absent (upstream `message.get(name) is None`).
-    def has(field: FieldSpec): Boolean =
-      DynamicValues.recordGet(message, field.name) match
-        case None | Some(_: DynamicValue.Null.type) => false
-        case Some(_)                                => true
+    def has(field: FieldSpec): Boolean = DynamicValues.present(message, field.name)
 
     // A replayed user turn keeps the output reminder of its request (upstream f207d35cf), so the messages of one call
     // are the start of the messages of the next call. A message with no input field gets no user turn: a turn of
@@ -143,7 +137,9 @@ private[adapters] object ConversationHistory:
         val assistantTurn = assistantText(requestLayout.outputFields, message)
           .map(text => Message(role = MessageRole.Assistant, text = Some(text)))
         val resultsTurn = Option.when(results.nonEmpty) {
-          val shown = DynamicValues.record(History.ToolCallResultsKey -> toolCallResultsValue(results))
+          val shown = DynamicValues.record(
+            History.ToolCallResultsKey -> History.withToolCallResults(DynamicValue.Record.empty, results)
+          )
           Message(role = MessageRole.User, text = Some(turns.user(ToolCallResultsLayout, shown, mainRequest = false)))
         }
         assistantTurn.toVector ++ resultsTurn.toVector
@@ -159,10 +155,6 @@ private[adapters] object ConversationHistory:
     outputFields = Vector.empty,
     instructions = None
   )
-
-  /** The results in the object form of upstream `ToolCallResults`: `{"tool_call_results": [...]}`. */
-  private def toolCallResultsValue(results: Vector[ToolCallResult]): DynamicValue =
-    DynamicValues.record(History.ToolCallResultsKey -> DynamicValue.Sequence(Chunk.from(results.map(_.toRecord))))
 
   /** The text of a tool message (upstream `_tool_result_content`): the string itself, else the JSON text of the value.
     */

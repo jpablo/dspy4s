@@ -212,11 +212,6 @@ object Refine:
           )
           baseAdapter.format(invocation.copy(layout = layoutWithHint, inputs = inputsWithHint))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
-        RuntimeContext
-    ): Either[DspyError, ParsedOutput] =
-      baseAdapter.parse(layout, output)
-
     override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =

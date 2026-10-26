@@ -26,27 +26,26 @@ private[adapters] object JSONAdapterParser:
     *   field, and an empty sequence when there are none. Else the field is an ordinary JSON key.
     */
   def parse(
-      adapterName                     : String,
       allowTextFallbackForSingleOutput: Boolean,
       layout                          : SignatureLayout,
       output                          : LmOutput,
       nativeCalls                     : Boolean
   ): Either[DspyError, ParsedOutput] =
     if layout.outputFields.exists(NativeFunctionCalling.isToolCallsField) && output.toolCalls.nonEmpty then
-      Right(parseNativeToolTurn(adapterName, layout, output))
+      Right(parseNativeToolTurn(layout, output))
     else
       extractJson(output.text).flatMap(parseJsonObject) match
-        case Right(root) => parseFields(adapterName, layout, root, output, nativeCalls)
+        case Right(root) => parseFields(layout, root, output, nativeCalls)
         case Left(_)     =>
           if allowTextFallbackForSingleOutput && layout.outputFields.size == 1 then
-            AdapterTextSupport.singleOutputTextFallback(adapterName, layout, output)
+            AdapterTextSupport.singleOutputTextFallback(layout, output)
           else
             Left(ParseError("adapter", "JSON parse failed and no fallback was applied", raw = Some(output.text)))
 
   /** A tool turn has no final answer yet: a field that is missing or does not fit its type takes its default, else a
     * null.
     */
-  private def parseNativeToolTurn(adapterName: String, layout: SignatureLayout, output: LmOutput): ParsedOutput =
+  private def parseNativeToolTurn(layout: SignatureLayout, output: LmOutput): ParsedOutput =
     val jsonRoot = extractJson(output.text).flatMap(parseJsonObject).toOption
     val entries  = layout
       .outputFields
@@ -60,10 +59,9 @@ private[adapters] object JSONAdapterParser:
             .map(coerced => field.name -> coerced)
             .getOrElse(field.name -> field.defaultValue.getOrElse(DynamicValue.Null))
       }
-    AdapterTextSupport.parsedOutput(adapterName, output, entries)
+    ParsedOutput(DynamicValues.recordFromEntries(entries))
 
   private def parseFields(
-      adapterName: String,
       layout     : SignatureLayout,
       root       : DynamicValue.Record,
       output     : LmOutput,
@@ -78,14 +76,14 @@ private[adapters] object JSONAdapterParser:
             case Some(raw) => decode(field, raw).map(Some(_))
             case None      => Right(None)
       }
-      .map(entries => AdapterTextSupport.parsedOutput(adapterName, output, entries))
+      .map(entries => ParsedOutput(DynamicValues.recordFromEntries(entries)))
 
   /** The value of the output field `field` (upstream `parse_value`). A JSON null of an optional field is a null. A tool
     * calls field takes a JSON list of calls, or the JSON text of such a list. A JSON string for a field whose type is
-    * not a string goes through the text coercion of the chat format (`AdapterTextSupport.coerceOutputText`), as
-    * upstream `parse_value` reads a string with `json_repair`: `"3"` for an `int` field is `3`, and `"[1, 2]"` for a
-    * `list` field is a list. A JSON value for a `list[T]` field of a string signature must be a list, as in the chat
-    * format. An optional field also takes the lenient forms of `AdapterTextSupport.optionalFallback`.
+    * not a string goes through the text coercion of the chat format (`AdapterTextSupport.outputTextValue`), as upstream
+    * `parse_value` reads a string with `json_repair`: `"3"` for an `int` field is `3`, and `"[1, 2]"` for a `list`
+    * field is a list. A JSON value for a `list[T]` field of a string signature must be a list, as in the chat format.
+    * An optional field also takes the lenient forms of `AdapterTextSupport.optionalFallback`.
     *
     * A field with allowed values takes the rule of `AdapterTextSupport.allowedJsonValue` (decision D7): a JSON string
     * only. Each other JSON value is an error: upstream `parse_value` validates a value that is not a string against the
@@ -176,7 +174,7 @@ private[adapters] object JSONAdapterParser:
       // A string signature type such as `list[str]`: the rule of the chat format (`AdapterTextSupport.listOfValue`).
       case other if AdapterTextSupport.isListOf(other) =>
         AdapterTextSupport.listOfValue(other, Some(value), jsonText(value))
-      case _ => Right(DynamicValue.Primitive(PrimitiveValue.String(jsonText(value))))
+      case _ => Right(DynamicValues.string(jsonText(value)))
 
   /** The text of a JSON value: a string is its text, and each other value is its JSON text ([[PythonText.json]]). */
   private def jsonText(value: DynamicValue): String =

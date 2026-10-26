@@ -83,22 +83,17 @@ class RefinePerModuleAdviceSuite extends FunSuite:
       prompts(tag) = text
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some(text)))))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
-        RuntimeContext
-    ): Either[DspyError, ParsedOutput] =
-      val entries = layout.outputFields.map { field =>
-        field.name -> DynamicValues.recordGet(output.metadata, field.name).getOrElse(DynamicValue.Null)
-      }
-      Right(ParsedOutput(values = DynamicValues.recordFromEntries(entries)))
-
-    /** The invocations of the parse calls that have an invocation. */
+    /** The invocations of the parse calls. */
     val parsed: mutable.ArrayBuffer[AdapterInvocation] = mutable.ArrayBuffer.empty
 
     override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
       parsed += invocation
-      parse(invocation.layout, output)
+      val entries = invocation.layout.outputFields.map { field =>
+        field.name -> DynamicValues.recordGet(output.metadata, field.name).getOrElse(DynamicValue.Null)
+      }
+      Right(ParsedOutput(values = DynamicValues.recordFromEntries(entries)))
 
   /** One LM that plays both task and reflection roles, routed by the prompt's OUTPUTS tag:
     *   - `advice` -> returns a per-module JSON advice dict telling each predictor its own secret token.

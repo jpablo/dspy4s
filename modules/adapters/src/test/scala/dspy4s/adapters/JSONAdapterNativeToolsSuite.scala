@@ -1,6 +1,7 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.adapters.contracts.ToolParameterSpec
 import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.DspyError
@@ -62,7 +63,7 @@ class JSONAdapterNativeToolsSuite extends FunSuite:
       case other                  => fail(s"expected a record to read '$key' from, got $other")
 
   test("JSONAdapter native function-calling injects tools and omits the tool_calls key from the instruction") {
-    val adapter          = JSONAdapter(useNativeFunctionCalling = true)
+    val adapter          = JSONAdapter(native = NativeTools(enabled = true))
     given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = true)))
 
     val prompt = adapter.format(invocation).toOption.get
@@ -74,7 +75,7 @@ class JSONAdapterNativeToolsSuite extends FunSuite:
   }
 
   test("JSONAdapter parse fills the tool_calls field and defaults other fields on a tool turn") {
-    val adapter          = JSONAdapter(useNativeFunctionCalling = true)
+    val adapter          = JSONAdapter(native = NativeTools(enabled = true))
     given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = true)))
 
     val output = LmOutput(

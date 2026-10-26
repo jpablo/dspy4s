@@ -83,6 +83,12 @@ object DynamicValues:
         if index < 0 then None else Some(rec.fields(index)._2)
       case _ => None
 
+  /** `true` when `value` is a record that has the field `name` with a value that is not null (upstream
+    * `values.get(name) is not None`).
+    */
+  def present(value: DynamicValue, name: String): Boolean =
+    recordGet(value, name).exists(found => !isNull(found))
+
   /** The record in `value`. `None` for another value. */
   def asRecord(value: DynamicValue): Option[DynamicValue.Record] =
     value match

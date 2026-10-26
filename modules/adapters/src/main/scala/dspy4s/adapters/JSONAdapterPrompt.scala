@@ -1,9 +1,10 @@
 package dspy4s.adapters
 
-import dspy4s.adapters.contracts.{AdapterInvocation, FormattedPrompt, NativeFunctionCalling, ToolChoice}
+import dspy4s.adapters.contracts.{AdapterInvocation, FormattedPrompt, NativeFunctionCalling, NativeTools}
 import dspy4s.adapters.internal.{ConversationHistory, PromptText, StrictJsonSchema, TurnText}
 import dspy4s.adapters.internal.PromptText.OutputSchema
 import dspy4s.core.contracts.{
+  :=,
   DspyError,
   DynamicValues,
   FieldSpec,
@@ -15,47 +16,26 @@ import dspy4s.core.contracts.{
 }
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
-import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+import zio.blocks.schema.DynamicValue
 
 /** Builds JSONAdapter's system message, demonstrations, conversation history, and provider response-schema options
   * (upstream `JSONAdapter` in `dspy/adapters/json_adapter.py`). The system message and the user turns have the form of
   * the chat adapter, with a JSON object for the outputs.
   */
 private[adapters] object JSONAdapterPrompt:
-  def format(
-      invocation              : AdapterInvocation,
-      useNativeFunctionCalling: Boolean,
-      parallelToolCalls       : Option[Boolean],
-      toolChoice              : Option[ToolChoice]
-  )(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-    val layout       = invocation.layout
-    val renderLayout = NativeFunctionCalling.promptLayout(layout, useNativeFunctionCalling)
-    val schema       = OutputSchema(invocation.outputJsonSchema)
-    val systemText   = PromptText.systemMessage(layout, renderLayout, fieldStructure(renderLayout, schema))
-
-    val messages = ConversationHistory.messages(
-      invocation,
-      renderLayout = renderLayout,
-      systemText,
-      useNativeFunctionCalling,
-      Turns
-    )
-
+  def format(invocation: AdapterInvocation, native: NativeTools)(using
+      RuntimeContext
+  ): Either[DspyError, FormattedPrompt] =
+    val schema   = OutputSchema(invocation.outputJsonSchema)
+    val messages = ConversationHistory.messages(invocation, native, Turns) { shown =>
+      PromptText.systemMessage(invocation.layout, shown, fieldStructure(shown, schema))
+    }
+    val tools = native.toolOptions(invocation)
     Right(
       FormattedPrompt(
         messages = messages,
-        requestOptions = FormattedPrompt.mergeOptions(
-          responseFormatOptions(invocation, useNativeFunctionCalling),
-          NativeFunctionCalling.toolOptions(
-            invocation.layout,
-            invocation.tools,
-            useNativeFunctionCalling,
-            parallelToolCalls,
-            toolChoice
-          )
-        ),
-        removedOptions = NativeFunctionCalling.removedOptions(layout, useNativeFunctionCalling)
+        requestOptions = DynamicValues.mergeRecords(responseFormatOptions(invocation, native.isActive), tools.request),
+        removedOptions = tools.removed
       )
     )
 
@@ -77,7 +57,7 @@ private[adapters] object JSONAdapterPrompt:
       s"[[ ## ${field.name} ## ]]\n${PromptText.placeholder(field, output = false, schema)}"
     )
     val outputs = layout.outputFields.map { field =>
-      field -> DynamicValue.Primitive(PrimitiveValue.String(PromptText.placeholder(field, output = true, schema)))
+      field -> DynamicValues.string(PromptText.placeholder(field, output = true, schema))
     }
     PythonText.strip(
       Vector(
@@ -91,7 +71,7 @@ private[adapters] object JSONAdapterPrompt:
 
   /** The output fields as one JSON object, in the form of `json.dumps(..., indent=2)`. */
   private def outputObject(fields: Vector[(FieldSpec, DynamicValue)]): String =
-    PythonText.json(DynamicValue.Record(Chunk.from(fields.map((field, value) => field.name -> value))), Some(2))
+    PythonText.json(DynamicValues.recordFromEntries(fields.map((field, value) => field.name -> value)), Some(2))
 
   /** The output reminder of the user turn (upstream `JSONAdapter.user_message_output_requirements`). */
   private def outputRequirements(layout: SignatureLayout): String =
@@ -103,9 +83,9 @@ private[adapters] object JSONAdapterPrompt:
     *
     * The schema is the typed output schema of the invocation, else the schema that
     * [[dspy4s.adapters.internal.StrictJsonSchema.fromFields]] builds from the output fields. With native function
-    * calling active ([[NativeFunctionCalling.isActive]]), the schema has no tool calls field. The constraints of the
-    * fields are added, then [[dspy4s.adapters.internal.StrictJsonSchema.shape]] puts the schema in strict shape. The
-    * result is `{"type": "json_schema", "json_schema": {"name": "DSPyProgramOutputs", "schema": ..., "strict": true}}`.
+    * calling active (`nativeActive`), the schema has no tool calls field. The constraints of the fields are added, then
+    * [[dspy4s.adapters.internal.StrictJsonSchema.shape]] puts the schema in strict shape. The result is
+    * `{"type": "json_schema", "json_schema": {"name": "DSPyProgramOutputs", "schema": ..., "strict": true}}`.
     *
     * JSON mode, `{"type": "json_object"}`, replaces the schema when an output is a tool calls field and native function
     * calling is not active, or when no strict schema results: a field type has no schema, or the schema has an open
@@ -117,17 +97,14 @@ private[adapters] object JSONAdapterPrompt:
     * ([[dspy4s.adapters.internal.StrictJsonSchema.hasFieldOpenMap]]). An open root is a failed build: the decision
     * adapter writes it when a field has no schema, and upstream then logs the warning.
     */
-  private def responseFormatOptions(invocation: AdapterInvocation, useNativeFunctionCalling: Boolean)(using
+  private def responseFormatOptions(invocation: AdapterInvocation, nativeActive: Boolean)(using
       ctx: RuntimeContext
   ): DynamicValue.Record =
     val capable = ctx.lm match
       case Some(lm: LanguageModel) => lm.supportsResponseSchema
       case _                       => false
-    if !capable then
-      DynamicValue.Record.empty
-    else
-      val format = responseFormat(invocation, NativeFunctionCalling.isActive(useNativeFunctionCalling))
-      DynamicValue.Record(Chunk.single("response_format" -> format))
+    if !capable then DynamicValue.Record.empty
+    else DynamicValues.record("response_format" -> responseFormat(invocation, nativeActive))
 
   /** The strict `json_schema` format of `invocation`, else JSON mode. See [[responseFormatOptions]]. */
   private def responseFormat(invocation: AdapterInvocation, nativeActive: Boolean): DynamicValue.Record =
@@ -151,25 +128,17 @@ private[adapters] object JSONAdapterPrompt:
         schema
           .map(embedConstraints(_, fields))
           .flatMap(StrictJsonSchema.shape(_, optionalFields).toOption) match
-          case Some(strict) => DynamicValue.Record(
-              Chunk(
-                "type"        -> DynamicValue.Primitive(PrimitiveValue.String("json_schema")),
-                "json_schema" -> DynamicValue.Record(
-                  Chunk(
-                    "name"   -> DynamicValue.Primitive(PrimitiveValue.String(StrictJsonSchema.Name)),
-                    "schema" -> strict,
-                    "strict" -> DynamicValue.Primitive(PrimitiveValue.Boolean(true))
-                  )
-                )
-              )
+          case Some(strict) => DynamicValues.record(
+              "type"        := "json_schema",
+              "json_schema" ->
+                DynamicValues.record("name" := StrictJsonSchema.Name, "schema" -> strict, "strict" := true)
             )
           case None =>
             RuntimeEnvironment.warn("JSONAdapter", SchemaBuildWarning)
             JsonMode
 
   /** The JSON mode format: the response is a JSON object, with no schema. */
-  private val JsonMode: DynamicValue.Record =
-    DynamicValue.Record(Chunk.single("type" -> DynamicValue.Primitive(PrimitiveValue.String("json_object"))))
+  private val JsonMode: DynamicValue.Record = DynamicValues.record("type" := "json_object")
 
   /** The warning when the schema build fails (upstream `JSONAdapter._prepare_response_format`). */
   private val SchemaBuildWarning: String = "Failed to build structured output schema; using JSON mode before execution."
@@ -178,8 +147,7 @@ private[adapters] object JSONAdapterPrompt:
   private def withoutProperties(schema: DynamicValue.Record, names: Set[String]): DynamicValue.Record =
     DynamicValues.recordGet(schema, "properties") match
       case Some(properties: DynamicValue.Record) if names.nonEmpty =>
-        val kept = properties.fields.toVector.filterNot((name, _) => names.contains(name))
-        schema.updated("properties", DynamicValue.Record(Chunk.from(kept)))
+        schema.updated("properties", DynamicValues.recordFilterKeys(properties, name => !names.contains(name)))
       case _ => schema
 
   /** Add each output field's constraints to the corresponding JSON Schema property. */
@@ -204,5 +172,5 @@ private[adapters] object JSONAdapterPrompt:
                   )
               case other => other
             }
-          schema.updated("properties", DynamicValue.Record(Chunk.from(updatedProperties)))
+          schema.updated("properties", DynamicValue.Record(updatedProperties))
         case _ => schema

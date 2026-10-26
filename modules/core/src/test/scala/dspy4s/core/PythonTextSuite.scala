@@ -106,9 +106,17 @@ class PythonTextSuite extends FunSuite:
     assert(parsed.isRight, parsed.left.toString)
   }
 
+  test("a JSON string escapes a control character, and the ASCII form escapes each character after ~") {
+    val text = DynamicValues.string("é\u0001 😀")
+    assertEquals(PythonText.json(text), "\"é\\u0001 😀\"")
+    assertEquals(PythonText.jsonAscii(text), "\"\\u00e9\\u0001\\u2028\\ud83d\\ude00\"")
+  }
+
   test("dedent, splitLines, and strip follow Python") {
     assertEquals(PythonText.dedent("  a\n    b\n  \n  c"), "a\n  b\n\nc")
     assertEquals(PythonText.dedent("\ta\n  b"), "\ta\n  b")
+    // Only `\n` ends a line, as in Python: the margin after `\r` stays.
+    assertEquals(PythonText.dedent("  a\r  b\n  c"), "a\r  b\nc")
     assertEquals(PythonText.splitLines("a\r\nb\rc\u000bd\u001ce f\n"), Vector("a", "b", "c", "d", "e", "f"))
     assertEquals(PythonText.strip("   x　\u0085 "), "x")
   }

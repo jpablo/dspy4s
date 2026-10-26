@@ -3,6 +3,7 @@ package dspy4s.adapters
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, NativeFunctionCalling, ParsedOutput}
 import dspy4s.adapters.internal.{AdapterTextSupport, PromptText, StrictJsonSchema}
 import dspy4s.core.contracts.{
+  :=,
   DspyError,
   DynamicValues,
   FieldSpec,
@@ -18,7 +19,6 @@ import dspy4s.core.contracts.{
 import dspy4s.core.data.Example
 import dspy4s.core.decisions.{DecisionEvidence, DecisionKind, DecisionPlan}
 import dspy4s.lm.contracts.LmOutput
-import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** Experimental. The adapter that asks a generative model for the evidence of the decision outputs of `plan`, and
@@ -61,18 +61,21 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
       inner.format(evidenceInvocation(invocation, evidence).copy(layout = withTaskExamples(invocation, evidence)))
     }
 
-  override def parse(layout: SignatureLayout, output: LmOutput)(using
-      RuntimeContext
-  ): Either[DspyError, ParsedOutput] =
-    decodeWith(layout, output)(evidence => inner.parse(evidence, output))
-
-  /** The parse of `inner` gets the invocation of the request: the evidence layout, and the output schema with the
-    * evidence schemas.
+  /** The output values of `output`: `inner` parses it with the invocation of the request (the evidence layout, and the
+    * output schema with the evidence schemas), then the evidence gives the decisions.
     */
   override def parse(invocation: AdapterInvocation, output: LmOutput)(using
       RuntimeContext
   ): Either[DspyError, ParsedOutput] =
-    decodeWith(invocation.layout, output)(evidence => inner.parse(evidenceInvocation(invocation, evidence), output))
+    for
+      evidence <- DecisionAdapter.evidenceLayout(invocation.layout, plan)
+      parsed   <- inner.parse(evidenceInvocation(invocation, evidence), output)
+      answers  <- answersOf(parsed.values, output.text)
+      decoded  <- plan.decode(answers)
+    yield parsed.copy(
+      values = decoded.fields.foldLeft(parsed.values)((values, entry) => values.updated(entry._1, entry._2)),
+      evidence = plan.kinds.flatMap((name, _) => answers.get(name).map(name -> _))
+    )
 
   /** The invocation of `inner` for the evidence layout `evidence`: no demos, and the output schema with the evidence
     * schemas ([[outputSchema]]).
@@ -82,22 +85,6 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
       layout = evidence,
       demos = Vector.empty,
       outputJsonSchema = Some(outputSchema(invocation, evidence))
-    )
-
-  /** The output values of `output`: `parseEvidence` parses it with the evidence layout of `layout`, then the evidence
-    * gives the decisions.
-    */
-  private def decodeWith(layout: SignatureLayout, output: LmOutput)(
-      parseEvidence: SignatureLayout => Either[DspyError, ParsedOutput]
-  ): Either[DspyError, ParsedOutput] =
-    for
-      evidence <- DecisionAdapter.evidenceLayout(layout, plan)
-      parsed   <- parseEvidence(evidence)
-      answers  <- answersOf(parsed.values, output.text)
-      decoded  <- plan.decode(answers)
-    yield parsed.copy(
-      values = decoded.fields.foldLeft(parsed.values)((values, entry) => values.updated(entry._1, entry._2)),
-      evidence = plan.kinds.flatMap((name, _) => answers.get(name).map(name -> _))
     )
 
   override def formatUserMessageContent(layout: SignatureLayout, values: DynamicValue.Record): String =
@@ -110,13 +97,11 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
     if invocation.demos.isEmpty then evidence
     else
       val names    = invocation.layout.fields.map(_.name).toSet
-      val examples = invocation.demos.map(demo =>
-        DynamicValue.Record(demo.values.fields.filter((name, _) => names.contains(name)))
-      )
+      val examples = invocation.demos.map(demo => DynamicValues.recordFilterKeys(demo.values, names.contains))
       evidence.withInstructions(
         Some(
           invocation.layout.effectiveInstructions + DecisionAdapter.TaskExamplesHeader +
-            PythonText.jsonAscii(DynamicValue.Sequence(Chunk.from(examples)))
+            PythonText.jsonAscii(DynamicValues.sequence(examples))
         )
       )
 
@@ -142,10 +127,10 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
         val fields   = evidence.outputFields.filterNot(NativeFunctionCalling.isToolCallsField)
         val openMaps = fields.filter(_.typeRef == TypeRef.json).map(_.name -> StrictJsonSchema.OpenMapSchema)
         StrictJsonSchema.fromFields(fields, schemas.toMap).getOrElse(
-          DynamicValue.Record(
-            "type"                 -> DecisionAdapter.text("object"),
-            "properties"           -> DynamicValue.Record(Chunk.from(schemas ++ openMaps)),
-            "additionalProperties" -> DynamicValue.Primitive(PrimitiveValue.Boolean(true))
+          DynamicValues.record(
+            "type"                 := "object",
+            "properties"           -> DynamicValues.recordFromEntries(schemas ++ openMaps),
+            "additionalProperties" := true
           )
         )
 
@@ -247,7 +232,7 @@ object DecisionAdapter:
           question  <- plan.question(name)
         yield questions :+ (name -> question)
       }
-      .map(entries => DynamicValue.Record(Chunk.from(entries)))
+      .map(DynamicValues.recordFromEntries)
 
   /** The state of a System One request (upstream `DecisionAdapter._prepare` with `system_one`). Its keys, in this
     * order:
@@ -271,18 +256,15 @@ object DecisionAdapter:
       inputNames.contains
     )
     val examples = Option.when(demos.nonEmpty)(
-      "demos" -> DynamicValue.Sequence(
-        Chunk.from(demos.map(demo => DynamicValues.recordFilterKeys(demo.values, fieldNames.contains)))
-      )
+      "demos" ->
+        DynamicValues.sequence(demos.map(demo => DynamicValues.recordFilterKeys(demo.values, fieldNames.contains)))
     )
-    DynamicValue.Record(
-      Chunk.from(
-        Vector[(String, DynamicValue)](
-          "instructions" -> text(layout.effectiveInstructions),
-          "input_fields" -> text(PromptText.descriptions(layout.inputFields)),
-          "inputs"       -> declared
-        ) ++ examples
-      )
+    DynamicValues.recordFromEntries(
+      Vector[(String, DynamicValue)](
+        "instructions" := layout.effectiveInstructions,
+        "input_fields" := PromptText.descriptions(layout.inputFields),
+        "inputs"       -> declared
+      ) ++ examples
     )
 
   /** The evidence of each decision output of `plan` in the answers of a System One model, by question name, in the
@@ -329,27 +311,17 @@ object DecisionAdapter:
       properties : Vector[(String, DynamicValue)],
       description: Option[String]
   ): DynamicValue.Record =
-    DynamicValue.Record(
-      Chunk.from(
-        Vector(
-          "type"                 -> text("object"),
-          "properties"           -> DynamicValue.Record(Chunk.from(properties)),
-          "required"             -> DynamicValue.Sequence(Chunk.from(properties.map((name, _) => text(name)))),
-          "additionalProperties" -> DynamicValue.Primitive(PrimitiveValue.Boolean(false))
-        ) ++ description.map("description" -> text(_))
-      )
+    DynamicValues.recordFromEntries(
+      Vector(
+        "type"                 := "object",
+        "properties"           -> DynamicValues.recordFromEntries(properties),
+        "required"             -> DynamicValues.sequence(properties.map((name, _) => DynamicValues.string(name))),
+        "additionalProperties" := false
+      ) ++ description.map("description" := _)
     )
 
   /** The schema of a number in [0, 1] (upstream `Probability`). */
   private def probability(description: Option[String]): DynamicValue.Record =
-    DynamicValue.Record(
-      Chunk.from(
-        Vector(
-          "type"    -> text("number"),
-          "minimum" -> DynamicValue.Primitive(PrimitiveValue.Int(0)),
-          "maximum" -> DynamicValue.Primitive(PrimitiveValue.Int(1))
-        ) ++ description.map("description" -> text(_))
-      )
+    DynamicValues.recordFromEntries(
+      Vector("type" := "number", "minimum" := 0, "maximum" := 1) ++ description.map("description" := _)
     )
-
-  private def text(value: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(value))

@@ -378,7 +378,7 @@ Thread `RuntimeContext` (or an LM handle) into the metric scoring path. Tier 1.
 **Status:** Resolved — `response_format` (v1, commit ed2c69f) and native function-calling (G-7b) both done
 
 **Resolution (response_format / structured outputs).** Added the request-influence seam
-`FormattedPrompt.requestOptions` (+ `FormattedPrompt.mergeOptions`); `PredictEngine` and
+`FormattedPrompt.requestOptions` (+ `FormattedPrompt.options`, which merges them); `PredictEngine` and
 `Adapter.execute` (removed in b33) merge it under the per-call/module options. `JSONAdapter`, when the
 ambient LM `supportsResponseSchema` and an `outputJsonSchema` is present, emits
 `response_format: {type:"json_schema", json_schema:{name, schema, strict:false}}` (prose
@@ -387,8 +387,8 @@ schema kept as fallback; malformed schema → prose only).
 **Resolution (G-7b, native function-calling).** Ported faithfully from dspy `adapters/base.py`
 (verified against upstream v3.3.0b1): native calling is an **adapter-level** feature, NOT a
 ReAct change — dspy keeps ReAct on the text protocol in every version, so dspy4s ReAct is
-unchanged. `ChatAdapter`/`JSONAdapter` gained `useNativeFunctionCalling` (off by default,
-+ `parallelToolCalls`); the shared `NativeFunctionCalling` helper injects `tools` (built by
+unchanged. `ChatAdapter`/`JSONAdapter` gained the `native` option (a `NativeTools`: `enabled`, off by default,
++ `parallelToolCalls` and `toolChoice`); the shared `NativeTools` rules inject `tools` (built by
 `ToolSchemaBridge.toOpenAiToolsDynamic`) into `requestOptions` and fills a `TypeRef.toolCalls`
 output field from the provider's `tool_calls`, gated on `supportsFunctionCalling`. Tools reach
 the adapter via `AdapterInvocation.tools` (pure `ToolSpec` data); `DynamicPredict`/`Predict`/`PredictEngine`
@@ -1348,7 +1348,7 @@ function calling is off, `tool_calls` stays a text field (`base.py:91-119`).
   (`modules/programs/.../runtime/PredictEngine.scala:68-94`).
 - Demos omit the missing fields (`modules/adapters/.../ChatAdapterPrompt.scala:24-34`).
 - `tool_calls` is always removed from the prompt (`ChatAdapterPrompt.scala:17`) and comes from provider calls only.
-  The default is `useNativeFunctionCalling = false`, so the field is always empty by default.
+  Native function calling is off by default (now `NativeTools.Off`), so the field is always empty by default.
 - A coercion failure is a `ValidationError` with no field name and no raw text
   (`modules/adapters/.../internal/AdapterTextSupport.scala:92-102`). Upstream raises a parse error with both.
 - Duplicate headers concatenate (`ChatAdapterParser.scala:51-57`); upstream uses the first.

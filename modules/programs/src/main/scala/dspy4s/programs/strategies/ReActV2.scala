@@ -38,7 +38,7 @@ import scala.annotation.tailrec
   * Each turn runs the step predictor [[reactPredict]] once. The step predictor has the layout [[reactLayout]]: it gets
   * the pending inputs, the [[History]] of the run, and the tools, and gives `next_thought` and `tool_calls`. The
   * adapter of the call decides the form of the tool calls: with native function calling (the adapter has
-  * `useNativeFunctionCalling` and the model supports function calling), the request has the tools as provider tools;
+  * `NativeTools(enabled = true)` and the model supports function calling), the request has the tools as provider tools;
   * else the prompt shows the tools as text, and the model writes the tool calls as JSON text.
   *
   * The loop (upstream `ReActV2.forward`), for each turn from 0 to `maxIterations - 1`:
@@ -446,7 +446,7 @@ object ReActV2:
     * type of its `TypeRef`, else `{"type": "string"}`.
     */
   private def argumentSchema(field: FieldSpec, outputJsonSchema: Option[DynamicValue.Record]): DynamicValue =
-    def jsonType: DynamicValue = DynamicValues.record("type" := ToolText.jsonType(field.typeRef).getOrElse("string"))
+    def jsonType: DynamicValue = DynamicValues.record("type" := field.typeRef.jsonType.getOrElse("string"))
     if isPlainPrimitive(field) then jsonType
     else ProgramPromptText.outputProperty(field.name, outputJsonSchema).getOrElse(jsonType)
 

@@ -8,7 +8,7 @@ import dspy4s.core.contracts.updated
 import dspy4s.core.data.Example
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
-import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+import zio.blocks.schema.DynamicValue
 
 /** The messages of the demos of a request (upstream `Adapter.format_demos`). [[AdapterDemos]] gives the rule and its
   * texts. The Chat, JSON, XML, and TwoStep adapters use this one implementation. A demo shows each value that it has,
@@ -49,18 +49,13 @@ private[adapters] object DemoMessages:
       Message(role = MessageRole.Assistant, text = Some(assistantText))
     )
 
+  /** `true` when `values` has a value that is not null for each field of `fields`. */
   private def hasValues(fields: Vector[FieldSpec], values: DynamicValue.Record): Boolean =
-    fields.forall(hasValue(_, values))
+    fields.forall(field => DynamicValues.present(values, field.name))
 
   /** `true` when `values` has the key of `field`, also with a null value. */
   private def hasKey(field: FieldSpec, values: DynamicValue.Record): Boolean =
     DynamicValues.recordGet(values, field.name).isDefined
-
-  /** `true` when `values` has a value that is not null for `field`. */
-  private def hasValue(field: FieldSpec, values: DynamicValue.Record): Boolean =
-    DynamicValues.recordGet(values, field.name) match
-      case None | Some(_: DynamicValue.Null.type) => false
-      case Some(_)                                => true
 
   /** The values that the assistant turn of an incomplete demo shows: `missingOutput` for each output field that the
     * demo does not have. A null value stays, as upstream `outputs.get(k, missing_field_message)`.
@@ -72,6 +67,6 @@ private[adapters] object DemoMessages:
   ): DynamicValue.Record =
     missingOutput.fold(values) { text =>
       layout.outputFields.filterNot(hasKey(_, values)).foldLeft(values) { (shown, field) =>
-        shown.updated(field.name, DynamicValue.Primitive(PrimitiveValue.String(text)))
+        shown.updated(field.name, DynamicValues.string(text))
       }
     }

@@ -263,7 +263,7 @@ Simplify 6 (rank 4). Code-review 6 (rank 3). 4243 main lines, 4943 test lines.
 ### Passes
 
 - (a) The internals and the contracts, about 2190 lines: `internal/`, `contracts/`.
-  - [ ] /simplify
+  - [x] /simplify
   - [ ] /code-review
 - (b) The adapters, the parsers, and the streaming states, about 2050 lines: the files at the top of the source root.
   - [ ] /simplify
@@ -271,12 +271,22 @@ Simplify 6 (rank 4). Code-review 6 (rank 3). 4243 main lines, 4943 test lines.
 
 ### Simplify findings
 
-- [ ] Private copies of `DynamicValues.string`: `DecisionAdapter.scala:353` (`text`), `contracts/ToolContracts.scala:102` (`str`), `contracts/NativeFunctionCalling.scala:111` (`str`), `internal/StrictJsonSchema.scala` (`str`). Use the core helper. (found in the lm pass)
+- [x] Private copies of `DynamicValues.string`: `DecisionAdapter.scala` (`text`), `contracts/ToolContracts.scala` (`str`), `contracts/NativeFunctionCalling.scala` (`str`), `internal/StrictJsonSchema.scala` (`str`). Use the core helper. (found in the lm pass) Fixed in the simplify (a) pass: the four copies are gone. The adapters use `DynamicValues.string`, `DynamicValues.record` with `:=`, `mergeRecords`, `recordFilterKeys`, the new `DynamicValues.present`, `Traverse`, and `History.withToolCallResults`.
 - [x] Three JSON readers with different number rules: internal/JsonDynamic.scala (removed), internal/PythonText.scala (moved to core; ujson BufferedValue), and `JSONAdapterParser.scala`. Use one reader. Fixed: core `PythonText.parseJson` is the one reader (Python number rule, one pass, a `StackOverflowError` guard), and `JsonDynamic` is gone. The ujson dependency moved from adapters to core.
 - [ ] (from simplify (a)) Core `ToolCall.argumentsRecord` reads an `arguments` JSON text with `DynamicValues.parseJsonRecord` (the zio-blocks number rule), and the text can come from a tool call that the model wrote. The adapters read the same kind of text with `PythonText.parseJson`. The lm module declares ujson in `build.sbt` but does not use it.
 - [x] `contracts/AdapterInvocation.scala`: `outputJsonSchema: Option[String]` is parsed again in `DecisionAdapter.scala`, `JSONAdapterPrompt.scala` (two times, with two readers), `internal/PromptText.scala`, and `internal/ProgramPromptText.scala` (once for each field). `DecisionAdapter.scala` writes it back to text. Fixed: `Shape.jsonSchema` and `AdapterInvocation.outputJsonSchema` are `Option[DynamicValue.Record]`, built once for each shape. Core `JsonSchemaRefs` has the one root-`$ref` rule.
-- [ ] `contracts/ToolContracts.scala:31-65`, `:103-104`: `toOpenAiTools` (`Map[String, Any]`), `ToolCallData`, and `fromOutput`. Only tests use them.
-- [ ] `ChatAdapterPrompt.scala:14-37` repeats `JSONAdapterPrompt.scala:17-51`. Three adapters repeat the same native-tool options (the flag, `parallelToolCalls`, and `toolChoice`). Four files have their own copy of the `str` helper.
+- [x] `contracts/ToolContracts.scala`: `toOpenAiTools` (`Map[String, Any]`), `ToolCallData`, and `fromOutput`. Only tests use them. Fixed in the simplify (a) pass: deleted. The JSON type of a tool parameter is core `TypeRef.jsonType`, which programs `ToolText` and `ReActV2` also use, so an `int` parameter is `integer` and a `list` parameter is `array`, as upstream.
+- [x] `ChatAdapterPrompt.scala` repeats `JSONAdapterPrompt.scala`. Three adapters repeat the same native-tool options (the flag, `parallelToolCalls`, and `toolChoice`). Four files have their own copy of the `str` helper. Fixed in the simplify (a) pass: one `NativeTools` value (`contracts/NativeFunctionCalling.scala`) with `isActive`, `promptLayout`, and `toolOptions`. The Chat and JSON adapters have one `native` field, and `ConversationHistory.messages` derives the layout of the prompt from it.
+- [x] (simplify (a)) Unused fields and aliases: `ParsedOutput.rawText` and `metadata`, `FormattedPrompt.metadata`, the `adapterName` parameter, AdapterErrors.scala, `PromptText.instructions`, and `FormattedPrompt.mergeOptions`. Fixed: removed.
+- [x] (simplify (a)) Two `parse` overloads, and each wrapper overrode both. Fixed: `parse(invocation, output)` is the one abstract method; the layout form is a final convenience.
+- [x] (simplify (a)) Three list-type rules on the text of `TypeRef`, and three TypeRef-to-JSON-type maps (one wrong: `int` to `number`). Fixed: core `TypeRef.collection` and `TypeRef.jsonType`. Each place keeps its own accepted kinds.
+- [x] (simplify (a)) Copies of core helpers (`overlay`, `removed`, `recordAt`, two "present and not null" checks, hand-written traversals, the tool-call record shapes). Fixed: the core helpers, and a new `DynamicValues.present`.
+- [x] (simplify (a)) `PythonText.dedent` compiled a regex on each call, the JSON writer called `String.format` for each escaped character, and `OutputSchema` and `StrictJsonSchema` repeated work for each field and each `$ref`. Fixed: a line loop, a hex table, lazy values, and a memo for each `shape` call. `dedent` now ends a line only at `\n`, as Python does.
+- [ ] (simplify (a), skipped) The system message, the demo messages, and the strict `response_format` depend only on the signature, but each call builds them again. A cache across calls needs a key and a place to live. Skipped: the typed schema already removed most of the repeated work.
+- [ ] (simplify (a), design) The native-tool controls (`tools`, `tool_choice`, `parallel_tool_calls`, `response_format`) go to the provider as magic keys in the option bag, and `lm/providers/ResponsesWire.scala` reads them back by name. Typed fields on `LmRequest` (with `ToolSpec` and `ToolChoice` in the lm contracts) are the typed form. Programs `ReActV2` writes the `tool_choice` shape by hand.
+- [ ] (simplify (a), design) The adapter type coercion (`internal/AdapterTextSupport.scala` `coerceText` and the optional fallback, and `JSONAdapterParser.coerce`) has other rules than core `LenientValues` and the signatures decode: a required `int` rejects `"$1,200"` but an `Option[Int]` accepts it, `"3.0"` is an `Int` here but not in `LenientValues.toInt`, and an optional `int` out of range becomes a `Long`. One `LenientValues.coerce(value, TypeRef)` is the general form. Check the upstream rules first.
+- [ ] (simplify (a)) The native-tool gate cases where the old predicates disagreed, kept as they were: with the flag on, function calling, a tool-calls field, and no `tools`, the prompt hides the tool fields but no tools go to the provider; with the flag on and no function calling, the tool options of the call config stay. Check them in the code review.
+- [ ] (docs) The `Adapter` row of `modules/adapters/README.md` names an `execute` method that no longer exists.
 
 ### Code-review findings
 
@@ -456,7 +466,7 @@ Simplify 2 (rank 12). Code-review 3 (rank 10). 396 main lines, 586 test lines.
 
 - [ ] `McpTools.scala:210` (`string`) is a private copy of `DynamicValues.string`. (found in the lm pass)
 - [ ] `JavaJson.scala:90` reads `productElement(0)` by reflection for dates and UUIDs, which is fragile. Line `:88` maps `Unit` to an empty map.
-- [ ] `McpTools.scala:198-206` (`typeRefOf`) is the inverse of programs `internal/ToolText.scala` (`jsonType`). The two copies of one mapping can become different.
+- [ ] `McpTools.scala:198-206` (`typeRefOf`) is the inverse of core `TypeRef.jsonType` (before: programs `internal/ToolText.scala` `jsonType`). The two copies of one mapping can become different.
 - [ ] `McpTools.scala:90-99` (`convert`) uses alias vals and an anonymous `ToolFunction`.
 - [ ] Optional: `JavaJson.toDynamic` walks the Java JSON tree by hand. A path through JSON text and the zio-blocks codec can replace it.
 

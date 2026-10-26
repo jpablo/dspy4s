@@ -3,6 +3,7 @@ package dspy4s.adapters
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterDemos
 import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.adapters.contracts.ToolChoice
 import dspy4s.adapters.contracts.ToolParameterSpec
 import dspy4s.adapters.contracts.ToolSpec
@@ -183,19 +184,9 @@ class AdapterOutputRulesSuite extends FunSuite:
 
   test("a chat adapter falls back to a JSON adapter with its native function-calling options") {
     assertEquals(ChatAdapter().fallback, Some(JSONAdapter()))
-    val native = ChatAdapter(
-      useNativeFunctionCalling = true,
-      parallelToolCalls = Some(true),
-      toolChoice = Some(ToolChoice.Required)
-    )
-    assertEquals(
-      native.fallback,
-      Some(JSONAdapter(
-        useNativeFunctionCalling = true,
-        parallelToolCalls = Some(true),
-        toolChoice = Some(ToolChoice.Required)
-      ))
-    )
+    val tools  = NativeTools(enabled = true, parallelToolCalls = Some(true), toolChoice = Some(ToolChoice.Required))
+    val native = ChatAdapter(native = tools)
+    assertEquals(native.fallback, Some(JSONAdapter(native = tools)))
     assertEquals(ChatAdapter(useJsonAdapterFallback = false).fallback, None)
     assertEquals(JSONAdapter().fallback, None)
     assertEquals(XMLAdapter().fallback, None)
@@ -332,12 +323,13 @@ class AdapterOutputRulesSuite extends FunSuite:
     Vector(
       "ChatAdapter"                -> agentText(ChatAdapter(), functionCalling = true),
       "JSONAdapter"                -> agentText(JSONAdapter(), functionCalling = true),
-      "ChatAdapter, no LM support" -> agentText(ChatAdapter(useNativeFunctionCalling = true), functionCalling = false)
+      "ChatAdapter, no LM support" ->
+        agentText(ChatAdapter(native = NativeTools(enabled = true)), functionCalling = false)
     ).foreach { (label, text) =>
       assert(text.contains("tool_calls"), s"$label: $text")
     }
     // With native function calling active, the provider gives the tool calls, so the prompt does not ask for them.
-    val native = agentText(ChatAdapter(useNativeFunctionCalling = true), functionCalling = true)
+    val native = agentText(ChatAdapter(native = NativeTools(enabled = true)), functionCalling = true)
     assert(!native.contains("[[ ## tool_calls ## ]]"), native)
   }
 
@@ -367,7 +359,7 @@ class AdapterOutputRulesSuite extends FunSuite:
     val output           =
       LmOutput(text = "[[ ## next_thought ## ]]\nI search.\n\n[[ ## completed ## ]]", toolCalls = Vector(search))
     assertEquals(
-      ChatAdapter(useNativeFunctionCalling = true).parse(agentLayout, output).map(parsed =>
+      ChatAdapter(native = NativeTools(enabled = true)).parse(agentLayout, output).map(parsed =>
         value(parsed.values, "tool_calls")
       ),
       Right(Some(DynamicValue.Sequence(Chunk(search.toRecord)): DynamicValue))

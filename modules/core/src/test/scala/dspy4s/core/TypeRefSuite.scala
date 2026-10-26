@@ -18,3 +18,22 @@ class TypeRefSuite extends FunSuite:
     assertEquals(TypeRef("custom").pythonTypeName, None)
     assertEquals(TypeRef.toolCalls.pythonTypeName, None)
   }
+
+  test("well-known wire types have the JSON types of upstream Tool._parse_function") {
+    assertEquals(
+      Vector(TypeRef.string, TypeRef.int, TypeRef.double, TypeRef.bool, TypeRef.list, TypeRef.json).map(_.jsonType),
+      Vector("string", "integer", "number", "boolean", "array", "object").map(Some(_))
+    )
+    assertEquals(TypeRef.toolCalls.jsonType, None)
+    assertEquals(TypeRef("list[str]").jsonType, None)
+  }
+
+  test("a collection type with an item type gives its kind and the text of its item type") {
+    assertEquals(TypeRef("list[str]").collection, Some((TypeRef.Collection.List, "str")))
+    assertEquals(TypeRef("tuple[int, str]").collection, Some((TypeRef.Collection.Tuple, "int, str")))
+    assertEquals(TypeRef("set[str]").collection, Some((TypeRef.Collection.Set, "str")))
+    assertEquals(TypeRef("frozenset[list[int]]").collection, Some((TypeRef.Collection.FrozenSet, "list[int]")))
+    assertEquals(TypeRef.list.collection, None)
+    assertEquals(TypeRef("list[]").collection, None)
+    assertEquals(TypeRef("dict[str, int]").collection, None)
+  }

@@ -12,7 +12,6 @@ import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.CompileStartEvent
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
@@ -68,10 +67,10 @@ class GivenContextCompileSuite extends FunSuite:
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       val _ = formatted.synchronized(formatted += invocation.layout.outputFields.map(_.name))
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("question")))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      Right(ParsedOutput(values = rec(layout.outputFields.map(_.name := output.text)*)))
+      Right(ParsedOutput(values = rec(invocation.layout.outputFields.map(_.name := output.text)*)))
 
   /** An optimizer that records the adapter of the context of its `compile` body, and runs the student one time. */
   private final class ProbeOptimizer extends Teleprompter[DynamicPredict]:

@@ -1,6 +1,6 @@
 package dspy4s.adapters
 
-import dspy4s.adapters.contracts.{AdapterInvocation, FormattedPrompt, NativeFunctionCalling, ToolChoice}
+import dspy4s.adapters.contracts.{AdapterInvocation, FormattedPrompt, NativeTools}
 import dspy4s.adapters.internal.{ConversationHistory, PromptText, TurnText}
 import dspy4s.adapters.internal.PromptText.OutputSchema
 import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, PythonText, RuntimeContext, SignatureLayout}
@@ -11,30 +11,15 @@ import zio.blocks.schema.DynamicValue
   * The JSON adapter uses the marker form of the input fields too.
   */
 private[adapters] object ChatAdapterPrompt:
-  def format(
-      invocation              : AdapterInvocation,
-      useNativeFunctionCalling: Boolean,
-      parallelToolCalls       : Option[Boolean],
-      toolChoice              : Option[ToolChoice]
-  )(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-    val layout       = invocation.layout
-    val renderLayout = NativeFunctionCalling.promptLayout(layout, useNativeFunctionCalling)
-    val schema       = OutputSchema(invocation.outputJsonSchema)
-    val systemText   = PromptText.systemMessage(layout, renderLayout, fieldStructure(renderLayout, schema))
-
-    Right(
-      FormattedPrompt(
-        messages = ConversationHistory.messages(invocation, renderLayout, systemText, useNativeFunctionCalling, Turns),
-        requestOptions = NativeFunctionCalling.toolOptions(
-          layout,
-          invocation.tools,
-          useNativeFunctionCalling,
-          parallelToolCalls,
-          toolChoice
-        ),
-        removedOptions = NativeFunctionCalling.removedOptions(layout, useNativeFunctionCalling)
-      )
-    )
+  def format(invocation: AdapterInvocation, native: NativeTools)(using
+      RuntimeContext
+  ): Either[DspyError, FormattedPrompt] =
+    val schema   = OutputSchema(invocation.outputJsonSchema)
+    val messages = ConversationHistory.messages(invocation, native, Turns) { shown =>
+      PromptText.systemMessage(invocation.layout, shown, fieldStructure(shown, schema))
+    }
+    val tools = native.toolOptions(invocation)
+    Right(FormattedPrompt(messages = messages, requestOptions = tools.request, removedOptions = tools.removed))
 
   /** The marker-framed text of a turn. A user turn of a current request ends with the output reminder. An assistant
     * turn ends with the completed marker.

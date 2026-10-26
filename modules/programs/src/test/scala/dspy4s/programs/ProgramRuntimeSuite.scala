@@ -43,13 +43,10 @@ class ProgramRuntimeSuite extends FunSuite:
 
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(
-        FormattedPrompt(
-          messages = Vector(Message(role = MessageRole.User, text = Some("test"))),
-          metadata = Map.empty
-        )
+        FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("test"))))
       )
 
-    override def parse(signature: dspy4s.core.contracts.SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = rec("text" := output.text)))

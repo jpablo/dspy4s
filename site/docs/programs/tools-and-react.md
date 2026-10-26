@@ -50,6 +50,6 @@ function-calling support.
 |---|---|
 | The model to fetch data or take an action | `ReAct` with one or more tools |
 | A tool from an existing method | `ToolFunction.fromMethod(method)` |
-| Structured tool calls on a capable model | `ChatAdapter(useNativeFunctionCalling = true)` |
+| Structured tool calls on a capable model | `ChatAdapter(native = NativeTools(enabled = true))` |
 
 Next: [Composing programs](composing.md).

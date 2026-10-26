@@ -10,7 +10,6 @@ import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.LmChunk
@@ -49,10 +48,10 @@ class StreamifyGivenContextSuite extends FunSuite:
     override val name: String                                                                                    = "passthrough"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("x")))))
-    override def parse(signature: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      Right(ParsedOutput(values = rec(signature.outputFields.map(_.name := output.text)*)))
+      Right(ParsedOutput(values = rec(invocation.layout.outputFields.map(_.name := output.text)*)))
 
   private final class Recorder extends CallbackHandler:
     private val buffer                                                     = ArrayBuffer.empty[CallbackEvent]

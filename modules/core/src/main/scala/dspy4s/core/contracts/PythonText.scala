@@ -94,7 +94,7 @@ private[dspy4s] object PythonText:
       )
 
   /** The text between the two `quote` characters at the ends of `text`, or `None`. */
-  private def quotedBody(text: String, quote: Char): Option[String] =
+  def quotedBody(text: String, quote: Char): Option[String] =
     Option.when(text.length > 1 && text.head == quote && text.last == quote)(text.substring(1, text.length - 1))
 
   /** The text of the body `body` of a string in `quote` characters, with each escape that `escape` decodes. `escape`
@@ -192,7 +192,18 @@ private[dspy4s] object PythonText:
         else margin.zip(indent).takeWhile(_ == _).map(_._1).mkString
       }
     }
-    margin.filter(_.nonEmpty).fold(cleaned)(prefix => s"(?m)^${Regex.quote(prefix)}".r.replaceAllIn(cleaned, ""))
+    margin.filter(_.nonEmpty).fold(cleaned)(withoutMargin(cleaned, _))
+
+  /** `text` with no `margin` at the start of each line. Only `\n` ends a line, as in Python. */
+  private def withoutMargin(text: String, margin: String): String =
+    val out   = new java.lang.StringBuilder(text.length)
+    var start = 0
+    while start < text.length do
+      val lineEnd = text.indexOf('\n', start)
+      val end     = if lineEnd < 0 then text.length else lineEnd + 1
+      out.append(text, if text.startsWith(margin, start) then start + margin.length else start, end)
+      start = end
+    out.toString
 
   // The patterns of `textwrap`. The flag `d` makes `\n` the only line break, as in Python.
   private val WhitespaceOnlyLine: Regex = "(?md)^[ \t]+$".r
@@ -216,7 +227,7 @@ private[dspy4s] object PythonText:
     */
   def json(value: DynamicValue, indent: Option[Int] = None): String =
     val out = new StringBuilder
-    writeJson(value, JsonStyle(indent, ascii = false), 0, out)
+    writeJson(value, new JsonStyle(indent, ascii = false), 0, out)
     out.toString
 
   /** Python `json.dumps(value)` with the default `ensure_ascii=True`: as [[json]], but each character that is not a
@@ -225,15 +236,34 @@ private[dspy4s] object PythonText:
     */
   def jsonAscii(value: DynamicValue): String =
     val out = new StringBuilder
-    writeJson(value, JsonStyle(indent = None, ascii = true), 0, out)
+    writeJson(value, new JsonStyle(indent = None, ascii = true), 0, out)
     out.toString
 
-  /** The options of `json.dumps`: `indent`, and `ascii` for `ensure_ascii=True`. */
-  private final case class JsonStyle(indent: Option[Int], ascii: Boolean)
+  /** The options of `json.dumps`: `indent`, and `ascii` for `ensure_ascii=True`. One style serves one call of [[json]]
+    * or [[jsonAscii]]. It keeps the line start of each indent level that the call uses, so that the call builds each
+    * indent text one time.
+    */
+  private final class JsonStyle(indent: Option[Int], val ascii: Boolean):
+    private val lineStarts = mutable.ArrayBuffer.empty[String]
+
+    /** The text between two items: `","` with an indent, else `", "`. */
+    val separator: String = if indent.isDefined then "," else ", "
+
+    /** The level of the items of a container at `level`: one level more with an indent. */
+    def nested(level: Int): Int = if indent.isDefined then level + 1 else level
+
+    /** The text before an item and before the close of a container at `level`: a line break and the indent of `level`
+      * with an indent, else no text.
+      */
+    def lineStart(level: Int): String =
+      indent.fold("") { width =>
+        while lineStarts.length <= level do lineStarts += "\n" + " " * (width * lineStarts.length)
+        lineStarts(level)
+      }
 
   private def writeJson(value: DynamicValue, style: JsonStyle, level: Int, out: StringBuilder): Unit =
-    def writeFields(fields: Vector[(String, DynamicValue)]): Unit = writeObject(fields, style, level, out)
-    def writeText(text    : String): Unit                         = quote(text, style.ascii, out)
+    def writeFields(fields: Iterator[(String, DynamicValue)]): Unit = writeObject(fields, style, level, out)
+    def writeText(text    : String): Unit                           = quote(text, style.ascii, out)
     unwrap(value) match
       case _: DynamicValue.Null.type                             => out ++= "null"
       case DynamicValue.Primitive(PrimitiveValue.String(text))   => writeText(text)
@@ -246,21 +276,21 @@ private[dspy4s] object PythonText:
       case NumberText(text)                      => out ++= text
       case primitive: DynamicValue.Primitive     => writeText(DynamicValues.renderText(primitive))
       case EnumCase(name)                        => writeText(name)
-      case DynamicValue.Variant(caseName, inner) => writeFields(Vector(caseName -> inner))
-      case record: DynamicValue.Record           => writeFields(record.fields.toVector)
-      case map: DynamicValue.Map                 => writeFields(entriesOf(map))
+      case DynamicValue.Variant(caseName, inner) => writeFields(Iterator.single(caseName -> inner))
+      case record: DynamicValue.Record           => writeFields(record.fields.iterator)
+      case map: DynamicValue.Map                 => writeFields(map.entries.iterator.map((key, item) => keyText(key) -> item))
       case sequence: DynamicValue.Sequence       =>
-        writeContainer(sequence.elements.toVector, "[", "]", style.indent, level, out)((item, nested) =>
+        writeContainer(sequence.elements.iterator, '[', ']', style, level, out)((item, nested) =>
           writeJson(item, style, nested, out)
         )
 
   private def writeObject(
-      fields: Vector[(String, DynamicValue)],
+      fields: Iterator[(String, DynamicValue)],
       style : JsonStyle,
       level : Int,
       out   : StringBuilder
   ): Unit =
-    writeContainer(fields, "{", "}", style.indent, level, out) { (field, nested) =>
+    writeContainer(fields, '{', '}', style, level, out) { (field, nested) =>
       quote(field._1, style.ascii, out)
       out ++= ": "
       writeJson(field._2, style, nested, out)
@@ -270,32 +300,25 @@ private[dspy4s] object PythonText:
     * line of its own, and the separator is `","`. An empty container is `open` and `close` only.
     */
   private def writeContainer[A](
-      items : Vector[A],
-      open  : String,
-      close : String,
-      indent: Option[Int],
-      level : Int,
-      out   : StringBuilder
+      items: Iterator[A],
+      open : Char,
+      close: Char,
+      style: JsonStyle,
+      level: Int,
+      out  : StringBuilder
   )(writeItem: (A, Int) => Unit): Unit =
-    out ++= open
-    if items.nonEmpty then
-      indent match
-        case Some(width) =>
-          val inner = "\n" + " " * (width * (level + 1))
-          items.zipWithIndex.foreach { (item, index) =>
-            if index > 0 then out += ','
-            out ++= inner
-            writeItem(item, level + 1)
-          }
-          out ++= "\n" + " " * (width * level)
-        case None => items.zipWithIndex.foreach { (item, index) =>
-            if index > 0 then out ++= ", "
-            writeItem(item, level)
-          }
-    out ++= close
-
-  private def entriesOf(map: DynamicValue.Map): Vector[(String, DynamicValue)] =
-    map.entries.toVector.map((key, item) => keyText(key) -> item)
+    out += open
+    if items.hasNext then
+      val nested            = style.nested(level)
+      def writeNext(): Unit =
+        out ++= style.lineStart(nested)
+        writeItem(items.next(), nested)
+      writeNext()
+      while items.hasNext do
+        out ++= style.separator
+        writeNext()
+      out ++= style.lineStart(level)
+    out += close
 
   /** The key of a map entry: Python `json.dumps` writes a bool, a number, and a null key as its JSON text. */
   private def keyText(key: DynamicValue): String =
@@ -320,10 +343,20 @@ private[dspy4s] object PythonText:
       case '\t'                                        => out ++= "\\t"
       case '\b'                                        => out ++= "\\b"
       case '\f'                                        => out ++= "\\f"
-      case char if char < ' ' || (ascii && char > '~') => out ++= f"\\u${char.toInt}%04x"
+      case char if char < ' ' || (ascii && char > '~') => unicodeEscape(char, out)
       case char                                        => out += char
     }
     out += '"'
+
+  /** The escape of `char`: a backslash, `u`, and four lower-case hexadecimal digits. */
+  private def unicodeEscape(char: Char, out: StringBuilder): Unit =
+    out ++= "\\u"
+    out += HexDigits((char >> 12) & 0xf)
+    out += HexDigits((char >> 8) & 0xf)
+    out += HexDigits((char >> 4) & 0xf)
+    out += HexDigits(char & 0xf)
+
+  private val HexDigits: String = "0123456789abcdef"
 
   /** The Python text of an integer, a float, or a decimal value. */
   private object NumberText:

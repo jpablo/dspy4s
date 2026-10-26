@@ -3,7 +3,7 @@ package dspy4s.programs
 import zio.blocks.schema.Schema
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput, ToolSpec}
-import dspy4s.core.contracts.{DspyError, LmUsage, RuntimeContext, SignatureLayout}
+import dspy4s.core.contracts.{DspyError, LmUsage, RuntimeContext}
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
@@ -48,7 +48,7 @@ class TypedPredictSuite extends FunSuite:
         )
       ))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values =
@@ -139,7 +139,7 @@ class TypedPredictSuite extends FunSuite:
             Message(role = MessageRole.User, text = Some("hi"))
           )
         ))
-      override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext) =
+      override def parse(invocation: AdapterInvocation, output: LmOutput)(using RuntimeContext) =
         Right(ParsedOutput(values =
           rec(
             "answer" := "x",

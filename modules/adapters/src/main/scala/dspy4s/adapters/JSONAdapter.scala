@@ -4,9 +4,8 @@ import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
-import dspy4s.adapters.contracts.NativeFunctionCalling
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.adapters.contracts.ParsedOutput
-import dspy4s.adapters.contracts.ToolChoice
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -15,27 +14,20 @@ import dspy4s.lm.contracts.LmOutput
 final case class JSONAdapter(
     name                            : String  = "json",
     allowTextFallbackForSingleOutput: Boolean = true,
-    /** See [[ChatAdapter.useNativeFunctionCalling]] — same adapter-level native function-calling gate, shared via
-      * [[NativeFunctionCalling]]. Off by default.
+    /** The native function calling options ([[NativeTools]]), with the same rules as for [[ChatAdapter.native]]. Off by
+      * default.
       */
-    useNativeFunctionCalling: Boolean         = false,
-    parallelToolCalls       : Option[Boolean] = None,
-    /** See [[ChatAdapter.toolChoice]]. */
-    toolChoice: Option[ToolChoice] = None
+    native: NativeTools = NativeTools.Off
 ) extends Adapter:
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-    JSONAdapterPrompt.format(invocation, useNativeFunctionCalling, parallelToolCalls, toolChoice)
+    JSONAdapterPrompt.format(invocation, native)
 
   override def streamingState(layout: SignatureLayout)(using RuntimeContext): Option[AdapterStreamingState] =
     Some(
       new JsonStreamingState(layout.outputFields)
     )
 
-  override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
-    JSONAdapterParser.parse(
-      name,
-      allowTextFallbackForSingleOutput,
-      layout,
-      output,
-      NativeFunctionCalling.isActive(useNativeFunctionCalling)
-    )
+  override def parse(invocation: AdapterInvocation, output: LmOutput)(using
+      RuntimeContext
+  ): Either[DspyError, ParsedOutput] =
+    JSONAdapterParser.parse(allowTextFallbackForSingleOutput, invocation.layout, output, native.isActive)

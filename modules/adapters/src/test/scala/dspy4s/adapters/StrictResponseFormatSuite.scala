@@ -1,6 +1,7 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.adapters.internal.StrictJsonSchema
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
@@ -68,7 +69,7 @@ class StrictResponseFormatSuite extends FunSuite:
       request = LmRequest(model = "stub"),
       outputJsonSchema = schema.map(parsed)
     )
-    val options = JSONAdapter(useNativeFunctionCalling = native).format(invocation)
+    val options = JSONAdapter(native = NativeTools(enabled = native)).format(invocation)
       .fold(error => fail(s"format failed: $error"), _.requestOptions)
     DynamicValues.recordGet(options, "response_format").map(ujsonOf).getOrElse(fail(s"no response_format: $options"))
 
@@ -273,6 +274,28 @@ class StrictResponseFormatSuite extends FunSuite:
     )
     assertEquals(result("properties")("second"), json("""{"$ref": "#/$defs/Step"}"""))
     assertEquals(result("$defs")("Step")("additionalProperties"), ujson.Bool(false))
+  }
+
+  test("a $ref with other keys resolves at each use, and a cycle of such references cannot take strict shape") {
+    val result = shaped(
+      """{
+        |  "type": "object",
+        |  "$defs": {"Step": {"type": "object", "properties": {"action": {"type": "string"}}}},
+        |  "properties": {
+        |    "first": {"$ref": "#/$defs/Step", "description": "the first step"},
+        |    "last": {"$ref": "#/$defs/Step", "title": "Last"}
+        |  }
+        |}""".stripMargin
+    )
+    val step =
+      """"type": "object", "properties": {"action": {"type": "string"}}, "required": ["action"], "additionalProperties": false"""
+    assertEquals(result("properties")("first"), json(s"""{$step, "description": "the first step"}"""))
+    assertEquals(result("properties")("last"), json(s"""{$step, "title": "Last"}"""))
+    val cycle = """{"type": "object", "$defs": {
+        |  "A": {"type": "object", "properties": {"b": {"$ref": "#/$defs/B", "title": "B"}}},
+        |  "B": {"type": "object", "properties": {"a": {"$ref": "#/$defs/A", "title": "A"}}}
+        |}, "properties": {"x": {"$ref": "#/$defs/A", "title": "X"}}}""".stripMargin
+    assert(StrictJsonSchema.shape(parsed(cycle)).isLeft)
   }
 
   test("a null default is removed, and a default that is not null stays") {

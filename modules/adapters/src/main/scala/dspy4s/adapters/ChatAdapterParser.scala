@@ -2,7 +2,7 @@ package dspy4s.adapters
 
 import dspy4s.adapters.contracts.{NativeFunctionCalling, ParsedOutput}
 import dspy4s.adapters.internal.AdapterTextSupport
-import dspy4s.core.contracts.{DspyError, FieldSpec, PythonText, SignatureLayout}
+import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, PythonText, SignatureLayout}
 import dspy4s.lm.contracts.LmOutput
 import zio.blocks.schema.DynamicValue
 
@@ -14,12 +14,7 @@ private[adapters] object ChatAdapterParser:
     *   field. They also fill it when the response has provider tool calls (upstream `_call_postprocess`). Else the
     *   field is a text field.
     */
-  def parse(
-      adapterName: String,
-      layout     : SignatureLayout,
-      output     : LmOutput,
-      nativeCalls: Boolean
-  ): Either[DspyError, ParsedOutput] =
+  def parse(layout: SignatureLayout, output: LmOutput, nativeCalls: Boolean): Either[DspyError, ParsedOutput] =
     val providerCalls                           = nativeCalls || output.toolCalls.nonEmpty
     def fromProvider(field: FieldSpec): Boolean = providerCalls && NativeFunctionCalling.isToolCallsField(field)
 
@@ -47,7 +42,7 @@ private[adapters] object ChatAdapterParser:
             case None if output.toolCalls.nonEmpty => Right(Some(field.defaultValue.getOrElse(DynamicValue.Null)))
             case None                              => Right(None)
       }
-      .map(entries => AdapterTextSupport.parsedOutput(adapterName, output, entries))
+      .map(entries => ParsedOutput(DynamicValues.recordFromEntries(entries)))
 
   /** The output fields of `layout` that the text of the reply gives: each output field, less the tool calls field when
     * `providerCalls` is `true`. The provider tool calls then fill that field. [[ChatStreamingState]] gets the same

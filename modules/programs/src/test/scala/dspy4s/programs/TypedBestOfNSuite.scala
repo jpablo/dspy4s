@@ -241,11 +241,11 @@ class TypedBestOfNSuite extends FunSuite:
       if !isOfferFeedback then innerPrompts += text
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some(text)))))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
       // The LM packs each output field's value into `metadata` under its field name.
-      val entries = layout.outputFields.map { field =>
+      val entries = invocation.layout.outputFields.map { field =>
         val raw = DynamicValues.recordGet(output.metadata, field.name).getOrElse(DynamicValue.Null)
         field.name -> raw
       }

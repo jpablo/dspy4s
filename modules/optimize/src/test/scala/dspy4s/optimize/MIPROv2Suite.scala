@@ -67,11 +67,11 @@ class MIPROv2Suite extends FunSuite:
       val body  = s"INSTRUCTION=[$instr] QUESTION=[$q]"
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some(body)))))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     )
         : Either[DspyError, ParsedOutput] =
-      val outField = layout.outputFields.headOption.map(_.name).getOrElse("answer")
+      val outField = invocation.layout.outputFields.headOption.map(_.name).getOrElse("answer")
       Right(ParsedOutput(values = rec(outField := output.text)))
 
   private final class ScriptedLm extends LanguageModel:

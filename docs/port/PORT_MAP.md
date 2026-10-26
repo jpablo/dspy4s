@@ -116,7 +116,7 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
   `response_format: {type:"json_schema", …}` when the ambient LM `supportsResponseSchema` and an
   `outputJsonSchema` is present (prose schema kept as fallback), via the new `FormattedPrompt.requestOptions`
   request-influence seam. **Native function-calling (G-7b):** ✅ ported — `tools`/`tool_choice` injected via
-  the same seam (shared `NativeFunctionCalling` helper), native `tool_calls` parsed into a `tool_calls` output
+  the same request options (shared `NativeTools` rules), native `tool_calls` parsed into a `tool_calls` output
   field; gated on `supportsFunctionCalling`. ReAct stays on the text protocol (upstream parity). See PORT_GAPS G-7.
 - **Field constraints (`PYDANTIC_CONSTRAINT_MAP`).** ✅ ported (v1, commit `d8c80de`) — `FieldSpec.constraints`
   + `FieldConstraints` build the upstream constraint strings (`gt`/`ge`/`lt`/`le`/`minLength`/`maxLength`/

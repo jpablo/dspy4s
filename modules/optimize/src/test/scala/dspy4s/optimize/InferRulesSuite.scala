@@ -41,10 +41,10 @@ class InferRulesSuite extends FunSuite:
         Vector(Message(role = MessageRole.User, text = Some(s"OUT=[$out] INSTRUCTION=[$instr] $inputs")))
       ))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      val outField = layout.outputFields.headOption.map(_.name).getOrElse("answer")
+      val outField = invocation.layout.outputFields.headOption.map(_.name).getOrElse("answer")
       Right(ParsedOutput(values = DynamicValues.record(outField := output.text)))
 
   private final class ScriptedLm extends LanguageModel:

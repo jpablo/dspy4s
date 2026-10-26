@@ -11,7 +11,6 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ToolEndEvent
 import dspy4s.core.contracts.ToolStartEvent
 import dspy4s.core.contracts.:=
@@ -45,10 +44,10 @@ class ReActSuite extends FunSuite:
     override val name: String                                                                                    = "scripted-react-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      val outputNames = layout.outputFields.map(_.name).toSet
+      val outputNames = invocation.layout.outputFields.map(_.name).toSet
       val text        = output.text
       if outputNames.contains("next_tool_name") then
         val parts    = text.split("\\|\\|", -1)
@@ -64,7 +63,7 @@ class ReActSuite extends FunSuite:
           rec("next_thought" := thought, "next_tool_name" := toolName, "next_tool_args" -> args)
         ))
       else
-        Right(ParsedOutput(values = rec(layout.outputFields.map(_.name := text)*)))
+        Right(ParsedOutput(values = rec(invocation.layout.outputFields.map(_.name := text)*)))
 
   private final class SearchTool extends ToolFunction:
     val calls: AtomicInteger                                                                              = AtomicInteger(0)
@@ -255,10 +254,10 @@ class ReActSuite extends FunSuite:
         dspy4s.core.contracts.DynamicValues.recordGet(invocation.inputs.values, "trajectory")
           .map(dspy4s.core.contracts.DynamicValues.renderText).foreach(extractorTrajectories += _)
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      ScriptedAdapter.parse(layout, output)
+      ScriptedAdapter.parse(invocation, output)
 
   private def cwError: DspyError = dspy4s.core.contracts.ContextWindowExceededError()
 

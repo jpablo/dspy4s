@@ -4,7 +4,7 @@ import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
-import dspy4s.adapters.contracts.NativeFunctionCalling
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.adapters.internal.AdapterTextSupport
 import dspy4s.adapters.internal.ConversationHistory
@@ -38,22 +38,16 @@ final case class XMLAdapter(
     allowTextFallbackForSingleOutput: Boolean = true
 ) extends Adapter:
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-    val layout     = invocation.layout
-    val schema     = OutputSchema(invocation.outputJsonSchema)
-    val systemText = PromptText.systemMessage(layout, layout, fieldStructure(layout, schema))
+    val schema = OutputSchema(invocation.outputJsonSchema)
 
     // This adapter has no native function calling: a turn of the history with tool calls stays text, and the request
     // has no tool options (upstream `Adapter._call_preprocess`).
     Right(
       FormattedPrompt(
-        messages = ConversationHistory.messages(
-          invocation,
-          renderLayout = layout,
-          systemText,
-          useNativeFunctionCalling = false,
-          Turns
-        ),
-        removedOptions = NativeFunctionCalling.ToolOptionKeys
+        messages = ConversationHistory.messages(invocation, NativeTools.Off, Turns) { shown =>
+          PromptText.systemMessage(invocation.layout, shown, fieldStructure(shown, schema))
+        },
+        removedOptions = NativeTools.Off.toolOptions(invocation).removed
       )
     )
 
@@ -64,7 +58,10 @@ final case class XMLAdapter(
   override def formatUserMessageContent(layout: SignatureLayout, values: DynamicValue.Record): String =
     Turns.user(layout, values, mainRequest = false)
 
-  override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+  override def parse(invocation: AdapterInvocation, output: LmOutput)(using
+      RuntimeContext
+  ): Either[DspyError, ParsedOutput] =
+    val layout = invocation.layout
     // The plain-text fallback only applies when the reply is not an XML document at all (the model ignored the
     // format). Falling back on ANY structured failure would mask real errors: a present-but-unfillable field
     // used to return the ENTIRE raw XML document as the field's "value".
@@ -72,7 +69,7 @@ final case class XMLAdapter(
       case Right(document) => parseFields(layout, document, output)
       case Left(_)         =>
         if allowTextFallbackForSingleOutput && layout.outputFields.size == 1 then
-          AdapterTextSupport.singleOutputTextFallback(name, layout, output)
+          AdapterTextSupport.singleOutputTextFallback(layout, output)
         else Left(ParseError("adapter", "XML parse failed and no fallback was applied", raw = Some(output.text)))
 
   /** The values of the output fields of `document`. A text `tool_calls` field takes the JSON list of calls in its text,
@@ -83,7 +80,7 @@ final case class XMLAdapter(
       extractFieldText(document, field.name) match
         case Some(raw) => AdapterTextSupport.outputTextValue(field, raw).map(Some(_))
         case None      => Right(None)
-    }.map(entries => AdapterTextSupport.parsedOutput(name, output, entries))
+    }.map(entries => ParsedOutput(DynamicValues.recordFromEntries(entries)))
 
   /** The text of a turn: the tag form of the input fields for a user turn, with the output reminder in a current
     * request, and the tag form of the output fields for an assistant turn (upstream

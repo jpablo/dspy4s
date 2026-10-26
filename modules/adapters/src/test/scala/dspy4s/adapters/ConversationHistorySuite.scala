@@ -2,6 +2,7 @@ package dspy4s.adapters
 
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.adapters.contracts.ToolParameterSpec
 import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.DspyError
@@ -74,13 +75,13 @@ class ConversationHistorySuite extends FunSuite:
     Vector("ChatAdapter" -> ChatAdapter(), "JSONAdapter" -> JSONAdapter(), "XMLAdapter" -> XMLAdapter())
 
   private val nativeAdapters: Vector[(String, Adapter)] = Vector(
-    "ChatAdapter" -> ChatAdapter(useNativeFunctionCalling = true),
-    "JSONAdapter" -> JSONAdapter(useNativeFunctionCalling = true)
+    "ChatAdapter" -> ChatAdapter(native = NativeTools(enabled = true)),
+    "JSONAdapter" -> JSONAdapter(native = NativeTools(enabled = true))
   )
 
   private val nonNativeAdapters: Vector[(String, Adapter)] = Vector(
-    "ChatAdapter" -> ChatAdapter(useNativeFunctionCalling = false),
-    "JSONAdapter" -> JSONAdapter(useNativeFunctionCalling = false)
+    "ChatAdapter" -> ChatAdapter(native = NativeTools(enabled = false)),
+    "JSONAdapter" -> JSONAdapter(native = NativeTools(enabled = false))
   )
 
   private def turn(question: String, answer: String): DynamicValue.Record =

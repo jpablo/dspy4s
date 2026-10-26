@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.adapters.JSONAdapter
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
-import dspy4s.core.contracts.{DspyError, RuntimeContext, SignatureLayout}
+import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -35,7 +35,7 @@ class RequestOptionsMergeSuite extends FunSuite:
         messages = Vector(Message(role = MessageRole.User, text = Some("hi"))),
         requestOptions = opts
       ))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = rec("answer" := output.text)))

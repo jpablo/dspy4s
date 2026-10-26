@@ -1,6 +1,7 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.adapters.contracts.ToolChoice
 import dspy4s.adapters.contracts.ToolParameterSpec
 import dspy4s.adapters.contracts.ToolSpec
@@ -64,7 +65,7 @@ class ChatAdapterNativeToolsSuite extends FunSuite:
       case other                  => fail(s"expected a record to read '$key' from, got $other")
 
   test("native function-calling injects tools into requestOptions and omits the tool_calls field from the prompt") {
-    val adapter          = ChatAdapter(useNativeFunctionCalling = true)
+    val adapter          = ChatAdapter(native = NativeTools(enabled = true))
     given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = true)))
 
     val prompt = adapter.format(invocation()).toOption.get
@@ -86,14 +87,14 @@ class ChatAdapterNativeToolsSuite extends FunSuite:
   test("native function-calling injects a string tool_choice when configured, and omits it otherwise") {
     given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = true)))
 
-    val withChoice = ChatAdapter(useNativeFunctionCalling = true, toolChoice = Some(ToolChoice.Required))
+    val withChoice = ChatAdapter(native = NativeTools(enabled = true, toolChoice = Some(ToolChoice.Required)))
       .format(invocation()).toOption.get
     assertEquals(
       DynamicValues.recordGet(withChoice.requestOptions, "tool_choice").map(DynamicValues.renderText),
       Some("required")
     )
 
-    val withoutChoice = ChatAdapter(useNativeFunctionCalling = true).format(invocation()).toOption.get
+    val withoutChoice = ChatAdapter(native = NativeTools(enabled = true)).format(invocation()).toOption.get
     assert(
       DynamicValues.recordGet(withoutChoice.requestOptions, "tool_choice").isEmpty,
       "tool_choice must be absent when not configured"
@@ -103,7 +104,7 @@ class ChatAdapterNativeToolsSuite extends FunSuite:
   test("native function-calling forces a specific function via the object tool_choice form") {
     given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = true)))
 
-    val prompt = ChatAdapter(useNativeFunctionCalling = true, toolChoice = Some(ToolChoice.Function("search")))
+    val prompt = ChatAdapter(native = NativeTools(enabled = true, toolChoice = Some(ToolChoice.Function("search"))))
       .format(invocation()).toOption.get
     val choice = DynamicValues.recordGet(prompt.requestOptions, "tool_choice").getOrElse(fail("tool_choice missing"))
     assertEquals(DynamicValues.renderText(field(choice, "type")), "function")
@@ -111,7 +112,7 @@ class ChatAdapterNativeToolsSuite extends FunSuite:
   }
 
   test("native function-calling is suppressed when the LM does not support function calling") {
-    val adapter          = ChatAdapter(useNativeFunctionCalling = true)
+    val adapter          = ChatAdapter(native = NativeTools(enabled = true))
     given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = false)))
 
     val prompt = adapter.format(invocation()).toOption.get
@@ -122,7 +123,7 @@ class ChatAdapterNativeToolsSuite extends FunSuite:
   }
 
   test("parse fills the tool_calls field from structured tool_calls and defaults other missing fields on a tool turn") {
-    val adapter          = ChatAdapter(useNativeFunctionCalling = true)
+    val adapter          = ChatAdapter(native = NativeTools(enabled = true))
     given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = true)))
 
     // A tool-call turn: the model returned only tool_calls, no answer text.

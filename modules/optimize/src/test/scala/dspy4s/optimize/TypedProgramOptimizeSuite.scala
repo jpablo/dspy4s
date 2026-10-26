@@ -6,7 +6,7 @@ import dspy4s.programs.optimization.OptimizableStructure
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, RuntimeContext, SignatureLayout}
+import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, RuntimeContext}
 import dspy4s.core.data.{RawPrediction, Example}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
@@ -55,7 +55,7 @@ class TypedProgramOptimizeSuite extends FunSuite:
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       val q = DynamicValues.recordGet(invocation.inputs.values, "question").map(DynamicValues.renderText).getOrElse("")
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some(q)))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = rec("answer" := output.text)))

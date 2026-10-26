@@ -6,8 +6,6 @@ import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.:=
-import dspy4s.lm.contracts.LmOutput
-import dspy4s.core.contracts.ToolCall
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
@@ -24,7 +22,7 @@ class ToolSchemaBridgeSuite extends FunSuite:
       case DynamicValue.Sequence(els) => els.iterator.toVector
       case other                      => fail(s"expected a sequence, got $other")
 
-  test("toOpenAiTools renders function schema with required fields") {
+  test("toOpenAiToolsDynamic builds the OpenAI tools array with the JSON type of each parameter") {
     val tools = Vector(
       ToolSpec(
         name = "search",
@@ -36,38 +34,13 @@ class ToolSchemaBridgeSuite extends FunSuite:
             description = Some("Search query"),
             required = true
           ),
-          ToolParameterSpec(name = "top_k", typeRef = TypeRef.int, description = Some("Result count"), required = false)
-        )
-      )
-    )
-
-    val rendered = ToolSchemaBridge.toOpenAiTools(tools)
-
-    assertEquals(rendered.size, 1)
-    val function   = rendered.head("function").asInstanceOf[Map[String, Any]]
-    val parameters = function("parameters").asInstanceOf[Map[String, Any]]
-    val properties = parameters("properties").asInstanceOf[Map[String, Map[String, String]]]
-    val required   = parameters("required").asInstanceOf[Vector[String]]
-
-    assertEquals(function("name"), "search")
-    assertEquals(properties("query")("type"), "string")
-    assertEquals(properties("top_k")("type"), "number")
-    assertEquals(required, Vector("query"))
-  }
-
-  test("toOpenAiToolsDynamic builds the OpenAI tools array as a DynamicValue for the requestOptions seam") {
-    val tools = Vector(
-      ToolSpec(
-        name = "search",
-        description = Some("Search documents"),
-        parameters = Vector(
           ToolParameterSpec(
-            name = "query",
-            typeRef = TypeRef.string,
-            description = Some("Search query"),
-            required = true
+            name = "top_k",
+            typeRef = TypeRef.int,
+            description = Some("Result count"),
+            required = false
           ),
-          ToolParameterSpec(name = "top_k", typeRef = TypeRef.int, description = Some("Result count"), required = false)
+          ToolParameterSpec(name = "tags", typeRef = TypeRef.list, required = false)
         )
       )
     )
@@ -85,46 +58,31 @@ class ToolSchemaBridgeSuite extends FunSuite:
     assertEquals(DynamicValues.renderText(field(function, "description")), "Search documents")
     assertEquals(DynamicValues.renderText(field(params, "type")), "object")
     assertEquals(DynamicValues.renderText(field(field(props, "query"), "type")), "string")
-    assertEquals(DynamicValues.renderText(field(field(props, "top_k"), "type")), "number")
+    // The JSON types of upstream `Tool._parse_function` (`TypeRef.jsonType`).
+    assertEquals(DynamicValues.renderText(field(field(props, "top_k"), "type")), "integer")
+    assertEquals(DynamicValues.renderText(field(field(props, "tags"), "type")), "array")
     // Only `required = true` parameters appear in the JSON-schema `required` list.
     assertEquals(elementsOf(field(params, "required")).map(DynamicValues.renderText), Vector("query"))
   }
 
-  test("toOpenAiTools sends the input schema of a spec as the parameters, and keeps the other specs") {
+  test("toOpenAiToolsDynamic sends the input schema of a spec as the parameters, and keeps the other specs") {
     val schema = DynamicValues.record(
       "type"       := "object",
       "properties" -> DynamicValues.record("query" -> DynamicValues.record("type" := "string")),
       "required"   := List("query")
     )
-    val rendered = ToolSchemaBridge.toOpenAiTools(Vector(
+    val rendered = elementsOf(ToolSchemaBridge.toOpenAiToolsDynamic(Vector(
       ToolSpec("search", Some("Search documents"), inputSchema = Some(schema)),
       ToolSpec("lookup", parameters = Vector(ToolParameterSpec("id", TypeRef.int)))
-    ))
-    val parameters = rendered.map(_("function").asInstanceOf[Map[String, Any]]("parameters"))
-    assertEquals(parameters.head, DynamicValues.recordToMap(schema): Any)
+    )))
+    val parameters = rendered.map(tool => field(field(tool, "function"), "parameters"))
+    assertEquals(parameters.head, schema: DynamicValue)
     assertEquals(
       parameters.last,
-      Map(
-        "type"       -> "object",
-        "properties" -> Map("id" -> Map("type" -> "number", "description" -> "")),
-        "required"   -> Vector("id")
-      ): Any
+      DynamicValues.record(
+        "type"       := "object",
+        "properties" -> DynamicValues.record("id" -> DynamicValues.record("type" := "integer", "description" := "")),
+        "required"   := List("id")
+      ): DynamicValue
     )
-  }
-
-  test("fromOutput maps lm tool calls to adapter tool call data") {
-    val output = LmOutput(
-      text = "",
-      toolCalls = Vector(
-        ToolCall(name = "search", args = DynamicValues.recordFromEntries(Seq("query" := "capital of belgium"))),
-        ToolCall(name = "lookup", args = DynamicValues.recordFromEntries(Seq("id" := 42)))
-      )
-    )
-
-    val calls = ToolSchemaBridge.fromOutput(output)
-
-    assertEquals(calls.map(_.name), Vector("search", "lookup"))
-    assertEquals(DynamicValues.recordToMap(calls.head.args)("query"), "capital of belgium": Any)
-    // Int stays Int through the DynamicValue round-trip (the old String-flattening cache would lose this).
-    assertEquals(DynamicValues.recordToMap(calls.last.args)("id"), 42: Any)
   }

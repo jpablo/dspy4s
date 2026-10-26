@@ -8,7 +8,6 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
@@ -53,10 +52,10 @@ class EffectiveContextSuite extends FunSuite:
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       val _ = formats.incrementAndGet()
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("question")))))
-    override def parse(signature: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      Right(ParsedOutput(values = rec(signature.outputFields.map(_.name := output.text)*)))
+      Right(ParsedOutput(values = rec(invocation.layout.outputFields.map(_.name := output.text)*)))
 
   private given RuntimeContext = RuntimeContext(lm = Some(ParisLm))
 

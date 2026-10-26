@@ -1,7 +1,6 @@
 package dspy4s.adapters.internal
 
-import dspy4s.core.contracts.{:=, DynamicValues, FieldSpec, PythonText, SignatureLayout, ToolCall, TypeRef}
-import zio.blocks.chunk.Chunk
+import dspy4s.core.contracts.{DynamicValues, FieldSpec, PythonText, SignatureLayout, ToolCall, TypeRef}
 import zio.blocks.schema.DynamicValue
 
 /** The prompt texts that the Chat, JSON, XML, and TwoStep adapters share (decision D3). The adapters compute each text
@@ -52,20 +51,18 @@ private[adapters] object PromptText:
     * `dspy/adapters/base.py`): the field description of `shown`, the structure of the adapter, and the task description
     * with the instructions of `layout`.
     *
+    * The instructions are the instructions of `layout`, else its default instructions
+    * ([[SignatureLayout.effectiveInstructions]], upstream `_default_instructions` in `dspy/signatures/signature.py`).
+    * Upstream computes the default instructions when it makes the signature, so an adapter takes them from the full
+    * layout, also when the prompt does not show each field of the layout.
+    *
     * @param layout
     *   the full layout of the signature
     * @param shown
     *   the layout that the prompt shows: with native function calling active, it has no tool calls field
     */
   def systemMessage(layout: SignatureLayout, shown: SignatureLayout, structure: String): String =
-    s"${fieldDescription(shown)}\n$structure\n${taskDescription(instructions(layout))}"
-
-  /** The instructions of `layout`, else its default instructions (upstream `_default_instructions` in
-    * `dspy/signatures/signature.py`). Upstream computes the default instructions when it makes the signature, so an
-    * adapter takes them from the full layout, also when the prompt does not show each field of the layout.
-    */
-  def instructions(layout: SignatureLayout): String =
-    layout.effectiveInstructions
+    s"${fieldDescription(shown)}\n$structure\n${taskDescription(layout.effectiveInstructions)}"
 
   /** The task description of the Chat, JSON, and XML adapters (upstream `ChatAdapter.format_task_description`): each
     * line of the dedented instructions on a new line, after eight spaces.
@@ -132,9 +129,10 @@ private[adapters] object PromptText:
         // the output schema has a property for the field.
         case _ => schema.propertyText(field).map(text => s"must adhere to the JSON schema: $text")
 
-  /** `true` for a dict, a list, and a list with an item type (`list[str]`). */
+  /** `true` for a dict, a list, and a list with an item type (`list[str]`, [[TypeRef.collection]]). */
   private def isStructured(typeRef: TypeRef): Boolean =
-    typeRef == TypeRef.json || typeRef == TypeRef.list || typeRef.repr.startsWith("list[")
+    typeRef == TypeRef.json || typeRef == TypeRef.list ||
+      typeRef.collection.exists((kind, _) => kind == TypeRef.Collection.List)
 
   /** The type hint of `field` in the output reminder of the Chat and JSON adapters (upstream
     * `user_message_output_requirements`): empty for a `str` field.
@@ -168,11 +166,8 @@ private[adapters] object PromptText:
     if field.typeRef != TypeRef.toolCalls then value
     else
       ToolCall.fromDynamic(value).fold(value) { found =>
-        val items = found.map(call => DynamicValues.record("name" := call.name, "args" -> call.args))
-        DynamicValues.record(ToolCallsKey -> DynamicValue.Sequence(Chunk.from(items)))
+        DynamicValues.record(ToolCall.ToolCallsKey -> DynamicValues.sequence(found.map(_.copy(id = None).toRecord)))
       }
-
-  private val ToolCallsKey: String = "tool_calls"
 
   /** A list value of a `str` field (upstream `_format_input_list_field_value`): `N/A` for an empty list, one blob for
     * one item, and else one numbered blob on each line.
@@ -217,25 +212,32 @@ private[adapters] object PromptText:
       property(name).map(withDefinitions)
 
     private def property(name: String): Option[DynamicValue] =
-      root.flatMap(recordAt(_, "properties")).flatMap(DynamicValues.recordGet(_, name))
+      root.flatMap(DynamicValues.recordGet(_, "properties")).flatMap(DynamicValues.recordGet(_, name))
 
-    private val definitions: Vector[(String, DynamicValue)] =
-      root.flatMap(recordAt(_, "$defs")).fold(Vector.empty)(_.fields.toVector)
+    /** The `$defs` entries of the output schema, in its order. The schema of each structured field reads them, so the
+      * object computes them one time.
+      */
+    private lazy val definitions: Vector[(String, DynamicValue)] =
+      root.flatMap(DynamicValues.recordGet(_, "$defs")).flatMap(DynamicValues.asRecord)
+        .fold(Vector.empty)(DynamicValues.recordEntries)
+
+    /** The names of the definitions that each definition references, by name, computed one time. */
+    private lazy val definitionReferences: Map[String, Vector[String]] =
+      definitions.map((name, schema) => name -> references(schema)).toMap
 
     /** `schema` with a `$defs` key at the end that holds each definition that `schema` uses, also through other
       * definitions, in the order of the output schema.
       */
     private def withDefinitions(schema: DynamicValue): DynamicValue =
-      val byName                                                         = definitions.toMap
       def closure(found: Set[String], next: Vector[String]): Set[String] =
         next.filterNot(found.contains) match
           case Vector() => found
-          case fresh    => closure(found ++ fresh, fresh.flatMap(name => byName.get(name).toVector.flatMap(references)))
+          case fresh    => closure(found ++ fresh, fresh.flatMap(definitionReferences.getOrElse(_, Vector.empty)))
       val used = closure(Set.empty, references(schema))
       schema match
         case record: DynamicValue.Record if used.nonEmpty =>
           val entries = definitions.filter((name, _) => used.contains(name))
-          DynamicValue.Record(record.fields :+ ("$defs" -> DynamicValue.Record(Chunk.from(entries))))
+          DynamicValue.Record(record.fields :+ ("$defs" -> DynamicValues.recordFromEntries(entries)))
         case other => other
 
     /** The names of the definitions that `schema` references with `{"$ref": "#/$defs/<name>"}`. */
@@ -248,6 +250,3 @@ private[adapters] object PromptText:
           }
         case sequence: DynamicValue.Sequence => sequence.elements.toVector.flatMap(references)
         case _                               => Vector.empty
-
-    private def recordAt(record: DynamicValue.Record, key: String): Option[DynamicValue.Record] =
-      DynamicValues.recordGet(record, key).collect { case found: DynamicValue.Record => found }

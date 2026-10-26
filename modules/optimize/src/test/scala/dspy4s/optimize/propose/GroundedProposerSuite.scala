@@ -58,11 +58,11 @@ class GroundedProposerSuite extends FunSuite:
       val body = s"INSTRUCTION=[$instr] $inputs"
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some(body)))))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     )
         : Either[DspyError, ParsedOutput] =
-      val outField = layout.outputFields.headOption.map(_.name).getOrElse("observations")
+      val outField = invocation.layout.outputFields.headOption.map(_.name).getOrElse("observations")
       Right(ParsedOutput(values = rec(outField := output.text)))
 
   private final class ScriptedLm extends LanguageModel:

@@ -2,7 +2,8 @@ package dspy4s.adapters.contracts
 
 import dspy4s.adapters.ChatAdapterPrompt
 import dspy4s.core.contracts.{AdapterRef, DspyError, RuntimeContext, SignatureLayout}
-import dspy4s.lm.contracts.LmOutput
+import dspy4s.core.data.Example
+import dspy4s.lm.contracts.{LmOutput, LmRequest}
 import zio.blocks.schema.DynamicValue
 
 trait Adapter extends AdapterRef:
@@ -19,15 +20,20 @@ trait Adapter extends AdapterRef:
 
   def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt]
 
-  def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput]
-
   /** The parse of `output`, the reply to the request that [[format]] made from `invocation`. The predictor calls this
-    * method. The default is `parse(invocation.layout, output)`. An adapter that needs more of the invocation overrides
-    * it: [[dspy4s.adapters.TwoStepAdapter]] gives the output JSON schema of the invocation to its extraction prompt. An
-    * adapter that wraps another adapter gives the invocation to the parse of that adapter.
+    * method. An adapter that needs more of the invocation than the layout uses it: [[dspy4s.adapters.TwoStepAdapter]]
+    * gives the output JSON schema of the invocation to its extraction prompt. An adapter that wraps another adapter
+    * gives the invocation to the parse of that adapter.
     */
-  def parse(invocation: AdapterInvocation, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
-    parse(invocation.layout, output)
+  def parse(invocation: AdapterInvocation, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput]
+
+  /** The parse of `output` for an invocation of `layout` with no demos, no inputs, no output JSON schema, and no tools.
+    */
+  final def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
+    parse(
+      AdapterInvocation(layout = layout, demos = Vector.empty, inputs = Example.empty, request = LmRequest(model = "")),
+      output
+    )
 
   /** The text of a user turn that shows the values of the input fields of `layout` that `values` has, with no output
     * reminder (upstream `Adapter.format_user_message_content` with `main_request=False`). `ReAct` writes its trajectory

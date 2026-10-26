@@ -22,20 +22,20 @@ An adapter writes the prompt of a signature and reads the response of the model.
 | Type | Description |
 |------|-------------|
 | `Adapter` | The interface: `format`, `parse`, `execute`, `streamingState`, and `fallback` (the adapter to try after a parse error). |
-| `ChatAdapter` | The marker format. Its options set native tool calls, parallel tool calls, the tool choice, and the JSON fallback. |
+| `ChatAdapter` | The marker format. Its options are the native tool calls (`native`, a `NativeTools`) and the JSON fallback. |
 | `JSONAdapter` | The JSON format. It adds a `response_format` to the request options when the model supports a response schema. |
 | `XMLAdapter` | The XML format. It has no native tool calls. |
 | `TwoStepAdapter` | Asks the main model for an answer in natural language. Then a `ChatAdapter` call to the `extractionModel` reads the output fields from that answer. It shows a `History` input as a field value. |
 | `AdapterInvocation` | The input of `format`: the layout, the demos, the inputs, the `LmRequest`, the output JSON schema, and the tool specs. |
-| `FormattedPrompt` | The result of `format`: the messages, the metadata, and the `requestOptions` of the adapter. The options of the request win over `requestOptions`. |
-| `ParsedOutput` | The result of `parse`: the `values` record, the `rawText` of the response, and the metadata. |
+| `FormattedPrompt` | The result of `format`: the messages, the `requestOptions` of the adapter, and the `removedOptions` (the keys that the request must not have). The options of the request win over `requestOptions`. |
+| `ParsedOutput` | The result of `parse`: the `values` record, and the decision evidence of a `DecisionAdapter` parse. |
 | `AdapterStreamingState` / `FieldChunk` | The state of one streamed call. `receive(delta)` and `finish()` give a `FieldChunk` for each part of the text of a field. The last part of a field has `isLast`. |
-| `NativeFunctionCalling` | Decides if native tool calls are active. It adds `tools`, `parallel_tool_calls`, and `tool_choice` to the request options. |
+| `NativeTools` | The native tool call options of an adapter: `enabled`, `parallelToolCalls`, and `toolChoice`. It decides if native tool calls are active for a call, which fields the prompt shows, and which tool options (`tools`, `parallel_tool_calls`, and `tool_choice`) the request gets or must not have. `NativeTools.Off` is the default. |
 | `ToolSpec` / `ToolParameterSpec` / `ToolChoice` | The data of a tool, of its parameters, and of the `tool_choice` value. `ToolSchemaBridge` writes a tool as an OpenAI function schema. |
 
 ## Design notes
 
-- **Native tool calls have four conditions.** The adapter sends the tools only when `useNativeFunctionCalling` is on,
+- **Native tool calls have four conditions.** The adapter sends the tools only when `NativeTools.enabled` is on,
   the request has tools, the signature has a `tool_calls` output field, and the model supports native tool calls. In
   each other case, `tool_calls` is a text output field. The prompt then asks for `{"tool_calls": [{"name", "args"}]}`,
   and the parser reads that object or a JSON list of calls. The Chat, JSON, and XML adapters read the text tool calls.
@@ -68,7 +68,7 @@ An adapter writes the prompt of a signature and reads the response of the model.
 | Package | Contents |
 |---------|----------|
 | top level | the four adapters and their prompt objects, parser objects, and stream states |
-| `contracts/` | the `Adapter` interface, its input and result data, the stream state interface, the demo rule, the parse errors, native tool calls, and the tool data |
+| `contracts/` | the `Adapter` interface, its input and result data, the stream state interface, the demo rule, native tool calls, and the tool data |
 | `internal/` | the shared prompt texts, the history turns, the demo messages, the strict JSON schema, and the rules for text values. `ProgramPromptText` gives some of these texts to `ChainOfThought`, `ReAct`, and `RLM`. |
 
 ## Relation to dspy

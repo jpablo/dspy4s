@@ -41,16 +41,6 @@ private[programs] object ToolText:
           .fold("Any")(value => DynamicValues.asString(value).getOrElse(PythonText.json(value)))
       case _ => "Any"
 
+  /** The schema of an argument: its JSON type ([[TypeRef.jsonType]], the types of upstream `Tool._parse_function`). */
   private def argument(typeRef: TypeRef): DynamicValue.Record =
-    jsonType(typeRef).fold(DynamicValue.Record.empty)(name => DynamicValues.record("type" := name))
-
-  /** The JSON schema type of a wire type (the types of upstream `Tool._parse_function`). */
-  private[programs] def jsonType(typeRef: TypeRef): Option[String] =
-    typeRef match
-      case TypeRef.string => Some("string")
-      case TypeRef.int    => Some("integer")
-      case TypeRef.double => Some("number")
-      case TypeRef.bool   => Some("boolean")
-      case TypeRef.list   => Some("array")
-      case TypeRef.json   => Some("object")
-      case _              => None
+    typeRef.jsonType.fold(DynamicValue.Record.empty)(name => DynamicValues.record("type" := name))

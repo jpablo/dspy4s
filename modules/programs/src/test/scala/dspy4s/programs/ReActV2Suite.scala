@@ -1,6 +1,6 @@
 package dspy4s.programs
 
-import dspy4s.adapters.contracts.Adapter
+import dspy4s.adapters.contracts.{Adapter, NativeTools}
 import dspy4s.adapters.{ChatAdapter, JSONAdapter}
 import dspy4s.core.contracts.{
   :=,
@@ -158,7 +158,7 @@ class ReActV2Suite extends FunSuite:
       chat("I can answer now.", calls("submit" -> """{"answer": "found cats"}"""))
     ))
     val result =
-      run(lm, ChatAdapter(useNativeFunctionCalling = false))(ReActV2(qa, Vector(lookup))((question = "cats")))
+      run(lm, ChatAdapter(native = NativeTools(enabled = false)))(ReActV2(qa, Vector(lookup))((question = "cats")))
         .fold(error => fail(error.message), identity)
     assertEquals(result.output.answer, "found cats")
     assertEquals(ReActV2.terminationReason(result), Some(TerminationReason.Submit))
@@ -169,8 +169,9 @@ class ReActV2Suite extends FunSuite:
     val lm = Script(Vector(
       chat("I can answer now.", """{"tool_calls": [{"name": "submit", "arguments": {"answer": "done"}}]}""")
     ))
-    val result = run(lm, ChatAdapter(useNativeFunctionCalling = false))(ReActV2(qa, Vector.empty)((question = "cats")))
-      .fold(error => fail(error.message), identity)
+    val result =
+      run(lm, ChatAdapter(native = NativeTools(enabled = false)))(ReActV2(qa, Vector.empty)((question = "cats")))
+        .fold(error => fail(error.message), identity)
     assertEquals(result.output.answer, "done")
     assertEquals(ReActV2.terminationReason(result), Some(TerminationReason.Submit))
   }
@@ -219,8 +220,9 @@ class ReActV2Suite extends FunSuite:
         """{"next_thought": "Forced final.", "tool_calls": {"tool_calls": [{"name": "submit", "args": {"answer": "forced"}}]}}"""
       ))
     ))
-    val result = run(lm, JSONAdapter(useNativeFunctionCalling = true))(ReActV2(qa, Vector.empty)((question = "cats")))
-      .fold(error => fail(error.message), identity)
+    val result =
+      run(lm, JSONAdapter(native = NativeTools(enabled = true)))(ReActV2(qa, Vector.empty)((question = "cats")))
+        .fold(error => fail(error.message), identity)
     assertEquals(result.output.answer, "forced")
     assertEquals(ReActV2.terminationReason(result), Some(TerminationReason.ForcedSubmit))
     assert(!options(lm.requests(1)).contains("tool_choice"), options(lm.requests(1)).toString)
@@ -235,8 +237,9 @@ class ReActV2Suite extends FunSuite:
       ),
       functionCalling = true
     )
-    val result = run(lm, ChatAdapter(useNativeFunctionCalling = true))(ReActV2(qa, Vector(lookup))((question = "cats")))
-      .fold(error => fail(error.message), identity)
+    val result =
+      run(lm, ChatAdapter(native = NativeTools(enabled = true)))(ReActV2(qa, Vector(lookup))((question = "cats")))
+        .fold(error => fail(error.message), identity)
     assertEquals(result.output.answer, "found cats")
     val messages = messagesOf(result)
     assertEquals(toolCallsOf(messages(0)).map(_.id), Vector(Some("call_provider_1")))
@@ -264,7 +267,7 @@ class ReActV2Suite extends FunSuite:
       ),
       functionCalling = true
     )
-    val adapter = ChatAdapter(useNativeFunctionCalling = true, parallelToolCalls = Some(true))
+    val adapter = ChatAdapter(native = NativeTools(enabled = true, parallelToolCalls = Some(true)))
     val result  = run(lm, adapter)(ReActV2(qa, Vector(lookup))((question = "cats and dogs")))
       .fold(error => fail(error.message), identity)
     assertEquals(result.output.answer, "found cats and found dogs")
@@ -392,8 +395,9 @@ class ReActV2Suite extends FunSuite:
       ),
       functionCalling = true
     )
-    val result = run(lm, ChatAdapter(useNativeFunctionCalling = true))(ReActV2(qa, Vector(lookup))((question = "cats")))
-      .fold(error => fail(error.message), identity)
+    val result =
+      run(lm, ChatAdapter(native = NativeTools(enabled = true)))(ReActV2(qa, Vector(lookup))((question = "cats")))
+        .fold(error => fail(error.message), identity)
     assertEquals(result.output.answer, "forced")
     assertEquals(ReActV2.terminationReason(result), Some(TerminationReason.ForcedSubmit))
     assert(!options(lm.requests(0)).contains("tool_choice"), options(lm.requests(0)).toString)

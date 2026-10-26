@@ -10,7 +10,6 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
 import dspy4s.lm.contracts.LmChunk
@@ -57,7 +56,7 @@ class StreamingFallbackSuite extends FunSuite:
     override def fallback: Option[Adapter]                                                                       = Some(JSONAdapter())
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("x")))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
       Left(ParseError("failing", "the format is wrong", raw = Some(output.text)))

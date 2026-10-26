@@ -89,7 +89,7 @@ object ToolCall:
       case _ => None
 
   /** The key of the list in the object form of a tool calls value (upstream `ToolCalls`). */
-  private val ToolCallsKey: String = "tool_calls"
+  val ToolCallsKey: String = "tool_calls"
 
   /** `true` for a record in the form of one call (upstream `_is_tool_call_dict`). */
   private def isCallRecord(record: DynamicValue.Record): Boolean =

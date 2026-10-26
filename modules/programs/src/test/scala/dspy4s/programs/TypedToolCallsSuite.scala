@@ -1,6 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.adapters.ChatAdapter
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.adapters.contracts.ToolParameterSpec
 import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.DspyError
@@ -52,7 +53,7 @@ class TypedToolCallsSuite extends FunSuite:
     val predict = Predict(signature = signature, tools = tools)
 
     RuntimeEnvironment.withSettings(
-      RuntimeContext(lm = Some(new ToolLm), adapter = Some(ChatAdapter(useNativeFunctionCalling = true)))
+      RuntimeContext(lm = Some(new ToolLm), adapter = Some(ChatAdapter(native = NativeTools(enabled = true))))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val result           = predict(Ask("capital of belgium?"))

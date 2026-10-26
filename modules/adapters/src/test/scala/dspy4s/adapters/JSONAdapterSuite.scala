@@ -180,7 +180,6 @@ class JSONAdapterSuite extends FunSuite:
 
     assert(parsed.isRight)
     assertEquals(lookup(parsed.toOption.get.values, "answer"), Some("Brussels": Any))
-    assertEquals(parsed.toOption.get.metadata("fallback"), "text")
   }
 
   // C1 — empty/null LM response must be a parse error (dspy 3.2.1 base.py raises

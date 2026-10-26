@@ -5,7 +5,7 @@ import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, SignatureLayout}
+import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
 import dspy4s.signatures.Signature
@@ -38,10 +38,10 @@ class RLMLiveSuite extends FunSuite:
     override val name: String                                                                                    = "rlm-live-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      val names = layout.outputFields.map(_.name)
+      val names = invocation.layout.outputFields.map(_.name)
       if names.contains("code") then
         val parts = output.text.split("\\|\\|", 2)
         Right(ParsedOutput(values =

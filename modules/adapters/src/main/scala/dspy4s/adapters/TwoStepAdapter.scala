@@ -3,7 +3,7 @@ package dspy4s.adapters
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt
-import dspy4s.adapters.contracts.NativeFunctionCalling
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.adapters.internal.AdapterTextSupport
 import dspy4s.adapters.internal.DemoMessages
@@ -59,50 +59,41 @@ final case class TwoStepAdapter(
     Right(FormattedPrompt(
       messages = (Message(role = MessageRole.System, text = Some(taskDescription(layout))) +: demos) :+
         Message(role = MessageRole.User, text = Some(fieldsText(layout.inputFields, inputs))),
-      removedOptions = NativeFunctionCalling.ToolOptionKeys
+      removedOptions = NativeTools.Off.toolOptions(invocation).removed
     ))
 
   /** The input fields as `name: value` blocks (upstream `TwoStepAdapter.format_user_message_content`). */
   override def formatUserMessageContent(layout: SignatureLayout, values: DynamicValue.Record): String =
     fieldsText(layout.inputFields, values)
 
-  /** The extraction step with no output JSON schema. See [[extract]]. */
-  override def parse(layout: SignatureLayout, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput] =
-    extract(layout, outputJsonSchema = None, output)
-
-  /** The extraction step with the output JSON schema of `invocation`. See [[extract]]. */
-  override def parse(invocation: AdapterInvocation, output: LmOutput)(using
-      RuntimeContext
-  ): Either[DspyError, ParsedOutput] =
-    extract(invocation.layout, invocation.outputJsonSchema, output)
-
   /** The extraction step (upstream `TwoStepAdapter.parse`): the extraction model gets a [[ChatAdapter]] prompt for the
-    * extractor signature of `layout`, with `text` as the completion of the main LM. The prompt takes the schema of each
-    * structured output field from `outputJsonSchema`, as upstream copies the annotated output fields. After a parse
-    * error of the chat format, the step runs one more time with the fallback of the chat adapter, a [[JSONAdapter]]
-    * (upstream `ChatAdapter.__call__`). An error of the format step or of the model gives no second call.
+    * extractor signature of the layout of `invocation`, with `text` as the completion of the main LM. The prompt takes
+    * the schema of each structured output field from the output JSON schema of `invocation`, as upstream copies the
+    * annotated output fields. After a parse error of the chat format, the step runs one more time with the fallback of
+    * the chat adapter, a [[JSONAdapter]] (upstream `ChatAdapter.__call__`). An error of the format step or of the model
+    * gives no second call.
     *
     * A parse error of the last parse becomes the error of [[originalCompletionError]]. An error of the format step or
     * of the model stays as it is, as upstream catches only `AdapterParseError`.
     */
-  private def extract(layout: SignatureLayout, outputJsonSchema: Option[DynamicValue.Record], output: LmOutput)(using
+  override def parse(invocation: AdapterInvocation, output: LmOutput)(using
       RuntimeContext
   ): Either[DspyError, ParsedOutput] =
     val chat = ChatAdapter()
     for
-      extractorLayout <- buildExtractorLayout(layout)
+      extractorLayout <- buildExtractorLayout(invocation.layout)
       textField        = extractorLayout.inputFields.head.name
-      invocation       = AdapterInvocation(
+      extraction       = AdapterInvocation(
                      layout = extractorLayout,
                      demos = Vector.empty,
                      inputs =
                        Example(values = DynamicValues.record(textField := output.text), inputKeys = Set(textField)),
                      request = LmRequest(model = extractionModel.id),
-                     outputJsonSchema = outputJsonSchema
+                     outputJsonSchema = invocation.outputJsonSchema
                    )
-      parsed <- attempt(chat, invocation).flatMap {
+      parsed <- attempt(chat, extraction).flatMap {
                   case Left(error: ParseError) => chat.fallback match
-                      case Some(next) => attempt(next, invocation)
+                      case Some(next) => attempt(next, extraction)
                       case None       => Right(Left(error))
                   case other => Right(other)
                 }
@@ -167,7 +158,7 @@ final case class TwoStepAdapter(
     * fields, and the instructions of the signature.
     */
   private def taskDescription(layout: SignatureLayout): String =
-    val instructions = PromptText.instructions(layout)
+    val instructions = layout.effectiveInstructions
     (Vector(
       "You are a helpful assistant that can solve tasks based on user input.",
       "As input, you will be provided with:\n" + PromptText.descriptions(layout.inputFields),

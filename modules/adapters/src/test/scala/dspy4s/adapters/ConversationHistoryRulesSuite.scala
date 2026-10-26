@@ -3,6 +3,7 @@ package dspy4s.adapters
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.NativeFunctionCalling
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
@@ -70,8 +71,8 @@ class ConversationHistoryRulesSuite extends FunSuite:
     Vector("ChatAdapter" -> chat, "JSONAdapter" -> json, "XMLAdapter" -> xml)
 
   private val nativeAdapters: Vector[(String, Adapter)] = Vector(
-    "ChatAdapter" -> ChatAdapter(useNativeFunctionCalling = true),
-    "JSONAdapter" -> JSONAdapter(useNativeFunctionCalling = true)
+    "ChatAdapter" -> ChatAdapter(native = NativeTools(enabled = true)),
+    "JSONAdapter" -> JSONAdapter(native = NativeTools(enabled = true))
   )
 
   private val oneTurn: History = History.empty :+ DynamicValues.record("question" := "What is 1+1?", "answer" := "2")
@@ -309,7 +310,7 @@ class ConversationHistoryRulesSuite extends FunSuite:
 
   test("ChatAdapter (native): the assistant text has the fields of the message with no tool calls field") {
     val messages = messagesOf(
-      ChatAdapter(useNativeFunctionCalling = true),
+      ChatAdapter(native = NativeTools(enabled = true)),
       agentWithHistory,
       withHistory("Q2", History.empty :+ toolTurn)
     )
@@ -320,7 +321,7 @@ class ConversationHistoryRulesSuite extends FunSuite:
 
   test("JSONAdapter (native): the assistant text has the fields of the message with no tool calls field") {
     val messages = messagesOf(
-      JSONAdapter(useNativeFunctionCalling = true),
+      JSONAdapter(native = NativeTools(enabled = true)),
       agentWithHistory,
       withHistory("Q2", History.empty :+ toolTurn)
     )
@@ -424,8 +425,8 @@ class ConversationHistoryRulesSuite extends FunSuite:
   }
 
   Vector(
-    "ChatAdapter" -> ChatAdapter(useNativeFunctionCalling = true),
-    "JSONAdapter" -> JSONAdapter(useNativeFunctionCalling = true)
+    "ChatAdapter" -> ChatAdapter(native = NativeTools(enabled = true)),
+    "JSONAdapter" -> JSONAdapter(native = NativeTools(enabled = true))
   )
     .foreach { (name, adapter) =>
       test(s"$name: parse keeps the id of a native tool call in the tool calls field") {

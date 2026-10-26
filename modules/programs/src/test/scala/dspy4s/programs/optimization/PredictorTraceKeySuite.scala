@@ -26,11 +26,11 @@ class PredictorTraceKeySuite extends FunSuite:
     override val name: String                                                                                    = "fill"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
       if failParse then Left(ParseError("fill", "cannot parse", Some(output.text)))
-      else Right(ParsedOutput(values = record(layout.outputFields.map(_.name := output.text)*)))
+      else Right(ParsedOutput(values = record(invocation.layout.outputFields.map(_.name := output.text)*)))
 
   private val qa      = Signature.fromString("question -> answer")
   private val rewrite = Signature.fromString("answer -> summary")

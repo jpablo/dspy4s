@@ -2,7 +2,7 @@ package dspy4s.optimize.para
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, RuntimeContext, SignatureLayout}
+import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, RuntimeContext}
 import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
@@ -54,10 +54,10 @@ class ParaCompileSuite extends FunSuite:
         Vector(Message(role = MessageRole.User, text = Some(s"INSTRUCTION=[$instr] QUESTION=[$q] BASIC=[$bi]")))
       ))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      val outField = layout.outputFields.headOption.map(_.name).getOrElse("answer")
+      val outField = invocation.layout.outputFields.headOption.map(_.name).getOrElse("answer")
       Right(ParsedOutput(values = rec(outField := output.text)))
 
   private final class ScriptedLm extends LanguageModel:

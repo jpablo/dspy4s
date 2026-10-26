@@ -78,6 +78,7 @@ Phase 4 focuses on adapter formatting/parsing parity.
 - Added bridge utilities:
   - `ToolSchemaBridge.toOpenAiTools(...)`
   - `ToolSchemaBridge.fromOutput(...)`
+  - Later removed: only tests used `ToolCallData`, `toOpenAiTools`, and `fromOutput`. `toOpenAiToolsDynamic` writes the tools.
 - Added `/Users/jpablo/proyectos/experimentos/dspy4s/modules/adapters/src/test/scala/dspy4s/adapters/ToolSchemaBridgeSuite.scala`
   - OpenAI function schema rendering coverage
   - LM tool-call extraction coverage

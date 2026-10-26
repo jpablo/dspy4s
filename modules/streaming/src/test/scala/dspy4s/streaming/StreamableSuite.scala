@@ -1,6 +1,7 @@
 package dspy4s.streaming
 
 import dspy4s.adapters.ChatAdapter
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
@@ -199,7 +200,7 @@ class StreamableSuite extends FunSuite:
   test("streamify runs ReActV2 with native tool calls, and streams next_thought of a reply with no header") {
     val program  = ReActV2(qa, Vector.empty)
     val lm       = NativeReplyLm("I can answer now.", "submit", """{"answer": "42"}""")
-    val adapter  = ChatAdapter(useNativeFunctionCalling = true)
+    val adapter  = ChatAdapter(native = NativeTools(enabled = true))
     val warnings = ArrayBuffer.empty[String]
     val events   = streamRunWith(program, lm, adapter, StreamListener("next_thought"), warnings)
 

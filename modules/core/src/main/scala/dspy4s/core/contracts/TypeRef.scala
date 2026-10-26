@@ -26,7 +26,42 @@ final case class TypeRef(repr: String) derives CanEqual:
       case "tools"   => Some("list[Tool]")
       case _         => None
 
+  /** The JSON schema type of this wire type (the types of upstream `Tool._parse_function`): `string`, `integer`,
+    * `number`, `boolean`, `array` for [[TypeRef.list]], and `object` for [[TypeRef.json]]. `None` for each other type.
+    */
+  def jsonType: Option[String] =
+    this match
+      case TypeRef.string => Some("string")
+      case TypeRef.int    => Some("integer")
+      case TypeRef.double => Some("number")
+      case TypeRef.bool   => Some("boolean")
+      case TypeRef.list   => Some("array")
+      case TypeRef.json   => Some("object")
+      case _              => None
+
+  /** The kind and the item type text of a collection type with an item type, as [[TypeRef.fromToken]] gives it:
+    * `list[T]`, `tuple[T, ...]`, `set[T]`, or `frozenset[T]`. For example, `list[str]` gives
+    * `(Collection.List, "str")`. `None` for each other type, also for [[TypeRef.list]], which has no item type.
+    */
+  def collection: Option[(TypeRef.Collection, String)] =
+    TypeRef.Collection.values.collectFirst {
+      case kind if repr.startsWith(kind.prefix) && repr.endsWith("]") && repr.length > kind.prefix.length + 1 =>
+        kind -> repr.substring(kind.prefix.length, repr.length - 1)
+    }
+
 object TypeRef:
+
+  /** The kind of a collection type with an item type ([[TypeRef.collection]]). `prefix` is the start of its type text.
+    */
+  enum Collection(val prefix: String) derives CanEqual:
+    case List      extends Collection("list[")
+    case Tuple     extends Collection("tuple[")
+    case Set       extends Collection("set[")
+    case FrozenSet extends Collection("frozenset[")
+
+    /** `true` for a set type: upstream gives a Python set, which keeps one copy of each equal value. */
+    def isSet: Boolean = this == Set || this == FrozenSet
+
   val string: TypeRef = TypeRef("string")
   val int: TypeRef    = TypeRef("int")
   val double: TypeRef = TypeRef("double")
