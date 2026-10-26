@@ -48,12 +48,12 @@ private[dspy4s] final case class PredictEngine(
     demos     : Vector[Example],
     moduleName: String,
     runtime   : ProgramRuntime,
-    /** Optional pre-rendered JSON Schema for the output. Populated by the [[dspy4s.programs.strategies.Predict]] path
-      * (which has a `Schema[O]` to render via `Shape.jsonSchemaString`); left `None` by
+    /** Optional JSON Schema of the output as a JSON object. Populated by the [[dspy4s.programs.strategies.Predict]]
+      * path (which has a `Schema[O]` to render via `Shape.jsonSchema`); left `None` by
       * [[dspy4s.programs.strategies.DynamicPredict]]. Passed straight through to [[AdapterInvocation]]; adapters that
       * understand it inline the schema in their prompt instruction.
       */
-    outputJsonSchema: Option[String] = None,
+    outputJsonSchema: Option[DynamicValue.Record] = None,
     /** Module-level LM option bag, the analogue of Python's `dspy.Predict(signature, **config)` `self.config`. Merged
       * *under* the per-call [[ProgramCall.config]] in [[buildInvocation]] (per-call keys win on collision), so it
       * supplies defaults a call may override. Empty by default, in which case the merged options are exactly the

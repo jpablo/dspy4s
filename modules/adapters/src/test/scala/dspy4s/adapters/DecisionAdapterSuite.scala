@@ -241,7 +241,7 @@ class DecisionAdapterSuite extends FunSuite:
       system
     )
     val format = DynamicValues.recordGet(prompt.requestOptions, "response_format").getOrElse(fail("no response_format"))
-    val text   = dspy4s.adapters.internal.ProgramPromptText.json(format)
+    val text   = dspy4s.core.contracts.PythonText.json(format)
     assert(text.contains(""""noul": {"type": "number""""), text)
     assert(text.contains(""""probabilities""""), text)
   }

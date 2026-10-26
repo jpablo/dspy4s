@@ -185,7 +185,7 @@ class RefinePerModuleAdviceSuite extends FunSuite:
       demos = Vector.empty,
       inputs = Example(values = rec("q" := "Where?"), inputKeys = Set("q")),
       request = LmRequest(model = "m"),
-      outputJsonSchema = Some("""{"type": "object"}""")
+      outputJsonSchema = Some(rec("type" := "object"))
     )
     assert(hint.parse(invocation, LmOutput(text = "")).isRight)
     assertEquals(adapter.parsed.toVector, Vector(invocation))

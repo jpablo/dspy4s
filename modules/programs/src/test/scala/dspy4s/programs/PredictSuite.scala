@@ -197,7 +197,7 @@ class TypedPredictSuite extends FunSuite:
     assertEquals(erased.demos, demos)
     assertEquals(erased.name, program.name)
     assert(erased.runtime eq runtime)
-    assertEquals(erased.outputJsonSchema, sig.outputShape.jsonSchemaString)
+    assertEquals(erased.outputJsonSchema, sig.outputShape.jsonSchema)
     assertEquals(erased.config, config)
     assert(erased.lm.exists(_ eq FixedLm))
     assertEquals(erased.tools, tools)

@@ -33,8 +33,8 @@ case class EmotionOutput(sentiment: Emotion) derives Schema
   *     `ProgramCall.input` record.
   *   - decode: `Prediction.output` is an `EmotionOutput`, so `tp.output.sentiment` has type `Emotion` with no runtime
   *     cast.
-  *   - enum constraints reach the LM via `Shape.jsonSchemaString` (rendered from the backing `Schema[O]`); the
-  *     `JSONAdapter` inlines that schema into its prompt.
+  *   - enum constraints reach the LM via `Shape.jsonSchema` (built from the backing `Schema[O]`); the `JSONAdapter`
+  *     inlines that schema into its prompt.
   */
 object CaseClassExample:
 

@@ -31,7 +31,7 @@ object BuilderExample:
   // --8<-- [end:builder-sig]
 
   /** Reusing an enum that has a `Schema` (see CaseClassExample's `Emotion`) gives the builder a `TypeRef.string` field;
-    * enum allowed-values reach the LM through the `Predict` path's `Shape.jsonSchemaString` (inlined by `JSONAdapter`).
+    * enum allowed-values reach the LM through the `Predict` path's `Shape.jsonSchema` (inlined by `JSONAdapter`).
     */
   val classifyEmotion: SignatureLayout = Signature
     .builder("Emotion")

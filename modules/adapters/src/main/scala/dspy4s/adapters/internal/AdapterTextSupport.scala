@@ -8,6 +8,7 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.LenientValues
 import dspy4s.core.contracts.ParseError
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ToolCall
 import dspy4s.core.contracts.TypeRef
@@ -149,8 +150,22 @@ private[adapters] object AdapterTextSupport:
   /** The whitespace that `json_repair` skips around a value. */
   private val JsonWhitespace: Set[Char] = Set(' ', '\t', '\n', '\r')
 
+  /** The allowed value of the output field `field` that the JSON value `value` gives (upstream `parse_value` with a
+    * `Literal` annotation, decision D7). The JSON adapter uses this rule for a value of its JSON object, and `RLM` uses
+    * it for a value of `SUBMIT`. Use it only for a field for which [[hasAllowedValues]] is `true`:
+    *   - A null of an optional field is a null.
+    *   - A string takes the steps of [[allowedValue]], and the result is the allowed value itself.
+    *   - Each other value is an error, because each allowed value is a string. The error shows the JSON text of the
+    *     value ([[PythonText.json]]).
+    */
+  def allowedJsonValue(field: FieldSpec, value: DynamicValue): Either[DspyError, DynamicValue] =
+    value match
+      case _: DynamicValue.Null.type if field.optional         => Right(DynamicValue.Null)
+      case DynamicValue.Primitive(PrimitiveValue.String(text)) => outputTextValue(field, text)
+      case other                                               => Left(notAllowedValue(field, PythonText.json(other)))
+
   /** The error of the text or the JSON text `text` that is not an allowed value of the output field `field`. */
-  def notAllowedValue(field: FieldSpec, text: String): DspyError =
+  private def notAllowedValue(field: FieldSpec, text: String): DspyError =
     ValidationError(s"Value '$text' is not one of the allowed values: ${field.enumValues.mkString("; ")}")
 
   /** The prefixes of a wrapper that upstream `parse_value` removes from a `Literal` value. */
@@ -206,10 +221,10 @@ private[adapters] object AdapterTextSupport:
   private val NullTexts: Set[String] = Set("null", "None")
 
   /** The value of a `tool_calls` output field that the model wrote as text (native function calling is not active). The
-    * text is a JSON value in a form of [[toolCallsValue]]. Each other text is an error.
+    * text is a JSON value ([[PythonText.parseJson]]) in a form of [[toolCallsValue]]. Each other text is an error.
     */
   def textToolCalls(raw: String): Either[DspyError, DynamicValue] =
-    JsonDynamic.parse(raw).flatMap(toolCallsValue)
+    PythonText.parseJson(raw).flatMap(toolCallsValue)
 
   /** The value of a `tool_calls` output field from a JSON value, in a form that upstream `ToolCalls.validate_input`
     * accepts ([[ToolCall.fromDynamic]]): a list of `{"name", "args"}` objects, an object with that list under the key
@@ -225,7 +240,9 @@ private[adapters] object AdapterTextSupport:
       ))
 
   /** Coerce a raw string field value into the `DynamicValue` its declared `TypeRef` demands. Shared by the Chat and XML
-    * adapters so a `json` / `list` field decodes identically regardless of which adapter parsed it.
+    * adapters so a `json` / `list` field decodes identically regardless of which adapter parsed it. A `json` or a
+    * `list` field reads the text as JSON with the rules of Python `json.loads` ([[PythonText.parseJson]]): an integer
+    * keeps its exact value, and a float stays a float.
     */
   def coerceText(typeRef: TypeRef, raw: String): Either[DspyError, DynamicValue] =
     typeRef match
@@ -238,10 +255,10 @@ private[adapters] object AdapterTextSupport:
           case "true"  => Right(DynamicValue.Primitive(PrimitiveValue.Boolean(true)))
           case "false" => Right(DynamicValue.Primitive(PrimitiveValue.Boolean(false)))
           case other   => Left(ValidationError(s"Cannot parse boolean output from '$other'"))
-      case TypeRef.json | TypeRef.list => JsonDynamic.parse(raw).left.map(_ =>
+      case TypeRef.json | TypeRef.list => PythonText.parseJson(raw).left.map(_ =>
           ValidationError(s"Field could not be parsed as JSON from '$raw'")
         )
-      case other if isListOf(other) => listOfValue(other, JsonDynamic.parse(raw).toOption, raw)
+      case other if isListOf(other) => listOfValue(other, PythonText.parseJson(raw).toOption, raw)
       case _                        => Right(DynamicValue.Primitive(PrimitiveValue.String(raw)))
 
   /** `true` for a list type with an item type, for example the type `list[str]` of a string signature. A `tuple[...]`,

@@ -71,7 +71,7 @@ class ProgramPersistenceSuite extends FunSuite:
       layout = trainedLayout,
       demos = demo,
       name = Some("training_predictor"),
-      outputJsonSchema = Some("training-schema"),
+      outputJsonSchema = Some(DynamicValues.record("title" := "training-schema")),
       config = DynamicValues.record("temperature" := 0.2)
     )
     val freshRuntime = new SettingsProgramRuntime {}
@@ -79,7 +79,7 @@ class ProgramPersistenceSuite extends FunSuite:
       layout = freshLayout,
       name = Some("deployment_predictor"),
       runtime = freshRuntime,
-      outputJsonSchema = Some("deployment-schema")
+      outputJsonSchema = Some(DynamicValues.record("title" := "deployment-schema"))
     )
 
     val restored = ProgramPersistence.loadState(fresh, ProgramPersistence.dumpState(trained)).toOption.get

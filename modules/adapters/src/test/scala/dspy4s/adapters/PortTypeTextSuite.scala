@@ -6,6 +6,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
@@ -17,6 +18,7 @@ import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import munit.FunSuite
+import zio.blocks.schema.DynamicValue
 
 /** The type text of a field outside the scope of the golden prompts (decision D3, the boundary rule). The adapters
   * compute the type text from the data of the port only:
@@ -61,7 +63,11 @@ class PortTypeTextSuite extends FunSuite:
       demos = Vector.empty,
       inputs = Example(values = DynamicValues.record("question" := "Q?"), inputKeys = Set("question")),
       request = LmRequest(model = "stub"),
-      outputJsonSchema = outputJsonSchema
+      outputJsonSchema = outputJsonSchema.map(text =>
+        PythonText.parseJson(text) match
+          case Right(record: DynamicValue.Record) => record
+          case other                              => fail(s"not a JSON object: $other")
+      )
     )
     adapter.format(invocation) match
       case Right(prompt) => (prompt.messages.head.text.getOrElse(""), prompt.messages.last.text.getOrElse(""))

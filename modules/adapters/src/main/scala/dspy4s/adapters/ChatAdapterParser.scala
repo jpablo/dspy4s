@@ -1,8 +1,8 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.{NativeFunctionCalling, ParsedOutput}
-import dspy4s.adapters.internal.{AdapterTextSupport, PythonText}
-import dspy4s.core.contracts.{DspyError, FieldSpec, SignatureLayout}
+import dspy4s.adapters.internal.AdapterTextSupport
+import dspy4s.core.contracts.{DspyError, FieldSpec, PythonText, SignatureLayout}
 import dspy4s.lm.contracts.LmOutput
 import zio.blocks.schema.DynamicValue
 

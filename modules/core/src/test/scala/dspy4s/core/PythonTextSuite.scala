@@ -1,7 +1,6 @@
-package dspy4s.adapters
+package dspy4s.core
 
-import dspy4s.adapters.internal.PythonText
-import dspy4s.core.contracts.{:=, DynamicValues, PythonRepr}
+import dspy4s.core.contracts.{:=, DspyError, DynamicValues, PythonRepr, PythonText}
 import munit.FunSuite
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
@@ -79,8 +78,32 @@ class PythonTextSuite extends FunSuite:
 
   test("a JSON text keeps the float form of its numbers") {
     val parsed = PythonText.parseJson("""{"a": 1.0, "b": 2, "c": 1e-05, "d": [true, null, "é"]}""")
-    assertEquals(parsed.map(PythonText.json(_)), Some("""{"a": 1.0, "b": 2, "c": 1e-05, "d": [true, null, "é"]}"""))
-    assertEquals(PythonText.parseJson("not json"), None)
+    assertEquals(parsed.map(PythonText.json(_)), Right("""{"a": 1.0, "b": 2, "c": 1e-05, "d": [true, null, "é"]}"""))
+    assert(PythonText.parseJson("not json").isLeft)
+  }
+
+  test("a JSON integer keeps its exact value, also above 2^53 and above the range of a Long") {
+    def number(text: String): Either[DspyError, DynamicValue] = PythonText.parseJson(text)
+    assertEquals(number("9007199254740993"), Right(DynamicValue.Primitive(PrimitiveValue.Long(9007199254740993L))))
+    assertEquals(number("3"), Right(DynamicValue.Primitive(PrimitiveValue.Int(3))))
+    assertEquals(number("1.0"), Right(DynamicValue.Primitive(PrimitiveValue.Double(1.0))))
+    assertEquals(
+      number("123456789012345678901234567890"),
+      Right(DynamicValue.Primitive(PrimitiveValue.BigInt(BigInt("123456789012345678901234567890"))))
+    )
+  }
+
+  test("a JSON object with a key two times keeps the last value at the position of the first key") {
+    assertEquals(
+      PythonText.parseJson("""{"a": 1, "b": 2, "a": 3}""").map(PythonText.json(_)),
+      Right("""{"a": 3, "b": 2}""")
+    )
+  }
+
+  test("a JSON text that is nested very deep gives a value, not a StackOverflowError") {
+    val depth  = 100000
+    val parsed = PythonText.parseJson("[" * depth + "]" * depth)
+    assert(parsed.isRight, parsed.left.toString)
   }
 
   test("dedent, splitLines, and strip follow Python") {

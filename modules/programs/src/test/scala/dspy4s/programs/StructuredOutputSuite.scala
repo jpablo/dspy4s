@@ -71,7 +71,7 @@ class StructuredOutputSuite extends FunSuite:
       demos = Vector.empty,
       inputs = Example(values = DynamicValues.recordFromEntries(Seq("text" := "x")), inputKeys = Set("text")),
       request = LmRequest(model = "openai/test"),
-      outputJsonSchema = signature.outputShape.jsonSchemaString
+      outputJsonSchema = signature.outputShape.jsonSchema
     )
     given RuntimeContext = RuntimeEnvironment.current
     val system           = ChatAdapter().format(invocation).toOption.get.messages.head.text.get

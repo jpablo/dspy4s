@@ -57,11 +57,11 @@ final case class DynamicPredict(
     demos  : Vector[Example] = Vector.empty,
     name   : Option[String]  = None,
     runtime: ProgramRuntime  = SettingsProgramRuntime.default,
-    /** Optional pre-rendered JSON Schema string for the output, threaded into [[AdapterInvocation]]. A [[Predict]]
-      * derives the same input for its own engine from `signature.outputShape.jsonSchemaString`; users who construct
-      * `DynamicPredict` directly usually leave it `None`.
+    /** Optional JSON Schema of the output as a JSON object, threaded into [[AdapterInvocation]]. A [[Predict]] derives
+      * the same input for its own engine from `signature.outputShape.jsonSchema`; users who construct `DynamicPredict`
+      * directly usually leave it `None`.
       */
-    outputJsonSchema: Option[String] = None,
+    outputJsonSchema: Option[DynamicValue.Record] = None,
     /** Module-level LM option bag, the analogue of Python's `dspy.Predict(signature, **config)` `self.config`. Merged
       * *under* the per-call `ProgramCall.config` (per-call keys win on collision), so it supplies defaults a call may
       * override. Empty by default — then the merged options are exactly the per-call config.

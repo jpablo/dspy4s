@@ -200,7 +200,7 @@ final case class RLM[I, O](
   private def buildActionInstructions: String =
     val inputs           = baseLayout.inputFields.map(f => s"`${f.name}`").mkString(", ")
     val finalOutputNames = outputFieldNames.mkString(", ")
-    val outputSchema     = baseSignature.outputShape.jsonSchemaString
+    val outputSchema     = baseSignature.outputShape.jsonSchema
     val outputFields     =
       baseLayout.outputFields.map(f => s"- ${ProgramPromptText.outputPlaceholder(f, outputSchema)}").mkString("\n")
     val taskInstructions = Option(baseLayout.effectiveInstructions).filter(_.nonEmpty).fold("")(_ + "\n\n")

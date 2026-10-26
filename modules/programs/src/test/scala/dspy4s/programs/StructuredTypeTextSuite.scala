@@ -44,7 +44,7 @@ class StructuredTypeTextSuite extends FunSuite:
       demos = Vector.empty,
       inputs = Example(values = DynamicValues.record("question" := "Q?"), inputKeys = Set("question")),
       request = LmRequest(model = "stub"),
-      outputJsonSchema = signature.outputShape.jsonSchemaString
+      outputJsonSchema = signature.outputShape.jsonSchema
     )
     ChatAdapter().format(invocation) match
       case Right(prompt) => (prompt.messages.head.text.getOrElse(""), prompt.messages.last.text.getOrElse(""))

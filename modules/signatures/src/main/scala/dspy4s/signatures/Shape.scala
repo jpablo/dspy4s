@@ -22,11 +22,12 @@ trait Shape[A]:
   /** Decode a value from a `DynamicValue.Record` produced by an adapter or supplied by user code. */
   def decode(raw: DynamicValue.Record): Either[DspyError, A]
 
-  /** The JSON schema of this shape, as text, for the prompt of an LM that follows a structured output. `None` for a
-    * shape that has no `zio.blocks.schema.Schema` (for example, the `MapShape` of `Signature.fromStringDynamic`). For
-    * such a shape, an adapter uses its default instruction in natural language.
+  /** The JSON schema of this shape as a JSON object, for the prompt of an LM that follows a structured output, and for
+    * the strict `response_format` of the JSON adapter. `None` for a shape that has no `zio.blocks.schema.Schema` (for
+    * example, the `MapShape` of `Signature.fromStringDynamic`). For such a shape, an adapter uses its default
+    * instruction in natural language.
     */
-  def jsonSchemaString: Option[String] = None
+  def jsonSchema: Option[DynamicValue.Record] = None
 
   /** Experimental. The names of the fields whose type holds a `Noul`, a `Score`, or a `Choice` inside an `Option`, a
     * collection, or a map, for example `List[Noul]` (upstream `extract_custom_type_from_annotation`). Such a field is

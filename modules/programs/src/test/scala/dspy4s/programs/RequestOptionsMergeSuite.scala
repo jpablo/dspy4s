@@ -85,7 +85,7 @@ class RequestOptionsMergeSuite extends FunSuite:
   }
 
   test("end-to-end: Predict + JSONAdapter + capable LM puts response_format in the LM request") {
-    // The Predict path supplies outputJsonSchema (rendered from Schema[O]); JSONAdapter emits a
+    // The Predict path supplies outputJsonSchema (from the Schema[O] of the output); JSONAdapter emits a
     // response_format that the engine merges into request.options. The capturing LM declares
     // supportsResponseSchema = true.
     val sig  = dspy4s.signatures.Signature.derived[MCQAInput, MCQAOutput]("QA")

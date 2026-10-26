@@ -109,7 +109,7 @@ class SignatureFieldOpsSuite extends FunSuite:
     val signature = withReasoning(reasoned)
     assertEquals(signature.layout, reasoned.layout)
     assertEquals(signature.outputShape.fieldSpecs, reasoned.outputShape.fieldSpecs)
-    assertEquals(signature.outputShape.jsonSchemaString, reasoned.outputShape.jsonSchemaString)
+    assertEquals(signature.outputShape.jsonSchema, reasoned.outputShape.jsonSchema)
 
     val raw = reasoned.outputShape.encode(SfReasoned("kept", "Paris"))
     assertEquals(
@@ -151,8 +151,8 @@ class SignatureFieldOpsSuite extends FunSuite:
 
   // ── prependOutput: the JSON schema of the output ─────────────────────────────────────────────
 
-  private def parsed(schema: Option[String]): DynamicValue.Record =
-    schema.flatMap(DynamicValues.parseJsonRecord).getOrElse(fail(s"no JSON schema: $schema"))
+  private def parsed(schema: Option[DynamicValue.Record]): DynamicValue.Record =
+    schema.getOrElse(fail("no JSON schema"))
 
   private def at(record: DynamicValue.Record, path: String*): Option[DynamicValue] =
     path.foldLeft[Option[DynamicValue]](Some(record)) {
@@ -171,26 +171,26 @@ class SignatureFieldOpsSuite extends FunSuite:
       case other                             => fail(s"expected a list, got: $other")
 
   test("prependOutput: the JSON schema has the prepended property first in the properties and in required") {
-    val schema = parsed(withReasoning(base).outputShape.jsonSchemaString)
+    val schema = parsed(withReasoning(base).outputShape.jsonSchema)
     assertEquals(keysAt(schema, "properties"), Vector("reasoning", "answer", "score"))
     assertEquals(at(schema, "properties", "reasoning"), Some(rec("type" -> str("string"))))
     assertEquals(names(at(schema, "required")), Vector("reasoning", "answer", "score"))
     assertEquals(
       at(schema, "properties", "score"),
-      at(parsed(base.outputShape.jsonSchemaString), "properties", "score")
+      at(parsed(base.outputShape.jsonSchema), "properties", "score")
     )
   }
 
   test("prependOutput: an optional field or a field with a default value is not in required") {
     for field <- Vector(reasoningField.copy(optional = true), reasoningField.copy(defaultValue = Some(str("none"))))
     do
-      val schema = parsed(withReasoning(base, field).outputShape.jsonSchemaString)
+      val schema = parsed(withReasoning(base, field).outputShape.jsonSchema)
       assertEquals(keysAt(schema, "properties"), Vector("reasoning", "answer", "score"))
       assertEquals(names(at(schema, "required")), Vector("answer", "score"))
   }
 
   test("prependOutput: for a recursive base type, the definition replaces the root $ref and $defs stays") {
-    val schema = parsed(withReasoning(Signature.derived[SfQuestion, SfNode]("Tree")).outputShape.jsonSchemaString)
+    val schema = parsed(withReasoning(Signature.derived[SfQuestion, SfNode]("Tree")).outputShape.jsonSchema)
     assertEquals(at(schema, "$ref"), None)
     assertEquals(keysAt(schema, "properties"), Vector("reasoning", "label", "children"))
     assertEquals(names(at(schema, "required")), Vector("reasoning", "label"))
@@ -206,7 +206,7 @@ class SignatureFieldOpsSuite extends FunSuite:
         DynamicValues.requireString(raw, "answer", "test").map(answer => (answer = answer))
     val signature = withReasoning(Signature.fromShapes("Plain", "", base.inputShape, answerShape))
     assertAgree(signature)
-    assertEquals(signature.outputShape.jsonSchemaString, None)
+    assertEquals(signature.outputShape.jsonSchema, None)
   }
 
   // ── withOutputs ──────────────────────────────────────────────────────────────────────────────

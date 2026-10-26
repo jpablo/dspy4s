@@ -159,7 +159,7 @@ final class OptimizableParametersSuite extends FunSuite:
       demos = demos,
       name = Some("bound_predict"),
       runtime = runtime,
-      outputJsonSchema = Some("{\"type\":\"object\"}"),
+      outputJsonSchema = Some(DynamicValues.record("type" := "object")),
       config = DynamicValues.record("seed" := 1),
       lm = Some(BoundLm),
       tools = tools

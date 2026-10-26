@@ -1,12 +1,14 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, NativeFunctionCalling, ParsedOutput}
-import dspy4s.adapters.internal.{AdapterTextSupport, JsonDynamic, PromptText, PythonText, StrictJsonSchema}
+import dspy4s.adapters.internal.{AdapterTextSupport, PromptText, StrictJsonSchema}
 import dspy4s.core.contracts.{
   DspyError,
   DynamicValues,
   FieldSpec,
+  JsonSchemaRefs,
   ParseError,
+  PythonText,
   RuntimeContext,
   SignatureLayout,
   TypeRef,
@@ -79,7 +81,7 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
     invocation.copy(
       layout = evidence,
       demos = Vector.empty,
-      outputJsonSchema = Some(PythonText.json(outputSchema(invocation, evidence)))
+      outputJsonSchema = Some(outputSchema(invocation, evidence))
     )
 
   /** The output values of `output`: `parseEvidence` parses it with the evidence layout of `layout`, then the evidence
@@ -120,7 +122,7 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
 
   /** The output JSON schema of the request: the output schema of `invocation` with the evidence schema as the property
     * of each evidence field. When the root of the output schema is a `$ref` (a recursive output type), the schema that
-    * it names replaces it first ([[StrictJsonSchema.inlineRootRef]]), so that the other properties stay. With no output
+    * it names replaces it first ([[JsonSchemaRefs.inlineRoot]]), so that the other properties stay. With no output
     * schema, the schema of the fields of `evidence` ([[StrictJsonSchema.fromFields]]), with the evidence schemas. When
     * a field has a type with no schema there, the result has the evidence properties, the open map schema of each field
     * of the type `json`, and `"additionalProperties": true` at the root. The JSON adapter then sends JSON mode, as it
@@ -129,14 +131,14 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
     */
   private def outputSchema(invocation: AdapterInvocation, evidence: SignatureLayout): DynamicValue.Record =
     val schemas = plan.kinds.map((name, kind) => name -> DecisionAdapter.evidenceSchema(kind))
-    invocation.outputJsonSchema.flatMap(PythonText.parseJson) match
-      case Some(parsed: DynamicValue.Record) =>
-        val typed      = StrictJsonSchema.inlineRootRef(parsed)
+    invocation.outputJsonSchema match
+      case Some(schema) =>
+        val typed      = JsonSchemaRefs.inlineRoot(schema)
         val properties = DynamicValues.recordGet(typed, "properties") match
           case Some(record: DynamicValue.Record) => record
           case _                                 => DynamicValue.Record.empty
         typed.updated("properties", schemas.foldLeft(properties)((acc, entry) => acc.updated(entry._1, entry._2)))
-      case _ =>
+      case None =>
         val fields   = evidence.outputFields.filterNot(NativeFunctionCalling.isToolCallsField)
         val openMaps = fields.filter(_.typeRef == TypeRef.json).map(_.name -> StrictJsonSchema.OpenMapSchema)
         StrictJsonSchema.fromFields(fields, schemas.toMap).getOrElse(
@@ -166,12 +168,12 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
         yield found.updated(name, evidence)
     }
 
-  /** The JSON value of an evidence field: a JSON object as it is, or the JSON value of a text. A chat reply gives the
-    * text of the object.
+  /** The JSON value of an evidence field: a JSON object as it is, or the JSON value of a text
+    * ([[PythonText.parseJson]]). A chat reply gives the text of the object.
     */
   private def evidenceValue(name: String, value: Option[DynamicValue]): Either[DspyError, DynamicValue] =
     value.toRight(ValidationError(s"The reply has no evidence for '$name'")).flatMap {
-      case DynamicValue.Primitive(PrimitiveValue.String(text)) => JsonDynamic.parse(text)
+      case DynamicValue.Primitive(PrimitiveValue.String(text)) => PythonText.parseJson(text)
       case other                                               => Right(other)
     }
 

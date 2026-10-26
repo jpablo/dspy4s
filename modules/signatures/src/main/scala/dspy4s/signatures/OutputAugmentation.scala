@@ -1,8 +1,7 @@
 package dspy4s.signatures
 
-import dspy4s.core.contracts.{DspyError, FieldSpec, ValidationError}
+import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, JsonSchemaRefs, ValidationError, updated}
 import zio.blocks.chunk.Chunk
-import zio.blocks.schema.json.Json
 import zio.blocks.schema.{DynamicValue, Schema}
 
 import scala.NamedTuple
@@ -137,12 +136,15 @@ object OutputAugmentation:
     new Shape[Out]:
       val fieldSpecs: Vector[FieldSpec] = if baseHasField then base.fieldSpecs else withField.fieldSpecs
 
-      override lazy val jsonSchemaString: Option[String] =
-        if baseHasField then base.jsonSchemaString
+      override lazy val jsonSchema: Option[DynamicValue.Record] =
+        if baseHasField then base.jsonSchema
         else
-          base.jsonSchemaString.flatMap(
-            withLeadingProperty(_, field.name, StringProperty, field.defaultValue.isEmpty && !field.optional)
-          )
+          for
+            schema    <- base.jsonSchema
+            property  <- StringProperty
+            augmented <-
+              withLeadingProperty(schema, field.name, property, field.defaultValue.isEmpty && !field.optional)
+          yield augmented
 
       override def nestedDecisionFields: Vector[String] = base.nestedDecisionFields
 
@@ -158,54 +160,32 @@ object OutputAugmentation:
         }
 
   /** The JSON schema of a `String` field, as zio-blocks writes it for the field of a record. */
-  private lazy val StringProperty: Json = Schema.string.toJsonSchema.toJson
+  private lazy val StringProperty: Option[DynamicValue.Record] =
+    ZioSchemaCodec.schemaRecord(Schema.string.toJsonSchema.toJson)
 
-  private val DefsPrefix: String = "#/$defs/"
-
-  /** The JSON schema text `schema` with the property `name: property` first in `properties`. When `required` is true,
-    * `name` is also first in `required`. A root `$ref` to an entry of `$defs` (the schema of a recursive type) becomes
-    * that entry, and `$defs` stays: the augmented output is not the recursive type. The text has the form of
-    * [[ZioSchemaCodec.jsonSchemaForModel]]. The result is `None` when `schema` is not a JSON object with `properties`.
+  /** The JSON schema `schema` with the property `name: property` first in `properties`. When `required` is true, `name`
+    * is also first in `required`. A root `$ref` (the schema of a recursive type) becomes the schema that it names
+    * ([[JsonSchemaRefs.inlineRoot]]), and `$defs` stays: the augmented output is not the recursive type. The result is
+    * `None` when `schema` has no `properties` object.
     */
-  private def withLeadingProperty(schema: String, name: String, property: Json, required: Boolean): Option[String] =
-    for
-      root       <- Json.parse(schema).toOption.collect { case root: Json.Object => inlinedRoot(root) }
-      properties <- member(root, "properties").collect { case properties: Json.Object => properties }
-    yield
-      val others       = properties.value.filterNot((key, _) => key == name)
-      val withProperty = updated(root, "properties", Json.Object((name -> property) +: others))
-      val augmented    =
-        if !required then withProperty
-        else
-          val names = member(root, "required").collect { case names: Json.Array => names.value }
-            .getOrElse(Chunk.empty)
-            .filterNot {
-              case Json.String(other) => other == name
-              case _                  => false
-            }
-          updated(withProperty, "required", Json.Array(Json.String(name) +: names))
-      augmented.toString
-
-  /** `root` with the entry of `$defs` that its `$ref` names in place of the `$ref`. Each other key of `root` comes
-    * after the keys of the entry. A root with no such `$ref` stays as it is.
-    */
-  private def inlinedRoot(root: Json.Object): Json.Object =
-    val entry =
-      for
-        ref         <- member(root, "$ref").collect { case Json.String(ref) if ref.startsWith(DefsPrefix) => ref }
-        definitions <- member(root, "$defs").collect { case definitions: Json.Object => definitions }
-        found       <- member(definitions, ref.stripPrefix(DefsPrefix)).collect { case found: Json.Object => found }
-      yield found
-    entry.fold(root)(found => Json.Object(found.value ++ root.value.filterNot((key, _) => key == "$ref")))
-
-  private def member(obj: Json.Object, key: String): Option[Json] =
-    obj.value.find((name, _) => name == key).map((_, value) => value)
-
-  /** `obj` with `value` at `key`. An existing key keeps its position, and a new key goes at the end. */
-  private def updated(obj: Json.Object, key: String, value: Json): Json.Object =
-    if obj.value.exists((name, _) => name == key) then
-      Json.Object(obj.value.map((name, old) => if name == key then name -> value else name -> old))
-    else Json.Object(obj.value :+ (key -> value))
+  private def withLeadingProperty(
+      schema  : DynamicValue.Record,
+      name    : String,
+      property: DynamicValue,
+      required: Boolean
+  ): Option[DynamicValue.Record] =
+    val root = JsonSchemaRefs.inlineRoot(schema)
+    DynamicValues.recordGet(root, "properties").collect { case properties: DynamicValue.Record =>
+      val others       = properties.fields.filterNot((key, _) => key == name)
+      val withProperty = root.updated("properties", DynamicValue.Record((name -> property) +: others))
+      if !required then withProperty
+      else
+        val names = DynamicValues.recordGet(root, "required")
+          .collect { case list: DynamicValue.Sequence => list.elements }
+          .getOrElse(Chunk.empty)
+          .filterNot(DynamicValues.asString(_).contains(name))
+        withProperty.updated("required", DynamicValue.Sequence(DynamicValues.string(name) +: names))
+    }
 
   /** The error for an output with no static fields. The output of a `Signature` with no static fields (the
     * `DynamicValue.Record` output of `Signature.fromStringDynamic`) cannot hold a prepended field.

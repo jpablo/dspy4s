@@ -67,7 +67,7 @@ the runtime context, the errors, and the events. It uses only the `algebra` modu
 |---------|----------|
 | `data/` | `Example`, `Completions`, and `RawPrediction` |
 | `collections/` | `SizedVector`, a vector that has its length in its type |
-| `contracts/` | the signature layout, the runtime context, the errors, the events, the tool calls, the history, and the interpreter interfaces |
+| `contracts/` | the signature layout, the runtime context, the errors, the events, the tool calls, the history, the interpreter interfaces, and the Python text forms of a value (`PythonText`, `PythonRepr`), with the JSON reader that keeps the number rule of Python `json.loads` |
 | `signatures/` | the parser for signature text such as `"question -> answer"` |
 | `runtime/` | `RuntimeEnvironment`, `CallbackDispatcher`, `ContextPropagation` (gives the context to other threads), and the three Python interpreters |
 

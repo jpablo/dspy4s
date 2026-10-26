@@ -109,7 +109,7 @@ class PredictDecisionSuite extends FunSuite:
     assert(predict.withDecision("missing", DecisionSettings()).isLeft)
     assert(predict.withDecision("urgent", DecisionSettings(cuts = Some(Vector(0.5)))).isLeft)
     assertEquals(
-      predict.criteria("severity").map(_.map(dspy4s.adapters.internal.ProgramPromptText.json)),
+      predict.criteria("severity").map(_.map(dspy4s.core.contracts.PythonText.json(_))),
       Right(Some("""["Minor", "Disruptive", "Critical"]"""))
     )
     assertEquals(predict.criteria("urgent"), Right(None))
@@ -120,7 +120,7 @@ class PredictDecisionSuite extends FunSuite:
       .fold(error => fail(error.message), identity)
     assertEquals(updated.decisions("severity").cuts, Some(Vector(0.4, 1.7)), "the other settings stay")
     assertEquals(
-      updated.criteria("severity").map(_.map(dspy4s.adapters.internal.ProgramPromptText.json)),
+      updated.criteria("severity").map(_.map(dspy4s.core.contracts.PythonText.json(_))),
       Right(Some("""["low", "mid", "high"]"""))
     )
   }

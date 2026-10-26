@@ -1,9 +1,9 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.{AdapterInvocation, FormattedPrompt, NativeFunctionCalling, ToolChoice}
-import dspy4s.adapters.internal.{ConversationHistory, PromptText, PythonText, TurnText}
+import dspy4s.adapters.internal.{ConversationHistory, PromptText, TurnText}
 import dspy4s.adapters.internal.PromptText.OutputSchema
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout}
+import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, PythonText, RuntimeContext, SignatureLayout}
 import zio.blocks.schema.DynamicValue
 
 /** Builds ChatAdapter's marker-framed system, demonstration, conversation history, and input messages (upstream

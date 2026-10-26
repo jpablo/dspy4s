@@ -415,7 +415,7 @@ object ReActV2:
   /** The tool `submit` of `signature` (upstream `_make_submit_tool`). See [[ReActV2.allTools]]. */
   private def submitTool[A](signature: Signature[?, A]): ToolFunction =
     val outputs    = signature.layout.outputFields
-    val outputJson = signature.outputShape.jsonSchemaString
+    val outputJson = signature.outputShape.jsonSchema
     val properties =
       DynamicValues.recordFromEntries(outputs.map(field => field.name -> argumentSchema(field, outputJson)))
     val schema = DynamicValues.record(
@@ -445,7 +445,7 @@ object ReActV2:
     * ([[ToolText.args]]). Each other output has its property in the output JSON schema of the signature, else the JSON
     * type of its `TypeRef`, else `{"type": "string"}`.
     */
-  private def argumentSchema(field: FieldSpec, outputJsonSchema: Option[String]): DynamicValue =
+  private def argumentSchema(field: FieldSpec, outputJsonSchema: Option[DynamicValue.Record]): DynamicValue =
     def jsonType: DynamicValue = DynamicValues.record("type" := ToolText.jsonType(field.typeRef).getOrElse("string"))
     if isPlainPrimitive(field) then jsonType
     else ProgramPromptText.outputProperty(field.name, outputJsonSchema).getOrElse(jsonType)

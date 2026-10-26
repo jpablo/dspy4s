@@ -1,13 +1,20 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.{NativeFunctionCalling, ParsedOutput}
-import dspy4s.adapters.internal.{AdapterTextSupport, JsonDynamic}
-import dspy4s.core.contracts.{DspyError, FieldSpec, ParseError, SignatureLayout, TypeRef, ValidationError}
+import dspy4s.adapters.internal.AdapterTextSupport
+import dspy4s.core.contracts.{
+  DspyError,
+  DynamicValues,
+  FieldSpec,
+  ParseError,
+  PythonText,
+  SignatureLayout,
+  TypeRef,
+  ValidationError
+}
 import dspy4s.lm.contracts.LmOutput
-import ujson.Value
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
-import scala.util.Try
 import scala.util.matching.Regex
 
 /** Decodes JSONAdapter's JSON body and provider-native tool calls into schema-backed `DynamicValue` fields. */
@@ -40,15 +47,15 @@ private[adapters] object JSONAdapterParser:
     * null.
     */
   private def parseNativeToolTurn(adapterName: String, layout: SignatureLayout, output: LmOutput): ParsedOutput =
-    val jsonRoot: Option[Value] = extractJson(output.text).flatMap(parseJsonObject).toOption
-    val entries                 = layout
+    val jsonRoot = extractJson(output.text).flatMap(parseJsonObject).toOption
+    val entries  = layout
       .outputFields
       .map { field =>
         if NativeFunctionCalling.isToolCallsField(field) then
           field.name -> NativeFunctionCalling.encodeToolCalls(output.toolCalls)
         else
           jsonRoot
-            .flatMap(_.objOpt.flatMap(_.get(field.name)))
+            .flatMap(DynamicValues.recordGet(_, field.name))
             .flatMap(raw => decode(field, raw).toOption)
             .map(coerced => field.name -> coerced)
             .getOrElse(field.name -> field.defaultValue.getOrElse(DynamicValue.Null))
@@ -58,7 +65,7 @@ private[adapters] object JSONAdapterParser:
   private def parseFields(
       adapterName: String,
       layout     : SignatureLayout,
-      root       : Value,
+      root       : DynamicValue.Record,
       output     : LmOutput,
       nativeCalls: Boolean
   ): Either[DspyError, ParsedOutput] =
@@ -67,7 +74,7 @@ private[adapters] object JSONAdapterParser:
         if nativeCalls && NativeFunctionCalling.isToolCallsField(field) then
           Right(Some(NativeFunctionCalling.encodeToolCalls(output.toolCalls)))
         else
-          root.obj.get(field.name) match
+          DynamicValues.recordGet(root, field.name) match
             case Some(raw) => decode(field, raw).map(Some(_))
             case None      => Right(None)
       }
@@ -80,19 +87,18 @@ private[adapters] object JSONAdapterParser:
     * `list` field is a list. A JSON value for a `list[T]` field of a string signature must be a list, as in the chat
     * format. An optional field also takes the lenient forms of `AdapterTextSupport.optionalFallback`.
     *
-    * A field with allowed values takes a JSON string only, with the rule of `AdapterTextSupport.allowedValue` (decision
-    * D7). Each other JSON value is an error: upstream `parse_value` validates a value that is not a string against the
+    * A field with allowed values takes the rule of `AdapterTextSupport.allowedJsonValue` (decision D7): a JSON string
+    * only. Each other JSON value is an error: upstream `parse_value` validates a value that is not a string against the
     * `Literal`, whose members are strings.
     */
-  private def decode(field: FieldSpec, value: Value): Either[DspyError, DynamicValue] =
-    value match
-      case _: ujson.Null.type if field.optional                   => Right(DynamicValue.Null)
-      case ujson.Str(text)                                        => AdapterTextSupport.outputTextValue(field, text)
-      case other if NativeFunctionCalling.isToolCallsField(field) =>
-        AdapterTextSupport.toolCallsValue(JsonDynamic.fromUjson(other))
-      case other if AdapterTextSupport.hasAllowedValues(field) =>
-        Left(AdapterTextSupport.notAllowedValue(field, renderJson(other)))
-      case other => AdapterTextSupport.optionalFallback(field, renderJson(other), coerce(field.typeRef, other))
+  private def decode(field: FieldSpec, value: DynamicValue): Either[DspyError, DynamicValue] =
+    if AdapterTextSupport.hasAllowedValues(field) then AdapterTextSupport.allowedJsonValue(field, value)
+    else
+      value match
+        case _: DynamicValue.Null.type if field.optional            => Right(DynamicValue.Null)
+        case DynamicValue.Primitive(PrimitiveValue.String(text))    => AdapterTextSupport.outputTextValue(field, text)
+        case other if NativeFunctionCalling.isToolCallsField(field) => AdapterTextSupport.toolCallsValue(other)
+        case other                                                  => coerce(field, other)
 
   private def extractJson(text: String): Either[DspyError, String] =
     val trimmed = text.trim
@@ -138,40 +144,40 @@ private[adapters] object JSONAdapterParser:
       else
         None
 
-  private def parseJsonObject(raw: String): Either[DspyError, Value] =
-    Try(ujson.read(raw))
-      .toEither
-      .left
-      .map(error => ParseError("adapter", DspyError.messageOf(error)))
-      .flatMap { value =>
-        if value.objOpt.isDefined then
-          Right(value)
-        else
-          Left(ParseError("adapter", "Parsed JSON output is not an object"))
-      }
+  /** The JSON object of `raw`, read with the rules of Python `json.loads` ([[PythonText.parseJson]]). */
+  private def parseJsonObject(raw: String): Either[DspyError, DynamicValue.Record] =
+    PythonText.parseJson(raw).flatMap {
+      case record: DynamicValue.Record => Right(record)
+      case _                           => Left(ParseError("adapter", "Parsed JSON output is not an object"))
+    }
 
-  private def coerce(typeRef: TypeRef, value: Value): Either[DspyError, DynamicValue] =
+  /** The value of the output field `field` from a JSON value `value` that is not a string or a null. A whole float in
+    * the `Int` range is an integer (upstream pydantic lax mode). A field of another type takes the JSON text of the
+    * value as its text. An optional field also takes the lenient forms of `AdapterTextSupport.optionalFallback`.
+    */
+  private def coerce(field: FieldSpec, value: DynamicValue): Either[DspyError, DynamicValue] =
+    AdapterTextSupport.optionalFallback(field, jsonText(value), coerceTo(field.typeRef, value))
+
+  private def coerceTo(typeRef: TypeRef, value: DynamicValue): Either[DspyError, DynamicValue] =
     typeRef match
-      case TypeRef.int => value
-          .numOpt
+      case TypeRef.int => DynamicValues
+          .asDouble(value)
           .filter(number => number.isWhole && number >= Int.MinValue.toDouble && number <= Int.MaxValue.toDouble)
           .map(number => DynamicValue.Primitive(PrimitiveValue.Int(number.toInt)))
-          .toRight(ValidationError(s"Expected integer value, found: $value"))
-      case TypeRef.double => value
-          .numOpt
-          .toRight(ValidationError(s"Expected numeric value, found: $value"))
+          .toRight(ValidationError(s"Expected integer value, found: ${jsonText(value)}"))
+      case TypeRef.double => DynamicValues
+          .asDouble(value)
+          .toRight(ValidationError(s"Expected numeric value, found: ${jsonText(value)}"))
           .map(number => DynamicValue.Primitive(PrimitiveValue.Double(number)))
-      case TypeRef.bool => value
-          .boolOpt
-          .toRight(ValidationError(s"Expected boolean value, found: $value"))
-          .map(boolean => DynamicValue.Primitive(PrimitiveValue.Boolean(boolean)))
-      case TypeRef.json | TypeRef.list => Right(JsonDynamic.fromUjson(value))
+      case TypeRef.bool => Some(value)
+          .collect { case boolean @ DynamicValue.Primitive(PrimitiveValue.Boolean(_)) => boolean }
+          .toRight(ValidationError(s"Expected boolean value, found: ${jsonText(value)}"))
+      case TypeRef.json | TypeRef.list => Right(value)
       // A string signature type such as `list[str]`: the rule of the chat format (`AdapterTextSupport.listOfValue`).
       case other if AdapterTextSupport.isListOf(other) =>
-        AdapterTextSupport.listOfValue(other, Some(JsonDynamic.fromUjson(value)), renderJson(value))
-      case _ => Right(DynamicValue.Primitive(PrimitiveValue.String(value.strOpt.getOrElse(renderJson(value)))))
+        AdapterTextSupport.listOfValue(other, Some(value), jsonText(value))
+      case _ => Right(DynamicValue.Primitive(PrimitiveValue.String(jsonText(value))))
 
-  private def renderJson(value: Value): String =
-    value match
-      case ujson.Str(text) => text
-      case other           => other.render()
+  /** The text of a JSON value: a string is its text, and each other value is its JSON text ([[PythonText.json]]). */
+  private def jsonText(value: DynamicValue): String =
+    DynamicValues.asString(value).getOrElse(PythonText.json(value))

@@ -1,6 +1,6 @@
 package dspy4s.adapters.internal
 
-import dspy4s.core.contracts.{:=, DynamicValues, FieldSpec, SignatureLayout, ToolCall, TypeRef}
+import dspy4s.core.contracts.{:=, DynamicValues, FieldSpec, PythonText, SignatureLayout, ToolCall, TypeRef}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 
@@ -193,8 +193,10 @@ private[adapters] object PromptText:
 
   // ── The output schema ──────────────────────────────────────────────────────────────────────────────────────────
 
-  /** The output JSON schema of an invocation, for the schema notes of the structured fields. */
-  final class OutputSchema private (root: Option[DynamicValue.Record]):
+  /** The output JSON schema `root` of an invocation, for the schema notes of the structured fields. With no schema, no
+    * field has a property.
+    */
+  final class OutputSchema(root: Option[DynamicValue.Record]):
 
     /** The JSON text of the schema of `field`: its property in the output schema, with the `$defs` entries that the
       * property uses at the end. With no such property, the schema of a list or of a dict.
@@ -249,8 +251,3 @@ private[adapters] object PromptText:
 
     private def recordAt(record: DynamicValue.Record, key: String): Option[DynamicValue.Record] =
       DynamicValues.recordGet(record, key).collect { case found: DynamicValue.Record => found }
-
-  object OutputSchema:
-    /** The schema of the JSON text `schema`. A text that is not a JSON object gives an empty schema. */
-    def apply(schema: Option[String]): OutputSchema =
-      new OutputSchema(schema.flatMap(PythonText.parseJson).collect { case record: DynamicValue.Record => record })

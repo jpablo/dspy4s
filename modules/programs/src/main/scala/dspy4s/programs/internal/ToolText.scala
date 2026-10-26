@@ -1,7 +1,6 @@
 package dspy4s.programs.internal
 
-import dspy4s.adapters.internal.ProgramPromptText
-import dspy4s.core.contracts.{:=, DynamicValues, TypeRef}
+import dspy4s.core.contracts.{:=, DynamicValues, PythonText, TypeRef}
 import dspy4s.programs.contracts.ToolFunction
 import zio.blocks.schema.DynamicValue
 
@@ -28,7 +27,7 @@ private[programs] object ToolText:
     val desc =
       if tool.description.nonEmpty then s", whose description is <desc>${tool.description}</desc>.".replace("\n", "  ")
       else "."
-    s"${tool.name}$desc It takes arguments ${ProgramPromptText.json(args(tool))}."
+    s"${tool.name}$desc It takes arguments ${PythonText.json(args(tool))}."
 
   /** The parameters of `tool` as `name: type` texts (upstream `RLM._format_tool_docs`). An argument with no `type` has
     * the type `Any`.
@@ -39,7 +38,7 @@ private[programs] object ToolText:
   private def typeText(schema: DynamicValue): String =
     schema match
       case record: DynamicValue.Record => DynamicValues.recordGet(record, "type")
-          .fold("Any")(value => DynamicValues.asString(value).getOrElse(ProgramPromptText.json(value)))
+          .fold("Any")(value => DynamicValues.asString(value).getOrElse(PythonText.json(value)))
       case _ => "Any"
 
   private def argument(typeRef: TypeRef): DynamicValue.Record =

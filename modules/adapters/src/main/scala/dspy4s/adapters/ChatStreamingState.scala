@@ -1,8 +1,8 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.FieldChunk
-import dspy4s.adapters.internal.{PythonText, SingleUseAdapterStreamingState}
-import dspy4s.core.contracts.FieldSpec
+import dspy4s.adapters.internal.SingleUseAdapterStreamingState
+import dspy4s.core.contracts.{FieldSpec, PythonText}
 
 import scala.collection.mutable
 

@@ -8,12 +8,12 @@ import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.adapters.internal.AdapterTextSupport
 import dspy4s.adapters.internal.DemoMessages
 import dspy4s.adapters.internal.PromptText
-import dspy4s.adapters.internal.PythonText
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.ParseError
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.:=
@@ -85,7 +85,7 @@ final case class TwoStepAdapter(
     * A parse error of the last parse becomes the error of [[originalCompletionError]]. An error of the format step or
     * of the model stays as it is, as upstream catches only `AdapterParseError`.
     */
-  private def extract(layout: SignatureLayout, outputJsonSchema: Option[String], output: LmOutput)(using
+  private def extract(layout: SignatureLayout, outputJsonSchema: Option[DynamicValue.Record], output: LmOutput)(using
       RuntimeContext
   ): Either[DspyError, ParsedOutput] =
     val chat = ChatAdapter()

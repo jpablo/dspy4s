@@ -1,9 +1,18 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.{AdapterInvocation, FormattedPrompt, NativeFunctionCalling, ToolChoice}
-import dspy4s.adapters.internal.{ConversationHistory, JsonDynamic, PromptText, PythonText, StrictJsonSchema, TurnText}
+import dspy4s.adapters.internal.{ConversationHistory, PromptText, StrictJsonSchema, TurnText}
 import dspy4s.adapters.internal.PromptText.OutputSchema
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout, TypeRef, updated}
+import dspy4s.core.contracts.{
+  DspyError,
+  DynamicValues,
+  FieldSpec,
+  PythonText,
+  RuntimeContext,
+  SignatureLayout,
+  TypeRef,
+  updated
+}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
 import zio.blocks.chunk.Chunk
@@ -99,8 +108,8 @@ private[adapters] object JSONAdapterPrompt:
     * result is `{"type": "json_schema", "json_schema": {"name": "DSPyProgramOutputs", "schema": ..., "strict": true}}`.
     *
     * JSON mode, `{"type": "json_object"}`, replaces the schema when an output is a tool calls field and native function
-    * calling is not active, or when no strict schema results: the typed schema does not parse, a field type has no
-    * schema, or the schema has an open map.
+    * calling is not active, or when no strict schema results: a field type has no schema, or the schema has an open
+    * map.
     *
     * When the schema build fails and the adapter goes back to JSON mode, the adapter logs the warning of upstream
     * ([[SchemaBuildWarning]]). A tool calls field and an open map give JSON mode with no warning, as upstream. An open
@@ -131,10 +140,8 @@ private[adapters] object JSONAdapterPrompt:
       val fields         = outputFields.filterNot(NativeFunctionCalling.isToolCallsField)
       val toolCallsNames = outputFields.filter(NativeFunctionCalling.isToolCallsField).map(_.name).toSet
       val schema         = invocation.outputJsonSchema match
-        case Some(schemaString) => JsonDynamic.parse(schemaString).toOption.collect {
-            case typed: DynamicValue.Record => withoutProperties(typed, toolCallsNames)
-          }
-        case None => StrictJsonSchema.fromFields(fields)
+        case Some(typed) => Some(withoutProperties(typed, toolCallsNames))
+        case None        => StrictJsonSchema.fromFields(fields)
       val optionalFields = fields.filter(_.optional).map(_.name).toSet
       val openMap        = invocation.outputJsonSchema match
         case Some(_) => schema.exists(StrictJsonSchema.hasFieldOpenMap)

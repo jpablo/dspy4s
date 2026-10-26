@@ -1,11 +1,11 @@
 package dspy4s.signatures
 
-import dspy4s.core.contracts.{DspyError, FieldSpec, LenientValues, TypeMarker, TypeRef, ValidationError}
+import dspy4s.core.contracts.{DspyError, FieldSpec, LenientValues, PythonText, TypeMarker, TypeRef, ValidationError}
 import dspy4s.core.contracts.Reflects.{caseNames, withoutDeferred}
 import zio.blocks.chunk.{Chunk, ChunkMap, NonEmptyChunk}
 import zio.blocks.docs.Doc
 import zio.blocks.schema.binding.{Binding, BindingType}
-import zio.blocks.schema.json.{JsonCodec, JsonFormat, JsonReader, JsonSchema, JsonWriter}
+import zio.blocks.schema.json.{Json, JsonCodec, JsonFormat, JsonReader, JsonSchema, JsonWriter}
 import zio.blocks.schema.{
   DynamicOptic,
   DynamicValue,
@@ -286,12 +286,23 @@ private[signatures] object ZioSchemaCodec:
     * same). zio-blocks writes no `$ref`. It puts the schema of each field in the schema of its record, so for a
     * recursive type its `toJsonSchema` (a `lazy val`) reads itself and waits forever. Thus this function cuts each
     * cycle before zio-blocks makes the schema. When the root type is recursive, the root is a `$ref` to its definition.
+    *
+    * The result is the record of [[schemaRecord]], or `None` when the schema is not a JSON object.
     */
-  def jsonSchemaForModel[A](schema: Schema[A]): String =
+  def jsonSchemaForModel[A](schema: Schema[A]): Option[DynamicValue.Record] =
     val shown     = schema.reflect.transform(DynamicOptic.root, HideToolCallId).force
     val recursive = recursiveTypes(shown)
-    if recursive.isEmpty then Schema(shown).toJsonSchema.toJson.toString
-    else withDefinitions(shown, recursive).toJson.toString
+    schemaRecord(
+      if recursive.isEmpty then Schema(shown).toJsonSchema.toJson else withDefinitions(shown, recursive).toJson
+    )
+
+  /** The JSON object `json` as a record, or `None` when `json` is not an object. The record has the value of the JSON
+    * text of `json` with the rules of Python `json.loads` ([[PythonText.parseJson]]): a number with a decimal point or
+    * an exponent is a float, and each other number is an integer. Thus the schema note of a prompt shows each number as
+    * zio-blocks writes it.
+    */
+  def schemaRecord(json: Json): Option[DynamicValue.Record] =
+    PythonText.parseJson(json.toString).toOption.collect { case record: DynamicValue.Record => record }
 
   /** The JSON schema of `root`, with a definition in `$defs` for each type in `recursive`. In each schema, each
     * reference to a type in `recursive` is a placeholder whose JSON schema is a `$ref` ([[RefSchemaCodec]]).
@@ -452,7 +463,7 @@ private[signatures] object ZioSchemaCodec:
     new RoundTripShape[A]:
       override val fieldSpecs: Vector[FieldSpec] = specs
 
-      override lazy val jsonSchemaString: Option[String] = Some(jsonSchemaForModel(schema))
+      override lazy val jsonSchema: Option[DynamicValue.Record] = jsonSchemaForModel(schema)
 
       override lazy val nestedDecisionFields: Vector[String] = nestedDecisionFieldsOf(rootReflect)
 

@@ -1,12 +1,12 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.AdapterInvocation
-import dspy4s.adapters.internal.JsonDynamic
 import dspy4s.adapters.internal.StrictJsonSchema
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
@@ -19,6 +19,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.PrimitiveValue
 
 /** The strict response schema of the JSON adapter (upstream `JSONAdapter._prepare_response_format` in
   * `dspy/adapters/json_adapter.py`, and `_strict_json_schema` in `dspy/clients/legacy_requests.py`).
@@ -38,10 +39,10 @@ class StrictResponseFormatSuite extends FunSuite:
 
   private def json(text: String): ujson.Value = ujson.read(text)
 
-  private def ujsonOf(value: DynamicValue): ujson.Value = JsonDynamic.toUjson(value)
+  private def ujsonOf(value: DynamicValue): ujson.Value = ujson.read(PythonText.json(value))
 
   private def parsed(text: String): DynamicValue.Record =
-    JsonDynamic.parse(text) match
+    PythonText.parseJson(text) match
       case Right(record: DynamicValue.Record) => record
       case other                              => fail(s"not a JSON object: $other")
 
@@ -65,7 +66,7 @@ class StrictResponseFormatSuite extends FunSuite:
       demos = Vector.empty,
       inputs = Example(values = DynamicValues.record("question" := "x"), inputKeys = Set("question")),
       request = LmRequest(model = "stub"),
-      outputJsonSchema = schema
+      outputJsonSchema = schema.map(parsed)
     )
     val options = JSONAdapter(useNativeFunctionCalling = native).format(invocation)
       .fold(error => fail(s"format failed: $error"), _.requestOptions)
@@ -210,10 +211,6 @@ class StrictResponseFormatSuite extends FunSuite:
     assertEquals(responseFormat(layoutOf("question -> answer: Widget")), jsonMode)
   }
 
-  test("a typed schema that does not parse gives JSON mode") {
-    assertEquals(responseFormat(layoutOf("question -> answer"), Some("{not valid json")), jsonMode)
-  }
-
   /** The value of `body`, and the text that `body` writes to the standard error stream. */
   private def withStderr[A](body: => A): (A, String) =
     val buffer = java.io.ByteArrayOutputStream()
@@ -228,7 +225,6 @@ class StrictResponseFormatSuite extends FunSuite:
     val badRef  = """{"type":"object","properties":{"answer":{"$ref":"#/$defs/Missing","title":"T"}}}"""
     Vector(
       withStderr(responseFormat(layoutOf("question -> answer: Widget"))),
-      withStderr(responseFormat(layoutOf("question -> answer"), Some("{not valid json"))),
       withStderr(responseFormat(layoutOf("question -> answer"), Some(badRef)))
     ).foreach { (format, log) =>
       assertEquals(format, jsonMode)
@@ -338,4 +334,31 @@ class StrictResponseFormatSuite extends FunSuite:
     assertEquals(StrictJsonSchema.fromFields(Vector(FieldSpec("a", typeRef = TypeRef.toolCalls))), None)
     assertEquals(StrictJsonSchema.fromFields(Vector(FieldSpec("a", typeRef = TypeRef("Widget")))), None)
     assertEquals(StrictJsonSchema.fromFields(Vector(FieldSpec("a", typeRef = TypeRef("list[dict]")))), None)
+  }
+
+  test("fromFields keeps an exact integer default, a decimal default is a number, and an enum case is its name") {
+    def number(value: PrimitiveValue): Option[DynamicValue] = Some(DynamicValue.Primitive(value))
+    val schema                                              = StrictJsonSchema.fromFields(
+      Vector(
+        FieldSpec("big", typeRef = TypeRef.int, defaultValue = number(PrimitiveValue.Long(9007199254740993L))),
+        FieldSpec(
+          "ratio",
+          typeRef = TypeRef.double,
+          defaultValue = number(PrimitiveValue.BigDecimal(BigDecimal("2.5")))
+        ),
+        FieldSpec(
+          "tone",
+          enumValues = Vector("calm", "angry"),
+          defaultValue = Some(DynamicValue.Variant("calm", DynamicValue.Record.empty))
+        )
+      )
+    )
+    assertEquals(
+      schema.map(PythonText.json(_)),
+      Some(
+        """{"type": "object", "properties": {"big": {"type": "integer", "default": 9007199254740993}, """ +
+          """"ratio": {"type": "number", "default": 2.5}, """ +
+          """"tone": {"type": "string", "enum": ["calm", "angry"], "default": "calm"}}}"""
+      )
+    )
   }

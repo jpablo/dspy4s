@@ -80,7 +80,8 @@ lazy val algebra = (project in file("modules/algebra"))
 // zio-blocks-schema here because `DynamicValue` is the interchange format carried
 // through `Example.values`, `ProgramCall.input`, `RawPrediction.values`,
 // and `ParsedOutput.values` — the codec intermediate shared by adapters,
-// programs, evaluate, and the signatures API.
+// programs, evaluate, and the signatures API. ujson reads a JSON text with the
+// text of each number, so `PythonText.parseJson` keeps the number rule of Python.
 lazy val core = (project in file("modules/core"))
   .dependsOn(algebra)
   .settings(commonSettings)
@@ -89,6 +90,7 @@ lazy val core = (project in file("modules/core"))
     libraryDependencies ++= Seq(
       "dev.zio"            %% "zio-blocks-schema" % zioBlocksVersion,
       "io.github.iltotore" %% "iron"              % ironVersion,
+      "com.lihaoyi"        %% "ujson"             % ujsonVersion,
       "org.scalameta"      %% "munit"             % munitVersion           % Test,
       "org.scalameta"      %% "munit-scalacheck"  % munitScalacheckVersion % Test
     ),
@@ -131,7 +133,6 @@ lazy val adapters = (project in file("modules/adapters"))
   .settings(
     libraryDependencies ++= Seq(
       "org.scalameta"          %% "munit"     % munitVersion % Test,
-      "com.lihaoyi"            %% "ujson"     % ujsonVersion,
       "org.scala-lang.modules" %% "scala-xml" % scalaXmlVersion
     )
   )

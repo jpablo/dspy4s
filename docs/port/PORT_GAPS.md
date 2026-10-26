@@ -1414,7 +1414,7 @@ is the same. The dspy4s tests use `contains`, so they do not detect a difference
 UPGRADE-3.2.1-to-3.4.0.md, phase 0). The Chat, JSON, XML, and two-step adapters now build each prompt as upstream
 does: the field list, the structure, the objective, the demos, the history turns, and the reminder. The type text
 comes from the data of the port only (`internal/PromptText.scala`); a value prints in the Python form
-(`internal/PythonText.scala`). A structured type shows the type name and the JSON schema of the port. The port-only
+(core `contracts/PythonText.scala`). A structured type shows the type name and the JSON schema of the port. The port-only
 texts are gone: the output schema block, the JSON key instructions, and the history note. `scripts/golden` writes
 the expected prompts from upstream. Tests: `AdapterPromptParitySuite` (28 golden cases and the two-step extraction
 prompts), `PortTypeTextSuite`, `TypedPromptParitySuite`, `StructuredTypeTextSuite`, `PythonTextSuite`. The

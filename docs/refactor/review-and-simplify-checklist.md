@@ -229,7 +229,7 @@ Simplify 5 (rank 5). Code-review 5 (rank 8). 4966 main lines, 6422 test lines.
 - [x] (simplify (b)) `runtime/RequestHash.scala` built the key text by hand, with three branches for old disk keys. Fixed: a derived `KeyData` record, sorted, encoded, and hashed (120 to 45 lines). A non-finite number or a lone surrogate gives no key.
 - [x] (simplify (b)) runtime/LmCacheConfiguration.scala (removed): a global registry with no reader, which made a disk cache in the home directory in seven test suites. Fixed: deleted; `NoopLmCache` is in `contracts/LmCache.scala`, and `CompositeLmCache` takes two plain caches.
 - [x] ProviderLanguageModel (removed) writes a magic `mode` key, and `providers/OpenAiClient.scala:24-39`, `:103-113` read it and remove it. Pass the mode as a typed value. Fixed: `OpenAiClient.invoke(mode, body)` and `stream(mode, body)`.
-- [x] `providers/PythonStr.scala` copied the Python float repr of adapters `internal/PythonText.scala`, with a different algorithm. Fixed: core `contracts/PythonRepr.scala` has the algorithm of `PythonText`, and `PythonStr`, `PythonText`, and gepa `ReflectiveRecord` use it.
+- [x] `providers/PythonStr.scala` copied the Python float repr of adapters internal/PythonText.scala (moved to core), with a different algorithm. Fixed: core `contracts/PythonRepr.scala` has the algorithm of `PythonText`, and `PythonStr`, `PythonText`, and gepa `ReflectiveRecord` use it. (`PythonText` moved to core `contracts/PythonText.scala` later.)
 - [x] `providers/OpenAiLanguageModel.scala:69-94` copies the pipeline of ProviderLanguageModel (removed). Fixed: `ProviderLanguageModel` had no user in the main code and is removed. Its encoders and its reply parser are `providers/ChatWire.scala`.
 
 ### Code-review findings
@@ -271,18 +271,19 @@ Simplify 6 (rank 4). Code-review 6 (rank 3). 4243 main lines, 4943 test lines.
 
 ### Simplify findings
 
-- [ ] Private copies of `DynamicValues.string`: `DecisionAdapter.scala:353` (`text`), `contracts/ToolContracts.scala:102` (`str`), `contracts/NativeFunctionCalling.scala:111` (`str`), `internal/StrictJsonSchema.scala:360` (`str`). Use the core helper. (found in the lm pass)
-- [ ] Three JSON readers with different number rules: `internal/JsonDynamic.scala:55`, `internal/PythonText.scala:371` (ujson BufferedValue), and `JSONAdapterParser.scala:142`. Use one reader.
-- [ ] `contracts/AdapterInvocation.scala:19`: `outputJsonSchema: Option[String]` is parsed again at `DecisionAdapter.scala:132`, `JSONAdapterPrompt.scala:134`, and `internal/PromptText.scala:256`. `DecisionAdapter.scala:82` writes it back to text. A typed record removes these round trips, but the change touches other modules.
+- [ ] Private copies of `DynamicValues.string`: `DecisionAdapter.scala:353` (`text`), `contracts/ToolContracts.scala:102` (`str`), `contracts/NativeFunctionCalling.scala:111` (`str`), `internal/StrictJsonSchema.scala` (`str`). Use the core helper. (found in the lm pass)
+- [x] Three JSON readers with different number rules: internal/JsonDynamic.scala (removed), internal/PythonText.scala (moved to core; ujson BufferedValue), and `JSONAdapterParser.scala`. Use one reader. Fixed: core `PythonText.parseJson` is the one reader (Python number rule, one pass, a `StackOverflowError` guard), and `JsonDynamic` is gone. The ujson dependency moved from adapters to core.
+- [ ] (from simplify (a)) Core `ToolCall.argumentsRecord` reads an `arguments` JSON text with `DynamicValues.parseJsonRecord` (the zio-blocks number rule), and the text can come from a tool call that the model wrote. The adapters read the same kind of text with `PythonText.parseJson`. The lm module declares ujson in `build.sbt` but does not use it.
+- [x] `contracts/AdapterInvocation.scala`: `outputJsonSchema: Option[String]` is parsed again in `DecisionAdapter.scala`, `JSONAdapterPrompt.scala` (two times, with two readers), `internal/PromptText.scala`, and `internal/ProgramPromptText.scala` (once for each field). `DecisionAdapter.scala` writes it back to text. Fixed: `Shape.jsonSchema` and `AdapterInvocation.outputJsonSchema` are `Option[DynamicValue.Record]`, built once for each shape. Core `JsonSchemaRefs` has the one root-`$ref` rule.
 - [ ] `contracts/ToolContracts.scala:31-65`, `:103-104`: `toOpenAiTools` (`Map[String, Any]`), `ToolCallData`, and `fromOutput`. Only tests use them.
 - [ ] `ChatAdapterPrompt.scala:14-37` repeats `JSONAdapterPrompt.scala:17-51`. Three adapters repeat the same native-tool options (the flag, `parallelToolCalls`, and `toolChoice`). Four files have their own copy of the `str` helper.
 
 ### Code-review findings
 
 - [ ] `XMLAdapter.scala:146-149` uses `XML.loadString`. A raw `&` or `<` in a value ("AT&T", "a < b") breaks the parse. Upstream uses a tolerant regex. With one output field, the fallback returns the whole tagged text as the value. `XmlStreamingState` accepts the same text, so the stream and the parse give different results. No test covers this.
-- [ ] `internal/JsonDynamic.scala:21-26`, `:42`, and `JSONAdapterParser.scala:142`: ujson keeps numbers as Double. Integers above 2^53 in `json` and `list` fields change value. `internal/StrictJsonSchema.scala:345` does the same to defaults.
+- [x] internal/JsonDynamic.scala (removed) and `JSONAdapterParser.scala`: ujson kept numbers as Double. Integers above 2^53 in `json` and `list` fields changed value. `internal/StrictJsonSchema.scala` did the same to defaults. Fixed in the simplify (a) pass: the one reader keeps an exact `Long` and `BigInt`, also for a default.
 - [ ] `JsonStreamingState.scala:91` starts at the first `{`, but the parser prefers the ```` ```json ```` fence (`JSONAdapterParser.scala:97-105`). Duplicate keys and repeated XML tags give extra chunks, but the parser keeps one value.
-- [ ] `internal/PythonText.scala:374-390` and `JsonDynamic.fromUjson` recurse on deep LM output. `Try` does not catch `StackOverflowError`.
+- [x] internal/PythonText.scala (moved to core) and `JsonDynamic.fromUjson` recursed on deep LM output. `Try` does not catch `StackOverflowError`. Fixed in the simplify (a) pass: the reader has no recursion of its own and catches `StackOverflowError`.
 - [ ] `JSONAdapterParser.scala:155-159` rejects an `int` above Int.MaxValue. `internal/AdapterTextSupport.scala:191` accepts a Long for an optional field.
 
 ## programs
@@ -399,7 +400,7 @@ Simplify 5 (rank 8). Code-review 4 (rank 9). 3242 main lines, 6331 test lines.
 ### Simplify findings
 
 - [ ] `GepaAdapter.scala:326` (`text`) is a private copy of `DynamicValues.string`. (found in the lm pass)
-- [ ] `ReflectiveRecord.scala:68-138` has its own Python `json.dumps` writer. Adapters `internal/PythonText.scala:216` (`json`) already does this, but it is `private[adapters]`.
+- [ ] `ReflectiveRecord.scala:68-138` has its own Python `json.dumps` writer. Core `contracts/PythonText.scala` (`json`, `private[dspy4s]`) does this now. Use it.
 - [ ] `GepaAdapter.scala:174-190` builds its own `newFixedThreadPool` and context capture. This copies what ParallelExecutor in programs does.
 - [ ] Thin wrappers: `GepaEngine.scala:560` (`fullEval`) only calls `cache.scored`. `GepaEvalCache.scala:125` (`scores`) and the public `makeReflectiveDataset` overload (`GepaAdapter.scala:210`, with an adapter-level `rng`) are used only by tests.
 - [ ] `MergeProposer.scala:59-105`: the engine builds a mutable proposer for each iteration and copies its `MergeSchedule` back. Plain functions on the schedule are simpler. `sharedExamples` (`:203`) always equals the valset size.
@@ -455,7 +456,7 @@ Simplify 2 (rank 12). Code-review 3 (rank 10). 396 main lines, 586 test lines.
 
 - [ ] `McpTools.scala:210` (`string`) is a private copy of `DynamicValues.string`. (found in the lm pass)
 - [ ] `JavaJson.scala:90` reads `productElement(0)` by reflection for dates and UUIDs, which is fragile. Line `:88` maps `Unit` to an empty map.
-- [ ] `McpTools.scala:198-206` (`typeRefOf`) is the inverse of programs `internal/ToolText.scala:49-57` (`jsonType`). The two copies of one mapping can become different.
+- [ ] `McpTools.scala:198-206` (`typeRefOf`) is the inverse of programs `internal/ToolText.scala` (`jsonType`). The two copies of one mapping can become different.
 - [ ] `McpTools.scala:90-99` (`convert`) uses alias vals and an anonymous `ToolFunction`.
 - [ ] Optional: `JavaJson.toDynamic` walks the Java JSON tree by hand. A path through JSON text and the zio-blocks codec can replace it.
 

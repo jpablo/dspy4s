@@ -41,7 +41,7 @@ in a field `result`.
 | Type | Description |
 |------|-------------|
 | `Signature[I, O]` | A name, a `SignatureLayout`, a `Shape[I]`, and a `Shape[O]`. Its field operations change the layout and the shapes in one call (see below). |
-| `Shape[A]` | The `Shape` codecs of one type: `fieldSpecs`, `encode`, `decode`, and `jsonSchemaString`. |
+| `Shape[A]` | The `Shape` codecs of one type: `fieldSpecs`, `encode`, `decode`, and `jsonSchema` (the JSON schema as a record). |
 | `RoundTripShape[A]` | A `Shape[A]` with a law: `decode(encode(a)) == Right(a)`. Each shape that comes from a `Schema` has this type. |
 | `Shape.MapShape` | The shape of `fromStringDynamic`. Its `decode` only checks that each field of the layout is in the record. |
 | `OutputAugmentation` | The output type of `Signature.prependOutput`: `WithField[O, Name, T]` is a named tuple, and the `PrependField` evidence makes and splits its values. |
@@ -97,7 +97,7 @@ and this case.
   schema, and the macros read it from the annotations of the type. Neither of them keeps a list of these types.
 - **A `Score[L]` field has the cases of `L` as its levels,** from the type of its `level: Option[L]` field. A
   `Choice[O]` field has the cases of `O` as its options, from the type of its `value: O` field.
-- **The JSON schema has no `ToolCall.id`.** `Shape.jsonSchemaString` removes the `id` of each `ToolCall` from the
+- **The JSON schema has no `ToolCall.id`.** `Shape.jsonSchema` removes the `id` of each `ToolCall` from the
   schema that a model sees. The id comes from the provider.
 
 ## Source layout

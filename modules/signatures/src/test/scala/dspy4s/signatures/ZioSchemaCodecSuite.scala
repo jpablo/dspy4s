@@ -1,6 +1,6 @@
 package dspy4s.signatures
 
-import dspy4s.core.contracts.{:=, DynamicValues, NotFoundError, ToolCall, TypeRef, ValidationError}
+import dspy4s.core.contracts.{:=, DynamicValues, NotFoundError, PythonText, ToolCall, TypeRef, ValidationError}
 import munit.FunSuite
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
@@ -231,29 +231,33 @@ class ZioSchemaCodecSuite extends FunSuite:
       case _                                         => None
     }
 
+  /** The JSON object of the JSON text `text`, with the number rule of the JSON schema of a shape. */
+  private def jsonObject(text: String): Option[DynamicValue.Record] =
+    PythonText.parseJson(text).toOption.collect { case record: DynamicValue.Record => record }
+
   private def keys(value: Option[DynamicValue]): Set[String] =
     value match
       case Some(record: DynamicValue.Record) => DynamicValues.recordKeys(record).toSet
       case other                             => fail(s"expected a record, got: $other")
 
   test("the JSON schema of an output type does not ask for the id of a tool call") {
-    val schema = Shape.derived[ZsToolPlan].jsonSchemaString.flatMap(DynamicValues.parseJsonRecord).get
+    val schema = Shape.derived[ZsToolPlan].jsonSchema.get
     assertEquals(keys(get(schema, "properties")), Set("thought", "toolCalls", "last"))
     assertEquals(keys(get(schema, "properties", "toolCalls", "items", "properties")), Set("name", "args"))
     assertEquals(keys(get(schema, "properties", "last", "properties")), Set("name", "args"))
     // The canonical derivation of `Signature.derived` gives the same schema.
-    assertEquals(Shape.canonicalDerived[ZsToolPlan].jsonSchemaString, Shape.derived[ZsToolPlan].jsonSchemaString)
+    assertEquals(Shape.canonicalDerived[ZsToolPlan].jsonSchema, Shape.derived[ZsToolPlan].jsonSchema)
   }
 
   test("the JSON schema of a type with no tool call is the JSON schema of its Schema") {
     assertEquals(
-      Shape.derived[ZsPipeline].jsonSchemaString,
-      Some(summon[Schema[ZsPipeline]].toJsonSchema.toJson.toString)
+      Shape.derived[ZsPipeline].jsonSchema,
+      jsonObject(summon[Schema[ZsPipeline]].toJsonSchema.toJson.toString)
     )
     import ZsClassifyOutput.given
     assertEquals(
-      ZioSchemaCodec.derivedFromZioSchema[ZsClassifyOutput].jsonSchemaString,
-      Some(summon[Schema[ZsClassifyOutput]].toJsonSchema.toJson.toString)
+      ZioSchemaCodec.derivedFromZioSchema[ZsClassifyOutput].jsonSchema,
+      jsonObject(summon[Schema[ZsClassifyOutput]].toJsonSchema.toJson.toString)
     )
   }
 
@@ -274,8 +278,7 @@ class ZioSchemaCodecSuite extends FunSuite:
     catch case _: TimeoutException => fail(s"the call did not return in $limit")
 
   private def jsonSchemaOf[A](using schema: Schema[A]): DynamicValue.Record =
-    val json = withinTimeLimit(10.seconds)(ZioSchemaCodec.jsonSchemaForModel(schema))
-    DynamicValues.parseJsonRecord(json).getOrElse(fail(s"not a JSON object: $json"))
+    withinTimeLimit(10.seconds)(ZioSchemaCodec.jsonSchemaForModel(schema)).getOrElse(fail("not a JSON object"))
 
   private def refTo(name: String): DynamicValue = DynamicValues.record("$ref" := s"#/$$defs/$name")
 

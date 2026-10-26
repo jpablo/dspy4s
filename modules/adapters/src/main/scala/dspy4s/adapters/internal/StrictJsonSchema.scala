@@ -4,6 +4,8 @@ import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.JsonSchemaRefs
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.updated
@@ -61,7 +63,9 @@ private[adapters] object StrictJsonSchema:
     *     `{"type": "boolean"}`.
     *   - `list` gives `{"type": "array", "items": {}}`. `list[T]` gives `{"type": "array", "items": <schema of T>}` for
     *     each `T` in these rules.
-    *   - A field with a [[FieldSpec.defaultValue]] has the JSON of that value under `default`.
+    *   - A field with a [[FieldSpec.defaultValue]] has the JSON value of that value under `default`: the value of its
+    *     JSON text ([[PythonText.json]], then [[PythonText.parseJson]]). Thus an enum case is its name, and an integer
+    *     keeps its exact value. A value with no JSON text (a float that is not finite) stays as it is.
     *   - A field that `known` has takes its schema from `known`, as it is. The decision adapter gives the evidence
     *     schemas this way.
     *
@@ -81,19 +85,6 @@ private[adapters] object StrictJsonSchema:
     properties.map(entries =>
       DynamicValue.Record(Chunk("type" -> str("object"), "properties" -> DynamicValue.Record(Chunk.from(entries))))
     )
-
-  /** `schema` with the schema that its root `$ref` names in place of the `$ref`. The keys of the named schema come
-    * first, then each other key of `schema`. The root of the schema of a recursive type is a `$ref` (see
-    * `ZioSchemaCodec.jsonSchemaForModel`), thus a change to the root `properties` must come after this step. A schema
-    * with no root `$ref`, or with a `$ref` that does not resolve, stays as it is.
-    */
-  def inlineRootRef(schema: DynamicValue.Record): DynamicValue.Record =
-    DynamicValues.recordGet(schema, "$ref") match
-      case Some(DynamicValue.Primitive(PrimitiveValue.String(ref))) => lookup(schema, ref) match
-          case Right(target: DynamicValue.Record) =>
-            overlay(target, schema.fields.toVector.filterNot((key, _) => key == "$ref"))
-          case _ => schema
-      case _ => schema
 
   // ── Strict shape ──────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -135,7 +126,7 @@ private[adapters] object StrictJsonSchema:
   /** An object schema with no `additionalProperties` gets `additionalProperties: false`. An open map is a `Left`. */
   private def close(schema: DynamicValue.Record): Either[DspyError, DynamicValue.Record] =
     if isOpenMap(schema) then
-      Left(ValidationError(s"Strict mode does not take an open map: ${JsonDynamic.toUjson(schema)}"))
+      Left(ValidationError(s"Strict mode does not take an open map: ${PythonText.json(schema)}"))
     else if hasType(schema, "object") && DynamicValues.recordGet(schema, "additionalProperties").isEmpty then
       Right(schema.updated("additionalProperties", DynamicValue.Primitive(PrimitiveValue.Boolean(false))))
     else Right(schema)
@@ -244,27 +235,13 @@ private[adapters] object StrictJsonSchema:
       case Some(DynamicValue.Primitive(PrimitiveValue.String(ref))) if schema.fields.length > 1 =>
         if refs.contains(ref) then Left(ValidationError(s"The $$ref '$ref' is in a cycle"))
         else
-          lookup(root, ref).flatMap {
+          JsonSchemaRefs.lookup(root, ref).flatMap {
             case target: DynamicValue.Record => shapeAt(target, root, refs + ref).map(shaped =>
                 overlay(shaped, schema.fields.toVector.filterNot((key, _) => key == "$ref"))
               )
             case _ => Right(schema)
           }
       case _ => Right(schema)
-
-  /** The value at the internal path `ref` (`#/a/b`) of `root` (upstream `_resolve_ref`). */
-  private def lookup(root: DynamicValue.Record, ref: String): Either[DspyError, DynamicValue] =
-    if !ref.startsWith("#/") then
-      Left(ValidationError(s"Unexpected $$ref format '$ref'; only internal references are supported"))
-    else
-      ref.drop(2).split("/").toVector.foldLeft[Either[DspyError, DynamicValue]](Right(root)) { (acc, part) =>
-        acc.flatMap {
-          case node: DynamicValue.Record => DynamicValues.recordGet(node, part) match
-              case Some(_: DynamicValue.Null.type) | None => Left(ValidationError(s"Could not resolve $$ref '$ref'"))
-              case Some(value)                            => Right(value)
-          case _ => Left(ValidationError(s"Could not resolve $$ref '$ref'"))
-        }
-      }
 
   /** Each top-level property in `optionalFields` that does not permit `null` gets a `null` option. */
   private def permitNull(schema: DynamicValue.Record, optionalFields: Set[String]): DynamicValue.Record =
@@ -338,7 +315,7 @@ private[adapters] object StrictJsonSchema:
           schema.updated("enum", DynamicValue.Sequence(Chunk.from(field.enumValues.map(str))))
         else schema
       field.defaultValue.fold(withEnum)(value =>
-        withEnum.updated("default", JsonDynamic.fromUjson(JsonDynamic.toUjson(value)))
+        withEnum.updated("default", PythonText.parseJson(PythonText.json(value)).getOrElse(value))
       )
     }
 

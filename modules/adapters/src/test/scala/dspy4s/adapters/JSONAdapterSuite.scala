@@ -5,6 +5,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.ParseError
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
@@ -12,7 +13,8 @@ import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.MessageRole
 import munit.FunSuite
-import zio.blocks.schema.DynamicValue
+import zio.blocks.chunk.Chunk
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 class JSONAdapterSuite extends FunSuite:
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
@@ -60,7 +62,9 @@ class JSONAdapterSuite extends FunSuite:
       demos = Vector.empty,
       inputs = Example(values = rec("question" := "x"), inputKeys = Set("question")),
       request = LmRequest(model = "openai/test"),
-      outputJsonSchema = Some(schemaString)
+      outputJsonSchema = PythonText.parseJson(schemaString).toOption.collect { case record: DynamicValue.Record =>
+        record
+      }
     )
 
     given RuntimeContext = RuntimeEnvironment.current
@@ -210,7 +214,7 @@ class JSONAdapterSuite extends FunSuite:
 
   // A1 — non-ASCII characters must be emitted literally (not \uXXXX escaped).
   // dspy 3.2.1 json_adapter.py uses json.dumps(..., ensure_ascii=False); dspy4s
-  // formats demo assistant messages via ujson.write, which writes UTF-8 literally.
+  // formats demo assistant messages via PythonText.json, which writes UTF-8 literally.
   test("A1: format emits non-ASCII demo values literally in the assistant JSON (no \\uXXXX)") {
     val signature  = SignatureDsl.parse("question -> answer").toOption.get
     val invocation = AdapterInvocation(
@@ -233,7 +237,7 @@ class JSONAdapterSuite extends FunSuite:
 
   // Companion of A1 on the parse/round-trip side: a json output field whose value
   // is itself a nested JSON object containing non-ASCII must round-trip literally
-  // through value.render() (JSONAdapter coerce for TypeRef.json -> JsonDynamic).
+  // through the JSON reader of the adapter (JSONAdapter coerce for TypeRef.json -> PythonText.parseJson).
   test("A1: parse round-trips non-ASCII inside a nested json output field literally") {
     val signature        = SignatureDsl.parse("question -> payload: json").toOption.get
     given RuntimeContext = RuntimeEnvironment.current
@@ -249,4 +253,26 @@ class JSONAdapterSuite extends FunSuite:
     assert(rendered.contains("naïve"), s"expected literal 'naïve' in rendered payload: $rendered")
     assert(rendered.contains("日本語"), s"expected literal '日本語' in rendered payload: $rendered")
     assert(!rendered.contains("\\u"), s"non-ASCII was \\u-escaped in rendered payload: $rendered")
+  }
+
+  test("an integer above 2^53 in a json field and in a list field keeps its exact value, and 1.0 stays a float") {
+    given RuntimeContext = RuntimeEnvironment.current
+    val big              = DynamicValue.Primitive(PrimitiveValue.Long(9007199254740993L))
+    val one              = DynamicValue.Primitive(PrimitiveValue.Double(1.0))
+    val json             = JSONAdapter().parse(
+      SignatureDsl.parse("question -> payload: json").toOption.get,
+      LmOutput(text = """{"payload": {"id": 9007199254740993, "ratio": 1.0}}""")
+    )
+    assertEquals(
+      json.map(parsed => DynamicValues.recordGet(parsed.values, "payload")),
+      Right(Some(rec("id" -> big, "ratio" -> one)))
+    )
+    val chat = ChatAdapter().parse(
+      SignatureDsl.parse("question -> items: list").toOption.get,
+      LmOutput(text = "[[ ## items ## ]]\n[9007199254740993, 1.0]\n\n[[ ## completed ## ]]")
+    )
+    assertEquals(
+      chat.map(parsed => DynamicValues.recordGet(parsed.values, "items")),
+      Right(Some(DynamicValue.Sequence(Chunk(big, one))))
+    )
   }

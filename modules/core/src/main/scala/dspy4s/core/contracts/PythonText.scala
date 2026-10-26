@@ -1,23 +1,24 @@
-package dspy4s.adapters.internal
+package dspy4s.core.contracts
 
-import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.PythonRepr
-import upickle.core.BufferedValue
+import ujson.JsVisitor
+import upickle.core.{ArrVisitor, ObjVisitor, StringVisitor, Visitor}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
-import scala.util.Try
+import scala.collection.mutable
+import scala.util.control.NonFatal
 import scala.util.matching.Regex
 
 /** The text forms of Python that the prompts of upstream use: `str()` and `repr()` of a value, `json.dumps` with
   * `ensure_ascii=False` and with ASCII escapes, `str.strip`, `str.splitlines`, and `textwrap.dedent`. The adapters use
   * these forms so that a prompt is equal to the upstream prompt, character for character (decision D3). The parsers
-  * also read a JSON string and a Python string literal, as upstream `parse_value` reads them.
+  * also read a JSON text as Python `json.loads` reads it, and a JSON string and a Python string literal as upstream
+  * `parse_value` reads them.
   *
   * A value is a `DynamicValue`. An `Option` value of a typed record (the `Some` and `None` variants) prints as its
   * element or as `None`. An enum case with no fields prints as its case name.
   */
-private[adapters] object PythonText:
+private[dspy4s] object PythonText:
 
   /** Python `str.strip()`: no whitespace at the start and at the end. Python whitespace is `str.isspace`. Java
     * `String.strip` is different: it keeps U+0085, U+00A0, U+2007, and U+202F.
@@ -365,37 +366,56 @@ private[adapters] object PythonText:
         fields.headOption.fold(value)(field => unwrap(field._2))
       case other => other
 
-  /** The value of a JSON text, or `None` when the text is not JSON. A number with a decimal point or an exponent is a
-    * float, and each other number is an integer, so [[json]] writes the number again as the text has it.
+  /** The value of the JSON text `text` (Python `json.loads`), or a [[ParseError]] when the text is not JSON. A number
+    * with a decimal point or an exponent is a float (a `Double`). Each other number is an integer: an `Int`, a `Long`,
+    * or a `BigInt`, by its size. Thus an integer keeps its exact value, and [[json]] writes each number again as the
+    * text has it. When an object has a key two times, the last value wins at the position of the first key, as in a
+    * Python `dict`.
+    *
+    * The reader of ujson has no recursion, and the visitor builds each container in one pass, so a deep value does not
+    * fill the stack. If a `StackOverflowError` occurs all the same, the result is a `Left`: a text from a model cannot
+    * stop the caller.
     */
-  def parseJson(text: String): Option[DynamicValue] =
-    Try(ujson.transform(ujson.Readable.fromString(text), BufferedValue.Builder)).toOption.flatMap(fromBuffered)
+  def parseJson(text: String): Either[DspyError, DynamicValue] =
+    try Right(ujson.transform(ujson.Readable.fromString(text), JsonValues))
+    catch
+      case _: StackOverflowError => Left(ParseError("json", "the value is nested too deep"))
+      case NonFatal(error)       => Left(ParseError("json", DspyError.messageOf(error)))
 
-  private def fromBuffered(value: BufferedValue): Option[DynamicValue] =
-    value match
-      case BufferedValue.Str(text, _)                     => Some(primitive(PrimitiveValue.String(text.toString)))
-      case BufferedValue.Num(text, decIndex, expIndex, _) => Some(number(text.toString, decIndex < 0 && expIndex < 0))
-      case BufferedValue.True(_)                          => Some(primitive(PrimitiveValue.Boolean(true)))
-      case BufferedValue.False(_)                         => Some(primitive(PrimitiveValue.Boolean(false)))
-      case BufferedValue.Null(_)                          => Some(DynamicValue.Null)
-      case BufferedValue.Arr(items, _)                    =>
-        val values = items.toVector.map(fromBuffered)
-        Option.when(values.forall(_.isDefined))(DynamicValue.Sequence(Chunk.from(values.flatten)))
-      case BufferedValue.Obj(items, _, _) =>
-        val fields = items.toVector.map {
-          case (BufferedValue.Str(key, _), item) => fromBuffered(item).map(key.toString -> _)
-          case _                                 => None
-        }
-        Option.when(fields.forall(_.isDefined))(DynamicValue.Record(Chunk.from(fields.flatten)))
-      case _ => None
+  /** The visitor that builds the value of [[parseJson]] as the reader of ujson reads the text. */
+  private object JsonValues extends JsVisitor[DynamicValue, DynamicValue]:
+    def visitNull(index : Int): DynamicValue = DynamicValue.Null
+    def visitTrue(index : Int): DynamicValue = DynamicValue.Primitive(PrimitiveValue.Boolean(true))
+    def visitFalse(index: Int): DynamicValue = DynamicValue.Primitive(PrimitiveValue.Boolean(false))
 
-  private def primitive(value: PrimitiveValue): DynamicValue = DynamicValue.Primitive(value)
+    def visitString(text: CharSequence, index: Int): DynamicValue = DynamicValues.string(text.toString)
 
+    def visitFloat64StringParts(text: CharSequence, decIndex: Int, expIndex: Int, index: Int): DynamicValue =
+      number(text.toString, integral = decIndex < 0 && expIndex < 0)
+
+    def visitArray(length: Int, index: Int): ArrVisitor[DynamicValue, DynamicValue] =
+      new ArrVisitor[DynamicValue, DynamicValue]:
+        private val items                                     = Chunk.newBuilder[DynamicValue]
+        def subVisitor: Visitor[?, ?]                         = JsonValues
+        def visitValue(value: DynamicValue, index: Int): Unit = items += value
+        def visitEnd(index  : Int): DynamicValue              = DynamicValue.Sequence(items.result())
+
+    def visitJsonableObject(length: Int, index: Int): ObjVisitor[DynamicValue, DynamicValue] =
+      new ObjVisitor[DynamicValue, DynamicValue]:
+        private val fields                                       = mutable.LinkedHashMap.empty[String, DynamicValue]
+        private var key                                          = ""
+        def visitKey(index     : Int): Visitor[?, ?]             = StringVisitor
+        def visitKeyValue(value: Any): Unit                      = key = value.toString
+        def subVisitor: Visitor[?, ?]                            = JsonValues
+        def visitValue(value   : DynamicValue, index: Int): Unit = fields.update(key, value)
+        def visitEnd(index     : Int): DynamicValue              = DynamicValue.Record(Chunk.from(fields))
+
+  /** The value of the JSON number `text`: an integer when `integral`, else a float. */
   private def number(text: String, integral: Boolean): DynamicValue =
     if integral then
-      primitive(
+      DynamicValue.Primitive(
         text.toIntOption.map(PrimitiveValue.Int(_))
           .orElse(text.toLongOption.map(PrimitiveValue.Long(_)))
           .getOrElse(PrimitiveValue.BigInt(BigInt(text)))
       )
-    else primitive(PrimitiveValue.Double(text.toDouble))
+    else DynamicValue.Primitive(PrimitiveValue.Double(text.toDouble))

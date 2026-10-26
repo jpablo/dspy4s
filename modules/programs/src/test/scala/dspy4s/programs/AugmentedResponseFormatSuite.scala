@@ -1,14 +1,13 @@
 package dspy4s.programs
 
 import dspy4s.adapters.JSONAdapter
-import dspy4s.adapters.internal.ProgramPromptText
-import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, DynamicValues, PythonText, RuntimeContext}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse}
 import dspy4s.programs.strategies.ChainOfThought
 import dspy4s.signatures.Signature
 import munit.FunSuite
-import zio.blocks.schema.{DynamicValue, Schema}
+import zio.blocks.schema.Schema
 
 final case class ArQuestion(question: String) derives Schema
 final case class ArAnswer(answer: String, confidence: Double) derives Schema
@@ -38,7 +37,7 @@ class AugmentedResponseFormatSuite extends FunSuite:
     DynamicValues.recordGet(
       request.options,
       "response_format"
-    ).map(ProgramPromptText.json).getOrElse(fail("no response_format"))
+    ).map(PythonText.json(_)).getOrElse(fail("no response_format"))
 
   test("a typed ChainOfThought sends a response schema with the reasoning field") {
     val lm     = SchemaLm()

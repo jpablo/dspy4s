@@ -7,6 +7,7 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.FieldConstraints
 import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
@@ -47,6 +48,12 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
+  /** The JSON object of `text`, as the output JSON schema of an invocation. */
+  private def jsonObject(text: String): DynamicValue.Record =
+    PythonText.parseJson(text) match
+      case Right(record: DynamicValue.Record) => record
+      case other                              => fail(s"not a JSON object: $other")
+
   private val schemaString = """{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}"""
 
   private def invocationWithSchema(schema: Option[String]): AdapterInvocation =
@@ -56,7 +63,7 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
       demos = Vector.empty,
       inputs = Example(values = rec("question" := "x"), inputKeys = Set("question")),
       request = LmRequest(model = "openai/test"),
-      outputJsonSchema = schema
+      outputJsonSchema = schema.map(jsonObject)
     )
 
   test("response_format is emitted when the LM supports response schema and a schema is present") {
@@ -101,7 +108,7 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
       demos = Vector.empty,
       inputs = Example(values = rec("question" := "x"), inputKeys = Set("question")),
       request = LmRequest(model = "openai/test"),
-      outputJsonSchema = Some(schema)
+      outputJsonSchema = Some(jsonObject(schema))
     )
 
     val opts      = JSONAdapter().format(invocation).toOption.get.requestOptions
@@ -150,21 +157,4 @@ class JSONAdapterResponseFormatSuite extends FunSuite:
     given RuntimeContext = RuntimeContext()
     val formatted        = JSONAdapter().format(invocationWithSchema(Some(schemaString)))
     assertEquals(DynamicValues.recordEntries(formatted.toOption.get.requestOptions), Vector.empty)
-  }
-
-  test("malformed schema string yields JSON mode but format still succeeds with prose") {
-    given RuntimeContext = RuntimeContext(lm = Some(new StubLm(supportsResponseSchema = true)))
-    val formatted        = JSONAdapter().format(invocationWithSchema(Some("{not valid json")))
-    assert(formatted.isRight, s"format must not fail over a malformed schema, got: $formatted")
-    // Upstream: when no structured schema results, the request uses JSON mode.
-    assertEquals(
-      DynamicValues.recordGet(formatted.toOption.get.requestOptions, "response_format")
-        .flatMap(stringField(_, "type")),
-      Some("json_object")
-    )
-    // The system message has no block for the output schema, as upstream.
-    assert(
-      !formatted.toOption.get.messages.head.text.exists(_.contains("{not valid json")),
-      "expected no schema text in the system message"
-    )
   }

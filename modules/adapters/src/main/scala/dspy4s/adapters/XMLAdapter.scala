@@ -10,12 +10,12 @@ import dspy4s.adapters.internal.AdapterTextSupport
 import dspy4s.adapters.internal.ConversationHistory
 import dspy4s.adapters.internal.PromptText
 import dspy4s.adapters.internal.PromptText.OutputSchema
-import dspy4s.adapters.internal.PythonText
 import dspy4s.adapters.internal.TurnText
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.ParseError
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.lm.contracts.LmOutput

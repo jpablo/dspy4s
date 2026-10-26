@@ -74,7 +74,7 @@ class TypeMarkerSuite extends FunSuite:
   }
 
   test("the JSON schema does not show the id of a tool call, also in a sequence") {
-    val schema = Shape.canonicalDerived[TmHolder].jsonSchemaString.flatMap(DynamicValues.parseJsonRecord)
+    val schema = Shape.canonicalDerived[TmHolder].jsonSchema
     val items  = Vector("properties", "calls", "items", "properties").foldLeft(schema: Option[DynamicValue]) {
       case (Some(record: DynamicValue.Record), key) => DynamicValues.recordGet(record, key)
       case _                                        => None

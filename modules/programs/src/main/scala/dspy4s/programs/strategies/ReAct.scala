@@ -278,7 +278,7 @@ object ReAct:
   /** Hand-written LENIENT output shape mirroring the prior dynamic reads EXACTLY: a missing `next_thought` /
     * `next_tool_name` renders as "" (a step that names no tool ends the loop rather than failing the call), and
     * `next_tool_args` accepts a JSON object (JSONAdapter), a JSON-object string (ChatAdapter has no `json` coercion),
-    * or nothing (empty record). Decode never fails; `jsonSchemaString` stays `None` for parity with the prior direct
+    * or nothing (empty record). Decode never fails; `jsonSchema` stays `None` for parity with the prior direct
     * `DynamicPredict` construction. The parsers of the port give a parse error before this decode for an empty or an
     * unknown tool name (decision D7).
     */
