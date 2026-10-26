@@ -55,7 +55,8 @@ import scala.concurrent.Future
   * [[apply]] opens one usage scope for the call ([[UsageScope.measure]], decision D9 of UPGRADE-3.2.1-to-3.4.0). The LM
   * usage of a successful result (`raw.lmUsage`) is the total of each model call that the call made. This includes a
   * call whose reply failed to parse, a call inside a tool, a call on a worker thread, and each attempt of `BestOfN` and
-  * `Refine`. A cache hit and a call that failed at the provider add nothing.
+  * `Refine`. A cache hit and a call that failed at the provider add nothing. The usage trackers of the user
+  * (`UsageTracking`) get the same records ([[UsageScope]]), when `trackUsage` is not `false`.
   *
   * The total replaces the usage that [[forward]] gave. It is `None` when no model call gave a usage. A nested call has
   * the total of its own calls, and the outer total has them one time. The callbacks of the module end see the total.

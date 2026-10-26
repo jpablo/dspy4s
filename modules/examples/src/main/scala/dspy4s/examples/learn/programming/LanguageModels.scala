@@ -14,7 +14,7 @@
   *     dspy.context(lm=…):` → `RuntimeEnvironment.withSettings(ctx.copy(lm = Some(other))) { … }`.
   *   - dspy4s never throws on LM failure: `lm.call` / a program returns `Either[DspyError, …]`.
   *   - There is no global `lm.history`; per-call usage is on `LmResponse.usage`, and aggregate usage is via
-  *     `ManagedLanguageModel` + `UsageTracking` (see tutorials/cache/Cache.scala).
+  *     `UsageTracking` (see tutorials/cache/Cache.scala).
   */
 package dspy4s.examples.learn.programming
 
@@ -153,9 +153,9 @@ object LanguageModels:
 
   // ── Inspecting output and usage metadata (lines 238–251) ──
   // | len(lm.history); lm.history[-1].keys()  # global per-LM history with usage/cost/metadata
-  // dspy4s has no global `lm.history`. Per-call usage rides on `LmResponse.usage`; aggregate usage across calls
-  // is via `ManagedLanguageModel` + `UsageTracking` (see tutorials/cache/Cache.scala). Here we read the usage of
-  // a single direct call:
+  // dspy4s has no global `lm.history`. Per-call usage rides on `LmResponse.usage`; aggregate usage across the model
+  // calls of the programs is via `UsageTracking` (see tutorials/cache/Cache.scala). A direct call counts in no tracker
+  // (use `LanguageModel.callAndRecordUsage` to count it). Here we read the usage of a single direct call:
   def callWithUsage(prompt: String)(using ctx: RuntimeContext): Either[DspyError, (String, Option[LmUsage])] =
     ctx.lm match
       case Some(lm: LanguageModel) =>

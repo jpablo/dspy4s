@@ -64,7 +64,8 @@ class RuntimeReviewSuite extends FunSuite:
     given RuntimeContext = RuntimeEnvironment.current
     val delegate         = Answering()
     val outer            = ManagedLanguageModel(ManagedLanguageModel(delegate, cache = memory), cache = memory)
-    val (result, total)  = UsageTracking.withNewTracker(tracker => (outer.call(request), tracker.totalUsage))
+    val (result, total)  =
+      UsageTracking.withNewTracker(tracker => (LanguageModel.callAndRecordUsage(outer, request), tracker.totalUsage))
     assert(result.isRight, result.toString)
     assertEquals(lmHistory.size, 1, lmHistory.toString)
     assertEquals(total, Map("test-model" -> usage))

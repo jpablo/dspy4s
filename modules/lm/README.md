@@ -1,7 +1,7 @@
 # dspy4s `lm`
 
 `lm` is the interface to the language models. It contains the request and response types, a provider for
-OpenAI-compatible servers, and a wrapper that adds a cache, retries, and usage records to a model. It uses only the
+OpenAI-compatible servers, a wrapper that adds a cache and retries to a model, and the usage trackers. It uses only the
 [`core`](../core/README.md) module.
 
 ## Main concepts
@@ -45,9 +45,9 @@ OpenAI-compatible servers, and a wrapper that adds a cache, retries, and usage r
 
 | Type | Description |
 |------|-------------|
-| `ManagedLanguageModel` | Wraps a model with a cache, a `RetryPolicy`, the history, the usage records, and a cost estimate. By default it has no cache and no retry. |
+| `ManagedLanguageModel` | Wraps a model with a cache, a `RetryPolicy`, the history, and a cost estimate. By default it has no cache and no retry. It records no usage. |
 | `RetryPolicies` | `never`, `maxRetries`, `maxRetriesOnCodes`, and `exponentialBackoff` (with an optional jitter). |
-| `UsageTracker` / `UsageTracking` | Records the token usage of each model name in a block of code. |
+| `UsageTracker` / `UsageTracking` | Records the token usage of each model name in a block of code. The record point is `LanguageModel.callAndRecordUsage`, which the programs use for each model call. A direct `call` or `stream` of a model counts in no tracker. |
 | `InMemoryLmCache` / `DiskLmCache` / `CompositeLmCache` | A memory cache with a size limit, and a cache with one file for each entry. `CompositeLmCache` reads the memory cache first, then the disk cache. Give a cache to `ManagedLanguageModel` as `cache = Some(...)`. `NoopLmCache` (in `contracts`) stores nothing. |
 
 ## Design notes

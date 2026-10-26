@@ -246,7 +246,7 @@ its primary consumer:
 | `utils/callback.py` | `core/contracts/Callbacks.scala` (because every module depends on it) |
 | `utils/caching.py` | `lm/runtime/CacheRuntime.scala` (LM-specific) |
 | `utils/parallelizer.py` | `programs/runtime/ParallelExecutor.scala` (lives with `Parallel` / `BestOfN` / `Evaluate`) |
-| `utils/usage_tracker.py` | inside `lm/runtime/ManagedLanguageModel.scala` (per-call accumulator) |
+| `utils/usage_tracker.py` | `core/runtime/UsageScope.scala` (the usage scopes and `UsageTracker`); the user facade `UsageTracking` is in `lm/runtime/ManagedLanguageModel.scala` |
 
 The convention is **no catch-all utility namespace**. Each helper
 lives in the module that owns its lifecycle, which makes ownership
@@ -264,8 +264,9 @@ Scala has no decorator equivalent that composes well with generic
 signatures. Behavior layers are explicit wrapper objects that
 decorate a `LanguageModel` and conform to the same trait:
 
-- `ManagedLanguageModel` wraps a base LM with cache + retry + usage
-  + history.
+- `ManagedLanguageModel` wraps a base LM with cache + retry + history.
+  It records no usage: `LanguageModel.callAndRecordUsage` is the record
+  point.
 - `StreamingLanguageModelWrapper` wraps a streaming LM with the
   stream-pump + per-call queue + callback bridging.
 

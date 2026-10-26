@@ -215,10 +215,10 @@ class LmCostSuite extends FunSuite:
     val model            = ManagedLanguageModel(delegate = Fixed(Right(response)))
     UsageTracking.withNewTracker { outer =>
       val inner = UsageTracking.withNewTracker { inner =>
-        assert(model.call(request).isRight)
+        assert(LanguageModel.callAndRecordUsage(model, request).isRight)
         inner
       }
-      assert(model.call(request).isRight)
+      assert(LanguageModel.callAndRecordUsage(model, request).isRight)
       assertEquals(inner.usageData.get("gpt-test").map(_.size), Some(1))
       assertEquals(outer.usageData.get("gpt-test").map(_.size), Some(2))
       assertEquals(outer.totalUsage.get("gpt-test").map(_.promptTokens), Some(2000L))

@@ -209,7 +209,7 @@ object RuntimeEnvironment:
     * and the trace and the history of this thread. On exit, it restores the services and the configuration of the
     * previous context, but the trace and the history that `thunk` adds stay, also when `thunk` throws. Thus, unlike
     * [[withContext]], the restore is not wholesale, and the output of the call reaches the caller as with no helper.
-    * The usage trackers and the evidence log have their own thread-local state, so the helper does not change them.
+    * The usage scopes and the evidence log have their own thread-local state, so the helper does not change them.
     *
     * The helper only runs `thunk` with the current context, with no install, in two cases: the services and the
     * configuration of `context` are the current ones (a reference check), or each field that `context` sets already has

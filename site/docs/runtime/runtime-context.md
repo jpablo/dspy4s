@@ -43,6 +43,6 @@ turns off the callbacks for the block, as `dspy.context(callbacks=[])` does.
 | `lm` | The active [language model](../language-models/configuring.md). |
 | `adapter` | The active [adapter](../language-models/adapters.md). |
 | `callbacks` | Handlers for the [observability](observability.md) event stream. |
-| `trackUsage` | Whether to record [token usage](../language-models/caching-and-usage.md). |
+| `trackUsage` | Whether the usage trackers get the [token usage](../language-models/caching-and-usage.md). `Some(false)` turns them off. The usage of a program result stays. |
 
 Next: [Observability](observability.md).

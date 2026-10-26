@@ -66,25 +66,27 @@ trait LanguageModel extends LanguageModelRef:
 
 object LanguageModel:
 
-  /** One model call for a program call: `model.call(request)`, then the usage of the reply goes to each open usage
-    * scope ([[UsageScope.record]], decision D9 of UPGRADE-3.2.1-to-3.4.0). This function is the one record point of the
-    * usage of a program result. Upstream records the usage of each LM call into the tracker of the call
+  /** One model call of the framework: `model.call(request)`, then the usage of a successful reply goes to each open
+    * usage scope, with the model name `request.model` ([[UsageScope.record]], decision D9 of UPGRADE-3.2.1-to-3.4.0).
+    * This function is the one record point of the LM usage. The user trackers (`UsageTracking`) and the usage of a
+    * program result get each record from here. Upstream records the usage of each LM call into `settings.usage_tracker`
     * (`dspy/clients/execution.py`, `finalize`).
     *
     * Each part of the framework that calls a model for a program uses this function. These parts are `Predict` (each
     * attempt, also an attempt whose reply then fails to parse), the extraction step of `TwoStepAdapter`, and the sub-LM
     * tools of `RLM`. A tool or a program of the user that calls a model directly must also use it, else the call does
-    * not count.
+    * not count. A direct `call` or `stream` of a model counts in no scope, also for a
+    * [[dspy4s.lm.runtime.ManagedLanguageModel]].
     *
     * A `Left` gives no record: a call that fails at the provider has no reply, thus no usage. A cache hit of
     * [[dspy4s.lm.runtime.ManagedLanguageModel]] has no usage, thus no record (upstream `finalize` skips a cache hit).
-    * The usage tracker of the user (`UsageTracking`) does not get this record, because the managed model records into
-    * it.
+    * With `trackUsage = Some(false)` in the context, the user trackers get nothing, and the program results still get
+    * the usage.
     */
   def callAndRecordUsage(model: LanguageModel, request: LmRequest)(using
       RuntimeContext
   ): Either[DspyError, LmResponse] =
     model.call(request).map { response =>
-      UsageScope.record(response.usage)
+      UsageScope.record(request.model, response.usage)
       response
     }

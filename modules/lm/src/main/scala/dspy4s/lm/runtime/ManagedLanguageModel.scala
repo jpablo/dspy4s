@@ -9,7 +9,7 @@ import dspy4s.core.contracts.LmStreamAssemblyError
 import dspy4s.core.contracts.LmUnexpectedError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.core.runtime.ScopedLocal
+import dspy4s.core.runtime.UsageScope
 import dspy4s.lm.contracts.CacheKey
 import dspy4s.lm.contracts.ForwardingLanguageModel
 import dspy4s.lm.contracts.LanguageModel
@@ -117,63 +117,52 @@ object RetryPolicies:
   private def retryHintMillis(error: DspyError, maxHintMillis: RetryDelayMillis): Option[Long] =
     LmError.retryAfter(error).map(hint => math.min(hint.toMillis, maxHintMillis))
 
-final class UsageTracker:
-  private val data = mutable.Map.empty[String, Vector[LmUsage]]
+/** The usage tracker of the user: the usage of the model calls in a block of code, for each model name. The class is
+  * [[dspy4s.core.runtime.UsageTracker]].
+  */
+type UsageTracker = dspy4s.core.runtime.UsageTracker
 
-  def addUsage(model: String, usage: LmUsage): Unit =
-    this.synchronized {
-      val entries = data.getOrElse(model, Vector.empty)
-      data.update(model, entries :+ usage)
-    }
-
-  def usageData: Map[String, Vector[LmUsage]] =
-    this.synchronized {
-      data.toMap
-    }
-
-  def totalUsage: Map[String, LmUsage] =
-    this.synchronized {
-      data.view.mapValues(_.foldLeft(LmUsage.empty)(_.combine(_))).toMap
-    }
-
-/** The usage trackers of the user (upstream `dspy.track_usage`, `dspy/utils/usage_tracker.py`).
-  * [[ManagedLanguageModel]] records the usage of each call that its delegate answers into each open tracker, per model,
-  * when `trackUsage` is not `false`. The LM usage of a program result does not come from these trackers. It comes from
-  * the usage scope of the program call ([[dspy4s.core.runtime.UsageScope]], decision D9 of UPGRADE-3.2.1-to-3.4.0).
+/** The usage trackers of the user (upstream `dspy.track_usage`, `dspy/utils/usage_tracker.py`). A tracker is a usage
+  * scope ([[dspy4s.core.runtime.UsageScope]]): it gets the usage of each model call in the block, for each model, also
+  * on the worker threads that the block starts (`ParallelExecutor`, the futures, the producer of `streamify`).
+  *
+  * The record point is `LanguageModel.callAndRecordUsage`. `Predict`, `TwoStepAdapter`, and the sub-LM tools of `RLM`
+  * use it, so each model call of a program counts, also for a model with no managed wrapper. A direct `call` or
+  * `stream` of a model counts in no tracker, also for a [[ManagedLanguageModel]]. A cache hit adds nothing. The
+  * trackers get nothing when the context of the call has `trackUsage = Some(false)`.
+  *
+  * The LM usage of a program result comes from the same records: it is the total of the usage scope of the program
+  * call. Thus a tracker around one program call has the total of the result, when `trackUsage` is not `false`.
   */
 object UsageTracking:
 
-  /** The open trackers of this thread, the outermost first. They travel with the runtime context to the worker threads
-    * (`ParallelExecutor`, the futures, the producer of `streamify`), so the usage of a call there goes into them.
-    */
-  private val activeTrackers = ScopedLocal[Vector[UsageTracker]](Vector.empty, travels = true)
-
   def withTracker[A](tracker: UsageTracker)(thunk: => A): A =
-    activeTrackers.within(activeTrackers.get :+ tracker)(thunk)
+    UsageScope.track(tracker)(thunk)
 
   def withNewTracker[A](thunk: UsageTracker => A): A =
     val tracker = new UsageTracker
     withTracker(tracker)(thunk(tracker))
 
-  def record(model: String, usage: LmUsage): Unit =
-    activeTrackers.get.foreach(_.addUsage(model, usage))
-
-/** A model with a cache, retries, the history, and the usage record over `delegate`. The capability flags, the default
-  * options, the cache identity, and `close` come from the delegate ([[ForwardingLanguageModel]]). A close closes the
-  * delegate, and the cache stays.
+/** A model with a cache, retries, and the history over `delegate`. The capability flags, the default options, the cache
+  * identity, and `close` come from the delegate ([[ForwardingLanguageModel]]). A close closes the delegate, and the
+  * cache stays.
+  *
+  * The model records no usage. The one record point of the usage is
+  * [[dspy4s.lm.contracts.LanguageModel.callAndRecordUsage]], which the framework uses for each model call of a program.
+  * Thus a direct `call` or `stream` of this model counts in no sink: not in a user tracker ([[UsageTracking]]), and not
+  * in the usage of a program result. The response and the chunks still carry the usage of the delegate.
   *
   * A delegate that throws a non-fatal exception gives an [[dspy4s.core.contracts.LmUnexpectedError]] with the message
   * of the exception, on the call path and on the stream path (upstream `error_boundary(..., unexpected=True)` in
   * `dspy/clients/errors.py`). The retry policy decides on that error as on each other error, and the call gets the
   * failure entry. A fatal error, for example an `InterruptedException`, goes up to the caller.
   *
-  * The delegate can be a second managed model, the inner model. One call of this model then gives one history entry and
-  * one usage record: the inner model writes the history entry and records the usage of each call that it gets, and this
-  * model writes no history entry and records no usage for these calls. The entry has the cost estimate at the price of
-  * the inner model. This model still stores a response of the inner model that is not a cache hit. A cache hit of the
-  * inner model is a hit of this model too, and this model does not store it. A cache hit of this model does not call
-  * the inner model, so this model writes the history entry of that hit. When this model retries a failure, the inner
-  * model writes a failure entry for each attempt.
+  * The delegate can be a second managed model, the inner model. One call of this model then gives one history entry:
+  * the inner model writes the history entry of each call that it gets, and this model writes no history entry for these
+  * calls. The entry has the cost estimate at the price of the inner model. This model still stores a response of the
+  * inner model that is not a cache hit. A cache hit of the inner model is a hit of this model too, and this model does
+  * not store it. A cache hit of this model does not call the inner model, so this model writes the history entry of
+  * that hit. When this model retries a failure, the inner model writes a failure entry for each attempt.
   *
   * The model computes the cache key of a call one time, with `cacheKey`. A request with no cache key, for example one
   * with a value nested too deep for the stack, is a miss, and the cache stores nothing for it. The delegate thus gets
@@ -201,8 +190,8 @@ final case class ManagedLanguageModel(
   /** The component of the history entries of this model. */
   private val historyComponent: String = s"lm:$id"
 
-  /** `false` when the delegate is a managed model: that model writes the history entry and records the usage of each
-    * call that it gets, so this model does not do it again.
+  /** `false` when the delegate is a managed model: that model writes the history entry of each call that it gets, so
+    * this model does not do it again.
     */
   private val recordsDelegateCalls: Boolean = delegate match
     case _: ManagedLanguageModel => false
@@ -221,8 +210,8 @@ final case class ManagedLanguageModel(
     *     visible output; a thinking delta and a citation delta are visible output too).
     *   - History: one entry for each streamed call, when the stream ends: the entry of [[call]] for a success or a
     *     cache hit, and the failure entry of [[call]] for a failure.
-    *   - Usage: the usage of the chunks is recorded, also when the stream fails after the chunk that has the usage. A
-    *     cache hit records no usage.
+    *   - Usage: this model records no usage. The chunks of the delegate carry the usage to the caller, and the stored
+    *     response has the usage of the chunks. A cache hit has no usage.
     *   - Output: the stored response has the output of [[StreamAccumulator]] in the mode of the delegate.
     *
     * A delegate that cannot stream gives one terminal chunk assembled from [[call]], or a reified
@@ -289,14 +278,13 @@ final case class ManagedLanguageModel(
   private def acceptDelegateHit(request: LmRequest, response: LmResponse)(using RuntimeContext): LmResponse =
     if recordsDelegateCalls then acceptHit(request, response) else response.copy(cacheHit = true, usage = None)
 
-  /** Store the response that the delegate gave, append its history entry, and record its usage. */
+  /** Store the response that the delegate gave, and append its history entry. */
   private def acceptResponse(request: LmRequest, key: Option[CacheKey], response: LmResponse)(using
       RuntimeContext
   ): LmResponse =
     val uncached = response.copy(cacheHit = false)
     for store <- cache; found <- key do store.put(found, uncached)
     if recordsDelegateCalls then appendHistory(request, uncached, cacheHit = false, uncached.usage)
-    trackUsage(request, uncached.usage)
     uncached
 
   /** One call of the delegate. A non-fatal exception gives an [[dspy4s.core.contracts.LmUnexpectedError]]. */
@@ -341,28 +329,18 @@ final case class ManagedLanguageModel(
     if recordsDelegateCalls && RuntimeEnvironment.historyEnabled then
       RuntimeEnvironment.appendHistory(HistoryEntry(historyComponent, LmHistoryRecord.failure(request, mode, error)))
 
-  /** Record the usage of a call that the delegate answered. A cache hit does not come here, so it records no usage. A
-    * delegate that is a managed model recorded the usage, so this model records none (see [[recordsDelegateCalls]]).
-    */
-  private def trackUsage(request: LmRequest, usage: Option[LmUsage])(using RuntimeContext): Unit =
-    val usageEnabled = summon[RuntimeContext].trackUsage.getOrElse(true)
-    if recordsDelegateCalls && usageEnabled then
-      usage.foreach { value =>
-        UsageTracking.record(request.model, value)
-      }
-
-  /** One streamed call to a streaming delegate, with the retry, the stream guard, the history, the usage, and the cache
-    * store of [[stream]].
+  /** One streamed call to a streaming delegate, with the retry, the stream guard, the history, and the cache store of
+    * [[stream]].
     *
     * An attempt holds back its chunks until its first chunk with text, reasoning, a citation, or a tool call, or until
     * its chunk with a finish reason. Then the attempt is visible: the held chunks and all later chunks go to the
     * caller. A failure of an attempt that is not visible drops its chunks, and the retry policy decides on a new
     * attempt. A failure of a visible attempt ends the stream.
     *
-    * The history entry, the usage record, and the cache store occur at the end of the stream. A caller that closes the
-    * stream before its end gets none of them. A stream with a [[LmChunk.cached]] chunk is a cache hit of the delegate:
-    * it gets the history entry of a hit, and no store. A delegate that is a managed model writes the history entry and
-    * records the usage itself, so this stream does neither (see [[recordsDelegateCalls]]).
+    * The history entry and the cache store occur at the end of the stream. A caller that closes the stream before its
+    * end gets neither of them. A stream with a [[LmChunk.cached]] chunk is a cache hit of the delegate: it gets the
+    * history entry of a hit, and no store. A delegate that is a managed model writes the history entry itself, so this
+    * stream writes none (see [[recordsDelegateCalls]]).
     *
     * A non-fatal exception of the delegate, when it opens the stream or during a read, is a failure of the attempt with
     * an [[dspy4s.core.contracts.LmUnexpectedError]].
@@ -456,7 +434,6 @@ final case class ManagedLanguageModel(
         held.clear()
         ready += chunk
         finished = true
-        trackUsage(request, usage)
         appendFailureHistory(request, error)
 
     private def succeed(): Unit =

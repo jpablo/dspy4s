@@ -59,7 +59,10 @@ final case class RuntimeConfig(
     maxErrors     : Option[ErrorLimit]   = None,
     maxHistorySize: Option[HistoryLimit] = None,
     disableHistory: Option[Boolean]      = None,
-    trackUsage    : Option[Boolean]      = None,
+    /** `Some(false)`: the usage trackers of the user get no usage (see `dspy4s.core.runtime.UsageScope`). The usage of
+      * the program results stays.
+      */
+    trackUsage: Option[Boolean] = None,
     /** The metadata for the callbacks. An empty record is a set value: it hides the metadata of the defaults. */
     callbackMetadata: Option[DynamicValue.Record] = None,
     /** `Some(true)`: a failed module call records a failure trace entry. `Some(false)` turns off the failure traces of

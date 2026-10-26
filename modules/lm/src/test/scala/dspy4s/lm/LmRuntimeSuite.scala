@@ -194,8 +194,8 @@ class LmRuntimeSuite extends FunSuite:
 
     given RuntimeContext = RuntimeEnvironment.current
     UsageTracking.withTracker(tracker) {
-      assert(managed.call(baseRequest).isRight)
-      assert(managed.call(baseRequest).isRight)
+      assert(LanguageModel.callAndRecordUsage(managed, baseRequest).isRight)
+      assert(LanguageModel.callAndRecordUsage(managed, baseRequest).isRight)
     }
 
     val usageData = tracker.usageData
@@ -216,7 +216,7 @@ class LmRuntimeSuite extends FunSuite:
     given RuntimeContext = RuntimeEnvironment.current
     UsageTracking.withTracker(tracker) {
       RuntimeEnvironment.withSettings(RuntimeContext(trackUsage = Some(false))) {
-        assert(managed.call(baseRequest).isRight)
+        assert(LanguageModel.callAndRecordUsage(managed, baseRequest).isRight)
       }
     }
 

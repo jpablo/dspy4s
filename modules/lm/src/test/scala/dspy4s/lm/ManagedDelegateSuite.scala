@@ -129,7 +129,8 @@ class ManagedDelegateSuite extends FunSuite:
     val outer            = ManagedLanguageModel(inner, cache = Some(outerCache))
     assert(inner.call(request).isRight)
 
-    val (result, recorded) = UsageTracking.withNewTracker(tracker => (outer.call(request), tracker.totalUsage))
+    val (result, recorded) =
+      UsageTracking.withNewTracker(tracker => (LanguageModel.callAndRecordUsage(outer, request), tracker.totalUsage))
     assertEquals(result.map(_.cacheHit), Right(true))
     assertEquals(result.map(_.outputs.map(_.text)), Right(Vector("Hello")))
     assertEquals(outerCache.puts, 0, "the outer model must not store a hit of the inner model")

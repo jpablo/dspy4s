@@ -242,29 +242,31 @@ class ManagedStreamSuite extends FunSuite:
 
   // ── Usage ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-  test("the usage of a streamed call is recorded, and a cache hit records no usage") {
+  // The record point of the usage is `LanguageModel.callAndRecordUsage`: a direct stream counts in no tracker.
+
+  test("a direct stream counts in no tracker: the chunks carry the usage, and a cache hit has no usage") {
     val delegate         = ScriptedStreams(Vector(complete))
     val model            = managed(delegate, cached = true)
     val tracker          = new UsageTracker
     given RuntimeContext = RuntimeEnvironment.current
 
-    UsageTracking.withTracker(tracker) {
-      val _ = streamAll(model)
-      val _ = streamAll(model)
+    val (miss, hit) = UsageTracking.withTracker(tracker) {
+      (streamAll(model), streamAll(model))
     }
-    assertEquals(tracker.usageData.get("test-model").map(_.size), Some(1))
-    assertEquals(tracker.totalUsage("test-model").totalTokens, 9L)
+    assertEquals(miss.flatMap(_.usage), Vector(usage))
+    assertEquals(hit.flatMap(_.usage), Vector.empty)
+    assertEquals(hit.flatMap(_.cachedResponse).map(_.usage), Vector(None))
+    assertEquals(tracker.usageData, Map.empty)
   }
 
-  test("the usage of a chunk before a failure is recorded") {
+  test("a direct stream that fails counts in no tracker, and the caller gets the chunk with the usage") {
     val failed           = Vector(LmChunk(text = "Hi"), LmChunk(usage = Some(usage)), LmChunk.failure(LmServerError("x")))
     val delegate         = ScriptedStreams(Vector(failed))
     val model            = managed(delegate)
     val tracker          = new UsageTracker
     given RuntimeContext = RuntimeEnvironment.current
 
-    UsageTracking.withTracker(tracker) {
-      val _ = streamAll(model)
-    }
-    assertEquals(tracker.totalUsage.get("test-model").map(_.totalTokens), Some(9L))
+    val chunks = UsageTracking.withTracker(tracker)(streamAll(model))
+    assertEquals(chunks.flatMap(_.usage), Vector(usage))
+    assertEquals(tracker.usageData, Map.empty)
   }

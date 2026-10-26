@@ -6,9 +6,10 @@
   * `dspy.configure_cache(...)` / `dspy.cache` — caching is a *per-LM composition*. You wrap a `LanguageModel` in
   * `ManagedLanguageModel(delegate, cache = Some(...))`, choosing the cache implementation: `NoopLmCache` (disable),
   * `InMemoryLmCache` (memory), `DiskLmCache(dir)` (disk), or your own `LmCache`; and a custom key with the `cacheKey`
-  * function. Usage tracking (snippet 1's `track_usage=True`) is `RuntimeContext(trackUsage = Some(true))` read inside a
-  * `UsageTracking.withNewTracker`. The Anthropic `cache_control_injection_points` (snippet 2) is a provider-specific
-  * prompt-caching hint with no dspy4s surface and is out of scope.
+  * function. Usage tracking (snippet 1's `track_usage=True`) is a `UsageTracking.withNewTracker` block: each model call
+  * of a program in the block counts, also with no `ManagedLanguageModel`. `trackUsage` is on by default, and
+  * `RuntimeContext(trackUsage = Some(false))` turns off the trackers. The Anthropic `cache_control_injection_points`
+  * (snippet 2) is a provider-specific prompt-caching hint with no dspy4s surface and is out of scope.
   */
 package dspy4s.examples.tutorials.cache
 
