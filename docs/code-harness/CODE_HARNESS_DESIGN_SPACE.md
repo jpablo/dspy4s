@@ -24,6 +24,7 @@ and the dspy4s programs `ReAct`, `ReActV2` and `RLM`.
 |---|---|
 | The agent loop: the step, the stop rules, the limits, the input during a turn, the outer loop | [CODE_HARNESS_LOOPS.md](CODE_HARNESS_LOOPS.md) |
 | Execution and runtime models: the REPL host, the state between cells, persistence, replay, actors | A separate analysis, in progress |
+| Durability: what survives a crash, a restart or a close, and if the work continues | [CODE_HARNESS_DURABILITY.md](CODE_HARNESS_DURABILITY.md) |
 
 ## The five aspects
 
@@ -154,7 +155,7 @@ place of optimization, and what the dspy4s harness must expose to the optimizers
 | Topic | Reason |
 |---|---|
 | The stop rules, the goals, and the user input during a turn | CODE_HARNESS_LOOPS.md covers them. |
-| Session persistence, replay, the REPL host, and actors | The analysis of execution and runtime models covers them. |
+| Session persistence, replay, the REPL host, and actors | The analysis of execution and runtime models covers them. CODE_HARNESS_DURABILITY.md covers what survives a crash. |
 | The process and host model of a sandbox | The runtime analysis covers it. Aspect 3 treats a sandbox only as a boundary of authority. |
 | The terminal UI, the provider adapters, the configuration formats, the MCP plumbing, and the edit algorithm of a tool | These are details. They do not change the shape of a harness. |
 
