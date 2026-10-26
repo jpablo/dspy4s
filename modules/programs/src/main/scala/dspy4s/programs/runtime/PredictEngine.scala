@@ -191,10 +191,16 @@ private[dspy4s] final case class PredictEngine(
   /** Format, call the model, and parse with `adapter`. After a [[ParseError]] of the parse step, do the three steps one
     * more time with [[Adapter.fallback]] (upstream `ChatAdapter.__call__`). A call that streamed output to a listener
     * gets no second call. An error of the format step or of the model gives no second call.
+    *
+    * The steps run with `model` as the model of the context, also when `Predict.withLm` pins a model that is not the
+    * model of the context. The adapters read the capabilities of the model from the context: the response schema of the
+    * JSON adapter, and native function calling. The stream state of a streamed call
+    * ([[dspy4s.adapters.contracts.Adapter.streamingState]]) gets the context of the model call, thus the same model.
     */
   private def answerWithFallback(adapter: Adapter, model: LanguageModel, invocation: AdapterInvocation)(using
-      RuntimeContext
+      context: RuntimeContext
   ): Either[DspyError, PredictEngine.Answer] =
+    given RuntimeContext = context.withServices(context.services.copy(lm = Some(model)))
     StreamProgress.withScope { progress =>
       callModel(adapter, model, invocation).flatMap { attempt =>
         attempt.parsed match
@@ -255,9 +261,6 @@ private[dspy4s] final case class PredictEngine(
     * module config and upsert each per-call field by name (later wins, preserving insertion order via the `updated`
     * extension). Mirrors Python's `{**self.config, **call_kwargs}`. When module `config` is empty the result is exactly
     * `callConfig`, so behavior is unchanged for callers that don't set a module config.
-    *
-    * (Deferred: a per-module bound LM — Python's `set_lm`/`get_lm` — is intentionally not handled here; the LM is
-    * resolved from the ambient `RuntimeContext` via `runtime.resolveModel`. See PORT_GAPS G-3.)
     */
   private def mergeConfig(moduleConfig: DynamicValue.Record, callConfig: DynamicValue.Record): DynamicValue.Record =
     DynamicValues.mergeRecords(moduleConfig, callConfig)

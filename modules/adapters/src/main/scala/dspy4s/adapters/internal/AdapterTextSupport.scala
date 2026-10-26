@@ -35,24 +35,75 @@ private[adapters] object AdapterTextSupport:
         case _                     => filled
     }
 
-  /** Decode every output field in layout order, attaching the field name exactly once at this shared boundary.
+  /** The parse of the reply `output` for the output fields of `layout`, with the tool calls rule of upstream
+    * `Adapter._call_postprocess`. The Chat, JSON, and XML adapters use this function, so the rule is the same in each
+    * format. `parseText` parses the text of the reply for the output fields that it gets.
+    *   - A tool turn: the reply has provider tool calls, and `layout` has a tool calls field. `parseText` gets the
+    *     output fields less the tool calls field ([[textFields]]). A parse error of the text gives no values (upstream
+    *     `except AdapterParseError: value = {}`). An empty text, or no text field, gives no parse. Each output field
+    *     that the parse does not give takes its default, else a null (upstream `apply_output_field_defaults` and
+    *     `value.setdefault(name, None)`). The provider tool calls fill the tool calls field.
+    *   - Native function calling is active (`nativeCalls`), and the reply has no provider tool calls: `parseText` gets
+    *     the output fields less the tool calls field, and the tool calls field gets an empty list of calls.
+    *   - Else `parseText` gets each output field. Thus a reply with provider tool calls and no tool calls field is not
+    *     a tool turn: the text must give each required output field.
+    *
+    * An error that is not a [[ParseError]] stays an error, as upstream catches only `AdapterParseError`.
+    */
+  def parseOutputs(layout: SignatureLayout, output: LmOutput, nativeCalls: Boolean)(
+      parseText: Vector[FieldSpec] => Either[DspyError, DynamicValue.Record]
+  ): Either[DspyError, ParsedOutput] =
+    val hasToolCallsField = layout.outputFields.exists(NativeFunctionCalling.isToolCallsField)
+    val toolTurn          = hasToolCallsField && output.toolCalls.nonEmpty
+    if !hasToolCallsField || !(toolTurn || nativeCalls) then parseText(layout.outputFields).map(ParsedOutput(_))
+    else
+      val fields = textFields(layout, providerCalls = true)
+      val parsed =
+        if !toolTurn then parseText(fields)
+        else if output.text.isEmpty || fields.isEmpty then Right(DynamicValue.Record.empty)
+        else
+          parseText(fields) match
+            case Left(_: ParseError) => Right(DynamicValue.Record.empty)
+            case other               => other
+      val calls = NativeFunctionCalling.encodeToolCalls(output.toolCalls)
+      parsed.map { values =>
+        ParsedOutput(DynamicValues.recordFromEntries(layout.outputFields.map { field =>
+          if NativeFunctionCalling.isToolCallsField(field) then field.name -> calls
+          else
+            field.name ->
+              DynamicValues
+                .recordGet(values, field.name)
+                .orElse(field.defaultValue)
+                .getOrElse(DynamicValue.Null)
+        }))
+      }
+
+  /** The output fields of `layout` that the text of the reply gives: each output field, less the tool calls field when
+    * `providerCalls` is `true`. The provider tool calls then fill that field ([[parseOutputs]]). The stream states of
+    * the chat and the JSON formats get the same fields, so the stream follows the parser.
+    */
+  def textFields(layout: SignatureLayout, providerCalls: Boolean): Vector[FieldSpec] =
+    layout.outputFields.filterNot(field => providerCalls && NativeFunctionCalling.isToolCallsField(field))
+
+  /** The record of the output fields `fields`, in their order, with the field name attached exactly once at this shared
+    * boundary.
     *
     * `decode` gives `None` when the response does not have the field. The field then takes the value of
     * [[missingOutput]]. An error of `decode` becomes a [[ParseError]] that names the field and has the raw response
     * `raw`.
     */
   def decodeOutputFields(
-      layout: SignatureLayout,
+      fields: Vector[FieldSpec],
       raw   : String
   )(
       decode: FieldSpec => Either[DspyError, Option[DynamicValue]]
-  ): Either[DspyError, Vector[(String, DynamicValue)]] =
-    Traverse.either(layout.outputFields) { field =>
+  ): Either[DspyError, DynamicValue.Record] =
+    Traverse.either(fields) { field =>
       for
         found <- decode(field).left.map(fieldError(field.name, raw, _))
         value <- found.fold(missingOutput(field, raw))(Right(_))
       yield field.name -> value
-    }
+    }.map(DynamicValues.recordFromEntries)
 
   /** The value of an output field that the response does not have (upstream `apply_output_field_defaults`): the
     * [[FieldSpec.defaultValue]] of the field, else a null when the field is optional. Else it is a parse error that has
@@ -298,18 +349,28 @@ private[adapters] object AdapterTextSupport:
       else PrimitiveValue.BigInt(whole)
     )
 
-  /** Single-output plain-text fallback shared by the JSON and XML adapters: when structured parsing failed at the
-    * DOCUMENT level and the signature has exactly one output field, treat the whole (trimmed, non-empty) reply as that
-    * field's value. Callers gate on their `allowTextFallbackForSingleOutput` flag and field count before invoking. A
-    * field with allowed values takes the value of [[allowedValue]], so a text outside the allowed values is a parse
-    * error, as in the other parse paths (decision D7).
+  /** The single-output text fallback (a port rule) of the Chat, JSON, and XML adapters: the record of the one text
+    * output field `field` for a reply with no structure. The text of the reply, with the line ends and the strip of
+    * [[fallbackText]], is the text of the value, and [[outputTextValue]] gives the value. Thus an `int` field takes
+    * `42` for the reply `42`, and a field with allowed values takes the value of [[allowedValue]] (decision D7). A text
+    * that does not fit the field is a parse error that names the field. An empty text is a parse error.
+    *
+    * Each caller applies its gate first: one text output field, and, for the JSON and XML adapters, the flag
+    * `allowTextFallbackForSingleOutput`.
     */
-  def singleOutputTextFallback(layout: SignatureLayout, output: LmOutput): Either[DspyError, ParsedOutput] =
-    val field   = layout.outputFields.head
-    val trimmed = output.text.trim
-    if trimmed.nonEmpty then
-      val value =
-        if hasAllowedValues(field) then allowedValue(field, trimmed).left.map(fieldError(field.name, output.text, _))
-        else Right(DynamicValues.string(trimmed))
-      value.map(text => ParsedOutput(DynamicValues.record(field.name -> text)))
-    else Left(ParseError("adapter", "Cannot fallback from empty model output", raw = Some(output.text)))
+  def singleOutputTextFallback(field: FieldSpec, output: LmOutput): Either[DspyError, DynamicValue.Record] =
+    val text = fallbackText(output.text)
+    if text.isEmpty then Left(ParseError("adapter", "Cannot fallback from empty model output", raw = Some(output.text)))
+    else
+      outputTextValue(field, text)
+        .left
+        .map(fieldError(field.name, output.text, _))
+        .map(value => DynamicValues.record(field.name -> value))
+
+  /** The text of the single-output fallback for the whole text `text` of a reply with no structure: the lines of `text`
+    * (Python `str.splitlines`), joined with `\n`, and stripped with Python `str.strip`. A section value of the chat
+    * format has the same line ends, so a CRLF reply gives the value of an LF reply. The chat stream state gives this
+    * text for the fallback too.
+    */
+  def fallbackText(text: String): String =
+    PythonText.strip(PythonText.splitLines(text).mkString("\n"))

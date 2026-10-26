@@ -2,7 +2,7 @@ package dspy4s.adapters
 
 import dspy4s.adapters.contracts.FieldChunk
 import dspy4s.adapters.internal.{JsonTextScan, SingleUseAdapterStreamingState}
-import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.{FieldSpec, PythonText}
 
 import scala.collection.mutable
 import scala.util.control.NonFatal
@@ -15,8 +15,8 @@ import scala.util.control.NonFatal
   *   - Any preamble before the first `{` is skipped, so fenced ```json blocks are tolerated.
   *   - String values are emitted with their escape sequences decoded (`\n`, `\t`, `\"`, `\\`, `\/`, `\uXXXX`, …). The
   *     surrounding quotes are stripped.
-  *   - Non-string scalars (numbers, booleans, `null`) emit their literal textual form, trimmed of surrounding
-  *     whitespace at value boundaries.
+  *   - Non-string scalars (numbers, booleans, `null`) emit their literal textual form, with no whitespace at the two
+  *     ends (Python `str.strip`, [[PythonText.strip]]).
   *   - Nested object / array values emit the raw sub-document, tracking brace / bracket nesting and string state so
   *     internal `{` or `,` characters do not terminate the value early.
   *   - Keys not present in the signature's output fields are parsed but produce no [[FieldChunk]]s. The state buffers
@@ -79,7 +79,7 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
     contentBuffer.clear()
 
   private def finalContent(): String =
-    if currentIsString then contentBuffer.toString else contentBuffer.toString.strip
+    if currentIsString then contentBuffer.toString else PythonText.strip(contentBuffer.toString)
 
   private def processChar(c: Char, out: mutable.ArrayBuffer[FieldChunk]): Unit =
     phase match

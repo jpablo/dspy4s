@@ -6,6 +6,7 @@ import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.NativeTools
 import dspy4s.adapters.contracts.ParsedOutput
+import dspy4s.adapters.internal.AdapterTextSupport
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -23,10 +24,12 @@ final case class JSONAdapter(
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     JSONAdapterPrompt.format(invocation, native)
 
+  /** The stream state of the text fields of the parser, as for [[ChatAdapter.streamingState]]: with native function
+    * calling active, the provider fills the tool calls field, so the stream does not track it
+    * ([[AdapterTextSupport.textFields]]).
+    */
   override def streamingState(layout: SignatureLayout)(using RuntimeContext): Option[AdapterStreamingState] =
-    Some(
-      new JsonStreamingState(layout.outputFields)
-    )
+    Some(new JsonStreamingState(AdapterTextSupport.textFields(layout, native.isActive)))
 
   override def parse(invocation: AdapterInvocation, output: LmOutput)(using
       RuntimeContext

@@ -6,6 +6,7 @@ import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.NativeTools
 import dspy4s.adapters.contracts.ParsedOutput
+import dspy4s.adapters.internal.AdapterTextSupport
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -41,12 +42,12 @@ final case class ChatAdapter(
     ChatAdapterPrompt.format(invocation, native)
 
   /** The stream state of the text fields of the parser: with native function calling active, the tool calls field is
-    * not a text field ([[ChatAdapterParser.textFields]]). When native function calling is not active, the parser also
+    * not a text field ([[AdapterTextSupport.textFields]]). When native function calling is not active, the parser also
     * removes that field for a reply that has provider tool calls. The stream state cannot know these calls before the
     * end of the stream, so it then gets each output field.
     */
   override def streamingState(layout: SignatureLayout)(using RuntimeContext): Option[AdapterStreamingState] =
-    Some(new ChatStreamingState(ChatAdapterParser.textFields(layout, native.isActive)))
+    Some(new ChatStreamingState(AdapterTextSupport.textFields(layout, native.isActive)))
 
   override def parse(invocation: AdapterInvocation, output: LmOutput)(using
       RuntimeContext

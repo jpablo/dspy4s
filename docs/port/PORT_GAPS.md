@@ -1453,8 +1453,10 @@ A6
 - **JSON mode.** Upstream can send `{"type": "json_object"}` (`dspy/adapters/json_adapter.py:58-63`). dspy4s sends
   `json_schema` or nothing.
 - **Nested XML.** Upstream parses nested elements for list, dict, and model outputs
-  (`dspy/adapters/xml_adapter.py:95-135,159-218`). dspy4s reads the text of the first match and parses it as JSON
-  (`modules/adapters/.../XMLAdapter.scala:98`).
+  (`dspy/adapters/xml_adapter.py:95-135,159-218`). dspy4s reads the text of the first element of the field that is
+  not inside another field element, and parses it as JSON (`XMLAdapter.fieldTexts` in
+  `modules/adapters/.../XMLAdapter.scala`). A syntax error of the XML is a parse error, and the JSON fallback runs, as
+  upstream 3.4.0.
 - **BAMLAdapter.** Not ported. Low value.
 
 ---

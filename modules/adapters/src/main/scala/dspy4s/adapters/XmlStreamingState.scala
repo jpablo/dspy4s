@@ -2,7 +2,7 @@ package dspy4s.adapters
 
 import dspy4s.adapters.contracts.FieldChunk
 import dspy4s.adapters.internal.SingleUseAdapterStreamingState
-import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.{FieldSpec, PythonText}
 
 import scala.collection.mutable
 import scala.util.control.NonFatal
@@ -23,8 +23,12 @@ import scala.util.control.NonFatal
   * name, an entity, or content are all resumed cleanly on the next call.
   *
   * Boundary whitespace (upstream `_default_handle_stream_chunk`): the chunks of a field have no leading and no trailing
-  * whitespace of the field value. Thus the text of the chunks of a field, joined, is the value that [[XMLAdapter]]
-  * parses for that field, for each split of the response into deltas.
+  * Python whitespace of the field value ([[PythonText.strip]], as the parser). Thus the text of the chunks of a field,
+  * joined, is the value that [[XMLAdapter]] parses for that field, for each split of the response into deltas.
+  *
+  * The first element of a field wins, as in the parser: a later element of the same field gives no chunks. A field tag
+  * inside the content of a field is text of that field, and a tag of another name holds no value, so the stream reads
+  * the field tags that the parser reads.
   */
 final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUseAdapterStreamingState:
   private val fieldNames: Set[String] = outputFields.map(_.name).toSet
@@ -39,9 +43,12 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
 
   /** The output field of the open tag. A tag of another name gives no chunks. */
   private var currentField: Option[String] = None
-  private val tagBuilder                   = new StringBuilder
-  private val contentBuffer                = new StringBuilder
-  private val entityBuilder                = new StringBuilder
+
+  /** The output fields whose first element closed. A later element of such a field gives no chunks. */
+  private val closedFields: mutable.Set[String] = mutable.Set.empty
+  private val tagBuilder                        = new StringBuilder
+  private val contentBuffer                     = new StringBuilder
+  private val entityBuilder                     = new StringBuilder
 
   override protected def receiveOpen(delta: String): Vector[FieldChunk] =
     val out = mutable.ArrayBuffer.empty[FieldChunk]
@@ -60,8 +67,8 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
 
   private def emitFinal(out: mutable.ArrayBuffer[FieldChunk]): Unit =
     currentField.foreach { name =>
-      // The parser trims the field value (`XMLAdapter.extractFieldText`), so the chunk does too.
-      out += FieldChunk(name, contentBuffer.toString.trim, isLast = true)
+      // The parser strips the field value with Python `str.strip` (`XMLAdapter.fieldTexts`), so the chunk does too.
+      if closedFields.add(name) then out += FieldChunk(name, PythonText.strip(contentBuffer.toString), isLast = true)
     }
     contentBuffer.clear()
     currentField = None

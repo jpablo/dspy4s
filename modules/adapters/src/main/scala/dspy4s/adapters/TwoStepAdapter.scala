@@ -110,25 +110,30 @@ final case class TwoStepAdapter(extractionModel: LanguageModel) extends Adapter:
       case other => other
 
   /** Format with `adapter`, call the extraction model, and parse. The inner result is the result of the parse step, so
-    * that the caller can tell a parse error from an error of the other steps. The format step sees the extraction model
-    * as the model of the context: the JSON adapter asks that model for response schema support (upstream
-    * `JSONAdapter._prepare_response_format` gets the extraction model). The usage of the reply goes to the usage scope
-    * of the program call ([[LanguageModel.callAndRecordUsage]]), as upstream records the usage of the extraction LM in
-    * the tracker of the call.
+    * that the caller can tell a parse error from an error of the other steps. A reply with no output is a parse error
+    * of the parse step ("Extraction model returned no output"), so the JSON fallback runs and the final error has the
+    * completion of the main LM. The format and the parse steps see the extraction model as the model of the context:
+    * the JSON adapter asks that model for response schema support (upstream `JSONAdapter._prepare_response_format` gets
+    * the extraction model). The usage of the reply goes to the usage scope of the program call
+    * ([[LanguageModel.callAndRecordUsage]]), as upstream records the usage of the extraction LM in the tracker of the
+    * call.
     */
   private def attempt(adapter: Adapter, invocation: AdapterInvocation)(using
       context: RuntimeContext
   ): Either[DspyError, Either[DspyError, ParsedOutput]] =
-    val formatContext = context.withServices(context.services.copy(lm = Some(extractionModel)))
+    val modelContext = context.withServices(context.services.copy(lm = Some(extractionModel)))
     for
-      prompt   <- adapter.format(invocation)(using formatContext)
+      prompt   <- adapter.format(invocation)(using modelContext)
       response <-
         LanguageModel.callAndRecordUsage(
           extractionModel,
           invocation.request.copy(messages = prompt.messages, options = prompt.options(invocation.request.options))
         )
-      lmOutput <- response.outputs.headOption.toRight(ParseError(name, "Extraction model returned no output"))
-    yield adapter.parse(invocation, lmOutput)
+    yield response
+      .outputs
+      .headOption
+      .toRight(ParseError(name, "Extraction model returned no output"))
+      .flatMap(adapter.parse(invocation, _)(using modelContext))
 
   /** The on-the-fly extractor signature: `text -> <the original output fields>` (upstream
     * `_create_extractor_signature`). When the original signature already has an output field named `text`, the

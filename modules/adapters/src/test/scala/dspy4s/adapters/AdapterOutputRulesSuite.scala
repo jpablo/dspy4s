@@ -189,7 +189,9 @@ class AdapterOutputRulesSuite extends FunSuite:
     assertEquals(native.fallback, Some(JSONAdapter(native = tools)))
     assertEquals(ChatAdapter(useJsonAdapterFallback = false).fallback, None)
     assertEquals(JSONAdapter().fallback, None)
-    assertEquals(XMLAdapter().fallback, None)
+    // Upstream `XMLAdapter` extends `ChatAdapter`, so it has the JSON fallback too.
+    assertEquals(XMLAdapter().fallback, Some(JSONAdapter()))
+    assertEquals(XMLAdapter(useJsonAdapterFallback = false).fallback, None)
   }
 
   // ── Incomplete demos ────────────────────────────────────────────────────────────────────────────────────────

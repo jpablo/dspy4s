@@ -15,15 +15,15 @@ import dspy4s.core.contracts.{
 import dspy4s.lm.contracts.LmOutput
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
-import scala.util.matching.Regex
-
 /** Decodes JSONAdapter's JSON body and provider-native tool calls into schema-backed `DynamicValue` fields. */
 private[adapters] object JSONAdapterParser:
-  private val FencedJson: Regex = "(?s)```json\\s*(\\{.*?\\})\\s*```".r
 
-  /** @param nativeCalls
+  /** The values of the output fields of `layout`, with the tool calls rule of [[AdapterTextSupport.parseOutputs]].
+    *
+    * @param nativeCalls
     *   `true` when native function calling is active for the call. The provider tool calls then fill the tool calls
-    *   field, and an empty sequence when there are none. Else the field is an ordinary JSON key.
+    *   field, and an empty sequence when there are none. Else the field is an ordinary JSON key, also when the response
+    *   has provider tool calls and the layout has no tool calls field.
     */
   def parse(
       allowTextFallbackForSingleOutput: Boolean,
@@ -31,52 +31,27 @@ private[adapters] object JSONAdapterParser:
       output                          : LmOutput,
       nativeCalls                     : Boolean
   ): Either[DspyError, ParsedOutput] =
-    if layout.outputFields.exists(NativeFunctionCalling.isToolCallsField) && output.toolCalls.nonEmpty then
-      Right(parseNativeToolTurn(layout, output))
-    else
-      extractJson(output.text).flatMap(parseJsonObject) match
-        case Right(root) => parseFields(layout, root, output, nativeCalls)
-        case Left(_)     =>
-          if allowTextFallbackForSingleOutput && layout.outputFields.size == 1 then
-            AdapterTextSupport.singleOutputTextFallback(layout, output)
-          else
-            Left(ParseError("adapter", "JSON parse failed and no fallback was applied", raw = Some(output.text)))
+    AdapterTextSupport.parseOutputs(layout, output, nativeCalls)(parseText(allowTextFallbackForSingleOutput, _, output))
 
-  /** A tool turn has no final answer yet: a field that is missing or does not fit its type takes its default, else a
-    * null.
+  /** The values of the text output fields `fields` from the JSON object of the text of `output` ([[extractJson]]). A
+    * text with no JSON object gives the single-output text fallback ([[AdapterTextSupport.singleOutputTextFallback]])
+    * when `allowTextFallbackForSingleOutput` is on and there is one text field. Else it is a parse error.
     */
-  private def parseNativeToolTurn(layout: SignatureLayout, output: LmOutput): ParsedOutput =
-    val jsonRoot = extractJson(output.text).flatMap(parseJsonObject).toOption
-    val entries  = layout
-      .outputFields
-      .map { field =>
-        if NativeFunctionCalling.isToolCallsField(field) then
-          field.name -> NativeFunctionCalling.encodeToolCalls(output.toolCalls)
-        else
-          jsonRoot
-            .flatMap(DynamicValues.recordGet(_, field.name))
-            .flatMap(raw => decode(field, raw).toOption)
-            .map(coerced => field.name -> coerced)
-            .getOrElse(field.name -> field.defaultValue.getOrElse(DynamicValue.Null))
-      }
-    ParsedOutput(DynamicValues.recordFromEntries(entries))
-
-  private def parseFields(
-      layout     : SignatureLayout,
-      root       : DynamicValue.Record,
-      output     : LmOutput,
-      nativeCalls: Boolean
-  ): Either[DspyError, ParsedOutput] =
-    AdapterTextSupport
-      .decodeOutputFields(layout, output.text) { field =>
-        if nativeCalls && NativeFunctionCalling.isToolCallsField(field) then
-          Right(Some(NativeFunctionCalling.encodeToolCalls(output.toolCalls)))
-        else
+  private def parseText(
+      allowTextFallbackForSingleOutput: Boolean,
+      fields                          : Vector[FieldSpec],
+      output                          : LmOutput
+  ): Either[DspyError, DynamicValue.Record] =
+    extractJson(output.text) match
+      case Right(root) => AdapterTextSupport.decodeOutputFields(fields, output.text) { field =>
           DynamicValues.recordGet(root, field.name) match
             case Some(raw) => decode(field, raw).map(Some(_))
             case None      => Right(None)
-      }
-      .map(entries => ParsedOutput(DynamicValues.recordFromEntries(entries)))
+        }
+      case Left(_) =>
+        if allowTextFallbackForSingleOutput && fields.size == 1 then
+          AdapterTextSupport.singleOutputTextFallback(fields.head, output)
+        else Left(ParseError("adapter", "JSON parse failed and no fallback was applied", raw = Some(output.text)))
 
   /** The value of the output field `field` (upstream `parse_value`). A JSON null of an optional field is a null. A tool
     * calls field takes a JSON list of calls, or the JSON text of such a list. A JSON string for a field whose type is
@@ -98,15 +73,18 @@ private[adapters] object JSONAdapterParser:
         case other if NativeFunctionCalling.isToolCallsField(field) => AdapterTextSupport.toolCallsValue(other)
         case other                                                  => coerce(field, other)
 
-  private def extractJson(text: String): Either[DspyError, String] =
-    val trimmed = text.trim
-    if trimmed.startsWith("{") && trimmed.endsWith("}") then
-      Right(trimmed)
-    else
-      FencedJson.findFirstMatchIn(text).map(_.group(1)) match
-        case Some(json) => Right(json)
-        case None       =>
-          extractFirstJsonObject(text).toRight(ParseError("adapter", "Could not find JSON object in model output"))
+  /** The JSON object of `text`: the whole text when it is one JSON object, else the first JSON object of the text
+    * ([[extractFirstJsonObject]]). Upstream `JSONAdapter.parse` reads the whole text with `json_repair`, and else the
+    * first balanced object of a regex. The JSON stream state starts at the first `{` too, so the parser and the stream
+    * read the same object. A fenced ```json block needs no rule of its own: when the only object is in the fence, the
+    * first object is in the fence.
+    */
+  private def extractJson(text: String): Either[DspyError, DynamicValue.Record] =
+    parseJsonObject(PythonText.strip(text)).orElse(
+      extractFirstJsonObject(text)
+        .toRight(ParseError("adapter", "Could not find JSON object in model output"))
+        .flatMap(parseJsonObject)
+    )
 
   /** The text of the first JSON object of `text`: from the first `{` to the `}` that closes it. A brace in a JSON
     * string does not count ([[JsonTextScan]]).

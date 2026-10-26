@@ -70,8 +70,8 @@ inline signature, write the type as `Optional[T]` or `T | None`, for example
 `"question -> answer, note: Optional[str]"`.
 
 A required field that the response does not have is a parse error. With the
-default `ChatAdapter`, a parse error gives one more call in the JSON format
-(`useJsonAdapterFallback`).
+default `ChatAdapter`, and with `XMLAdapter`, a parse error gives one more call
+in the JSON format (`useJsonAdapterFallback`).
 
 ## Building a signature programmatically
 

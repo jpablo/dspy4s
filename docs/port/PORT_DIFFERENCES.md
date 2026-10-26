@@ -176,7 +176,8 @@ plug into it yet.
 
 Per-chunk granularity also differs: dspy4s emits one chunk per
 field at the value boundary (JSON), at the close-tag boundary
-(XML), or via a holdback window (Chat). Concatenated content
+(XML), or after the hold of a tail that can still become a marker
+(Chat). Concatenated content
 matches Python; per-chunk shape doesn't. See
 [STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md) for the per-token
 refactor that would close the gap, and

@@ -49,6 +49,11 @@ class StreamingWrapperFlushSuite extends FunSuite:
   /** A token as `(field, chunk, isLastChunk)`. */
   private type Token = (String, String, Boolean)
 
+  /** The tokens before the failure of a stream of `[[ ## answer ## ]]\nPar`. The text `Par` cannot become a marker, so
+    * the stream emits it at once. A flush would add a last chunk of the field.
+    */
+  private val beforeFailure: Vector[Token] = Vector(("answer", "Par", false))
+
   /** A stream model whose stream gives the chunks of `chunks`, then throws a non-fatal exception at the next read. */
   private final class Breaking(chunks: Vector[LmChunk]) extends StreamingLanguageModel:
     override val id: String   = "breaking"
@@ -111,8 +116,8 @@ class StreamingWrapperFlushSuite extends FunSuite:
 
   test("a failure chunk ends the stream path with no flush, as the call path does") {
     val chunks = Vector(LmChunk(text = "[[ ## answer ## ]]\nPar"), LmChunk.failure(RuntimeError("test", "boom")))
-    assertEquals(called(chunks), Vector.empty)
-    assertEquals(streamed(chunks), Vector.empty)
+    assertEquals(called(chunks), beforeFailure)
+    assertEquals(streamed(chunks), beforeFailure)
   }
 
   test("a cache hit gives no token on the stream path, as on the call path") {
@@ -139,8 +144,8 @@ class StreamingWrapperFlushSuite extends FunSuite:
 
   test("a delegate stream that throws ends the stream path with no flush, as the call path does") {
     val chunks = Vector(LmChunk(text = "[[ ## answer ## ]]\nPar"))
-    assertEquals(tokensOf(Breaking(chunks))(wrapper => wrapper.call(request)), Vector.empty)
-    assertEquals(tokensOf(Breaking(chunks))(wrapper => wrapper.stream(request).toVector), Vector.empty)
+    assertEquals(tokensOf(Breaking(chunks))(wrapper => wrapper.call(request)), beforeFailure)
+    assertEquals(tokensOf(Breaking(chunks))(wrapper => wrapper.stream(request).toVector), beforeFailure)
   }
 
   test("a close of the stream before its end gives no flush") {

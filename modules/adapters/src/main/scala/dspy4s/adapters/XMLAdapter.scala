@@ -12,15 +12,17 @@ import dspy4s.adapters.internal.FramedTurns
 import dspy4s.adapters.internal.PromptText
 import dspy4s.adapters.internal.PromptText.OutputSchema
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.ParseError
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.lm.contracts.LmOutput
 import zio.blocks.schema.DynamicValue
 
 import scala.util.Try
-import scala.xml.NodeSeq
+import scala.xml.Elem
+import scala.xml.Node
 import scala.xml.XML
 
 /** The XML adapter (upstream `XMLAdapter` in `dspy/adapters/xml_adapter.py`). Each field is a tag:
@@ -30,9 +32,22 @@ import scala.xml.XML
   * parser reads that text as JSON. Upstream asks for nested XML elements. The structure and the output reminder thus
   * have the form that upstream uses for each other output type.
   */
-final case class XMLAdapter(allowTextFallbackForSingleOutput: Boolean = true) extends Adapter:
+final case class XMLAdapter(
+    allowTextFallbackForSingleOutput: Boolean = true,
+    /** Try a [[JSONAdapter]] after a parse error, as [[ChatAdapter.useJsonAdapterFallback]]. On by default: upstream
+      * `XMLAdapter` extends `ChatAdapter`, so a parse error of the XML gives the JSON fallback. See
+      * [[Adapter.fallback]].
+      */
+    useJsonAdapterFallback: Boolean = true
+) extends Adapter:
 
   override def name: String = "xml"
+
+  /** A [[JSONAdapter]] when [[useJsonAdapterFallback]] is on. This adapter has no native function calling, so the
+    * fallback adapter has none too.
+    */
+  override def fallback: Option[Adapter] =
+    Option.when(useJsonAdapterFallback)(JSONAdapter())
 
   // This adapter has no native function calling: a turn of the history with tool calls stays text, and the request
   // has no tool options (upstream `Adapter._call_preprocess`).
@@ -46,33 +61,45 @@ final case class XMLAdapter(allowTextFallbackForSingleOutput: Boolean = true) ex
   override def formatUserMessageContent(layout: SignatureLayout, values: DynamicValue.Record): String =
     Turns.user(layout, values, mainRequest = false)
 
+  /** The values of the output fields, with the tool calls rule of [[AdapterTextSupport.parseOutputs]]. This adapter has
+    * no native function calling, but a reply with provider tool calls is a tool turn, as in the other formats.
+    */
   override def parse(invocation: AdapterInvocation, output: LmOutput)(using
       RuntimeContext
   ): Either[DspyError, ParsedOutput] =
-    val layout = invocation.layout
-    // The plain-text fallback only applies when the reply is not an XML document at all (the model ignored the
-    // format). Falling back on ANY structured failure would mask real errors: a present-but-unfillable field
-    // used to return the ENTIRE raw XML document as the field's "value".
-    extractXml(output.text).flatMap(parseXml(_, layout)) match
-      case Right(document) => parseFields(layout, document, output)
-      case Left(_)         =>
-        if allowTextFallbackForSingleOutput && layout.outputFields.size == 1 then
-          AdapterTextSupport.singleOutputTextFallback(layout, output)
-        else Left(ParseError("adapter", "XML parse failed and no fallback was applied", raw = Some(output.text)))
+    AdapterTextSupport.parseOutputs(invocation.layout, output, nativeCalls = false)(parseText(_, output))
 
-  /** The values of the output fields of `document`. A text `tool_calls` field takes the JSON list of calls in its text,
-    * as in the chat and JSON formats (upstream `parse_value` with `ToolCalls`).
+  /** The values of the text output fields `fields` from the XML document of the text of `output`.
+    *
+    * The single-output text fallback ([[AdapterTextSupport.singleOutputTextFallback]]) applies only when the reply has
+    * no XML document at all ([[extractXml]]): the model did not use the format. A reply with an XML document that does
+    * not parse, for example `<answer>AT&T</answer>`, is a parse error (upstream `ET.fromstring` raises), and the
+    * predictor then tries the fallback adapter ([[fallback]]).
+    */
+  private def parseText(fields: Vector[FieldSpec], output: LmOutput): Either[DspyError, DynamicValue.Record] =
+    extractXml(output.text) match
+      case Some(xml) =>
+        parseXml(xml).left.map(error => ParseError("adapter", s"Failed to parse XML: $error", raw = Some(output.text)))
+          .flatMap(document => parseFields(fields, document, output))
+      case None =>
+        if allowTextFallbackForSingleOutput && fields.size == 1 then
+          AdapterTextSupport.singleOutputTextFallback(fields.head, output)
+        else Left(ParseError("adapter", "Could not find XML document in model output", raw = Some(output.text)))
+
+  /** The values of the output fields `fields` of `document` ([[fieldTexts]]). A text `tool_calls` field takes the JSON
+    * list of calls in its text, as in the chat and JSON formats (upstream `parse_value` with `ToolCalls`).
     */
   private def parseFields(
-      layout  : SignatureLayout,
-      document: NodeSeq,
+      fields  : Vector[FieldSpec],
+      document: Seq[Node],
       output  : LmOutput
-  ): Either[DspyError, ParsedOutput] =
-    AdapterTextSupport.decodeOutputFields(layout, output.text) { field =>
-      extractFieldText(document, field.name) match
+  ): Either[DspyError, DynamicValue.Record] =
+    val texts = XMLAdapter.fieldTexts(document, fields.map(_.name).toSet)
+    AdapterTextSupport.decodeOutputFields(fields, output.text) { field =>
+      texts.get(field.name) match
         case Some(raw) => AdapterTextSupport.outputTextValue(field, raw).map(Some(_))
         case None      => Right(None)
-    }.map(entries => ParsedOutput(DynamicValues.recordFromEntries(entries)))
+    }
 
   /** The text of a turn: the tag form of the input fields for a user turn, with the output reminder in a current
     * request, and the tag form of the output fields for an assistant turn (upstream
@@ -102,42 +129,30 @@ final case class XMLAdapter(allowTextFallbackForSingleOutput: Boolean = true) ex
       "Respond with the corresponding output fields wrapped in XML tags " +
         layout.outputFields.map(field => s"`<${field.name}>`").mkString(", then ") + "."
 
-  private def extractXml(text: String): Either[DspyError, String] =
-    val trimmed = text.trim
-    if trimmed.startsWith("<") then Right(trimmed)
+  /** The XML document of `text`, or `None` when the text has no XML document at all: the whole text when it starts with
+    * `<` after Python whitespace, else the first ```xml block ([[XMLAdapter.fencedXml]]), else the text from the first
+    * `<` to the last `>`.
+    */
+  private def extractXml(text: String): Option[String] =
+    val stripped = PythonText.strip(text)
+    if stripped.startsWith("<") then Some(stripped)
     else
-      XMLAdapter.fencedXml(text) match
-        case Some(xml) => Right(xml)
-        case None      =>
-          val first = text.indexOf('<')
-          val last  = text.lastIndexOf('>')
-          if first >= 0 && last > first then Right(text.substring(first, last + 1))
-          else Left(ParseError("adapter", "Could not find XML document in model output"))
+      XMLAdapter.fencedXml(text).orElse {
+        val first = text.indexOf('<')
+        val last  = text.lastIndexOf('>')
+        Option.when(first >= 0 && last > first)(text.substring(first, last + 1))
+      }
 
-  /** The top nodes of the document of `raw`. A reply with more than one top-level tag, as the prompt asks, is the
-    * content of one root element (upstream `XMLAdapter.parse` reads `<dspy_root>completion</dspy_root>`). The parse
-    * tries that form first, and the nodes are the content of the root. A reply that this form does not take, for
-    * example a reply with a leading `<?xml ?>` declaration, is one document, and the node is its root element.
-    *
-    * The root element of the wrapped form can match a field ([[XMLAdapter.RootMatches]]). With such a field, the plain
-    * form comes first, and the node of the wrapped form is its root element.
+  /** The top nodes of the document of `raw`, or the message of the XML syntax error. A reply with more than one
+    * top-level tag, as the prompt asks, is the content of one root element (upstream `XMLAdapter.parse` reads
+    * `<dspy_root>completion</dspy_root>`). The parse tries that form first, and the nodes are the content of the root.
+    * A reply that this form does not take, for example a reply with a leading `<?xml ?>` declaration, is one document,
+    * and the node is its root element.
     */
-  private def parseXml(raw: String, layout: SignatureLayout): Either[DspyError, NodeSeq] =
-    def wrapped  = Try(XML.loadString(s"<${XMLAdapter.RootTag}>$raw</${XMLAdapter.RootTag}>"))
-    def plain    = Try(XML.loadString(raw))
-    val document =
-      if layout.outputFields.exists(field => XMLAdapter.RootMatches.contains(field.name)) then plain.orElse(wrapped)
-      else wrapped.map(root => NodeSeq.fromSeq(root.child)).orElse(plain)
-    document.toEither.left.map(error => ParseError("adapter", DspyError.messageOf(error)))
-
-  /** A present-but-empty tag is a PRESENT field with an empty value (`Some("")`), not a missing field — treating it as
-    * missing used to route single-output signatures into the text fallback, which returned the whole raw XML document
-    * as the field's value.
-    */
-  private def extractFieldText(
-      document : NodeSeq,
-      fieldName: String
-  ): Option[String] = (document \\ fieldName).headOption.map(_.text.trim)
+  private def parseXml(raw: String): Either[String, Seq[Node]] =
+    def wrapped = Try(XML.loadString(s"<${XMLAdapter.RootTag}>$raw</${XMLAdapter.RootTag}>")).map(_.child.toSeq)
+    def plain   = Try(XML.loadString(raw)).map(Seq(_))
+    wrapped.orElse(plain).toEither.left.map(DspyError.messageOf)
 
   /** The text of a `str` output value in a tag: `&` and `<` escaped, as upstream `format_field_with_value`. */
   private def escapeXml(value: String): String =
@@ -147,10 +162,28 @@ object XMLAdapter:
   /** The root element that holds a reply with more than one top-level tag. */
   private val RootTag: String = "dspy_root"
 
-  /** The field names that match the root element of the wrapped form in the search of a field (`\\` of `NodeSeq`): the
-    * name of the root, and `_` (each element).
+  /** The text of each output field of `names` in the nodes `nodes`, stripped with Python `str.strip` (upstream
+    * `.strip()`). A field is an element of a field name that is not inside another field element: the parser does not
+    * read the content of a field element for more fields. An element of another name, for example an `<outputs>`
+    * wrapper, holds no value, and the parser reads its content. The first element of a field wins. A present but empty
+    * tag is a present field with an empty value, not a missing field.
+    *
+    * Upstream reads the direct children of the root only (`_group_children`). This rule is the rule of
+    * [[XmlStreamingState]], which also reads the fields inside a wrapper, so the parser and the stream agree.
     */
-  private val RootMatches: Set[String] = Set(RootTag, "_")
+  private def fieldTexts(
+      nodes: Seq[Node],
+      names: Set[String],
+      found: Map[String, String] = Map.empty
+  ): Map[String, String] =
+    nodes.foldLeft(found) { (texts, node) =>
+      node match
+        case element: Elem if names.contains(element.label) =>
+          if texts.contains(element.label) then texts
+          else texts.updated(element.label, PythonText.strip(element.text))
+        case element: Elem => fieldTexts(element.child.toSeq, names, texts)
+        case _             => texts
+    }
 
   /** The start of a fenced XML block, and the end of a fenced block. */
   private val XmlFence: String = "```xml"
