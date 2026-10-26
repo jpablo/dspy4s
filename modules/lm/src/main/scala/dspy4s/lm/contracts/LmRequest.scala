@@ -48,12 +48,17 @@ final case class Message(
   * @param rolloutId
   *   a control value of the framework, not a provider parameter: it selects a new cache entry for a repeated sample.
   *   The cache key has it, and the provider never sends it.
+  * @param decision
+  *   experimental. The payload of a decision request for a System One model ([[DecisionRequests.request]]), else
+  *   `None`. It is a value of the framework, not a provider parameter. The cache key and the history entry have it, and
+  *   only a System One model reads it.
   */
 final case class LmRequest(
     model    : String,
-    messages : Vector[Message]     = Vector.empty,
-    options  : DynamicValue.Record = DynamicValue.Record.empty,
-    rolloutId: Option[Int]         = None
+    messages : Vector[Message]         = Vector.empty,
+    options  : DynamicValue.Record     = DynamicValue.Record.empty,
+    rolloutId: Option[Int]             = None,
+    decision : Option[DecisionPayload] = None
 ):
 
   /** The option bag that the provider sends: `defaultOptions` overlaid by [[options]], with no option whose value is

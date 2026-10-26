@@ -1,8 +1,16 @@
 package dspy4s.programs
 
 import dspy4s.adapters.ChatAdapter
-import dspy4s.adapters.internal.ProgramPromptText
-import dspy4s.core.contracts.{:=, DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout, TypeRef}
+import dspy4s.core.contracts.{
+  :=,
+  DspyError,
+  DynamicValues,
+  FieldSpec,
+  RuntimeContext,
+  SignatureLayout,
+  TypeRef,
+  ValidationError
+}
 import dspy4s.core.data.Example
 import dspy4s.core.decisions.{DecisionPlan, DecisionSettings}
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -37,7 +45,7 @@ class PredictSystemOneSuite extends FunSuite:
     override def supportsDecisionRequests: Boolean                                             = true
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       requests = requests :+ request
-      DecisionRequests.parts(request).map { (_, questions) =>
+      request.decision.map(_.questions).toRight(ValidationError("not a decision request")).map { questions =>
         val answers = DynamicValues.recordKeys(questions).map { name =>
           val kind = DynamicValues.recordGet(questions, name).collect { case q: DynamicValue.Record => q }
             .flatMap(DynamicValues.recordGet(_, "type")).map(DynamicValues.renderText).getOrElse("")
@@ -103,24 +111,24 @@ class PredictSystemOneSuite extends FunSuite:
     run(lm)(program(DynamicValues.record("text" := text))).fold(error => fail(error.message), _.raw.values)
 
   test("the request has the state and the questions, and no setting goes to the model") {
-    val lm                 = FakeSystemOne()
-    val _                  = call(DynamicPredict(layout), lm)
-    val (state, questions) = DecisionRequests.parts(lm.requests.headOption.getOrElse(fail("no request")))
-      .fold(error => fail(error.message), identity)
+    val lm      = FakeSystemOne()
+    val _       = call(DynamicPredict(layout), lm)
+    val request = lm.requests.headOption.getOrElse(fail("no request"))
+    val payload = request.decision.getOrElse(fail("no decision payload"))
     assertEquals(
-      state,
+      payload.state,
       json("""{"instructions": "Assess the document.", "input_fields": "1. `text` (str):", "inputs": {"text": "x"}}""")
     )
     assertEquals(
-      questions,
+      payload.questions,
       json(
         """{"flag": {"instructions": "Is it relevant?", "type": "noul"},
           | "rating": {"instructions": "Rate usefulness.", "type": "score", "criteria": ["bad", "fair", "great"]},
           | "label": {"instructions": "Classify the document.", "type": "choice", "criteria": {"2": null, "other": null}}}""".stripMargin
       )
     )
-    val text = ProgramPromptText.json(lm.requests.head.options)
-    assert(!text.contains("threshold") && !text.contains("cuts") && !text.contains("weights"), text)
+    assertEquals(request.options, DynamicValue.Record.empty, "no setting goes to the model")
+    assertEquals(request.messages, Vector.empty)
   }
 
   test("the settings decode the evidence locally, and a cached answer serves new settings") {
@@ -155,14 +163,14 @@ class PredictSystemOneSuite extends FunSuite:
       inputKeys = Set("text")
     )
     val _           = call(DynamicPredict(layout, demos = Vector(demo)), lm)
-    val (state, _)  = DecisionRequests.parts(lm.requests.head).fold(error => fail(error.message), identity)
+    val state       = lm.requests.head.decision.map(_.state).getOrElse(fail("no decision payload"))
     val stateRecord = state match
       case record: DynamicValue.Record => record
       case other                       => fail(s"not a record: $other")
     assertEquals(get(stateRecord, "demos"), json("""[{"text": "d", "flag": false, "rating": 0.0, "label": "other"}]"""))
-    val _          = call(DynamicPredict(layout), lm)
-    val (plain, _) = DecisionRequests.parts(lm.requests.last).fold(error => fail(error.message), identity)
-    val plainKeys  = plain match
+    val _         = call(DynamicPredict(layout), lm)
+    val plain     = lm.requests.last.decision.map(_.state).getOrElse(fail("no decision payload"))
+    val plainKeys = plain match
       case record: DynamicValue.Record => DynamicValues.recordKeys(record)
       case other                       => fail(s"not a record: $other")
     assertEquals(plainKeys, Vector("instructions", "input_fields", "inputs"))

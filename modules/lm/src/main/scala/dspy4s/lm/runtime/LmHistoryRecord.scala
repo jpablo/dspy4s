@@ -6,6 +6,7 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.LmUsage
 import dspy4s.core.contracts.ToolCall
 import dspy4s.lm.contracts.ContentPart
+import dspy4s.lm.contracts.DecisionPayload
 import dspy4s.lm.contracts.LmCost
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
@@ -31,7 +32,11 @@ import java.util.UUID
   *     message has them), and `parts` (a list of `{"kind", "payload"}`, when the message has parts);
   *   - `kwargs`: the options of the request, with no top-level key that starts with `api_`, for example `api_key`
   *     (upstream `finalize`, and `BaseLM._record_response` in `dspy/clients/base_lm.py`). A nested key stays;
-  *   - `outputs`: one object for each output, with `text` and `tool_calls`;
+  *   - `decision`: for a decision request, `{"state", "questions"}` of its payload ([[LmRequest.decision]]). Upstream
+  *     `TypeSafe._finish` in `dspy/clients/typesafe.py` keeps them under `request` and `prompt`. A request with no
+  *     payload has no such key;
+  *   - `outputs`: one object for each output, with `text` and `tool_calls`. The text of a decision reply is the JSON
+  *     text of its answers (upstream `outputs`);
   *   - `usage`: `prompt_tokens`, `completion_tokens`, `total_tokens`, then each extra under its wire name, or `null`;
   *   - `cost`: the estimated cost in US dollars, or `null` when the estimate is unknown (decision L10);
   *   - `cost_details`: `{"kind": "estimate", "currency": "USD", "model", "source": "declared"}` for an estimate, else
@@ -40,8 +45,8 @@ import java.util.UUID
   *   - `uuid`: a new random UUID.
   *
   * A tool call is `{"id", "name", "args"}` ([[dspy4s.core.contracts.ToolCall.toRecord]]), with no `id` key when the
-  * call has no id. A failure has `model`, `model_type`, `cache_hit` (`false`), `messages`, `kwargs`, `error_code`,
-  * `error_message`, and `uuid`.
+  * call has no id. A failure has `model`, `model_type`, `cache_hit` (`false`), `messages`, `kwargs`, `decision` (for a
+  * decision request), `error_code`, `error_message`, and `uuid`.
   *
   * The extras of the usage are in the alphabetical order of their wire names.
   */
@@ -87,15 +92,20 @@ object LmHistoryRecord:
       )
     )
 
-  /** The keys that a success and a failure share: `model`, `model_type`, `cache_hit`, `messages`, and `kwargs`. */
+  /** The keys that a success and a failure share: `model`, `model_type`, `cache_hit`, `messages`, `kwargs`, and
+    * `decision` for a decision request.
+    */
   private def head(request: LmRequest, mode: LmMode, cacheHit: Boolean): Vector[(String, DynamicValue)] =
-    Vector(
+    Vector[(String, DynamicValue)](
       "model"      := request.model,
       "model_type" := mode.toString.toLowerCase(Locale.ROOT),
       "cache_hit"  := cacheHit,
       "messages"   -> DynamicValues.sequence(request.messages.map(message)),
       "kwargs"     -> DynamicValues.recordFilterKeys(request.options, key => !key.startsWith("api_"))
-    )
+    ) ++ request.decision.map(payload => "decision" -> decision(payload))
+
+  private def decision(payload: DecisionPayload): DynamicValue =
+    DynamicValues.record("state" -> payload.state, "questions" -> payload.questions)
 
   private def message(value: Message): DynamicValue =
     DynamicValues.recordFromEntries(

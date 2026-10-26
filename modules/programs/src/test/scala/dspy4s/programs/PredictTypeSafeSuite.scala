@@ -1,7 +1,16 @@
 package dspy4s.programs
 
 import dspy4s.adapters.ChatAdapter
-import dspy4s.core.contracts.{:=, DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout, TypeRef}
+import dspy4s.core.contracts.{
+  :=,
+  DspyError,
+  DynamicValues,
+  FieldSpec,
+  RuntimeContext,
+  SignatureLayout,
+  TypeRef,
+  ValidationError
+}
 import dspy4s.core.decisions.{Choice, DecisionSettings, Noul, Score}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{DecisionRequests, LanguageModel, LmMode, LmRequest, LmResponse}
@@ -43,7 +52,8 @@ class PredictTypeSafeSuite extends FunSuite:
     override def supportsDecisionRequests: Boolean                                             = true
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       requests = requests :+ request
-      DecisionRequests.parts(request).map(_ => DecisionRequests.response(answers, None, Some(id)))
+      request.decision.toRight(ValidationError("not a decision request"))
+        .map(_ => DecisionRequests.response(answers, None, Some(id)))
 
   /** A transport that keeps each request and gives `reply`. */
   private final class Stub(reply: HttpResponse) extends HttpTransport:
@@ -109,16 +119,15 @@ class PredictTypeSafeSuite extends FunSuite:
     assertEquals(output.severity.probabilities, Some(Map(0 -> 0.1, 1 -> 0.3, 2 -> 0.6)))
     assertEquals(output.category.value, PdTeam.technical, "the weights apply, not the pick of the model")
     assertEquals(output.category.probabilities, Some(Map("billing" -> 0.6, "technical" -> 0.4)))
-    val (state, questions) = DecisionRequests.parts(lm.requests.headOption.getOrElse(fail("no request")))
-      .fold(error => fail(error.message), identity)
+    val payload = lm.requests.headOption.flatMap(_.decision).getOrElse(fail("no decision request"))
     assertEquals(
-      state,
+      payload.state,
       json(
         """{"instructions": "Triage the ticket.", "input_fields": "1. `ticket` (str):", "inputs": {"ticket": "Checkout fails."}}"""
       )
     )
     assertEquals(
-      questions,
+      payload.questions,
       json(
         """{"urgent": {"instructions": "Is immediate action needed?", "type": "noul"},
           | "severity": {"instructions": "How severe is it?", "type": "score", "criteria": ["Minor", "Disruptive", "Critical"]},

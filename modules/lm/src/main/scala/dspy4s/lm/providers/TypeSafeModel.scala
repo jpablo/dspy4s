@@ -15,7 +15,7 @@ import dspy4s.core.contracts.{
   LmUsage,
   RuntimeContext
 }
-import dspy4s.lm.contracts.{DecisionRequests, LanguageModel, LmMode, LmRequest, LmResponse}
+import dspy4s.lm.contracts.{DecisionPayload, DecisionRequests, LanguageModel, LmMode, LmRequest, LmResponse}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import java.time.Instant
@@ -35,8 +35,9 @@ import java.util.Locale
   *     finite `noul` in [0, 1]; a `score` or `choice` answer has `probabilities` with one finite number in [0, 1] for
   *     each declared key and no other key; a `choice` answer has a `choice` that is a declared key. A reply that breaks
   *     a rule is an [[dspy4s.core.contracts.LmProviderResponseError]] with the path of the fault.
-  *   - The response has one output with the JSON text of the answers as the reply gave them, the usage (the input
-  *     tokens as prompt tokens, the output tokens as completion tokens), and the model of the reply.
+  *   - The response has one output with the answers as the reply gave them ([[dspy4s.lm.contracts.LmOutput.answers]])
+  *     and their JSON text, the usage (the input tokens as prompt tokens, the output tokens as completion tokens), and
+  *     the model of the reply.
   *   - The header `x-typesafe-request-id` gives the request id of an error.
   *   - An error status maps as upstream `normalize_error`: 401 (or the code `authentication_error`) is an
   *     [[dspy4s.core.contracts.LmAuthError]]; 429 is an [[dspy4s.core.contracts.LmRateLimitError]]; 400 with "unknown
@@ -44,10 +45,10 @@ import java.util.Locale
   *     [[dspy4s.core.contracts.LmInvalidRequestError]]; 500 or more is an [[dspy4s.core.contracts.LmServerError]]. The
   *     message is `detail.message` of the body, or `<loc>: <msg>` of the first entry of a `detail` list (with the
   *     `body` part of `loc` left out), else the body text.
-  *   - A request that is not a decision request (it has messages, or it lacks the state or the questions) is an
-  *     [[dspy4s.core.contracts.LmInvalidRequestError]] before the wire: Jev generates no text. A request with other
-  *     options (for example `temperature`) is an [[dspy4s.core.contracts.LmInvalidRequestError]] too (upstream
-  *     "Unsupported TypeSafe generation settings").
+  *   - A request that is not a decision request (it has no payload, [[dspy4s.lm.contracts.LmRequest.decision]], or it
+  *     has messages) is an [[dspy4s.core.contracts.LmInvalidRequestError]] before the wire: Jev generates no text. A
+  *     request with an option (for example `temperature`) is an [[dspy4s.core.contracts.LmInvalidRequestError]] too
+  *     (upstream "Unsupported TypeSafe generation settings"). The message names each option.
   *
   * The other rules of the vendored provider:
   *   - The keys of a `score` question are the level indexes `"0"` to `"N-1"` of its `criteria` array; the keys of a
@@ -176,16 +177,16 @@ object TypeSafeModel:
     * send.
     */
   private def wireRequest(request: LmRequest): Either[DspyError, Wire] =
-    def invalid(message: String): DspyError = LmInvalidRequestError(message, details(request))
+    def invalid(message: String): DspyError   = LmInvalidRequestError(message, details(request))
+    def notDecision(cause: String): DspyError =
+      invalid(s"TypeSafe Jev answers decision requests only, and generates no text: $cause")
+    val settings = DynamicValues.recordKeys(request.options)
     for
-      parts <- DecisionRequests.parts(request).left.map(error =>
-                 invalid(s"TypeSafe Jev answers decision requests only, and generates no text: ${error.message}")
-               )
-      extra = DynamicValues.recordKeys(request.options)
-                .filterNot(key => key == DecisionRequests.StateKey || key == DecisionRequests.QuestionsKey)
-      _         <- Either.cond(extra.isEmpty, (), invalid(DecisionRequests.unsupportedSettings(extra)))
-      questions <- questionsOf(parts._2).left.map(invalid)
-      body      <- encode(request.model, parts._1, parts._2).left.map(invalid)
+      payload   <- request.decision.toRight(notDecision("the request has no decision payload"))
+      _         <- Either.cond(request.messages.isEmpty, (), notDecision("a decision request has no messages"))
+      _         <- Either.cond(settings.isEmpty, (), invalid(DecisionRequests.unsupportedSettings(settings)))
+      questions <- questionsOf(payload.questions).left.map(invalid)
+      body      <- encode(request.model, payload).left.map(invalid)
     yield Wire(body, questions)
 
   /** The questions of a request, or the text of the fault. */
@@ -211,12 +212,8 @@ object TypeSafeModel:
   /** The JSON text of the body. Each null stays: a choice criterion with no description is a JSON null. A body with no
     * JSON text (for example one with a NaN, or one nested too deep) gives the cause of `DynamicValues.tryEncodeJson`.
     */
-  private def encode(model: String, state: DynamicValue, questions: DynamicValue.Record): Either[String, String] =
-    val body = DynamicValues.record(
-      "model"                       := model,
-      DecisionRequests.StateKey     -> state,
-      DecisionRequests.QuestionsKey -> questions
-    )
+  private def encode(model: String, payload: DecisionPayload): Either[String, String] =
+    val body = DynamicValues.record("model" := model, "state" -> payload.state, "questions" -> payload.questions)
     DynamicValues.tryEncodeJson(body).left.map(cause => s"The value has no JSON text: $cause")
 
   /** The response of a reply with a status from 200 to 299, with the reply rules of upstream `parse_response`. */

@@ -226,9 +226,9 @@ final case class ManagedLanguageModel(
     *   - Output: the stored response has the output of [[StreamAccumulator]] in the mode of the delegate.
     *
     * A delegate that cannot stream gives one terminal chunk assembled from [[call]], or a reified
-    * `finishReason = "error"` chunk on failure. The chunk carries the text, the reasoning, the citations, and the tool
-    * calls of the first output. Each tool call is one complete delta, so `ToolCallAssembler.assemble` gives the call
-    * back with its id.
+    * `finishReason = "error"` chunk on failure. The chunk carries the text, the reasoning, the citations, the tool
+    * calls, and the answers of the first output. Each tool call is one complete delta, so `ToolCallAssembler.assemble`
+    * gives the call back with its id.
     */
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
     delegate match

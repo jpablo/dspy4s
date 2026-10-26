@@ -115,9 +115,9 @@ private[dspy4s] final case class PredictEngine(
     *
     * The request is [[DecisionRequests.request]] with the state of [[DecisionAdapter.systemOneState]] and the questions
     * of [[DecisionAdapter.systemOneQuestions]], and the `rolloutId` of the call (it changes only the cache key). The
-    * call dispatches the LM callback events. The answers of the reply give the evidence
-    * ([[DecisionAdapter.systemOneEvidence]]), which goes to the evidence log before the decode, as upstream. The decode
-    * gives the output values. The usage of the reply goes to the usage scope of the call
+    * call dispatches the LM callback events. The typed answers of the reply ([[DecisionRequests.answers]]) give the
+    * evidence ([[DecisionAdapter.systemOneEvidence]]), which goes to the evidence log before the decode, as upstream.
+    * The decode gives the output values. The usage of the reply goes to the usage scope of the call
     * ([[LanguageModel.callAndRecordUsage]]). Each nested decision output fails the plan first, so a System One call
     * gives no warning for it (upstream `resolve_adapter` makes the `DecisionState` before the warnings).
     */

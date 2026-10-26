@@ -11,7 +11,8 @@ import dspy4s.core.contracts.{
   SignatureLayout,
   ThreadCount,
   TraceEntry,
-  TypeRef
+  TypeRef,
+  ValidationError
 }
 import dspy4s.core.data.{Example, RawPrediction}
 import dspy4s.core.decisions.{DecisionEvidence, DecisionEvidenceLog, DecisionSettings}
@@ -166,8 +167,8 @@ class ReAnchorUpstreamSuite extends FunSuite:
     override def supportsDecisionRequests: Boolean                                             = true
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       synchronized { requests = requests :+ request }
-      DecisionRequests.parts(request).map { (state, questions) =>
-        val answers = DynamicValues.recordKeys(questions).map(name => name -> answer(state, name))
+      request.decision.toRight(ValidationError("not a decision request")).map { payload =>
+        val answers = DynamicValues.recordKeys(payload.questions).map(name => name -> answer(payload.state, name))
         DecisionRequests.response(DynamicValues.recordFromEntries(answers), None, Some("jev-test"))
       }
 

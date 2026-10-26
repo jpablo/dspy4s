@@ -15,13 +15,17 @@ import zio.blocks.schema.DynamicValue
   * @param metadata
   *   the other keys of the reply for this output: for a chat reply, the keys of its choice other than `message` and
   *   `text` (for example `finish_reason` and `index`).
+  * @param answers
+  *   experimental. The typed answers of the reply to a decision request, by question name, else `None`
+  *   ([[DecisionRequests.response]]). The text of such an output is the JSON text of the answers.
   */
 final case class LmOutput(
     text     : String,
     toolCalls: Vector[ToolCall]            = Vector.empty,
     reasoning: String                      = "",
     citations: Vector[DynamicValue.Record] = Vector.empty,
-    metadata : DynamicValue.Record         = DynamicValue.Record.empty
+    metadata : DynamicValue.Record         = DynamicValue.Record.empty,
+    answers  : Option[DynamicValue.Record] = None
 )
 
 final case class LmResponse(

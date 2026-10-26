@@ -9,7 +9,8 @@ import dspy4s.core.contracts.{
   FieldSpec,
   RuntimeContext,
   SignatureLayout,
-  TypeRef
+  TypeRef,
+  ValidationError
 }
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{DecisionRequests, LanguageModel, LmMode, LmRequest, LmResponse}
@@ -36,7 +37,7 @@ class StreamingSystemOneSuite extends FunSuite:
     override def supportsDecisionRequests: Boolean                                             = true
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       requests = requests :+ request
-      DecisionRequests.parts(request).map { (_, questions) =>
+      request.decision.map(_.questions).toRight(ValidationError("not a decision request")).map { questions =>
         val answers = DynamicValues.recordKeys(questions).map(name =>
           name -> DynamicValues.record("type" := "noul", "noul" := 0.9)
         )

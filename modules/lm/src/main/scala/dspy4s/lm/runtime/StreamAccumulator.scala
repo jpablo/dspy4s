@@ -17,6 +17,7 @@ import scala.collection.mutable
   *     ([[ToolCallAssembler.assemble]]).
   *   - The reasoning is the joined reasoning of the chunks, and the citations are the citations of the chunks in order,
   *     as the output of a plain call in the Responses mode.
+  *   - The answers of a decision reply are the answers of the last chunk that has them ([[LmChunk.answers]]).
   *
   * [[ManagedLanguageModel]] and the stream wrapper of `streamify` use this class, so the two give the same output.
   *
@@ -28,13 +29,15 @@ final class StreamAccumulator(mode: LmMode):
   private val reasoning  = new StringBuilder
   private val citations  = mutable.ArrayBuffer.empty[DynamicValue.Record]
   private val toolDeltas = mutable.ArrayBuffer.empty[LmToolCallDelta]
+  private var answers    = Option.empty[DynamicValue.Record]
 
-  /** Add the text, the reasoning, the citations, and the tool-call deltas of `chunk`. */
+  /** Add the text, the reasoning, the citations, the tool-call deltas, and the answers of `chunk`. */
   def push(chunk: LmChunk): Unit =
     text.append(chunk.text)
     reasoning.append(chunk.reasoning)
     citations ++= chunk.citations
     toolDeltas ++= chunk.toolCalls
+    chunk.answers.foreach(found => answers = Some(found))
 
   /** Remove the parts of all chunks, for a new attempt. */
   def clear(): Unit =
@@ -42,6 +45,7 @@ final class StreamAccumulator(mode: LmMode):
     reasoning.clear()
     citations.clear()
     toolDeltas.clear()
+    answers = None
 
   /** The output of the chunks so far. */
   def output: LmOutput =
@@ -49,5 +53,6 @@ final class StreamAccumulator(mode: LmMode):
       text = text.toString,
       toolCalls = ToolCallAssembler.assemble(toolDeltas, mode),
       reasoning = reasoning.toString,
-      citations = citations.toVector
+      citations = citations.toVector,
+      answers = answers
     )

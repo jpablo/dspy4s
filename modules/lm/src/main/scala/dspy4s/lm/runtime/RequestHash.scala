@@ -1,16 +1,16 @@
 package dspy4s.lm.runtime
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, ValidationError, recordSchema}
-import dspy4s.lm.contracts.{CacheKey, LmMode, LmRequest, Message}
+import dspy4s.lm.contracts.{CacheKey, DecisionPayload, LmMode, LmRequest, Message}
 import zio.blocks.schema.{DynamicValue, Schema}
 
 import scala.util.control.NonFatal
 
 /** The cache key of a request (upstream `Cache.cache_key` in `dspy/clients/cache.py`). The key is the SHA-256 hash of
   * the JSON text of one record: the model, the mode, the messages with all their fields, the options, the rollout id,
-  * and the cache identity of the model. The keys of each record and of each map in it are in sorted order, so two
-  * requests that differ only in the order of their options get one key. The JSON text keeps the type of each value, so
-  * a string `"1"` and a number `1` give different keys.
+  * the decision payload, and the cache identity of the model. The keys of each record and of each map in it are in
+  * sorted order, so two requests that differ only in the order of their options get one key. The JSON text keeps the
+  * type of each value, so a string `"1"` and a number `1` give different keys.
   */
 object RequestHash:
 
@@ -21,6 +21,7 @@ object RequestHash:
       messages     : Vector[Message],
       options      : DynamicValue.Record,
       rolloutId    : Option[Int],
+      decision     : Option[DecisionPayload],
       cacheIdentity: DynamicValue.Record
   ) derives Schema
 
@@ -36,7 +37,15 @@ object RequestHash:
       mode         : LmMode,
       cacheIdentity: DynamicValue.Record = DynamicValue.Record.empty
   ): Either[DspyError, CacheKey] =
-    val data = KeyData(request.model, mode, request.messages, request.options, request.rolloutId, cacheIdentity)
+    val data = KeyData(
+      request.model,
+      mode,
+      request.messages,
+      request.options,
+      request.rolloutId,
+      request.decision,
+      cacheIdentity
+    )
     try
       DynamicValues.tryEncodeJson(Schema[KeyData].toDynamicValue(data).sortFields.sortMapKeys) match
         case Right(json) => Right(CacheKey.of(json))

@@ -26,7 +26,8 @@ import scala.util.control.NonFatal
   *     "tool_calls": [{"name": "...", "args": {...}, "id": "..."}],
   *     "reasoning": "...",
   *     "citations": [{...}],
-  *     "metadata": {...}
+  *     "metadata": {...},
+  *     "answers": {...}
   *   }],
   *   "usage": {"total_tokens": 9, "prompt_tokens": 4, "completion_tokens": 5, "extras": {"cached_tokens": 3}},
   *   "model_name": "..."
@@ -34,8 +35,9 @@ import scala.util.control.NonFatal
   * }}}
   * The record has no key for a value that the response does not have: no `id` for a tool call with no id, no
   * `tool_calls` for an output with no tool call, no `reasoning` for an output with an empty reasoning, no `citations`
-  * for an output with no citation, and no `usage` or `model_name` for a response with none. An absent key reads as that
-  * value. The `args`, the `citations`, and the `metadata` keep their JSON types.
+  * for an output with no citation, no `answers` for an output with no typed answers ([[LmOutput.answers]]), and no
+  * `usage` or `model_name` for a response with none. An absent key reads as that value. The `args`, the `citations`,
+  * the `metadata`, and the `answers` keep their JSON types.
   *
   * A file that is not a record of [[DiskLmCache.RecordFormat]] is a miss, and `get` removes it: a file that is not
   * JSON, a record with another `_dspy4s_format`, or a record with a value of the wrong JSON type. A file that `get`
@@ -269,7 +271,8 @@ object DiskLmCache:
       toolCalls: Vector[ToolCall],
       reasoning: String                      = "",
       citations: Vector[DynamicValue.Record] = Vector.empty,
-      metadata : DynamicValue.Record
+      metadata : DynamicValue.Record,
+      answers  : Option[DynamicValue.Record] = None
   ) derives Schema
 
   /** The usage of a record. The keys of `extras` are the wire names of the token categories. */
@@ -299,7 +302,7 @@ object DiskLmCache:
     val record = DiskRecord(
       format = RecordFormat,
       outputs = response.outputs.map { output =>
-        DiskOutput(output.text, output.toolCalls, output.reasoning, output.citations, output.metadata)
+        DiskOutput(output.text, output.toolCalls, output.reasoning, output.citations, output.metadata, output.answers)
       },
       usage = usage,
       modelName = response.modelName
@@ -320,7 +323,7 @@ object DiskLmCache:
     record.filter(_.format == RecordFormat).map { found =>
       LmResponse(
         outputs = found.outputs.map { output =>
-          LmOutput(output.text, output.toolCalls, output.reasoning, output.citations, output.metadata)
+          LmOutput(output.text, output.toolCalls, output.reasoning, output.citations, output.metadata, output.answers)
         },
         usage = found.usage.map { value =>
           LmUsage(

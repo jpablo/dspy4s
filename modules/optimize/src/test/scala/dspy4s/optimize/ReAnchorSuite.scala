@@ -2,7 +2,16 @@ package dspy4s.optimize
 
 import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.{
-  :=, DspyError, DynamicValues, FieldSpec, RuntimeContext, RuntimeError, SignatureLayout, TraceEntry, TypeRef
+  :=,
+  DspyError,
+  DynamicValues,
+  FieldSpec,
+  RuntimeContext,
+  RuntimeError,
+  SignatureLayout,
+  TraceEntry,
+  TypeRef,
+  ValidationError
 }
 import dspy4s.core.data.{Example, RawPrediction}
 import dspy4s.core.decisions.{DecisionEvidence, DecisionEvidenceLog, DecisionSettings}
@@ -54,8 +63,8 @@ class ReAnchorSuite extends FunSuite:
     override def supportsDecisionRequests: Boolean                                             = true
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       synchronized { requests = requests :+ request }
-      DecisionRequests.parts(request).map { (state, questions) =>
-        val answers = DynamicValues.recordKeys(questions).map(name => name -> answer(state, name))
+      request.decision.toRight(ValidationError("not a decision request")).map { payload =>
+        val answers = DynamicValues.recordKeys(payload.questions).map(name => name -> answer(payload.state, name))
         DecisionRequests.response(DynamicValues.recordFromEntries(answers), None, Some("jev-test"))
       }
 
@@ -196,7 +205,7 @@ class ReAnchorSuite extends FunSuite:
   test("each distinct request goes once to the model, however many settings are tried") {
     val model = FakeSystemOne(leaningPair)
     val _     = calibrate(DynamicPredict(matchLayout), pairs(Seq("same", "different")), equalOn("match"), model)
-    assertEquals(model.requests.map(_.options).distinct.size, 2)
+    assertEquals(model.requests.map(_.decision).distinct.size, 2)
     assertEquals(model.requests.size, 2, "the cache serves each repeated request")
   }
 
