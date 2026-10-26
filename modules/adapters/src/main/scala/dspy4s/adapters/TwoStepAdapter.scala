@@ -40,10 +40,9 @@ import zio.blocks.schema.DynamicValue
   * This adapter does not replay a conversation history. As upstream, it shows a `History` input as one field value of
   * the user message.
   */
-final case class TwoStepAdapter(
-    extractionModel: LanguageModel,
-    name           : String = "two_step"
-) extends Adapter:
+final case class TwoStepAdapter(extractionModel: LanguageModel) extends Adapter:
+
+  override def name: String = "two_step"
 
   /** The system message, the demos, and the current request (upstream `TwoStepAdapter.format`). A turn shows each field
     * that its values have as `name: value`. An incomplete demo shows the output fields that it has only. The request
@@ -59,7 +58,7 @@ final case class TwoStepAdapter(
     Right(FormattedPrompt(
       messages = (Message(role = MessageRole.System, text = Some(taskDescription(layout))) +: demos) :+
         Message(role = MessageRole.User, text = Some(fieldsText(layout.inputFields, inputs))),
-      removedOptions = NativeTools.Off.toolOptions(invocation).removed
+      removedOptions = NativeTools.OptionKeys
     ))
 
   /** The input fields as `name: value` blocks (upstream `TwoStepAdapter.format_user_message_content`). */
@@ -79,7 +78,6 @@ final case class TwoStepAdapter(
   override def parse(invocation: AdapterInvocation, output: LmOutput)(using
       RuntimeContext
   ): Either[DspyError, ParsedOutput] =
-    val chat = ChatAdapter()
     for
       extractorLayout <- buildExtractorLayout(invocation.layout)
       textField        = extractorLayout.inputFields.head.name
@@ -91,11 +89,9 @@ final case class TwoStepAdapter(
                      request = LmRequest(model = extractionModel.id),
                      outputJsonSchema = invocation.outputJsonSchema
                    )
-      parsed <- attempt(chat, extraction).flatMap {
-                  case Left(error: ParseError) => chat.fallback match
-                      case Some(next) => attempt(next, extraction)
-                      case None       => Right(Left(error))
-                  case other => Right(other)
+      parsed <- attempt(ChatAdapter(), extraction).flatMap {
+                  case Left(_: ParseError) => attempt(JSONAdapter(), extraction)
+                  case other               => Right(other)
                 }
       result <- parsed.left.map(originalCompletionError(_, output.text))
     yield result

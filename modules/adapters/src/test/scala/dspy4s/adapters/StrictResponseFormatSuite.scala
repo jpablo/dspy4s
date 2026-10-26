@@ -352,11 +352,17 @@ class StrictResponseFormatSuite extends FunSuite:
 
   // ── A schema from the field types, function by function ─────────────────────────────────────────────────────
 
-  test("fromFields gives no schema for a field type that has none") {
-    assertEquals(StrictJsonSchema.fromFields(Vector(FieldSpec("a"), FieldSpec("b", typeRef = TypeRef.json))), None)
-    assertEquals(StrictJsonSchema.fromFields(Vector(FieldSpec("a", typeRef = TypeRef.toolCalls))), None)
-    assertEquals(StrictJsonSchema.fromFields(Vector(FieldSpec("a", typeRef = TypeRef("Widget")))), None)
-    assertEquals(StrictJsonSchema.fromFields(Vector(FieldSpec("a", typeRef = TypeRef("list[dict]")))), None)
+  test("fromFields gives an open root for a field type that has no schema, with the open map of a dict field") {
+    def schemaText(fields: FieldSpec*): String = PythonText.json(StrictJsonSchema.fromFields(fields.toVector))
+    val openRoot                               = """{"type": "object", "properties": {}, "additionalProperties": true}"""
+    assertEquals(
+      schemaText(FieldSpec("a"), FieldSpec("b", typeRef = TypeRef.json)),
+      """{"type": "object", "properties": {"b": {"type": "object", "additionalProperties": true}}, """ +
+        """"additionalProperties": true}"""
+    )
+    assertEquals(schemaText(FieldSpec("a", typeRef = TypeRef.toolCalls)), openRoot)
+    assertEquals(schemaText(FieldSpec("a", typeRef = TypeRef("Widget"))), openRoot)
+    assertEquals(schemaText(FieldSpec("a", typeRef = TypeRef("list[dict]"))), openRoot)
   }
 
   test("fromFields keeps an exact integer default, a decimal default is a number, and an enum case is its name") {
@@ -377,11 +383,9 @@ class StrictResponseFormatSuite extends FunSuite:
       )
     )
     assertEquals(
-      schema.map(PythonText.json(_)),
-      Some(
-        """{"type": "object", "properties": {"big": {"type": "integer", "default": 9007199254740993}, """ +
-          """"ratio": {"type": "number", "default": 2.5}, """ +
-          """"tone": {"type": "string", "enum": ["calm", "angry"], "default": "calm"}}}"""
-      )
+      PythonText.json(schema),
+      """{"type": "object", "properties": {"big": {"type": "integer", "default": 9007199254740993}, """ +
+        """"ratio": {"type": "number", "default": 2.5}, """ +
+        """"tone": {"type": "string", "enum": ["calm", "angry"], "default": "calm"}}}"""
     )
   }

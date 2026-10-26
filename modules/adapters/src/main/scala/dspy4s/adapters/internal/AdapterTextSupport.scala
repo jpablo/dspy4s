@@ -49,7 +49,7 @@ private[adapters] object AdapterTextSupport:
   ): Either[DspyError, Vector[(String, DynamicValue)]] =
     Traverse.either(layout.outputFields) { field =>
       for
-        found <- decode(field).left.map(fieldError(field, raw, _))
+        found <- decode(field).left.map(fieldError(field.name, raw, _))
         value <- found.fold(missingOutput(field, raw))(Right(_))
       yield field.name -> value
     }
@@ -64,9 +64,11 @@ private[adapters] object AdapterTextSupport:
       case None if field.optional => Right(DynamicValue.Null)
       case None                   => Left(ParseError("adapter", s"Missing required output field: ${field.name}", raw = Some(raw)))
 
-  /** The parse error of a value of the output field `field` that does not fit the type of the field. */
-  private def fieldError(field: FieldSpec, raw: String, error: DspyError): DspyError =
-    ParseError("adapter", s"Failed to parse field ${field.name}: ${error.message}", raw = Some(raw))
+  /** The parse error of a value of the output field `name` that does not fit the field, with the error `error` and the
+    * raw response `raw`. The decision adapter gives this error for a value that is not evidence.
+    */
+  def fieldError(name: String, raw: String, error: DspyError): DspyError =
+    ParseError("adapter", s"Failed to parse field $name: ${error.message}", raw = Some(raw))
 
   /** The value of the output field `field` from its raw text (upstream `parse_value` with a string). The Chat, JSON,
     * and XML adapters use this function, so a text value has the same rules in each format:
@@ -171,11 +173,12 @@ private[adapters] object AdapterTextSupport:
     * lenient form, keeps the error of `result`.
     *
     * @param raw
-    *   the text of the value: the text of the response, or the JSON text of a JSON value
+    *   the text of the value: the text of the response, or the JSON text of a JSON value. The function reads it only
+    *   for a `Left` of an optional field.
     */
   def optionalFallback(
       field : FieldSpec,
-      raw   : String,
+      raw   : => String,
       result: Either[DspyError, DynamicValue]
   ): Either[DspyError, DynamicValue] =
     result match
@@ -260,9 +263,9 @@ private[adapters] object AdapterTextSupport:
     * `DynamicValue`s are equal.
     *
     * @param raw
-    *   the text of the value, for the error
+    *   the text of the value, for the error only
     */
-  def listOfValue(typeRef: TypeRef, value: Option[DynamicValue], raw: String): Either[DspyError, DynamicValue] =
+  def listOfValue(typeRef: TypeRef, value: Option[DynamicValue], raw: => String): Either[DspyError, DynamicValue] =
     value
       .collect { case list: DynamicValue.Sequence =>
         if typeRef.collection.exists((kind, _) => kind.isSet) then DynamicValue.Sequence(list.elements.distinct)
@@ -306,7 +309,7 @@ private[adapters] object AdapterTextSupport:
     val trimmed = output.text.trim
     if trimmed.nonEmpty then
       val value =
-        if hasAllowedValues(field) then allowedValue(field, trimmed).left.map(fieldError(field, output.text, _))
+        if hasAllowedValues(field) then allowedValue(field, trimmed).left.map(fieldError(field.name, output.text, _))
         else Right(DynamicValues.string(trimmed))
       value.map(text => ParsedOutput(DynamicValues.record(field.name -> text)))
     else Left(ParseError("adapter", "Cannot fallback from empty model output", raw = Some(output.text)))

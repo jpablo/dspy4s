@@ -4,15 +4,7 @@ import dspy4s.adapters.contracts.{AdapterInvocation, FormattedPrompt, NativeFunc
 import dspy4s.adapters.internal.{ConversationHistory, PromptText, StrictJsonSchema, TurnText}
 import dspy4s.adapters.internal.PromptText.OutputSchema
 import dspy4s.core.contracts.{
-  :=,
-  DspyError,
-  DynamicValues,
-  FieldSpec,
-  PythonText,
-  RuntimeContext,
-  SignatureLayout,
-  TypeRef,
-  updated
+  :=, DspyError, DynamicValues, FieldSpec, PythonText, RuntimeContext, SignatureLayout, updated
 }
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
@@ -26,18 +18,7 @@ private[adapters] object JSONAdapterPrompt:
   def format(invocation: AdapterInvocation, native: NativeTools)(using
       RuntimeContext
   ): Either[DspyError, FormattedPrompt] =
-    val schema   = OutputSchema(invocation.outputJsonSchema)
-    val messages = ConversationHistory.messages(invocation, native, Turns) { shown =>
-      PromptText.systemMessage(invocation.layout, shown, fieldStructure(shown, schema))
-    }
-    val tools = native.toolOptions(invocation)
-    Right(
-      FormattedPrompt(
-        messages = messages,
-        requestOptions = DynamicValues.mergeRecords(responseFormatOptions(invocation, native.isActive), tools.request),
-        removedOptions = tools.removed
-      )
-    )
+    Right(ConversationHistory.prompt(invocation, native, Turns, responseFormatOptions(invocation, native.isActive)))
 
   /** The text of a turn: the marker form of the chat adapter for a user turn, with the JSON reminder in a current
     * request, and one JSON object for an assistant turn (upstream `JSONAdapter.format_assistant_message_content`).
@@ -51,23 +32,20 @@ private[adapters] object JSONAdapterPrompt:
         field -> PromptText.jsonable(field, DynamicValues.recordGet(values, field.name).getOrElse(DynamicValue.Null))
       })
 
-  /** The structure of the system message (upstream `JSONAdapter.format_field_structure`). */
-  private def fieldStructure(layout: SignatureLayout, schema: OutputSchema): String =
-    val inputs = layout.inputFields.map(field =>
-      s"[[ ## ${field.name} ## ]]\n${PromptText.placeholder(field, output = false, schema)}"
-    )
-    val outputs = layout.outputFields.map { field =>
-      field -> DynamicValues.string(PromptText.placeholder(field, output = true, schema))
-    }
-    PythonText.strip(
-      Vector(
-        PromptText.StructureHeader,
-        "Inputs will have the following structure:",
-        PythonText.strip(inputs.mkString("\n\n")),
-        "Outputs will be a JSON object with the following fields.",
-        outputObject(outputs)
-      ).mkString("\n\n")
-    )
+    /** The structure of the system message (upstream `JSONAdapter.format_field_structure`). */
+    override def structure(layout: SignatureLayout, schema: OutputSchema): String =
+      val outputs = layout.outputFields.map { field =>
+        field -> DynamicValues.string(PromptText.placeholder(field, output = true, schema))
+      }
+      PythonText.strip(
+        Vector(
+          PromptText.StructureHeader,
+          "Inputs will have the following structure:",
+          ChatAdapterPrompt.inputStructure(layout, schema),
+          "Outputs will be a JSON object with the following fields.",
+          outputObject(outputs)
+        ).mkString("\n\n")
+      )
 
   /** The output fields as one JSON object, in the form of `json.dumps(..., indent=2)`. */
   private def outputObject(fields: Vector[(FieldSpec, DynamicValue)]): String =
@@ -92,10 +70,11 @@ private[adapters] object JSONAdapterPrompt:
     * map.
     *
     * When the schema build fails and the adapter goes back to JSON mode, the adapter logs the warning of upstream
-    * ([[SchemaBuildWarning]]). A tool calls field and an open map give JSON mode with no warning, as upstream. An open
-    * map is a field of the type `json` (upstream `dict`), or an open map below the root of the typed schema
-    * ([[dspy4s.adapters.internal.StrictJsonSchema.hasFieldOpenMap]]). An open root is a failed build: the decision
-    * adapter writes it when a field has no schema, and upstream then logs the warning.
+    * ([[SchemaBuildWarning]]). A tool calls field and an open map give JSON mode with no warning, as upstream. The open
+    * map of a field is an open map below the root of the schema
+    * ([[dspy4s.adapters.internal.StrictJsonSchema.hasFieldOpenMap]]), for example the schema of a field of the type
+    * `json` (upstream `dict`). An open root is a failed build: `fromFields` writes it when a field has no schema, and
+    * upstream then logs the warning.
     */
   private def responseFormatOptions(invocation: AdapterInvocation, nativeActive: Boolean)(using
       ctx: RuntimeContext
@@ -114,26 +93,19 @@ private[adapters] object JSONAdapterPrompt:
     else
       // In this branch, a tool calls field is an output only when native function calling is active. The schema does
       // not show that field.
-      val fields         = outputFields.filterNot(NativeFunctionCalling.isToolCallsField)
-      val toolCallsNames = outputFields.filter(NativeFunctionCalling.isToolCallsField).map(_.name).toSet
-      val schema         = invocation.outputJsonSchema match
-        case Some(typed) => Some(withoutProperties(typed, toolCallsNames))
-        case None        => StrictJsonSchema.fromFields(fields)
-      val optionalFields = fields.filter(_.optional).map(_.name).toSet
-      val openMap        = invocation.outputJsonSchema match
-        case Some(_) => schema.exists(StrictJsonSchema.hasFieldOpenMap)
-        case None    => fields.exists(_.typeRef == TypeRef.json)
-      if openMap then JsonMode
+      val (toolCalls, fields) = outputFields.partition(NativeFunctionCalling.isToolCallsField)
+      val schema              = invocation.outputJsonSchema.fold(StrictJsonSchema.fromFields(fields))(
+        withoutProperties(_, toolCalls.map(_.name).toSet)
+      )
+      if StrictJsonSchema.hasFieldOpenMap(schema) then JsonMode
       else
-        schema
-          .map(embedConstraints(_, fields))
-          .flatMap(StrictJsonSchema.shape(_, optionalFields).toOption) match
-          case Some(strict) => DynamicValues.record(
+        StrictJsonSchema.shape(embedConstraints(schema, fields), fields.filter(_.optional).map(_.name).toSet) match
+          case Right(strict) => DynamicValues.record(
               "type"        := "json_schema",
               "json_schema" ->
                 DynamicValues.record("name" := StrictJsonSchema.Name, "schema" -> strict, "strict" := true)
             )
-          case None =>
+          case Left(_) =>
             RuntimeEnvironment.warn("JSONAdapter", SchemaBuildWarning)
             JsonMode
 

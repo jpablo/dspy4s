@@ -70,18 +70,28 @@ private[adapters] object StrictJsonSchema:
     *   - A field that `known` has takes its schema from `known`, as it is. The decision adapter gives the evidence
     *     schemas this way.
     *
-    * The result is `None` when a field has a type with no schema in these rules: `json` (an open map, upstream `dict`),
-    * `tool_calls`, `history`, and each opaque type. Upstream sends JSON mode in these cases.
+    * A field of the type `json` (an open map, upstream `dict`) and a field of a type with no schema in these rules
+    * (`tool_calls`, `history`, and each opaque type) give an open root: `"additionalProperties": true` at the root. Its
+    * properties are only the schemas of `known` and the open map schema ([[OpenMapSchema]]) of each `json` field.
+    * Upstream sends JSON mode in these cases, and the JSON adapter does too: [[hasFieldOpenMap]] finds the open map of
+    * a `json` field, and [[shape]] gives a `Left` for an open root.
     */
   def fromFields(
       fields: Vector[FieldSpec],
       known : Map[String, DynamicValue.Record] = Map.empty
-  ): Option[DynamicValue.Record] =
-    Traverse
-      .option(fields)(field => known.get(field.name).orElse(fieldSchema(field)).map(field.name -> _))
-      .map(entries =>
+  ): DynamicValue.Record =
+    Traverse.option(fields)(field => known.get(field.name).orElse(fieldSchema(field)).map(field.name -> _)) match
+      case Some(entries) =>
         DynamicValues.record("type" := "object", "properties" -> DynamicValues.recordFromEntries(entries))
-      )
+      case None =>
+        val entries = fields.flatMap { field =>
+          known.get(field.name).orElse(Option.when(field.typeRef == TypeRef.json)(OpenMapSchema)).map(field.name -> _)
+        }
+        DynamicValues.record(
+          "type"                 := "object",
+          "properties"           -> DynamicValues.recordFromEntries(entries),
+          "additionalProperties" := true
+        )
 
   // ── Strict shape ──────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -146,14 +156,14 @@ private[adapters] object StrictJsonSchema:
     * or in a definition. This is the open map of an output field. The JSON adapter then sends JSON mode with no
     * warning, as upstream does for an open map (`_has_open_ended_mapping` in `dspy/adapters/json_adapter.py` tests the
     * type of each output field). The root is the object of the output fields, so an open root is not the open map of a
-    * field: the decision adapter writes an open root when a field has no schema. [[shape]] gives a `Left` for an open
-    * root.
+    * field: [[fromFields]] writes an open root when a field has no schema. [[shape]] gives a `Left` for an open root.
     */
   def hasFieldOpenMap(schema: DynamicValue.Record): Boolean =
     schema.fields.exists((_, inner) => hasOpenMap(inner))
 
   /** The schema of an open map: an object with any properties (upstream `dict`). */
-  val OpenMapSchema: DynamicValue.Record = DynamicValues.record("type" := "object", "additionalProperties" := true)
+  private val OpenMapSchema: DynamicValue.Record =
+    DynamicValues.record("type" := "object", "additionalProperties" := true)
 
   /** `true` for an object schema whose `additionalProperties` is a schema or `true`. */
   private def isOpenMap(schema: DynamicValue.Record): Boolean =

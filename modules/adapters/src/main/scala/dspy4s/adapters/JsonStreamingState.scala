@@ -1,7 +1,7 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.FieldChunk
-import dspy4s.adapters.internal.SingleUseAdapterStreamingState
+import dspy4s.adapters.internal.{JsonTextScan, SingleUseAdapterStreamingState}
 import dspy4s.core.contracts.FieldSpec
 
 import scala.collection.mutable
@@ -19,7 +19,8 @@ import scala.util.control.NonFatal
   *     whitespace at value boundaries.
   *   - Nested object / array values emit the raw sub-document, tracking brace / bracket nesting and string state so
   *     internal `{` or `,` characters do not terminate the value early.
-  *   - Keys not present in the signature's output fields are parsed but produce no [[FieldChunk]]s.
+  *   - Keys not present in the signature's output fields are parsed but produce no [[FieldChunk]]s. The state buffers
+  *     each value, and only the emission checks the key.
   *   - `finish()` flushes any in-progress field with `isLast = true` — useful when the model stops mid-value or omits
   *     the closing brace.
   *
@@ -45,10 +46,9 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
   private var unicodeRemaining: Int = 0
   private val unicodeBuf            = new StringBuilder
 
-  // Other-value sub-state.
-  private var otherDepth: Int            = 0
-  private var otherInString: Boolean     = false
-  private var otherStringEscape: Boolean = false
+  // Other-value sub-state: the nesting depth, and the strings in the value.
+  private var otherDepth: Int = 0
+  private val otherScan       = new JsonTextScan
 
   override protected def receiveOpen(delta: String): Vector[FieldChunk] =
     val out = mutable.ArrayBuffer.empty[FieldChunk]
@@ -68,15 +68,10 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
     val out = mutable.ArrayBuffer.empty[FieldChunk]
     // A tracked value still open at stream end needs its isLast terminator even when the buffer is empty —
     // string content may have already been flushed incrementally by receive().
-    if isInValuePhase && isCurrentTracked then
-      out += FieldChunk(currentKey, finalContent(), isLast = true)
-      contentBuffer.clear()
+    if phase == InStringValue || phase == InOtherValue then emitFinal(out)
     out.toVector
 
   private def isCurrentTracked: Boolean = fieldNames.contains(currentKey)
-
-  private def isInValuePhase: Boolean =
-    phase == InStringValue || phase == InOtherValue
 
   private def emitFinal(out: mutable.ArrayBuffer[FieldChunk]): Unit =
     if isCurrentTracked then
@@ -121,20 +116,12 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
             unicodeBuf.clear()
             currentIsString = true
             phase = InStringValue
-          case '{' | '[' =>
-            contentBuffer.clear()
-            contentBuffer.append(c)
-            otherDepth = 1
-            otherInString = false
-            otherStringEscape = false
-            currentIsString = false
-            phase = InOtherValue
           case _ =>
+            // A value that is not a string. An object or a list starts at depth one.
             contentBuffer.clear()
             contentBuffer.append(c)
-            otherDepth = 0
-            otherInString = false
-            otherStringEscape = false
+            otherDepth = if c == '{' || c == '[' then 1 else 0
+            otherScan.reset()
             currentIsString = false
             phase = InOtherValue
       case InStringValue => handleStringValueChar(c, out)
@@ -151,64 +138,40 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
       unicodeBuf.append(c)
       unicodeRemaining -= 1
       if unicodeRemaining == 0 then
-        if isCurrentTracked then
-          // A malformed `\u` escape (non-hex digits) must degrade to the literal text, not throw out of the
-          // stream — mirroring XmlStreamingState.decodeEntity's NonFatal guard.
-          try
-            val _ = contentBuffer.append(Integer.parseInt(unicodeBuf.toString, 16).toChar)
-          catch
-            case NonFatal(_) => val _ = contentBuffer.append("\\u").append(unicodeBuf)
+        // A malformed `\u` escape (non-hex digits) must degrade to the literal text, not throw out of the
+        // stream — mirroring XmlStreamingState.decodeEntity's NonFatal guard.
+        try
+          val _ = contentBuffer.append(Integer.parseInt(unicodeBuf.toString, 16).toChar)
+        catch
+          case NonFatal(_) => val _ = contentBuffer.append("\\u").append(unicodeBuf)
         unicodeBuf.clear()
     else if stringEscape then
       stringEscape = false
       if c == 'u' then
         unicodeBuf.clear()
         unicodeRemaining = 4
-      else if isCurrentTracked then
-        contentBuffer.append(unescapeChar(c))
+      else contentBuffer.append(unescapeChar(c))
     else
       c match
         case '\\' => stringEscape = true
         case '"'  =>
           emitFinal(out)
           phase = AfterValue
-        case _ => if isCurrentTracked then contentBuffer.append(c)
+        case _ => contentBuffer.append(c)
 
   private def handleOtherValueChar(c: Char, out: mutable.ArrayBuffer[FieldChunk]): Unit =
-    if otherStringEscape then
-      otherStringEscape = false
-      if isCurrentTracked then contentBuffer.append(c)
-    else if otherInString then
-      c match
-        case '\\' =>
-          otherStringEscape = true
-          if isCurrentTracked then contentBuffer.append(c)
-        case '"' =>
-          otherInString = false
-          if isCurrentTracked then contentBuffer.append(c)
-        case _ => if isCurrentTracked then contentBuffer.append(c)
+    val structural = otherScan.structural(c)
+    if structural && otherDepth == 0 && (c == '}' || c == ',') then
+      // At depth 0, `}` closes the outer object and `,` comes before the next key: each ends this value.
+      emitFinal(out)
+      phase = if c == '}' then PostObj else ObjStart
     else
-      c match
-        case '"' =>
-          otherInString = true
-          if isCurrentTracked then contentBuffer.append(c)
-        case '{' | '[' =>
-          otherDepth += 1
-          if isCurrentTracked then contentBuffer.append(c)
-        case ']' if otherDepth > 0 =>
-          otherDepth -= 1
-          if isCurrentTracked then contentBuffer.append(c)
-        case '}' if otherDepth > 0 =>
-          otherDepth -= 1
-          if isCurrentTracked then contentBuffer.append(c)
-        case '}' =>
-          // depth is 0 → this closes the outer object and ends this value.
-          emitFinal(out)
-          phase = PostObj
-        case ',' if otherDepth == 0 =>
-          emitFinal(out)
-          phase = ObjStart
-        case _ => if isCurrentTracked then contentBuffer.append(c)
+      if structural then
+        c match
+          case '{' | '['                   => otherDepth += 1
+          case '}' | ']' if otherDepth > 0 => otherDepth -= 1
+          case _                           => ()
+      contentBuffer.append(c)
 
   private def unescapeChar(c: Char): Char =
     c match
@@ -221,12 +184,3 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
       case '\\'  => '\\'
       case '/'   => '/'
       case other => other
-
-object JsonStreamingState:
-  /** True iff `text`'s tail could be the start of a JSON value boundary (closing quote, comma, or right brace) that
-    * would terminate the currently-streaming field. Ported from Python `StreamListener._could_form_end_identifier` for
-    * `JSONAdapter`. Returns true when the buffer ends with `"`, `",`, `" `, or `"}`, or already contains `}` anywhere.
-    */
-  def couldFormEndIdentifier(text: String): Boolean =
-    val endPrefixes = Seq("\"", "\",", "\" ", "\"}")
-    endPrefixes.exists(text.endsWith) || text.contains("}")

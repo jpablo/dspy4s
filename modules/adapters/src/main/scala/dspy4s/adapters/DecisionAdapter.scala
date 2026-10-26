@@ -2,13 +2,12 @@ package dspy4s.adapters
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, NativeFunctionCalling, ParsedOutput}
 import dspy4s.adapters.internal.{AdapterTextSupport, PromptText, StrictJsonSchema}
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.{
   :=,
   DspyError,
   DynamicValues,
-  FieldSpec,
   JsonSchemaRefs,
-  ParseError,
   PythonText,
   RuntimeContext,
   SignatureLayout,
@@ -71,11 +70,8 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
       evidence <- DecisionAdapter.evidenceLayout(invocation.layout, plan)
       parsed   <- inner.parse(evidenceInvocation(invocation, evidence), output)
       answers  <- answersOf(parsed.values, output.text)
-      decoded  <- plan.decode(answers)
-    yield parsed.copy(
-      values = decoded.fields.foldLeft(parsed.values)((values, entry) => values.updated(entry._1, entry._2)),
-      evidence = plan.kinds.flatMap((name, _) => answers.get(name).map(name -> _))
-    )
+      decoded  <- plan.decode(answers.toMap)
+    yield parsed.copy(values = DynamicValues.mergeRecords(parsed.values, decoded), evidence = answers)
 
   /** The invocation of `inner` for the evidence layout `evidence`: no demos, and the output schema with the evidence
     * schemas ([[outputSchema]]).
@@ -109,10 +105,10 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
     * of each evidence field. When the root of the output schema is a `$ref` (a recursive output type), the schema that
     * it names replaces it first ([[JsonSchemaRefs.inlineRoot]]), so that the other properties stay. With no output
     * schema, the schema of the fields of `evidence` ([[StrictJsonSchema.fromFields]]), with the evidence schemas. When
-    * a field has a type with no schema there, the result has the evidence properties, the open map schema of each field
-    * of the type `json`, and `"additionalProperties": true` at the root. The JSON adapter then sends JSON mode, as it
-    * does for that field with no decision outputs: with no warning for an open map, else with the warning of a failed
-    * schema build (upstream `JSONAdapter._prepare_response_format` with the evidence signature).
+    * a field has a type with no schema there, the result is the open root of `fromFields`, with the evidence
+    * properties. The JSON adapter then sends JSON mode, as it does for that field with no decision outputs: with no
+    * warning for an open map, else with the warning of a failed schema build (upstream
+    * `JSONAdapter._prepare_response_format` with the evidence signature).
     */
   private def outputSchema(invocation: AdapterInvocation, evidence: SignatureLayout): DynamicValue.Record =
     val schemas = plan.kinds.map((name, kind) => name -> DecisionAdapter.evidenceSchema(kind))
@@ -122,45 +118,27 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
         val properties = DynamicValues.recordGet(typed, "properties") match
           case Some(record: DynamicValue.Record) => record
           case _                                 => DynamicValue.Record.empty
-        typed.updated("properties", schemas.foldLeft(properties)((acc, entry) => acc.updated(entry._1, entry._2)))
-      case None =>
-        val fields   = evidence.outputFields.filterNot(NativeFunctionCalling.isToolCallsField)
-        val openMaps = fields.filter(_.typeRef == TypeRef.json).map(_.name -> StrictJsonSchema.OpenMapSchema)
-        StrictJsonSchema.fromFields(fields, schemas.toMap).getOrElse(
-          DynamicValues.record(
-            "type"                 := "object",
-            "properties"           -> DynamicValues.recordFromEntries(schemas ++ openMaps),
-            "additionalProperties" := true
-          )
+        typed.updated("properties", DynamicValues.mergeRecords(properties, DynamicValues.recordFromEntries(schemas)))
+      case None => StrictJsonSchema.fromFields(
+          evidence.outputFields.filterNot(NativeFunctionCalling.isToolCallsField),
+          schemas.toMap
         )
 
-  /** The evidence of each decision output in the parsed `values`. A value that is not evidence is a [[ParseError]] that
-    * names the field and has the raw response `raw`.
+  /** The evidence of each decision output in the parsed `values`, by output name, in the order of the layout. The value
+    * of an evidence field is a JSON object, or the JSON text of one ([[PythonText.parseJson]]): a chat reply gives the
+    * text of the object. A value that is not evidence is a [[dspy4s.core.contracts.ParseError]] that names the field
+    * and has the raw response `raw`.
     */
-  private def answersOf(values: DynamicValue.Record, raw: String): Either[DspyError, Map[String, DecisionEvidence]] =
-    plan.kinds.foldLeft[Either[DspyError, Map[String, DecisionEvidence]]](Right(Map.empty)) {
-      case (acc, (name, _)) =>
-        val answer =
-          for
-            value    <- evidenceValue(name, DynamicValues.recordGet(values, name))
-            evidence <- plan.evidence(name, value)
-          yield evidence
-        for
-          found    <- acc
-          evidence <- answer.left.map(error =>
-                        ParseError("adapter", s"Failed to parse field $name: ${error.message}", raw = Some(raw))
-                      )
-        yield found.updated(name, evidence)
-    }
-
-  /** The JSON value of an evidence field: a JSON object as it is, or the JSON value of a text
-    * ([[PythonText.parseJson]]). A chat reply gives the text of the object.
-    */
-  private def evidenceValue(name: String, value: Option[DynamicValue]): Either[DspyError, DynamicValue] =
-    value.toRight(ValidationError(s"The reply has no evidence for '$name'")).flatMap {
-      case DynamicValue.Primitive(PrimitiveValue.String(text)) => PythonText.parseJson(text)
-      case other                                               => Right(other)
-    }
+  private def answersOf(
+      values: DynamicValue.Record,
+      raw   : String
+  ): Either[DspyError, Vector[(String, DecisionEvidence)]] =
+    DecisionAdapter
+      .evidenceOf(plan, values, name => s"The reply has no evidence for '$name'") {
+        case DynamicValue.Primitive(PrimitiveValue.String(text)) => PythonText.parseJson(text)
+        case other                                               => Right(other)
+      }
+      .left.map((name, error) => AdapterTextSupport.fieldError(name, raw, error))
 
 object DecisionAdapter:
 
@@ -203,36 +181,31 @@ object DecisionAdapter:
     * properties stay.
     */
   def evidenceLayout(layout: SignatureLayout, plan: DecisionPlan): Either[DspyError, SignatureLayout] =
-    plan.kinds
-      .foldLeft[Either[DspyError, Map[String, FieldSpec]]](Right(Map.empty)) { case (acc, (name, kind)) =>
-        for
-          fields   <- acc
-          question <- plan.question(name)
-        yield fields ++ layout.outputFields.find(_.name == name).map(field =>
-          name -> field.copy(
-            typeRef = evidenceType(kind),
-            description = Some("\n" + PythonText.json(question, indent = Some(2))),
-            defaultValue = None,
-            enumValues = Vector.empty,
-            optional = false
+    Traverse
+      .either(plan.kinds) { (name, kind) =>
+        plan.question(name).map { question =>
+          layout.outputFields.find(_.name == name).map(field =>
+            name -> field.copy(
+              typeRef = evidenceType(kind),
+              description = Some("\n" + PythonText.json(question, indent = Some(2))),
+              defaultValue = None,
+              enumValues = Vector.empty,
+              optional = false
+            )
           )
-        )
+        }
       }
-      .map(fields => layout.withOutputFields(layout.outputFields.map(field => fields.getOrElse(field.name, field))))
+      .map { found =>
+        val fields = found.flatten.toMap
+        layout.withOutputFields(layout.outputFields.map(field => fields.getOrElse(field.name, field)))
+      }
 
   /** The questions of a System One request (upstream `DecisionAdapter._prepare` with `system_one`): the question of
     * each decision output of `plan` ([[DecisionPlan.question]]), by output name, in the order of the layout. A question
     * that the plan cannot give is a `Left`.
     */
   def systemOneQuestions(plan: DecisionPlan): Either[DspyError, DynamicValue.Record] =
-    plan.kinds
-      .foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) { case (acc, (name, _)) =>
-        for
-          questions <- acc
-          question  <- plan.question(name)
-        yield questions :+ (name -> question)
-      }
-      .map(DynamicValues.recordFromEntries)
+    Traverse.either(plan.kinds)((name, _) => plan.question(name).map(name -> _)).map(DynamicValues.recordFromEntries)
 
   /** The state of a System One request (upstream `DecisionAdapter._prepare` with `system_one`). Its keys, in this
     * order:
@@ -275,14 +248,31 @@ object DecisionAdapter:
       plan   : DecisionPlan,
       answers: DynamicValue.Record
   ): Either[DspyError, Vector[(String, DecisionEvidence)]] =
-    plan.kinds.foldLeft[Either[DspyError, Vector[(String, DecisionEvidence)]]](Right(Vector.empty)) {
-      case (acc, (name, _)) =>
-        for
-          found  <- acc
-          answer <- DynamicValues.recordGet(answers, name)
-                      .toRight(ValidationError(s"The reply of the System One model has no answer for '$name'"))
-          evidence <- plan.evidence(name, answer)
-        yield found :+ (name -> evidence)
+    evidenceOf(plan, answers, name => s"The reply of the System One model has no answer for '$name'")(Right(_))
+      .left.map(_._2)
+
+  /** `true` for the type of an evidence field ([[NoulEvidence]], [[ScoreEvidence]], and [[ChoiceEvidence]]). The JSON
+    * adapter keeps the JSON value of such a field as it is.
+    */
+  private[adapters] def isEvidenceType(typeRef: TypeRef): Boolean =
+    typeRef == NoulEvidence || typeRef == ScoreEvidence || typeRef == ChoiceEvidence
+
+  /** The evidence of each decision output of `plan` in `values`, by output name, in the order of the layout
+    * ([[DecisionPlan.evidence]]). `json` gives the JSON value of the evidence from the value of an output. A `Left` has
+    * the name of the first output that has no evidence: `values` does not have it (`missing` gives the text of the
+    * error), or its value is not evidence.
+    */
+  private def evidenceOf(plan: DecisionPlan, values: DynamicValue.Record, missing: String => String)(
+      json: DynamicValue => Either[DspyError, DynamicValue]
+  ): Either[(String, DspyError), Vector[(String, DecisionEvidence)]] =
+    Traverse.either(plan.kinds) { (name, _) =>
+      DynamicValues
+        .recordGet(values, name)
+        .toRight(ValidationError(missing(name)))
+        .flatMap(json)
+        .flatMap(plan.evidence(name, _))
+        .map(name -> _)
+        .left.map(name -> _)
     }
 
   private def evidenceType(kind: DecisionKind): TypeRef =

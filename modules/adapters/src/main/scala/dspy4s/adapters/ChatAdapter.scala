@@ -22,7 +22,6 @@ import scala.util.matching.Regex
   *   - reliable streaming detection of field boundaries.
   */
 final case class ChatAdapter(
-    name: String = "chat",
     /** The native function calling options ([[NativeTools]]). Off by default, as upstream. */
     native: NativeTools = NativeTools.Off,
     /** Try a [[JSONAdapter]] after a parse error (dspy's `use_json_adapter_fallback`). On by default, as upstream. The
@@ -30,6 +29,8 @@ final case class ChatAdapter(
       */
     useJsonAdapterFallback: Boolean = true
 ) extends Adapter:
+
+  override def name: String = "chat"
 
   /** A [[JSONAdapter]] with the native function-calling options of this adapter, when [[useJsonAdapterFallback]] is on.
     */
@@ -53,12 +54,16 @@ final case class ChatAdapter(
     ChatAdapterParser.parse(invocation.layout, output, native.isActive)
 
 object ChatAdapter:
-  /** Pattern matching `[[ ## field_name ## ]]`. Capture group 1 is the field name. The pattern is intentionally
-    * anchored to start-of-string by callers (`findPrefixMatchOf`), so leading whitespace is the caller's responsibility
-    * to strip.
+
+  /** The pattern of a marker `[[ ## field_name ## ]]` ([[marker]]). Capture group 1 is the field name. The parser
+    * matches it at the start of a stripped line (`findPrefixMatchOf`). The stream state finds it in its buffer, and
+    * then checks that only the indentation of its line comes before it.
     */
-  val MarkerPattern: Regex = """\[\[ ## (\w+) ## \]\]""".r
+  private[adapters] val MarkerPattern: Regex = """\[\[ ## (\w+) ## \]\]""".r
+
+  /** The marker of the field `name`: `[[ ## name ## ]]`. */
+  private[adapters] def marker(name: String): String = s"[[ ## $name ## ]]"
 
   /** Reserved field name that closes the structured output. */
-  val CompletedFieldName: String = "completed"
-  val CompletedMarker: String    = s"[[ ## $CompletedFieldName ## ]]"
+  private[adapters] val CompletedFieldName: String = "completed"
+  private[adapters] val CompletedMarker: String    = marker(CompletedFieldName)

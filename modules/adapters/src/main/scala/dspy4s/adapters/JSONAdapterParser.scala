@@ -1,7 +1,7 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.{NativeFunctionCalling, ParsedOutput}
-import dspy4s.adapters.internal.AdapterTextSupport
+import dspy4s.adapters.internal.{AdapterTextSupport, JsonTextScan}
 import dspy4s.core.contracts.{
   DspyError,
   DynamicValues,
@@ -108,39 +108,27 @@ private[adapters] object JSONAdapterParser:
         case None       =>
           extractFirstJsonObject(text).toRight(ParseError("adapter", "Could not find JSON object in model output"))
 
+  /** The text of the first JSON object of `text`: from the first `{` to the `}` that closes it. A brace in a JSON
+    * string does not count ([[JsonTextScan]]).
+    */
   private def extractFirstJsonObject(text: String): Option[String] =
     val start = text.indexOf('{')
     if start < 0 then
       None
     else
-      var depth    = 0
-      var end      = -1
-      var i        = start
-      var inString = false
-      var escaped  = false
+      val scan  = new JsonTextScan
+      var depth = 0
+      var end   = -1
+      var i     = start
       while i < text.length && end < 0 do
         val char = text.charAt(i)
-        if inString then
-          if escaped then
-            escaped = false
-          else if char == '\\' then
-            escaped = true
-          else if char == '"' then
-            inString = false
-        else
-          char match
-            case '"' => inString = true
-            case '{' => depth += 1
-            case '}' =>
-              depth -= 1
-              if depth == 0 then
-                end = i
-            case _ => ()
+        if scan.structural(char) then
+          if char == '{' then depth += 1
+          else if char == '}' then
+            depth -= 1
+            if depth == 0 then end = i
         i += 1
-      if end >= start then
-        Some(text.substring(start, end + 1))
-      else
-        None
+      Option.when(end >= start)(text.substring(start, end + 1))
 
   /** The JSON object of `raw`, read with the rules of Python `json.loads` ([[PythonText.parseJson]]). */
   private def parseJsonObject(raw: String): Either[DspyError, DynamicValue.Record] =
@@ -151,29 +139,32 @@ private[adapters] object JSONAdapterParser:
 
   /** The value of the output field `field` from a JSON value `value` that is not a string or a null. An `int` field
     * takes the rule of `AdapterTextSupport.integerValue`: a whole number, also a whole float (upstream pydantic lax
-    * mode), keeps its exact value as an `Int`, a `Long`, or a `BigInt`. A field of another type takes the JSON text of
-    * the value as its text. An optional field also takes the lenient forms of `AdapterTextSupport.optionalFallback`.
+    * mode), keeps its exact value as an `Int`, a `Long`, or a `BigInt`. A `json` field, a `list` field, and an evidence
+    * field of the decision adapter ([[DecisionAdapter.isEvidenceType]]) keep the value as it is. A field of another
+    * type takes the JSON text of the value as its text. An optional field also takes the lenient forms of
+    * `AdapterTextSupport.optionalFallback`. The parser encodes the JSON text one time, only when a rule reads it.
     */
   private def coerce(field: FieldSpec, value: DynamicValue): Either[DspyError, DynamicValue] =
-    AdapterTextSupport.optionalFallback(field, jsonText(value), coerceTo(field.typeRef, value))
+    lazy val text = jsonText(value)
+    AdapterTextSupport.optionalFallback(field, text, coerceTo(field.typeRef, value, text))
 
-  private def coerceTo(typeRef: TypeRef, value: DynamicValue): Either[DspyError, DynamicValue] =
+  private def coerceTo(typeRef: TypeRef, value: DynamicValue, text: => String): Either[DspyError, DynamicValue] =
     typeRef match
       case TypeRef.int => AdapterTextSupport
           .integerValue(value)
-          .toRight(ValidationError(s"Expected integer value, found: ${jsonText(value)}"))
+          .toRight(ValidationError(s"Expected integer value, found: $text"))
       case TypeRef.double => DynamicValues
           .asDouble(value)
-          .toRight(ValidationError(s"Expected numeric value, found: ${jsonText(value)}"))
+          .toRight(ValidationError(s"Expected numeric value, found: $text"))
           .map(number => DynamicValue.Primitive(PrimitiveValue.Double(number)))
       case TypeRef.bool => Some(value)
           .collect { case boolean @ DynamicValue.Primitive(PrimitiveValue.Boolean(_)) => boolean }
-          .toRight(ValidationError(s"Expected boolean value, found: ${jsonText(value)}"))
-      case TypeRef.json | TypeRef.list => Right(value)
+          .toRight(ValidationError(s"Expected boolean value, found: $text"))
+      case TypeRef.json | TypeRef.list                          => Right(value)
+      case evidence if DecisionAdapter.isEvidenceType(evidence) => Right(value)
       // A string signature type such as `list[str]`: the rule of the chat format (`AdapterTextSupport.listOfValue`).
-      case other if AdapterTextSupport.isListOf(other) =>
-        AdapterTextSupport.listOfValue(other, Some(value), jsonText(value))
-      case _ => Right(DynamicValues.string(jsonText(value)))
+      case other if AdapterTextSupport.isListOf(other) => AdapterTextSupport.listOfValue(other, Some(value), text)
+      case _                                           => Right(DynamicValues.string(text))
 
   /** The text of a JSON value: a string is its text, and each other value is its JSON text ([[PythonText.json]]). */
   private def jsonText(value: DynamicValue): String =

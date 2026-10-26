@@ -1,10 +1,7 @@
 package dspy4s.streaming
 
 import dspy4s.adapters.ChatAdapter
-import dspy4s.adapters.ChatStreamingState
 import dspy4s.adapters.JSONAdapter
-import dspy4s.adapters.JsonStreamingState
-import dspy4s.adapters.XmlStreamingState
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
@@ -314,47 +311,4 @@ class StreamingPortedSuite extends FunSuite:
     assertEquals(statusMessages.size, 2)
     assertEquals(statusMessages(0), "Calling tool generate_question...")
     assertEquals(statusMessages(1), "Tool calling finished! Querying the LLM with tool calling results...")
-  }
-
-  // ── Port: test_stream_listener_could_form_end_identifier_chat_adapter ──
-
-  test("could_form_end_identifier_chat: partial bracket sequences and pattern containment trip the holdback") {
-    // True for partial bracket sequences.
-    assert(ChatStreamingState.couldFormEndIdentifier("some text ["))
-    assert(ChatStreamingState.couldFormEndIdentifier("some text [["))
-    assert(ChatStreamingState.couldFormEndIdentifier("some text [[ "))
-    assert(ChatStreamingState.couldFormEndIdentifier("some text [[ #"))
-    assert(ChatStreamingState.couldFormEndIdentifier("some text [[ ##"))
-
-    // True when the partial-marker prefix already appears anywhere.
-    assert(ChatStreamingState.couldFormEndIdentifier("some text [[ ## com"))
-    assert(ChatStreamingState.couldFormEndIdentifier("some text [[ ## completed"))
-
-    // False when the text clearly cannot form the pattern.
-    assert(!ChatStreamingState.couldFormEndIdentifier("hello world"))
-    assert(!ChatStreamingState.couldFormEndIdentifier("some text"))
-    assert(!ChatStreamingState.couldFormEndIdentifier("answer: hello"))
-  }
-
-  // ── Port: test_stream_listener_could_form_end_identifier_json_adapter ──
-
-  test("could_form_end_identifier_json: partial quote/brace sequences trip the holdback") {
-    assert(JsonStreamingState.couldFormEndIdentifier("some text \""))
-    assert(JsonStreamingState.couldFormEndIdentifier("some text \","))
-    assert(JsonStreamingState.couldFormEndIdentifier("some text \" "))
-    assert(JsonStreamingState.couldFormEndIdentifier("some text \"}"))
-
-    assert(!JsonStreamingState.couldFormEndIdentifier("hello world"))
-    assert(!JsonStreamingState.couldFormEndIdentifier("some text"))
-  }
-
-  // ── Port: test_stream_listener_could_form_end_identifier_xml_adapter ───
-
-  test("could_form_end_identifier_xml: partial closing tag trips the holdback") {
-    assert(XmlStreamingState.couldFormEndIdentifier("some text <"))
-    assert(XmlStreamingState.couldFormEndIdentifier("some text </"))
-    assert(XmlStreamingState.couldFormEndIdentifier("some text </result"))
-
-    assert(!XmlStreamingState.couldFormEndIdentifier("hello world"))
-    assert(!XmlStreamingState.couldFormEndIdentifier("some text"))
   }

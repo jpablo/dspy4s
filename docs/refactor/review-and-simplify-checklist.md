@@ -266,7 +266,7 @@ Simplify 6 (rank 4). Code-review 6 (rank 3). 4243 main lines, 4943 test lines.
   - [x] /simplify
   - [x] /code-review
 - (b) The adapters, the parsers, and the streaming states, about 2050 lines: the files at the top of the source root.
-  - [ ] /simplify
+  - [x] /simplify
   - [ ] /code-review
 
 ### Simplify findings
@@ -287,12 +287,18 @@ Simplify 6 (rank 4). Code-review 6 (rank 3). 4243 main lines, 4943 test lines.
 - [ ] (simplify (a), design) The adapter type coercion (`internal/AdapterTextSupport.scala` `coerceText` and the optional fallback, and `JSONAdapterParser.coerce`) has other rules than core `LenientValues` and the signatures decode: a required `int` rejects `"$1,200"` but an `Option[Int]` accepts it, `"3.0"` is an `Int` here but not in `LenientValues.toInt`, and an optional `int` out of range becomes a `Long`. One `LenientValues.coerce(value, TypeRef)` is the general form. Check the upstream rules first.
 - [ ] (simplify (a)) The native-tool gate cases where the old predicates disagreed, kept as they were: with the flag on, function calling, a tool-calls field, and no `tools`, the prompt hides the tool fields but no tools go to the provider; with the flag on and no function calling, the tool options of the call config stay. Check them in the code review.
 - [ ] (docs) The `Adapter` row of `modules/adapters/README.md` names an `execute` method that no longer exists.
+- [x] (simplify (b)) The Chat, JSON, and XML prompts repeated one skeleton, Chat and XML repeated their turn text, and the chat marker was written in five places. Fixed: `ConversationHistory.prompt`, `FramedTurns`, and `ChatAdapter.marker`.
+- [x] (simplify (b)) `DecisionAdapter` had four hand-written traversals, a `Map` of evidence that `parse` sorted again, and an open-root trick that two files shared. Fixed: `Traverse.either`, a `Vector` in plan order, and a total `StrictJsonSchema.fromFields`. An evidence object of a JSON reply needs no text round trip now.
+- [x] (simplify (b)) API with no main caller: `couldFormEndIdentifier` (three streams), the `name` parameters of the adapters, a dead branch of `TwoStepAdapter`; and the stream states kept derivable state. Fixed: removed. The JSON stream and the JSON parser share `internal/JsonTextScan.scala`.
+- [x] (simplify (b)) Wasted work: a JSON text encode for each value, a failed strict XML parse before each wrapped parse, a regex that backtracks on an open XML fence, and two buffer copies for each chunk of the chat stream. Fixed, with no change of result (checked on random inputs).
+- [ ] (simplify (b), design) The format, call, parse, and fallback loop of `TwoStepAdapter` copies `PredictEngine.answerWithFallback`, with no callback events and no tool calls of the main reply. One shared loop in the adapters module is the general form.
+- [ ] (simplify (b), design) `DecisionAdapter` and the hint adapter of programs `Refine` forward each `Adapter` member by hand, and neither forwards `streamingState`. A delegating adapter base is the general form.
 
 ### Code-review findings
 
-- [ ] `XMLAdapter.scala:146-149` uses `XML.loadString`. A raw `&` or `<` in a value ("AT&T", "a < b") breaks the parse. Upstream uses a tolerant regex. With one output field, the fallback returns the whole tagged text as the value. `XmlStreamingState` accepts the same text, so the stream and the parse give different results. No test covers this.
+- [ ] `XMLAdapter.scala` uses `XML.loadString`. A raw `&` or `<` in a value ("AT&T", "a < b") breaks the parse. Upstream 3.2.1 used a tolerant regex; upstream 3.4.0 (#10239) parses strictly with `ET.fromstring("<dspy_root>...</dspy_root>")`, reads the direct children only, and a parse error gives the JSON fallback (`XMLAdapter` extends `ChatAdapter`). With one output field, the fallback returns the whole tagged text as the value. `XmlStreamingState` accepts the same text, so the stream and the parse give different results. No test covers this.
 - [x] internal/JsonDynamic.scala (removed) and `JSONAdapterParser.scala`: ujson kept numbers as Double. Integers above 2^53 in `json` and `list` fields changed value. `internal/StrictJsonSchema.scala` did the same to defaults. Fixed in the simplify (a) pass: the one reader keeps an exact `Long` and `BigInt`, also for a default.
-- [ ] `JsonStreamingState.scala:91` starts at the first `{`, but the parser prefers the ```` ```json ```` fence (`JSONAdapterParser.scala:97-105`). Duplicate keys and repeated XML tags give extra chunks, but the parser keeps one value.
+- [ ] `JsonStreamingState.scala` starts at the first `{`, but the parser prefers the ```` ```json ```` fence (`JSONAdapterParser.scala`). Upstream `json_adapter.parse` has no fence rule: `json_repair` on the whole text, then the first balanced object. Duplicate keys and repeated XML tags give extra chunks, but the parser keeps one value.
 - [x] internal/PythonText.scala (moved to core) and `JsonDynamic.fromUjson` recursed on deep LM output. `Try` does not catch `StackOverflowError`. Fixed in the simplify (a) pass: the reader has no recursion of its own and catches `StackOverflowError`.
 - [x] `JSONAdapterParser.scala` rejects an `int` above Int.MaxValue. `internal/AdapterTextSupport.scala` accepts a Long for an optional field. Fixed in the code review (a): an `int` text or JSON number gives the smallest of `Int`, `Long`, and `BigInt`, on each path (upstream Python `int`). A typed `Int` field then gets a clear decode error.
 - [x] (code-review (a)) An optional field with allowed values took `""`, `none`, `n/a`, and `null` in any case as a null. Fixed: only `None` and `null` give a null (upstream `parse_value`); each other text is an error.
@@ -301,6 +307,11 @@ Simplify 6 (rank 4). Code-review 6 (rank 3). 4243 main lines, 4943 test lines.
 - [ ] (code-review (a), skipped) With native calling on, an LM with function calling, a tool-calls field, and no tools, the prompt hides the tool fields and the request has no tools. Upstream sends the tools of the input field. Rare: ReActV2 always has tools.
 - [ ] (code-review (a), skipped) `PythonText.parseJson` rejects `NaN`, `Infinity`, and `-Infinity`, which Python `json.loads` accepts and `PythonText.json` writes. The ujson reader has no option for them.
 - [ ] (code-review (a), skipped) The `int` and `float` text rules accept Java forms (`3d`, `0x1p3`). Upstream reads the text with `json_repair` first; check its rules before a change.
+- [ ] (from simplify (b)) The tool-turn rule is written two times with other triggers and results: `ChatAdapterParser` (any provider tool calls; a mistyped field is an error) and `JSONAdapterParser` (only with a tool-calls field; a mistyped field takes its default). `XMLAdapter` has none. Upstream `_call_postprocess` is one rule for each adapter.
+- [ ] (from simplify (b)) The single-output text fallback has three forms: Chat coerces the value with `outputTextValue`; JSON and XML (`AdapterTextSupport.singleOutputTextFallback`) give a raw string with Java `trim`. A bare `42` for an `int` output is an `Int` in Chat and a string in JSON and XML.
+- [ ] (from simplify (b)) XML and the streams strip with Java `trim`/`strip`, not `PythonText.strip` (upstream `.strip()`): a value with a no-break space differs between the formats.
+- [ ] (from simplify (b)) Format, parse, and the stream state read the capabilities of the model from the ambient context. `Predict.withLm(m)` calls `m`, but the adapter checks the context LM, so `response_format` and native tools follow the wrong model. `TwoStepAdapter` formats with the extraction model and parses with the context of the caller.
+- [ ] (from simplify (b)) `ChatStreamingState`: the hold-back length counts only the markers of the output fields, but the marker match takes any name, so a long header of another name split across two chunks shows in the field text.
 
 ## programs
 

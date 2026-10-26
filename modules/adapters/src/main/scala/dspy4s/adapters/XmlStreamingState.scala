@@ -30,17 +30,19 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
   private val fieldNames: Set[String] = outputFields.map(_.name).toSet
 
   private enum Phase derives CanEqual:
-    case PreDoc, BetweenTags, TagStart, ReadingOpenTag, SkippingAttrs,
-      ReadingCloseTag, InContent, InContentSeenLt, InEntity, PostDoc
+    case PreDoc, BetweenTags, TagStart, ReadingOpenTag, SkippingAttrs, ReadingCloseTag, InContent, InContentSeenLt,
+      InEntity
 
   import Phase.*
 
-  private var phase: Phase                                              = PreDoc
-  private var currentField: Option[String]                              = None
-  private val tagBuilder                                                = new StringBuilder
-  private val contentBuffer                                             = new StringBuilder
-  private val entityBuilder                                             = new StringBuilder
-  private var pendingTagMatch: Boolean                                  = false
+  private var phase: Phase = PreDoc
+
+  /** The output field of the open tag. A tag of another name gives no chunks. */
+  private var currentField: Option[String] = None
+  private val tagBuilder                   = new StringBuilder
+  private val contentBuffer                = new StringBuilder
+  private val entityBuilder                = new StringBuilder
+
   override protected def receiveOpen(delta: String): Vector[FieldChunk] =
     val out = mutable.ArrayBuffer.empty[FieldChunk]
     var i   = 0
@@ -63,7 +65,6 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
     }
     contentBuffer.clear()
     currentField = None
-    pendingTagMatch = false
 
   private def processChar(c: Char, out: mutable.ArrayBuffer[FieldChunk]): Unit =
     phase match
@@ -82,21 +83,19 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
           case _ =>
             // Unrecognized — `<?xml ... ?>`, `<!-- ... -->`, etc. Skip to next '>'.
             phase = SkippingAttrs
-            pendingTagMatch = false
       case ReadingOpenTag =>
         if isNameChar(c) then tagBuilder.append(c)
         else
           val tag = tagBuilder.toString
-          pendingTagMatch = fieldNames.contains(tag)
-          if pendingTagMatch then
+          if fieldNames.contains(tag) then
             currentField = Some(tag)
             contentBuffer.clear()
           c match
-            case '>' => phase = if pendingTagMatch then InContent else BetweenTags
+            case '>' => phase = if currentField.isDefined then InContent else BetweenTags
             case _   => phase = SkippingAttrs
       case SkippingAttrs =>
         if c == '>' then
-          phase = if pendingTagMatch then InContent else BetweenTags
+          phase = if currentField.isDefined then InContent else BetweenTags
         // else: skip attribute chars, including self-closing '/'
       case ReadingCloseTag => c match
           case '>' =>
@@ -145,7 +144,6 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
           contentBuffer.append(entityBuilder.toString)
           contentBuffer.append(c)
           phase = InContent
-      case PostDoc => ()
 
   private def isNameStart(c : Char): Boolean = c.isLetter || c == '_'
   private def isNameChar(c  : Char): Boolean = c.isLetterOrDigit || c == '_' || c == '-' || c == '.'
@@ -166,11 +164,3 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
         try Character.toString(Integer.parseInt(s.drop(1)))
         catch case NonFatal(_) => s"&$name;"
       case _ => s"&$name;"
-
-object XmlStreamingState:
-  /** True iff `text`'s tail could be the start of an XML closing tag that would terminate the currently-streaming
-    * field. Ported from Python `StreamListener._could_form_end_identifier` for `XMLAdapter`. Returns true when the
-    * buffer ends with `<` or `</`, or already contains `</` anywhere.
-    */
-  def couldFormEndIdentifier(text: String): Boolean =
-    text.endsWith("<") || text.endsWith("</") || text.contains("</")

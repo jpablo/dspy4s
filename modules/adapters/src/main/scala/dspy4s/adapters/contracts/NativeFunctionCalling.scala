@@ -83,7 +83,7 @@ final case class NativeTools(
             toolChoice.map(choice => "tool_choice" -> NativeTools.encodeToolChoice(choice))
         )
       else DynamicValue.Record.empty
-    val removed = if !enabled || (hasField && !supported) then NativeTools.ToolOptionKeys else Set.empty[String]
+    val removed = if !enabled || (hasField && !supported) then NativeTools.OptionKeys else Set.empty[String]
     NativeTools.ToolOptions(request, removed)
 
 object NativeTools:
@@ -100,8 +100,10 @@ object NativeTools:
     */
   final case class ToolOptions(request: DynamicValue.Record, removed: Set[String])
 
-  /** The request options of native function calling (upstream `_call_preprocess`). */
-  private val ToolOptionKeys: Set[String] = Set("tools", "tool_choice", "parallel_tool_calls")
+  /** The request options of native function calling (upstream `_call_preprocess`). An adapter with no native function
+    * calling removes them from each request ([[FormattedPrompt.removedOptions]]).
+    */
+  val OptionKeys: Set[String] = Set("tools", "tool_choice", "parallel_tool_calls")
 
   /** Whether the ambient LM advertises function-calling support (narrows the opaque `RuntimeContext.lm` ref). */
   private def lmSupportsFunctionCalling(using ctx: RuntimeContext): Boolean =

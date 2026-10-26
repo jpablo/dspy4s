@@ -12,13 +12,14 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.lm.contracts.LmOutput
 
 final case class JSONAdapter(
-    name                            : String  = "json",
     allowTextFallbackForSingleOutput: Boolean = true,
     /** The native function calling options ([[NativeTools]]), with the same rules as for [[ChatAdapter.native]]. Off by
       * default.
       */
     native: NativeTools = NativeTools.Off
 ) extends Adapter:
+  override def name: String = "json"
+
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     JSONAdapterPrompt.format(invocation, native)
 

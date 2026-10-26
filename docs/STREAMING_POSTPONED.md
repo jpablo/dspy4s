@@ -191,6 +191,10 @@ and `XmlStreamingState`. The helpers are not yet used by the state
 machines themselves — they exist as the foundation for a future
 per-token state-machine refactor.
 
+Removed later: only the three tests called the helpers, and the state
+machines did not use them. The port removed the three helpers and the
+three tests.
+
 Test bug fix as part of this batch: `ChatStreamingState.stripFramingNewlines`
 previously stripped at most one boundary newline. It now strips all
 leading/trailing newlines from emitted content so that real LM output
@@ -209,9 +213,10 @@ Five Python tests assert per-token chunk shape and remain unported:
 
 To port these we'd rewrite all three `*StreamingState`s around a
 queue-of-received-fragments + holdback discipline that emits each LM
-token as its own `FieldChunk`. The `couldFormEndIdentifier` helpers
-shipped in v1.8 are the per-adapter holdback predicates this refactor
-would consume.
+token as its own `FieldChunk`. The refactor must also write the
+holdback predicate of each adapter (upstream
+`_could_form_end_identifier`). The port removed the helpers of v1.8,
+because nothing used them.
 
 The work is bounded but substantial (~hundreds of lines across the
 three states + companions, plus rewriting the existing
