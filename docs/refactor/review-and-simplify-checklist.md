@@ -264,7 +264,7 @@ Simplify 6 (rank 4). Code-review 6 (rank 3). 4243 main lines, 4943 test lines.
 
 - (a) The internals and the contracts, about 2190 lines: `internal/`, `contracts/`.
   - [x] /simplify
-  - [ ] /code-review
+  - [x] /code-review
 - (b) The adapters, the parsers, and the streaming states, about 2050 lines: the files at the top of the source root.
   - [ ] /simplify
   - [ ] /code-review
@@ -294,7 +294,13 @@ Simplify 6 (rank 4). Code-review 6 (rank 3). 4243 main lines, 4943 test lines.
 - [x] internal/JsonDynamic.scala (removed) and `JSONAdapterParser.scala`: ujson kept numbers as Double. Integers above 2^53 in `json` and `list` fields changed value. `internal/StrictJsonSchema.scala` did the same to defaults. Fixed in the simplify (a) pass: the one reader keeps an exact `Long` and `BigInt`, also for a default.
 - [ ] `JsonStreamingState.scala:91` starts at the first `{`, but the parser prefers the ```` ```json ```` fence (`JSONAdapterParser.scala:97-105`). Duplicate keys and repeated XML tags give extra chunks, but the parser keeps one value.
 - [x] internal/PythonText.scala (moved to core) and `JsonDynamic.fromUjson` recursed on deep LM output. `Try` does not catch `StackOverflowError`. Fixed in the simplify (a) pass: the reader has no recursion of its own and catches `StackOverflowError`.
-- [ ] `JSONAdapterParser.scala:155-159` rejects an `int` above Int.MaxValue. `internal/AdapterTextSupport.scala:191` accepts a Long for an optional field.
+- [x] `JSONAdapterParser.scala` rejects an `int` above Int.MaxValue. `internal/AdapterTextSupport.scala` accepts a Long for an optional field. Fixed in the code review (a): an `int` text or JSON number gives the smallest of `Int`, `Long`, and `BigInt`, on each path (upstream Python `int`). A typed `Int` field then gets a clear decode error.
+- [x] (code-review (a)) An optional field with allowed values took `""`, `none`, `n/a`, and `null` in any case as a null. Fixed: only `None` and `null` give a null (upstream `parse_value`); each other text is an error.
+- [x] (code-review (a)) `JsonSchemaRefs.lookup` did not decode the JSON pointer escapes `~1` and `~0`. Fixed, also for the `$defs` names of the prompt schema.
+- [x] (code-review (a)) `ProgramPromptText` built a new output schema for each output field. Fixed: `ProgramPromptText.schema` once for each prompt.
+- [ ] (code-review (a), skipped) With native calling on, an LM with function calling, a tool-calls field, and no tools, the prompt hides the tool fields and the request has no tools. Upstream sends the tools of the input field. Rare: ReActV2 always has tools.
+- [ ] (code-review (a), skipped) `PythonText.parseJson` rejects `NaN`, `Infinity`, and `-Infinity`, which Python `json.loads` accepts and `PythonText.json` writes. The ujson reader has no option for them.
+- [ ] (code-review (a), skipped) The `int` and `float` text rules accept Java forms (`3d`, `0x1p3`). Upstream reads the text with `json_repair` first; check its rules before a change.
 
 ## programs
 

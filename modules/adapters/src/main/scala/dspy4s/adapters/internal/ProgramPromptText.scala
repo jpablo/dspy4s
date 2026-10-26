@@ -13,14 +13,24 @@ private[dspy4s] object ProgramPromptText:
   def fieldValue(field: FieldSpec, value: DynamicValue): String =
     PromptText.fieldValue(field, value)
 
-  /** The placeholder of the output field `field`, with its note (upstream `translate_field_type`). The note of a
-    * structured field shows its schema in `outputJsonSchema`, the output JSON schema of the signature.
+  /** The prompt texts of the output fields for `outputJsonSchema`, the output JSON schema of the signature. Build this
+    * object one time for a prompt and use it for each output field: it computes the `$defs` entries of the schema one
+    * time.
     */
-  def outputPlaceholder(field: FieldSpec, outputJsonSchema: Option[DynamicValue.Record]): String =
-    PromptText.placeholder(field, output = true, PromptText.OutputSchema(outputJsonSchema))
+  def schema(outputJsonSchema: Option[DynamicValue.Record]): OutputSchemaText =
+    OutputSchemaText(PromptText.OutputSchema(outputJsonSchema))
 
-  /** The schema of the output `name` in `outputJsonSchema`, the output JSON schema of the signature: the property of
-    * the output, with the `$defs` entries that it uses at the end. `None` when the schema has no such property.
-    */
-  def outputProperty(name: String, outputJsonSchema: Option[DynamicValue.Record]): Option[DynamicValue] =
-    PromptText.OutputSchema(outputJsonSchema).propertySchema(name)
+  /** The prompt texts of the output fields for one output JSON schema. Use [[ProgramPromptText.schema]] to build it. */
+  final class OutputSchemaText private[adapters] (schema: PromptText.OutputSchema):
+
+    /** The placeholder of the output field `field`, with its note (upstream `translate_field_type`). The note of a
+      * structured field shows its schema in the output JSON schema.
+      */
+    def placeholder(field: FieldSpec): String =
+      PromptText.placeholder(field, output = true, schema)
+
+    /** The schema of the output `name` in the output JSON schema: the property of the output, with the `$defs` entries
+      * that it uses at the end. `None` when the schema has no such property.
+      */
+    def property(name: String): Option[DynamicValue] =
+      schema.propertySchema(name)

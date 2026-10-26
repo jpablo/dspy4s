@@ -149,19 +149,18 @@ private[adapters] object JSONAdapterParser:
       case _                           => Left(ParseError("adapter", "Parsed JSON output is not an object"))
     }
 
-  /** The value of the output field `field` from a JSON value `value` that is not a string or a null. A whole float in
-    * the `Int` range is an integer (upstream pydantic lax mode). A field of another type takes the JSON text of the
-    * value as its text. An optional field also takes the lenient forms of `AdapterTextSupport.optionalFallback`.
+  /** The value of the output field `field` from a JSON value `value` that is not a string or a null. An `int` field
+    * takes the rule of `AdapterTextSupport.integerValue`: a whole number, also a whole float (upstream pydantic lax
+    * mode), keeps its exact value as an `Int`, a `Long`, or a `BigInt`. A field of another type takes the JSON text of
+    * the value as its text. An optional field also takes the lenient forms of `AdapterTextSupport.optionalFallback`.
     */
   private def coerce(field: FieldSpec, value: DynamicValue): Either[DspyError, DynamicValue] =
     AdapterTextSupport.optionalFallback(field, jsonText(value), coerceTo(field.typeRef, value))
 
   private def coerceTo(typeRef: TypeRef, value: DynamicValue): Either[DspyError, DynamicValue] =
     typeRef match
-      case TypeRef.int => DynamicValues
-          .asDouble(value)
-          .filter(number => number.isWhole && number >= Int.MinValue.toDouble && number <= Int.MaxValue.toDouble)
-          .map(number => DynamicValue.Primitive(PrimitiveValue.Int(number.toInt)))
+      case TypeRef.int => AdapterTextSupport
+          .integerValue(value)
           .toRight(ValidationError(s"Expected integer value, found: ${jsonText(value)}"))
       case TypeRef.double => DynamicValues
           .asDouble(value)

@@ -1,6 +1,6 @@
 package dspy4s.adapters.internal
 
-import dspy4s.core.contracts.{DynamicValues, FieldSpec, PythonText, SignatureLayout, ToolCall, TypeRef}
+import dspy4s.core.contracts.{DynamicValues, FieldSpec, JsonSchemaRefs, PythonText, SignatureLayout, ToolCall, TypeRef}
 import zio.blocks.schema.DynamicValue
 
 /** The prompt texts that the Chat, JSON, XML, and TwoStep adapters share (decision D3). The adapters compute each text
@@ -240,12 +240,14 @@ private[adapters] object PromptText:
           DynamicValue.Record(record.fields :+ ("$defs" -> DynamicValues.recordFromEntries(entries)))
         case other => other
 
-    /** The names of the definitions that `schema` references with `{"$ref": "#/$defs/<name>"}`. */
+    /** The names of the definitions that `schema` references with `{"$ref": "#/$defs/<name>"}`. The name has its JSON
+      * pointer escapes decoded ([[JsonSchemaRefs.unescape]]).
+      */
     private def references(schema: DynamicValue): Vector[String] =
       schema match
         case record: DynamicValue.Record => record.fields.toVector.flatMap {
             case ("$ref", value) => DynamicValues.asString(value).filter(_.startsWith(DefsPrefix))
-                .map(_.stripPrefix(DefsPrefix)).toVector
+                .map(ref => JsonSchemaRefs.unescape(ref.stripPrefix(DefsPrefix))).toVector
             case (_, value) => references(value)
           }
         case sequence: DynamicValue.Sequence => sequence.elements.toVector.flatMap(references)
