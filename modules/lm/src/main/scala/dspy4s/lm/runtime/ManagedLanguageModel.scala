@@ -128,8 +128,9 @@ type UsageTracker = dspy4s.core.runtime.UsageTracker
   *
   * The record point is `LanguageModel.callAndRecordUsage`. `Predict`, `TwoStepAdapter`, and the sub-LM tools of `RLM`
   * use it, so each model call of a program counts, also for a model with no managed wrapper. A direct `call` or
-  * `stream` of a model counts in no tracker, also for a [[ManagedLanguageModel]]. A cache hit adds nothing. The
-  * trackers get nothing when the context of the call has `trackUsage = Some(false)`.
+  * `stream` of a model counts in no tracker, also for a [[ManagedLanguageModel]]. A cache hit adds nothing. A failed
+  * call adds the usage that its LM error carries, if any. The trackers get nothing when the context of the call has
+  * `trackUsage = Some(false)`.
   *
   * The LM usage of a program result comes from the same records: it is the total of the usage scope of the program
   * call. Thus a tracker around one program call has the total of the result, when `trackUsage` is not `false`.
@@ -151,6 +152,13 @@ object UsageTracking:
   * [[dspy4s.lm.contracts.LanguageModel.callAndRecordUsage]], which the framework uses for each model call of a program.
   * Thus a direct `call` or `stream` of this model counts in no sink: not in a user tracker ([[UsageTracking]]), and not
   * in the usage of a program result. The response and the chunks still carry the usage of the delegate.
+  *
+  * The usage of a call is the total of each attempt that reported a usage (upstream `combine(results)` and
+  * `_account_failed_call(results)` in `dspy/clients/execution.py`): the usage of each failed attempt
+  * ([[dspy4s.core.contracts.LmError.usage]] of its error) plus the usage of the last attempt. A success gets the total
+  * as the usage of its response, so the history cost, the cache store, and the record point see the total. A failure
+  * gets the total on its error ([[dspy4s.core.contracts.LmErrorDetails.usage]]) when the total is not empty and the
+  * error is an LM error. An error that is not an LM error stays as it is. A cache hit has no usage.
   *
   * A delegate that throws a non-fatal exception gives an [[dspy4s.core.contracts.LmUnexpectedError]] with the message
   * of the exception, on the call path and on the stream path (upstream `error_boundary(..., unexpected=True)` in
@@ -210,8 +218,11 @@ final case class ManagedLanguageModel(
     *     visible output; a thinking delta and a citation delta are visible output too).
     *   - History: one entry for each streamed call, when the stream ends: the entry of [[call]] for a success or a
     *     cache hit, and the failure entry of [[call]] for a failure.
-    *   - Usage: this model records no usage. The chunks of the delegate carry the usage to the caller, and the stored
-    *     response has the usage of the chunks. A cache hit has no usage.
+    *   - Usage: this model records no usage. The chunks of the delegate carry the usage to the caller. The usage of a
+    *     failed attempt is the usage of its error, else the usage of its chunks. A usage chunk of the last attempt
+    *     carries the usage of the call, the total of the rules of [[call]], and so does the stored response. When the
+    *     last attempt has no usage chunk, one more chunk with the usage of the failed attempts comes at the end of a
+    *     successful stream. The error of the failure chunk has the usage of the call. A cache hit has no usage.
     *   - Output: the stored response has the output of [[StreamAccumulator]] in the mode of the delegate.
     *
     * A delegate that cannot stream gives one terminal chunk assembled from [[call]], or a reified
@@ -292,12 +303,23 @@ final case class ManagedLanguageModel(
     try delegate.call(request)
     catch case NonFatal(error) => Left(ManagedLanguageModel.unexpected(error, request))
 
+  /** The attempts of a call, with the retry policy. `spent` is the usage of the failed attempts. The response of a
+    * success and the error of a failure get the usage of the call (see [[ManagedLanguageModel]]).
+    */
   private def executeWithRetry(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-    @tailrec def loop(attempt: Int): Either[DspyError, LmResponse] =
+    @tailrec def loop(attempt: Int, spent: Option[LmUsage]): Either[DspyError, LmResponse] =
       callDelegate(request) match
-        case Left(error) if retryAfter(attempt, error) => loop(attempt + 1)
-        case result                                    => result
-    loop(0)
+        case Left(error) =>
+          val used = total(spent, LmError.usage(error))
+          if retryAfter(attempt, error) then loop(attempt + 1, used) else Left(LmError.withUsage(error, used))
+        case Right(response) => Right(response.copy(usage = total(spent, response.usage)))
+    loop(0, None)
+
+  /** The total of two usages. `None` is no usage, so the total of two `None` values is `None`. */
+  private def total(
+      first : Option[LmUsage],
+      second: Option[LmUsage]
+  ): Option[LmUsage] = (first ++ second).reduceOption(_.combine(_))
 
   /** `true` when the retry policy gives a new attempt after the failure `error` of the attempt `attempt`. The function
     * then waits for the delay of the policy before it gives `true`. The call path and the stream path use it.
@@ -352,6 +374,7 @@ final case class ManagedLanguageModel(
     private val held                       = mutable.ArrayBuffer.empty[LmChunk]
     private val parts                      = StreamAccumulator(streaming.mode)
     private var usage: Option[LmUsage]     = None
+    private var spent: Option[LmUsage]     = None
     private var cached: Option[LmResponse] = None
     private var attempt                    = 0
     private var visible                    = false
@@ -404,9 +427,11 @@ final case class ManagedLanguageModel(
       chunk.usage.foreach(value => usage = Some(value))
       chunk.cachedResponse.foreach(response => cached = Some(response))
       if chunk.isFinal then complete = true
-      if visible then ready += chunk
+      // The caller gets the usage of the call: the usage of the failed attempts plus the usage of this attempt.
+      val shown = if chunk.usage.isEmpty then chunk else chunk.copy(usage = total(spent, chunk.usage))
+      if visible then ready += shown
       else
-        held += chunk
+        held += shown
         // Upstream `_retryable`: no retry after visible output, and no retry after the end of the stream. Upstream
         // `ListenerBridge.chunk` gives a chunk for a thinking delta and a citation delta too.
         val output = chunk.text.nonEmpty || chunk.reasoning.nonEmpty || chunk.citations.nonEmpty ||
@@ -418,9 +443,13 @@ final case class ManagedLanguageModel(
       ready ++= held
       held.clear()
 
-    /** End the attempt with `error`. The caller gets `chunk`, the failure chunk, when no retry occurs. */
+    /** End the attempt with `error`. The usage of the attempt is the usage of `error`, else the usage of its chunks,
+      * and it adds to `spent`. The caller gets `chunk`, the failure chunk, when no retry occurs. The error of that
+      * chunk then has the usage of the call.
+      */
     private def fail(error: DspyError, chunk: LmChunk): Unit =
       release()
+      spent = total(spent, LmError.usage(error).orElse(usage))
       if !visible && retryAfter(attempt, error) then
         attempt += 1
         held.clear()
@@ -430,9 +459,9 @@ final case class ManagedLanguageModel(
         complete = false
         source = open()
       else
-        // The caller gets no held chunk of the attempt. It gets only the failure chunk.
+        // The caller gets no held chunk of the attempt. It gets only the failure chunk, with the usage of the call.
         held.clear()
-        ready += chunk
+        ready += chunk.copy(error = chunk.error.map(LmError.withUsage(_, spent)))
         finished = true
         appendFailureHistory(request, error)
 
@@ -442,7 +471,9 @@ final case class ManagedLanguageModel(
       cached match
         case Some(response) => val _ = acceptDelegateHit(request, response)
         case None           =>
-          val response = LmResponse(outputs = Vector(parts.output), usage = usage)
+          // The last attempt has no usage chunk: one more chunk gives the usage of the failed attempts to the caller.
+          if usage.isEmpty then spent.foreach(value => ready += LmChunk(usage = Some(value)))
+          val response = LmResponse(outputs = Vector(parts.output), usage = total(spent, usage))
           val _        = acceptResponse(request, key, response)
 
     /** Close the stream of the delegate, so that the connection does not stay open. A non-fatal exception of the close

@@ -56,6 +56,10 @@ final case class RuntimeError(component: String, message: String) extends DspyEr
   *   the request id of the provider
   * @param retryAfter
   *   the delay that the provider asked for before the next attempt
+  * @param usage
+  *   the usage that the provider reported for the failed call. The record point of the usage
+  *   (`LanguageModel.callAndRecordUsage`) records it, because the provider bills these tokens also when the call fails
+  *   (upstream `_account_failed_call` in `dspy/clients/execution.py`).
   */
 final case class LmErrorDetails(
     model       : Option[String]         = None,
@@ -63,7 +67,8 @@ final case class LmErrorDetails(
     providerCode: Option[String]         = None,
     status      : Option[Int]            = None,
     requestId   : Option[String]         = None,
-    retryAfter  : Option[FiniteDuration] = None
+    retryAfter  : Option[FiniteDuration] = None,
+    usage       : Option[LmUsage]        = None
 )
 
 object LmErrorDetails:
@@ -97,6 +102,22 @@ object LmError:
     error match
       case lm: LmError => lm.details.retryAfter
       case _           => None
+
+  /** The usage that the provider reported for the failed call, if the error carries one ([[LmErrorDetails.usage]]). An
+    * error that is not an [[LmError]] has none.
+    */
+  def usage(error: DspyError): Option[LmUsage] =
+    error match
+      case lm: LmError => lm.details.usage
+      case _           => None
+
+  /** `error` with `usage` as the usage of the failed call ([[LmErrorDetails.usage]]). The usage replaces the usage that
+    * the error had. An error that is not an [[LmError]], and a `usage` of `None`, give `error` as it is.
+    */
+  def withUsage(error: DspyError, usage: Option[LmUsage]): DspyError =
+    (error, usage) match
+      case (lm: LmError, Some(value)) => lm.withDetails(lm.details.copy(usage = Some(value)))
+      case _                          => error
 
 /** The request failed before the provider returned a response: network, DNS, TLS, or a connection reset. */
 final case class LmTransportError(message: String, details: LmErrorDetails = LmErrorDetails.empty) extends LmError:

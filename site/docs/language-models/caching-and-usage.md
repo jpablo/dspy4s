@@ -40,6 +40,13 @@ The framework records the usage when a program calls a model
 `lm.stream(...)` in your code counts in no tracker. To count such a call, use
 `LanguageModel.callAndRecordUsage(lm, request)`.
 
+A failed call counts too when the provider reported a usage for it, because
+the provider bills these tokens. Examples are a stream that fails after its
+usage chunk, and a reply with a usage and no output. The LM error then carries
+the usage (`LmError.usage(error)`). When `ManagedLanguageModel` retries a call,
+the usage of the call is the total of each attempt that reported a usage. This
+rule applies to a successful call and to a failed call.
+
 The LM usage of a program result (`raw.lmUsage`) comes from the same records.
 `trackUsage` is on by default. With `trackUsage = Some(false)` in the context,
 the trackers get nothing, but each result still has its usage.

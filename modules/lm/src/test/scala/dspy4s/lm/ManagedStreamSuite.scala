@@ -270,3 +270,28 @@ class ManagedStreamSuite extends FunSuite:
     assertEquals(chunks.flatMap(_.usage), Vector(usage))
     assertEquals(tracker.usageData, Map.empty)
   }
+
+  // The usage of a streamed call is the total of each attempt that reported a usage (upstream `combine(results)`).
+
+  test("a retried attempt with a usage: the usage chunk of the last attempt and the stored response have the total") {
+    val failed           = Vector(LmChunk(usage = Some(usage)), LmChunk.failure(LmServerError("busy")))
+    val delegate         = ScriptedStreams(Vector(failed, complete))
+    val model            = managed(delegate, retry = twoRetries)
+    given RuntimeContext = RuntimeEnvironment.current
+
+    assertEquals(streamAll(model).flatMap(_.usage), Vector(usage.combine(usage)))
+    val stored = field(lmHistory.head, "usage")
+      .flatMap(DynamicValues.recordGet(_, "total_tokens"))
+      .flatMap(DynamicValues.asLong)
+    assertEquals(stored, Some(18L))
+  }
+
+  test("a retried attempt with a usage and a last attempt with no usage chunk: one more chunk has the usage") {
+    val failed           = Vector(LmChunk(usage = Some(usage)), LmChunk.failure(LmServerError("busy")))
+    val noUsage          = Vector(LmChunk(text = "Hel"), LmChunk(text = "lo", finishReason = Some("stop")))
+    val delegate         = ScriptedStreams(Vector(failed, noUsage))
+    val model            = managed(delegate, retry = twoRetries)
+    given RuntimeContext = RuntimeEnvironment.current
+
+    assertEquals(streamAll(model), noUsage :+ LmChunk(usage = Some(usage)))
+  }

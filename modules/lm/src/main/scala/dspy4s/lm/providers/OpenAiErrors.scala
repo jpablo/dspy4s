@@ -16,6 +16,7 @@ import dspy4s.core.contracts.LmServerError
 import dspy4s.core.contracts.LmStreamAssemblyError
 import dspy4s.core.contracts.LmTimeoutError
 import dspy4s.core.contracts.LmUnsupportedModelError
+import dspy4s.core.contracts.LmUsage
 import zio.blocks.schema.DynamicValue
 
 import java.time.DateTimeException
@@ -261,6 +262,15 @@ private[lm] object OpenAiErrors:
   /** The error for a stream that is not complete or not valid. */
   def streamAssembly(message: String, model: Option[String]): LmStreamAssemblyError =
     LmStreamAssemblyError(message, LmErrorDetails(model = model, provider = Some(provider)))
+
+  /** The error for a reply with no output, for example a reply that a content filter stopped. The details hold the
+    * model, the provider, and the usage of the reply: the provider can bill the prompt of such a reply.
+    */
+  def noOutputs(model: Option[String], usage: Option[LmUsage]): LmProviderResponseError =
+    LmProviderResponseError(
+      "Provider response does not contain any outputs",
+      LmErrorDetails(model = model, provider = Some(provider), usage = usage)
+    )
 
   /** Adds the model and the provider to an LM error that the transport returned. The transport is generic, so it does
     * not know them. A field that is already set stays. An error that is not an LM error passes unchanged.

@@ -4,8 +4,8 @@ import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.LmAuthError
+import dspy4s.core.contracts.LmProviderResponseError
 import dspy4s.core.contracts.LmRateLimitError
-import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.:=
@@ -366,10 +366,15 @@ class OpenAiLanguageModelSuite extends FunSuite:
     }
   }
 
-  test("a reply with no output is a ParseError") {
+  test("a reply with no output is a provider response error that is not transient") {
     val (model, _)       = recordingModel("""{"model": "openai/test", "choices": []}""")
     given RuntimeContext = RuntimeEnvironment.current
     model.call(LmRequest(model = "openai/test", messages = Vector(Message(MessageRole.User, Some("Q?"))))) match
-      case Left(error: ParseError) => assertEquals(error.message, "Provider response does not contain any outputs")
-      case other                   => fail(s"expected a ParseError, got $other")
+      case Left(error: LmProviderResponseError) =>
+        assertEquals(error.message, "Provider response does not contain any outputs")
+        assertEquals(error.details.model, Some("openai/test"))
+        assertEquals(error.details.provider, Some("openai"))
+        assertEquals(error.details.usage, None)
+        assert(!error.isTransient)
+      case other => fail(s"expected an LmProviderResponseError, got $other")
   }

@@ -1167,7 +1167,8 @@ chunk. The wrapper returns the typed error. Tests: `StreamingWrapperContractSuit
 - Tests: `OpenAiStreamGuardSuite`, `ManagedStreamSuite`, `StreamingCacheSuite`.
 
 **Open points (batch 11).** A managed stream that the caller closes early gets no history, usage, or cache entry.
-No check rejects an event after the end event. The usage of a retried attempt is not recorded. An outer
+No check rejects an event after the end event. The usage of a retried attempt is not recorded (closed on 2026-10-25:
+the usage of a call is the total of its attempts, also for a failure; see `FailedCallUsageSuite`). An outer
 `ManagedLanguageModel` reads a cached chunk of an inner one as a new response. The UPGRADE file lists the details.
 
 ---

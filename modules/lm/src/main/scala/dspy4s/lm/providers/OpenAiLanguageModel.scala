@@ -2,7 +2,6 @@ package dspy4s.lm.providers
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.lm.contracts.LmCapabilities
 import dspy4s.lm.contracts.LmChunk
@@ -94,7 +93,10 @@ final case class OpenAiLanguageModel(
 
   /** The response of the reply body `raw` on the wire of [[mode]]. A reply with an `error` object is the typed error of
     * its code, also with a success status ([[OpenAiErrors.fromReplyError]]). A reply with no output (no text and no
-    * tool call) is a `ParseError`. The usage and the model name come from the `usage` and `model` keys of the reply.
+    * tool call) is an [[dspy4s.core.contracts.LmProviderResponseError]] ([[OpenAiErrors.noOutputs]]), with the usage of
+    * the reply in its details: the provider can bill the prompt of such a reply, for example when a content filter
+    * stops it. The error is not transient, so a retry policy does not retry it. The usage and the model name come from
+    * the `usage` and `model` keys of the reply.
     *
     * @param requestModel
     *   the model of the request, for the details of an error
@@ -105,12 +107,13 @@ final case class OpenAiLanguageModel(
       case LmMode.Text      => ChatWire.textOutputs(raw, Some(requestModel))
       case LmMode.Responses => ResponsesWire.outputs(raw, Some(requestModel))
     outputs.flatMap { entries =>
-      if entries.isEmpty then Left(ParseError("lm", "Provider response does not contain any outputs"))
+      val usage = DynamicValues.recordGet(raw, WireKeys.usage).flatMap(DynamicValues.asRecord)
+        .map(OpenAiUsage.fromDynamic(_).toLmUsage)
+      if entries.isEmpty then Left(OpenAiErrors.noOutputs(Some(requestModel), usage))
       else
         Right(LmResponse(
           outputs = entries,
-          usage = DynamicValues.recordGet(raw, WireKeys.usage).flatMap(DynamicValues.asRecord)
-            .map(OpenAiUsage.fromDynamic(_).toLmUsage),
+          usage = usage,
           modelName = DynamicValues.recordGet(raw, WireKeys.model).flatMap(DynamicValues.asString),
           cacheHit = false
         ))

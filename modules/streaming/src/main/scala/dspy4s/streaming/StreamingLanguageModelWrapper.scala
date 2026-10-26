@@ -5,6 +5,7 @@ import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FieldChunk
 import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.LmError
 import dspy4s.core.contracts.LmUsage
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.ActivePredictContext
@@ -76,6 +77,10 @@ final class StreamingLanguageModelWrapper private (
     * response is the output of a [[dspy4s.lm.runtime.StreamAccumulator]] in the mode of the delegate, as in
     * [[ManagedLanguageModel]].
     *
+    * A failure chunk gives a `Left` with its error. When that error is an LM error with no usage, it gets the usage of
+    * the stream (the usage of the last usage chunk), so the record point counts the billed tokens of the failed call
+    * (upstream `_account_failed_call`).
+    *
     * A non-fatal exception, for example of the delegate when it opens or reads the stream, gives an
     * [[dspy4s.core.contracts.LmUnexpectedError]], as in [[ManagedLanguageModel]] (upstream
     * `error_boundary(..., unexpected=True)` in `dspy/clients/errors.py`). A fatal error goes up to the caller.
@@ -106,7 +111,7 @@ final class StreamingLanguageModelWrapper private (
       }
       (cached, streamError) match
         case (Some(response), _) => Right(response)
-        case (_, Some(failure))  => Left(failure)
+        case (_, Some(failure))  => Left(LmError.withUsage(failure, LmError.usage(failure).orElse(lastUsage)))
         case (None, None)        =>
           flush(ctx)
           Right(LmResponse(outputs = Vector(parts.output), usage = lastUsage))

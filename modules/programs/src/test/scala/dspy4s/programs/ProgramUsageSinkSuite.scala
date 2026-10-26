@@ -1,7 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.adapters.ChatAdapter
-import dspy4s.core.contracts.{DspyError, LmUsage, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, LmErrorDetails, LmServerError, LmUsage, RuntimeContext}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse}
 import dspy4s.lm.runtime.UsageTracking
@@ -37,6 +37,25 @@ class ProgramUsageSinkSuite extends FunSuite:
       }
       val result = prediction.fold(error => fail(error.message), identity)
       assertEquals(result.raw.lmUsage, Some(usage))
+      assertEquals(tracked.values.toVector, Vector(usage), tracked.toString)
+    }
+  }
+
+  /** A model that fails with an LM error that carries `usage` (upstream `_account_failed_call`). */
+  private final class Failing extends LanguageModel:
+    override val id: String   = "failing"
+    override val mode: LmMode = LmMode.Chat
+
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      Left(LmServerError("the server is busy", LmErrorDetails(usage = Some(usage))))
+
+  test("Predict with a model that fails: the user tracker has the usage of the failed call") {
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(Failing()), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext      = RuntimeEnvironment.current
+      val (prediction, tracked) = UsageTracking.withNewTracker { tracker =>
+        (Predict(Signature.fromString("question -> answer"))((question = "capital?")), tracker.totalUsage)
+      }
+      assert(prediction.isLeft, prediction.toString)
       assertEquals(tracked.values.toVector, Vector(usage), tracked.toString)
     }
   }

@@ -38,12 +38,13 @@ final class UsageTracker:
   *     it (upstream `dspy.track_usage`, `dspy/utils/usage_tracker.py`).
   *
   * The record point is the framework code that calls a model (`LanguageModel.callAndRecordUsage` in the lm module). It
-  * records the usage of each successful reply one time, with the model name of the request ([[record]]). Upstream
-  * records each LM call into `settings.usage_tracker` (`dspy/clients/execution.py`, `finalize`). The model itself does
-  * not record. Thus a model with no managed wrapper counts, and a model that calls a second model counts one time only.
-  * A direct `call` or `stream` of a model, also of `ManagedLanguageModel`, counts in no scope. A reply with no usage,
-  * for example a cache hit of `ManagedLanguageModel`, adds nothing. A call that fails gives no reply, so it adds
-  * nothing.
+  * records the usage of each model call one time, with the model name of the request ([[record]]): the usage of a
+  * successful reply, or the usage that the LM error of a failed call carries (`LmError.usage`). Upstream records each
+  * LM call into `settings.usage_tracker` (`dspy/clients/execution.py`, `finalize`), and the usage of a failed call too
+  * (`_account_failed_call`). The model itself does not record. Thus a model with no managed wrapper counts, and a model
+  * that calls a second model counts one time only. A direct `call` or `stream` of a model, also of
+  * `ManagedLanguageModel`, counts in no scope. A reply with no usage, for example a cache hit of
+  * `ManagedLanguageModel`, adds nothing. A call that fails adds nothing when its error carries no usage.
   *
   * A record adds the usage to each open scope of the thread: the scopes of the program calls and the scopes of the user
   * trackers. Thus a nested scope has the total of its own model calls, and each outer scope has them too, one time.
@@ -78,9 +79,9 @@ object UsageScope:
   def track[A](tracker: UsageTracker)(body: => A): A =
     open(Open(tracker, ofUser = true))(body)
 
-  /** Add the usage of one model call of the model `model` to each open scope of this thread. `None` (a reply with no
-    * usage) changes nothing. With `trackUsage = Some(false)` in the context, the scopes of the user trackers get
-    * nothing. With no open scope, the usage goes nowhere.
+  /** Add the usage of one model call of the model `model` to each open scope of this thread. The call can be a success
+    * or a failure. `None` (a call with no usage) changes nothing. With `trackUsage = Some(false)` in the context, the
+    * scopes of the user trackers get nothing. With no open scope, the usage goes nowhere.
     */
   def record(model: String, usage: Option[LmUsage])(using context: RuntimeContext): Unit =
     val toUsers = context.trackUsage.getOrElse(true)
