@@ -108,6 +108,21 @@ final case class RuntimeConfig(
       captureFailureTraces.forall(installed.captureFailureTraces.contains) &&
       callbackMetadata.forall(requested => installed.callbackMetadata.exists(_ eq requested))
 
+/** The language-model options and the rollout id of one extent of the execution. `BestOfN`, `Refine`, and
+  * `BootstrapFewShot` set them for an attempt ([[dspy4s.core.runtime.RuntimeEnvironment.withLmDefaults]]). They are the
+  * analog of upstream `lm.copy(...)` with `mod.set_lm(...)`, so they reach each predictor of the extent, also when a
+  * program builds a new call.
+  *
+  * @param options
+  *   the options of the model requests. The config of a predictor and a per-call config win over them.
+  * @param rolloutId
+  *   the rollout id of the model requests. A per-call rollout id wins over it.
+  */
+final case class LmDefaults(
+    options  : DynamicValue.Record = DynamicValue.Record.empty,
+    rolloutId: Option[Int]         = None
+) derives CanEqual
+
 /** Dynamic correlation scope for the current execution. Scope is restored when a `with*` boundary exits; it is not part
   * of the observable execution output captured by [[RuntimeDelta]].
   */
@@ -118,7 +133,11 @@ final case class RuntimeScope(
       * that starts inside that extent records no key in its trace entries, and the decision evidence of the extent
       * belongs to this key.
       */
-    predictor: Option[PredictorKey] = None
+    predictor: Option[PredictorKey] = None,
+    /** The options and the rollout id of the extent, the analog of upstream `lm.copy(...)` with `mod.set_lm(...)`.
+      * `PredictEngine` reads them under the config of a predictor and under a per-call config.
+      */
+    lmDefaults: Option[LmDefaults] = None
 ) derives CanEqual:
   /** The innermost open call scope's id: always the top of [[callStack]]. */
   def activeCallId: Option[String] = callStack.lastOption
@@ -129,13 +148,15 @@ final case class RuntimeScope(
   /** Fill each unset field from `defaults`. When `defaults` fills no field, the result is this value itself. */
   def fillFrom(defaults: RuntimeScope): RuntimeScope =
     val complete = (asyncTaskId.isDefined || defaults.asyncTaskId.isEmpty) &&
-      (callStack.nonEmpty || defaults.callStack.isEmpty) && (predictor.isDefined || defaults.predictor.isEmpty)
+      (callStack.nonEmpty || defaults.callStack.isEmpty) && (predictor.isDefined || defaults.predictor.isEmpty) &&
+      (lmDefaults.isDefined || defaults.lmDefaults.isEmpty)
     if complete then this
     else
       RuntimeScope(
         asyncTaskId = asyncTaskId.orElse(defaults.asyncTaskId),
         callStack = if callStack.nonEmpty then callStack else defaults.callStack,
-        predictor = predictor.orElse(defaults.predictor)
+        predictor = predictor.orElse(defaults.predictor),
+        lmDefaults = lmDefaults.orElse(defaults.lmDefaults)
       )
 
 /** The unit of execution context, partitioned into services, configuration, dynamic scope, and accumulated delta. It is

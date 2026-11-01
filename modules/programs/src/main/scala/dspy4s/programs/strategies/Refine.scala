@@ -20,16 +20,18 @@ import dspy4s.programs.contracts.Prediction
 
 import scala.compiletime.ops.int.+
 
-/** `Refine`: runs an inner program up to `n` times (varying `rolloutId` at `temperature=1.0`), keeps the highest-reward
-  * `Prediction[O]`, and short-circuits once `rewardFn` reaches `threshold` — the same selection surface as [[BestOfN]]
-  * — but, on each sub-threshold attempt that is not the last, it generates LM **advice** grounded in that attempt's
-  * trajectory and injects it as a `hint_` input into the next attempt via a [[Refine.HintInjectingAdapter]]. A port of
-  * DSPy 3.x's `dspy.Refine` (`OfferFeedback` iterative feedback loop).
+/** `Refine`: runs an inner program up to `n` times (each attempt has the temperature 1.0 and its own rollout id in
+  * `RuntimeScope.lmDefaults`, as in [[BestOfN]]), keeps the highest-reward `Prediction[O]`, and short-circuits once
+  * `rewardFn` reaches `threshold` — the same selection surface as [[BestOfN]] — but, on each sub-threshold attempt that
+  * is not the last, it generates LM **advice** grounded in that attempt's trajectory and injects it as a `hint_` input
+  * into the next attempt via a [[Refine.HintInjectingAdapter]]. A port of DSPy 3.x's `dspy.Refine` (`OfferFeedback`
+  * iterative feedback loop).
   *
   * The advice is produced by an [[RefineFeedback.signature OfferFeedback]] sub-program (a [[Predict]]) grounded in the
   * attempt's runtime trace plus the program I/O, the reward value, and the threshold. It is run with the ambient
-  * LM/adapter (NOT under the hint adapter), and yields a per-module advice map (component name -> advice) that is
-  * routed to the matching predictor of the next attempt via a [[Refine.HintInjectingAdapter]].
+  * LM/adapter (NOT under the hint adapter, and without the temperature and the rollout id of the attempt), and yields a
+  * per-module advice map (component name -> advice) that is routed to the matching predictor of the next attempt via a
+  * [[Refine.HintInjectingAdapter]].
   *
   * '''Per-module advice (parity with Python).''' OfferFeedback returns a JSON object `{componentName: advice}` keyed by
   * the inner program's named predictors ([[OptimizableStructure.inspectNamed]], the dspy4s analogue of

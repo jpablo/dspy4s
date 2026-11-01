@@ -483,7 +483,7 @@ the raw text of the error is the completion of the main LM. Two errors differ fr
 - A `ParseError` of the model, for example a provider reply that is not JSON, also gets that text. Upstream wraps only
   an `AdapterParseError`, and a model call does not raise it.
 
-## 20. The trace limit, and the failure budget of `BestOfN` and `Refine`
+## 20. The trace limit, and the failure budget and the controls of `BestOfN` and `Refine`
 
 **Convention.**
 
@@ -494,6 +494,19 @@ the raw text of the error is the completion of the main LM. Two errors differ fr
   gives a `Left`. Upstream checks `idx > fail_count`, which mixes the index of the attempt and the count. Upstream also
   lowers `self.fail_count` at each failure, so the lower value applies to all later calls of the same module.
 - A call with no successful attempt gives a `Left` with the last error. Upstream returns `None`.
+- The controls of an attempt are the temperature 1.0 and the rollout id of the attempt. They are in
+  `RuntimeScope.lmDefaults`, for the extent of the attempt. The port has no copy of the LM. Upstream sets them on a copy
+  (`lm.copy(rollout_id=rid, temperature=1.0)`, `mod.set_lm(lm_)`). `PredictEngine` reads them under the config of a
+  predictor and under a per-call config, so they stay under these two values as in upstream. They also reach each
+  predictor when a composite builds a new `ProgramCall`. A retry round of `BootstrapFewShot` uses the same field.
+- A predictor with a bound LM keeps its LM and gets the controls. In `BestOfN` and `Refine`, upstream `set_lm` replaces
+  each bound LM with a copy of one LM. In `BootstrapFewShot`, upstream sets the LM with `dspy.context(lm=lm)`, so a
+  predictor with a bound LM gets no rollout. The port gives the controls to this predictor too, because a repeat of the
+  same request adds nothing.
+- Inside a nested attempt, the critic of `Refine` and a reward function have the controls of the outer attempt. Upstream
+  gives them `dspy.settings.lm`, which does not have the controls.
+- A System One model rejects the temperature of an attempt, so an attempt on this model gives a `Left`. In upstream the
+  call also fails: `TypeSafe` has no `kwargs`, and `TypeSafe.copy` does not accept `temperature`.
 
 ## What this means in practice
 

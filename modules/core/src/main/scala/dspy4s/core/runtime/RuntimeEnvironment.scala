@@ -8,6 +8,7 @@ import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.HistoryLimit
 import dspy4s.core.contracts.HistoryRenderer
+import dspy4s.core.contracts.LmDefaults
 import dspy4s.core.contracts.PredictorKey
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeDelta
@@ -173,6 +174,19 @@ object RuntimeEnvironment:
   def withinPredictor[A](key: PredictorKey)(thunk: => A): A =
     withScopeChange(_.copy(predictor = Some(key)))((after, before) => after.copy(predictor = before.predictor))(thunk)
 
+  /** The options and the rollout id of the extent that runs on this thread, or `None` when no extent sets them. */
+  def activeLmDefaults: Option[LmDefaults] = current.scope.lmDefaults
+
+  /** Run `thunk` with `defaults` as the options and the rollout id of the language-model calls, then restore the
+    * previous values (the analog of upstream `lm.copy(...)` with `mod.set_lm(...)`). The change is on the overlay of
+    * this thread, because [[withInstalled]] keeps the scope of this thread and does not read the scope of the given
+    * context. Like [[withActiveCall]], this keeps the trace and the history that `thunk` accumulates.
+    */
+  def withLmDefaults[A](defaults: LmDefaults)(thunk: => A): A =
+    withScopeChange(_.copy(lmDefaults = Some(defaults)))((after, before) => after.copy(lmDefaults = before.lmDefaults))(
+      thunk
+    )
+
   /** Replace this thread's overlay context wholesale for the duration of `thunk`, restoring the previous overlay on
     * exit. The low-level primitive of [[isolatedAttempt]] and [[ContextPropagation.Captured.run]]. Because the restore
     * is wholesale, any state accumulated on the overlay inside the thunk (trace / history) does not outlive the scope.
@@ -206,11 +220,12 @@ object RuntimeEnvironment:
     * and the workers thus see one context. For example, a given context with only a language model gets the adapter of
     * the installed context, also for the parts that read the `using` value.
     *
-    * The helper keeps the dynamic scope of this thread (the open call scopes, the async task, and the predictor mark)
-    * and the trace and the history of this thread. On exit, it restores the services and the configuration of the
-    * previous context, but the trace and the history that `thunk` adds stay, also when `thunk` throws. Thus, unlike
-    * [[withContext]], the restore is not wholesale, and the output of the call reaches the caller as with no helper.
-    * The usage scopes and the evidence log have their own thread-local state, so the helper does not change them.
+    * The helper keeps the dynamic scope of this thread (the open call scopes, the async task, the predictor mark, and
+    * the LM defaults) and the trace and the history of this thread. On exit, it restores the services and the
+    * configuration of the previous context, but the trace and the history that `thunk` adds stay, also when `thunk`
+    * throws. Thus, unlike [[withContext]], the restore is not wholesale, and the output of the call reaches the caller
+    * as with no helper. The usage scopes and the evidence log have their own thread-local state, so the helper does not
+    * change them.
     *
     * The helper only runs `thunk` with the current context, with no install, in two cases: the services and the
     * configuration of `context` are the current ones (a reference check), or each field that `context` sets already has

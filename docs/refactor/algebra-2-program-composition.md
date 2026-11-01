@@ -87,7 +87,8 @@ bestOf(reward, threshold, failCount)(attempts) : M[Prediction[O]]            // 
 //   (A, trace, score) => Either[err, Option[AdapterRef]] returning the NEXT attempt's adapter override.
 
 selectBest(p, n, reward, threshold) : Program[I, O] => Program[I, O]   // bestOf over sampled attempts  [= BestOfN, DONE]
-//   n attempts varying rolloutId / temperature; ordered because early stopping and ties select the first match
+//   n attempts, each with the temperature 1.0 and its own rollout id in RuntimeScope.lmDefaults (not on the
+//   ProgramCall); ordered because early stopping and ties select the first match
 
 feedback(p, critic, n, reward, threshold) : Program[I, O] => Program[I, O]         // bestOf over a SEQUENTIAL stream  [= Refine, DONE]
 //   the carried hint is realized as the next attempt's adapter override (Refine: OfferFeedback advice routed

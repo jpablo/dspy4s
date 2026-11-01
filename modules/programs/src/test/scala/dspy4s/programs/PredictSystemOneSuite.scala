@@ -6,6 +6,7 @@ import dspy4s.core.contracts.{
   DspyError,
   DynamicValues,
   FieldSpec,
+  LmDefaults,
   RuntimeContext,
   SignatureLayout,
   TypeRef,
@@ -16,6 +17,7 @@ import dspy4s.core.decisions.{DecisionPlan, DecisionSettings}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{DecisionRequests, LanguageModel, LmMode, LmRequest, LmResponse}
 import dspy4s.lm.runtime.{CacheCapacity, InMemoryLmCache, ManagedLanguageModel}
+import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.strategies.DynamicPredict
 import munit.FunSuite
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
@@ -211,6 +213,35 @@ class PredictSystemOneSuite extends FunSuite:
     val lm     = FakeSystemOne()
     val tuned  = DynamicPredict(layout, config = DynamicValues.record("temperature" := 0.5))
     val result = run(lm)(tuned(DynamicValues.record("text" := "x")))
+    assert(result.left.exists(_.message.contains("temperature")), result.toString)
+    assertEquals(lm.requests.size, 0)
+  }
+
+  test("the rollout id of the scope reaches the decision request") {
+    val lm = FakeSystemOne()
+    val _  = RuntimeEnvironment.withLmDefaults(LmDefaults(rolloutId = Some(4)))(call(DynamicPredict(layout), lm))
+    assertEquals(lm.requests.map(_.rolloutId), Vector(Some(4)))
+  }
+
+  test("a per-call rollout id wins over the rollout id of the scope in the decision request") {
+    val lm = FakeSystemOne()
+    val _  = RuntimeEnvironment.withLmDefaults(LmDefaults(rolloutId = Some(4))) {
+      run(lm)(DynamicPredict(layout)(ProgramCall(DynamicValues.record("text" := "x"), rolloutId = Some(9))))
+    }
+    assertEquals(lm.requests.map(_.rolloutId), Vector(Some(9)))
+  }
+
+  // Upstream: `TypeSafe` has no `kwargs`, so `BestOfN.forward` raises, and `TypeSafe.copy(temperature=...)` raises. The
+  // port gives the same result as a `Left`: the temperature of an attempt reaches the decision path, which rejects it.
+  test("an attempt of BestOfN on a System One model fails on its temperature, before the request") {
+    val lm   = FakeSystemOne()
+    val best = BestOfN[DynamicPredict, DynamicValue.Record, DynamicValue.Record](
+      DynamicPredict(layout),
+      AttemptCount(1),
+      (_, _) => 0.0,
+      threshold = 1.0
+    )
+    val result = run(lm)(best(DynamicValues.record("text" := "x")))
     assert(result.left.exists(_.message.contains("temperature")), result.toString)
     assertEquals(lm.requests.size, 0)
   }

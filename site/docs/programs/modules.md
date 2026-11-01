@@ -47,7 +47,7 @@ the result, and repeats until it has an answer. It has its own page,
 
 Two modules wrap another module to improve its output against a reward function:
 
-- `BestOfN` samples several completions in parallel and keeps the best one.
+- `BestOfN` samples several completions, one after the other, and keeps the best one.
 - `Refine` does the same sequentially, feeding each attempt's score back in.
 
 Both take a reward function `(input, prediction) => Double`:

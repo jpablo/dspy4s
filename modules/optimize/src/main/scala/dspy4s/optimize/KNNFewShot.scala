@@ -65,5 +65,5 @@ final class KNNFewShotProgram[P: {OptimizableStructure, ProgramRunner}] private[
     for
       neighbors <- knn.retrieve(call.input)
       report    <- new BootstrapFewShot[P](bootstrapConfig).compile(student, neighbors, teacher)
-      result    <- summon[ProgramRunner[P]].run(report.bestProgram, call.input)
+      result    <- summon[ProgramRunner[P]].run(report.bestProgram, call)
     yield result

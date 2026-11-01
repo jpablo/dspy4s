@@ -229,11 +229,12 @@ Resolution and option merging follow explicit precedence rules:
 | Concern | Highest precedence → lowest precedence |
 |---|---|
 | Language model | `predict.withLm(model)` / `lm = Some(model)` → ambient `RuntimeContext` model |
-| Request option | per-call `ProgramCall.config` → module `Predict.config` → adapter-contributed option |
+| Request option | per-call `ProgramCall.config` → module `Predict.config` → options of `RuntimeScope.lmDefaults` → adapter-contributed option |
+| Rollout id | per-call `ProgramCall.rolloutId` → rollout id of `RuntimeScope.lmDefaults` |
 | Adapter | resolved by `ProgramRuntime`, normally from the ambient `RuntimeContext` |
 
 Both `withLm` and request configuration are immutable. `withLm` returns a copy; a per-call config changes only that
-invocation.
+invocation. `RuntimeScope.lmDefaults` holds the temperature and the rollout id of an attempt of `BestOfN` and `Refine`.
 
 ## Failure and observability semantics
 

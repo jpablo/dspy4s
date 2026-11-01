@@ -46,7 +46,7 @@ class TypedBestOfNSuite extends FunSuite:
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
     DynamicValues.recordFromEntries(entries)
 
-  /** A program stub returning scripted `Prediction[Cand]`s, tracking call count + the rolloutIds it saw. */
+  /** A program stub returning scripted `Prediction[Cand]`s, tracking call count + the rollout ids of its scope. */
   private final class TypedStub(results: Vector[Either[DspyError, Prediction[Cand]]])
       extends Module[Q, Cand]:
     val rolloutIds: ArrayBuffer[Int]                                                                                = ArrayBuffer.empty
@@ -56,7 +56,7 @@ class TypedBestOfNSuite extends FunSuite:
     override protected val lifecycle: ModuleLifecycle[Q]                                                            = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Q])(using RuntimeContext): Either[DspyError, Prediction[Cand]] =
       calls.incrementAndGet()
-      rolloutIds += call.rolloutId.getOrElse(-1)
+      rolloutIds += summon[RuntimeContext].scope.lmDefaults.flatMap(_.rolloutId).getOrElse(-1)
       results(Math.min(counter.getAndIncrement(), results.size - 1))
 
   private def candidate(answer: String, score: Double): Prediction[Cand] =

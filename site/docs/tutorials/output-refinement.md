@@ -13,8 +13,8 @@ For a short introduction to these two modules, see [Modules](../programs/modules
 --8<-- "tutorials/output_refinement/BestOfNAndRefine.scala:best-of-n"
 ```
 
-`BestOfN` samples `n` completions from the inner program in parallel and returns the
-one with the highest reward. The reward is `(input, prediction) => Double`. Because the
+`BestOfN` samples up to `n` completions from the inner program, one after the other, and
+returns the one with the highest reward. The reward is `(input, prediction) => Double`. Because the
 inner program is a `ChainOfThought("question -> answer")`, its prediction carries the
 augmented output `(reasoning, answer)`, so the reward reads `pred.output.answer`. The
 `threshold` lets sampling stop early: once a completion scores at or above it, that

@@ -11,6 +11,7 @@ import dspy4s.programs.retrievers.NeighborCount
 import dspy4s.programs.retrievers.NonEmptyTrainset
 import dspy4s.programs.contracts.ProgramCall
 import munit.FunSuite
+import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -42,11 +43,13 @@ class KNNFewShotSuite extends FunSuite:
     */
   private final class ScriptedLm extends LanguageModel:
     val prompts: ArrayBuffer[String]                                                           = ArrayBuffer.empty
+    val options: ArrayBuffer[DynamicValue.Record]                                              = ArrayBuffer.empty
     override val id: String                                                                    = "scripted-knn"
     override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       val full = request.messages.flatMap(_.text).mkString("\n")
       prompts += full
+      options += request.options
       val question = extractLastQuestion(full)
       val answer   = gold.getOrElse(question, if full.contains("a1") then "guided" else "unguided")
       Right(LmResponse(outputs = Vector(LmOutput(text = s"[[ ## answer ## ]]\n$answer\n\n[[ ## completed ## ]]"))))
@@ -86,6 +89,27 @@ class KNNFewShotSuite extends FunSuite:
 
       // Bootstrap ran the teacher on exactly the 2 neighbors before the final call.
       assertEquals(lm.prompts.size, 3)
+    }
+  }
+
+  // Upstream `KNNFewShot`: `compiled_student(**kwargs)`, so `config` reaches the compiled program.
+  test("the per-call config reaches the compiled program") {
+    val lm = new ScriptedLm
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+
+      val compiled =
+        new KNNFewShot[DynamicPredict](k = NeighborCount(2), trainset, embedder).compile(student).toOption.get
+      val result = compiled(ProgramCall(
+        input = DynamicValues.record("question" := "query"),
+        config = DynamicValues.record("temperature" := 0.3)
+      ))
+
+      assert(result.isRight, result.toString)
+      assertEquals(
+        DynamicValues.recordGet(lm.options.last, "temperature").map(DynamicValues.toAny),
+        Some(0.3)
+      )
     }
   }
 

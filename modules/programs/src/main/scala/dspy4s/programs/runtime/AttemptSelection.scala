@@ -1,6 +1,9 @@
 package dspy4s.programs.runtime
 
+import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.LmDefaults
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeDelta
 import dspy4s.core.contracts.RuntimeError
@@ -8,10 +11,10 @@ import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.AttemptCount
 import dspy4s.programs.FailureCount
-import dspy4s.programs.compose.{Mode, mode}
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.Prediction
 import dspy4s.programs.contracts.ProgramCall
+import zio.blocks.schema.DynamicValue
 
 import scala.util.control.NonFatal
 
@@ -29,15 +32,18 @@ import scala.util.control.NonFatal
   * hint adapter of the attempt. The critic call of the feedback step stays outside the isolation, as upstream, so its
   * trace reaches the caller.
   *
+  * The temperature and the rollout id of an attempt of [[sample]] are in `RuntimeScope.lmDefaults`, only for the extent
+  * of the attempt. The reward and the critic run outside that extent.
+  *
   * The usage scope of the call is not isolated: the model calls of each attempt, of each reward, and of each feedback
   * count in the usage of the result of the caller (decision D9 of UPGRADE-3.2.1-to-3.4.0). The reducer does not change
   * the usage of the result that it keeps; `Module.apply` of the caller sets the total.
   *
   * The two combinators differ in the state carried between attempts:
   *
-  *   - '''selectBest''' (= [[dspy4s.programs.strategies.BestOfN]]) passes no `feedback`: attempts vary only by
-  *     `rolloutId` / `config`. Execution is still ordered because threshold short-circuiting and ties prefer earlier
-  *     attempts.
+  *   - '''selectBest''' (= [[dspy4s.programs.strategies.BestOfN]]) passes no `feedback`: attempts vary only by the
+  *     rollout id of `RuntimeScope.lmDefaults`. Execution is still ordered because threshold short-circuiting and ties
+  *     prefer earlier attempts.
   *   - '''feedback''' (sequential stream, = [[dspy4s.programs.strategies.Refine]]) passes a `feedback` hook: after a
   *     sub-threshold, non-last attempt it inspects that attempt (value + trace + score) and produces the context the
   *     NEXT attempt runs under (Refine's context has the `hint_`-injecting adapter), making the stream order-dependent.
@@ -57,8 +63,8 @@ object AttemptSelection:
     * `threshold`. `label` names the loop in the no-success error.
     *
     * @param runAttempt
-    *   builds and runs attempt `idx` under the isolated [[RuntimeContext]] supplied here (the caller varies `rolloutId`
-    *   / `config` by index).
+    *   builds and runs attempt `idx` under the isolated [[RuntimeContext]] supplied here (the caller varies the attempt
+    *   by index, for example with the rollout id of [[sample]]).
     * @param reward
     *   scores a successful attempt, in an isolated context from the base context of the loop; a `Left` charges the
     *   failure budget and the reduction continues with the best-so-far retained (upstream parity: reward_fn exceptions
@@ -121,9 +127,17 @@ object AttemptSelection:
         Right(kept.value)
       case None => Left(lastError.getOrElse(RuntimeError(label, "No successful predictions were produced")))
 
-  /** [[bestOf]] over `module`: each attempt runs `call` at temperature 1.0 with its own rollout id, from the rollout id
-    * of `call`. `rewardFn` scores an attempt, and a thrown exception is a reward failure ([[guardedReward]]). `label`
-    * names the loop in the errors.
+  /** [[bestOf]] over `module`: each attempt runs `call` at temperature 1.0 with its own rollout id. Both are in
+    * `RuntimeScope.lmDefaults`, as upstream sets them on a copy of the LM (`lm.copy(rollout_id=rid, temperature=1.0)`,
+    * `mod.set_lm(lm_)`). Thus they reach each predictor of the attempt, and they stay under the config of a predictor
+    * and under a per-call config.
+    *
+    * The first rollout id is the rollout id of `call`, else the rollout id of the enclosing `LmDefaults`, else 0
+    * (upstream `lm.kwargs.get("rollout_id", 0)`). Thus a nested attempt starts at the rollout id of the outer attempt.
+    * The attempt runs with no rollout id on the call, because a per-call rollout id wins over the scope.
+    *
+    * `rewardFn` scores an attempt, and a thrown exception is a reward failure ([[guardedReward]]). `label` names the
+    * loop in the errors.
     */
   private[programs] def sample[I, O](
       module   : Module[I, O],
@@ -135,9 +149,16 @@ object AttemptSelection:
       label    : String,
       feedback : Option[Feedback[Prediction[O]]] = None
   ): Either[DspyError, Prediction[O]] =
-    val rolloutStart = call.rolloutId.getOrElse(0)
+    val enclosing    = RuntimeEnvironment.activeLmDefaults
+    val rolloutStart = call.rolloutId.orElse(enclosing.flatMap(_.rolloutId)).getOrElse(0)
+    val options      = DynamicValues.mergeRecords(
+      enclosing.fold(DynamicValue.Record.empty)(_.options),
+      DynamicValues.record("temperature" := 1.0d)
+    )
+    val attemptCall = call.copy(rolloutId = None)
     bestOf[Prediction[O]](n, threshold, failCount, label)(
-      runAttempt = idx => module.mode(Mode.temperature(1.0d) ++ Mode.rolloutId(rolloutStart + idx))(call),
+      runAttempt = idx =>
+        RuntimeEnvironment.withLmDefaults(LmDefaults(options, Some(rolloutStart + idx)))(module(attemptCall)),
       reward = prediction => guardedReward(label)(rewardFn(call.input, prediction)),
       feedback = feedback
     )

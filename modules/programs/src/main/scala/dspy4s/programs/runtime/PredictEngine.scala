@@ -9,6 +9,7 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.LenientValues
+import dspy4s.core.contracts.LmDefaults
 import dspy4s.core.contracts.PythonText
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
@@ -47,7 +48,8 @@ private[dspy4s] final case class PredictEngine(
     outputJsonSchema: Option[DynamicValue.Record] = None,
     /** Module-level LM option bag, the analogue of Python's `dspy.Predict(signature, **config)` `self.config`. Merged
       * *under* the per-call [[ProgramCall.config]] in [[requestOptions]] (per-call keys win on collision), so it
-      * supplies defaults a call may override.
+      * supplies defaults a call may override. It is merged *over* the options of `RuntimeScope.lmDefaults`, so it wins
+      * over the temperature of an attempt of `BestOfN`.
       */
     config: DynamicValue.Record,
     /** Optional per-module bound LM (Python's `set_lm`/`get_lm`). When set, it is used in preference to the ambient
@@ -76,10 +78,14 @@ private[dspy4s] final case class PredictEngine(
   private lazy val decisionPlan: Either[DspyError, DecisionPlan]  = DecisionPlan.of(layout, decisions)
   private lazy val systemOnePlan: Either[DspyError, DecisionPlan] = DecisionPlan.forSystemOne(layout, decisions)
 
-  def execute(call: ProgramCall[DynamicValue.Record])(using RuntimeContext): Either[DspyError, RawPrediction] =
+  def execute(call: ProgramCall[DynamicValue.Record])(using context: RuntimeContext): Either[DspyError, RawPrediction] =
+    // `Module.apply` gives the effective context, whose scope is the scope of this thread.
+    val lmDefaults = context.scope.lmDefaults
+    val rolloutId  = call.rolloutId.orElse(lmDefaults.flatMap(_.rolloutId))
     ActivePredictContext.withActive(moduleName, layout) {
       lm.fold(runtime.resolveModel)(Right(_)).flatMap { model =>
         warnOnInputMismatch(call)
+        val options = requestOptions(call, model, lmDefaults)
         if model.supportsDecisionRequests then
           for
             plan   <- systemOnePlan
@@ -90,8 +96,8 @@ private[dspy4s] final case class PredictEngine(
                         moduleName,
                         model,
                         call.input,
-                        requestOptions(call, model),
-                        call.rolloutId
+                        options,
+                        rolloutId
                       )
             prediction <- buildPrediction(Vector(values), Vector.empty)
           yield prediction
@@ -99,7 +105,7 @@ private[dspy4s] final case class PredictEngine(
           for
             base       <- runtime.resolveAdapter
             adapter    <- DecisionAdapter.resolve(base, decisionPlan, layout, nestedDecisionFields, moduleName, model)
-            answer     <- AdapterCall.run(adapter, model, buildInvocation(call, model))
+            answer     <- AdapterCall.run(adapter, model, buildInvocation(call, model, options, rolloutId))
             _           = answer.parsed.map(_.evidence).foreach(DecisionAdapter.recordEvidence(moduleName, layout, _))
             prediction <- buildPrediction(
                             answer.parsed.map(_.values),
@@ -109,7 +115,12 @@ private[dspy4s] final case class PredictEngine(
       }
     }
 
-  private def buildInvocation(call: ProgramCall[DynamicValue.Record], model: LanguageModel): AdapterInvocation =
+  private def buildInvocation(
+      call     : ProgramCall[DynamicValue.Record],
+      model    : LanguageModel,
+      options  : DynamicValue.Record,
+      rolloutId: Option[Int]
+  ): AdapterInvocation =
     AdapterInvocation(
       layout = layout,
       demos = demos,
@@ -118,24 +129,39 @@ private[dspy4s] final case class PredictEngine(
       tools = tools,
       request = LmRequest(
         model = model.id,
-        options = requestOptions(call, model),
-        rolloutId = call.rolloutId
+        options = options,
+        rolloutId = rolloutId
       )
     )
 
-  /** The options of the model request: [[config]] under the per-call config, with the temperature rule of upstream
-    * `_forward_preprocess` (`dspy/predict/predict.py`). When the temperature is not set or is at most 0.15, and `n` is
-    * above 1, the temperature becomes 0.7 to keep randomness. Each number comes from the options, else from the
-    * defaults of `model` ([[LanguageModel.defaultOptions]]). As with the Python `or`, a value of 0 counts as not set.
+  /** The options of the model request: the options of `lmDefaults`, then [[config]], then the per-call config. A later
+    * record wins. `lmDefaults` is the analog of the kwargs of an upstream LM copy (`lm.copy(temperature=1.0)`).
+    *
+    * The temperature rule of upstream `_forward_preprocess` (`dspy/predict/predict.py`) applies: when the temperature
+    * is not set or is at most 0.15, and `n` is above 1, the temperature becomes 0.7 to keep randomness. Each number
+    * comes from the merge of [[config]] and the per-call config, else from `lmDefaults`, else from the defaults of
+    * `model` ([[LanguageModel.defaultOptions]]; for `n`, also its `num_generations`). As with the Python `or`, a value
+    * of 0 counts as not set at each step. When the rule does not start, the merged options go out unchanged, so a
+    * config temperature of 0 stays 0 in an attempt.
     */
-  private def requestOptions(call: ProgramCall[DynamicValue.Record], model: LanguageModel): DynamicValue.Record =
+  private def requestOptions(
+      call      : ProgramCall[DynamicValue.Record],
+      model     : LanguageModel,
+      lmDefaults: Option[LmDefaults]
+  ): DynamicValue.Record =
     def number(record: DynamicValue.Record, key: String): Option[Double] =
       DynamicValues.recordGet(record, key).flatMap(LenientValues.toDouble).filter(_ != 0.0)
 
-    val options     = DynamicValues.mergeRecords(config, call.config)
-    val defaults    = model.defaultOptions
-    val temperature = number(options, "temperature").orElse(number(defaults, "temperature"))
-    val generations = number(options, "n").orElse(number(defaults, "n")).orElse(number(defaults, "num_generations"))
+    val own       = DynamicValues.mergeRecords(config, call.config)
+    val fromScope = lmDefaults.fold(DynamicValue.Record.empty)(_.options)
+    val fromModel = model.defaultOptions
+
+    def read(key: String): Option[Double] =
+      number(own, key).orElse(number(fromScope, key)).orElse(number(fromModel, key))
+
+    val options     = DynamicValues.mergeRecords(fromScope, own)
+    val temperature = read("temperature")
+    val generations = read("n").orElse(number(fromModel, "num_generations"))
     if temperature.forall(_ <= 0.15) && generations.exists(_ > 1) then
       DynamicValues.mergeRecords(options, DynamicValues.record("temperature" := 0.7))
     else options

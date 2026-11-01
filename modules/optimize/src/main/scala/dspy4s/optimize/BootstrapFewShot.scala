@@ -12,6 +12,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ErrorLimit
+import dspy4s.core.contracts.LmDefaults
 import dspy4s.core.data.Example
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
@@ -22,6 +23,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.optimize.contracts.CandidateProgram
 import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.optimize.contracts.Teleprompter
+
 import zio.blocks.schema.DynamicValue
 
 import scala.annotation.tailrec
@@ -48,8 +50,9 @@ final case class BootstrapFewShotConfig(
   *   1. '''Bootstrap.''' The teacher runs on the trainset examples, in order, until `maxBootstrappedDemos` examples
   *      pass. For the run of an example, the teacher does not have that example in its demos. An example passes when
   *      the run is successful and the metric accepts the prediction. The metric receives the trace of the run. An
-  *      example that does not pass gets up to `maxRounds` runs. Round 0 is the plain call. A later round `r` sends
-  *      `rolloutId = r` and `temperature = 1.0`, so the model does not give the same result again.
+  *      example that does not pass gets up to `maxRounds` runs. Round 0 is the plain call. A later round `r` runs with
+  *      the rollout id `r` and the temperature 1.0 in `RuntimeScope.lmDefaults`, so the model does not give the same
+  *      result again.
   *   1. '''Demos for each predictor.''' An example that passes gives one bootstrapped demo to each predictor that ran:
   *      the inputs and the outputs of the trace entry of that predictor. The optimizer finds the entries of a predictor
   *      by the predictor key (`PredictorTraces`, decision D2). A predictor that ran more than one time in one example
@@ -74,8 +77,12 @@ final case class BootstrapFewShotConfig(
   *     instructions. Thus a teacher can have other instructions.
   *   - '''Random numbers.''' Python uses `random.Random(0)` and a hash of the demos. dspy4s uses `scala.util.Random`
   *     with `seed`. A run is repeatable for a seed, but the choices are not equal to the choices of Python.
-  *   - '''Retry rounds.''' Python makes a copy of the configured LM with the new rollout id and temperature. dspy4s
-  *     sends the two values in the [[ProgramCall]], and they have priority over the configuration of a predictor.
+  *   - '''Retry rounds.''' Python makes a copy of the configured LM with the new rollout id and temperature, and sets
+  *     it with `dspy.context(lm=lm)`. dspy4s has no copy of the LM. It sets the two values in
+  *     `RuntimeScope.lmDefaults`, under the configuration of a predictor and under a per-call config. In Python, a
+  *     predictor with a bound LM keeps its LM and gets no rollout. dspy4s gives the two values to each predictor,
+  *     because a repeat of the same request adds nothing. The metric has the two values, because it runs in the
+  *     isolated context of the run. Python runs the metric outside `dspy.context(lm=lm)`.
   *   - '''Errors.''' Python raises the last exception again. dspy4s returns a `RuntimeError` with the message of the
   *     last error.
   *   - '''Report.''' `compile` returns an [[OptimizationReport]] with one candidate. The metadata of the candidate
@@ -246,7 +253,7 @@ final class BootstrapFewShot[P: {OptimizableStructure, ProgramRunner}](
         given RuntimeContext = RuntimeEnvironment.current
         // The metric runs in the isolated context of the run (Python: inside `dspy.context(trace=[])`), so the trace
         // and the history of an LM-judged metric do not reach the caller's context.
-        TracedRun.runWith(withoutDemo(teacher, example), teacherCall(example, round)) { (result, trace) =>
+        TracedRun.runWith(withoutDemo(teacher, example), ProgramCall(example.inputs)) { (result, trace) =>
           result match
             case Left(error)       => Right(Attempt.Failed(error.message))
             case Right(prediction) =>
@@ -255,10 +262,11 @@ final class BootstrapFewShot[P: {OptimizableStructure, ProgramRunner}](
                 accepts(example, prediction, trace) match
                   case Left(error)  => Attempt.Failed(error.message)
                   case Right(false) => Attempt.Rejected
-                  case Right(true)  =>
-                    Attempt.Accepted(entries.map(group => BootstrapFewShot.chooseDemo(group.map(demoOf), config.seed)))
+                  case Right(true)  => Attempt.Accepted(
+                      entries.map(group => BootstrapFewShot.chooseDemo(group.map(demoOf), config.seed))
+                    )
               }
-        }
+        }(using roundRunner(round), summon[RuntimeContext])
       }
     catch
       case NonFatal(error) => Right(Attempt.Failed(DspyError.messageOf(error)))
@@ -270,13 +278,24 @@ final class BootstrapFewShot[P: {OptimizableStructure, ProgramRunner}](
     def same(demo: Example): Boolean = demo.augmented == example.augmented && demo.values.equals(example.values)
     ps.replace(teacher, ps.read(teacher).map(leaf => leaf.copy(demos = leaf.demos.filterNot(same))))
 
-  /** Round 0 is the plain call. A later round sends a new rollout id and the temperature 1.0, so the cache gives no
-    * stored result and the model gives a different trace (Python: `lm.copy(rollout_id=round_idx, temperature=1.0)`).
-    * The per-call config has priority over the config of a predictor.
+  /** The runner of the program in a round. Round 0 runs the program as it is. A later round runs the program with a new
+    * rollout id and the temperature 1.0 in `RuntimeScope.lmDefaults`, so the cache gives no stored result and the model
+    * gives a different trace (Python: `lm.copy(rollout_id=round_idx, temperature=1.0)`). The two values reach each
+    * predictor, also when the program builds a new call. The config of a predictor and a per-call config have priority
+    * over them. The values end with the program, so an LM-judged metric does not get them (Python: the metric runs
+    * outside `dspy.context(lm=lm)`).
     */
-  private def teacherCall(example: Example, round: Int): ProgramCall[DynamicValue.Record] =
-    if round == 0 then ProgramCall(example.inputs)
-    else ProgramCall(example.inputs, config = DynamicValues.record("temperature" := 1.0), rolloutId = Some(round))
+  private def roundRunner(round: Int): ProgramRunner[P] =
+    val runner = summon[ProgramRunner[P]]
+    if round == 0 then runner
+    else
+      new ProgramRunner[P]:
+        def run(program: P, call: ProgramCall[DynamicValue.Record])(using
+            RuntimeContext
+        ): Either[DspyError, RawPrediction] =
+          RuntimeEnvironment.withLmDefaults(LmDefaults(DynamicValues.record("temperature" := 1.0), Some(round))) {
+            runner.run(program, call)
+          }
 
   private def accepts(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry])(using
       RuntimeContext

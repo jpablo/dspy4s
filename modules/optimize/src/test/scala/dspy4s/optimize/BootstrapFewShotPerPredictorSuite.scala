@@ -5,6 +5,7 @@ import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ErrorLimit
+import dspy4s.core.contracts.LmDefaults
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
@@ -48,6 +49,19 @@ object TwoStage:
       program.drafter(call).flatMap { drafted =>
         val draft = DynamicValues.recordGet(drafted.output, "draft").getOrElse(DynamicValue.Null)
         program.answerer(call.mapInput(_ => call.input.updated("draft", draft))).map(_.raw)
+      }
+
+/** Like [[TwoStage]], but each predictor gets a new call, so the run does not pass the controls of its call along. */
+final case class NewCallStage(drafter: DynamicPredict, answerer: DynamicPredict)
+
+object NewCallStage:
+  given ProgramRunner[NewCallStage] with
+    def run(program: NewCallStage, call: ProgramCall[DynamicValue.Record])(using
+        RuntimeContext
+    ): Either[DspyError, RawPrediction] =
+      program.drafter(ProgramCall(call.input)).flatMap { drafted =>
+        val draft = DynamicValues.recordGet(drafted.output, "draft").getOrElse(DynamicValue.Null)
+        program.answerer(ProgramCall(call.input.updated("draft", draft))).map(_.raw)
       }
 
 /** Like [[TwoStage]], but the drafter runs two times in each run. */
@@ -112,6 +126,16 @@ class BootstrapFewShotPerPredictorSuite extends FunSuite:
             s"[[ ## answer ## ]]\n$answer\n\n[[ ## completed ## ]]"
           else "[[ ## draft ## ]]\na draft\n\n[[ ## completed ## ]]"
         Right(LmResponse(outputs = Vector(LmOutput(text = text))))
+
+  /** The metric `exactAnswer`, which records the controls that an LM call of the metric would get. */
+  private final class ControlsRecordingMetric extends Metric:
+    val seen: ArrayBuffer[Option[LmDefaults]] = ArrayBuffer.empty
+    override def name: String                 = "controls"
+    override def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry])(using
+        context: RuntimeContext
+    ): Either[DspyError, Double] =
+      val _ = seen.synchronized(seen += RuntimeEnvironment.current.scope.lmDefaults)
+      exactAnswer.score(example, prediction, trace)
 
   /** Accepts each run and records how many predictor entries the trace has. */
   private final class TraceRecordingMetric extends Metric:
@@ -228,6 +252,57 @@ class BootstrapFewShotPerPredictorSuite extends FunSuite:
       Vector(Some(1.0))
     )
     assertEquals(compiled.answerer.demos.count(_.augmented), 1)
+  }
+
+  // Upstream `_bootstrap_one_example`: `lm.copy(rollout_id=round_idx, temperature=1.0)` in `dspy.context(lm=lm)`.
+  test("a retry round reaches a program that builds a new call for each predictor") {
+    val lm      = new StageLm(rightOnlyOnRetry = true)
+    val student = NewCallStage(twoStage.drafter, twoStage.answerer)
+    val config  = BootstrapFewShotConfig(
+      metric = Some(exactAnswer),
+      maxBootstrappedDemos = DemoCount(1),
+      maxLabeledDemos = DemoCount(0),
+      maxRounds = RoundCount(2)
+    )
+    val compiled = compile(student, trainset(1), config, lm).toOption.get.bestProgram
+
+    assertEquals(compiled.answerer.demos.count(_.augmented), 1)
+    val retries = lm.requests.toVector.filter(_.rolloutId.isDefined)
+    assertEquals(retries.size, 2)
+    assertEquals(retries.map(_.rolloutId).distinct, Vector(Some(1)))
+  }
+
+  // Upstream runs the metric inside `dspy.context(trace=[])`, but outside `dspy.context(lm=lm)`, so an LM-judged metric
+  // gets the plain LM (`dspy/teleprompt/bootstrap.py`, `_bootstrap_one_example`).
+  test("the metric of a retry round does not have the controls of the round") {
+    val lm     = new StageLm(rightOnlyOnRetry = true)
+    val metric = new ControlsRecordingMetric
+    val config = BootstrapFewShotConfig(
+      metric = Some(metric),
+      maxBootstrappedDemos = DemoCount(1),
+      maxLabeledDemos = DemoCount(0),
+      maxRounds = RoundCount(2)
+    )
+    assert(compile(twoStage, trainset(1), config, lm).isRight)
+    assert(lm.requests.exists(_.rolloutId.isDefined), "the second round must run")
+    assertEquals(metric.seen.toVector, Vector(None, None))
+  }
+
+  test("the temperature of a retry round stays under the config of a predictor") {
+    val lm      = new StageLm(rightOnlyOnRetry = true)
+    val student = twoStage.copy(answerer = twoStage.answerer.copy(config = DynamicValues.record("temperature" := 0.2)))
+    val config  = BootstrapFewShotConfig(
+      metric = Some(exactAnswer),
+      maxBootstrappedDemos = DemoCount(1),
+      maxLabeledDemos = DemoCount(0),
+      maxRounds = RoundCount(2)
+    )
+    val _ = compile(student, trainset(1), config, lm).toOption.get
+
+    val temperatures = lm.requests.toVector.filter(_.rolloutId.isDefined).map { request =>
+      DynamicValues.recordGet(request.options, "temperature").map(DynamicValues.toAny)
+    }
+    assertEquals(temperatures, Vector(Some(1.0), Some(0.2)))
   }
 
   test("a teacher with no demos gets labeled demos first, without the current example") {

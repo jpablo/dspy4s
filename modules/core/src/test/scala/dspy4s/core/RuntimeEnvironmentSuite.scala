@@ -6,6 +6,7 @@ import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.HistoryLimit
+import dspy4s.core.contracts.LmDefaults
 import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.ThreadCount
@@ -214,6 +215,22 @@ class RuntimeEnvironmentSuite extends FunSuite:
     val key     = dspy4s.core.contracts.PredictorKey.from("predict", layout)
     val context = RuntimeContext().withScope(dspy4s.core.contracts.RuntimeScope(predictor = Some(key)))
     assert(context.copy(disableHistory = Some(true)).scope.withinPredictor, "copy lost scope.withinPredictor")
+  }
+
+  test("withLmDefaults sets the scope of its extent, a nested settings block keeps it, and the exit restores it") {
+    val outer = LmDefaults(DynamicValues.record("temperature" := 1.0), Some(3))
+    val inner = LmDefaults(rolloutId = Some(4))
+    RuntimeEnvironment.withLmDefaults(outer) {
+      assertEquals(RuntimeEnvironment.activeLmDefaults, Some(outer))
+      RuntimeEnvironment.withSettings(RuntimeContext(disableHistory = Some(true))) {
+        assertEquals(RuntimeEnvironment.activeLmDefaults, Some(outer))
+      }
+      RuntimeEnvironment.withLmDefaults(inner) {
+        assertEquals(RuntimeEnvironment.activeLmDefaults, Some(inner))
+      }
+      assertEquals(RuntimeEnvironment.activeLmDefaults, Some(outer))
+    }
+    assertEquals(RuntimeEnvironment.activeLmDefaults, None)
   }
 
   test("the interpreter factory is a service: a scope fills it from the defaults, and copy keeps it") {
