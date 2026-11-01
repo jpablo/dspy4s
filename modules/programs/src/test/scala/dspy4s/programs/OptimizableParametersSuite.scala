@@ -159,7 +159,6 @@ final class OptimizableParametersSuite extends FunSuite:
       demos = demos,
       name = Some("bound_predict"),
       runtime = runtime,
-      outputJsonSchema = Some(DynamicValues.record("type" := "object")),
       config = DynamicValues.record("seed" := 1),
       lm = Some(BoundLm),
       tools = tools
@@ -172,7 +171,6 @@ final class OptimizableParametersSuite extends FunSuite:
     assertEquals(updated.layout.fields, program.layout.fields)
     assertEquals(updated.name, program.name)
     assert(updated.runtime eq runtime)
-    assertEquals(updated.outputJsonSchema, program.outputJsonSchema)
     assert(updated.lm.exists(_ eq BoundLm))
     assertEquals(updated.tools, tools)
   }

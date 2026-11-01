@@ -48,13 +48,9 @@ final case class MultiChainInput[I](
   *   temperature for the comparison call (Python's default 0.7)
   */
 final case class MultiChainComparison[I, O](
-    baseSignature       : Signature[I, O],
-    m                   : AttemptCount   = AttemptCount(3),
-    temperature         : Double         = 0.7,
-    rationalePrefix     : String         = "Accurate Reasoning: Thank you everyone. Let's now holistically",
-    rationaleDescription: String         = "${corrected reasoning}",
-    attemptDescription  : String         = "${reasoning attempt}",
-    answerFieldOverride : Option[String] = None,
+    baseSignature: Signature[I, O],
+    m            : AttemptCount = AttemptCount(3),
+    temperature  : Double       = 0.7,
     /** Optional optimizable parameters for the comparison predictor. The executable predictor itself is built
       * internally over this instance's path-branded, arity-validated attempt carrier, so callers cannot replace it with
       * a shape that accepts arbitrary vectors. Optimizer replacement writes only this lawful parameter surface.
@@ -70,27 +66,26 @@ final case class MultiChainComparison[I, O](
 
   override val moduleName: String = "multi_chain_comparison"
 
-  /** The output field used to render the "prediction" part of each attempt line. Defaults to the last output field in
+  /** The output field used to render the "prediction" part of each attempt line: the last output field in
     * `baseSignature`.
     */
-  private val lastOutputName: Option[String] =
-    answerFieldOverride.orElse(baseSignature.layout.outputFields.lastOption.map(_.name))
+  private val lastOutputName: Option[String] = baseSignature.layout.outputFields.lastOption.map(_.name)
 
-  /** The `m` attempt inputs, one for each expected candidate, with the descriptions of this instance and the prefixes
-    * `Student Attempt #i:`. [[Signature.appendInputs]] adds them to the layout and to the input shape in one call.
+  /** The `m` attempt inputs, one for each expected candidate, with the prefixes `Student Attempt #i:`.
+    * [[Signature.appendInputs]] adds them to the layout and to the input shape in one call.
     */
   private val attemptFields: Vector[FieldSpec] = (1 to m).toVector.map { idx =>
     FieldSpec(
       name = s"reasoning_attempt_$idx",
-      description = Some(attemptDescription),
+      description = Some(MultiChainComparison.AttemptDescription),
       prefix = Some(s"Student Attempt #$idx:")
     )
   }
 
   private val rationaleField: FieldSpec = FieldSpec(
     name = MultiChainComparison.rationaleName,
-    description = Some(rationaleDescription),
-    prefix = Some(rationalePrefix)
+    description = Some(MultiChainComparison.RationaleDescription),
+    prefix = Some(MultiChainComparison.RationalePrefix)
   )
 
   /** The base signature with the `m` attempt inputs after the base inputs, and the type of their values. */
@@ -140,7 +135,6 @@ final case class MultiChainComparison[I, O](
             .copy(config = call.config.updated("temperature", DynamicValues.fromAny(temperature)))
         )
       }
-      .map(result => Prediction(result.output, result.raw))
 
   /** Convenience entry: supply the base input and the candidate completions directly. Mirrors Python's
     * `compare_answers(completions, question=...)`.
@@ -174,6 +168,11 @@ final case class MultiChainComparison[I, O](
 
 object MultiChainComparison:
   private[programs] val rationaleName: "rationale" = "rationale"
+
+  // The texts of upstream `dspy/predict/multi_chain_comparison.py`.
+  private val RationalePrefix: String      = "Accurate Reasoning: Thank you everyone. Let's now holistically"
+  private val RationaleDescription: String = "${corrected reasoning}"
+  private val AttemptDescription: String   = "${reasoning attempt}"
 
   /** The output type: `rationale: String` prepended to `O`'s named-tuple view, idempotently. */
   type WithRationale[O] = OutputAugmentation.WithField[O, "rationale", String]

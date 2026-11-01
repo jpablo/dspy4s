@@ -461,8 +461,7 @@ obtain `Values`, so the per-instance shape total-encodes exactly the `m` numbere
 without truncation or a representable wrong-length value. The wire format is unchanged. The remaining
 `DynamicPredict` constructors in the framework are exactly the
 principled residue: layouts that exist only as runtime VALUES (COPRO / GroundedProposer / InferRules attempt
-injection over optimizer-assembled layouts, the evaluation judge), `Predict.erase`, and user
-`fromStringDynamic` signatures.
+injection over optimizer-assembled layouts, the evaluation judge), and user `fromStringDynamic` signatures.
 
 ## Deferred items (recorded, not lost — additive, no consumer yet)
 

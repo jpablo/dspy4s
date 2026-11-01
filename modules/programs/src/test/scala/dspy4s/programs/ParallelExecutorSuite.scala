@@ -30,7 +30,7 @@ class ParallelExecutorSuite extends FunSuite:
       )
 
       assert(result.isRight)
-      val values = result.toOption.get.results.flatten
+      val values = result.toOption.get.results.flatMap(_.toOption)
       assertEquals(values, Vector("42", "42", "42", "42", "42"))
     }
   }
@@ -48,9 +48,9 @@ class ParallelExecutorSuite extends FunSuite:
 
     assert(result.isRight)
     val output = result.toOption.get
-    assertEquals(output.results, Vector(Some(1), Some(2), None, Some(4), Some(5)))
-    assertEquals(output.failedIndices, Vector(2))
-    assert(output.errors.get(2).exists(_.isInstanceOf[RuntimeError]))
+    assertEquals(output.results.map(_.toOption), Vector(Some(1), Some(2), None, Some(4), Some(5)))
+    assertEquals(output.results.indices.filter(output.results(_).isLeft).toVector, Vector(2))
+    assert(output.results(2).left.exists(_.isInstanceOf[RuntimeError]))
   }
 
   test("max errors met returns cancellation error") {
@@ -124,7 +124,7 @@ class ParallelExecutorSuite extends FunSuite:
     assert(limited.left.exists(_.message.startsWith("Execution timed out")), limited.toString)
 
     val unlimited = ParallelExecutor(numThreads = ThreadCount(3), timeout = Duration.Inf).execute(task, data)
-    assertEquals(unlimited.map(_.results), Right(Vector(Some(1), Some(2), Some(3))))
+    assertEquals(unlimited.map(_.results.map(_.toOption)), Right(Vector(Some(1), Some(2), Some(3))))
   }
 
   // Upstream `ParallelExecutor` never fails a batch for time: its `timeout` only submits a slow task again

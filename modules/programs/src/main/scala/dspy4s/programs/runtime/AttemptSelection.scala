@@ -1,6 +1,5 @@
 package dspy4s.programs.runtime
 
-import dspy4s.core.contracts.AdapterRef
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeDelta
@@ -9,6 +8,10 @@ import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.AttemptCount
 import dspy4s.programs.FailureCount
+import dspy4s.programs.compose.{Mode, mode}
+import dspy4s.programs.contracts.Module
+import dspy4s.programs.contracts.Prediction
+import dspy4s.programs.contracts.ProgramCall
 
 import scala.util.control.NonFatal
 
@@ -30,10 +33,19 @@ import scala.util.control.NonFatal
   *     `rolloutId` / `config`. Execution is still ordered because threshold short-circuiting and ties prefer earlier
   *     attempts.
   *   - '''feedback''' (sequential stream, = [[dspy4s.programs.strategies.Refine]]) passes a `feedback` hook: after a
-  *     sub-threshold, non-last attempt it inspects that attempt (value + trace + score) and produces the adapter
-  *     override the NEXT attempt runs under (Refine's `hint_`-injecting adapter), making the stream order-dependent.
+  *     sub-threshold, non-last attempt it inspects that attempt (value + trace + score) and produces the context the
+  *     NEXT attempt runs under (Refine's context has the `hint_`-injecting adapter), making the stream order-dependent.
   */
 object AttemptSelection:
+
+  /** The step after a sub-threshold attempt that is not the last. It gets the `(value, trace, score)` of the attempt,
+    * and the base context of the loop as its `using` value. It gives the context of the next attempt.
+    */
+  private[programs] type Feedback[A] =
+    (A, Vector[TraceEntry], Double) => RuntimeContext ?=> Either[DspyError, RuntimeContext]
+
+  /** The attempt with the highest reward so far, with its trace and history. */
+  private final case class Best[A](value: A, score: Double, delta: RuntimeDelta)
 
   /** Drive up to `n` attempts, keeping the highest-reward result and short-circuiting once `reward` reaches
     * `threshold`. `label` names the loop in the no-success error.
@@ -45,11 +57,9 @@ object AttemptSelection:
     *   scores a successful attempt; a `Left` charges the failure budget and the reduction continues with the
     *   best-so-far retained (upstream parity: reward_fn exceptions count toward fail_count).
     * @param feedback
-    *   optional inter-attempt hook. After a sub-threshold attempt that is not the last, it is given the attempt's
-    *   `(value, trace, score)` and returns the `Option[AdapterRef]` the next attempt's isolated context runs under
-    *   (`None` keeps the base adapter). The hook is AUXILIARY: a `Left` charges the failure budget and keeps the
-    *   best-so-far (the prior carried adapter is retained), mirroring the module-failure path. Omitted (`None`) for
-    *   best-of-`n` without carried feedback.
+    *   optional inter-attempt hook ([[Feedback]]). The hook is AUXILIARY: a `Left` charges the failure budget and keeps
+    *   the best-so-far (the prior context stays), as a module failure does. It is `None` for best-of-`n` with no
+    *   carried feedback.
     */
   private[programs] def bestOf[A](
       n        : AttemptCount,
@@ -59,70 +69,71 @@ object AttemptSelection:
   )(
       runAttempt: Int => (RuntimeContext ?=> Either[DspyError, A]),
       reward    : A => Either[DspyError, Double],
-      feedback  : Option[(A, Vector[TraceEntry], Double) => Either[DspyError, Option[AdapterRef]]] = None
+      feedback  : Option[Feedback[A]] = None
   ): Either[DspyError, A] =
     val baseContext                  = RuntimeEnvironment.current
+    var attemptContext               = baseContext
     var remainingFailures            = failCount.getOrElse(n)
-    var bestReward                   = Double.NegativeInfinity
-    var best: Option[A]              = None
-    var bestDelta                    = RuntimeDelta.empty
+    var best: Option[Best[A]]        = None
     var lastError: Option[DspyError] = None
-    // Adapter override carried from a sub-threshold attempt's feedback into the next attempt (None until the
-    // first feedback fires; for Refine this is the hint-injecting adapter derived from the generated advice).
-    var carriedAdapter: Option[AdapterRef] = None
+
+    // A score must beat the score of `best`. With no `best`, it must beat negative infinity.
+    def keepBest(value: A, score: Double, delta: RuntimeDelta): Unit =
+      if score > best.fold(Double.NegativeInfinity)(_.score) then best = Some(Best(value, score, delta))
 
     var idx = 0
     while idx < n do
-      // Apply the carried adapter override (if any) before isolating, so core's isolatedAttempt stays a plain
-      // "fresh delta over base" primitive with no knowledge of per-attempt service overrides.
-      val attemptContext = carriedAdapter.fold(baseContext) { adapter =>
-        baseContext.withServices(baseContext.services.copy(adapter = Some(adapter)))
-      }
       val executed = RuntimeEnvironment.isolatedAttempt(attemptContext)(runAttempt(idx))
+      val outcome  =
+        for
+          value  <- executed.value
+          score  <- reward(value)
+          _       = keepBest(value, score, executed.delta)
+          reached = score >= threshold
+          _      <- feedback match
+                 case Some(step) if !reached && idx < n - 1 =>
+                   step(value, executed.delta.trace, score)(using baseContext).map(next => attemptContext = next)
+                 case _ => Right(())
+        yield reached
 
-      executed.value match
-        case Right(value) => reward(value) match
-            case Left(error) =>
-              // A reward failure charges the failure budget like a module failure — upstream DSPy catches
-              // reward_fn exceptions and continues; aborting would discard budgeted attempts and best-so-far.
-              lastError = Some(error)
-              if remainingFailures <= 0 then return Left(error)
-              remainingFailures -= 1
-              idx += 1
-            case Right(score) =>
-              if score > bestReward then
-                bestReward = score
-                best = Some(value)
-                bestDelta = executed.delta
-
-              if score >= threshold then
-                idx = n // short-circuit at threshold
-              else if idx == n - 1 then
-                idx += 1 // last attempt; no feedback to generate
-              else
-                // Produce the next attempt's adapter override from this attempt's feedback. Auxiliary: a
-                // failure charges the failure budget and keeps `best`, retaining the prior carried adapter.
-                feedback match
-                  case None           => ()
-                  case Some(generate) => generate(value, executed.delta.trace, score) match
-                      case Right(nextAdapter) => carriedAdapter = nextAdapter
-                      case Left(error)        =>
-                        lastError = Some(error)
-                        if remainingFailures <= 0 then return Left(error)
-                        remainingFailures -= 1
-                idx += 1
-
-        case Left(error) =>
+      outcome match
+        case Right(true)  => idx = n // short-circuit at threshold
+        case Right(false) => idx += 1
+        case Left(error)  =>
+          // Each failure charges the failure budget: of the attempt, of the reward, and of the feedback. Upstream DSPy
+          // catches reward_fn exceptions and continues, because a stop would discard the attempts of the budget and
+          // the best-so-far.
           lastError = Some(error)
           if remainingFailures <= 0 then return Left(error)
           remainingFailures -= 1
           idx += 1
 
     best match
-      case Some(value) =>
-        RuntimeEnvironment.propagate(bestDelta)
-        Right(value)
+      case Some(kept) =>
+        RuntimeEnvironment.propagate(kept.delta)
+        Right(kept.value)
       case None => Left(lastError.getOrElse(RuntimeError(label, "No successful predictions were produced")))
+
+  /** [[bestOf]] over `module`: each attempt runs `call` at temperature 1.0 with its own rollout id, from the rollout id
+    * of `call`. `rewardFn` scores an attempt, and a thrown exception is a reward failure ([[guardedReward]]). `label`
+    * names the loop in the errors.
+    */
+  private[programs] def sample[I, O](
+      module   : Module[I, O],
+      call     : ProgramCall[I],
+      rewardFn : (I, Prediction[O]) => Double,
+      n        : AttemptCount,
+      threshold: Double,
+      failCount: Option[FailureCount],
+      label    : String,
+      feedback : Option[Feedback[Prediction[O]]] = None
+  ): Either[DspyError, Prediction[O]] =
+    val rolloutStart = call.rolloutId.getOrElse(0)
+    bestOf[Prediction[O]](n, threshold, failCount, label)(
+      runAttempt = idx => module.mode(Mode.temperature(1.0d) ++ Mode.rolloutId(rolloutStart + idx))(call),
+      reward = prediction => guardedReward(label)(rewardFn(call.input, prediction)),
+      feedback = feedback
+    )
 
   /** Evaluate a user reward function, lifting any thrown exception into the `Either` channel. */
   private[programs] def guardedReward(label: String)(score: => Double): Either[DspyError, Double] =

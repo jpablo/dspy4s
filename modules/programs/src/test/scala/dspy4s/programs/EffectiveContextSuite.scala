@@ -90,7 +90,7 @@ class EffectiveContextSuite extends FunSuite:
       )
     }
 
-    assertEquals(result.map(_.results.flatten), Right(Vector.fill(3)("Paris")))
+    assertEquals(result.map(_.results.flatMap(_.toOption)), Right(Vector.fill(3)("Paris")))
     assertEquals(installed.formats.get, 3)
   }
 
@@ -103,7 +103,7 @@ class EffectiveContextSuite extends FunSuite:
     }
 
     assertEquals(
-      result.map(_.results.flatten.map(raw => lookupString(raw.values, "answer"))),
+      result.map(_.results.flatMap(_.toOption).map(raw => lookupString(raw.values, "answer"))),
       Right(Vector.fill(3)("Paris"))
     )
     assertEquals(installed.formats.get, 3)
@@ -138,7 +138,7 @@ class EffectiveContextSuite extends FunSuite:
     }
 
     assertEquals(single.map(prediction => lookupString(prediction.output, "answer")), Right("Paris"))
-    assertEquals(parallel.map(_.results.flatten.size), Right(2))
+    assertEquals(parallel.map(_.results.flatMap(_.toOption).size), Right(2))
     assertEquals(givenAdapter.formats.get, 3)
     assertEquals(installedAdapter.formats.get, 0)
   }

@@ -31,9 +31,8 @@ import zio.blocks.schema.DynamicValue
   * They are siblings rather than wrappers: each configures its own shared [[PredictEngine]]. The dynamic surface is
   * needed wherever there is no static `I`/`O` to carry, including:
   *
-  *   - composite programs whose internal generations have runtime-built signatures, such as [[MultiChainComparison]]
-  *     and the internal passes in [[ReAct]];
-  *   - optimizer helper generations whose proposed signature exists only as a [[SignatureLayout]].
+  *   - composite programs whose internal generations have runtime-built signatures, such as [[ReActV2]];
+  *   - metric judges and optimizer helper generations whose signature exists only as a [[SignatureLayout]].
   *
   * For USER programs over runtime-string signatures, prefer [[DynamicSignature]] (`parse` + `predict()`): it mints
   * fresh input/output types with their decoder, so the program composes and optimizes through the same machinery as
@@ -47,8 +46,6 @@ import zio.blocks.schema.DynamicValue
   *   module name used in callbacks/trace/history (defaults to `"predict"`)
   * @param runtime
   *   resolves the model and adapter from the ambient [[dspy4s.core.contracts.RuntimeContext]]
-  * @param outputJsonSchema
-  *   see field comment below
   * @param config
   *   module-level LM option bag (see field comment below)
   */
@@ -57,11 +54,6 @@ final case class DynamicPredict(
     demos  : Vector[Example] = Vector.empty,
     name   : Option[String]  = None,
     runtime: ProgramRuntime  = SettingsProgramRuntime.default,
-    /** Optional JSON Schema of the output as a JSON object, threaded into [[AdapterInvocation]]. A [[Predict]] derives
-      * the same input for its own engine from `signature.outputShape.jsonSchema`; users who construct `DynamicPredict`
-      * directly usually leave it `None`.
-      */
-    outputJsonSchema: Option[DynamicValue.Record] = None,
     /** Module-level LM option bag, the analogue of Python's `dspy.Predict(signature, **config)` `self.config`. Merged
       * *under* the per-call `ProgramCall.config` (per-call keys win on collision), so it supplies defaults a call may
       * override. Empty by default — then the merged options are exactly the per-call config.
@@ -82,7 +74,8 @@ final case class DynamicPredict(
       * [[Predict.decisions]].
       */
     decisions: Map[String, DecisionSettings] = Map.empty
-) extends DynamicModule:
+) extends DynamicModule,
+      DecisionOutputs[DynamicPredict]:
 
   override val moduleName: String = name.getOrElse("predict")
 
@@ -91,26 +84,12 @@ final case class DynamicPredict(
     ModuleLifecycle.dynamicPredictor(PredictorKey.from(moduleName, layout))
 
   private val engine =
-    PredictEngine(layout, demos, moduleName, runtime, outputJsonSchema, config, lm, tools, decisions = decisions)
+    PredictEngine(layout, demos, moduleName, runtime, config = config, lm = lm, tools = tools, decisions = decisions)
 
-  /** Experimental. This predictor with the explicit `settings` of the decision output `field` (upstream
-    * `Predict.fields[field]`). The settings replace the earlier settings of the field. A `Left` comes when the plan of
-    * the layout rejects the settings ([[dspy4s.core.decisions.DecisionPlan.of]]).
-    */
-  def withDecision(field: String, settings: DecisionSettings): Either[DspyError, DynamicPredict] =
-    PredictEngine.withDecision(layout, decisions, field, settings).map(updated => copy(decisions = updated))
+  override protected def decisionLayout: SignatureLayout = layout
 
-  /** Experimental. The effective criteria of the decision output `field` (upstream `get_criteria`): the explicit
-    * criteria, else the default of its kind. A `Left` comes when `field` is not a decision output.
-    */
-  def criteria(field: String): Either[DspyError, Option[DynamicValue]] =
-    PredictEngine.criteria(layout, decisions, field)
-
-  /** Experimental. This predictor with the criteria of the decision output `field` set to `criteria` (upstream
-    * `set_criteria`). The other settings of the field stay. A `Left` comes when the plan rejects the criteria.
-    */
-  def withCriteria(field: String, criteria: DynamicValue): Either[DspyError, DynamicPredict] =
-    PredictEngine.withCriteria(layout, decisions, field, criteria).map(updated => copy(decisions = updated))
+  override protected def withDecisions(updated: Map[String, DecisionSettings]): DynamicPredict =
+    copy(decisions = updated)
 
   override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
       RuntimeContext

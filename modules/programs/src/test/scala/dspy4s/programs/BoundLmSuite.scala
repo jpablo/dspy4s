@@ -63,7 +63,7 @@ class BoundLmSuite extends FunSuite:
   test("Predict[I,O]: withLm pins a bound lm used in preference to ambient") {
     val sig    = Signature.derived[BlmInput, BlmOutput]("QA")
     val module = Predict(sig).withLm(boundLm)
-    assertEquals(module.boundLm.map(_.id), Some("bound"))
+    assertEquals(module.lm.map(_.id), Some("bound"))
     val out = underAmbient(module(BlmInput("x")))
     assertEquals(out.toOption.get.output.answer, "BOUND")
   }

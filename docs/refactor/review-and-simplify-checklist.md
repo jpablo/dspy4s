@@ -328,7 +328,7 @@ Simplify 7 (rank 1). Code-review 6 (rank 4). 8004 main lines, 11858 test lines.
   - [x] /simplify
   - [x] /code-review
 - (b) Predict and the selection, about 2100 lines: `strategies/Predict.scala`, `strategies/DynamicPredict.scala`, `strategies/ChainOfThought.scala`, `strategies/MultiChainComparison.scala`, `strategies/BestOfN.scala`, `strategies/Refine.scala`, `strategies/RefineFeedback.scala`, `runtime/PredictEngine.scala`, `runtime/AttemptSelection.scala`, `runtime/ParallelExecutor.scala`, `runtime/SettingsProgramRuntime.scala`, `Aggregation.scala`, `Parallel.scala`, `retrievers/`.
-  - [ ] /simplify
+  - [x] /simplify
   - [ ] /code-review
 - (c) The structure, about 3150 lines: `optimization/`, `algebra/`, `compose/`, the other files in `contracts/`, and the other files at the top of the source root.
   - [ ] /simplify
@@ -350,9 +350,17 @@ Simplify 7 (rank 1). Code-review 6 (rank 4). 8004 main lines, 11858 test lines.
 - [ ] (simplify (a), design) A typed `toolChoice` on `AdapterInvocation`, next to `tools`, in place of the `tool_choice` key that `ReActV2` writes in `call.config`. An adapter that builds its own `FormattedPrompt` then cannot send `tool_choice` with no `tools`.
 - [ ] (simplify (a), skipped) After the first overflow, each later step of ReAct retries a prompt that is likely too large. Remembering the overflow length changes the upstream call sequence. Only for runs that overflow.
 - [ ] `RecordObject.scala` has no user in the main code. Only ProgramAlgebraLawSuite uses it.
-- [ ] `DynamicValues.fromAny` on typed values, against the single-codec rule: `compose/Mode.scala:58`, `:61`, `strategies/MultiChainComparison.scala:151`, `strategies/Refine.scala:210`, `strategies/RLMSandboxTools.scala:66`, `:76`, `:94`.
-- [ ] Small items: the stale comment at `runtime/PredictEngine.scala:260-261` (the `lm` field exists), `Parallel.apply` is the same as `Parallel.run`, and `ErrorLimit(10)` occurs two times (`runtime/ParallelExecutor.scala:38`, `:173`).
+- [ ] `DynamicValues.fromAny` on typed values, against the single-codec rule: `compose/Mode.scala` (group (c)), and `strategies/MultiChainComparison.scala` (the temperature, in the code review of group (b)). `strategies/Refine.scala` and `strategies/RLMSandboxTools.scala` are fixed.
+- [x] Small items: the stale comment in `runtime/PredictEngine.scala`, `Parallel.apply` the same as `Parallel.run`, and `ErrorLimit(10)` two times in `runtime/ParallelExecutor.scala`. Fixed. `Evaluate.scala`, `BootstrapFewShot.scala`, and `BootstrapFewShotWithRandomSearch.scala` still have the literal (their module passes).
 - [ ] `optimization/CompositeOptimizableStructureInstances.scala:36-71` writes single-leaf instances by hand, while Refine uses `ParameterOptic`. That gives three styles for one job.
+- [x] (simplify (b)) `runtime/PredictEngine.scala` held the decision routing, about 120 of 379 lines. Fixed: the `DecisionAdapter` companion and `DecisionPlan`, as upstream `dspy/adapters/decision.py`. One `strategies/DecisionOutputs.scala` trait replaces three copies of three forwarders. `Predict.erase`, `boundLm`, and `DynamicPredict.outputJsonSchema` are gone.
+- [x] (simplify (b)) `runtime/AttemptSelection.scala` `bestOf` had six nesting levels and three copies of the failure charge, and `strategies/BestOfN.scala` and `strategies/Refine.scala` repeated the sample loop. Fixed: one `for`, and `AttemptSelection.sample`. The `OfferFeedback` types moved to `strategies/RefineFeedback.scala`, and the four forwarders of Refine are gone.
+- [x] (simplify (b)) `ParallelExecutionResult` had three views of one result and forced dead arms. Fixed: `results: Vector[Either[DspyError, A]]`.
+- [x] (simplify (b)) `Aggregation.scala` had unreachable lines, `strategies/MultiChainComparison.scala` had four fields that nothing set, and `retrievers/KNN.scala` and `retrievers/EmbeddingsRetriever.scala` repeated the query steps. Fixed: `Similarity.topK`.
+- [ ] (simplify (b), skipped) The hand-written `Shape` of `strategies/RefineFeedback.scala`. A derived shape changes the `response_format` of the JSON adapter (a `title` and the key order) and rejects a null `discussion` and a number `advice`.
+- [ ] (simplify (b), design) `DynamicPredict` is not needed: `Predict` over `Shape.MapShape` does the same work. A `Predict.dynamic(layout, ...)` removes a field list, a leaf instance, and a `Streamable` case. Behavior: missing inputs and required outputs then fail.
+- [ ] (simplify (b), design) `runtime/SettingsProgramRuntime.scala`: `adapterOrChat` is private, so `Streamify.scala` copies its type test. A missing adapter is a `Left` in the engine and a chat adapter elsewhere. `Adapter.fromContext`, `LanguageModel.fromContext`, and `adapter: Option[Adapter]` beside `lm` remove both runtime types.
+- [ ] (simplify (b), skipped) `OpenAiEmbedder.scala` sends corpus batches in sequence, as upstream, and `Embedder.scala` boxes each float. These are one-time costs of a retriever, in the lm module.
 
 ### Code-review findings
 

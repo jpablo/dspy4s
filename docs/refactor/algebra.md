@@ -350,5 +350,5 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     runtime-arity attempt block rides a per-instance opaque carrier (`Signature.appendInputs`: validation constructs
     the path-branded value and the shape total-encodes the `m` numbered fields). Each of these `Signature` operations
     changes the layout and the shapes in one call. Only layouts that exist purely as runtime values
-    still construct a `DynamicPredict` inside the framework: the optimizers' own helper generations, the
-    evaluation judge, and `Predict.erase`. See `algebra-2-program-composition.md` for the recipe.
+    still construct a `DynamicPredict` inside the framework: the optimizers' own helper generations and the
+    evaluation judge. See `algebra-2-program-composition.md` for the recipe.

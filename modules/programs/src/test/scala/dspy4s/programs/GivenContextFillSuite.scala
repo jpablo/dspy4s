@@ -92,7 +92,7 @@ class GivenContextFillSuite extends FunSuite:
       )
     }
 
-    assertEquals(result.map(_.results.flatten), Right(Vector(true, true, true)))
+    assertEquals(result.map(_.results.flatMap(_.toOption)), Right(Vector(true, true, true)))
   }
 
   test("Parallel.run in a withCallbacks block sends the events of each worker to the handler of the block") {
@@ -104,7 +104,7 @@ class GivenContextFillSuite extends FunSuite:
     }
 
     assertEquals(
-      result.map(_.results.flatten.map(raw => lookupString(raw.values, "answer"))),
+      result.map(_.results.flatMap(_.toOption).map(raw => lookupString(raw.values, "answer"))),
       Right(Vector.fill(3)("Paris"))
     )
     assertEquals(recorder.moduleStarts, Vector.fill(3)("predict"))
@@ -133,7 +133,7 @@ class GivenContextFillSuite extends FunSuite:
       )
     }
 
-    assertEquals(result.map(_.results.flatten), Right(Vector(true, true, true)))
+    assertEquals(result.map(_.results.flatMap(_.toOption)), Right(Vector(true, true, true)))
   }
 
   test("a program that reads the installed context runs with the LM of the given context") {

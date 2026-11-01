@@ -9,7 +9,6 @@ import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.contracts.TraceEntry
@@ -118,9 +117,9 @@ final class GepaAdapter[P](
         task = (example: Example) => runOne(prog, example, captureTraces)(using RuntimeEnvironment.current),
         data = batch
       ) match
-      // An example that threw has no result, and it gets the failure score and the error of the executor.
-      case Right(outcome) => batch.indices.toVector.map(i =>
-          outcome.results(i).getOrElse(failedRun(batch(i), outcome.errors.getOrElse(i, GepaAdapter.NotCompleted)))
+      // An example that threw gets the failure score and the error of the executor.
+      case Right(outcome) => batch.zip(outcome.results).map((example, result) =>
+          result.fold(failedRun(example, _), identity)
         )
       // A failure of the whole executor: each example gets the failure score.
       case Left(error) => batch.map(failedRun(_, error))
@@ -376,9 +375,6 @@ object GepaAdapter:
     error match
       case ParseError(_, _, Some(raw)) => raw
       case other                       => other.message
-
-  /** The error of an example that the executor did not run, because it stopped the batch first. */
-  private val NotCompleted: DspyError = RuntimeError("gepa_adapter", "The run of the example did not complete")
 
   /** The executor of one evaluation of `batchSize` examples ([[GepaAdapter.evaluate]]). The number of threads comes
     * from the context, or else it is [[ParallelExecutor.DefaultNumThreads]].

@@ -43,7 +43,7 @@ class ParallelSuite extends FunSuite:
     val result = Parallel(numThreads = Some(ThreadCount(2)), maxErrors = Some(ErrorLimit(2))).run(tasks)
 
     assert(result.isRight)
-    val outputs = result.toOption.get.results.map(p => lookup(p.get.values, "output").get)
+    val outputs = result.toOption.get.results.map(p => lookup(p.toOption.get.values, "output").get)
     assertEquals(outputs, Vector(2, 4, 6, 8, 10): Vector[Any])
   }
 
@@ -62,9 +62,9 @@ class ParallelSuite extends FunSuite:
 
     assert(result.isRight)
     val output = result.toOption.get
-    assertEquals(output.failedIndices, Vector(2))
-    assert(output.results(2).isEmpty)
-    assert(output.errors.get(2).exists(_.isInstanceOf[ValidationError]))
+    assertEquals(output.results.indices.filter(output.results(_).isLeft).toVector, Vector(2))
+    assert(output.results(2).isLeft)
+    assert(output.results(2).left.exists(_.isInstanceOf[ValidationError]))
   }
 
   test("parallel returns cancellation error when threshold is met") {
@@ -120,7 +120,7 @@ class ParallelSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       val result           = Parallel(numThreads = Some(ThreadCount(2)), maxErrors = Some(ErrorLimit(2))).run(tasks)
       assert(result.isRight)
-      val values = result.toOption.get.results.flatten.map(p => lookupString(p.values, "sample"))
+      val values = result.toOption.get.results.flatMap(_.toOption).map(p => lookupString(p.values, "sample"))
       assertEquals(values, Vector("42", "42", "42", "42"))
     }
   }
@@ -145,7 +145,7 @@ class ParallelSuite extends FunSuite:
     val result = Parallel(numThreads = Some(ThreadCount(2)), maxErrors = Some(ErrorLimit(2))).run(tasks)
 
     assert(result.isRight)
-    val outputs = result.toOption.get.results.flatten
+    val outputs = result.toOption.get.results.flatMap(_.toOption)
     assertEquals(outputs.map(p => lookupString(p.values, "answer")), Vector("answer-1", "answer-2"))
     val toolCalls = outputs.map(p => lookup(p.values, "tool_calls").get.asInstanceOf[List[Map[String, Any]]])
     assertEquals(toolCalls.map(_.head("name")), Vector("search", "search"): Vector[Any])

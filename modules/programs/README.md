@@ -21,7 +21,7 @@ optimizers, and two in-memory retrievers. It uses `core`, `lm`, `adapters`, and 
 
 | Type | Description |
 |------|-------------|
-| `Predict[I, O]` | The base predictor. It encodes `I`, calls the LM through the adapter, and decodes the response. `withLm` binds a model to it. `erase` gives a `DynamicPredict` with the same configuration. |
+| `Predict[I, O]` | The base predictor. It encodes `I`, calls the LM through the adapter, and decodes the response. `withLm` binds a model to it. |
 | `DynamicPredict` | The predictor for a `SignatureLayout`. Its input and its output are records. |
 | `ChainOfThought[I, O]` | Runs a `Predict` that has a `reasoning: String` output first. The output is a named tuple. |
 | `ReAct[I, O]` | An agent that calls tools. In each step, the model writes `next_thought`, `next_tool_name`, and `next_tool_args`. When the model selects `finish`, or after `maxIterations` steps, an extractor writes the output with a `reasoning` field first. |

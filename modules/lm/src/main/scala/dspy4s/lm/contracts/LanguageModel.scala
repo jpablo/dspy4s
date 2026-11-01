@@ -1,7 +1,7 @@
 package dspy4s.lm.contracts
 
-import dspy4s.core.contracts.{DspyError, Executed, LanguageModelRef, LmError, RuntimeContext}
-import dspy4s.core.runtime.{ContextPropagation, UsageScope}
+import dspy4s.core.contracts.{:=, DspyError, DynamicValues, Executed, LanguageModelRef, LmError, RuntimeContext}
+import dspy4s.core.runtime.{CallbackDispatcher, ContextPropagation, UsageScope}
 import zio.blocks.schema.DynamicValue
 
 import scala.concurrent.{ExecutionContext, Future}
@@ -92,3 +92,12 @@ object LanguageModel:
     val result = model.call(request)
     UsageScope.record(request.model, result.fold(LmError.usage, _.usage))
     result
+
+  /** [[callAndRecordUsage]] in the LM callback scope of `model`: an `LmStartEvent` before the call and an `LmEndEvent`
+    * after the call. The call of a predictor uses this function.
+    */
+  def callWithEvents(model: LanguageModel, request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+    CallbackDispatcher.withLm(
+      modelId = model.id,
+      request = DynamicValues.record("model" := model.id, "mode" := model.mode.toString)
+    )(callAndRecordUsage(model, request))

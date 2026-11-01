@@ -71,15 +71,13 @@ class ProgramPersistenceSuite extends FunSuite:
       layout = trainedLayout,
       demos = demo,
       name = Some("training_predictor"),
-      outputJsonSchema = Some(DynamicValues.record("title" := "training-schema")),
       config = DynamicValues.record("temperature" := 0.2)
     )
     val freshRuntime = new SettingsProgramRuntime {}
     val fresh        = DynamicPredict(
       layout = freshLayout,
       name = Some("deployment_predictor"),
-      runtime = freshRuntime,
-      outputJsonSchema = Some(DynamicValues.record("title" := "deployment-schema"))
+      runtime = freshRuntime
     )
 
     val restored = ProgramPersistence.loadState(fresh, ProgramPersistence.dumpState(trained)).toOption.get
@@ -89,7 +87,6 @@ class ProgramPersistenceSuite extends FunSuite:
     assertEquals(restored.layout.fields, freshLayout.fields)
     assertEquals(restored.name, fresh.name)
     assert(restored.runtime eq freshRuntime)
-    assertEquals(restored.outputJsonSchema, fresh.outputJsonSchema)
   }
 
   // ── Composite (2 Predicts) ─────────────────────────────────────────────────

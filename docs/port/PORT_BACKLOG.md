@@ -192,7 +192,7 @@ Shipped after v1 (predictor-introspection + persistence track):
   Composite multi-predictor programs are now introspectable/optimizable end-to-end.
 - Program `save`/`load` + `dumpState`/`loadState` via `ProgramPersistence`
   (commit 9c5a6db; G-4 resolved).
-- Per-module `config` (commit b85fe27) + bound LM `withLm`/`boundLm`
+- Per-module `config` (commit b85fe27) + bound LM `withLm`/`lm`
   (commit b2d0096; G-3 resolved).
 - Instruction-editing enabler: `OptimizableLeaf.set` writes back demos + config +
   instructions (commit 50dd00e), unblocking COPRO/MIPRO-style optimizers.

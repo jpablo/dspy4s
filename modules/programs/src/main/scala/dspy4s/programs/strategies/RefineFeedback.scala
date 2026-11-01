@@ -5,10 +5,28 @@ import dspy4s.core.data.RawPrediction
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.Prediction
 import dspy4s.signatures.{Shape, Signature}
-import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.{DynamicValue, Schema}
 
 /** OfferFeedback critic and its translation between runtime traces and per-module advice. */
 private[programs] object RefineFeedback:
+
+  /** The critic's input: the six input fields of [[layout]], with the same names. */
+  final case class OfferFeedbackInputs(
+      program_inputs    : String,
+      program_trajectory: String,
+      program_outputs   : String,
+      reward_value      : Double,
+      target_threshold  : Double,
+      module_names      : String
+  ) derives Schema
+
+  /** The critic's output. `discussion` is prompt-guidance only ([[generateAdvice]] never reads it), which the lenient
+    * shape below reflects.
+    */
+  final case class OfferFeedbackAdvice(discussion: String, advice: String)
+
+  /** The type of the critic predict. */
+  type Critic = Predict[OfferFeedbackInputs, OfferFeedbackAdvice]
 
   /** The OfferFeedback signature layout: a paraphrase of upstream's `OfferFeedback` docstring, with the input fields
     * dspy4s can ground from the runtime (program I/O, the runtime trajectory, reward + threshold, and the
@@ -69,24 +87,24 @@ private[programs] object RefineFeedback:
   ).getOrElse(throw new IllegalStateException("OfferFeedback layout failed to construct"))
 
   /** Hand-written lenient output shape: advice is required, while discussion defaults to an empty string. */
-  private val outputShape: Shape[Refine.OfferFeedbackAdvice] = new Shape[Refine.OfferFeedbackAdvice]:
+  private val outputShape: Shape[OfferFeedbackAdvice] = new Shape[OfferFeedbackAdvice]:
     val fieldSpecs: Vector[FieldSpec] = layout.outputFields
 
-    def encode(value: Refine.OfferFeedbackAdvice): DynamicValue.Record =
+    def encode(value: OfferFeedbackAdvice): DynamicValue.Record =
       DynamicValues.record("discussion" := value.discussion, "advice" := value.advice)
 
-    def decode(raw: DynamicValue.Record): Either[DspyError, Refine.OfferFeedbackAdvice] =
+    def decode(raw: DynamicValue.Record): Either[DspyError, OfferFeedbackAdvice] =
       RawPrediction(values = raw).asString("advice").map { advice =>
-        Refine.OfferFeedbackAdvice(
+        OfferFeedbackAdvice(
           discussion = DynamicValues.recordGet(raw, "discussion").map(DynamicValues.renderText).getOrElse(""),
           advice = advice
         )
       }
 
   /** The critic signature, preserving the hand-built descriptions and lenient output decoding. */
-  val signature: Signature[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice] = Signature(
+  val signature: Signature[OfferFeedbackInputs, OfferFeedbackAdvice] = Signature(
     layout = layout,
-    inputShape = Shape.derived[Refine.OfferFeedbackInputs],
+    inputShape = Shape.derived[OfferFeedbackInputs],
     outputShape = outputShape
   )
 
@@ -100,9 +118,12 @@ private[programs] object RefineFeedback:
         s"${entry.component}: $inputs -> $outputs"
       }.mkString("\n")
 
-  /** Run the critic under the ambient runtime context and decode its per-module advice. */
+  /** Run the critic under the ambient runtime context (NOT under the hint adapter) and decode its per-module advice.
+    * The critic reads the trace of the attempt, the program I/O, the reward value, the threshold, and the
+    * `moduleNames`.
+    */
   def generateAdvice[I, O](
-      critic     : Predict[Refine.OfferFeedbackInputs, Refine.OfferFeedbackAdvice],
+      critic     : Critic,
       input      : I,
       prediction : Prediction[O],
       trace      : Vector[TraceEntry],
@@ -115,7 +136,7 @@ private[programs] object RefineFeedback:
       .getOrElse(input.toString)
     val programOutputs = DynamicValues.renderText(prediction.raw.values)
     critic(ProgramCall(input =
-      Refine.OfferFeedbackInputs(
+      OfferFeedbackInputs(
         program_inputs = programInputs,
         program_trajectory = renderTrajectory(trace),
         program_outputs = programOutputs,
@@ -125,7 +146,10 @@ private[programs] object RefineFeedback:
       )
     )).map(result => parseAdvice(result.output.advice, moduleNames))
 
-  /** Decode a JSON advice object, falling back to the same uniform advice for every module. */
+  /** Parse the OfferFeedback `advice` output into a per-module advice map. The usual output is a JSON object
+    * `{module_name: advice}`. The parse finds the object first, so prose or code fences can be around it. An output
+    * with no JSON object is uniform advice: each module gets the same text.
+    */
   def parseAdvice(raw: String, moduleNames: Vector[String]): Map[String, String] =
     extractJsonObject(raw).flatMap(decodeStringMap).filter(_.nonEmpty)
       .getOrElse(moduleNames.iterator.map(_ -> raw.trim).toMap)

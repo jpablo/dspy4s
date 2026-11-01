@@ -597,6 +597,41 @@ object DecisionPlan:
     }
     planOf(layout, settings, kinds)
 
+  /** `settings` with `value` as the settings of the output `field` of `layout` (upstream `Predict.fields[field]`). A
+    * `Left` comes when the plan of `layout` rejects the result ([[of]]). Upstream checks the settings at the call only;
+    * the port checks them here too, so that an error comes early.
+    */
+  def withDecision(
+      layout  : SignatureLayout,
+      settings: Map[String, DecisionSettings],
+      field   : String,
+      value   : DecisionSettings
+  ): Either[DspyError, Map[String, DecisionSettings]] =
+    val updated = settings.updated(field, value)
+    of(layout, updated).map(_ => updated)
+
+  /** The effective criteria of the output `field` of `layout` (upstream `Predict.get_criteria`). A field with no
+    * settings gets empty settings for the check, so a native output that can be a decision output has criteria too. A
+    * `Left` comes when `field` cannot be a decision output, or when the plan rejects `settings`.
+    */
+  def criteria(
+      layout  : SignatureLayout,
+      settings: Map[String, DecisionSettings],
+      field   : String
+  ): Either[DspyError, Option[DynamicValue]] =
+    of(layout, settings.updatedWith(field)(_.orElse(Some(DecisionSettings())))).map(_.criteria(field))
+
+  /** `settings` with `criteria` as the criteria of the output `field` of `layout` (upstream `Predict.set_criteria`).
+    * The other settings of the field stay. A `Left` comes when the plan rejects the result.
+    */
+  def withCriteria(
+      layout  : SignatureLayout,
+      settings: Map[String, DecisionSettings],
+      field   : String,
+      criteria: DynamicValue
+  ): Either[DspyError, Map[String, DecisionSettings]] =
+    withDecision(layout, settings, field, settings.getOrElse(field, DecisionSettings()).copy(criteria = Some(criteria)))
+
   /** The plan of `layout` with the decision outputs `kinds` and the explicit `settings`, with the checks of [[of]]. */
   private def planOf(
       layout  : SignatureLayout,

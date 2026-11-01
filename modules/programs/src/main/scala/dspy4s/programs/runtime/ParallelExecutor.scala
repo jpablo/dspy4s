@@ -17,11 +17,10 @@ import scala.concurrent.duration.Duration
 import scala.concurrent.duration.FiniteDuration
 import scala.util.control.NonFatal
 
-final case class ParallelExecutionResult[+A](
-    results      : Vector[Option[A]],
-    failedIndices: Vector[Int],
-    errors       : Map[Int, DspyError]
-)
+/** The result of a batch that completed: one entry for each item, in the order of the items. A `Left` is the error of
+  * the task of that item.
+  */
+final case class ParallelExecutionResult[+A](results: Vector[Either[DspyError, A]])
 
 /** Runs a task for each item of a batch on a pool of `numThreads` threads (upstream `dspy/utils/parallelizer.py`).
   *
@@ -35,7 +34,7 @@ final case class ParallelExecutionResult[+A](
   */
 final class ParallelExecutor(
     val numThreads: ThreadCount = ParallelExecutor.DefaultNumThreads,
-    val maxErrors : ErrorLimit  = ErrorLimit(10),
+    val maxErrors : ErrorLimit  = ParallelExecutor.DefaultMaxErrors,
     val timeout   : Duration    = Duration.Inf
 ):
 
@@ -61,93 +60,67 @@ final class ParallelExecutor(
       task: A => Either[DspyError, B],
       data: Vector[A]
   ): Either[DspyError, ParallelExecutionResult[B]] =
-    if data.isEmpty then
-      return Right(ParallelExecutionResult(results = Vector.empty, failedIndices = Vector.empty, errors = Map.empty))
+    if data.isEmpty then return Right(ParallelExecutionResult(Vector.empty))
 
     val captured        = ContextPropagation.captureAll
     val pool            = Executors.newFixedThreadPool(numThreads)
-    val completion      = ExecutorCompletionService[(Int, Option[Either[DspyError, B]])](pool)
+    val completion      = ExecutorCompletionService[(Int, Either[DspyError, B])](pool)
     val cancelRequested = AtomicBoolean(false)
+    val cancelled       = RuntimeError("parallel_executor", "Execution cancelled due to errors or interruption.")
+
+    def thrown(error: Throwable): RuntimeError =
+      RuntimeError(component = "parallel_executor", message = DspyError.messageOf(error))
 
     try
       def submit(index: Int): Unit =
-        val _ = completion.submit(new Callable[(Int, Option[Either[DspyError, B]])]:
-          override def call(): (Int, Option[Either[DspyError, B]]) =
+        val _ = completion.submit(new Callable[(Int, Either[DspyError, B])]:
+          override def call(): (Int, Either[DspyError, B]) =
             captured.runAsTask("parallel-task") {
-              if cancelRequested.get() then index -> None
+              // The loop below reads no result after the cancel request, so this `Left` is not visible.
+              if cancelRequested.get() then index -> Left(cancelled)
               else
                 val value: Either[DspyError, B] =
                   try task(data(index))
                   catch
-                    case NonFatal(error) => Left(
-                        RuntimeError(
-                          component = "parallel_executor",
-                          message = DspyError.messageOf(error)
-                        )
-                      )
-                index -> Some(value)
+                    case NonFatal(error) => Left(thrown(error))
+                index -> value
             })
 
-      var submitted = 0
       var completed = 0
       var next      = 0
 
-      while submitted < numThreads && next < data.size do
+      while next < numThreads && next < data.size do
         submit(next)
-        submitted += 1
         next += 1
 
-      val resultBuffer      = Array.fill[Option[B]](data.size)(None)
-      val failedIndices     = Vector.newBuilder[Int]
-      val errors            = scala.collection.mutable.Map.empty[Int, DspyError]
-      var cancelledByErrors = false
-      var timedOut          = false
+      val results                    = scala.collection.mutable.Map.empty[Int, Either[DspyError, B]]
+      var failures                   = 0
+      var stopped: Option[DspyError] = None
 
-      while completed < submitted && !cancelledByErrors && !timedOut do
+      while completed < next && stopped.isEmpty do
         val completedFuture = timeout match
           case limit: FiniteDuration => completion.poll(limit.toMillis, TimeUnit.MILLISECONDS)
           case _: Duration.Infinite  => completion.take()
         if completedFuture == null then
-          timedOut = true
+          stopped = Some(RuntimeError("parallel_executor", s"Execution timed out after ${timeout.toSeconds} seconds"))
         else
-          val (index, maybeOutcome) = completedFuture.get()
+          val (index, outcome) = completedFuture.get()
           completed += 1
+          results.update(index, outcome)
 
-          maybeOutcome match
-            case None          => ()
-            case Some(outcome) => outcome match
-                case Right(value) => resultBuffer(index) = Some(value)
-                case Left(error)  =>
-                  failedIndices += index
-                  errors.update(index, error)
-                  if errors.size >= maxErrors then
-                    cancelledByErrors = true
-                    cancelRequested.set(true)
+          if outcome.isLeft then
+            failures += 1
+            if failures >= maxErrors then
+              stopped = Some(cancelled)
+              cancelRequested.set(true)
 
-          if !cancelledByErrors && next < data.size then
+          if stopped.isEmpty && next < data.size then
             submit(next)
-            submitted += 1
             next += 1
 
-      if timedOut then
-        Left(RuntimeError("parallel_executor", s"Execution timed out after ${timeout.toSeconds} seconds"))
-      else if cancelledByErrors then
-        Left(RuntimeError("parallel_executor", "Execution cancelled due to errors or interruption."))
-      else
-        Right(
-          ParallelExecutionResult(
-            results = resultBuffer.toVector,
-            failedIndices = failedIndices.result().sorted,
-            errors = errors.toMap
-          )
-        )
+      stopped.toLeft(ParallelExecutionResult(Vector.tabulate(data.size)(results)))
     catch
-      case NonFatal(error) => Left(
-          RuntimeError(
-            component = "parallel_executor",
-            message = DspyError.messageOf(error)
-          )
-        )
+      case NonFatal(error) => Left(thrown(error))
     finally
       cancelRequested.set(true)
       val _ = pool.shutdownNow()
@@ -155,6 +128,9 @@ final class ParallelExecutor(
 object ParallelExecutor:
   /** The number of threads of an executor when the caller and the context give none. */
   val DefaultNumThreads: ThreadCount = ThreadCount(8)
+
+  /** The number of failed tasks that stops a batch when the caller and the context give no limit. */
+  val DefaultMaxErrors: ErrorLimit = ErrorLimit(10)
 
   /** Build an executor from the ambient context's `numThreads` / `maxErrors`, falling back to the defaults. Explicit
     * `numThreads` / `maxErrors` arguments win over the context (the resolution chain [[dspy4s.programs.Parallel]]
@@ -168,6 +144,6 @@ object ParallelExecutor:
     val ctx = summon[RuntimeContext]
     ParallelExecutor(
       numThreads = numThreads.orElse(ctx.numThreads).getOrElse(DefaultNumThreads),
-      maxErrors = maxErrors.orElse(ctx.maxErrors).getOrElse(ErrorLimit(10)),
+      maxErrors = maxErrors.orElse(ctx.maxErrors).getOrElse(DefaultMaxErrors),
       timeout = timeout
     )

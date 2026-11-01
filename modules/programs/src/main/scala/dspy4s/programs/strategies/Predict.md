@@ -268,16 +268,6 @@ flowchart TD
     dynamic["DynamicPredict<br/>record input + record output"] --> engine
 ```
 
-`Predict.erase` creates an immutable `DynamicPredict` snapshot with the same layout, demos, runtime, output JSON
-schema, config, bound model, and tools:
-
-```scala
-val dynamic: DynamicPredict = answerQuestion.erase
-```
-
-Erasure removes the static `I` and `O` boundary; it does not add another runtime wrapper. For valid encoded inputs and
-decodable model outputs, the `Predict` call's `.raw` value equals the erased call's `.raw` value.
-
 ## Optimization
 
 A standalone `Predict` is one independently tunable leaf named `self`:

@@ -132,16 +132,12 @@ final class Evaluate(val config: EvaluateConfig) extends Evaluator:
       )
 
     execResultE.flatMap { execResult =>
-      val evaluations = dataset.indices.map { idx =>
-        execResult.results(idx) match
-          case Some((prediction, score)) => ExampleEvaluation(dataset(idx), prediction, score)
-          case None                      =>
-            val capturedError =
-              if cfg.provideTraceback then
-                execResult.errors.get(idx).map(err => s"[${err.code}] ${err.message}")
-              else None
-            ExampleEvaluation(dataset(idx), RawPrediction.empty, cfg.failureScore, error = capturedError)
-      }.toVector
+      val evaluations = dataset.zip(execResult.results).map {
+        case (example, Right((prediction, score))) => ExampleEvaluation(example, prediction, score)
+        case (example, Left(err))                  =>
+          val capturedError = Option.when(cfg.provideTraceback)(s"[${err.code}] ${err.message}")
+          ExampleEvaluation(example, RawPrediction.empty, cfg.failureScore, error = capturedError)
+      }
 
       val totalScore = evaluations.map(_.score).sum
       val aggregate  = if evaluations.nonEmpty then (totalScore / evaluations.size) * 100.0 else 0.0

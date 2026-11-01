@@ -1,7 +1,7 @@
 package dspy4s.programs.strategies
 
 import dspy4s.adapters.contracts.ToolSpec
-import dspy4s.core.contracts.{DspyError, DynamicValues, NotFoundError, PredictorKey, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, DynamicValues, NotFoundError, PredictorKey, RuntimeContext, SignatureLayout}
 import dspy4s.core.data.Example
 import dspy4s.core.decisions.DecisionSettings
 import dspy4s.lm.contracts.LanguageModel
@@ -54,7 +54,8 @@ final case class Predict[I, O](
       * [[dspy4s.core.decisions]].
       */
     decisions: Map[String, DecisionSettings] = Map.empty
-) extends Module[I, O]:
+) extends Module[I, O],
+      DecisionOutputs[Predict[I, O]]:
 
   override val moduleName: String = name.getOrElse("predict")
 
@@ -76,51 +77,14 @@ final case class Predict[I, O](
   )
 
   /** Pin a bound LM to this predictor (immutable `set_lm`): returns a copy that resolves to `model` instead of the
-    * ambient `RuntimeContext` LM.
+    * ambient `RuntimeContext` LM. The field [[lm]] is the bound LM (`get_lm`).
     */
   def withLm(model: LanguageModel): Predict[I, O] = copy(lm = Some(model))
 
-  /** The bound LM, if any (`get_lm`); `None` means the predictor uses the ambient `RuntimeContext` LM. */
-  def boundLm: Option[LanguageModel] = lm
+  override protected def decisionLayout: SignatureLayout = signature.layout
 
-  /** Experimental. This predictor with the explicit `settings` of the decision output `field` (upstream
-    * `Predict.fields[field]`). The settings replace the earlier settings of the field. A `Left` comes when the plan of
-    * the layout rejects the settings ([[dspy4s.core.decisions.DecisionPlan.of]]).
-    */
-  def withDecision(field: String, settings: DecisionSettings): Either[DspyError, Predict[I, O]] =
-    PredictEngine.withDecision(signature.layout, decisions, field, settings).map(updated => copy(decisions = updated))
-
-  /** Experimental. The effective criteria of the decision output `field` (upstream `get_criteria`): the explicit
-    * criteria, else the default of its kind. A `Left` comes when `field` is not a decision output.
-    */
-  def criteria(field: String): Either[DspyError, Option[DynamicValue]] =
-    PredictEngine.criteria(signature.layout, decisions, field)
-
-  /** Experimental. This predictor with the criteria of the decision output `field` set to `criteria` (upstream
-    * `set_criteria`). The other settings of the field stay. A `Left` comes when the plan rejects the criteria.
-    */
-  def withCriteria(field: String, criteria: DynamicValue): Either[DspyError, Predict[I, O]] =
-    PredictEngine.withCriteria(signature.layout, decisions, field, criteria).map(updated => copy(decisions = updated))
-
-  /** Forget the static input/output shapes and expose this predictor as a record-valued program.
-    *
-    * This is a one-way, immutable snapshot: it preserves the complete engine configuration, including the output JSON
-    * schema derived from `O`, but the returned module no longer validates or decodes values. For every input whose
-    * encoded record and model output satisfy this signature, `apply(input).map(_.raw)` and the erased module's result
-    * are equal.
-    */
-  def erase: DynamicPredict =
-    DynamicPredict(
-      layout = signature.layout,
-      demos = demos,
-      name = name,
-      runtime = runtime,
-      outputJsonSchema = signature.outputShape.jsonSchema,
-      config = config,
-      lm = lm,
-      tools = tools,
-      decisions = decisions
-    )
+  override protected def withDecisions(updated: Map[String, DecisionSettings]): Predict[I, O] =
+    copy(decisions = updated)
 
   // The key is the data of this leaf's `OptimizableMetadata`, so an optimizer finds the trace entries of the leaf.
   override protected val lifecycle: ModuleLifecycle[I, O] =

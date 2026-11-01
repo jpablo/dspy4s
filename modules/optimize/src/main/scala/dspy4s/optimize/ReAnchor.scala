@@ -512,7 +512,7 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
       data = examples
     )(using context)
     run.left.map(error => failure.get.getOrElse(error)).flatMap { result =>
-      val values = result.results.flatten
+      val values = result.results.flatMap(_.toOption)
       if values.size != examples.size then
         Left(failure.get.getOrElse(RuntimeError("reanchor", "A pass did not score each example.")))
       else if values.exists(value => !value.isFinite) then

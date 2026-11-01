@@ -24,18 +24,12 @@ final case class Parallel(
     maxErrors : Option[ErrorLimit]  = None,
     timeout   : Duration            = Duration.Inf
 ):
-  private def resolvedExecutor(using RuntimeContext): ParallelExecutor =
-    ParallelExecutor.fromSettings(timeout = timeout, numThreads = numThreads, maxErrors = maxErrors)
-
   def run(
       tasks: Vector[(DynamicModule, ProgramCall[DynamicValue.Record])]
   )(using RuntimeContext): Either[DspyError, ParallelExecutionResult[RawPrediction]] =
-    resolvedExecutor.executeEither[(DynamicModule, ProgramCall[DynamicValue.Record]), RawPrediction](
-      task = (pair: (DynamicModule, ProgramCall[DynamicValue.Record])) => pair._1(pair._2).map(_.raw),
-      data = tasks
-    )
-
-  def apply(
-      tasks: Vector[(DynamicModule, ProgramCall[DynamicValue.Record])]
-  )(using RuntimeContext): Either[DspyError, ParallelExecutionResult[RawPrediction]] =
-    run(tasks)
+    ParallelExecutor
+      .fromSettings(timeout = timeout, numThreads = numThreads, maxErrors = maxErrors)
+      .executeEither[(DynamicModule, ProgramCall[DynamicValue.Record]), RawPrediction](
+        task = (pair: (DynamicModule, ProgramCall[DynamicValue.Record])) => pair._1(pair._2).map(_.raw),
+        data = tasks
+      )

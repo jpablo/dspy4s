@@ -134,7 +134,7 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
   detect an equal-size reorder, and the former layout-bearing state format is unsupported. See PORT_GAPS G-4.
 - **Per-module `config` + bound LM.** ✅ ported — `DynamicPredict`, `Predict[I, O]`, and `ChainOfThought[I, O]`
   carry immutable module-level `config` (commit `b85fe27`, merged under per-call config). `DynamicPredict` and
-  `Predict` can also carry an optional bound LM (`Predict.withLm` / `Predict.boundLm`, commit `b2d0096`; a bound
+  `Predict` can also carry an optional bound LM (`Predict.withLm` / `Predict.lm`, commit `b2d0096`; a bound
   LM wins over the ambient `RuntimeContext` LM).
   See PORT_GAPS G-3.
 

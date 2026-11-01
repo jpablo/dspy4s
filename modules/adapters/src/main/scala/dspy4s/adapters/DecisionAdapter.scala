@@ -12,9 +12,11 @@ import dspy4s.adapters.internal.{AdapterTextSupport, PromptText, StrictJsonSchem
 import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.{
   :=,
+  ConfigurationError,
   DspyError,
   DynamicValues,
   JsonSchemaRefs,
+  PredictorKey,
   PythonText,
   RuntimeContext,
   SignatureLayout,
@@ -23,15 +25,16 @@ import dspy4s.core.contracts.{
   updated
 }
 import dspy4s.core.data.Example
-import dspy4s.core.decisions.{DecisionEvidence, DecisionKind, DecisionPlan}
-import dspy4s.lm.contracts.LmOutput
+import dspy4s.core.decisions.{DecisionEvidence, DecisionEvidenceLog, DecisionKind, DecisionPlan}
+import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.lm.contracts.{DecisionRequests, LanguageModel, LmOutput, StreamingLanguageModel}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** Experimental. The adapter that asks a generative model for the evidence of the decision outputs of `plan`, and
   * decodes it (upstream `DecisionAdapter` for a model that is not a System One model, in `dspy/adapters/decision.py`).
   * Each other part of the request comes from `inner`, so the same rules hold for the Chat, JSON, and XML adapters. A
-  * System One model gets no prompt: `Predict` sends it the state and the questions of the companion functions
-  * [[DecisionAdapter.systemOneState]] and [[DecisionAdapter.systemOneQuestions]].
+  * System One model gets no prompt: [[DecisionAdapter.decide]] sends it the state and the questions of the companion
+  * functions [[DecisionAdapter.systemOneState]] and [[DecisionAdapter.systemOneQuestions]].
   *
   * The request (upstream `DecisionAdapter._prepare`):
   *   - Each decision output of `plan` becomes an evidence field ([[DecisionAdapter.evidenceLayout]]): the same name,
@@ -254,6 +257,102 @@ object DecisionAdapter:
   ): Either[DspyError, Vector[(String, DecisionEvidence)]] =
     evidenceOf(plan, answers, name => s"The reply of the System One model has no answer for '$name'")(Right(_))
       .left.map(_._2)
+
+  /** The adapter of a call with the decision outputs of the layout (upstream `resolve_adapter` in
+    * `dspy/adapters/decision.py`): `adapter` itself when `layout` has no decision output, else a [[DecisionAdapter]]
+    * around `adapter`. Its fallback is the fallback of `adapter`, in a [[DecisionAdapter]] too. These errors fail the
+    * call before the request:
+    *   - settings that the plan rejects (`plan`, from [[DecisionPlan.of]]);
+    *   - a call that streams to a listener (upstream `DecisionAdapter._prepare`: "Streaming decision evidence is not
+    *     supported.");
+    *   - a decision output with no question: no description and no instructions ([[DecisionPlan.question]]).
+    *
+    * The call warns about each output in `nestedFields` (an output with a nested decision type), with the text of
+    * upstream `resolve_adapter`.
+    */
+  def resolve(
+      adapter     : Adapter,
+      plan        : Either[DspyError, DecisionPlan],
+      layout      : SignatureLayout,
+      nestedFields: Vector[String],
+      moduleName  : String,
+      model       : LanguageModel
+  ): Either[DspyError, Adapter] =
+    nestedFields.foreach(name => RuntimeEnvironment.warn(s"Predict '${layout.name}'", nestedDecisionWarning(name)))
+    plan.flatMap { resolved =>
+      if resolved.kinds.isEmpty then Right(adapter)
+      else
+        for
+          _ <- rejectStream(model, moduleName, layout)
+          _ <- evidenceLayout(layout, resolved)
+        yield DecisionAdapter(adapter, resolved)
+    }
+
+  /** The call of a System One model (upstream `DecisionAdapter.__call__` with `system_one`, in
+    * `dspy/adapters/decision.py`), for the System One plan of `layout` ([[DecisionPlan.forSystemOne]]): no adapter, and
+    * no prompt. These errors fail the call before the request:
+    *   - a call that streams to a listener ("Streaming decision evidence is not supported."): Jev has no stream;
+    *   - a decision output with no question ([[DecisionPlan.question]]);
+    *   - request options: `options` must be empty ("Unsupported TypeSafe generation settings: [...]").
+    *
+    * The request is [[DecisionRequests.request]] with the state of [[systemOneState]] and the questions of
+    * [[systemOneQuestions]], and `rolloutId` (it changes only the cache key). The call dispatches the LM callback
+    * events. The typed answers of the reply ([[DecisionRequests.answers]]) give the evidence ([[systemOneEvidence]]),
+    * which goes to the evidence log before the decode, as upstream. The result is the decode: the output values. The
+    * usage of the reply goes to the usage scope of the call ([[LanguageModel.callAndRecordUsage]]). Each nested
+    * decision output fails the plan first, so a System One call gives no warning for it (upstream `resolve_adapter`
+    * makes the `DecisionState` before the warnings).
+    */
+  def decide(
+      plan      : DecisionPlan,
+      layout    : SignatureLayout,
+      demos     : Vector[Example],
+      moduleName: String,
+      model     : LanguageModel,
+      inputs    : DynamicValue.Record,
+      options   : DynamicValue.Record,
+      rolloutId : Option[Int]
+  )(using RuntimeContext): Either[DspyError, DynamicValue.Record] =
+    val optionKeys  = DynamicValues.recordKeys(options)
+    def unsupported = ConfigurationError(DecisionRequests.unsupportedSettings(optionKeys))
+    for
+      _         <- rejectStream(model, moduleName, layout)
+      questions <- systemOneQuestions(plan)
+      _         <- Either.cond(optionKeys.isEmpty, (), unsupported)
+      request    = DecisionRequests
+                  .request(model.id, systemOneState(layout, demos, inputs), questions)
+                  .copy(rolloutId = rolloutId)
+      response <- LanguageModel.callWithEvents(model, request)
+      answers  <- DecisionRequests.answers(response)
+      evidence <- systemOneEvidence(plan, answers)
+      _         = recordEvidence(moduleName, layout, evidence)
+      values   <- plan.decode(evidence.toMap)
+    yield values
+
+  /** Add the decision evidence of one completion to the evidence log (upstream `DecisionAdapter._decode` with
+    * `record_evidence`). The key is the key of the predictor that runs ([[RuntimeEnvironment.activePredictor]]), so
+    * that the evidence of the `Predict` inside `ChainOfThought` belongs to the `ChainOfThought` leaf, as its trace
+    * entry does. With no such predictor, the key of the module `moduleName` with `layout`.
+    */
+  def recordEvidence(moduleName: String, layout: SignatureLayout, evidence: Vector[(String, DecisionEvidence)]): Unit =
+    if evidence.nonEmpty then
+      val key = RuntimeEnvironment.activePredictor.getOrElse(PredictorKey.from(moduleName, layout))
+      evidence.foreach((field, value) => DecisionEvidenceLog.record(key, field, value))
+
+  /** A `Left` when `model` gives the stream output of the predictor to a listener ([[StreamingLanguageModel]]): the
+    * decision outputs cannot stream (upstream `DecisionAdapter._prepare`).
+    */
+  private def rejectStream(model: LanguageModel, moduleName: String, layout: SignatureLayout): Either[DspyError, Unit] =
+    val streams = model match
+      case streaming: StreamingLanguageModel => streaming.streamsToListener(moduleName, layout.outputFields.map(_.name))
+      case _                                 => false
+    Either.cond(!streams, (), ConfigurationError("Streaming decision evidence is not supported."))
+
+  /** The warning for an output with a nested decision type (upstream `resolve_adapter`). */
+  private def nestedDecisionWarning(name: String): String =
+    s"Decision evidence decoding is not implemented for nested output '$name'. The LM generates values and " +
+      "confidence directly; thresholds, cuts, and weights are not applied. Use top-level decision output fields " +
+      "instead."
 
   /** `true` for the type of an evidence field ([[NoulEvidence]], [[ScoreEvidence]], and [[ChoiceEvidence]]). The JSON
     * adapter keeps the JSON value of such a field as it is.

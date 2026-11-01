@@ -5,7 +5,7 @@ import dspy4s.core.data.Example
 import dspy4s.core.decisions.DecisionSettings
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.{Module, ModuleLifecycle, ProgramCall, ProgramRuntime}
-import dspy4s.programs.runtime.{PredictEngine, SettingsProgramRuntime}
+import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.signatures.OutputAugmentation.PrependField
 import dspy4s.programs.contracts.Prediction
 import dspy4s.signatures.{OutputAugmentation, Signature}
@@ -49,7 +49,8 @@ final case class ChainOfThought[I, O](
       */
     decisions: Map[String, DecisionSettings] = Map.empty
 )(using prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O])
-    extends Module[I, ChainOfThought.WithReasoning[O]]:
+    extends Module[I, ChainOfThought.WithReasoning[O]],
+      DecisionOutputs[ChainOfThought[I, O]]:
 
   /** The augmented output type — always a named tuple. See [[ChainOfThought.WithReasoning]]. */
   type Out = ChainOfThought.WithReasoning[O]
@@ -78,21 +79,10 @@ final case class ChainOfThought[I, O](
   private lazy val predict: Predict[I, Out] =
     Predict(signature = signature, demos = demos, runtime = runtime, config = config, decisions = decisions)
 
-  /** Experimental. This program with the explicit `settings` of the decision output `field`, as
-    * [[Predict.withDecision]].
-    */
-  def withDecision(field: String, settings: DecisionSettings): Either[DspyError, ChainOfThought[I, O]] =
-    PredictEngine.withDecision(signature.layout, decisions, field, settings).map(updated => copy(decisions = updated))
+  override protected def decisionLayout: SignatureLayout = signature.layout
 
-  /** Experimental. The effective criteria of the decision output `field`, as [[Predict.criteria]]. */
-  def criteria(field: String): Either[DspyError, Option[DynamicValue]] =
-    PredictEngine.criteria(signature.layout, decisions, field)
-
-  /** Experimental. This program with the criteria of the decision output `field` set to `criteria`, as
-    * [[Predict.withCriteria]].
-    */
-  def withCriteria(field: String, criteria: DynamicValue): Either[DspyError, ChainOfThought[I, O]] =
-    PredictEngine.withCriteria(signature.layout, decisions, field, criteria).map(updated => copy(decisions = updated))
+  override protected def withDecisions(updated: Map[String, DecisionSettings]): ChainOfThought[I, O] =
+    copy(decisions = updated)
 
 object ChainOfThought:
 

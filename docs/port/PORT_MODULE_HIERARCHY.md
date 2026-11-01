@@ -88,7 +88,7 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
 | Learnable-leaf marker | `Parameter` | — *(typeclass `OptimizableLeaf[P]`; writable carrier `OptimizableParameters`)* |
 | Enumerate sub-predictors | `named_predictors()` / `named_parameters()` | `OptimizableStructure[P].inspect` / `inspectNamed` |
 | Attach demos | mutate `predictor.demos` | update `OptimizableParameters.demos`, then immutable `replace` |
-| Set the LM | `set_lm` / `get_lm` | ambient LM or immutable per-module `Predict.withLm` / `boundLm` |
+| Set the LM | `set_lm` / `get_lm` | ambient LM or immutable per-module `Predict.withLm` / `lm` |
 | Where cross-cutting wrapping lives | `Module.__call__` (universal, non-bypassable) | `Module.apply` (`final`; universal, non-bypassable — [G-2 resolved](PORT_GAPS.md)) |
 
 ## Per-class side-by-side

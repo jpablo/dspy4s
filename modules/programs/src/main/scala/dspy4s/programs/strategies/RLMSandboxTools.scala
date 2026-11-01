@@ -91,11 +91,7 @@ private[programs] object RLMSandboxTools:
                 data = prompts
               )(using ctx)
               .map { outcome =>
-                val answers = prompts.indices.map { i =>
-                  outcome.results(i).getOrElse(
-                    s"[ERROR] ${outcome.errors.get(i).map(_.message).getOrElse("prompt was not executed")}"
-                  )
-                }
+                val answers = outcome.results.map(_.fold(error => s"[ERROR] ${error.message}", identity))
                 DynamicValues.sequence(answers.map(DynamicValues.string))
               }
           }

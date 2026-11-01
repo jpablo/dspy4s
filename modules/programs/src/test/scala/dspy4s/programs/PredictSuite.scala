@@ -2,15 +2,13 @@ package dspy4s.programs
 
 import zio.blocks.schema.Schema
 
-import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput, ToolSpec}
+import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.{DspyError, LmUsage, RuntimeContext}
-import dspy4s.core.data.Example
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.signatures.{InputField, OutputField, Shape, Spec, Signature}
 import munit.FunSuite
 
@@ -169,45 +167,6 @@ class TypedPredictSuite extends FunSuite:
       val result           = Predict(sig)(P4QAInput("Capital of France?")).toOption.get
       assertEquals(result.raw.completions.map(_.size), Some(2))
       assertEquals(result.raw.lmUsage.map(_.totalTokens), Some(12L))
-    }
-  }
-
-  test("Predict.erase preserves engine state and commutes with valid execution") {
-    val sig     = Signature.derived[P4QAInput, P4QAOutput]("QA")
-    val runtime = new SettingsProgramRuntime {}
-    val demos   = Vector(
-      Example("question" := "Capital of Germany?", "answer" := "Berlin", "score" := 1.0)
-        .withInputs(Set("question"))
-    )
-    val config  = DynamicValues.record("temperature" := 0.2)
-    val tools   = Vector(ToolSpec("search", description = Some("Search the corpus")))
-    val program = Predict(
-      signature = sig,
-      demos = demos,
-      name = Some("typed_qa"),
-      runtime = runtime,
-      config = config,
-      lm = Some(FixedLm),
-      tools = tools
-    )
-    val erased = program.erase
-    val input  = P4QAInput("Capital of France?")
-
-    assertEquals(erased.layout, sig.layout)
-    assertEquals(erased.demos, demos)
-    assertEquals(erased.name, program.name)
-    assert(erased.runtime eq runtime)
-    assertEquals(erased.outputJsonSchema, sig.outputShape.jsonSchema)
-    assertEquals(erased.config, config)
-    assert(erased.lm.exists(_ eq FixedLm))
-    assertEquals(erased.tools, tools)
-
-    RuntimeEnvironment.withSettings(defaultSettings) {
-      given RuntimeContext = RuntimeEnvironment.current
-      val typedResult      = program(input).map(_.raw)
-      val erasedResult     = erased(ProgramCall(sig.inputShape.encode(input))).map(_.raw)
-
-      assertEquals(erasedResult, typedResult)
     }
   }
 

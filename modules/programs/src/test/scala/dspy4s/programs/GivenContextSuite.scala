@@ -148,7 +148,7 @@ class GivenContextSuite extends FunSuite:
     val result = Parallel(numThreads = Some(ThreadCount(2))).run(Vector.fill(3)(program -> ProgramCall(question)))
 
     assertEquals(
-      result.map(_.results.flatten.map(raw => lookupString(raw.values, "answer"))),
+      result.map(_.results.flatMap(_.toOption).map(raw => lookupString(raw.values, "answer"))),
       Right(Vector.fill(3)("Paris"))
     )
     assertEquals(recorder.moduleStarts, Vector.fill(3)("predict"))
@@ -166,7 +166,7 @@ class GivenContextSuite extends FunSuite:
       )(using context)
     }
 
-    assertEquals(result.map(_.results.flatten), Right(Vector(true, true, true)))
+    assertEquals(result.map(_.results.flatMap(_.toOption)), Right(Vector(true, true, true)))
   }
 
   // ── Tools ───────────────────────────────────────────────────────────────────────────────────────────────────

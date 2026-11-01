@@ -166,7 +166,7 @@ uniform result by `Prediction.dynamic`. This removes the former domain/record re
 
 ## G-3 — No per-module `config` / `set_lm` (only per-call config)
 
-**Status:** Resolved — module `config` (commit b85fe27) + per-module bound LM `withLm`/`boundLm` (commit b2d0096)
+**Status:** Resolved — module `config` (commit b85fe27) + per-module bound LM `withLm`/`lm` (commit b2d0096)
 
 **Resolution (config).** `DynamicPredict`, `Predict[I, O]`, and `ChainOfThought[I, O]` now carry an immutable
 module-level `config: DynamicValue.Record`, threaded into `PredictEngine` and merged
@@ -177,7 +177,7 @@ config is unchanged behavior.
 `lm: Option[LanguageModel]`, threaded into `PredictEngine`, which resolves the model as
 `lm.fold(runtime.resolveModel)(Right(_))` — a bound LM wins over the ambient `RuntimeContext`
 LM, so a program can pin different models to different predictors. `Predict.withLm(model)`
-(immutable `set_lm`) and `Predict.boundLm` (`get_lm`) are the accessors. The bound LM is
+(immutable `set_lm`) and the field `Predict.lm` (`get_lm`) are the accessors. The bound LM is
 an execution binding, not part of `OptimizableParameters` (like `runtime`), so `ProgramPersistence` excludes it.
 
 **Summary.** Python's `Predict` carries module-level `config` and a `set_lm`/`get_lm`
@@ -1754,7 +1754,7 @@ no caller has a batch time limit by default: `Duration.Inf` is the default `time
   default is no time limit. A caller that gives a finite `timeout` still gets a `Left` for the full batch when no task
   completes in that time (`modules/programs/.../runtime/ParallelExecutor.scala`). `PORT_BACKLOG.md` defers the
   resubmission of a slow task.
-- **Typed `Parallel`.** `Parallel.run` accepts `DynamicModule` only (`modules/programs/.../Parallel.scala:30-32`), and
+- **Typed `Parallel`.** `Parallel.run` accepts `DynamicModule` only (`modules/programs/.../Parallel.scala:27-29`), and
   `fanout` is sequential (`modules/programs/.../compose/Both.scala:12-15`).
 - **Temperature for `n > 1`.** Upstream sets 0.7 when the temperature is low (`dspy/predict/predict.py:179-185`).
   `PredictEngine.scala:96-121` has no equivalent.

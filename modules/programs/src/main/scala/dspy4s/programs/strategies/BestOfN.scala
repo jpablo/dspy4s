@@ -1,7 +1,6 @@
 package dspy4s.programs.strategies
 
 import dspy4s.programs.{AttemptCount, FailureCount}
-import dspy4s.programs.compose.{Mode, mode}
 import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
@@ -43,13 +42,7 @@ final case class BestOfN[P <: Module[I, O], I, O](
   override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.typedWithoutInputs
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    val rolloutStart = call.rolloutId.getOrElse(0)
-    AttemptSelection.bestOf[Prediction[O]](n, threshold, failCount, moduleName)(
-      runAttempt = idx =>
-        module
-          .mode(Mode.temperature(1.0d) ++ Mode.rolloutId(rolloutStart + idx))(call),
-      reward = prediction => AttemptSelection.guardedReward(moduleName)(rewardFn(call.input, prediction))
-    )
+    AttemptSelection.sample(module, call, rewardFn, n, threshold, failCount, moduleName)
 
 object BestOfN:
   /** Pass-through addressability (the spec's `selectBest(p)` rule): `BestOfN` wraps without adding any learnable

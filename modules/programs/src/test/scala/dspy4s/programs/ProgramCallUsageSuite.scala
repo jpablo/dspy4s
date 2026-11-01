@@ -113,8 +113,8 @@ class ProgramCallUsageSuite extends FunSuite:
     ): Either[DspyError, RawPrediction] =
       val tasks = (1 to count).toVector.map(i => inner -> ProgramCall(DynamicValues.record("question" := s"q$i")))
       Parallel(numThreads = Some(ThreadCount(4))).run(tasks).map { result =>
-        nested.set(result.results.map(_.flatMap(_.lmUsage)))
-        RawPrediction(values = DynamicValues.record("count" := result.results.flatten.size))
+        nested.set(result.results.map(_.toOption.flatMap(_.lmUsage)))
+        RawPrediction(values = DynamicValues.record("count" := result.results.flatMap(_.toOption).size))
       }
 
   /** A REPL that runs a small script language in place of Python: `query` calls `llm_query` one time and

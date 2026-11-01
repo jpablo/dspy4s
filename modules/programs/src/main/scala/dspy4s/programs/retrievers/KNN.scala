@@ -25,13 +25,7 @@ final class KNN private (
     * trainset index, deterministically.
     */
   def retrieve(inputs: DynamicValue.Record)(using RuntimeContext): Either[DspyError, Vector[Example]] =
-    embedder.embed(Vector(KNN.serialize(inputs))).flatMap { queryRows =>
-      queryRows.headOption.toRight(RuntimeError("knn", "embedder returned no rows for the query")).map { query =>
-        val q      = query.toArray
-        val scored = Vector.tabulate(trainVectors.length)(i => (Similarity.dot(q, trainVectors(i)), i))
-        scored.sortBy { case (score, i) => (-score, i) }.take(k).map { case (_, i) => trainset(i) }
-      }
-    }
+    Similarity.topK(embedder, "knn", KNN.serialize(inputs), trainVectors, k).map(_.map((_, i) => trainset(i)))
 
 object KNN:
   /** Embed every trainset example's input fields and assemble the retriever. */
@@ -55,6 +49,26 @@ private[retrievers] object Similarity:
   /** Convert embedder rows into the primitive matrix the retrievers store. */
   def toMatrix(rows: Vector[Vector[Float]]): Array[Array[Float]] =
     rows.iterator.map(_.toArray).toArray
+
+  /** Embed `query` and score it against each row of `matrix`. The result has the `k` best rows as `(score, row index)`,
+    * best first. A tie goes to the earlier row. With `normalizeQuery`, the function first normalizes the query vector
+    * (L2). `component` names the retriever in the error of an embedder that returns no rows.
+    */
+  def topK(
+      embedder      : Embedder,
+      component     : String,
+      query         : String,
+      matrix        : Array[Array[Float]],
+      k             : NeighborCount,
+      normalizeQuery: Boolean = false
+  )(using RuntimeContext): Either[DspyError, Vector[(Double, Int)]] =
+    embedder.embed(Vector(query)).flatMap { rows =>
+      rows.headOption.toRight(RuntimeError(component, "embedder returned no rows for the query")).map { row =>
+        val q      = if normalizeQuery then normalize(row.toArray) else row.toArray
+        val scored = Vector.tabulate(matrix.length)(i => (dot(q, matrix(i)), i))
+        scored.sortBy { case (score, i) => (-score, i) }.take(k)
+      }
+    }
 
   def dot(a: Array[Float], b: Array[Float]): Double =
     var acc = 0.0

@@ -23,6 +23,7 @@ import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.Prediction
 import dspy4s.programs.optimization.optimizableView
+import dspy4s.programs.strategies.RefineFeedback
 import dspy4s.signatures.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
@@ -189,11 +190,11 @@ class RefinePerModuleAdviceSuite extends FunSuite:
   test("parseAdvice decodes a JSON dict and falls back to uniform advice for non-JSON") {
     val names = Vector("hinter", "answerer")
     // Faithful path: JSON object keyed by module name (tolerating surrounding prose).
-    val dict = Refine.parseAdvice("""here you go: {"hinter": "A", "answerer": "N/A"} thanks""", names)
+    val dict = RefineFeedback.parseAdvice("""here you go: {"hinter": "A", "answerer": "N/A"} thanks""", names)
     assertEquals(dict, Map("hinter" -> "A", "answerer" -> "N/A"))
     // Fallback path: a bare string becomes uniform advice across every module.
     assertEquals(
-      Refine.parseAdvice("just try harder", names),
+      RefineFeedback.parseAdvice("just try harder", names),
       Map("hinter" -> "just try harder", "answerer" -> "just try harder")
     )
   }

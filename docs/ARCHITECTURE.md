@@ -120,7 +120,7 @@ graph TD
      `Prediction.dynamic` at the module boundary.
    - `DynamicPredict` — record-valued predict, extends `DynamicModule`
    - `Predict[I, O]` — domain-valued predict, a `Module[I, O]`; a *sibling*
-     of `DynamicPredict` over the shared `PredictEngine`, with explicit one-way `erase`
+     of `DynamicPredict` over the shared `PredictEngine`
    - `ChainOfThought[I, O]` — `Module` that composes an inner `Predict`
      (prepends `reasoning`; output is always a named tuple)
    - All other programs are `Module[I, …]` too:
