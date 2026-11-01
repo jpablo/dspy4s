@@ -1,10 +1,9 @@
 package dspy4s.programs.strategies
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, TypeRef}
+import dspy4s.core.contracts.{:=, DspyError, DynamicValues, FieldSpec, TypeRef}
 import dspy4s.programs.OutputCharLimit
 import dspy4s.signatures.Shape
-import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
+import zio.blocks.schema.{DynamicValue, Schema}
 
 /** Data exchanged between an [[RLM]] strategy, its action predictor, and its persistent Python REPL. */
 object RLMModel:
@@ -20,16 +19,6 @@ object RLMModel:
 
   /** The output of one action step. */
   final case class ActionStep(reasoning: String, code: String)
-
-  /** A parsed Python action ready for the per-call REPL. */
-  final case class ReplAction(reasoning: String, code: String)
-
-  /** Post-execution control signal: ordinary observations continue the loop; a validated SUBMIT carries terminal
-    * outputs back to the enclosing RLM program.
-    */
-  enum ReplExecution:
-    case Observed(entry: ReplEntry)
-    case Submitted(entry: ReplEntry, outputs: DynamicValue.Record)
 
   /** Metadata about a REPL variable, shown to the LM instead of the value itself. */
   final case class ReplVariable(
@@ -99,10 +88,7 @@ object RLMModel:
     val fieldSpecs: Vector[FieldSpec] = Vector(reasoningField, codeField)
 
     def encode(value: ActionStep): DynamicValue.Record =
-      DynamicValue.Record(Chunk.from(Seq(
-        "reasoning" -> DynamicValue.Primitive(PrimitiveValue.String(value.reasoning)),
-        "code"      -> DynamicValue.Primitive(PrimitiveValue.String(value.code))
-      )))
+      DynamicValues.record("reasoning" := value.reasoning, "code" := value.code)
 
     def decode(raw: DynamicValue.Record): Either[DspyError, ActionStep] =
       Right(ActionStep(

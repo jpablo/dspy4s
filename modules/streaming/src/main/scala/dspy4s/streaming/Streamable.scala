@@ -63,9 +63,9 @@ object Streamable:
   given reAct[I, O](using ProgramRunner[ReAct[I, O]]): Streamable[ReAct[I, O]] =
     from { program =>
       Vector(
-        (program.reactProgramName, program.reactSignature.layout),
+        (program.reactPredict.moduleName, program.reactSignature.layout),
         // The extractor layout has the `reasoning` output first. Thus a `reasoning` stream listener can find its field.
-        (program.extractorProgramName, program.extractorPredict.signature.layout)
+        (program.extractorPredict.moduleName, program.extractorPredict.signature.layout)
       )
     }
 

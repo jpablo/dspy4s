@@ -209,6 +209,96 @@ class ReActSuite extends FunSuite:
     }
   }
 
+  test("with an adapter that does not check the allowed values, an empty tool name ends the loop after its entry") {
+    val search = new SearchTool
+    val lm     = new ScriptedLm(Vector("no idea||||", "done"))
+    val react  = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
+
+    withReact(lm) {
+      val result = react((question = "q?"))
+      assertEquals(result.map(_.output.answer), Right("done"))
+      assertEquals(lm.calls.get(), 2, "one react step and one extract call")
+      assertEquals(search.calls.get(), 0)
+      val traj = result.map(prediction => lookupString(prediction.raw.values, "trajectory")).getOrElse("")
+      assert(traj.contains("[[ ## observation_0 ## ]]\nNo tool was selected."), traj)
+    }
+  }
+
+  test("the result keeps the completions and the raw values of the extractor, and adds the complete trajectory") {
+    // The first call is the react step. The second call is the extractor, with two candidates.
+    val lm = new LanguageModel:
+      private val calls: AtomicInteger                                                           = AtomicInteger(0)
+      override val id: String                                                                    = "two-candidates-lm"
+      override val mode: LmMode                                                                  = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        val texts = if calls.getAndIncrement() == 0 then Vector("done||finish||") else Vector("first", "second")
+        Right(LmResponse(outputs = texts.map(text => LmOutput(text = text))))
+    val react = ReAct(baseSignature = qaSignature, tools = Vector.empty, maxIterations = IterationLimit(5))
+
+    withLmAndAdapter(lm, ScriptedAdapter) {
+      val prediction = react((question = "q?")).fold(error => fail(error.message), identity)
+      assertEquals(prediction.output.answer, "first")
+      assertEquals(prediction.raw.asString("answer"), Right("first"))
+      assertEquals(prediction.raw.asString("reasoning"), Right("first"))
+      assert(lookupString(prediction.raw.values, "trajectory").contains("[[ ## tool_name_0 ## ]]\nfinish"))
+      val completions = prediction.raw.completions.getOrElse(fail("no completions"))
+      assertEquals(completions.size, 2)
+      assertEquals(completions.at(1).flatMap(_.asString("answer")), Right("second"))
+    }
+  }
+
+  test("the injected finish tool takes the place of a user tool with the name finish") {
+    val userCalls  = AtomicInteger(0)
+    val userFinish = ToolFunction(ReAct.FinishToolName, "A user tool.") { _ =>
+      userCalls.incrementAndGet()
+      Right(ToolFunction.result("user"))
+    }
+    val search = new SearchTool
+    val lm     = new ScriptedLm(Vector("done||finish||", "answer"))
+    val react  =
+      ReAct(baseSignature = qaSignature, tools = Vector(userFinish, search), maxIterations = IterationLimit(5))
+
+    // A later tool takes the place of an earlier tool with the same name, in the position of the earlier tool.
+    val toolNames = react.reactSignature.layout.outputFields.find(_.name == "next_tool_name").map(_.enumValues)
+    assertEquals(toolNames, Some(Vector("finish", "search")))
+    val instructions = react.reactSignature.layout.effectiveInstructions
+    assert(instructions.contains("(1) finish, whose description is <desc>Marks the task as complete."), instructions)
+    assert(instructions.contains("(2) search, whose description is"), instructions)
+    assert(!instructions.contains("(3) "), instructions)
+
+    withReact(lm) {
+      val result = react((question = "q?"))
+      assertEquals(result.map(_.output.answer), Right("answer"))
+      assertEquals(userCalls.get(), 0)
+      val traj = result.map(prediction => lookupString(prediction.raw.values, "trajectory")).getOrElse("")
+      assert(traj.contains("[[ ## observation_0 ## ]]\nCompleted."), traj)
+    }
+  }
+
+  test("two user tools with the same name: the later tool runs, in the position of the earlier tool") {
+    def named(toolName: String, result: String): ToolFunction =
+      ToolFunction(toolName, s"Gives $result.")(_ => Right(ToolFunction.result(result)))
+    val lm    = new ScriptedLm(Vector("look||lookup||", "done||finish||", "answer"))
+    val react = ReAct(
+      baseSignature = qaSignature,
+      tools = Vector(named("lookup", "early"), named("other", "other"), named("lookup", "late")),
+      maxIterations = IterationLimit(5)
+    )
+
+    val toolNames = react.reactSignature.layout.outputFields.find(_.name == "next_tool_name").map(_.enumValues)
+    assertEquals(toolNames, Some(Vector("lookup", "other", "finish")))
+    val instructions = react.reactSignature.layout.effectiveInstructions
+    assert(instructions.contains("(1) lookup, whose description is <desc>Gives late.</desc>"), instructions)
+    assert(!instructions.contains("Gives early."), instructions)
+
+    withReact(lm) {
+      val result = react((question = "q?"))
+      assertEquals(result.map(_.output.answer), Right("answer"))
+      val traj = result.map(prediction => lookupString(prediction.raw.values, "trajectory")).getOrElse("")
+      assert(traj.contains("[[ ## observation_0 ## ]]\nlate"), traj)
+    }
+  }
+
   test("react emits tool callback events parented to the react module call") {
     val events   = ArrayBuffer.empty[CallbackEvent]
     val callback = new CallbackHandler:

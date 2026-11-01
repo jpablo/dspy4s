@@ -12,7 +12,7 @@ import dspy4s.core.contracts.{
   :=
 }
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.programs.contracts.{ToolCallRequest, ToolFunction, description}
+import dspy4s.programs.contracts.{ToolFunction, description}
 import dspy4s.programs.runtime.ToolExecutor
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 import munit.FunSuite
@@ -36,7 +36,7 @@ class ToolExecutorSuite extends FunSuite:
 
   /** The point of representing tool args/results as `DynamicValue` rather than `Map[String, Any]`/`Any`: a primitive
     * arrives at the tool with its type intact (an Int stays an Int, not collapsed to a String through an Any
-    * round-trip), and a structured result flows back through `ToolCallResult` verbatim — no `fromAny` re-guessing.
+    * round-trip), and a structured result flows back verbatim, with no `fromAny` re-guessing.
     */
   test("tool args arrive as a Record and a structured result returns verbatim") {
     val doubler = new ToolFunction:
@@ -49,12 +49,11 @@ class ToolExecutorSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(RuntimeContext()) {
       given RuntimeContext = RuntimeEnvironment.current
-      val request          = ToolCallRequest("doubler", DynamicValues.recordFromEntries(Seq("n" := 21)))
-      val result           = ToolExecutor.invoke(request, Vector(doubler))
+      val result           = ToolExecutor.run(doubler, DynamicValues.recordFromEntries(Seq("n" := 21)))
 
       assertEquals(
-        result.map(_.result),
-        Right(Right(DynamicValues.recordFromEntries(Seq("doubled" := 42, "label" := "even"))))
+        result,
+        Right(DynamicValues.recordFromEntries(Seq("doubled" := 42, "label" := "even")))
       )
     }
   }
@@ -106,7 +105,7 @@ class ToolExecutorSuite extends FunSuite:
     }
   }
 
-  test("a tool's structured failure surfaces as a Left inside the ToolCallResult") {
+  test("a tool's structured failure surfaces as a Left") {
     val picky = new ToolFunction:
       override val name: String                                                                             = "picky"
       override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
@@ -114,13 +113,8 @@ class ToolExecutorSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(RuntimeContext()) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result           = ToolExecutor.invoke(ToolCallRequest("picky", DynamicValue.Record.empty), Vector(picky))
-      result match
-        case Right(callResult) => assert(
-            callResult.result.isLeft,
-            s"expected the tool failure to be carried as Left, got: ${callResult.result}"
-          )
-        case Left(err) => fail(s"dispatch itself should succeed; got: $err")
+      val result           = ToolExecutor.run(picky, DynamicValue.Record.empty)
+      assert(result.isLeft, s"expected the tool failure to be carried as Left, got: $result")
     }
   }
 
@@ -135,10 +129,10 @@ class ToolExecutorSuite extends FunSuite:
     val quiet = ToolFunction("quiet")(_ => throw IllegalStateException())
     RuntimeEnvironment.withSettings(RuntimeContext(callbacks = Some(Vector(callback)))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val first            = ToolExecutor.invoke(ToolCallRequest("loud", DynamicValue.Record.empty), Vector(loud, quiet))
-      assertEquals(first.map(_.result.left.map(_.message)), Right(Left("IllegalStateException: boom")))
-      val second = ToolExecutor.invoke(ToolCallRequest("quiet", DynamicValue.Record.empty), Vector(loud, quiet))
-      assertEquals(second.map(_.result.left.map(_.message)), Right(Left("IllegalStateException")))
+      val first            = ToolExecutor.run(loud, DynamicValue.Record.empty)
+      assertEquals(first.left.map(_.message), Left("IllegalStateException: boom"))
+      val second = ToolExecutor.run(quiet, DynamicValue.Record.empty)
+      assertEquals(second.left.map(_.message), Left("IllegalStateException"))
     }
     val ends = events.toVector.collect { case end: ToolEndEvent => end.toolName -> end.output.left.map(_.message) }
     assertEquals(ends, Vector("loud" -> Left("IllegalStateException: boom"), "quiet" -> Left("IllegalStateException")))
@@ -151,7 +145,7 @@ class ToolExecutorSuite extends FunSuite:
       // `intercept` catches only non-fatal errors, so the test catches the fatal error itself.
       val thrown =
         try
-          val _ = ToolExecutor.invoke(ToolCallRequest("fatal", DynamicValue.Record.empty), Vector(fatal))
+          val _ = ToolExecutor.run(fatal, DynamicValue.Record.empty)
           None
         catch case error: InterruptedException => Some(error.getMessage)
       assertEquals(thrown, Some("stop"))

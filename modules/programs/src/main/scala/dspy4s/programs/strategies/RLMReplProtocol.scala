@@ -1,7 +1,7 @@
 package dspy4s.programs.strategies
 
 import dspy4s.adapters.internal.ProgramOutputValues
-import dspy4s.core.contracts.{DynamicValues, SignatureLayout, updated}
+import dspy4s.core.contracts.{DynamicValues, SignatureLayout}
 import dspy4s.programs.{LlmCallLimit, OutputCharLimit}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
@@ -81,7 +81,7 @@ private[programs] object RLMReplProtocol:
       "provide the final outputs."
 
   /** Upstream `REPLHistory.format`. */
-  def renderHistory(entries: Vector[RLM.ReplEntry], maxOutputChars: OutputCharLimit): String =
+  def renderHistory(entries: Vector[RLMModel.ReplEntry], maxOutputChars: OutputCharLimit): String =
     if entries.isEmpty then "You have not interacted with the REPL environment yet."
     else entries.zipWithIndex.map { case (entry, i) => entry.format(i, maxOutputChars) }.mkString("\n")
 
@@ -141,7 +141,7 @@ private[programs] object RLMReplProtocol:
     val problems = checked.collect { case Left(problem) => problem }
     val values   = checked.collect { case Right(entry) => entry }
     if problems.nonEmpty then Left(s"[Type Error] ${problems.mkString("; ")}")
-    else Right(values.foldLeft(record)((done, entry) => done.updated(entry._1, entry._2)))
+    else Right(DynamicValues.mergeRecords(record, DynamicValues.recordFromEntries(values)))
 
   /** Upstream `_strip_code_fences`: strip decorative outer fences, accept ```python/```py/bare fences, REJECT an
     * explicit non-Python language tag (the error becomes an `[Error]` observation).

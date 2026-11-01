@@ -46,7 +46,7 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
   wiring.)
 - Caching (memory + disk), retries, rollout behavior, history updates
 - `ChatAdapter`, `JSONAdapter`, `XMLAdapter` (TwoStepAdapter not yet ported)
-- Tool-calling bridge (`ToolFunction`, `ToolCallRequest` / `ToolCallResult`)
+- Tool-calling bridge (`ToolFunction`, `ToolExecutor`)
 
 4. Program modules
 - `Predict[I, O]` (domain-valued) and `DynamicPredict` (erased), backed by a

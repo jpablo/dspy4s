@@ -118,7 +118,7 @@ object NativeTools:
   /** Encode a [[ToolChoice]] as the provider `tool_choice` value: a string for the modes, an object for a forced
     * function.
     */
-  private def encodeToolChoice(choice: ToolChoice): DynamicValue =
+  private[dspy4s] def encodeToolChoice(choice: ToolChoice): DynamicValue =
     choice match
       case ToolChoice.Auto        => DynamicValues.string("auto")
       case ToolChoice.Required    => DynamicValues.string("required")

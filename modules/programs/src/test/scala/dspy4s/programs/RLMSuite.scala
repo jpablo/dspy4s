@@ -12,6 +12,7 @@ import dspy4s.core.contracts.{
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
 import dspy4s.signatures.Signature
+import dspy4s.programs.strategies.{RLMModel, RLMReplProtocol, RLMSandboxTools}
 import dspy4s.programs.support.ScriptedLm
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
@@ -168,16 +169,16 @@ class RLMSuite extends FunSuite:
   }
 
   test("stripCodeFences ports upstream: decorative fences, bare/py tags, non-Python rejection") {
-    assertEquals(RLM.stripCodeFences("print(1)"), Right("print(1)"))
-    assertEquals(RLM.stripCodeFences("```python\nprint(1)\n```"), Right("print(1)"))
-    assertEquals(RLM.stripCodeFences("```\nprint(2)\n```"), Right("print(2)"))
-    assertEquals(RLM.stripCodeFences("```py\nprint(3)\n```"), Right("print(3)"))
+    assertEquals(RLMReplProtocol.stripCodeFences("print(1)"), Right("print(1)"))
+    assertEquals(RLMReplProtocol.stripCodeFences("```python\nprint(1)\n```"), Right("print(1)"))
+    assertEquals(RLMReplProtocol.stripCodeFences("```\nprint(2)\n```"), Right("print(2)"))
+    assertEquals(RLMReplProtocol.stripCodeFences("```py\nprint(3)\n```"), Right("print(3)"))
     // Outer decorative pair around a tagged fence.
-    assertEquals(RLM.stripCodeFences("```\n```python\nprint(4)\n```\n```"), Right("print(4)"))
+    assertEquals(RLMReplProtocol.stripCodeFences("```\n```python\nprint(4)\n```\n```"), Right("print(4)"))
     // Explicit non-Python tag is rejected.
-    assert(RLM.stripCodeFences("```javascript\nconsole.log(1)\n```").isLeft)
+    assert(RLMReplProtocol.stripCodeFences("```javascript\nconsole.log(1)\n```").isLeft)
     // Unclosed fence: take the remainder.
-    assertEquals(RLM.stripCodeFences("```python\nprint(5)"), Right("print(5)"))
+    assertEquals(RLMReplProtocol.stripCodeFences("```python\nprint(5)"), Right("print(5)"))
   }
 
   test("llm_query tools: shared counter caps total calls; batched returns per-item [ERROR] entries") {
@@ -192,7 +193,7 @@ class RLMSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(RuntimeContext()) {
       given ctx: RuntimeContext = RuntimeEnvironment.current
-      val tools                 = RLM.makeLlmTools(maxLlmCalls = LlmCallLimit(3), subLm = Some(subLm), ctx)
+      val tools                 = RLMSandboxTools.build(maxLlmCalls = LlmCallLimit(3), subLm = Some(subLm), ctx)
       val query                 = tools.find(_.name == "llm_query").get
       val batched               = tools.find(_.name == "llm_query_batched").get
 
@@ -258,7 +259,7 @@ class RLMSuite extends FunSuite:
 
   test("ReplVariable.fromValue renders metadata with a head+tail preview, not the full value") {
     val long = "x" * 3000
-    val v    = RLM.ReplVariable.fromValue(
+    val v    = RLMModel.ReplVariable.fromValue(
       "context",
       DynamicValues.fromAny(long),
       Some(FieldSpec("context", description = Some("the corpus")))

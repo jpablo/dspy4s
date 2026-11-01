@@ -43,7 +43,7 @@ final case class ReAct[I, O](
     baseSignature: Signature[I, O],
     tools: Vector[ToolFunction],
     maxIterations: IterationLimit = IterationLimit(20)
-) extends Module[I, ReAct.WithReasoning[O]]
+) extends Module[I, ChainOfThought.WithReasoning[O]]
 ```
 
 A caller supplies an `I` and receives a `Prediction` whose output contains:
@@ -84,7 +84,7 @@ reactPredict:
   Predict[(I, String), ReAct.ReactStep]
 
 extractorPredict:
-  Predict[(I, String), ReAct.WithReasoning[O]]
+  Predict[(I, String), ChainOfThought.WithReasoning[O]]
 ```
 
 Their signatures come from the field operations of `Signature`. Each operation changes the layout and the shapes in
@@ -134,22 +134,17 @@ flowchart TD
     budget -->|"no"| done
 ```
 
-The bounded recursion lives in [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala), while
-[`runtime/TrajectoryAgent.scala`](../runtime/TrajectoryAgent.scala) owns the loop-then-extract postlude. ReAct
-also uses [`runtime/InterpretedTrajectoryAgent.scala`](../runtime/InterpretedTrajectoryAgent.scala), whose final transition
-is:
+The bounded recursion lives in [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala). `ReAct.forward` runs that loop
+with one private step, then the extractor, and then adds the complete trajectory to the raw values of the extractor.
 
-```text
-generate model step → prepare action → interpret action → record outcome → decide → continue or stop
-```
+These rules apply to one step:
 
-ReAct supplies the concrete meanings: `ReactStep`, `ToolCallRequest`, a `ToolFunction`-backed `ActionInterpreter`, and
-`TrajectoryEntry`. The shared trait represents every phase with a state and every legal successor set with a
-transition ADT. In particular, rejected preparation and interpreted-outcome recording are different states. A halted
-generation does not invoke or record an action, a ready action executes and records exactly once, and a fatal interpreter
-error appends nothing. For a ready action, ReAct's decision runs after recording and stops when the prepared tool name is
-`finish` or empty, regardless of whether that invocation succeeded. These branches are executable in
-`InterpretedTrajectoryAgentLawSuite` rather than repeated in every concrete agent suite.
+- A context-window overflow that truncation cannot solve ends the loop with no entry, and the extractor runs.
+- Another error of the react predict is the result of the call, with no extract step.
+- Each other step runs one tool call and appends one entry. An error of the tool is the observation of the entry.
+- The tool name `finish` and an empty tool name end the loop after the entry, also when the tool fails.
+
+`ReActSuite` holds these rules.
 
 ## Tools and the synthetic `finish` tool
 
@@ -318,24 +313,16 @@ values. Detailed inner calls remain available through the runtime's callbacks, t
 
 A useful reading order is:
 
-1. [`ReAct.scala`](ReAct.scala): agent configuration, signatures, transition decisions, and result assembly.
+1. [`ReAct.scala`](ReAct.scala): agent configuration, signatures, the step of the loop, and result assembly.
 2. [`ReActProtocol.scala`](ReActProtocol.scala): step fields and decoding, tool-argument normalization, the synthetic
    `finish` tool, and trajectory rendering.
-3. [`runtime/InterpretedTrajectoryAgent.scala`](../runtime/InterpretedTrajectoryAgent.scala): generate, prepare, interpret,
-   record, and stop.
-4. [`contracts/ActionInterpreter.scala`](../contracts/ActionInterpreter.scala): success, recoverable failure, and fatal
-   action outcomes.
-5. [`runtime/TrajectoryAgent.scala`](../runtime/TrajectoryAgent.scala): gather a trajectory, then extract exactly once.
-6. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): the bounded continue/done recursion.
-7. [`runtime/TrajectoryTruncation.scala`](../runtime/TrajectoryTruncation.scala): context-window retry behavior.
-8. [`contracts/ToolFunction.scala`](../contracts/ToolFunction.scala): the tool abstraction and method derivation.
+3. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): the bounded continue/done recursion.
+4. [`runtime/TrajectoryTruncation.scala`](../runtime/TrajectoryTruncation.scala): context-window retry behavior.
+5. [`contracts/ToolFunction.scala`](../contracts/ToolFunction.scala): the tool abstraction and method derivation.
    [`runtime/ToolExecutor.scala`](../runtime/ToolExecutor.scala) runs one tool call and turns a non-fatal exception into
    an error.
-9. [`ReActSuite.scala`](../../../../../test/scala/dspy4s/programs/ReActSuite.scala): executable examples of finish, limits,
-   tool errors, callbacks, and truncation.
-10. [`InterpretedTrajectoryAgentLawSuite.scala`](../../../../../test/scala/dspy4s/programs/runtime/InterpretedTrajectoryAgentLawSuite.scala)
-   and [`TrajectoryAgentLawSuite.scala`](../../../../../test/scala/dspy4s/programs/runtime/TrajectoryAgentLawSuite.scala):
-   the shared transition and extraction contracts.
+6. [`ReActSuite.scala`](../../../../../test/scala/dspy4s/programs/ReActSuite.scala): executable examples of finish, limits,
+   tool errors, callbacks, truncation, and the result of the extractor.
 
 ## Scope and assumptions
 

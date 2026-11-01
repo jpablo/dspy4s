@@ -2,8 +2,8 @@
 
 **Status:** running record. Algebra 1 (signature transforms) is specified and its laws are property-tested;
 algebra 2 (program composition) is specified and fully implemented (steps 6.1–6.5 landed: `bestOf`, the
-`id`/`>>>`/`fanout` combinators, the `AgentLoop` / `TrajectoryAgent` / `InterpretedTrajectoryAgent` iteration
-layers, the `augment`, and the `mode` middleware monoid; see the status section at the bottom).
+`id`/`>>>`/`fanout` combinators, the `AgentLoop` iteration primitive, the `augment`, and the `mode` middleware monoid;
+see the status section at the bottom).
 **Method:** design the algebra first (types, operations, and the equations relating them), read law
 complexity as the fitness signal, then derive the implementation. The laws are the deliverable; the code is
 downstream. Related: [composite-primitives.md](composite-primitives.md), [kyo-ai-comparison.md](kyo-ai-comparison.md).
@@ -205,12 +205,11 @@ be required before monoidal or Markov coherence becomes meaningful.
   `AttemptSelection.bestOf`: `BestOfN` is the independent instance (no feedback), `Refine` the sequential
   instance (feedback = advice→adapter hook). The law `refine = bestOf + critic-hint` is structural.
 - ~~`ReAct` / `CodeAct` / `RLM` are one `loop` written three times.~~ **Resolved (step 6.3).** All three (and
-  PoT's `retryUntil`) run on the shared `AgentLoop.run` bounded-iteration primitive; ReAct/CodeAct also share
-  `TrajectoryAgent.runAndExtract` (loop + extractor) and the final `InterpretedTrajectoryAgent` transition
-  (generate → prepare → interpret → record → decide), encoded as phase states with state-specific legal-successor
-  ADTs. Code-truth: the universal `env.step`/`classify`/`render` decomposition was rejected; associated
-  action/observation types preserve each language. `ProgramOfThought` is `retryUntil` (regenerate-on-error), not the
-  trajectory agent and not `feedback`.
+  PoT's `retryUntil`) ran on the shared `AgentLoop.run` bounded-iteration primitive. Code-truth: the universal
+  `env.step`/`classify`/`render` decomposition was rejected. `ProgramOfThought` was `retryUntil`
+  (regenerate-on-error), not `feedback`. A later simplification (2026-11-01) removed the trajectory templates on top
+  of the loop, because `ReAct` was their one implementation. The agents now are `ReAct`, `ReActV2`, and `RLM`, each
+  directly on `AgentLoop.run`.
 
 The conclusion: the step-6 plan and this algebra are the same object. ADD supplies the vocabulary (Category,
 Monoid, ordered fan-out) and the laws or explicit non-laws that govern each carrier.
@@ -226,7 +225,7 @@ Monoid, ordered fan-out) and the laws or explicit non-laws that govern each carr
 - **Ad-hoc (ADD would refactor):** `BestOfN` / `Refine` / `MultiChainComparison` sharing no middleware (no
   `Mode` monoid). (Resolved already: `Refine` reimplementing the selection loop — now the shared
   `AttemptSelection.bestOf`, step 6.1; sequential composition — now `>>>`/`AndThen`, step 6.2; the three
-  hand-written agent loops + PoT's inline retry — now the shared `AgentLoop.run` / `TrajectoryAgent`, step 6.3;
+  hand-written agent loops + PoT's inline retry, now the shared `AgentLoop.run`, step 6.3;
   the `SignatureLayout` unique-name `require` — now closed by construction.)
 
 ## Testing discipline (how the laws become properties)
@@ -256,10 +255,8 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
   - **6.2 done** (commit `60d2ea5`, later law-audit correction): `id` / `>>>` / `fanout` in `Compose.scala`;
     `ComposeLawSuite` covers value-category laws, lifecycle-transparent association, ordered fan-out, and
     addressability. `fanout` is Arrow-like ordered pairing, not an Applicative or the batch-executor `Parallel`.
-  - **6.3 done** (commit `6faa94e`, later interpreted-agent and law refinements): `AgentLoop.run` +
-    `TrajectoryAgent.runAndExtract`; ReAct/CodeAct/RLM/PoT all reduced onto them. ReAct and CodeAct additionally share
-    `InterpretedTrajectoryAgent` and `ActionInterpreter` without erasing their action languages. `AgentLoopLawSuite`,
-    `TrajectoryAgentLawSuite`, and `InterpretedTrajectoryAgentLawSuite` pin the three layers.
+  - **6.3 done** (commit `6faa94e`): `AgentLoop.run`; the agents all reduced onto it. The trajectory templates that
+    followed this step were removed on 2026-11-01. `AgentLoopLawSuite` and `ReActSuite` pin the rules.
   - **6.4 done** (commit `31aecbd`): `decodeAugmented` (field via a pluggable reader + post-decode hook);
     `decodePrepended` is its String/identity instance. Closing position left additive (no consumer). The
     signatures cleanup later moved this code into the decode of `prependedStringShape` and removed both functions.

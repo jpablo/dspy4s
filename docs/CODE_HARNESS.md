@@ -163,7 +163,6 @@ Ideas to change:
 | `Predict[I, O]`, `PredictorKey` (D2) | `programs/strategies/Predict.scala` | Each LM step of the harness is a `Predict` leaf. The optimizers find its trace entries by its key. |
 | `OptimizableStructure`, `ProgramRunner` | `programs/optimization`, `programs/ProgramRunner.scala` | All optimizers need these two instances. |
 | `AgentLoop.run` | `programs/runtime/AgentLoop.scala` | The bounded loop: `Continue`, `Done`, or the `onExhausted` result. |
-| `ActionInterpreter`, `ActionOutcome` | `programs/contracts/ActionInterpreter.scala` | A recoverable failure is an observation. A fatal failure is a `Left`. |
 | `ReplCodeInterpreter`, `ReplInterpreterFactory`, `SandboxTool` | `core/contracts/CodeInterpreter.scala` | The RLM interpreter seam. All three implementations run Python. |
 | `RLM[I, O]` | `programs/strategies/RLM*.scala` | The action leaf (`variables_info, repl_history, iteration -> reasoning, code`), the extract leaf, `SUBMIT`, `llm_query`, the budgets. |
 | `History` | `core/contracts/History.scala` | The adapter replays each message as earlier turns. The policy can see its trajectory as chat turns. |
@@ -387,8 +386,8 @@ type Projection = Session => PolicyInput
 //    task, variables, observation, history -> reasoning, code
 val policy: Predict[PolicyInput, PolicyStep]
 
-// 4. The interpreter: the REPL behind the current ActionInterpreter seam.
-val interpreter: ActionInterpreter[Cell, CellResult]
+// 4. The interpreter: the REPL of F1. A recoverable failure is an observation. A fatal failure is a `Left`.
+val interpreter: ScalaRepl
 ```
 
 History message `k` holds the observation before step `k` as its input, and step `k` as its output. The adapter
@@ -403,16 +402,16 @@ def step(session: Session, i: Int)(using RuntimeContext)
   for
     prepared <- middleware(session)                   // compaction, output limits
     action   <- policy(projection(prepared))
-    result   <- interpreter.execute(Cell(action.output.code))
+    result   <- interpreter.run(Cell(action.output.code))
   yield
     val next = prepared
       .append(Entry.Acted(action.output.reasoning, action.output.code))
-      .append(Entry.Observed(result.observation.output, result.observation.outcome))
-    result.observation.outcome match
+      .append(Entry.Observed(result.output, result.outcome))
+    result.outcome match
       case CellOutcome.Submitted(value) => AgentLoop.Step.Done(Outcome.Submitted(next, value))
       case _                            => AgentLoop.Step.Continue(next)
 
-AgentLoop.run(start, 0, limits.iterations)(onExhausted = finish)(step)
+AgentLoop.run(start, limits.iterations)(onExhausted = finish)(step)
 ```
 
 ### Hooks as values

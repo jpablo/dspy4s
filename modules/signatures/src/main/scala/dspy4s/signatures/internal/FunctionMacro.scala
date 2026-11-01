@@ -13,28 +13,6 @@ private[signatures] object FunctionMacro:
     */
   def fromImpl[F: Type](fn: Expr[F])(using Quotes): Expr[Any] =
     import quotes.reflect.*
-    given CanEqual[Symbol, Symbol] = CanEqual.derived
-
-    def unwrap(term: Term): Term =
-      term match
-        case Inlined(_, _, inner) => unwrap(inner)
-        case Typed(inner, _)      => unwrap(inner)
-        case Block(Nil, inner)    => unwrap(inner)
-        case other                => other
-
-    def referencedMethod(term: Term): Symbol =
-      unwrap(term) match
-        case id: Ident if id.symbol.isDefDef                        => id.symbol
-        case sel: Select if sel.symbol.isDefDef                     => sel.symbol
-        case Block(stats, Closure(meth, _)) if meth.symbol.isDefDef =>
-          stats.collectFirst {
-            case dd: DefDef if dd.symbol == meth.symbol => dd
-          }.flatMap(_.rhs.flatMap(calledMethod)).getOrElse(meth.symbol)
-        case Closure(meth, _) if meth.symbol.isDefDef => meth.symbol
-        case other                                    => report.errorAndAbort(
-            "Signature.from expects a method reference, e.g. " +
-              "`Signature.from(emotionsSig)`; got: " + other.show
-          )
 
     def methodDef(sym: Symbol): DefDef =
       sym.tree match
@@ -43,21 +21,17 @@ private[signatures] object FunctionMacro:
             s"Signature.from could not inspect method '${sym.name}'"
           )
 
-    def calledMethod(term: Term): Option[Symbol] =
-      unwrap(term) match
-        case Apply(fn, _) if fn.symbol.isDefDef && !fn.symbol.name.startsWith("$anonfun")  => Some(fn.symbol)
-        case Apply(fn, _)                                                                  => calledMethod(fn)
-        case TypeApply(fn, _)                                                              => calledMethod(fn)
-        case id: Ident if id.symbol.isDefDef && !id.symbol.name.startsWith("$anonfun")     => Some(id.symbol)
-        case sel: Select if sel.symbol.isDefDef && !sel.symbol.name.startsWith("$anonfun") => Some(sel.symbol)
-        case _                                                                             => None
-
     def dealiasedMethod(sym: Symbol): Symbol =
       if sym.name.startsWith("$anonfun") then
-        methodDef(sym).rhs.flatMap(calledMethod).getOrElse(sym)
+        methodDef(sym).rhs.flatMap(MethodResolution.calledMethod).getOrElse(sym)
       else sym
 
-    val sym     = dealiasedMethod(referencedMethod(fn.asTerm))
+    val sym = dealiasedMethod(
+      MethodResolution.referencedMethod(
+        fn.asTerm,
+        "Signature.from expects a method reference, e.g. `Signature.from(emotionsSig)`"
+      )
+    )
     val dd      = methodDef(sym)
     val sigName = sym.name
 

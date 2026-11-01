@@ -1,13 +1,10 @@
 package dspy4s.programs.runtime
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.NotFoundError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.programs.contracts.ToolCallRequest
-import dspy4s.programs.contracts.ToolCallResult
 import dspy4s.programs.contracts.ToolFunction
 import zio.blocks.schema.DynamicValue
 
@@ -15,17 +12,6 @@ import scala.util.control.NonFatal
 
 /** Runs the tools of the tool-using programs. `ReAct` and `ReActV2` run each tool call through [[run]]. */
 object ToolExecutor:
-
-  /** Run the tool of `tools` that has the name of `request`. An unknown name gives a `Left` with a [[NotFoundError]].
-    * Else the result has the outcome of [[run]]: the value of the tool, or its error.
-    */
-  def invoke(
-      request: ToolCallRequest,
-      tools  : Vector[ToolFunction]
-  )(using RuntimeContext): Either[DspyError, ToolCallResult] =
-    tools.find(_.name == request.name) match
-      case None       => Left(NotFoundError("tool", s"Tool '${request.name}' does not exist"))
-      case Some(tool) => Right(ToolCallResult(name = request.name, result = run(tool, request.args)))
 
   /** Run `tool` with `args` in a tool callback scope ([[CallbackDispatcher.withTool]]).
     *
@@ -48,3 +34,8 @@ object ToolExecutor:
         catch case NonFatal(error) => Left(RuntimeError(tool.name, DspyError.describe(error)))
       }
     }
+
+  /** The text that the model gets for the error of a tool (upstream `ReAct.forward` and `ReActV2._execute_tool_calls`).
+    */
+  def errorText(toolName: String, error: DspyError): String =
+    s"Execution error in $toolName: ${error.message}"

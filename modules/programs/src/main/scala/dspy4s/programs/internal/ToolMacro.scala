@@ -4,6 +4,7 @@ import dspy4s.core.contracts.{DspyError, DynamicValues, NotFoundError, RuntimeCo
 import dspy4s.core.contracts.TypeRef as DspyTypeRef
 import dspy4s.programs.contracts.{ToolFunction, description}
 import dspy4s.signatures.SchemaInterop
+import dspy4s.signatures.internal.MethodResolution
 import zio.blocks.schema.{DynamicValue, Schema}
 
 import scala.quoted.*
@@ -26,36 +27,12 @@ object ToolMacro:
     */
   def fromMethodImpl[F: Type](method: Expr[F])(using Quotes): Expr[ToolFunction] =
     import quotes.reflect.*
-    given CanEqual[Symbol, Symbol] = CanEqual.derived
-
-    def unwrap(t: Term): Term =
-      t match
-        case Inlined(_, _, inner) => unwrap(inner)
-        case Typed(inner, _)      => unwrap(inner)
-        case Block(Nil, inner)    => unwrap(inner)
-        case other                => other
-
-    def calledMethod(term: Term): Option[Symbol] =
-      unwrap(term) match
-        case Apply(fn, _) if fn.symbol.isDefDef && !fn.symbol.name.startsWith("$anonfun")  => Some(fn.symbol)
-        case Apply(fn, _)                                                                  => calledMethod(fn)
-        case TypeApply(fn, _)                                                              => calledMethod(fn)
-        case id: Ident if id.symbol.isDefDef && !id.symbol.name.startsWith("$anonfun")     => Some(id.symbol)
-        case sel: Select if sel.symbol.isDefDef && !sel.symbol.name.startsWith("$anonfun") => Some(sel.symbol)
-        case _                                                                             => None
 
     // Resolve the referenced method symbol (the call site eta-expands the method into a closure).
-    val methodSym: Symbol = unwrap(method.asTerm) match
-      case id: Ident if id.symbol.isDefDef                        => id.symbol
-      case sel: Select if sel.symbol.isDefDef                     => sel.symbol
-      case Block(stats, Closure(meth, _)) if meth.symbol.isDefDef =>
-        stats.collectFirst { case dd: DefDef if dd.symbol == meth.symbol => dd }
-          .flatMap(_.rhs.flatMap(calledMethod)).getOrElse(meth.symbol)
-      case Closure(meth, _) if meth.symbol.isDefDef => meth.symbol
-      case other                                    => report.errorAndAbort(
-          "ToolFunction.fromMethod expects a method reference, e.g. `ToolFunction.fromMethod(getWeather)`; got: " +
-            other.show
-        )
+    val methodSym: Symbol = MethodResolution.referencedMethod(
+      method.asTerm,
+      "ToolFunction.fromMethod expects a method reference, e.g. `ToolFunction.fromMethod(getWeather)`"
+    )
 
     val toolName = methodSym.name
 

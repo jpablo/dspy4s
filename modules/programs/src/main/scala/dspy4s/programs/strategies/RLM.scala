@@ -22,7 +22,6 @@ import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.contracts.Prediction
 import dspy4s.programs.internal.ToolText
 import dspy4s.signatures.{Shape, Signature}
-import zio.blocks.schema.DynamicValue
 
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -90,17 +89,15 @@ final case class RLM[I, O](
     verbose           : Boolean                        = false,
     tools             : Vector[ToolFunction]           = Vector.empty,
     subLm             : Option[LanguageModel]          = None,
-    interpreterFactory: Option[RLM.InterpreterFactory] = None,
-    actionProgramName : String                         = "rlm_action",
-    extractProgramName: String                         = "rlm_extract",
+    interpreterFactory: Option[ReplInterpreterFactory] = None,
     /** Optional override for the per-iteration action predict (tunable; see ReAct's same pattern) — a `Predict` over
-      * the three declared meta inputs, producing a lenient [[RLM.ActionStep]].
+      * the three declared meta inputs, producing a lenient [[RLMModel.ActionStep]].
       */
-    actionPredictOverride: Option[Predict[RLM.ActionInputs, RLM.ActionStep]] = None,
+    actionPredictOverride: Option[Predict[RLMModel.ActionInputs, RLMModel.ActionStep]] = None,
     /** Optional override for the max-iterations extract-fallback predict — a `Predict` over the two declared meta
       * inputs, producing the base outputs `O` directly (the base output shape's decode, as before).
       */
-    extractPredictOverride: Option[Predict[RLM.ExtractInputs, O]] = None,
+    extractPredictOverride: Option[Predict[RLMModel.ExtractInputs, O]] = None,
     /** The execution text of the factory of the runtime context at the first construction, or of
       * [[RLM.defaultInterpreterFactory]] when that context has no factory. The default value reads the context once,
       * and a `copy` keeps the value. Thus a copy in a context with another factory keeps the action instructions of the
@@ -153,7 +150,7 @@ final case class RLM[I, O](
         description = Some("Current iteration number (1-indexed) out of max_iters")
       )
     ))
-    .withOutputFields(Vector(RLM.reasoningField, RLM.codeField))
+    .withOutputFields(Vector(RLMModel.reasoningField, RLMModel.codeField))
     .withInstructions(Some(buildActionInstructions))
 
   /** Extract-fallback signature: `variables_info, repl_history -> <base outputs>`. */
@@ -170,27 +167,28 @@ final case class RLM[I, O](
 
   /** The per-iteration action predict (addressable + tunable, like ReAct's `reactPredict`) — a
     * `Predict[ActionInputs, ActionStep]`: the action signature's I/O is fully synthetic (base inputs reach the LM only
-    * as REPL variable metadata), so both shapes are static. Output decode is lenient (see [[RLM.actionStepShape]]).
+    * as REPL variable metadata), so both shapes are static. Output decode is lenient (see
+    * [[RLMModel.actionStepShape]]).
     */
-  val actionPredict: Predict[RLM.ActionInputs, RLM.ActionStep] = actionPredictOverride.getOrElse(Predict(
+  val actionPredict: Predict[RLMModel.ActionInputs, RLMModel.ActionStep] = actionPredictOverride.getOrElse(Predict(
     signature = Signature(
       layout = actionSignature,
-      inputShape = Shape.derived[RLM.ActionInputs],
-      outputShape = RLM.actionStepShape
+      inputShape = Shape.derived[RLMModel.ActionInputs],
+      outputShape = RLMModel.actionStepShape
     ),
-    name = Some(actionProgramName)
+    name = Some(RLM.ActionModuleName)
   ))
 
   /** The extract-fallback predict — a `Predict[ExtractInputs, O]`: synthetic meta inputs, base outputs `O` decoded
     * through the base output shape (the same decode the dynamic path ran on `extracted.values`).
     */
-  val extractPredict: Predict[RLM.ExtractInputs, O] = extractPredictOverride.getOrElse(Predict(
+  val extractPredict: Predict[RLMModel.ExtractInputs, O] = extractPredictOverride.getOrElse(Predict(
     signature = Signature(
       layout = extractSignature,
-      inputShape = Shape.derived[RLM.ExtractInputs],
+      inputShape = Shape.derived[RLMModel.ExtractInputs],
       outputShape = baseSignature.outputShape
     ),
-    name = Some(extractProgramName)
+    name = Some(RLM.ExtractModuleName)
   ))
 
   /** The action instructions (upstream `RLM._build_signatures`): the effective instructions of the base signature, the
@@ -212,7 +210,13 @@ final case class RLM[I, O](
         }
         "\nAdditional tools available (use these instead of standard library equivalents):\n" + lines.mkString("\n")
     taskInstructions +
-      RLM.actionInstructionsTemplate(inputs, outputFields, finalOutputNames, maxLlmCalls, initialInterpreterRules) +
+      RLMReplProtocol.actionInstructionsTemplate(
+        inputs,
+        outputFields,
+        finalOutputNames,
+        maxLlmCalls,
+        initialInterpreterRules
+      ) +
       toolDocs
 
   /** The action predict for a call on `factory` (upstream `_action_signature_for_current_factory`). A factory with the
@@ -221,7 +225,9 @@ final case class RLM[I, O](
     * replace the first copy of the rules of the construction in the instructions, or they come at the end when an
     * optimizer removed those rules. The other parts of the instructions stay.
     */
-  private[programs] def actionPredictFor(factory: RLM.InterpreterFactory): Predict[RLM.ActionInputs, RLM.ActionStep] =
+  private[programs] def actionPredictFor(
+      factory: ReplInterpreterFactory
+  ): Predict[RLMModel.ActionInputs, RLMModel.ActionStep] =
     val executionInstructions = factory.executionInstructions
     if executionInstructions == initialExecutionInstructions then actionPredict
     else
@@ -240,40 +246,17 @@ final case class RLM[I, O](
     new RLMExecution(this).run(call)
 
 object RLM:
-  // Source-compatible facade for the model types now housed in RLMModel.
-  type ActionInputs = RLMModel.ActionInputs
-  val ActionInputs: RLMModel.ActionInputs.type = RLMModel.ActionInputs
+  /** The module name of the action predict of each iteration. */
+  private val ActionModuleName: String = "rlm_action"
 
-  type ExtractInputs = RLMModel.ExtractInputs
-  val ExtractInputs: RLMModel.ExtractInputs.type = RLMModel.ExtractInputs
-
-  type ActionStep = RLMModel.ActionStep
-  val ActionStep: RLMModel.ActionStep.type = RLMModel.ActionStep
-
-  type ReplAction = RLMModel.ReplAction
-  val ReplAction: RLMModel.ReplAction.type = RLMModel.ReplAction
-
-  type ReplExecution = RLMModel.ReplExecution
-  val ReplExecution: RLMModel.ReplExecution.type = RLMModel.ReplExecution
-
-  type ReplVariable = RLMModel.ReplVariable
-  val ReplVariable: RLMModel.ReplVariable.type = RLMModel.ReplVariable
-
-  type ReplEntry = RLMModel.ReplEntry
-  val ReplEntry: RLMModel.ReplEntry.type = RLMModel.ReplEntry
-
-  private[programs] val reasoningField: FieldSpec          = RLMModel.reasoningField
-  private[programs] val codeField: FieldSpec               = RLMModel.codeField
-  private[programs] val actionStepShape: Shape[ActionStep] = RLMModel.actionStepShape
-
-  /** Builds the per-forward REPL from the sandbox tools and the schema-validated SUBMIT output fields. */
-  type InterpreterFactory = ReplInterpreterFactory
+  /** The module name of the extract-fallback predict. */
+  private val ExtractModuleName: String = "rlm_extract"
 
   /** Fresh sandboxed [[DenoPyodideInterpreter]] per forward (closed by RLM afterwards) — upstream's default. Its
     * execution text is the text of upstream `PythonInterpreter.execution_instructions`
     * (`dspy/primitives/python_interpreter.py`, upgrade item I7).
     */
-  val defaultInterpreterFactory: InterpreterFactory = new InterpreterFactory:
+  val defaultInterpreterFactory: ReplInterpreterFactory = new ReplInterpreterFactory:
     override def apply(tools: Vector[SandboxTool], outputs: Vector[SandboxOutputField]): ReplCodeInterpreter =
       new DenoPyodideInterpreter(tools = tools, outputFields = outputs)
 
@@ -286,7 +269,9 @@ object RLM:
     * the factory of the runtime context, then [[defaultInterpreterFactory]]. `RLMExecution` calls this for each
     * forward, so a factory that `RuntimeEnvironment.withSettings` installs applies to the calls in its scope.
     */
-  def resolveInterpreterFactory(own: Option[InterpreterFactory])(using ctx: RuntimeContext): InterpreterFactory =
+  private[programs] def resolveInterpreterFactory(own: Option[ReplInterpreterFactory])(using
+      ctx: RuntimeContext
+  ): ReplInterpreterFactory =
     own.orElse(ctx.interpreterFactory).getOrElse(defaultInterpreterFactory)
 
   /** The execution text of the factory of the current runtime context, or of [[defaultInterpreterFactory]] when the
@@ -298,15 +283,15 @@ object RLM:
   /** Names of the built-in sandbox functions. A tool or an input field must not use them (upstream
     * `_RESERVED_SANDBOX_NAMES`).
     */
-  val ReservedToolNames: Set[String] = Set("llm_query", "llm_query_batched", "SUBMIT", "print")
+  private val ReservedToolNames: Set[String] = Set("llm_query", "llm_query_batched", "SUBMIT", "print")
 
   /** Names that the result keeps on `.raw`. An output field must not use them (upstream `_RESERVED_RESULT_NAMES`). */
-  val ReservedResultNames: Set[String] = Set("trajectory", "final_reasoning")
+  private val ReservedResultNames: Set[String] = Set("trajectory", "final_reasoning")
 
   /** True when the sandbox owns `name`: a built-in function, the `dspy` facade, or a name that starts with `_dspy` or
     * `__dspy` (upstream `is_reserved_sandbox_name`).
     */
-  def isReservedSandboxName(name: String): Boolean =
+  private def isReservedSandboxName(name: String): Boolean =
     ReservedToolNames.contains(name) || name == "dspy" || name.startsWith("_dspy") || name.startsWith("__dspy")
 
   /** A latch that runs one action at most (the parameter `decisionWarning` of [[RLM]]). Each latch is equal to each
@@ -368,55 +353,3 @@ object RLM:
       reservedOutputs.isEmpty,
       s"Output fields conflict with RLM result metadata: ${reservedOutputs.mkString(", ")}"
     )
-
-  /** Upstream's `ACTION_INSTRUCTIONS_TEMPLATE`, ported verbatim with the same placeholders. */
-  private[programs] def actionInstructionsTemplate(
-      inputs          : String,
-      outputFields    : String,
-      finalOutputNames: String,
-      maxLlmCalls     : LlmCallLimit,
-      interpreterRules: String
-  ): String =
-    RLMReplProtocol.actionInstructionsTemplate(inputs, outputFields, finalOutputNames, maxLlmCalls, interpreterRules)
-
-  /** Upstream `REPLHistory.format`. */
-  private[programs] def renderHistory(entries: Vector[ReplEntry], maxOutputChars: OutputCharLimit): String =
-    RLMReplProtocol.renderHistory(entries, maxOutputChars)
-
-  /** Upstream `REPLEntry.format_output`: head+tail truncation with the true length in the header. */
-  private[programs] def formatOutputBlock(output: String, maxOutputChars: OutputCharLimit): String =
-    RLMReplProtocol.formatOutputBlock(output, maxOutputChars)
-
-  private[programs] def formatOutput(output: String): String =
-    RLMReplProtocol.formatOutput(output)
-
-  // ── SUBMIT payload + code-fence handling ────────────────────────────────────────────────────────────────────
-
-  /** Parse a SUBMIT payload (the interpreter's `finalOutput` JSON) and verify every output field is present. Returns
-    * the upstream-style `[Error] …` message on a problem.
-    */
-  private[programs] def parseSubmitted(
-      finalJson       : String,
-      outputFieldNames: Vector[String]
-  ): Either[String, DynamicValue.Record] =
-    RLMReplProtocol.parseSubmitted(finalJson, outputFieldNames)
-
-  /** Upstream `_strip_code_fences`: strip decorative outer fences, accept ```python/```py/bare fences, REJECT an
-    * explicit non-Python language tag (the error becomes an `[Error]` observation).
-    */
-  private[programs] def stripCodeFences(raw: String): Either[String, String] =
-    RLMReplProtocol.stripCodeFences(raw)
-
-  // ── Built-in llm_query tools ────────────────────────────────────────────────────────────────────────────────
-
-  /** Build `llm_query` / `llm_query_batched` as [[SandboxTool]]s with a SHARED call counter capped at `maxLlmCalls`
-    * (upstream `_make_llm_tools`). The sub-LM is `subLm` or the captured context's LM; failures surface as in-sandbox
-    * exceptions (`llm_query`) or per-item `[ERROR] …` strings (`llm_query_batched`). The usage of each sub-LM call goes
-    * to the usage scope of the RLM call.
-    */
-  private[programs] def makeLlmTools(
-      maxLlmCalls: LlmCallLimit,
-      subLm      : Option[LanguageModel],
-      ctx        : RuntimeContext
-  ): Vector[SandboxTool] =
-    RLMSandboxTools.build(maxLlmCalls, subLm, ctx)

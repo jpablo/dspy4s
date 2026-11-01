@@ -324,8 +324,8 @@ Simplify 7 (rank 1). Code-review 6 (rank 4). 8004 main lines, 11858 test lines.
 
 ### Passes
 
-- (a) The agents, about 2740 lines: `strategies/ReAct.scala`, `strategies/ReActV2.scala`, `strategies/ReActProtocol.scala`, `strategies/RLM*.scala`, `runtime/InterpretedTrajectoryAgent.scala`, `runtime/TrajectoryAgent.scala`, `runtime/AgentLoop.scala`, `runtime/TrajectoryTruncation.scala`, `runtime/ToolExecutor.scala`, `runtime/SandboxToolBridge.scala`, `internal/`, `contracts/ToolFunction.scala`, `contracts/ToolCall.scala`.
-  - [ ] /simplify
+- (a) The agents, about 2740 lines: `strategies/ReAct.scala`, `strategies/ReActV2.scala`, `strategies/ReActProtocol.scala`, `strategies/RLM*.scala`, `runtime/AgentLoop.scala`, `runtime/TrajectoryTruncation.scala`, `runtime/ToolExecutor.scala`, `internal/`, `contracts/ToolFunction.scala`.
+  - [x] /simplify
   - [ ] /code-review
 - (b) Predict and the selection, about 2100 lines: `strategies/Predict.scala`, `strategies/DynamicPredict.scala`, `strategies/ChainOfThought.scala`, `strategies/MultiChainComparison.scala`, `strategies/BestOfN.scala`, `strategies/Refine.scala`, `strategies/RefineFeedback.scala`, `runtime/PredictEngine.scala`, `runtime/AttemptSelection.scala`, `runtime/ParallelExecutor.scala`, `runtime/SettingsProgramRuntime.scala`, `Aggregation.scala`, `Parallel.scala`, `retrievers/`.
   - [ ] /simplify
@@ -337,11 +337,18 @@ Simplify 7 (rank 1). Code-review 6 (rank 4). 8004 main lines, 11858 test lines.
 ### Simplify findings
 
 - [ ] (from the adapters designs) One shared format, call, parse, and fallback loop for `PredictEngine` and adapters `TwoStepAdapter`, for example `AdapterCall.run` in the adapters module. The extraction step then sends the callback events, as upstream. `strategies/ReActV2.scala` also writes the `tool_choice` shape by hand, where `NativeTools` has the encoder.
-- [ ] Private copies of `DynamicValues.string`: `strategies/ReActProtocol.scala:92` and `strategies/ReActV2.scala:513` (`text`). Use the core helper. (found in the lm pass)
-- [ ] `strategies/RLM.scala:246-270`, `:375-425`: a "Source-compatible facade" with type aliases and one-line forwarders to RLMModel, RLMReplProtocol, and RLMSandboxTools. the end of `strategies/ReAct.scala` (the lines moved in the augmentation change) and `strategies/Refine.scala:172`, `:246`, `:263`, `:271` repeat the pattern.
-- [ ] `runtime/InterpretedTrajectoryAgent.scala` and `runtime/TrajectoryAgent.scala` have one implementer: ReAct. `ReAct.prepareAction` (`strategies/ReAct.scala:216-218`) always returns `Ready`, so the `Rejected` path and `recordRejection` (`:231-242`) are dead code.
-- [ ] `strategies/ReAct.scala:84-90` and `strategies/ReActV2.scala:149-154` hold the same tool dedup fold. The "Execution error in" text also occurs in both. Keep both programs: ReActV2 ports upstream `dspy.ReActV2`, and ReAct ports the text protocol.
-- [ ] `contracts/ToolCall.scala:6-7`: `ToolCallRequest` and `ToolCallResult` duplicate `core.contracts.ToolCall` and `ToolCallResult`. `ToolExecutor.invoke` (`runtime/ToolExecutor.scala:20-27`) has one caller, and its NotFound branch cannot run, because `strategies/ReAct.scala:109` checks the name first.
+- [x] Private copies of `DynamicValues.string` in `strategies/ReActProtocol.scala` and `strategies/ReActV2.scala`. Fixed: the core helpers, also for the hand-built records and the `updated` folds.
+- [x] `strategies/RLM.scala`: a "Source-compatible facade" with type aliases and one-line forwarders to RLMModel, RLMReplProtocol, and RLMSandboxTools. The end of `strategies/ReAct.scala` repeated the pattern. Fixed: removed. `strategies/Refine.scala` still has it (group (b)).
+- [x] runtime/InterpretedTrajectoryAgent.scala and runtime/TrajectoryAgent.scala (removed) had one implementer: ReAct. `prepareAction` always gave `Ready`, so the `Rejected` path was dead. Fixed: ReAct is a plain `Module` on `AgentLoop.run`. `ActionInterpreter` and `ActionOutcome` are gone too.
+- [x] `strategies/ReAct.scala` and `strategies/ReActV2.scala` held the same tool dedup fold and the "Execution error in" text. Fixed: `ToolFunction.byName` and `ToolExecutor.errorText`. Both programs stay: ReActV2 ports upstream `dspy.ReActV2`, and ReAct ports the text protocol.
+- [x] contracts/ToolCall.scala (removed): `ToolCallRequest` and `ToolCallResult` duplicated core types. `ToolExecutor.invoke` had one caller, and its NotFound branch could not run. Fixed: removed; ReAct calls `ToolExecutor.run`.
+- [x] (simplify (a)) `RLMExecution` nested five levels and wrapped each result two times. `SandboxToolBridge` had one caller. Fixed: one `step` method; the bridge is `RLMSandboxTools.fromToolFunctions`.
+- [x] (simplify (a)) `ReActV2` had its own budget loop, unreachable branches, and a hand-written `tool_choice` shape. Fixed: `AgentLoop.run`, and `NativeTools.encodeToolChoice`. Four program-name parameters that nothing set are gone, and `AgentLoop.run` hides its `iteration`.
+- [x] (simplify (a)) `internal/ToolMacro.scala` copied the method resolution of `FunctionMacro`. Fixed: `signatures/internal/MethodResolution.scala`.
+- [ ] (simplify (a), design) RLM sends the whole input context again on each step, and the sandbox parses it again (`core/runtime/DenoPyodideInterpreter.scala`, `core/runtime/LocalPythonInterpreter.scala`). `runner.js` already has an `inject_var` that no Scala code calls. Send each variable one time for a session. This costs tens to hundreds of ms for each step for each MB, an estimate from reading the code. Long contexts are the purpose of RLM. It needs a run with Deno.
+- [ ] (simplify (a), design) Program metadata (`history`, `termination_reason`, `trajectory`, `final_reasoning`) shares `RawPrediction.values` with the outputs, so each program needs its own reserved names. A `RawPrediction.metadata` removes the lists. It changes the readers of `raw.values`.
+- [ ] (simplify (a), design) A typed `toolChoice` on `AdapterInvocation`, next to `tools`, in place of the `tool_choice` key that `ReActV2` writes in `call.config`. An adapter that builds its own `FormattedPrompt` then cannot send `tool_choice` with no `tools`.
+- [ ] (simplify (a), skipped) After the first overflow, each later step of ReAct retries a prompt that is likely too large. Remembering the overflow length changes the upstream call sequence. Only for runs that overflow.
 - [ ] `RecordObject.scala` has no user in the main code. Only ProgramAlgebraLawSuite uses it.
 - [ ] `DynamicValues.fromAny` on typed values, against the single-codec rule: `compose/Mode.scala:58`, `:61`, `strategies/MultiChainComparison.scala:151`, `strategies/Refine.scala:210`, `strategies/RLMSandboxTools.scala:66`, `:76`, `:94`.
 - [ ] Small items: the stale comment at `runtime/PredictEngine.scala:260-261` (the `lm` field exists), `Parallel.apply` is the same as `Parallel.run`, and `ErrorLimit(10)` occurs two times (`runtime/ParallelExecutor.scala:38`, `:173`).
@@ -352,7 +359,7 @@ Simplify 7 (rank 1). Code-review 6 (rank 4). 8004 main lines, 11858 test lines.
 - [ ] `Aggregation.scala:51`: `keys.last` throws `NoSuchElementException` when the first completion row is an empty record. (checked)
 - [ ] `strategies/RLMSandboxTools.scala:34-42`: `counter.get()` and then `addAndGet` is not atomic. Two `llm_query` calls at the same time can go past `maxLlmCalls`.
 - [ ] `runtime/ParallelExecutor.scala:108-141`: the timeout applies to each completion, not to the batch. The error says "0 seconds" for a timeout of less than one second. `shutdownNow` does not stop a running LM call, so work can continue after the batch fails.
-- [ ] `strategies/ReActV2.scala:504` merges the final outputs into the event record. An output named `next_thought` or `tool_calls` overwrites the event fields, but `checkNames` (`:406-413`) reserves only `history` and `termination_reason`. Line `:134` drops a task input named `history` or `tools` with no error.
+- [ ] `strategies/ReActV2.scala` merges the final outputs into the event record. An output named `next_thought` or `tool_calls` overwrites the event fields, but `checkNames` reserves only `history` and `termination_reason`. It also drops a task input named `history` or `tools` with no error.
 - [ ] `strategies/RLMReplProtocol.scala:149-175`: `stripCodeFences` is a hand-written parser with `var`, and it does not handle all cases. `runtime/AttemptSelection.scala:63-120` (`bestOf`): the failure-budget rule `remainingFailures <= 0` can differ by one from upstream `idx > fail_count`. A NaN reward is never selected.
 
 ## evaluate

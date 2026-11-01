@@ -1715,10 +1715,11 @@ the replacement of the second predictor to a `ReAct` test in `ProgramOptimizable
 Open after the removal:
 
 - `RLM` has no `Streamable` instance. The two removed programs had one, so `Streamify` cannot run the replacement.
-- These public items have no user in main sources: `SubprocessPythonInterpreter`, the plain `CodeInterpreter`
-  trait (`RLM` needs `ReplCodeInterpreter`), `ActionOutcome.isError`, and the rejection branch of
-  `InterpretedTrajectoryAgent` (`ActionPreparation.Rejected`). `TrajectoryAgent` and `InterpretedTrajectoryAgent`
-  have one implementation, `ReAct`.
+- These public items have no user in main sources: `SubprocessPythonInterpreter` and the plain `CodeInterpreter`
+  trait (`RLM` needs `ReplCodeInterpreter`).
+- **Resolved (2026-11-01).** `TrajectoryAgent`, `InterpretedTrajectoryAgent`, and `ActionInterpreter` had one main
+  implementation, `ReAct`, and `ActionOutcome.isError` and `ActionPreparation.Rejected` had no main user. The
+  simplification removed these types. `ReAct` is a plain `Module` that runs `AgentLoop.run` and then its extractor.
 - Entries of this ledger that are older than this one name the two programs as they were at that time.
 
 ---

@@ -11,12 +11,12 @@ import dspy4s.core.contracts.{
 }
 import dspy4s.lm.contracts.{LanguageModel, LmRequest, Message, MessageRole}
 import dspy4s.programs.LlmCallLimit
+import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.runtime.ParallelExecutor
-import zio.blocks.schema.DynamicValue
 
 import java.util.concurrent.atomic.AtomicInteger
 
-/** Builds the sandbox functions that let generated RLM code call a subordinate language model. */
+/** Builds the sandbox functions of generated RLM code: the calls of a subordinate language model and the user tools. */
 private[programs] object RLMSandboxTools:
 
   /** The tools `llm_query` and `llm_query_batched`. The usage of each sub-LM call goes to the usage scope of the RLM
@@ -63,17 +63,15 @@ private[programs] object RLMSandboxTools:
           for
             _      <- checkAndIncrement(1)
             answer <- queryLm(prompt)
-          yield DynamicValues.fromAny(answer)
+          yield DynamicValues.string(answer)
     )
 
     val llmQueryBatched = SandboxTool(
       name = "llm_query_batched",
       parameters = Vector(SandboxTool.Param("prompts", Some("list"))),
       invoke = kwargs =>
-        val prompts = DynamicValues.recordGet(kwargs, "prompts") match
-          case Some(seq: DynamicValue.Sequence) => seq.elements.iterator.map(DynamicValues.renderText).toVector
-          case _                                => Vector.empty
-        if prompts.isEmpty then Right(DynamicValues.fromAny(List.empty[String]))
+        val prompts = DynamicValues.sequenceAt(kwargs, "prompts").map(DynamicValues.renderText)
+        if prompts.isEmpty then Right(DynamicValues.sequence(Vector.empty))
         else
           checkAndIncrement(prompts.size).flatMap { _ =>
             val executor = ParallelExecutor(
@@ -91,9 +89,21 @@ private[programs] object RLMSandboxTools:
                     s"[ERROR] ${outcome.errors.get(i).map(_.message).getOrElse("prompt was not executed")}"
                   )
                 }
-                DynamicValues.fromAny(answers.toList)
+                DynamicValues.sequence(answers.map(DynamicValues.string))
               }
           }
     )
 
     Vector(llmQuery, llmQueryBatched)
+
+  /** The user tools as host functions for the sandbox. Each function runs with the runtime context of the call, and
+    * keeps the name of its tool and the parameter hints in the Python form.
+    */
+  def fromToolFunctions(tools: Vector[ToolFunction])(using ctx: RuntimeContext): Vector[SandboxTool] =
+    tools.map { tool =>
+      SandboxTool(
+        name = tool.name,
+        parameters = tool.argSchema.map { case (name, typeRef) => SandboxTool.Param(name, typeRef.pythonTypeName) },
+        invoke = kwargs => tool.invoke(kwargs)(using ctx)
+      )
+    }

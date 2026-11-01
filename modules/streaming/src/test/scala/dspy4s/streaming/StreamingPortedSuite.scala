@@ -17,7 +17,6 @@ import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.programs.contracts.ToolCallRequest
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.runtime.ToolExecutor
 import zio.blocks.schema.DynamicValue
@@ -295,7 +294,7 @@ class StreamingPortedSuite extends FunSuite:
       override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
       ): Either[DspyError, RawPrediction] =
-        ToolExecutor.invoke(ToolCallRequest(tool.name, DynamicValue.Record.empty), Vector(tool)).map { _ =>
+        ToolExecutor.run(tool, DynamicValue.Record.empty).map { _ =>
           RawPrediction(values = rec("answer" := "blue"))
         }
 

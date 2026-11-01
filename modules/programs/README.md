@@ -52,7 +52,7 @@ the optimizers can find their predictors.
 | `Prediction[O]` | The output `O` and its `RawPrediction` (`raw`), with the completions and the token usage. |
 | `OptimizableStructure[P]` / `OptimizableLeaf[P]` | The predictors of a program, and one predictor. The built-in composites have their own instances, and the compiler derives an instance for a case class. |
 | `ToolFunction` | A tool: `name`, `description`, `argSchema`, and `invoke(args)`. `ToolFunction.fromMethod` makes a tool from a method. |
-| `AgentLoop` / `TrajectoryAgent` | The bounded loop of the agents, and the template of `ReAct`: a loop that makes a trajectory, and then one extraction. |
+| `AgentLoop` | The bounded loop of the agents. `ReAct` runs a loop that makes a trajectory, and then one extraction. |
 | `Aggregation.majority` | Selects the most frequent value of a field in the candidate completions. |
 | `KNN` / `EmbeddingsRetriever` | `KNN` finds the nearest trainset examples by dot product. `EmbeddingsRetriever` finds the top-k passages by cosine similarity. |
 
@@ -68,8 +68,6 @@ the optimizers can find their predictors.
 - **ReAct uses a text protocol.** The model selects a tool through output fields. ReAct does not use the native
   function calls of the adapters. A tool failure becomes an observation in the trajectory. On a context window
   overflow, ReAct removes the oldest trajectory entry and tries again.
-- **Fixed agent templates.** `TrajectoryAgent.forward` and `InterpretedTrajectoryAgent.trajectoryStep` are `final`. A
-  subclass selects its action type, but it cannot change the order of the steps.
 
 ## Source layout
 
@@ -78,7 +76,7 @@ the optimizers can find their predictors.
 | top level | `Parallel`, `Aggregation`, `ProgramRunner`, `RecordCodec`, `DynamicSignature`, and the limit types, for example `AttemptCount` |
 | `strategies/` | `Predict`, `DynamicPredict`, and the other programs |
 | `compose/` | the composition operators and `Mode` |
-| `contracts/` | `Module`, `ProgramCall`, `Prediction`, `ModuleLifecycle`, `ToolFunction`, and `ActionInterpreter` |
+| `contracts/` | `Module`, `ProgramCall`, `Prediction`, `ModuleLifecycle`, and `ToolFunction` |
 | `optimization/` | `OptimizableStructure`, `OptimizableLeaf`, `OptimizableParameters`, and their instances |
 | `algebra/` | `Program` (a module with a fixed number of predictors) and the `algebra` instances for programs |
 | `runtime/` | `PredictEngine`, the agent loops, `ParallelExecutor`, and `ToolExecutor` |

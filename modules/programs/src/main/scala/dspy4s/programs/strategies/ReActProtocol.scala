@@ -1,11 +1,10 @@
 package dspy4s.programs.strategies
 
 import dspy4s.adapters.internal.ProgramPromptText
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout, TypeRef}
+import dspy4s.core.contracts.{:=, DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout, TypeRef}
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.signatures.Shape
-import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** ReAct's model-facing step schema, synthetic finish tool, and rendered trajectory protocol. The fields, the finish
@@ -28,16 +27,21 @@ private[programs] object ReActProtocol:
   /** The arguments of the tool (upstream type `dict[str, Any]`). */
   val nextToolArgsField: FieldSpec = FieldSpec(name = ReActKeys.nextToolArgs, typeRef = TypeRef.json)
 
-  /** Leniently decode fields produced through either JSONAdapter or ChatAdapter. */
+  /** Hand-written LENIENT output shape: a missing `next_thought` / `next_tool_name` renders as "" (a step that names no
+    * tool ends the loop rather than failing the call), and `next_tool_args` accepts a JSON object (JSONAdapter), a
+    * JSON-object string (ChatAdapter has no `json` coercion), or nothing (empty record). Decode never fails;
+    * `jsonSchema` stays `None`. The parsers of the port give a parse error before this decode for an empty or an
+    * unknown tool name (decision D7).
+    */
   val reactStepShape: Shape[ReAct.ReactStep] = new Shape[ReAct.ReactStep]:
     val fieldSpecs: Vector[FieldSpec] = Vector(nextThoughtField, nextToolNameField(Vector.empty), nextToolArgsField)
 
     def encode(value: ReAct.ReactStep): DynamicValue.Record =
-      DynamicValue.Record(Chunk.from(Seq(
-        ReActKeys.nextThought  -> DynamicValue.Primitive(PrimitiveValue.String(value.nextThought)),
-        ReActKeys.nextToolName -> DynamicValue.Primitive(PrimitiveValue.String(value.nextToolName)),
-        ReActKeys.nextToolArgs -> (value.nextToolArgs: DynamicValue)
-      )))
+      DynamicValues.record(
+        ReActKeys.nextThought  := value.nextThought,
+        ReActKeys.nextToolName := value.nextToolName,
+        ReActKeys.nextToolArgs -> value.nextToolArgs
+      )
 
     def decode(raw: DynamicValue.Record): Either[DspyError, ReAct.ReactStep] =
       Right(ReAct.ReactStep(
@@ -46,16 +50,17 @@ private[programs] object ReActProtocol:
         nextToolArgs = toolArgsRecord(DynamicValues.recordGet(raw, ReActKeys.nextToolArgs))
       ))
 
-  /** Build the no-op tool whose selection terminates the action loop and starts extraction (upstream `finish`). */
+  /** Build the no-op tool whose selection terminates the action loop and starts extraction (upstream `finish`). It does
+    * no work: the selection signals "I have enough to produce the outputs", the observation is a fixed marker, and the
+    * extractor then produces the real outputs.
+    */
   def finishTool(baseLayout: SignatureLayout): ToolFunction =
     val outputs = baseLayout.outputFields.map(field => s"`${field.name}`").mkString(", ")
-    new ToolFunction:
-      override val name: String        = ReAct.FinishToolName
-      override val description: String =
-        s"Marks the task as complete. That is, signals that all information for producing the outputs, i.e. $outputs, " +
-          "are now available to be extracted."
-      override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
-        Right(ToolFunction.result("Completed."))
+    ToolFunction.of(
+      ReAct.FinishToolName,
+      s"Marks the task as complete. That is, signals that all information for producing the outputs, i.e. $outputs, " +
+        "are now available to be extracted."
+    )(_ => "Completed.")
 
   /** The text of the observation `value` in the trajectory: the text of upstream `format_field_value` for a `str`
     * field, the type of each field of the trajectory signature.
@@ -72,10 +77,10 @@ private[programs] object ReActProtocol:
     val values = entries.flatMap { entry =>
       val index = entry.iteration
       Vector(
-        s"thought_$index"     -> text(entry.thought),
-        s"tool_name_$index"   -> text(entry.toolName),
-        s"tool_args_$index"   -> (entry.toolArgs: DynamicValue),
-        s"observation_$index" -> text(entry.observation)
+        s"thought_$index"     -> DynamicValues.string(entry.thought),
+        s"tool_name_$index"   -> DynamicValues.string(entry.toolName),
+        s"tool_args_$index"   -> entry.toolArgs,
+        s"observation_$index" -> DynamicValues.string(entry.observation)
       )
     }
     val layout = SignatureLayout.of(
@@ -88,8 +93,6 @@ private[programs] object ReActProtocol:
       layout,
       DynamicValues.recordFromEntries(values)
     )
-
-  private def text(value: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(value))
 
   /** Normalize tool arguments into the record consumed by ToolFunction. */
   private def toolArgsRecord(value: Option[DynamicValue]): DynamicValue.Record =

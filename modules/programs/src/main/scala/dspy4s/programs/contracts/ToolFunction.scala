@@ -3,6 +3,8 @@ package dspy4s.programs.contracts
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import zio.blocks.schema.{DynamicValue, Schema}
 
+import scala.collection.immutable.VectorMap
+
 /** A callable tool exposed to tool-using programs (`ReAct`, ...). `invoke` receives the call arguments as a
   * `DynamicValue.Record` (the named params parsed from the LM's tool call) and returns its result as a `DynamicValue`,
   * so both ends stay in the interchange format, with no lossy `Any` round-trip. Extract args with
@@ -45,6 +47,13 @@ trait ToolFunction:
 final class description(val value: String) extends scala.annotation.StaticAnnotation
 
 object ToolFunction:
+  /** The tools of an agent by name, with one tool for each name, as the dict of upstream `ReAct.__init__` and
+    * `ReActV2.__init__`: a later tool with a name takes the place of the earlier one, in the position of the earlier
+    * one.
+    */
+  def byName(tools: Vector[ToolFunction]): VectorMap[String, ToolFunction] =
+    VectorMap.from(tools.map(tool => tool.name -> tool))
+
   /** Lift a return value with a `Schema` into the `DynamicValue` a tool yields, so authors can write
     * `Right(ToolFunction.result("Brussels"))` (or return any case class with a `Schema`) instead of hand-constructing
     * `DynamicValue.Primitive(...)`.
