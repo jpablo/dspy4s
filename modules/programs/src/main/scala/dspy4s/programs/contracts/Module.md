@@ -70,7 +70,7 @@ classDiagram
         <<example>>
     }
 
-    note for TransparentModule "Composition<br/>Identity · AndThen · Both · Tensor<br/>Copy · Discard · Swap<br/><br/>Transformations<br/>Lift · LiftEither · MapOutput<br/>ContramapInput · Dimap<br/><br/>Control<br/>Moded · RecoverWith"
+    note for TransparentModule "Composition<br/>Identity · AndThen · Both · Tensor<br/><br/>Transformations<br/>Lift · LiftEither · Dimap<br/><br/>Control<br/>Moded · RecoverWith"
 
     Module <|-- TransparentModule
     Module <|-- DynamicModule
@@ -113,7 +113,7 @@ The descendants fall into three semantic branches:
 | Branch | Purpose | Descendants |
 |---|---|---|
 | Direct executable programs | Implement a complete strategy directly | `Predict`, `ChainOfThought`, `ReAct`, `RLM`, `MultiChainComparison`, `BestOfN`, `Refine` |
-| `TransparentModule` | Structural syntax whose own node must not appear in callbacks, trace, or history | `Identity`, `AndThen`, `Both`, `Tensor`, `Copy`, `Discard`, `Swap`, `Lift`, `LiftEither`, `MapOutput`, `ContramapInput`, `Dimap`, `Moded`, `RecoverWith` |
+| `TransparentModule` | Structural syntax whose own node must not appear in callbacks, trace, or history | `Identity`, `AndThen`, `Both`, `Tensor`, `Lift`, `LiftEither`, `Dimap`, `Moded`, `RecoverWith` |
 | `DynamicModule` | Execute over runtime `DynamicValue.Record` inputs and outputs | `DynamicPredict`, `KNNFewShotProgram`, internal `EnsembledProgram`, example `SimplifyModule`, example `ScoringModule` |
 
 This is an inheritance diagram, not a catalog of every type that mentions `Module`. In particular:
@@ -236,19 +236,22 @@ sealed trait ModuleLifecycle[I, O]
 object ModuleLifecycle:
   final case class Transparent[I, O]() extends ModuleLifecycle[I, O]
   final case class Observed[I, O](
-      observation: CallObservation[ProgramCall[I], O]
+      inputs   : ProgramCall[I] => DynamicValue.Record,
+      predictor: Option[PredictorKey] = None
   ) extends ModuleLifecycle[I, O]
 ```
 
-`CallObservation` answers three questions for an observed boundary:
+`Observed` answers two questions for an observed boundary:
 
 1. How is the input projected into a runtime record?
-2. Does this call permit trace/history recording?
-3. How is the prediction projected into an output record?
+2. Which key does the boundary write into its trace entries, when the module is a predictor?
 
-It is a field rather than a typeclass because observation is not unique for a given `I` and `O`. A signature-backed
-`Predict[I, O]` can encode its input through its `Shape[I]`; a generic wrapper such as `BestOfN[I, O]` has the same type
-shape but may not possess an authoritative input encoder.
+The `traceEnabled` flag of the call permits trace/history recording, and the output record is the value record of the
+raw prediction, for each observed module.
+
+The input projection is a field rather than a typeclass because observation is not unique for a given `I` and `O`. A
+signature-backed `Predict[I, O]` can encode its input through its `Shape[I]`; a generic wrapper such as `BestOfN[I, O]`
+has the same type shape but may not possess an authoritative input encoder.
 
 ## Why transparent modules exist
 
@@ -345,10 +348,10 @@ extend `DynamicModule`.
 | `apply(input, config, traceEnabled)` | Convenience constructor for a `ProgramCall`, followed by ordinary execution |
 | `apply(call)` | Canonical synchronous, lifecycle-wrapped boundary |
 | `applyAsync(call)` | Runs asynchronously and returns only the value; the worker's trace/history remains isolated |
-| `applyAsyncExecuted(call)` | Runs asynchronously and returns `Executed[value]`, including the worker-produced runtime delta |
 
-Both asynchronous methods propagate the runtime services, configuration, scope, and registered context carriers into
-the worker. Use `applyAsyncExecuted` when the caller must explicitly join the child's observable runtime output.
+The asynchronous method propagates the runtime services, configuration, scope, and registered context carriers into
+the worker. Use `ContextPropagation.futureExecuted` when the caller must explicitly join the child's observable runtime
+output.
 
 ## Boundary invariants
 
@@ -387,7 +390,7 @@ sbt --error \
 ## Suggested reading order
 
 1. Read `Module.apply(call)` to see the lifecycle template.
-2. Read `ModuleLifecycle` and `CallObservation` to see how values become runtime records.
+2. Read `ModuleLifecycle` to see how values become runtime records.
 3. Read `ProgramCall.mapInput` and `Prediction` to understand what composition changes and preserves.
 4. Read `TransparentModule` and then `AndThen` to see structural composition without structural trace noise.
 5. Read `DynamicModule`, `Predict`, and `DynamicPredict` to compare domain-specific and record carriers.

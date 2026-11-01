@@ -1,6 +1,6 @@
 package dspy4s.programs.strategies
 
-import dspy4s.programs.IterationLimit
+import dspy4s.programs.{IterationLimit, SignatureInput}
 import dspy4s.core.contracts.ContextWindowExceededError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
@@ -11,6 +11,7 @@ import dspy4s.programs.contracts.Prediction
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.internal.ToolText
+import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.runtime.AgentLoop
 import dspy4s.programs.runtime.ToolExecutor
 import dspy4s.programs.runtime.TrajectoryTruncation.truncateOnOverflow
@@ -66,9 +67,9 @@ final case class ReAct[I, O](
       */
     extractorPredictOverride: Option[Predict[(I, String), ChainOfThought.WithReasoning[O]]] = None
 )(using
-    // A `val`, so that a `copy` keeps this evidence (see `CompositeOptimizableStructureInstances`).
+    // A `val`, so that a `copy` keeps this evidence (see `reactOptimizableStructure`).
     private[programs] val prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O]
-) extends Module[I, ChainOfThought.WithReasoning[O]]:
+) extends Module[I, ChainOfThought.WithReasoning[O]], SignatureInput[I]:
   import ReAct.TrajectoryEntry
 
   override val moduleName: String         = ReActKeys.reactModule
@@ -216,6 +217,20 @@ final case class ReAct[I, O](
 
 object ReAct:
   val FinishToolName: String = "finish"
+
+  /** Two optimizable parts: the step predictor `react` and the final `extractor`. A `copy` gets the `PrependField`
+    * evidence of the program. This instance does not know `O`, thus a new search for the evidence finds only the
+    * fallback, which makes no augmented output.
+    */
+  given reactOptimizableStructure[I, O]: OptimizableStructure.Of[ReAct[I, O], 2] =
+    OptimizableStructure.overridePair("ReAct", "react", "extractor")(
+      _.reactPredict,
+      _.reactPredictOverride,
+      _.extractorPredict,
+      _.extractorPredictOverride,
+      (program, react, extractor) =>
+        program.copy(reactPredictOverride = react, extractorPredictOverride = extractor)(using program.prepend)
+    )
 
   /** The output of one react loop step. */
   final case class ReactStep(

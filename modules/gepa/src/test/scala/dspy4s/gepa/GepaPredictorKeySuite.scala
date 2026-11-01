@@ -1,5 +1,6 @@
 package dspy4s.gepa
 
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -23,7 +24,6 @@ import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.optimization.OptimizableId
 import dspy4s.programs.optimization.OptimizableLeaf
-import dspy4s.programs.optimization.OptimizableMetadata
 import dspy4s.programs.optimization.OptimizableParameters
 import dspy4s.programs.strategies.DynamicPredict
 import munit.FunSuite
@@ -52,9 +52,9 @@ final case class KeylessLeaf(layout: SignatureLayout) extends DynamicModule:
 
 object KeylessLeaf:
   given OptimizableLeaf[KeylessLeaf] with
-    def get(program: KeylessLeaf): OptimizableParameters    = OptimizableParameters(program.layout.instructions)
-    def metadata(program: KeylessLeaf): OptimizableMetadata =
-      OptimizableMetadata.from(program.layout, program.moduleName)
+    def get(program: KeylessLeaf): OptimizableParameters = OptimizableParameters(program.layout.instructions)
+    def metadata(program: KeylessLeaf): PredictorKey     =
+      PredictorKey.from(program.moduleName, program.layout)
     def set(program: KeylessLeaf, updated: OptimizableParameters): KeylessLeaf =
       program.copy(layout = program.layout.withInstructions(updated.instructions))
 

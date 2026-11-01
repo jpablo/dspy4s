@@ -233,7 +233,7 @@ caller in the main code. The review-and-simplify pass removed it. The sections "
 "dspy4s state before resolution" tell the state before that change.
 
 **Round-trip scope.** Instructions, demos, and module config round-trip for every supported leaf.
-Signature field structure and module name are read-only `OptimizableMetadata`; runtimes, output schemas,
+Signature field structure and module name are the read-only metadata (`PredictorKey`); runtimes, output schemas,
 bound LMs, tools, callbacks, and history are execution resources. Loading state into a fresh program
 preserves all of them. The target must have the same optimizable structure and leaf order: `optimizable-N` IDs reject
 missing/unknown ordinals and ignore JSON object order, but cannot detect a same-cardinality reorder.

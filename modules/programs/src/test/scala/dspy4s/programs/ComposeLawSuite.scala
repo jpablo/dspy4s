@@ -1,5 +1,6 @@
 package dspy4s.programs
 
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.CallbackEvent
@@ -57,14 +58,14 @@ class ComposeLawSuite extends FunSuite:
   private object Step:
     given stepOptimizable[I, O]: OptimizableLeaf[Step[I, O]] with
       def get(program     : Step[I, O]): OptimizableParameters                 = program.predict.optimizableParameters
-      def metadata(program: Step[I, O]): OptimizableMetadata                   = program.predict.optimizableView.metadata
+      def metadata(program: Step[I, O]): PredictorKey                          = program.predict.optimizableView.metadata
       def set(program: Step[I, O], updated: OptimizableParameters): Step[I, O] =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
   private object TraceSize:
     given traceSizeOptimizable: OptimizableLeaf[TraceSize] with
       def get(program     : TraceSize): OptimizableParameters                = program.predict.optimizableParameters
-      def metadata(program: TraceSize): OptimizableMetadata                  = program.predict.optimizableView.metadata
+      def metadata(program: TraceSize): PredictorKey                         = program.predict.optimizableView.metadata
       def set(program: TraceSize, updated: OptimizableParameters): TraceSize =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 

@@ -51,7 +51,7 @@ object BestOfN:
   given bestOfNOptimizableStructure[P <: Module[I, O], I, O, N <: Int](using
       inner: OptimizableStructure.WithArity[P, N]
   ): OptimizableStructure.Of[BestOfN[P, I, O], N] =
-    ParameterOptic.throughStructure(
+    OptimizableStructure.unary(
       "BestOfN",
       _.module,
       (wrapper, updated) => wrapper.copy(module = updated),

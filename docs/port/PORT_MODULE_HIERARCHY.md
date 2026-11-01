@@ -125,7 +125,7 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
 4. **`Predict` is a `Parameter`; dspy4s uses a lawful state lens.** Python's
    `Predict` is simultaneously a `Module` and a mutable `Parameter`. dspy4s has
    no marker base class: `OptimizableLeaf[P]` exposes the leaf's writable
-   `OptimizableParameters` (instructions, demos, config), while `OptimizableMetadata`
+   `OptimizableParameters` (instructions, demos, config), while the metadata (`PredictorKey`)
    keeps signature structure and module identity read-only. `OptimizableStructure[P]`
    derives composite structure and immutable replacement (G-1).
 

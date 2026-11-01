@@ -45,7 +45,7 @@ class PredictorTraceKeySuite extends FunSuite:
       RuntimeContext(lm = Some(new ScriptedLm(Vector.fill(16)("v"))), adapter = Some(FillAdapter(failParse)))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      TracedRun.run(program, ProgramCall(inputs), captureFailures)
+      TracedRun.runWith(program, ProgramCall(inputs), captureFailures)((result, trace) => (result, trace))
     }
 
   private def leavesOf[P](program: P)(using structure: OptimizableStructure[P]): Vector[IdentifiedOptimizable] =
@@ -59,35 +59,35 @@ class PredictorTraceKeySuite extends FunSuite:
   test("Predict records one entry with the key of its leaf metadata") {
     val program = Predict(qa)
     val trace   = successfulTrace(program)
-    assertEquals(trace.map(_.predictor), Vector(Some(program.optimizableView.metadata.key)))
+    assertEquals(trace.map(_.predictor), Vector(Some(program.optimizableView.metadata)))
     assertEquals(trace.map(_.withinPredictor), Vector(false))
   }
 
   test("DynamicPredict records one entry with the key of its leaf metadata") {
     val program = DynamicPredict(layout = SignatureLayout.parse("question -> answer").toOption.get)
     val trace   = successfulTrace(program)
-    assertEquals(trace.map(_.predictor), Vector(Some(program.optimizableView.metadata.key)))
+    assertEquals(trace.map(_.predictor), Vector(Some(program.optimizableView.metadata)))
   }
 
   test("ChainOfThought records its key on its own entry, and its inner Predict records none") {
     val program = ChainOfThought(qa)
     val trace   = successfulTrace(program)
     assertEquals(trace.map(_.component), Vector("predict", "chain_of_thought"))
-    assertEquals(trace.map(_.predictor), Vector(None, Some(program.optimizableView.metadata.key)))
+    assertEquals(trace.map(_.predictor), Vector(None, Some(program.optimizableView.metadata)))
     assertEquals(trace.map(_.withinPredictor), Vector(true, false))
   }
 
   test("the key does not change when an optimizer writes new parameters") {
     val program = Predict(qa)
     val updated = program.withOptimizableParameters(OptimizableParameters(instructions = Some("Answer in one word.")))
-    assertEquals(successfulTrace(updated).flatMap(_.predictor), Vector(program.optimizableView.metadata.key))
+    assertEquals(successfulTrace(updated).flatMap(_.predictor), Vector(program.optimizableView.metadata))
   }
 
   test("a name gives a predictor a different key") {
     val plain = Predict(qa)
     val named = Predict(qa, name = Some("second_pass"))
-    assertNotEquals(named.optimizableView.metadata.key, plain.optimizableView.metadata.key)
-    assertEquals(successfulTrace(named).flatMap(_.predictor), Vector(named.optimizableView.metadata.key))
+    assertNotEquals(named.optimizableView.metadata, plain.optimizableView.metadata)
+    assertEquals(successfulTrace(named).flatMap(_.predictor), Vector(named.optimizableView.metadata))
   }
 
   test("a failed predictor call records its key when failure traces are on") {
@@ -95,7 +95,7 @@ class PredictorTraceKeySuite extends FunSuite:
     val (result, trace) = traced(program, failParse = true, captureFailures = true)
     assert(result.isLeft, result.toString)
     assertEquals(trace.map(_.failure.isDefined), Vector(true))
-    assertEquals(trace.map(_.predictor), Vector(Some(program.optimizableView.metadata.key)))
+    assertEquals(trace.map(_.predictor), Vector(Some(program.optimizableView.metadata)))
   }
 
   test("a sequential program gives one keyed entry for each leaf, and byLeaf groups them by leaf") {
@@ -109,7 +109,7 @@ class PredictorTraceKeySuite extends FunSuite:
     val groups = PredictorTraces.byLeaf(leaves, trace).toOption.get
     assertEquals(
       groups.map(_.map(_.predictor)),
-      Vector(Vector(Some(first.optimizableView.metadata.key)), Vector(Some(second.optimizableView.metadata.key)))
+      Vector(Vector(Some(first.optimizableView.metadata)), Vector(Some(second.optimizableView.metadata)))
     )
     assertEquals(
       groups.map(_.map(e => DynamicValues.recordKeys(e.outputs))),

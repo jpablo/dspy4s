@@ -1,5 +1,6 @@
 package dspy4s.programs
 
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.programs.optimization.*
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
@@ -336,9 +337,9 @@ class TypedBestOfNSuite extends FunSuite:
     * back to it without treating an executable `DynamicPredict` as optimizer parameters.
     */
   private given OptimizableLeaf[InnerPredict] with
-    def get(program: InnerPredict): OptimizableParameters    = program.parameters
-    def metadata(program: InnerPredict): OptimizableMetadata =
-      OptimizableMetadata.from(program.layout, program.moduleName)
+    def get(program: InnerPredict): OptimizableParameters = program.parameters
+    def metadata(program: InnerPredict): PredictorKey     =
+      PredictorKey.from(program.moduleName, program.layout)
     def set(program: InnerPredict, updated: OptimizableParameters): InnerPredict = program.copy(parameters = updated)
 
   test("Refine generates advice and injects it as a hint so a retry improves above threshold") {

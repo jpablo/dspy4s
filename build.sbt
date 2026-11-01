@@ -146,11 +146,10 @@ lazy val programs = (project in file("modules/programs"))
       "io.github.iltotore" %% "iron"  % ironVersion,
       "org.scalameta"      %% "munit" % munitVersion % Test
     ),
-    // Keep mutation testing on the generic optic and explicit-heap implementation. Mutating all program sources hits
+    // Keep mutation testing on the explicit-heap implementation. Mutating all program sources hits
     // a current stryker4s Scala 3 parser defect on top-level extension methods before any mutant can run.
     strykerMutate := Seq(
       "src/main/scala/dspy4s/programs/compose/AndThen.scala",
-      "src/main/scala/dspy4s/programs/optimization/ParameterOptic.scala",
       "src/main/scala/dspy4s/programs/optimization/StackSafeOptimizableStructure.scala"
     )
   )

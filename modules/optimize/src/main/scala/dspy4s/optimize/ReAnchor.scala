@@ -342,7 +342,7 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
     private def observe(program: P): Either[DspyError, (Vector[DecisionEvidence], Vector[Double])] =
       val (scored, entries) = DecisionEvidenceLog.recording(scores(program, trainset, threads))
       scored.map(base =>
-        (entries.filter(e => e.predictor == leaf.metadata.key && e.field == field).map(_.evidence), base)
+        (entries.filter(e => e.predictor == leaf.metadata && e.field == field).map(_.evidence), base)
       )
 
   /** The result of the fit of one output: the settings with the best parameter, the scores with them, the observed

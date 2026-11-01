@@ -11,7 +11,6 @@ import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.SignatureOps.*
-import dspy4s.algebra.Lens
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
@@ -127,30 +126,19 @@ object Refine:
   given refineOptimizableStructure[P <: Module[I, O], I, O, N <: Int](using
       inner: OptimizableStructure.WithArity[P, N]
   ): OptimizableStructure.Of[Refine[P, I, O], N + 1] =
-    val children = new Lens[Refine[P, I, O], (P, RefineFeedback.Critic)]:
-      def get(program: Refine[P, I, O]): (P, RefineFeedback.Critic) = program.module -> program.criticPredict
-
-      def set(program: Refine[P, I, O], replacement: (P, RefineFeedback.Critic)): Refine[P, I, O] =
-        val nextCriticOverride =
-          if replacement._2.equals(program.criticPredict) then program.criticPredictOverride
-          else Some(replacement._2)
-        program.copy(module = replacement._1, criticPredictOverride = nextCriticOverride)
-
-    val critic = ParameterOptic.leaf[RefineFeedback.Critic](
-      "self",
-      _.optimizableView,
-      (current, updated) => current.withOptimizableParameters(updated)
-    )
-
-    ParameterOptic.toStructure(
+    OptimizableStructure.pair[Refine[P, I, O], P, RefineFeedback.Critic, N, 1](
       "Refine",
-      ParameterOptic.pairThrough(
-        children,
-        ParameterOptic.fromStructure(inner),
-        critic,
-        None,
-        Some("critic")
-      )
+      None,
+      Some("critic"),
+      _.module,
+      _.criticPredict,
+      (program, module, critic) =>
+        val nextCriticOverride =
+          if critic.equals(program.criticPredict) then program.criticPredictOverride else Some(critic)
+        program.copy(module = module, criticPredictOverride = nextCriticOverride)
+      ,
+      inner,
+      OptimizableStructure.fromOptimizableLeaf
     )
 
   /** Wrapper [[Adapter]] that injects each predictor's OWN advice into ITS call, mirroring Python's `WrapperAdapter`

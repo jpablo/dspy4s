@@ -606,7 +606,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
   test("the evidence is recorded for the predictor that decoded it") {
     val model                = FakeSystemOne((_, name) => if name == "match" then noul(0.9) else choice("x" -> 0.6, "y" -> 0.4))
     val program              = RaTwo(DynamicPredict(matchLayout), DynamicPredict(kindLayout))
-    val keys                 = summon[OptimizableStructure[RaTwo]].readIdentified(program).map(_.metadata.key)
+    val keys                 = summon[OptimizableStructure[RaTwo]].readIdentified(program).map(_.metadata)
     def call(names: String*) =
       runInputs(program, DynamicValues.record("items" -> DynamicValue.Sequence(Chunk.from(names.map(text)))))
     val (_, log) = run(context(model))(DecisionEvidenceLog.recording(call("a", "b", "c")))
@@ -699,7 +699,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
     )
     val (answer, log) = run(context(model))(DecisionEvidenceLog.recording(program(RaPairInput("same"))))
     assertEquals(answer.map(_.output.same), Right(true))
-    val key = summon[OptimizableLeaf[ChainOfThought[RaPairInput, RaSameOutput]]].metadata(program).key
+    val key = summon[OptimizableLeaf[ChainOfThought[RaPairInput, RaSameOutput]]].metadata(program)
     assertEquals(key.moduleName, "chain_of_thought")
     assertEquals(log, Vector(DecisionEvidenceLog.Entry(key, "same", DecisionEvidence.Noul(0.9))))
   }

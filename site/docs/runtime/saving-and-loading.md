@@ -45,12 +45,12 @@ Algebraically, `OptimizableLeaf[P]` is a lawful lens focused on one `Optimizable
 while `OptimizableStructure[P]` describes a finite, ordered collection of such leaves. Composition concatenates
 the child structures, parameter-free structure contributes the empty vector, and
 `Vector[OptimizableParameters]` forms the parameter monoid under concatenation. Named
-inspection is checked against the canonical structure so labels cannot silently
+inspection is the canonical structure, and `read` comes from it, so labels cannot
 reorder or substitute parameters.
 
 ## Metadata and execution resources
 
-`OptimizableMetadata` is inspectable but not writable through optimizer replacement.
+The metadata (a `PredictorKey`) is inspectable but not writable through optimizer replacement.
 It contains the signature field structure (with instructions removed) and module
 name. Loading preserves that metadata from the fresh target program.
 

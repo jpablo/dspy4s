@@ -2,10 +2,10 @@ package dspy4s.programs.compose
 
 import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicValues
 import dspy4s.algebra.{Monoid, MonoidAction}
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.updated
+import dspy4s.core.contracts.:=
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.TransparentModule
 import dspy4s.programs.contracts.ProgramCall
@@ -51,14 +51,14 @@ object Mode:
   val id: Mode = Mode(identity)
 
   /** Upsert a provider-config key — the building block for model / temperature / any provider knob. */
-  def setConfig(key: String, value: DynamicValue): Mode =
-    Mode(controls => controls.copy(config = controls.config.updated(key, value)))
+  def setConfig(entry: (String, DynamicValue)): Mode =
+    Mode(controls => controls.copy(config = controls.config.updated(entry._1, entry._2)))
 
   /** Set the provider sampling temperature. */
-  def temperature(value: Double): Mode = setConfig("temperature", DynamicValues.fromAny(value))
+  def temperature(value: Double): Mode = setConfig("temperature" := value)
 
   /** Swap the provider model. */
-  def model(name: String): Mode = setConfig("model", DynamicValues.fromAny(name))
+  def model(name: String): Mode = setConfig("model" := name)
 
   /** Set the framework cache-busting rolloutId. */
   def rolloutId(value: Int): Mode = Mode(controls => controls.copy(rolloutId = Some(value)))
@@ -75,7 +75,7 @@ object Mode:
 
   /** The control-transform monoid acting lawfully on modules without adding an observed lifecycle node. */
   given moduleAction[I, O]: MonoidAction[Mode, Module[I, O]] with
-    def act(mode: Mode, program: Module[I, O]): Module[I, O] = Compose.mode(mode)(program)
+    def act(mode: Mode, program: Module[I, O]): Module[I, O] = Moded(mode, program)
 
 /** `mode(m)(p)`: run `p` with its per-call controls rewritten by `m`. Lifecycle-transparent — it records no callback,
   * trace, or history event of its own, so a chain of modes collapses to the wrapped program's single lifecycle scope
@@ -98,7 +98,7 @@ object Moded:
   given modedOptimizableStructure[I, O, P <: Module[I, O], N <: Int](using
       inner: OptimizableStructure.WithArity[P, N]
   ): OptimizableStructure.Of[Moded[I, O, P], N] =
-    ParameterOptic.throughStructure(
+    OptimizableStructure.unary(
       "Moded",
       _.program,
       (wrapper, updated) => wrapper.copy(program = updated),

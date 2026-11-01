@@ -1,6 +1,7 @@
 package dspy4s.programs.optimization
 
 import dspy4s.algebra.{IsEq, Law, Lens, <->}
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.programs.strategies.{ChainOfThought, DynamicPredict, Predict}
 import dspy4s.signatures.OutputAugmentation.PrependField
 
@@ -8,23 +9,23 @@ import dspy4s.signatures.OutputAugmentation.PrependField
   *
   * This is a lawful [[dspy4s.algebra.Lens Lens]] onto exactly the program's [[OptimizableParameters]]: six get, put,
   * and modify statements are inherited from the `Lens` trait, and the [[frame]] law added here pins what makes the
-  * focus exact — writing parameters can never change the read-only [[OptimizableMetadata]], which excludes signature
-  * structure and execution resources from optimizer replacement. `OptimizableParametersSuite` executes all seven
-  * statements per instance.
+  * focus exact: writing parameters can never change the read-only metadata (a [[PredictorKey]]), which excludes
+  * signature structure and execution resources from optimizer replacement. `OptimizableParametersSuite` executes all
+  * seven statements per instance.
   *
-  * '''Trace key.''' An optimizer finds the calls of a leaf by the key of its metadata ([[OptimizableMetadata.key]]).
-  * The module of a leaf type must record that key in its trace entries: give it the lifecycle
+  * '''Trace key.''' The metadata of a leaf is the key by which an optimizer finds the calls of the leaf. The module of
+  * a leaf type must record that key in its trace entries: give it the lifecycle
   * `ModuleLifecycle.predictor(shape, key)`, or `ModuleLifecycle.dynamicPredictor(key)` for a dynamic module. `Predict`,
   * `ChainOfThought`, and `DynamicPredict` do this. An optimizer returns an error for a leaf type that records no key,
   * and for a program in which two leaves have the same key (see [[PredictorTraces]]).
   */
 trait OptimizableLeaf[P] extends Lens[P, OptimizableParameters]:
-  def metadata(program: P): OptimizableMetadata
+  def metadata(program: P): PredictorKey
 
   final def inspect(program: P): OptimizableView = OptimizableView(metadata(program), get(program))
 
   @Law("frame: writing parameters never changes the read-only metadata")
-  def frame(program: P, updated: OptimizableParameters): IsEq[OptimizableMetadata] =
+  def frame(program: P, updated: OptimizableParameters): IsEq[PredictorKey] =
     metadata(set(program, updated)) <-> metadata(program)
 
 object OptimizableLeaf:
@@ -35,8 +36,8 @@ object OptimizableLeaf:
     def get(program: DynamicPredict): OptimizableParameters =
       OptimizableParameters(program.layout.instructions, program.demos, program.config, program.decisions)
 
-    def metadata(program: DynamicPredict): OptimizableMetadata =
-      OptimizableMetadata.from(program.layout, program.moduleName)
+    def metadata(program: DynamicPredict): PredictorKey =
+      PredictorKey.from(program.moduleName, program.layout)
 
     def set(program: DynamicPredict, updated: OptimizableParameters): DynamicPredict =
       if updated == get(program) then program
@@ -61,8 +62,8 @@ object OptimizableLeaf:
     def get(program: Predict[I, O]): OptimizableParameters =
       OptimizableParameters(program.signature.layout.instructions, program.demos, program.config, program.decisions)
 
-    def metadata(program: Predict[I, O]): OptimizableMetadata =
-      OptimizableMetadata.from(program.signature.layout, program.moduleName)
+    def metadata(program: Predict[I, O]): PredictorKey =
+      PredictorKey.from(program.moduleName, program.signature.layout)
 
     def set(program: Predict[I, O], updated: OptimizableParameters): Predict[I, O] =
       if updated == get(program) then program
@@ -87,8 +88,8 @@ object OptimizableLeaf:
     def get(program: ChainOfThought[I, O]): OptimizableParameters =
       OptimizableParameters(program.baseSignature.layout.instructions, program.demos, program.config, program.decisions)
 
-    def metadata(program: ChainOfThought[I, O]): OptimizableMetadata =
-      OptimizableMetadata.from(program.signature.layout, program.moduleName)
+    def metadata(program: ChainOfThought[I, O]): PredictorKey =
+      PredictorKey.from(program.moduleName, program.signature.layout)
 
     def set(program: ChainOfThought[I, O], updated: OptimizableParameters): ChainOfThought[I, O] =
       if updated == get(program) then program

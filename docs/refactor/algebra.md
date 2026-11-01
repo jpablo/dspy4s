@@ -316,7 +316,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     every monoid in the codebase is a named instance, none left implicit. The same pattern now covers optics:
     `core.algebra.Lens[S, A]` states get-put / put-get / put-put on the trait, and `OptimizableLeaf[P] extends
     Lens[P, OptimizableParameters]` inherits them, adding only the `frame` law (writing parameters never changes the
-    read-only `OptimizableMetadata`). The focus had to be carved down to exactly the writable triple
+    read-only metadata, a `PredictorKey`). The focus had to be carved down to exactly the writable triple
     (instructions / demos / config) before these laws could hold; `OptimizableParametersSuite` executes all four
     statements per leaf instance (`DynamicPredict`, `Predict`, `ChainOfThought`).
     The same placement rule now distinguishes `RoundTripShape[A]`, which carries `decodeEncode` on the abstract trait,

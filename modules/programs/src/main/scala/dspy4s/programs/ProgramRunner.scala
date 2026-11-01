@@ -2,8 +2,8 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.core.data.RawPrediction
-import dspy4s.programs.contracts.{DynamicModule, Module, ProgramCall}
-import dspy4s.signatures.Shape
+import dspy4s.programs.contracts.{DynamicModule, Module, Prediction, ProgramCall}
+import dspy4s.signatures.Signature
 import zio.blocks.schema.DynamicValue
 
 /** Capability for evaluating a program from the dynamic record boundary.
@@ -25,6 +25,10 @@ trait ProgramRunner[P]:
   final def run(program: P, inputs: DynamicValue.Record)(using RuntimeContext): Either[DspyError, RawPrediction] =
     run(program, ProgramCall(inputs))
 
+/** A framework program that decodes its record input through its own (base) signature. */
+private[programs] trait SignatureInput[I]:
+  private[programs] def baseSignature: Signature[I, ?]
+
 private[programs] trait LowPriorityProgramRunner:
   /** Any module whose input type carries a [[RecordCodec]] (user composites without a hand-written runner). Lower
     * priority than the signature-backed instances in the companion.
@@ -35,11 +39,16 @@ private[programs] trait LowPriorityProgramRunner:
     def run(program: P, call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, RawPrediction] =
-      codec.decode(call.input).flatMap { decoded =>
-        program(call.mapInput(_ => decoded)).map(_.raw)
-      }
+      ProgramRunner.decodeThenRun(codec.decode, call)(program(_))
 
 object ProgramRunner extends LowPriorityProgramRunner:
+
+  /** Decode the record input of `call`, run `program` on the decoded call, and keep the raw prediction. */
+  private[programs] def decodeThenRun[I, O](
+      decode: DynamicValue.Record => Either[DspyError, I],
+      call  : ProgramCall[DynamicValue.Record]
+  )(program: ProgramCall[I] => Either[DspyError, Prediction[O]]): Either[DspyError, RawPrediction] =
+    decode(call.input).flatMap(decoded => program(call.mapInput(_ => decoded)).map(_.raw))
 
   /** Dynamic modules already inhabit the record boundary. */
   given fromDynamicModule[P <: DynamicModule]: ProgramRunner[P] with
@@ -48,31 +57,11 @@ object ProgramRunner extends LowPriorityProgramRunner:
     ): Either[DspyError, RawPrediction] =
       program(call).map(_.raw)
 
-  private def signatureBacked[I, O, P <: Module[I, O]](
-      inputShapeOf: P => Shape[I]
-  ): ProgramRunner[P] =
-    new ProgramRunner[P]:
-      def run(program: P, call: ProgramCall[DynamicValue.Record])(using
-          RuntimeContext
-      ): Either[DspyError, RawPrediction] =
-        inputShapeOf(program).decode(call.input).flatMap { decoded =>
-          program(call.mapInput(_ => decoded)).map(_.raw)
-        }
-
-  // ── The framework leaves and composites, decoded through their own (base) signature ──────────────────────
-  given fromPredict[I, O]: ProgramRunner[Predict[I, O]] =
-    signatureBacked[I, O, Predict[I, O]](_.signature.inputShape)
-
-  given fromChainOfThought[I, O]: ProgramRunner[ChainOfThought[I, O]] =
-    signatureBacked[I, ChainOfThought.WithReasoning[O], ChainOfThought[I, O]](_.baseSignature.inputShape)
-
-  given fromReAct[I, O]: ProgramRunner[ReAct[I, O]] =
-    signatureBacked[I, ChainOfThought.WithReasoning[O], ReAct[I, O]](_.baseSignature.inputShape)
-
-  given fromRLM[I, O]: ProgramRunner[RLM[I, O]] =
-    signatureBacked[I, O, RLM[I, O]](_.baseSignature.inputShape)
-
-  given fromReActV2[I, O]: ProgramRunner[ReActV2[I, O]] =
-    signatureBacked[I, O, ReActV2[I, O]](_.baseSignature.inputShape)
+  /** The framework leaves and composites, decoded through their own (base) signature. */
+  given fromSignature[I, O, P <: Module[I, O] & SignatureInput[I]]: ProgramRunner[P] with
+    def run(program: P, call: ProgramCall[DynamicValue.Record])(using
+        RuntimeContext
+    ): Either[DspyError, RawPrediction] =
+      decodeThenRun(program.baseSignature.inputShape.decode, call)(program(_))
 
   def apply[P](using runner: ProgramRunner[P]): ProgramRunner[P] = runner

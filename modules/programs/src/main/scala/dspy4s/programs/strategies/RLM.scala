@@ -1,6 +1,6 @@
 package dspy4s.programs.strategies
 
-import dspy4s.programs.{IterationLimit, LlmCallLimit, OutputCharLimit}
+import dspy4s.programs.{IterationLimit, LlmCallLimit, OutputCharLimit, SignatureInput}
 import dspy4s.adapters.internal.ProgramPromptText
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldSpec
@@ -22,6 +22,7 @@ import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.contracts.Prediction
 import dspy4s.programs.internal.ToolText
+import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.signatures.{Shape, Signature}
 
 import java.util.concurrent.atomic.AtomicBoolean
@@ -111,7 +112,8 @@ final case class RLM[I, O](
       * a deep copy does not run `__init__`, `dspy/predict/rlm.py`). The latch takes no part in the equality of an RLM.
       */
     decisionWarning: RLM.WarningLatch = RLM.WarningLatch()
-) extends Module[I, O]:
+) extends Module[I, O],
+      SignatureInput[I]:
 
   override val moduleName: String = "rlm"
   RLM.checkNames(tools.map(_.name), baseSignature.layout)
@@ -247,6 +249,16 @@ final case class RLM[I, O](
     new RLMExecution(this).run(call)
 
 object RLM:
+  /** Two optimizable parts: the `action` predictor of each iteration and the `extract` fallback. */
+  given rlmOptimizableStructure[I, O]: OptimizableStructure.Of[RLM[I, O], 2] =
+    OptimizableStructure.overridePair("RLM", "action", "extract")(
+      _.actionPredict,
+      _.actionPredictOverride,
+      _.extractPredict,
+      _.extractPredictOverride,
+      (program, action, extract) => program.copy(actionPredictOverride = action, extractPredictOverride = extract)
+    )
+
   /** The module name of the action predict of each iteration. */
   private val ActionModuleName: String = "rlm_action"
 

@@ -1,5 +1,6 @@
 package dspy4s.programs
 
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
@@ -44,7 +45,7 @@ class RecoveryCombinatorSuite extends FunSuite:
   private object Attempt:
     given attemptOptimizable: OptimizableLeaf[Attempt] with
       def get(program     : Attempt): OptimizableParameters              = program.predict.optimizableParameters
-      def metadata(program: Attempt): OptimizableMetadata                = program.predict.optimizableView.metadata
+      def metadata(program: Attempt): PredictorKey                       = program.predict.optimizableView.metadata
       def set(program: Attempt, updated: OptimizableParameters): Attempt =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
@@ -82,7 +83,7 @@ class RecoveryCombinatorSuite extends FunSuite:
     assertEquals(runs.toVector, Vector("primary", "fallback"))
     runs.clear()
     assertEquals(
-      Compose.recover(primary, fallback, RecoveryPolicy.Always)(ProgramCall(1)).map(_.output),
+      RecoverWith(primary, fallback, RecoveryPolicy.Always)(ProgramCall(1)).map(_.output),
       Right("fallback")
     )
     assertEquals(runs.toVector, Vector("primary", "fallback"))

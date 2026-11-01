@@ -234,15 +234,15 @@ per stable path, the path-dependent freshness the compiler enforces) and carries
 the same parse behind the abstraction. Every record-boundary execution over the bundle then decodes identically as a
 consequence of abstraction, and re-parsing the
 same string mints a distinct object (cross-bundle composition is a compile error; both pinned in
-`ProgramAlgebraLawSuite`). Because Scala widens `val alias = s`, `s.stable` captures the path's types in generic
-parameters that survive further aliases; its compile-time contract is pinned too. Cardinality-shaped value dependence uses the same idea:
+`ProgramAlgebraLawSuite`). Because Scala widens `val alias = s`, a test helper of that suite captures the path's types
+in generic parameters that survive further aliases; its compile-time contract is pinned too. Cardinality-shaped value dependence uses the same idea:
 `MultiChainComparison` owns a path-branded opaque attempt block validated against `m`. Plain `fromStringDynamic`
 remains the data-bag surface for consumers that never enter the category (optimizer helper generations, the
 evaluation judge). The second step this enabled LANDED as stage 4: with every category-entering program either carrying
 concrete I/O types or bundled, `decodeInput` left the `Program` package entirely and the `ProgramInput` law dissolved at the
 category level (see "The close" above).
 
-Usability shipped with the prototype (`DynamicSignatureSuite`): `s.predict(...)` is the path-dependent
+Usability shipped with the prototype (`DynamicSignatureSuite`): `s.predict()` is the path-dependent
 constructor (the runtime-string counterpart of `Predict(Signature.derived(...))`, outputs read from the raw
 envelope as always), and the optimizer surface (`OptimizableStructure` read/replace + the record-boundary
 `ProgramRunner`) holds over a packaged bundle program. Cross-fiber pipelines are expressed through

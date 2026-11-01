@@ -9,6 +9,7 @@ import dspy4s.programs.contracts.{Module, ModuleLifecycle, ProgramCall, ProgramR
 import dspy4s.programs.runtime.{PredictEngine, SettingsProgramRuntime}
 import dspy4s.programs.contracts.Prediction
 import dspy4s.signatures.Signature
+import dspy4s.programs.SignatureInput
 import zio.blocks.schema.DynamicValue
 
 /** The fundamental prediction module: given a `Signature[I, O]`, `apply` takes an input `I`, formats and dispatches a
@@ -55,9 +56,12 @@ final case class Predict[I, O](
       */
     decisions: Map[String, DecisionSettings] = Map.empty
 ) extends Module[I, O],
-      DecisionOutputs[Predict[I, O]]:
+      DecisionOutputs[Predict[I, O]],
+      SignatureInput[I]:
 
   override val moduleName: String = name.getOrElse("predict")
+
+  private[programs] def baseSignature: Signature[I, O] = signature
 
   // The declared input names, computed once: `forward` checks them on every call.
   private val requiredInputs: Set[String] = signature.layout.inputFields.iterator.map(_.name).toSet
@@ -86,7 +90,7 @@ final case class Predict[I, O](
   override protected def withDecisions(updated: Map[String, DecisionSettings]): Predict[I, O] =
     copy(decisions = updated)
 
-  // The key is the data of this leaf's `OptimizableMetadata`, so an optimizer finds the trace entries of the leaf.
+  // The key is the metadata of this leaf, so an optimizer finds the trace entries of the leaf.
   override protected val lifecycle: ModuleLifecycle[I, O] =
     ModuleLifecycle.predictor(signature.inputShape, PredictorKey.from(moduleName, signature.layout))
 

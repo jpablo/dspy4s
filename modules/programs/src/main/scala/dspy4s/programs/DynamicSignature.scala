@@ -2,7 +2,6 @@ package dspy4s.programs
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ValidationError
-import dspy4s.core.data.Example
 import dspy4s.programs.algebra.Program
 import dspy4s.programs.compose.LiftEither
 import dspy4s.programs.optimization.OptimizableStructure
@@ -22,9 +21,7 @@ import zio.blocks.schema.DynamicValue
   * abstraction, not as an instance obligation. `RecordCodec` is sealed, so application code cannot introduce a
   * competing decoder for either fresh type.
   *
-  * Scala widens an ordinary `val alias = s` back to `DynamicSignature`, which gives the alias a new path projection.
-  * Use [[stable]] when a second binding must retain this bundle's exact `In` / `Out` types. Re-parsing the same string
-  * still mints a distinct object (two fibers that happen to agree).
+  * Re-parsing the same string mints a distinct object (two fibers that happen to agree).
   *
   * Cardinality-shaped value dependence uses the same boundary pattern separately: `MultiChainComparison` validates a
   * vector against `m`, then hides it behind its own path-branded carrier before prediction.
@@ -39,22 +36,13 @@ sealed trait DynamicSignature:
   /** The fresh input type: externally abstract, so this bundle's codec and signature are its only sources. */
   type In
 
-  /** The fresh output type (codec-equipped so it can later serve as a record-boundary input). */
+  /** The fresh output type. */
   type Out
 
   val signature: Signature[In, Out]
 
   /** The canonical decoder for [[In]]: definitionally the signature's own input decode. */
   given inputCodec: RecordCodec[In]
-
-  /** The canonical decoder for [[Out]]: definitionally the signature's own output decode. */
-  given outputCodec: RecordCodec[Out]
-
-  /** Project this path-dependent bundle into an ordinary generic value. Unlike a direct alias, the generic type
-    * arguments survive Scala's value widening: `val same = signature.stable` gives `same.In = signature.In` and
-    * likewise for `Out`.
-    */
-  final def stable: DynamicSignature.Stable[In, Out] = new DynamicSignature.Stable(this)
 
   /** Validating entry: decode a raw record into the tagged input (field presence checked here, at the boundary, rather
     * than at call time).
@@ -67,49 +55,12 @@ sealed trait DynamicSignature:
     * `Predict(Signature.derived[Q, A](...))`. Outputs are read from the prediction's `raw` envelope (the wire record),
     * the same surface the dynamic layer always exposed.
     */
-  final def predict(
-      demos : Vector[Example]     = Vector.empty,
-      name  : Option[String]      = None,
-      config: DynamicValue.Record = DynamicValue.Record.empty
-  ): Predict[In, Out] =
-    Predict(signature, demos = demos, name = name, config = config)
+  final def predict(): Predict[In, Out] = Predict(signature)
 
   /** Package this bundle's predict as a graded-category morphism in one step. */
-  final def packaged(
-      demos : Vector[Example]     = Vector.empty,
-      name  : Option[String]      = None,
-      config: DynamicValue.Record = DynamicValue.Record.empty
-  ): Program[In, Out, 1] =
-    Program.of(predict(demos, name, config))
+  final def packaged(): Program[In, Out, 1] = Program.of(predict())
 
 object DynamicSignature:
-
-  /** Alias-safe generic view of a dynamic-signature bundle. Its type arguments capture the originating path once, then
-    * survive any number of ordinary `val` aliases.
-    */
-  final class Stable[I, O] private[DynamicSignature] (
-      underlying: DynamicSignature { type In = I; type Out = O }
-  ):
-    type In  = I
-    type Out = O
-
-    val signature: Signature[I, O]    = underlying.signature
-    given inputCodec: RecordCodec[I]  = underlying.inputCodec
-    given outputCodec: RecordCodec[O] = underlying.outputCodec
-
-    def input(record: DynamicValue.Record): Either[DspyError, I] = underlying.input(record)
-
-    def predict(
-        demos : Vector[Example]     = Vector.empty,
-        name  : Option[String]      = None,
-        config: DynamicValue.Record = DynamicValue.Record.empty
-    ): Predict[I, O] = underlying.predict(demos, name, config)
-
-    def packaged(
-        demos : Vector[Example]     = Vector.empty,
-        name  : Option[String]      = None,
-        config: DynamicValue.Record = DynamicValue.Record.empty
-    ): Program[I, O, 1] = underlying.packaged(demos, name, config)
 
   /** Parse a DSPy-style DSL string at runtime, minting a fresh pair of input/output types for it. The declared
     * `DynamicSignature` return type is what seals the type members: the concrete representation (`In` and `Out` are
@@ -120,9 +71,8 @@ object DynamicSignature:
       new DynamicSignature:
         type In  = DynamicValue.Record
         type Out = DynamicValue.Record
-        val signature: Signature[In, Out]   = parsed
-        given inputCodec: RecordCodec[In]   = RecordCodec.fromShape(parsed.inputShape)
-        given outputCodec: RecordCodec[Out] = RecordCodec.fromShape(parsed.outputShape)
+        val signature: Signature[In, Out] = parsed
+        given inputCodec: RecordCodec[In] = RecordCodec.fromShape(parsed.inputShape)
     }
 
   /** The reindexing morphism across fibers: a parameter-free program converting one bundle's outputs into another's

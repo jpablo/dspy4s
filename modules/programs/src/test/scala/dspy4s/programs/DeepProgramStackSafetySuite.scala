@@ -1,5 +1,6 @@
 package dspy4s.programs
 
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.algebra.AnyObject
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
@@ -55,6 +56,21 @@ final class DeepProgramStackSafetySuite extends FunSuite:
       result = step(index) >>> result
       index -= 1
     result
+
+  /** One step inside `size` `Refine` wrappers. The syntax tree is deep on the `module` side. */
+  private def nestedRefine(size: Int): SomeProgram[Int, Int] =
+    var result = step(0)
+    var index  = 0
+    while index < size do
+      result = refined(result)
+      index += 1
+    result
+
+  private def refined[N <: Int](inner: Program[Int, Int, N]): SomeProgram[Int, Int] =
+    given OptimizableStructure.WithArity[inner.Rep, N] = inner.optimizableParameters
+    Program.of[Int, Int, Refine[inner.Rep, Int, Int]](
+      Refine[inner.Rep, Int, Int](inner.program, n = AttemptCount(1), rewardFn = (_, _) => 1.0, threshold = 1.0)
+    )
 
   private def updates(size: Int): Vector[OptimizableParameters] =
     Vector.tabulate(size)(index => OptimizableParameters(instructions = Some(s"update $index")))
@@ -120,6 +136,16 @@ final class DeepProgramStackSafetySuite extends FunSuite:
       assert(tooMany.getMessage.contains("AndThen expects 5 updates, got 6"), tooMany.getMessage)
     }
 
+  test("20,000 nested Refine programs support inspect and replace without using the JVM call stack") {
+    val size      = 20_000
+    val deep      = nestedRefine(size)
+    val structure = deep.optimizableParameters
+    val next      = updates(size + 1)
+
+    assertEquals(structure.arity(deep.program), size + 1)
+    assertEquals(structure.read(structure.replace(deep.program, next)), next)
+  }
+
   test("sequential leaves take their names from the syntax tree") {
     val leftNested  = leftNestedSteps(4)
     val rightNested = rightNestedSteps(4)
@@ -179,5 +205,5 @@ object DeepProgramStackSafetySuite:
 
     given stepOptimizable: OptimizableLeaf[Step] with
       def get(program                        : Step): OptimizableParameters                = program.parameters
-      def metadata(@annotation.unused program: Step): OptimizableMetadata                  = OptimizableMetadata.from(layout, "step")
+      def metadata(@annotation.unused program: Step): PredictorKey                         = PredictorKey.from("step", layout)
       def set(program                        : Step, updated: OptimizableParameters): Step = program.copy(parameters = updated)

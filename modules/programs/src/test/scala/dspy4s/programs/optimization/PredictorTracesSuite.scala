@@ -16,7 +16,7 @@ class PredictorTracesSuite extends FunSuite:
     IdentifiedOptimizable(
       OptimizableId.fromOrdinal(OptimizableOrdinal.assume(ordinal)),
       displayName,
-      OptimizableView(OptimizableMetadata.from(layout, moduleName), OptimizableParameters())
+      OptimizableView(PredictorKey.from(moduleName, layout), OptimizableParameters())
     )
 
   private def record(entries: (String, DynamicValue)*): DynamicValue.Record = DynamicValues.recordFromEntries(entries)
@@ -62,13 +62,13 @@ class PredictorTracesSuite extends FunSuite:
 
   test("instructions are not part of the key") {
     val withInstructions = qa.withInstructions(Some("Answer briefly."))
-    assertEquals(PredictorKey.from("predict", withInstructions), first.metadata.key)
+    assertEquals(PredictorKey.from("predict", withInstructions), first.metadata)
   }
 
   test("byLeaf assigns each entry to the leaf with the same key, in trace order") {
     val trace = Vector(
-      entry("predict", Some(first.metadata.key), mark = "a"),
-      entry("predict", Some(second.metadata.key), "b", record("summary" := "s"))
+      entry("predict", Some(first.metadata), mark = "a"),
+      entry("predict", Some(second.metadata), "b", record("summary" := "s"))
     )
     val groups = PredictorTraces.byLeaf(Vector(first, second), trace).toOption.get
     assertEquals(groups.map(marks), Vector(Vector("a"), Vector("b")))
@@ -76,10 +76,10 @@ class PredictorTracesSuite extends FunSuite:
 
   test("byLeaf does not use the position: a leaf that runs in a loop gets all of its entries") {
     val trace = Vector(
-      entry("predict", Some(first.metadata.key), mark = "step 1"),
-      entry("predict", Some(first.metadata.key), mark = "step 2"),
-      entry("predict", Some(first.metadata.key), mark = "step 3"),
-      entry("predict", Some(second.metadata.key), "extract", record("summary" := "s")),
+      entry("predict", Some(first.metadata), mark = "step 1"),
+      entry("predict", Some(first.metadata), mark = "step 2"),
+      entry("predict", Some(first.metadata), mark = "step 3"),
+      entry("predict", Some(second.metadata), "extract", record("summary" := "s")),
       entry("agent", None, "composite", record("summary" := "s"))
     )
     val groups = PredictorTraces.byLeaf(Vector(first, second), trace).toOption.get
@@ -87,16 +87,15 @@ class PredictorTracesSuite extends FunSuite:
   }
 
   test("a leaf that did not run has an empty group") {
-    val trace  = Vector(entry("predict", Some(first.metadata.key), mark = "a"))
+    val trace  = Vector(entry("predict", Some(first.metadata), mark = "a"))
     val groups = PredictorTraces.byLeaf(Vector(first, second), trace).toOption.get
     assertEquals(groups.map(marks), Vector(Vector("a"), Vector.empty))
   }
 
   test("an entry with a key that no leaf has is ignored") {
     val stranger = PredictorKey.from("other", qa)
-    val trace    =
-      Vector(entry("other", Some(stranger), mark = "x"), entry("predict", Some(first.metadata.key), mark = "a"))
-    val groups = PredictorTraces.byLeaf(Vector(first), trace).toOption.get
+    val trace    = Vector(entry("other", Some(stranger), mark = "x"), entry("predict", Some(first.metadata), mark = "a"))
+    val groups   = PredictorTraces.byLeaf(Vector(first), trace).toOption.get
     assertEquals(groups.map(marks), Vector(Vector("a")))
   }
 

@@ -14,7 +14,13 @@ import dspy4s.core.contracts.:=
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.programs.optimization.{OptimizableParameters, withOptimizableParameters}
+import dspy4s.programs.optimization.{
+  OptimizableParameters,
+  OptimizableStructure,
+  optimizableParameters,
+  optimizableView,
+  withOptimizableParameters
+}
 import dspy4s.signatures.OutputAugmentation.PrependField
 import dspy4s.programs.contracts.Prediction
 import dspy4s.signatures.{OutputAugmentation, Signature}
@@ -60,7 +66,7 @@ final case class MultiChainComparison[I, O](
       */
     comparePredictParametersOverride: Option[OptimizableParameters] = None
 )(using
-    // A `val`, so that a `copy` keeps this evidence (see `CompositeOptimizableStructureInstances`).
+    // A `val`, so that a `copy` keeps this evidence (see `multiChainComparisonOptimizableStructure`).
     private[programs] val prepend: PrependField.Of["rationale", String, O]
 ) extends Module[MultiChainInput[I], MultiChainComparison.WithRationale[O]]:
 
@@ -113,11 +119,9 @@ final case class MultiChainComparison[I, O](
     val base = Predict(signature = compareSignature, config = DynamicValues.record("temperature" := temperature))
     comparePredictParametersOverride.fold(base)(base.withOptimizableParameters)
 
-  override protected val lifecycle: ModuleLifecycle[MultiChainInput[I], Out] = ModuleLifecycle.observed(
+  override protected val lifecycle: ModuleLifecycle[MultiChainInput[I], Out] = ModuleLifecycle.typed(
     // Preserve the existing observation surface: attempts affect execution but are not copied into trace inputs.
-    call => baseSignature.inputShape.encode(call.input.baseInput),
-    _.traceEnabled,
-    _.raw.values
+    call => baseSignature.inputShape.encode(call.input.baseInput)
   )
 
   override protected def forward(
@@ -171,6 +175,20 @@ final case class MultiChainComparison[I, O](
 
 object MultiChainComparison:
   private[programs] val rationaleName: "rationale" = "rationale"
+
+  /** One optimizable part, the predictor `compare`. A `copy` gets the `PrependField` evidence of the program. This
+    * instance does not know `O`, thus a new search for the evidence finds only the fallback, which makes no augmented
+    * output.
+    */
+  given multiChainComparisonOptimizableStructure[I, O]: OptimizableStructure.Of[MultiChainComparison[I, O], 1] =
+    OptimizableStructure.leaf(
+      "MultiChainComparison",
+      "compare",
+      _.comparePredict.optimizableView,
+      (program, updated) =>
+        if updated == program.comparePredict.optimizableParameters then program
+        else program.copy(comparePredictParametersOverride = Some(updated))(using program.prepend)
+    )
 
   // The texts of upstream `dspy/predict/multi_chain_comparison.py`.
   private val RationalePrefix: String      = "Accurate Reasoning: Thank you everyone. Let's now holistically"

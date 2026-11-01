@@ -575,8 +575,7 @@ A useful reading order is:
    `ReplCodeInterpreter`, `CodeResult`, and `SandboxTool` contracts.
 8. [`DenoPyodideInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/runtime/DenoPyodideInterpreter.scala):
    the default stateful sandbox and host-tool bridge.
-9. [`CompositeOptimizableStructureInstances.scala`](../optimization/CompositeOptimizableStructureInstances.scala): the
-   two-leaf optimizable structure.
+9. The `rlmOptimizableStructure` given in the companion of [`RLM`](RLM.scala): the two-leaf optimizable structure.
 10. [`RLMSuite.scala`](../../../../../test/scala/dspy4s/programs/RLMSuite.scala): executable cases for iteration, invalid
    submissions, code errors, call limits, metadata, logging, and fallback.
 11. [`RLMLiveSuite.scala`](../../../../../test/scala/dspy4s/programs/RLMLiveSuite.scala): end-to-end execution against the

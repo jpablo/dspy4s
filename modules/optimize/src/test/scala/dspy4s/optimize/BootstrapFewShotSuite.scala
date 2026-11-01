@@ -31,8 +31,9 @@ object ScriptedChain:
 
   given OptimizableStructure[ScriptedChain] with
     type Arity = Int
-    def arity(program  : ScriptedChain): Int                                                   = program.steps.size
-    def inspect(program: ScriptedChain): Vector[OptimizableView]                               = program.steps.map(leaf.inspect)
+    def inspectNamed(program: ScriptedChain): Vector[(String, OptimizableView)] =
+      program.steps.map(leaf.inspect).zipWithIndex.map((view, index) => index.toString -> view)
+
     def replace(program: ScriptedChain, updates: Vector[OptimizableParameters]): ScriptedChain =
       ScriptedChain(program.steps.zip(updates).map((step, update) => leaf.set(step, update)))
 

@@ -86,8 +86,8 @@ class GepaTraceAssociationSuite extends FunSuite:
     finisher = predict("question, note -> answer", "Answer with the note.")
   )
 
-  private val stepperKey  = summon[OptimizableLeaf[DynamicPredict]].metadata(pipeline.stepper).key
-  private val finisherKey = summon[OptimizableLeaf[DynamicPredict]].metadata(pipeline.finisher).key
+  private val stepperKey  = summon[OptimizableLeaf[DynamicPredict]].metadata(pipeline.stepper)
+  private val finisherKey = summon[OptimizableLeaf[DynamicPredict]].metadata(pipeline.finisher)
 
   private val dataset: Vector[Example] = Vector(
     Example(

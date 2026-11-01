@@ -2,6 +2,7 @@ package dspy4s.programs
 
 import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
@@ -39,9 +40,38 @@ class CompositeOptimizableStructureSuite extends FunSuite:
   private object Leaf:
     given leafOptimizable[I, O]: OptimizableLeaf[Leaf[I, O]] with
       def get(program     : Leaf[I, O]): OptimizableParameters                 = program.predict.optimizableParameters
-      def metadata(program: Leaf[I, O]): OptimizableMetadata                   = program.predict.optimizableView.metadata
+      def metadata(program: Leaf[I, O]): PredictorKey                          = program.predict.optimizableView.metadata
       def set(program: Leaf[I, O], updated: OptimizableParameters): Leaf[I, O] =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
+
+  // Fixtures of the `pair` tests.
+  private final case class Slot(parameters: OptimizableParameters)
+  private final case class TwoSlots(first: Slot, second: Slot, fixedLabel: String)
+
+  private val slotLayout = SignatureLayout.parse("input -> output").toOption.get
+  private val slotOne    = OptimizableParameters(instructions = Some("first"))
+  private val slotTwo    = OptimizableParameters(instructions = Some("second"))
+  private val twoSlots   = TwoSlots(Slot(slotOne), Slot(slotTwo), fixedLabel = "keep")
+
+  private def slotStructure(name: String): OptimizableStructure.Of[Slot, 1] =
+    OptimizableStructure.leaf(
+      "Slot",
+      name,
+      slot => OptimizableView(PredictorKey.from("slot", slotLayout), slot.parameters),
+      (slot, parameters) => slot.copy(parameters = parameters)
+    )
+
+  private def twoSlotsStructure(leafName: String): OptimizableStructure.Of[TwoSlots, 2] =
+    OptimizableStructure.pair[TwoSlots, Slot, Slot, 1, 1](
+      "TwoSlots",
+      Some("first"),
+      Some("second"),
+      _.first,
+      _.second,
+      (whole, first, second) => whole.copy(first = first, second = second),
+      slotStructure(leafName),
+      slotStructure(leafName)
+    )
 
   test("hand-written composite structures expose logical parameter names") {
     val signature  = Signature.derived[RlmIn, RlmOut]("CompositeNames")
@@ -160,4 +190,79 @@ class CompositeOptimizableStructureSuite extends FunSuite:
     assertEquals(P.read(reverted), original)
     assertEquals(P.inspect(updated).map(_.metadata), metadata)
     assertEquals(P.inspect(reverted).map(_.metadata), metadata)
+  }
+
+  // ── pair: the names, the split of the updates, and the other fields ───────────────────────────────────────
+
+  test("a pair keeps the exact arity, reads in order, and keeps the other fields on replace") {
+    val exact: OptimizableStructure.WithArity[TwoSlots, 2] = twoSlotsStructure("self")
+    val updated                                            = slotTwo.copy(instructions = Some("updated"))
+
+    assertEquals(exact.arity(twoSlots), 2)
+    assertEquals(exact.inspectNamed(twoSlots).map(_._1), Vector("first", "second"))
+    assertEquals(exact.read(twoSlots), Vector(slotOne, slotTwo))
+    assertEquals(exact.replace(twoSlots, exact.read(twoSlots)), twoSlots)
+    assertEquals(
+      exact.replace(twoSlots, Vector(slotOne, updated)),
+      TwoSlots(Slot(slotOne), Slot(updated), fixedLabel = "keep")
+    )
+  }
+
+  test("a pair keeps both path segments of a leaf with its own name") {
+    assertEquals(twoSlotsStructure("value").inspectNamed(twoSlots).map(_._1), Vector("first.value", "second.value"))
+  }
+
+  test("a pair accepts an empty right child at the exact split boundary") {
+    val structure = OptimizableStructure.pair[(Slot, Unit), Slot, Unit, 1, 0](
+      "SlotAndNothing",
+      Some("slot"),
+      Some("nothing"),
+      _._1,
+      _._2,
+      (_, slot, nothing) => slot -> nothing,
+      slotStructure("self"),
+      OptimizableStructure.empty
+    )
+
+    assertEquals(structure.replace(Slot(slotOne) -> (), Vector(slotTwo)), Slot(slotTwo) -> ())
+  }
+
+  test("Refine rejects an update vector of the wrong size") {
+    val leaf = Leaf[Int, Int](identity, predict("a -> b"))
+    val r    = Refine[Leaf[Int, Int], Int, Int](leaf, n = AttemptCount(2), rewardFn = (_, _) => 1.0, threshold = 1.0)
+    val P    = summon[OptimizableStructure[Refine[Leaf[Int, Int], Int, Int]]]
+
+    val tooFew  = intercept[IllegalArgumentException](P.replace(r, P.read(r).take(1)))
+    val tooMany = intercept[IllegalArgumentException](P.replace(r, P.read(r) ++ P.read(r).take(1)))
+    assert(tooFew.getMessage.contains("Refine expects 2 updates, got 1"), tooFew.getMessage)
+    assert(tooMany.getMessage.contains("Refine expects 2 updates, got 3"), tooMany.getMessage)
+  }
+
+  test("unchanged parameters give the same program") {
+    val signature = Signature.derived[RlmIn, RlmOut]("CompositeSame")
+    val react     = ReAct(baseSignature = signature, tools = Vector.empty)
+    val reactV2   = ReActV2(baseSignature = signature, tools = Vector.empty)
+    val rlm       = RLM(baseSignature = signature)
+    val compare   = MultiChainComparison(baseSignature = signature)
+
+    def same[P <: AnyRef](program: P)(using structure: OptimizableStructure[P]): Boolean =
+      structure.replace(program, structure.read(program)) eq program
+
+    assert(same(react))
+    assert(same(reactV2))
+    assert(same(rlm))
+    assert(same(compare))
+  }
+
+  test("a change of one predictor keeps the override of the other predictor exactly") {
+    val rlm        = RLM(baseSignature = Signature.derived[RlmIn, RlmOut]("RlmQA"))
+    val P          = summon[OptimizableStructure[RLM[RlmIn, RlmOut]]]
+    val overridden = rlm.copy(actionPredictOverride = Some(rlm.actionPredict.copy(name = Some("bound_action"))))
+    val tuned      = overridden.extractPredict.optimizableParameters.copy(instructions = Some("Extract the answer."))
+
+    val replaced = P.replace(overridden, P.read(overridden).updated(1, tuned))
+
+    assert(replaced.actionPredictOverride eq overridden.actionPredictOverride)
+    assertEquals(replaced.extractPredictOverride.map(_.optimizableParameters), Some(tuned))
+    assertEquals(P.inspectNamed(replaced).map(_._2.moduleName).head, "bound_action")
   }

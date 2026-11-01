@@ -28,8 +28,7 @@ private[dspy4s] object StackSafeOptimizableStructure:
             val element = current.get
             parts.prepend(element.segment)
             current = element.parent
-          if name != "self" then parts.append(name)
-          parts.mkString(".")
+          OptimizableStructure.qualifiedName(parts.mkString("."), name)
 
   /** A value with the structure witness for its static type. A work list hides `P`, but the value and the witness of
     * one node always agree.
@@ -80,12 +79,9 @@ private[dspy4s] object StackSafeOptimizableStructure:
     /** Rebuild `value` from its replaced children. The trampoline keeps the recursion on the heap. */
     def replaceChildren(value: P, updates: Updates): TailRec[P]
 
-    final def arity(program: P): Int = arityFrom(Node(program, this, None, None))
+    final override def arity(program: P): Int = arityFrom(Node(program, this, None, None))
 
-    final def inspect(program: P): Vector[OptimizableView] =
-      inspectNamed(program).map(_._2)
-
-    final override def inspectNamed(program: P): Vector[(String, OptimizableView)] =
+    final def inspectNamed(program: P): Vector[(String, OptimizableView)] =
       inspectNamedFrom(Node(program, this, None, None))
 
     final def replace(program: P, updates: Vector[OptimizableParameters]): P =
@@ -164,6 +160,9 @@ private[dspy4s] object StackSafeOptimizableStructure:
 
     result.result()
 
+  /** A transparent wrapper with one structural child. The child keeps its names. `label` starts the text of a size
+    * error.
+    */
   def unary[P, A, N <: Int](
       label       : String,
       get         : P => A,
@@ -172,6 +171,10 @@ private[dspy4s] object StackSafeOptimizableStructure:
   ): OptimizableStructure.Of[P, N] =
     new Unary(label, get, replaceInner, inner)
 
+  /** A wrapper with two structural children. `read` is the left child, then the right child, and `replace` slices the
+    * updates by the arity of the left child. `leftName` and `rightName` prefix the names of the children. `label`
+    * starts the text of a size error.
+    */
   def pair[P, A, B, NA <: Int, NB <: Int](
       label      : String,
       leftName   : Option[String],

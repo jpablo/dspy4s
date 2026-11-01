@@ -18,15 +18,15 @@ object RecordCodec:
   private final class ShapeBacked[A](shape: Shape[A]) extends RecordCodec[A]:
     def decode(record: DynamicValue.Record): Either[DspyError, A] = shape.decode(record)
 
-  /** Internal construction gate for legitimate non-derived objects: fresh runtime-signature and custom-schema bundles.
-    * Keeping the carrier sealed prevents application code from shadowing a type's canonical derived decoder with an
-    * unrelated instance.
+  /** Internal construction gate for legitimate non-derived objects: fresh runtime-signature bundles. Keeping the
+    * carrier sealed prevents application code from shadowing a type's canonical derived decoder with an unrelated
+    * instance.
     */
   private[programs] def fromShape[A](shape: Shape[A]): RecordCodec[A] = ShapeBacked(shape)
 
   /** Decode a case class, a tuple, or a named tuple with `Shape.canonicalDerived`, the closed structural shape that the
     * signatures use for their inputs. Thus this decode is the decode of each typed signature with the same input type.
-    * An ambient schema cannot change it. For a custom schema, use a new branded object type.
+    * An ambient schema cannot change it.
     */
   inline given fromProduct[A](using
       scala.deriving.Mirror.ProductOf[A],

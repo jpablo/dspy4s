@@ -1,5 +1,6 @@
 package dspy4s.programs
 
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
@@ -14,7 +15,7 @@ import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.Prediction
 import munit.FunSuite
-import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -44,7 +45,7 @@ class ModeLawSuite extends FunSuite:
   private object Recorder:
     given recorderOptimizable: OptimizableLeaf[Recorder] with
       def get(program     : Recorder): OptimizableParameters               = program.predict.optimizableParameters
-      def metadata(program: Recorder): OptimizableMetadata                 = program.predict.optimizableView.metadata
+      def metadata(program: Recorder): PredictorKey                        = program.predict.optimizableView.metadata
       def set(program: Recorder, updated: OptimizableParameters): Recorder =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
@@ -52,6 +53,17 @@ class ModeLawSuite extends FunSuite:
 
   private def temp(controls: Mode.Controls): Option[String] =
     DynamicValues.recordGet(controls.config, "temperature").map(DynamicValues.renderText)
+
+  test("Mode.temperature writes a Double and Mode.model writes a String into the config") {
+    val controls = Mode.Controls(DynamicValue.Record.empty, traceEnabled = true, rolloutId = None)
+    assertEquals(
+      (Mode.temperature(0.7) ++ Mode.model("gpt-x")).transform(controls).config,
+      DynamicValues.record(
+        "temperature" -> DynamicValue.Primitive(PrimitiveValue.Double(0.7)),
+        "model"       -> DynamicValue.Primitive(PrimitiveValue.String("gpt-x"))
+      )
+    )
+  }
 
   test("mode applies the control transform — the temperature reaches the wrapped program") {
     val r = Recorder(predict("a -> b"))

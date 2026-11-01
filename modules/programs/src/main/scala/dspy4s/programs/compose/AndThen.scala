@@ -68,10 +68,10 @@ object AndThen:
       pa: OptimizableStructure.WithArity[A, NA],
       pb: OptimizableStructure.WithArity[B, NB]
   ): OptimizableStructure.Of[AndThen[I, X, O, A, B], NA + NB] =
-    PairOptimizableStructure.structure[AndThen[I, X, O, A, B], A, B, NA, NB](
+    OptimizableStructure.pair[AndThen[I, X, O, A, B], A, B, NA, NB](
       "AndThen",
-      "first",
-      "second",
+      Some("first"),
+      Some("second"),
       _.first,
       _.second,
       (program, first, second) => program.copy(first = first, second = second),

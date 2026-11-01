@@ -1,9 +1,9 @@
 package dspy4s.programs.optimization
 
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.{DspyError, DynamicValues, ValidationError}
 import dspy4s.core.data.Example
 import dspy4s.core.decisions.DecisionSettings
-import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** The complete optimizer-writable parameters of one optimizable leaf.
@@ -37,20 +37,16 @@ final case class OptimizableParameters(
     * of `decisions` are in the order of the output names, so that equal settings give the same text.
     */
   def dumpState: DynamicValue.Record =
-    val encodedInstructions: DynamicValue = instructions.fold(DynamicValue.Null: DynamicValue)(value =>
-      DynamicValue.Primitive(PrimitiveValue.String(value))
+    val encodedDecisions = Option.when[(String, DynamicValue)](decisions.nonEmpty)(
+      "decisions" -> DynamicValues.recordFromEntries(decisions.toVector.sortBy(_._1).map((name, settings) =>
+        name -> settings.toDynamic
+      ))
     )
-    val encodedDemos: Seq[DynamicValue] = demos.map(demo => demo.dumpState: DynamicValue)
-    val encodedDecisions                = Option.when(decisions.nonEmpty)(
-      "decisions" -> DynamicValue.Record(Chunk.from(decisions.toVector.sortBy(_._1).map((name, settings) =>
-        name -> (settings.toDynamic: DynamicValue)
-      )))
-    )
-    DynamicValue.Record(Chunk.from(Seq(
-      "instructions" -> encodedInstructions,
-      "demos"        -> DynamicValue.Sequence(Chunk.from(encodedDemos)),
-      "config"       -> (config: DynamicValue)
-    ) ++ encodedDecisions))
+    DynamicValues.recordFromEntries(Vector[(String, DynamicValue)](
+      "instructions" -> instructions.fold(DynamicValue.Null: DynamicValue)(DynamicValues.string),
+      "demos"        -> DynamicValues.sequence(demos.map(_.dumpState)),
+      "config"       -> config
+    ) ++ encodedDecisions)
 
 object OptimizableParameters:
 
@@ -72,15 +68,9 @@ object OptimizableParameters:
 
     def readDemos: Either[DspyError, Vector[Example]] =
       DynamicValues.recordGet(state, "demos") match
-        case Some(sequence: DynamicValue.Sequence) =>
-          sequence.elements.iterator.foldLeft[Either[DspyError, Vector[Example]]](Right(Vector.empty)) {
-            (acc, raw) =>
-              for
-                demos <- acc
-                demo  <- raw match
-                          case record: DynamicValue.Record => Example.fromState(record)
-                          case _                           => Left(ValidationError("OptimizableParameters 'demos' must contain records"))
-              yield demos :+ demo
+        case Some(sequence: DynamicValue.Sequence) => Traverse.either(sequence.elements) {
+            case record: DynamicValue.Record => Example.fromState(record)
+            case _                           => Left(ValidationError("OptimizableParameters 'demos' must contain records"))
           }
         case None    => Left(ValidationError("OptimizableParameters is missing 'demos'"))
         case Some(_) => Left(ValidationError("OptimizableParameters 'demos' must be a sequence"))
@@ -94,16 +84,12 @@ object OptimizableParameters:
     def readDecisions: Either[DspyError, Map[String, DecisionSettings]] =
       DynamicValues.recordGet(state, "decisions") match
         case None                              => Right(Map.empty)
-        case Some(record: DynamicValue.Record) =>
-          record.fields.foldLeft[Either[DspyError, Map[String, DecisionSettings]]](Right(Map.empty)) {
-            case (acc, (name, raw)) =>
-              for
-                decisions <- acc
-                settings  <- DecisionSettings.fromDynamic(raw).left.map(error =>
-                              ValidationError(s"OptimizableParameters 'decisions' entry '$name': ${error.message}")
-                            )
-              yield decisions.updated(name, settings)
-          }
+        case Some(record: DynamicValue.Record) => Traverse.either(record.fields) { (name, raw) =>
+            DecisionSettings.fromDynamic(raw) match
+              case Right(settings) => Right(name -> settings)
+              case Left(error)     =>
+                Left(ValidationError(s"OptimizableParameters 'decisions' entry '$name': ${error.message}"))
+          }.map(_.toMap)
         case Some(_) => Left(ValidationError("OptimizableParameters 'decisions' must be a record"))
 
     for

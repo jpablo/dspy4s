@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.optimization.{OptimizableLeaf, OptimizableMetadata, OptimizableParameters}
+import dspy4s.programs.optimization.{OptimizableLeaf, OptimizableParameters}
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
@@ -29,7 +29,7 @@ final case class ScriptedPredictProgram(
     config   : DynamicValue.Record      = DynamicValue.Record.empty
 ) extends DynamicModule:
   override val moduleName: String = "scripted"
-  // An optimizer finds the trace entries of this leaf by the key of its `OptimizableMetadata`.
+  // An optimizer finds the trace entries of this leaf by the key of its metadata.
   override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] =
     ModuleLifecycle.dynamicPredictor(PredictorKey.from(moduleName, layout))
   override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
@@ -48,7 +48,7 @@ final case class DemoAwarePredictProgram(
     config : DynamicValue.Record = DynamicValue.Record.empty
 ) extends DynamicModule:
   override val moduleName: String = "demo_aware"
-  // An optimizer finds the trace entries of this leaf by the key of its `OptimizableMetadata`.
+  // An optimizer finds the trace entries of this leaf by the key of its metadata.
   override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] =
     ModuleLifecycle.dynamicPredictor(PredictorKey.from(moduleName, layout))
   override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
@@ -69,8 +69,8 @@ object DemoAwarePredictProgram:
   given demoAwareOptimizable: OptimizableLeaf[DemoAwarePredictProgram] with
     def get(program: DemoAwarePredictProgram): OptimizableParameters =
       OptimizableParameters(program.layout.instructions, program.demos, program.config)
-    def metadata(program: DemoAwarePredictProgram): OptimizableMetadata =
-      OptimizableMetadata.from(program.layout, program.moduleName)
+    def metadata(program: DemoAwarePredictProgram): PredictorKey =
+      PredictorKey.from(program.moduleName, program.layout)
     def set(program: DemoAwarePredictProgram, updated: OptimizableParameters): DemoAwarePredictProgram =
       if updated == get(program) then program
       else
@@ -84,8 +84,8 @@ object ScriptedPredictProgram:
   given scriptedOptimizable: OptimizableLeaf[ScriptedPredictProgram] with
     def get(program: ScriptedPredictProgram): OptimizableParameters =
       OptimizableParameters(program.layout.instructions, program.demos, program.config)
-    def metadata(program: ScriptedPredictProgram): OptimizableMetadata =
-      OptimizableMetadata.from(program.layout, program.moduleName)
+    def metadata(program: ScriptedPredictProgram): PredictorKey =
+      PredictorKey.from(program.moduleName, program.layout)
     def set(program: ScriptedPredictProgram, updated: OptimizableParameters): ScriptedPredictProgram =
       if updated == get(program) then program
       else

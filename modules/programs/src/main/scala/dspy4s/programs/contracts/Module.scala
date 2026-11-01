@@ -3,7 +3,6 @@ package dspy4s.programs.contracts
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
@@ -40,9 +39,8 @@ import scala.concurrent.Future
   * structural module as lifecycle-transparent.
   *
   * [[moduleName]] is the public identity (snake_case: `"predict"`, `"chain_of_thought"`, `"react"`), used by callbacks,
-  * trace entries, and stream-listener routing. [[applyAsync]] is the value-only async entry; [[applyAsyncExecuted]]
-  * additionally returns the worker's trace/history delta. Both propagate runtime services, configuration, scope, and
-  * registered carriers across the thread boundary.
+  * trace entries, and stream-listener routing. [[applyAsync]] is the value-only async entry. It propagates runtime
+  * services, configuration, scope, and registered carriers across the thread boundary.
   *
   * [[apply]] installs the context that it gets for the duration of the call (UPGRADE-3.2.1-to-3.4.0, decision D8: the
   * given context wins). Thus the callbacks, the workers, and the other parts that read the installed context see the
@@ -84,30 +82,30 @@ trait Module[I, O]:
     */
   private[programs] final def observedInputs(call: ProgramCall[I]): DynamicValue.Record =
     lifecycle match
-      case ModuleLifecycle.Transparent()         => DynamicValue.Record.empty
-      case ModuleLifecycle.Observed(observation) => observation.inputs(call)
+      case ModuleLifecycle.Transparent()       => DynamicValue.Record.empty
+      case ModuleLifecycle.Observed(inputs, _) => inputs(call)
 
   /** The module lifecycle around [[forward]], with the effective context of the call. */
   private def runLifecycle(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     lifecycle match
-      case ModuleLifecycle.Transparent()         => measured(forward(call))
-      case ModuleLifecycle.Observed(observation) =>
-        val inputBag = observation.inputs(call)
+      case ModuleLifecycle.Transparent()               => measured(forward(call))
+      case ModuleLifecycle.Observed(inputs, predictor) =>
+        val inputBag = inputs(call)
         // The outermost predictor on the call path owns the key. A module that runs inside a predictor (the `Predict`
         // inside `ChainOfThought`) records no key, so one predictor call gives exactly one entry with a key. The scope
         // keeps the key, so the decision evidence of the call belongs to the same predictor.
         val nested       = RuntimeEnvironment.withinPredictor
-        val predictorKey = observation.predictor.filterNot(_ => nested)
+        val predictorKey = predictor.filterNot(_ => nested)
         CallbackDispatcher.withModule(moduleName, inputBag) {
           val result = measured {
             predictorKey match
               case Some(key) => RuntimeEnvironment.withinPredictor(key)(forward(call))
               case None      => forward(call)
           }
-          if observation.traceEnabled(call) then
+          if call.traceEnabled then
             result match
               case Right(output) =>
-                val outputs = observation.outputs(output)
+                val outputs = output.raw.values
                 RuntimeEnvironment.appendTrace(
                   TraceEntry(
                     component = moduleName,
@@ -160,19 +158,11 @@ trait Module[I, O]:
   )(using RuntimeContext): Either[DspyError, Prediction[O]] =
     apply(call = ProgramCall(input, config, traceEnabled))
 
-  /** Async value-only compatibility entry. Worker trace/history is isolated; use [[applyAsyncExecuted]] when the
-    * observable runtime output must be retained and explicitly joined into another execution.
-    */
+  /** Async value-only entry. The trace and the history of the worker stay isolated. */
   def applyAsync(
       call: ProgramCall[I]
   )(using RuntimeContext, ExecutionContext): Future[Either[DspyError, Prediction[O]]] =
-    applyAsyncExecuted(call).map(_.value)(using ExecutionContext.parasitic)
-
-  /** Async writer entry: returns the program result together with the worker-produced runtime delta. */
-  def applyAsyncExecuted(
-      call: ProgramCall[I]
-  )(using RuntimeContext, ExecutionContext): Future[Executed[Either[DspyError, Prediction[O]]]] =
-    ContextPropagation.futureExecuted(apply(call))
+    ContextPropagation.futureExecuted(apply(call)).map(_.value)(using ExecutionContext.parasitic)
 
 /** A structural program node whose own identity is not part of execution observability. Its children remain ordinary
   * [[Module]]s and therefore still emit callbacks, trace, and history. Keeping this distinction in the base lifecycle

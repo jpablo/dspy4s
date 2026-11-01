@@ -21,9 +21,15 @@ import dspy4s.core.contracts.{
 }
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.programs.IterationLimit
+import dspy4s.programs.{IterationLimit, SignatureInput}
 import dspy4s.programs.contracts.{ModuleLifecycle, Prediction, ProgramCall, ToolFunction}
 import dspy4s.programs.internal.ToolText
+import dspy4s.programs.optimization.{
+  OptimizableStructure,
+  optimizableParameters,
+  optimizableView,
+  withOptimizableParameters
+}
 import dspy4s.programs.runtime.{AgentLoop, ToolExecutor}
 import dspy4s.signatures.Signature
 import zio.blocks.schema.{DynamicValue, Schema}
@@ -108,7 +114,8 @@ final case class ReActV2[I, O](
     tools               : Vector[ToolFunction],
     maxIterations       : IterationLimit         = IterationLimit(20),
     reactPredictOverride: Option[DynamicPredict] = None
-) extends dspy4s.programs.contracts.Module[I, O]:
+) extends dspy4s.programs.contracts.Module[I, O],
+      SignatureInput[I]:
   import ReActV2.*
 
   override val moduleName: String = ReActV2.ModuleName
@@ -340,6 +347,20 @@ final case class ReActV2[I, O](
     }
 
 object ReActV2:
+
+  /** One optimizable part, the step predictor `react` (upstream `ReActV2.react`). `replace` writes the parameters
+    * through [[ReActV2.reactPredict]] into `reactPredictOverride`; parameters equal to the current ones give the same
+    * program.
+    */
+  given reactV2OptimizableStructure[I, O]: OptimizableStructure.Of[ReActV2[I, O], 1] =
+    OptimizableStructure.leaf(
+      "ReActV2",
+      "react",
+      _.reactPredict.optimizableView,
+      (program, updated) =>
+        if updated == program.reactPredict.optimizableParameters then program
+        else program.copy(reactPredictOverride = Some(program.reactPredict.withOptimizableParameters(updated)))
+    )
 
   /** The name of the program in the callbacks and the trace. */
   val ModuleName: String = "react_v2"

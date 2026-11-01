@@ -128,7 +128,7 @@ read-only metadata separately from the exact optimizable parameters:
 ```scala
 trait OptimizableLeaf[P]:
   def get(program: P): OptimizableParameters
-  def metadata(program: P): OptimizableMetadata
+  def metadata(program: P): PredictorKey
   def set(program: P, parameters: OptimizableParameters): P
 ```
 

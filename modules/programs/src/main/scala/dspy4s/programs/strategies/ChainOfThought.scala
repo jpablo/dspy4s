@@ -6,6 +6,7 @@ import dspy4s.core.decisions.DecisionSettings
 import dspy4s.core.contracts.SignatureOps.*
 import dspy4s.programs.contracts.{Module, ModuleLifecycle, ProgramCall, ProgramRuntime}
 import dspy4s.programs.runtime.SettingsProgramRuntime
+import dspy4s.programs.SignatureInput
 import dspy4s.signatures.OutputAugmentation.PrependField
 import dspy4s.programs.contracts.Prediction
 import dspy4s.signatures.{OutputAugmentation, Signature}
@@ -50,7 +51,8 @@ final case class ChainOfThought[I, O](
     decisions: Map[String, DecisionSettings] = Map.empty
 )(using prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O])
     extends Module[I, ChainOfThought.WithReasoning[O]],
-      DecisionOutputs[ChainOfThought[I, O]]:
+      DecisionOutputs[ChainOfThought[I, O]],
+      SignatureInput[I]:
 
   /** The augmented output type — always a named tuple. See [[ChainOfThought.WithReasoning]]. */
   type Out = ChainOfThought.WithReasoning[O]
@@ -63,7 +65,7 @@ final case class ChainOfThought[I, O](
   val signature: Signature[I, Out] =
     baseSignature.prependOutput(ChainOfThought.reasoningName, ChainOfThought.reasoningField)
 
-  // The key uses the augmented layout, as this leaf's `OptimizableMetadata` does. The inner `Predict` runs inside
+  // The key uses the augmented layout, as the metadata of this leaf does. The inner `Predict` runs inside
   // this predictor, so it records no key of its own.
   override protected val lifecycle: ModuleLifecycle[I, Out] = ModuleLifecycle.predictor(
     baseSignature.inputShape,

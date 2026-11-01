@@ -44,7 +44,7 @@ final case class Tensor[
     )
 
 object Tensor:
-  /** Structural `read(a) ++ read(b)`, same distribution as `AndThen` / `Both` (via [[PairOptimizableStructure]]). */
+  /** Structural `read(a) ++ read(b)`, same distribution as `AndThen` / `Both`. */
   given tensorOptimizableStructure[
       I,
       J,
@@ -59,10 +59,10 @@ object Tensor:
       pa: OptimizableStructure.WithArity[FA, NA],
       pb: OptimizableStructure.WithArity[FB, NB]
   ): OptimizableStructure.Of[Tensor[I, J, A, B, FA, FB], NA + NB] =
-    PairOptimizableStructure.structure[Tensor[I, J, A, B, FA, FB], FA, FB, NA, NB](
+    OptimizableStructure.pair[Tensor[I, J, A, B, FA, FB], FA, FB, NA, NB](
       "Tensor",
-      "first",
-      "second",
+      Some("first"),
+      Some("second"),
       _.first,
       _.second,
       (program, first, second) => program.copy(first = first, second = second),

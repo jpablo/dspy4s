@@ -1,5 +1,6 @@
 package dspy4s.gepa
 
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -23,7 +24,6 @@ import dspy4s.programs.ProgramRunner
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.optimization.OptimizableId
 import dspy4s.programs.optimization.OptimizableLeaf
-import dspy4s.programs.optimization.OptimizableMetadata
 import dspy4s.programs.optimization.OptimizableParameters
 import dspy4s.programs.strategies.DynamicPredict
 import munit.FunSuite
@@ -54,7 +54,7 @@ object Fragile:
 
     def get(program: Fragile): OptimizableParameters = leaf.get(program.inner)
 
-    def metadata(program: Fragile): OptimizableMetadata = leaf.metadata(program.inner)
+    def metadata(program: Fragile): PredictorKey = leaf.metadata(program.inner)
 
     def set(program: Fragile, updated: OptimizableParameters): Fragile =
       if updated.instructions.exists(_.contains("BOOM")) then throw IllegalStateException("BOOM")

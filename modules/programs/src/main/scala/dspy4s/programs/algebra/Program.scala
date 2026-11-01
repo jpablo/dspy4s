@@ -111,10 +111,10 @@ object Program:
 
   /** Optimizable structure delegates to the packaged representation while preserving `N`. */
   given programOptimizableStructure[I, O, N <: Int]: OptimizableStructure.Of[Program[I, O, N], N] with
-    def arity(program: Program[I, O, N]): Int =
+    override def arity(program: Program[I, O, N]): Int =
       program.optimizableParameters.arity(program.program)
 
-    def inspect(program: Program[I, O, N]): Vector[OptimizableView] =
+    override def inspect(program: Program[I, O, N]): Vector[OptimizableView] =
       program.optimizableParameters.inspect(program.program)
 
     def replace(
@@ -140,7 +140,7 @@ object Program:
     def run(program: SomeProgram[I, O], call: ProgramCall[DynamicValue.Record])(using
         RuntimeContext
     ): Either[DspyError, dspy4s.core.data.RawPrediction] =
-      codec.decode(call.input).flatMap(input => program(call.mapInput(_ => input)).map(_.raw))
+      ProgramRunner.decodeThenRun(codec.decode, call)(program(_))
 
   /** The ordinary category obtained by existentially forgetting program grades.
     *
