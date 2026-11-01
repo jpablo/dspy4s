@@ -23,7 +23,7 @@ trait Adapter extends AdapterRef:
   /** The parse of `output`, the reply to the request that [[format]] made from `invocation`. The predictor calls this
     * method. An adapter that needs more of the invocation than the layout uses it: [[dspy4s.adapters.TwoStepAdapter]]
     * gives the output JSON schema of the invocation to its extraction prompt. An adapter that wraps another adapter
-    * gives the invocation to the parse of that adapter.
+    * ([[DelegatingAdapter]]) gives the invocation to the parse of that adapter.
     */
   def parse(invocation: AdapterInvocation, output: LmOutput)(using RuntimeContext): Either[DspyError, ParsedOutput]
 

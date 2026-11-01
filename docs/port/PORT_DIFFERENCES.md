@@ -422,6 +422,41 @@ constraints. The port has no model of Python types, so a few places of a prompt 
   has `level: Option[L]`, a case of the level enum. Upstream gives the zero-based level index. The probabilities of
   both are keyed by the level index.
 
+## 17. Output values: one lenient rule for numbers and bools
+
+**Convention.**
+
+Upstream `parse_value` reads an output value with `json_repair`, then `ast.literal_eval`, then pydantic lax mode. The
+port reads a number and a bool with one rule, `LenientValues`. The Chat, JSON, and XML adapters, the typed decode, and
+the accessors of `RawPrediction` use this rule. Thus one text has one value on each path, and a lenient form needs no
+second call of the model.
+
+Each number text and each bool text that upstream reads for its type, the port reads with the same value:
+
+| Type | The text forms |
+|---|---|
+| `int` | Digits with a sign, a `_` between digits (`1_000`), and a whole float text (`3.0`, `5.`, `1e3`), of any size. |
+| `float` | Decimal forms with a sign (`.5`, `5.`, `1e3`), a `_` between digits, and `inf`, `infinity`, and `nan` in any case. `1e400` is an infinite float. |
+| `bool` | `true`, `false`, `yes`, `no`, `on`, `off`, `t`, `f`, `y`, and `n` in any case, and a number or a number text with the value 1 or 0. |
+
+The port also reads these forms, and upstream rejects them:
+
+- A currency symbol (`$ € £ ¥`) and thousands commas: `$1,200` and `1,200`. A comma that does not separate the
+  thousands makes the text no number, so a decimal comma (`3,5`) is an error, not `35`.
+- The null texts of an optional field: `n/a`, `none`, and the empty text. Upstream reads only `None` and `null`.
+- Spaces around a bool word: ` yes `.
+- A whole float text out of the range of a 64-bit integer: `1e19`.
+
+The port does not read these forms, and upstream reads them:
+
+- The Python integer literals `0x10`, `0o7`, and `0b11`. Upstream reads them through `ast.literal_eval`. A model does
+  not write them.
+- A bool for an `int` or a `float` field. Upstream gives `1` or `1.0` for `true`, and `0` or `0.0` for `false`.
+- A space between a sign and the digits: `- 5`.
+- A `_` next to a decimal point: `1_.5` for a `float`.
+
+A form that only Java reads (`3d`, `3f`, `0x1p3`) is no number on each path, as upstream.
+
 ## What this means in practice
 
 If you're porting a Python DSPy script to dspy4s, the friction will

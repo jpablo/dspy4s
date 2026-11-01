@@ -22,6 +22,7 @@ An adapter writes the prompt of a signature and reads the response of the model.
 | Type | Description |
 |------|-------------|
 | `Adapter` | The interface: `format`, `parse`, `execute`, `streamingState`, and `fallback` (the adapter to try after a parse error). |
+| `DelegatingAdapter` | The base of an adapter that wraps another adapter. It forwards each member of `Adapter` to its `delegate`, so a wrapper overrides only what it changes. `DecisionAdapter` and the hint adapter of `Refine` extend it. |
 | `ChatAdapter` | The marker format. Its options are the native tool calls (`native`, a `NativeTools`) and the JSON fallback. |
 | `JSONAdapter` | The JSON format. It adds a `response_format` to the request options when the model supports a response schema. |
 | `XMLAdapter` | The XML format. It has no native tool calls. |
@@ -42,6 +43,10 @@ An adapter writes the prompt of a signature and reads the response of the model.
 - **An output that the response does not have.** The output takes the `defaultValue` of its field. Else it is a null
   when the field is `optional`. Else it is a `ParseError`. A value that does not fit the type of its field is also a
   `ParseError`. The `ParseError` keeps the raw response.
+- **One rule for a number and a bool.** An `int`, a `float`, and a `bool` field take the rule of core
+  `LenientValues.valueOf`, in each adapter, for a required field and for an optional field. Thus `$1,200`, `1_000`, and
+  `3.0` are integers, and `yes` is a bool. A form that only Java reads (`3d`) is an error. An optional field also takes
+  the null texts `n/a`, `none`, `null`, and the empty text, in any case.
 - **One output field.** When the signature has one output field, the Chat, JSON, and XML adapters can read a response
   with no structure as the value of that field. The stream state of `ChatAdapter` also sends the text to that field
   until a marker comes.
@@ -80,3 +85,5 @@ This module ports `dspy.adapters`:
 - Native tool calls are a feature of the adapter, as upstream. `ReAct` keeps its text protocol.
 - `XMLAdapter` asks for a list, a dict, or a structured value as JSON text in its tag. Upstream asks for nested XML
   elements.
+- A number and a bool have the values of upstream `parse_value`, and some lenient forms more. `docs/port/PORT_DIFFERENCES.md`
+  (section 17) lists the differences.

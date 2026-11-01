@@ -26,10 +26,11 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
   *     lenient rules.
   *   - [[asInt]]: accepts a whole number of each numeric type in the `Int` range. A number that is not whole (`1.5`) or
   *     that is out of the range is an error: the accessor does not round a number and does not cut it. A text can have
-  *     spaces, a currency symbol, a `+`, and thousands commas (`"$1,200"`), and must be an integer text.
+  *     spaces, a currency symbol, a `+`, thousands commas (`"$1,200"`), and a `_` between digits, and must have a whole
+  *     value (`"3.0"` and `"1e3"` are whole).
   *   - [[asDouble]]: accepts each numeric primitive, and a number text in the same lenient form (`"+3.5"`).
-  *   - [[asBoolean]]: accepts `Boolean`, or the case-insensitive strings `"true"`/`"false"`. `"yes"`/`"1"`/`0` etc. are
-  *     rejected.
+  *   - [[asBoolean]]: accepts `Boolean`, the case-insensitive strings `"true"`, `"yes"`, `"on"`, `"t"`, and `"y"`, and
+  *     `"false"`, `"no"`, `"off"`, `"f"`, and `"n"`, and a number or a number text with the value 1 or 0.
   *
   * A field missing from [[values]] is a [[NotFoundError]] from [[value]], propagated by the coercive accessors. The
   * [[score]] helper is a thin alias for `asDouble("score")` used by metrics and optimizers.

@@ -6,6 +6,7 @@ import dspy4s.core.contracts.{
   DspyError,
   DynamicValues,
   FieldSpec,
+  LenientValues,
   ParseError,
   PythonText,
   SignatureLayout,
@@ -58,7 +59,6 @@ private[adapters] object JSONAdapterParser:
     * not a string goes through the text coercion of the chat format (`AdapterTextSupport.outputTextValue`), as upstream
     * `parse_value` reads a string with `json_repair`: `"3"` for an `int` field is `3`, and `"[1, 2]"` for a `list`
     * field is a list. A JSON value for a `list[T]` field of a string signature must be a list, as in the chat format.
-    * An optional field also takes the lenient forms of `AdapterTextSupport.optionalFallback`.
     *
     * A field with allowed values takes the rule of `AdapterTextSupport.allowedJsonValue` (decision D7): a JSON string
     * only. Each other JSON value is an error: upstream `parse_value` validates a value that is not a string against the
@@ -71,7 +71,7 @@ private[adapters] object JSONAdapterParser:
         case _: DynamicValue.Null.type if field.optional            => Right(DynamicValue.Null)
         case DynamicValue.Primitive(PrimitiveValue.String(text))    => AdapterTextSupport.outputTextValue(field, text)
         case other if NativeFunctionCalling.isToolCallsField(field) => AdapterTextSupport.toolCallsValue(other)
-        case other                                                  => coerce(field, other)
+        case other                                                  => coerce(field.typeRef, other)
 
   /** The JSON object of `text`: the whole text when it is one JSON object, else the first JSON object of the text
     * ([[extractFirstJsonObject]]). Upstream `JSONAdapter.parse` reads the whole text with `json_repair`, and else the
@@ -115,29 +115,21 @@ private[adapters] object JSONAdapterParser:
       case _                           => Left(ParseError("adapter", "Parsed JSON output is not an object"))
     }
 
-  /** The value of the output field `field` from a JSON value `value` that is not a string or a null. An `int` field
-    * takes the rule of `AdapterTextSupport.integerValue`: a whole number, also a whole float (upstream pydantic lax
-    * mode), keeps its exact value as an `Int`, a `Long`, or a `BigInt`. A `json` field, a `list` field, and an evidence
-    * field of the decision adapter ([[DecisionAdapter.isEvidenceType]]) keep the value as it is. A field of another
-    * type takes the JSON text of the value as its text. An optional field also takes the lenient forms of
-    * `AdapterTextSupport.optionalFallback`. The parser encodes the JSON text one time, only when a rule reads it.
+  /** The value of an output field of the type `typeRef` from a JSON value `value` that is not a string or a null. An
+    * `int`, a `double`, and a `bool` field take the rule of `LenientValues.valueOf`, as a text does: a whole number,
+    * also a whole float, keeps its exact value as an `Int`, a `Long`, or a `BigInt`, and the number 1 or 0 is a bool. A
+    * `json` field, a `list` field, and an evidence field of the decision adapter ([[DecisionAdapter.isEvidenceType]])
+    * keep the value as it is. A field of another type takes the JSON text of the value as its text. The parser encodes
+    * the JSON text one time, only when a rule reads it.
     */
-  private def coerce(field: FieldSpec, value: DynamicValue): Either[DspyError, DynamicValue] =
-    lazy val text = jsonText(value)
-    AdapterTextSupport.optionalFallback(field, text, coerceTo(field.typeRef, value, text))
-
-  private def coerceTo(typeRef: TypeRef, value: DynamicValue, text: => String): Either[DspyError, DynamicValue] =
+  private def coerce(typeRef: TypeRef, value: DynamicValue): Either[DspyError, DynamicValue] =
+    lazy val text                 = jsonText(value)
+    def lenient(expected: String) =
+      LenientValues.valueOf(value, typeRef).toRight(ValidationError(s"Expected $expected value, found: $text"))
     typeRef match
-      case TypeRef.int => AdapterTextSupport
-          .integerValue(value)
-          .toRight(ValidationError(s"Expected integer value, found: $text"))
-      case TypeRef.double => DynamicValues
-          .asDouble(value)
-          .toRight(ValidationError(s"Expected numeric value, found: $text"))
-          .map(number => DynamicValue.Primitive(PrimitiveValue.Double(number)))
-      case TypeRef.bool => Some(value)
-          .collect { case boolean @ DynamicValue.Primitive(PrimitiveValue.Boolean(_)) => boolean }
-          .toRight(ValidationError(s"Expected boolean value, found: $text"))
+      case TypeRef.int                                          => lenient("integer")
+      case TypeRef.double                                       => lenient("numeric")
+      case TypeRef.bool                                         => lenient("boolean")
       case TypeRef.json | TypeRef.list                          => Right(value)
       case evidence if DecisionAdapter.isEvidenceType(evidence) => Right(value)
       // A string signature type such as `list[str]`: the rule of the chat format (`AdapterTextSupport.listOfValue`).

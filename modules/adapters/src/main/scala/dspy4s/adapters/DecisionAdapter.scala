@@ -1,6 +1,13 @@
 package dspy4s.adapters
 
-import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, NativeFunctionCalling, ParsedOutput}
+import dspy4s.adapters.contracts.{
+  Adapter,
+  AdapterInvocation,
+  DelegatingAdapter,
+  FormattedPrompt,
+  NativeFunctionCalling,
+  ParsedOutput
+}
 import dspy4s.adapters.internal.{AdapterTextSupport, PromptText, StrictJsonSchema}
 import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.{
@@ -48,12 +55,12 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   * of the adapter). An error of the decode (for example a distribution with a total of zero) is not a parse error:
   * upstream `_decode` raises it after the adapter call.
   */
-final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Adapter:
+final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends DelegatingAdapter:
 
-  override def name: String = inner.name
+  override def delegate: Adapter = inner
 
-  /** The fallback of `inner`, with the same plan. */
-  override def fallback: Option[Adapter] = inner.fallback.map(DecisionAdapter(_, plan))
+  /** The fallback of `inner` gets the same plan. */
+  override protected def wrap(next: Adapter): Adapter = DecisionAdapter(next, plan)
 
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     DecisionAdapter.evidenceLayout(invocation.layout, plan).flatMap { evidence =>
@@ -82,9 +89,6 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
       demos = Vector.empty,
       outputJsonSchema = Some(outputSchema(invocation, evidence))
     )
-
-  override def formatUserMessageContent(layout: SignatureLayout, values: DynamicValue.Record): String =
-    inner.formatUserMessageContent(layout, values)
 
   /** `evidence` with the task examples of the demos of `invocation` after the effective instructions of its layout.
     * With no demos, `evidence` stays as it is.

@@ -5,8 +5,8 @@ import dspy4s.programs.compose.{Mode, mode}
 import dspy4s.programs.optimization.*
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.adapters.contracts.DelegatingAdapter
 import dspy4s.adapters.contracts.FormattedPrompt
-import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
@@ -17,7 +17,6 @@ import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.updated
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.algebra.Lens
-import dspy4s.lm.contracts.LmOutput
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
@@ -25,7 +24,7 @@ import dspy4s.programs.runtime.AttemptSelection
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.programs.contracts.Prediction
 import dspy4s.signatures.Signature
-import zio.blocks.schema.{DynamicValue, Schema}
+import zio.blocks.schema.Schema
 
 import scala.compiletime.ops.int.+
 
@@ -176,25 +175,25 @@ object Refine:
     * [[SignatureLayout]] (dspy4s's stand-in for Python's `signature` object identity); `adviceByLayout` maps each
     * predictor's layout to its advice. `format` looks up the invocation's layout: on a real (non-`N/A`, non-empty)
     * advice it appends a `hint_` INPUT field carrying that advice and delegates to `baseAdapter.format`; otherwise (no
-    * advice for this predictor) it delegates unchanged. `parse` is always unchanged. The lookup compares the fields and
-    * the name of the layouts, and not their instructions.
+    * advice for this predictor) it delegates unchanged. Each member other than `name` and `format` comes from the base
+    * adapter ([[DelegatingAdapter]]). The lookup compares the fields and the name of the layouts, and not their
+    * instructions.
     */
   private[programs] final case class HintInjectingAdapter(
       baseAdapter   : Adapter,
       adviceByLayout: Map[SignatureLayout, String]
-  ) extends Adapter:
+  ) extends DelegatingAdapter:
+    override def delegate: Adapter = baseAdapter
+
     override def name: String = s"${baseAdapter.name}+hint"
 
     private val adviceByStructure: Map[SignatureLayout, String] =
       adviceByLayout.map((layout, advice) => layout.withInstructions(None) -> advice)
 
-    /** The fallback of the base adapter, with the same advice (upstream `WrapperAdapter` calls the base adapter, which
+    /** The fallback of the base adapter gets the same advice (upstream `WrapperAdapter` calls the base adapter, which
       * does its own fallback).
       */
-    override def fallback: Option[Adapter] = baseAdapter.fallback.map(next => copy(baseAdapter = next))
-
-    override def formatUserMessageContent(layout: SignatureLayout, values: DynamicValue.Record): String =
-      baseAdapter.formatUserMessageContent(layout, values)
+    override protected def wrap(next: Adapter): Adapter = copy(baseAdapter = next)
 
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       adviceByStructure.get(invocation.layout.withInstructions(None)).map(_.trim)
@@ -211,11 +210,6 @@ object Refine:
             inputKeys = invocation.inputs.inputKeys + "hint_"
           )
           baseAdapter.format(invocation.copy(layout = layoutWithHint, inputs = inputsWithHint))
-
-    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
-        RuntimeContext
-    ): Either[DspyError, ParsedOutput] =
-      baseAdapter.parse(invocation, output)
 
   /** The critic's input: the six grounding fields of [[RefineFeedback.layout]], field names matching the layout
     * exactly.

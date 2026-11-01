@@ -84,9 +84,10 @@ and this case.
 
 - **The schema comes from the structure of the type.** `derived` and the macros ignore a custom `Schema` in scope for
   `I`, `O`, and their fields. Thus a custom `given` cannot change the fields or the codecs of a signature.
-- **Decode accepts the text of a model.** Before the decode, `ZioSchemaCodec.normalize` changes `"true"` into a
-  `Boolean` and `"42"` into an `Int`. It also removes a currency symbol and commas from a number, and changes a text
-  into an enum case.
+- **Decode accepts the text of a model.** Before the decode, `ZioSchemaCodec.normalize` changes `"true"` and `"yes"`
+  into a `Boolean`, and `"42"` and `"3.0"` into an `Int`. It also removes a currency symbol, commas, and a `_` between
+  digits from a number, and changes a text into an enum case. The parsers of the adapters have the same rule (core
+  `LenientValues`). A text that only Java reads as a number (`"3d"`) makes the decode fail.
 - **An absent `Option` field is `None`,** also in a nested record. The values `null`, `"none"`, and `"n/a"` are also
   `None`. An absent field that is not an `Option` makes the decode fail.
 - **A `History` field gets `TypeRef.history`** from each entry point and from the builder.

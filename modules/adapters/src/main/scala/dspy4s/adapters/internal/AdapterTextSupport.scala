@@ -17,8 +17,6 @@ import dspy4s.core.contracts.updated
 import dspy4s.lm.contracts.LmOutput
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
-import scala.util.control.Exception.catching
-
 /** Prompt-text helpers shared across the adapters. One implementation guarantees the adapters render demo / input
   * fields, coerce string field values, and apply the single-output text fallback identically — fixing a defect in one
   * adapter can no longer silently miss the others.
@@ -127,18 +125,22 @@ private[adapters] object AdapterTextSupport:
     *     field has allowed values ([[isNullText]]).
     *   - A `tool_calls` field takes the JSON list of calls in the text ([[textToolCalls]]).
     *   - A field with allowed values takes the text of [[allowedValue]].
-    *   - Each other text goes to [[coerceText]].
+    *   - Each other text goes to [[coerceText]]. When [[coerceText]] gives an error for an optional field, a null text
+    *     of [[LenientValues.isNullText]] (`""`, `null`, `none`, and `n/a`, in any case) is a null.
     *
-    * An optional field that is not a `tool_calls` field and has no allowed values also takes the lenient forms of
-    * [[optionalFallback]]. An optional field with allowed values does not: upstream `parse_value` gives `None` for an
-    * `Optional[Literal[...]]` only for a text that reads as `None`, and an error for each other text that is not an
-    * allowed value.
+    * An `Option` field of a typed signature has the type of its element. Before, it was a text field, and the typed
+    * decode read these null texts. This rule keeps them for an optional field. An optional field with allowed values
+    * does not take them: upstream `parse_value` gives `None` for an `Optional[Literal[...]]` only for a text that reads
+    * as `None`, and an error for each other text that is not an allowed value.
     */
   def outputTextValue(field: FieldSpec, raw: String): Either[DspyError, DynamicValue] =
     if isNullText(field, raw) then Right(DynamicValue.Null)
     else if NativeFunctionCalling.isToolCallsField(field) then textToolCalls(raw)
     else if hasAllowedValues(field) then allowedValue(field, raw)
-    else optionalFallback(field, raw, coerceText(field.typeRef, raw))
+    else
+      coerceText(field.typeRef, raw) match
+        case Left(_) if field.optional && LenientValues.isNullText(raw) => Right(DynamicValue.Null)
+        case result                                                     => result
 
   /** `true` when the output field `field` takes only its allowed values: a string field with [[FieldSpec.enumValues]],
     * as a `Literal[...]` of a string signature or a Scala enum of a typed signature gives it (decision D7). The enum
@@ -214,38 +216,6 @@ private[adapters] object AdapterTextSupport:
   private def withoutQuotes(text: String): String =
     PythonText.quotedBody(text, '\'').orElse(PythonText.quotedBody(text, '"')).getOrElse(text)
 
-  /** `result`, else, for an optional field, the value of the lenient forms of the typed decode
-    * ([[dspy4s.core.contracts.LenientValues]]): the texts `""`, `null`, `none`, and `n/a` in any case are a null, and a
-    * number can have a currency symbol, a `+`, and thousands commas (`"$2,399.00"`). An integer has the type of
-    * [[integerOf]]. Use it only for a field with no allowed values ([[hasAllowedValues]]).
-    *
-    * An `Option` field of a typed signature has the type of its element. Before, it was a text field, and the typed
-    * decode read these forms. This rule keeps them for an optional field. A text that does not fit the type, also in a
-    * lenient form, keeps the error of `result`.
-    *
-    * @param raw
-    *   the text of the value: the text of the response, or the JSON text of a JSON value. The function reads it only
-    *   for a `Left` of an optional field.
-    */
-  def optionalFallback(
-      field : FieldSpec,
-      raw   : => String,
-      result: Either[DspyError, DynamicValue]
-  ): Either[DspyError, DynamicValue] =
-    result match
-      case Left(error) if field.optional => lenientOptional(field.typeRef, raw.trim).toRight(error)
-      case other                         => other
-
-  private def lenientOptional(typeRef: TypeRef, text: String): Option[DynamicValue] =
-    if LenientValues.isNullText(text) then Some(DynamicValue.Null)
-    else
-      val value = DynamicValues.string(text)
-      typeRef match
-        case TypeRef.int    => LenientValues.toBigInt(value).map(integerOf)
-        case TypeRef.double =>
-          LenientValues.toDouble(value).map(number => DynamicValue.Primitive(PrimitiveValue.Double(number)))
-        case _ => None
-
   /** `true` when `raw` is a null text ([[NullTexts]]) of the optional field `field`. The field must have a type that is
     * not a string, or allowed values ([[hasAllowedValues]]). For a field with allowed values, the text has no
     * whitespace at the two ends (Python `str.strip`).
@@ -279,19 +249,18 @@ private[adapters] object AdapterTextSupport:
       ))
 
   /** Coerce a raw string field value into the `DynamicValue` its declared `TypeRef` demands. Shared by the Chat and XML
-    * adapters so a `json` / `list` field decodes identically regardless of which adapter parsed it. A `json` or a
-    * `list` field reads the text as JSON with the rules of Python `json.loads` ([[PythonText.parseJson]]): an integer
-    * keeps its exact value, and a float stays a float.
+    * adapters so a `json` / `list` field decodes identically regardless of which adapter parsed it. An `int`, a
+    * `double`, and a `bool` field take the rule of [[LenientValues.valueOf]]. A `json` or a `list` field reads the text
+    * as JSON with the rules of Python `json.loads` ([[PythonText.parseJson]]): an integer keeps its exact value, and a
+    * float stays a float.
     */
   private def coerceText(typeRef: TypeRef, raw: String): Either[DspyError, DynamicValue] =
+    def lenient(error: => String) =
+      LenientValues.valueOf(DynamicValues.string(raw), typeRef).toRight(ValidationError(error))
     typeRef match
-      // Upstream `parse_value` reads the text as JSON, then pydantic lax mode accepts a whole float for an int.
-      case TypeRef.int    => wholeNumber(raw.trim).toRight(ValidationError(s"Cannot parse integer output from '$raw'"))
-      case TypeRef.double => raw.trim.toDoubleOption.toRight(ValidationError(s"Cannot parse double output from '$raw'"))
-          .map(d => DynamicValue.Primitive(PrimitiveValue.Double(d)))
-      case TypeRef.bool => LenientValues.toBoolean(DynamicValues.string(raw))
-          .map(flag => DynamicValue.Primitive(PrimitiveValue.Boolean(flag)))
-          .toRight(ValidationError(s"Cannot parse boolean output from '${raw.trim.toLowerCase}'"))
+      case TypeRef.int                 => lenient(s"Cannot parse integer output from '$raw'")
+      case TypeRef.double              => lenient(s"Cannot parse double output from '$raw'")
+      case TypeRef.bool                => lenient(s"Cannot parse boolean output from '${raw.trim.toLowerCase}'")
       case TypeRef.json | TypeRef.list => PythonText.parseJson(raw).left.map(_ =>
           ValidationError(s"Field could not be parsed as JSON from '$raw'")
         )
@@ -323,31 +292,6 @@ private[adapters] object AdapterTextSupport:
         else list
       }
       .toRight(ValidationError(s"Expected a JSON list for ${typeRef.repr} from '$raw'"))
-
-  /** The integer of an integer text, or of a float text with no fraction (`3.0`), with the type of [[integerOf]]. */
-  private def wholeNumber(text: String): Option[DynamicValue] =
-    catching(classOf[NumberFormatException]).opt(BigInt(text)).map(integerOf).orElse(
-      text.toDoubleOption.flatMap(number => integerValue(DynamicValue.Primitive(PrimitiveValue.Double(number))))
-    )
-
-  /** The integer of the number `value` for an `int` output field, with the type of [[integerOf]]. A whole float (`3.0`)
-    * is an integer, as pydantic lax mode accepts it. A float with a fraction, a `NaN`, an infinite float, and a value
-    * that is not a number give `None`. The text coercion and the JSON adapter use this rule.
-    */
-  def integerValue(value: DynamicValue): Option[DynamicValue] =
-    value match
-      case DynamicValue.Primitive(PrimitiveValue.String(_)) => None
-      case number                                           => LenientValues.toBigInt(number).map(integerOf)
-
-  /** The integer `whole` as the smallest of `Int`, `Long`, and `BigInt` that holds it. A Python `int` has no size
-    * limit, so an `int` output keeps its exact value. The typed decode then reads the value into the type of the field.
-    */
-  private def integerOf(whole: BigInt): DynamicValue =
-    DynamicValue.Primitive(
-      if whole.isValidInt then PrimitiveValue.Int(whole.toInt)
-      else if whole.isValidLong then PrimitiveValue.Long(whole.toLong)
-      else PrimitiveValue.BigInt(whole)
-    )
 
   /** The single-output text fallback (a port rule) of the Chat, JSON, and XML adapters: the record of the one text
     * output field `field` for a reply with no structure. The text of the reply, with the line ends and the strip of

@@ -218,14 +218,18 @@ class DataSuite extends FunSuite:
     assertEquals(p.asBoolean("str-padded"), Right(true))
   }
 
-  test("asBoolean rejects ambiguous strings and other types") {
+  test("asBoolean has the bool rule of the typed decode") {
     val p = RawPrediction.empty
       .withRawValue("yes", "yes")
       .withRawValue("one", "1")
       .withRawValue("number", 1)
-    assert(p.asBoolean("yes").isLeft, "'yes' must not coerce to true (Phase 1: conservative only)")
-    assert(p.asBoolean("one").isLeft, "'1' must not coerce to true (Phase 1: conservative only)")
-    assert(p.asBoolean("number").isLeft)
+      .withRawValue("other-number", 2)
+      .withRawValue("other-text", "maybe")
+    assertEquals(p.asBoolean("yes"), Right(true))
+    assertEquals(p.asBoolean("one"), Right(true))
+    assertEquals(p.asBoolean("number"), Right(true))
+    assert(p.asBoolean("other-number").isLeft)
+    assert(p.asBoolean("other-text").isLeft)
   }
 
   test("completion at out-of-bounds index fails with validation error") {

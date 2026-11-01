@@ -39,8 +39,9 @@ private[signatures] object ZioSchemaCodec:
 
   /** Coerce a `DynamicValue` to the form that the target `Reflect` expects. These are the two important coercions:
     *
-    *   - A primitive: the lenient rules of [[LenientValues]] apply. For example, the LM text `"true"` becomes
-    *     `Primitive(Boolean(true))` when the target field is `Boolean`, and the text `"$1,200"` becomes an `Int`.
+    *   - A primitive: the lenient rules of [[LenientValues]] apply. For example, the LM text `"yes"` becomes
+    *     `Primitive(Boolean(true))` when the target field is `Boolean`, and the texts `"$1,200"` and `"3.0"` become an
+    *     `Int`. A text that only Java reads as a number (`"3d"`) stays a text, thus the decode fails.
     *   - A variant field: a bare `Primitive(String("joy"))` becomes `Variant("joy", Record.empty)`, so that
     *     `Schema.fromDynamicValue` can select the correct case.
     *
