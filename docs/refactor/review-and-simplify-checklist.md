@@ -329,7 +329,7 @@ Simplify 7 (rank 1). Code-review 6 (rank 4). 8004 main lines, 11858 test lines.
   - [x] /code-review
 - (b) Predict and the selection, about 2100 lines: `strategies/Predict.scala`, `strategies/DynamicPredict.scala`, `strategies/ChainOfThought.scala`, `strategies/MultiChainComparison.scala`, `strategies/BestOfN.scala`, `strategies/Refine.scala`, `strategies/RefineFeedback.scala`, `runtime/PredictEngine.scala`, `runtime/AttemptSelection.scala`, `runtime/ParallelExecutor.scala`, `runtime/SettingsProgramRuntime.scala`, `Aggregation.scala`, `Parallel.scala`, `retrievers/`.
   - [x] /simplify
-  - [ ] /code-review
+  - [x] /code-review
 - (c) The structure, about 3150 lines: `optimization/`, `algebra/`, `compose/`, the other files in `contracts/`, and the other files at the top of the source root.
   - [ ] /simplify
   - [ ] /code-review
@@ -350,7 +350,7 @@ Simplify 7 (rank 1). Code-review 6 (rank 4). 8004 main lines, 11858 test lines.
 - [ ] (simplify (a), design) A typed `toolChoice` on `AdapterInvocation`, next to `tools`, in place of the `tool_choice` key that `ReActV2` writes in `call.config`. An adapter that builds its own `FormattedPrompt` then cannot send `tool_choice` with no `tools`.
 - [ ] (simplify (a), skipped) After the first overflow, each later step of ReAct retries a prompt that is likely too large. Remembering the overflow length changes the upstream call sequence. Only for runs that overflow.
 - [ ] `RecordObject.scala` has no user in the main code. Only ProgramAlgebraLawSuite uses it.
-- [ ] `DynamicValues.fromAny` on typed values, against the single-codec rule: `compose/Mode.scala` (group (c)), and `strategies/MultiChainComparison.scala` (the temperature, in the code review of group (b)). `strategies/Refine.scala` and `strategies/RLMSandboxTools.scala` are fixed.
+- [ ] `DynamicValues.fromAny` on typed values, against the single-codec rule: `compose/Mode.scala` (group (c)). `strategies/MultiChainComparison.scala`, `strategies/Refine.scala`, and `strategies/RLMSandboxTools.scala` are fixed.
 - [x] Small items: the stale comment in `runtime/PredictEngine.scala`, `Parallel.apply` the same as `Parallel.run`, and `ErrorLimit(10)` two times in `runtime/ParallelExecutor.scala`. Fixed. `Evaluate.scala`, `BootstrapFewShot.scala`, and `BootstrapFewShotWithRandomSearch.scala` still have the literal (their module passes).
 - [ ] `optimization/CompositeOptimizableStructureInstances.scala:36-71` writes single-leaf instances by hand, while Refine uses `ParameterOptic`. That gives three styles for one job.
 - [x] (simplify (b)) `runtime/PredictEngine.scala` held the decision routing, about 120 of 379 lines. Fixed: the `DecisionAdapter` companion and `DecisionPlan`, as upstream `dspy/adapters/decision.py`. One `strategies/DecisionOutputs.scala` trait replaces three copies of three forwarders. `Predict.erase`, `boundLm`, and `DynamicPredict.outputJsonSchema` are gone.
@@ -364,12 +364,20 @@ Simplify 7 (rank 1). Code-review 6 (rank 4). 8004 main lines, 11858 test lines.
 
 ### Code-review findings
 
-- [ ] `Aggregation.scala:51`: `keys.last` throws `NoSuchElementException` when the first completion row is an empty record. (checked)
+- [x] `Aggregation.scala`: `keys.last` threw `NoSuchElementException` when the first completion row was an empty record. Fixed: a `Left`.
 - [x] `strategies/RLMSandboxTools.scala`: `counter.get()` and then `addAndGet` was not atomic. Fixed: a `compareAndSet` loop.
-- [ ] `runtime/ParallelExecutor.scala:108-141`: the timeout applies to each completion, not to the batch. The error says "0 seconds" for a timeout of less than one second. `shutdownNow` does not stop a running LM call, so work can continue after the batch fails.
+- [x] `runtime/ParallelExecutor.scala`: the error said "0 seconds" for a timeout of less than one second. Fixed: the text of the `Duration`. The timeout for each completion is the documented rule (PORT_GAPS G-41), and it stays. `shutdownNow` interrupts a running task, and a model call that ignores the interrupt continues after the batch fails.
 - [x] `strategies/ReActV2.scala` merges the final outputs into the event record, so an output named `next_thought`, `tool_calls`, or `tool_call_results` overwrote the event fields. Fixed: construction rejects these names (PORT_DIFFERENCES section 18). The drop of a task input named `history` or `tools` is upstream field-dict parity, and it stays.
 - [x] `strategies/RLMReplProtocol.scala`: `stripCodeFences` used `var`. Fixed: a `@tailrec` helper. The cases are the cases of upstream `_strip_code_fences`.
-- [ ] `runtime/AttemptSelection.scala:63-120` (`bestOf`): the failure-budget rule `remainingFailures <= 0` can differ by one from upstream `idx > fail_count`. A NaN reward is never selected.
+- [x] `runtime/AttemptSelection.scala` (`bestOf`): the failure-budget rule `remainingFailures <= 0` differs from upstream `idx > fail_count`, which mixes the index and the count and lowers `self.fail_count` for later calls. The port keeps its plain budget (PORT_DIFFERENCES section 20). A NaN reward is never selected, as upstream.
+- [x] (code-review (b)) The trace had no size limit, so a long-lived thread kept each input and output. Fixed: `maxTraceSize`, default 10000, as upstream `max_trace_size`.
+- [x] (code-review (b)) A reward function added its model calls to the trace and the history of the caller. Fixed: the reward runs in an isolated context, as upstream.
+- [x] (code-review (b)) The critic of `strategies/Refine.scala` got wrapper and nested entries, names that do not match `module_names`, and the input of the first predictor as the program input. Fixed: one named entry for each predictor, the observed inputs of the program, and JSON text with an indent of 2, as upstream. `parseAdvice` uses the one string-aware scan `JsonTextScan.firstObject`.
+- [x] (code-review (b)) `strategies/MultiChainComparison.scala` kept a multi-line answer, sent an empty text for a missing value, and overrode a per-call temperature. Fixed: the rules of upstream `forward`, and the temperature is module config.
+- [x] (code-review (b)) `runtime/PredictEngine.scala` had no rule for a low temperature with `n` above 1, no warning for a missing input of `DynamicPredict`, and the 3.2.1 text for an extra input. Fixed: the rules and the texts of upstream `_forward_preprocess`.
+- [x] (code-review (b)) `retrievers/KNN.scala` used Scala text for a value, and a query vector of another size gave a score from part of each vector. Fixed: `PythonText.str`, and a `Left`.
+- [ ] (code-review (b), design) The temperature and the rollout id of an attempt of `BestOfN` and `Refine` travel on `ProgramCall`. A composite that builds a new `ProgramCall`, for example `KNNFewShot.scala`, drops them, so with a cache each attempt can give one answer. They also win over the temperature of a `Predict` config, where upstream `lm.copy` stays under it. `RuntimeScope.lmDefaults`, which `PredictEngine` merges under `config`, is the smallest general fix. It also serves `BootstrapFewShot`.
+- [ ] (code-review (b), no change) Under `captureFailureTraces`, a failed predictor entry is in the trajectory of the critic. Upstream has no such entries.
 - [x] (code-review (a)) `RLMReplProtocol.renderValue` used compact JSON and Scala text, and a NaN in a list threw. Fixed: the text of upstream `REPLVariable.from_value` (`json.dumps` with an indent of 2, and Python `str`).
 - [x] (code-review (a)) The Deno wrapper of a tool with no declared parameters was `def name():`, so each argument raised `TypeError`. Fixed: `def name(**kwargs):` in `runner.js` (PORT_DIFFERENCES section 18).
 - [x] (code-review (a)) `llm_query_batched` gave one generic `Left` when each prompt threw. Fixed: the error limit is above the batch size, so each prompt gets its `[ERROR]` text.

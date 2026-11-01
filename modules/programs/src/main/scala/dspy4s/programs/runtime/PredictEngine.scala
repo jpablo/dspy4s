@@ -8,9 +8,12 @@ import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.LenientValues
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.:=
 import dspy4s.core.decisions.{DecisionPlan, DecisionSettings}
 import dspy4s.core.runtime.ActivePredictContext
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -43,8 +46,8 @@ private[dspy4s] final case class PredictEngine(
       */
     outputJsonSchema: Option[DynamicValue.Record] = None,
     /** Module-level LM option bag, the analogue of Python's `dspy.Predict(signature, **config)` `self.config`. Merged
-      * *under* the per-call [[ProgramCall.config]] in [[buildInvocation]] (per-call keys win on collision), so it
-      * supplies defaults a call may override. When it is empty, the merged options are exactly the per-call config.
+      * *under* the per-call [[ProgramCall.config]] in [[requestOptions]] (per-call keys win on collision), so it
+      * supplies defaults a call may override.
       */
     config: DynamicValue.Record,
     /** Optional per-module bound LM (Python's `set_lm`/`get_lm`). When set, it is used in preference to the ambient
@@ -76,8 +79,8 @@ private[dspy4s] final case class PredictEngine(
   def execute(call: ProgramCall[DynamicValue.Record])(using RuntimeContext): Either[DspyError, RawPrediction] =
     ActivePredictContext.withActive(moduleName, layout) {
       lm.fold(runtime.resolveModel)(Right(_)).flatMap { model =>
+        warnOnInputMismatch(call)
         if model.supportsDecisionRequests then
-          warnOnExtraInputs(call)
           for
             plan   <- systemOnePlan
             values <- DecisionAdapter.decide(
@@ -87,7 +90,7 @@ private[dspy4s] final case class PredictEngine(
                         moduleName,
                         model,
                         call.input,
-                        DynamicValues.mergeRecords(config, call.config),
+                        requestOptions(call, model),
                         call.rolloutId
                       )
             prediction <- buildPrediction(Vector(values), Vector.empty)
@@ -107,7 +110,6 @@ private[dspy4s] final case class PredictEngine(
     }
 
   private def buildInvocation(call: ProgramCall[DynamicValue.Record], model: LanguageModel): AdapterInvocation =
-    warnOnExtraInputs(call)
     AdapterInvocation(
       layout = layout,
       demos = demos,
@@ -116,25 +118,56 @@ private[dspy4s] final case class PredictEngine(
       tools = tools,
       request = LmRequest(
         model = model.id,
-        options = DynamicValues.mergeRecords(config, call.config),
+        options = requestOptions(call, model),
         rolloutId = call.rolloutId
       )
     )
 
-  /** Mirror upstream dspy 3.2.1 `predict.py` `_forward_preprocess`: input keys that are not declared input fields are
-    * tolerated (the extras are dropped downstream, since [[AdapterInvocation]] is built with `inputKeys` restricted to
-    * the layout), but their presence is surfaced as a warning naming the unexpected keys and the expected fields. The
-    * call still proceeds -- this is a diagnostic, not an error. One-off diagnostics are not callback events (those are
-    * strictly Start/End scope pairs), so this routes through [[RuntimeEnvironment.warn]].
+  /** The options of the model request: [[config]] under the per-call config, with the temperature rule of upstream
+    * `_forward_preprocess` (`dspy/predict/predict.py`). When the temperature is not set or is at most 0.15, and `n` is
+    * above 1, the temperature becomes 0.7 to keep randomness. Each number comes from the options, else from the
+    * defaults of `model` ([[LanguageModel.defaultOptions]]). As with the Python `or`, a value of 0 counts as not set.
     */
-  private def warnOnExtraInputs(call: ProgramCall[DynamicValue.Record]): Unit =
-    val extra = DynamicValues.recordKeys(call.input).filterNot(inputKeys.contains)
+  private def requestOptions(call: ProgramCall[DynamicValue.Record], model: LanguageModel): DynamicValue.Record =
+    def number(record: DynamicValue.Record, key: String): Option[Double] =
+      DynamicValues.recordGet(record, key).flatMap(LenientValues.toDouble).filter(_ != 0.0)
+
+    val options     = DynamicValues.mergeRecords(config, call.config)
+    val defaults    = model.defaultOptions
+    val temperature = number(options, "temperature").orElse(number(defaults, "temperature"))
+    val generations = number(options, "n").orElse(number(defaults, "n")).orElse(number(defaults, "num_generations"))
+    if temperature.forall(_ <= 0.15) && generations.exists(_ > 1) then
+      DynamicValues.mergeRecords(options, DynamicValues.record("temperature" := 0.7))
+    else options
+
+  /** The warnings of upstream `_forward_preprocess` (`dspy/predict/predict.py`), with its texts. The call still
+    * proceeds: these are diagnostics, not errors. One-off diagnostics are not callback events (those are strictly
+    * Start/End scope pairs), so this routes through [[RuntimeEnvironment.warn]].
+    *
+    *   - A key of the input that is not a declared input field. The adapter drops it, because [[AdapterInvocation]] has
+    *     `inputKeys` restricted to the layout.
+    *   - A declared input field with no value that is not optional (upstream `annotation_allows_none`). A field with a
+    *     default counts as present, because upstream fills the defaults first. `Predict` has its own check for a
+    *     missing input before this engine, thus only `DynamicPredict` gets this warning.
+    */
+  private def warnOnInputMismatch(call: ProgramCall[DynamicValue.Record]): Unit =
+    val provided  = DynamicValues.recordKeys(call.input)
+    val fields    = layout.inputFields
+    val extra     = provided.filterNot(inputKeys.contains)
+    val component = s"Predict '${layout.name}'"
     if extra.nonEmpty then
-      val expected = layout.inputFields.map(_.name).mkString(", ")
       RuntimeEnvironment.warn(
-        s"Predict '${layout.name}'",
-        s"ignoring unexpected input field(s) [${extra.sorted.mkString(", ")}] not declared in the signature; " +
-          s"expected input fields: [$expected]"
+        component,
+        s"Input contains fields not in signature. These fields will be ignored: ${PythonText.nameList(extra)}. " +
+          s"Expected fields: ${PythonText.nameList(fields.map(_.name))}."
+      )
+    val (present, absent) = fields.partition(field => provided.contains(field.name) || field.defaultValue.isDefined)
+    val missing           = absent.filterNot(_.optional)
+    if missing.nonEmpty then
+      RuntimeEnvironment.warn(
+        component,
+        s"Not all input fields were provided to module. Present: ${PythonText.nameList(present.map(_.name))}. " +
+          s"Missing: ${PythonText.nameList(missing.map(_.name))}."
       )
 
   /** The prediction of the output `rows` (one row for each completion). It has no usage: `Module.apply` gives the

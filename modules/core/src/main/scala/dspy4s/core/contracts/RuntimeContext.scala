@@ -58,6 +58,7 @@ final case class RuntimeConfig(
     numThreads    : Option[ThreadCount]  = None,
     maxErrors     : Option[ErrorLimit]   = None,
     maxHistorySize: Option[HistoryLimit] = None,
+    maxTraceSize  : Option[TraceLimit]   = None,
     disableHistory: Option[Boolean]      = None,
     /** `Some(false)`: the usage trackers of the user get no usage (see `dspy4s.core.runtime.UsageScope`). The usage of
       * the program results stays.
@@ -76,6 +77,7 @@ final case class RuntimeConfig(
       (numThreads.isDefined || defaults.numThreads.isEmpty) &&
         (maxErrors.isDefined || defaults.maxErrors.isEmpty) &&
         (maxHistorySize.isDefined || defaults.maxHistorySize.isEmpty) &&
+        (maxTraceSize.isDefined || defaults.maxTraceSize.isEmpty) &&
         (disableHistory.isDefined || defaults.disableHistory.isEmpty) &&
         (trackUsage.isDefined || defaults.trackUsage.isEmpty) &&
         (callbackMetadata.isDefined || defaults.callbackMetadata.isEmpty) &&
@@ -86,6 +88,7 @@ final case class RuntimeConfig(
         numThreads = numThreads.orElse(defaults.numThreads),
         maxErrors = maxErrors.orElse(defaults.maxErrors),
         maxHistorySize = maxHistorySize.orElse(defaults.maxHistorySize),
+        maxTraceSize = maxTraceSize.orElse(defaults.maxTraceSize),
         disableHistory = disableHistory.orElse(defaults.disableHistory),
         trackUsage = trackUsage.orElse(defaults.trackUsage),
         callbackMetadata = callbackMetadata.orElse(defaults.callbackMetadata),
@@ -99,6 +102,7 @@ final case class RuntimeConfig(
     numThreads.forall(installed.numThreads.contains) &&
       maxErrors.forall(installed.maxErrors.contains) &&
       maxHistorySize.forall(installed.maxHistorySize.contains) &&
+      maxTraceSize.forall(installed.maxTraceSize.contains) &&
       disableHistory.forall(installed.disableHistory.contains) &&
       trackUsage.forall(installed.trackUsage.contains) &&
       captureFailureTraces.forall(installed.captureFailureTraces.contains) &&
@@ -157,6 +161,7 @@ final class RuntimeContext private (
   def numThreads: Option[ThreadCount]                    = config.numThreads
   def maxErrors: Option[ErrorLimit]                      = config.maxErrors
   def maxHistorySize: Option[HistoryLimit]               = config.maxHistorySize
+  def maxTraceSize: Option[TraceLimit]                   = config.maxTraceSize
   def disableHistory: Option[Boolean]                    = config.disableHistory
   def trackUsage: Option[Boolean]                        = config.trackUsage
   def asyncTaskId: Option[String]                        = scope.asyncTaskId
@@ -183,7 +188,7 @@ final class RuntimeContext private (
   def withCallbacks(updated: Vector[CallbackHandler]): RuntimeContext =
     withServices(services.copy(callbacks = Some(updated)))
   def withHistory(updated: Vector[HistoryEntry]): RuntimeContext = withDelta(delta.copy(history = updated))
-  def appendTrace(entry  : TraceEntry): RuntimeContext           = withDelta(delta.copy(trace = trace :+ entry))
+  def withTrace(updated  : Vector[TraceEntry]): RuntimeContext   = withDelta(delta.copy(trace = updated))
   def appendHistory(entry: HistoryEntry): RuntimeContext         = withDelta(delta.copy(history = history :+ entry))
 
   /** Compatibility copy over the former flat case-class surface. Each parameter has the type of its field in the
@@ -196,6 +201,7 @@ final class RuntimeContext private (
       numThreads          : Option[ThreadCount]             = this.numThreads,
       maxErrors           : Option[ErrorLimit]              = this.maxErrors,
       maxHistorySize      : Option[HistoryLimit]            = this.maxHistorySize,
+      maxTraceSize        : Option[TraceLimit]              = this.maxTraceSize,
       disableHistory      : Option[Boolean]                 = this.disableHistory,
       trackUsage          : Option[Boolean]                 = this.trackUsage,
       callbackMetadata    : Option[DynamicValue.Record]     = config.callbackMetadata,
@@ -213,6 +219,7 @@ final class RuntimeContext private (
         numThreads,
         maxErrors,
         maxHistorySize,
+        maxTraceSize,
         disableHistory,
         trackUsage,
         callbackMetadata,
@@ -258,6 +265,7 @@ object RuntimeContext:
       numThreads          : Option[ThreadCount]             = None,
       maxErrors           : Option[ErrorLimit]              = None,
       maxHistorySize      : Option[HistoryLimit]            = None,
+      maxTraceSize        : Option[TraceLimit]              = None,
       disableHistory      : Option[Boolean]                 = None,
       trackUsage          : Option[Boolean]                 = None,
       callbackMetadata    : Option[DynamicValue.Record]     = None,
@@ -274,6 +282,7 @@ object RuntimeContext:
         numThreads,
         maxErrors,
         maxHistorySize,
+        maxTraceSize,
         disableHistory,
         trackUsage,
         callbackMetadata,

@@ -222,6 +222,12 @@ private[dspy4s] object PythonText:
       case primitive: DynamicValue.Primitive                    => DynamicValues.renderText(primitive)
       case other                                                => json(other)
 
+  /** The text of a Python list of names, for example `['a', 'b']`. Each name goes in single quotes, as the Python
+    * `repr` of an identifier.
+    */
+  def nameList(names: Seq[String]): String =
+    names.map(name => s"'$name'").mkString("[", ", ", "]")
+
   /** Python `json.dumps(value, ensure_ascii=False)`, with the separators `", "` and `": "`. With `indent`, the form of
     * `json.dumps(value, indent=indent, ensure_ascii=False)`.
     */

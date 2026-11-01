@@ -14,7 +14,8 @@ import java.time.Instant
   * Appended to [[RuntimeContext.trace]] when the underlying `ProgramCall.traceEnabled` is `true`. A successful call
   * records `failure = None`. A FAILED call is recorded only when [[RuntimeContext.captureFailureTraces]] is set (e.g.
   * by GEPA's reflective evaluation): `failure` carries the error message and `outputs` carries the raw model response
-  * (`raw_response`) when the error is a parse failure. See PORT_GAPS G-12 (P-a).
+  * (`raw_response`) when the error is a parse failure. See PORT_GAPS G-12 (P-a). The trace is capped by
+  * [[RuntimeContext.maxTraceSize]] in `RuntimeEnvironment.appendTrace`.
   *
   * `predictor` is the [[PredictorKey]] of the predictor that recorded the entry. It is `None` for a module that is not
   * a predictor (a composite such as `ReAct`), and for a module that ran inside a predictor (the `Predict` inside

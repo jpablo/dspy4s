@@ -116,16 +116,10 @@ private[programs] object RLMReplProtocol:
           Right(DynamicValues.recordFromEntries(values.collect { case (name, Some(value)) => name -> value }))
         else
           val names = outputFieldNames.mkString(", ")
-          Left(s"[Error] Missing output fields: ${pythonNameList(missing.sorted)}. Use SUBMIT($names)")
+          Left(s"[Error] Missing output fields: ${PythonText.nameList(missing.sorted)}. Use SUBMIT($names)")
       case other =>
         val typeName = other.fold("str")(pythonTypeName)
-        Left(s"[Error] FINAL returned $typeName, expected dict with fields: ${pythonNameList(outputFieldNames)}")
-
-  /** The text of a Python list of field names, for example `['a', 'b']`. A field name is an identifier, so its Python
-    * `repr` is the name in single quotes.
-    */
-  private def pythonNameList(names: Vector[String]): String =
-    names.map(name => s"'$name'").mkString("[", ", ", "]")
+        Left(s"[Error] FINAL returned $typeName, expected dict with fields: ${PythonText.nameList(outputFieldNames)}")
 
   /** The SUBMIT values `record` with the allowed values of the outputs of `layout` checked (upstream
     * `_process_final_output` reads each value with `parse_value`, `dspy/predict/rlm.py`). An output with allowed values

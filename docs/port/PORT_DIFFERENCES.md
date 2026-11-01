@@ -483,6 +483,18 @@ the raw text of the error is the completion of the main LM. Two errors differ fr
 - A `ParseError` of the model, for example a provider reply that is not JSON, also gets that text. Upstream wraps only
   an `AdapterParseError`, and a model call does not raise it.
 
+## 20. The trace limit, and the failure budget of `BestOfN` and `Refine`
+
+**Convention.**
+
+- `maxTraceSize` has the default and the rule of upstream `max_trace_size`: the default is 10000, the oldest entry
+  drops, and 0 keeps no entry. The port records each module call. Upstream records only each predictor call. Thus a
+  limit holds fewer predictor calls than upstream.
+- `failCount` of `BestOfN` and `Refine` is the number of failures that the program can take, and the next failure
+  gives a `Left`. Upstream checks `idx > fail_count`, which mixes the index of the attempt and the count. Upstream also
+  lowers `self.fail_count` at each failure, so the lower value applies to all later calls of the same module.
+- A call with no successful attempt gives a `Left` with the last error. Upstream returns `None`.
+
 ## What this means in practice
 
 If you're porting a Python DSPy script to dspy4s, the friction will

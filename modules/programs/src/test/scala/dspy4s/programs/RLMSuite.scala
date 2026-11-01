@@ -474,7 +474,7 @@ class RLMSuite extends FunSuite:
         assertEquals(result.toOption.get.output.answer, "FALLBACK")
       }
     }
-    val warnings = captured.toString.linesIterator.filter(_.contains("ignoring unexpected input field")).toVector
+    val warnings = captured.toString.linesIterator.filter(_.contains("Input contains fields not in signature")).toVector
     assertEquals(warnings, Vector.empty)
   }
 

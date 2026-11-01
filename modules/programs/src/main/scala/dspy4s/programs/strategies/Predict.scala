@@ -35,7 +35,7 @@ final case class Predict[I, O](
     runtime  : ProgramRuntime  = SettingsProgramRuntime.default,
     /** Module-level LM option bag, the analogue of Python's `dspy.Predict(signature, **config)` `self.config`. Merged
       * *under* the per-call `config` (per-call keys win on collision), so it supplies defaults a call may override.
-      * Empty by default — then the merged options are exactly the per-call config.
+      * Empty by default.
       */
     config: DynamicValue.Record = DynamicValue.Record.empty,
     /** Optional per-module bound LM (the immutable analogue of Python's `set_lm`/`get_lm`). When set, this predictor

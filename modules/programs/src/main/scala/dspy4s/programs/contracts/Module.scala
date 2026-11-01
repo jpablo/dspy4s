@@ -79,6 +79,14 @@ trait Module[I, O]:
   final def apply(call: ProgramCall[I])(using context: RuntimeContext): Either[DspyError, Prediction[O]] =
     RuntimeEnvironment.withInstalled(context)(effective ?=> runLifecycle(call)(using effective))
 
+  /** The input record of `call` that [[apply]] gives to the callbacks and the trace of this module. The record is empty
+    * for a transparent module, and for a module that observes no inputs ([[ModuleLifecycle.typedWithoutInputs]]).
+    */
+  private[programs] final def observedInputs(call: ProgramCall[I]): DynamicValue.Record =
+    lifecycle match
+      case ModuleLifecycle.Transparent()         => DynamicValue.Record.empty
+      case ModuleLifecycle.Observed(observation) => observation.inputs(call)
+
   /** The module lifecycle around [[forward]], with the effective context of the call. */
   private def runLifecycle(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     lifecycle match

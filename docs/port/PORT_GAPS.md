@@ -1756,8 +1756,8 @@ no caller has a batch time limit by default: `Duration.Inf` is the default `time
   resubmission of a slow task.
 - **Typed `Parallel`.** `Parallel.run` accepts `DynamicModule` only (`modules/programs/.../Parallel.scala:27-29`), and
   `fanout` is sequential (`modules/programs/.../compose/Both.scala:12-15`).
-- **Temperature for `n > 1`.** Upstream sets 0.7 when the temperature is low (`dspy/predict/predict.py:179-185`).
-  `PredictEngine.scala:96-121` has no equivalent.
+- **Temperature for `n > 1`.** Resolved: `PredictEngine.requestOptions` has the rule of upstream
+  (`dspy/predict/predict.py:180-185`). It sets 0.7 when the temperature is not set or is low.
 
 ---
 

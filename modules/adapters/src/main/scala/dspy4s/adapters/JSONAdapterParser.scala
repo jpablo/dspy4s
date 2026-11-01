@@ -74,39 +74,17 @@ private[adapters] object JSONAdapterParser:
         case other                                                  => coerce(field.typeRef, other)
 
   /** The JSON object of `text`: the whole text when it is one JSON object, else the first JSON object of the text
-    * ([[extractFirstJsonObject]]). Upstream `JSONAdapter.parse` reads the whole text with `json_repair`, and else the
+    * ([[JsonTextScan.firstObject]]). Upstream `JSONAdapter.parse` reads the whole text with `json_repair`, and else the
     * first balanced object of a regex. The JSON stream state starts at the first `{` too, so the parser and the stream
     * read the same object. A fenced ```json block needs no rule of its own: when the only object is in the fence, the
     * first object is in the fence.
     */
   private def extractJson(text: String): Either[DspyError, DynamicValue.Record] =
     parseJsonObject(PythonText.strip(text)).orElse(
-      extractFirstJsonObject(text)
+      JsonTextScan.firstObject(text)
         .toRight(ParseError("adapter", "Could not find JSON object in model output"))
         .flatMap(parseJsonObject)
     )
-
-  /** The text of the first JSON object of `text`: from the first `{` to the `}` that closes it. A brace in a JSON
-    * string does not count ([[JsonTextScan]]).
-    */
-  private def extractFirstJsonObject(text: String): Option[String] =
-    val start = text.indexOf('{')
-    if start < 0 then
-      None
-    else
-      val scan  = new JsonTextScan
-      var depth = 0
-      var end   = -1
-      var i     = start
-      while i < text.length && end < 0 do
-        val char = text.charAt(i)
-        if scan.structural(char) then
-          if char == '{' then depth += 1
-          else if char == '}' then
-            depth -= 1
-            if depth == 0 then end = i
-        i += 1
-      Option.when(end >= start)(text.substring(start, end + 1))
 
   /** The JSON object of `raw`, read with the rules of Python `json.loads` ([[PythonText.parseJson]]). */
   private def parseJsonObject(raw: String): Either[DspyError, DynamicValue.Record] =

@@ -123,7 +123,7 @@ class MultiChainComparisonSuite extends FunSuite:
     val mcc   = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = AttemptCount(3))
     val input = MultiChainInput(
       baseInput = (question = "What is the color of the sky?"),
-      attempts = Vector.fill(3)(RawPrediction.empty)
+      attempts = Vector.fill(3)(RawPrediction(values = rec("rationale" := "r", "answer" := "blue")))
     )
 
     RuntimeEnvironment.withSettings(settings) {

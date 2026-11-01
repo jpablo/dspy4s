@@ -23,6 +23,12 @@ import scala.util.control.NonFatal
   * trace/history are propagated to the caller. The reducer keeps the highest-reward attempt, short-circuits at
   * `threshold`, and tolerates up to `failCount` failures.
   *
+  * The reward also runs in an isolated context, and the reducer discards its delta. Thus the model calls of a reward
+  * function leave no trace and no history (upstream `best_of_n.py` and `refine.py` run the reward under
+  * `dspy.context(trace=[])`, with the note "Not including the trace of reward_fn"). The reward does not run with the
+  * hint adapter of the attempt. The critic call of the feedback step stays outside the isolation, as upstream, so its
+  * trace reaches the caller.
+  *
   * The usage scope of the call is not isolated: the model calls of each attempt, of each reward, and of each feedback
   * count in the usage of the result of the caller (decision D9 of UPGRADE-3.2.1-to-3.4.0). The reducer does not change
   * the usage of the result that it keeps; `Module.apply` of the caller sets the total.
@@ -54,8 +60,9 @@ object AttemptSelection:
     *   builds and runs attempt `idx` under the isolated [[RuntimeContext]] supplied here (the caller varies `rolloutId`
     *   / `config` by index).
     * @param reward
-    *   scores a successful attempt; a `Left` charges the failure budget and the reduction continues with the
-    *   best-so-far retained (upstream parity: reward_fn exceptions count toward fail_count).
+    *   scores a successful attempt, in an isolated context from the base context of the loop; a `Left` charges the
+    *   failure budget and the reduction continues with the best-so-far retained (upstream parity: reward_fn exceptions
+    *   count toward fail_count).
     * @param feedback
     *   optional inter-attempt hook ([[Feedback]]). The hook is AUXILIARY: a `Left` charges the failure budget and keeps
     *   the best-so-far (the prior context stays), as a module failure does. It is `None` for best-of-`n` with no
@@ -87,7 +94,7 @@ object AttemptSelection:
       val outcome  =
         for
           value  <- executed.value
-          score  <- reward(value)
+          score  <- RuntimeEnvironment.isolatedAttempt(baseContext)(reward(value)).value
           _       = keepBest(value, score, executed.delta)
           reached = score >= threshold
           _      <- feedback match

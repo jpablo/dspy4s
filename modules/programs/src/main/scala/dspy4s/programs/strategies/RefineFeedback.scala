@@ -1,9 +1,20 @@
 package dspy4s.programs.strategies
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout, TraceEntry, :=}
+import dspy4s.adapters.internal.JsonTextScan
+import dspy4s.core.contracts.{
+  DspyError,
+  DynamicValues,
+  FieldSpec,
+  PythonText,
+  RuntimeContext,
+  SignatureLayout,
+  TraceEntry,
+  :=
+}
 import dspy4s.core.data.RawPrediction
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.Prediction
+import dspy4s.programs.optimization.OptimizableView
 import dspy4s.signatures.{Shape, Signature}
 import zio.blocks.schema.{DynamicValue, Schema}
 
@@ -108,56 +119,62 @@ private[programs] object RefineFeedback:
     outputShape = outputShape
   )
 
-  /** Render one runtime trace block per component: `component: <inputs> -> <outputs>`. */
-  def renderTrajectory(trace: Vector[TraceEntry]): String =
-    if trace.isEmpty then "(no recorded module calls)"
-    else
-      trace.map { entry =>
-        val inputs  = DynamicValues.renderText(entry.inputs)
-        val outputs = DynamicValues.renderText(entry.outputs)
-        s"${entry.component}: $inputs -> $outputs"
-      }.mkString("\n")
+  /** `value` as upstream `Refine.forward` gives it to the critic: `orjson.dumps` with an indent of 2. Non-ASCII stays
+    * as it is.
+    */
+  private def jsonText(value: DynamicValue): String = PythonText.json(value, indent = Some(2))
+
+  /** The trajectory of `trace` as JSON text (upstream `Refine.forward`): a list of objects with the keys `module_name`,
+    * `inputs`, and `outputs`, one for each predictor call. An entry with no [[TraceEntry.predictor]] key (a wrapper
+    * module, or a module inside a predictor) is not in the list. The name is the name in `named` of the view with the
+    * structure of the key, else the component of the entry.
+    */
+  def renderTrajectory(trace: Vector[TraceEntry], named: Vector[(String, OptimizableView)]): String =
+    val entries = trace.flatMap { entry =>
+      entry.predictor.map { key =>
+        val found = named.find((_, view) => view.layout.withInstructions(None).equals(key.structure))
+        val name  = found.fold(entry.component)(_._1)
+        DynamicValues.record("module_name" := name, "inputs" -> entry.inputs, "outputs" -> entry.outputs)
+      }
+    }
+    jsonText(DynamicValues.sequence(entries))
 
   /** Run the critic under the ambient runtime context (NOT under the hint adapter) and decode its per-module advice.
-    * The critic reads the trace of the attempt, the program I/O, the reward value, the threshold, and the
-    * `moduleNames`.
+    * The critic reads the inputs and the outputs of the program, the trajectory of the attempt, the reward value, the
+    * threshold, and the names of `named`. Each of them that is not a number is JSON text ([[jsonText]]).
+    *
+    * `programInputs` are the observed inputs of the program ([[dspy4s.programs.contracts.Module.observedInputs]]). A
+    * program that observes no inputs, such as `BestOfN`, gives `{}`. The trajectory still shows the inputs of each
+    * predictor.
     */
-  def generateAdvice[I, O](
-      critic     : Critic,
-      input      : I,
-      prediction : Prediction[O],
-      trace      : Vector[TraceEntry],
-      reward     : Double,
-      threshold  : Double,
-      moduleNames: Vector[String]
+  def generateAdvice[O](
+      critic       : Critic,
+      programInputs: DynamicValue.Record,
+      prediction   : Prediction[O],
+      trace        : Vector[TraceEntry],
+      reward       : Double,
+      threshold    : Double,
+      named        : Vector[(String, OptimizableView)]
   )(using RuntimeContext): Either[DspyError, Map[String, String]] =
-    val programInputs = trace.headOption
-      .map(e => DynamicValues.renderText(e.inputs))
-      .getOrElse(input.toString)
-    val programOutputs = DynamicValues.renderText(prediction.raw.values)
+    val moduleNames = named.map(_._1)
     critic(ProgramCall(input =
       OfferFeedbackInputs(
-        program_inputs = programInputs,
-        program_trajectory = renderTrajectory(trace),
-        program_outputs = programOutputs,
+        program_inputs = jsonText(programInputs),
+        program_trajectory = renderTrajectory(trace, named),
+        program_outputs = jsonText(prediction.raw.values),
         reward_value = reward,
         target_threshold = threshold,
-        module_names = moduleNames.mkString(", ")
+        module_names = jsonText(DynamicValues.sequence(moduleNames.map(DynamicValues.string)))
       )
     )).map(result => parseAdvice(result.output.advice, moduleNames))
 
   /** Parse the OfferFeedback `advice` output into a per-module advice map. The usual output is a JSON object
-    * `{module_name: advice}`. The parse finds the object first, so prose or code fences can be around it. An output
-    * with no JSON object is uniform advice: each module gets the same text.
+    * `{module_name: advice}`. The parse finds the first object ([[JsonTextScan.firstObject]]), so prose or code fences
+    * can be around it. An output with no JSON object is uniform advice: each module gets the same text.
     */
   def parseAdvice(raw: String, moduleNames: Vector[String]): Map[String, String] =
-    extractJsonObject(raw).flatMap(decodeStringMap).filter(_.nonEmpty)
+    JsonTextScan.firstObject(raw).flatMap(decodeStringMap).filter(_.nonEmpty)
       .getOrElse(moduleNames.iterator.map(_ -> raw.trim).toMap)
-
-  private def extractJsonObject(raw: String): Option[String] =
-    val start = raw.indexOf('{')
-    val end   = raw.lastIndexOf('}')
-    if start >= 0 && end > start then Some(raw.substring(start, end + 1)) else None
 
   private def decodeStringMap(json: String): Option[Map[String, String]] =
     DynamicValues.parseJsonRecord(json).map { record =>

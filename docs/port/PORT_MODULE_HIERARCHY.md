@@ -173,7 +173,7 @@ overridable hook); it doesn't carry or fire its own callback list or call log.
 
 - **History/trace** are owned by `RuntimeEnvironment` — `Module.apply`
   calls `RuntimeEnvironment.appendTrace`/`appendHistory`, and the environment
-  enforces `maxHistorySize` / `disableHistory`.
+  enforces `maxHistorySize` / `maxTraceSize` / `disableHistory`.
 - **Callbacks** are dispatched by `CallbackDispatcher` off the ambient
   `RuntimeContext.callbacks` (`withModule`/`withTool`/…), not off a list hanging
   on each program.

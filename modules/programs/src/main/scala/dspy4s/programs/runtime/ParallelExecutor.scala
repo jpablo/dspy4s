@@ -102,7 +102,7 @@ final class ParallelExecutor(
           case limit: FiniteDuration => completion.poll(limit.toMillis, TimeUnit.MILLISECONDS)
           case _: Duration.Infinite  => completion.take()
         if completedFuture == null then
-          stopped = Some(RuntimeError("parallel_executor", s"Execution timed out after ${timeout.toSeconds} seconds"))
+          stopped = Some(RuntimeError("parallel_executor", s"Execution timed out after $timeout"))
         else
           val (index, outcome) = completedFuture.get()
           completed += 1

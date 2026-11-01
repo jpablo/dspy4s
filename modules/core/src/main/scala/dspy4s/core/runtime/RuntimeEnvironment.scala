@@ -13,6 +13,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeDelta
 import dspy4s.core.contracts.RuntimeScope
 import dspy4s.core.contracts.TraceEntry
+import dspy4s.core.contracts.TraceLimit
 
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
@@ -255,9 +256,22 @@ object RuntimeEnvironment:
   def withCallbacks[A](callbacks: Vector[CallbackHandler])(thunk: => A): A =
     withOverlay(current.withCallbacks(callbacks))(thunk)
 
-  /** Append a trace entry to this thread's overlay; visible to [[current]] for the rest of the enclosing scope. */
-  def appendTrace(entry: TraceEntry): Unit =
-    contextRef.set(localContext.appendTrace(entry))
+  /** Append a trace entry to this thread's overlay; visible to [[current]] for the rest of the enclosing scope. The
+    * `maxTraceSize` cap applies (default 10000, as upstream `settings.max_trace_size`): the oldest entries drop once
+    * the cap is exceeded, and a cap of 0 keeps no entry. Upstream records each predictor call. The port records each
+    * module call, so a cap holds fewer predictor calls than upstream.
+    */
+  def appendTrace(entry: TraceEntry): Unit = appendTraceEntries(Vector(entry))
+
+  /** The `maxTraceSize` cap of `effective` (10000 by default). */
+  private def traceCap(effective: RuntimeContext): Int =
+    effective.maxTraceSize.getOrElse(TraceLimit(10000))
+
+  /** [[appendTrace]] for each of `entries`, in order, with one write of the overlay. */
+  private def appendTraceEntries(entries: Vector[TraceEntry]): Unit =
+    val base = localContext
+    val cap  = traceCap(base.fillFrom(globalRef.get()))
+    if entries.nonEmpty && cap > 0 then contextRef.set(base.withTrace((base.trace ++ entries).takeRight(cap)))
 
   /** Append a history entry, honoring the context's `disableHistory` flag and `maxHistorySize` cap (default 10000;
     * oldest entries drop once the cap is exceeded). No-op when history is disabled or the cap is <= 0.
@@ -301,13 +315,12 @@ object RuntimeEnvironment:
       Executed(result, current.delta)
     }
 
-  /** Replay an explicitly captured delta into the current overlay, in order. This is the caller-controlled join
-    * operation for isolated attempts and [[ContextPropagation.futureExecuted]] workers.
+  /** Replay an explicitly captured delta into the current overlay, in order, with the caps of [[appendTrace]] and
+    * [[appendHistory]]. This is the caller-controlled join operation for isolated attempts and
+    * [[ContextPropagation.futureExecuted]] workers.
     */
   def propagate(delta: RuntimeDelta): Unit =
-    if delta.trace.nonEmpty then
-      val base = localContext
-      contextRef.set(base.withDelta(base.delta.copy(trace = base.trace ++ delta.trace)))
+    appendTraceEntries(delta.trace)
     appendHistoryEntries(delta.history)
 
   /** Render the last `n` LM-call history entries on the active context as a human-readable string, as upstream

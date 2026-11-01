@@ -65,6 +65,23 @@ class RefinePerModuleAdviceSuite extends FunSuite:
         answer   <- ansPred.raw.asString("answer")
       yield Prediction(output = Cand(answer), raw = ansPred.raw)
 
+  /** `HintThenAnswer` where the inner predictors get another `q` than the program, so that a test can tell the input of
+    * the program from the input of its first predictor.
+    */
+  private final case class InnerQuestion(hinter: DynamicPredict, answerer: DynamicPredict)
+      extends Module[Q, Cand]:
+    override val moduleName: String                            = "inner_question"
+    override protected val lifecycle: ModuleLifecycle[Q, Cand] = ModuleLifecycle.typed(call => rec("q" := call.input.q))
+
+    override protected def forward(call: ProgramCall[Q])(using RuntimeContext): Either[DspyError, Prediction[Cand]] =
+      val inner = s"inner ${call.input.q}"
+      for
+        hintPred <- hinter(ProgramCall(input = rec("q" := inner)))
+        hint      = DynamicValues.recordGet(hintPred.output, "hint").map(DynamicValues.renderText).getOrElse("")
+        ansPred  <- answerer(ProgramCall(input = rec("q" := inner, "hint" := hint)))
+        answer   <- ansPred.raw.asString("answer")
+      yield Prediction(output = Cand(answer), raw = ansPred.raw)
+
   /** Generic adapter that tags each prompt with its requested OUTPUT fields (so the LM and the test can route), and
     * records the LAST prompt per tag (so we can inspect what each predictor saw on the final attempt). Parses output
     * field values back out of `LmOutput.metadata`.
@@ -197,4 +214,49 @@ class RefinePerModuleAdviceSuite extends FunSuite:
       RefineFeedback.parseAdvice("just try harder", names),
       Map("hinter" -> "just try harder", "answerer" -> "just try harder")
     )
+  }
+
+  // Upstream `Refine.forward` dumps each value that is not a text as JSON with an indent of 2. Its trajectory has one
+  // entry for each predictor, with the name of `named_predictors`, and `program_inputs` is the input of the program.
+  test("the critic gets the program input, and one named entry for each predictor, as JSON") {
+    val program = InnerQuestion(hinter = predict("q -> hint"), answerer = predict("q, hint -> answer"))
+    val adapter = RecordingAdapter()
+    val refine  = Refine[InnerQuestion, Q, Cand](
+      module = program,
+      n = AttemptCount(2),
+      rewardFn = (_, _) => 0.0,
+      threshold = 1.0
+    )
+
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(TaskAndFeedbackLm()), adapter = Some(adapter))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      assert(refine(ProgramCall(Q("Capital?"))).isRight)
+    }
+
+    val critic = adapter.prompts("discussion,advice")
+    assert(critic.contains("program_inputs: {\n  \"q\": \"Capital?\"\n}"), critic)
+    assert(critic.contains("program_outputs: {\n  \"answer\": \"Wrong\"\n}"), critic)
+    assert(critic.contains("module_names: [\n  \"hinter\",\n  \"answerer\"\n]"), critic)
+    val trajectory = """program_trajectory: [
+        |  {
+        |    "module_name": "hinter",
+        |    "inputs": {
+        |      "q": "inner Capital?"
+        |    },
+        |    "outputs": {
+        |      "hint": "bad"
+        |    }
+        |  },
+        |  {
+        |    "module_name": "answerer",
+        |    "inputs": {
+        |      "q": "inner Capital?",
+        |      "hint": "bad"
+        |    },
+        |    "outputs": {
+        |      "answer": "Wrong"
+        |    }
+        |  }
+        |]""".stripMargin
+    assert(critic.contains(trajectory), critic)
   }

@@ -106,7 +106,8 @@ final case class Refine[P <: Module[I, O], I, O](
         // advice into ITS `hint_`. Auxiliary: a generation failure charges the budget and keeps `best` (handled
         // by `bestOf`). `base` has the call scope of this module, and the next attempt needs that scope.
         val named = optimization.inspectNamed(module)
-        RefineFeedback.generateAdvice(criticPredict, call.input, prediction, trace, score, threshold, named.map(_._1))
+        RefineFeedback
+          .generateAdvice(criticPredict, module.observedInputs(call), prediction, trace, score, threshold, named)
           .map { adviceMap =>
             val byLayout = named.iterator.map { case (name, view) =>
               view.layout -> adviceMap.getOrElse(name, "N/A")

@@ -30,7 +30,7 @@ object Aggregation:
     * Ties are broken by first occurrence.
     *
     *   - `field = None` picks the **last** key in the first row (matches Python's "last output field" default when no
-    *     signature is available).
+    *     signature is available). A first row with no keys is a `Left`.
     *   - `normalize` returns `None` to exclude a row from the count entirely. If every row normalizes to `None`, the
     *     first row wins.
     */
@@ -43,15 +43,16 @@ object Aggregation:
     else
       // "Last key" must skip the synthetic `tool_calls` value PredictEngine appends on native-tool turns —
       // otherwise the default vote runs over tool-call payloads instead of the answer field.
-      val resolvedField = field.getOrElse {
-        val keys = DynamicValues.recordKeys(rows.head)
-        keys.filterNot(_ == ToolCall.ToolCallsKey).lastOption.getOrElse(keys.last)
-      }
-      Traverse
-        .either(rows) { row =>
-          DynamicValues.recordGet(row, resolvedField)
-            .toRight(NotFoundError("completion_field", s"Completion field '$resolvedField' does not exist"))
-            .map(value => normalize(value).map(_ -> row))
+      val keys = DynamicValues.recordKeys(rows.head)
+      field.orElse(keys.filterNot(_ == ToolCall.ToolCallsKey).lastOption.orElse(keys.lastOption))
+        .toRight(ValidationError("Cannot compute majority: the first completion has no fields"))
+        .flatMap { resolvedField =>
+          Traverse
+            .either(rows) { row =>
+              DynamicValues.recordGet(row, resolvedField)
+                .toRight(NotFoundError("completion_field", s"Completion field '$resolvedField' does not exist"))
+                .map(value => normalize(value).map(_ -> row))
+            }
         }
         .flatMap { counted =>
           val votes    = counted.flatten

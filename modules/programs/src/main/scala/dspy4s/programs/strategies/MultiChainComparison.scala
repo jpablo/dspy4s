@@ -1,14 +1,16 @@
 package dspy4s.programs.strategies
 
 import dspy4s.programs.AttemptCount
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ValidationError
-import dspy4s.core.contracts.updated
+import dspy4s.core.contracts.:=
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
@@ -45,7 +47,8 @@ final case class MultiChainInput[I](
   * @param m
   *   positive number of expected attempts (validated against `attempts.length`)
   * @param temperature
-  *   temperature for the comparison call (Python's default 0.7)
+  *   the default temperature of the comparison call (Python's default 0.7). The comparison predict holds it as module
+  *   config, thus a per-call value overrides it (upstream `Predict(signature, temperature=temperature, **config)`).
   */
 final case class MultiChainComparison[I, O](
     baseSignature: Signature[I, O],
@@ -107,7 +110,7 @@ final case class MultiChainComparison[I, O](
     * The optimizers inspect and replace it, thus it is package-private. A public call goes through [[compare]].
     */
   private[programs] val comparePredict: Predict[(I, Attempts), MultiChainComparison.WithRationale[O]] =
-    val base = Predict(signature = compareSignature)
+    val base = Predict(signature = compareSignature, config = DynamicValues.record("temperature" := temperature))
     comparePredictParametersOverride.fold(base)(base.withOptimizableParameters)
 
   override protected val lifecycle: ModuleLifecycle[MultiChainInput[I], Out] = ModuleLifecycle.observed(
@@ -121,20 +124,16 @@ final case class MultiChainComparison[I, O](
       call: ProgramCall[MultiChainInput[I]]
   )(using RuntimeContext): Either[DspyError, Prediction[Out]] =
     val input = call.input
-    attemptInputs
-      .validate(input.attempts.map(formatAttempt))
-      .left.map(_ =>
-        ValidationError(
-          s"Number of attempts (${input.attempts.size}) doesn't match the configured m ($m). Pass exactly $m candidates."
-        )
-      )
-      .flatMap { attempts =>
-        comparePredict(
-          call
-            .mapInput(_ => (input.baseInput, attempts))
-            .copy(config = call.config.updated("temperature", DynamicValues.fromAny(temperature)))
-        )
-      }
+    if input.attempts.sizeIs != attemptFields.size then
+      Left(ValidationError(
+        s"Number of attempts (${input.attempts.size}) doesn't match the configured m ($m). Pass exactly $m candidates."
+      ))
+    else
+      for
+        lines    <- Traverse.either(input.attempts)(formatAttempt)
+        attempts <- attemptInputs.validate(lines)
+        result   <- comparePredict(call.mapInput(_ => (input.baseInput, attempts)))
+      yield result
 
   /** Convenience entry: supply the base input and the candidate completions directly. Mirrors Python's
     * `compare_answers(completions, question=...)`.
@@ -149,22 +148,26 @@ final case class MultiChainComparison[I, O](
 
   /** Renders a single attempt verbatim as Python does (no period after the rationale, matching
     * `multi_chain_comparison.py`): `«I'm trying to {rationale} I'm not sure but my prediction is {answer}»`.
+    *
+    * The rationale is `c.get("rationale", c.get("reasoning"))`: a present `rationale` wins, also when it is empty. The
+    * answer is the value of the last output field of the base signature. A `Left` comes before the model call when an
+    * attempt has no answer, or no rationale and no reasoning (upstream raises `KeyError` and `AttributeError`). A null
+    * rationale is a `Left` too, because upstream calls `.strip()` on it. A null answer is the text `None`, as `str`.
     */
-  private def formatAttempt(attempt: RawPrediction): String =
-    val row       = attempt.values
-    val rationale = firstNonEmpty(row, Seq("rationale", "reasoning"))
-    val answer    = lastOutputName.flatMap(name => DynamicValues.recordGet(row, name))
-      .map(DynamicValues.renderText).getOrElse("")
-    s"«I'm trying to $rationale I'm not sure but my prediction is $answer»"
+  private def formatAttempt(attempt: RawPrediction): Either[DspyError, String] =
+    val row = attempt.values
+    for
+      rationale <- DynamicValues.recordGet(row, MultiChainComparison.rationaleName)
+                     .orElse(DynamicValues.recordGet(row, "reasoning"))
+                     .filterNot(DynamicValues.isNull)
+                     .toRight(ValidationError("An attempt has no rationale and no reasoning value."))
+      answer <- lastOutputName.flatMap(name => DynamicValues.recordGet(row, name))
+                  .toRight(ValidationError(s"An attempt has no value for the output ${lastOutputName.getOrElse("")}."))
+    yield s"«I'm trying to ${firstLine(rationale)} I'm not sure but my prediction is ${firstLine(answer)}»"
 
-  private def firstNonEmpty(row: DynamicValue.Record, keys: Seq[String]): String =
-    keys.iterator
-      .flatMap(k => DynamicValues.recordGet(row, k).map(DynamicValues.renderText))
-      .map(_.trim)
-      .filter(_.nonEmpty)
-      .map(_.linesIterator.next().trim)
-      .nextOption()
-      .getOrElse("")
+  /** Python `str(value).strip().split("\n")[0].strip()`. Only `\n` ends the line. */
+  private def firstLine(value: DynamicValue): String =
+    PythonText.strip(PythonText.strip(PythonText.str(value)).takeWhile(_ != '\n'))
 
 object MultiChainComparison:
   private[programs] val rationaleName: "rationale" = "rationale"

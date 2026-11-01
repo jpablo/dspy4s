@@ -56,7 +56,7 @@ final case class DynamicPredict(
     runtime: ProgramRuntime  = SettingsProgramRuntime.default,
     /** Module-level LM option bag, the analogue of Python's `dspy.Predict(signature, **config)` `self.config`. Merged
       * *under* the per-call `ProgramCall.config` (per-call keys win on collision), so it supplies defaults a call may
-      * override. Empty by default — then the merged options are exactly the per-call config.
+      * override. Empty by default.
       */
     config: DynamicValue.Record = DynamicValue.Record.empty,
     /** Optional per-module bound LM (Python's `set_lm`/`get_lm`). When set, this predictor uses it in preference to the

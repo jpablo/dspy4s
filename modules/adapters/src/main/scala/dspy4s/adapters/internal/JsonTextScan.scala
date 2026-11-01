@@ -26,3 +26,27 @@ private[adapters] final class JsonTextScan:
   def reset(): Unit =
     inString = false
     escaped = false
+
+private[dspy4s] object JsonTextScan:
+
+  /** The text of the first JSON object of `text`: from the first `{` to the `}` that closes it. A brace in a JSON
+    * string does not count. `None` when `text` has no such object. The function does not parse the object.
+    */
+  def firstObject(text: String): Option[String] =
+    val start = text.indexOf('{')
+    if start < 0 then
+      None
+    else
+      val scan  = new JsonTextScan
+      var depth = 0
+      var end   = -1
+      var i     = start
+      while i < text.length && end < 0 do
+        val char = text.charAt(i)
+        if scan.structural(char) then
+          if char == '{' then depth += 1
+          else if char == '}' then
+            depth -= 1
+            if depth == 0 then end = i
+        i += 1
+      Option.when(end >= start)(text.substring(start, end + 1))

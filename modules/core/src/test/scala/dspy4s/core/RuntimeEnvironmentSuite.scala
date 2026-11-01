@@ -9,7 +9,9 @@ import dspy4s.core.contracts.HistoryLimit
 import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.ThreadCount
+import dspy4s.core.contracts.RuntimeDelta
 import dspy4s.core.contracts.TraceEntry
+import dspy4s.core.contracts.TraceLimit
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import munit.FunSuite
@@ -155,6 +157,35 @@ class RuntimeEnvironmentSuite extends FunSuite:
 
     assertEquals(RuntimeEnvironment.current.callStack, Vector.empty)
     assertEquals(RuntimeEnvironment.activeCallId, None)
+  }
+
+  private def traceEntry(name: String): TraceEntry =
+    TraceEntry(name, DynamicValue.Record.empty, DynamicValue.Record.empty)
+
+  // Upstream `Predict._forward_postprocess` drops the oldest entry at `max_trace_size`, and 0 turns the trace off.
+  test("the trace keeps the newest entries within maxTraceSize, in appendTrace and in propagate") {
+    RuntimeEnvironment.withSettings(RuntimeContext(maxTraceSize = Some(TraceLimit(2)))) {
+      Vector("a", "b", "c").foreach(name => RuntimeEnvironment.appendTrace(traceEntry(name)))
+      assertEquals(RuntimeEnvironment.current.trace.map(_.component), Vector("b", "c"))
+      RuntimeEnvironment.propagate(RuntimeDelta(trace = Vector("d", "e", "f").map(traceEntry)))
+      assertEquals(RuntimeEnvironment.current.trace.map(_.component), Vector("e", "f"))
+    }
+  }
+
+  test("maxTraceSize 0 turns off the trace") {
+    RuntimeEnvironment.withSettings(RuntimeContext(maxTraceSize = Some(TraceLimit(0)))) {
+      RuntimeEnvironment.appendTrace(traceEntry("a"))
+      RuntimeEnvironment.propagate(RuntimeDelta(trace = Vector(traceEntry("b"))))
+      assertEquals(RuntimeEnvironment.current.trace, Vector.empty)
+    }
+  }
+
+  test("the default limit of the trace is 10000, as upstream") {
+    RuntimeEnvironment.withSettings(RuntimeContext()) {
+      (0 to 10000).foreach(index => RuntimeEnvironment.appendTrace(traceEntry(index.toString)))
+      assertEquals(RuntimeEnvironment.current.trace.size, 10000)
+      assertEquals(RuntimeEnvironment.current.trace.head.component, "1")
+    }
   }
 
   test("appendHistory honors max history size and disable history settings") {
