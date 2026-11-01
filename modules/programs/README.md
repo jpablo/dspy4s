@@ -69,6 +69,12 @@ the optimizers can find their predictors.
   function calls of the adapters. A tool failure becomes an observation in the trajectory. On a context window
   overflow, ReAct removes the oldest trajectory entry and tries again.
 
+## Save and load a program
+
+`ProgramPersistence` saves the instructions, the demos, and the configuration of each predictor as JSON. To load a
+state, give a new program with the same structure. The program keeps its signatures, LMs, and tools, and gets the
+saved values. The [state contract](../../site/docs/runtime/saving-and-loading.md) gives the rules and the limits.
+
 ## Source layout
 
 | Package | Contents |
@@ -77,7 +83,7 @@ the optimizers can find their predictors.
 | `strategies/` | `Predict`, `DynamicPredict`, and the other programs |
 | `compose/` | the composition operators and `Mode` |
 | `contracts/` | `Module`, `ProgramCall`, `Prediction`, `ModuleLifecycle`, and `ToolFunction` |
-| `optimization/` | `OptimizableStructure`, `OptimizableLeaf`, `OptimizableParameters`, and their instances |
+| `optimization/` | `OptimizableStructure`, `OptimizableLeaf`, `OptimizableParameters`, their instances, and `ProgramPersistence` |
 | `algebra/` | `Program` (a module with a fixed number of predictors) and the `algebra` instances for programs |
 | `runtime/` | `PredictEngine`, the agent loops, `ParallelExecutor`, and `ToolExecutor` |
 | `retrievers/` | `KNN` and `EmbeddingsRetriever` |

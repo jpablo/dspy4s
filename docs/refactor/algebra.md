@@ -289,8 +289,9 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `algebra-2-program-composition.md`).
     `OptimizableStructure.derived` now requires evidence for every product field; deliberately parameter-free field types
     opt in with `OptimizableStructure.empty`, so an omitted learnable subtree can no longer disappear silently.
-    Pinned by `ProgramAlgebraLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is
-    deferred to the CIO phase; see the "Parameterized program algebra" section of the step-6 spec.
+    Pinned by `ProgramAlgebraLawSuite` / `ParaCompileSuite`. The suite calls `new COPRO[Program[I, O, N]](config).compile(...)`
+    directly: the `ParaCompile` helper had no main caller, so it was removed. Adoption of a packaged entry point as the
+    public optimizer API is deferred to the CIO phase; see the "Parameterized program algebra" section of the step-6 spec.
   - **Law-statement adoption** (commits `446ccb6`, `7004627`, `d7ab930`, from jpablo/math-with-scala): laws are
     now stated ON the structures as `@Law` methods returning `IsEq` (`core.algebra.Laws`) and executed by the
     suites under per-law honest observations. Applied to the parameterized structures (`446ccb6`) and retrofitted onto

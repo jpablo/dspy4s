@@ -21,16 +21,12 @@ final class LabeledFewShot[P: OptimizableStructure](
 
   override val name: String = "labeled_few_shot"
 
-  override def compile(
+  override protected[optimize] def compileInScope(
       student : P,
       trainset: Vector[Example],
-      teacher : Option[P]               = None,
-      valset  : Option[Vector[Example]] = None
+      teacher : Option[P],
+      valset  : Option[Vector[Example]]
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    Teleprompter.withCompileCallbacks(this, trainset, valset)(compileInScope(student, trainset))
-
-  /** The work of [[compile]], inside its compile scope. */
-  private def compileInScope(student: P, trainset: Vector[Example]): Either[DspyError, OptimizationReport[P]] =
     val ps = summon[OptimizableStructure[P]]
 
     val demos: Vector[Example] =

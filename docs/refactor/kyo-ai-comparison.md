@@ -106,7 +106,7 @@ Same concept, but a different mechanism:
 
 **dspy4s only:**
 - Optimizers and teleprompters: `BootstrapFewShot` (+ random search), `LabeledFewShot`, `KNNFewShot`,
-  `COPRO`, `MIPROv2`, `InferRules`, `Ensemble`, `ReAnchor`, GEPA (own module), `ParaCompile`.
+  `COPRO`, `MIPROv2`, `InferRules`, `Ensemble`, `ReAnchor`, GEPA (own module).
 - Evaluation, metrics, and LLM-as-judge (`evaluate` module).
 - Few-shot `Example` values and demos; `ProgramPersistence` for compiled programs.
 - A `Signature` / `SignatureLayout` value that programs change (augment, dump, optimize the instructions).

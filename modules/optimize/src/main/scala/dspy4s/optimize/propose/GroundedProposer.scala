@@ -5,16 +5,13 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
-import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SignatureLayout
 import dspy4s.optimize.OptimizerSupport
 import dspy4s.optimize.CandidateCount
 import dspy4s.optimize.DatasetSampleSize
 import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.optimization.OptimizableView
-import dspy4s.programs.contracts.ProgramCall
 
 /** Knobs for [[GroundedProposer]], mirroring the relevant slice of upstream's
   * `dspy.propose.grounded_proposer.GroundedProposer.__init__`.
@@ -125,66 +122,34 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
 
   // ── Dataset summary (the create_dataset_summary analogue) ──────────────────
 
-  /** The dataset-summary signature: `examples -> observations`. `summaryMarker` is set as the signature instructions so
-    * summary prompts are distinguishable from instruction-generation / task prompts.
-    */
-  private def summaryLayout: SignatureLayout =
-    SignatureLayout.of(
-      name = "SummarizeDataset",
-      inputFields = Vector(FieldSpec(name = "examples")),
-      outputFields = Vector(FieldSpec(name = "observations")),
-      instructions = Some(config.summaryMarker)
-    )
-
   /** Bootstrap a dataset-summary observations string from a sample of `trainset` (cached: computed once per
-    * `proposeInstructions` call by the caller). Returns `None` when `useDatasetSummary` is false (and makes no LM
-    * call), or when the trainset is empty.
+    * `proposeInstructions` call by the caller). The signature is `examples -> observations`. `summaryMarker` is set as
+    * the signature instructions so summary prompts are distinguishable from instruction-generation / task prompts.
+    * Returns `None` when `useDatasetSummary` is false (and makes no LM call), or when the trainset is empty.
     */
   private def datasetSummary(trainset: Vector[Example])(using RuntimeContext): Either[DspyError, Option[String]] =
     if !config.useDatasetSummary || trainset.isEmpty then Right(None)
     else
       val sample   = trainset.take(config.datasetSampleSize)
       val rendered = sample.iterator.map(renderExample).mkString("\n\n")
-      val gen      = DynamicPredict(layout = summaryLayout, name = Some("grounded_summary"))
-      val call     = ProgramCall(
-        input = DynamicValues.record("examples" := rendered),
-        config = DynamicValues.record("temperature" := config.initTemperature),
-        rolloutId = Some(OptimizerSupport.seedBase(config.seed))
+      val inputs   = DynamicValues.record("examples" := rendered)
+      val output   = "observations"
+      val gen      = DynamicPredict(
+        layout = OptimizerSupport.generationLayout("SummarizeDataset", inputs, output, config.summaryMarker),
+        name = Some("grounded_summary")
       )
       // The dataset summary is best-effort grounding: a failed summary LM call degrades to "no grounding"
       // (Right(None)) rather than aborting the whole proposeInstructions / MIPROv2 compile.
-      gen(call) match
-        case Right(pred) => Right(
-            DynamicValues.recordGet(pred.output, "observations")
-              .map(DynamicValues.renderText)
-              .map(_.trim)
-              .filter(_.nonEmpty)
-          )
-        case Left(_) => Right(None)
+      OptimizerSupport.generateText(gen, inputs, output, config.initTemperature, OptimizerSupport.seedBase(config.seed))
+        .orElse(Right(None))
 
   // ── Per-leaf instruction generation (GenerateModuleInstruction analogue) ──
 
-  /** The instruction-generation signature. Inputs are gated by config + availability: `dataset_description?`,
-    * `program_description`, `basic_instruction`, `task_demos?`, `tip?` -> `proposed_instruction`. `instructionMarker`
-    * is set as the signature instructions so generation prompts are distinguishable from task prompts.
-    */
-  private def instructionGenLayout(withSummary: Boolean, withDemos: Boolean, withTip: Boolean): SignatureLayout =
-    val inputs = (if withSummary then Vector(FieldSpec(name = "dataset_description")) else Vector.empty) ++
-      Vector(
-        FieldSpec(name = "program_description"),
-        FieldSpec(name = "basic_instruction")
-      ) ++
-      (if withDemos then Vector(FieldSpec(name = "task_demos")) else Vector.empty) ++
-      (if withTip then Vector(FieldSpec(name = "tip")) else Vector.empty)
-    SignatureLayout.of(
-      name = "GenerateModuleInstruction",
-      inputFields = inputs,
-      outputFields = Vector(FieldSpec(name = "proposed_instruction")),
-      instructions = Some(config.instructionMarker)
-    )
-
   /** Generate `config.numInstructions` candidate instructions for one leaf, grounded in the (cached) dataset summary,
-    * the leaf's signature-derived description, the optional demo set, and a rotating tip.
+    * the leaf's signature-derived description, the optional demo set, and a rotating tip. The inputs of the generation
+    * signature are gated by config + availability: `dataset_description?`, `program_description`, `basic_instruction`,
+    * `task_demos?`, `tip?` -> `proposed_instruction`. `instructionMarker` is set as the signature instructions so
+    * generation prompts are distinguishable from task prompts.
     */
   private def proposeForLeaf(
       leaf   : OptimizableView,
@@ -194,9 +159,8 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
   )(using RuntimeContext): Either[DspyError, Vector[String]] =
     val basicInstruction   = leaf.layout.instructions.getOrElse("")
     val programDescription = describeModule(leaf)
-    val withSummary        = summary.isDefined
-    val withDemos          = demoSet.nonEmpty
-    val demosText          = if withDemos then demoSet.iterator.map(renderExample).mkString("\n\n") else ""
+    val demosText          = Option.when(demoSet.nonEmpty)(demoSet.iterator.map(renderExample).mkString("\n\n"))
+    val output             = "proposed_instruction"
 
     // Deterministic, contiguous rolloutId stream per leaf so candidate sampling is reproducible AND each leaf draws a
     // distinct window (so distinct leaves need not collide). A scripted/temperature-driven
@@ -204,32 +168,22 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
     val base = OptimizerSupport.seedBase(config.seed) + (idx + 1) * 64
 
     Traverse.either((0 until config.numInstructions).toVector) { i =>
-      val withTip   = config.useTips
-      val tip       = if withTip then Some(GroundedProposer.tips(i % GroundedProposer.tips.size)) else None
-      val layout    = instructionGenLayout(withSummary, withDemos, withTip)
-      val gen       = DynamicPredict(layout = layout, name = Some("grounded_instruct"))
-      val rolloutId = base + i
-
-      val entries: Vector[(String, zio.blocks.schema.DynamicValue)] =
-        (summary.map(s => "dataset_description" := s).toVector) ++
+      val tip    = Option.when(config.useTips)(GroundedProposer.tips(i % GroundedProposer.tips.size))
+      val inputs = DynamicValues.recordFromEntries(
+        summary.map("dataset_description" := _).toVector ++
           Vector(
             "program_description" := programDescription,
             "basic_instruction"   := basicInstruction
           ) ++
-          (if withDemos then Vector("task_demos" := demosText) else Vector.empty) ++
-          (tip.map(t => "tip" := t).toVector)
-
-      val call = ProgramCall(
-        input = DynamicValues.recordFromEntries(entries),
-        config = DynamicValues.record("temperature" := config.initTemperature),
-        rolloutId = Some(rolloutId)
+          demosText.map("task_demos" := _) ++
+          tip.map("tip" := _)
       )
-      gen(call).map { pred =>
-        DynamicValues.recordGet(pred.output, "proposed_instruction")
-          .map(DynamicValues.renderText)
-          .map(_.trim)
-          .getOrElse("")
-      }
+      val gen = DynamicPredict(
+        layout =
+          OptimizerSupport.generationLayout("GenerateModuleInstruction", inputs, output, config.instructionMarker),
+        name = Some("grounded_instruct")
+      )
+      OptimizerSupport.generateText(gen, inputs, output, config.initTemperature, base + i).map(_.getOrElse(""))
     }
 
   /** The signature-derived module description (the `DescribeModule` analogue): the leaf's module name plus a

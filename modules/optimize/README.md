@@ -27,15 +27,22 @@ Each demo optimizer and each instruction optimizer implements `Teleprompter[P]`:
 ```scala
 trait Teleprompter[P]:
   def name: String
-  def compile(
+  final def compile(
       student: P,
       trainset: Vector[Example],
       teacher: Option[P] = None,
       valset: Option[Vector[Example]] = None
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]]
+  protected[optimize] def compileInScope(
+      student: P,
+      trainset: Vector[Example],
+      teacher: Option[P],
+      valset: Option[Vector[Example]]
+  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]]
 ```
 
-`compile` returns an `OptimizationReport[P]` with the `bestProgram` and each scored `CandidateProgram[P]`. An
+An optimizer implements `compileInScope`. `compile` runs it in a compile scope. `compile` returns an
+`OptimizationReport[P]` with the `bestProgram` and each scored `CandidateProgram[P]`. An
 optimizer that scores candidates uses the `valset`, else the trainset. With no `valset`, `InferRules` uses the second
 half of the trainset.
 
@@ -68,20 +75,13 @@ instructions for each predictor from a summary of the trainset, the demos, and a
 trials. Each trial selects a demo set and one instruction for each predictor at random. MIPROv2 returns the candidate
 with the best score.
 
-## Save and load a program
-
-`ProgramPersistence` saves the instructions, the demos, and the configuration of each predictor as JSON. To load a
-state, give a new program with the same structure. The program keeps its signatures, LMs, and tools, and gets the
-saved values. The [state contract](../../site/docs/runtime/saving-and-loading.md) gives the rules and the limits.
-
 ## Source layout
 
 | Package | Contents |
 |---------|----------|
-| `optimize/` | the optimizers, `OptimizerSupport`, the count types such as `DemoCount`, and `ProgramPersistence` |
+| `optimize/` | the optimizers, `OptimizerSupport`, and the count types such as `DemoCount` |
 | `contracts/` | `Teleprompter`, `OptimizationReport`, and `CandidateProgram` |
 | `propose/` | `GroundedProposer` |
-| `para/` | `ParaCompile`, which runs `COPRO` on a `Program[I, O, N]` |
 
 ## Relation to dspy
 

@@ -9,6 +9,7 @@ import dspy4s.core.contracts.{
   RuntimeContext,
   RuntimeError,
   SignatureLayout,
+  ThreadCount,
   TraceEntry,
   TypeRef,
   ValidationError
@@ -113,7 +114,7 @@ class ReAnchorSuite extends FunSuite:
       trainset: Vector[Example],
       metric  : Metric,
       model   : LanguageModel,
-      config  : ReAnchorConfig = ReAnchorConfig(numThreads = 2)
+      config  : ReAnchorConfig = ReAnchorConfig(numThreads = ThreadCount(2))
   ): (DynamicPredict, ReAnchorReport) =
     RuntimeEnvironment.withSettings(context(model)) {
       ReAnchor[DynamicPredict](metric, config).calibrate(program, trainset)(using RuntimeEnvironment.current)
@@ -239,7 +240,7 @@ class ReAnchorSuite extends FunSuite:
     assertEquals(program.decisions.get("match").flatMap(_.threshold), Some(0.99))
     assertEquals(
       report.fitted.map(_.observed),
-      Vector(Map("calls" -> 8.0, "distinct" -> 2.0, "min" -> 0.98, "max" -> 1.0, "candidates" -> 2.0))
+      Vector(ReAnchorRow.Observed(calls = 8, distinct = Some(2), min = Some(0.98), max = Some(1.0), candidates = 2))
     )
   }
 
@@ -262,11 +263,11 @@ class ReAnchorSuite extends FunSuite:
     val (lone, loneTrain)    = loneOutlier(1)
     val (stayed, stayReport) = calibrate(DynamicPredict(matchLayout), loneTrain, equalOn("match"), lone)
     assertEquals(stayed.decisions, Map.empty[String, DecisionSettings])
-    assertEquals(stayReport.fitted.map(_.foldCheck), Vector((0, 1)))
+    assertEquals(stayReport.fitted.map(_.foldCheck), Vector(ReAnchorRow.FoldCheck(0, 1)))
     val (many, manyTrain)   = loneOutlier(6)
     val (moved, moveReport) = calibrate(DynamicPredict(matchLayout), manyTrain, equalOn("match"), many)
     assertEquals(moved.decisions.get("match").flatMap(_.threshold), Some(0.2))
-    assertEquals(moveReport.fitted.map(_.foldCheck), Vector((1, 0)))
+    assertEquals(moveReport.fitted.map(_.foldCheck), Vector(ReAnchorRow.FoldCheck(1, 0)))
   }
 
   // ── compile ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -280,7 +281,7 @@ class ReAnchorSuite extends FunSuite:
 
   test("compile fits the threshold, reports the training scores, and puts the report in the result") {
     val result = RuntimeEnvironment.withSettings(context(FakeSystemOne(tricky))) {
-      ReAnchor[DynamicPredict](equalOn("match"), ReAnchorConfig(numThreads = 2))
+      ReAnchor[DynamicPredict](equalOn("match"), ReAnchorConfig(numThreads = ThreadCount(2)))
         .compile(DynamicPredict(matchLayout), trickyTrain)(using RuntimeEnvironment.current)
     }.fold(error => fail(error.message), identity)
     assertEquals(result.bestProgram.decisions.get("match").flatMap(_.threshold), Some(0.8))
@@ -314,7 +315,7 @@ class ReAnchorSuite extends FunSuite:
   test("the validation set is scored before and after, and the log folder holds report.json") {
     val folder = Files.createTempDirectory("reanchor")
     val result = RuntimeEnvironment.withSettings(context(FakeSystemOne(tricky))) {
-      ReAnchor[DynamicPredict](equalOn("match"), ReAnchorConfig(numThreads = 2, logDir = Some(folder)))
+      ReAnchor[DynamicPredict](equalOn("match"), ReAnchorConfig(numThreads = ThreadCount(2), logDir = Some(folder)))
         .calibrate(DynamicPredict(matchLayout), trickyTrain, valset = Some(trickyTrain.take(10)))(using
           RuntimeEnvironment.current
         )

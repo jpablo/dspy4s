@@ -431,24 +431,31 @@ Simplify 7 (rank 2). Code-review 6 (rank 5). 2954 main lines, 4945 test lines.
 
 ### Passes
 
-- (a) The bootstrap optimizers and the shared files, about 1030 lines: `BootstrapFewShot.scala`, `BootstrapFewShotWithRandomSearch.scala`, `LabeledFewShot.scala`, `KNNFewShot.scala`, `Ensemble.scala`, `DemoCount.scala`, `OptimizerSupport.scala`, `OptimizerLimits.scala`, `contracts/`, `para/`.
-  - [ ] /simplify
+- (a) The bootstrap optimizers and the shared files, about 1030 lines: `BootstrapFewShot.scala`, `BootstrapFewShotWithRandomSearch.scala`, `LabeledFewShot.scala`, `KNNFewShot.scala`, `Ensemble.scala`, `DemoCount.scala`, `OptimizerSupport.scala`, `OptimizerLimits.scala`, `contracts/`.
+  - [x] /simplify
   - [ ] /code-review
 - (b) The instruction optimizers, about 1000 lines: `COPRO.scala`, `MIPROv2.scala`, `propose/GroundedProposer.scala`, `InferRules.scala`.
-  - [ ] /simplify
+  - [x] /simplify
   - [ ] /code-review
-- (c) ReAnchor and the persistence, about 930 lines: `ReAnchor.scala`, `ReAnchorSearch.scala`, `ProgramPersistence.scala`.
-  - [ ] /simplify
+- (c) ReAnchor, about 800 lines: `ReAnchor.scala`, `ReAnchorSearch.scala`. ProgramPersistence moved to programs `optimization/` in the simplify pass.
+  - [x] /simplify
   - [ ] /code-review
 
 ### Simplify findings
 
-- [ ] Private copies of core helpers: `ReAnchor.scala:144` (`record`, the same as `DynamicValues.recordFromEntries`) and `ReAnchor.scala:151` (`text`, the same as `DynamicValues.string`). (found in the lm pass)
-- [ ] `BootstrapFewShotWithRandomSearch.scala:56-198` uses `return`, `var`, `boundary/break`, and mutable buffers. The `BootstrapFewShotConfig` at `:86` and `:111` is written two times, and only the seed is different.
+- [x] Private copies of core helpers in `ReAnchor.scala` (`record`, `text`, a sequence builder). Fixed: the core helpers.
+- [x] `BootstrapFewShotWithRandomSearch.scala` used `return`, `var`, `boundary/break`, and mutable buffers, and wrote `BootstrapFewShotConfig` two times. Fixed: a lazy sequence of candidates, which stops at the stop score, so an early stop makes no more bootstrap runs, as upstream.
 - [x] The same Either `traverse` helper in ReAnchor, GroundedProposer, and adapters StrictJsonSchema. Fixed in the core group (d) pass: `Traverse.either` in core.
-- [ ] `COPRO.scala:213`, `propose/GroundedProposer.scala:188`, and `InferRules.scala:158` repeat one pattern: a DynamicPredict call loop with a rolloutId window, a temperature bag, and `recordGet`/`renderText`/`trim`. The window offsets (64, 100, 10000) are magic numbers.
-- [ ] `var` and `ArrayBuffer` accumulation where a fold fits: `MIPROv2.scala:202-223`, `COPRO.scala:111-117`, `InferRules.scala:124-138`.
-- [ ] `ReAnchor.scala:97-144` builds the report JSON by hand, not with a derived Schema. `Ensemble.scala:77` keeps a mutable `Random` in a module instance.
+- [x] `COPRO.scala`, `propose/GroundedProposer.scala`, and `InferRules.scala` repeated one generation call and the field gating. Fixed: `OptimizerSupport.generateText` and `generationLayout`. The rollout id windows are in the code review.
+- [x] `var` and `ArrayBuffer` accumulation in `MIPROv2.scala`, `COPRO.scala`, and `InferRules.scala`. Fixed: folds.
+- [x] `ReAnchor.scala` built the report JSON by hand. Fixed: `ReAnchorRow.Observed`, `ReAnchorRow.FoldCheck`, and a derived codec; `report.json` stayed byte-equal. `Ensemble.scala` keeps its `Random` in a plain class, not a case class.
+- [x] (simplify) `Teleprompter` has one `final def compile` over `compileInScope`, in place of six copies. para/ParaCompile.scala (removed) had no main caller. `CandidateProgram.evaluation` had no reader. `ReAnchorSearch.scala` `fsum` is an exact `BigDecimal` sum.
+- [x] (simplify) ProgramPersistence moved to `optimization/ProgramPersistence.scala` in programs, because it uses nothing from optimize (upstream `dspy/primitives/base_module.py`).
+- [ ] (simplify, design) `OptimizationReport` is not typed: `best_score` is a key in a `Map[String, Any]`, and LabeledFewShot and BootstrapFewShot report a score of 0.0 that nothing measured. A `score: Option[Double]` and a `bestScore` field fix both.
+- [ ] (simplify, design) ProgramPersistence keys the leaves by position, so a reorder of leaves with the same size loads with no error. Upstream keys by name. Store the signature structure of each leaf, and reject a mismatch.
+- [ ] (simplify, design) `MIPROv2.scala` scores each trial on the full set, a documented difference: about 11n runs against the 350 + 3n of upstream for its defaults. A minibatch of 35 and a full evaluation every 5 trials follow upstream, but trial scores get more noise.
+- [ ] (simplify, skipped) `KNNFewShot.scala` bootstraps the neighbors on each call, and `InferRules.scala` drops one example at a time on an overflow. Both are as upstream. A memo of each neighbor and a bisection save calls, but change the demos or the failure events.
+- [ ] (evaluate pass) `ParallelExecutor.scala` gives a generic `Left` at the error limit, and nothing logs the cause of a failed task, where upstream logs each one. `Evaluate.scala` keeps errors only with `provideTraceback`.
 
 ### Code-review findings
 

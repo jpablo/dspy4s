@@ -17,9 +17,6 @@ import dspy4s.optimize.contracts.Teleprompter
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.optimization.OptimizableView
 import dspy4s.programs.optimization.OptimizableStructure
-import dspy4s.programs.contracts.ProgramCall
-
-import scala.collection.mutable
 
 /** Knobs for [[InferRules]], mirroring upstream's `InferRules(num_candidates, num_rules, metric, ...)`.
   *
@@ -77,16 +74,7 @@ final class InferRules[P: {OptimizableStructure, ProgramRunner}](config: InferRu
   private val ps: OptimizableStructure[P] = summon[OptimizableStructure[P]]
   private val runner: ProgramRunner[P]    = summon[ProgramRunner[P]]
 
-  override def compile(
-      student : P,
-      trainset: Vector[Example],
-      teacher : Option[P]               = None,
-      valset  : Option[Vector[Example]] = None
-  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    Teleprompter.withCompileCallbacks(this, trainset, valset)(compileInScope(student, trainset, teacher, valset))
-
-  /** The work of [[compile]], inside its compile scope. */
-  private def compileInScope(
+  override protected[optimize] def compileInScope(
       student : P,
       trainset: Vector[Example],
       teacher : Option[P],
@@ -112,7 +100,7 @@ final class InferRules[P: {OptimizableStructure, ProgramRunner}](config: InferRu
       // Upstream `InferRules` is a subclass of `BootstrapFewShot` and calls `super().compile`, which opens no compile
       // scope inside the `InferRules` scope. Thus the bootstrap runs with no compile scope of its own.
       val bootstrapped = OptimizerSupport.requireDistinctKeys(student, teacher).flatMap { _ =>
-        new BootstrapFewShot[P](bootstrapConfig).compileInScope(student, effTrain, teacher)
+        new BootstrapFewShot[P](bootstrapConfig).compileInScope(student, effTrain, teacher, valset = None)
       }
       bootstrapped.map { bootstrapReport =>
         val base = bootstrapReport.bestProgram
@@ -120,11 +108,8 @@ final class InferRules[P: {OptimizableStructure, ProgramRunner}](config: InferRu
         // 3) Snapshot each leaf's original instruction (rules are appended to THIS, not cumulatively).
         val originalInstructions = ps.read(base).map(_.instructions.getOrElse(""))
 
-        // 4) Generate + score `numCandidates` rule-augmented candidates.
-        val candidates                = mutable.ArrayBuffer.empty[CandidateProgram[P]]
-        var best: Option[(P, Double)] = None
-
-        (0 until config.numCandidates).foreach { candIdx =>
+        // 4) Generate + score `numCandidates` rule-augmented candidates. An evaluation that fails gives no candidate.
+        val candidates = (0 until config.numCandidates).toVector.flatMap { candIdx =>
           val candidate = ps.read(base).indices.foldLeft(base) { (prog, leafIdx) =>
             induceRules(ps.inspect(base)(leafIdx), effTrain, candIdx, leafIdx) match
               case Some(rules) =>
@@ -133,20 +118,18 @@ final class InferRules[P: {OptimizableStructure, ProgramRunner}](config: InferRu
                 OptimizerSupport.applyInstruction(prog, leafIdx, augmented)
               case None => prog // induction failed for this leaf; leave its instruction unchanged
           }
-          OptimizerSupport.evalScore(candidate, effVal, config.metric, runner).foreach { score =>
-            candidates += CandidateProgram(candidate, score, metadata = Map("candidate" -> candIdx))
-            if best.forall(score > _._2) then best = Some((candidate, score))
-          }
+          OptimizerSupport.evalScore(candidate, effVal, config.metric, runner)
+            .map(score => CandidateProgram(candidate, score, metadata = Map("candidate" -> candIdx)))
         }
 
-        val bestProgram = best.map(_._1).getOrElse(base)
+        val best = candidates.reduceLeftOption((best, next) => if next.score > best.score then next else best)
         OptimizationReport(
-          bestProgram = bestProgram,
-          candidates = candidates.toVector.sortBy(-_.score),
+          bestProgram = best.fold(base)(_.program),
+          candidates = candidates.sortBy(-_.score),
           metadata = Map(
             "optimizer"          -> name,
             "num_candidates"     -> candidates.size,
-            "best_score"         -> best.map(_._2).getOrElse(0.0),
+            "best_score"         -> best.fold(0.0)(_.score),
             "optimizable_leaves" -> ps.read(base).size
           )
         )
@@ -166,15 +149,9 @@ final class InferRules[P: {OptimizableStructure, ProgramRunner}](config: InferRu
     def attempt(demos: Vector[Example]): Option[String] =
       if demos.isEmpty then None
       else
-        val call = ProgramCall(
-          input = DynamicValues.record("examples_text" := formatExamples(demos, leaf)),
-          config = DynamicValues.record("temperature" := config.initTemperature),
-          rolloutId = Some(rolloutId)
-        )
-        gen(call) match
-          case Right(pred) =>
-            DynamicValues.recordGet(pred.output, "natural_language_rules").map(DynamicValues.renderText).map(_.trim)
-              .filter(_.nonEmpty)
+        val inputs = DynamicValues.record("examples_text" := formatExamples(demos, leaf))
+        OptimizerSupport.generateText(gen, inputs, "natural_language_rules", config.initTemperature, rolloutId) match
+          case Right(rules)                                          => rules
           case Left(_: ContextWindowExceededError) if demos.size > 1 => attempt(demos.dropRight(1))
           case Left(_)                                               => None
 

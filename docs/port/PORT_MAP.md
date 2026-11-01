@@ -128,7 +128,7 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
 ### Persistence & per-module bindings
 
 - **Program `save`/`load` + `dumpState`/`loadState`.** ✅ ported (commit `9c5a6db`) via `ProgramPersistence`
-  (`modules/optimize/.../ProgramPersistence.scala`), built on `OptimizableStructure`. JSON state of
+  (`modules/programs/.../optimization/ProgramPersistence.scala`), built on `OptimizableStructure`. JSON state of
   `{ "optimizableParameters": { "optimizable-0": <OptimizableParameters>, ... } }`; ordinal IDs are validated on load.
   Instructions/demos/config round-trip; metadata and execution resources stay on the fresh target. Ordinals do not
   detect an equal-size reorder, and the former layout-bearing state format is unsupported. See PORT_GAPS G-4.

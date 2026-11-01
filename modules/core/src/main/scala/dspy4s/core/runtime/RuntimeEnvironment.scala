@@ -4,6 +4,7 @@ import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.HistoryLimit
@@ -177,13 +178,21 @@ object RuntimeEnvironment:
   /** The options and the rollout id of the extent that runs on this thread, or `None` when no extent sets them. */
   def activeLmDefaults: Option[LmDefaults] = current.scope.lmDefaults
 
-  /** Run `thunk` with `defaults` as the options and the rollout id of the language-model calls, then restore the
-    * previous values (the analog of upstream `lm.copy(...)` with `mod.set_lm(...)`). The change is on the overlay of
-    * this thread, because [[withInstalled]] keeps the scope of this thread and does not read the scope of the given
-    * context. Like [[withActiveCall]], this keeps the trace and the history that `thunk` accumulates.
+  /** Run `thunk` with `defaults` merged into the options and the rollout id of the language-model calls, then restore
+    * the previous values (the analog of upstream `lm.copy(...)` with `mod.set_lm(...)`, and `lm.copy` keeps the kwargs
+    * of its LM). The options of `defaults` win over the enclosing options, and each other enclosing option stays. The
+    * rollout id of `defaults` wins, else the enclosing rollout id stays. The change is on the overlay of this thread,
+    * because [[withInstalled]] keeps the scope of this thread and does not read the scope of the given context. Like
+    * [[withActiveCall]], this keeps the trace and the history that `thunk` accumulates.
     */
   def withLmDefaults[A](defaults: LmDefaults)(thunk: => A): A =
-    withScopeChange(_.copy(lmDefaults = Some(defaults)))((after, before) => after.copy(lmDefaults = before.lmDefaults))(
+    val merged = activeLmDefaults.fold(defaults)(enclosing =>
+      LmDefaults(
+        options = DynamicValues.mergeRecords(enclosing.options, defaults.options),
+        rolloutId = defaults.rolloutId.orElse(enclosing.rolloutId)
+      )
+    )
+    withScopeChange(_.copy(lmDefaults = Some(merged)))((after, before) => after.copy(lmDefaults = before.lmDefaults))(
       thunk
     )
 

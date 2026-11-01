@@ -226,11 +226,23 @@ class RuntimeEnvironmentSuite extends FunSuite:
         assertEquals(RuntimeEnvironment.activeLmDefaults, Some(outer))
       }
       RuntimeEnvironment.withLmDefaults(inner) {
-        assertEquals(RuntimeEnvironment.activeLmDefaults, Some(inner))
+        assertEquals(RuntimeEnvironment.activeLmDefaults, Some(LmDefaults(outer.options, Some(4))))
       }
       assertEquals(RuntimeEnvironment.activeLmDefaults, Some(outer))
     }
     assertEquals(RuntimeEnvironment.activeLmDefaults, None)
+  }
+
+  test("withLmDefaults merges with the enclosing defaults, as lm.copy keeps the kwargs of its LM") {
+    val outer = LmDefaults(DynamicValues.record("temperature" := 1.0, "max_tokens" := 8), Some(3))
+    RuntimeEnvironment.withLmDefaults(outer) {
+      RuntimeEnvironment.withLmDefaults(LmDefaults(DynamicValues.record("temperature" := 0.5, "top_p" := 0.9))) {
+        assertEquals(
+          RuntimeEnvironment.activeLmDefaults,
+          Some(LmDefaults(DynamicValues.record("temperature" := 0.5, "max_tokens" := 8, "top_p" := 0.9), Some(3)))
+        )
+      }
+    }
   }
 
   test("the interpreter factory is a service: a scope fills it from the defaults, and copy keeps it") {

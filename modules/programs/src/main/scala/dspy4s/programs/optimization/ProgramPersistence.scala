@@ -1,15 +1,11 @@
-package dspy4s.optimize
+package dspy4s.programs.optimization
 
-import dspy4s.programs.optimization.OptimizableStructure
-import dspy4s.programs.optimization.OptimizableId
-import dspy4s.programs.optimization.OptimizableParameters
-
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.ValidationError
-import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, Schema}
+import zio.blocks.schema.DynamicValue
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -32,38 +28,31 @@ import java.nio.file.Paths
   */
 object ProgramPersistence:
 
-  /** The JSON codec for the `DynamicValue` state. */
-  private lazy val dynamicJsonCodec = Schema.dynamic.jsonCodec
-
   /** Serialize a program's optimizable parameters to
     * `{ "optimizableParameters": { "optimizable-0": <OptimizableParameters>, ... } }`. [[OptimizableId]] keys make
     * loading independent of JSON object order and detect missing/unknown ordinals.
     */
   def dumpState[P](program: P)(using structure: OptimizableStructure[P]): DynamicValue.Record =
-    val parameters: Seq[(String, DynamicValue)] = structure.readIdentified(program).map { identified =>
-      identified.id.render -> (identified.parameters.dumpState: DynamicValue)
-    }
-    DynamicValue.Record(Chunk.from(Seq(
-      "optimizableParameters" -> DynamicValue.Record(Chunk.from(parameters))
-    )))
+    DynamicValues.record(
+      "optimizableParameters" -> DynamicValues.recordFromEntries(
+        structure.readIdentified(program).map(identified => identified.id.render -> identified.parameters.dumpState)
+      )
+    )
 
   private def decodeParameters(raw: DynamicValue, at: String): Either[DspyError, OptimizableParameters] =
-    raw match
-      case rec: DynamicValue.Record => OptimizableParameters.fromState(rec)
-      case _                        => Left(ValidationError(s"Program state optimizable '$at' must be a record"))
+    DynamicValues.asRecord(raw)
+      .toRight(ValidationError(s"Program state optimizable '$at' must be a record"))
+      .flatMap(OptimizableParameters.fromState)
 
   private def loadById[P](program: P, record: DynamicValue.Record)(using
       structure: OptimizableStructure[P]
   ): Either[DspyError, P] =
     val expectedIds = structure.readIdentified(program).map(_.id)
-    val parsed      = record.fields.toVector.foldLeft[Either[DspyError, Vector[(OptimizableId, OptimizableParameters)]]](
-      Right(Vector.empty)
-    ) { case (acc, (rawId, rawParameters)) =>
+    val parsed      = Traverse.either(record.fields) { (rawId, rawParameters) =>
       for
-        entries    <- acc
         id         <- OptimizableId.parse(rawId).left.map(ValidationError(_))
         parameters <- decodeParameters(rawParameters, rawId)
-      yield entries :+ (id -> parameters)
+      yield id -> parameters
     }
 
     parsed.flatMap { entries =>
@@ -90,28 +79,31 @@ object ProgramPersistence:
   def loadState[P](program: P, state: DynamicValue.Record)(using
       structure: OptimizableStructure[P]
   ): Either[DspyError, P] =
-    DynamicValues.recordGet(state, "optimizableParameters") match
-      case Some(record: DynamicValue.Record) => loadById(program, record)
-      case Some(_)                           => Left(ValidationError("Program state 'optimizableParameters' must be an id-keyed record"))
-      case None                              => Left(ValidationError("Program state is missing 'optimizableParameters'"))
+    DynamicValues.recordGet(state, "optimizableParameters")
+      .toRight(ValidationError("Program state is missing 'optimizableParameters'"))
+      .flatMap(parameters =>
+        DynamicValues.asRecord(parameters)
+          .toRight(ValidationError("Program state 'optimizableParameters' must be an id-keyed record"))
+      )
+      .flatMap(loadById(program, _))
 
   /** Serialize a program's state to a clean JSON string (via the `DynamicValue` JSON codec). Round-trips with
     * [[loadJson]].
     */
   def dumpJson[P](program: P)(using OptimizableStructure[P]): String =
-    new String(dynamicJsonCodec.encode(dumpState(program)), StandardCharsets.UTF_8)
+    DynamicValues.encodeJson(dumpState(program))
 
   /** Rebuild a program from the JSON string produced by [[dumpJson]]. */
   def loadJson[P](program: P, json: String)(using OptimizableStructure[P]): Either[DspyError, P] =
-    dynamicJsonCodec.decode(json.getBytes(StandardCharsets.UTF_8)) match
+    DynamicValues.tryDecodeJson(json) match
       case Right(rec: DynamicValue.Record) => loadState(program, rec)
       case Right(other)                    => Left(ValidationError(s"Expected a JSON object for program state, got: $other"))
-      case Left(err)                       => Left(ValidationError(s"Invalid program-state JSON: ${err.toString}"))
+      case Left(err)                       => Left(ValidationError(s"Invalid program-state JSON: $err"))
 
   /** Write a program's state JSON to `path`. IO failures are wrapped into a [[RuntimeError]]. */
   def save[P](program: P, path: String)(using OptimizableStructure[P]): Either[DspyError, Unit] =
     try
-      Files.write(Paths.get(path), dumpJson(program).getBytes(StandardCharsets.UTF_8))
+      val _ = Files.writeString(Paths.get(path), dumpJson(program))
       Right(())
     catch
       case error: Throwable => Left(RuntimeError("program_save", DspyError.messageOf(error)))

@@ -20,8 +20,8 @@ The modules, in dependency order:
 | signatures | `dspy4s-signatures` | `Signature`, `Spec`, `InputField`, `OutputField`. |
 | lm | `dspy4s-lm` | `LanguageModel`, `OpenAiLanguageModel`, caching, usage. |
 | adapters | `dspy4s-adapters` | `ChatAdapter`, `JSONAdapter`. |
-| programs | `dspy4s-programs` | `Predict`, `ChainOfThought`, `ReAct`, `BestOfN`, `Refine`. |
+| programs | `dspy4s-programs` | `Predict`, `ChainOfThought`, `ReAct`, `BestOfN`, `Refine`, `ProgramPersistence`. |
 | evaluate | `dspy4s-evaluate` | `Evaluate`, `Metric`, `FunctionMetric`, `SemanticF1`. |
-| optimize | `dspy4s-optimize` | `BootstrapFewShot`, `COPRO`, `MIPROv2`, `ProgramPersistence`. |
+| optimize | `dspy4s-optimize` | `BootstrapFewShot`, `COPRO`, `MIPROv2`. |
 | gepa | `dspy4s-gepa` | `GEPA`. |
 | streaming | `dspy4s-streaming` | `Streamify`, `StreamListener`, `StreamEvent`. |

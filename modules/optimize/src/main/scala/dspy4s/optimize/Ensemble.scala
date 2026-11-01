@@ -1,5 +1,6 @@
 package dspy4s.optimize
 
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -44,14 +45,12 @@ final case class Ensemble(
     seed    : Long                                                            = 0L
 ):
 
-  val name: String = "ensemble"
-
   /** Build the ensembled program over the given members. The call is a compile scope (upstream
     * `_with_compile_callbacks`) with the input `programs_size`, because an ensemble has no trainset. The output of the
     * scope is the ensembled program.
     */
   def compile(programs: Vector[DynamicModule]): DynamicModule =
-    val ensembled: DynamicModule = Ensemble.EnsembledProgram(programs, reduceFn, size, seed)
+    val ensembled: DynamicModule = new Ensemble.EnsembledProgram(programs, reduceFn, size, seed)
     val inputs                   = DynamicValues.record("programs_size" := programs.size)
     CallbackDispatcher
       .withCompile(this, getClass.getSimpleName, inputs)(Right(ensembled): Either[DspyError, DynamicModule])
@@ -63,7 +62,7 @@ object Ensemble:
   val majorityVote: Vector[DynamicValue.Record] => Either[DspyError, RawPrediction] = rows => Aggregation.majority(rows)
 
   /** The compiled ensemble: a [[DynamicModule]] that runs the (optionally sampled) members and reduces. */
-  private final case class EnsembledProgram(
+  private final class EnsembledProgram(
       programs: Vector[DynamicModule],
       reduceFn: Vector[DynamicValue.Record] => Either[DspyError, RawPrediction],
       size    : Option[EnsembleSize],
@@ -86,12 +85,4 @@ object Ensemble:
         case None => programs
 
       if selected.isEmpty then Left(ValidationError("Ensemble has no programs to run"))
-      else
-        selected
-          .foldLeft[Either[DspyError, Vector[DynamicValue.Record]]](Right(Vector.empty)) { (acc, program) =>
-            for
-              soFar      <- acc
-              prediction <- program(input)
-            yield soFar :+ prediction.output
-          }
-          .flatMap(reduceFn)
+      else Traverse.either(selected)(program => program(input).map(_.output)).flatMap(reduceFn)

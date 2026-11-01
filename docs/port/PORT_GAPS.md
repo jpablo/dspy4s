@@ -221,7 +221,7 @@ New primitives:
   (`modules/programs/.../OptimizableParameters.scala`) —
   `{ "instructions": <string|null>, "demos": [<Example state>..], "config": <record> }`.
   This is the complete writable state for `DynamicPredict`, `Predict`, and `ChainOfThought`.
-- `ProgramPersistence` (`modules/optimize/.../ProgramPersistence.scala`) —
+- `ProgramPersistence` (`modules/programs/.../optimization/ProgramPersistence.scala`) —
   `dumpState` / `loadState` / `dumpJson` / `loadJson` / `save` / `load`, all
   `OptimizableStructure`-based: `{ "optimizableParameters": { "optimizable-0": <OptimizableParameters>, ... } }`.
   Ordinal IDs are validated on load. JSON via

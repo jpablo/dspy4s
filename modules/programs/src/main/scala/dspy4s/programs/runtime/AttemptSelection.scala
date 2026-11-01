@@ -14,7 +14,6 @@ import dspy4s.programs.FailureCount
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.Prediction
 import dspy4s.programs.contracts.ProgramCall
-import zio.blocks.schema.DynamicValue
 
 import scala.util.control.NonFatal
 
@@ -134,7 +133,8 @@ object AttemptSelection:
     *
     * The first rollout id is the rollout id of `call`, else the rollout id of the enclosing `LmDefaults`, else 0
     * (upstream `lm.kwargs.get("rollout_id", 0)`). Thus a nested attempt starts at the rollout id of the outer attempt.
-    * The attempt runs with no rollout id on the call, because a per-call rollout id wins over the scope.
+    * The attempt runs with no rollout id on the call, because a per-call rollout id wins over the scope. Each other
+    * option of the enclosing `LmDefaults` stays ([[RuntimeEnvironment.withLmDefaults]]).
     *
     * `rewardFn` scores an attempt, and a thrown exception is a reward failure ([[guardedReward]]). `label` names the
     * loop in the errors.
@@ -149,13 +149,9 @@ object AttemptSelection:
       label    : String,
       feedback : Option[Feedback[Prediction[O]]] = None
   ): Either[DspyError, Prediction[O]] =
-    val enclosing    = RuntimeEnvironment.activeLmDefaults
-    val rolloutStart = call.rolloutId.orElse(enclosing.flatMap(_.rolloutId)).getOrElse(0)
-    val options      = DynamicValues.mergeRecords(
-      enclosing.fold(DynamicValue.Record.empty)(_.options),
-      DynamicValues.record("temperature" := 1.0d)
-    )
-    val attemptCall = call.copy(rolloutId = None)
+    val rolloutStart = call.rolloutId.orElse(RuntimeEnvironment.activeLmDefaults.flatMap(_.rolloutId)).getOrElse(0)
+    val options      = DynamicValues.record("temperature" := 1.0d)
+    val attemptCall  = call.copy(rolloutId = None)
     bestOf[Prediction[O]](n, threshold, failCount, label)(
       runAttempt = idx =>
         RuntimeEnvironment.withLmDefaults(LmDefaults(options, Some(rolloutStart + idx)))(module(attemptCall)),

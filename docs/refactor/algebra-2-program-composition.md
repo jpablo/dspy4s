@@ -266,7 +266,7 @@ decoding is type-indexed at the record boundary, and the coherence law is not di
 unrepresentable. Record-running is uniform over exact `Program[I, O, N]` values and the existential
 `SomeProgram[I, O]`, while optimization deliberately retains the grade `N`. An upcast to `SomeProgram[I, O]`
 therefore remains runnable but erases the parameter shape required by `OptimizableStructure`; shape-preserving composed pipelines
-still optimize end-to-end, and `.copro` preserves their arity in its report type. Pinned by
+still optimize end-to-end, and `new COPRO[Program[I, O, N]]` preserves their arity in its report type. Pinned by
 `ProgramAlgebraLawSuite` (boundary decoding + the unrepresentability gates) and `ParaCompileSuite`
 (erasure boundary + composed-pipeline + bundle optimization).
 

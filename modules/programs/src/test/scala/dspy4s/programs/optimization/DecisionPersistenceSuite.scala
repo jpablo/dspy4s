@@ -1,8 +1,7 @@
-package dspy4s.optimize
+package dspy4s.programs.optimization
 
 import dspy4s.core.contracts.{:=, DynamicValues}
 import dspy4s.core.decisions.{Choice, DecisionSettings, Noul}
-import dspy4s.programs.optimization.{OptimizableStructure, optimizableParameters}
 import dspy4s.programs.strategies.Predict
 import dspy4s.signatures.Signature
 import munit.FunSuite

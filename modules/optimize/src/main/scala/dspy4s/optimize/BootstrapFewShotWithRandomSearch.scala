@@ -4,6 +4,7 @@ import dspy4s.programs.ProgramRunner
 
 import dspy4s.programs.optimization.OptimizableStructure
 
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.Example
@@ -15,9 +16,7 @@ import dspy4s.optimize.contracts.CandidateProgram
 import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.optimize.contracts.Teleprompter
 
-import scala.collection.mutable
-import scala.util.boundary
-import scala.util.boundary.break
+import scala.util.Random
 
 final case class RandomSearchConfig(
     metric              : Metric,
@@ -32,167 +31,119 @@ final case class RandomSearchConfig(
     seed                : Long                 = 0L
 )
 
+/** BootstrapFewShotWithRandomSearch makes candidate programs with different seeds, scores each one on the validation
+  * set, and keeps the best one (upstream `dspy/teleprompt/random_search.py`). The seeds, in order:
+  *   - -3: the student with no demos.
+  *   - -2: the labeled demos of [[LabeledFewShot]], when `maxLabeledDemos` is more than 0.
+  *   - -1: [[BootstrapFewShot]] on the trainset, in its order.
+  *   - 0 to `numCandidates - 1`: [[BootstrapFewShot]] on a shuffled part of the trainset.
+  *
+  * As upstream, the search builds each candidate inside the loop, so the first candidate that reaches `stopAtScore`
+  * stops the search and no more bootstrap runs occur. A configuration error of a bootstrap run stops the compile. Each
+  * other failure gives no candidate.
+  */
 final class BootstrapFewShotWithRandomSearch[P: {OptimizableStructure, ProgramRunner}](
     config: RandomSearchConfig
 ) extends Teleprompter[P]:
 
   override val name: String = "bootstrap_few_shot_random_search"
 
-  override def compile(
-      student : P,
-      trainset: Vector[Example],
-      teacher : Option[P]               = None,
-      valset  : Option[Vector[Example]] = None
-  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    Teleprompter.withCompileCallbacks(this, trainset, valset)(compileInScope(student, trainset, teacher, valset))
+  private val bootstrapConfig = BootstrapFewShotConfig(
+    metric = Some(config.metric),
+    metricThreshold = config.metricThreshold,
+    maxBootstrappedDemos = config.maxBootstrappedDemos,
+    maxLabeledDemos = config.maxLabeledDemos,
+    maxRounds = config.maxRounds,
+    maxErrors = config.maxErrors,
+    seed = config.seed
+  )
 
-  /** The work of [[compile]], inside its compile scope. */
-  private def compileInScope(
+  override protected[optimize] def compileInScope(
       student : P,
       trainset: Vector[Example],
       teacher : Option[P],
       valset  : Option[Vector[Example]]
-  )(using ctx: RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    val ps = summon[OptimizableStructure[P]]
+  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     // No valset or an empty valset selects the trainset (upstream `self.valset = valset or trainset`,
     // `dspy/teleprompt/random_search.py`).
-    val effectiveValset: Vector[Example] = valset.filter(_.nonEmpty).getOrElse(trainset)
+    val evalset = valset.filter(_.nonEmpty).getOrElse(trainset)
     // Each candidate gets its score from `Evaluate`, which rejects an empty devset. Stop before the bootstrap work.
-    if effectiveValset.isEmpty then return Left(OptimizerSupport.emptyEvalsetError(name))
-    // Two leaves with the same predictor key are a configuration error (decision D2). Stop before any run.
-    OptimizerSupport.requireDistinctKeys(student, teacher) match
-      case Left(error) => return Left(error)
-      case Right(())   => ()
+    if evalset.isEmpty then Left(OptimizerSupport.emptyEvalsetError(name))
+    else
+      for
+        // Two leaves with the same predictor key are a configuration error (decision D2). Stop before any run.
+        _          <- OptimizerSupport.requireDistinctKeys(student, teacher)
+        candidates <- search(student, trainset, teacher, evalset)
+      yield report(candidates)
 
-    val candidates = mutable.ArrayBuffer.empty[(Int, P)]
-
-    // A configuration error of a bootstrap run stops the compile. Each other failure gives no candidate.
-    def addBootstrapped(seed: Int, result: Either[DspyError, OptimizationReport[P]]): Either[DspyError, Unit] =
-      OptimizerSupport.bootstrapCandidate(result).map(_.foreach(program => candidates += ((seed, program))))
-
-    // seed -3: zero-shot (no demos)
-    candidates += ((-3, ps.replace(student, ps.read(student).map(_.copy(demos = Vector.empty)))))
-
-    // seed -2: labeled few shot
-    if config.maxLabeledDemos > 0 then
-      val labeled = new LabeledFewShot[P](
-        LabeledFewShotConfig(k = config.maxLabeledDemos, seed = config.seed)
-      )
-      labeled.compile(student, trainset) match
-        case Right(report) => candidates += ((-2, report.bestProgram))
-        case Left(_)       => ()
-
-    // seed -1: bootstrap with unshuffled trainset
-    val bootstrapConfig = BootstrapFewShotConfig(
-      metric = Some(config.metric),
-      metricThreshold = config.metricThreshold,
-      maxBootstrappedDemos = config.maxBootstrappedDemos,
-      maxLabeledDemos = config.maxLabeledDemos,
-      maxRounds = config.maxRounds,
-      maxErrors = config.maxErrors,
-      seed = config.seed
-    )
-    val bootstrapSeedMinus1 = new BootstrapFewShot[P](bootstrapConfig)
-    val unshuffled          = addBootstrapped(-1, bootstrapSeedMinus1.compile(student, trainset, teacher))
-
-    // seeds 0..numCandidates-1: bootstrap with shuffled subset
-    val bootstrapped = (0 until config.numCandidates).foldLeft(unshuffled) { (added, seed) =>
-      added.flatMap { _ =>
-        val subsetRng  = new scala.util.Random((config.seed + seed).toLong)
-        val shuffled   = Vector.from(subsetRng.shuffle(trainset))
-        val minSamples = 1
-        val maxSamples = math.max(minSamples, config.maxBootstrappedDemos)
-        val targetSize =
-          if maxSamples == minSamples then minSamples
-          else minSamples + subsetRng.nextInt(maxSamples - minSamples + 1)
-        val subset = shuffled.take(targetSize)
-
-        val candidateBootstrap = new BootstrapFewShot[P](
-          BootstrapFewShotConfig(
-            metric = Some(config.metric),
-            metricThreshold = config.metricThreshold,
-            maxBootstrappedDemos = config.maxBootstrappedDemos,
-            maxLabeledDemos = config.maxLabeledDemos,
-            maxRounds = config.maxRounds,
-            maxErrors = config.maxErrors,
-            seed = seed.toLong
-          )
-        )
-        addBootstrapped(seed, candidateBootstrap.compile(student, subset, teacher))
-      }
+  /** The candidates in the order of their seeds, up to the first candidate that reaches `stopAtScore`. The sequence is
+    * lazy, so a seed after that candidate makes no run.
+    */
+  private def search(student: P, trainset: Vector[Example], teacher: Option[P], evalset: Vector[Example])(using
+      RuntimeContext
+  ): Either[DspyError, Vector[CandidateProgram[P]]] =
+    val attempts = (-3 until config.numCandidates).to(LazyList).map { seed =>
+      programOf(seed, student, trainset, teacher).map(_.map(scored(seed, _, evalset)))
     }
-    bootstrapped match
-      case Left(error) => return Left(error)
-      case Right(())   => ()
+    def reachesStop(candidate: CandidateProgram[P]): Boolean = config.stopAtScore.exists(candidate.score >= _)
+    // The first attempt that reaches the stop score is the head of `rest`.
+    val (running, rest) = attempts.span(attempt => !attempt.exists(_.exists(reachesStop)))
+    Traverse.either(running ++ rest.take(1))(identity).map(_.flatten)
 
-    var bestScore: Option[Double]                  = None
-    var bestCandidate: Option[CandidateProgram[P]] = None
-    val allCandidates                              = mutable.ArrayBuffer.empty[CandidateProgram[P]]
+  /** The program of one seed, or `None` when the seed gives no candidate. */
+  private def programOf(seed: Int, student: P, trainset: Vector[Example], teacher: Option[P])(using
+      RuntimeContext
+  ): Either[DspyError, Option[P]] =
+    seed match
+      case -3 =>
+        val ps = summon[OptimizableStructure[P]]
+        Right(Some(ps.replace(student, ps.read(student).map(_.copy(demos = Vector.empty)))))
+      case -2 if config.maxLabeledDemos > 0 =>
+        val labeled = new LabeledFewShot[P](LabeledFewShotConfig(k = config.maxLabeledDemos, seed = config.seed))
+        Right(labeled.compile(student, trainset).toOption.map(_.bestProgram))
+      case -2 => Right(None)
+      case -1 => OptimizerSupport.bootstrapCandidate(new BootstrapFewShot[P](bootstrapConfig).compile(
+          student,
+          trainset,
+          teacher
+        ))
+      case _ =>
+        val rng        = new Random(config.seed + seed)
+        val shuffled   = rng.shuffle(trainset)
+        val maxSamples = math.max(1, config.maxBootstrappedDemos)
+        val subset     = shuffled.take(1 + rng.nextInt(maxSamples))
+        OptimizerSupport.bootstrapCandidate(
+          new BootstrapFewShot[P](bootstrapConfig.copy(seed = seed.toLong)).compile(student, subset, teacher)
+        )
 
-    val sortedCandidates = candidates.sortBy(c =>
-      val (seed, _) = c
-      // Evaluate special seeds first (-3, -2, -1), then the numeric ones
-      if seed < 0 then seed.toLong else (seed + 1000).toLong
+  /** The candidate of `program`, with its score on `evalset`. An evaluation that fails gives the score 0.0. */
+  private def scored(seed: Int, program: P, evalset: Vector[Example])(using RuntimeContext): CandidateProgram[P] =
+    val evaluator = Evaluate(
+      devset = evalset,
+      metric = config.metric,
+      numThreads = config.numThreads,
+      maxErrors = Some(config.maxErrors)
     )
+    val (score, perExample) =
+      evaluator()((example: Example) => summon[ProgramRunner[P]].run(program, example.inputs)) match
+        case Right(result) => (result.score, result.results.map(_.score))
+        case Left(_)       => (0.0, Vector.empty[Double])
+    CandidateProgram(program = program, score = score, metadata = Map("seed" -> seed, "per_example" -> perExample))
 
-    boundary[Either[DspyError, OptimizationReport[P]]] {
-      sortedCandidates.foreach { case (seed, program) =>
-        val evaluator = Evaluate(
-          devset = effectiveValset,
-          metric = config.metric,
-          numThreads = config.numThreads,
-          maxErrors = Some(config.maxErrors)
+  /** The report of the search. The seed -3 always gives a candidate, so `candidates` is not empty. */
+  private def report(candidates: Vector[CandidateProgram[P]]): OptimizationReport[P] =
+    val sorted = candidates.sortBy(-_.score)
+    val last   = candidates.last
+    config.stopAtScore.filter(last.score >= _) match
+      case Some(stop) => OptimizationReport(
+          bestProgram = last.program,
+          candidates = sorted,
+          metadata = Map("stopped_early" -> true, "stop_at_score" -> stop, "score" -> last.score)
         )
-        val evalResult = evaluator()((ex: Example) =>
-          summon[ProgramRunner[P]].run(program, ex.inputs)
+      case None =>
+        val best = candidates.reduceLeft((best, next) => if next.score > best.score then next else best)
+        OptimizationReport(
+          bestProgram = best.program,
+          candidates = sorted,
+          metadata = Map("num_candidates" -> candidates.size, "best_score" -> best.score)
         )
-        val (score, perExample) = evalResult match
-          case Right(r) =>
-            val subscores: Vector[Double] = r.results.map(_.score)
-            (r.score, subscores)
-          case Left(_) => (0.0, Vector.empty[Double])
-
-        val candidate = CandidateProgram(
-          program = program,
-          score = score,
-          metadata = Map("seed" -> seed, "per_example" -> perExample)
-        )
-        allCandidates += candidate
-
-        if bestScore.forall(score > _) then
-          bestScore = Some(score)
-          bestCandidate = Some(candidate)
-
-        config.stopAtScore.foreach { stop =>
-          if score >= stop then
-            break(
-              Right(
-                OptimizationReport(
-                  bestProgram = program,
-                  candidates = allCandidates.toVector.sortBy(-_.score),
-                  metadata = Map("stopped_early" -> true, "stop_at_score" -> stop, "score" -> score)
-                )
-              )
-            )
-        }
-      }
-
-      bestCandidate match
-        case Some(best) => Right(
-            OptimizationReport(
-              bestProgram = best.program,
-              candidates = allCandidates.toVector.sortBy(-_.score),
-              metadata = Map(
-                "num_candidates" -> allCandidates.size,
-                "best_score"     -> best.score
-              )
-            )
-          )
-        case None => Right(
-            OptimizationReport(
-              bestProgram = student,
-              candidates = Vector.empty,
-              metadata = Map("no_candidates_evaluated" -> true)
-            )
-          )
-    }

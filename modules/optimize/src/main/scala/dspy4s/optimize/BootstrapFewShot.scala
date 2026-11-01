@@ -81,8 +81,8 @@ final case class BootstrapFewShotConfig(
   *     it with `dspy.context(lm=lm)`. dspy4s has no copy of the LM. It sets the two values in
   *     `RuntimeScope.lmDefaults`, under the configuration of a predictor and under a per-call config. In Python, a
   *     predictor with a bound LM keeps its LM and gets no rollout. dspy4s gives the two values to each predictor,
-  *     because a repeat of the same request adds nothing. The metric has the two values, because it runs in the
-  *     isolated context of the run. Python runs the metric outside `dspy.context(lm=lm)`.
+  *     because a repeat of the same request adds nothing. The two values end with the program run, so an LM-judged
+  *     metric does not have them. This is the same in Python, which runs the metric outside `dspy.context(lm=lm)`.
   *   - '''Errors.''' Python raises the last exception again. dspy4s returns a `RuntimeError` with the message of the
   *     last error.
   *   - '''Report.''' `compile` returns an [[OptimizationReport]] with one candidate. The metadata of the candidate
@@ -99,22 +99,15 @@ final class BootstrapFewShot[P: {OptimizableStructure, ProgramRunner}](
 
   private val ps: OptimizableStructure[P] = summon[OptimizableStructure[P]]
 
-  override def compile(
-      student : P,
-      trainset: Vector[Example],
-      teacher : Option[P]               = None,
-      valset  : Option[Vector[Example]] = None
-  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    Teleprompter.withCompileCallbacks(this, trainset, valset)(compileInScope(student, trainset, teacher))
-
-  /** The work of [[compile]], inside its compile scope. [[InferRules]] calls it directly: upstream `InferRules` is a
-    * subclass of `BootstrapFewShot`, and its call of `super().compile` opens no second compile scope.
+  /** [[InferRules]] calls this method directly: upstream `InferRules` is a subclass of `BootstrapFewShot`, and its call
+    * of `super().compile` opens no second compile scope.
     */
-  private[optimize] def compileInScope(
+  override protected[optimize] def compileInScope(
       student : P,
       trainset: Vector[Example],
-      teacher : Option[P]
-  )(using ctx: RuntimeContext): Either[DspyError, OptimizationReport[P]] =
+      teacher : Option[P],
+      valset  : Option[Vector[Example]]
+  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     if trainset.isEmpty then
       Right(
         OptimizationReport(
@@ -180,8 +173,7 @@ final class BootstrapFewShot[P: {OptimizableStructure, ProgramRunner}](
   ): Either[DspyError, Unit] =
     def fields(leaf: IdentifiedOptimizable): String =
       val structure = leaf.metadata.structure
-      s"'${structure.name}': ${structure.inputFields.map(_.name).mkString(", ")} -> " +
-        structure.outputFields.map(_.name).mkString(", ")
+      s"'${structure.name}': ${structure.signatureString}"
 
     if student.size != teacher.size then
       Left(

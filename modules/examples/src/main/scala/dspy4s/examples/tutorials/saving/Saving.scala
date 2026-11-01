@@ -2,10 +2,10 @@
   *
   * Source: docs/docs/tutorials/saving/index.md Upstream:
   * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/saving/index.md Status: translated — program state
-  * `save` / `load` is now ported (PORT_GAPS G-4, `dspy4s.optimize.ProgramPersistence`). dspy4s serializes each leaf's
-  * writable `OptimizableParameters` (instructions + demos + module config) to clean JSON — the analogue of Python's
-  * `save(..., save_program=False)`. The GSM8K dataset (snippet 1) is swapped for a small hand-built trainset (no
-  * `dspy.datasets`, PORT_GAPS G-21).
+  * `save` / `load` is now ported (PORT_GAPS G-4, `dspy4s.programs.optimization.ProgramPersistence`). dspy4s serializes
+  * each leaf's writable `OptimizableParameters` (instructions + demos + module config) to clean JSON — the analogue of
+  * Python's `save(..., save_program=False)`. The GSM8K dataset (snippet 1) is swapped for a small hand-built trainset
+  * (no `dspy.datasets`, PORT_GAPS G-21).
   *
   * Out of scope: the "whole-program" `save_program=True` directory form (snippets 6–8). That cloudpickles the program's
   * *architecture/code* so it can be reloaded without re-declaring it. dspy4s programs are immutable Scala values — you
@@ -17,7 +17,8 @@ package dspy4s.examples.tutorials.saving
 import dspy4s.core.contracts.{:=, DspyError, RuntimeContext}
 import dspy4s.core.data.Example
 import dspy4s.evaluate.contracts.Metric
-import dspy4s.optimize.{BootstrapFewShot, BootstrapFewShotConfig, DemoCount, ProgramPersistence, RoundCount}
+import dspy4s.optimize.{BootstrapFewShot, BootstrapFewShotConfig, DemoCount, RoundCount}
+import dspy4s.programs.optimization.ProgramPersistence
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.signatures.Signature

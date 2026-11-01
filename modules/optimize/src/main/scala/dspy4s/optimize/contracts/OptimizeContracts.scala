@@ -7,13 +7,11 @@ import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.CallbackDispatcher
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.evaluate.contracts.EvaluationResult
 
 final case class CandidateProgram[P](
-    program   : P,
-    score     : Double,
-    evaluation: Option[EvaluationResult] = None,
-    metadata  : Map[String, Any]         = Map.empty
+    program : P,
+    score   : Double,
+    metadata: Map[String, Any] = Map.empty
 )
 
 final case class OptimizationReport[P](
@@ -24,18 +22,29 @@ final case class OptimizationReport[P](
 
 /** An optimizer that compiles a student program (upstream `dspy.teleprompt.Teleprompter`).
   *
-  * Each implementation of [[compile]] runs its work in a compile scope with [[Teleprompter.withCompileCallbacks]]
-  * (upstream `_with_compile_callbacks`). That helper also installs the context that `compile` gets, so the given
-  * context wins for the whole compile (UPGRADE-3.2.1-to-3.4.0, decision D8).
+  * [[compile]] runs [[compileInScope]] in a compile scope with [[Teleprompter.withCompileCallbacks]] (upstream
+  * `_with_compile_callbacks`). That helper also installs the context that `compile` gets, so the given context wins for
+  * the whole compile (UPGRADE-3.2.1-to-3.4.0, decision D8).
   */
 trait Teleprompter[P]:
   def name: String
 
-  def compile(
+  final def compile(
       student : P,
       trainset: Vector[Example],
       teacher : Option[P]               = None,
       valset  : Option[Vector[Example]] = None
+  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
+    Teleprompter.withCompileCallbacks(this, trainset, valset)(compileInScope(student, trainset, teacher, valset))
+
+  /** The work of [[compile]], inside its compile scope. An optimizer of this package can call it on another optimizer,
+    * to run that optimizer with no compile scope of its own ([[dspy4s.optimize.InferRules]]).
+    */
+  protected[optimize] def compileInScope(
+      student : P,
+      trainset: Vector[Example],
+      teacher : Option[P],
+      valset  : Option[Vector[Example]]
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]]
 
 object Teleprompter:

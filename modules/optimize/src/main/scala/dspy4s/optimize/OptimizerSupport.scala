@@ -2,15 +2,23 @@ package dspy4s.optimize
 
 import dspy4s.programs.ProgramRunner
 
+import dspy4s.core.collections.Traverse
+import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ValidationError
 import dspy4s.evaluate.Evaluate
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.optimize.contracts.OptimizationReport
+import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.optimization.PredictorTraces
+import dspy4s.programs.strategies.DynamicPredict
+import zio.blocks.schema.DynamicValue
 
 /** Cross-optimizer helpers shared by the teleprompter family (COPRO, MIPROv2, GroundedProposer). Kept in one place so
   * the seed→rolloutId mapping and the Evaluate+ProgramRunner scoring wiring stay identical across optimizers.
@@ -22,10 +30,11 @@ private[optimize] object OptimizerSupport:
     */
   def requireDistinctKeys[P](student: P, teacher: Option[P])(using
       ps: OptimizableStructure[P]
-  ): Either[DspyError, Unit] = (student +: teacher.toVector).foldLeft[Either[DspyError, Unit]](Right(())) {
-    (checked, program) =>
-      checked.flatMap(_ => PredictorTraces.requireDistinctKeys(ps.readIdentified(program)))
-  }
+  ): Either[DspyError, Unit] =
+    Traverse.either(student +: teacher.toVector)(program =>
+      PredictorTraces.requireDistinctKeys(ps.readIdentified(program))
+    )
+      .map(_ => ())
 
   /** The program of one bootstrap candidate, for an optimizer that makes more than one candidate. A `ValidationError`
     * from [[BootstrapFewShot]] is a configuration error: two leaves with the same key, a leaf type that records no key,
@@ -61,6 +70,43 @@ private[optimize] object OptimizerSupport:
     * base from a given seed.
     */
   def seedBase(seed: Long): Int = math.floorMod(seed.toInt, 1024)
+
+  /** The layout of a generation call of an optimizer: one input field for each key of `inputs`, in order, and the
+    * output field `output`.
+    */
+  def generationLayout(
+      name        : String,
+      inputs      : DynamicValue.Record,
+      output      : String,
+      instructions: String
+  ): SignatureLayout =
+    SignatureLayout.of(
+      name = name,
+      inputFields = DynamicValues.recordKeys(inputs).map(key => FieldSpec(name = key)),
+      outputFields = Vector(FieldSpec(name = output)),
+      instructions = Some(instructions)
+    )
+
+  /** One generation call of an optimizer: `predict` runs on `inputs` with `temperature` and `rolloutId`. The result is
+    * the trimmed text of the output `output`, or `None` when the output is absent or blank. Each caller keeps its
+    * rollout id formula and its rule for a `Left`.
+    */
+  def generateText(
+      predict    : DynamicPredict,
+      inputs     : DynamicValue.Record,
+      output     : String,
+      temperature: Double,
+      rolloutId  : Int
+  )(using RuntimeContext): Either[DspyError, Option[String]] =
+    predict(
+      ProgramCall(
+        input = inputs,
+        config = DynamicValues.record("temperature" := temperature),
+        rolloutId = Some(rolloutId)
+      )
+    ).map(prediction =>
+      DynamicValues.recordGet(prediction.output, output).map(DynamicValues.renderText).map(_.trim).filter(_.nonEmpty)
+    )
 
   /** The error for an optimizer that has no example to score its candidates on. [[Evaluate]] rejects an empty devset,
     * and an optimizer cannot select a candidate that has no score. Each optimizer that scores candidates returns this

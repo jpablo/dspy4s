@@ -1,6 +1,9 @@
 package dspy4s.optimize
 
 import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.CallbackEvent
+import dspy4s.core.contracts.CallbackHandler
+import dspy4s.core.contracts.CompileStartEvent
 import dspy4s.core.contracts.ErrorLimit
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
@@ -81,6 +84,38 @@ class BootstrapFewShotWithRandomSearchSuite extends FunSuite:
     val report       = result.toOption.get
     val stoppedEarly = report.metadata.get("stopped_early").collect { case b: Boolean => b }.getOrElse(false)
     assert(stoppedEarly, s"should have stopped early but metadata was: ${report.metadata}")
+  }
+
+  // Upstream builds each candidate inside the evaluation loop (`dspy/teleprompt/random_search.py`): a stop makes no more
+  // bootstrap runs.
+  test("BootstrapFewShotWithRandomSearch makes no bootstrap run after the candidate that reaches stopAtScore") {
+    val trainset = (1 to 4).map(i =>
+      Example(rec("question" := s"q$i", "answer" := s"a$i"), inputKeys = Set("question"))
+    ).toVector
+    val optimizer = new BootstrapFewShotWithRandomSearch[DemoAwarePredictProgram](
+      RandomSearchConfig(
+        metric = new ExactMatch(answerField = "answer"),
+        numCandidates = SearchCandidateCount(20),
+        maxBootstrappedDemos = DemoCount(4),
+        maxLabeledDemos = DemoCount(4),
+        maxErrors = ErrorLimit(50),
+        stopAtScore = Some(100.0)
+      )
+    )
+    val started = scala.collection.mutable.ArrayBuffer.empty[String]
+    val handler = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
+        event match
+          case start: CompileStartEvent => started += start.optimizerName
+          case _                        => ()
+
+    val result = RuntimeEnvironment.withCallbacks(Vector(handler)) {
+      // The labeled demos of the seed -2 answer each question, so the score of that candidate is 100.
+      optimizer.compile(zeroShotStudent, trainset)(using RuntimeEnvironment.current)
+    }
+
+    assertEquals(result.map(_.candidates.size), Right(2))
+    assertEquals(started.toVector, Vector("BootstrapFewShotWithRandomSearch", "LabeledFewShot"))
   }
 
   // PORT_GAPS G-46 (upstream c7ee4462a): `Evaluate` rejects an empty devset. With no valset, the trainset is the

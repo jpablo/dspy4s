@@ -8,17 +8,14 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
-import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SignatureLayout
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.optimize.contracts.CandidateProgram
 import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.optimize.contracts.Teleprompter
 import dspy4s.programs.strategies.DynamicPredict
-import dspy4s.programs.contracts.ProgramCall
 
-import scala.collection.mutable
+import scala.collection.immutable.VectorMap
 
 /** Knobs for [[COPRO]], mirroring upstream's `COPRO(metric, breadth, depth, init_temperature)`.
   *
@@ -86,18 +83,10 @@ final class COPRO[P: {OptimizableStructure, ProgramRunner}](config: COPROConfig)
   private val ps: OptimizableStructure[P] = summon[OptimizableStructure[P]]
   private val runner: ProgramRunner[P]    = summon[ProgramRunner[P]]
 
-  override def compile(
+  override protected[optimize] def compileInScope(
       student : P,
       trainset: Vector[Example],
-      teacher : Option[P]               = None,
-      valset  : Option[Vector[Example]] = None
-  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    Teleprompter.withCompileCallbacks(this, trainset, valset)(compileInScope(student, trainset, valset))
-
-  /** The work of [[compile]], inside its compile scope. */
-  private def compileInScope(
-      student : P,
-      trainset: Vector[Example],
+      teacher : Option[P],
       valset  : Option[Vector[Example]]
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     val evalset: Vector[Example] = valset.getOrElse(trainset)
@@ -108,19 +97,16 @@ final class COPRO[P: {OptimizableStructure, ProgramRunner}](config: COPROConfig)
     else if evalset.isEmpty then Left(OptimizerSupport.emptyEvalsetError(name))
     else
       // Greedy coordinate ascent: optimize each leaf's instruction in turn, keeping the others fixed.
-      var current       = student
-      val allCandidates = mutable.ArrayBuffer.empty[CandidateProgram[P]]
-
-      (0 until leafCount).foreach { idx =>
-        val (updated, candidates) = optimizeLeaf(current, idx, evalset)
-        current = updated
-        allCandidates ++= candidates
+      val (current, candidates) = (0 until leafCount).foldLeft((student, Vector.empty[CandidateProgram[P]])) {
+        case ((program, done), idx) =>
+          val (updated, found) = optimizeLeaf(program, idx, evalset)
+          (updated, done ++ found)
       }
 
       // Score the final program (all leaves at their best) so the report's best reflects the applied state.
       // A failed final eval reports as 0.0 in metadata (it's a summary number, not a selection input).
       val finalScore = scoreProgram(current, evalset).getOrElse(0.0)
-      val sorted     = allCandidates.toVector.sortBy(-_.score)
+      val sorted     = candidates.sortBy(-_.score)
       Right(
         OptimizationReport(
           bestProgram = current,
@@ -144,42 +130,41 @@ final class COPRO[P: {OptimizableStructure, ProgramRunner}](config: COPROConfig)
     val fieldNames      = leaf.layout.fields.map(_.name)
 
     // (instruction -> best score) seen for this leaf, plus the whole-program candidates emitted.
-    val evaluated  = mutable.LinkedHashMap.empty[String, Double]
-    val candidates = mutable.ArrayBuffer.empty[CandidateProgram[P]]
+    type Attempts = (VectorMap[String, Double], Vector[CandidateProgram[P]])
 
-    def scoreCandidate(instruction: String): P =
-      val applied = OptimizerSupport.applyInstruction(program, idx, instruction)
-      // A whole-eval failure (timeout / maxErrors) yields None — skip it entirely rather than recording a
-      // real 0.0 that would corrupt selection (a genuinely-0-scoring instruction could then look "as good").
-      scoreProgram(applied, evalset).foreach { score =>
-        if evaluated.get(instruction).forall(score > _) then evaluated.update(instruction, score)
-        candidates += CandidateProgram(
-          program = applied,
-          score = score,
-          metadata = Map("optimizable_leaf" -> idx, "instruction" -> instruction)
-        )
+    def scoreAll(start: Attempts, instructions: Vector[String]): Attempts =
+      instructions.foldLeft(start) { case (attempts @ (evaluated, candidates), instruction) =>
+        val applied = OptimizerSupport.applyInstruction(program, idx, instruction)
+        // A whole-eval failure (timeout / maxErrors) gives None. Skip it: a recorded 0.0 would corrupt selection,
+        // because an instruction that really scores 0 could then look "as good".
+        scoreProgram(applied, evalset).fold(attempts) { score =>
+          val next = CandidateProgram(
+            program = applied,
+            score = score,
+            metadata = Map("optimizable_leaf" -> idx, "instruction" -> instruction)
+          )
+          (if evaluated.get(instruction).forall(score > _) then evaluated.updated(instruction, score) else evaluated) ->
+            (candidates :+ next)
+        }
       }
-      applied
 
     // ── Round 0: seed breadth-1 fresh candidates + the leaf's own current instruction ──
     val seedProposals =
       generateInstructions(idx, baseInstruction, fieldNames, config.breadth - 1, attempts = Vector.empty, round = 0)
-    val round0 = (seedProposals :+ baseInstruction).filter(_.nonEmpty).distinct
-    round0.foreach(scoreCandidate)
+    val round0: Attempts =
+      scoreAll((VectorMap.empty, Vector.empty), (seedProposals :+ baseInstruction).filter(_.nonEmpty).distinct)
 
     // ── Rounds 1..depth-1: refine using past (instruction, score) attempts ──
-    (1 until config.depth).foreach { round =>
-      val attempts = evaluated.toVector.sortBy(_._2) // ascending score, as upstream presents them
-      val refined  = generateInstructions(idx, baseInstruction, fieldNames, config.breadth, attempts, round = round)
-      refined.filter(_.nonEmpty).distinct.foreach(scoreCandidate)
+    val (evaluated, candidates) = (1 until config.depth).foldLeft(round0) { (done, round) =>
+      val attempts = done._1.toVector.sortBy(_._2) // ascending score, as upstream presents them
+      scoreAll(done, generateInstructions(idx, baseInstruction, fieldNames, config.breadth, attempts, round = round))
     }
 
     // Lock in the best instruction for this leaf.
     val bestInstruction =
       if evaluated.isEmpty then baseInstruction
       else evaluated.maxBy(_._2)._1
-    val updated = OptimizerSupport.applyInstruction(program, idx, bestInstruction)
-    (updated, candidates.toVector)
+    (OptimizerSupport.applyInstruction(program, idx, bestInstruction), candidates)
 
   /** Run the whole program on the evalset and return the aggregate metric score (0..100), or `None` when the whole
     * evaluation fails (timeout / maxErrors exceeded). `None` must NOT be collapsed into `0.0` at call sites that select
@@ -190,25 +175,12 @@ final class COPRO[P: {OptimizableStructure, ProgramRunner}](config: COPROConfig)
 
   // ── Instruction generation sub-program ──────────────────────────────────
 
-  /** The instruction-generation signature. Round 0 (`BasicGenerateInstruction`): `basic_instruction ->
-    * proposed_instruction`. Refinement rounds (`GenerateInstructionGivenAttempts`): add an `attempted_instructions`
-    * input. `instructionMarker` is set as the signature instructions so generation prompts are distinguishable from
-    * task prompts.
-    */
-  private def instructionGenLayout(withAttempts: Boolean): SignatureLayout =
-    val inputs = Vector(FieldSpec(name = "basic_instruction")) ++
-      (if withAttempts then Vector(FieldSpec(name = "attempted_instructions"))
-       else Vector.empty)
-    SignatureLayout.of(
-      name = "GenerateInstruction",
-      inputFields = inputs,
-      outputFields = Vector(FieldSpec(name = "proposed_instruction")),
-      instructions = Some(config.instructionMarker)
-    )
-
   /** Generate up to `count` distinct candidate instructions by running the generation [[DynamicPredict]] once per
     * candidate, varying `rolloutId` (and seeding temperature into the option bag) so the LM yields distinct proposals.
-    * `attempts` (ascending by score) seed the refinement variant when non-empty.
+    * The signature of round 0 (`BasicGenerateInstruction`) is `basic_instruction -> proposed_instruction`. `attempts`
+    * (ascending by score) add an `attempted_instructions` input when non-empty (`GenerateInstructionGivenAttempts`).
+    * `instructionMarker` is set as the signature instructions so generation prompts are distinguishable from task
+    * prompts.
     */
   private def generateInstructions(
       leafIdx        : Int,
@@ -218,38 +190,28 @@ final class COPRO[P: {OptimizableStructure, ProgramRunner}](config: COPROConfig)
       attempts       : Vector[(String, Double)],
       round          : Int
   )(using RuntimeContext): Vector[String] =
-    if count <= 0 then Vector.empty
-    else
-      val withAttempts = attempts.nonEmpty
-      val gen          = DynamicPredict(layout = instructionGenLayout(withAttempts), name = Some("copro_instruct"))
-      val attemptsText = attempts.zipWithIndex
-        .map { case ((instr, score), i) => s"Instruction #${i + 1}: $instr\nResulting Score #${i + 1}: $score" }
-        .mkString("\n")
-      val fieldsHint                                                   = fieldNames.mkString(", ")
-      val baseInputs: Vector[(String, zio.blocks.schema.DynamicValue)] =
-        Vector("basic_instruction" := s"$baseInstruction (fields: $fieldsHint)") ++
-          (if withAttempts then Vector("attempted_instructions" := attemptsText) else Vector.empty)
+    val attemptsText = attempts.zipWithIndex
+      .map { case ((instr, score), i) => s"Instruction #${i + 1}: $instr\nResulting Score #${i + 1}: $score" }
+      .mkString("\n")
+    val fieldsHint = fieldNames.mkString(", ")
+    val inputs     = DynamicValues.recordFromEntries(
+      Vector("basic_instruction" := s"$baseInstruction (fields: $fieldsHint)") ++
+        Option.when(attempts.nonEmpty)("attempted_instructions" := attemptsText)
+    )
+    val output = "proposed_instruction"
+    val gen    = DynamicPredict(
+      layout = OptimizerSupport.generationLayout("GenerateInstruction", inputs, output, config.instructionMarker),
+      name = Some("copro_instruct")
+    )
 
-      // Deterministic, contiguous rolloutId stream so candidate sampling is reproducible AND spans a
-      // predictable window (a scripted/temperature-driven LM yields a distinct proposal per rolloutId). The
-      // per-round salt gives EACH round (seed = round 0, plus every refinement round) its own non-overlapping
-      // window of `count` ids, so successive refinement rounds don't re-draw the same window (which would yield
-      // byte-identical generations via the LM cache); the per-leaf offset likewise keeps HOMOGENEOUS
-      // leaves (identical baseInstruction/fields) from drawing the SAME window.
-      val roundSalt = round * config.breadth
-      val base      = OptimizerSupport.seedBase(config.seed) + leafIdx * 10000 + roundSalt
-      val results   = (0 until count).iterator.flatMap { i =>
-        val rolloutId = base + i
-        val call      = ProgramCall(
-          input = DynamicValues.recordFromEntries(baseInputs),
-          config = DynamicValues.recordFromEntries(Vector("temperature" := config.initTemperature)),
-          rolloutId = Some(rolloutId)
-        )
-        gen(call) match
-          case Right(pred) => DynamicValues.recordGet(pred.output, "proposed_instruction")
-              .map(DynamicValues.renderText)
-              .map(_.trim)
-              .filter(_.nonEmpty)
-          case Left(_) => None
-      }
-      results.toVector.distinct
+    // Deterministic, contiguous rolloutId stream so candidate sampling is reproducible AND spans a
+    // predictable window (a scripted/temperature-driven LM yields a distinct proposal per rolloutId). The
+    // per-round salt gives EACH round (seed = round 0, plus every refinement round) its own non-overlapping
+    // window of `count` ids, so successive refinement rounds don't re-draw the same window (which would yield
+    // byte-identical generations via the LM cache); the per-leaf offset likewise keeps HOMOGENEOUS
+    // leaves (identical baseInstruction/fields) from drawing the SAME window.
+    val roundSalt = round * config.breadth
+    val base      = OptimizerSupport.seedBase(config.seed) + leafIdx * 10000 + roundSalt
+    Vector.tabulate(count) { i =>
+      OptimizerSupport.generateText(gen, inputs, output, config.initTemperature, base + i).toOption.flatten
+    }.flatten.distinct

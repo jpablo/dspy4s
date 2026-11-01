@@ -76,17 +76,12 @@ class GivenContextCompileSuite extends FunSuite:
   private final class ProbeOptimizer extends Teleprompter[DynamicPredict]:
     override val name: String           = "probe"
     var bodyAdapter: Option[AdapterRef] = None
-    override def compile(
+    override protected[optimize] def compileInScope(
         student : DynamicPredict,
         trainset: Vector[Example],
-        teacher : Option[DynamicPredict]  = None,
-        valset  : Option[Vector[Example]] = None
-    )(using RuntimeContext): Either[DspyError, OptimizationReport[DynamicPredict]] =
-      Teleprompter.withCompileCallbacks(this, trainset, valset)(probe(student))
-
-    private def probe(student: DynamicPredict)(using
-        context: RuntimeContext
-    ): Either[DspyError, OptimizationReport[DynamicPredict]] =
+        teacher : Option[DynamicPredict],
+        valset  : Option[Vector[Example]]
+    )(using context: RuntimeContext): Either[DspyError, OptimizationReport[DynamicPredict]] =
       bodyAdapter = context.adapter
       student(ProgramCall(rec("question" := "q1"))).map(_ => OptimizationReport(student, Vector.empty))
 

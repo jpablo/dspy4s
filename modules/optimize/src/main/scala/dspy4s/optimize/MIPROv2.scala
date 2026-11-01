@@ -4,6 +4,7 @@ import dspy4s.programs.ProgramRunner
 
 import dspy4s.programs.optimization.{OptimizableParameters, OptimizableStructure}
 
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
@@ -14,7 +15,6 @@ import dspy4s.optimize.contracts.Teleprompter
 import dspy4s.optimize.propose.GroundedProposer
 import dspy4s.optimize.propose.GroundedProposerConfig
 
-import scala.collection.mutable
 import scala.util.Random
 
 /** Knobs for [[MIPROv2]], mirroring the relevant slice of upstream's `MIPROv2.__init__` / `.compile`.
@@ -94,16 +94,7 @@ final class MIPROv2[P: {OptimizableStructure, ProgramRunner}](config: MIPROv2Con
   private val ps: OptimizableStructure[P] = summon[OptimizableStructure[P]]
   private val runner: ProgramRunner[P]    = summon[ProgramRunner[P]]
 
-  override def compile(
-      student : P,
-      trainset: Vector[Example],
-      teacher : Option[P]               = None,
-      valset  : Option[Vector[Example]] = None
-  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    Teleprompter.withCompileCallbacks(this, trainset, valset)(compileInScope(student, trainset, teacher, valset))
-
-  /** The work of [[compile]], inside its compile scope. */
-  private def compileInScope(
+  override protected[optimize] def compileInScope(
       student : P,
       trainset: Vector[Example],
       teacher : Option[P],
@@ -141,25 +132,20 @@ final class MIPROv2[P: {OptimizableStructure, ProgramRunner}](config: MIPROv2Con
   )(using RuntimeContext): Either[DspyError, Vector[Vector[Vector[Example]]]] =
     val leafCount = ps.read(student).size
     val zeroShot  = Vector.fill(leafCount)(Vector.empty[Example])
-    val start     = Right(Vector.empty): Either[DspyError, Vector[Vector[Vector[Example]]]]
 
-    val bootstrapped = (0 until config.numCandidates).foldLeft(start) { (candidates, k) =>
-      candidates.flatMap { done =>
-        val bootstrap = new BootstrapFewShot[P](
-          BootstrapFewShotConfig(
-            metric = Some(config.metric),
-            maxBootstrappedDemos = config.maxBootstrappedDemos,
-            maxLabeledDemos = config.maxLabeledDemos,
-            seed = config.seed + k
-          )
+    Traverse.either(0 until config.numCandidates) { k =>
+      val bootstrap = new BootstrapFewShot[P](
+        BootstrapFewShotConfig(
+          metric = Some(config.metric),
+          maxBootstrappedDemos = config.maxBootstrappedDemos,
+          maxLabeledDemos = config.maxLabeledDemos,
+          seed = config.seed + k
         )
-        OptimizerSupport.bootstrapCandidate(bootstrap.compile(student, trainset, teacher)).map { compiled =>
-          done :+ compiled.fold(zeroShot)(program => ps.read(program).map(_.demos))
-        }
+      )
+      OptimizerSupport.bootstrapCandidate(bootstrap.compile(student, trainset, teacher)).map { compiled =>
+        compiled.fold(zeroShot)(program => ps.read(program).map(_.demos))
       }
-    }
-
-    bootstrapped.map(candidates => (zeroShot +: candidates).distinct)
+    }.map(candidates => (zeroShot +: candidates).distinct)
 
   // ── Phase 2 ─────────────────────────────────────────────────────────────
 
@@ -198,16 +184,15 @@ final class MIPROv2[P: {OptimizableStructure, ProgramRunner}](config: MIPROv2Con
       instructionCandidates: Vector[Vector[String]],
       leafCount            : Int
   )(using RuntimeContext): OptimizationReport[P] =
-    val rng        = new Random(config.seed)
-    val candidates = mutable.ArrayBuffer.empty[CandidateProgram[P]]
+    val rng = new Random(config.seed)
 
     // Baseline: the unmodified student.
     val baselineScore = scoreProgram(student, evalset)
-    candidates += CandidateProgram(student, baselineScore, metadata = Map("trial" -> -1, "baseline" -> true))
+    val baseline      = CandidateProgram(student, baselineScore, metadata = Map("trial" -> -1, "baseline" -> true))
 
-    // `student` is immutable, so its optimizable leaves are the same every trial — read them once.
+    // `student` is immutable, so its optimizable leaves are the same in each trial. Read them one time.
     val leaves = ps.read(student)
-    (0 until config.numTrials).foreach { trial =>
+    val trials = Vector.tabulate(config.numTrials) { trial =>
       val demoIdx        = rng.nextInt(demoCandidates.size)
       val demoAssignment = demoCandidates(demoIdx)
       val instrIndices   = (0 until leafCount).map(p => rng.nextInt(instructionCandidates(p).size)).toVector
@@ -215,14 +200,14 @@ final class MIPROv2[P: {OptimizableStructure, ProgramRunner}](config: MIPROv2Con
 
       val applied = applyTrial(leaves, student, chosenInstrs, demoAssignment)
       val score   = scoreProgram(applied, evalset)
-      candidates += CandidateProgram(
+      CandidateProgram(
         program = applied,
         score = score,
         metadata = Map("trial" -> trial, "demo_index" -> demoIdx, "instruction_indices" -> instrIndices)
       )
     }
 
-    val sorted = candidates.toVector.sortBy(-_.score)
+    val sorted = (baseline +: trials).sortBy(-_.score)
     val best   = sorted.head
     OptimizationReport(
       bestProgram = best.program,
@@ -246,12 +231,12 @@ final class MIPROv2[P: {OptimizableStructure, ProgramRunner}](config: MIPROv2Con
       instructions  : Vector[String],
       demoAssignment: Vector[Vector[Example]]
   ): P =
-    val updated = leaves.zipWithIndex.map { case (leaf, idx) =>
-      val instr = instructions.lift(idx).getOrElse(leaf.instructions.getOrElse(""))
-      val demos = demoAssignment.lift(idx).getOrElse(leaf.demos)
-      leaf.copy(instructions = Some(instr), demos = demos)
-    }
-    ps.replace(student, updated)
+    ps.replace(
+      student,
+      leaves.lazyZip(instructions).lazyZip(demoAssignment).map { (leaf, instruction, demos) =>
+        leaf.copy(instructions = Some(instruction), demos = demos)
+      }
+    )
 
   /** Run the whole program on the evalset and return the aggregate metric score (0..100), 0.0 on failure. */
   private def scoreProgram(program: P, evalset: Vector[Example])(using RuntimeContext): Double =

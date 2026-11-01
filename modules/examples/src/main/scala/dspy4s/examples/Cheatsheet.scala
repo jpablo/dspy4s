@@ -32,7 +32,6 @@ import dspy4s.optimize.{
   LabeledFewShotConfig,
   MIPROv2,
   MIPROv2Config,
-  ProgramPersistence,
   RandomSearchConfig,
   RoundCount,
   SearchCandidateCount
@@ -49,6 +48,7 @@ import dspy4s.programs.{
   Refine
 }
 import dspy4s.programs.contracts.{DynamicModule, ProgramCall, ToolFunction, description}
+import dspy4s.programs.optimization.ProgramPersistence
 import dspy4s.programs.retrievers.{KNN, NeighborCount, NonEmptyTrainset}
 import dspy4s.signatures.{InputField, OutputField, Signature, Spec}
 import zio.blocks.schema.DynamicValue

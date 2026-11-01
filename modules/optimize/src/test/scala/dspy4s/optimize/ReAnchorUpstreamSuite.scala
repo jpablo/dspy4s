@@ -256,7 +256,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
       trainset: Vector[Example],
       metric  : Metric,
       settings: RuntimeContext,
-      config  : ReAnchorConfig = ReAnchorConfig(numThreads = 2)
+      config  : ReAnchorConfig = ReAnchorConfig(numThreads = ThreadCount(2))
   ): (P, ReAnchorReport) =
     run(settings)(ReAnchor[P](metric, config).calibrate(program, trainset)).fold(error => fail(error.message), identity)
 
@@ -294,7 +294,10 @@ class ReAnchorUpstreamSuite extends FunSuite:
   test("compile leaves the student unchanged") {
     val student = DynamicPredict(matchLayout)
     val result  = run(context(FakeSystemOne(tricky))) {
-      ReAnchor[DynamicPredict](equalOn("match"), ReAnchorConfig(numThreads = 2)).compile(student, trickyTrain)
+      ReAnchor[DynamicPredict](
+        equalOn("match"),
+        ReAnchorConfig(numThreads = ThreadCount(2))
+      ).compile(student, trickyTrain)
     }.fold(error => fail(error.message), identity)
     assertEquals(student.decisions, Map.empty[String, DecisionSettings])
     assert(!(result.bestProgram eq student))
@@ -339,7 +342,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
       trickyTrain,
       equalOn("match"),
       context(ComputedLm(generative), cached = false),
-      ReAnchorConfig(numThreads = 2, requireCache = false)
+      ReAnchorConfig(numThreads = ThreadCount(2), requireCache = false)
     )
     assertEquals(student.decisions, Map.empty[String, DecisionSettings])
     assertEquals(program.decisions, Map("match" -> DecisionSettings(threshold = Some(0.8))))
@@ -358,7 +361,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
         trickyTrain,
         equalOn("match"),
         context(ComputedLm(right), cached = false),
-        ReAnchorConfig(numThreads = 2, requireCache = false)
+        ReAnchorConfig(numThreads = ThreadCount(2), requireCache = false)
       )
       assertEquals(program.decisions, Map.empty[String, DecisionSettings], s"accurate $accurate")
       val row = onlyRow(report)
@@ -381,7 +384,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
       pairs(names),
       equalOn("match"),
       context(ComputedLm(oneMiss), cached = false),
-      ReAnchorConfig(numThreads = 2, requireCache = false)
+      ReAnchorConfig(numThreads = ThreadCount(2), requireCache = false)
     )
     assertEquals(program.decisions, Map.empty[String, DecisionSettings])
     assertEquals(onlyRow(report).skipped, Some(ReAnchor.SkippedReason))
@@ -398,7 +401,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
         trickyTrain,
         equalOn("match"),
         outer,
-        ReAnchorConfig(numThreads = 2, requireCache = false)
+        ReAnchorConfig(numThreads = ThreadCount(2), requireCache = false)
       )
       assertEquals(fitted.judge.decisions, Map("match" -> DecisionSettings(threshold = Some(0.8))), client.id)
       val different = run(outer)(runInputs(fitted, DynamicValues.record("pair" := "different")))
@@ -493,7 +496,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
   }
 
   test("the calibration does not change the request") {
-    Vector(1, 2).foreach { threads =>
+    Vector(ThreadCount(1), ThreadCount(2)).foreach { threads =>
       val model = FakeSystemOne(leaning)
       val _     = calibrate(
         DynamicPredict(matchLayout),
@@ -593,12 +596,12 @@ class ReAnchorUpstreamSuite extends FunSuite:
       train,
       equalOn("match"),
       context(model),
-      ReAnchorConfig(numThreads = 4)
+      ReAnchorConfig(numThreads = ThreadCount(4))
     )
     val row = onlyRow(report)
-    assertEquals(row.observed.get("distinct"), Some(200.0))
+    assertEquals(row.observed.distinct, Some(200))
     // The midpoints of the gaps, and the zero end.
-    assert(row.observed.getOrElse("candidates", Double.MaxValue) <= ReAnchorSearch.MaxCandidates + 1, row.toString)
+    assert(row.observed.candidates <= ReAnchorSearch.MaxCandidates + 1, row.toString)
     val t = threshold(program).getOrElse(fail("no threshold"))
     assert(0.55 < t && t <= 0.6 && row.trainScore >= 0.97, row.toString)
   }
@@ -666,7 +669,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
       context(model)
     )
     assertEquals(program.decisions, Map.empty[String, DecisionSettings])
-    assert(onlyRow(report).foldCheck._2 >= 1, report.toString)
+    assert(onlyRow(report).foldCheck.failed >= 1, report.toString)
   }
 
   test("Choice weights stay when their whole gain is one example") {
@@ -684,7 +687,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
       context(model)
     )
     assertEquals(program.decisions, Map.empty[String, DecisionSettings])
-    assert(onlyRow(report).foldCheck._2 >= 1, report.toString)
+    assert(onlyRow(report).foldCheck.failed >= 1, report.toString)
   }
 
   // ── the port ──────────────────────────────────────────────────────────────────────────────────────────────────

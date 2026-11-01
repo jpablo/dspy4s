@@ -5,6 +5,7 @@ import dspy4s.core.contracts.{
   ConfigurationError,
   DspyError,
   ErrorLimit,
+  PythonText,
   RuntimeContext,
   RuntimeError,
   SignatureLayout,
@@ -28,9 +29,8 @@ import dspy4s.optimize.contracts.{CandidateProgram, OptimizationReport, Teleprom
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.optimization.{IdentifiedOptimizable, OptimizableStructure, PredictorTraces}
 import dspy4s.programs.runtime.ParallelExecutor
-import zio.blocks.chunk.Chunk
-import zio.blocks.schema.json.WriterConfig
-import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
+import zio.blocks.schema.json.{JsonCodec, JsonCodecDeriver, WriterConfig}
+import zio.blocks.schema.{DynamicValue, NameMapper, Schema}
 
 import java.nio.file.{Files, Path}
 import java.util.concurrent.atomic.AtomicReference
@@ -47,7 +47,11 @@ import scala.util.control.NonFatal
   *   because each candidate setting runs the program over the training set again. Set it to `false` for a model that a
   *   program picks at run time, or to allow requests with no cache.
   */
-final case class ReAnchorConfig(numThreads: Int = 1, logDir: Option[Path] = None, requireCache: Boolean = true)
+final case class ReAnchorConfig(
+    numThreads  : ThreadCount  = ThreadCount(1),
+    logDir      : Option[Path] = None,
+    requireCache: Boolean      = true
+)
 
 /** One row of the report: the fit of one decision output of one predictor (upstream `calibrate` report row).
   *
@@ -65,8 +69,7 @@ final case class ReAnchorConfig(numThreads: Int = 1, logDir: Option[Path] = None
   * @param trainScoreOriginal
   *   the mean score with the original settings of the output (before the evidence decoding was on)
   * @param observed
-  *   `calls`, `candidates`, and for a threshold or cuts `distinct`, `min`, and `max` of the observed values (rounded to
-  *   4 decimal places)
+  *   what the fit observed
   * @param foldCheck
   *   the count of search steps whose better training score passed and failed the fold check
   * @param skipped
@@ -80,10 +83,36 @@ final case class ReAnchorRow(
     trainScore        : Double,
     trainScoreAtStart : Double,
     trainScoreOriginal: Double,
-    observed          : Map[String, Double],
-    foldCheck         : (Int, Int),
+    observed          : ReAnchorRow.Observed,
+    foldCheck         : ReAnchorRow.FoldCheck,
     skipped           : Option[String]
-) derives CanEqual
+) derives CanEqual, Schema
+
+object ReAnchorRow:
+
+  /** What the fit of one output observed.
+    *
+    * @param calls
+    *   the count of calls with evidence
+    * @param distinct
+    *   for a threshold or cuts with at least one call, the count of the distinct observed values
+    * @param min
+    *   for a threshold or cuts with at least one call, the smallest observed value, rounded to 4 decimal places
+    * @param max
+    *   for a threshold or cuts with at least one call, the largest observed value, rounded to 4 decimal places
+    * @param candidates
+    *   the count of the candidate settings that the fit scored
+    */
+  final case class Observed(
+      calls     : Int,
+      distinct  : Option[Int],
+      min       : Option[Double],
+      max       : Option[Double],
+      candidates: Int
+  ) derives CanEqual, Schema
+
+  /** The count of search steps whose better training score passed and failed the fold check. */
+  final case class FoldCheck(passed: Int, failed: Int) derives CanEqual, Schema
 
 /** The report of one `compile` (upstream `ReAnchor.report`). Each score is a mean metric score rounded to 4 decimal
   * places.
@@ -94,61 +123,17 @@ final case class ReAnchorReport(
     valScoreBefore  : Option[Double],
     valScore        : Option[Double],
     fitted          : Vector[ReAnchorRow]
-) derives CanEqual:
+) derives CanEqual, Schema
 
-  /** The JSON form of `report.json`: `train_score_before`, `train_score`, `val_score_before` and `val_score` when a
+object ReAnchorReport:
+
+  /** The codec of `report.json`: `train_score_before`, `train_score`, `val_score_before` and `val_score` when a
     * validation set was given, and `fitted`, one object for each row with the upstream keys (`predictor`, `field`,
     * `parameter`, `value` when kept, `train_score`, `train_score_at_start`, `train_score_original`, `observed`,
     * `fold_check` with `passed` and `failed`, and `skipped` when skipped).
     */
-  def toDynamic: DynamicValue.Record =
-    import ReAnchorReport.{number, record}
-    record(
-      Vector(
-        Some("train_score_before" -> number(trainScoreBefore)),
-        Some("train_score"        -> number(trainScore)),
-        valScoreBefore.map("val_score_before" -> number(_)),
-        valScore.map("val_score" -> number(_)),
-        Some("fitted" -> DynamicValue.Sequence(Chunk.from(fitted.map(ReAnchorReport.rowJson))))
-      ).flatten
-    )
-
-object ReAnchorReport:
-
-  /** The keys of `observed` in the order of upstream `_summary` and the fit, with the keys that are counts. */
-  private val observedKeys: Vector[(String, Boolean)] =
-    Vector("calls" -> true, "distinct" -> true, "min" -> false, "max" -> false, "candidates" -> true)
-
-  private def rowJson(row: ReAnchorRow): DynamicValue =
-    val observed = observedKeys.flatMap((key, count) =>
-      row.observed.get(key).map(value => key -> (if count then integer(value.toInt) else number(value)))
-    )
-    record(
-      Vector(
-        Some("predictor" -> text(row.predictor)),
-        Some("field"     -> text(row.field)),
-        Some("parameter" -> text(row.parameter)),
-        row.value.map("value" -> _),
-        Some("train_score"          -> number(row.trainScore)),
-        Some("train_score_at_start" -> number(row.trainScoreAtStart)),
-        Some("train_score_original" -> number(row.trainScoreOriginal)),
-        Some("observed"             -> record(observed)),
-        Some("fold_check"           -> record(Vector(
-          "passed" -> integer(row.foldCheck._1),
-          "failed" -> integer(row.foldCheck._2)
-        ))),
-        row.skipped.map("skipped" -> text(_))
-      ).flatten
-    )
-
-  private def record(entries: Vector[(String, DynamicValue)]): DynamicValue.Record =
-    DynamicValue.Record(Chunk.from(entries))
-
-  private def number(value: Double): DynamicValue = DynamicValue.Primitive(PrimitiveValue.Double(value))
-
-  private def integer(value: Int): DynamicValue = DynamicValue.Primitive(PrimitiveValue.Int(value))
-
-  private def text(value: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(value))
+  private[optimize] val jsonCodec: JsonCodec[ReAnchorReport] =
+    Schema[ReAnchorReport].derive(JsonCodecDeriver.withFieldNameMapper(NameMapper.SnakeCase))
 
 /** Experimental. The calibration optimizer of the decision outputs (upstream `dspy.experimental.ReAnchor`, in
   * `dspy/teleprompt/reanchor/`). It fits the threshold of each Noul output, the cuts of each Score output, and the
@@ -200,24 +185,22 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
     * after, and no setting is fitted on it. The result has one candidate: the calibrated program with the mean training
     * score of the report.
     */
-  override def compile(
+  override protected[optimize] def compileInScope(
       student : P,
       trainset: Vector[Example],
-      teacher : Option[P]               = None,
-      valset  : Option[Vector[Example]] = None
+      teacher : Option[P],
+      valset  : Option[Vector[Example]]
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    Teleprompter.withCompileCallbacks(this, trainset, valset) {
-      for
-        _          <- Either.cond(teacher.isEmpty, (), ValidationError(ReAnchor.TeacherError))
-        calibrated <- calibrate(student, trainset, valset)
-      yield
-        val (program, report) = calibrated
-        OptimizationReport(
-          bestProgram = program,
-          candidates = Vector(CandidateProgram(program = program, score = report.trainScore)),
-          metadata = Map("report" -> report)
-        )
-    }
+    for
+      _          <- Either.cond(teacher.isEmpty, (), ValidationError(ReAnchor.TeacherError))
+      calibrated <- calibrate(student, trainset, valset)
+    yield
+      val (program, report) = calibrated
+      OptimizationReport(
+        bestProgram = program,
+        candidates = Vector(CandidateProgram(program = program, score = report.trainScore)),
+        metadata = Map("report" -> report)
+      )
 
   /** The calibrated program and its report, with no `OptimizationReport` wrapper. */
   def calibrate(
@@ -228,9 +211,6 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
     // Upstream scores the validation set only when it is not empty.
     val validation = valset.filter(_.nonEmpty)
     for
-      threads <- ThreadCount.either(config.numThreads).left.map(_ =>
-                   ValidationError(s"ReAnchor numThreads must be positive, got ${config.numThreads}")
-                 )
       _    <- Either.cond(trainset.nonEmpty, (), ValidationError("trainset must contain at least one example."))
       found = ReAnchor.predictors(student)
       _    <- Either.cond(
@@ -240,11 +220,11 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
            )
       _         <- PredictorTraces.requireDistinctKeys(found)
       _         <- checkCache(found)
-      before    <- scores(student, trainset, threads)
-      valBefore <- Traverse.either(validation.toVector)(scores(student, _, threads))
-      fitted    <- fit(student, found, trainset, threads)
-      after     <- scores(fitted._1, trainset, threads)
-      valAfter  <- Traverse.either(validation.toVector)(scores(fitted._1, _, threads))
+      before    <- scores(student, trainset)
+      valBefore <- Traverse.either(validation.toVector)(scores(student, _))
+      fitted    <- fit(student, found, trainset)
+      after     <- scores(fitted._1, trainset)
+      valAfter  <- Traverse.either(validation.toVector)(scores(fitted._1, _))
       report     = ReAnchorReport(
                  trainScoreBefore = mean(before),
                  trainScore = mean(after),
@@ -267,10 +247,9 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
             "ReAnchor cannot check caching without a configured model. For a model that the program picks at run " +
               "time, set requireCache = false."
           ))
-        case Some(_) =>
-          val names = found.map(leaf => s"'${leaf.displayName}'").mkString("[", ", ", "]")
-          Left(ConfigurationError(
-            s"Predictors $names do not cache responses, so every candidate setting would send new requests. Use a " +
+        case Some(_) => Left(ConfigurationError(
+            s"Predictors ${PythonText.nameList(found.map(_.displayName))} do not cache responses, so every candidate " +
+              "setting would send new requests. Use a " +
               "ManagedLanguageModel with a cache, or set requireCache = false to calibrate anyway."
           ))
 
@@ -278,13 +257,12 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
   private def fit(
       student : P,
       found   : Vector[IdentifiedOptimizable],
-      trainset: Vector[Example],
-      threads : ThreadCount
+      trainset: Vector[Example]
   )(using RuntimeContext): Either[DspyError, (P, Vector[ReAnchorRow])] =
     found.foldLeft[Either[DspyError, (P, Vector[ReAnchorRow])]](Right((student, Vector.empty))) { (done, leaf) =>
       DecisionKind.outputsOf(leaf.layout).foldLeft(done) { case (acc, (field, kind)) =>
         acc.flatMap((program, rows) =>
-          OutputFit(leaf, field, trainset, threads).run(program, kind).map((next, row) => (next, rows :+ row))
+          OutputFit(leaf, field, trainset).run(program, kind).map((next, row) => (next, rows :+ row))
         )
       }
     }
@@ -293,8 +271,7 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
   private final class OutputFit(
       leaf    : IdentifiedOptimizable,
       field   : String,
-      trainset: Vector[Example],
-      threads : ThreadCount
+      trainset: Vector[Example]
   )(using RuntimeContext):
 
     private val index: Int = leaf.id.ordinal
@@ -309,12 +286,12 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
     def run(program: P, kind: DecisionKind): Either[DspyError, (P, ReAnchorRow)] =
       val original = structure.read(program)(index).decisions.get(field)
       for
-        before          <- scores(program, trainset, threads)
+        before          <- scores(program, trainset)
         effective       <- ReAnchor.effective(leaf.layout, structure.read(program)(index).decisions, field)
         started          = withEntry(program, Some(effective))
         observed        <- observe(started)
         (evidence, base) = observed
-        score            = (settings: DecisionSettings) => scores(withEntry(program, Some(settings)), trainset, threads)
+        score            = (settings: DecisionSettings) => scores(withEntry(program, Some(settings)), trainset)
         result          <- kind match
                     case DecisionKind.Noul           => fitThreshold(effective, evidence, base, score)
                     case DecisionKind.Score(levels)  => fitCuts(levels.size, effective, evidence, base, score)
@@ -330,8 +307,8 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
           trainScore = mean(if kept then result.scores else before),
           trainScoreAtStart = mean(base),
           trainScoreOriginal = mean(before),
-          observed = result.observed.toMap,
-          foldCheck = (result.passed, result.failed),
+          observed = result.observed,
+          foldCheck = result.foldCheck,
           skipped = Option.unless(kept)(ReAnchor.SkippedReason)
         )
         (withEntry(program, if kept then Some(result.settings) else original), row)
@@ -340,7 +317,7 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
       * An entry belongs to this output when it has the key of the leaf and the name of the output.
       */
     private def observe(program: P): Either[DspyError, (Vector[DecisionEvidence], Vector[Double])] =
-      val (scored, entries) = DecisionEvidenceLog.recording(scores(program, trainset, threads))
+      val (scored, entries) = DecisionEvidenceLog.recording(scores(program, trainset))
       scored.map(base =>
         (entries.filter(e => e.predictor == leaf.metadata && e.field == field).map(_.evidence), base)
       )
@@ -352,9 +329,8 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
       settings : DecisionSettings,
       parameter: DecisionParameter[?],
       scores   : Vector[Double],
-      observed : Vector[(String, Double)],
-      passed   : Int,
-      failed   : Int
+      observed : ReAnchorRow.Observed,
+      foldCheck: ReAnchorRow.FoldCheck = ReAnchorRow.FoldCheck(0, 0)
   )
 
   private type Scorer = DecisionSettings => Either[DspyError, Vector[Double]]
@@ -380,17 +356,11 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
       tried <- Traverse.either(candidates) { (t, width) =>
                  score(effective.copy(threshold = Some(t))).map(Tried(_, Vector(width, -math.abs(t - start), t), t))
                }
-    yield
-      val selection      = select(base, tried)
-      val (best, values) = selection.kept.fold((start, base))(kept => (kept.setting, kept.scores))
-      Fit(
-        effective.copy(threshold = Some(best)),
-        DecisionParameter.Threshold,
-        values,
-        summary(probabilities) :+ ("candidates" -> tried.size.toDouble),
-        if selection.kept.isDefined then 1 else 0,
-        if selection.refused then 1 else 0
-      )
+    yield step(
+      Fit(effective, DecisionParameter.Threshold, base, summary(probabilities)),
+      tried,
+      threshold => effective.copy(threshold = Some(threshold))
+    )
 
   /** The Choice weights that score best, one label at a time (upstream `_fit_weights`). The pick of a label flips where
     * its weighted probability meets the strongest rival, so the candidates are between these flip points.
@@ -408,12 +378,10 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
         effective.copy(weights = Some(labels.map(l => l -> start.getOrElse(l, 1.0)).toMap)),
         DecisionParameter.Weights,
         base,
-        Vector.empty,
-        0,
-        0
+        ReAnchorRow.Observed(calls = evidence.size, distinct = None, min = None, max = None, candidates = 0)
       )
-      labels.foldLeft[Either[DspyError, (Fit, Int)]](Right((initial, 0))) { (acc, label) =>
-        acc.flatMap { (current, count) =>
+      sweep[String, Map[String, Double]](labels, initial, effective, score, (s, w) => s.copy(weights = Some(w))) {
+        (current, label) =>
           val best  = current.settings.weights.getOrElse(Map.empty)
           val flips = distributions.flatMap { p =>
             val rivals = labels.filter(_ != label).map(other => best.getOrElse(other, 1.0) * p.getOrElse(other, 0.0))
@@ -428,20 +396,10 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
                 math.max(ReAnchorSearch.WeightRange._1, flips.min / 4),
                 math.min(ReAnchorSearch.WeightRange._2, flips.max * 4)
               )
-          val candidates = gaps(flips, low, high, geometric = true).filterNot((w, _) => w == best.getOrElse(label, 1.0))
-          Traverse.either(candidates) { (w, width) =>
-            val weights = best.updated(label, w)
-            score(effective.copy(weights = Some(weights))).map(Tried(_, Vector(width), weights))
-          }.map(tried =>
-            (
-              step(current, select(current.scores, tried), weights => current.settings.copy(weights = Some(weights))),
-              count + tried.size
-            )
-          )
-        }
-      }.map((done, count) =>
-        done.copy(observed = Vector("calls" -> evidence.size.toDouble, "candidates" -> count.toDouble))
-      )
+          gaps(flips, low, high, geometric = true)
+            .filterNot((w, _) => w == best.getOrElse(label, 1.0))
+            .map((w, width) => (best.updated(label, w), width))
+      }
     }
 
   /** The Score cuts that score best, one cut at a time between its neighbors (upstream `_fit_cuts`). The level of a
@@ -459,45 +417,57 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
       DecisionPlan.meanLevel((0 until levels).toVector.map(i => p.getOrElse(i, 0.0)))
     }
     ReAnchor.parameter(effective, DecisionParameter.Cuts).flatMap { start =>
-      val initial = Fit(effective, DecisionParameter.Cuts, base, Vector.empty, 0, 0)
-      start.indices.foldLeft[Either[DspyError, (Fit, Int)]](Right((initial, 0))) { (acc, i) =>
-        acc.flatMap { (current, count) =>
-          val best       = current.settings.cuts.getOrElse(start)
-          val below      = if i > 0 then best(i - 1) else 0.0
-          val above      = if i + 1 < best.size then best(i + 1) else top
-          val candidates = gaps(means, below, above).filterNot((c, _) => c == best(i))
-          Traverse.either(candidates) { (c, width) =>
-            val cuts = best.updated(i, c)
-            score(effective.copy(cuts = Some(cuts))).map(Tried(_, Vector(width), cuts))
-          }.map(tried =>
-            (
-              step(current, select(current.scores, tried), cuts => current.settings.copy(cuts = Some(cuts))),
-              count + tried.size
-            )
-          )
-        }
-      }.map((done, count) => done.copy(observed = summary(means) :+ ("candidates" -> count.toDouble)))
+      val initial = Fit(effective, DecisionParameter.Cuts, base, summary(means))
+      sweep[Int, Vector[Double]](start.indices, initial, effective, score, (s, c) => s.copy(cuts = Some(c))) {
+        (current, i) =>
+          val best  = current.settings.cuts.getOrElse(start)
+          val below = if i > 0 then best(i - 1) else 0.0
+          val above = if i + 1 < best.size then best(i + 1) else top
+          gaps(means, below, above).filterNot((c, _) => c == best(i)).map((c, width) => (best.updated(i, c), width))
+      }
     }
 
-  /** `current` after one search step: the kept candidate (with `update`) and its scores, and the counts of the fold
-    * check.
+  /** The search of a parameter, one axis at a time. For each axis, `candidates` gives the values to try from the fit so
+    * far, each with the width of its gap. `set` writes a value in the settings.
     */
-  private def step[A](current: Fit, selection: ReAnchorSearch.Selection[A], update: A => DecisionSettings): Fit =
-    val moved =
+  private def sweep[K, A](
+      axes     : Iterable[K],
+      initial  : Fit,
+      effective: DecisionSettings,
+      score    : Scorer,
+      set      : (DecisionSettings, A) => DecisionSettings
+  )(candidates: (Fit, K) => Vector[(A, Double)]): Either[DspyError, Fit] =
+    axes.foldLeft[Either[DspyError, Fit]](Right(initial)) { (done, axis) =>
+      done.flatMap { current =>
+        Traverse.either(candidates(current, axis)) { (setting, width) =>
+          score(set(effective, setting)).map(Tried(_, Vector(width), setting))
+        }.map(step(current, _, set(current.settings, _)))
+      }
+    }
+
+  /** `current` after one search step over `tried`: the kept candidate (with `update`) and its scores, the count of the
+    * candidates, and the counts of the fold check.
+    */
+  private def step[A](current: Fit, tried: Vector[Tried[A]], update: A => DecisionSettings): Fit =
+    val selection = select(current.scores, tried)
+    val moved     =
       selection.kept.fold(current)(kept => current.copy(settings = update(kept.setting), scores = kept.scores))
     moved.copy(
-      passed = current.passed + (if selection.kept.isDefined then 1 else 0),
-      failed = current.failed + (if selection.refused then 1 else 0)
+      observed = current.observed.copy(candidates = current.observed.candidates + tried.size),
+      foldCheck = ReAnchorRow.FoldCheck(
+        passed = current.foldCheck.passed + (if selection.kept.isDefined then 1 else 0),
+        failed = current.foldCheck.failed + (if selection.refused then 1 else 0)
+      )
     )
 
-  /** The metric score of `program` on each example of `examples` (upstream `scores`). The examples run on `threads`
+  /** The metric score of `program` on each example of `examples` (upstream `scores`). The examples run on `numThreads`
     * threads. The pass fails at the first error of the program or the metric, and on a score that is not finite.
     */
-  private def scores(program: P, examples: Vector[Example], threads: ThreadCount)(using
+  private def scores(program: P, examples: Vector[Example])(using
       context: RuntimeContext
   ): Either[DspyError, Vector[Double]] =
     val failure  = new AtomicReference[Option[DspyError]](None)
-    val executor = ParallelExecutor(numThreads = threads, maxErrors = ErrorLimit(1))
+    val executor = ParallelExecutor(numThreads = config.numThreads, maxErrors = ErrorLimit(1))
     // The executor installs the given context, so the workers get it with the dynamic scope of this thread.
     val run = executor.executeEither[Example, Double](
       task = example =>
@@ -512,11 +482,9 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
       data = examples
     )(using context)
     run.left.map(error => failure.get.getOrElse(error)).flatMap { result =>
+      // With the error limit 1, a `Right` holds no `Left`.
       val values = result.results.flatMap(_.toOption)
-      if values.size != examples.size then
-        Left(failure.get.getOrElse(RuntimeError("reanchor", "A pass did not score each example.")))
-      else if values.exists(value => !value.isFinite) then
-        Left(ValidationError("ReAnchor requires finite metric values."))
+      if values.exists(value => !value.isFinite) then Left(ValidationError("ReAnchor requires finite metric values."))
       else Right(values)
     }
 
@@ -527,7 +495,7 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
         val _ = Files.createDirectories(folder)
         val _ = Files.write(
           folder.resolve("report.json"),
-          Schema.dynamic.jsonCodec.encode(report.toDynamic, WriterConfig.withIndentionStep(2))
+          ReAnchorReport.jsonCodec.encode(report, WriterConfig.withIndentionStep(2))
         )
         Right(())
       catch

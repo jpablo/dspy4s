@@ -51,7 +51,7 @@ final class KNNFewShot[P: {OptimizableStructure, ProgramRunner}](
   * bootstraps them onto the student as demos, and runs the result.
   */
 final class KNNFewShotProgram[P: {OptimizableStructure, ProgramRunner}] private[optimize] (
-    val student    : P,
+    student        : P,
     teacher        : Option[P],
     knn            : KNN,
     bootstrapConfig: BootstrapFewShotConfig
