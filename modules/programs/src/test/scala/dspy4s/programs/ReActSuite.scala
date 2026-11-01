@@ -495,6 +495,19 @@ class ReActSuite extends FunSuite:
     }
   }
 
+  test("with a ChatAdapter, tool arguments that are not a dict are a parse error, and no tool runs") {
+    // Upstream types `next_tool_args` as `dict[str, Any]`, so a list does not pass `parse_value`.
+    val search = new SearchTool
+    val lm     = new ScriptedLm(Vector(chatStep("search", """["Paris"]"""), chatStep("finish"), chatExtract))
+    val react  = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
+
+    withLmAndAdapter(lm, ChatAdapter()) {
+      val result = react((question = "capital?"))
+      assert(result.left.exists(_.isInstanceOf[ParseError]), result.toString)
+      assertEquals(search.calls.get(), 0)
+    }
+  }
+
   test("with a ChatAdapter, an empty tool name is a parse error of the step, as upstream") {
     val search = new SearchTool
     val lm     = new ScriptedLm(Vector(chatStep(""), chatStep("finish"), chatExtract))

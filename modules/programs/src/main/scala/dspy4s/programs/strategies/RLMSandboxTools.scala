@@ -15,6 +15,7 @@ import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.runtime.ParallelExecutor
 
 import java.util.concurrent.atomic.AtomicInteger
+import scala.annotation.tailrec
 
 /** Builds the sandbox functions of generated RLM code: the calls of a subordinate language model and the user tools. */
 private[programs] object RLMSandboxTools:
@@ -31,16 +32,18 @@ private[programs] object RLMSandboxTools:
   ): Vector[SandboxTool] =
     val counter = new AtomicInteger(0)
 
+    // The check and the add are one atomic step (upstream `_LLMCallBudget.reserve` holds a lock for them).
+    @tailrec
     def checkAndIncrement(n: Int): Either[DspyError, Unit] =
-      if counter.get() + n > maxLlmCalls then
+      val count = counter.get()
+      if count + n > maxLlmCalls then
         Left(RuntimeError(
           "rlm",
-          s"LLM call limit exceeded: ${counter.get()} + $n > $maxLlmCalls. " +
+          s"LLM call limit exceeded: $count + $n > $maxLlmCalls. " +
             "Use Python code for aggregation instead of making more LLM calls."
         ))
-      else
-        val _ = counter.addAndGet(n)
-        Right(())
+      else if counter.compareAndSet(count, count + n) then Right(())
+      else checkAndIncrement(n)
 
     def queryLm(prompt: String): Either[DspyError, String] =
       val lm = subLm.orElse(ctx.lm.collect { case m: LanguageModel => m })
@@ -51,13 +54,16 @@ private[programs] object RLMSandboxTools:
               model,
               LmRequest(model = model.id, messages = Vector(Message(role = MessageRole.User, text = Some(prompt))))
             )(using ctx)
-            .map(_.outputs.headOption.map(_.text).getOrElse(""))
+            .flatMap(_.outputs.headOption.map(_.text).toRight(RuntimeError("rlm", "The sub-LM returned no outputs.")))
 
     val llmQuery = SandboxTool(
       name = "llm_query",
       parameters = Vector(SandboxTool.Param("prompt", Some("str"))),
       invoke = kwargs =>
-        val prompt = DynamicValues.recordGet(kwargs, "prompt").map(DynamicValues.renderText).getOrElse("")
+        val prompt = DynamicValues.recordGet(kwargs, "prompt")
+          .filterNot(DynamicValues.isNull)
+          .map(DynamicValues.renderText)
+          .getOrElse("")
         if prompt.isEmpty then Left(RuntimeError("rlm", "prompt cannot be empty"))
         else
           for
@@ -74,9 +80,10 @@ private[programs] object RLMSandboxTools:
         if prompts.isEmpty then Right(DynamicValues.sequence(Vector.empty))
         else
           checkAndIncrement(prompts.size).flatMap { _ =>
+            // The limit is above the size of the batch, so errors never stop the batch and each prompt gets its text.
             val executor = ParallelExecutor(
               numThreads = ThreadCount.applyUnsafe(math.min(8, prompts.size)),
-              maxErrors = ErrorLimit.applyUnsafe(prompts.size)
+              maxErrors = ErrorLimit.applyUnsafe(prompts.size + 1)
             )
             executor
               .execute(

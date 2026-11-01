@@ -11,6 +11,7 @@ import dspy4s.core.contracts.SandboxOutputField
 import dspy4s.core.contracts.SandboxTool
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
+import dspy4s.core.decisions.DecisionKind
 import dspy4s.core.runtime.DenoPyodideInterpreter
 import dspy4s.core.runtime.PythonNames
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -322,10 +323,8 @@ object RLM:
     * `Option`, a collection, or a map (upstream `RLM.__init__`).
     */
   private def hasDecisionOutputs(signature: Signature[?, ?]): Boolean =
-    signature.layout.outputFields.exists(field => DecisionTypes.contains(field.typeRef)) ||
+    signature.layout.outputFields.exists(field => DecisionKind.richTypes.contains(field.typeRef)) ||
       signature.outputShape.nestedDecisionFields.nonEmpty
-
-  private val DecisionTypes: Set[TypeRef] = Set(TypeRef.noul, TypeRef.score, TypeRef.choice)
 
   /** The name checks of the constructor (upstream `_normalize_tools` and `_validate_namespace`). See the "Name checks"
     * section of [[RLM]]. Throws an `IllegalArgumentException` for the first problem.

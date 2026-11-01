@@ -326,7 +326,7 @@ Simplify 7 (rank 1). Code-review 6 (rank 4). 8004 main lines, 11858 test lines.
 
 - (a) The agents, about 2740 lines: `strategies/ReAct.scala`, `strategies/ReActV2.scala`, `strategies/ReActProtocol.scala`, `strategies/RLM*.scala`, `runtime/AgentLoop.scala`, `runtime/TrajectoryTruncation.scala`, `runtime/ToolExecutor.scala`, `internal/`, `contracts/ToolFunction.scala`.
   - [x] /simplify
-  - [ ] /code-review
+  - [x] /code-review
 - (b) Predict and the selection, about 2100 lines: `strategies/Predict.scala`, `strategies/DynamicPredict.scala`, `strategies/ChainOfThought.scala`, `strategies/MultiChainComparison.scala`, `strategies/BestOfN.scala`, `strategies/Refine.scala`, `strategies/RefineFeedback.scala`, `runtime/PredictEngine.scala`, `runtime/AttemptSelection.scala`, `runtime/ParallelExecutor.scala`, `runtime/SettingsProgramRuntime.scala`, `Aggregation.scala`, `Parallel.scala`, `retrievers/`.
   - [ ] /simplify
   - [ ] /code-review
@@ -357,10 +357,20 @@ Simplify 7 (rank 1). Code-review 6 (rank 4). 8004 main lines, 11858 test lines.
 ### Code-review findings
 
 - [ ] `Aggregation.scala:51`: `keys.last` throws `NoSuchElementException` when the first completion row is an empty record. (checked)
-- [ ] `strategies/RLMSandboxTools.scala:34-42`: `counter.get()` and then `addAndGet` is not atomic. Two `llm_query` calls at the same time can go past `maxLlmCalls`.
+- [x] `strategies/RLMSandboxTools.scala`: `counter.get()` and then `addAndGet` was not atomic. Fixed: a `compareAndSet` loop.
 - [ ] `runtime/ParallelExecutor.scala:108-141`: the timeout applies to each completion, not to the batch. The error says "0 seconds" for a timeout of less than one second. `shutdownNow` does not stop a running LM call, so work can continue after the batch fails.
-- [ ] `strategies/ReActV2.scala` merges the final outputs into the event record. An output named `next_thought` or `tool_calls` overwrites the event fields, but `checkNames` reserves only `history` and `termination_reason`. It also drops a task input named `history` or `tools` with no error.
-- [ ] `strategies/RLMReplProtocol.scala:149-175`: `stripCodeFences` is a hand-written parser with `var`, and it does not handle all cases. `runtime/AttemptSelection.scala:63-120` (`bestOf`): the failure-budget rule `remainingFailures <= 0` can differ by one from upstream `idx > fail_count`. A NaN reward is never selected.
+- [x] `strategies/ReActV2.scala` merges the final outputs into the event record, so an output named `next_thought`, `tool_calls`, or `tool_call_results` overwrote the event fields. Fixed: construction rejects these names (PORT_DIFFERENCES section 18). The drop of a task input named `history` or `tools` is upstream field-dict parity, and it stays.
+- [x] `strategies/RLMReplProtocol.scala`: `stripCodeFences` used `var`. Fixed: a `@tailrec` helper. The cases are the cases of upstream `_strip_code_fences`.
+- [ ] `runtime/AttemptSelection.scala:63-120` (`bestOf`): the failure-budget rule `remainingFailures <= 0` can differ by one from upstream `idx > fail_count`. A NaN reward is never selected.
+- [x] (code-review (a)) `RLMReplProtocol.renderValue` used compact JSON and Scala text, and a NaN in a list threw. Fixed: the text of upstream `REPLVariable.from_value` (`json.dumps` with an indent of 2, and Python `str`).
+- [x] (code-review (a)) The Deno wrapper of a tool with no declared parameters was `def name():`, so each argument raised `TypeError`. Fixed: `def name(**kwargs):` in `runner.js` (PORT_DIFFERENCES section 18).
+- [x] (code-review (a)) `llm_query_batched` gave one generic `Left` when each prompt threw. Fixed: the error limit is above the batch size, so each prompt gets its `[ERROR]` text.
+- [x] (code-review (a)) `llm_query` sent the text `null` for a null prompt, and a reply with no outputs gave an empty text. Fixed: both are errors, as upstream.
+- [x] (code-review (a)) The result of a SUBMIT kept the keys that the signature does not declare, and the observations differed from upstream (`[a]`, `a non-dict payload`). Fixed: the declared outputs only, and the texts of upstream `_process_final_output`.
+- [x] (code-review (a)) `ReActProtocol.toolArgsRecord` turned tool arguments that are not a dict into an empty record, and the tool ran. Fixed: a `ParseError`, and no tool runs (PORT_DIFFERENCES section 18).
+- [x] (code-review (a)) `RLM.DecisionTypes` copied `DecisionKind.richTypes`. Fixed: one set.
+- [ ] (code-review (a), no change) A tool exception gives `boom` under Deno and `IllegalStateException: boom` under Local. Upstream has the same two texts (`python_interpreter.py:529`, `local_interpreter.py:225`), so the port keeps them.
+- [ ] (code-review (a), not checked) A SUBMIT dict that holds a NaN: `DynamicValues.decodeJson` is the parser, as before. If it rejects a NaN, the observation says `FINAL returned str`. Upstream reads the value.
 
 ## evaluate
 

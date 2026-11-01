@@ -39,10 +39,11 @@ import scala.util.control.NonFatal
 
 /** Sandboxed [[CodeInterpreter]]: Python via Pyodide (WASM) inside a Deno subprocess. It is a port of Python DSPy's
   * `PythonInterpreter` (`dspy/primitives/python_interpreter.py`). The sandbox side is upstream's `runner.js`, vendored
-  * as a resource with three changed comment lines (`dspy4s/core/runtime/runner.js`, MIT, adapted by upstream from Simon
-  * Willison's Pyodide-in-Deno TIL); this class is the JSON-RPC 2.0 client speaking to it over the subprocess's
-  * stdin/stdout, line by line. Code runs with no host filesystem / network / environment access except what the
-  * `enable*` allowlists grant via Deno permission flags.
+  * as a resource with three changed comment lines and one changed rule (`dspy4s/core/runtime/runner.js`, MIT, adapted
+  * by upstream from Simon Willison's Pyodide-in-Deno TIL). The changed rule: a tool with no declared parameters takes
+  * keyword arguments (PORT_DIFFERENCES section 18). This class is the JSON-RPC 2.0 client speaking to it over the
+  * subprocess's stdin/stdout, line by line. Code runs with no host filesystem / network / environment access except
+  * what the `enable*` allowlists grant via Deno permission flags.
   *
   * Capabilities beyond [[SubprocessPythonInterpreter]] (the unsandboxed `python3 -c` impl):
   *   - '''Sandboxed''': untrusted LM-generated code cannot touch the host.

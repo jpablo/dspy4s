@@ -84,8 +84,10 @@ import scala.collection.immutable.VectorMap
   *
   * Construction fails with an `IllegalArgumentException` when an output of `baseSignature` has the name `history` or
   * `termination_reason` ("Output field name(s) `history` are reserved by ReActV2 and attached to every returned
-  * Prediction. Rename these output fields on your signature."), or when a tool has the name `submit` ("`submit` is
-  * reserved by ReActV2 as the final-output tool.").
+  * Prediction. Rename these output fields on your signature."), when an output has the name `next_thought`,
+  * `tool_calls`, or `tool_call_results` (the event of a turn has these keys, and the final outputs go over them; this
+  * check is stricter than upstream), or when a tool has the name `submit` ("`submit` is reserved by ReActV2 as the
+  * final-output tool.").
   *
   * The upstream logger warnings go to [[dspy4s.core.runtime.RuntimeEnvironment.warn]]: "Ending ReActV2 loop after parse
   * failure: <message>", "Ending ReActV2 loop after context window exceeded.", and, for a parse error or a full context
@@ -387,6 +389,10 @@ object ReActV2:
   private val StepFieldNames: Set[String] =
     Vector(HistoryField, ToolsField, NextThoughtField, ToolCallsField).map(_.name).toSet
 
+  /** The keys of the event of a turn that an output cannot have: [[event]] merges the final outputs over them. */
+  private val ReservedEventNames: Set[String] =
+    Set(NextThoughtField.name, ToolCallsField.name, History.ToolCallResultsKey)
+
   /** The types of the outputs whose argument of `submit` has the JSON type of the `TypeRef`. */
   private val PrimitiveTypes: Set[TypeRef] = Set(TypeRef.string, TypeRef.int, TypeRef.double, TypeRef.bool)
 
@@ -401,11 +407,19 @@ object ReActV2:
 
   /** The construction checks (upstream `ReActV2.__init__`). Throws an `IllegalArgumentException`. */
   private def checkNames(layout: SignatureLayout, tools: Vector[ToolFunction]): Unit =
-    val reserved = layout.outputFields.map(_.name).filter(ReservedOutputNames.contains).sorted
+    def quoted(names: Vector[String]): String = names.map(name => s"`$name`").mkString(", ")
+    val names                                 = layout.outputFields.map(_.name)
+    val reserved                              = names.filter(ReservedOutputNames.contains).sorted
     require(
       reserved.isEmpty,
-      s"Output field name(s) ${reserved.map(name => s"`$name`").mkString(", ")} are reserved by ReActV2 and attached " +
+      s"Output field name(s) ${quoted(reserved)} are reserved by ReActV2 and attached " +
         "to every returned Prediction. Rename these output fields on your signature."
+    )
+    val eventNames = names.filter(ReservedEventNames.contains).sorted
+    require(
+      eventNames.isEmpty,
+      s"Output field name(s) ${quoted(eventNames)} are reserved by ReActV2 for the history event of each turn. " +
+        "Rename these output fields on your signature."
     )
     require(!tools.exists(_.name == SubmitToolName), "`submit` is reserved by ReActV2 as the final-output tool.")
 

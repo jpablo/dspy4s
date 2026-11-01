@@ -284,8 +284,10 @@ class ReActV2Suite extends FunSuite:
     )
   }
 
-  test("an output named history or termination_reason, and a tool named submit, fail at construction") {
-    Vector("history", "termination_reason").foreach { reserved =>
+  test(
+    "an output with a reserved name of the result or of the history event, and a tool named submit, fail at construction"
+  ) {
+    Vector("history", "termination_reason", "next_thought", "tool_calls", "tool_call_results").foreach { reserved =>
       val error =
         intercept[IllegalArgumentException](ReActV2(dynamic(s"question -> answer, $reserved: str"), Vector.empty))
       assert(error.getMessage.contains(reserved), error.getMessage)

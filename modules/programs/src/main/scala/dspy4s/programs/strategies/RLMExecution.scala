@@ -62,9 +62,10 @@ private[programs] final class RLMExecution[I, O](rlm: RLM[I, O]):
     * protocol). Generated code cannot repair that failure, so the `Left` ends the run and the LM gets no more calls.
     * Upstream `_execute_code` catches only `CodeExecutionError` and `SyntaxError`. `run` still closes the interpreter.
     *
-    * A SUBMIT that is not complete becomes an `[Error]` observation. The check of the allowed values (decision D7) and
-    * the single schema decode of the SUBMIT payload then give a `[Type Error]` observation on a failure, and the loop
-    * continues (upstream `_process_final_output`). A success ends the loop.
+    * A SUBMIT that is not complete becomes an `[Error]` observation. The result of a complete SUBMIT holds the declared
+    * outputs only. The check of the allowed values (decision D7) and the single schema decode of the SUBMIT payload
+    * then give a `[Type Error]` observation on a failure, and the loop continues (upstream `_process_final_output`). A
+    * success ends the loop.
     */
   private def step(
       call         : ProgramCall[I],

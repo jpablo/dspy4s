@@ -232,12 +232,21 @@ private[dspy4s] object PythonText:
 
   /** Python `json.dumps(value)` with the default `ensure_ascii=True`: as [[json]], but each character that is not a
     * printable ASCII character is an escape (a backslash, `u`, and four hexadecimal digits). A character above U+FFFF
-    * is two escapes (a surrogate pair).
+    * is two escapes (a surrogate pair). With `indent`, the form of `json.dumps(value, indent=indent)`.
     */
-  def jsonAscii(value: DynamicValue): String =
+  def jsonAscii(value: DynamicValue, indent: Option[Int] = None): String =
     val out = new StringBuilder
-    writeJson(value, new JsonStyle(indent = None, ascii = true), 0, out)
+    writeJson(value, new JsonStyle(indent, ascii = true), 0, out)
     out.toString
+
+  /** `true` for a value that is a Python `dict` or `list` in JSON form: a record, a map, a sequence, or a variant with
+    * fields. An `Option` value counts as its element. An enum case with no fields is a text, so it is not a container.
+    */
+  def isContainer(value: DynamicValue): Boolean =
+    unwrap(value) match
+      case EnumCase(_)                                                                                       => false
+      case _: DynamicValue.Record | _: DynamicValue.Map | _: DynamicValue.Sequence | _: DynamicValue.Variant => true
+      case _                                                                                                 => false
 
   /** The options of `json.dumps`: `indent`, and `ascii` for `ensure_ascii=True`. One style serves one call of [[json]]
     * or [[jsonAscii]]. It keeps the line start of each indent level that the call uses, so that the call builds each

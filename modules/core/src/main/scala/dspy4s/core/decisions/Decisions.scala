@@ -118,7 +118,7 @@ enum DecisionKind derives CanEqual:
 object DecisionKind:
 
   /** The type refs of the rich decision outputs. */
-  private val richTypes: Set[TypeRef] = Set(TypeRef.noul, TypeRef.score, TypeRef.choice)
+  private[dspy4s] val richTypes: Set[TypeRef] = Set(TypeRef.noul, TypeRef.score, TypeRef.choice)
 
   /** The kind of `field`, or `None` when the field cannot be a decision output. A `noul`, `score`, or `choice` field is
     * a rich decision output. A `bool` field, and a `string` field with enum values, is a native output that can be a

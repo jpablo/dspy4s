@@ -194,6 +194,21 @@ class DenoPyodideInterpreterSuite extends FunSuite:
     finally interp.close()
   }
 
+  test("a tool with no declared parameters takes keyword arguments, as in the local interpreter") {
+    assumeDeno()
+    val lookup = SandboxTool(
+      name = "lookup",
+      parameters = Vector.empty,
+      invoke = kwargs =>
+        Right(DynamicValues.string(DynamicValues.recordGet(kwargs, "city").fold("none")(DynamicValues.renderText)))
+    )
+    val interp = new DenoPyodideInterpreter(tools = Vector(lookup))
+    try
+      assertEquals(interp.execute("print(lookup(city='Paris'))").map(_.stdout.trim), Right("Paris"))
+      assertEquals(interp.execute("print(lookup())").map(_.stdout.trim), Right("none"))
+    finally interp.close()
+  }
+
   // The tests below are for the current upstream runner and the launch rules (PORT_GAPS G-34).
 
   test("the sandbox runs the fixed Pyodide version") {

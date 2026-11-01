@@ -49,15 +49,19 @@ const makeToolWrapper = (toolName, parameters = []) => {
     if (p.default !== undefined) part += ` = ${toPythonLiteral(p.default)}`;
     return part;
   });
-  const signature = sigParts.join(', ');
   const argNames = parameters.map(p => p.name);
   const kwargParts = argNames.map(n => `"${n}": ${n}`).join(', ');
+  // dspy4s: a tool with no declared parameters (`ToolFunction(...)`, `ToolFunction.of(...)`) has an unknown argument
+  // list, so its wrapper takes keyword arguments, as in the local interpreter. The upstream runner generates
+  // `def name():` for such a tool, and that function rejects each argument.
+  const signature = parameters.length === 0 ? "**kwargs" : sigParts.join(', ');
+  const kwargsValue = parameters.length === 0 ? "kwargs" : `{${kwargParts}}`;
 
   return `
 import json
 from pyodide.ffi import run_sync, JsProxy
 def ${toolName}(${signature}):
-    result = run_sync(_js_tool_call("${toolName}", json.dumps({"kwargs": {${kwargParts}}})))
+    result = run_sync(_js_tool_call("${toolName}", json.dumps({"kwargs": ${kwargsValue}})))
     parsed = result.to_py() if isinstance(result, JsProxy) else result
     if isinstance(parsed, dict) and parsed.get("${TOOL_BRIDGE_ERROR_KEY}"):
         raise RuntimeError(parsed.get("message", "Tool bridge error"))

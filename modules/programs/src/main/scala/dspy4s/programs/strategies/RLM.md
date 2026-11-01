@@ -232,8 +232,8 @@ Preview:
 ```
 ````
 
-`ReplVariable.fromValue` uses a 1,000-character head-and-tail preview by default. Structured values are rendered as
-JSON for the purpose of computing their type, total length, and preview.
+`ReplVariable.fromValue` uses a 1,000-character head-and-tail preview by default. The total length and the preview use
+the text of upstream: `json.dumps` with an indent of 2 for a dict or a list, and Python `str` for each other value.
 
 After one action, `repl_history` resembles:
 
@@ -329,7 +329,8 @@ SUBMIT(answer=42, confidence="very")     # wrong output types
 ```
 
 The next model turn sees an `[Error] Missing output fields: ...` or `[Type Error] ...` entry and can correct the call.
-A successful submission is decoded to `O` and returned directly; the fallback predictor does not run.
+A successful submission is decoded to `O` and returned directly; the fallback predictor does not run. The result holds
+the declared outputs only, in the order of the signature.
 
 ## Fallback extraction
 

@@ -1,7 +1,16 @@
 package dspy4s.programs.strategies
 
 import dspy4s.adapters.internal.ProgramPromptText
-import dspy4s.core.contracts.{:=, DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout, TypeRef}
+import dspy4s.core.contracts.{
+  :=,
+  DspyError,
+  DynamicValues,
+  FieldSpec,
+  ParseError,
+  RuntimeContext,
+  SignatureLayout,
+  TypeRef
+}
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.signatures.Shape
@@ -27,11 +36,12 @@ private[programs] object ReActProtocol:
   /** The arguments of the tool (upstream type `dict[str, Any]`). */
   val nextToolArgsField: FieldSpec = FieldSpec(name = ReActKeys.nextToolArgs, typeRef = TypeRef.json)
 
-  /** Hand-written LENIENT output shape: a missing `next_thought` / `next_tool_name` renders as "" (a step that names no
-    * tool ends the loop rather than failing the call), and `next_tool_args` accepts a JSON object (JSONAdapter), a
-    * JSON-object string (ChatAdapter has no `json` coercion), or nothing (empty record). Decode never fails;
-    * `jsonSchema` stays `None`. The parsers of the port give a parse error before this decode for an empty or an
-    * unknown tool name (decision D7).
+  /** Hand-written output shape. It is LENIENT for the text fields: a missing `next_thought` / `next_tool_name` renders
+    * as "" (a step that names no tool ends the loop rather than failing the call). `next_tool_args` accepts a JSON
+    * object (JSONAdapter), a JSON-object string (ChatAdapter has no `json` coercion), or nothing (a missing value, a
+    * null, or an empty text gives an empty record). Each other value is not a dict (upstream type `dict[str, Any]`), so
+    * decode gives a [[ParseError]] and no tool runs. `jsonSchema` stays `None`. The parsers of the port give a parse
+    * error before this decode for an empty or an unknown tool name (decision D7).
     */
   val reactStepShape: Shape[ReAct.ReactStep] = new Shape[ReAct.ReactStep]:
     val fieldSpecs: Vector[FieldSpec] = Vector(nextThoughtField, nextToolNameField(Vector.empty), nextToolArgsField)
@@ -44,11 +54,14 @@ private[programs] object ReActProtocol:
       )
 
     def decode(raw: DynamicValue.Record): Either[DspyError, ReAct.ReactStep] =
-      Right(ReAct.ReactStep(
-        nextThought = DynamicValues.recordGet(raw, ReActKeys.nextThought).map(DynamicValues.renderText).getOrElse(""),
-        nextToolName = DynamicValues.recordGet(raw, ReActKeys.nextToolName).map(DynamicValues.renderText).getOrElse(""),
-        nextToolArgs = toolArgsRecord(DynamicValues.recordGet(raw, ReActKeys.nextToolArgs))
-      ))
+      def text(key: String): String = DynamicValues.recordGet(raw, key).map(DynamicValues.renderText).getOrElse("")
+      toolArgsRecord(DynamicValues.recordGet(raw, ReActKeys.nextToolArgs)).map { args =>
+        ReAct.ReactStep(
+          nextThought = text(ReActKeys.nextThought),
+          nextToolName = text(ReActKeys.nextToolName),
+          nextToolArgs = args
+        )
+      }
 
   /** Build the no-op tool whose selection terminates the action loop and starts extraction (upstream `finish`). It does
     * no work: the selection signals "I have enough to produce the outputs", the observation is a fixed marker, and the
@@ -94,16 +107,21 @@ private[programs] object ReActProtocol:
       DynamicValues.recordFromEntries(values)
     )
 
-  /** Normalize tool arguments into the record consumed by ToolFunction. */
-  private def toolArgsRecord(value: Option[DynamicValue]): DynamicValue.Record =
+  /** Normalize tool arguments into the record consumed by ToolFunction. See [[reactStepShape]] for the rule. */
+  private def toolArgsRecord(value: Option[DynamicValue]): Either[DspyError, DynamicValue.Record] =
+    def notADict(found: DynamicValue): DspyError =
+      val text = DynamicValues.renderText(found)
+      ParseError(ReActKeys.reactModule, s"`${ReActKeys.nextToolArgs}` must be a JSON object, got: $text", Some(text))
     value match
-      case Some(rec: DynamicValue.Record)                         => rec
-      case Some(DynamicValue.Primitive(PrimitiveValue.String(s))) => parseJsonRecord(s)
-      case _                                                      => DynamicValue.Record.empty
-
-  private def parseJsonRecord(text: String): DynamicValue.Record =
-    if text.trim.isEmpty then DynamicValue.Record.empty
-    else DynamicValues.parseJsonRecord(text).getOrElse(DynamicValue.Record.empty)
+      case None | Some(_: DynamicValue.Null.type) => Right(DynamicValue.Record.empty)
+      case Some(record: DynamicValue.Record)      => Right(record)
+      case Some(map: DynamicValue.Map)            => Right(DynamicValues.recordFromEntries(
+          map.entries.iterator.map((key, item) => DynamicValues.renderText(key) -> item).toVector
+        ))
+      case Some(text @ DynamicValue.Primitive(PrimitiveValue.String(s))) =>
+        if s.trim.isEmpty then Right(DynamicValue.Record.empty)
+        else DynamicValues.parseJsonRecord(s).toRight(notADict(text))
+      case Some(other) => Left(notADict(other))
 
 /** Names ReAct hard-codes in module identities and augmented signatures. */
 private[programs] object ReActKeys:

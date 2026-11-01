@@ -457,6 +457,20 @@ The port does not read these forms, and upstream reads them:
 
 A form that only Java reads (`3d`, `3f`, `0x1p3`) is no number on each path, as upstream.
 
+## 18. Sandbox tools and ReActV2 names
+
+**Convention.**
+
+- The vendored `runner.js` differs from the upstream file in one rule. A tool with no declared parameters
+  (`ToolFunction(...)`, `ToolFunction.of(...)`) has an unknown argument list, so its wrapper is `def name(**kwargs):`,
+  as in the local interpreter. Upstream generates `def name():`, and that function rejects each argument. A wrapper
+  with parameters is the same as upstream.
+- ReActV2 rejects an output with the name `next_thought`, `tool_calls`, or `tool_call_results` at construction,
+  because the history event of a turn has these keys and the final outputs go over them. Upstream does not check
+  these names.
+- ReAct finds a `next_tool_args` value that is not a dict in the decode of the step, after the adapter. The call fails
+  with one model call. Upstream finds it in `parse_value`, so the chat adapter tries its JSON fallback first.
+
 ## What this means in practice
 
 If you're porting a Python DSPy script to dspy4s, the friction will

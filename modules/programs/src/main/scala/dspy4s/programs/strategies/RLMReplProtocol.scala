@@ -1,16 +1,15 @@
 package dspy4s.programs.strategies
 
 import dspy4s.adapters.internal.ProgramOutputValues
-import dspy4s.core.contracts.{DynamicValues, SignatureLayout}
+import dspy4s.core.contracts.{DynamicValues, PythonText, SignatureLayout}
 import dspy4s.programs.{LlmCallLimit, OutputCharLimit}
-import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
-import java.nio.charset.StandardCharsets
+import scala.annotation.tailrec
 import scala.util.matching.Regex
 
 /** Text and data protocol shared by the RLM prompt, persistent REPL history, and schema-validated SUBMIT boundary. */
 private[programs] object RLMReplProtocol:
-  private val dynamicJsonCodec = Schema.dynamic.jsonCodec
 
   /** Upstream's `ACTION_INSTRUCTIONS_TEMPLATE` of dspy 3.4.0, ported verbatim with the same placeholders. The line
     * about the standard libraries is not in the template: the execution text of the interpreter tells the model which
@@ -100,25 +99,33 @@ private[programs] object RLMReplProtocol:
   def formatOutput(output: String): String =
     if output.isEmpty then "(no output - did you forget to print?)" else output
 
-  /** Parse a SUBMIT payload (the interpreter's `finalOutput` JSON) and verify every output field is present. Returns
-    * the upstream-style `[Error] …` message on a problem.
+  /** Parse a SUBMIT payload (the interpreter's `finalOutput` JSON) and verify every output field is present. The result
+    * holds the output fields only, in the order of the signature (upstream `_process_final_output`), so a key that the
+    * signature does not declare goes away. A problem gives the `[Error] ...` observation of upstream. The type in that
+    * observation is the Python type name of the JSON value, and `str` for a text that is not JSON.
     */
   def parseSubmitted(
       finalJson       : String,
       outputFieldNames: Vector[String]
   ): Either[String, DynamicValue.Record] =
-    DynamicValues.parseJsonRecord(finalJson) match
-      case Some(record) =>
-        val present = DynamicValues.recordKeys(record).toSet
-        val missing = outputFieldNames.filterNot(present.contains)
-        if missing.isEmpty then Right(record)
+    DynamicValues.decodeJson(finalJson) match
+      case Some(record: DynamicValue.Record) =>
+        val values  = outputFieldNames.map(name => name -> DynamicValues.recordGet(record, name))
+        val missing = values.collect { case (name, None) => name }
+        if missing.isEmpty then
+          Right(DynamicValues.recordFromEntries(values.collect { case (name, Some(value)) => name -> value }))
         else
-          Left(
-            s"[Error] Missing output fields: ${missing.sorted.mkString("[", ", ", "]")}. Use SUBMIT(${outputFieldNames.mkString(", ")})"
-          )
-      case None => Left(
-          s"[Error] FINAL returned a non-dict payload, expected dict with fields: ${outputFieldNames.mkString(", ")}"
-        )
+          val names = outputFieldNames.mkString(", ")
+          Left(s"[Error] Missing output fields: ${pythonNameList(missing.sorted)}. Use SUBMIT($names)")
+      case other =>
+        val typeName = other.fold("str")(pythonTypeName)
+        Left(s"[Error] FINAL returned $typeName, expected dict with fields: ${pythonNameList(outputFieldNames)}")
+
+  /** The text of a Python list of field names, for example `['a', 'b']`. A field name is an identifier, so its Python
+    * `repr` is the name in single quotes.
+    */
+  private def pythonNameList(names: Vector[String]): String =
+    names.map(name => s"'$name'").mkString("[", ", ", "]")
 
   /** The SUBMIT values `record` with the allowed values of the outputs of `layout` checked (upstream
     * `_process_final_output` reads each value with `parse_value`, `dspy/predict/rlm.py`). An output with allowed values
@@ -147,14 +154,10 @@ private[programs] object RLMReplProtocol:
     * explicit non-Python language tag (the error becomes an `[Error]` observation).
     */
   def stripCodeFences(raw: String): Either[String, String] =
-    var code = raw.trim
-    if !code.contains("```") then Right(code)
+    val trimmed = raw.trim
+    if !trimmed.contains("```") then Right(trimmed)
     else
-      // Strip outer decorative fence pairs (e.g. ```\n```python\n...\n```\n```).
-      var lines = code.linesIterator.toVector
-      while lines.size >= 2 && lines.head.trim == "```" && lines.last.trim == "```" do
-        lines = lines.drop(1).dropRight(1)
-      code = lines.mkString("\n").trim
+      val code = withoutOuterFences(trimmed.linesIterator.toVector).mkString("\n").trim
       if !code.contains("```") then Right(code)
       else
         val fenceStart = code.indexOf("```")
@@ -170,6 +173,13 @@ private[programs] object RLMReplProtocol:
             val remainder = afterFence.drop(newline + 1)
             val blockEnd  = remainder.indexOf("```")
             if blockEnd < 0 then Right(remainder.trim) else Right(remainder.take(blockEnd).trim)
+
+  /** `lines` with no outer decorative fence pairs (e.g. ```\n```python\n...\n```\n```). */
+  @tailrec
+  private def withoutOuterFences(lines: Vector[String]): Vector[String] =
+    if lines.size >= 2 && lines.head.trim == "```" && lines.last.trim == "```" then
+      withoutOuterFences(lines.drop(1).dropRight(1))
+    else lines
 
   /** Python-style type name for the variable metadata (upstream `type(value).__name__`). */
   def pythonTypeName(value: DynamicValue): String =
@@ -187,11 +197,11 @@ private[programs] object RLMReplProtocol:
       case _: DynamicValue.Null.type => "NoneType"
       case _                         => "str"
 
-  /** Render a variable's value for length/preview: primitives as text, records/sequences as JSON. */
+  /** The text of a variable for its length and its preview (upstream `REPLVariable.from_value`): `json.dumps` with an
+    * indent of 2 for a dict or a list, and Python `str` for each other value.
+    */
   def renderValue(value: DynamicValue): String =
-    value match
-      case DynamicValue.Primitive(_) => DynamicValues.renderText(value)
-      case _                         => new String(dynamicJsonCodec.encode(value), StandardCharsets.UTF_8)
+    if PythonText.isContainer(value) then PythonText.jsonAscii(value, indent = Some(2)) else PythonText.str(value)
 
   /** Digit grouping like Python's `{:,}` (locale-independent). */
   def groupDigits(n: Int): String =

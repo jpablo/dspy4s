@@ -20,7 +20,8 @@ trait ToolFunction:
 
   /** The tool's parameters as `(name, wire type)` pairs, surfaced to the model by tool-using programs so it knows what
     * arguments to supply. Empty for hand-written tools and the function factories; populated by
-    * [[ToolFunction.fromMethod]] from the method's signature.
+    * [[ToolFunction.fromMethod]] from the method's signature. An empty list means an unknown argument list, so in the
+    * sandbox of `RLM` the tool takes keyword arguments.
     */
   def argSchema: Vector[(String, dspy4s.core.contracts.TypeRef)] = Vector.empty
 
