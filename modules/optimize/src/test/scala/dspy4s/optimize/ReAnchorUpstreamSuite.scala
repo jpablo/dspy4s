@@ -256,7 +256,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
       trainset: Vector[Example],
       metric  : Metric,
       settings: RuntimeContext,
-      config  : ReAnchorConfig = ReAnchorConfig(numThreads = ThreadCount(2))
+      config  : ReAnchorConfig = ReAnchorConfig(numThreads = Some(ThreadCount(2)))
   ): (P, ReAnchorReport) =
     run(settings)(ReAnchor[P](metric, config).calibrate(program, trainset)).fold(error => fail(error.message), identity)
 
@@ -296,7 +296,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
     val result  = run(context(FakeSystemOne(tricky))) {
       ReAnchor[DynamicPredict](
         equalOn("match"),
-        ReAnchorConfig(numThreads = ThreadCount(2))
+        ReAnchorConfig(numThreads = Some(ThreadCount(2)))
       ).compile(student, trickyTrain)
     }.fold(error => fail(error.message), identity)
     assertEquals(student.decisions, Map.empty[String, DecisionSettings])
@@ -342,7 +342,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
       trickyTrain,
       equalOn("match"),
       context(ComputedLm(generative), cached = false),
-      ReAnchorConfig(numThreads = ThreadCount(2), requireCache = false)
+      ReAnchorConfig(numThreads = Some(ThreadCount(2)), requireCache = false)
     )
     assertEquals(student.decisions, Map.empty[String, DecisionSettings])
     assertEquals(program.decisions, Map("match" -> DecisionSettings(threshold = Some(0.8))))
@@ -361,7 +361,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
         trickyTrain,
         equalOn("match"),
         context(ComputedLm(right), cached = false),
-        ReAnchorConfig(numThreads = ThreadCount(2), requireCache = false)
+        ReAnchorConfig(numThreads = Some(ThreadCount(2)), requireCache = false)
       )
       assertEquals(program.decisions, Map.empty[String, DecisionSettings], s"accurate $accurate")
       val row = onlyRow(report)
@@ -384,7 +384,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
       pairs(names),
       equalOn("match"),
       context(ComputedLm(oneMiss), cached = false),
-      ReAnchorConfig(numThreads = ThreadCount(2), requireCache = false)
+      ReAnchorConfig(numThreads = Some(ThreadCount(2)), requireCache = false)
     )
     assertEquals(program.decisions, Map.empty[String, DecisionSettings])
     assertEquals(onlyRow(report).skipped, Some(ReAnchor.SkippedReason))
@@ -401,7 +401,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
         trickyTrain,
         equalOn("match"),
         outer,
-        ReAnchorConfig(numThreads = ThreadCount(2), requireCache = false)
+        ReAnchorConfig(numThreads = Some(ThreadCount(2)), requireCache = false)
       )
       assertEquals(fitted.judge.decisions, Map("match" -> DecisionSettings(threshold = Some(0.8))), client.id)
       val different = run(outer)(runInputs(fitted, DynamicValues.record("pair" := "different")))
@@ -503,7 +503,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
         pairs(Seq("same", "different")),
         equalOn("match"),
         context(model, cached = false),
-        ReAnchorConfig(numThreads = threads, requireCache = false)
+        ReAnchorConfig(numThreads = Some(threads), requireCache = false)
       )
       assertEquals(model.requests.distinct.size, 2, s"$threads threads: one distinct request for each example")
     }
@@ -596,7 +596,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
       train,
       equalOn("match"),
       context(model),
-      ReAnchorConfig(numThreads = ThreadCount(4))
+      ReAnchorConfig(numThreads = Some(ThreadCount(4)))
     )
     val row = onlyRow(report)
     assertEquals(row.observed.distinct, Some(200))

@@ -15,6 +15,10 @@ final case class LabeledFewShotConfig(
     seed  : Long      = 0L
 )
 
+/** LabeledFewShot gives each predictor labeled demos from the trainset (upstream `dspy/teleprompt/vanilla.py`). With
+  * `sample`, one random source gives a new sample of `k` examples to each predictor, in read order. Without `sample`,
+  * each predictor gets the same first `k` examples.
+  */
 final class LabeledFewShot[P: OptimizableStructure](
     config: LabeledFewShotConfig = LabeledFewShotConfig()
 ) extends Teleprompter[P]:
@@ -29,14 +33,12 @@ final class LabeledFewShot[P: OptimizableStructure](
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
     val ps = summon[OptimizableStructure[P]]
 
-    val demos: Vector[Example] =
-      if trainset.isEmpty then Vector.empty
-      else if !config.sample then Vector.from(trainset.take(config.k))
-      else
-        val rng = new scala.util.Random(config.seed)
-        Vector.from(rng.shuffle(trainset).take(config.k))
+    val rng = new scala.util.Random(config.seed)
 
-    val compiled = ps.replace(student, ps.read(student).map(_.copy(demos = demos)))
+    def demos(): Vector[Example] =
+      if config.sample then rng.shuffle(trainset).take(config.k) else trainset.take(config.k)
+
+    val compiled = ps.replace(student, ps.read(student).map(_.copy(demos = demos())))
     Right(
       OptimizationReport(
         bestProgram = compiled,
@@ -46,7 +48,7 @@ final class LabeledFewShot[P: OptimizableStructure](
             score = 0.0,
             metadata = Map(
               "optimizer"     -> name,
-              "num_demos"     -> demos.size,
+              "num_demos"     -> math.min(config.k, trainset.size),
               "trainset_size" -> trainset.size
             )
           )

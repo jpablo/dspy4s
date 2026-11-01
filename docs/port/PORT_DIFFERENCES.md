@@ -508,6 +508,22 @@ the raw text of the error is the completion of the main LM. Two errors differ fr
 - A System One model rejects the temperature of an attempt, so an attempt on this model gives a `Left`. In upstream the
   call also fails: `TypeSafe` has no `kwargs`, and `TypeSafe.copy` does not accept `temperature`.
 
+## 21. Optimizer rules with no upstream form
+
+**Convention.**
+
+The optimizers follow the failure rule of upstream: a `Left` stops the compile where upstream raises. These rules differ
+from upstream:
+
+- A `maxBootstrappedDemos` of 0 gives a shuffled bootstrap the size 0. Upstream `randint(1, 0)` raises a `ValueError`.
+- The current instruction of a leaf stays a candidate of COPRO and MIPROv2 that writes nothing, so a leaf with no
+  instructions keeps `None`. A prompt shows its effective instructions. Upstream reads the default text and writes it
+  back, which gives the same prompt.
+- A blank proposal gives no candidate, and a blank rule text of InferRules keeps the instructions of the leaf. Upstream
+  writes the blank text.
+- The check of ReAnchor for a cache reads only the model of the context. Upstream reads the bound LM of each predictor,
+  else `dspy.settings.lm`, and its `cache` config.
+
 ## What this means in practice
 
 If you're porting a Python DSPy script to dspy4s, the friction will

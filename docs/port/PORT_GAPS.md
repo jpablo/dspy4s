@@ -1799,12 +1799,13 @@ discarded it. Tests: `BootstrapFewShotPerPredictorSuite`, `OptimizerConfiguratio
 
 ## G-43 — Random search and MIPROv2 candidates are less diverse than upstream
 
-**Status:** Open · **Verification:** R
+**Status:** Resolved (2026-11-01): the two optimizers share `OptimizerSupport.shuffledBootstrap`, which shuffles the
+whole trainset and changes `maxBootstrappedDemos`. · **Verification:** R
 
-- `BootstrapFewShotWithRandomSearch` gives a subset of 1 to N examples as the trainset
+- `BootstrapFewShotWithRandomSearch` gave a subset of 1 to N examples as the trainset
   (`modules/optimize/.../BootstrapFewShotWithRandomSearch.scala:82-101`). Upstream shuffles the full trainset and
   changes `max_bootstrapped_demos` (`dspy/teleprompt/random_search.py:106-112`).
-- In MIPROv2 the seed changes only the labeled shuffle (`modules/optimize/.../MIPROv2.scala:132-146`). Upstream
+- In MIPROv2 the seed changed only the labeled shuffle (`modules/optimize/.../MIPROv2.scala:132-146`). Upstream
   shuffles and changes the size (`dspy/teleprompt/utils.py:392-393`).
 
 ---

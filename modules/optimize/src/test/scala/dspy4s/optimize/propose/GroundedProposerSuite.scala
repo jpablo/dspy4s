@@ -16,8 +16,8 @@ import zio.blocks.schema.DynamicValue
 
 /** Offline GroundedProposer suite.
   *
-  * The scripted LM serves two distinct sub-tasks through the single ambient model, branching on markers the proposer
-  * weaves into each signature's instructions (rendered into the prompt by the test adapter):
+  * The scripted LM serves two distinct sub-tasks through the single ambient model, branching on the upstream texts of
+  * the signatures (rendered into the prompt by the test adapter):
   *
   *   1. Dataset summary. The summary `DynamicPredict` asks for `observations`. The scripted LM returns a canned summary
   *      string AND bumps a call counter (so the test can assert the summary call is skipped when
@@ -30,8 +30,9 @@ class GroundedProposerSuite extends FunSuite:
 
   // ── Fixtures ──────────────────────────────────────────────────────────────
 
-  private val summaryMarker     = "SUMMARIZE_THE_DATASET"
-  private val instructionMarker = "PROPOSE_THE_INSTRUCTION"
+  private val summaryMarker     = "Given several examples from a dataset"
+  private val instructionMarker = "Use the information below to learn about a task"
+  private val noDemos           = "task_demos=[No task demos provided.]"
 
   /** The canned dataset-summary string the scripted LM returns for summary calls; a fragment is echoed into proposals
     * so grounding is observable.
@@ -117,9 +118,7 @@ class GroundedProposerSuite extends FunSuite:
       numInstructions = numInstructions,
       useDatasetSummary = useDatasetSummary,
       useTips = useTips,
-      seed = seed,
-      summaryMarker = summaryMarker,
-      instructionMarker = instructionMarker
+      seed = seed
     )
 
   // ── 1. Single predictor: N distinct, non-empty candidates ─────────────────
@@ -210,7 +209,43 @@ class GroundedProposerSuite extends FunSuite:
     assertEquals(run(), run())
   }
 
-  // ── 6. numInstructions <= 0 is rejected ───────────────────────────────────
+  // ── 6. task_demos (upstream `GenerateModuleInstruction.forward`) ──────────
+
+  /** The prompts of `proposeInstructions` for two proposals of one leaf, with `demos` as its demo set. */
+  private def promptsWith(demos: Vector[Example]): Vector[String] =
+    val prompts = java.util.concurrent.ConcurrentLinkedQueue[String]()
+    val lm      = new LanguageModel:
+      override val id: String                                                                    = "recording"
+      override val mode: LmMode                                                                  = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        val _ = prompts.add(request.messages.lastOption.flatMap(_.text).getOrElse(""))
+        Right(LmResponse(outputs = Vector(LmOutput(text = "A candidate."))))
+    val proposer = new GroundedProposer[DynamicPredict](
+      config(numInstructions = CandidateCount(2), useDatasetSummary = false, useTips = false)
+    )
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(GroundingAwareAdapter))) {
+      val program = DynamicPredict(layout = taskLayout("QA", "INSTR_INITIAL"))
+      val result  = proposer.proposeInstructions(program, trainset, Vector(demos))(using RuntimeEnvironment.current)
+      assert(result.isRight, result.toString)
+    }
+    prompts.toArray(Array.empty[String]).toVector
+
+  test("the input task_demos has the upstream text when a proposal has no bootstrapped demo") {
+    val labeled = Example(rec("question" := "a labeled demo", "answer" := "x"), inputKeys = Set("question"))
+    assert(promptsWith(Vector.empty).forall(_.contains(noDemos)))
+    assert(promptsWith(Vector(labeled)).forall(_.contains(noDemos)))
+  }
+
+  test("the first proposal shows no demos, and a later proposal shows the bootstrapped demos only") {
+    val labeled = Example(rec("question" := "a labeled demo", "answer" := "x"), inputKeys = Set("question"))
+    val traced  = Example(rec("question" := "a traced demo", "answer" := "y"), Set("question"), augmented = true)
+    val prompts = promptsWith(Vector(labeled, traced))
+    assert(prompts(0).contains(noDemos), prompts(0))
+    assert(prompts(1).contains("a traced demo"), prompts(1))
+    assert(!prompts(1).contains("a labeled demo"), prompts(1))
+  }
+
+  // ── 7. numInstructions <= 0 is rejected ───────────────────────────────────
 
   test("CandidateCount rejects non-positive instruction counts") {
     assert(compileErrors("dspy4s.optimize.CandidateCount(0)").nonEmpty)

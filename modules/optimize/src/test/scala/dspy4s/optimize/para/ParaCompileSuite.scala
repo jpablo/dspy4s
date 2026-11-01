@@ -35,7 +35,7 @@ class ParaCompileSuite extends FunSuite:
     "INSTR_E: be casual"
   )
 
-  private val instrGenMarker = "OPTIMIZE_THE_INSTRUCTION"
+  private val instrGenMarker = "You are an instruction optimizer for large language models."
 
   private val gold: Map[String, String] = Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3")
 
@@ -103,8 +103,7 @@ class ParaCompileSuite extends FunSuite:
       metric = new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer"),
       breadth = CoproBreadth(5),
       depth = RoundCount(1),
-      seed = seed,
-      instructionMarker = instrGenMarker
+      seed = seed
     )
 
   // ── 1. Happy path: the packaged entry point finds the winner; assertions via the parameterized surface ────────────
@@ -169,8 +168,7 @@ class ParaCompileSuite extends FunSuite:
       metric = new dspy4s.evaluate.metrics.ExactMatch(answerField = "question"),
       breadth = CoproBreadth(5),
       depth = RoundCount(1),
-      seed = 0L,
-      instructionMarker = instrGenMarker
+      seed = 0L
     )
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current

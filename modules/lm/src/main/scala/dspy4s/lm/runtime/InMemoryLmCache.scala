@@ -4,8 +4,10 @@ import dspy4s.lm.contracts.{CacheKey, LmCache, LmResponse}
 
 import java.util.LinkedHashMap
 
-/** An [[LmCache]] in memory, with the least recently used entry removed above `maxEntries`. */
-final class InMemoryLmCache(maxEntries: CacheCapacity = CacheCapacity(1024)) extends LmCache:
+/** An [[LmCache]] in memory, with the least recently used entry removed above `maxEntries`. The default is upstream
+  * `memory_max_entries` (`dspy/clients/__init__.py`), so a long run such as a ReAnchor pass keeps its own entries.
+  */
+final class InMemoryLmCache(maxEntries: CacheCapacity = CacheCapacity(1000000)) extends LmCache:
 
   private val store = new LinkedHashMap[CacheKey, LmResponse](16, 0.75f, true):
     override def removeEldestEntry(eldest: java.util.Map.Entry[CacheKey, LmResponse]): Boolean =

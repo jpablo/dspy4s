@@ -23,6 +23,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.optimize.contracts.CandidateProgram
 import dspy4s.optimize.contracts.OptimizationReport
 import dspy4s.optimize.contracts.Teleprompter
+import dspy4s.programs.runtime.ParallelExecutor
 
 import zio.blocks.schema.DynamicValue
 
@@ -37,7 +38,7 @@ final case class BootstrapFewShotConfig(
     maxBootstrappedDemos: DemoCount                                = DemoCount(4),
     maxLabeledDemos     : DemoCount                                = DemoCount(16),
     maxRounds           : RoundCount                               = RoundCount(1),
-    maxErrors           : ErrorLimit                               = ErrorLimit(10),
+    maxErrors           : Option[ErrorLimit]                       = None,
     seed                : Long                                     = 0L
 )
 
@@ -63,9 +64,11 @@ final case class BootstrapFewShotConfig(
   *      `maxLabeledDemos` demos.
   *
   * A run that returns a `Left`, a metric that returns a `Left`, and a thrown exception each count as one error. When
-  * the count is `maxErrors`, `compile` returns a `Left`. Two predictors with the same key, a predictor type that
-  * records no key, and a teacher that does not agree with the student are configuration errors. `compile` returns each
-  * of them immediately as a `ValidationError` and does not count them.
+  * the count is the error limit, `compile` returns a `Left`. The error limit is `maxErrors`, else the limit of the
+  * context, else `ParallelExecutor.DefaultMaxErrors` (upstream `dspy.settings.max_errors`). Two predictors with the
+  * same key, a predictor type that records no key, and a teacher that does not agree with the student are configuration
+  * errors. `compile` returns each of them immediately as a `ValidationError` and does not count them. The check of the
+  * keys comes before each other step, so it also applies to an empty trainset.
   *
   * ==Deliberate differences from Python==
   *   - '''Compiled teacher.''' Python reads the `_compiled` flag of the teacher, and it rejects a compiled student.
@@ -108,32 +111,34 @@ final class BootstrapFewShot[P: {OptimizableStructure, ProgramRunner}](
       teacher : Option[P],
       valset  : Option[Vector[Example]]
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    if trainset.isEmpty then
-      Right(
-        OptimizationReport(
-          bestProgram = student,
-          candidates =
-            Vector(CandidateProgram(student, 0.0, metadata = Map("optimizer" -> name, "reason" -> "empty_trainset"))),
-          metadata = Map("optimizer" -> name)
+    OptimizerSupport.requireDistinctKeys(student, teacher).flatMap { _ =>
+      if trainset.isEmpty then
+        Right(
+          OptimizationReport(
+            bestProgram = student,
+            candidates =
+              Vector(CandidateProgram(student, 0.0, metadata = Map("optimizer" -> name, "reason" -> "empty_trainset"))),
+            metadata = Map("optimizer" -> name)
+          )
         )
-      )
-    else
-      compileInternal(student, trainset, teacher)
+      else
+        compileInternal(student, trainset, teacher)
+    }
 
   private def compileInternal(
       student : P,
       trainset: Vector[Example],
       teacher : Option[P]
-  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
+  )(using context: RuntimeContext): Either[DspyError, OptimizationReport[P]] =
+    val maxErrors = config.maxErrors.orElse(context.maxErrors).getOrElse(ParallelExecutor.DefaultMaxErrors)
     // With no teacher, the student is the teacher, and it keeps its demos (Python: `student.deepcopy()`).
     val teacherBase = teacher.getOrElse(student)
     // The keys do not change when a leaf gets demos, so the leaves of the base teacher are valid for each run.
     val leaves = ps.readIdentified(teacherBase)
     for
-      _              <- OptimizerSupport.requireDistinctKeys(student, teacher)
       _              <- requireSameSignatures(ps.readIdentified(student), leaves)
       teacherProgram <- withLabeledDemos(teacherBase, trainset)
-      progress       <- bootstrap(teacherProgram, leaves, trainset)
+      progress       <- bootstrap(teacherProgram, leaves, trainset, maxErrors)
     yield
       val pool                    = labeledPool(trainset, progress.bootstrapped)
       val (compiled, labeledSize) = train(student, progress.demos, pool)
@@ -156,7 +161,7 @@ final class BootstrapFewShot[P: {OptimizableStructure, ProgramRunner}](
           "max_bootstrapped_demos" -> config.maxBootstrappedDemos,
           "max_labeled_demos"      -> config.maxLabeledDemos,
           "max_rounds"             -> config.maxRounds,
-          "max_errors"             -> config.maxErrors,
+          "max_errors"             -> maxErrors,
           "seed"                   -> config.seed
         )
       )
@@ -210,9 +215,10 @@ final class BootstrapFewShot[P: {OptimizableStructure, ProgramRunner}](
     * error limit or a configuration error.
     */
   private def bootstrap(
-      teacher : P,
-      leaves  : Vector[IdentifiedOptimizable],
-      trainset: Vector[Example]
+      teacher  : P,
+      leaves   : Vector[IdentifiedOptimizable],
+      trainset : Vector[Example],
+      maxErrors: ErrorLimit
   ): Either[DspyError, Progress] =
     @tailrec
     def loop(index: Int, round: Int, progress: Progress): Either[DspyError, Progress] =
@@ -225,7 +231,7 @@ final class BootstrapFewShot[P: {OptimizableStructure, ProgramRunner}](
           case Right(Attempt.Rejected)        => loop(index, round + 1, progress)
           case Right(Attempt.Failed(reason))  =>
             val errors = progress.errors + 1
-            if errors >= config.maxErrors then
+            if errors >= maxErrors then
               Left(RuntimeError("bootstrap", s"Too many bootstrap errors ($errors): $reason"))
             else loop(index, round + 1, progress.copy(errors = errors))
 

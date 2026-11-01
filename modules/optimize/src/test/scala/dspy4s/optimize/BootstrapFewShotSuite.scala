@@ -137,7 +137,7 @@ class BootstrapFewShotSuite extends FunSuite:
       failsWith = Some(new RuntimeException("boom"))
     )
     val optimizer = new BootstrapFewShot[ScriptedPredictProgram](
-      BootstrapFewShotConfig(maxErrors = ErrorLimit(2), maxBootstrappedDemos = DemoCount(10))
+      BootstrapFewShotConfig(maxErrors = Some(ErrorLimit(2)), maxBootstrappedDemos = DemoCount(10))
     )
     given RuntimeContext = RuntimeEnvironment.current
 
@@ -160,7 +160,7 @@ class BootstrapFewShotSuite extends FunSuite:
       BootstrapFewShotConfig(
         maxBootstrappedDemos = DemoCount(1),
         maxLabeledDemos = DemoCount(2),
-        maxErrors = ErrorLimit(100),
+        maxErrors = Some(ErrorLimit(100)),
         seed = 7L
       )
     )
@@ -202,7 +202,7 @@ class BootstrapFewShotSuite extends FunSuite:
     new BootstrapFewShot[ScriptedPredictProgram](config).compile(program, trainset, teacher = Some(program))
 
   test("BootstrapFewShot counts a metric that returns a Left as an error") {
-    val config = BootstrapFewShotConfig(metric = Some(new FailingMetric(_ => true)), maxErrors = ErrorLimit(2))
+    val config = BootstrapFewShotConfig(metric = Some(new FailingMetric(_ => true)), maxErrors = Some(ErrorLimit(2)))
     compileScripted(config, numbered(5)) match
       case Left(error: RuntimeError) => assert(error.message.contains("metric failed"), error.message)
       case other                     => fail(s"expected the error limit to stop the compile, got $other")
@@ -210,7 +210,7 @@ class BootstrapFewShotSuite extends FunSuite:
 
   test("BootstrapFewShot counts a metric that throws as an error") {
     val metric = new FailingMetric(_ => true, thrown = true)
-    val config = BootstrapFewShotConfig(metric = Some(metric), maxErrors = ErrorLimit(2))
+    val config = BootstrapFewShotConfig(metric = Some(metric), maxErrors = Some(ErrorLimit(2)))
     compileScripted(config, numbered(5)) match
       case Left(error: RuntimeError) => assert(error.message.contains("metric boom"), error.message)
       case other                     => fail(s"expected the error limit to stop the compile, got $other")
@@ -221,7 +221,7 @@ class BootstrapFewShotSuite extends FunSuite:
       metric = Some(new FailingMetric(_.equals("q1"))),
       maxBootstrappedDemos = DemoCount(2),
       maxLabeledDemos = DemoCount(0),
-      maxErrors = ErrorLimit(3)
+      maxErrors = Some(ErrorLimit(3))
     )
     val report = compileScripted(config, numbered(5)).toOption.get
     assertEquals(report.bestProgram.demos.map(demo => lookupString(demo.values, "question")), Vector("q2", "q3"))

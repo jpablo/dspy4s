@@ -70,7 +70,8 @@ trace of the passed example. `maxBootstrappedDemos` and `maxLabeledDemos` limit 
 
 ### `MIPROv2`
 
-MIPROv2 first bootstraps `numCandidates` demo sets, and adds one set with no demos. Then `GroundedProposer` proposes
+MIPROv2 first makes `numCandidates` demo sets, in this order: one set with no demos, one set of labeled demos, one
+bootstrap on the trainset in its order, and then bootstraps on the shuffled trainset. Then `GroundedProposer` proposes
 instructions for each predictor from a summary of the trainset, the demos, and a tip. Then MIPROv2 runs `numTrials`
 trials. Each trial selects a demo set and one instruction for each predictor at random. MIPROv2 returns the candidate
 with the best score.

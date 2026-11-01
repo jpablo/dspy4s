@@ -41,8 +41,9 @@ class COPROSuite extends FunSuite:
     "INSTR_E: be casual"
   )
 
-  /** Marker the instruction-generation layout carries so the scripted LM can tell the two sub-tasks apart. */
-  private val instrGenMarker = "OPTIMIZE_THE_INSTRUCTION"
+  /** The start of the upstream text of each generation signature, so the scripted LM can tell the two sub-tasks apart.
+    */
+  private val instrGenMarker = "You are an instruction optimizer for large language models."
 
   private val gold: Map[String, String] = Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3")
 
@@ -123,7 +124,7 @@ class COPROSuite extends FunSuite:
       depth  : RoundCount   = RoundCount(1),
       seed   : Long         = 0L
   ): COPROConfig =
-    COPROConfig(metric = metric, breadth = breadth, depth = depth, seed = seed, instructionMarker = instrGenMarker)
+    COPROConfig(metric = metric, breadth = breadth, depth = depth, seed = seed)
 
   // ── 1. Happy path: single-Predict student, COPRO selects the winner ───────
 

@@ -39,7 +39,8 @@ import scala.util.control.NonFatal
 /** The settings of [[ReAnchor]].
   *
   * @param numThreads
-  *   the number of examples that a pass runs at the same time, as in `Evaluate`
+  *   the number of examples that a pass runs at the same time. With `None`, the context gives the count, else
+  *   `ParallelExecutor.DefaultNumThreads` (upstream `num_threads=None`)
   * @param logDir
   *   when set, `compile` writes `report.json` to this folder
   * @param requireCache
@@ -48,9 +49,9 @@ import scala.util.control.NonFatal
   *   program picks at run time, or to allow requests with no cache.
   */
 final case class ReAnchorConfig(
-    numThreads  : ThreadCount  = ThreadCount(1),
-    logDir      : Option[Path] = None,
-    requireCache: Boolean      = true
+    numThreads  : Option[ThreadCount] = None,
+    logDir      : Option[Path]        = None,
+    requireCache: Boolean             = true
 )
 
 /** One row of the report: the fit of one decision output of one predictor (upstream `calibrate` report row).
@@ -460,14 +461,15 @@ final class ReAnchor[P: {OptimizableStructure, ProgramRunner}](
       )
     )
 
-  /** The metric score of `program` on each example of `examples` (upstream `scores`). The examples run on `numThreads`
-    * threads. The pass fails at the first error of the program or the metric, and on a score that is not finite.
+  /** The metric score of `program` on each example of `examples` (upstream `scores`). The examples run on the threads
+    * that `numThreads` or the context gives. The pass fails at the first error of the program or the metric, and on a
+    * score that is not finite.
     */
   private def scores(program: P, examples: Vector[Example])(using
       context: RuntimeContext
   ): Either[DspyError, Vector[Double]] =
     val failure  = new AtomicReference[Option[DspyError]](None)
-    val executor = ParallelExecutor(numThreads = config.numThreads, maxErrors = ErrorLimit(1))
+    val executor = ParallelExecutor.fromSettings(numThreads = config.numThreads, maxErrors = Some(ErrorLimit(1)))
     // The executor installs the given context, so the workers get it with the dynamic scope of this thread.
     val run = executor.executeEither[Example, Double](
       task = example =>

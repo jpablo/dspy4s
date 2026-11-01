@@ -14,8 +14,8 @@ import munit.FunSuite
 
 /** Offline MIPROv2 suite.
   *
-  * The single ambient scripted LM serves THREE sub-tasks, branched on markers MIPROv2's composed phases weave into each
-  * signature's instructions (the test adapter renders the active instruction into the prompt):
+  * The single ambient scripted LM serves THREE sub-tasks, branched on the upstream texts of the signatures (the test
+  * adapter renders the active instruction into the prompt):
   *
   *   1. Dataset summary (GroundedProposer phase A): returns a canned observations string.
   *   2. Instruction generation (GroundedProposer phase A): returns a distinct candidate per `rolloutId`, and the pool
@@ -32,24 +32,25 @@ class MIPROv2Suite extends FunSuite:
   // ── Fixtures ──────────────────────────────────────────────────────────────
 
   /** The instruction MIPROv2 must discover as the winner. */
-  private val winningInstruction = "INSTR_WIN: answer precisely"
+  private val winningInstruction = "INSTR_WIN answer precisely"
 
   /** Candidate instruction pool the scripted LM proposes for instruction-generation calls; selected by
-    * `rolloutId % size` so the winner is always reachable.
+    * `rolloutId % size` so the winner is always reachable. A text has no colon, because upstream `strip_prefix` removes
+    * a label such as `INSTR_WIN:`.
     */
   private val proposalPool: Vector[String] = Vector(
-    "INSTR_A: be brief",
-    "INSTR_B: be verbose",
+    "INSTR_A be brief",
+    "INSTR_B be verbose",
     winningInstruction,
-    "INSTR_D: be formal",
-    "INSTR_E: be casual"
+    "INSTR_D be formal",
+    "INSTR_E be casual"
   )
 
-  /** Marker the instruction-generation layout carries (GroundedProposer instructionMarker). */
-  private val instrGenMarker = "PROPOSE_THE_INSTRUCTION"
+  /** The start of the upstream text of the instruction-generation signature. */
+  private val instrGenMarker = "Use the information below to learn about a task"
 
-  /** Marker the dataset-summary layout carries (GroundedProposer summaryMarker). */
-  private val summaryMarker = "SUMMARIZE_THE_DATASET"
+  /** The start of the upstream text of the dataset-summary signature. */
+  private val summaryMarker = "Given several examples from a dataset"
 
   private val cannedSummary = "DATASET=qa pairs"
 
@@ -142,9 +143,7 @@ class MIPROv2Suite extends FunSuite:
       seed = seed,
       proposerConfig = GroundedProposerConfig(
         numInstructions = numCandidates,
-        seed = seed,
-        summaryMarker = summaryMarker,
-        instructionMarker = instrGenMarker
+        seed = seed
       )
     )
 

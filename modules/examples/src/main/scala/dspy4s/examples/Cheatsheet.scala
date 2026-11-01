@@ -156,7 +156,7 @@ object Cheatsheet:
       maxBootstrappedDemos = DemoCount(4),
       maxLabeledDemos = DemoCount(16),
       maxRounds = RoundCount(1),
-      maxErrors = ErrorLimit(10)
+      maxErrors = Some(ErrorLimit(10))
     )).compile(student, trainset).map(_.bestProgram)
   // --8<-- [end:opt-bootstrap]
 

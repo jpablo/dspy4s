@@ -222,7 +222,7 @@ class BootstrapFewShotPerPredictorSuite extends FunSuite:
   }
 
   test("a failed run counts as an error, and the limit stops the compile") {
-    val config = BootstrapFewShotConfig(metric = Some(exactAnswer), maxErrors = ErrorLimit(2))
+    val config = BootstrapFewShotConfig(metric = Some(exactAnswer), maxErrors = Some(ErrorLimit(2)))
     val result = compile(twoStage, trainset(5), config, new StageLm(fail = true))
     assert(result.isLeft, s"expected the error limit to stop the compile, got $result")
   }

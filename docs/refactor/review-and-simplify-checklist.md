@@ -433,13 +433,13 @@ Simplify 7 (rank 2). Code-review 6 (rank 5). 2954 main lines, 4945 test lines.
 
 - (a) The bootstrap optimizers and the shared files, about 1030 lines: `BootstrapFewShot.scala`, `BootstrapFewShotWithRandomSearch.scala`, `LabeledFewShot.scala`, `KNNFewShot.scala`, `Ensemble.scala`, `DemoCount.scala`, `OptimizerSupport.scala`, `OptimizerLimits.scala`, `contracts/`.
   - [x] /simplify
-  - [ ] /code-review
+  - [x] /code-review
 - (b) The instruction optimizers, about 1000 lines: `COPRO.scala`, `MIPROv2.scala`, `propose/GroundedProposer.scala`, `InferRules.scala`.
   - [x] /simplify
-  - [ ] /code-review
+  - [x] /code-review
 - (c) ReAnchor, about 800 lines: `ReAnchor.scala`, `ReAnchorSearch.scala`. ProgramPersistence moved to programs `optimization/` in the simplify pass.
   - [x] /simplify
-  - [ ] /code-review
+  - [x] /code-review
 
 ### Simplify findings
 
@@ -459,11 +459,18 @@ Simplify 7 (rank 2). Code-review 6 (rank 5). 2954 main lines, 4945 test lines.
 
 ### Code-review findings
 
-- [ ] `BootstrapFewShotWithRandomSearch.scala:101-121` (a parity bug): seeds of 0 or more cut the trainset to 1..maxBootstrappedDemos examples. Upstream passes the whole shuffled trainset and uses the random size as `max_bootstrapped_demos`. The bootstrap seed also ignores `config.seed`. No test covers this.
-- [ ] `MIPROv2.scala:258` and `BootstrapFewShotWithRandomSearch.scala:153`: a failure scores 0.0 with no error. If the LM is down, every score is 0 and the result is still `Right`.
-- [ ] `MIPROv2.scala:177-183`, `:250-252`, and `COPRO.scala:143`: a leaf with `instructions = None` can become `Some("")`. `MIPROv2.scala:213` assumes that `ps.inspect` (used by GroundedProposer) and `ps.read` give the same number of leaves.
-- [ ] `propose/GroundedProposer.scala:203` (more than 64 instructions) and `InferRules.scala:163` (more than 100 leaves): the rolloutId windows can overlap. Overlapping IDs can give the same cached proposals.
-- [ ] `ReAnchorSearch.scala:170-230` is a bit-exact port of the Python MT19937 and `fsum`. It is fragile, but ReAnchorUpstreamSuite tests it.
+- [x] `BootstrapFewShotWithRandomSearch.scala` (a parity bug): seeds of 0 or more cut the trainset, and the bootstrap seed ignored `config.seed`. Fixed: the whole shuffled trainset, with the random size as `maxBootstrappedDemos`.
+- [x] A failure scored 0.0 or dropped a candidate with no error in `BootstrapFewShotWithRandomSearch.scala`, `COPRO.scala`, and `InferRules.scala`. Fixed: a `Left`, as upstream raises. `MIPROv2.scala` keeps 0.0 for a failed trial, as upstream `eval_candidate_program`, and writes a warning.
+- [x] A leaf with `instructions = None` could become `Some("")` in `MIPROv2.scala` and `COPRO.scala`, and an empty text went to the model. Fixed: prompts show the effective instructions, and the current instruction is a candidate that writes nothing. `ps.inspect` and `ps.read` now come from one list (programs simplify (c)).
+- [x] `propose/GroundedProposer.scala`, `COPRO.scala`, and `InferRules.scala`: the rollout id windows could overlap. Fixed: ids with no overlap for any size. `MIPROv2.scala` passes its seed to the proposer.
+- [x] `ReAnchorSearch.scala` holds a bit-exact port of the Python random generator. It is fragile, but ReAnchorUpstreamSuite tests it, and no other code uses it. No change.
+- [x] (code-review) `LabeledFewShot.scala` gave each predictor the same sample. Fixed: one random source, and a sample for each predictor, as upstream.
+- [x] (code-review) `MIPROv2.scala` bootstrapped the same trainset order for each demo set. Fixed: the sets of upstream `create_n_fewshot_demo_sets`, with `OptimizerSupport.shuffledBootstrap` shared with the random search.
+- [x] (code-review) `COPRO.scala`, `propose/GroundedProposer.scala`, and `InferRules.scala` used paraphrased prompts with marker settings. Fixed: the texts, the field descriptions, the input order, and `strip_prefix` of upstream. COPRO shows the best attempts up to the breadth, strips quotes, and runs no evaluation after its search.
+- [x] (code-review) `BootstrapFewShot.scala`, `BootstrapFewShotWithRandomSearch.scala`, and `ReAnchor.scala` ignored the `maxErrors` and `numThreads` of the context. Fixed: `Option` settings. A duplicate key with an empty trainset now fails. `InMemoryLmCache` holds 1000000 entries by default, as upstream.
+- [ ] (code-review, open) A `ChainOfThought` leaf with no instructions shows `produce the fields `reasoning`, `answer`` in `basic_instruction`, and InferRules writes that text, because `OptimizableView.layout` rebuilds the text from the augmented structure. Upstream and the program use the base text. A read of the effective instructions on `OptimizableLeaf` fixes it.
+- [ ] (code-review, open) `MIPROv2.scala`: upstream `num_candidates` also sets the number of proposals, replaces the first proposal with the current instruction, and limits the proposals to `min(N, demo sets)`. The port has `proposerConfig.numInstructions` and puts the current instruction before the proposals. Random search seed -2 with no labeled demos gives no candidate, where upstream scores an empty-demo program again.
+- [ ] (code-review, no change) `ReAnchor.scala` checks the cache of the model of the context only (PORT_DIFFERENCES section 21).
 
 ## gepa
 

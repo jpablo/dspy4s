@@ -45,7 +45,7 @@ class BootstrapFewShotWithRandomSearchSuite extends FunSuite:
         numCandidates = SearchCandidateCount(3),
         maxBootstrappedDemos = DemoCount(2),
         maxLabeledDemos = DemoCount(2),
-        maxErrors = ErrorLimit(20)
+        maxErrors = Some(ErrorLimit(20))
       )
     )
     given RuntimeContext = RuntimeEnvironment.current
@@ -73,7 +73,7 @@ class BootstrapFewShotWithRandomSearchSuite extends FunSuite:
         numCandidates = SearchCandidateCount(20),
         maxBootstrappedDemos = DemoCount(4),
         maxLabeledDemos = DemoCount(4),
-        maxErrors = ErrorLimit(50),
+        maxErrors = Some(ErrorLimit(50)),
         stopAtScore = Some(100.0)
       )
     )
@@ -98,7 +98,7 @@ class BootstrapFewShotWithRandomSearchSuite extends FunSuite:
         numCandidates = SearchCandidateCount(20),
         maxBootstrappedDemos = DemoCount(4),
         maxLabeledDemos = DemoCount(4),
-        maxErrors = ErrorLimit(50),
+        maxErrors = Some(ErrorLimit(50)),
         stopAtScore = Some(100.0)
       )
     )

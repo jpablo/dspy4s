@@ -63,7 +63,7 @@ class CompileCallbackSuite extends FunSuite:
         numCandidates = SearchCandidateCount(2),
         maxBootstrappedDemos = DemoCount(1),
         maxLabeledDemos = DemoCount(1),
-        maxErrors = ErrorLimit(20)
+        maxErrors = Some(ErrorLimit(20))
       )
     )
     val teacher          = DemoAwarePredictProgram(layout = signature, answers = (1 to 4).map(i => s"q$i" -> s"a$i").toMap)

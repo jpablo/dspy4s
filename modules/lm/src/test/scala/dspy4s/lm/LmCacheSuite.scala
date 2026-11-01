@@ -57,6 +57,15 @@ class LmCacheSuite extends FunSuite:
     assertEquals(cache.get(key), Some(baseResponse))
   }
 
+  // Upstream `memory_max_entries` is 1000000 (`dspy/clients/__init__.py`), so a long run does not evict its own entries.
+  test("a default in-memory cache keeps 2000 entries") {
+    val cache = new InMemoryLmCache()
+    (1 to 2000).foreach(index => cache.put(CacheKey.of(s"key-$index"), baseResponse))
+
+    assertEquals(cache.size, 2000)
+    assertEquals(cache.get(CacheKey.of("key-1")), Some(baseResponse))
+  }
+
   test("disk cache persists values across cache instances") {
     val tempDir = Files.createTempDirectory("dspy4s-lm-disk-cache")
     try
