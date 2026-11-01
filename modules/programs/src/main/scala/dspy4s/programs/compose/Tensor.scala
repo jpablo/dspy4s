@@ -38,12 +38,19 @@ final case class Tensor[
     for
       predA <- first(call.mapInput(_._1))
       predB <- second(call.mapInput(_._2))
-    yield Prediction(
-      output = (predA.output, predB.output),
-      raw = RawPrediction(values = DynamicValues.mergeRecords(predA.raw.values, predB.raw.values))
-    )
+    yield Tensor.pairedPrediction(predA, predB)
 
 object Tensor:
+  /** The result of two programs that ran one after the other. The output is the pair of the two outputs. The raw
+    * prediction merges the value records of the two raw predictions, and `second` wins on a key collision. [[Both]]
+    * uses the same result.
+    */
+  private[compose] def pairedPrediction[A, B](first: Prediction[A], second: Prediction[B]): Prediction[(A, B)] =
+    Prediction(
+      output = (first.output, second.output),
+      raw = RawPrediction(values = DynamicValues.mergeRecords(first.raw.values, second.raw.values))
+    )
+
   /** Structural `read(a) ++ read(b)`, same distribution as `AndThen` / `Both`. */
   given tensorOptimizableStructure[
       I,

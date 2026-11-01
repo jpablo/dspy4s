@@ -54,8 +54,8 @@ object Compose:
     */
   def swap[I, J]: Lift[(I, J), (J, I)] = Lift(_.swap)
 
-  /** Non-learnable control middleware: `mode(m)(p)` runs `p` with its per-call controls rewritten by `m` (model /
-    * temperature / rolloutId / traceEnabled). See [[Mode]].
+  /** Non-learnable control middleware: `mode(m)(p)` runs `p` with its per-call controls rewritten by `m` (temperature /
+    * rolloutId / traceEnabled). See [[Mode]].
     */
   def mode[I, O, P <: Module[I, O]](m: Mode)(p: P): Moded[I, O, P] = Moded(m, p)
 

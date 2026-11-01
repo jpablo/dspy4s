@@ -111,11 +111,11 @@ object Program:
 
   /** Optimizable structure delegates to the packaged representation while preserving `N`. */
   given programOptimizableStructure[I, O, N <: Int]: OptimizableStructure.Of[Program[I, O, N], N] with
+    /** The count of the representation resolves no name. The default count resolves the name of each leaf, and a deep
+      * program has long names, thus it runs out of memory (`DeepProgramStackSafetySuite`).
+      */
     override def arity(program: Program[I, O, N]): Int =
       program.optimizableParameters.arity(program.program)
-
-    override def inspect(program: Program[I, O, N]): Vector[OptimizableView] =
-      program.optimizableParameters.inspect(program.program)
 
     def replace(
         program: Program[I, O, N],

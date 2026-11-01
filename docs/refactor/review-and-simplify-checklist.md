@@ -332,7 +332,7 @@ Simplify 7 (rank 1). Code-review 6 (rank 4). 8004 main lines, 11858 test lines.
   - [x] /code-review
 - (c) The structure, about 3150 lines: `optimization/`, `algebra/`, `compose/`, the other files in `contracts/`, and the other files at the top of the source root.
   - [x] /simplify
-  - [ ] /code-review
+  - [x] /code-review
 
 ### Simplify findings
 
@@ -383,6 +383,11 @@ Simplify 7 (rank 1). Code-review 6 (rank 4). 8004 main lines, 11858 test lines.
 - [x] (code-review (b)) `retrievers/KNN.scala` used Scala text for a value, and a query vector of another size gave a score from part of each vector. Fixed: `PythonText.str`, and a `Left`.
 - [ ] (code-review (b), design) The temperature and the rollout id of an attempt of `BestOfN` and `Refine` travel on `ProgramCall`. A composite that builds a new `ProgramCall`, for example `KNNFewShot.scala`, drops them, so with a cache each attempt can give one answer. They also win over the temperature of a `Predict` config, where upstream `lm.copy` stays under it. `RuntimeScope.lmDefaults`, which `PredictEngine` merges under `config`, is the smallest general fix. It also serves `BootstrapFewShot`.
 - [ ] (code-review (b), no change) Under `captureFailureTraces`, a failed predictor entry is in the trajectory of the critic. Upstream has no such entries.
+- [x] (code-review (c)) `compose/Mode.scala` `Mode.model` had no effect, because the wire layer overwrites the `model` key with `request.model`. Fixed: removed. `Mode.setConfig` with a `model` key still has no effect, and its scaladoc says so.
+- [x] (code-review (c)) `DynamicSignature.scala` `bridge` rejected an optional or defaulted target input, which its validating entry accepts. Fixed: the same rule.
+- [x] (code-review (c)) `ModuleLifecycle` had a type parameter `O` that nothing read, `compose/Both.scala` and `compose/Tensor.scala` repeated one merge, and `algebra/Program.scala` forwarded `inspect`. Fixed. The `arity` of `Program` stays: the default builds each name and needs more than 1 GB for 20,000 left-nested leaves.
+- [ ] (code-review (c), skipped) `read` and `inspect` go through `inspectNamed`, so a left-nested program of 20,000 leaves builds one long name for each leaf. Names that are built only when needed remove this cost. Real programs are far smaller.
+- [ ] (code-review (c), skipped) The rule for a required field is in `Shape.scala` `requiredFieldsCheck`, `DynamicSignature.scala` `bridge`, and, in its inverse form, `OutputAugmentation.scala`. A method on `FieldSpec` can hold it in one place (the core or signatures pass).
 - [x] (code-review (a)) `RLMReplProtocol.renderValue` used compact JSON and Scala text, and a NaN in a list threw. Fixed: the text of upstream `REPLVariable.from_value` (`json.dumps` with an indent of 2, and Python `str`).
 - [x] (code-review (a)) The Deno wrapper of a tool with no declared parameters was `def name():`, so each argument raised `TypeError`. Fixed: `def name(**kwargs):` in `runner.js` (PORT_DIFFERENCES section 18).
 - [x] (code-review (a)) `llm_query_batched` gave one generic `Left` when each prompt threw. Fixed: the error limit is above the batch size, so each prompt gets its `[ERROR]` text.

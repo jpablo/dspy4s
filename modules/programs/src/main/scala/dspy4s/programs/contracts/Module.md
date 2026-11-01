@@ -6,7 +6,7 @@ type `I`, a semantic output type `O`, and one uniform runtime boundary:
 ```scala
 trait Module[I, O]:
   def moduleName: String
-  protected val lifecycle: ModuleLifecycle[I, O]
+  protected val lifecycle: ModuleLifecycle[I]
   protected def forward(
       call: ProgramCall[I]
   )(using RuntimeContext): Either[DspyError, Prediction[O]]
@@ -231,14 +231,14 @@ category.
 [`ModuleLifecycle`](ModuleLifecycle.scala) is a value-level strategy:
 
 ```scala
-sealed trait ModuleLifecycle[I, O]
+sealed trait ModuleLifecycle[I]
 
 object ModuleLifecycle:
-  final case class Transparent[I, O]() extends ModuleLifecycle[I, O]
-  final case class Observed[I, O](
+  final case class Transparent[I]() extends ModuleLifecycle[I]
+  final case class Observed[I](
       inputs   : ProgramCall[I] => DynamicValue.Record,
       predictor: Option[PredictorKey] = None
-  ) extends ModuleLifecycle[I, O]
+  ) extends ModuleLifecycle[I]
 ```
 
 `Observed` answers two questions for an observed boundary:
@@ -249,7 +249,7 @@ object ModuleLifecycle:
 The `traceEnabled` flag of the call permits trace/history recording, and the output record is the value record of the
 raw prediction, for each observed module.
 
-The input projection is a field rather than a typeclass because observation is not unique for a given `I` and `O`. A
+The input projection is a field rather than a typeclass because observation is not unique for a given `I`. A
 signature-backed `Predict[I, O]` can encode its input through its `Shape[I]`; a generic wrapper such as `BestOfN[I, O]`
 has the same type shape but may not possess an authoritative input encoder.
 
@@ -311,7 +311,7 @@ This module has a domain-specific function, an explicit observation projection, 
 final case class LengthModule() extends Module[String, Int]:
   override val moduleName: String = "length"
 
-  override protected val lifecycle: ModuleLifecycle[String, Int] =
+  override protected val lifecycle: ModuleLifecycle[String] =
     ModuleLifecycle.typed(call => DynamicValues.record("text" := call.input))
 
   override protected def forward(

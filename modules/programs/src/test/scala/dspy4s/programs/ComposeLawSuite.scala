@@ -40,7 +40,7 @@ class ComposeLawSuite extends FunSuite:
   private final case class Step[I, O](tag: String, f: I => O, predict: DynamicPredict)
       extends Module[I, O]:
     override val moduleName: String                                                                              = s"step_$tag"
-    override protected val lifecycle: ModuleLifecycle[I, O]                                                      = ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[I]                                                         = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), RawPrediction(values = DynamicValues.record("tag" := tag))))
 
@@ -48,8 +48,8 @@ class ComposeLawSuite extends FunSuite:
     * Associativity requires both syntax trees to have run the same leaves before reaching it.
     */
   private final case class TraceSize(predict: DynamicPredict) extends Module[String, Int]:
-    override val moduleName: String                                = "trace_size"
-    override protected val lifecycle: ModuleLifecycle[String, Int] = ModuleLifecycle.typedWithoutInputs
+    override val moduleName: String                           = "trace_size"
+    override protected val lifecycle: ModuleLifecycle[String] = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[String])(using
         RuntimeContext
     ): Either[DspyError, Prediction[Int]] =

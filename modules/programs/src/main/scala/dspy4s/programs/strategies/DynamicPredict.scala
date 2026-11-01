@@ -80,7 +80,7 @@ final case class DynamicPredict(
   override val moduleName: String = name.getOrElse("predict")
 
   // The key is the metadata of this leaf, so an optimizer finds the trace entries of the leaf.
-  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] =
+  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record] =
     ModuleLifecycle.dynamicPredictor(PredictorKey.from(moduleName, layout))
 
   private val engine =

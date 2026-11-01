@@ -80,14 +80,16 @@ object DynamicSignature:
     * types, so direct cross-bundle composition is a compile error by design; a bridge is the only crossing, and it is
     * failable where the direct composition was silently wrong.
     *
-    * Fails EAGERLY when the target's input fields are not covered by the source's output fields; that name-set
-    * condition is the base-level compatibility arrow this bridge lifts. At run time the validating entry rejects
-    * records whose declared fields are absent. Parameter-free ([[LiftEither]]), so it contributes nothing to `params`
-    * and pipelines optimize exactly as before.
+    * Fails EAGERLY when the source's output fields do not cover a required input of the target. An input is required
+    * when it is not optional and has no default, which is the rule of the validating entry
+    * ([[DynamicSignature.input]]). That name-set condition is the base-level compatibility arrow this bridge lifts. At
+    * run time the validating entry rejects a record that does not have a required input. Parameter-free
+    * ([[LiftEither]]), so it contributes nothing to `params` and pipelines optimize exactly as before.
     */
   def bridge(from: DynamicSignature, to: DynamicSignature): Either[DspyError, Program[from.Out, to.In, 0]] =
     val provided = from.signature.layout.outputFields.map(_.name).toSet
-    val missing  = to.signature.layout.inputFields.map(_.name).filterNot(provided.contains)
+    val required = to.signature.layout.inputFields.filterNot(field => field.optional || field.defaultValue.isDefined)
+    val missing  = required.map(_.name).filterNot(provided.contains)
     if missing.nonEmpty then
       Left(ValidationError(
         s"bridge: target inputs not covered by source outputs; missing: ${missing.mkString(", ")}"

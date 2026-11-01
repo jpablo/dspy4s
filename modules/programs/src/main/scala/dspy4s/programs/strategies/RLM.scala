@@ -243,7 +243,7 @@ final case class RLM[I, O](
         else current + rules
       actionPredict.copy(signature = actionPredict.signature.withInstructions(Some(updated)))
 
-  override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.typed(baseSignature.inputShape)
+  override protected val lifecycle: ModuleLifecycle[I] = ModuleLifecycle.typed(baseSignature.inputShape)
 
   override protected def forward(call: ProgramCall[I])(using ctx: RuntimeContext): Either[DspyError, Prediction[O]] =
     new RLMExecution(this).run(call)

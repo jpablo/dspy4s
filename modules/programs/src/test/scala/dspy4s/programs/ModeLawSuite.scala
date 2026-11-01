@@ -37,7 +37,7 @@ class ModeLawSuite extends FunSuite:
   private final case class Recorder(predict: DynamicPredict) extends Module[Int, Int]:
     val seen: ArrayBuffer[Mode.Controls]                                                                             = ArrayBuffer.empty
     override val moduleName: String                                                                                  = "recorder"
-    override protected val lifecycle: ModuleLifecycle[Int, Int]                                                      = ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[Int]                                                           = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
       seen += Mode.Controls(call.config, call.traceEnabled, call.rolloutId)
       Right(Prediction(call.input, RawPrediction.empty))
@@ -54,13 +54,13 @@ class ModeLawSuite extends FunSuite:
   private def temp(controls: Mode.Controls): Option[String] =
     DynamicValues.recordGet(controls.config, "temperature").map(DynamicValues.renderText)
 
-  test("Mode.temperature writes a Double and Mode.model writes a String into the config") {
+  test("Mode.temperature writes a Double and Mode.setConfig writes a String into the config") {
     val controls = Mode.Controls(DynamicValue.Record.empty, traceEnabled = true, rolloutId = None)
     assertEquals(
-      (Mode.temperature(0.7) ++ Mode.model("gpt-x")).transform(controls).config,
+      (Mode.temperature(0.7) ++ Mode.setConfig("stop" := "END")).transform(controls).config,
       DynamicValues.record(
         "temperature" -> DynamicValue.Primitive(PrimitiveValue.Double(0.7)),
-        "model"       -> DynamicValue.Primitive(PrimitiveValue.String("gpt-x"))
+        "stop"        -> DynamicValue.Primitive(PrimitiveValue.String("END"))
       )
     )
   }
@@ -79,7 +79,7 @@ class ModeLawSuite extends FunSuite:
   test("Mode is a lawful monoid: the Monoid[Mode] instance's laws, executed") {
     val M       = Monoid[Mode]
     val m1      = Mode.temperature(0.5)
-    val m2      = Mode.model("gpt-x")
+    val m2      = Mode.setConfig("top_p" := 0.5)
     val m3      = Mode.rolloutId(3)
     val samples = Vector(
       Mode.Controls(DynamicValue.Record.empty, traceEnabled = true, rolloutId = None),

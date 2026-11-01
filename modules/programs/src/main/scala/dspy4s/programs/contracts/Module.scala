@@ -67,7 +67,7 @@ trait Module[I, O]:
   def moduleName: String
 
   /** How this module boundary participates in callbacks, trace, and history. */
-  protected val lifecycle: ModuleLifecycle[I, O]
+  protected val lifecycle: ModuleLifecycle[I]
 
   /** The program's actual computation, minus the module lifecycle. Subclasses implement this; callers invoke [[apply]]
     * (or [[applyAsync]]), never `forward`.
@@ -170,7 +170,7 @@ trait Module[I, O]:
   * solely because their syntax trees are associated differently.
   */
 private[programs] trait TransparentModule[I, O] extends Module[I, O]:
-  final override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.transparent
+  final override protected val lifecycle: ModuleLifecycle[I] = ModuleLifecycle.transparent
 
 /** Record-valued programs: `Module[DynamicValue.Record, DynamicValue.Record]` with a lifecycle strategy for the record
   * shapes. Subclasses implement [[forwardDynamic]] in terms of the raw engine envelope; this trait lifts that result
@@ -182,7 +182,7 @@ private[programs] trait TransparentModule[I, O] extends Module[I, O]:
   */
 trait DynamicModule extends Module[DynamicValue.Record, DynamicValue.Record]:
   // A dynamic module that is an optimizable leaf overrides this with `ModuleLifecycle.dynamicPredictor(key)`.
-  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] = ModuleLifecycle.dynamic
+  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record] = ModuleLifecycle.dynamic
 
   protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
       RuntimeContext

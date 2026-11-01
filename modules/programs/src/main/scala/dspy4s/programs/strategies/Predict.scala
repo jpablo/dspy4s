@@ -91,7 +91,7 @@ final case class Predict[I, O](
     copy(decisions = updated)
 
   // The key is the metadata of this leaf, so an optimizer finds the trace entries of the leaf.
-  override protected val lifecycle: ModuleLifecycle[I, O] =
+  override protected val lifecycle: ModuleLifecycle[I] =
     ModuleLifecycle.predictor(signature.inputShape, PredictorKey.from(moduleName, signature.layout))
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =

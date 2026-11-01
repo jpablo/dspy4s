@@ -53,7 +53,7 @@ class TypedBestOfNSuite extends FunSuite:
     val calls: AtomicInteger                                                                                        = AtomicInteger(0)
     private val counter                                                                                             = AtomicInteger(0)
     override val moduleName: String                                                                                 = "typed_stub"
-    override protected val lifecycle: ModuleLifecycle[Q, Cand]                                                      = ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[Q]                                                            = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Q])(using RuntimeContext): Either[DspyError, Prediction[Cand]] =
       calls.incrementAndGet()
       rolloutIds += call.rolloutId.getOrElse(-1)
@@ -312,8 +312,8 @@ class TypedBestOfNSuite extends FunSuite:
       extends Module[Q, Cand]:
     val layout: SignatureLayout =
       SignatureLayout.parse("q -> answer, score").toOption.get.withInstructions(parameters.instructions)
-    override val moduleName: String                            = "inner_predict"
-    override protected val lifecycle: ModuleLifecycle[Q, Cand] = ModuleLifecycle.typed(call => rec("q" := call.input.q))
+    override val moduleName: String                      = "inner_predict"
+    override protected val lifecycle: ModuleLifecycle[Q] = ModuleLifecycle.typed(call => rec("q" := call.input.q))
 
     override protected def forward(call: ProgramCall[Q])(using RuntimeContext): Either[DspyError, Prediction[Cand]] =
       val ctx        = RuntimeEnvironment.current

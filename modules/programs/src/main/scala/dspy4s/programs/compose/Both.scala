@@ -1,9 +1,7 @@
 package dspy4s.programs.compose
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.data.RawPrediction
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.TransparentModule
@@ -27,10 +25,7 @@ final case class Both[I, OA, OB, A <: Module[I, OA], B <: Module[I, OB]](
     for
       predA <- first(call)
       predB <- second(call)
-    yield Prediction(
-      output = (predA.output, predB.output),
-      raw = RawPrediction(values = DynamicValues.mergeRecords(predA.raw.values, predB.raw.values))
-    )
+    yield Tensor.pairedPrediction(predA, predB)
 
 object Both:
   /** Same structural distribution as [[AndThen.andThenOptimizableStructure]]. */

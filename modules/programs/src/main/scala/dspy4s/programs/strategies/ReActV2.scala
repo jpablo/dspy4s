@@ -120,7 +120,7 @@ final case class ReActV2[I, O](
 
   override val moduleName: String = ReActV2.ModuleName
 
-  override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.typed(baseSignature.inputShape)
+  override protected val lifecycle: ModuleLifecycle[I] = ModuleLifecycle.typed(baseSignature.inputShape)
 
   private val baseLayout: SignatureLayout = baseSignature.layout
 

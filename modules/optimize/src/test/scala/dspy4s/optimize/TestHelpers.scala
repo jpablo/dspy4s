@@ -30,7 +30,7 @@ final case class ScriptedPredictProgram(
 ) extends DynamicModule:
   override val moduleName: String = "scripted"
   // An optimizer finds the trace entries of this leaf by the key of its metadata.
-  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] =
+  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record] =
     ModuleLifecycle.dynamicPredictor(PredictorKey.from(moduleName, layout))
   override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
       RuntimeContext
@@ -49,7 +49,7 @@ final case class DemoAwarePredictProgram(
 ) extends DynamicModule:
   override val moduleName: String = "demo_aware"
   // An optimizer finds the trace entries of this leaf by the key of its metadata.
-  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] =
+  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record] =
     ModuleLifecycle.dynamicPredictor(PredictorKey.from(moduleName, layout))
   override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
       RuntimeContext

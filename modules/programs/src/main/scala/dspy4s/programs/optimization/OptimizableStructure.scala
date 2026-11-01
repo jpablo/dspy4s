@@ -118,7 +118,7 @@ object OptimizableStructure extends LowPriorityOptimizableStructure:
     def inspectNamed(program: P): Vector[(String, OptimizableView)] = Vector(name -> view(program))
 
     def replace(program: P, updates: Vector[OptimizableParameters]): P =
-      require(updates.size == 1, s"$label expects 1 updates, got ${updates.size}")
+      require(updates.size == 1, s"$label expects 1 update, got ${updates.size}")
       write(program, updates.head)
 
   /** A composite with two `copy`-reachable predictors, each with an override field. `replace` writes parameters through

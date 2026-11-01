@@ -67,7 +67,7 @@ final case class ChainOfThought[I, O](
 
   // The key uses the augmented layout, as the metadata of this leaf does. The inner `Predict` runs inside
   // this predictor, so it records no key of its own.
-  override protected val lifecycle: ModuleLifecycle[I, Out] = ModuleLifecycle.predictor(
+  override protected val lifecycle: ModuleLifecycle[I] = ModuleLifecycle.predictor(
     baseSignature.inputShape,
     PredictorKey.from(moduleName, signature.layout)
   )

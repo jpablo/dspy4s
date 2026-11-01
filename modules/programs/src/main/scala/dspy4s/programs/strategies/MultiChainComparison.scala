@@ -119,7 +119,7 @@ final case class MultiChainComparison[I, O](
     val base = Predict(signature = compareSignature, config = DynamicValues.record("temperature" := temperature))
     comparePredictParametersOverride.fold(base)(base.withOptimizableParameters)
 
-  override protected val lifecycle: ModuleLifecycle[MultiChainInput[I], Out] = ModuleLifecycle.typed(
+  override protected val lifecycle: ModuleLifecycle[MultiChainInput[I]] = ModuleLifecycle.typed(
     // Preserve the existing observation surface: attempts affect execution but are not copied into trace inputs.
     call => baseSignature.inputShape.encode(call.input.baseInput)
   )

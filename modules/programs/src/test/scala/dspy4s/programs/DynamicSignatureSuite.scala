@@ -86,6 +86,13 @@ class DynamicSignatureSuite extends FunSuite:
     assert(message.contains("query"), s"expected the missing fields named, got: $message")
   }
 
+  test("bridge accepts a target with an optional input, as its validating entry does") {
+    val target = DynamicSignature.parse("answer, note: Optional[str] -> verdict").toOption.get
+    assert(target.input(DynamicValues.record("answer" := "a")).isRight, "the entry accepts an absent optional input")
+    val result = DynamicSignature.bridge(qa, target)
+    assert(result.isRight, result.toString)
+  }
+
   test("a bridged cross-fiber pipeline composes, stays parameter-transparent, and runs end-to-end") {
     import qa.given
     val b        = DynamicSignature.bridge(qa, judge).toOption.get

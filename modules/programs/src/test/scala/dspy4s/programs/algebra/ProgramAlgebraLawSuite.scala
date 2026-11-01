@@ -64,7 +64,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
 
     override val moduleName: String = s"step_$tag"
 
-    override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[I] = ModuleLifecycle.typedWithoutInputs
 
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), RawPrediction(values = DynamicValues.record("tag" := tag))))
@@ -81,7 +81,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
     */
   private final class Opaque extends Module[Int, Int]:
     override val moduleName: String                                                                                  = "opaque"
-    override protected val lifecycle: ModuleLifecycle[Int, Int]                                                      = ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[Int]                                                           = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
       Right(Prediction(call.input, RawPrediction.empty))
 

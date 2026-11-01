@@ -85,7 +85,7 @@ final case class Refine[P <: Module[I, O], I, O](
   val criticPredict: RefineFeedback.Critic =
     criticPredictOverride.getOrElse(Predict(signature = RefineFeedback.signature, name = Some("offer_feedback")))
 
-  override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.typedWithoutInputs
+  override protected val lifecycle: ModuleLifecycle[I] = ModuleLifecycle.typedWithoutInputs
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     // Refine is the SEQUENTIAL instance of the shared best-of-`n` reducer: a `feedback` hook turns each

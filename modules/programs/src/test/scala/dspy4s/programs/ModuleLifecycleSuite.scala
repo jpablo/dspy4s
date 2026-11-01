@@ -11,10 +11,10 @@ import scala.collection.mutable.ArrayBuffer
 
 class ModuleLifecycleSuite extends FunSuite:
   private final case class Echo(
-      lifecycleStrategy: ModuleLifecycle[Int, Int]
+      lifecycleStrategy: ModuleLifecycle[Int]
   ) extends Module[Int, Int]:
-    override val moduleName: String                             = "echo"
-    override protected val lifecycle: ModuleLifecycle[Int, Int] = lifecycleStrategy
+    override val moduleName: String                        = "echo"
+    override protected val lifecycle: ModuleLifecycle[Int] = lifecycleStrategy
 
     override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
       Right(Prediction(call.input, RawPrediction(DynamicValues.record("result" := call.input))))

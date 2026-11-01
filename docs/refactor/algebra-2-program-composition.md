@@ -76,7 +76,7 @@ augment[Name, T](field)(p) : Program[I, O] => Program[I, Out]                   
 //   AppendField dual).
 
 mode(m: Mode)(p)               : Program[I, O] => Program[I, O]         // Monoid middleware, NON-learnable  [IMPLEMENTED 6.5]
-//   IMPLEMENTED as Mode (Controls => Controls, monoid under ++ / Mode.id) + Moded + Compose.mode: model swap /
+//   IMPLEMENTED as Mode (Controls => Controls, monoid under ++ / Mode.id) + Moded + Compose.mode:
 //   temperature / rolloutId / traceEnabled. m introduces no learnable predict (OptimizableStructure passes through);
 //   trace-transparent. Execution-wrapping modes (retry / pre-post) stay additive (no consumer yet).
 
@@ -433,7 +433,8 @@ suites as the regression net:
 5. **`mode`. DONE (commit `dca35e9`).** Introduced `Mode` (the `Controls => Controls` monoid) + `Moded` +
    `Compose.mode` as the home for model-swap / temperature / rolloutId; trace-transparent, OptimizableStructure
    pass-through, `ModeLawSuite` pins the monoid + identity. Execution-wrapping modes (retry / pre-post) stay
-   additive until a consumer needs them.
+   additive until a consumer needs them. A later change removed `Mode.model`, because the wire writes the model
+   of the request over a `model` option. A program selects a model through the LM.
 
 ## Status: all six steps landed
 

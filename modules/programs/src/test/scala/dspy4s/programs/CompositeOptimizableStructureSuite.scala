@@ -33,7 +33,7 @@ class CompositeOptimizableStructureSuite extends FunSuite:
   private final case class Leaf[I, O](f: I => O, predict: DynamicPredict)
       extends Module[I, O]:
     override val moduleName: String                                                                              = "leaf"
-    override protected val lifecycle: ModuleLifecycle[I, O]                                                      = ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[I]                                                         = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), RawPrediction.empty))
 

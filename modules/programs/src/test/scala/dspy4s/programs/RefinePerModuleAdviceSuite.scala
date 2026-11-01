@@ -54,8 +54,8 @@ class RefinePerModuleAdviceSuite extends FunSuite:
     */
   private final case class HintThenAnswer(hinter: DynamicPredict, answerer: DynamicPredict)
       extends Module[Q, Cand]:
-    override val moduleName: String                            = "hint_then_answer"
-    override protected val lifecycle: ModuleLifecycle[Q, Cand] = ModuleLifecycle.typed(call => rec("q" := call.input.q))
+    override val moduleName: String                      = "hint_then_answer"
+    override protected val lifecycle: ModuleLifecycle[Q] = ModuleLifecycle.typed(call => rec("q" := call.input.q))
 
     override protected def forward(call: ProgramCall[Q])(using RuntimeContext): Either[DspyError, Prediction[Cand]] =
       for
@@ -70,8 +70,8 @@ class RefinePerModuleAdviceSuite extends FunSuite:
     */
   private final case class InnerQuestion(hinter: DynamicPredict, answerer: DynamicPredict)
       extends Module[Q, Cand]:
-    override val moduleName: String                            = "inner_question"
-    override protected val lifecycle: ModuleLifecycle[Q, Cand] = ModuleLifecycle.typed(call => rec("q" := call.input.q))
+    override val moduleName: String                      = "inner_question"
+    override protected val lifecycle: ModuleLifecycle[Q] = ModuleLifecycle.typed(call => rec("q" := call.input.q))
 
     override protected def forward(call: ProgramCall[Q])(using RuntimeContext): Either[DspyError, Prediction[Cand]] =
       val inner = s"inner ${call.input.q}"

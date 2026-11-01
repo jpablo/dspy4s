@@ -32,7 +32,7 @@ class TransformCombinatorSuite extends FunSuite:
   private final case class Step[I, O](tag: String, run: I => Either[DspyError, O], predict: DynamicPredict)
       extends Module[I, O]:
     override val moduleName: String                                                                              = s"step_$tag"
-    override protected val lifecycle: ModuleLifecycle[I, O]                                                      = ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[I]                                                         = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       run(call.input).map(output => Prediction(output, RawPrediction(DynamicValues.record("tag" := tag))))
 
@@ -115,10 +115,9 @@ class TransformCombinatorSuite extends FunSuite:
     val controls =
       ProgramCall(Vector(1), DynamicValues.record("temperature" := 0.2), traceEnabled = false, rolloutId = Some(7))
     val controlAware = new Module[Int, (Int, DynamicValue.Record, Boolean, Option[Int])]:
-      val moduleName: String = "control_aware"
-      protected val lifecycle
-          : ModuleLifecycle[Int, (Int, DynamicValue.Record, Boolean, Option[Int])] = ModuleLifecycle.typedWithoutInputs
-      protected def forward(call: ProgramCall[Int])(using RuntimeContext)          =
+      val moduleName: String                                              = "control_aware"
+      protected val lifecycle: ModuleLifecycle[Int]                       = ModuleLifecycle.typedWithoutInputs
+      protected def forward(call: ProgramCall[Int])(using RuntimeContext) =
         Right(Prediction((call.input, call.config, call.traceEnabled, call.rolloutId), RawPrediction.empty))
     val adapted = controlAware.contramapInput[Vector[Int]](_.sum)
     assertEquals(adapted(controls).map(_.output), Right((1, controls.config, false, Some(7))))

@@ -145,8 +145,7 @@ final case class ReAct[I, O](
       "When providing `next_tool_args`, the value inside the field must be in JSON format"
     lines.mkString("\n")
 
-  override protected val lifecycle: ModuleLifecycle[I, ChainOfThought.WithReasoning[O]] =
-    ModuleLifecycle.typed(baseSignature.inputShape)
+  override protected val lifecycle: ModuleLifecycle[I] = ModuleLifecycle.typed(baseSignature.inputShape)
 
   /** Run the loop ([[AgentLoop.run]]), then the extractor one time over its trajectory. An error of a step ends the
     * call with no extract. The extractor truncates its own view on a context-window overflow, but the result keeps the

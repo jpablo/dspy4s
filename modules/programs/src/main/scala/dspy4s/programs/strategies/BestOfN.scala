@@ -39,7 +39,7 @@ final case class BestOfN[P <: Module[I, O], I, O](
 ) extends Module[I, O]:
   override val moduleName: String = "best_of_n"
 
-  override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.typedWithoutInputs
+  override protected val lifecycle: ModuleLifecycle[I] = ModuleLifecycle.typedWithoutInputs
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     AttemptSelection.sample(module, call, rewardFn, n, threshold, failCount, moduleName)

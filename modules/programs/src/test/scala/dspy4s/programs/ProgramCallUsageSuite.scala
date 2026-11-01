@@ -93,7 +93,7 @@ class ProgramCallUsageSuite extends FunSuite:
   private final class TwoPrograms[I, O](first: Module[I, O], second: Module[I, O]) extends Module[I, O]:
     val nested: AtomicReference[Vector[Option[LmUsage]]]                                                         = AtomicReference(Vector.empty)
     override val moduleName: String                                                                              = "both"
-    override protected val lifecycle: ModuleLifecycle[I, O]                                                      = ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[I]                                                         = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       for
         one <- first(call)

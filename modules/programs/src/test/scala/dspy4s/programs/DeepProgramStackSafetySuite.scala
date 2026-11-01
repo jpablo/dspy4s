@@ -72,6 +72,10 @@ final class DeepProgramStackSafetySuite extends FunSuite:
       Refine[inner.Rep, Int, Int](inner.program, n = AttemptCount(1), rewardFn = (_, _) => 1.0, threshold = 1.0)
     )
 
+  /** The arity through the structure of the packaged program, not through the structure of its representation. */
+  private def packagedArity[N <: Int](program: Program[Int, Int, N]): Int =
+    summon[OptimizableStructure[Program[Int, Int, N]]].arity(program)
+
   private def updates(size: Int): Vector[OptimizableParameters] =
     Vector.tabulate(size)(index => OptimizableParameters(instructions = Some(s"update $index")))
 
@@ -111,6 +115,12 @@ final class DeepProgramStackSafetySuite extends FunSuite:
       // Each step folds its own parameters into the output, so the result depends on the position of every update.
       val replaced = structure.replace(deep.program, next)
       assertEquals(replaced(ProgramCall(0, traceEnabled = false)).map(_.output), Right(expectedDigest(next)))
+    }
+
+    // The count of the packaged program comes from the interpreter, which resolves no name. A count from the named
+    // views resolves one long name for each leaf. At this size, that count runs out of a 1 GB heap.
+    test(s"the packaged structure counts 20,000 $association leaves without their names") {
+      assertEquals(packagedArity(build(20_000)), 20_000)
     }
 
     test(s"$association leaves read back the replaced parameters in order") {
@@ -195,7 +205,7 @@ object DeepProgramStackSafetySuite:
     */
   private final case class Step(parameters: OptimizableParameters) extends Module[Int, Int]:
     override val moduleName: String                                                                                  = "step"
-    override protected val lifecycle: ModuleLifecycle[Int, Int]                                                      = ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[Int]                                                           = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
       Right(Prediction(Step.digest(call.input, parameters), RawPrediction.empty))
 
