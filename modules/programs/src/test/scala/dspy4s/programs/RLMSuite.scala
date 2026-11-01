@@ -6,10 +6,10 @@ import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.{
-  CodeResult, DspyError, DynamicValues, FieldSpec, ReplCodeInterpreter, RuntimeContext, RuntimeError, SandboxTool,
-  TypeRef
+  CallbackEvent, CallbackHandler, CodeResult, DspyError, DynamicValues, FieldSpec, LmEndEvent, LmStartEvent,
+  ModuleStartEvent, ReplCodeInterpreter, RuntimeContext, RuntimeError, SandboxTool, TypeRef
 }
-import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.core.runtime.{CallbackDispatcher, RuntimeEnvironment}
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
 import dspy4s.signatures.Signature
 import dspy4s.programs.strategies.{RLMModel, RLMReplProtocol, RLMSandboxTools}
@@ -17,8 +17,10 @@ import dspy4s.programs.support.ScriptedLm
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
+import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch, TimeUnit}
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
+import scala.jdk.CollectionConverters.*
 
 class RLMSuite extends FunSuite:
 
@@ -287,6 +289,73 @@ class RLMSuite extends FunSuite:
       assertEquals(calls.get(), 0)
       val empty = query.invoke(rec("prompt" := "hi"))
       assert(empty.left.exists(_.message.contains("no outputs")), empty.toString)
+    }
+  }
+
+  // Upstream `target_lm(prompt)` is a `BaseLM.__call__`, which sends the LM events (`dspy/clients/base_lm.py`).
+  test("llm_query sends one LmStartEvent and one LmEndEvent for its model call") {
+    val events   = ArrayBuffer.empty[CallbackEvent]
+    val callback = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = events += event
+
+    RuntimeEnvironment.withCallbacks(Vector(callback)) {
+      given ctx: RuntimeContext = RuntimeEnvironment.current
+      val subLm                 = new ScriptedLm(Vector("reply"), id = "sub")
+      val tools                 = RLMSandboxTools.build(LlmCallLimit(3), Some(subLm), ctx)
+      val query                 = tools.find(_.name == "llm_query").get
+      assertEquals(query.invoke(rec("prompt" := "hi")).map(DynamicValues.renderText), Right("reply"))
+    }
+
+    events.toVector match
+      case Vector(start: LmStartEvent, end: LmEndEvent) =>
+        assertEquals(start.modelId, "sub")
+        assertEquals(end.modelId, "sub")
+        assertEquals(end.callId, start.callId)
+        assert(end.response.isRight, end.response.toString)
+      case other => fail(s"expected one LM start and one LM end, got $other")
+  }
+
+  test("each model call of llm_query_batched is a scope under the caller scope, on its worker thread") {
+    val prompts = Vector("a", "b", "c")
+    // Each call waits for the other calls, so that the scopes of the calls overlap on the workers.
+    val overlap = new CountDownLatch(prompts.size)
+    val subLm   = new LanguageModel:
+      override val id: String                                                                    = "sub"
+      override val mode: LmMode                                                                  = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        overlap.countDown()
+        val text = if overlap.await(30, TimeUnit.SECONDS) then "reply" else "no overlap"
+        Right(LmResponse(outputs = Vector(LmOutput(text = text))))
+    val events   = new ConcurrentLinkedQueue[(CallbackEvent, Long)]()
+    val callback = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
+        val _ = events.add(event -> Thread.currentThread().threadId())
+
+    RuntimeEnvironment.withCallbacks(Vector(callback)) {
+      given ctx: RuntimeContext = RuntimeEnvironment.current
+      val tools                 = RLMSandboxTools.build(LlmCallLimit(3), Some(subLm), ctx)
+      val batched               = tools.find(_.name == "llm_query_batched").get
+      val answer                = CallbackDispatcher.withModule("rlm", DynamicValue.Record.empty) {
+        batched.invoke(rec("prompts" -> DynamicValues.fromAny(prompts.toList)))
+      }
+      assertEquals(
+        answer.map(DynamicValues.asSequence(_).map(DynamicValues.renderText)),
+        Right(prompts.map(_ => "reply"))
+      )
+      // The scopes of the workers leave nothing on the thread of the caller.
+      assertEquals(RuntimeEnvironment.activeCallId, None)
+    }
+
+    val recorded = events.asScala.toVector
+    val module   = recorded.collectFirst { case (start: ModuleStartEvent, _) => start }.getOrElse(fail("no module"))
+    val workers  = recorded.filter(_._2 != Thread.currentThread().threadId()).groupMap(_._2)(_._1)
+    assertEquals(workers.size, prompts.size)
+    workers.values.foreach {
+      case Vector(start: LmStartEvent, end: LmEndEvent) =>
+        assertEquals(end.callId, start.callId)
+        assertEquals(start.parentCallId, Some(module.callId))
+        assertEquals(end.parentCallId, Some(module.callId))
+      case other => fail(s"expected one LM start and one LM end on each worker, got $other")
     }
   }
 

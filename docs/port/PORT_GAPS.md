@@ -651,7 +651,7 @@ A verification spike (trace + failure capture) surfaced four bounded prerequisit
 - **P-a — failure-trace capture.** `Module.apply` records a `TraceEntry` only on `Right` (`case Left(_) => ()`),
   so failed predictor calls leave no trace — but reflection's signal IS failures. Record a trace entry on failure
   with the raw output.
-- **P-b — parse-failure-as-feedback.** `PredictEngine.parseOutputs` aborts on `adapter.parse → Left` and discards
+- **P-b — parse-failure-as-feedback.** `AdapterCall.run` aborts on `adapter.parse → Left` and discards
   the raw `LmOutput.text`. Need a `FailedPrediction`-style capture (raw completion + low score + format feedback),
   not an aborting error (dspy's `add_format_failure_as_feedback`).
 - **P-c — named predictors.** At the time of this prerequisite spike, `OptimizableStructure.read` was positional

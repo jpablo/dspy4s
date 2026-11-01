@@ -322,7 +322,7 @@ object DecisionAdapter:
       request    = DecisionRequests
                   .request(model.id, systemOneState(layout, demos, inputs), questions)
                   .copy(rolloutId = rolloutId)
-      response <- LanguageModel.callWithEvents(model, request)
+      response <- LanguageModel.callAndRecordUsage(model, request)
       answers  <- DecisionRequests.answers(response)
       evidence <- systemOneEvidence(plan, answers)
       _         = recordEvidence(moduleName, layout, evidence)

@@ -37,7 +37,8 @@ cache hit adds no usage:
 The framework records the usage when a program calls a model
 (`LanguageModel.callAndRecordUsage`). Thus a model with no
 `ManagedLanguageModel` wrapper counts too. A direct `lm.call(...)` or
-`lm.stream(...)` in your code counts in no tracker. To count such a call, use
+`lm.stream(...)` in your code counts in no tracker and sends no LM callback
+events. To count such a call and send its events, use
 `LanguageModel.callAndRecordUsage(lm, request)`.
 
 A failed call counts too when the provider reported a usage for it, because

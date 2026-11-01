@@ -20,10 +20,12 @@ import scala.annotation.tailrec
 /** Builds the sandbox functions of generated RLM code: the calls of a subordinate language model and the user tools. */
 private[programs] object RLMSandboxTools:
 
-  /** The tools `llm_query` and `llm_query_batched`. The usage of each sub-LM call goes to the usage scope of the RLM
-    * call ([[LanguageModel.callAndRecordUsage]]). The batched calls run on worker threads, and the scope travels to
-    * them. Upstream counts these calls in the usage of the RLM call, because they run in the context of the call
-    * (`dspy/predict/rlm.py`, `_make_llm_tools`, with `contextvars.copy_context` for the batched calls).
+  /** The tools `llm_query` and `llm_query_batched`. Each sub-LM call sends the LM callback events, and its usage goes
+    * to the usage scope of the RLM call ([[LanguageModel.callAndRecordUsage]]). The batched calls run on worker
+    * threads. The usage scope and the open call scopes travel to them, so the LM events of a batched call have the
+    * scope of the tool as their parent. Upstream counts these calls in the usage of the RLM call, because they run in
+    * the context of the call (`dspy/predict/rlm.py`, `_make_llm_tools`, with `contextvars.copy_context` for the batched
+    * calls), and `target_lm(prompt)` is a `BaseLM.__call__`, which has `with_callbacks`.
     */
   def build(
       maxLlmCalls: LlmCallLimit,

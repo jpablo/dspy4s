@@ -266,8 +266,8 @@ signatures. Behavior layers are explicit wrapper objects that
 decorate a `LanguageModel` and conform to the same trait:
 
 - `ManagedLanguageModel` wraps a base LM with cache + retry + history.
-  It records no usage: `LanguageModel.callAndRecordUsage` is the record
-  point.
+  It records no usage and sends no LM callback events:
+  `LanguageModel.callAndRecordUsage` is the one record point.
 - `StreamingLanguageModelWrapper` wraps a streaming LM with the
   stream-pump + per-call queue + callback bridging.
 
@@ -470,6 +470,18 @@ A form that only Java reads (`3d`, `3f`, `0x1p3`) is no number on each path, as 
   these names.
 - ReAct finds a `next_tool_args` value that is not a dict in the decode of the step, after the adapter. The call fails
   with one model call. Upstream finds it in `parse_value`, so the chat adapter tries its JSON fallback first.
+
+## 19. The errors of the `TwoStepAdapter` extraction step
+
+**Convention.**
+
+The extraction step gives each `ParseError` the text "Failed to parse response from the original completion: ", and
+the raw text of the error is the completion of the main LM. Two errors differ from upstream:
+
+- An extraction reply with no outputs is a `ParseError` with that text. Upstream takes `parsed_result[0]` of an empty
+  list, and that raises an `IndexError`.
+- A `ParseError` of the model, for example a provider reply that is not JSON, also gets that text. Upstream wraps only
+  an `AdapterParseError`, and a model call does not raise it.
 
 ## What this means in practice
 

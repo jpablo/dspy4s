@@ -9,8 +9,8 @@ import zio.blocks.schema.DynamicValue
 trait Adapter extends AdapterRef:
   def name: String
 
-  /** The adapter that a predictor tries after a parse error of this adapter (dspy's `use_json_adapter_fallback`). The
-    * predictor then formats, calls the model, and parses one more time with that adapter.
+  /** The adapter that [[dspy4s.adapters.AdapterCall.run]] tries after a parse error of this adapter (dspy's
+    * `use_json_adapter_fallback`). The call then formats, calls the model, and parses one more time with that adapter.
     *
     * Only a [[dspy4s.core.contracts.ParseError]] of the parse step gives the second call. An error of the model, of the
     * configuration, or of the format step does not. A call that already streamed visible output to a listener gets no

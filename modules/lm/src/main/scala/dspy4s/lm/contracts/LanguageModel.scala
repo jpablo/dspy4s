@@ -66,19 +66,22 @@ trait LanguageModel extends LanguageModelRef:
 
 object LanguageModel:
 
-  /** One model call of the framework: `model.call(request)`, then the usage of the call goes to each open usage scope,
-    * with the model name `request.model` ([[UsageScope.record]], decision D9 of UPGRADE-3.2.1-to-3.4.0). The usage of
-    * the call is the usage of a successful reply, or the usage of the LM error of a failed call
-    * ([[dspy4s.core.contracts.LmError.usage]]). This function is the one record point of the LM usage. The user
-    * trackers (`UsageTracking`) and the usage of a program result get each record from here. Upstream records the usage
-    * of each LM call into `settings.usage_tracker` (`dspy/clients/execution.py`, `finalize`), and the usage of a failed
-    * call too (`_account_failed_call`).
+  /** One model call of the framework, in the LM callback scope of `model`: an `LmStartEvent`, `model.call(request)`,
+    * the record of the usage, and an `LmEndEvent`. Upstream `BaseLM.__call__` has `with_callbacks`
+    * (`dspy/clients/base_lm.py`).
+    *
+    * The usage of the call goes to each open usage scope, with the model name `request.model` ([[UsageScope.record]],
+    * decision D9 of UPGRADE-3.2.1-to-3.4.0). The usage of the call is the usage of a successful reply, or the usage of
+    * the LM error of a failed call ([[dspy4s.core.contracts.LmError.usage]]). This function is the one record point of
+    * the LM usage and the LM events. The user trackers (`UsageTracking`), the usage of a program result, and the LM
+    * callbacks get each record from here. Upstream records the usage of each LM call into `settings.usage_tracker`
+    * (`dspy/clients/execution.py`, `finalize`), and the usage of a failed call too (`_account_failed_call`).
     *
     * Each part of the framework that calls a model for a program uses this function. These parts are `Predict` (each
-    * attempt, also an attempt whose reply then fails to parse), the extraction step of `TwoStepAdapter`, and the sub-LM
-    * tools of `RLM`. A tool or a program of the user that calls a model directly must also use it, else the call does
-    * not count. A direct `call` or `stream` of a model counts in no scope, also for a
-    * [[dspy4s.lm.runtime.ManagedLanguageModel]].
+    * attempt, also an attempt whose reply then fails to parse), the decision requests of `DecisionAdapter`, the
+    * extraction step of `TwoStepAdapter`, and the sub-LM tools of `RLM`. A tool or a program of the user that calls a
+    * model directly must also use it, else the call does not count and sends no events. A direct `call` or `stream` of
+    * a model counts in no scope and sends no events, also for a [[dspy4s.lm.runtime.ManagedLanguageModel]].
     *
     * A `Left` gives a record only when its error carries a usage, for example the error of a stream that failed after
     * its usage chunk. An error that is not an LM error carries no usage. A cache hit of
@@ -89,15 +92,11 @@ object LanguageModel:
   def callAndRecordUsage(model: LanguageModel, request: LmRequest)(using
       RuntimeContext
   ): Either[DspyError, LmResponse] =
-    val result = model.call(request)
-    UsageScope.record(request.model, result.fold(LmError.usage, _.usage))
-    result
-
-  /** [[callAndRecordUsage]] in the LM callback scope of `model`: an `LmStartEvent` before the call and an `LmEndEvent`
-    * after the call. The call of a predictor uses this function.
-    */
-  def callWithEvents(model: LanguageModel, request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
     CallbackDispatcher.withLm(
       modelId = model.id,
       request = DynamicValues.record("model" := model.id, "mode" := model.mode.toString)
-    )(callAndRecordUsage(model, request))
+    ) {
+      val result = model.call(request)
+      UsageScope.record(request.model, result.fold(LmError.usage, _.usage))
+      result
+    }
