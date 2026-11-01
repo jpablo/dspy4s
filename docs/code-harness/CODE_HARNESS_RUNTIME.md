@@ -4,7 +4,7 @@ Status: analysis, 2026-10-25. This document adds to [CODE_HARNESS.md](CODE_HARNE
 [CODE_HARNESS_LOOPS.md](CODE_HARNESS_LOOPS.md). The loop document compares the agent loops. This document compares
 how each project executes its work: threads, effects, cancellation, context, resources, streams, processes and
 durability. The facts come from the source code of each project on 2026-10-25. A statement marked *(inference)* is
-an interpretation of the code, not a fact that the code states.
+an interpretation of the code, not a fact that the code states. Section 5.5 was added on 2026-11-01.
 
 ## Scope
 
@@ -52,6 +52,8 @@ documents will compare the Scala runtimes, and the dspy4s programs from one `Pre
     retry that effect automatically.
 - **No project runs the same agent logic on two scheduling runtimes.** kyo-ai comes nearest by design, but its
   runtime is Kyo only. Kyo can put ZIO and Pekko on its own thread pool, but the program stays a Kyo program.
+- **Pekko event sourcing fits only part of the harness** *(inference)*. The core actor loop fits with a small
+  adapter. The log reads, the forks and the REPL replay do not fit, so the full harness needs other code (5.5).
 
 ## 1. The points of comparison
 
@@ -384,4 +386,111 @@ This table is an *(inference)* from the reports. The next document must check ea
 2. Which program levels does the next document cover first: one `Predict`, a composition, an optimizer, or the
    harness?
 3. For Pekko: do Pekko Streams (backpressure, `KillSwitch`, `BroadcastHub`) and Cluster Sharding get a full
-   section, or only the parts that the harness needs?
+   section, or only the parts that the harness needs? Section 5.5 gives a first answer for Pekko Persistence and
+   Cluster Sharding.
+
+### 5.5 The fit of Pekko event sourcing
+
+The question: is the event sourcing of Pekko Persistence a good match for the actions of the harness, and mainly
+for its core actor loop? The scale has four answers, and the second answer has two forms:
+
+| Answer | Test |
+|---|---|
+| 1. Natural | The concepts map one to one, and the harness uses a Pekko guarantee as it is. |
+| 2. Vertical | A harness concept is a composition of Pekko concepts, and the Pekko guarantees still hold. |
+| 2. Horizontal | The concepts translate, but the adapter must fill a gap in meaning. |
+| 3. Contortion | The adapter must bypass or duplicate a Pekko guarantee. A different tool is then a better fit. |
+| 4. No fit | The code of the harness is about the same with or without Pekko. |
+
+The answer changes with the aspect of the harness. The core actor loop alone is answer 2, mostly vertical. The full
+harness is answer 3: it can fit, but `EventSourcedBehavior` is not the right core. These answers, and the answers
+in the next table, are *(inference)*.
+
+| Harness aspect | Answer | Why |
+|---|---|---|
+| Session state machine (the decider of [CODE_HARNESS.md](CODE_HARNESS.md), 8.5) | 1. Natural | `decide` and `evolve` are the command handler and the event handler. Each session id has one writer. |
+| Mailbox, steering, unload of an idle session | 1. Natural | This is the actor model, and it needs no persistence. |
+| Step loop: policy, cell, observation | 2. Vertical | This is the standard pattern: write, `pipeToSelf`, write. A step is a phase in the state, and `RecoveryCompleted` starts the next phase. |
+| Effect protocol for each guest API call | 2. Vertical | The sketch below shows it. Each call costs two journal writes and one wait. The actor stashes commands during a write, up to `stash-capacity = 4096`, and the default `stash-overflow-strategy` is `"drop"`. A worker whose `Start` is dropped gets only a timeout. |
+| The log as the input of each step | 2. Horizontal | A Pekko entity reads its journal only at recovery, and other readers use a query side. The policy needs the full log at each step. So `State` must hold the log, and a snapshot saves little. |
+| LM derivations (memory tree, graph) | 2. Horizontal | A projection handler can run again. Here each run costs money and gives different text, so the outputs must be events of a second entity. |
+| Commit across sessions | 2. Horizontal | A Pekko write is atomic for one persistence id only (`AtomicWrite` has one `persistenceId`), so a parent and a child need a saga. `pi-durable` commits entries, tasks and documents in one transaction. |
+| Fork of a session | 3. Contortion | A persistence id is one linear stream. A fork needs a full copy, or a parent pointer that custom recovery code follows. That code duplicates the Pekko recovery. |
+| REPL replay, and a cell that continues after a crash | 4. No fit | The event handler must be pure, and it also runs after each write. A replay compiles and runs code, and it makes live objects. So the replay must run outside, and Pekko gives only the event list. |
+
+An LM output that becomes an event is not a mismatch. A command can carry an external result, so the step loop is
+a normal composition of Pekko concepts.
+
+The effect protocol as a small harness DSL on Pekko concepts. This sketch leaves out the imports, and it covers
+only the vertical part of the table:
+
+```scala
+object SessionEntity:
+  /** Commands arrive in the mailbox. The journal does not store them. */
+  enum Command:
+    case Submit(text: String)
+    case Start(id: Long, op: String, replyTo: ActorRef[Long]) // from the `recorded` handler, before an effect
+    case Finish(id: Long, result: String)                     // from the `recorded` handler, after the effect
+
+  /** Events are the facts in the journal. */
+  enum Event:
+    case InputAccepted(text: String)
+    case EffectStarted(id: Long, op: String)
+    case EffectDone(id: Long, result: String)
+
+  /** The state is a fold of the events. `open` holds the effects that have no outcome. */
+  final case class State(inputs: Vector[String], open: Map[Long, String])
+
+  def apply(sessionId: String): Behavior[Command] =
+    Behaviors.setup { context =>
+      EventSourcedBehavior[Command, Event, State](
+        persistenceId = PersistenceId.ofUniqueId(sessionId),
+        emptyState = State(Vector.empty, Map.empty),
+        commandHandler = (_, command) =>
+          command match
+            case Command.Submit(text)           => Effect.persist(Event.InputAccepted(text))
+            case Command.Start(id, op, replyTo) => // the worker waits for this reply before it does the effect
+              Effect.persist(Event.EffectStarted(id, op)).thenReply(replyTo)(_ => id)
+            case Command.Finish(id, result)     => Effect.persist(Event.EffectDone(id, result)),
+        eventHandler = (state, event) =>
+          event match
+            case Event.InputAccepted(text)   => state.copy(inputs = state.inputs :+ text)
+            case Event.EffectStarted(id, op) => state.copy(open = state.open + (id -> op))
+            case Event.EffectDone(id, _)     => state.copy(open = state.open - id)
+      ).receiveSignal { case (state, RecoveryCompleted) =>
+        // A start with no done: the outcome is unknown. Record that, and do not run the effect again.
+        state.open.keys.foreach(id => context.self ! Command.Finish(id, "interrupted: the outcome is unknown"))
+      }
+    }
+```
+
+**The two main strengths of Pekko do not meet in this design.** This follows from section 8.6 of CODE_HARNESS.md:
+
+- A work session needs durability. But its worktree and its REPL are on one machine, so Cluster Sharding cannot
+  move it.
+- An optimizer rollout can use many machines. But it is short, and a failed rollout can run again, so it needs no
+  recovery *(inference)*.
+
+So `EventSourcedBehavior` with Cluster Sharding has no clear use in this design. Also, the parts that fit best are
+the small parts, and Pekko gives no help with the hardest parts.
+
+**The recommendation.** This is not a decision yet.
+
+- Keep the log, the effect protocol and the replay as the code of the harness, with the decider above them. This
+  agrees with decision 1 of CODE_HARNESS.md, 8.7.
+- If the harness uses Pekko for other reasons, use plain typed actors, and use Cluster Sharding only for rollouts.
+- If the harness uses Pekko Persistence later, the log can go behind a journal plugin. The plugin API has four
+  methods: `asyncWriteMessages`, `asyncDeleteMessagesTo`, `asyncReplayMessages` and `asyncReadHighestSequenceNr`.
+
+**What would change this answer:**
+
+- Fresh cells with an explicit store in place of the persistent REPL. The replay row goes away, and the store is
+  plain data in the fold.
+- No forks of a session log. The contortion row goes away. With this change and the one above, the full harness
+  moves to answer 2.
+- Sessions that are not tied to one machine, for example with remote devices (CODE_HARNESS.md, 8.6). Cluster
+  Sharding then has a real use for work sessions.
+
+**How far this is checked.** The sketch compiles with Scala 3.8.2 and `pekko-persistence-typed` 1.1.3 and 1.7.1. The
+two stash settings, the plugin API and `AtomicWrite` come from the 1.7.1 jars. No other row was built, and the cost
+of the effect path was not measured.

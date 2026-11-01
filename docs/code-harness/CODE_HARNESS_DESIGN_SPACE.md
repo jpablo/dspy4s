@@ -23,7 +23,7 @@ and the dspy4s programs `ReAct`, `ReActV2` and `RLM`.
 | Topic | Where |
 |---|---|
 | The agent loop: the step, the stop rules, the limits, the input during a turn, the outer loop | [CODE_HARNESS_LOOPS.md](CODE_HARNESS_LOOPS.md) |
-| Execution and runtime models: the REPL host, the state between cells, persistence, replay, actors | A separate analysis, in progress |
+| Execution and runtime models: the REPL host, the state between cells, persistence, replay, actors | [CODE_HARNESS_RUNTIME.md](CODE_HARNESS_RUNTIME.md), with later documents in progress |
 | Durability: what survives a crash, a restart or a close, and if the work continues | [CODE_HARNESS_DURABILITY.md](CODE_HARNESS_DURABILITY.md) |
 
 ## The five aspects

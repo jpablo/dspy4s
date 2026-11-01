@@ -1608,7 +1608,8 @@ back as messages.
 | An effect system (ZIO, kyo, or Cats Effect): a fiber, a queue, and a fold | Typed effects and cancellation | The project evaluated kyo-compat, but it did not adopt it (`docs/refactor/composite-primitives.md`) |
 
 `decide` maps directly to the command handler of `EventSourcedBehavior`, and `evolve` maps to its event handler.
-So a Pekko interpreter is a small adapter.
+So a Pekko interpreter of the decider alone is a small adapter. The log reads, the forks and the REPL replay do not
+fit in the same way ([CODE_HARNESS_RUNTIME.md](CODE_HARNESS_RUNTIME.md), 5.5).
 
 ### 8.6 Distribution
 
