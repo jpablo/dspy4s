@@ -146,8 +146,14 @@ graph TD
    `OptimizableParameters` (instructions, demos, config), and rebuild candidates;
    `ProgramRunner[P]` supplies uniform static/dynamic execution.
 
-9. **`streaming`** — `Streamify`, `StreamingLanguageModelWrapper`,
-   `StreamingQueue`, `StatusStreamingCallback`. Per-LM-call routing keyed
+9. **`streaming`** — `Streamify`, `StreamSession`,
+   `StreamingLanguageModelWrapper`, `StreamingQueue`,
+   `StatusStreamingCallback`. `Streamify` puts a `StreamSession` in the
+   context (`RuntimeContext.streamSink`, the analog of upstream
+   `settings.send_stream`). The model of the context does not change.
+   `LanguageModel.callAndRecordUsage` wraps each model that it calls with
+   that session, so each model of the program streams, also the own model
+   of a predictor. Per-LM-call routing keyed
    off `ActivePredictContext`. `Streamify` accepts any program via a
    `Streamable[P]` typeclass (run-from-record + best-effort sub-signatures),
    so programs stream without a record-valued twin.
@@ -232,7 +238,8 @@ When `Predict[I, O].apply(input)` fires:
    3. `adapter.format(invocation)` inside
       `CallbackDispatcher.withAdapter("format")` → `FormattedPrompt`.
    4. `model.call(request)` inside `CallbackDispatcher.withLm` →
-      `LmResponse`.
+      `LmResponse` (`LanguageModel.callAndRecordUsage`). Under `Streamify`,
+      this function wraps the model with the stream of the context.
    5. `adapter.parse(layout, output)` inside
       `CallbackDispatcher.withAdapter("parse")` for each output →
       `Vector[ParsedOutput]`.

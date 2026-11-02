@@ -9,7 +9,6 @@ import dspy4s.core.contracts.LmError
 import dspy4s.core.contracts.LmUsage
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.ActivePredictContext
-import dspy4s.core.runtime.StreamProgress
 import dspy4s.lm.contracts.ForwardingLanguageModel
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmMode
@@ -22,11 +21,16 @@ import dspy4s.streaming.contracts.StreamEvent
 import dspy4s.streaming.contracts.StreamListener
 import dspy4s.streaming.contracts.TokenEvent
 
-import java.util.concurrent.ConcurrentHashMap
 import scala.util.control.NonFatal
 
-/** Wraps a [[StreamingLanguageModel]] so the runtime can siphon streamed text into a [[StreamingQueue]] while still
-  * returning a fully assembled [[LmResponse]] to non-streaming callers.
+/** Wraps a [[StreamingLanguageModel]] for one model call. The wrapper gives the streamed text to the [[StreamingQueue]]
+  * of its [[StreamSession]], and it returns a fully assembled [[LmResponse]] to the caller.
+  *
+  * Routing: under `streamify`, the context holds a [[StreamSession]], and
+  * [[dspy4s.lm.contracts.LanguageModel.callAndRecordUsage]] builds a wrapper over each model that it calls
+  * ([[StreamSession.wrap]]). The model can be the model of the context, the own model of a predictor, the model of a
+  * scope in the program, the extraction model of `TwoStepAdapter`, or the sub-LM of `RLM`. The model of the context
+  * stays the real model. A direct `call` or `stream` of a model gets no wrapper, and it gives no token.
   *
   * Per-call signature routing: on each `call()` / `stream()` the wrapper reads the innermost [[ActivePredictContext]]
   * entry. That entry carries the active predictor's name (used as `TokenEvent.predictName`) and signature (used to
@@ -37,52 +41,39 @@ import scala.util.control.NonFatal
   * When there is no active predict context (e.g. the LM is called outside any `PredictEngine.execute`, or no adapter is
   * configured), the wrapper falls back to raw-token emission with an empty `fieldName`.
   *
-  * Listener filtering: when `listeners` is non-empty, only field chunks whose `(predictName, fieldName)` match at least
-  * one listener are emitted.
+  * Listener filtering: when the session has listeners, only field chunks whose `(predictName, fieldName)` match at
+  * least one listener are emitted.
   *
   * Cancel: when the consumer closes the stream, the queue refuses the next token, and the wrapper throws an
-  * `InterruptedException` ([[offerToken]]). The program stops, and the stream of the delegate closes.
+  * `InterruptedException` ([[StreamSession.offerToken]]). The program stops, and the stream of the delegate closes.
   *
   * `allowReuse = false` semantics: a non-reuse listener fires for the chunks of a single field cycle (up to and
   * including the chunk that carries `isLastChunk = true`) and then goes silent for the remainder of the `streamify`
-  * invocation. The concurrent set [[firedListeners]] holds the indices that have closed at least one field cycle.
+  * invocation, also for the other models of that invocation. The [[StreamSession]] holds the indices that have closed
+  * at least one field cycle.
   */
-final class StreamingLanguageModelWrapper private (
-    val delegate: StreamingLanguageModel,
-    queue       : StreamingQueue[StreamEvent],
-    adapter     : Option[Adapter],
-    listeners   : Vector[StreamListener]
+final class StreamingLanguageModelWrapper private[streaming] (
+    val delegate                  : StreamingLanguageModel,
+    private[streaming] val session: StreamSession
 ) extends StreamingLanguageModel
     with ForwardingLanguageModel:
 
-  // The workers of a parallel program share this wrapper.
-  private val firedListeners: java.util.Set[Int] = ConcurrentHashMap.newKeySet[Int]()
-  @volatile private var cacheHitSeen             = false
-  @volatile private var tokenGiven               = false
-
   override val id: String   = delegate.id
   override val mode: LmMode = delegate.mode
-  // This wrapper is the active LM during `streamify`, so it must not hide what the delegate supports (adapters
-  // consult the flags to decide e.g. whether to emit `response_format` or native tools, and `Predict` reads
-  // `supportsDecisionRequests` to choose a decision request), its default options, or its cache identity.
-  // ForwardingLanguageModel forwards them.
+  // The model of the context stays the real model during `streamify`, so the adapters and `Predict` read the flags of
+  // that model. This wrapper stands for its delegate in one model call, so it must not hide what the delegate supports,
+  // its default options, or its cache identity. ForwardingLanguageModel forwards them.
 
-  /** `true` when a call of this wrapper got a [[LmChunk.cached]] chunk. */
-  private[streaming] def sawCacheHit: Boolean = cacheHitSeen
-
-  /** `true` when this wrapper gave a token to the queue. */
-  private[streaming] def gaveToken: Boolean = tokenGiven
-
-  /** Does nothing. The delegate is the model of the configuration, and this wrapper does not own it: the wrapper is the
-    * active model for one `streamify` call only. Thus the wrapper does not close the delegate.
+  /** Does nothing. The delegate is a model of the program, and this wrapper does not own it: the wrapper exists for one
+    * model call only. Thus the wrapper does not close the delegate.
     */
   override def close(): Unit = ()
 
   /** `true` when no listener narrows the stream, or when a listener matches the predictor `predictName` and one of its
-    * `outputFields` (upstream `Predict._should_stream`: each predictor streams when there is no listener).
+    * `outputFields` ([[StreamSession.streamsToListener]]).
     */
   override def streamsToListener(predictName: String, outputFields: Vector[String]): Boolean =
-    listeners.isEmpty || listeners.exists(listener => outputFields.exists(listener.matches(predictName, _)))
+    session.streamsToListener(predictName, outputFields)
 
   /** Stream the call, give the tokens to the listeners, and assemble the response. The chunks and the tokens are those
     * of [[stream]]. A [[LmChunk.cached]] chunk gives its response as is, and no token goes to a listener (upstream: a
@@ -145,7 +136,7 @@ final class StreamingLanguageModelWrapper private (
     * [[dspy4s.core.contracts.LmUnexpectedError]], the last chunk of the stream, as [[call]] gives a `Left` (upstream
     * `error_boundary(..., unexpected=True)`). Each other exception goes up to the caller: a fatal error, and an
     * exception of the listeners or of the flush. An example is the `InterruptedException` of a consumer that closed the
-    * stream ([[offerToken]]).
+    * stream ([[StreamSession.offerToken]]).
     *
     * The wrapper closes the stream of the delegate at the end of the stream, and after each exception, so no caller
     * must depend on a later close. A close of the result also closes the stream of the delegate, so a caller that stops
@@ -190,7 +181,7 @@ final class StreamingLanguageModelWrapper private (
           if !hasNext then throw new NoSuchElementException("The stream of the wrapper has no more chunks")
           val chunk = guarded(chunks.next())(identity)
           if chunk.cachedResponse.isDefined || chunk.reportedFailure.isDefined then
-            if chunk.cachedResponse.isDefined then cacheHitSeen = true
+            if chunk.cachedResponse.isDefined then session.markCacheHit()
             finishPending = false
             flushPending = false
           else
@@ -246,7 +237,7 @@ final class StreamingLanguageModelWrapper private (
   private def activeContext()(using RuntimeContext): CallContext =
     ActivePredictContext.current match
       case Some(active) =>
-        val state = adapter.flatMap(_.streamingState(active.layout))
+        val state = session.adapter.flatMap(_.streamingState(active.layout))
         CallContext(active.name, state)
       case None => CallContext(predictName = "", state = None)
 
@@ -254,8 +245,8 @@ final class StreamingLanguageModelWrapper private (
     ctx.state match
       case Some(s) => if chunk.text.nonEmpty then
           s.receive(chunk.text).foreach(emitFieldChunk(ctx, _, isFinalChunk = chunk.isFinal))
-      case None => if chunk.text.nonEmpty && listenerAccepts(ctx.predictName, "") then
-          offerToken(
+      case None => if chunk.text.nonEmpty && session.listenerAccepts(ctx.predictName, "") then
+          session.offerToken(
             TokenEvent(
               predictName = ctx.predictName,
               fieldName = "",
@@ -271,8 +262,8 @@ final class StreamingLanguageModelWrapper private (
 
   private def emitFieldChunk(ctx: CallContext, fc: FieldChunk, isFinalChunk: Boolean): Unit =
     val isLast = fc.isLast || isFinalChunk
-    if listenerAccepts(ctx.predictName, fc.fieldName) then
-      offerToken(
+    if session.listenerAccepts(ctx.predictName, fc.fieldName) then
+      session.offerToken(
         TokenEvent(
           predictName = ctx.predictName,
           fieldName = fc.fieldName,
@@ -280,42 +271,14 @@ final class StreamingLanguageModelWrapper private (
           isLastChunk = isLast
         )
       )
-      if isLast then markListenersFired(ctx.predictName, fc.fieldName)
-
-  /** Give a token to the listeners, and record the visible output, so the predictor tries no fallback adapter for this
-    * call (see [[StreamProgress]]).
-    *
-    * When the queue refuses the token, the consumer has gone, and this method throws an `InterruptedException`.
-    * `NonFatal` rejects this exception, so it passes the catches of the program layers, and the program stops.
-    */
-  private def offerToken(event: TokenEvent): Unit =
-    if !queue.offer(event) then throw new InterruptedException("The consumer closed the stream")
-    tokenGiven = true
-    StreamProgress.markEmitted()
-
-  private def listenerAccepts(predictName: String, fieldName: String): Boolean =
-    if listeners.isEmpty then true
-    else
-      listeners.iterator.zipWithIndex.exists { case (l, i) =>
-        l.matches(predictName, fieldName) && (l.allowReuse || !firedListeners.contains(i))
-      }
-
-  private def markListenersFired(predictName: String, fieldName: String): Unit =
-    listeners.iterator.zipWithIndex.foreach { case (l, i) =>
-      if !l.allowReuse && l.matches(predictName, fieldName) then
-        val _ = firedListeners.add(i)
-    }
+      if isLast then session.markListenersFired(ctx.predictName, fc.fieldName)
 
 object StreamingLanguageModelWrapper:
+  /** A wrapper over `delegate` with a new [[StreamSession]] of its own. */
   def apply(
       delegate : StreamingLanguageModel,
       queue    : StreamingQueue[StreamEvent],
       adapter  : Option[Adapter]        = None,
       listeners: Vector[StreamListener] = Vector.empty
   ): StreamingLanguageModelWrapper =
-    new StreamingLanguageModelWrapper(
-      delegate = delegate,
-      queue = queue,
-      adapter = adapter,
-      listeners = listeners
-    )
+    new StreamingLanguageModelWrapper(delegate, StreamSession(queue, adapter, listeners))

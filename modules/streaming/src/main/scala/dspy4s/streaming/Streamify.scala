@@ -7,7 +7,6 @@ import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.streaming.contracts.ErrorEvent
 import dspy4s.streaming.contracts.PredictionEvent
@@ -22,7 +21,19 @@ object Streamify:
   /** Wrap a program in a streaming envelope: each invocation of the returned function runs the program on a daemon
     * producer thread and yields a [[ClosableIterator]] of [[StreamEvent]]s.
     *
-    * Per-LM-call signature routing happens inside the wrapped [[StreamingLanguageModel]]: it consults
+    * The stream is in the context, not in the model. Each invocation puts a [[StreamSession]] in the context of the
+    * program ([[dspy4s.core.contracts.RuntimeContext.streamSink]], the analog of upstream `settings.send_stream`), and
+    * [[dspy4s.lm.contracts.LanguageModel.callAndRecordUsage]] wraps each model that it calls with that session. Thus
+    * each model call of the program streams: the model of the context, the own model of a predictor, the model of a
+    * scope in the program, the extraction model of `TwoStepAdapter`, and the sub-LM of `RLM`. A program with no model
+    * in the context streams too. The model of the context stays the real model. A direct `call` or `stream` of a model
+    * does not stream.
+    *
+    * The wrappers of all the models of one invocation share the session. A `streamify` inside a program replaces the
+    * session in the context of its own program, so the tokens of that program go to the inner stream only (as
+    * upstream).
+    *
+    * Per-LM-call signature routing happens inside [[StreamingLanguageModelWrapper]]: it consults
     * [[dspy4s.core.runtime.ActivePredictContext]] at the start of each `call()` to pick the active predictor's
     * signature and name, then builds a fresh adapter state machine for that signature. As a result, programs that
     * internally invoke multiple `DynamicPredict`s with different signatures stream per-field tokens correctly under
@@ -30,9 +41,8 @@ object Streamify:
     *
     * The producer thread runs the program in the context that `streamify` gets (UPGRADE-3.2.1-to-3.4.0, decision D8:
     * the given context wins), also when the caller did not install that context. Each field that the given context does
-    * not set comes from the context that is installed when the returned function runs, also the model and the adapter
-    * of the stream. Each invocation of the returned function takes the dynamic scope and the carriers of the thread
-    * that invokes it.
+    * not set comes from the context that is installed when the returned function runs, also the adapter of the stream.
+    * Each invocation of the returned function takes the dynamic scope and the carriers of the thread that invokes it.
     *
     * A caller that stops before the end of the stream must close the iterator. A consumer that stops and does not close
     * leaves the producer thread parked on the full queue. Upstream has the same need. A close removes the events in the
@@ -69,35 +79,22 @@ object Streamify:
     inputs =>
       val queue = StreamingQueue[StreamEvent](queueCapacity)
       // The producer thread runs in the effective context of `streamify`: the given context, filled from the installed
-      // one (decision D8: the given context wins). The model and the adapter of the stream come from that context too.
+      // one (decision D8: the given context wins). The adapter of the stream comes from that context too.
       val (captured, effective) =
         RuntimeEnvironment.withInstalled(outerContext)(installed ?=> (ContextPropagation.captureAll, installed))
 
       val provider = statusMessageProvider.getOrElse(StatusMessageProvider.default)
       val callback = new StatusStreamingCallback(provider, queue)
 
-      val currentLm = effective.lm
       // The stream rules come from the configured adapter. With no configured adapter, they are the chat rules
       // (upstream `StreamListener.receive` and `flush` in `dspy/streaming/streaming_listener.py`).
       val adapter = SettingsProgramRuntime.adapterOrChat(effective)
 
-      val wrappedLm = currentLm.collect { case slm: StreamingLanguageModel =>
-        StreamingLanguageModelWrapper(
-          delegate = slm,
-          queue = queue,
-          adapter = Some(adapter),
-          listeners = streamListeners
-        )
-      }
-
-      val lmOverride: RuntimeContext = wrappedLm match
-        case Some(wrapper) => RuntimeContext(lm = Some(wrapper))
-        case None          => RuntimeContext()
+      val session = StreamSession(queue, Some(adapter), streamListeners)
 
       // Upstream `streamify.py`: a stream with no token of a listener still has the prediction.
       def keepsPrediction: Boolean =
-        includeFinalPrediction || streamListeners.isEmpty ||
-          wrappedLm.forall(wrapper => wrapper.sawCacheHit || !wrapper.gaveToken)
+        includeFinalPrediction || streamListeners.isEmpty || session.sawCacheHit || !session.gaveToken
 
       val producer = new Thread(
         new Runnable:
@@ -107,7 +104,7 @@ object Streamify:
             // end-of-stream sentinel and leave the consumer parked in take() forever.
             try
               val _ = captured.run {
-                RuntimeEnvironment.withSettings(lmOverride) {
+                RuntimeEnvironment.withSettings(RuntimeContext(streamSink = Some(session))) {
                   val existingCallbacks = RuntimeEnvironment.current.callbacks
                   RuntimeEnvironment.withCallbacks(existingCallbacks :+ callback) {
                     given RuntimeContext = RuntimeEnvironment.current

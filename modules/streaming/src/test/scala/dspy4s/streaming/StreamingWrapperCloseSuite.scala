@@ -67,5 +67,5 @@ class StreamingWrapperCloseSuite extends FunSuite:
     assert(interrupted, "the wrapper must stop at the token that the queue refuses")
     assert(source.closed, "the stream of the delegate is open, and the caller has no close to call")
     assertEquals(stream.hasNext, false)
-    assertEquals(wrapper.gaveToken, false)
+    assertEquals(wrapper.session.gaveToken, false)
   }

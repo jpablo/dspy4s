@@ -27,7 +27,7 @@ import dspy4s.core.contracts.{
 import dspy4s.core.data.Example
 import dspy4s.core.decisions.{DecisionEvidence, DecisionEvidenceLog, DecisionKind, DecisionPlan}
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.lm.contracts.{DecisionRequests, LanguageModel, LmOutput, StreamingLanguageModel}
+import dspy4s.lm.contracts.{DecisionRequests, LanguageModel, LmOutput, StreamSink, StreamingLanguageModel}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** Experimental. The adapter that asks a generative model for the evidence of the decision outputs of `plan`, and
@@ -277,7 +277,7 @@ object DecisionAdapter:
       nestedFields: Vector[String],
       moduleName  : String,
       model       : LanguageModel
-  ): Either[DspyError, Adapter] =
+  )(using RuntimeContext): Either[DspyError, Adapter] =
     nestedFields.foreach(name => RuntimeEnvironment.warn(s"Predict '${layout.name}'", nestedDecisionWarning(name)))
     plan.flatMap { resolved =>
       if resolved.kinds.isEmpty then Right(adapter)
@@ -339,11 +339,15 @@ object DecisionAdapter:
       val key = RuntimeEnvironment.activePredictor.getOrElse(PredictorKey.from(moduleName, layout))
       evidence.foreach((field, value) => DecisionEvidenceLog.record(key, field, value))
 
-  /** A `Left` when `model` gives the stream output of the predictor to a listener ([[StreamingLanguageModel]]): the
-    * decision outputs cannot stream (upstream `DecisionAdapter._prepare`).
+  /** A `Left` when a call of `model` gives the stream output of the predictor to a listener
+    * ([[StreamingLanguageModel]]): the decision outputs cannot stream (upstream `DecisionAdapter._prepare`). The check
+    * asks `model` as the call sees it, with the sink of the context ([[StreamSink.applied]]). Thus a predictor with its
+    * own model gets the same error. A model that does not stream stays as it is, and the check does not reject it.
     */
-  private def rejectStream(model: LanguageModel, moduleName: String, layout: SignatureLayout): Either[DspyError, Unit] =
-    val streams = model match
+  private def rejectStream(model: LanguageModel, moduleName: String, layout: SignatureLayout)(using
+      RuntimeContext
+  ): Either[DspyError, Unit] =
+    val streams = StreamSink.applied(model) match
       case streaming: StreamingLanguageModel => streaming.streamsToListener(moduleName, layout.outputFields.map(_.name))
       case _                                 => false
     Either.cond(!streams, (), ConfigurationError("Streaming decision evidence is not supported."))

@@ -40,7 +40,7 @@ the runtime context, the errors, and the events. It uses only the `algebra` modu
 
 | Type | Description |
 |------|-------------|
-| `RuntimeContext` | The active context, in four parts: `RuntimeServices` (the model, the adapter, and the handlers), `RuntimeConfig` (the settings), `RuntimeScope` (the call stack), and `RuntimeDelta`. |
+| `RuntimeContext` | The active context, in four parts: `RuntimeServices` (the model, the adapter, the handlers, and the stream of `streamify`), `RuntimeConfig` (the settings), `RuntimeScope` (the call stack), and `RuntimeDelta`. |
 | `RuntimeDelta` / `Executed[A]` | `RuntimeDelta` is the trace and the history that a call adds. `Executed[A]` is a value together with its `RuntimeDelta`. |
 | `RuntimeEnvironment` | Holds the global default context and the context of each thread. `configure` sets the global default. It also sends the events to the handlers. |
 | `CallbackEvent` / `CallbackHandler` | The start events and the end events, and the interface of a handler that gets them. |

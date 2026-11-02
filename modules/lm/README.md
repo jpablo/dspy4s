@@ -30,6 +30,7 @@ OpenAI-compatible servers, a wrapper that adds a cache and retries to a model, a
 | `LmCapabilities` | What a model can do: native tool calls, a response schema, and `reasoning` output. |
 | `LmPrice` / `LmCost` | The price of the tokens of a model, and the cost estimate of one call. You declare the price, because the module has no price list. |
 | `LmChunk` / `LmToolCallDelta` | One chunk of a stream (text, a finish reason, usage, a typed error, or a cache hit), and one part of a tool call. |
+| `StreamSink` | The stream of one `streamify` call, in the context. `LanguageModel.callAndRecordUsage` applies it to each model that it calls. |
 | `Embedder` | `embed(texts)` gives one vector for each text. `Embedder.cached` keeps the vector of each text. |
 
 ### Providers

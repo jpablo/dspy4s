@@ -550,8 +550,10 @@ The `streaming` module follows `dspy/streaming/`. These rules differ from upstre
   `TypeError`.
 - The port streams the text of any field. Upstream also accepts any field, but it gives a field of a streamable
   `dspy.Type` to `parse_stream_chunk`. The port has no such hook.
-- A predictor with its own model (`Predict.withLm`) does not go through the wrapper, so it streams no token. Upstream
-  streams each model through `settings.send_stream`.
+- A direct `call` or `stream` of a model by user code does not stream, because only
+  `LanguageModel.callAndRecordUsage` applies the sink. Upstream streams each call of an `LM`.
+- The stream rules come from the adapter at the start of the stream, so a scope with another adapter inside a program
+  still uses the first rules. Upstream reads `settings.adapter` for each chunk.
 - A model chunk that holds a whole field gives a token to the listener. Upstream reads this chunk as `cache_hit`: the
   listener gets no token, and the stream keeps the prediction with `include_final_prediction_in_output_stream=False`.
 - The stream of a raw provider with no finish reason fails with `LmStreamAssemblyError`, as in `ManagedLanguageModel`.

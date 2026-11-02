@@ -542,10 +542,10 @@ The inner predictors are stable members, so callbacks and tracing can observe ev
 `rlm_extract` call. Direct REPL execution is not a module boundary, though its rendered result appears in later action
 inputs and in the final trajectory.
 
-The current [`Streamable.scala`](../../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala) defines
-dedicated instances for `Predict`, `ChainOfThought`, and `ReAct`, but not for `RLM`.
-Consequently, RLM does not yet have the same `Streamify` entry point and listener-signature validation as those
-programs.
+[`Streamable.scala`](../../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala) has an instance
+for `RLM`, so `Streamify` can run it, and the listener validation knows `actionPredict` and `extractPredict`.
+The sub-LM tools stream too. Their tokens have no predictor name, so they reach the stream only when it has no
+listener.
 
 ## RLM compared with nearby programs
 

@@ -32,6 +32,7 @@ with `predictName`.
 ## Notes
 
 - The language model must support streaming. The bundled OpenAI provider does.
+- Each model of the program streams, also the own model of a predictor.
 - Streaming is synchronous, so there is no async iteration to manage; the
   consumer is a plain `while` loop over the iterator.
 - A streamed call goes through the cache, the retry policy, and the history

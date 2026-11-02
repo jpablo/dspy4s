@@ -1,6 +1,6 @@
 package dspy4s.lm.contracts
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, RuntimeContext, RuntimeError, ToolCall}
+import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, RuntimeContext, RuntimeError, StreamSinkRef, ToolCall}
 import zio.blocks.schema.DynamicValue
 
 /** A single tool-call delta extracted from one streaming LM chunk. OpenAI emits `id`/`function.name` on the first delta
@@ -121,6 +121,22 @@ trait StreamingLanguageModel extends LanguageModel:
     * cannot stream its output, for example a predictor with decision outputs, fails such a call before the request.
     *
     * The default is `false`: a model gives its output to a listener only in a `streamify` call, where the wrapper of
-    * the streaming module is the model.
+    * the streaming module wraps the model ([[StreamSink.applied]]).
     */
   def streamsToListener(predictName: String, outputFields: Vector[String]): Boolean = false
+
+/** The stream of one `streamify` call (upstream `settings.send_stream`). The context holds it
+  * ([[dspy4s.core.contracts.RuntimeContext.streamSink]]), and each model call of the framework reads it
+  * ([[LanguageModel.callAndRecordUsage]]). Thus each model streams: the model of the context, the own model of a
+  * predictor, and each other model that a program calls with that function. The streaming module implements this trait.
+  */
+trait StreamSink extends StreamSinkRef:
+  /** `model` with its tokens given to this sink. A model that does not stream stays as it is. */
+  def wrap(model: LanguageModel): LanguageModel
+
+object StreamSink:
+  /** `model`, wrapped by the sink of the context when the context has one. */
+  def applied(model: LanguageModel)(using context: RuntimeContext): LanguageModel =
+    context.streamSink match
+      case Some(sink: StreamSink) => sink.wrap(model)
+      case _                      => model

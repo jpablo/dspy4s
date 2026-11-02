@@ -24,6 +24,15 @@ to port" list under v1.7 overlaps the tests already shipped in v1.8 (e.g.
 `*_returns_correct_chunk_*` matrix). Treat the v1.8 / per-token-refactor sections
 as authoritative for current status.
 
+## Shipped: the stream in the context
+
+`Streamify` does not change the model of the context. It puts a `StreamSession` in
+the context (`RuntimeContext.streamSink`, the analog of upstream
+`settings.send_stream`). `LanguageModel.callAndRecordUsage` wraps each model that it
+calls with that session. Thus each model of the program streams, also the own model
+of a predictor. The session holds the state that the wrappers of one `streamify`
+call share.
+
 ## Shipped in v1 (Phase 8 — minimal slice)
 
 - `LmChunk` + `StreamingLanguageModel` trait (in `lm.contracts`)
@@ -147,7 +156,7 @@ for the small residual chunk-emission delta that remains
   `false`, the listener emits chunks for one complete field cycle (up to and
   including `isLastChunk = true`) and then goes silent for the rest of
   the `streamify` invocation.
-  Implementation: `StreamingLanguageModelWrapper.firedListeners`, a
+  Implementation: `StreamSession.firedListeners`, a
   concurrent set, tracks which listener indices have closed a field cycle.
 - `Streamify.streamify` now accepts a `warningSink: String => Unit`
   (defaults to `System.err.println`) and walks the program tree

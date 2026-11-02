@@ -537,7 +537,7 @@ Simplify 4 (rank 10). Code-review 6 (rank 7). 689 main lines, 3378 test lines.
 - [x] (code-review (a)) `StreamListener.allowReuse` defaults to `false`, as upstream `allow_reuse=False`.
 - [x] (code-review (a)) `includeFinalPrediction = false` keeps the prediction with no listeners, on a cache hit, or when no listener got a token, as upstream.
 - [x] (code-review (a)) A listener with no `predictName` on a field of more than one predictor gives a warning. `docs/port/PORT_DIFFERENCES.md` section 23 lists the differences from upstream.
-- [ ] (design, open) A predictor with its own model (`Predict.withLm`) does not go through `StreamingLanguageModelWrapper`, so it streams no token. Upstream streams each model through `settings.send_stream`. A fix needs a stream slot in the context, read at the point where the predictor picks its model, in place of the swap of the model in `Streamify`.
+- [x] (design) A predictor with its own model (`Predict.withLm`) did not go through `StreamingLanguageModelWrapper`, so it streamed no token. The stream is now in the context (`RuntimeContext.streamSink`, the analog of upstream `settings.send_stream`), and `LanguageModel.callAndRecordUsage` applies it to each model. This also covers the model of a scope, the extraction model of `TwoStepAdapter`, and the sub-LM of `RLM`. `Streamify` no longer replaces the model of the context.
 
 ## mcp
 

@@ -83,6 +83,10 @@ object LanguageModel:
     * model directly must also use it, else the call does not count and sends no events. A direct `call` or `stream` of
     * a model counts in no scope and sends no events, also for a [[dspy4s.lm.runtime.ManagedLanguageModel]].
     *
+    * A call through this function streams while the context has a sink ([[StreamSink.applied]]). Upstream `LM` reads
+    * `settings.send_stream` for each call (`dspy/clients/lm.py`, `_get_stream_completion_fn`). A direct `call` or
+    * `stream` of a model does not give its tokens to the sink.
+    *
     * A `Left` gives a record only when its error carries a usage, for example the error of a stream that failed after
     * its usage chunk. An error that is not an LM error carries no usage. A cache hit of
     * [[dspy4s.lm.runtime.ManagedLanguageModel]] has no usage, thus no record (upstream `finalize` skips a cache hit).
@@ -96,7 +100,7 @@ object LanguageModel:
       modelId = model.id,
       request = DynamicValues.record("model" := model.id, "mode" := model.mode.toString)
     ) {
-      val result = model.call(request)
+      val result = StreamSink.applied(model).call(request)
       UsageScope.record(request.model, result.fold(LmError.usage, _.usage))
       result
     }

@@ -13,3 +13,10 @@ trait LanguageModelRef
   * without `core` depending on the adapters module.
   */
 trait AdapterRef
+
+/** Marker trait for the stream of one `streamify` call, the analog of upstream `settings.send_stream`. Same
+  * cycle-breaking pattern as [[LanguageModelRef]]: the concrete `StreamSink` trait lives in `lm/contracts` and extends
+  * `StreamSinkRef`, so [[RuntimeContext]] can hold a stream without `core` depending on the lm module. The code that
+  * calls a model (`StreamSink.applied`) reads `ctx.streamSink` and narrows back to `StreamSink` via a pattern match.
+  */
+trait StreamSinkRef

@@ -17,20 +17,27 @@ final case class RuntimeServices(
     /** The factory that builds the REPL interpreter of a code program such as `RLM`, when the program has no factory of
       * its own (Python DSPy's `dspy.settings.interpreter_factory`). `None` selects the default of the program.
       */
-    interpreterFactory: Option[ReplInterpreterFactory] = None
+    interpreterFactory: Option[ReplInterpreterFactory] = None,
+    /** The stream of the `streamify` call that runs, the analog of upstream `settings.send_stream`. Each model call of
+      * the framework reads it (`LanguageModel.callAndRecordUsage`), so each model streams. An inner `streamify` sets
+      * its own stream for its program. `None` when no stream runs.
+      */
+    streamSink: Option[StreamSinkRef] = None
 ) derives CanEqual:
   /** Fill each unset field from `defaults`. When `defaults` fills no field, the result is this value itself. */
   def fillFrom(defaults: RuntimeServices): RuntimeServices =
     val complete = (lm.isDefined || defaults.lm.isEmpty) && (adapter.isDefined || defaults.adapter.isEmpty) &&
       (callbacks.isDefined || defaults.callbacks.isEmpty) &&
-      (interpreterFactory.isDefined || defaults.interpreterFactory.isEmpty)
+      (interpreterFactory.isDefined || defaults.interpreterFactory.isEmpty) &&
+      (streamSink.isDefined || defaults.streamSink.isEmpty)
     if complete then this
     else
       RuntimeServices(
         lm = lm.orElse(defaults.lm),
         adapter = adapter.orElse(defaults.adapter),
         callbacks = callbacks.orElse(defaults.callbacks),
-        interpreterFactory = interpreterFactory.orElse(defaults.interpreterFactory)
+        interpreterFactory = interpreterFactory.orElse(defaults.interpreterFactory),
+        streamSink = streamSink.orElse(defaults.streamSink)
       )
 
   /** `true` when this value filled from `installed` gives `installed`: each service that this value sets is the same
@@ -40,6 +47,7 @@ final case class RuntimeServices(
   private[dspy4s] def keptBy(installed: RuntimeServices): Boolean =
     sameObject(lm, installed.lm) && sameObject(adapter, installed.adapter) &&
       sameObject(interpreterFactory, installed.interpreterFactory) &&
+      sameObject(streamSink, installed.streamSink) &&
       callbacks.forall { requested =>
         installed.callbacks.exists(list => (list eq requested) || list.corresponds(requested)(_ eq _))
       }
@@ -179,6 +187,7 @@ final class RuntimeContext private (
   def lm: Option[LanguageModelRef]                       = services.lm
   def adapter: Option[AdapterRef]                        = services.adapter
   def interpreterFactory: Option[ReplInterpreterFactory] = services.interpreterFactory
+  def streamSink: Option[StreamSinkRef]                  = services.streamSink
   def numThreads: Option[ThreadCount]                    = config.numThreads
   def maxErrors: Option[ErrorLimit]                      = config.maxErrors
   def maxHistorySize: Option[HistoryLimit]               = config.maxHistorySize
@@ -231,11 +240,12 @@ final class RuntimeContext private (
       callStack           : Vector[String]                  = this.callStack,
       trace               : Vector[TraceEntry]              = this.trace,
       history             : Vector[HistoryEntry]            = this.history,
-      interpreterFactory  : Option[ReplInterpreterFactory]  = this.interpreterFactory
+      interpreterFactory  : Option[ReplInterpreterFactory]  = this.interpreterFactory,
+      streamSink          : Option[StreamSinkRef]           = this.streamSink
   ): RuntimeContext =
     // The scope is copied, not built again: it has fields that this flat surface does not show.
     RuntimeContext.fromParts(
-      RuntimeServices(lm, adapter, callbacks, interpreterFactory),
+      RuntimeServices(lm, adapter, callbacks, interpreterFactory, streamSink),
       RuntimeConfig(
         numThreads,
         maxErrors,
@@ -295,10 +305,11 @@ object RuntimeContext:
       callStack           : Vector[String]                  = Vector.empty,
       trace               : Vector[TraceEntry]              = Vector.empty,
       history             : Vector[HistoryEntry]            = Vector.empty,
-      interpreterFactory  : Option[ReplInterpreterFactory]  = None
+      interpreterFactory  : Option[ReplInterpreterFactory]  = None,
+      streamSink          : Option[StreamSinkRef]           = None
   ): RuntimeContext =
     fromParts(
-      RuntimeServices(lm, adapter, callbacks, interpreterFactory),
+      RuntimeServices(lm, adapter, callbacks, interpreterFactory, streamSink),
       RuntimeConfig(
         numThreads,
         maxErrors,
