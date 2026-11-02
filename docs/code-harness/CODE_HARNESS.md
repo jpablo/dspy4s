@@ -32,6 +32,8 @@ document exists in the code of dspy4s yet.
 - Section 8 describes the runtime. A session is an actor, its log is an event journal, and each guest API call
   in a cell is an event. The store of 4.2 survives a restart, and a replay of the journal can also rebuild the
   REPL definitions. The first runtime uses direct style, and distribution comes later.
+- [CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md) says which parts of Kyo the harness can reuse: the session host, a journal
+  backend, and an early MCP server.
 - The Phase 0 experiment (section 11) recommends a REPL in the same JVM, with five guards. Two of the guards
   start a new REPL. The store keeps the saved values across that change, and replay also keeps the definitions.
 - deepseek-harness, Codex and tacit confirm the main choices (section 9). tacit reports that agents that write
@@ -923,9 +925,13 @@ enum Command:
 
 - **A soft preemption** lets the model decide. `Send` adds a message, and the policy reads it at the next step
   (Codex, uniichat, deepseek-harness). A `Send` with a known `RequestId` adds nothing, so a repeated input runs one
-  time (`pi-durable`). If an `Input` waits when `TurnEnded` commits, `TurnStarted` commits with it.
+  time (`pi-durable`). If an `Input` waits when `TurnEnded` commits, `TurnStarted` commits with it. `StopRequested`
+  clears the inputs that wait: the next turn shows them, but they do not start it.
 - **A hard abort** stops the work. The host stops the LM transport, the REPL (the stop flag and an interrupt) and
-  the process groups. The next intent of the worker gets a rejection, and the worker ends with `Aborted`.
+  the process groups. The next intent of the worker gets a rejection, and the worker ends with `Aborted`. In the
+  REPL, only the cell thread gets the interrupt, so the commits of the worker complete. After the cell ends, the worker
+  closes each open effect with `EffectResult.Unknown`. An interrupt does not wait for a commit in progress, so the
+  decider drops a late outcome of a closed effect ([CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md), 4.1).
 - **A stop does not cut a commit.** A journal write and the `Observed` of a cell complete after a stop. The worker
   commits `TurnEnded` only after the REPL and the processes are quiet (deepseek-harness, Codex).
 - **A cell that does not stop.** After a grace period, the host marks the process as unclean (guard 3 in section
@@ -969,7 +975,7 @@ The user can then continue the work, or a new turn with a note can. The rules fo
 | Effect | An intent commits before its effect, and the outcome commits after the effect. |
 | Store | The store is the fold of the `writes` of `Observed`. A cell that does not complete has no `writes`. |
 | Input | Two `Send` commands with one `RequestId` give one `Input`. |
-| Stop | After `StopRequested`, the decider accepts no new intent in that turn. |
+| Stop | After `StopRequested`, the decider accepts no new intent in that turn. An `Input` from before the stop starts no turn. |
 | Projection | `project` depends only on the log and the derived data (7.2). |
 | Log | No part of the harness changes or removes an entry of the log. |
 | Fork | A fork at entry `k` starts with the first `k` entries of the parent log. |
@@ -1061,7 +1067,8 @@ only after three turns with the same blocker.
 The costs:
 
 - There is more new code than in an RLM configuration (5.1).
-- Each guest API call costs two commits, and the worker waits for each commit. This cost is not measured yet.
+- Each guest API call costs two commits, and the caller waits for each commit. On SQLite, a check measured about
+  140 µs for each commit ([CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md), section 2).
 - The journal stores the result of each guest API call, so a large `read` or `exec` result costs storage (8.4).
 - The builder of the derived data runs in the background, so it adds concurrency.
 - In a session with the memory tree, each message costs one compaction call on a cheaper model (6.5).
@@ -1811,6 +1818,9 @@ the actor is the one writer of the journal.
 So a Pekko interpreter of the decider alone is a small adapter. The log reads, the forks and the REPL replay do not
 fit in the same way ([CODE_HARNESS_RUNTIME.md](CODE_HARNESS_RUNTIME.md), 5.5).
 
+[CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md) analyzes which parts of Kyo can serve as this runtime, and it tests a small
+session host on `kyo-actor`.
+
 ### 8.6 Distribution
 
 A session is tied to one machine: its worktree is on one disk, and its REPL is in one JVM. When a Pekko cluster
@@ -1849,6 +1859,8 @@ Open questions:
    with a small amount of code (one handler that records and one that replays). Two guards of the REPL in the same
    JVM start a new REPL, and replay keeps the definitions across that change. One guard restarts an unclean host.
    The other guard limits a REPL to about 300 cells.
+2. Does the session host use `kyo-actor`, and does the journal use `kyo-sql-sqlite`
+   ([CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md), section 7)? This needs JDK 25, and it changes decision 1 for the host.
 
 ## 9. Findings from deepseek-harness, Codex and tacit
 
