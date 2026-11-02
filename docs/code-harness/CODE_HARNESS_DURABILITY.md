@@ -308,5 +308,8 @@ these rules:
 9. **Crash tests.** Kill a process with SIGKILL during a model request and during a guest API call, as the
    deepseek-harness tests do.
 
+Section 4.2 of CODE_HARNESS.md now has rules 3, 4 and 5, and the first part of rule 1. The other rules are still
+open.
+
 An open question: can safe mode keep model code away from the system clock and random numbers? If it can, the type
 system can make the cells deterministic, and replay is safe.
