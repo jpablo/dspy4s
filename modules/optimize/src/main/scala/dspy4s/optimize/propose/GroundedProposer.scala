@@ -13,6 +13,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.optimize.OptimizerSupport
 import dspy4s.optimize.CandidateCount
 import dspy4s.optimize.DatasetSampleSize
+import dspy4s.optimize.DemoCount
 import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.optimization.OptimizableView
@@ -203,8 +204,10 @@ object GroundedProposer:
 
   private val Output: String = "proposed_instruction"
 
-  /** Upstream `num_demos_in_context`. */
-  private val NumDemosInContext: Int = 3
+  /** Upstream `num_demos_in_context`. MIPROv2 gives it the value of `BOOTSTRAPPED_FEWSHOT_EXAMPLES_IN_CONTEXT`, and
+    * also uses that value as the cap of bootstrapped demos of a zero-shot optimizer.
+    */
+  private[optimize] val NumDemosInContext: DemoCount = DemoCount(3)
 
   /** The value of `task_demos` when a proposal has no demos (upstream `GenerateModuleInstruction.forward`). */
   private val NoTaskDemos: String = "No task demos provided."

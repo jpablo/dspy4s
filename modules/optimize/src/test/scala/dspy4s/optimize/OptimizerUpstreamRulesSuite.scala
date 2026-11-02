@@ -463,3 +463,33 @@ class OptimizerUpstreamRulesSuite extends FunSuite:
     }.toOption.get
     assertEquals(report.candidates.flatMap(_.metadata.get("seed")).toSet, Set[Any](-3, -2, -1))
   }
+
+  // ── MIPROv2 with both demo limits at 0 (`mipro_optimizer_v2.py`, `zeroshot_opt`) ──────────────────────────────────
+
+  private def zeroShot: MIPROv2[DynamicPredict] =
+    new MIPROv2[DynamicPredict](MIPROv2Config(
+      metric = metric(),
+      numCandidates = CandidateCount(5),
+      numTrials = TrialCount(10),
+      maxBootstrappedDemos = DemoCount(0),
+      maxLabeledDemos = DemoCount(0)
+    ))
+
+  test("zero-shot MIPROv2 bootstraps demos to ground its proposals, as upstream") {
+    val lm = answering()
+    assert(withLm(lm)(zeroShot.compile(student, trainset(8))).isRight)
+    val prompts = lm.requests.toVector.filter(isGeneration).map(text)
+    assert(prompts.exists(_.contains("question: q")), prompts.mkString("\n---\n"))
+  }
+
+  test("zero-shot MIPROv2 discards the demo sets, so each trial keeps the demos of the student, as upstream") {
+    val own    = student.copy(demos = Vector(example(0)))
+    val report = withLm(answering())(zeroShot.compile(own, trainset(8))).toOption.get
+    val found  = report.candidates.map(candidate => leaf(candidate.program).demos.map(question)).distinct
+    assertEquals(found, Vector(Vector("q0")))
+  }
+
+  test("zero-shot MIPROv2 reports no demo candidates") {
+    val report = withLm(answering())(zeroShot.compile(student, trainset(8))).toOption.get
+    assertEquals(report.metadata.get("num_demo_candidates"), Some(0))
+  }
