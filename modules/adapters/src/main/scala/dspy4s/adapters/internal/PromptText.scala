@@ -1,7 +1,7 @@
 package dspy4s.adapters.internal
 
 import dspy4s.core.contracts.{DynamicValues, FieldSpec, JsonSchemaRefs, PythonText, SignatureLayout, ToolCall, TypeRef}
-import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** The prompt texts that the Chat, JSON, XML, and TwoStep adapters share (decision D3). The adapters compute each text
   * from the data of the port: the [[TypeRef]], the enum values, the optional flag, the description, and the constraints
@@ -147,12 +147,32 @@ private[adapters] object PromptText:
   // ── Values ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
   /** The text of the value of `field` (upstream `format_field_value`). A list value of a `str` field is a numbered
-    * list. A list, a dict, or a record is JSON text. Each other value is its Python `str` text.
+    * list. A list, a dict, or a record is JSON text, with a `null` for each number that is not finite in it
+    * ([[jsonMode]]). Each other value is its Python `str` text, so a bare NaN is `nan`.
     */
   def fieldValue(field: FieldSpec, value: DynamicValue): String =
-    jsonable(field, value) match
+    jsonMode(jsonable(field, value)) match
       case sequence: DynamicValue.Sequence if isStr(field) => numberedList(sequence.elements.toVector)
       case other                                           => PythonText.str(other)
+
+  /** `value` as upstream `serialize_for_json` gives it to `json.dumps`. Pydantic JSON mode writes NaN and an infinite
+    * number in a list or in a dict as `None`, at any depth. It keeps a bare float, because the serializer of a `float`
+    * does not change the float. The rule is for prompt values only: [[PythonText.json]] keeps the form of `json.dumps`.
+    */
+  private def jsonMode(value: DynamicValue): DynamicValue =
+    if PythonText.isContainer(value) then nonFiniteAsNull(value) else value
+
+  /** `value` with a null for each number that is not finite, at any depth. A key of a map stays as it is. */
+  private def nonFiniteAsNull(value: DynamicValue): DynamicValue =
+    value match
+      case DynamicValue.Primitive(PrimitiveValue.Double(number)) if !number.isFinite => DynamicValue.Null
+      case DynamicValue.Primitive(PrimitiveValue.Float(number)) if !number.isFinite  => DynamicValue.Null
+      case record: DynamicValue.Record                                               =>
+        DynamicValue.Record(record.fields.map((name, item) => name -> nonFiniteAsNull(item)))
+      case map: DynamicValue.Map             => DynamicValue.Map(map.entries.map((key, item) => key -> nonFiniteAsNull(item)))
+      case sequence: DynamicValue.Sequence   => DynamicValue.Sequence(sequence.elements.map(nonFiniteAsNull))
+      case DynamicValue.Variant(name, inner) => DynamicValue.Variant(name, nonFiniteAsNull(inner))
+      case other                             => other
 
   /** `true` when the type of `field` is `str` in upstream: a text field with no enum values that is not optional. */
   def isStr(field: FieldSpec): Boolean =

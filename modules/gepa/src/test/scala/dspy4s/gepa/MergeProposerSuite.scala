@@ -520,3 +520,25 @@ class MergeProposerSuite extends FunSuite:
     assertEquals(state.parents, Vector(Vector.empty, Vector(0), Vector(0)))
     assertEquals(state.aggregateScore(state.bestIndex), 0.5)
   }
+
+  test("the search reads the common ancestors in sorted order, not in the order of the hash") {
+    // Six common ancestors, so the set is a hash set, and the weights make the pick depend on the order.
+    val ancestors = Vector.tabulate(6)(index => (Map(first -> Some("a"), second -> Some("b")), 0.1 * (index + 1)))
+    val state     = GepaStateFixtures.state(
+      candidates = CandidatePool.applyUnsafe(
+        ancestors.map(_._1) ++
+          Vector(Map(first -> Some("x"), second -> Some("b")), Map(first -> Some("a"), second -> Some("y")))
+      ),
+      valSubscores = ancestors.map(ancestor => Vector(ancestor._2)) ++ Vector(Vector(1.0), Vector(1.0)),
+      parents = ancestors.map(_ => Vector.empty[Int]) ++ Vector((0 until 6).toVector, (0 until 6).toVector),
+      totalMetricCalls = MetricCallCount(0)
+    )
+    val dominators = Vector(6, 7)
+    (0L until 40L).foreach { seed =>
+      val draws    = new Random(seed)
+      val _        = draws.shuffle(dominators)
+      val expected = MergeProposer.weightedPick((0 until 6).toVector, state.aggregateScore, draws)
+      val found    = MergeProposer.findMerge(state, dominators, 1, MergeOverlapFloor(1), new Random(seed))
+      assertEquals(found.map(_._1), Some((6, 7, expected)), s"seed: $seed")
+    }
+  }

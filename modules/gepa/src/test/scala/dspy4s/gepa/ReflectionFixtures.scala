@@ -1,5 +1,6 @@
 package dspy4s.gepa
 
+import dspy4s.adapters.internal.ProgramPromptText
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.:=
 import zio.blocks.schema.{DynamicValue, Schema}
@@ -17,6 +18,14 @@ object ReflectionFixtures:
 
   private def jsonObject(key: String, value: String): String =
     new String(Schema.dynamic.jsonCodec.encode(DynamicValues.record(key := value)), StandardCharsets.UTF_8)
+
+  /** The text of `records` in a prompt of the default proposer: the text that an adapter writes for the value of the
+    * input field `examples_with_feedback`.
+    */
+  def examplesText(records: Vector[ReflectiveRecord]): String =
+    val field =
+      DefaultInstructionProposer().proposeSignature.inputFields.filter(_.name == "examples_with_feedback").head
+    ProgramPromptText.fieldValue(field, DynamicValues.sequence(records.map(_.toRecord)))
 
   /** A string as a value of a reflective record. */
   def string(value: String): DynamicValue = DynamicValues.fromAny(value)

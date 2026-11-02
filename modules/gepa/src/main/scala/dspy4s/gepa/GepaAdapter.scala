@@ -41,9 +41,9 @@ import scala.util.Try
   * @param metric
   *   the feedback metric — scores examples AND yields the reflection feedback
   * @param failureScore
-  *   the score for an example the program failed on (parse/runtime error); default `0.0`
+  *   the score for an example the program or the metric failed on; default `0.0`. It must be finite.
   * @param addFormatFailureAsFeedback
-  *   when `true`, a predictor call that failed gives the reflection LM a record (dspy's
+  *   when `true`, a predictor call that failed to parse gives the reflection LM a record (dspy's
   *   `add_format_failure_as_feedback`); default `false`, as upstream
   */
 final class GepaAdapter[P](
@@ -52,6 +52,12 @@ final class GepaAdapter[P](
     failureScore              : Double  = 0.0,
     addFormatFailureAsFeedback: Boolean = false
 )(using ps: OptimizableStructure[P], runner: ProgramRunner[P]):
+  import GepaAdapter.RunResult
+
+  require(failureScore.isFinite, s"failureScore must be finite: $failureScore")
+
+  /** The result of an example with no result of its own: the failure score, and no trajectory. */
+  private val failedRun: RunResult = RunResult(failureScore, Map.empty, None)
 
   /** The optimizable leaves in read order. `replace` keeps the metadata, so their predictor keys hold for each
     * candidate.
@@ -75,20 +81,27 @@ final class GepaAdapter[P](
     * of runs that fail or throw, and for any duration of a run.
     *
     * The program-level feedback of the metric gives the score and the objective scores of an example. The metric gets
-    * one call for each run that passes. A run that fails, a metric that gives a `Left`, or an exception has
-    * `failureScore` and no objective score. A failure of the whole executor (for example a fatal error in a worker
-    * thread) gives each example `failureScore`. The trajectory of a run that fails, or of an example whose run or
-    * metric throws, has the text of the failure ([[Trajectory.failure]]). In [[EvaluationBatch.objectiveScores]], an
-    * example with no objective score has an empty map. The adapter does not read the objective scores of a
-    * component-level feedback.
+    * one call for each run that passes, with an empty trace on the two paths (upstream gives `trace=None` to each such
+    * call). These examples have `failureScore` and no objective score:
+    *   - A run that fails, or that throws an exception.
+    *   - A metric that gives a `Left`, that throws an exception, or that gives a score that is not finite. Upstream
+    *     keeps a float NaN. The port saves the state as JSON, and JSON has no such number.
+    *   - An example with no input keys. It gets no run and no model call (upstream `Example.inputs` raises).
+    *   - Each example of the batch, when the whole executor fails (for example a fatal error in a worker thread). The
+    *     adapter then writes a warning with the cause.
+    *
+    * The adapter drops each objective score that is not finite, and it keeps the finite ones. In
+    * [[EvaluationBatch.objectiveScores]], an example with no objective score has an empty map. The adapter does not
+    * read the objective scores of a component-level feedback.
     *
     * With `captureTraces` (the reflective path), [[RuntimeContext.captureFailureTraces]] is on, so a parse failure
     * stays in the trace with the raw response (G-12 P-a/P-b). `addFormatFailureAsFeedback` decides if that failure
-    * becomes reflection signal. The metric gets the trace of the run, and the batch has one [[Trajectory]] for each
-    * example.
+    * becomes reflection signal. The batch has one [[Trajectory]] for each run that passed, and for each run that failed
+    * with a [[ParseError]] that has the raw response (upstream `bootstrap_trace_data` with
+    * `capture_failed_parses=True`). Each other example has no trajectory, so [[EvaluationBatch.trajectories]] can be
+    * shorter than the batch.
     *
-    * When `captureTraces` is false (the acceptance/full-eval fast path), the batch has no trajectories, and the metric
-    * gets an empty trace.
+    * When `captureTraces` is false (the acceptance/full-eval fast path), the batch has no trajectories.
     */
   def evaluate(batch: Vector[Example], candidate: Candidate, captureTraces: Boolean)(using
       RuntimeContext
@@ -101,15 +114,18 @@ final class GepaAdapter[P](
         task = (example: Example) => runOne(prog, example, captureTraces)(using RuntimeEnvironment.current),
         data = batch
       ) match
-      // An example that threw gets the failure score and the error of the executor.
-      case Right(outcome) => batch.zip(outcome.results).map((example, result) =>
-          result.fold(failedRun(example, _), identity)
-        )
+      // An example that threw gets the failure score.
+      case Right(outcome) => outcome.results.map(_.getOrElse(failedRun))
       // A failure of the whole executor: each example gets the failure score.
-      case Left(error) => batch.map(failedRun(_, error))
+      case Left(error) =>
+        RuntimeEnvironment.warn(
+          "GepaAdapter",
+          s"The evaluation of ${batch.size} examples failed, so each example has the failure score: ${error.message}"
+        )
+        batch.map(_ => failedRun)
     EvaluationBatch(
       scores = runs.map(_.score),
-      trajectories = Option.when(captureTraces)(runs),
+      trajectories = Option.when(captureTraces)(runs.flatMap(_.trajectory)),
       objectiveScores = runs.map(_.objectiveScores)
     )
 
@@ -165,17 +181,24 @@ final class GepaAdapter[P](
     * of that component plus the optimizable-level feedback (gepa's `make_reflective_dataset`). The
     * [[InstructionProposer]] gives these records to the reflection LM to rewrite the instruction of the component.
     *
-    * Requires `evalBatch` to carry trajectories (i.e. it came from [[evaluate]] with `captureTraces = true`).
+    * Reads the trajectories of `evalBatch`, so `evalBatch` comes from [[evaluate]] with `captureTraces = true`.
     *
     * Finds the calls of a component by the predictor key of each trace entry ([[PredictorTraces.byLeaf]]), not by the
     * position of the entry. A trajectory gives one record for a component at most:
     *   - Without `addFormatFailureAsFeedback`, a call that failed does not count.
-    *   - The first call that failed gives the record. The user metric gets no call for it.
+    *   - With `addFormatFailureAsFeedback`, a call that failed counts only when its trace entry has the raw response.
+    *     Upstream has a failed trace entry only for a parse failure. The first such call gives the record, and the user
+    *     metric gets no call for it. This holds also for a parse failure that a program caught, in a run that passed.
+    *     Upstream has no such entry.
     *   - Otherwise, a run that failed gives no record. A run that passed gives the record of one call, selected with
     *     `random` (gepa's `self.rng.choice`). The engine gives each proposal task a source of its own
     *     ([[RandomStream.Reflection]]), so a resumed run makes the same selections.
     *
-    * `Left` when two leaves have the same predictor key, or when a leaf ran but its module recorded no key.
+    * `Left` in two groups of cases. The engine reads the first group with [[requireTraceKeys]], and that group stops a
+    * run. The second group skips a proposal task. A `Left` of the metric stops the dataset, as an exception of the
+    * metric does.
+    *   - Two leaves have the same predictor key, or a leaf ran but its module recorded no key.
+    *   - The metric gives a `Left` for a component.
     */
   private[gepa] def makeReflectiveDataset(
       candidate : Candidate,
@@ -184,48 +207,73 @@ final class GepaAdapter[P](
       random    : Random
   )(using RuntimeContext): Either[DspyError, Map[OptimizableId, Vector[ReflectiveRecord]]] =
     for
-      _    <- distinctKeys
-      runs <- callsByLeaf(evalBatch.trajectories.getOrElse(Vector.empty))
-    yield components.iterator.map { component =>
-      component -> leafIndexById.get(component).toVector.flatMap { index =>
-        val leaf = leaves(index)
-        // The layout that the candidate gives to this leaf (gepa's `build_program(candidate)`). With no instructions,
-        // it has the default text that the leaf runs, not the default text of its structure.
-        val instructions = candidate.getOrElse(component, leaf.parameters.instructions)
-        val layout       = leaf.metadata.structure.withInstructions(instructions.orElse(leaf.view.defaultInstructions))
-        runs.flatMap { case (traj, calls) => recordFor(leaf, layout, traj, calls(index), random) }
-      }
-    }.toMap
+      _       <- distinctKeys
+      runs    <- callsByLeaf(evalBatch.trajectories.getOrElse(Vector.empty))
+      records <- Traverse.either(components)(component =>
+                   recordsOf(component, candidate, runs, random).map(component -> _)
+                 )
+    yield records.toMap
+
+  /** `Left` when two leaves have the same predictor key, or when a leaf ran but its module recorded no key (decision
+    * D2): the adapter then cannot find the calls of each leaf in `evalBatch`. The engine reads this `Left` before
+    * [[makeReflectiveDataset]], because it stops the run, and each other `Left` of the dataset only skips a task.
+    */
+  private[gepa] def requireTraceKeys(evalBatch: EvaluationBatch): Either[DspyError, Unit] =
+    for
+      _ <- distinctKeys
+      _ <- callsByLeaf(evalBatch.trajectories.getOrElse(Vector.empty))
+    yield ()
 
   /** The calls of each leaf in each trajectory. `Left` when a leaf ran but its module recorded no predictor key. */
   private def callsByLeaf(trajectories: Vector[Trajectory]) =
     Traverse.either(trajectories)(traj => PredictorTraces.byLeaf(leaves, traj.trace).map(traj -> _))
 
-  /** The record of one leaf for one trajectory, built from the call that [[selectEntry]] gives. */
+  /** The records of `component` for each of `runs`. A component that no leaf has gets no record. The first `Left` of
+    * the metric is the result.
+    */
+  private def recordsOf(
+      component: OptimizableId,
+      candidate: Candidate,
+      runs     : Vector[(Trajectory, Vector[Vector[TraceEntry]])],
+      random   : Random
+  )(using RuntimeContext): Either[DspyError, Vector[ReflectiveRecord]] =
+    leafIndexById.get(component) match
+      case None        => Right(Vector.empty)
+      case Some(index) =>
+        val leaf = leaves(index)
+        // The layout that the candidate gives to this leaf (gepa's `build_program(candidate)`). With no instructions,
+        // it has the default text that the leaf runs, not the default text of its structure.
+        val instructions = candidate.getOrElse(component, leaf.parameters.instructions)
+        val layout       = leaf.metadata.structure.withInstructions(instructions.orElse(leaf.view.defaultInstructions))
+        Traverse.either(
+          runs
+        ) { case (traj, calls) => recordFor(leaf, layout, traj, calls(index), random) }.map(_.flatten)
+
+  /** The record of one leaf for one trajectory, built from the call that [[selectEntry]] gives. `Left` when the metric
+    * gives a `Left` for that call.
+    */
   private def recordFor(
       leaf   : IdentifiedOptimizable,
       layout : SignatureLayout,
       traj   : Trajectory,
       entries: Vector[TraceEntry],
       random : Random
-  )(using RuntimeContext): Option[ReflectiveRecord] =
-    selectEntry(entries, traj.failed, random).map { entry =>
-      val inputs = reflectiveInputs(entry.inputs, layout)
-      entry.failure match
-        case Some(message) => failureRecord(inputs, entry, message, layout)
-        case None          =>
-          val feedback = metric
-            .feedback(
-              traj.example,
-              traj.prediction,
-              traj.trace,
-              component = Some(leaf.displayName),
-              componentTrace = Vector(entry)
-            )
-            .map(_.feedback)
-            .getOrElse(FeedbackMetric.defaultFeedback(traj.score))
-          ReflectiveRecord(inputs, entry.outputs, feedback)
-    }
+  )(using RuntimeContext): Either[DspyError, Option[ReflectiveRecord]] =
+    selectEntry(entries, traj.failed, random) match
+      case None        => Right(None)
+      case Some(entry) =>
+        val inputs = reflectiveInputs(entry.inputs, layout)
+        rawResponse(entry) match
+          case Some(raw) => Right(Some(failureRecord(inputs, raw, layout)))
+          case None      => metric
+              .feedback(
+                traj.example,
+                traj.prediction,
+                traj.trace,
+                component = Some(leaf.displayName),
+                componentTrace = Vector(entry)
+              )
+              .map(scored => Some(ReflectiveRecord(inputs, entry.outputs, scored.feedback)))
 
   /** The inputs of one call in the form of a reflective record (gepa's `make_reflective_dataset`): the conversation
     * history of the call moves to the key [[ReflectiveRecord.ContextKey]], and that key is first. The value of each
@@ -250,34 +298,36 @@ final class GepaAdapter[P](
     * `entries` are the calls of the leaf in that trajectory, in trace order.
     */
   private def selectEntry(entries: Vector[TraceEntry], runFailed: Boolean, random: Random): Option[TraceEntry] =
-    val usable = if addFormatFailureAsFeedback then entries else entries.filter(_.failure.isEmpty)
+    val usable =
+      if addFormatFailureAsFeedback then entries.filter(entry => entry.failure.isEmpty || rawResponse(entry).isDefined)
+      else entries.filter(_.failure.isEmpty)
     usable.find(_.failure.isDefined).orElse {
       // A run that failed gives no record from a call that passed.
       if runFailed || usable.isEmpty then None
       else Some(usable(random.nextInt(usable.size)))
     }
 
-  /** The record of a call that failed. The user metric gets no call, because the call has no prediction to score. The
-    * two texts for a parse failure are those of gepa's `make_reflective_dataset`.
+  /** The raw response of the model in the trace entry of a call that failed to parse. `None` for a call that passed,
+    * and for a call that failed with another error, for example an LM error. Upstream has no trace entry for such a
+    * call.
     */
-  private def failureRecord(
-      inputs : DynamicValue.Record,
-      entry  : TraceEntry,
-      message: String,
-      layout : SignatureLayout
-  )(using RuntimeContext): ReflectiveRecord =
-    DynamicValues.recordGet(entry.outputs, "raw_response").map(DynamicValues.renderText) match
-      case Some(raw) => ReflectiveRecord(
-          inputs,
-          DynamicValues.string(
-            "Couldn't parse the output as per the expected output format. The model's raw response was:\n" +
-              s"```\n$raw\n```\n\n"
-          ),
-          s"Your output failed to parse. Follow this structure:\n${structureInstruction(layout)}"
-        )
-      case None =>
-        // The call failed and recorded no model response (for example an LM error). Upstream has no such trace entry.
-        ReflectiveRecord(inputs, DynamicValues.string("(no output)"), s"The call failed with this error: $message")
+  private def rawResponse(entry: TraceEntry): Option[String] =
+    entry.failure.flatMap(_ => DynamicValues.recordGet(entry.outputs, "raw_response").map(DynamicValues.renderText))
+
+  /** The record of a call that failed to parse, with the raw response `raw`. The user metric gets no call, because the
+    * call has no prediction to score. The two texts are those of gepa's `make_reflective_dataset`.
+    */
+  private def failureRecord(inputs: DynamicValue.Record, raw: String, layout: SignatureLayout)(using
+      RuntimeContext
+  ): ReflectiveRecord =
+    ReflectiveRecord(
+      inputs,
+      DynamicValues.string(
+        "Couldn't parse the output as per the expected output format. The model's raw response was:\n" +
+          s"```\n$raw\n```\n\n"
+      ),
+      s"Your output failed to parse. Follow this structure:\n${structureInstruction(layout)}"
+    )
 
   /** The output structure that the model must follow, as text: the chat prompt of `layout` with no demos and no inputs.
     * Upstream uses a `ChatAdapter` for this text, whichever adapter the program uses. Each message is its role, `": "`,
@@ -288,45 +338,60 @@ final class GepaAdapter[P](
       .format(AdapterInvocation(layout, demos = Vector.empty, inputs = Example.empty, request = LmRequest(model = "")))
       .fold(
         _ => "",
-        _.messages.map(m => s"${m.role.toString.toLowerCase}: ${m.text.getOrElse("").strip}\n").mkString
+        _.messages.map(m => s"${m.role.toString.toLowerCase}: ${m.text.getOrElse("")}\n").mkString
       )
 
-  /** Run one example in an isolated context and assemble its [[Trajectory]]. With `captureTraces`, the context captures
-    * the failures, and the trajectory and the metric get the trace of the run. Without it, the two get an empty trace:
-    * the caller reads the score and the objective scores only.
+  /** `candidate` with the text that each leaf runs in the place of each `None`, for the current instruction that the
+    * proposer reads. dspy seeds from `pred.signature.instructions`, which has the default text. The genome keeps
+    * `None`, so the child of a candidate comes from the candidate itself and not from this value.
     */
-  private def runOne(prog: P, example: Example, captureTraces: Boolean)(using RuntimeContext): Trajectory =
-    // The metric runs in the isolated context of the run, so the trace and the history of an LM-judged metric do not
-    // reach the trajectory or the caller's context.
-    TracedRun.runWith(prog, ProgramCall(example.inputs), captureFailures = captureTraces) { (result, runTrace) =>
-      val trace = if captureTraces then runTrace else Vector.empty
-      result match
-        case Right(prediction) =>
-          metric.feedback(example, prediction, trace, component = None, componentTrace = Vector.empty) match
-            case Right(scored) =>
-              Trajectory(example, prediction, trace, scored.score, objectiveScores = scored.objectiveScores)
-            case Left(_) => Trajectory(example, prediction, trace, failureScore)
-        case Left(error) =>
-          // With `captureTraces`, the trace already holds the failure entry (raw response) via captureFailureTraces.
-          Trajectory(example, RawPrediction.empty, trace, failureScore, failure = Some(GepaAdapter.failureText(error)))
+  private[gepa] def withEffectiveInstructions(candidate: Candidate): Candidate =
+    candidate.map { (component, instructions) =>
+      component -> instructions.orElse(leafIndexById.get(component).map(index => defaultText(leaves(index))))
     }
 
-  /** The trajectory of an example that has no result, because its run did not complete. `error` is the error of the
-    * executor for the example, for example the error of an exception of the run or of the metric.
+  /** The text that `leaf` runs with no instructions. */
+  private def defaultText(leaf: IdentifiedOptimizable): String =
+    leaf.view.copy(parameters = leaf.parameters.copy(instructions = None)).effectiveInstructions
+
+  /** Run one example in an isolated context and assemble its result. With `captureTraces`, the context captures the
+    * failures, and a run that passed or a parse failure has a [[Trajectory]] with the trace of the run. The metric gets
+    * an empty trace on the two paths.
     */
-  private def failedRun(example: Example, error: DspyError): Trajectory =
-    Trajectory(example, RawPrediction.empty, Vector.empty, failureScore, failure = Some(GepaAdapter.failureText(error)))
+  private def runOne(prog: P, example: Example, captureTraces: Boolean)(using RuntimeContext): RunResult =
+    // Upstream `Example.inputs` raises for an example with no input keys, so the example gets the failure score.
+    if example.inputKeys.isEmpty then failedRun
+    else
+      // The metric runs in the isolated context of the run, so the trace and the history of an LM-judged metric do not
+      // reach the trajectory or the caller's context.
+      TracedRun.runWith(prog, ProgramCall(example.inputs), captureFailures = captureTraces) { (result, trace) =>
+        result match
+          case Right(prediction) =>
+            // `wrapped_metric` of upstream gets `trace=None`, because `Evaluate` calls it with two arguments.
+            metric.feedback(example, prediction, Vector.empty, component = None, componentTrace = Vector.empty) match
+              case Right(scored) if scored.score.isFinite =>
+                val objectives = scored.objectiveScores.filter((_, value) => value.isFinite)
+                val trajectory = Trajectory(example, prediction, trace, scored.score, objectiveScores = objectives)
+                RunResult(scored.score, objectives, Option.when(captureTraces)(trajectory))
+              case _ => failedRun
+          // `bootstrap_trace_data` with `capture_failed_parses=True` keeps a parse failure, and it drops each other
+          // failure. With `captureTraces`, the trace already holds the failure entry through captureFailureTraces.
+          case Left(ParseError(_, _, Some(raw))) =>
+            val trajectory = Trajectory(example, RawPrediction.empty, trace, failureScore, failure = Some(raw))
+            RunResult(failureScore, Map.empty, Option.when(captureTraces)(trajectory))
+          case Left(_) => failedRun
+      }
 
 object GepaAdapter:
 
-  /** The text of a run that failed with `error` ([[Trajectory.failure]]): the raw response of the model for a parse
-    * error that has it (upstream `FailedPrediction(completion_text=e.lm_response)` in `bootstrap_trace_data`), else the
-    * message of the error.
+  /** The result of one example of a batch: its score, its objective scores, and its trajectory. Only a run that passed
+    * and a parse failure have a trajectory, and only with `captureTraces`.
     */
-  private def failureText(error: DspyError): String =
-    error match
-      case ParseError(_, _, Some(raw)) => raw
-      case other                       => other.message
+  private final case class RunResult(
+      score          : Double,
+      objectiveScores: Map[String, Double],
+      trajectory     : Option[Trajectory]
+  )
 
   /** The executor of one evaluation of `batchSize` examples ([[GepaAdapter.evaluate]]). The number of threads comes
     * from the context, or else it is [[ParallelExecutor.DefaultNumThreads]].

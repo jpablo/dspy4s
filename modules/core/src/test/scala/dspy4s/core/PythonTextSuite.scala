@@ -262,6 +262,25 @@ class PythonTextSuite extends FunSuite:
     assertEquals(PythonText.round(Double.NegativeInfinity, 2), Double.NegativeInfinity)
   }
 
+  test("sum follows Python 3.12: a compensated sum, for each order of the values") {
+    // The expected values come from the venv Python: `sum([0.1] * 10)` and the others.
+    assertEquals(PythonText.sum(Vector.fill(10)(0.1)), 1.0)
+    assertEquals(PythonText.sum(Vector(0.3, 0.2, 0.1)), 0.6)
+    assertEquals(PythonText.sum(Vector(0.1, 0.2, 0.3)), 0.6)
+    assertEquals(PythonText.sum(Vector(1e100, 1.0, -1e100)), 1.0)
+  }
+
+  test("the sum of no value is zero") {
+    assertEquals(PythonText.sum(Vector.empty), 0.0)
+  }
+
+  test("sum follows Python for a value that is not finite: no compensation goes into the result") {
+    // The venv Python gives `sum([inf, 1.0]) == inf`, and NaN for `sum([inf, -inf])` and `sum([nan, 1.0])`.
+    assertEquals(PythonText.sum(Vector(Double.PositiveInfinity, 1.0)), Double.PositiveInfinity)
+    assert(PythonText.sum(Vector(Double.PositiveInfinity, Double.NegativeInfinity)).isNaN)
+    assert(PythonText.sum(Vector(Double.NaN, 1.0)).isNaN)
+  }
+
   test("dedent, splitLines, and strip follow Python") {
     assertEquals(PythonText.dedent("  a\n    b\n  \n  c"), "a\n  b\n\nc")
     assertEquals(PythonText.dedent("\ta\n  b"), "\ta\n  b")

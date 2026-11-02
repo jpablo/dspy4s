@@ -6,6 +6,7 @@ import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.ThreadCount
+import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
@@ -32,6 +33,46 @@ class ParallelSuite extends FunSuite:
 
   override def afterEach(context: AfterEach): Unit =
     RuntimeEnvironment.resetForTests()
+
+  /** A program that writes the trace entry `task-<value>`, and then gives the result of `behavior`. */
+  private def tracing(behavior: Int => Either[DspyError, RawPrediction]): StubProgram =
+    StubProgram(
+      behavior = value =>
+        RuntimeEnvironment.appendTrace(TraceEntry(s"task-$value", DynamicValue.Record.empty, DynamicValue.Record.empty))
+        behavior(value)
+    )
+
+  private def taskTrace: Vector[String] =
+    RuntimeEnvironment.current.trace.map(_.component).filter(_.startsWith("task-"))
+
+  test("the output of a task that gives a Left, and of a task that throws, reaches the caller") {
+    val program = tracing { value =>
+      if value == 2 then Left(ValidationError("boom"))
+      else if value == 3 then throw IllegalStateException("thrown")
+      else Right(RawPrediction(values = rec("output" := value)))
+    }
+    val tasks = (1 to 4).toVector.map(value => program -> ProgramCall(input = rec("value" := value)))
+    RuntimeEnvironment.withSettings(RuntimeContext()) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result           = Parallel(numThreads = Some(ThreadCount(2)), maxErrors = Some(ErrorLimit(3))).run(tasks)
+      assertEquals(result.map(_.results.map(_.isLeft)), Right(Vector(false, true, true, false)))
+      assertEquals(taskTrace, Vector("task-1", "task-2", "task-3", "task-4"))
+    }
+  }
+
+  test("the output of each task that ran reaches the caller, also when the executor gives a Left") {
+    // One thread: the second task stops the batch, so the third task does not start.
+    val program = tracing { value =>
+      if value == 2 then Left(ValidationError("boom")) else Right(RawPrediction(values = rec("output" := value)))
+    }
+    val tasks = (1 to 3).toVector.map(value => program -> ProgramCall(input = rec("value" := value)))
+    RuntimeEnvironment.withSettings(RuntimeContext()) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result           = Parallel(numThreads = Some(ThreadCount(1)), maxErrors = Some(ErrorLimit(1))).run(tasks)
+      assert(result.isLeft, result.toString)
+      assertEquals(taskTrace, Vector("task-1", "task-2"))
+    }
+  }
 
   test("parallel executes programs and preserves task ordering") {
     given RuntimeContext = RuntimeEnvironment.current

@@ -25,6 +25,7 @@ import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.optimization.OptimizableId
 import munit.FunSuite
 
+import java.io.ByteArrayOutputStream
 import scala.concurrent.duration.Duration
 import scala.util.Random
 
@@ -198,10 +199,12 @@ class GepaAdapterEvaluateSuite extends FunSuite:
         val result = adapter.evaluate(batch, Candidate.seed(program), captureTraces)
         assertEquals(result.scores, Vector.fill(10)(-1.0) ++ Vector(1.0, 1.0), s"captureTraces=$captureTraces")
       }
+      // Only the two runs that passed have a trajectory (`bootstrap_trace_data` drops an example that raised).
       val traced = adapter.evaluate(batch, Candidate.seed(program), captureTraces = true)
-      assertEquals(traced.trajectories.map(_.map(_.failed)), Some(Vector.fill(10)(true) ++ Vector(false, false)))
+      assertEquals(traced.trajectories.map(_.map(_.example)), Some(batch.takeRight(2)))
+      assertEquals(traced.trajectories.map(_.map(_.failed)), Some(Vector(false, false)))
       assertEquals(
-        traced.trajectories.flatMap(_(10).prediction.get("answer")).map(DynamicValues.renderText),
+        traced.trajectories.flatMap(_(0).prediction.get("answer")).map(DynamicValues.renderText),
         Some("Paris")
       )
     }
@@ -225,11 +228,11 @@ class GepaAdapterEvaluateSuite extends FunSuite:
     }
   }
 
-  // ── The text of a failed example ────────────────────────────────────────────────────────────────────────────
-  // Upstream gives a failed example a `FailedPrediction` in the place of its prediction (`bootstrap_trace_data` in
-  // `dspy/teleprompt/bootstrap_trace.py`). Its `completion_text` is the raw response of the model for a parse failure
+  // ── The text of a parse failure ─────────────────────────────────────────────────────────────────────────────
+  // Upstream gives a parse failure a `FailedPrediction` in the place of its prediction (`bootstrap_trace_data` in
+  // `dspy/teleprompt/bootstrap_trace.py`). Its `completion_text` is the raw response of the model
   // (`AdapterParseError.lm_response`). `make_reflective_dataset` (`dspy/teleprompt/gepa/gepa_utils.py`) reads it from
-  // the failed trace entry.
+  // the failed trace entry. Upstream drops each other example that failed.
 
   /** Gives a reply with no field marker for BAD-FORMAT, a `Left` for LM-ERROR, and an exception for LM-THROWS. */
   private final class FailingLm extends LanguageModel:
@@ -245,7 +248,7 @@ class GepaAdapterEvaluateSuite extends FunSuite:
           else "[[ ## answer ## ]]\nParis\n\n[[ ## source ## ]]\natlas\n\n[[ ## completed ## ]]"
         Right(LmResponse(outputs = Vector(LmOutput(text = text))))
 
-  test("a failed example keeps the text of upstream FailedPrediction: the raw response, else the error message") {
+  test("only a run that passed and a parse failure keep a trajectory, and a parse failure has the raw response") {
     // Two outputs, so the JSON fallback of the chat adapter does not take the whole reply as the value of one output.
     val twoOutputs = DynamicPredict(layout =
       SignatureLayout.parse("question -> answer, source").toOption.get.withInstructions(Some("Answer."))
@@ -256,13 +259,39 @@ class GepaAdapterEvaluateSuite extends FunSuite:
       val adapter          = new GepaAdapter(twoOutputs, throwingMetric, failureScore = -1.0)
       val trajectories     = adapter.evaluate(batch, Candidate.seed(twoOutputs), captureTraces = true).trajectories
         .getOrElse(fail("the evaluation with traces must give the trajectories"))
-      assertEquals(trajectories.map(_.failed), Vector(false, true, true, true, true))
+      assertEquals(trajectories.map(_.example), batch.take(2))
+      assertEquals(trajectories.map(_.failed), Vector(false, true))
       assertEquals(trajectories(0).failure, None)
       assertEquals(trajectories(1).failure, Some("I do not know the format."))
-      assert(trajectories(2).failure.exists(_.contains("the model is down")), trajectories(2).failure.toString)
-      assert(trajectories(3).failure.exists(_.contains("the LM failed")), trajectories(3).failure.toString)
-      assert(trajectories(4).failure.exists(_.contains("the metric failed")), trajectories(4).failure.toString)
     }
+  }
+
+  test("a fatal error in a worker gives each example the failure score, no trajectory, and a warning with the cause") {
+    val fatal: FeedbackMetric = new FeedbackMetric:
+      override def name: String = "fatal"
+      override def feedback(
+          example       : Example,
+          prediction    : RawPrediction,
+          trace         : Vector[TraceEntry],
+          component     : Option[String],
+          componentTrace: Vector[TraceEntry]
+      )(using RuntimeContext): Either[DspyError, ScoreWithFeedback] =
+        throw new LinkageError("the worker failed")
+    val warnings = new ByteArrayOutputStream
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(ChatAdapter()))) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result           = Console.withErr(warnings) {
+        new GepaAdapter(
+          program,
+          fatal,
+          failureScore = -1.0
+        ).evaluate(batch, Candidate.seed(program), captureTraces = true)
+      }
+      assertEquals(result.scores, Vector(-1.0, -1.0))
+      assertEquals(result.objectiveScores, Vector(Map.empty[String, Double], Map.empty[String, Double]))
+      assertEquals(result.trajectories, Some(Vector.empty))
+    }
+    assert(warnings.toString.contains("the worker failed"), warnings.toString)
   }
 
   // ── The limits of the executor of an evaluation ─────────────────────────────────────────────────────────────

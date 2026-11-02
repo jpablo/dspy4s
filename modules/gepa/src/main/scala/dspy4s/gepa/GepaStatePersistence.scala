@@ -8,6 +8,7 @@ import zio.blocks.schema.json.JsonCodecDeriver
 
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import scala.util.control.NonFatal
 
 /** JSON persistence for [[GepaState]] — the basis for resuming an interrupted run (gepa's `state.save`/`load` into a
@@ -146,10 +147,20 @@ object GepaStatePersistence:
       )
     }
 
-  /** Write `state` to `<dir>/gepa_state.json`, creating `dir` if needed. */
+  /** Write `state` to `<dir>/gepa_state.json`, creating `dir` if needed. The write goes to a temporary file in `dir`,
+    * and an atomic move then replaces the checkpoint, so a failed write keeps the last good checkpoint (gepa
+    * `core/state.py`: a `.tmp` file and `os.replace`).
+    */
   def save(dir: Path, state: GepaState): Unit =
-    val _ = Files.createDirectories(dir)
-    val _ = Files.writeString(dir.resolve(fileName), toJson(state))
+    val _         = Files.createDirectories(dir)
+    val temporary = dir.resolve(fileName + ".tmp")
+    val _         = Files.writeString(temporary, toJson(state))
+    val _         = Files.move(
+      temporary,
+      dir.resolve(fileName),
+      StandardCopyOption.ATOMIC_MOVE,
+      StandardCopyOption.REPLACE_EXISTING
+    )
 
   /** Load a previously-saved state from `dir`. Absence is distinct from an unreadable or invalid checkpoint: a corrupt
     * file must never be silently treated as a fresh run and overwritten.

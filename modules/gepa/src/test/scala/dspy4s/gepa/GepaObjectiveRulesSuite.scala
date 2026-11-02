@@ -107,11 +107,8 @@ class GepaObjectiveRulesSuite extends FunSuite:
       val withTraces = adapter.evaluate(batch, seedCandidate, captureTraces = true)
       assertEquals(withTraces.scores, Vector(1.0, -1.0, 1.0))
       assertEquals(withTraces.objectiveScores, Vector(quality, none, quality))
-      // The run passed, so the trajectory keeps the prediction.
-      val unscored = withTraces.trajectories.map(_(1)).getOrElse(fail("the batch has no trajectories"))
-      assertEquals(unscored.failed, false)
-      assertEquals(unscored.objectiveScores, none)
-      assertEquals(unscored.prediction.get("answer").map(DynamicValues.renderText), Some("Paris"))
+      // Upstream has no trajectory for an example whose metric fails.
+      assertEquals(withTraces.trajectories.map(_.map(_.example)), Some(Vector(batch(0), batch(2))))
     }
   }
 
@@ -123,8 +120,8 @@ class GepaObjectiveRulesSuite extends FunSuite:
         val result = adapter.evaluate(batch, seedCandidate, captureTraces)
         assertEquals(result.scores, Vector(1.0, -1.0, 1.0), s"captureTraces=$captureTraces")
         assertEquals(result.objectiveScores, Vector(quality, none, quality), s"captureTraces=$captureTraces")
-        // The metric threw, so the example has no result of its run.
-        result.trajectories.foreach(runs => assertEquals(runs(1).prediction, RawPrediction.empty))
+        // Upstream has no trajectory for an example whose metric fails.
+        result.trajectories.foreach(runs => assertEquals(runs.map(_.example), Vector(batch(0), batch(2))))
       }
     }
   }

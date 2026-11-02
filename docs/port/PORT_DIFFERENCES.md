@@ -560,6 +560,25 @@ The `streaming` module follows `dspy/streaming/`. These rules differ from upstre
   The stream wrapper has this check because a raw provider can be the model of the wrapper. Upstream has this check in
   `checked_stream`, below each model.
 
+## 24. GEPA rules with no upstream form
+
+**Convention.**
+
+The `gepa` module follows `dspy/teleprompt/gepa/`, `dspy/teleprompt/bootstrap_trace.py`, and the `gepa` package. These
+rules differ from upstream:
+
+- A score that is not finite counts as a metric failure: the example gets the failure score and no trajectory. The
+  adapter drops each objective score that is not finite, and it keeps the finite ones. Upstream keeps a float NaN. The
+  port saves the state as JSON, and JSON has no such number.
+- With `addFormatFailureAsFeedback`, a parse failure that a program caught, in a run that passed, gives a record. The
+  trace of the port holds an entry for that call. Upstream has no such entry, because it adds a failed entry only when
+  the exception leaves the program.
+- A parse failure with a partial result keeps a trajectory. Upstream computes `present / expected` on two lists
+  (`bootstrap_trace.py`), so it raises a `TypeError` and drops that example. The port does not follow this defect.
+- A fatal error in a worker of the executor gives each example of the batch the failure score, with a warning. In
+  upstream, a `BaseException` of a worker goes to the caller of the evaluation, because `utils/parallelizer.py` catches
+  only `Exception`.
+
 ## What this means in practice
 
 If you're porting a Python DSPy script to dspy4s, the friction will

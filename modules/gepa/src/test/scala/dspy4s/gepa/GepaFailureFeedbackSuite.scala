@@ -315,18 +315,24 @@ class GepaFailureFeedbackSuite extends FunSuite:
     assertEquals(stepperTraces.map(_.map(_.failure)), Vector(Vector(None)))
   }
 
-  test("with the option on, a failed call with no model response gives its error as the feedback") {
+  test("with the option on, a run that failed with no model response gives no record") {
+    // `bootstrap_trace_data` drops an example whose program raised, also for an LM error.
     val metric  = new RecordingMetric
     val lm      = new FormatLm(crashQuestions = Set("second pass"))
     val records = reflect(loop, lm, metric, addFailureAsFeedback = true)
 
-    assertEquals(records(stepperId).size, 1)
-    val record = records(stepperId).head
-    assert(ReflectionFixtures.text(record.inputs).contains("second pass"), record.inputs)
-    assertEquals(record.generatedOutputs, ReflectionFixtures.string("(no output)"))
-    assert(record.feedback.startsWith("The call failed with this error: "), record.feedback)
-    assert(record.feedback.contains("the model is down"), record.feedback)
+    assertEquals(records(stepperId), Vector.empty)
+    assertEquals(records(finisherId), Vector.empty)
     assertEquals(metric.componentCalls.toVector, Vector.empty)
+  }
+
+  test("with the option on, a failed call with no model response in a run that passed gives no failure record") {
+    // The retry pipeline goes on after the call that failed, so the run passes.
+    val metric  = new RecordingMetric
+    val lm      = new FormatLm(crashQuestions = Set("first try"))
+    val records = reflect(retry, lm, metric, addFailureAsFeedback = true)
+
+    assertEquals(records(stepperId).map(_.feedback), Vector("feedback for stepper"))
   }
 
   /** For each example, `true` when the record of the stepper comes from its second call. */

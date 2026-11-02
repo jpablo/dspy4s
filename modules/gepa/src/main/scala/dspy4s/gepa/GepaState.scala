@@ -1,5 +1,6 @@
 package dspy4s.gepa
 
+import dspy4s.core.contracts.PythonText
 import dspy4s.programs.optimization.OptimizableId
 import zio.blocks.schema.Schema
 
@@ -96,10 +97,10 @@ final case class GepaState(
   require(failedProposals >= 0, s"GepaState failedProposals must not be negative: $failedProposals")
   require(discoveryCalls.length == candidates.length, "GepaState discoveryCalls must be aligned with candidates")
 
-  /** Mean validation score of candidate `i`. */
+  /** Mean validation score of candidate `i`, with the sum of Python `sum` (`PythonText.sum`). */
   def aggregateScore(i: Int): Double =
     val scores = valSubscores(i)
-    if scores.isEmpty then 0.0 else scores.sum / scores.size
+    if scores.isEmpty then 0.0 else PythonText.sum(scores) / scores.size
 
   /** The best candidate by mean validation score — the program GEPA ultimately returns. */
   def bestIndex: Int = candidates.indices.maxBy(aggregateScore)
@@ -122,7 +123,8 @@ final case class GepaState(
     * (gepa's `_aggregate_objective_scores`). Empty when the candidate has no objective score.
     */
   def objectiveAggregates(i: Int): Map[String, Double] =
-    // `groupMap` keeps the order of the validation examples, so the sum has the terms in the order of gepa.
+    // `groupMap` keeps the order of the validation examples, so the sum has the terms in the order of gepa. This is a
+    // plain sum, because gepa adds with `+` here (`core/state.py:432`), and not with `sum`.
     valObjectiveScores(i).flatten.groupMap(_._1)(_._2).map((name, scores) => name -> scores.sum / scores.size)
 
   /** The names of the objectives that one candidate at least has a score for, in alphabetical order. */
@@ -250,7 +252,8 @@ object GepaState:
     *
     * The routine examines the candidates in ascending `score` order, so a weak candidate leaves before a strong one.
     * The sort is stable. Candidates with equal scores keep the order of their first appearance in the fronts (fronts in
-    * order, candidates by index in a front). Each front keeps at least one candidate.
+    * order, candidates by index in a front). Each front keeps at least one candidate. gepa reads a front in the order
+    * of a Python set, so a large pool with equal scores can give another result (PORT_GAPS G-44).
     */
   private[gepa] def removeDominated(fronts: Vector[Set[Int]], score: Int => Double): Vector[Set[Int]] =
     val frontsOf = fronts.flatMap(front => front.iterator.map(_ -> front)).groupMap(_._1)(_._2)
@@ -290,13 +293,15 @@ trait CandidateSelector:
 
 object CandidateSelector:
   /** Sample a candidate from the Pareto frontier of the state, weighted by the number of fronts that hold it (gepa's
-    * default "pareto" strategy — frequency-weighted frontier sampling). For the instance type, that number is how many
+    * default "pareto" strategy: frequency-weighted frontier sampling). For the instance type, that number is how many
     * validation instances the candidate is best on. Falls back to a uniform draw when there is no frontier yet (e.g.
-    * zero validation instances). The sample excludes dominated candidates ([[GepaState.nonDominatedFrontier]]).
+    * zero validation instances). The sample excludes dominated candidates ([[GepaState.nonDominatedFrontier]]). The
+    * draw reads each front in sorted order, because the order of a hash set is a detail of the collection, and a seeded
+    * draw must not depend on it.
     */
   object Pareto extends CandidateSelector:
     def select(state: GepaState, rng: Random): Int =
-      val weighted = state.nonDominatedFrontier.flatten
+      val weighted = state.nonDominatedFrontier.flatMap(_.toVector.sorted)
       if weighted.isEmpty then rng.nextInt(state.candidates.size) else weighted(rng.nextInt(weighted.size))
 
   /** Always the current best by mean validation score (greedy). */

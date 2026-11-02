@@ -149,6 +149,7 @@ Findings of the group (a) simplify pass that the pass did not fix:
 - [ ] Group (c) review, skipped: `DecisionEvidenceLog.recording` takes its snapshot when `body` returns, so a worker that records later is lost (the same rule as `UsageScope`). `DecisionSettings.fromDynamic` keeps the last value of a key that occurs two times. (The `fromDynamic` part is fixed in the decisions follow-up: a key that occurs two times is a `Left`.)
 - [x] Group (d) review: `Completions.fromRows` gave the fields of a row in a hash order, `RawPrediction.asDouble`, `asInt`, and `asString` rejected `BigDecimal` and `BigInt`, and `Constraint` rendered a whole bound at or above 2^63 as `Long.MaxValue`. Fixed, each with a test.
 - [ ] Group (d) review, skipped: the narrowing of `contracts/ToolCall.scala`, `recordSchema`, throws for a value that is not a record (check how zio-blocks reports an exception of a transform). `SignatureParser` counts a `->` inside a quoted `Literal` member. (The `SignatureParser` part is fixed in the group (b) and (d) bug pass: the parser finds the arrow outside quotes and outside brackets.)
+- [ ] (from the gepa pass, low) `Example.inputs` gives an empty record when `inputKeys` is empty, and upstream raises. GEPA has its own check. Other callers, for example `OptimizerSupport`, run the program with empty inputs.
 
 ## signatures
 
@@ -316,6 +317,7 @@ Simplify 6 (rank 4). Code-review 6 (rank 3). 4243 main lines, 4943 test lines.
 - [x] (code-review (b)) The JSON stream tracked the tool-calls field when the provider fills it. Fixed: it gets `AdapterTextSupport.textFields`, as the chat stream.
 - [x] (code-review (b)) An empty reply of the TwoStep extraction model skipped the JSON fallback and the completion text. Fixed: it is a parse error of the parse step.
 - [ ] (code-review (b), open) A repeated key in a JSON reply gives a final chunk for each copy in `JsonStreamingState`, while the parser keeps the last value.
+- [ ] (from the gepa pass, low) Three other places of upstream `serialize_for_json` still write `NaN` for a number that is not finite, where pydantic JSON mode gives `null`: the assistant turn of the JSON adapter (`JSONAdapterPrompt`), the tool result text, and the tool-call arguments. `PromptText.fieldValue` has the rule.
 
 ## programs
 
@@ -484,28 +486,34 @@ Simplify 5 (rank 8). Code-review 4 (rank 9). 3242 main lines, 6331 test lines.
 ### Passes
 
 - (a) The engine core, about 1750 lines: `GepaEngine.scala`, `GepaState.scala`, `MergeProposer.scala`, `GepaProposals.scala`, `MinibatchSampler.scala`, `GepaRandom.scala`, `GepaBudget.scala`.
-  - [ ] /simplify
-  - [ ] /code-review
+  - [x] /simplify
+  - [x] /code-review
 - (b) The adapter and the I/O, about 1490 lines: `GepaAdapter.scala`, `GepaEvalCache.scala`, `InstructionProposer.scala`, `ReflectiveRecord.scala`, `GepaStatePersistence.scala`, `contracts/`, `Candidate.scala`, `EvaluationBatch.scala`, `Gepa.scala`, `GepaLimits.scala`.
-  - [ ] /simplify
-  - [ ] /code-review
+  - [x] /simplify
+  - [x] /code-review
 
 ### Simplify findings
 
-- [ ] `GepaAdapter.scala:326` (`text`) is a private copy of `DynamicValues.string`. (found in the lm pass)
-- [ ] `ReflectiveRecord.scala:68-138` has its own Python `json.dumps` writer. Core `contracts/PythonText.scala` (`json`, `private[dspy4s]`) does this now. Use it.
-- [ ] `GepaAdapter.scala:174-190` builds its own `newFixedThreadPool` and context capture. This copies what ParallelExecutor in programs does.
-- [ ] (from the optimize pass) `current_instruction` is the empty text for a leaf with no instructions, where upstream probably reads the default text of the signature. Check the upstream GEPA code, and use `view.effectiveInstructions` if it does.
-- [ ] Thin wrappers: `GepaEngine.scala:560` (`fullEval`) only calls `cache.scored`. `GepaEvalCache.scala:125` (`scores`) and the public `makeReflectiveDataset` overload (`GepaAdapter.scala:210`, with an adapter-level `rng`) are used only by tests.
-- [ ] `MergeProposer.scala:59-105`: the engine builds a mutable proposer for each iteration and copies its `MergeSchedule` back. Plain functions on the schedule are simpler. `sharedExamples` (`:203`) always equals the valset size.
-- [ ] Code for snapshots from older versions: the "empty means older" forms in `GepaState.scala:50-77`, `:204-210`, and the `Option` fields in `GepaStatePersistence.scala:23-49`.
+- [x] `GepaAdapter.scala:326` (`text`) is a private copy of `DynamicValues.string`. (found in the lm pass) It uses `DynamicValues.string`.
+- [x] `ReflectiveRecord.scala:68-138` has its own Python `json.dumps` writer. Core `contracts/PythonText.scala` (`json`, `private[dspy4s]`) does this now. Use it. The writer is gone. The records go to the adapter as a list value, and `PromptText.fieldValue` writes the JSON text.
+- [x] `GepaAdapter.scala:174-190` builds its own `newFixedThreadPool` and context capture. This copies what ParallelExecutor in programs does. `batchEvaluate` uses `ParallelExecutor`.
+- [x] (from the optimize pass) `current_instruction` is the empty text for a leaf with no instructions, where upstream probably reads the default text of the signature. Check the upstream GEPA code, and use `view.effectiveInstructions` if it does. Upstream reads the default text. `GepaAdapter.withEffectiveInstructions` fills the candidate that the proposer gets, and the genome keeps `None`.
+- [x] Thin wrappers: `GepaEngine.scala:560` (`fullEval`) only calls `cache.scored`. `GepaEvalCache.scala` (`scores`) and the public `makeReflectiveDataset` overload (`GepaAdapter.scala:210`, with an adapter-level `rng`) are used only by tests. They are gone. One correction: `scores` also had a main caller in `MergeProposer`.
+- [x] `MergeProposer.scala:59-105`: the engine builds a mutable proposer for each iteration and copies its `MergeSchedule` back. Plain functions on the schedule are simpler. `sharedExamples` (`:203`) always equals the valset size. `MergeProposer` is plain functions on a `MergeSchedule` that the state holds.
+- [x] Code for snapshots from older versions: the "empty means older" forms in `GepaState.scala:50-77`, `:204-210`, and the `Option` fields in `GepaStatePersistence.scala:23-49`. The state keeps one form, and the snapshot fields have defaults. A checkpoint without these fields gives a `Left`.
 
 ### Code-review findings
 
-- [ ] `GepaState.scala:117-122`, `:217-221`: no NaN guard on the metric scores. `maxBy` ranks NaN highest, so a candidate with a NaN score becomes `bestIndex`. The `== best` check then gives an empty Pareto front.
-- [ ] `GepaStatePersistence.scala:179-181`: the checkpoint is written in place, not atomically. A crash during the write leaves a corrupt file, and `load` then refuses to resume.
-- [ ] `GepaState.scala:355` and `MergeProposer.scala:112`: the random draws read the order of a hash `Map` or `Set`. Thus a resumed run depends on the order of the library collections.
-- [ ] `GepaAdapter.scala:185-190`: an exception from one pair is thrown again, and `shutdownNow` interrupts the other pairs. The engine does not catch it, so `optimize` throws and does not return a `Left`.
+- [x] `GepaState.scala:117-122`, `:217-221`: no NaN guard on the metric scores. `maxBy` ranks NaN highest, so a candidate with a NaN score becomes `bestIndex`. The `== best` check then gives an empty Pareto front. A score that is not finite counts as a metric failure in `GepaAdapter`, so no such score reaches the state.
+- [x] `GepaStatePersistence.scala`: the checkpoint is written in place, not atomically. A crash during the write leaves a corrupt file, and `load` then refuses to resume. `save` writes a temporary file and then makes an atomic move.
+- [x] `GepaState.scala` and `MergeProposer.scala:112`: the random draws read the order of a hash `Map` or `Set`. Thus a resumed run depends on the order of the library collections. The two draws read sorted orders. One correction: line 112 was already sorted, and the second place was line 189. A resume with the same library made the same draws before too.
+- [x] `GepaAdapter.scala:185-190`: an exception from one pair is thrown again, and `shutdownNow` interrupts the other pairs. The engine does not catch it, so `optimize` throws and does not return a `Left`. `optimize` gives a `Left` for a non-fatal exception. `batchEvaluate` still throws, as upstream.
+- [x] (code-review (a)) The acceptance compared two metric inputs: the trace for a parent, and an empty trace for a child. The program-level call now gets no trace on the two paths, as upstream `trace=None`.
+- [x] (code-review (a)) A component-level metric exception ended the run, and a component-level `Left` gave invented feedback. Each now skips the task, as upstream gepa, and the pointer stays moved.
+- [x] (code-review (b)) Only a run that passed and a parse failure keep a trajectory, as `bootstrap_trace_data`. A minibatch with no trajectory skips the task with no pointer move. A failed call with no raw response gives no record. An example with no input keys gets no run.
+- [x] (code-review (a)) A sum of scores uses `PythonText.sum`, the compensated sum of Python 3.12. The pad of an epoch follows upstream gepa.
+- [x] (code-review (b)) `Parallel` gives the trace and the history of each task to the caller, in task order. The field `examples_with_feedback` has the upstream type. `defaultFeedback` and `strip` have the Python forms. A number that is not finite in a list or a dict of a prompt value is `null`.
+- [x] (docs) A resume compares only the size of the validation rows, and upstream has no check. The docs now say so.
 
 ## streaming
 

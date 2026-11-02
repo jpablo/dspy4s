@@ -7,6 +7,7 @@ import dspy4s.core.contracts.History
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.LanguageModelRef
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.:=
@@ -408,6 +409,63 @@ class GepaProposerEngineSuite extends FunSuite:
       catch case error: InterruptedException => Some(error.getMessage)
     assertEquals(thrown, Some("stop"))
     assertEquals(proposer.calls.get, 1)
+  }
+
+  test("a non-fatal exception of the run gives a Left, and the history of the run reaches the caller") {
+    // The evaluation of a child with the word BOOM throws. `batchEvaluate` gives this exception to the engine.
+    val proposer = new ProbeProposer(Right(Map(first -> "BOOM")))
+    withTaskLm(new TaskLm) {
+      val result = new GepaEngine(
+        new GepaAdapter(Fragile(program), metric),
+        new ScriptedReflectionLm(reply("not used")),
+        oneIteration,
+        proposer
+      ).optimize(Candidate.seed(program), dataset, dataset)
+      assert(result.left.exists(_.isInstanceOf[RuntimeError]), result.toString)
+      assert(result.left.exists(_.message.contains("BOOM")), result.toString)
+      assertEquals(RuntimeEnvironment.current.history.map(_.component), Vector("probe"))
+    }
+  }
+
+  // ── The current instruction ─────────────────────────────────────────────────────────────────────────────────
+
+  test("the proposer gets the default text of a leaf with no instructions, and the child keeps None") {
+    // dspy `gepa.py` seeds from `pred.signature.instructions`. The genome of the port keeps `None`.
+    val bare     = DynamicPredict(layout = SignatureLayout.parse("question -> answer").toOption.get, name = Some("first"))
+    val text     = DynamicPredict(layout = SignatureLayout.parse("question -> answer").toOption.get, name = Some("second"))
+    val leaves   = TwoLeaves(bare, text)
+    val proposer = new ProbeProposer(Right(Map(second -> improved)))
+    val result   = withTaskLm(new TaskLm) {
+      new GepaEngine(
+        new GepaAdapter(leaves, metric),
+        new ScriptedReflectionLm(reply("not used")),
+        oneIteration,
+        proposer
+      )
+        .optimize(Candidate.seed(leaves), dataset, dataset)
+    }.fold(error => fail(error.message), identity)
+    val default = Some("Given the fields `question`, produce the fields `answer`.")
+    assertEquals(proposer.calls.map(_.candidate).toVector, Vector(Map(first -> default, second -> default)))
+    assertEquals(result.bestCandidate, Map(first -> None, second -> Some(improved)))
+  }
+
+  test("an instruction of the candidate wins over the text of the leaf for the proposer") {
+    val leaf     = predict("question -> answer", "The text of the leaf.")
+    val proposer = new ProbeProposer(Right(Map.empty))
+    val adapter  = new GepaAdapter(leaf, metric)
+    assertEquals(
+      adapter.withEffectiveInstructions(Map(first -> Some("The candidate."))),
+      Map(first -> Some("The candidate."))
+    )
+    assertEquals(adapter.withEffectiveInstructions(Map(first -> Some(""))), Map(first -> Some("")))
+    // A candidate with `None` runs the default text, also when the leaf itself has another text.
+    assertEquals(
+      adapter.withEffectiveInstructions(Map(first -> None)),
+      Map(first -> Some("Given the fields `question`, produce the fields `answer`."))
+    )
+    // A component that the program does not hold stays as it is.
+    assertEquals(adapter.withEffectiveInstructions(Map(second -> None)), Map(second -> None))
+    assertEquals(proposer.calls.size, 0)
   }
 
   // ── A given context that is not installed ───────────────────────────────────────────────────────────────────

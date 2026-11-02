@@ -6,15 +6,16 @@ import munit.FunSuite
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
-/** The wire form of [[ReflectiveRecord.toJson]]. `PythonTextSuite` of core has the forms of each value, and
-  * `InstructionProposerSuite` has the forms of a record.
+/** The text of the records in a prompt of the default proposer. An adapter writes it for the value of the input field
+  * `examples_with_feedback` ([[ReflectionFixtures.examplesText]]). `PythonTextSuite` of core has the forms of each
+  * value, and `InstructionProposerSuite` has the forms of a record.
   */
 class ReflectiveRecordJsonSuite extends FunSuite:
 
   /** The JSON text of `value` alone: the text of the generated outputs of one record. */
   private def json(value: DynamicValue): String =
-    ReflectiveRecord
-      .toJson(Vector(ReflectiveRecord(DynamicValue.Record.empty, value, "")))
+    ReflectionFixtures
+      .examplesText(Vector(ReflectiveRecord(DynamicValue.Record.empty, value, "")))
       .stripPrefix("""[{"Inputs": {}, "Generated Outputs": """)
       .stripSuffix(""", "Feedback": ""}]""")
 
@@ -28,7 +29,7 @@ class ReflectiveRecordJsonSuite extends FunSuite:
       "table" -> DynamicValue.Map(Chunk(DynamicValues.fromAny(1) -> DynamicValues.string("é\n")))
     )
     assertEquals(
-      ReflectiveRecord.toJson(Vector(ReflectiveRecord(DynamicValues.record("q" := "a"), outputs, "ok"))),
+      ReflectionFixtures.examplesText(Vector(ReflectiveRecord(DynamicValues.record("q" := "a"), outputs, "ok"))),
       """[{"Inputs": {"q": "a"}, """ +
         """"Generated Outputs": {"ratio": 1e-05, "mood": "Tense", "hint": null, "table": {"1": "é\n"}}, """ +
         """"Feedback": "ok"}]"""
@@ -36,7 +37,7 @@ class ReflectiveRecordJsonSuite extends FunSuite:
   }
 
   test("a Double that is not finite has the text of Python") {
-    assertEquals(json(double(Double.NaN)), "NaN")
-    assertEquals(json(double(Double.PositiveInfinity)), "Infinity")
-    assertEquals(json(double(Double.NegativeInfinity)), "-Infinity")
+    assertEquals(json(double(Double.NaN)), "null")
+    assertEquals(json(double(Double.PositiveInfinity)), "null")
+    assertEquals(json(double(Double.NegativeInfinity)), "null")
   }

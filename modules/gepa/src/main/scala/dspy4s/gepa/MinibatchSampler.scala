@@ -1,7 +1,5 @@
 package dspy4s.gepa
 
-import scala.collection.mutable
-
 /** Chooses the train-example indices for an iteration's reflection minibatch (gepa's `BatchSampler`). A sampler has no
   * state: each minibatch derives from the seed, the iteration index, and the call in the iteration. Thus a resumed run
   * gets the same minibatches as a run with no stop.
@@ -41,13 +39,11 @@ object MinibatchSampler:
 
   /** gepa's default `EpochShuffledBatchSampler`: shuffle the trainset once per epoch and walk it in sequential
     * minibatch-sized windows, so every example is used once per epoch before any repeats (sampling WITHOUT replacement
-    * across an epoch — better coverage than [[RandomDraw]]). The shuffled list is padded to a multiple of
-    * `minibatchSize` with the least-frequently-used ids so the final window is full; a new shuffle is drawn each time
-    * the walk wraps into the next epoch.
+    * across an epoch, with better coverage than [[RandomDraw]]). The shuffled list is padded to a multiple of
+    * `minibatchSize` so the final window is full; a new shuffle is drawn each time the walk wraps into the next epoch.
+    * Each pad slot takes the least-used id that comes last in the shuffled list ([[epochList]]).
     *
-    * The iteration index starts at 0, as in gepa (its `state.i` is -1 before the first iteration and 0 in it). Delta
-    * from gepa: padding ties break by smallest id (gepa uses `Counter` insertion order). This changes only WHICH
-    * example fills a pad slot, not the coverage guarantee.
+    * The iteration index starts at 0, as in gepa (its `state.i` is -1 before the first iteration and 0 in it).
     *
     * The epoch of the iteration `i` is `i × minibatchSize` divided by the length of the shuffled list. The shuffle of
     * each epoch has a random source of its own ([[RandomStream.EpochShuffle]]), so it depends on the seed and the epoch
@@ -72,18 +68,14 @@ object MinibatchSampler:
       val start = ((baseIdx + callInIteration.toLong * minibatchSize) % length).toInt
       shuffled.slice(start, start + minibatchSize)
 
-    /** The shuffled list of `epoch`, padded to a multiple of the minibatch size. */
+    /** The shuffled list of `epoch`, padded to a multiple of the minibatch size. gepa makes a new `Counter` for each
+      * epoch, and it takes `most_common()[::-1][0][0]` for each pad slot: the least-used id that comes last in the
+      * shuffled list. Thus the pad reads the list from its end, and it starts again at the end when the pad is longer
+      * than the list. The pad makes no random draw.
+      */
     private def epochList(trainsetSize: Int, epoch: Long): Vector[Int] =
       val random = GepaRandom.source(seed, RandomStream.EpochShuffle, epoch)
       val base   = random.shuffle((0 until trainsetSize).toVector)
       val mod    = trainsetSize % minibatchSize
       val pad    = if mod != 0 then minibatchSize - mod else 0
-      val counts = mutable.Map.from((0 until trainsetSize).map(_ -> 1))
-      val padded = mutable.ArrayBuffer.from(base)
-      var k      = 0
-      while k < pad do
-        val pick = counts.toVector.minBy { case (id, c) => (c, id) }._1 // least frequent, ties by smallest id
-        padded += pick
-        counts(pick) += 1
-        k += 1
-      padded.toVector
+      base ++ Vector.tabulate(pad)(k => base(trainsetSize - 1 - k % trainsetSize))

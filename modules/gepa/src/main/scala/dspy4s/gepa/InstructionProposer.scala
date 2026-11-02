@@ -6,8 +6,10 @@ import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.:=
 import dspy4s.programs.contracts.ProgramCall
@@ -29,7 +31,8 @@ trait InstructionProposer:
   /** The new instruction text of components of `candidate`.
     *
     * @param candidate
-    *   the parent candidate. It gives the current instruction of each component.
+    *   the parent candidate. It gives the current instruction of each component. The engine fills a component with no
+    *   instruction with the text that the leaf runs (dspy seeds from `pred.signature.instructions`).
     * @param reflective
     *   the reflective records of each component that has one record at least
     * @param components
@@ -58,10 +61,10 @@ object InstructionProposer:
   *
   * Rules, as upstream:
   *   - The components are handled in the order of `components`. The first failure stops the call and is the result.
-  *   - The records go to the model as one JSON text ([[ReflectiveRecord.toJson]]), in the input field
-  *     `examples_with_feedback`.
+  *   - The records go to the model as one list value, in the input field `examples_with_feedback` of the type
+  *     `list[dict[str, Any]]`. The adapter writes the JSON text of the value.
   *   - The current instruction of a component is the text of the candidate. A component with no instruction gives the
-  *     empty text.
+  *     empty text. The engine fills such a component before the call, so this rule is for a direct call only.
   *   - The new instruction has no white space at its two ends. A new instruction that is empty is a failure
   *     ([[dspy4s.core.contracts.ValidationError]]).
   *   - The proposer never extracts text from a fence, and it never truncates an instruction.
@@ -122,7 +125,7 @@ final case class DefaultInstructionProposer(
       name = "ProposeInstruction",
       inputFields = optional ++ Vector(
         FieldSpec(CurrentInstructionField, description = Some(CurrentInstructionDescription)),
-        FieldSpec(ExamplesWithFeedbackField, description = Some(ExamplesWithFeedbackDescription))
+        FieldSpec(ExamplesWithFeedbackField, ExamplesWithFeedbackType, Some(ExamplesWithFeedbackDescription))
       ),
       outputFields = Vector(FieldSpec(NewInstructionField, description = Some(NewInstructionDescription))),
       instructions = Some(clean(baseInstructions).getOrElse(ProposeInstructions))
@@ -163,7 +166,10 @@ final case class DefaultInstructionProposer(
     val inputs = DynamicValues.recordFromEntries(
       additional.map(AdditionalInstructionsField := _).toVector ++
         lengthLimit.map(LengthLimitField := _).toVector ++
-        Vector(CurrentInstructionField := current, ExamplesWithFeedbackField := ReflectiveRecord.toJson(records))
+        Vector(
+          CurrentInstructionField   := current,
+          ExamplesWithFeedbackField -> DynamicValues.sequence(records.map(_.toRecord))
+        )
     )
     run(proposePredict, inputs, NewInstructionField).flatMap { draft =>
       if draft.isEmpty then Left(emptyInstruction(component)) else enforceLength(component, draft)
@@ -200,7 +206,7 @@ final case class DefaultInstructionProposer(
       RuntimeContext
   ): Either[DspyError, String] =
     predict(ProgramCall(input = inputs)).map { prediction =>
-      DynamicValues.recordGet(prediction.output, output).map(DynamicValues.renderText).getOrElse("").strip
+      PythonText.strip(DynamicValues.recordGet(prediction.output, output).map(DynamicValues.renderText).getOrElse(""))
     }
 
 object DefaultInstructionProposer:
@@ -229,6 +235,9 @@ object DefaultInstructionProposer:
     "new content. Output only the shortened instruction."
 
   val CurrentInstructionDescription: String = "The instructions I provided to the assistant."
+
+  /** The type of the input field `examples_with_feedback`, as upstream declares it. */
+  val ExamplesWithFeedbackType: TypeRef = TypeRef("list[dict[str, Any]]")
 
   val ExamplesWithFeedbackDescription: String =
     "Task inputs provided to the assistant, the assistant's response for each, and feedback on how the response " +
@@ -267,7 +276,7 @@ object DefaultInstructionProposer:
   )
 
   /** `text` with no white space at its two ends. `None` for no text and for an empty text (dspy's `_clean_text`). */
-  private def clean(text: Option[String]): Option[String] = text.map(_.strip).filter(_.nonEmpty)
+  private def clean(text: Option[String]): Option[String] = text.map(PythonText.strip).filter(_.nonEmpty)
 
   /** The number of Unicode code points of `text`: the length that Python gives for a string. */
   private def codePoints(text: String): Int = text.codePointCount(0, text.length)

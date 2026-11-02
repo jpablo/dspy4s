@@ -1,5 +1,6 @@
 package dspy4s.gepa
 
+import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
@@ -39,9 +40,11 @@ final class Gepa[P](
     * yields. The trainset gives the reflective minibatches and also the Pareto scores (dspy's `compile` with no
     * `valset`). The budget of [[GepaConfig.budget]] resolves with no validation set ([[GepaBudget.resolve]]).
     *
-    * `Left(ConfigurationError)` before any LM call when the trainset is empty, or when the budget cannot hold the seed
-    * evaluation. `Left` when the checkpoint in [[GepaConfig.runDir]] cannot be read or does not agree with the program,
-    * the validation set, or the configuration; the file then stays unchanged.
+    * `Left(ConfigurationError)` before any LM call when the trainset is empty, when the budget cannot hold the seed
+    * evaluation, or when [[GepaConfig.failureScore]] is not finite. `Left` when the checkpoint in [[GepaConfig.runDir]]
+    * cannot be read or does not agree with the run: the component ids of the program, the frontier type of the
+    * configuration, or the size of the validation rows. The check of the validation set compares only the sizes. The
+    * file then stays unchanged.
     *
     * `Left` when GEPA cannot find the trace entries of each predictor (UPGRADE-3.2.1-to-3.4.0, decision D2):
     *   - Two predictors have the same module name and the same signature structure. The check runs before any LM call.
@@ -52,6 +55,8 @@ final class Gepa[P](
     *
     * `Left` also when [[GepaConfig.frontierType]] is not `Instance` and the metric gives the seed candidate no
     * objective score. The run stops after the seed evaluation.
+    *
+    * `Left(RuntimeError)` also for a non-fatal exception of the run. A fatal error goes up to the caller.
     */
   def compile(student: P, trainset: Vector[Example])(using RuntimeContext): Either[DspyError, GepaResult[P]] =
     Teleprompter.withCompileCallbacks(this, trainset)(run(student, trainset, trainset, valsetSize = None))
@@ -76,8 +81,11 @@ final class Gepa[P](
   private def run(student: P, trainset: Vector[Example], valset: Vector[Example], valsetSize: Option[Int])(using
       RuntimeContext
   ): Either[DspyError, GepaResult[P]] =
-    val seed    = Candidate.seed(student)
-    val budget  = GepaBudget.MetricCalls(config.budget.resolve(seed.size, trainset.size, valsetSize))
-    val adapter = new GepaAdapter(student, metric, config.failureScore, config.addFormatFailureAsFeedback)
-    val engine  = new GepaEngine(adapter, reflectionLm, config.copy(budget = budget), instructionProposer)
-    engine.optimize(seed, trainset, valset)
+    if !config.failureScore.isFinite then
+      Left(ConfigurationError(s"failureScore must be finite: ${config.failureScore}"))
+    else
+      val seed    = Candidate.seed(student)
+      val budget  = GepaBudget.MetricCalls(config.budget.resolve(seed.size, trainset.size, valsetSize))
+      val adapter = new GepaAdapter(student, metric, config.failureScore, config.addFormatFailureAsFeedback)
+      val engine  = new GepaEngine(adapter, reflectionLm, config.copy(budget = budget), instructionProposer)
+      engine.optimize(seed, trainset, valset)

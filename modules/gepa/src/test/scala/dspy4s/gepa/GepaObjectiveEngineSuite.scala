@@ -233,14 +233,14 @@ class GepaObjectiveEngineSuite extends FunSuite:
     assertEquals(batch.objectiveScores.drop(12), Vector(wrong, wrong))
   }
 
-  test("the metric gets the trace only in an evaluation with traces") {
+  test("the program-level call of the metric gets no trace, on the two paths") {
     val metric = new GradedMetric
     withTaskLm(new TaskLm) {
       val adapter = new GepaAdapter(program, metric)
       val _       = adapter.evaluate(dataset.take(1), seedCandidate, captureTraces = false)
       assertEquals(metric.traceSizes.toVector, Vector(0))
       val _ = adapter.evaluate(dataset.take(1), seedCandidate, captureTraces = true)
-      assertEquals(metric.traceSizes.toVector, Vector(0, 1))
+      assertEquals(metric.traceSizes.toVector, Vector(0, 0))
     }
   }
 

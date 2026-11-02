@@ -1,6 +1,7 @@
 package dspy4s.gepa
 
 import dspy4s.core.data.Example
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.contracts.RuntimeContext
 
 import scala.util.Random
@@ -123,13 +124,13 @@ object MergeProposer:
       findMerge(state, dominators, valset.size, valOverlapFloor, rng).map {
         case (triplet @ (id1, id2, _), merged, sources) =>
           val subIdx  = selectSubsample(state.valSubscores(id1), state.valSubscores(id2), SubsampleSize, rng)
-          val before1 = subIdx.iterator.map(state.valSubscores(id1)).sum
-          val before2 = subIdx.iterator.map(state.valSubscores(id2)).sum
+          val before1 = PythonText.sum(subIdx.map(state.valSubscores(id1)))
+          val before2 = PythonText.sum(subIdx.map(state.valSubscores(id2)))
           val result  = cache.scored(merged, subIdx.map(valset)) // cached so the later full-eval reuses these
           MergeProposal(
             merged,
             Vector(id1, id2),
-            accepted = result.scores.sum >= math.max(before1, before2),
+            accepted = PythonText.sum(result.scores) >= math.max(before1, before2),
             metricCalls = result.evaluated,
             triplet,
             (id1, id2, sources)
@@ -173,7 +174,8 @@ object MergeProposer:
   /** Up to [[MaxAttempts]] times (gepa's `find_common_ancestor_pair`): sample two distinct dominators (neither an
     * ancestor of the other) and look for a common ancestor that is (a) not already merged for this pair, (b)
     * outperformed by both descendants, and (c) "desirable" (some component exactly one descendant changed). Picks among
-    * valid ancestors weighted by score.
+    * valid ancestors weighted by score, in sorted order: the order of a hash set is a detail of the collection, and a
+    * seeded draw must not depend on it.
     */
   private def findCommonAncestorPair(state: GepaState, dominators: Vector[Int], rng: Random): Option[(Int, Int, Int)] =
     Iterator.range(0, MaxAttempts).flatMap { _ =>
@@ -189,7 +191,7 @@ object MergeProposer:
           state.aggregateScore(a) <= state.aggregateScore(i) &&
           state.aggregateScore(a) <= state.aggregateScore(j) &&
           hasDesirableComponents(state.candidates(a), state.candidates(i), state.candidates(j))
-        }.toVector
+        }.toVector.sorted
         Option.when(common.nonEmpty)((i, j, weightedPick(common, a => state.aggregateScore(a), rng)))
     }.nextOption()
 
@@ -233,7 +235,9 @@ object MergeProposer:
     }.toMap
     (merged, chosen.map(_._2))
 
-  /** Pick from `items` with probability proportional to a non-negative `weight`; uniform when all weights are 0. */
+  /** Pick from `items` with probability proportional to a non-negative `weight`; uniform when all weights are 0. The
+    * total is a plain sum, as in gepa: `random.choices` adds the weights with `itertools.accumulate`, not with `sum`.
+    */
   private[gepa] def weightedPick[A](items: Vector[A], weight: A => Double, rng: Random): A =
     val weights = items.map(a => math.max(0.0, weight(a)))
     val total   = weights.sum

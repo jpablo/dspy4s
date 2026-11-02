@@ -14,7 +14,7 @@ import scala.util.matching.Regex
   * `ensure_ascii=False` and with ASCII escapes, `str.strip`, `str.split`, `str.splitlines`, and `textwrap.dedent`. The
   * adapters use these forms so that a prompt is equal to the upstream prompt, character for character (decision D3).
   * The parsers also read a JSON text as Python `json.loads` reads it, and a JSON string and a Python string literal as
-  * upstream `parse_value` reads them. The object also has the rule of Python `round`.
+  * upstream `parse_value` reads them. The object also has the rules of Python `round` and of Python `sum`.
   *
   * A value is a `DynamicValue`. An `Option` value of a typed record (the `Some` and `None` variants) prints as its
   * element or as `None`. An enum case with no fields prints as its case name.
@@ -58,6 +58,21 @@ private[dspy4s] object PythonText:
   def round(x: Double, digits: Int): Double =
     if x.isNaN || x.isInfinite then x
     else new JBigDecimal(x).setScale(digits, RoundingMode.HALF_EVEN).doubleValue
+
+  /** The sum of `values`, as Python 3.12 `sum` gives it for floats (`builtin_sum_impl` in `Python/bltinmodule.c`). The
+    * sum is compensated, so the order of the values has a smaller effect on the result than in a plain fold. For each
+    * value `x`: `t = f + x`. If `|f| >= |x|`, then `c += (f - t) + x`, else `c += (x - t) + f`. Then `f = t`. At the
+    * end, if `c` is not zero and is finite, then `f += c`. The sum of no value is `0.0`.
+    */
+  def sum(values: Iterable[Double]): Double =
+    var total        = 0.0
+    var compensation = 0.0
+    values.foreach { value =>
+      val next = total + value
+      compensation += (if math.abs(total) >= math.abs(value) then (total - next) + value else (value - next) + total)
+      total = next
+    }
+    if compensation != 0.0 && compensation.isFinite then total + compensation else total
 
   /** The characters for which Python `str.isspace` is true (the list of the dspy venv, Python 3.12). Each one is in the
     * Basic Multilingual Plane, so a test of each `Char` is a test of each code point.

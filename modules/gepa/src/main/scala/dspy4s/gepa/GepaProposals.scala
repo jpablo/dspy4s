@@ -1,5 +1,7 @@
 package dspy4s.gepa
 
+import dspy4s.core.contracts.PythonText
+
 /** The (parent, minibatch) tasks of one reflective iteration (gepa's `sampling_strategy`). Each task draws a parent
   * with the candidate selector and then a minibatch, in task order. Each task can give one proposal.
   *
@@ -36,7 +38,8 @@ enum ProposalSampling derives CanEqual:
     Math.multiplyExact(draws, tasksForEachDraw)
 
 /** When an evaluated proposal passes (gepa's `acceptance_criterion`). The scores are those of the parent and of the
-  * child on the minibatch of the task.
+  * child on the minibatch of the task. A sum has the value of Python `sum` (`PythonText.sum`), so the order of the
+  * scores has a smaller effect on a comparison.
   */
 enum ProposalAcceptance derives CanEqual:
   /** The sum of the child is larger than the sum of the parent (gepa's `StrictImprovementAcceptance`). The default. */
@@ -47,8 +50,8 @@ enum ProposalAcceptance derives CanEqual:
 
   def accepts(proposal: Proposal): Boolean =
     this match
-      case StrictImprovement  => proposal.scoresAfter.sum > proposal.scoresBefore.sum
-      case ImprovementOrEqual => proposal.scoresAfter.sum >= proposal.scoresBefore.sum
+      case StrictImprovement  => PythonText.sum(proposal.scoresAfter) > PythonText.sum(proposal.scoresBefore)
+      case ImprovementOrEqual => PythonText.sum(proposal.scoresAfter) >= PythonText.sum(proposal.scoresBefore)
 
 /** Which of the proposals of one iteration go to the validation set and to the pool (gepa's `selection_strategy`). Each
   * strategy takes only proposals that pass the acceptance criterion.
@@ -94,4 +97,4 @@ final case class Proposal(
     scoresAfter : Vector[Double]
 ):
   /** The sum of the child minus the sum of the parent. */
-  def gain: Double = scoresAfter.sum - scoresBefore.sum
+  def gain: Double = PythonText.sum(scoresAfter) - PythonText.sum(scoresBefore)

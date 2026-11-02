@@ -1812,7 +1812,7 @@ whole trainset and changes `maxBootstrappedDemos`. · **Verification:** R
 
 ## G-44 — GEPA engine differs from the upstream engine
 
-**Status:** Resolved (2026-10-13, batch 9). Resolved: dominated candidates (batch 1); trace association, failure feedback, and empty reflective data (2026-10-11, batch 2); round-robin pointer and merge depth (batch 5); second proposal call (2026-10-12, batch 6); error limit of an evaluation (2026-10-12, batch 7); resume and the stop reason (2026-10-13, batch 9). · **Verification:** C (a second read of the two sides confirmed the open items, 2026-10-11)
+**Status:** Resolved (2026-10-13, batch 9). Resolved: dominated candidates (batch 1); trace association, failure feedback, and empty reflective data (2026-10-11, batch 2); round-robin pointer and merge depth (batch 5); second proposal call (2026-10-12, batch 6); error limit of an evaluation (2026-10-12, batch 7); resume and the stop reason (2026-10-13, batch 9); the kept runs, the skip checks, and the sums (2026-11-02). · **Verification:** C (a second read of the two sides confirmed the open items, 2026-10-11)
 
 The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.4 package.
 
@@ -1824,14 +1824,19 @@ The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.
 - **Dominated candidates (resolved).** `CandidateSelector.Pareto` and `MergeProposer` sampled from the raw
   frontier. Upstream removes dominated programs first (`gepa/gepa_utils.py:37-75,90-117`).
   `GepaState.nonDominatedFrontier` now holds that routine for the two callers. A comparison with the pinned `gepa`
-  0.1.4 on 4,000 random frontiers gave no difference. Tests: `GepaStateSuite`, `MergeProposerSuite`.
+  package on random frontiers (2026-11-02) gave no difference for pools of 2 to 8 candidates, and no difference for any
+  pool in which the scores are different. For larger pools with equal scores, the results can differ: 271 of 4,000 cases
+  for pools of 9 to 40. The cause is the order of equal scores. Upstream reads a front in the order of a Python set, and
+  the port reads it in index order. The same comparison with the order of the Python set gave no difference. This
+  difference stays, because the order of a Python set has no form in the port. Tests: `GepaStateSuite`,
+  `MergeProposerSuite`.
 - **Round-robin pointer (resolved).** The pointers were a local map of `search`, and a new candidate had no entry,
   so it started at 0. Upstream gives a new candidate the largest pointer of its parents
   (`gepa/core/state.py:539-543`). dspy4s also moved the pointer when a perfect minibatch skipped the iteration;
   upstream runs the component selector after the skip checks
   (`gepa/proposer/reflective_mutation/reflective_mutation.py:379-417`). The pointers are now in the state
   (`GepaState.nextComponent`), `GepaState.add` applies the inheritance rule, the selector runs after the
-  perfect-score check, and a saved state keeps the pointers. Tests: `GepaPointerMergeSuite`, `GepaStateSuite`,
+  two skip checks, and a saved state keeps the pointers. Tests: `GepaPointerMergeSuite`, `GepaStateSuite`,
   `GepaStatePersistenceSuite`.
 - **Empty reflective data (resolved).** dspy4s asked the reflection LM with zero examples and evaluated an unchanged
   candidate. Upstream skips the proposal (`gepa_utils.py:462-469`). A component with no record now gets no
@@ -1850,8 +1855,27 @@ The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.
   `GepaProposerEngineSuite`, `GepaFailureFeedbackSuite`.
 - **Failure feedback (resolved).** dspy4s always included failures and called the user metric with an empty
   prediction. The new option `GepaConfig.addFormatFailureAsFeedback` is `false` by default, as upstream. With the
-  option on, a failed call gives the upstream texts and the user metric gets no call. Tests:
-  `GepaFailureFeedbackSuite`.
+  option on, a call that failed to parse gives the upstream texts and the user metric gets no call. A call that failed
+  with another error gives no record. Tests: `GepaFailureFeedbackSuite`.
+- **Kept runs, skip checks, and sums (resolved, 2026-11-02).** The port differed from upstream in these rules. Tests:
+  `GepaUpstreamRulesSuite`, `GepaAdapterEvaluateSuite`, `GepaObjectiveRulesSuite`, `GepaFailureFeedbackSuite`,
+  `MergeProposerSuite`, `MinibatchSamplerSuite`, `PythonTextSuite`.
+  - The batch keeps a trajectory only for a run that passed and for a parse failure, as `bootstrap_trace_data` with
+    `capture_failed_parses=True`. Each other example has the failure score and no trajectory. An example with no input
+    keys gets no run and no model call, because upstream `Example.inputs` raises.
+  - The program-level metric call gets an empty trace on each path, as upstream `trace=None`. The component-level call
+    gets the trace of the run.
+  - A task follows `reflective_mutation.py:375-450`: no trajectory, then a perfect score, then the component selector
+    with the pointer move, then the reflective dataset. A failure of the dataset skips the task, and the pointer stays
+    moved. It writes a warning, and it does not count as a failed proposal. The key errors of decision D2 stay a `Left`
+    that stops the run.
+  - A sum of scores has the value of the Python 3.12 `sum` (`PythonText.sum`). The objective aggregate stays a plain
+    sum, because `core/state.py:432` uses `+`. The weights of `MergeProposer.weightedPick` stay a plain sum, because
+    `random.choices` uses `itertools.accumulate`.
+  - The pad of an epoch is the rule of `batch_sampler.py`: a new `Counter` for each epoch, and the least-used id that
+    comes last in the shuffled list.
+  - The parent draw and the search of a merge read a set in sorted order, so a draw depends on the seed only.
+  - A non-fatal exception of the run gives a `Left` from `GepaEngine.optimize`.
 - **API change.** `Gepa.compile` and `GepaEngine.optimize` now return `Either[DspyError, GepaResult[P]]`, because two
   leaves with the same key and a leaf type with no key are errors (decision D2).
 - **Resume (resolved, batch 9).** The iteration index and the random sources started again, `Gepa.compile` did not
@@ -1862,7 +1886,9 @@ The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.
   reflective dataset comes from the seed and fixed coordinates, so a resumed run makes the same draws as a run with
   no stop. This is a deliberate difference: it is stronger than upstream, and it changed the seeded results of the
   runs of earlier versions. Each checkpoint error and each configuration error is a `Left`, and the file stays
-  unchanged. A checkpoint that cannot be written is a `Left` too. Test: `GepaRunSuite`. One gap stays: the
+  unchanged. A checkpoint that cannot be written is a `Left` too, and an atomic move keeps the last good checkpoint
+  (`core/state.py:326-340`). The check of the validation set compares only the size of the rows, and upstream has no
+  such check. Test: `GepaRunSuite`. One gap stays: the
   checkpoint does not keep the cached scores of a merge subsample that the run rejected, so in a rare case a resumed
   run makes more metric calls than a run with no stop.
 - **Budget (resolved, batch 9).** dspy4s runs an iteration only when its worst-case cost fits. Upstream checks the
@@ -1911,19 +1937,24 @@ upstream, and their defaults agree with dspy4s. Only the instruction proposer ch
     its own `JSONAdapter` that has no fallback to plain text. `ReflectiveRecord` holds values, and a `History` input
     moves to the key `Context`. The engine calls the proposer in a context whose language model is the reflection LM,
     and one more time after a failure. The options are `additionalInstructions`, `baseInstructions`, `maxChars`, and
-    `adapter`. Tests: `InstructionProposerSuite`, `GepaProposerEngineSuite`.
+    `adapter`. A `Left` and a non-fatal exception of the proposer get the second call
+    (`GepaEngine.proposeInReflectionContext`), as upstream catches each `Exception`. A fatal error goes to the caller.
+    Tests: `InstructionProposerSuite`, `GepaProposerEngineSuite`.
   - **Differences that stay.**
-    - The proposer writes the JSON text of the records itself (`ReflectiveRecord.toJson`, in the form of Python
-      `json.dumps`), because the dspy4s `JSONAdapter` does not write a sequence as JSON. The other parts of the
-      prompt are those of the dspy4s adapter, not the upstream bytes (G-37): the JSON adapter shows no field
-      description.
     - `skills` and `truncate_history_outputs` are not ported. The skills loader needs a YAML parser. The ReAct
       trajectory of dspy4s is a string that is already rendered, so only a real `History` input can be compacted.
-    - Upstream logs each failed proposal. dspy4s has no logger in this module, so a run in which each reflection
-      call fails returns the seed with no signal. The stop reason of a run (G-44) is the place for that report.
+    - Upstream logs each failed proposal. dspy4s writes no warning for it. `GepaState.failedProposals` counts the
+      tasks whose proposer failed two times, so a run in which each reflection call fails is visible in the result.
     - A response `{"new_instruction": null}` gives the instruction `null`: `JSONAdapterParser` gives the JSON text
-      of a value that is not a string. Upstream fails there. The correction is in the adapter (decision D5).
-    - Only a `Left` of a proposer gets the second call. An exception goes to the caller; upstream catches it.
+      of a value that is not a string. Upstream gives the instruction `None`, because `parse_value` calls `str(value)`
+      for a `str` field (`dspy/adapters/utils.py:188-189`). The two accept a bad instruction. Test:
+      `InstructionProposerSuite`.
+  - **Prompt (2026-11-02).** The records go to the model as one list value in the field `examples_with_feedback` of the
+    type `list[dict[str, Any]]`, as upstream. The adapter writes the JSON text (`PromptText.fieldValue`), with `null`
+    for a number that is not finite in it, as pydantic JSON mode. A comparison with `JSONAdapter().format` of the venv
+    gave an equal prompt, also the description of each field. Test: `InstructionProposerSuite`. In a call, a component
+    with no instruction has the text that its leaf runs (dspy seeds from `pred.signature.instructions`), and the genome
+    keeps `None`.
 - **Objective-aware frontiers are an option** (`gepa_utils.py:70-79,301-310`; 638e155cf; engine `frontier_type` with
   the default `"instance"`). The metric can return `objective_scores`, and the engine can select candidates by
   `objective`, `hybrid`, or `cartesian` fronts (`gepa/core/state.py:157-236,474-601`). Acceptance and the best
@@ -1962,7 +1993,11 @@ upstream, and their defaults agree with dspy4s. Only the instruction proposer ch
     - The budget is a hard limit (decision of the owner). An iteration starts only when its largest possible cost
       fits: `2 × tasks × minibatch + limit × |distinct valset|`. Upstream checks the budget only at the start of an
       iteration, so it can go above the budget.
-    - dspy4s captures no traces for the children and for the validations. Upstream does; this changes no score.
+    - dspy4s captures no traces for the children and for the validations. Upstream does, because
+      `DspyAdapter.batch_evaluate` has the default `capture_traces=True` (`gepa_utils.py:312`). This changes no score:
+      the program-level metric call gets no trace on each path, as upstream `trace=None`, and a run that fails has the
+      failure score on each path. Before 2026-11-02, this was not true: the metric got the trace of the run only for a
+      parent, so a metric that read the trace could give a parent and an equal child different scores.
     - The selection and the acceptance are fixed sets of strategies. Upstream takes any object with the method of
       the strategy.
     - Equal minibatches are equal by the content and the order of their examples. Upstream compares the ids of the
@@ -1984,7 +2019,10 @@ upstream, and their defaults agree with dspy4s. Only the instruction proposer ch
 
 **Decisions of the owner (2026-10-12).**
 
-- The proposer writes the JSON text of the records itself.
+- The proposer writes the JSON text of the records itself. A review on 2026-11-02 changed this, and the owner has not
+  confirmed the change. The reason for the decision no longer holds: `PromptText.fieldValue` now writes a sequence as
+  JSON. The records go as a list value, and the adapter writes the text, as upstream. The prompt is equal to the
+  upstream prompt.
 - The first version has no `skills` and no `truncate_history_outputs`.
 - The budget stays a hard limit. An iteration that does not fit does not start, and the result must report why a
   run stopped (G-44). This rule also applies to an iteration with n proposals (O5).
