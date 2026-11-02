@@ -30,6 +30,7 @@ import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
 import java.util.concurrent.atomic.AtomicInteger
+import scala.util.Random
 
 /** Two leaves that run one after the other. Top-level so `OptimizableStructure.derived` sees its Mirror field labels.
   */
@@ -156,7 +157,12 @@ class GepaPredictorKeySuite extends FunSuite:
       val adapter = new GepaAdapter(twins, metric)
       val seed    = Candidate.seed(twins)
       val batch   = adapter.evaluate(dataset, seed, captureTraces = true)
-      assertTwinError(adapter.makeReflectiveDataset(seed, batch, Vector(OptimizableId(0), OptimizableId(1))))
+      assertTwinError(adapter.makeReflectiveDataset(
+        seed,
+        batch,
+        Vector(OptimizableId(0), OptimizableId(1)),
+        new Random(GepaRandom.mix(0L))
+      ))
     }
   }
 
@@ -176,7 +182,12 @@ class GepaPredictorKeySuite extends FunSuite:
       val adapter = new GepaAdapter(keyless, metric)
       val seed    = Candidate.seed(keyless)
       val batch   = adapter.evaluate(dataset, seed, captureTraces = true)
-      assertMissingKeyError(adapter.makeReflectiveDataset(seed, batch, Vector(OptimizableId(0))))
+      assertMissingKeyError(adapter.makeReflectiveDataset(
+        seed,
+        batch,
+        Vector(OptimizableId(0)),
+        new Random(GepaRandom.mix(0L))
+      ))
     }
   }
 

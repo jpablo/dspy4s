@@ -72,11 +72,8 @@ enum ProposalSelection derives CanEqual:
     val passing = proposals.filter(acceptance.accepts)
     this match
       case AllImprovements => passing
-      case BestImprovement =>
-        // gepa starts with a best gain of minus infinity, and only a larger gain replaces the best proposal.
-        passing.foldLeft((Option.empty[Proposal], Double.NegativeInfinity)) { case ((best, bestGain), proposal) =>
-          if proposal.gain > bestGain then (Some(proposal), proposal.gain) else (best, bestGain)
-        }._1.toVector
+      // Only a larger gain replaces the best proposal, as in gepa.
+      case BestImprovement => passing.maxByOption(_.gain).toVector
       // The sort is stable, as the sort of gepa is.
       case TopK(k) => passing.sortBy(_.gain)(using Ordering[Double].reverse).take(k)
 

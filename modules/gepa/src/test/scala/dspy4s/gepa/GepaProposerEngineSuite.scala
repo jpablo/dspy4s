@@ -27,6 +27,7 @@ import zio.blocks.schema.{DynamicValue, Schema}
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
+import scala.util.Random
 
 /** The instruction proposer in the GEPA engine, and the reflective records that the adapter gives to it (PORT_GAPS
   * G-45, item O3; upstream b6c8aaf1e, `dspy/teleprompt/gepa/gepa_utils.py`, and gepa 0.1.4
@@ -144,8 +145,9 @@ class GepaProposerEngineSuite extends FunSuite:
       val adapter   = new GepaAdapter(program, metric)
       val candidate = Candidate.seed(program)
       val batch     = adapter.evaluate(dataset.take(1), candidate, captureTraces = true)
-      val records   =
-        adapter.makeReflectiveDataset(candidate, batch, Vector(first)).fold(error => fail(error.message), identity)
+      val records   = adapter
+        .makeReflectiveDataset(candidate, batch, Vector(first), new Random(GepaRandom.mix(0L)))
+        .fold(error => fail(error.message), identity)
       assertEquals(
         records(first),
         Vector(
@@ -171,8 +173,9 @@ class GepaProposerEngineSuite extends FunSuite:
       val adapter   = new GepaAdapter(chat, metric)
       val candidate = Candidate.seed(chat)
       val batch     = adapter.evaluate(Vector(example), candidate, captureTraces = true)
-      val records   =
-        adapter.makeReflectiveDataset(candidate, batch, Vector(first)).fold(error => fail(error.message), identity)
+      val records   = adapter
+        .makeReflectiveDataset(candidate, batch, Vector(first), new Random(GepaRandom.mix(0L)))
+        .fold(error => fail(error.message), identity)
       val inputs = records(first).headOption.getOrElse(fail("no record")).inputs
       assertEquals(
         inputs,

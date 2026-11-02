@@ -133,18 +133,18 @@ class GepaPointerMergeSuite extends FunSuite:
 
   test("a new candidate takes the largest pointer of its parents") {
     val seed = GepaState.seed(seedCandidate, Vector(0.0, 0.0), metricCalls = 2)
-    assertEquals(seed.pointerOf(0), 0)
+    assertEquals(seed.nextComponent, Vector(0))
 
     // The pointer of the parent moves before its child is added, so the child continues with the next component.
     val child = seed.withPointer(0, 1).add(candidate("A1", "Component B."), Vector(1.0, 0.0), Vector(0), 2)
-    assertEquals((child.pointerOf(0), child.pointerOf(1)), (1, 1))
+    assertEquals(child.nextComponent, Vector(1, 1))
 
     val sibling = child.withPointer(0, 0).add(candidate("Component A.", "B1"), Vector(0.0, 1.0), Vector(0), 2)
-    assertEquals(sibling.pointerOf(2), 0)
+    assertEquals(sibling.nextComponent(2), 0)
 
     // A merge has two parents.
     val merged = sibling.add(candidate("A1", "B1"), Vector(1.0, 1.0), Vector(1, 2), 2)
-    assertEquals(merged.pointerOf(3), 1)
+    assertEquals(merged.nextComponent(3), 1)
   }
 
   test("a saved state keeps the pointers") {
@@ -152,16 +152,8 @@ class GepaPointerMergeSuite extends FunSuite:
       .withPointer(0, 1)
       .add(candidate("A1", "Component B."), Vector(1.0, 0.0), Vector(0), 2)
     val restored = GepaStatePersistence.fromJson(GepaStatePersistence.toJson(state))
-    assertEquals(restored.map(s => Vector(s.pointerOf(0), s.pointerOf(1))), Right(Vector(1, 1)))
+    assertEquals(restored.map(_.nextComponent), Right(Vector(1, 1)))
     assertEquals(restored, Right(state))
-  }
-
-  test("a state that an older version saved has the pointer 0 for each candidate") {
-    val older =
-      """{"candidates":[{"optimizable-0":"Component A.","optimizable-1":"Component B."}],"valSubscores":[[0.0,0.0]],"parents":[[]],"totalMetricCalls":2}"""
-    val restored = GepaStatePersistence.fromJson(older)
-    assertEquals(restored.map(_.pointerOf(0)), Right(0))
-    assertEquals(restored.map(_.candidates.size), Right(1))
   }
 
   // ── The pointer in the engine ───────────────────────────────────────────────────────────────────────────────
@@ -220,7 +212,7 @@ class GepaPointerMergeSuite extends FunSuite:
     val x                                            = candidate("A improved", "Component B.")
     val y                                            = candidate("Component A.", "B improved")
     val others                                       = (0 until 10).toVector.map(k => candidate(s"A other $k", "Component B."))
-    GepaState(
+    GepaStateFixtures.state(
       candidates = CandidatePool.applyUnsafe(Vector(seedCandidate, x, y) ++ others),
       valSubscores = Vector(Vector.fill(examples)(0.5), row(0, 0.5), row(1, 0.5)) ++
         others.indices.map(k => row(2 + k, 0.0)),
@@ -228,32 +220,29 @@ class GepaPointerMergeSuite extends FunSuite:
       totalMetricCalls = MetricCallCount(0)
     )
 
-  private def merger(seed: Long, valsetSize: Int, valOverlapFloor: Option[Int] = None): MergeProposer[TwoStage] =
-    val valset = Vector.tabulate(valsetSize)(i =>
-      Example(values = DynamicValues.record("question" := s"Validation $i?"), inputKeys = Set("question"))
-    )
-    val cache = new GepaEvalCache(new GepaAdapter[TwoStage](twoStage, anyMetric))
-    valOverlapFloor match
-      case Some(floor) =>
-        new MergeProposer[TwoStage](valset, MergeInvocationLimit(5), new Random(seed), cache, valOverlapFloor = floor)
-      case None => new MergeProposer[TwoStage](valset, MergeInvocationLimit(5), new Random(seed), cache)
+  /** The triplet that the merge search of the sparse state finds with `seed`. */
+  private def sparseTriplet(seed: Int, dominators: Vector[Int]): Option[(Int, Int, Int)] =
+    MergeProposer
+      .findMerge(
+        sparseState,
+        dominators,
+        valsetSize = 14,
+        MergeProposer.DefaultValOverlapFloor,
+        new Random(seed.toLong)
+      )
+      .map(_._1)
 
   test("the frontier of the sparse state has twelve candidates and no seed") {
-    val dominators = sparseState.nonDominatedFrontier.values.flatten.toSet
+    val dominators = sparseState.nonDominatedFrontier.flatten.toSet
     assertEquals(dominators, (1 to 12).toSet)
   }
 
   test("the merge search tries ten pairs in each of ten attempts") {
-    val dominators = sparseState.nonDominatedFrontier.values.flatten.toSet.toVector.sorted
+    val dominators = sparseState.nonDominatedFrontier.flatten.toSet.toVector.sorted
     // One pair of 66 can merge. Ten pair draws find it with a probability of 14%, and one hundred with 78%.
-    val found = (0 until 40).count(seed =>
-      merger(seed.toLong, valsetSize = 14).findTriplet(sparseState, dominators).isDefined
-    )
+    val found = (0 until 40).count(seed => sparseTriplet(seed, dominators).isDefined)
     assert(found >= 20, s"the search found the pair for $found of 40 seeds")
-    assertEquals(
-      (0 until 40).flatMap(seed => merger(seed.toLong, valsetSize = 14).findTriplet(sparseState, dominators)).toSet,
-      Set((1, 2, 0))
-    )
+    assertEquals((0 until 40).flatMap(seed => sparseTriplet(seed, dominators)).toSet, Set((1, 2, 0)))
   }
 
   // ── The overlap floor of a merge ────────────────────────────────────────────────────────────────────────────
@@ -261,7 +250,7 @@ class GepaPointerMergeSuite extends FunSuite:
   /** A seed and two children that each change one component. The two children are a pair that can merge. */
   private def pairState(examples: Int): GepaState =
     def row(best: Int): Vector[Double] = Vector.tabulate(examples)(i => if i == best then 1.0 else 0.0)
-    GepaState(
+    GepaStateFixtures.state(
       candidates = CandidatePool.applyUnsafe(Vector(
         seedCandidate,
         candidate("Component A. FIXED_A", "Component B."),
@@ -272,21 +261,28 @@ class GepaPointerMergeSuite extends FunSuite:
       totalMetricCalls = MetricCallCount(0)
     )
 
-  private def proposal(valsetSize: Int, valOverlapFloor: Option[Int]): Option[MergeProposal] =
+  private def proposal(
+      valsetSize     : Int,
+      valOverlapFloor: MergeOverlapFloor = MergeProposer.DefaultValOverlapFloor
+  ): Option[MergeProposal] =
+    val valset = Vector.tabulate(valsetSize)(i =>
+      Example(values = DynamicValues.record("question" := s"Validation $i?"), inputKeys = Set("question"))
+    )
+    val cache = new GepaEvalCache(new GepaAdapter[TwoStage](twoStage, anyMetric))
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new StageLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      merger(seed = 0L, valsetSize, valOverlapFloor).propose(pairState(valsetSize))
+      MergeProposer.propose(pairState(valsetSize), valset, cache, valOverlapFloor, new Random(0L))
     }
 
   test("two candidates that share fewer validation examples than the floor do not merge") {
     assertEquals(MergeProposer.DefaultValOverlapFloor, 5)
     // gepa's `val_overlap_floor` is 5: a validation set of 4 gives no merge.
-    assertEquals(proposal(valsetSize = 4, valOverlapFloor = None), None)
-    assert(proposal(valsetSize = 5, valOverlapFloor = None).isDefined, "five shared examples must permit the merge")
+    assertEquals(proposal(valsetSize = 4), None)
+    assert(proposal(valsetSize = 5).isDefined, "five shared examples must permit the merge")
   }
 
   test("a lower floor permits a merge on a small validation set") {
-    val merged = proposal(valsetSize = 2, valOverlapFloor = Some(2))
+    val merged = proposal(valsetSize = 2, valOverlapFloor = MergeOverlapFloor(2))
     assertEquals(merged.map(_.parents), Some(Vector(1, 2)))
     assert(merged.exists(_.accepted), merged.toString)
   }

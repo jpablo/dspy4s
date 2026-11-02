@@ -158,7 +158,6 @@ class InstructionProposerSuite extends FunSuite:
       )
     )
     assertEquals(description(layout, "new_instruction"), Some("The new instruction for the assistant."))
-    assertEquals(DefaultInstructionProposer().compressSignature, None)
   }
 
   test("each option adds its input field before the two fixed fields, in the upstream order") {
@@ -190,8 +189,8 @@ class InstructionProposerSuite extends FunSuite:
     assertEquals(both.proposeSignature.outputFields.map(_.name), Vector("new_instruction"))
   }
 
-  test("the signature that shortens an instruction exists only with a length limit") {
-    val layout = DefaultInstructionProposer(maxChars = limit(50)).compressSignature.getOrElse(fail("no signature"))
+  test("the signature that shortens an instruction has the upstream fields and instructions") {
+    val layout = DefaultInstructionProposer.CompressSignature
     assertEquals(fieldNames(layout), Vector("instruction", "length_limit"))
     assertEquals(layout.outputFields.map(_.name), Vector("shortened_instruction"))
     assertEquals(layout.instructions, Some(DefaultInstructionProposer.CompressInstructions))

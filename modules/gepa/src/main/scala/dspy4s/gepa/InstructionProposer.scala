@@ -2,6 +2,7 @@ package dspy4s.gepa
 
 import dspy4s.adapters.JSONAdapter
 import dspy4s.adapters.contracts.Adapter
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
@@ -127,20 +128,6 @@ final case class DefaultInstructionProposer(
       instructions = Some(clean(baseInstructions).getOrElse(ProposeInstructions))
     )
 
-  /** The signature of the call that shortens an instruction (dspy's `CompressInstruction`). `None` without `maxChars`.
-    *
-    * The input fields are `instruction` and `length_limit`. The output field is `shortened_instruction`. The fields
-    * have no description. The instructions are [[DefaultInstructionProposer.CompressInstructions]].
-    */
-  val compressSignature: Option[SignatureLayout] = lengthLimit.map { _ =>
-    SignatureLayout.of(
-      name = "CompressInstruction",
-      inputFields = Vector(FieldSpec(InstructionField), FieldSpec(LengthLimitField)),
-      outputFields = Vector(FieldSpec(ShortenedInstructionField)),
-      instructions = Some(CompressInstructions)
-    )
-  }
-
   /** The runtime of the two predictors: the language model of the context, and the adapter of this proposer. The
     * adapter of the context has no effect, and no setting of the context changes.
     */
@@ -150,24 +137,20 @@ final case class DefaultInstructionProposer(
   private val proposePredict: DynamicPredict =
     DynamicPredict(layout = proposeSignature, name = Some("gepa_propose_instruction"), runtime = runtime)
 
-  private val compressPredict: Option[DynamicPredict] = compressSignature.map(layout =>
-    DynamicPredict(layout = layout, name = Some("gepa_compress_instruction"), runtime = runtime)
-  )
+  private val compressPredict: DynamicPredict =
+    DynamicPredict(layout = CompressSignature, name = Some("gepa_compress_instruction"), runtime = runtime)
 
   override def propose(
       candidate : Candidate,
       reflective: Map[OptimizableId, Vector[ReflectiveRecord]],
       components: Vector[OptimizableId]
   )(using RuntimeContext): Either[DspyError, Map[OptimizableId, String]] =
-    components.foldLeft[Either[DspyError, Map[OptimizableId, String]]](Right(Map.empty)) { (done, component) =>
-      done.flatMap { texts =>
-        // A component that the candidate or the reflective dataset does not hold gets no call and no entry.
-        candidate.get(component).zip(reflective.get(component)) match
-          case Some((current, records)) =>
-            proposeFor(component, current.getOrElse(""), records).map(texts.updated(component, _))
-          case None => Right(texts)
-      }
-    }
+    // A component that the candidate or the reflective dataset does not hold gets no call and no entry.
+    val known =
+      components.flatMap(component => candidate.get(component).zip(reflective.get(component)).map(component -> _))
+    Traverse.either(known) { case (component, (current, records)) =>
+      proposeFor(component, current.getOrElse(""), records).map(component -> _)
+    }.map(_.toMap)
 
   /** The new instruction of one component: one proposal call, and then one call that shortens the draft when the draft
     * is longer than `maxChars`.
@@ -190,10 +173,10 @@ final case class DefaultInstructionProposer(
     * empty or is not in the limit. `draft` is not empty and has no white space at its two ends.
     */
   private def enforceLength(component: OptimizableId, draft: String)(using RuntimeContext): Either[DspyError, String] =
-    maxChars.zip(compressPredict) match
-      case Some((limit, compress)) if codePoints(draft) > limit =>
+    maxChars.filter(codePoints(draft) > _) match
+      case Some(limit) =>
         val inputs = DynamicValues.record(InstructionField := draft, LengthLimitField := lengthLimitText(limit))
-        run(compress, inputs, ShortenedInstructionField).flatMap { shortened =>
+        run(compressPredict, inputs, ShortenedInstructionField).flatMap { shortened =>
           val length = codePoints(shortened)
           if shortened.isEmpty then Left(emptyInstruction(component))
           else if length > limit then
@@ -205,7 +188,7 @@ final case class DefaultInstructionProposer(
             )
           else Right(shortened)
         }
-      case _ => Right(draft)
+      case None => Right(draft)
 
   private def emptyInstruction(component: OptimizableId): DspyError =
     ValidationError(s"The reflection LM returned an empty instruction for component '${component.render}'.")
@@ -270,6 +253,18 @@ object DefaultInstructionProposer:
   private val NewInstructionField         = "new_instruction"
   private val InstructionField            = "instruction"
   private val ShortenedInstructionField   = "shortened_instruction"
+
+  /** The signature of the call that shortens an instruction (dspy's `CompressInstruction`).
+    *
+    * The input fields are `instruction` and `length_limit`. The output field is `shortened_instruction`. The fields
+    * have no description. The instructions are [[CompressInstructions]].
+    */
+  val CompressSignature: SignatureLayout = SignatureLayout.of(
+    name = "CompressInstruction",
+    inputFields = Vector(FieldSpec(InstructionField), FieldSpec(LengthLimitField)),
+    outputFields = Vector(FieldSpec(ShortenedInstructionField)),
+    instructions = Some(CompressInstructions)
+  )
 
   /** `text` with no white space at its two ends. `None` for no text and for an empty text (dspy's `_clean_text`). */
   private def clean(text: Option[String]): Option[String] = text.map(_.strip).filter(_.nonEmpty)

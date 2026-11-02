@@ -360,11 +360,14 @@ private[dspy4s] object PythonText:
   /** The key of a map entry: Python `json.dumps` writes a bool, a number, and a null key as its JSON text. */
   private def keyText(key: DynamicValue): String =
     unwrap(key) match
-      case DynamicValue.Primitive(PrimitiveValue.String(text))  => text
-      case DynamicValue.Primitive(PrimitiveValue.Boolean(flag)) => if flag then "true" else "false"
-      case _: DynamicValue.Null.type                            => "null"
-      case NumberText(text)                                     => text
-      case other                                                => DynamicValues.renderText(other)
+      case DynamicValue.Primitive(PrimitiveValue.String(text))   => text
+      case DynamicValue.Primitive(PrimitiveValue.Boolean(flag))  => if flag then "true" else "false"
+      case _: DynamicValue.Null.type                             => "null"
+      case DynamicValue.Primitive(PrimitiveValue.Double(number)) => jsonFloat(number, PythonRepr.float(number))
+      case DynamicValue.Primitive(PrimitiveValue.Float(number))  =>
+        jsonFloat(number.toDouble, PythonRepr.float32(number))
+      case NumberText(text) => text
+      case other            => DynamicValues.renderText(other)
 
   /** The JSON string of `text` (Python `encode_basestring`): `"` and `\` escaped, a control character escaped, and each
     * other character as it is. With `ascii` (Python `encode_basestring_ascii`), each character that is not in the range

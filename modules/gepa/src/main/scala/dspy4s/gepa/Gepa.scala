@@ -35,8 +35,6 @@ final class Gepa[P](
     instructionProposer: InstructionProposer = InstructionProposer.default
 )(using OptimizableStructure[P], ProgramRunner[P]):
 
-  val name: String = "gepa"
-
   /** Optimize `student`'s predictor instructions over `trainset`, returning the best candidate and the program it
     * yields. The trainset gives the reflective minibatches and also the Pareto scores (dspy's `compile` with no
     * `valset`). The budget of [[GepaConfig.budget]] resolves with no validation set ([[GepaBudget.resolve]]).
@@ -80,6 +78,6 @@ final class Gepa[P](
   ): Either[DspyError, GepaResult[P]] =
     val seed    = Candidate.seed(student)
     val budget  = GepaBudget.MetricCalls(config.budget.resolve(seed.size, trainset.size, valsetSize))
-    val adapter = new GepaAdapter(student, metric, config.failureScore, config.addFormatFailureAsFeedback, config.seed)
+    val adapter = new GepaAdapter(student, metric, config.failureScore, config.addFormatFailureAsFeedback)
     val engine  = new GepaEngine(adapter, reflectionLm, config.copy(budget = budget), instructionProposer)
     engine.optimize(seed, trainset, valset)

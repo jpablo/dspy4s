@@ -26,6 +26,7 @@ import dspy4s.programs.optimization.OptimizableId
 import munit.FunSuite
 
 import scala.concurrent.duration.Duration
+import scala.util.Random
 
 class GepaAdapterEvaluateSuite extends FunSuite:
 
@@ -99,18 +100,20 @@ class GepaAdapterEvaluateSuite extends FunSuite:
 
       assertEquals(result.trajectories, None)
       assertEquals(result.scores, Vector(1.0, 0.0))
-      assertEquals(result.outputs.size, 2)
     }
   }
 
-  // PORT_GAPS G-46: an empty batch has no output and no score. The adapter runs nothing for it.
+  // PORT_GAPS G-46: an empty batch has no score. The adapter runs nothing for it.
   test("evaluate on an empty batch returns an empty batch on the two paths") {
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new ScriptedLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
       val scoresOnly       = adapter.evaluate(Vector.empty, Candidate.seed(program), captureTraces = false)
-      assertEquals(scoresOnly, EvaluationBatch(Vector.empty, Vector.empty, trajectories = None))
+      assertEquals(scoresOnly, EvaluationBatch(Vector.empty, trajectories = None, objectiveScores = Vector.empty))
       val withTraces = adapter.evaluate(Vector.empty, Candidate.seed(program), captureTraces = true)
-      assertEquals(withTraces, EvaluationBatch(Vector.empty, Vector.empty, trajectories = Some(Vector.empty)))
+      assertEquals(
+        withTraces,
+        EvaluationBatch(Vector.empty, trajectories = Some(Vector.empty), objectiveScores = Vector.empty)
+      )
     }
   }
 
@@ -133,7 +136,12 @@ class GepaAdapterEvaluateSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       val evalBatch        = adapter.evaluate(batch, Candidate.seed(program), captureTraces = true)
       val dataset          = adapter
-        .makeReflectiveDataset(Candidate.seed(program), evalBatch, Vector(OptimizableId(0)))
+        .makeReflectiveDataset(
+          Candidate.seed(program),
+          evalBatch,
+          Vector(OptimizableId(0)),
+          new Random(GepaRandom.mix(0L))
+        )
         .fold(error => fail(error.message), identity)
 
       assertEquals(dataset.keySet, Set(OptimizableId(0)))
@@ -189,10 +197,13 @@ class GepaAdapterEvaluateSuite extends FunSuite:
       Vector(false, true).foreach { captureTraces =>
         val result = adapter.evaluate(batch, Candidate.seed(program), captureTraces)
         assertEquals(result.scores, Vector.fill(10)(-1.0) ++ Vector(1.0, 1.0), s"captureTraces=$captureTraces")
-        assertEquals(result.outputs(10).get("answer").map(DynamicValues.renderText), Some("Paris"))
       }
       val traced = adapter.evaluate(batch, Candidate.seed(program), captureTraces = true)
       assertEquals(traced.trajectories.map(_.map(_.failed)), Some(Vector.fill(10)(true) ++ Vector(false, false)))
+      assertEquals(
+        traced.trajectories.flatMap(_(10).prediction.get("answer")).map(DynamicValues.renderText),
+        Some("Paris")
+      )
     }
   }
 

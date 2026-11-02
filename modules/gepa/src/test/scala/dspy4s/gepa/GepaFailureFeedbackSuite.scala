@@ -30,6 +30,7 @@ import zio.blocks.schema.DynamicValue
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
+import scala.util.Random
 
 /** Calls `stepper` one time for each question of [[RetryPipeline.questions]] and goes on after a call that failed. Then
   * `finisher` runs. A call that failed can thus be in the trace of a run that passed. Top-level so
@@ -161,11 +162,11 @@ class GepaFailureFeedbackSuite extends FunSuite:
       dataset             : Vector[Example] = examples(1)
   )(using OptimizableStructure[P], ProgramRunner[P]): Map[OptimizableId, Vector[ReflectiveRecord]] =
     withTaskLm(lm) {
-      val adapter   = new GepaAdapter(program, metric, addFormatFailureAsFeedback = addFailureAsFeedback, seed = seed)
+      val adapter   = new GepaAdapter(program, metric, addFormatFailureAsFeedback = addFailureAsFeedback)
       val candidate = Candidate.seed(program)
       val batch     = adapter.evaluate(dataset, candidate, captureTraces = true)
       adapter
-        .makeReflectiveDataset(candidate, batch, Vector(stepperId, finisherId))
+        .makeReflectiveDataset(candidate, batch, Vector(stepperId, finisherId), new Random(GepaRandom.mix(seed)))
         .fold(error => fail(error.message), identity)
     }
 
@@ -238,7 +239,7 @@ class GepaFailureFeedbackSuite extends FunSuite:
       val candidate = Candidate.seed(loop).updated(finisherId, Some("Answer in one word."))
       val batch     = adapter.evaluate(examples(1), candidate, captureTraces = true)
       adapter
-        .makeReflectiveDataset(candidate, batch, Vector(finisherId))
+        .makeReflectiveDataset(candidate, batch, Vector(finisherId), new Random(GepaRandom.mix(0L)))
         .fold(error => fail(error.message), identity)
     }
     val feedback = records(finisherId).head.feedback

@@ -9,7 +9,7 @@ import scala.util.Random
 class GepaStateSuite extends FunSuite:
 
   private def state(subscores: Vector[Double]*): GepaState =
-    GepaState(
+    GepaStateFixtures.state(
       candidates = CandidatePool.applyUnsafe(
         subscores.indices.map(i => Map(OptimizableId(0) -> Some(s"instr$i"))).toVector
       ),
@@ -25,24 +25,25 @@ class GepaStateSuite extends FunSuite:
     assertEquals(s.bestIndex, 1)
   }
 
-  test("paretoFrontier maps each instance to the candidates that are best on it") {
+  test("the instance fronts hold the candidates that are best on each validation example") {
     // c0 best on instance 0; c1 best on instance 1 (complementary specialists).
     val s = state(Vector(1.0, 0.0), Vector(0.0, 1.0))
-    assertEquals(s.paretoFrontier, Map(0 -> Set(0), 1 -> Set(1)))
+    assertEquals(s.fronts.map(_._2), Vector(Set(0), Set(1)))
   }
 
   test("a dominating candidate occupies the whole frontier") {
     val s = state(Vector(0.0, 0.0), Vector(1.0, 1.0))
-    assertEquals(s.paretoFrontier, Map(0 -> Set(1), 1 -> Set(1)))
+    assertEquals(s.fronts.map(_._2), Vector(Set(1), Set(1)))
   }
 
-  test("GepaState rejects ragged valSubscores up front (instead of an IndexOutOfBounds in paretoFrontier)") {
+  test("GepaState rejects ragged valSubscores up front (instead of an IndexOutOfBounds in the instance fronts)") {
     intercept[IllegalArgumentException] {
-      val _ = GepaState(
+      val _ = GepaStateFixtures.state(
         candidates = CandidatePool.applyUnsafe(
           Vector(Map(OptimizableId(0) -> Some("a")), Map(OptimizableId(0) -> Some("b")))
         ),
-        valSubscores = Vector(Vector(1.0, 0.0), Vector(1.0)), // second row is shorter — would crash paretoFrontier
+        // The second row is shorter, so the instance fronts cannot index it.
+        valSubscores = Vector(Vector(1.0, 0.0), Vector(1.0)),
         parents = Vector(Vector.empty[Int], Vector.empty[Int]),
         totalMetricCalls = MetricCallCount(0)
       )
@@ -79,7 +80,7 @@ class GepaStateSuite extends FunSuite:
 
   test("ancestors walks the full lineage, including a merge's two branches up to a common ancestor") {
     // Lineage: 0 (seed) -> 1, 0 -> 2; then 3 is a MERGE of 1 and 2 (two parents).
-    val s = GepaState(
+    val s = GepaStateFixtures.state(
       candidates = CandidatePool.applyUnsafe(Vector.tabulate(4)(i => Map(OptimizableId(0) -> Some(i.toString)))),
       valSubscores = Vector.fill(4)(Vector(1.0)),
       parents = Vector(Vector.empty, Vector(0), Vector(0), Vector(1, 2)),
@@ -158,28 +159,33 @@ class GepaStateSuite extends FunSuite:
 
   test("nonDominatedFrontier restricts each front to the candidates that stay") {
     val s = state(Vector(1.0, 0.0), Vector(0.0, 1.0), Vector(1.0, 1.0))
-    assertEquals(s.paretoFrontier, Map(0 -> Set(0, 2), 1 -> Set(1, 2)))
-    assertEquals(s.nonDominatedFrontier, Map(0 -> Set(2), 1 -> Set(2)))
+    assertEquals(s.fronts.map(_._2), Vector(Set(0, 2), Set(1, 2)))
+    assertEquals(s.nonDominatedFrontier, Vector(Set(2), Set(2)))
+  }
+
+  test("nonDominatedFrontier keeps the order of the fronts, also with six fronts or more") {
+    val s = state(Vector.tabulate(8)(i => Vector.tabulate(8)(j => if i == j then 1.0 else 0.0))*)
+    assertEquals(s.nonDominatedFrontier, Vector.tabulate(8)(i => Set(i)))
   }
 
   test("removal examines candidates with equal scores in the order of their first appearance in the fronts") {
     // The three aggregate scores are equal and each front holds two candidates. Each candidate is dominated until one
     // candidate leaves. Front 0 lists c1 first, so c1 leaves. The pinned gepa package (0.1.4) gives the same result.
     val s = state(Vector(0.0, 1.0, 1.0), Vector(1.0, 1.0, 0.0), Vector(1.0, 0.0, 1.0))
-    assertEquals(s.paretoFrontier, Map(0 -> Set(1, 2), 1 -> Set(0, 1), 2 -> Set(0, 2)))
-    assertEquals(s.nonDominatedFrontier, Map(0 -> Set(2), 1 -> Set(0), 2 -> Set(0, 2)))
+    assertEquals(s.fronts.map(_._2), Vector(Set(1, 2), Set(0, 1), Set(0, 2)))
+    assertEquals(s.nonDominatedFrontier, Vector(Set(2), Set(0), Set(0, 2)))
   }
 
   test("removal examines a candidate with a lower score first") {
     // c0 and c1 cover each other on front 0. c0 has the lower aggregate score, so c0 leaves and c1 stays.
-    val fronts = Map(0 -> Set(0, 1))
-    assertEquals(GepaState.removeDominated(fronts, Map(0 -> 0.2, 1 -> 0.8)), Map(0 -> Set(1)))
-    assertEquals(GepaState.removeDominated(fronts, Map(0 -> 0.8, 1 -> 0.2)), Map(0 -> Set(0)))
+    val fronts = Vector(Set(0, 1))
+    assertEquals(GepaState.removeDominated(fronts, Map(0 -> 0.2, 1 -> 0.8)), Vector(Set(1)))
+    assertEquals(GepaState.removeDominated(fronts, Map(0 -> 0.8, 1 -> 0.2)), Vector(Set(0)))
   }
 
   test("Pareto selection falls back to a uniform draw when the state has no frontier") {
     val s = state(Vector.empty, Vector.empty) // no validation instance
-    assertEquals(s.nonDominatedFrontier, Map.empty[Int, Set[Int]])
+    assertEquals(s.nonDominatedFrontier, Vector.empty[Set[Int]])
     val rng   = new Random(7)
     val picks = (0 until 200).map(_ => CandidateSelector.Pareto.select(s, rng)).toSet
     assertEquals(picks, Set(0, 1))

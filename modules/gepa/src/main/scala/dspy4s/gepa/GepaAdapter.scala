@@ -2,6 +2,7 @@ package dspy4s.gepa
 
 import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.core.collections.Traverse
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -13,7 +14,6 @@ import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.contracts.TraceEntry
 import dspy4s.core.contracts.TypeRef
-import dspy4s.core.runtime.ContextPropagation
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.gepa.contracts.FeedbackMetric
 import dspy4s.lm.contracts.LmRequest
@@ -26,13 +26,11 @@ import dspy4s.programs.optimization.TracedRun
 import dspy4s.programs.runtime.ParallelExecutor
 import dspy4s.programs.ProgramRunner
 
-import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+import zio.blocks.schema.DynamicValue
 
-import java.util.concurrent.Callable
-import java.util.concurrent.ExecutionException
-import java.util.concurrent.Executors
 import scala.concurrent.duration.Duration
 import scala.util.Random
+import scala.util.Try
 
 /** Bridges a dspy4s program into the GEPA engine — the analogue of Python's `DspyAdapter`. The engine drives the search
   * through this object: it applies a [[Candidate]] to the program, evaluates it, and builds the reflective dataset. The
@@ -47,16 +45,12 @@ import scala.util.Random
   * @param addFormatFailureAsFeedback
   *   when `true`, a predictor call that failed gives the reflection LM a record (dspy's
   *   `add_format_failure_as_feedback`); default `false`, as upstream
-  * @param seed
-  *   seeds the random source that selects one call of a predictor that ran more than one time in a run (dspy's `rng`).
-  *   The [[GepaEngine]] does not use this source: it gives each proposal task a source of its own.
   */
 final class GepaAdapter[P](
-    val program               : P,
-    val metric                : FeedbackMetric,
-    val failureScore          : Double  = 0.0,
-    addFormatFailureAsFeedback: Boolean = false,
-    seed                      : Long    = 0L
+    program                   : P,
+    metric                    : FeedbackMetric,
+    failureScore              : Double  = 0.0,
+    addFormatFailureAsFeedback: Boolean = false
 )(using ps: OptimizableStructure[P], runner: ProgramRunner[P]):
 
   /** The optimizable leaves in read order. `replace` keeps the metadata, so their predictor keys hold for each
@@ -67,21 +61,12 @@ final class GepaAdapter[P](
   /** Stable optimizable ID → position of the leaf in [[leaves]]. Display names never participate in lookup. */
   private val leafIndexById: Map[OptimizableId, Int] = leaves.iterator.map(_.id).zipWithIndex.toMap
 
-  /** Selects one call of a predictor that ran more than one time in a run (gepa's `self.rng.choice`), for a call of
-    * [[makeReflectiveDataset]] with no source. The seed is mixed first, because `java.util.Random` gives the same first
-    * values for near seeds such as 0 to 15.
-    */
-  private val rng = new Random(GepaRandom.mix(seed))
-
-  /** One trajectory with the calls of each leaf in it. The calls are aligned with [[leaves]]. */
-  private type LeafCalls = (Trajectory, Vector[Vector[TraceEntry]])
-
   /** `Left` when two leaves have the same predictor key: a trace entry then cannot be assigned to one of them
     * (UPGRADE-3.2.1-to-3.4.0, decision D2). The engine reads this before any run.
     */
   val distinctKeys: Either[DspyError, Unit] = PredictorTraces.requireDistinctKeys(leaves)
 
-  /** Apply `candidate` to the program and evaluate it over `batch`, returning per-example outputs + scores.
+  /** Apply `candidate` to the program and evaluate it over `batch`, returning the score of each example.
     *
     * Each example runs in an ISOLATED context with a fresh trace ([[TracedRun]]), through the executor of
     * [[GepaAdapter.evaluationExecutor]]. A run that fails is a result and not an error of the executor. A non-fatal
@@ -93,8 +78,8 @@ final class GepaAdapter[P](
     * one call for each run that passes. A run that fails, a metric that gives a `Left`, or an exception has
     * `failureScore` and no objective score. A failure of the whole executor (for example a fatal error in a worker
     * thread) gives each example `failureScore`. The trajectory of a run that fails, or of an example whose run or
-    * metric throws, has the text of the failure ([[Trajectory.failure]]). [[EvaluationBatch.objectiveScores]] is `None`
-    * when no example of the batch has an objective score. The adapter does not read the objective scores of a
+    * metric throws, has the text of the failure ([[Trajectory.failure]]). In [[EvaluationBatch.objectiveScores]], an
+    * example with no objective score has an empty map. The adapter does not read the objective scores of a
     * component-level feedback.
     *
     * With `captureTraces` (the reflective path), [[RuntimeContext.captureFailureTraces]] is on, so a parse failure
@@ -103,8 +88,7 @@ final class GepaAdapter[P](
     * example.
     *
     * When `captureTraces` is false (the acceptance/full-eval fast path), the batch has no trajectories, and the metric
-    * gets an empty trace. The output of an example whose metric gives a `Left` is then empty, as it is for a run that
-    * fails. With `captureTraces`, the trajectory of such an example keeps the prediction.
+    * gets an empty trace.
     */
   def evaluate(batch: Vector[Example], candidate: Candidate, captureTraces: Boolean)(using
       RuntimeContext
@@ -124,11 +108,9 @@ final class GepaAdapter[P](
       // A failure of the whole executor: each example gets the failure score.
       case Left(error) => batch.map(failedRun(_, error))
     EvaluationBatch(
-      outputs = runs.map(_.prediction),
       scores = runs.map(_.score),
       trajectories = Option.when(captureTraces)(runs),
-      // gepa_utils `_make_evaluation_batch`: `objective_scores if any(objective_scores) else None`.
-      objectiveScores = Option.when(runs.exists(_.objectiveScores.nonEmpty))(runs.map(_.objectiveScores))
+      objectiveScores = runs.map(_.objectiveScores)
     )
 
   /** Evaluate each `(candidate, batch)` pair of `items` with [[evaluate]], with the pairs in parallel (dspy's
@@ -139,9 +121,11 @@ final class GepaAdapter[P](
     * share as the number of threads, so the language model and the callbacks of the caller stay visible. The pairs have
     * no time limit and no error limit of their own: the limits of [[evaluate]] apply to the examples of each pair.
     *
-    * The number of workers is the smaller of the number of pairs and the number of threads. With two workers or more,
-    * each worker is a thread that gets the context of the caller. With one worker, the thread of the caller evaluates
-    * the pairs in order, and no thread starts. An exception from [[evaluate]] goes to the caller.
+    * The number of workers is the smaller of the number of pairs and the number of threads. Each worker is a thread of
+    * a [[ParallelExecutor]] that gets the context of the caller. Each pair runs to its end, also when another pair
+    * throws an exception. Then the first exception from [[evaluate]], in the order of `items`, goes to the caller with
+    * its class. A failure of the whole executor (for example a fatal error in a worker thread) goes to the caller as an
+    * `IllegalStateException`.
     *
     * The engine uses this for the parents, the children, and the selected candidates of one iteration. The call
     * installs the context that it gets (UPGRADE-3.2.1-to-3.4.0, decision D8: the given context wins).
@@ -158,7 +142,7 @@ final class GepaAdapter[P](
   )(using ctx: RuntimeContext): Vector[EvaluationBatch] =
     val total   = ctx.numThreads.getOrElse(ParallelExecutor.DefaultNumThreads)
     val shares  = GepaAdapter.threadShares(total, items.size)
-    val workers = math.min(items.size, total)
+    val workers = ThreadCount.applyUnsafe(math.max(1, math.min(items.size, total)))
 
     // The context that `evaluate` gets and `RuntimeEnvironment.current` are the same in the call.
     def evaluatePair(index: Int): EvaluationBatch =
@@ -168,25 +152,11 @@ final class GepaAdapter[P](
         evaluate(batch, candidate, captureTraces)(using RuntimeEnvironment.current)
       }
 
-    // One worker evaluates the pairs in order, so the thread of the caller does that work. With no pair, no work
-    // starts.
-    if workers <= 1 then items.indices.toVector.map(evaluatePair)
-    else
-      // The context of the caller goes to each worker thread, as it does in the `ParallelExecutor`.
-      val captured                                    = ContextPropagation.captureAll
-      def task(index: Int): Callable[EvaluationBatch] =
-        () =>
-          captured.runAsTask("gepa-batch-evaluate")(evaluatePair(index))
-      val pool = Executors.newFixedThreadPool(workers)
-      try
-        val pending = items.indices.toVector.map(index => pool.submit(task(index)))
-        // `get` has no time limit. An exception of a pair goes to the caller, as it does with one worker.
-        pending.map { result =>
-          try result.get()
-          catch case error: ExecutionException => throw Option(error.getCause).getOrElse(error)
-        }
-      finally
-        val _ = pool.shutdownNow()
+    // `Try` keeps the exception of a pair as the result of that pair, so `get` throws it with its class.
+    new ParallelExecutor(numThreads = workers, timeout = Duration.Inf)
+      .execute(task = (index: Int) => Try(evaluatePair(index)), data = items.indices.toVector)
+      .flatMap(outcome => Traverse.either(outcome.results)(identity))
+      .fold(error => throw IllegalStateException(error.message), _.map(_.get))
 
   /** The program with the instructions of `candidate`. The engine uses it to make the final result. */
   def applyCandidate(candidate: Candidate): P = Candidate.applyTo(program, candidate)
@@ -201,20 +171,11 @@ final class GepaAdapter[P](
     * position of the entry. A trajectory gives one record for a component at most:
     *   - Without `addFormatFailureAsFeedback`, a call that failed does not count.
     *   - The first call that failed gives the record. The user metric gets no call for it.
-    *   - Otherwise, a run that failed gives no record. A run that passed gives the record of one call, selected at
-    *     random with the seeded source.
+    *   - Otherwise, a run that failed gives no record. A run that passed gives the record of one call, selected with
+    *     `random` (gepa's `self.rng.choice`). The engine gives each proposal task a source of its own
+    *     ([[RandomStream.Reflection]]), so a resumed run makes the same selections.
     *
     * `Left` when two leaves have the same predictor key, or when a leaf ran but its module recorded no key.
-    */
-  def makeReflectiveDataset(
-      candidate : Candidate,
-      evalBatch : EvaluationBatch,
-      components: Vector[OptimizableId]
-  )(using RuntimeContext): Either[DspyError, Map[OptimizableId, Vector[ReflectiveRecord]]] =
-    makeReflectiveDataset(candidate, evalBatch, components, rng)
-
-  /** [[makeReflectiveDataset]] with `random` as the source that selects one call of a leaf. The engine gives each
-    * proposal task a source of its own ([[RandomStream.Reflection]]), so a resumed run makes the same selections.
     */
   private[gepa] def makeReflectiveDataset(
       candidate : Candidate,
@@ -237,13 +198,8 @@ final class GepaAdapter[P](
     }.toMap
 
   /** The calls of each leaf in each trajectory. `Left` when a leaf ran but its module recorded no predictor key. */
-  private def callsByLeaf(trajectories: Vector[Trajectory]): Either[DspyError, Vector[LeafCalls]] =
-    trajectories.foldLeft[Either[DspyError, Vector[LeafCalls]]](Right(Vector.empty)) { (done, traj) =>
-      for
-        runs  <- done
-        calls <- PredictorTraces.byLeaf(leaves, traj.trace)
-      yield runs :+ (traj -> calls)
-    }
+  private def callsByLeaf(trajectories: Vector[Trajectory]) =
+    Traverse.either(trajectories)(traj => PredictorTraces.byLeaf(leaves, traj.trace).map(traj -> _))
 
   /** The record of one leaf for one trajectory, built from the call that [[selectEntry]] gives. */
   private def recordFor(
@@ -313,7 +269,7 @@ final class GepaAdapter[P](
     DynamicValues.recordGet(entry.outputs, "raw_response").map(DynamicValues.renderText) match
       case Some(raw) => ReflectiveRecord(
           inputs,
-          text(
+          DynamicValues.string(
             "Couldn't parse the output as per the expected output format. The model's raw response was:\n" +
               s"```\n$raw\n```\n\n"
           ),
@@ -321,9 +277,7 @@ final class GepaAdapter[P](
         )
       case None =>
         // The call failed and recorded no model response (for example an LM error). Upstream has no such trace entry.
-        ReflectiveRecord(inputs, text("(no output)"), s"The call failed with this error: $message")
-
-  private def text(value: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(value))
+        ReflectiveRecord(inputs, DynamicValues.string("(no output)"), s"The call failed with this error: $message")
 
   /** The output structure that the model must follow, as text: the chat prompt of `layout` with no demos and no inputs.
     * Upstream uses a `ChatAdapter` for this text, whichever adapter the program uses. Each message is its role, `": "`,
@@ -339,7 +293,7 @@ final class GepaAdapter[P](
 
   /** Run one example in an isolated context and assemble its [[Trajectory]]. With `captureTraces`, the context captures
     * the failures, and the trajectory and the metric get the trace of the run. Without it, the two get an empty trace:
-    * the caller reads the output, the score, and the objective scores only.
+    * the caller reads the score and the objective scores only.
     */
   private def runOne(prog: P, example: Example, captureTraces: Boolean)(using RuntimeContext): Trajectory =
     // The metric runs in the isolated context of the run, so the trace and the history of an LM-judged metric do not
@@ -351,10 +305,7 @@ final class GepaAdapter[P](
           metric.feedback(example, prediction, trace, component = None, componentTrace = Vector.empty) match
             case Right(scored) =>
               Trajectory(example, prediction, trace, scored.score, objectiveScores = scored.objectiveScores)
-            case Left(_) =>
-              // The scores-only path gives an empty output for each example with no score, as `Evaluate` does
-              // (upstream uses `Evaluate` for this path). The reflective path keeps the prediction.
-              Trajectory(example, if captureTraces then prediction else RawPrediction.empty, trace, failureScore)
+            case Left(_) => Trajectory(example, prediction, trace, failureScore)
         case Left(error) =>
           // With `captureTraces`, the trace already holds the failure entry (raw response) via captureFailureTraces.
           Trajectory(example, RawPrediction.empty, trace, failureScore, failure = Some(GepaAdapter.failureText(error)))
@@ -397,7 +348,7 @@ object GepaAdapter:
     * workers` threads, and the first `total % workers` evaluations get one more. Examples: 8 threads and 3 items give
     * 3, 3, 2; 4 and 2 give 2, 2; 2 and 3 give 1, 1, 1. `total` must be positive.
     */
-  def threadShares(total: Int, items: Int): Vector[Int] =
+  private[gepa] def threadShares(total: Int, items: Int): Vector[Int] =
     require(total > 0, s"total must be positive: $total")
     if items <= 0 then Vector.empty
     else

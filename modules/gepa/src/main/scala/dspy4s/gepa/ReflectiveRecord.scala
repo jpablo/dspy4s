@@ -1,9 +1,9 @@
 package dspy4s.gepa
 
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.PythonRepr
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.contracts.:=
-import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+import zio.blocks.schema.DynamicValue
 
 /** One example that the reflection LM reads to improve the instruction of a component: gepa's
   * `{Inputs, Generated Outputs, Feedback}` record (dspy's `ReflectiveExample`). The reflective dataset of a component
@@ -30,7 +30,7 @@ final case class ReflectiveRecord(
 ):
 
   /** The record with the gepa keys, in the gepa order: `Inputs`, `Generated Outputs`, `Feedback`. */
-  def toRecord: DynamicValue.Record =
+  private def toRecord: DynamicValue.Record =
     DynamicValues.record(
       ReflectiveRecord.InputsKey   -> inputs,
       ReflectiveRecord.OutputsKey  -> generatedOutputs,
@@ -38,101 +38,17 @@ final case class ReflectiveRecord(
     )
 
 object ReflectiveRecord:
-  val InputsKey: String   = "Inputs"
-  val OutputsKey: String  = "Generated Outputs"
-  val FeedbackKey: String = "Feedback"
+  private val InputsKey   = "Inputs"
+  private val OutputsKey  = "Generated Outputs"
+  private val FeedbackKey = "Feedback"
 
   /** The key of [[ReflectiveRecord.inputs]] that holds the conversation history of the call (dspy's `"Context"`). */
   val ContextKey: String = "Context"
 
-  /** The JSON text of `records`: one JSON array of the [[ReflectiveRecord.toRecord]] objects, on one line.
-    *
-    * The form is that of Python's `json.dumps(records, ensure_ascii=False)`, which is the text that the upstream JSON
-    * adapter gives to the reflection LM:
-    *   - `", "` separates the items and `": "` separates a key from its value.
-    *   - The keys of a record keep their order.
-    *   - A character that is not ASCII stays as it is. A quote, a backslash, and a control character get an escape.
-    *
-    * A number has the text that Python gives: digits for an integer, and the text of `repr` for a `Float` and a
-    * `Double`.
-    *
-    * A value that Python's `json.dumps` does not write gets one of these forms:
-    *   - A `DynamicValue.Variant` whose value is an empty record (the case of an enum) is the name of the case, as a
-    *     string. An `Option` is different: the case `None` with no field is `null`, and the case `Some` with the one
-    *     field `value` is that value. Each other variant is an object with one key, the name of the case.
-    *   - A `DynamicValue.Map` is an object. A key that is not a string is the text of that key, as Python does for a
-    *     number and a boolean.
-    *   - A primitive that is not a string, a number, or a boolean is the text that an adapter shows for it
-    *     ([[DynamicValues.renderText]]), as a string. The unit value is `null`.
+  /** The JSON text of `records`: one JSON array of objects, on one line. Each object has the keys `Inputs`,
+    * `Generated Outputs`, and `Feedback`, in that order. The form is that of Python's
+    * `json.dumps(records, ensure_ascii=False)` ([[dspy4s.core.contracts.PythonText.json]]), which is the text that the
+    * upstream JSON adapter gives to the reflection LM.
     */
   def toJson(records: Vector[ReflectiveRecord]): String =
-    records.iterator.map(record => json(record.toRecord)).mkString("[", ", ", "]")
-
-  private def json(value: DynamicValue): String =
-    value match
-      case DynamicValue.Primitive(primitive) => scalar(primitive).fold(quote, identity)
-      case record: DynamicValue.Record       => jsonObject(record.fields.iterator)
-      case sequence: DynamicValue.Sequence   => sequence.elements.iterator.map(json).mkString("[", ", ", "]")
-      case map: DynamicValue.Map             => jsonObject(map.entries.iterator.map((key, item) => keyText(key) -> item))
-      case DynamicValue.Variant(name, item)  => variant(name, item)
-      case _: DynamicValue.Null.type         => "null"
-
-  private def jsonObject(entries: Iterator[(String, DynamicValue)]): String =
-    entries.map((key, item) => s"${quote(key)}: ${json(item)}").mkString("{", ", ", "}")
-
-  // The form that zio-blocks gives to an `Option`: the case `Some` with one field, and the case `None` with no field.
-  private val SomeCase  = "Some"
-  private val SomeField = "value"
-  private val NoneCase  = "None"
-
-  /** The JSON text of the case `name` of a variant, with the value `item`. */
-  private def variant(name: String, item: DynamicValue): String =
-    val fields = item match
-      case record: DynamicValue.Record => Some(DynamicValues.recordEntries(record))
-      case _                           => None
-    (name, fields) match
-      case (NoneCase, Some(Vector()))                  => "null"
-      case (_, Some(Vector()))                         => quote(name)
-      case (SomeCase, Some(Vector((SomeField, held)))) => json(held)
-      case _                                           => jsonObject(Iterator(name -> item))
-
-  /** The text of a primitive: `Right` for the text of a JSON number, boolean, or null, and `Left` for the content of a
-    * JSON string.
-    */
-  private def scalar(primitive: PrimitiveValue): Either[String, String] =
-    primitive match
-      case PrimitiveValue.String(text)       => Left(text)
-      case PrimitiveValue.Boolean(flag)      => Right(flag.toString)
-      case PrimitiveValue.Byte(number)       => Right(number.toString)
-      case PrimitiveValue.Short(number)      => Right(number.toString)
-      case PrimitiveValue.Int(number)        => Right(number.toString)
-      case PrimitiveValue.Long(number)       => Right(number.toString)
-      case PrimitiveValue.BigInt(number)     => Right(number.toString)
-      case PrimitiveValue.BigDecimal(number) => Right(number.toString)
-      // A value that is not finite has the same JSON text in the JVM and in Python `json.dumps`, for example `NaN`.
-      case PrimitiveValue.Float(number) =>
-        Right(if java.lang.Float.isFinite(number) then PythonRepr.float32(number) else number.toString)
-      case PrimitiveValue.Double(number) =>
-        Right(if java.lang.Double.isFinite(number) then PythonRepr.float(number) else number.toString)
-      case _: PrimitiveValue.Unit.type => Right("null")
-      case other                       => Left(DynamicValues.renderText(DynamicValue.Primitive(other)))
-
-  /** The key of a JSON object for the key of a `DynamicValue.Map`. */
-  private def keyText(key: DynamicValue): String =
-    key match
-      case DynamicValue.Primitive(primitive) => scalar(primitive).merge
-      case other                             => json(other)
-
-  /** `text` as a JSON string, with the escapes of Python's `json.dumps(text, ensure_ascii=False)`. */
-  private def quote(text: String): String =
-    text.iterator.map {
-      case '"'                      => "\\\""
-      case '\\'                     => "\\\\"
-      case '\n'                     => "\\n"
-      case '\r'                     => "\\r"
-      case '\t'                     => "\\t"
-      case '\b'                     => "\\b"
-      case '\f'                     => "\\f"
-      case control if control < ' ' => f"\\u${control.toInt}%04x"
-      case other                    => other.toString
-    }.mkString("\"", "", "\"")
+    PythonText.json(DynamicValues.sequence(records.map(_.toRecord)))

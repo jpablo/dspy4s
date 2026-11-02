@@ -13,7 +13,7 @@ import dspy4s.core.contracts.TraceEntry
   * The text is the `completion_text` of that value: the raw response of the model when the run failed to parse it
   * (upstream `AdapterParseError.lm_response`). For another error, the text is the message of the error, for example the
   * message of an exception of the run or of the metric (upstream drops such an example). The `prediction` of a run that
-  * failed is empty.
+  * failed is empty. A run that passed keeps its prediction, also when the metric gave a `Left`.
   */
 final case class Trajectory(
     example        : Example,
@@ -28,16 +28,14 @@ final case class Trajectory(
   def failed: Boolean = failure.isDefined
 
 /** Result of evaluating a candidate over a batch (the analogue of gepa's `EvaluationBatch`). `trajectories` is `Some`
-  * iff traces were captured (the reflective path) and `None` on the scores-only fast path. `outputs`, `scores`, and
-  * (when present) `trajectories` are all aligned with the input batch order.
+  * iff traces were captured (the reflective path) and `None` on the scores-only fast path. `scores`, `objectiveScores`,
+  * and (when present) `trajectories` are all aligned with the input batch order.
   *
   * `objectiveScores` holds the objective scores that the metric gave for each example
-  * ([[dspy4s.gepa.contracts.ScoreWithFeedback.objectiveScores]]), aligned with the batch. An example with no objective
-  * score has an empty map. The field is `None` when no example of the batch has an objective score, as upstream.
+  * ([[dspy4s.gepa.contracts.ScoreWithFeedback.objectiveScores]]). An example with no objective score has an empty map.
   */
 final case class EvaluationBatch(
-    outputs        : Vector[RawPrediction],
     scores         : Vector[Double],
     trajectories   : Option[Vector[Trajectory]],
-    objectiveScores: Option[Vector[Map[String, Double]]] = None
+    objectiveScores: Vector[Map[String, Double]]
 )

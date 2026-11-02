@@ -102,13 +102,11 @@ class GepaObjectiveRulesSuite extends FunSuite:
 
       val scoresOnly = adapter.evaluate(batch, seedCandidate, captureTraces = false)
       assertEquals(scoresOnly.scores, Vector(1.0, -1.0, 1.0))
-      assertEquals(scoresOnly.objectiveScores, Some(Vector(quality, none, quality)))
-      // The output is empty, as it is for a run that fails.
-      assertEquals(scoresOnly.outputs(1), RawPrediction.empty)
+      assertEquals(scoresOnly.objectiveScores, Vector(quality, none, quality))
 
       val withTraces = adapter.evaluate(batch, seedCandidate, captureTraces = true)
       assertEquals(withTraces.scores, Vector(1.0, -1.0, 1.0))
-      assertEquals(withTraces.objectiveScores, Some(Vector(quality, none, quality)))
+      assertEquals(withTraces.objectiveScores, Vector(quality, none, quality))
       // The run passed, so the trajectory keeps the prediction.
       val unscored = withTraces.trajectories.map(_(1)).getOrElse(fail("the batch has no trajectories"))
       assertEquals(unscored.failed, false)
@@ -124,8 +122,9 @@ class GepaObjectiveRulesSuite extends FunSuite:
       Vector(false, true).foreach { captureTraces =>
         val result = adapter.evaluate(batch, seedCandidate, captureTraces)
         assertEquals(result.scores, Vector(1.0, -1.0, 1.0), s"captureTraces=$captureTraces")
-        assertEquals(result.objectiveScores, Some(Vector(quality, none, quality)), s"captureTraces=$captureTraces")
-        assertEquals(result.outputs(1), RawPrediction.empty, s"captureTraces=$captureTraces")
+        assertEquals(result.objectiveScores, Vector(quality, none, quality), s"captureTraces=$captureTraces")
+        // The metric threw, so the example has no result of its run.
+        result.trajectories.foreach(runs => assertEquals(runs(1).prediction, RawPrediction.empty))
       }
     }
   }
@@ -144,51 +143,43 @@ class GepaObjectiveRulesSuite extends FunSuite:
     // A different value, a different set of names, and no objective score.
     assert(cache.restore(seedCandidate, batch, Vector(0.5, 0.5), Vector(Map("quality" -> 0.2), none)).isLeft)
     assert(cache.restore(seedCandidate, batch, Vector(0.5, 0.5), Vector(quality, Map("cost" -> 0.1))).isLeft)
-    assert(cache.restore(seedCandidate, batch, Vector(0.5, 0.5)).isLeft)
+    assert(cache.restore(seedCandidate, batch, Vector(0.5, 0.5), Vector(none, none)).isLeft)
     // The score rule stays.
     assert(cache.restore(seedCandidate, batch, Vector(0.5, 0.9), Vector(quality, none)).isLeft)
 
     // The first pair of this call is new, and the second pair has a conflict: the cache gets no pair.
     val third = example("Three?")
     assert(cache.restore(seedCandidate, Vector(third, batch(0)), Vector(0.9, 0.5), Vector(none, none)).isLeft)
-    assertEquals(cache.uncachedCount(seedCandidate, Vector(third)), 1)
 
     val lm = new AnswerLm
     withLm(lm) {
       assertEquals(cache.scored(seedCandidate, batch), ScoredBatch(Vector(0.5, 0.5), Vector(quality, none), 0))
       assertEquals(lm.calls.get(), 0)
+      assertEquals(cache.scored(seedCandidate, Vector(third)).evaluated, 1)
     }
   }
 
   test("an example that is two times in a restored batch must have one result") {
-    val cache = newCache
-    val twice = Vector(example("One?"), example("One?"))
-    assert(cache.restore(seedCandidate, twice, Vector(0.5, 0.5), Vector(quality, none)).isLeft)
-    assert(cache.restore(seedCandidate, twice, Vector(0.5, 0.9), Vector(quality, quality)).isLeft)
-    assertEquals(cache.uncachedCount(seedCandidate, twice), 1)
-    assertEquals(cache.restore(seedCandidate, twice, Vector(0.5, 0.5), Vector(quality, quality)), Right(()))
-    assertEquals(cache.uncachedCount(seedCandidate, twice), 0)
+    val twice    = Vector(example("One?"), example("One?"))
+    val rejected = newCache
+    assert(rejected.restore(seedCandidate, twice, Vector(0.5, 0.5), Vector(quality, none)).isLeft)
+    assert(rejected.restore(seedCandidate, twice, Vector(0.5, 0.9), Vector(quality, quality)).isLeft)
+    val restored = newCache
+    assertEquals(restored.restore(seedCandidate, twice, Vector(0.5, 0.5), Vector(quality, quality)), Right(()))
+    withLm(new AnswerLm) {
+      // A restore that fails gives the cache no pair.
+      assertEquals(rejected.scored(seedCandidate, twice).evaluated, 1)
+      assertEquals(restored.scored(seedCandidate, twice).evaluated, 0)
+    }
   }
 
   // ── Persistence ─────────────────────────────────────────────────────────────────────────────────────────────
 
-  test("a state with the instance type and no objective data writes the fields of an older snapshot only") {
-    val plain = GepaStatePersistence.toJson(GepaState.seed(seedCandidate, Vector(0.5, 0.5), metricCalls = 2))
-    assert(!plain.contains("valObjectiveScores"), plain)
-    assert(!plain.contains("frontierType"), plain)
-
-    val objective = GepaStatePersistence.toJson(
-      GepaState.seed(seedCandidate, Vector(0.5, 0.5), 2, Vector(quality, none), FrontierType.Hybrid)
-    )
-    assert(objective.contains(""""valObjectiveScores":[[{"quality":1.0},{}]]"""), objective)
-    assert(objective.contains(""""frontierType":"Hybrid""""), objective)
-  }
-
   test("a snapshot with objective scores that are not aligned with the scores is rejected") {
     def snapshot(objectiveScores: String): String =
-      s"""{"candidates":[{"optimizable-0":"c0"}],"valSubscores":[[0.5,0.5]],"parents":[[]],"totalMetricCalls":2,"valObjectiveScores":$objectiveScores}"""
+      s"""{"candidates":[{"optimizable-0":"c0"}],"valSubscores":[[0.5,0.5]],"parents":[[]],"totalMetricCalls":2,"nextComponent":[0],"discoveryCalls":[0],"valObjectiveScores":$objectiveScores}"""
     assertEquals(
-      GepaStatePersistence.fromJson(snapshot("""[[{"quality":1.0},{}]]""")).map(_.objectiveScoresOf(0)),
+      GepaStatePersistence.fromJson(snapshot("""[[{"quality":1.0},{}]]""")).map(_.valObjectiveScores(0)),
       Right(Vector(quality, none))
     )
     assert(GepaStatePersistence.fromJson(snapshot("""[[{"quality":1.0}]]""")).isLeft)
@@ -311,7 +302,7 @@ class GepaObjectiveRulesSuite extends FunSuite:
       Map(first -> Some("Component A. FIXED_A"), second -> Some("Component B. FIXED_B"))
     )
     // The subsample of the merge and its validation use the same cache entries.
-    assertEquals(result.state.objectiveScoresOf(3), Vector.fill(4)(Map("a" -> 1.0, "b" -> 1.0)))
-    assertEquals(result.state.objectiveScoresOf(0), Vector.fill(4)(Map("a" -> 0.0, "b" -> 0.0)))
+    assertEquals(result.state.valObjectiveScores(3), Vector.fill(4)(Map("a" -> 1.0, "b" -> 1.0)))
+    assertEquals(result.state.valObjectiveScores(0), Vector.fill(4)(Map("a" -> 0.0, "b" -> 0.0)))
     assertEquals(result.state.objectiveBest, Map("a" -> Set(1, 3), "b" -> Set(2, 3)))
   }

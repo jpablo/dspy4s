@@ -159,7 +159,7 @@ class GepaObjectiveEngineSuite extends FunSuite:
       new GepaAdapter(program, metric).evaluate(dataset.take(3), seedCandidate, captureTraces = false)
     }
     assertEquals(batch.scores, Vector(0.5, 0.5, 0.5))
-    assertEquals(batch.objectiveScores, Some(Vector(wrong, wrong, wrong)))
+    assertEquals(batch.objectiveScores, Vector(wrong, wrong, wrong))
     assertEquals(batch.trajectories, None)
     assertEquals(metric.programCalls.get(), 3)
   }
@@ -170,16 +170,22 @@ class GepaObjectiveEngineSuite extends FunSuite:
       new GepaAdapter(program, metric).evaluate(dataset.take(2), Map(first -> Some(improved)), captureTraces = true)
     }
     assertEquals(batch.scores, Vector(1.0, 1.0))
-    assertEquals(batch.objectiveScores, Some(Vector(right, right)))
+    assertEquals(batch.objectiveScores, Vector(right, right))
     assertEquals(batch.trajectories.map(_.map(_.objectiveScores)), Some(Vector(right, right)))
     assertEquals(metric.programCalls.get(), 2)
   }
 
-  test("a metric with no objective score gives no objective scores for the batch") {
+  test("a metric with no objective score gives each example of the batch an empty map") {
     withTaskLm(new TaskLm) {
       val adapter = new GepaAdapter(program, noObjectives)
-      assertEquals(adapter.evaluate(dataset.take(2), seedCandidate, captureTraces = false).objectiveScores, None)
-      assertEquals(adapter.evaluate(dataset.take(2), seedCandidate, captureTraces = true).objectiveScores, None)
+      assertEquals(
+        adapter.evaluate(dataset.take(2), seedCandidate, captureTraces = false).objectiveScores,
+        Vector(none, none)
+      )
+      assertEquals(
+        adapter.evaluate(dataset.take(2), seedCandidate, captureTraces = true).objectiveScores,
+        Vector(none, none)
+      )
     }
   }
 
@@ -190,11 +196,11 @@ class GepaObjectiveEngineSuite extends FunSuite:
       val adapter = new GepaAdapter(program, sparse)
       assertEquals(
         adapter.evaluate(dataset.take(2), seedCandidate, captureTraces = false).objectiveScores,
-        Some(Vector(wrong, none))
+        Vector(wrong, none)
       )
       assertEquals(
         adapter.evaluate(dataset.take(2), seedCandidate, captureTraces = true).objectiveScores,
-        Some(Vector(wrong, none))
+        Vector(wrong, none)
       )
     }
   }
@@ -205,15 +211,15 @@ class GepaObjectiveEngineSuite extends FunSuite:
       val adapter    = new GepaAdapter(program, new GradedMetric, failureScore = -1.0)
       val scoresOnly = adapter.evaluate(batchWithFailure, seedCandidate, captureTraces = false)
       assertEquals(scoresOnly.scores, Vector(0.5, -1.0, 0.5))
-      assertEquals(scoresOnly.objectiveScores, Some(Vector(wrong, none, wrong)))
+      assertEquals(scoresOnly.objectiveScores, Vector(wrong, none, wrong))
 
       val withTraces = adapter.evaluate(batchWithFailure, seedCandidate, captureTraces = true)
       assertEquals(withTraces.scores, Vector(0.5, -1.0, 0.5))
-      assertEquals(withTraces.objectiveScores, Some(Vector(wrong, none, wrong)))
+      assertEquals(withTraces.objectiveScores, Vector(wrong, none, wrong))
 
       // Each run fails: no example has an objective score.
       val allFail = adapter.evaluate(Vector(example("BROKEN one?"), example("BROKEN two?")), seedCandidate, false)
-      assertEquals(allFail.objectiveScores, None)
+      assertEquals(allFail.objectiveScores, Vector(none, none))
     }
   }
 
@@ -224,7 +230,7 @@ class GepaObjectiveEngineSuite extends FunSuite:
       new GepaAdapter(program, new GradedMetric).evaluate(broken ++ dataset.take(2), seedCandidate, false)
     }
     assertEquals(batch.scores, Vector.fill(12)(0.0) ++ Vector(0.5, 0.5))
-    assertEquals(batch.objectiveScores.map(_.drop(12)), Some(Vector(wrong, wrong)))
+    assertEquals(batch.objectiveScores.drop(12), Vector(wrong, wrong))
   }
 
   test("the metric gets the trace only in an evaluation with traces") {
@@ -248,7 +254,6 @@ class GepaObjectiveEngineSuite extends FunSuite:
       assertEquals(cache.scored(seedCandidate, batch), ScoredBatch(Vector(0.5, 0.5), Vector(wrong, wrong), 2))
       assertEquals(lm.calls.get(), 2)
       assertEquals(cache.scored(seedCandidate, batch), ScoredBatch(Vector(0.5, 0.5), Vector(wrong, wrong), 0))
-      assertEquals(cache.scores(seedCandidate, batch), (Vector(0.5, 0.5), 0))
       assertEquals(lm.calls.get(), 2)
     }
   }
@@ -265,9 +270,9 @@ class GepaObjectiveEngineSuite extends FunSuite:
     val cache = new GepaEvalCache[DynamicPredict](new GepaAdapter(program, new GradedMetric))
     val batch = dataset.take(2)
     assertEquals(cache.restore(seedCandidate, batch, Vector(0.25, 0.75), Vector(right, none)), Right(()))
-    // A restore with no objective scores gives each example an empty map.
+    // An example with no objective score has an empty map.
     val other = Map(first -> Some("Another instruction."))
-    assertEquals(cache.restore(other, batch, Vector(0.1, 0.2)), Right(()))
+    assertEquals(cache.restore(other, batch, Vector(0.1, 0.2), Vector(none, none)), Right(()))
     withTaskLm(lm) {
       assertEquals(cache.scored(seedCandidate, batch), ScoredBatch(Vector(0.25, 0.75), Vector(right, none), 0))
       assertEquals(cache.scored(other, batch), ScoredBatch(Vector(0.1, 0.2), Vector(none, none), 0))
@@ -286,18 +291,17 @@ class GepaObjectiveEngineSuite extends FunSuite:
     assertEquals(result.numCandidates.toInt, 2)
     assertEquals(result.state.frontierType, FrontierType.Instance)
     assertEquals(result.state.candidates.toVector, Vector(seedCandidate, Map(first -> Some(improved))))
-    assertEquals(result.state.objectiveScoresOf(0), Vector.fill(4)(wrong))
-    assertEquals(result.state.objectiveScoresOf(1), Vector.fill(4)(right))
+    assertEquals(result.state.valObjectiveScores(0), Vector.fill(4)(wrong))
+    assertEquals(result.state.valObjectiveScores(1), Vector.fill(4)(right))
     assertEquals(result.state.objectiveBest, Map("correctness" -> Set(1), "incorrectness" -> Set(0)))
     assertEquals(result.state.objectiveFront, Map("correctness" -> 1.0, "incorrectness" -> 1.0))
-    assertEquals(result.state.totalMetricCalls, result.totalMetricCalls)
   }
 
   test("a run with a metric that has no objective score keeps no objective data") {
     val result = withTaskLm(new TaskLm)(optimize(noObjectives, new ReflectionLm, oneIteration()))
       .fold(error => fail(error.message), identity)
     assertEquals(result.numCandidates.toInt, 2)
-    assertEquals(result.state.valObjectiveScores, Vector.empty)
+    assertEquals(result.state.valObjectiveScores, Vector.fill(2)(Vector.fill(4)(none)))
   }
 
   test("a run with the objective type has one front for each objective") {
@@ -368,7 +372,7 @@ class GepaObjectiveEngineSuite extends FunSuite:
 
     assertEquals(result.numCandidates.toInt, 2)
     assertEquals(result.state.valSubscores(1), Vector.fill(4)(0.0))
-    assertEquals(result.state.objectiveScoresOf(1), Vector.fill(4)(none))
+    assertEquals(result.state.valObjectiveScores(1), Vector.fill(4)(none))
     assertEquals(result.state.objectiveBest, Map("correctness" -> Set(0), "incorrectness" -> Set(0)))
     // The seed has the larger mean score.
     assertEquals(result.bestCandidate, seedCandidate)
@@ -387,7 +391,7 @@ class GepaObjectiveEngineSuite extends FunSuite:
         .fold(error => fail(error.message), identity)
 
       assertEquals(after.state, before.state)
-      assertEquals(after.state.objectiveScoresOf(1), Vector.fill(4)(right))
+      assertEquals(after.state.valObjectiveScores(1), Vector.fill(4)(right))
       // The budget is used, so the second run makes no iteration and no evaluation.
       assertEquals(taskLm.calls.get(), 0)
     }

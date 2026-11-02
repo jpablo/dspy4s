@@ -65,27 +65,25 @@ class GepaEvalCacheSuite extends FunSuite:
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
 
-      val (scores1, evals1) = cache.scores(candA, batch)
-      assertEquals(scores1, Vector(1.0, 1.0))
-      assertEquals(evals1, 2) // both examples actually evaluated
+      val first = cache.scored(candA, batch)
+      assertEquals(first.scores, Vector(1.0, 1.0))
+      assertEquals(first.evaluated, 2) // both examples actually evaluated
       assertEquals(lm.calls.get(), 2)
 
       // Identical (candidate, examples): fully cached -> no actual evals, no further LM calls.
-      val (scores2, evals2) = cache.scores(candA, batch)
-      assertEquals(scores2, Vector(1.0, 1.0))
-      assertEquals(evals2, 0)
+      val second = cache.scored(candA, batch)
+      assertEquals(second.scores, Vector(1.0, 1.0))
+      assertEquals(second.evaluated, 0)
       assertEquals(lm.calls.get(), 2)
 
       // A different candidate is a cache miss again (keyed by candidate AND example).
-      val (_, evals3) = cache.scores(candB, batch)
-      assertEquals(evals3, 2)
+      assertEquals(cache.scored(candB, batch).evaluated, 2)
       assertEquals(lm.calls.get(), 4)
 
       // Partial overlap: one already-seen example (candA, batch(0)) is free; the new one costs one eval.
       val newExample =
         Example(values = DynamicValues.record("question" := "Q3", "answer" := "Paris"), inputKeys = Set("question"))
-      val (_, evals4) = cache.scores(candA, Vector(batch(0), newExample))
-      assertEquals(evals4, 1)
+      assertEquals(cache.scored(candA, Vector(batch(0), newExample)).evaluated, 1)
       assertEquals(lm.calls.get(), 5)
     }
   }
@@ -98,10 +96,10 @@ class GepaEvalCacheSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val (scores, evals)  = cache.scores(cand, Vector(batch.head, batch.head, batch.last, batch.head))
+      val result           = cache.scored(cand, Vector(batch.head, batch.head, batch.last, batch.head))
 
-      assertEquals(scores, Vector(1.0, 1.0, 1.0, 1.0))
-      assertEquals(evals, 2)
+      assertEquals(result.scores, Vector(1.0, 1.0, 1.0, 1.0))
+      assertEquals(result.evaluated, 2)
       assertEquals(lm.calls.get(), 2)
     }
   }
@@ -117,9 +115,8 @@ class GepaEvalCacheSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val (_, evals)       = cache.scores(cand, Vector(original, differentInputs, augmented))
 
-      assertEquals(evals, 3)
+      assertEquals(cache.scored(cand, Vector(original, differentInputs, augmented)).evaluated, 3)
       assertEquals(lm.calls.get(), 3)
     }
   }
@@ -130,13 +127,13 @@ class GepaEvalCacheSuite extends FunSuite:
     val cache   = new GepaEvalCache[DynamicPredict](adapter)
     val cand    = Map(OptimizableId(0) -> Some("Answer A."))
 
-    assertEquals(cache.restore(cand, batch, Vector(0.25, 0.75)), Right(()))
+    assertEquals(cache.restore(cand, batch, Vector(0.25, 0.75), Vector(Map.empty, Map.empty)), Right(()))
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val (scores, evals)  = cache.scores(cand, batch)
+      val result           = cache.scored(cand, batch)
 
-      assertEquals(scores, Vector(0.25, 0.75))
-      assertEquals(evals, 0)
+      assertEquals(result.scores, Vector(0.25, 0.75))
+      assertEquals(result.evaluated, 0)
       assertEquals(lm.calls.get(), 0)
     }
   }

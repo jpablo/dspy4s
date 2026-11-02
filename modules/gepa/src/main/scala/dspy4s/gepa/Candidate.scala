@@ -28,9 +28,3 @@ object Candidate:
       }
     }
     ps.replace(program, updated)
-
-  /** Human-readable view for diagnostics and UI. A vector is used because structural display names are not the unique
-    * identity key and may collide in unusual user-defined `OptimizableStructure` instances.
-    */
-  def named[P](program: P, candidate: Candidate)(using ps: OptimizableStructure[P]): Vector[(String, Option[String])] =
-    ps.readIdentified(program).flatMap(entry => candidate.get(entry.id).map(entry.displayName -> _))

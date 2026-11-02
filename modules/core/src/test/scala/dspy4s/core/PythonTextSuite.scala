@@ -3,12 +3,26 @@ package dspy4s.core
 import dspy4s.core.contracts.{:=, DspyError, DynamicValues, PythonRepr, PythonText}
 import munit.FunSuite
 import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
+
+/** The values of the JSON tests of [[PythonTextSuite]]. Top-level so the derivation of each `Schema` sees the Mirror.
+  */
+enum Mood derives Schema:
+  case Calm, Tense
+
+sealed trait Shape derives Schema
+object Shape:
+  final case class Circle(radius: Int)          extends Shape
+  final case class Box(width: Int, height: Int) extends Shape
+
+final case class Row(hint: Option[String], note: Option[String], mood: Mood, shape: Shape) derives Schema
 
 /** The Python text forms that the prompts use (decision D3). The expected texts come from CPython 3.12: `repr` of a
   * float, `json.dumps(..., ensure_ascii=False)`, `textwrap.dedent`, `str.splitlines`, and `str.strip`.
   */
 class PythonTextSuite extends FunSuite:
+
+  private def double(value: Double): DynamicValue = DynamicValue.Primitive(PrimitiveValue.Double(value))
 
   private val floats: Vector[(Double, String)] = Vector(
     0.0                     -> "0.0",
@@ -63,6 +77,123 @@ class PythonTextSuite extends FunSuite:
       PythonText.json(value, Some(2)),
       "{\n  \"a\": [],\n  \"b\": {},\n  \"c\": [\n    1,\n    {\n      \"d\": 2.0\n    }\n  ]\n}"
     )
+  }
+
+  test("a Double in a JSON text has the text of the Python repr") {
+    val expected = Vector(
+      0.0                    -> "0.0",
+      -0.0                   -> "-0.0",
+      0.5                    -> "0.5",
+      1.0                    -> "1.0",
+      100.0                  -> "100.0",
+      123.456                -> "123.456",
+      3.14                   -> "3.14",
+      2.0 / 3                -> "0.6666666666666666",
+      1e-3                   -> "0.001",
+      1e-4                   -> "0.0001",
+      0.00012345             -> "0.00012345",
+      1e-5                   -> "1e-05",
+      1.5e-7                 -> "1.5e-07",
+      -2.5e-10               -> "-2.5e-10",
+      1e7                    -> "10000000.0",
+      12345678.0             -> "12345678.0",
+      -1234.5e10             -> "-12345000000000.0",
+      999999999999999.9      -> "999999999999999.9",
+      1e15                   -> "1000000000000000.0",
+      9999999999999998.0     -> "9999999999999998.0",
+      1e16                   -> "1e+16",
+      1.2345e16              -> "1.2345e+16",
+      123456789012345680.0   -> "1.2345678901234568e+17",
+      1e22                   -> "1e+22",
+      1.7976931348623157e308 -> "1.7976931348623157e+308"
+    )
+    expected.foreach((value, text) => assertEquals(PythonText.json(double(value)), text))
+  }
+
+  test("a Double that is not finite has the JSON text of Python") {
+    assertEquals(PythonText.json(double(Double.NaN)), "NaN")
+    assertEquals(PythonText.json(double(Double.PositiveInfinity)), "Infinity")
+    assertEquals(PythonText.json(double(Double.NegativeInfinity)), "-Infinity")
+  }
+
+  test("a Float has its shortest digits, and each integer type has its digits") {
+    def text(primitive: PrimitiveValue): String = PythonText.json(DynamicValue.Primitive(primitive))
+    assertEquals(text(PrimitiveValue.Float(0.1f)), "0.1")
+    assertEquals(text(PrimitiveValue.Float(1.0e-5f)), "1e-05")
+    assertEquals(text(PrimitiveValue.Long(-9007199254740993L)), "-9007199254740993")
+    assertEquals(text(PrimitiveValue.Short(7)), "7")
+    assertEquals(
+      text(PrimitiveValue.BigInt(BigInt("123456789012345678901234567890"))),
+      "123456789012345678901234567890"
+    )
+  }
+
+  test("each control character gets the escape of Python, and each other character stays") {
+    val controls = Vector(0x00, 0x1f, 0x08, 0x0c, 0x0d).map(_.toChar).mkString
+    assertEquals(PythonText.json(DynamicValues.string(controls)), "\"" + """\u0000\u001f\b\f\r""" + "\"")
+    // DEL and the line separator U+2028 get no escape in Python.
+    val others = Vector(0x7f, 0x2028).map(_.toChar).mkString
+    assertEquals(PythonText.json(DynamicValues.string(others)), "\"" + others + "\"")
+  }
+
+  test("the key of a record gets the same escapes as a string") {
+    assertEquals(PythonText.json(DynamicValues.record("a \"b\"\n" := 1)), """{"a \"b\"\n": 1}""")
+  }
+
+  test("the case of an enum is its name, and an Option is its value or null") {
+    val row = Row(hint = Some("look"), note = None, mood = Mood.Tense, shape = Shape.Circle(2))
+    assertEquals(
+      PythonText.json(summon[Schema[Row]].toDynamicValue(row)),
+      """{"hint": "look", "note": null, "mood": "Tense", "shape": {"Circle": {"radius": 2}}}"""
+    )
+  }
+
+  test("a variant with a value is an object with the name of the case as its key") {
+    assertEquals(
+      PythonText.json(summon[Schema[Shape]].toDynamicValue(Shape.Box(2, 3))),
+      """{"Box": {"width": 2, "height": 3}}"""
+    )
+    assertEquals(PythonText.json(DynamicValue.Variant("Count", DynamicValues.fromAny(3))), """{"Count": 3}""")
+  }
+
+  test("a map is an object, and a key that is not a string is the text of that key") {
+    val byName = DynamicValue.Map(Chunk(DynamicValues.fromAny("a") -> DynamicValues.fromAny(1)))
+    assertEquals(PythonText.json(byName), """{"a": 1}""")
+    val byNumber = DynamicValue.Map(
+      Chunk(
+        DynamicValues.fromAny(1)    -> DynamicValues.fromAny("one"),
+        DynamicValues.fromAny(true) -> DynamicValues.fromAny("yes"),
+        double(2.5)                 -> DynamicValue.Null
+      )
+    )
+    assertEquals(PythonText.json(byNumber), """{"1": "one", "true": "yes", "2.5": null}""")
+    assertEquals(PythonText.json(DynamicValue.Map(Chunk.empty)), "{}")
+  }
+
+  test("a float key that is not finite has the JSON text of Python, as a float value has") {
+    val byDouble = DynamicValue.Map(
+      Chunk(
+        double(Double.NaN)              -> DynamicValues.fromAny(1),
+        double(Double.PositiveInfinity) -> DynamicValues.fromAny(2),
+        double(Double.NegativeInfinity) -> DynamicValues.fromAny(3)
+      )
+    )
+    assertEquals(PythonText.json(byDouble), """{"NaN": 1, "Infinity": 2, "-Infinity": 3}""")
+    val byFloat = DynamicValue.Map(
+      Chunk(
+        DynamicValue.Primitive(PrimitiveValue.Float(Float.NaN)) -> DynamicValues.fromAny(1),
+        DynamicValue.Primitive(PrimitiveValue.Float(0.5f))      -> DynamicValues.fromAny(2)
+      )
+    )
+    assertEquals(PythonText.json(byFloat), """{"NaN": 1, "0.5": 2}""")
+  }
+
+  test("a primitive that JSON does not have is the text that an adapter shows, and the unit value is null") {
+    assertEquals(PythonText.json(DynamicValue.Primitive(PrimitiveValue.Char('x'))), "\"x\"")
+    val uuid =
+      DynamicValue.Primitive(PrimitiveValue.UUID(java.util.UUID.fromString("123e4567-e89b-12d3-a456-426614174000")))
+    assertEquals(PythonText.json(uuid), "\"" + DynamicValues.renderText(uuid) + "\"")
+    assertEquals(PythonText.json(DynamicValue.Primitive(PrimitiveValue.Unit)), "null")
   }
 
   test("str of a scalar is the Python text, and an Option value is its element or None") {

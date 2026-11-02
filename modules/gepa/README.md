@@ -46,7 +46,7 @@ With no validation set, or with an empty one, GEPA uses the trainset for the Par
 |----------|--------------|
 | `GepaBudget.MetricCalls(n)` | `n` |
 | `GepaBudget.FullEvals(n)` | `n` × (the trainset size + the size of the validation set that you give) |
-| `GepaBudget.Auto(level)` | the formula of `GepaBudget.auto`, for `Light`, `Medium`, or `Heavy` |
+| `GepaBudget.Auto(level)` | the formula of upstream `auto_budget`, for `Light`, `Medium`, or `Heavy` |
 
 `Auto` uses the number of components, the number of candidates of the level (6, 12, or 18), and the size of the
 validation set. With no validation set, it uses the size of the trainset. For one component, `Light`, and 4
@@ -231,7 +231,8 @@ for which the proposer failed two times.
 Set `GepaConfig.runDir` to save a checkpoint after the seed evaluation and after each iteration. A run with a
 checkpoint in that directory continues it. Each random draw comes from the seed and the iteration index, so a resumed
 run makes the same draws as a run with no stop. A checkpoint that cannot be read, or that does not agree with the
-program or the configuration, gives a `Left`. The file then stays unchanged.
+program or the configuration, gives a `Left`. The file then stays unchanged. A checkpoint must have the form that this
+version writes: an earlier form with no round-robin pointers, no objective rows, or no discovery counts gives a `Left`.
 
 ## Configuration (`GepaConfig`)
 
