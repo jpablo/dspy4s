@@ -39,7 +39,7 @@ object SettingsProgramRuntime:
 
   /** The adapter of `context`, else a default [[ChatAdapter]] (upstream `dspy.settings.adapter or dspy.ChatAdapter()`).
     */
-  private[programs] def adapterOrChat(context: RuntimeContext): Adapter =
+  private[dspy4s] def adapterOrChat(context: RuntimeContext): Adapter =
     context.adapter match
       case Some(adapter: Adapter) => adapter
       case _                      => ChatAdapter()

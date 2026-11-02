@@ -133,7 +133,7 @@ class StreamingWrapperFlushSuite extends FunSuite:
       Vector(header, LmChunk(text = "is", finishReason = Some("stop"))),
       Vector(header, LmChunk(text = "is", finishReason = Some("stop")), usage),
       Vector(LmChunk(text = "Par"), LmChunk(text = "is.", finishReason = Some("stop"))),
-      Vector(LmChunk(text = "Par"), LmChunk(text = "is."))
+      Vector(LmChunk(text = "Par"), LmChunk(text = "is.", finishReason = Some("stop")), usage)
     )
     cases.foreach { chunks =>
       val viaCall = called(chunks)
@@ -146,6 +146,12 @@ class StreamingWrapperFlushSuite extends FunSuite:
     val chunks = Vector(LmChunk(text = "[[ ## answer ## ]]\nPar"))
     assertEquals(tokensOf(Breaking(chunks))(wrapper => wrapper.call(request)), beforeFailure)
     assertEquals(tokensOf(Breaking(chunks))(wrapper => wrapper.stream(request).toVector), beforeFailure)
+  }
+
+  test("a stream with no finish reason ends the stream path with no flush, as the call path does") {
+    val chunks = Vector(LmChunk(text = "[[ ## answer ## ]]\nPar"))
+    assertEquals(called(chunks), beforeFailure)
+    assertEquals(streamed(chunks), beforeFailure)
   }
 
   test("a close of the stream before its end gives no flush") {

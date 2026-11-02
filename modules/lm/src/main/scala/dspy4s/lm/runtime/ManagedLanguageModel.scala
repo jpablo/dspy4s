@@ -416,10 +416,7 @@ final case class ManagedLanguageModel(
         case Right(None) if complete => succeed()
         case Right(None)             =>
           // The stream guard (upstream `checked_stream`): a stream with no completion chunk is not complete.
-          val error = LmStreamAssemblyError(
-            "The LM stream ended with no chunk that has a finish reason",
-            LmErrorDetails(model = Some(request.model))
-          )
+          val error = ManagedLanguageModel.noFinishReason(request)
           fail(error, LmChunk.failure(error))
 
     private def accept(chunk: LmChunk): Unit =
@@ -497,3 +494,12 @@ object ManagedLanguageModel:
     */
   def unexpected(error: Throwable, request: LmRequest): LmUnexpectedError =
     LmUnexpectedError(DspyError.messageOf(error), LmErrorDetails(model = Some(request.model)))
+
+  /** The error of a stream that ends with no chunk that has a finish reason (upstream `checked_stream`). The stream
+    * wrapper of `streamify` gives the same error for a stream of its model.
+    */
+  def noFinishReason(request: LmRequest): LmStreamAssemblyError =
+    LmStreamAssemblyError(
+      "The LM stream ended with no chunk that has a finish reason",
+      LmErrorDetails(model = Some(request.model))
+    )

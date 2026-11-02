@@ -353,7 +353,7 @@ class StreamingWrapperContractSuite extends FunSuite:
       case other => fail(s"expected only an LmUnexpectedError, got $other")
   }
 
-  test("on the stream path, a fatal error of the delegate stream goes up to the caller") {
+  test("on the stream path, a fatal error of the delegate stream goes up to the caller, and the stream closes") {
     val source  = Breaking(() => InterruptedException("stop"))
     val wrapper = StreamingLanguageModelWrapper(Opening(() => source), StreamingQueue[StreamEvent]())
 
@@ -365,6 +365,7 @@ class StreamingWrapperContractSuite extends FunSuite:
         None
       catch case error: InterruptedException => Some(error.getMessage)
     assertEquals(thrown, Some("stop"))
+    assert(source.closed, "the wrapper must close the stream of the delegate")
   }
 
   test("on the stream path, a next after the end of the stream throws NoSuchElementException, as for each iterator") {

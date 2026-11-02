@@ -182,8 +182,7 @@ matches Python; per-chunk shape doesn't. See
 [STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md) for the per-token
 refactor that would close the gap, and
 [PORT_MAP §4](PORT_MAP.md#4-behavioral-deltas) for the other
-documented streaming deltas (completion-chunk emission,
-`allowReuse` default).
+documented streaming deltas (completion-chunk emission).
 
 ## 6. Error handling: exceptions → `Either[DspyError, A]` at boundaries
 
@@ -538,6 +537,26 @@ The `evaluate` module follows `dspy/evaluate/`. These rules differ from upstream
   Upstream prints a pandas table, and a metric cell has a check mark.
 - `ExampleEvaluation.error` always holds the failure as `[code] message`, and there is no `provideTraceback`, because an
   `Either` has no stack trace. Upstream logs each error, and its `provide_traceback` adds the stack trace to the log.
+
+## 23. Streaming rules with no upstream form
+
+**Convention.**
+
+The `streaming` module follows `dspy/streaming/`. These rules differ from upstream:
+
+- A listener on a field that is not unique, or on an unknown field, gives a warning through `warningSink`. The port gives
+  a warning because `streamify` gives a function and not an `Either`. For a field that is not unique, upstream raises a
+  `ValueError`. For an unknown field, upstream also raises: its `ValueError` branch cannot run, so the error is a
+  `TypeError`.
+- The port streams the text of any field. Upstream also accepts any field, but it gives a field of a streamable
+  `dspy.Type` to `parse_stream_chunk`. The port has no such hook.
+- A predictor with its own model (`Predict.withLm`) does not go through the wrapper, so it streams no token. Upstream
+  streams each model through `settings.send_stream`.
+- A model chunk that holds a whole field gives a token to the listener. Upstream reads this chunk as `cache_hit`: the
+  listener gets no token, and the stream keeps the prediction with `include_final_prediction_in_output_stream=False`.
+- The stream of a raw provider with no finish reason fails with `LmStreamAssemblyError`, as in `ManagedLanguageModel`.
+  The stream wrapper has this check because a raw provider can be the model of the wrapper. Upstream has this check in
+  `checked_stream`, below each model.
 
 ## What this means in practice
 

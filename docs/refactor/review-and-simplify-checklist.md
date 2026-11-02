@@ -515,25 +515,29 @@ Simplify 4 (rank 10). Code-review 6 (rank 7). 689 main lines, 3378 test lines.
 ### Passes
 
 - (a) The whole module, 689 lines.
-  - [ ] /simplify
-  - [ ] /code-review
+  - [x] /simplify
+  - [x] /code-review
 
 ### Simplify findings
 
-- [ ] (from lm simplify (b)) `StreamingLanguageModelWrapper.scala` (about lines 83-123) folds the chunks into an `LmResponse` again, with no guard for a stream with no finish reason. Over a raw provider, a stream cut before its finish chunk becomes a partial success, not an `LmStreamAssemblyError`. Share one fold with `ManagedStream`.
-- [ ] `StreamingQueue.scala:8-66`: a queue of `Option` with `None` as the end marker, a nullable `pending: Option[A] | Null`, and three flags. A simpler design is possible.
-- [ ] `Streamify.scala:68-71` repeats the adapter type test of programs `runtime/SettingsProgramRuntime.scala:25`, `:44`.
-- [ ] `StreamingLanguageModelWrapper.scala:97-123`, `:164-198`: `call` and `stream` each repeat the chunk sort (cached, failure, emit) and the safe-close block.
-- [ ] `StatusMessageProvider.scala:15-22` has a stale comment ("still free-form Maps"), two `@nowarn`, and `output: Any`. `StatusStreamingCallback.scala:24`, `:26` use `fold(identity, identity)`.
-- [ ] The Scaladoc numbered list is broken at `Streamable.scala:21-26`. `docs/STREAMING_POSTPONED.md` still describes `Streamify.signatureFor`.
+- [x] (from lm simplify (b)) `StreamingLanguageModelWrapper.scala` (about lines 83-123) folds the chunks into an `LmResponse` again, with no guard for a stream with no finish reason. Over a raw provider, a stream cut before its finish chunk becomes a partial success, not an `LmStreamAssemblyError`. Share one fold with `ManagedStream`. `StreamingLanguageModelWrapper.call` reads the one iterator of `stream`. A stream with no finish reason gives `LmStreamAssemblyError` on both paths, with the text of `ManagedLanguageModel.noFinishReason`.
+- [x] `StreamingQueue.scala:8-66`: a queue of `Option` with `None` as the end marker, a nullable `pending: Option[A] | Null`, and three flags. A simpler design is possible. The iterator holds `pending: Option[A]` and one `ended` flag. The `Option` end marker of the queue stays, because it is the simplest typed marker.
+- [x] `Streamify.scala:68-71` repeats the adapter type test of programs `runtime/SettingsProgramRuntime.scala:25`, `:44`. `Streamify` uses `SettingsProgramRuntime.adapterOrChat`. A value in the adapter slot that is not an `Adapter` now gets the chat rules for the stream.
+- [x] `StreamingLanguageModelWrapper.scala:97-123`, `:164-198`: `call` and `stream` each repeat the chunk sort (cached, failure, emit) and the safe-close block. One chunk sort and one close remain, in `openChunks`.
+- [x] `StatusMessageProvider.scala` has a stale comment ("still free-form Maps"), two `@nowarn`, and `output: Any`. `StatusStreamingCallback.scala:24`, `:26` use `fold(identity, identity)`. The stale comments and `@nowarn` are gone, `output` is `Either[DspyError, Any]`, and `StatusStreamingCallback` passes the field as is.
+- [x] The Scaladoc numbered list is broken at `Streamable.scala:21-26`. `docs/STREAMING_POSTPONED.md` still describes `Streamify.signatureFor`. Repaired. `docs/STREAMING_POSTPONED.md` no longer describes `signatureFor` as current.
 
 ### Code-review findings
 
-- [ ] `StreamingLanguageModelWrapper.scala:251` and `Streamify.scala:99-109` ignore the `false` that `offer` returns. After the consumer closes, the program and the LM stream still run to the end. No test covers this.
-- [ ] `StreamingQueue.scala:23`: if a consumer stops reading and does not close, the daemon producer waits in `put` forever and keeps the SSE connection open.
-- [ ] `StreamingLanguageModelWrapper.scala:54`, `:257-264`: `firedListeners` is a mutable Set that is not thread-safe. Calls to parallel predictors race on it, and `allowReuse=false` then depends on timing.
-- [ ] `StreamingQueue.scala:26-30`: `close()` checks the flags and then acts, which is not atomic. Status callbacks from worker threads can add more producers.
-- [ ] `StreamingLanguageModelWrapper.scala:164-173`: the look-ahead in `next()` holds back each chunk until the next chunk arrives. This logic is complex, and 12 of the last 14 commits on the module were fixes.
+- [x] `StreamingLanguageModelWrapper.scala:251` and `Streamify.scala:99-109` ignore the `false` that `offer` returns. After the consumer closes, the program and the LM stream still run to the end. No test covers this. A refused token throws `InterruptedException`, and a close of the iterator interrupts the producer thread. `StreamingUpstreamRulesSuite` and `StreamifyHttpCloseSuite` (a local SSE server) cover this. Limit: a call with no token for a listener stops only at a blocking read or wait.
+- [x] `StreamingQueue.scala:23`: if a consumer stops reading and does not close, the daemon producer waits in `put` forever and keeps the SSE connection open. No code change, because upstream has the same need. The scaladoc of `streamify` says that a caller must close the iterator.
+- [x] `StreamingLanguageModelWrapper.scala:54`, `:257-264`: `firedListeners` is a mutable Set that is not thread-safe. Calls to parallel predictors race on it, and `allowReuse=false` then depends on timing. `firedListeners` is a concurrent set.
+- [x] `StreamingQueue.scala:26-30`: `close()` checks the flags and then acts, which is not atomic. Status callbacks from worker threads can add more producers. `close` uses `compareAndSet`, and an interrupt does not stop the end marker.
+- [x] `StreamingLanguageModelWrapper.scala:164-173`: the look-ahead in `next()` holds back each chunk until the next chunk arrives. This logic is complex, and 12 of the last 14 commits on the module were fixes. No change: the look-ahead stays, because tests pin the flush rule for a caller that uses only `next`.
+- [x] (code-review (a)) `StreamListener.allowReuse` defaults to `false`, as upstream `allow_reuse=False`.
+- [x] (code-review (a)) `includeFinalPrediction = false` keeps the prediction with no listeners, on a cache hit, or when no listener got a token, as upstream.
+- [x] (code-review (a)) A listener with no `predictName` on a field of more than one predictor gives a warning. `docs/port/PORT_DIFFERENCES.md` section 23 lists the differences from upstream.
+- [ ] (design, open) A predictor with its own model (`Predict.withLm`) does not go through `StreamingLanguageModelWrapper`, so it streams no token. Upstream streams each model through `settings.send_stream`. A fix needs a stream slot in the context, read at the point where the predictor picks its model, in place of the swap of the model in `Streamify`.
 
 ## mcp
 

@@ -41,5 +41,11 @@ with `predictName`.
   final prediction.
 - A stream that stops before its end is an error (`LmStreamAssemblyError`).
   The retry policy can start a new attempt only before the first token.
+- By default, a listener stops after one field. Pass `allowReuse = true` to get
+  the field from each model call, for example `next_thought` from each step of
+  `ReAct`.
+- Close the iterator if you stop before the end of the stream. The close stops
+  the program and the model stream. If you stop and do not close, the producer
+  thread stays parked on the full queue.
 
 Next: [Coming from DSPy](../coming-from-dspy.md).

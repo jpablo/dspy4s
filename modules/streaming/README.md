@@ -38,12 +38,17 @@ events.foreach {
 - **The tokens of each predictor.** At the start of each LM call, the wrapper reads `ActivePredictContext.current`
   to get the active predictor. Thus each token of `ReAct` has the correct predictor name and field name.
 - **Listeners and `allowReuse`.** If there are listeners, only the tokens that match a listener go into the queue. A
-  listener with `allowReuse = false` gets the tokens of one field only, up to the chunk with `isLastChunk = true`. A
-  listener with `allowReuse = true` (the default) gets the tokens of each LM call.
+  listener with `allowReuse = false` (the default) gets the tokens of one field only, up to the chunk with
+  `isLastChunk = true`. A listener with `allowReuse = true` gets the tokens of each LM call.
+- **The final prediction.** With `includeFinalPrediction = false`, the stream still has the prediction when there are
+  no listeners, when a model call was a cache hit, or when no listener got a token.
 - **Listener checks.** `streamify` compares each listener with the known signatures of the program. It sends a
-  message to `warningSink` for a field name or a predictor name that does not exist.
-- **Close.** When the consumer closes the iterator, the queue removes its events and refuses new events. Thus a
-  producer thread that waits on a full queue can continue.
+  message to `warningSink` for a field name or a predictor name that does not exist, and for a listener with no
+  predictor name on a field of more than one predictor.
+- **Close.** A caller that stops before the end of the stream must close the iterator. The queue then removes its
+  events and refuses new events, and the producer thread gets an interrupt. The program stops at its next wait or at
+  its next token, and the wrapper closes the model stream. A consumer that stops and does not close leaves the
+  producer thread parked on the full queue.
 
 ## Source layout
 
@@ -55,5 +60,5 @@ events.foreach {
 ## Relation to dspy
 
 `streaming` is the port of `dspy.streamify` and of its stream listeners. It uses the `StreamingLanguageModel` of
-[`lm`](../lm/README.md) and the `AdapterStreamingState` of [`adapters`](../adapters/README.md). One difference:
-`allowReuse` is `true` by default, but `allow_reuse` in Python DSPy is `False` by default.
+[`lm`](../lm/README.md) and the `AdapterStreamingState` of [`adapters`](../adapters/README.md). The differences are
+in [PORT_DIFFERENCES §23](../../docs/port/PORT_DIFFERENCES.md#23-streaming-rules-with-no-upstream-form).

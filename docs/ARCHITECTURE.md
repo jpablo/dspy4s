@@ -295,7 +295,7 @@ code:
 - **New optimizer** — use `OptimizableStructure[P].inspect` for layout/name metadata,
   `read` / `replace` for writable `OptimizableParameters`, and `ProgramRunner[P]` for
   execution. `BootstrapFewShot` is the template.
-- **New stream listener** — implement `StreamListener[A]`, pass to
+- **New stream listener**: build a `StreamListener`, and pass it to
   `Streamify.streamify`. The streaming wrapper routes via
   `ActivePredictContext`.
 

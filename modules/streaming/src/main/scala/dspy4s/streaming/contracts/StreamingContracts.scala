@@ -28,14 +28,14 @@ final case class ErrorEvent(error: DspyError, timestamp: Instant = Instant.now()
   *   - `predictName` optionally narrows the subscription to a specific predictor when a program contains more than one;
   *     `None` matches any predictor.
   *   - `allowReuse` controls whether the listener keeps firing across multiple LM calls in the same `streamify`
-  *     invocation. `true` (default) emits on every matching call. `false` matches Python DSPy's default
-  *     [[StreamListener.allow_reuse]]=False behaviour: emit for the first matching LM call only, then go silent for the
-  *     remainder.
+  *     invocation. `false` (the default, as upstream `allow_reuse=False`) emits for the first field cycle only, up to
+  *     and including the chunk with `isLastChunk = true`. The listener then goes silent. `true` emits on every matching
+  *     call. A loop, for example `ReAct`, needs `true` to stream each step.
   */
 final case class StreamListener(
     signatureFieldName: String,
     predictName       : Option[String] = None,
-    allowReuse        : Boolean        = true
+    allowReuse        : Boolean        = false
 ):
   def matches(predict: String, field: String): Boolean =
     field == signatureFieldName && predictName.forall(_ == predict)

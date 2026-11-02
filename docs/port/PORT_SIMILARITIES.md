@@ -208,8 +208,8 @@ The minimum-viable streaming surface ports:
 - Per-field `StreamListener` chunk routing with the same field-name
   filter semantics.
 
-The deltas — async-iterator vs producer-thread, per-token vs
-per-field chunk granularity, `allow_reuse` default — are in
+The deltas (async-iterator vs producer-thread, per-token vs
+per-field chunk granularity) are in
 `PORT_DIFFERENCES.md` §5 and the Python parity gap in
 [STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md).
 
