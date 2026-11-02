@@ -277,7 +277,7 @@ harness must do:
 
 ## 4. Terms with more than one meaning
 
-The right column is a proposal. No term is settled yet.
+The right column was a proposal. [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), section 3 now settles the terms.
 
 | Term | Meanings | Proposed reading |
 |---|---|---|
@@ -306,8 +306,8 @@ but the state is shared.
 
 ## 5. Scenarios that test the boundaries
 
-The proposal now answers scenarios 1, 4 and 7, and the table after this one gives the answers. The other scenarios
-are open questions, and their answers belong to the next step.
+[CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), section 11 now answers all the scenarios. The table after this one gives
+the first answers to scenarios 1, 4 and 7.
 
 | # | Scenario | The boundary that it tests |
 |---|---|---|

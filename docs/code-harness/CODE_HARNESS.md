@@ -22,7 +22,9 @@ document exists in the code of dspy4s yet.
   givens, and the compiler checks it. A handler decides what each call does.
 - The capability checks stop at the process boundary, and a permitted command can do anything that the user can
   do. So each command runs in an OS sandbox, with a policy from the capabilities in scope (F7, F8).
-- Section 4 shows the recommended design in one place. A session is a journal, a scope, a mode, a context strategy,
+- [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md) is the current design. It distills this document and the other
+  analysis documents.
+- Section 4 shows the design before that distillation. A session is a journal, a scope, a mode, a context strategy,
   and a REPL. Its state is a fold of the journal, and only committed state is observable. A pure decider checks each
   commit, and a `Predict` leaf makes each LM step. Section 5 keeps a short history of the three earlier designs (A,
   B and C) that led to it.
@@ -442,9 +444,9 @@ trait Shell extends caps.ExclusiveCapability:
 /** The session state that survives a restart. The bare `Store` can only load, and `Store^` can also store. */
 trait Store extends Cap:
   /** The value under `key`, from a snapshot at the start of the cell and the writes of the cell. */
-  def load[A: Schema](key: String): Option[A]
+  def load[A: Data](key: String): Option[A]
   /** Writes `value` under `key`. The write commits only if the cell completes. */
-  update def store[A: Schema](key: String, value: A): Unit
+  update def store[A: Data](key: String, value: A): Unit
 
 // The functions that the model calls.
 object api:
@@ -455,9 +457,12 @@ object api:
   def exec(command: String)(using s: Shell^, f: Files^): ExecResult = s.exec(command, 120)
   def exec(command: String, timeoutSeconds: Int)(using s: Shell^, f: Files^): ExecResult =
     s.exec(command, timeoutSeconds)
-  def load[A: Schema](key: String)(using s: Store): Option[A] = s.load[A](key)
-  def store[A: Schema](key: String, value: A)(using s: Store^): Unit = s.store(key, value)
+  def load[A: Data](key: String)(using s: Store): Option[A] = s.load[A](key)
+  def store[A: Data](key: String, value: A)(using s: Store^): Unit = s.store(key, value)
 ```
+
+`Data` is a type class that the guest API owns. Safe code cannot name the `Schema` of zio-blocks
+([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), 5.1).
 
 The rules:
 
@@ -723,8 +728,9 @@ The limits:
 
 ## 4. The recommended design
 
-This section shows the full design in one place. Each part links to the section with its details. Section 5
-tells how the design came from three earlier designs.
+[CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md) is now the current design, and it takes the place of this section.
+This section stays as the step before that design. Each part links to the section with its details. Section 5 tells how
+this section came from three earlier designs.
 
 ### 4.1 The parts
 
@@ -943,7 +949,7 @@ The session has two kinds of state between cells:
 
 | State | What it holds | After a restart |
 |---|---|---|
-| The store | Values with a `Schema`, under a key. It is a fold of the `writes` in `Observed`. | It comes back from the journal. |
+| The store | `Data` values (F2), under a key. It is a fold of the `writes` in `Observed`. | It comes back from the journal. |
 | The REPL state | Definitions and live objects. It is a cache. | A new REPL starts. Replay (8.4) can rebuild the definitions. |
 
 - `store(key, value)` and `load(key)` are guest functions (F2). A cell sees a snapshot of the store and its own
@@ -952,7 +958,7 @@ The session has two kinds of state between cells:
   cell, or for a change to a mutable object that an earlier cell made.
 - After a restart with no replay, the model gets a note with the names that it lost. `stored` shows what it can
   `load`, so the model knows what it must compute again.
-- A value with no `Schema`, for example a process handle, cannot go into the store. The type checks this.
+- A value with no `Data` instance, for example a process handle, cannot go into the store. The type checks this.
 
 #### After a crash
 
