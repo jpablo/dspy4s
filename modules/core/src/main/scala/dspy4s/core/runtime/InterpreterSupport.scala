@@ -158,5 +158,5 @@ private[runtime] object InterpreterSupport:
     }
 
   /** The record of a tool parameter or of an output field: the name, and the Python type when it is known. */
-  def nameAndType(name: String, pythonType: Option[String]): DynamicValue =
+  def nameAndType(name: String, pythonType: Option[String]): DynamicValue.Record =
     DynamicValues.recordFromEntries(("name" := name) +: pythonType.map("type" := _).toVector)

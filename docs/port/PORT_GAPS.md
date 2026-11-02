@@ -1538,8 +1538,8 @@ launch changes.
 - **Runner.** `runner.js` is the upstream file of f1260ff14. Three comment lines keep the dspy4s wording; a `diff`
   with the upstream file shows only those lines. The file fixes Pyodide at 0.29.4, uses the private control exception
   `_DSPyFinalOutput`, reports an unhandled promise rejection as a notification, freezes `JSON` and `console`, and
-  revokes the read permission for the Deno cache directory after it loaded Pyodide. Later, the wrapper of a tool with
-  no declared parameters changed too, so a `diff` now also shows that rule
+  revokes the read permission for the Deno cache directory after it loaded Pyodide. Later, the tool wrappers changed
+  too, so a `diff` now also shows these rules
   ([PORT_DIFFERENCES section 18](PORT_DIFFERENCES.md#18-sandbox-tools-and-reactv2-names)).
 - **Launch.** `DenoPyodideLaunch.command` passes `--no-config`, `--no-lock`, and `--node-modules-dir=false`. After the
   runner path it always passes the list of environment variables, and then `--dspy-deno-dir=`. The process gets

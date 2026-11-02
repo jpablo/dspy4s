@@ -39,9 +39,10 @@ import scala.util.control.NonFatal
 
 /** Sandboxed [[CodeInterpreter]]: Python via Pyodide (WASM) inside a Deno subprocess. It is a port of Python DSPy's
   * `PythonInterpreter` (`dspy/primitives/python_interpreter.py`). The sandbox side is upstream's `runner.js`, vendored
-  * as a resource with three changed comment lines and one changed rule (`dspy4s/core/runtime/runner.js`, MIT, adapted
-  * by upstream from Simon Willison's Pyodide-in-Deno TIL). The changed rule: a tool with no declared parameters takes
-  * keyword arguments (PORT_DIFFERENCES section 18). This class is the JSON-RPC 2.0 client speaking to it over the
+  * as a resource with three changed comment lines and changed tool wrappers (`dspy4s/core/runtime/runner.js`, MIT,
+  * adapted by upstream from Simon Willison's Pyodide-in-Deno TIL). The changed rules: a tool with no declared
+  * parameters takes keyword arguments, each wrapper calls one shared helper, and the code can leave out an optional
+  * argument (PORT_DIFFERENCES sections 18 and 25). This class is the JSON-RPC 2.0 client speaking to it over the
   * subprocess's stdin/stdout, line by line. Code runs with no host filesystem / network / environment access except
   * what the `enable*` allowlists grant via Deno permission flags.
   *
@@ -327,7 +328,7 @@ final class DenoPyodideInterpreter(
       val toolsInfo = tools.map { tool =>
         DynamicValues.record(
           "name"       := tool.name,
-          "parameters" -> DynamicValue.Sequence(Chunk.from(tool.parameters.map(p => nameAndType(p.name, p.pythonType))))
+          "parameters" -> DynamicValue.Sequence(Chunk.from(tool.parameters.map(toolParameter)))
         ): DynamicValue
       }
       val outputsInfo = outputFields.map(f => nameAndType(f.name, f.pythonType))
@@ -604,6 +605,13 @@ private object DenoPyodideInterpreter:
   private val SnippetLength = 200
 
   private def snippet(text: String): String = text.take(SnippetLength)
+
+  /** The record of a tool parameter in the `register` request. An optional parameter also has the key `optional`. A
+    * required parameter has no such key.
+    */
+  private def toolParameter(param: SandboxTool.Param): DynamicValue =
+    val record = nameAndType(param.name, param.pythonType)
+    if param.optional then DynamicValue.Record(record.fields :+ ("optional" := true)) else record
 
   /** The number of characters of one read of the standard error. */
   private val ReadSize = 4096

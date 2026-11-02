@@ -31,22 +31,37 @@ if 'SUBMIT' not in dir():
         raise _DSPyFinalOutput({"output": output})
 `;
 
-// Generate a tool wrapper function with declared parameters.
-// Parameters is an array of {name, type?, default?} objects.
-// Convert a JavaScript/JSON value to Python literal syntax
-const toPythonLiteral = (value) => {
-  const serialized = JSON.stringify(value);
-  return `__import__("json").loads(${JSON.stringify(serialized)})`;
-};
+// dspy4s: the code that each tool wrapper calls. It runs one time, before the main loop, because a wrapper reads these
+// names when it is defined. It is not in PYTHON_SETUP_CODE: a second run makes a new `_dspy_omitted`, and the wrappers
+// keep the old one as their default value. An argument of a wrapper cannot hide a name of this code, because this code
+// has its own scope.
+const makeToolCallHelper = () => `
+import json as _dspy_json
+from pyodide.ffi import run_sync as _dspy_run_sync, JsProxy as _dspy_js_proxy
+_dspy_omitted = object()
+def _dspy_tool_call(tool_name, kwargs):
+    arguments = {name: value for name, value in kwargs.items() if value is not _dspy_omitted}
+    result = _dspy_run_sync(_js_tool_call(tool_name, _dspy_json.dumps({"kwargs": arguments})))
+    parsed = result.to_py() if isinstance(result, _dspy_js_proxy) else result
+    if isinstance(parsed, dict) and parsed.get("${TOOL_BRIDGE_ERROR_KEY}"):
+        raise RuntimeError(parsed.get("message", "Tool bridge error"))
+    return parsed
+`;
 
 const toPythonType = (type) => type === "NoneType" ? "type(None)" : type;
 
+// Generate a tool wrapper function with declared parameters.
+// Parameters is an array of {name, type?, optional?} objects.
 const makeToolWrapper = (toolName, parameters = []) => {
-  // Build signature parts: "query: str, limit: int = 10"
-  const sigParts = parameters.map(p => {
+  // dspy4s: each parameter from the first optional one on has the default `_dspy_omitted`, because Python refuses a
+  // parameter with no default after one with a default. So the positions of the schema stay. Python does not check a
+  // required argument after the first optional one, so the tool or the server reports it.
+  const firstOptional = parameters.findIndex(p => p.optional);
+  // Build signature parts: "query: str, limit: int = _dspy_omitted"
+  const sigParts = parameters.map((p, index) => {
     let part = p.name;
     if (p.type) part += `: ${toPythonType(p.type)}`;
-    if (p.default !== undefined) part += ` = ${toPythonLiteral(p.default)}`;
+    if (firstOptional >= 0 && index >= firstOptional) part += " = _dspy_omitted";
     return part;
   });
   const argNames = parameters.map(p => p.name);
@@ -58,14 +73,8 @@ const makeToolWrapper = (toolName, parameters = []) => {
   const kwargsValue = parameters.length === 0 ? "kwargs" : `{${kwargParts}}`;
 
   return `
-import json
-from pyodide.ffi import run_sync, JsProxy
 def ${toolName}(${signature}):
-    result = run_sync(_js_tool_call("${toolName}", json.dumps({"kwargs": ${kwargsValue}})))
-    parsed = result.to_py() if isinstance(result, JsProxy) else result
-    if isinstance(parsed, dict) and parsed.get("${TOOL_BRIDGE_ERROR_KEY}"):
-        raise RuntimeError(parsed.get("message", "Tool bridge error"))
-    return parsed
+    return _dspy_tool_call("${toolName}", ${kwargsValue})
 `;
 };
 
@@ -212,6 +221,7 @@ async function toolCallBridge(name, argsJson) {
 
 // Expose the bridge to Python
 pyodide.globals.set("_js_tool_call", toolCallBridge);
+pyodide.runPython(makeToolCallHelper());
 
 try {
   const env_vars = (Deno.args[0] ?? "").split(",").filter(Boolean);

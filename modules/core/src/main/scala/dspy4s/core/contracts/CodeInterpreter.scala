@@ -91,7 +91,9 @@ trait ReplInterpreterFactory:
   *   the Python identifier the sandbox exposes
   * @param parameters
   *   declared parameters (name + optional Python type like `"str"`/`"list"`), used by the sandbox to generate a wrapper
-  *   signature
+  *   signature. The code can leave out an argument with `optional`, and the tool then does not get the argument. The
+  *   wrapper of [[dspy4s.core.runtime.DenoPyodideInterpreter]] uses this value.
+  *   [[dspy4s.core.runtime.LocalPythonInterpreter]] takes each argument of a call in any case, so it does not read it.
   * @param invoke
   *   the host implementation, given the call's keyword arguments. A string result crosses into the sandbox as a Python
   *   `str`; any other value crosses as JSON.
@@ -103,4 +105,4 @@ final case class SandboxTool(
 )
 
 object SandboxTool:
-  final case class Param(name: String, pythonType: Option[String] = None)
+  final case class Param(name: String, pythonType: Option[String] = None, optional: Boolean = false)

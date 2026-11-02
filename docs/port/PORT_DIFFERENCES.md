@@ -460,10 +460,12 @@ A form that only Java reads (`3d`, `3f`, `0x1p3`) is no number on each path, as 
 
 **Convention.**
 
-- The vendored `runner.js` differs from the upstream file in one rule. A tool with no declared parameters
+- The vendored `runner.js` differs from the upstream file in the tool wrappers. A tool with no declared parameters
   (`ToolFunction(...)`, `ToolFunction.of(...)`) has an unknown argument list, so its wrapper is `def name(**kwargs):`,
-  as in the local interpreter. Upstream generates `def name():`, and that function rejects each argument. A wrapper
-  with parameters is the same as upstream.
+  as in the local interpreter. Upstream generates `def name():`, and that function rejects each argument. Each wrapper
+  calls one shared helper, so an argument can have the name `json` or `run_sync`. Upstream puts the call in each
+  wrapper, so such an argument hides the module or the function. A parameter can be optional (section 25). The port
+  does not send a `default` for a parameter, so the runner has no such case.
 - ReActV2 rejects an output with the name `next_thought`, `tool_calls`, or `tool_call_results` at construction,
   because the history event of a turn has these keys and the final outputs go over them. Upstream does not check
   these names.
@@ -605,6 +607,11 @@ differ from upstream:
   `McpAsyncClient.java:703`). The Python client has no default read timeout (`mcp/shared/session.py:284-288`), and it
   checks structured content (`mcp/client/session.py:412-441`). The caller owns the client.
 - A part that is not text is its JSON object. Upstream keeps the pydantic object (`mcp.py:39`).
+- In the sandbox of `RLM`, a tool with a JSON schema has a wrapper with the names of the schema, and the code can leave
+  out an optional argument. A tool with an argument name that is not a Python name takes keyword arguments. Upstream
+  `PythonInterpreter._extract_parameters` (`dspy/primitives/python_interpreter.py:461-475`) reads the Python signature
+  of the tool. For an MCP tool the signature is `func(*args, **kwargs)`, so the upstream wrapper has the two parameters
+  `args` and `kwargs` (`dspy/predict/rlm.py`, `_make_interpreter_tool`).
 
 ## What this means in practice
 

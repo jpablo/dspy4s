@@ -18,6 +18,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.strategies.ReActV2
+import dspy4s.programs.strategies.RLM
 import dspy4s.signatures.Signature
 import io.modelcontextprotocol.client.McpClient
 import io.modelcontextprotocol.client.McpSyncClient
@@ -33,6 +34,7 @@ import java.nio.file.Paths
 import java.time.Duration
 import java.util.concurrent.ConcurrentLinkedQueue
 import scala.jdk.CollectionConverters.*
+import scala.util.control.NonFatal
 
 /** [[McpToolClient.fromSync]] against a real MCP server of the MCP Java SDK (upgrade item I10). The suite starts
   * [[McpTestServer]] in a child JVM with the class path of the test JVM, and connects an `McpSyncClient` to it over
@@ -231,6 +233,23 @@ class McpSdkClientSuite extends FunSuite:
       sent.flatMap(DynamicValues.recordGet(_, "parameters")),
       Some(json("""{"type": "object", "properties": {}, "required": []}"""))
     )
+  }
+
+  test("RLM runs a tool of a real server in the Deno sandbox, and the code can leave out an optional argument") {
+    val denoAvailable =
+      try new ProcessBuilder("deno", "--version").start().waitFor() == 0
+      catch case NonFatal(_) => false
+    assume(denoAvailable, "deno not installed")
+    val action = "[[ ## reasoning ## ]]\nCall the tool.\n\n" +
+      "[[ ## code ## ]]\n```python\nSUBMIT(answer=echo(text='hi'))\n```\n\n[[ ## completed ## ]]"
+    val lm      = Script(Vector(LmOutput(action)))
+    val context = RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))
+    val result  = RuntimeEnvironment.withSettings(context) {
+      RLM(baseSignature = Signature.fromString("question -> answer"), tools = tools().values.toVector)(
+        (question = "What does the tool say?")
+      )(using RuntimeEnvironment.current)
+    }.fold(error => fail(error.message), identity)
+    assertEquals(result.output.answer, "hi")
   }
 
   test("a JSON-RPC error of the server is a Left, not an exception") {

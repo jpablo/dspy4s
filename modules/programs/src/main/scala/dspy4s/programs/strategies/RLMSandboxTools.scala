@@ -9,6 +9,7 @@ import dspy4s.core.contracts.{
   SandboxTool,
   ThreadCount
 }
+import dspy4s.core.runtime.PythonNames
 import dspy4s.lm.contracts.{LanguageModel, LmRequest, Message, MessageRole}
 import dspy4s.programs.LlmCallLimit
 import dspy4s.programs.contracts.ToolFunction
@@ -103,12 +104,28 @@ private[programs] object RLMSandboxTools:
 
   /** The user tools as host functions for the sandbox. Each function runs with the runtime context of the call, and
     * keeps the name of its tool and the parameter hints in the Python form.
+    *
+    *   - An argument is optional when the tool has an `inputSchema` and the `required` list of the schema does not name
+    *     the argument. A tool with no `inputSchema` has only required arguments.
+    *   - A tool with an argument name that Python code cannot bind (`from`, `max-results`), or a name that the sandbox
+    *     keeps for itself (`_dspy...`), has no declared parameters, so it takes keyword arguments:
+    *     `search(**{'from': 'a'})`. This is the rule for an unknown argument list ([[ToolFunction.argSchema]]).
     */
   def fromToolFunctions(tools: Vector[ToolFunction])(using ctx: RuntimeContext): Vector[SandboxTool] =
     tools.map { tool =>
       SandboxTool(
         name = tool.name,
-        parameters = tool.argSchema.map { case (name, typeRef) => SandboxTool.Param(name, typeRef.pythonTypeName) },
+        parameters = sandboxParameters(tool),
         invoke = kwargs => tool.invoke(kwargs)(using ctx)
       )
     }
+
+  /** The declared parameters of `tool` in the sandbox. See [[fromToolFunctions]] for the two rules. */
+  private def sandboxParameters(tool: ToolFunction): Vector[SandboxTool.Param] =
+    if !tool.argSchema.forall((name, _) => PythonNames.isBindable(name) && !name.startsWith("_dspy")) then Vector.empty
+    else
+      val required =
+        tool.inputSchema.map(schema => DynamicValues.sequenceAt(schema, "required").flatMap(DynamicValues.asString))
+      tool.argSchema.map { (name, typeRef) =>
+        SandboxTool.Param(name, typeRef.pythonTypeName, optional = required.exists(!_.contains(name)))
+      }
