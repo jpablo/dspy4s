@@ -15,7 +15,7 @@ package dspy4s.examples.learn.evaluation
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, ThreadCount, :=}
 import dspy4s.core.data.{RawPrediction, Example}
-import dspy4s.evaluate.{Evaluate, EvaluateConfig}
+import dspy4s.evaluate.{Evaluate, EvaluateConfig, TableDisplay}
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.evaluate.metrics.{FunctionMetric, SemanticF1}
 import dspy4s.examples.Demo
@@ -87,7 +87,7 @@ object Metrics:
       metric = metric,
       numThreads = Some(ThreadCount(1)),
       displayProgress = true,
-      displayTable = Right(5)
+      displayTable = TableDisplay.Rows(5)
     ))
   // --8<-- [end:metric-evaluate]
   // Launch: `evaluator(devset, metric)()(program)(using RuntimeContext)` — the `using` is the

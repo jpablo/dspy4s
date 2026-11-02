@@ -1,6 +1,8 @@
 package dspy4s.optimize
 
-import java.math.{BigDecimal as JBigDecimal, RoundingMode}
+import dspy4s.core.contracts.PythonText
+
+import java.math.BigDecimal as JBigDecimal
 
 /** The search rules of [[ReAnchor]] (upstream `dspy/teleprompt/reanchor/calibrate.py`): the candidate settings, the
   * fold check, and the number rules of Python that the search uses, so that the port keeps the same settings as
@@ -51,17 +53,11 @@ private[optimize] object ReAnchorSearch:
     * (upstream `_tidy`).
     */
   def tidy(x: Double, lo: Double, hi: Double): Double =
-    val inside = (1 until 12).iterator.map(roundTo(x, _)).find(r => lo < r && r < hi)
+    val inside = (1 until 12).iterator.map(PythonText.round(x, _)).find(r => lo < r && r < hi)
     inside.getOrElse(x)
 
-  /** `x` rounded to `digits` decimal places, as Python `round(x, digits)`: the exact binary value of `x` rounds to the
-    * nearest decimal, with a half to the even digit.
-    */
-  def roundTo(x: Double, digits: Int): Double =
-    new JBigDecimal(x).setScale(digits, RoundingMode.HALF_EVEN).doubleValue
-
   /** The mean of `values` rounded to 4 decimal places (upstream `_mean`). */
-  def mean(values: Vector[Double]): Double = roundTo(fsum(values) / values.size, 4)
+  def mean(values: Vector[Double]): Double = PythonText.round(fsum(values) / values.size, 4)
 
   /** The count of the values, and for values that are not empty, the count of the distinct values and the smallest and
     * the largest value rounded to 4 decimal places (upstream `_summary`). The count of candidates is 0.
@@ -71,8 +67,8 @@ private[optimize] object ReAnchorSearch:
     ReAnchorRow.Observed(
       calls = values.size,
       distinct = Option.when(distinct.nonEmpty)(distinct.size),
-      min = distinct.headOption.map(roundTo(_, 4)),
-      max = distinct.lastOption.map(roundTo(_, 4)),
+      min = distinct.headOption.map(PythonText.round(_, 4)),
+      max = distinct.lastOption.map(PythonText.round(_, 4)),
       candidates = 0
     )
 

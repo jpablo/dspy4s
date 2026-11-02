@@ -112,6 +112,25 @@ class PythonTextSuite extends FunSuite:
     assertEquals(PythonText.jsonAscii(text), "\"\\u00e9\\u0001\\u2028\\ud83d\\ude00\"")
   }
 
+  test("split follows Python str.split with no separator") {
+    assertEquals(
+      PythonText.split(" a  b\t\nc\u0085d\u3000e\u00a0f\u200bg "),
+      Vector("a", "b", "c", "d", "e", "f\u200bg")
+    )
+    assertEquals(PythonText.split(""), Vector.empty)
+    assertEquals(PythonText.split("   "), Vector.empty)
+    assertEquals(PythonText.split("one"), Vector("one"))
+  }
+
+  test("round follows Python: the exact value, a half to the even digit, and no change when not finite") {
+    assertEquals(PythonText.round(100.0 * 2.0 / 3, 2), 66.67)
+    assertEquals(PythonText.round(0.125, 2), 0.12)
+    assertEquals(PythonText.round(2.675, 2), 2.67)
+    assert(PythonText.round(Double.NaN, 2).isNaN)
+    assertEquals(PythonText.round(Double.PositiveInfinity, 2), Double.PositiveInfinity)
+    assertEquals(PythonText.round(Double.NegativeInfinity, 2), Double.NegativeInfinity)
+  }
+
   test("dedent, splitLines, and strip follow Python") {
     assertEquals(PythonText.dedent("  a\n    b\n  \n  c"), "a\n  b\n\nc")
     assertEquals(PythonText.dedent("\ta\n  b"), "\ta\n  b")

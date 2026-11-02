@@ -10,15 +10,18 @@ import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
 import java.nio.file.Files
-import java.nio.file.Paths
-import scala.io.Source
 
 class PersistenceSuite extends FunSuite:
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
     DynamicValues.recordFromEntries(entries)
 
-  private def tmpPath(suffix: String) =
-    Files.createTempFile("dspy4s-evaluate-", suffix).toString
+  private def savedText(save: (EvaluationResult, String) => Either[String, Unit], result: EvaluationResult): String =
+    val path = Files.createTempFile("dspy4s-evaluate-", ".out")
+    try
+      assertEquals(save(result, path.toString), Right(()))
+      Files.readString(path)
+    finally
+      val _ = Files.deleteIfExists(path)
 
   private val sampleResult: EvaluationResult = EvaluationResult(
     score = 66.67,
@@ -42,83 +45,78 @@ class PersistenceSuite extends FunSuite:
     metricName = "exact_match"
   )
 
-  test("saveAsJson writes array of flat result objects") {
-    val path = tmpPath(".json")
-    try
-      val result = EvaluationResultPersistence.saveAsJson(sampleResult, path)
-      assertEquals(result, Right(()))
-      val content = Source.fromFile(path).mkString
-      val parsed  = ujson.read(content)
-      val arr     = parsed.arr
-      assertEquals(arr.size, 3)
-      assertEquals(arr(0)("example_question").str, "cap of France?")
-      assertEquals(arr(0)("example_answer").str, "Paris")
-      assertEquals(arr(0)("pred_answer").str, "Paris")
-      assertEquals(arr(0)("exact_match").num, 1.0)
-      assertEquals(arr(1)("exact_match").num, 0.0)
-      assertEquals(arr(2)("exact_match").num, 1.0)
-    finally
-      val _ = Files.deleteIfExists(Paths.get(path))
+  private def single(example: Example, prediction: RawPrediction): EvaluationResult =
+    EvaluationResult(50.0, Vector(ExampleEvaluation(example, prediction, 0.5)), "m")
+
+  test("saveAsJson writes one object for each row, with a prefix only on a name collision") {
+    assertEquals(
+      savedText(EvaluationResultPersistence.saveAsJson, sampleResult),
+      """[{"question": "cap of France?", "example_answer": "Paris", "pred_answer": "Paris", "exact_match": 1.0}, """ +
+        """{"question": "cap of Italy?", "example_answer": "Rome", "pred_answer": "Naples", "exact_match": 0.0}, """ +
+        """{"question": "cap of Spain?", "example_answer": "Madrid", "pred_answer": "Madrid", "exact_match": 1.0}]"""
+    )
   }
 
-  test("saveAsCsv writes header and one row per evaluation") {
-    val path = tmpPath(".csv")
-    try
-      val result = EvaluationResultPersistence.saveAsCsv(sampleResult, path)
-      assertEquals(result, Right(()))
-      val lines = Source.fromFile(path).getLines().toVector
-      assert(lines.size >= 4, s"expected at least 4 lines (header + 3 rows), got ${lines.size}")
-      val header = lines.head.split(",").map(_.stripPrefix("\"").stripSuffix("\"")).toSet
-      assert(header.contains("example_question"))
-      assert(header.contains("example_answer"))
-      assert(header.contains("exact_match"))
-      // prediction and example share 'answer', so CSV uses 'pred_answer'
-      assert(header.contains("pred_answer"))
-    finally
-      val _ = Files.deleteIfExists(Paths.get(path))
+  test("saveAsCsv writes a header and one line for each row, with the line end of Python csv") {
+    assertEquals(
+      savedText(EvaluationResultPersistence.saveAsCsv, sampleResult),
+      "question,example_answer,pred_answer,exact_match\r\n" +
+        "cap of France?,Paris,Paris,1.0\r\n" +
+        "cap of Italy?,Rome,Naples,0.0\r\n" +
+        "cap of Spain?,Madrid,Madrid,1.0\r\n"
+    )
   }
 
   test("saveAsCsv prefixes pred fields on collision with example fields") {
-    val path      = tmpPath(".csv")
-    val collision = EvaluationResult(
-      score = 50.0,
-      results = Vector(
-        ExampleEvaluation(
-          Example(rec("answer" := "Paris")),
-          RawPrediction(rec("answer" := "Lyon")),
-          score = 0.0
-        )
-      ),
-      metricName = "exact_match"
+    val collision = single(Example(rec("answer" := "Paris")), RawPrediction(rec("answer" := "Lyon")))
+    assertEquals(
+      savedText(EvaluationResultPersistence.saveAsCsv, collision),
+      "example_answer,pred_answer,m\r\nParis,Lyon,0.5\r\n"
     )
-    try
-      val result = EvaluationResultPersistence.saveAsCsv(collision, path)
-      assertEquals(result, Right(()))
-      val header = Source.fromFile(path).getLines().next()
-      assert(header.contains("example_answer"))
-      assert(header.contains("pred_answer"))
-    finally
-      val _ = Files.deleteIfExists(Paths.get(path))
   }
 
   test("saveAsJson supports non-string field values") {
-    val path        = tmpPath(".json")
-    val withNumbers = sampleResult.copy(
-      results = Vector(
-        ExampleEvaluation(
-          Example(rec("answer" := "Paris", "score" := 0.8)),
-          RawPrediction(rec("answer" := "Paris", "confidence" := 0.95)),
-          score = 1.0
-        )
-      )
+    val withNumbers = single(
+      Example(rec("answer" := "Paris", "score" := 0.8, "tags" := Vector("x"))),
+      RawPrediction(rec("answer" := "Paris", "confidence" := 0.95, "ok" := true))
     )
-    try
-      val result = EvaluationResultPersistence.saveAsJson(withNumbers, path)
-      assertEquals(result, Right(()))
-      val content = Source.fromFile(path).mkString
-      val parsed  = ujson.read(content)
-      assertEquals(parsed.arr(0)("example_score").num, 0.8)
-      assertEquals(parsed.arr(0)("confidence").num, 0.95)
+    assertEquals(
+      savedText(EvaluationResultPersistence.saveAsJson, withNumbers),
+      """[{"example_answer": "Paris", "score": 0.8, "tags": ["x"], """ +
+        """"pred_answer": "Paris", "confidence": 0.95, "ok": true, "m": 0.5}]"""
+    )
+  }
+
+  test("saveAsCsv quotes a field with a comma, a quote, or a line break, and writes each other value as Python str") {
+    val values = single(
+      Example(rec("a" := "x,y", "b" := "say \"hi\"", "c" := "one\ntwo", "d" := "one\rtwo", "e" := "plain")),
+      RawPrediction(rec("f" := 2, "g" := true, "h" := Vector("x"), "i" := Option.empty[String]))
+    )
+    assertEquals(
+      savedText(EvaluationResultPersistence.saveAsCsv, values),
+      "a,b,c,d,e,f,g,h,i,m\r\n" +
+        "\"x,y\",\"say \"\"hi\"\"\",\"one\ntwo\",\"one\rtwo\",plain,2,True,\"[\"\"x\"\"]\",,0.5\r\n"
+    )
+  }
+
+  test("the CSV columns are the union of the keys of the rows, in first-seen order") {
+    val failed = EvaluationResult(
+      score = 50.0,
+      results = Vector(
+        ExampleEvaluation(Example(rec("q" := "1", "answer" := "a")), RawPrediction.empty, 0.0, Some("[code] boom")),
+        ExampleEvaluation(Example(rec("q" := "2", "answer" := "b")), RawPrediction(rec("answer" := "b")), 1.0)
+      ),
+      metricName = "m"
+    )
+    assertEquals(
+      savedText(EvaluationResultPersistence.saveAsCsv, failed),
+      "q,answer,m,example_answer,pred_answer\r\n1,a,0.0,,\r\n2,,1.0,b,b\r\n"
+    )
+  }
+
+  test("a path that cannot take a file is a Left") {
+    val directory = Files.createTempDirectory("dspy4s-evaluate-")
+    try assert(EvaluationResultPersistence.saveAsCsv(sampleResult, directory.toString).isLeft)
     finally
-      val _ = Files.deleteIfExists(Paths.get(path))
+      val _ = Files.deleteIfExists(directory)
   }

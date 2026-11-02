@@ -5,15 +5,16 @@ import upickle.core.{ArrVisitor, ObjVisitor, StringVisitor, Visitor}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
+import java.math.{BigDecimal as JBigDecimal, RoundingMode}
 import scala.collection.mutable
 import scala.util.control.NonFatal
 import scala.util.matching.Regex
 
 /** The text forms of Python that the prompts of upstream use: `str()` and `repr()` of a value, `json.dumps` with
-  * `ensure_ascii=False` and with ASCII escapes, `str.strip`, `str.splitlines`, and `textwrap.dedent`. The adapters use
-  * these forms so that a prompt is equal to the upstream prompt, character for character (decision D3). The parsers
-  * also read a JSON text as Python `json.loads` reads it, and a JSON string and a Python string literal as upstream
-  * `parse_value` reads them.
+  * `ensure_ascii=False` and with ASCII escapes, `str.strip`, `str.split`, `str.splitlines`, and `textwrap.dedent`. The
+  * adapters use these forms so that a prompt is equal to the upstream prompt, character for character (decision D3).
+  * The parsers also read a JSON text as Python `json.loads` reads it, and a JSON string and a Python string literal as
+  * upstream `parse_value` reads them. The object also has the rule of Python `round`.
   *
   * A value is a `DynamicValue`. An `Option` value of a typed record (the `Some` and `None` variants) prints as its
   * element or as `None`. An enum case with no fields prints as its case name.
@@ -36,6 +37,27 @@ private[dspy4s] object PythonText:
   /** Python `str.rstrip()`: no whitespace at the end. */
   def rstrip(text: String): String =
     text.substring(0, text.lastIndexWhere(char => !isSpace(char)) + 1)
+
+  /** Python `str.split()` with no separator: the words of `text` between the runs of whitespace ([[isSpace]]). */
+  def split(text: String): Vector[String] =
+    val words = Vector.newBuilder[String]
+    var start = text.indexWhere(char => !isSpace(char))
+    while start >= 0 do
+      val end = text.indexWhere(isSpace, start)
+      if end < 0 then
+        words += text.substring(start)
+        start = -1
+      else
+        words += text.substring(start, end)
+        start = text.indexWhere(char => !isSpace(char), end)
+    words.result()
+
+  /** `x` rounded to `digits` decimal places, as Python `round(x, digits)`: the exact binary value of `x` rounds to the
+    * nearest decimal, with a half to the even digit. A value that is not finite stays as it is.
+    */
+  def round(x: Double, digits: Int): Double =
+    if x.isNaN || x.isInfinite then x
+    else new JBigDecimal(x).setScale(digits, RoundingMode.HALF_EVEN).doubleValue
 
   /** The characters for which Python `str.isspace` is true (the list of the dspy venv, Python 3.12). Each one is in the
     * Basic Multilingual Plane, so a test of each `Char` is a test of each code point.
@@ -406,7 +428,7 @@ private[dspy4s] object PythonText:
   /** The element of an `Option` value (the `Some` variant), and a null for the `None` variant. Each other value stays
     * as it is.
     */
-  private def unwrap(value: DynamicValue): DynamicValue =
+  def unwrap(value: DynamicValue): DynamicValue =
     value match
       case DynamicValue.Variant("None", DynamicValue.Record(fields)) if fields.isEmpty => DynamicValue.Null
       case DynamicValue.Variant("Some", DynamicValue.Record(fields))

@@ -22,7 +22,8 @@ import scala.util.control.NonFatal
   */
 final case class ParallelExecutionResult[+A](results: Vector[Either[DspyError, A]])
 
-/** Runs a task for each item of a batch on a pool of `numThreads` threads (upstream `dspy/utils/parallelizer.py`).
+/** Runs a task for each item of a batch on a pool of `numThreads` threads (upstream `dspy/utils/parallelizer.py`). Each
+  * failed task writes its cause to the standard error stream, as upstream logs each one.
   *
   * @param maxErrors
   *   the number of tasks that can fail before the executor cancels the batch and gives a `Left`
@@ -108,11 +109,14 @@ final class ParallelExecutor(
           completed += 1
           results.update(index, outcome)
 
-          if outcome.isLeft then
+          outcome.left.foreach { error =>
+            // Upstream logs each failed task (`dspy/utils/parallelizer.py`).
+            RuntimeEnvironment.warn("ParallelExecutor", s"Error for item $index: ${error.message}")
             failures += 1
             if failures >= maxErrors then
               stopped = Some(cancelled)
               cancelRequested.set(true)
+          }
 
           if stopped.isEmpty && next < data.size then
             submit(next)

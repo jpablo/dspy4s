@@ -160,8 +160,7 @@ lazy val evaluate = (project in file("modules/evaluate"))
   .settings(name := "dspy4s-evaluate")
   .settings(
     libraryDependencies ++= Seq(
-      "org.scalameta" %% "munit" % munitVersion % Test,
-      "com.lihaoyi"   %% "ujson" % ujsonVersion
+      "org.scalameta" %% "munit" % munitVersion % Test
     )
   )
 

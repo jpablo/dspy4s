@@ -524,6 +524,21 @@ from upstream:
 - The check of ReAnchor for a cache reads only the model of the context. Upstream reads the bound LM of each predictor,
   else `dspy.settings.lm`, and its `cache` config.
 
+## 22. Evaluate rules with no upstream form
+
+**Convention.**
+
+The `evaluate` module follows `dspy/evaluate/`. These rules differ from upstream:
+
+- A number or a bool answer reads as its text, and a list prediction reads as its JSON text. Upstream raises in
+  `normalize_text`.
+- The columns of `saveAsCsv` are the union of the keys of the rows, in first-seen order. Upstream takes the keys of the
+  first row, and `csv.DictWriter` raises on another key.
+- The table is plain text, with a column `<error>` when a result has an error. A metric cell has the form `%.3f`.
+  Upstream prints a pandas table, and a metric cell has a check mark.
+- `ExampleEvaluation.error` always holds the failure as `[code] message`, and there is no `provideTraceback`, because an
+  `Either` has no stack trace. Upstream logs each error, and its `provide_traceback` adds the stack trace to the log.
+
 ## What this means in practice
 
 If you're porting a Python DSPy script to dspy4s, the friction will

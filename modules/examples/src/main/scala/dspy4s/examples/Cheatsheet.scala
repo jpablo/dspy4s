@@ -14,7 +14,7 @@ package dspy4s.examples
 
 import dspy4s.core.contracts.{:=, DspyError, DynamicValues, ErrorLimit, RuntimeContext, ThreadCount}
 import dspy4s.core.data.{RawPrediction, Example}
-import dspy4s.evaluate.{Evaluate, EvaluateConfig}
+import dspy4s.evaluate.{Evaluate, EvaluateConfig, TableDisplay}
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.evaluate.metrics.FunctionMetric
 import dspy4s.lm.runtime.UsageTracking
@@ -132,7 +132,7 @@ object Cheatsheet:
       metric = metric,
       numThreads = Some(ThreadCount(4)),
       displayProgress = true,
-      displayTable = Right(5)
+      displayTable = TableDisplay.Rows(5)
     ))
 
   // ── Snippets 12/13/18 — few-shot optimizers (these snippets instantiate generic optimizers with DynamicPredict) ──

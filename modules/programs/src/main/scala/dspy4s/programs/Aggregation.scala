@@ -16,9 +16,9 @@ import zio.blocks.schema.DynamicValue
   * The primary entry point is [[majority]], which picks the most-common value for a given output field across a set of
   * candidate completions. Ties are broken by first occurrence (Python parity).
   *
-  * The default normalizer is a minimal trim-and-blank-check — pass `NormalizeText.normalize` from
-  * `dspy4s.evaluate.metrics` (or any custom function) for the heavier normalization. We keep the default minimal so
-  * `programs` doesn't need to depend on `evaluate` (which already depends on `programs`).
+  * The default normalizer is a minimal trim-and-blank-check — pass `NormalizeText.apply` from `dspy4s.evaluate.metrics`
+  * (or any custom function) for the heavier normalization. We keep the default minimal so `programs` doesn't need to
+  * depend on `evaluate` (which already depends on `programs`).
   */
 object Aggregation:
 

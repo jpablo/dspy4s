@@ -7,6 +7,7 @@ import dspy4s.core.contracts.{
   DynamicValues,
   FieldSpec,
   PredictorKey,
+  PythonText,
   RuntimeContext,
   SignatureLayout,
   ThreadCount,
@@ -737,7 +738,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
     )
     assertEquals(ReAnchorSearch.fsum(Vector(0.1, 0.2, 0.3, 1e100, -1e100)), 0.6)
     assertEquals(
-      Vector((0.35, 1), (0.45, 1), (0.65, 1), (2.675, 2), (0.125, 2)).map(ReAnchorSearch.roundTo),
+      Vector((0.35, 1), (0.45, 1), (0.65, 1), (2.675, 2), (0.125, 2)).map(PythonText.round),
       Vector(0.3, 0.5, 0.7, 2.67, 0.12)
     )
   }

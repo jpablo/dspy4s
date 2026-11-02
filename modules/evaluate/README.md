@@ -48,16 +48,17 @@ The arguments of `evaluator(metric, devset, …)(program)` replace the values of
 
 - **Threads.** The thread count is `numThreads`, else the value of the `RuntimeContext`, else 8. Each worker thread
   gets the context. Thus a metric can call an LM.
-- **Errors.** A failed example gets the `failureScore` (default `0.0`). The run stops with an error after `maxErrors`
-  failures (default 10). An empty dev set is a `ValidationError`.
+- **Errors.** A failed example gets the `failureScore` (default `0.0`), and the executor writes its cause to the
+  standard error stream. The run stops with an error after `maxErrors` failures (default 10). An empty dev set is a
+  `ValidationError`.
 - **Events.** Each run sends an evaluate start event and an end event. The callback handlers can read the
   `callbackMetadata` of the run in the `RuntimeContext`.
-- **Output.** `displayProgress` prints the score, and `displayTable` prints a table of the results. `saveAsCsv` and
-  `saveAsJson` write the results to a file.
+- **Output.** `displayProgress` prints the score. `displayTable` prints a table of the results: `TableDisplay.Off`,
+  `TableDisplay.All`, or `TableDisplay.Rows(n)`. `saveAsCsv` and `saveAsJson` write the results to a file.
 
-The result is an `EvaluationResult`: the `score`, the `metricName`, the `metadata`, and one `ExampleEvaluation` for
-each example, in order. An `ExampleEvaluation` has the example, the prediction, and its score. It also has the error
-message of a failed example when `provideTraceback` is true.
+The result is an `EvaluationResult`: the `score`, the `metricName`, and one `ExampleEvaluation` for each example, in
+order. The `score` is `round(100 * ncorrect / ntotal, 2)`, as upstream. An `ExampleEvaluation` has the example, the
+prediction, and its score. For a failed example, it also has the failure as `[code] message`.
 
 ## Metrics
 
@@ -74,8 +75,9 @@ trace of each run.
 ### Metrics that compare text
 
 These metrics compare the prediction with the reference answers of the example (default field `answer`). They first
-normalize the text with `NormalizeText`: lowercase, with no punctuation, articles, or accents. `PassageMatch` keeps
-the articles.
+normalize the text with `NormalizeText`, as upstream `normalize_text`: NFD, lower case, no punctuation, no articles,
+and one space between the words. An accent stays as its NFD mark. A null value is a `ValidationError`. A number or a
+bool reads as its text.
 
 | Metric | Score |
 |--------|-------|
@@ -83,7 +85,7 @@ the articles.
 | `ContainsMatch` | `1.0` if the prediction contains a reference answer |
 | `F1Score` | the token F1 score for the best reference answer |
 | `AnswerMatch(frac)` | `ExactMatch` if `frac >= 1.0`, else `1.0` if the F1 score is `frac` or more |
-| `PassageMatch` | `1.0` if a retrieved passage of the prediction contains a reference answer |
+| `PassageMatch` | `1.0` if the tokens of a retrieved passage of the prediction contain the tokens of a reference answer, in sequence |
 
 Use `FunctionMetric` to make a metric from a function:
 
@@ -106,13 +108,17 @@ field. It uses the LM and the adapter of the `RuntimeContext`.
   retrieved context, and returns their F1 score. The program must put the retrieved context in a field of the
   prediction (default `context`).
 
-The default field names are `question` and `response`.
+The default field names are `question` and `response`. The values go to the judge with no conversion, so a list
+context stays a list. With a trace, these metrics return `1.0` when the score reaches the `threshold` (default `0.66`),
+else `0.0`.
 
 ## Save the results
 
-`EvaluationResultPersistence` writes one row for each example, as JSON or as CSV. An example field `k` becomes
-`example_k`. A prediction field gets the prefix `pred_` only if an example field has the same name. The score is in a
-column with the name of the metric.
+`EvaluationResultPersistence` writes `EvaluationResult.rows`, one row for each example, as JSON or as CSV. These are
+the rows of upstream `merge_dicts`. A field gets the prefix `example_` or `pred_` only if the example and the prediction
+have a field with the same name. The score is in a column with the name of the metric, and it replaces a field with
+that name. The JSON text has the form of Python `json.dump`, and the CSV text has the form of the Python `csv` module.
+The table of `displayTable` has the same columns.
 
 ## Source layout
 
@@ -127,7 +133,8 @@ column with the name of the metric.
 `evaluate` ports `dspy/evaluate/`. These are the main differences:
 
 - A metric reads a field by its name. Python DSPy uses attribute access.
-- A metric always returns a `Double`. With a trace, the LM-judge metrics of Python DSPy return a `bool`.
+- A metric always returns a `Double`. With a trace, the LM-judge metrics return `1.0` or `0.0`, where Python DSPy
+  returns a `bool`.
 - dspy4s makes the `SignatureLayout` of each judge program at runtime.
 
-`AutoEvaluation.scala` describes these differences.
+`AutoEvaluation.scala` describes these differences. Section 22 of `docs/port/PORT_DIFFERENCES.md` has the others.

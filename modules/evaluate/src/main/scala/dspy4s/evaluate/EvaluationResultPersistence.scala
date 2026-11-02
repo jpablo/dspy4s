@@ -2,101 +2,47 @@ package dspy4s.evaluate
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.PythonText
 import dspy4s.evaluate.contracts.EvaluationResult
+import zio.blocks.schema.DynamicValue
 
-import java.io.PrintWriter
-import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Paths
+import scala.util.control.NonFatal
 
+/** Writes the [[EvaluationResult.rows]] to a file (the `save_as_json` and `save_as_csv` steps of upstream
+  * `Evaluate.__call__`).
+  */
 object EvaluationResultPersistence:
 
+  /** The rows as a JSON text, as upstream `json.dump(data, f)`: ASCII escapes, and no indent. */
   def saveAsJson(result: EvaluationResult, path: String): Either[String, Unit] =
+    write(path, PythonText.jsonAscii(DynamicValues.sequence(result.rows.map(row => DynamicValues.record(row.toSeq*)))))
+
+  /** The rows as a CSV text, in the form of the Python `csv` module. The columns are the union of the keys of the rows,
+    * in the order of their first occurrence. Upstream takes the keys of the first row, and raises on another key.
+    */
+  def saveAsCsv(result: EvaluationResult, path: String): Either[String, Unit] =
+    val rows    = result.rows
+    val columns = (rows.flatMap(_.keysIterator) :+ result.metricName).distinct
+    val lines   = columns +: rows.map(row => columns.map(column => row.get(column).fold("")(csvText)))
+    write(path, lines.map(_.map(csvField).mkString("", ",", "\r\n")).mkString)
+
+  private def write(path: String, text: String): Either[String, Unit] =
     try
-      val rows = result.results.map { eval =>
-        val entry       = scala.collection.mutable.LinkedHashMap[String, ujson.Value]()
-        val exampleKeys = DynamicValues.recordKeys(eval.example.values).toSet
-        DynamicValues.recordEntries(eval.example.values).foreach { (k, v) =>
-          entry += (s"example_$k" -> toJson(DynamicValues.toAny(v)))
-        }
-        DynamicValues.recordEntries(eval.prediction.values).foreach { (k, v) =>
-          val key = if exampleKeys.contains(k) then s"pred_$k" else k
-          entry += (key -> toJson(DynamicValues.toAny(v)))
-        }
-        entry += (result.metricName -> ujson.Num(eval.score))
-        ujson.Obj.from(entry)
-      }
-      val array  = ujson.Arr.from(rows)
-      val writer = new PrintWriter(Files.newBufferedWriter(Paths.get(path), StandardCharsets.UTF_8))
-      try writer.write(ujson.write(array, indent = 2))
-      finally writer.close()
+      val _ = Files.writeString(Paths.get(path), text)
       Right(())
     catch
-      case error: Throwable => Left(DspyError.messageOf(error))
+      case NonFatal(error) => Left(DspyError.messageOf(error))
 
-  def saveAsCsv(result: EvaluationResult, path: String): Either[String, Unit] =
-    try
-      val headerBuilder = scala.collection.mutable.LinkedHashSet[String]()
-      result.results.foreach { eval =>
-        val exampleKeys = DynamicValues.recordKeys(eval.example.values).toSet
-        DynamicValues.recordKeys(eval.example.values).foreach(k => headerBuilder += s"example_$k")
-        DynamicValues.recordKeys(eval.prediction.values).foreach { k =>
-          val key = if exampleKeys.contains(k) then s"pred_$k" else k
-          headerBuilder += key
-        }
-      }
-      headerBuilder += result.metricName
-      val header = headerBuilder.toVector
+  /** The CSV text of a value: a null is the empty text, as Python `csv`, and each other value is Python `str`. */
+  private def csvText(value: DynamicValue): String =
+    PythonText.unwrap(value) match
+      case _: DynamicValue.Null.type => ""
+      case other                     => PythonText.str(other)
 
-      val writer = new PrintWriter(Files.newBufferedWriter(Paths.get(path), StandardCharsets.UTF_8))
-      try
-        writer.println(header.map(csvEscape).mkString(","))
-        result.results.foreach { eval =>
-          val row = header.map { key =>
-            if key == result.metricName then eval.score.toString
-            else if key.startsWith("example_") then
-              val realKey = key.stripPrefix("example_")
-              eval.example.get(realKey).map(dv => toCsvString(DynamicValues.toAny(dv))).getOrElse("")
-            else if key.startsWith("pred_") then
-              val realKey = key.stripPrefix("pred_")
-              eval.prediction.get(realKey).map(dv => toCsvString(DynamicValues.toAny(dv))).getOrElse("")
-            else
-              eval.prediction.get(key).map(dv => toCsvString(DynamicValues.toAny(dv))).getOrElse("")
-          }
-          writer.println(row.map(csvEscape).mkString(","))
-        }
-        Right(())
-      finally writer.close()
-    catch
-      case error: Throwable => Left(DspyError.messageOf(error))
-
-  private def toJson(value: Any): ujson.Value =
-    value match
-      case s: String        => ujson.Str(s)
-      case b: Boolean       => ujson.Bool(b)
-      case n: Int           => ujson.Num(n.toDouble)
-      case n: Long          => ujson.Num(n.toDouble)
-      case n: Double        => ujson.Num(n)
-      case n: Float         => ujson.Num(n.toDouble)
-      case _: None.type     => ujson.Null
-      case Some(inner)      => toJson(inner)
-      case m: Map[?, ?]     => ujson.Obj.from(m.iterator.collect { case (k: String, v) => k -> toJson(v) })
-      case seq: Iterable[?] => ujson.Arr.from(seq.iterator.map(toJson))
-      case arr: Array[?]    => ujson.Arr.from(arr.iterator.map(toJson))
-      case other            => ujson.Str(String.valueOf(other))
-
-  private def toCsvString(value: Any): String =
-    value match
-      case s: String        => s
-      case b: Boolean       => b.toString
-      case n: Number        => n.toString
-      case _: None.type     => ""
-      case Some(inner)      => toCsvString(inner)
-      case seq: Iterable[?] => seq.map(toCsvString).mkString("; ")
-      case arr: Array[?]    => arr.map(toCsvString).mkString("; ")
-      case other            => String.valueOf(other)
-
-  private def csvEscape(field: String): String =
-    if field.contains(",") || field.contains("\"") || field.contains("\n") then
-      "\"" + field.replace("\"", "\"\"") + "\""
-    else field
+  /** A CSV field, in quotes when it has a comma, a quote, or a line break (Python `csv.QUOTE_MINIMAL`). */
+  private def csvField(text: String): String =
+    if text.exists(char => char == ',' || char == '"' || char == '\r' || char == '\n') then
+      "\"" + text.replace("\"", "\"\"") + "\""
+    else text

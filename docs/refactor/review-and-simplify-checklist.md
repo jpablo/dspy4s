@@ -406,23 +406,26 @@ Simplify 5 (rank 9). Code-review 6 (rank 6). 853 main lines, 701 test lines.
 ### Passes
 
 - (a) The whole module, 853 lines.
-  - [ ] /simplify
-  - [ ] /code-review
+  - [x] /simplify
+  - [x] /code-review
 
 ### Simplify findings
 
-- [ ] `EvaluationResultPersistence.scala:15-26`, `:72-96`: a second JSON library (ujson) and a conversion through `Any`. Core already has the zio-blocks DynamicValue JSON codec.
-- [ ] `metrics/AutoEvaluation.scala:144-146`, `:230-237` call the legacy `fromAny` on Strings. The `threshold` fields (`:100`, `:171`) are not used. The layouts at `:107-131` and `:179-193` repeat the same fields.
-- [ ] `Evaluate.scala:67-80` rebuilds the config field by field, where `config.copy` is enough. `displayTable: Either[Boolean, Int]` (`:31`) is a strange encoding. The metadata is a `Map[String, Any]` (`:152`). The `nonEmpty` branch at `:147` is dead code.
-- [ ] `metrics/NormalizeText.scala:11-24`: `apply` and `dpr` repeat four steps. `metrics/BuiltinMetrics.scala:118-128` repeats the same extraction two times.
+- [x] `EvaluationResultPersistence.scala:15-26`, `:72-96`: a second JSON library (ujson) and a conversion through `Any`. Core already has the zio-blocks DynamicValue JSON codec. Fixed: `PythonText.jsonAscii` of `EvaluationResult.rows`, as upstream `json.dump`, and no ujson dependency in the module.
+- [x] `metrics/AutoEvaluation.scala:144-146`, `:230-237` call the legacy `fromAny` on Strings. The `threshold` fields (`:100`, `:171`) are not used. The layouts at `:107-131` and `:179-193` repeat the same fields. Fixed: the values go to the judge with no conversion, a trace gives the result of the `threshold`, and the layouts share one input list.
+- [x] `Evaluate.scala:67-80` rebuilds the config field by field, where `config.copy` is enough. `displayTable: Either[Boolean, Int]` (`:31`) is a strange encoding. The metadata is a `Map[String, Any]` (`:152`). The `nonEmpty` branch at `:147` is dead code. Fixed: `config.copy`, the enum `TableDisplay`, and `ParallelExecutor.fromSettings`. `metadata`, `aggregateScore`, and the dead branch had no reader, and they are gone.
+- [x] `metrics/NormalizeText.scala:11-24`: `apply` and `dpr` repeat four steps. `metrics/BuiltinMetrics.scala:118-128` repeats the same extraction two times. Fixed: `NormalizeText` has `apply` and `dprTokens`, and `MetricHelpers.textValues` is the one extraction.
 
 ### Code-review findings
 
-- [ ] `metrics/BuiltinMetrics.scala:30`, `:34`, `:50`, `:121`, `:127`: `toAny(Null)` gives `null`, and `.toString` then throws a NullPointerException. A null answer gives an exception, not a `Left`.
-- [ ] `metrics/BuiltinMetrics.scala:136`: PassageMatch compares substrings, but upstream `has_answer` compares token sequences. With this code, "cat" matches "concatenate".
-- [ ] `metrics/NormalizeText.scala:13-15` is different from upstream `normalize_text`. It removes accents, and it changes punctuation to a space where upstream deletes it ("U.S." gives "u s"). Thus EM and F1 can differ from dspy.
-- [ ] `EvaluationResultPersistence.scala:54-63`: the CSV code finds each value from the header prefix. If a field name is the metric name, or starts with `example_` or `pred_`, the code reads the wrong value. Line `:85` writes a JSON null as the string "null". Lines `:34` and `:70` catch `Throwable`.
-- [ ] `contracts/EvaluateContracts.scala:63-69`: an example field named `score` or `error` shows the evaluation value, not the field value.
+- [x] `metrics/BuiltinMetrics.scala:30`, `:34`, `:50`, `:121`, `:127`: `toAny(Null)` gives `null`, and `.toString` then throws a NullPointerException. A null answer gives an exception, not a `Left`. Fixed: a null is a `ValidationError` that names the field, and a judged metric gives the null to the judge.
+- [x] `metrics/BuiltinMetrics.scala:136`: PassageMatch compares substrings, but upstream `has_answer` compares token sequences. With this code, "cat" matches "concatenate". Fixed: token sequences from `NormalizeText.dprTokens`, as upstream.
+- [x] `metrics/NormalizeText.scala:13-15` is different from upstream `normalize_text`. It removes accents, and it changes punctuation to a space where upstream deletes it ("U.S." gives "u s"). Thus EM and F1 can differ from dspy. Fixed: the steps of upstream `normalize_text`, and the expected values of the tests come from CPython.
+- [x] `EvaluationResultPersistence.scala`: the CSV code finds each value from the header prefix. If a field name is the metric name, or starts with `example_` or `pred_`, the code reads the wrong value. Line `:85` writes a JSON null as the string "null". Lines `:34` and `:70` catch `Throwable`. Fixed: one row form, `EvaluationResult.rows`, for JSON, CSV, and the table. A null is `null` in JSON and the empty text in CSV. The code catches `NonFatal`.
+- [x] `contracts/EvaluateContracts.scala:63-69`: an example field named `score` or `error` shows the evaluation value, not the field value. Fixed: the columns come from the rows, and the error column has a name that does not collide. A cell has at most 25 words, and the last line says how many rows the table hides.
+- [x] (code-review (a)) The score of `Evaluate` had no rounding, and upstream gives `round(100 * ncorrect / ntotal, 2)`. Fixed: `PythonText.round`, moved from `ReAnchorSearch`.
+- [x] (code-review (a)) A judged metric turned a list context into one text, and its instructions joined the lines of the upstream docstring with a space. Fixed: the value goes to the adapter as it is, and the instructions have the lines of upstream.
+- [x] (code-review (a)) `PassageMatch` with an empty context list gives `0.0`, as upstream `any` over no passages, and `TableDisplay.Rows(0)` gives no table, as upstream reads 0 as false.
 
 ## optimize
 
@@ -455,7 +458,7 @@ Simplify 7 (rank 2). Code-review 6 (rank 5). 2954 main lines, 4945 test lines.
 - [ ] (simplify, design) ProgramPersistence keys the leaves by position, so a reorder of leaves with the same size loads with no error. Upstream keys by name. Store the signature structure of each leaf, and reject a mismatch.
 - [ ] (simplify, design) `MIPROv2.scala` scores each trial on the full set, a documented difference: about 11n runs against the 350 + 3n of upstream for its defaults. A minibatch of 35 and a full evaluation every 5 trials follow upstream, but trial scores get more noise.
 - [ ] (simplify, skipped) `KNNFewShot.scala` bootstraps the neighbors on each call, and `InferRules.scala` drops one example at a time on an overflow. Both are as upstream. A memo of each neighbor and a bisection save calls, but change the demos or the failure events.
-- [ ] (evaluate pass) `ParallelExecutor.scala` gives a generic `Left` at the error limit, and nothing logs the cause of a failed task, where upstream logs each one. `Evaluate.scala` keeps errors only with `provideTraceback`.
+- [x] (evaluate pass) `ParallelExecutor.scala` gives a generic `Left` at the error limit, and nothing logs the cause of a failed task, where upstream logs each one. `Evaluate.scala` keeps errors only with `provideTraceback`. Fixed: each failed task writes its cause, as upstream, and `ExampleEvaluation.error` always holds it.
 
 ### Code-review findings
 

@@ -184,11 +184,13 @@ program's parameters: Python walks `__dict__`, dspy4s uses a
 - The built-in metrics — `ExactMatch`, `ContainsMatch`, `F1Score`,
   `AnswerMatch`, `PassageMatch`, plus a `FunctionMetric` adapter —
   match Python's `evaluate/metrics.py` behavior.
-- The text-normalization utility (lowercase + strip punctuation +
-  remove articles + NFD-strip combining marks + collapse whitespace)
-  ports byte-for-byte from `dspy.evaluate.evaluate.normalize_text`.
+- The text-normalization utility (NFD + lowercase + delete punctuation +
+  remove articles + collapse whitespace) ports
+  `dspy.evaluate.metrics.normalize_text`. `PassageMatch` ports the token
+  match of `has_answer`.
 - Result persistence (`saveAsJson` / `saveAsCsv`) uses the same
-  flat-row schema with `example_` / `pred_` collision prefixes.
+  flat rows as `merge_dicts`, with the `example_` / `pred_` prefixes
+  only on a name collision.
 
 ## Streaming v1
 
