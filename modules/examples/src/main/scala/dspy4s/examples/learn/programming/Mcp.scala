@@ -276,9 +276,10 @@ object Mcp:
   // | # Use it like any DSPy tool
   // | result = await dspy_tool.acall(param1="value", param2=123)
   //
-  // The converted tool keeps the name, the description, the input schema of the MCP tool (`inputSchema`), and the type
-  // of each argument (`argSchema`). `invoke` blocks, so there is no async form. `McpTools.toolSpec` gives the tool to a
-  // model with native function calling, with the full input schema and the description of each argument.
+  // The converted tool keeps the name and the description of the MCP tool. `inputSchema` is the object schema of the
+  // tool: `type`, `properties` with each `$ref` expanded, and the `required` list of the server. `argSchema` has the
+  // type of each argument. `invoke` blocks, so there is no async form. `McpTools.toolSpec` gives the tool to a model
+  // with native function calling, with the same object schema and the description of each argument.
   // --8<-- [start:tool-conversion]
   def callFirstTool(client: McpSyncClient)(using RuntimeContext): Either[DspyError, DynamicValue] =
     val session = McpToolClient.fromSync(client)

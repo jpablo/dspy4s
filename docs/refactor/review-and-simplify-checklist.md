@@ -399,6 +399,7 @@ Simplify 7 (rank 1). Code-review 6 (rank 4). 8004 main lines, 11858 test lines.
 - [x] (code-review (a)) `RLM.DecisionTypes` copied `DecisionKind.richTypes`. Fixed: one set.
 - [ ] (code-review (a), no change) A tool exception gives `boom` under Deno and `IllegalStateException: boom` under Local. Upstream has the same two texts (`python_interpreter.py:529`, `local_interpreter.py:225`), so the port keeps them.
 - [ ] (code-review (a), not checked) A SUBMIT dict that holds a NaN: `DynamicValues.decodeJson` is the parser, as before. If it rejects a NaN, the observation says `FINAL returned str`. Upstream reads the value.
+- [ ] (from the mcp pass, not run) In the sandbox of RLM a tool with an optional argument has a wrapper with no default, so the code cannot leave out the argument (`RLMSandboxTools.fromToolFunctions`, `runner.js`). A property name that is not a Python name, for example `from`, gives invalid Python. `RLM.checkNames` checks only the tool names. Upstream gives no target, because its wrapper is broken in another way (`rlm.py`, `python_interpreter.py`).
 
 ## evaluate
 
@@ -555,23 +556,30 @@ Simplify 2 (rank 12). Code-review 3 (rank 10). 396 main lines, 586 test lines.
 ### Passes
 
 - (a) The whole module, 396 lines.
-  - [ ] /simplify
-  - [ ] /code-review
+  - [x] /simplify
+  - [x] /code-review
 
 ### Simplify findings
 
-- [ ] `McpTools.scala:210` (`string`) is a private copy of `DynamicValues.string`. (found in the lm pass)
-- [ ] `JavaJson.scala:90` reads `productElement(0)` by reflection for dates and UUIDs, which is fragile. Line `:88` maps `Unit` to an empty map.
-- [ ] `McpTools.scala:198-206` (`typeRefOf`) is the inverse of core `TypeRef.jsonType` (before: programs `internal/ToolText.scala` `jsonType`). The two copies of one mapping can become different.
-- [ ] `McpTools.scala:90-99` (`convert`) uses alias vals and an anonymous `ToolFunction`.
-- [ ] Optional: `JavaJson.toDynamic` walks the Java JSON tree by hand. A path through JSON text and the zio-blocks codec can replace it.
+- [x] `McpTools.scala:210` (`string`) is a private copy of `DynamicValues.string`. (found in the lm pass) It uses `DynamicValues.string`.
+- [x] `JavaJson.scala:90` reads `productElement(0)` by reflection for dates and UUIDs, which is fragile. Line `:88` maps `Unit` to an empty map. `JavaJson` is gone. The JSON codec writes each primitive, with no reflection, and `Unit` stays `{}`.
+- [x] `McpTools.scala:198-206` (`typeRefOf`) is the inverse of core `TypeRef.jsonType` (before: programs `internal/ToolText.scala` `jsonType`). The two copies of one mapping can become different. `TypeRef.fromJsonType` in core is the inverse, and it reads `jsonType`, so one mapping exists.
+- [x] `McpTools.scala:90-99` (`convert`) uses alias vals and an anonymous `ToolFunction`. `ToolFunction.apply` takes `argSchema` and `inputSchema`, and `convert` is one call. The submit tool of `ReActV2` uses the same factory.
+- [x] Optional: `JavaJson.toDynamic` walks the Java JSON tree by hand. A path through JSON text and the zio-blocks codec can replace it. Done. The way in reads with `PythonText.parseJson`, because `tryDecodeJson` changes the number types and has a limit of 4 MiB. The way out writes with `DynamicValues.tryEncodeJson`.
 
 ### Code-review findings
 
-- [ ] `JavaJson.scala:65-70` (`fromNumber`): a `java.math.BigDecimal` becomes a `Double`, and this loses precision.
-- [ ] `McpTools.scala:146-149`: the error text for several text parts is a JSON array. Upstream gives a Python `str(list)`.
-- [ ] `SdkToolClient.scala:24-31`: the class sets no timeout of its own. It relies on the request timeout of the SDK client, and a call blocks the caller thread.
-- [ ] `McpTools.scala:182-195` (`resolve`): it reads only the last segment of a `$ref` and looks only in `$defs`. A ref that it cannot find gives the type `Any`.
+- [x] `JavaJson.scala:65-70` (`fromNumber`): a `java.math.BigDecimal` becomes a `Double`, and this loses precision. The file is gone. One correction: JSON text could not reach this path, because the mapper of the SDK reads a float as a `Double`.
+- [x] `McpTools.scala:146-149`: the error text for several text parts is a JSON array. Upstream gives a Python `str(list)`. The text stays JSON, through `PythonText.str`, under the boundary rule of decision D3. One correction: this is a recorded difference and not a defect (PORT_DIFFERENCES section 25). The old writer threw on a lone surrogate, and that is fixed.
+- [x] `SdkToolClient.scala:24-31`: the class sets no timeout of its own. It relies on the request timeout of the SDK client, and a call blocks the caller thread. No change: the caller owns the client. The doc of `fromSync` gives the default of the SDK, 20 seconds, and PORT_DIFFERENCES section 25 records the difference from upstream.
+- [x] `McpTools.scala:182-195` (`resolve`): it reads only the last segment of a `$ref` and looks only in `$defs`. A ref that it cannot find gives the type `Any`. Upstream also reads only the last segment and only `$defs`. Each `$ref` now expands at each depth. A `$ref` with no definition, and a recursive one, give `{}`, where upstream raises (PORT_DIFFERENCES section 25).
+- [x] (code-review) An interrupt of the caller during a call became a `Left`, and the program went on, because `Mono.block` wraps the `InterruptedException`. It now goes up as the `InterruptedException`, as the rule of `ToolFunction.invoke` says.
+- [x] (code-review) A null in a list after a number or a boolean reached the server as `0` or `false`, because `Chunk.map` chose an array of the type of the first value. The JSON text path has no such step.
+- [x] (code-review) The model saw a `$ref` that pointed at nothing on the text path, and `ToolText.parameters` gave `Any`. The schema of a converted tool now has each `$ref` expanded.
+- [x] (code-review) A tool with no arguments went to the provider as `{"type": "object"}`. The schema of a converted tool now always has `type`, `properties`, and `required`, and no other root key, as upstream. `required` stays the list of the server (PORT_DIFFERENCES section 25).
+- [x] (simplify) `McpContent` is gone, because nothing read the order of the parts. After the schema change, no main code set `ToolSpec.parameters`, so it, `ToolParameterSpec`, and the builder in `ToolSchemaBridge` are gone. Null checks that the records of the SDK make dead are gone.
+- [x] (tests) The port of upstream `test_react_v2_native_mcp_end_to_end` runs `ReActV2` with the tools of a real server. A wire test checks each JSON type through the JSON text.
+- [ ] (code-review, kept) The port does not check the arguments on the client, and upstream `_validate_and_parse_args` does. The server checks them (PORT_DIFFERENCES section 25). Change this only if the owner asks.
 
 ## examples
 

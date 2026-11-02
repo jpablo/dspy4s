@@ -3,7 +3,6 @@ package dspy4s.adapters
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.NativeTools
 import dspy4s.adapters.contracts.ToolChoice
-import dspy4s.adapters.contracts.ToolParameterSpec
 import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -46,7 +45,12 @@ class ChatAdapterNativeToolsSuite extends FunSuite:
     ToolSpec(
       "search",
       Some("Search the web"),
-      Vector(ToolParameterSpec("query", TypeRef.string, Some("the query"), required = true))
+      DynamicValues.record(
+        "type"       := "object",
+        "properties" ->
+          DynamicValues.record("query" -> DynamicValues.record("type" := "string", "description" := "the query")),
+        "required" := List("query")
+      )
     )
   )
 

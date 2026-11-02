@@ -3,7 +3,6 @@ package dspy4s.adapters
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.NativeTools
-import dspy4s.adapters.contracts.ToolParameterSpec
 import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -62,7 +61,11 @@ class ConversationHistorySuite extends FunSuite:
     ToolSpec(
       "search",
       Some("Search for documents."),
-      Vector(ToolParameterSpec("query", TypeRef.string, None, required = true))
+      DynamicValues.record(
+        "type"       := "object",
+        "properties" -> DynamicValues.record("query" -> DynamicValues.record("type" := "string")),
+        "required"   := List("query")
+      )
     )
   )
 

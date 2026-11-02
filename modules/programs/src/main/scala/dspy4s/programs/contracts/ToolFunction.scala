@@ -1,6 +1,6 @@
 package dspy4s.programs.contracts
 
-import dspy4s.core.contracts.{DspyError, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, RuntimeContext, TypeRef}
 import zio.blocks.schema.{DynamicValue, Schema}
 
 import scala.collection.immutable.VectorMap
@@ -19,15 +19,16 @@ trait ToolFunction:
   def description: String = ""
 
   /** The tool's parameters as `(name, wire type)` pairs, surfaced to the model by tool-using programs so it knows what
-    * arguments to supply. Empty for hand-written tools and the function factories; populated by
+    * arguments to supply. Empty for hand-written tools and by default in the function factories; populated by
     * [[ToolFunction.fromMethod]] from the method's signature. An empty list means an unknown argument list, so in the
     * sandbox of `RLM` the tool takes keyword arguments.
     */
-  def argSchema: Vector[(String, dspy4s.core.contracts.TypeRef)] = Vector.empty
+  def argSchema: Vector[(String, TypeRef)] = Vector.empty
 
-  /** The JSON schema of the arguments, when the tool has one: an object schema with `properties` and `required`, for
-    * example the `inputSchema` of an MCP tool (upgrade item I10; upstream `Tool.args` holds the schema of each
-    * argument). [[argSchema]] stays the flat view of the same arguments. `None` for a tool that has only [[argSchema]].
+  /** The JSON schema of the arguments, when the tool has one: an object schema with `type`, `properties`, and
+    * `required`, for example the object schema of a converted MCP tool, with each `$ref` expanded (upgrade item I10;
+    * upstream `Tool.args` holds the schema of each argument). [[argSchema]] stays the flat view of the same arguments.
+    * `None` for a tool that has only [[argSchema]].
     */
   def inputSchema: Option[DynamicValue.Record] = None
 
@@ -71,18 +72,27 @@ object ToolFunction:
     *   Right(ToolFunction.result(s"The weather in ${args.asString("city")} is sunny"))
     * }
     * }}}
+    *
+    * A tool that knows its arguments gives [[ToolFunction.argSchema]] and [[ToolFunction.inputSchema]].
     */
-  def apply(name: String, description: String = "")(
+  def apply(
+      name       : String,
+      description: String                      = "",
+      argSchema  : Vector[(String, TypeRef)]   = Vector.empty,
+      inputSchema: Option[DynamicValue.Record] = None
+  )(
       invoke: DynamicValue.Record => RuntimeContext ?=> Either[DspyError, DynamicValue]
   ): ToolFunction =
-    val toolName = name
-    val toolDesc = description
-    val toolFn   = invoke // alias: avoid the method-name shadowing the param in the body below
-    new ToolFunction:
-      override val name: String                                                                             = toolName
-      override val description: String                                                                      = toolDesc
-      override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
-        toolFn(args)
+    FunctionTool(name, description, argSchema, inputSchema, invoke)
+
+  private final class FunctionTool(
+      override val name       : String,
+      override val description: String,
+      override val argSchema  : Vector[(String, TypeRef)],
+      override val inputSchema: Option[DynamicValue.Record],
+      run                     : DynamicValue.Record => RuntimeContext ?=> Either[DspyError, DynamicValue]
+  ) extends ToolFunction:
+    override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] = run(args)
 
   /** Like [[apply]] but the body returns a value with a `Schema` directly (lifted via [[result]]) — no
     * `Right(ToolFunction.result(...))` wrapping. Use this for tools that never fail:

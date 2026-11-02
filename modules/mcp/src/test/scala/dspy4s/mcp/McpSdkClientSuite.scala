@@ -1,11 +1,24 @@
 package dspy4s.mcp
 
+import dspy4s.adapters.ChatAdapter
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.core.contracts.:=
+import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.History
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
+import dspy4s.core.contracts.ToolCall
 import dspy4s.core.contracts.TypeRef
+import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.lm.contracts.LanguageModel
+import dspy4s.lm.contracts.LmMode
+import dspy4s.lm.contracts.LmOutput
+import dspy4s.lm.contracts.LmRequest
+import dspy4s.lm.contracts.LmResponse
 import dspy4s.programs.contracts.ToolFunction
+import dspy4s.programs.strategies.ReActV2
+import dspy4s.signatures.Signature
 import io.modelcontextprotocol.client.McpClient
 import io.modelcontextprotocol.client.McpSyncClient
 import io.modelcontextprotocol.client.transport.ServerParameters
@@ -70,8 +83,6 @@ class McpSdkClientSuite extends FunSuite:
       case Right(record: DynamicValue.Record) => record
       case other                              => fail(s"not a JSON object: $other")
 
-  private def str(text: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(text))
-
   private def int(number: Int): DynamicValue = DynamicValue.Primitive(PrimitiveValue.Int(number))
 
   /** Each tool of the server, converted in `mode`, by name. */
@@ -82,10 +93,16 @@ class McpSdkClientSuite extends FunSuite:
 
   test("listTools gives each tool of the server, with the description and the input schema in the key order") {
     val listed = McpToolClient.fromSync(server()).listTools().fold(error => fail(error.message), identity)
-    assertEquals(listed.map(_.name), Vector("echo", "fail", "count", "pixel"))
+    assertEquals(listed.map(_.name), Vector("echo", "fail", "count", "pixel", "reflect"))
     assertEquals(
       listed.map(_.description),
-      Vector("Echo the text.", "Fail with a message.", "Count the words of the text.", "Draw a pixel.").map(Some(_))
+      Vector(
+        "Echo the text.",
+        "Fail with a message.",
+        "Count the words of the text.",
+        "Draw a pixel.",
+        "Give the arguments back."
+      ).map(Some(_))
     )
     assertEquals(listed.head.inputSchema, json(McpTestServer.echoSchema))
   }
@@ -94,8 +111,13 @@ class McpSdkClientSuite extends FunSuite:
     given RuntimeContext = RuntimeContext()
     val echo             = tools()("echo")
     assertEquals(echo.argSchema, Vector("text" -> TypeRef.string, "times" -> TypeRef.int))
-    assertEquals(echo.inputSchema, Some(json(McpTestServer.echoSchema)))
-    assertEquals(echo.invoke(DynamicValues.record("text" := "hi", "times" := 2)), Right(str("hi hi")))
+    assertEquals(
+      echo.inputSchema,
+      Some(json(
+        """{"type": "object", "properties": {"text": {"type": "string", "description": "The text to echo"}, "times": {"type": "integer"}}, "required": ["text"]}"""
+      ))
+    )
+    assertEquals(echo.invoke(DynamicValues.record("text" := "hi", "times" := 2)), Right(DynamicValues.string("hi hi")))
   }
 
   test("a result that the server marks as an error is a Left with the text") {
@@ -113,10 +135,10 @@ class McpSdkClientSuite extends FunSuite:
       tools(McpResultMode.Structured)("count").invoke(args),
       Right(DynamicValue.Record(Chunk(
         "count" -> int(3),
-        "words" -> DynamicValue.Sequence(Chunk(str("one"), str("two"), str("three")))
+        "words" -> DynamicValues.sequence(Vector("one", "two", "three").map(DynamicValues.string))
       )))
     )
-    assertEquals(tools()("count").invoke(args), Right(str("3")))
+    assertEquals(tools()("count").invoke(args), Right(DynamicValues.string("3")))
   }
 
   test("an image part is the JSON object of the part") {
@@ -128,9 +150,9 @@ class McpSdkClientSuite extends FunSuite:
       case Vector(record: DynamicValue.Record) => record
       case other                               => fail(s"not one part: $other")
     assertEquals(DynamicValues.recordKeys(image).headOption, Some("type"))
-    assertEquals(DynamicValues.recordGet(image, "type"), Some(str("image")))
-    assertEquals(DynamicValues.recordGet(image, "data"), Some(str(McpTestServer.pixelData)))
-    assertEquals(DynamicValues.recordGet(image, "mimeType"), Some(str("image/png")))
+    assertEquals(DynamicValues.recordGet(image, "type"), Some(DynamicValues.string("image")))
+    assertEquals(DynamicValues.recordGet(image, "data"), Some(DynamicValues.string(McpTestServer.pixelData)))
+    assertEquals(DynamicValues.recordGet(image, "mimeType"), Some(DynamicValues.string("image/png")))
   }
 
   test("arguments that the server rejects give a Left") {
@@ -138,6 +160,77 @@ class McpSdkClientSuite extends FunSuite:
     tools()("echo").invoke(DynamicValues.record("times" := 2)) match
       case Left(error) => assert(error.message.startsWith("Failed to call a MCP tool:"), error.message)
       case other       => fail(s"not a Left: $other")
+  }
+
+  test("the arguments and the structured content keep each JSON value through the JSON text of the wire") {
+    val arguments = DynamicValue.Record(Chunk(
+      "int"    -> int(3),
+      "long"   -> DynamicValue.Primitive(PrimitiveValue.Long(5000000000L)),
+      "big"    -> DynamicValue.Primitive(PrimitiveValue.BigInt(BigInt("123456789012345678901234567890"))),
+      "double" -> DynamicValue.Primitive(PrimitiveValue.Double(2.5)),
+      "whole"  -> DynamicValue.Primitive(PrimitiveValue.Double(2.0)),
+      "flag"   -> DynamicValue.Primitive(PrimitiveValue.Boolean(false)),
+      "text"   -> DynamicValues.string("h\u00e9llo \ud83d\ude00"),
+      "none"   -> DynamicValue.Null,
+      "list"   -> DynamicValue.Sequence(Chunk(int(1), DynamicValue.Null, int(3))),
+      "nested" ->
+        DynamicValue.Record(Chunk("z" -> DynamicValues.string("x"), "y" -> DynamicValue.Sequence(Chunk.empty))),
+      "empty" -> DynamicValue.Record.empty
+    ))
+    assertEquals(
+      McpToolClient.fromSync(server()).callTool("reflect", arguments).map(_.structuredContent),
+      Right(Some(arguments))
+    )
+  }
+
+  // ── A run of ReActV2 with the tools of a real server (upstream `test_react_v2_native_mcp_end_to_end`) ───────────
+
+  /** A model that gives back `outputs` in order and keeps each request. */
+  private final class Script(outputs: Vector[LmOutput]) extends LanguageModel:
+    @volatile var requests: Vector[LmRequest]                                                  = Vector.empty
+    override val id: String                                                                    = "script"
+    override val mode: LmMode                                                                  = LmMode.Chat
+    override def supportsFunctionCalling: Boolean                                              = true
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      val index = requests.size
+      requests = requests :+ request
+      Right(LmResponse(outputs = Vector(outputs(index))))
+
+  test("ReActV2 runs the tools of a real server on the native path, and a failed tool does not end the run") {
+    val lm = Script(Vector(
+      LmOutput(
+        "",
+        toolCalls = Vector(
+          ToolCall("fail", DynamicValue.Record.empty, Some("mcp_error")),
+          ToolCall("echo", DynamicValues.record("text" := "42"), Some("mcp_echo"))
+        )
+      ),
+      LmOutput("", toolCalls = Vector(ToolCall("submit", DynamicValues.record("answer" := "42"), Some("final"))))
+    ))
+    val context = RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter(native = NativeTools(enabled = true))))
+    val result  = RuntimeEnvironment.withSettings(context) {
+      ReActV2(Signature.fromString("question -> answer"), tools().values.toVector)(
+        (question = "What is the answer?")
+      )(using RuntimeEnvironment.current)
+    }.fold(error => fail(error.message), identity)
+
+    assertEquals(result.output.answer, "42")
+    val history = ReActV2.history(result).fold(fail("no history"))(_.messages)
+    val calls   = History.toolCallResults(history(0))
+    assertEquals(
+      calls.map(call => call.callId -> call.isError),
+      Vector(Some("mcp_error") -> true, Some("mcp_echo") -> false)
+    )
+    assertEquals(calls(1).value, DynamicValues.string("42"))
+
+    // The provider tool of a tool with no arguments has `properties` and `required`, as upstream.
+    val sent = DynamicValues.sequenceAt(lm.requests(0).options, "tools")
+      .flatMap(DynamicValues.recordGet(_, "function"))
+      .find(DynamicValues.recordGet(_, "name").contains(DynamicValues.string("fail")))
+    assertEquals(
+      sent.flatMap(DynamicValues.recordGet(_, "parameters")),
+      Some(json("""{"type": "object", "properties": {}, "required": []}"""))
+    )
   }
 
   test("a JSON-RPC error of the server is a Left, not an exception") {

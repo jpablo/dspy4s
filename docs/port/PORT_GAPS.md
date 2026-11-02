@@ -2066,6 +2066,11 @@ server (upstream `convert_mcp_tool`); `McpTools.toolSpec` gives a `ToolSpec` for
 the `parameters` of a function. The two MCP example pages are translated. Tests: `McpToolsSuite`,
 `McpSdkClientSuite` (a server of the SDK in a child JVM over stdio), `McpSdkPagingSuite`.
 
+**Correction (review of 2026-11-02).** The review changed the schema of a converted tool. Each `$ref` is expanded, and
+the schema has only `type`, `properties`, and `required`. `McpToolInfo.inputSchema` stays the raw schema of the server.
+`JavaJson` is gone: `SdkToolClient` converts through JSON text. `ToolSpec.parameters` and `ToolParameterSpec` are gone,
+and `ToolSpec.inputSchema` is required. See PORT_DIFFERENCES section 25.
+
 ---
 
 ## G-48 — Small surface gaps

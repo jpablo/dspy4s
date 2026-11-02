@@ -455,21 +455,17 @@ object ReActV2:
       "properties" -> properties,
       "required"   -> DynamicValues.sequence(outputs.map(field => DynamicValues.string(field.name)))
     )
-    new ToolFunction:
-      override val name: String                             = SubmitToolName
-      override val description: String                      = SubmitDescription
-      override val argSchema: Vector[(String, TypeRef)]     = outputs.map(field => field.name -> field.typeRef)
-      override val inputSchema: Option[DynamicValue.Record] = Some(schema)
-
-      override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
-        val missing = outputs.map(_.name).filter(output => DynamicValues.recordGet(args, output).isEmpty)
-        if missing.nonEmpty then
-          Left(ValidationError(s"Missing required final output field(s): ${missing.mkString(", ")}"))
-        else
-          val values = DynamicValues.recordFromEntries(
-            outputs.flatMap(field => DynamicValues.recordGet(args, field.name).map(field.name -> _))
-          )
-          signature.outputShape.decode(values).map(signature.outputShape.encode)
+    val flat = outputs.map(field => field.name -> field.typeRef)
+    ToolFunction(SubmitToolName, SubmitDescription, flat, Some(schema)) { args =>
+      val missing = outputs.map(_.name).filter(output => DynamicValues.recordGet(args, output).isEmpty)
+      if missing.nonEmpty then
+        Left(ValidationError(s"Missing required final output field(s): ${missing.mkString(", ")}"))
+      else
+        val values = DynamicValues.recordFromEntries(
+          outputs.flatMap(field => DynamicValues.recordGet(args, field.name).map(field.name -> _))
+        )
+        signature.outputShape.decode(values).map(signature.outputShape.encode)
+    }
 
   /** The JSON schema of the argument of `submit` for the output `field` (upstream `_json_schema_for_annotation`, in the
     * port form of decision D3). A plain output of a primitive type has the JSON type of its `TypeRef`, as the pydantic
@@ -494,13 +490,13 @@ object ReActV2:
     ToolSpec(
       name = tool.name,
       description = Some(tool.description).filter(_.nonEmpty),
-      inputSchema = Some(tool.inputSchema.getOrElse(
+      inputSchema = tool.inputSchema.getOrElse(
         DynamicValues.record(
           "type"       := "object",
           "properties" -> args,
           "required"   -> DynamicValues.sequence(DynamicValues.recordKeys(args).map(DynamicValues.string))
         )
-      ))
+      )
     )
 
   /** The tool calls of the answer of a step (upstream `_coerce_tool_calls`): none for a null, and a parse error for a

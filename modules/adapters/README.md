@@ -32,7 +32,7 @@ An adapter writes the prompt of a signature and reads the response of the model.
 | `ParsedOutput` | The result of `parse`: the `values` record, and the decision evidence of a `DecisionAdapter` parse. |
 | `AdapterStreamingState` / `FieldChunk` | The state of one streamed call. `receive(delta)` and `finish()` give a `FieldChunk` for each part of the text of a field. The last part of a field has `isLast`. |
 | `NativeTools` | The native tool call options of an adapter: `enabled`, `parallelToolCalls`, and `toolChoice`. It decides if native tool calls are active for a call, which fields the prompt shows, and which tool options (`tools`, `parallel_tool_calls`, and `tool_choice`) the request gets or must not have. `NativeTools.Off` is the default. |
-| `ToolSpec` / `ToolParameterSpec` / `ToolChoice` | The data of a tool, of its parameters, and of the `tool_choice` value. `ToolSchemaBridge` writes a tool as an OpenAI function schema. |
+| `ToolSpec` / `ToolChoice` | The data of a tool, with the JSON schema of its arguments, and of the `tool_choice` value. `ToolSchemaBridge` writes a tool as an OpenAI function schema. |
 
 ## Design notes
 

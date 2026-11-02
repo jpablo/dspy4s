@@ -463,7 +463,8 @@ object Mcp:
   // |     asyncio.run(run())
   //
   // The server is `airlineMcpServer` in a child JVM: the command is the `java` of this JVM, with the class path of the
-  // examples. `dspy_tools[0].args` is the input schema of the tool (`inputSchema`); `argSchema` is the flat view.
+  // examples. `dspy_tools[0].args` is the `properties` of the object schema of the tool (`inputSchema`), with each
+  // `$ref` expanded; `argSchema` is the flat view.
   // --8<-- [start:gather-tools]
   def serverParameters(classPath: String): ServerParameters =
     val javaBin = Paths.get(System.getProperty("java.home"), "bin", "java").toString
@@ -483,7 +484,8 @@ object Mcp:
 
   def describeTools(classPath: String): Either[DspyError, String] =
     withAirlineTools(classPath) { tools =>
-      val firstArgs = tools.headOption.flatMap(_.inputSchema).fold("")(DynamicValues.renderText)
+      val firstArgs = tools.headOption.flatMap(_.inputSchema).flatMap(DynamicValues.recordGet(_, "properties"))
+        .fold("")(DynamicValues.renderText)
       Right(s"${tools.size}\n$firstArgs")
     }
   // --8<-- [end:gather-tools]

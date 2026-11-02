@@ -2,7 +2,6 @@ package dspy4s.programs
 
 import dspy4s.adapters.ChatAdapter
 import dspy4s.adapters.contracts.NativeTools
-import dspy4s.adapters.contracts.ToolParameterSpec
 import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -10,7 +9,6 @@ import dspy4s.core.contracts.History
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.ToolCall
 import dspy4s.core.contracts.ToolCallResult
-import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
@@ -51,7 +49,11 @@ class PredictHistorySuite extends FunSuite:
     ToolSpec(
       "search",
       Some("Search the web"),
-      Vector(ToolParameterSpec("query", TypeRef.string, None, required = true))
+      DynamicValues.record(
+        "type"       := "object",
+        "properties" -> DynamicValues.record("query" -> DynamicValues.record("type" := "string")),
+        "required"   := List("query")
+      )
     )
   )
 

@@ -69,6 +69,10 @@ object TypeRef:
   val json: TypeRef   = TypeRef("json")
   val list: TypeRef   = TypeRef("list")
 
+  /** The wire type of the JSON schema type `name`, the inverse of [[TypeRef.jsonType]]. `None` for each other name. */
+  def fromJsonType(name: String): Option[TypeRef] =
+    Vector(string, int, double, bool, list, json).find(_.jsonType.contains(name))
+
   /** Sentinel for the output field that receives native provider tool calls (the analogue of Python dspy's `ToolCalls`
     * output annotation). An adapter with native function-calling enabled fills this field from the provider's
     * `tool_calls` instead of asking the model to emit it as text. See PORT_GAPS G-7b. A typed field that is a sequence

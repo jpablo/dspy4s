@@ -153,7 +153,7 @@ final class OptimizableParametersSuite extends FunSuite:
 
   test("DynamicPredict parameter replacement preserves every execution binding and signature structure") {
     val runtime = new SettingsProgramRuntime {}
-    val tools   = Vector(ToolSpec("search", description = Some("Search the corpus")))
+    val tools   = Vector(ToolSpec("search", Some("Search the corpus"), DynamicValue.Record.empty))
     val program = DynamicPredict(
       layout = layout,
       demos = demos,

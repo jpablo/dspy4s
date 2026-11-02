@@ -579,6 +579,33 @@ rules differ from upstream:
   upstream, a `BaseException` of a worker goes to the caller of the evaluation, because `utils/parallelizer.py` catches
   only `Exception`.
 
+## 25. MCP rules with no upstream form
+
+**Convention.**
+
+The `mcp` module follows `dspy/utils/mcp.py` and the schema functions of `dspy/adapters/types/tool.py`. These rules
+differ from upstream:
+
+- The `required` list of a tool is the list of the server. Upstream `format_as_litellm_function_call`
+  (`tool.py:162-166`) marks each argument with no `default` as required, so it also marks an optional argument with no
+  default.
+- The port does not check the arguments on the client. Upstream `_validate_and_parse_args` (`tool.py:124-151`) checks
+  each argument with `jsonschema` and parses it before the call. In the port, the server checks the arguments, and its
+  error text goes to the model. A server with no check runs with the value of the model.
+- A `$ref` with no definition and a recursive definition give `{}`, the schema of any value. Upstream
+  `_resolve_json_schema_reference` (`tool.py:523-546`) raises `KeyError` and `RecursionError` at conversion. A `type`
+  that is a list gives `Any`. Upstream `convert_input_schema_to_tool_args` (`tool.py:573`) raises `TypeError`.
+- An explicit null `structuredContent` through the Java SDK gives the text fallback, because the record of the SDK has
+  `null` for a null and for an absent field. Upstream returns `None` (`mcp.py:48-49`). `resultValue` gives the null when
+  the client sends `Some(DynamicValue.Null)`.
+- The error text of several text parts is JSON text, under the boundary rule of section 16. Upstream writes the Python
+  list text (`mcp.py:46`).
+- The Java client has a request timeout of 20 seconds by default (`McpClient.java:167`). It does not check structured
+  content against the output schema by default, because `enableCallToolSchemaCaching` is false (`McpClient.java:201`,
+  `McpAsyncClient.java:703`). The Python client has no default read timeout (`mcp/shared/session.py:284-288`), and it
+  checks structured content (`mcp/client/session.py:412-441`). The caller owns the client.
+- A part that is not text is its JSON object. Upstream keeps the pydantic object (`mcp.py:39`).
+
 ## What this means in practice
 
 If you're porting a Python DSPy script to dspy4s, the friction will

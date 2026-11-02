@@ -28,6 +28,14 @@ class TypeRefSuite extends FunSuite:
     assertEquals(TypeRef("list[str]").jsonType, None)
   }
 
+  test("fromJsonType is the inverse of jsonType, and an unknown name gives None") {
+    Vector(TypeRef.string, TypeRef.int, TypeRef.double, TypeRef.bool, TypeRef.list, TypeRef.json).foreach { typeRef =>
+      assertEquals(typeRef.jsonType.flatMap(TypeRef.fromJsonType), Some(typeRef))
+    }
+    assertEquals(TypeRef.fromJsonType("null"), None)
+    assertEquals(TypeRef.fromJsonType("str"), None)
+  }
+
   test("a collection type with an item type gives its kind and the text of its item type") {
     assertEquals(TypeRef("list[str]").collection, Some((TypeRef.Collection.List, "str")))
     assertEquals(TypeRef("tuple[int, str]").collection, Some((TypeRef.Collection.Tuple, "int, str")))
