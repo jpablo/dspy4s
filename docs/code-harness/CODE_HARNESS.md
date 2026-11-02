@@ -2,8 +2,9 @@
 
 Status: proposal, 2026-10-19. Sections 7 and 8 were added on 2026-10-21, the Phase 0 results (section 11) on
 2026-10-22, and sections 2.4 to 2.6 and section 9 on 2026-10-24. On 2026-10-24 the document was also put in a new
-order around one recommended design (section 4), and F7 and F8 were added. Nothing in this document exists in the
-code of dspy4s yet.
+order around one recommended design (section 4), and F7 and F8 were added. On 2026-11-01 the kernel in 4.2 got one
+journal with a commit rule, a store, both stop rules, two stop commands, and metadata on each entry. Nothing in this
+document exists in the code of dspy4s yet.
 
 ## Summary
 
@@ -21,20 +22,22 @@ code of dspy4s yet.
   givens, and the compiler checks it. A handler decides what each call does.
 - The capability checks stop at the process boundary, and a permitted command can do anything that the user can
   do. So each command runs in an OS sandbox, with a policy from the capabilities in scope (F7, F8).
-- Section 4 shows the recommended design in one place. A session is a log, a scope, a mode, a context strategy,
-  and a REPL, with a pure decider and a `Predict` leaf for each LM step. Section 5 keeps a short history of the
-  three earlier designs (A, B and C) that led to it.
+- Section 4 shows the recommended design in one place. A session is a journal, a scope, a mode, a context strategy,
+  and a REPL. Its state is a fold of the journal, and only committed state is observable. A pure decider checks each
+  commit, and a `Predict` leaf makes each LM step. Section 5 keeps a short history of the three earlier designs (A,
+  B and C) that led to it.
 - Each work session has a pluggable context strategy: a window, a prefix summary, or the memory tree of
   section 6. One controller conversation that never ends uses the memory tree, starts the sessions, and sees
   each session through a ledger, a knowledge graph with time and a pluggable ontology, and probes (section 7).
 - Section 8 describes the runtime. A session is an actor, its log is an event journal, and each guest API call
-  in a cell is an event. A replay of the journal can rebuild the REPL state. The first runtime uses direct
-  style, and distribution comes later.
+  in a cell is an event. The store of 4.2 survives a restart, and a replay of the journal can also rebuild the
+  REPL definitions. The first runtime uses direct style, and distribution comes later.
 - The Phase 0 experiment (section 11) recommends a REPL in the same JVM, with five guards. Two of the guards
-  need the replay of section 8.
+  start a new REPL. The store keeps the saved values across that change, and replay also keeps the definitions.
 - deepseek-harness, Codex and tacit confirm the main choices (section 9). tacit reports that agents that write
   capability-safe Scala match the tool-call baselines. The three harnesses also challenge three choices: REPL
-  state with no explicit store, cells that stop at a timeout, and a journal with only rendered results.
+  state with no explicit store, cells that stop at a timeout, and a journal with only rendered results. Section
+  4.2 now answers the first choice and the third choice.
 
 ## 1. Goal
 
@@ -348,7 +351,7 @@ trait ScalaRepl extends AutoCloseable:
   def run(cell: Cell)(using RuntimeContext): Either[DspyError, CellResult]
 
 final case class Cell(code: String)
-final case class CellResult(output: String, outcome: CellOutcome)
+final case class CellResult(output: String, outcome: CellOutcome, writes: Map[String, DynamicValue])
 
 enum CellOutcome:
   case Ok
@@ -379,6 +382,13 @@ enum CellOutcome:
   checks.
 - Keep the current error split: a failure of the REPL is a `Left`, and a failure of the user code is a `Right`
   with an outcome.
+- A cell commits only if it completes. The outcomes `Ok` and `Submitted` keep the definitions of the cell and give
+  its store writes in `writes`. After `CompileError`, `Failed` or `TimedOut`, a later cell sees only the definitions
+  from before the cell, and `writes` is empty. For a failure at run time, the driver does this itself with
+  `invalidObjectIndexes`: after `val x = 21; val boom: Int = 1 / 0`, a later cell gets `Not found: x`. A check on the
+  3.8.2 driver showed this on 2026-11-01, and the check did not run on the 3.10 nightly. For a timeout, the host marks
+  the wrapper as invalid (atc), or it keeps the earlier REPL state (tacit). This rule covers definitions and the
+  store (4.2). It does not undo the effects of the cell, or a change to a mutable object that an earlier cell made.
 - A later variant runs the REPL in a forked JVM. That variant isolates memory and crashes. Capture checking
   does not need it, because the build already uses the nightly compiler. Phase 0 recommends the REPL in the same
   JVM, with five guards (section 11).
@@ -407,7 +417,7 @@ traits of its session, in a fixed order.
 
 #### Effects and views
 
-Start with the four operations of pi, as typed Scala functions. This is a sketch:
+Start with the four operations of pi, as typed Scala functions, and add the store of 4.2. This is a sketch:
 
 ```scala
 // The guest side. This source text, with its doc comments, is the API reference in the prompt.
@@ -427,6 +437,13 @@ trait Shell extends caps.ExclusiveCapability:
   /** Runs `command` and stops it after `timeoutSeconds`. A command can change files, so it needs `Files^`. */
   def exec(command: String, timeoutSeconds: Int)(using Files^): ExecResult
 
+/** The session state that survives a restart. The bare `Store` can only load, and `Store^` can also store. */
+trait Store extends Cap:
+  /** The value under `key`, from a snapshot at the start of the cell and the writes of the cell. */
+  def load[A: Schema](key: String): Option[A]
+  /** Writes `value` under `key`. The write commits only if the cell completes. */
+  update def store[A: Schema](key: String, value: A): Unit
+
 // The functions that the model calls.
 object api:
   def read(path: String)(using f: Files): String = f.read(path, 1, Int.MaxValue)
@@ -436,6 +453,8 @@ object api:
   def exec(command: String)(using s: Shell^, f: Files^): ExecResult = s.exec(command, 120)
   def exec(command: String, timeoutSeconds: Int)(using s: Shell^, f: Files^): ExecResult =
     s.exec(command, timeoutSeconds)
+  def load[A: Schema](key: String)(using s: Store): Option[A] = s.load[A](key)
+  def store[A: Schema](key: String, value: A)(using s: Store^): Unit = s.store(key, value)
 ```
 
 The rules:
@@ -463,13 +482,14 @@ which givens exist, and in which view:
 
 | Mode | Givens in the preamble |
 |---|---|
-| Full | `files: Files^`, `shell: Shell^`, `net: Network^`, `llm: Llm^`, `agents: Agents^` |
-| Local | `files: Files^`, `shell: Shell^`, `llm: Llm^`, `agents: Agents^` |
-| Read-only | `files: Files` (the read-only view), `llm: Llm^` |
-| Controller (7.3) | `sessions: Sessions^`, `files: Files` (the read-only view) |
+| Full | `files: Files^`, `shell: Shell^`, `net: Network^`, `llm: Llm^`, `agents: Agents^`, `state: Store^` |
+| Local | `files: Files^`, `shell: Shell^`, `llm: Llm^`, `agents: Agents^`, `state: Store^` |
+| Read-only | `files: Files` (the read-only view), `llm: Llm^`, `state: Store^` |
+| Controller (7.3) | `sessions: Sessions^`, `files: Files` (the read-only view), `state: Store^` |
 
 `Llm` (F4) and `Agents` (F5) are exclusive capabilities too. An LM call costs money and sends data to a provider,
-and a child agent can use each capability that it gets, so both need a capability.
+and a child agent can use each capability that it gets, so both need a capability. Each mode has `Store^`, because
+the store changes only the state of the session.
 
 The results:
 
@@ -516,7 +536,8 @@ The value behind each given is a handler. The host composes the handler for each
 | `Files.overlay(base)` | Copy on write over `base`, for one rollout. |
 | `Files.memory(snapshot)` | Files in memory, for tests. |
 | `Shell.sandboxed(root, policy)`, `Shell.local(cwd)`, `Shell.denied` | Commands in an OS sandbox (F8), real commands with no sandbox (only for tests), or no commands. |
-| `recorded(h)` | Writes each call and its result into the session log. |
+| `Store.snapshot(state)` | A snapshot of the store and a write buffer for one cell. `CellResult.writes` holds the buffer. |
+| `recorded(h)` | Commits `EffectStarted` before each call and `EffectDone` after it (8.3). |
 | `replayed(log)` | Answers each call from a log. |
 | `guarded(h, policy)` | Checks a policy before each call. A deny rule wins, as in atc. |
 
@@ -708,10 +729,10 @@ tells how the design came from three earlier designs.
 | Part | What it is | Details |
 |---|---|---|
 | Guest API | One trait for each effect. A mode is a set of givens that the compiler checks. A handler decides what each call does. | F2 |
-| REPL | One embedded `ReplDriver` for each session, in the same JVM, with capture checking and safe mode | F1, 11 (Phase 0) |
+| REPL | One embedded `ReplDriver` for each session, in the same JVM, with capture checking and safe mode. Its state is a cache, and the store holds the state that must survive. | F1, 4.2, 11 (Phase 0) |
 | Sandbox | An OS sandbox for each command, with a policy from the capabilities in scope | F7, F8 |
-| Session | A log, a scope, a mode, a context strategy, and a REPL. A pure decider owns the state machine of the session. | 4.2, 7, 8 |
-| Policy | A `Predict` leaf that writes the next cell | 4.2 |
+| Session | A journal, a scope, a mode, a context strategy, and a REPL. The state of the session is a fold of the journal, and a pure decider checks each commit. | 4.2, 7, 8 |
+| Policy | A `Predict` leaf that writes the next cell, or a reply with no cell | 4.2 |
 | Context strategy | A window, a prefix summary, or the memory tree. It derives data from the log, and it makes the policy input. | 7.2, 6 |
 | RLM | Inputs as REPL values, `llmQuery` through a `Predict` leaf, and `rlm(...)` children with at most the mode of the parent | F4, F5, 4.4 |
 | Controller | One session that never ends, with the memory tree and the controller mode. It starts the work sessions, and it sees them through a ledger, a graph, and probes. | 7 |
@@ -720,37 +741,87 @@ tells how the design came from three earlier designs.
 
 A turn, in short:
 
-1. A message arrives in the mailbox of a session. It comes from the user, from the controller (`tell`), or from
-   a child.
-2. The decider of the session accepts the message and starts a turn (8.5).
-3. In each step of the turn, the context strategy updates its derived data and makes the policy input. The
-   policy writes a cell, and the REPL runs the cell with the givens of the mode.
-4. Each guest API call of the cell goes through its handler, and the `recorded` handler writes an event (8.3).
-5. The turn ends at `submit(...)` or at the end of the budget. Open question 2 of section 11 asks if a reply
-   with no code also ends a turn. The goal check can start one more turn (4.4).
+1. A message arrives for a session. It comes from the user, from the controller (`tell`), or from a child. The
+   decider commits an `Input`. In an idle session, it also commits `TurnStarted`, and a worker starts the turn.
+2. Each step of the turn commits `StepStarted`. The context strategy updates its derived data and makes the policy
+   input, with each new `Input`.
+3. The policy replies, and the worker commits `Acted`. If the reply has a cell, the REPL runs the cell with the
+   givens of the mode.
+4. Each guest API call of the cell goes through its handler. The `recorded` handler commits `EffectStarted` before
+   the effect and `EffectDone` after it (8.3). At the end of the cell, the worker commits `Observed`, with the store
+   writes of a cell that completed.
+5. The turn ends at `submit(...)`, at a reply with no cell, at the end of the budget, or at an `Abort`. The worker
+   commits `TurnEnded`. The goal check can start one more turn (4.4).
 6. The session sends its events to the controller (7.4).
 
 ### 4.2 The session kernel
 
-The kernel comes from design B (5.2). It has four values and one fold.
+The kernel comes from design B (5.2). It has four values, one fold, and one rule:
+
+> Only committed state is observable.
+
+The rule comes from `pi-durable` ([CODE_HARNESS_DURABILITY.md](CODE_HARNESS_DURABILITY.md), 3.1). Each change to a
+session is an entry in its journal, and the state of the session is a fold of the journal. Thus a restart and a
+reopen use the same fold as a live session.
 
 ```scala
-// 1. The log: append-only, plain data with a Schema. It is the event journal of the session (8.2).
+// 1. The log: one append-only journal of plain data with a Schema. `Entry` is the one event type of a session (8.2).
+final case class Logged(seq: Long, meta: Meta, entry: Entry) derives Schema
+
+// The data that the model never sees. `required` tells a reader what to do with an entry that it cannot decode (8.2).
+final case class Meta(source: Source, taint: Taint, required: Boolean) derives Schema
+
+enum Source derives Schema:
+  case User, Controller, Harness, Policy
+  case Child(session: SessionId)
+
+enum Taint derives Schema:
+  case Trusted, External
+
 enum Entry derives Schema:
-  case Input(text: String, sender: Sender)             // the user, the controller (7.3), or a child
-  case Acted(reasoning: String, code: String)          // a policy output
-  case Observed(output: String, outcome: CellOutcome)  // a REPL result; the cell events of 8.3 add the detail
+  case Started(versions: Versions)                            // the compiler and the guest API (8.4)
+  case Input(request: RequestId, text: String)                // `meta.source` is the sender
+  case TurnStarted
+  case StepStarted(step: Int)                                 // the intent of the LM call
+  case Acted(reasoning: String, text: String, code: Option[String]) // the LM outcome, and the intent of the cell
+  case EffectStarted(id: EffectId, op: String, args: DynamicValue.Record) // the intent of a guest API call (8.3)
+  case EffectDone(id: EffectId, result: EffectResult)         // the outcome of the guest API call (8.3)
+  case Observed(output: String, outcome: CellOutcome, writes: Map[String, DynamicValue]) // the outcome of the cell
   case Child(task: String, session: SessionId, result: Either[String, DynamicValue.Record])
-  case Submitted(value: DynamicValue.Record)
-  case Ended(outcome: Outcome, reason: String)         // 7.9
-  case Reopened                                        // 7.9
-  case ScopeSnapshot(head: Sha, clean: Boolean)        // at the end of each turn (7.9)
+  case StopRequested(reason: String)
+  case TurnEnded(outcome: TurnOutcome)
+  case Ended(outcome: Outcome, reason: String)                // 7.9
+  case Reopened(versions: Versions)                           // 7.9
+  case ScopeSnapshot(head: Sha, clean: Boolean)               // at the end of each turn (7.9)
+
+enum TurnOutcome derives Schema:
+  case Replied(text: String)                                  // a reply with no cell
+  case Submitted(value: DynamicValue.Record)                  // a cell called `submit(...)`
+  case Exhausted                                              // the step limit of a program call
+  case Aborted(reason: String)                                // an `Abort` stopped the turn
+  case Crashed                                                // a crash cut the turn
+  case Failed(error: String)                                  // the LM call or the REPL failed
+
+// The fold of the log.
+final case class SessionState(
+    log     : Vector[Logged],
+    phase   : Phase,                     // Idle, InTurn, Stopping, Closed
+    store   : Map[String, DynamicValue], // the writes of the cells that completed
+    requests: Set[RequestId]             // the inputs that the journal already has
+)
 
 // 2. The context: a strategy (7.2) derives data from the log, and it makes the policy input.
-final case class PolicyInput(task: String, variables: Vector[String], observation: String, history: History)
+final case class PolicyInput(
+    task       : String,
+    variables  : Vector[String],         // the names in the REPL
+    stored     : Vector[String],         // the keys of the store
+    observation: String,
+    history    : History
+)
 
 // 3. The policy: a Predict leaf. The optimizers find it by its key.
-//    task, variables, observation, history -> reasoning, code
+//    task, variables, stored, observation, history -> reasoning, text, code
+final case class PolicyStep(reasoning: String, text: String, code: Option[String])
 val policy: Predict[PolicyInput, PolicyStep]
 
 // 4. The interpreter: the REPL of the session, with the givens of its mode (F2). A recoverable failure is an
@@ -760,37 +831,145 @@ val interpreter: ScalaRepl
 
 History message `k` holds the observation before step `k` as its input, and step `k` as its output. The adapter
 replays these messages as chat turns. Each step adds turns at the end, so the prompt prefix stays the same, and
-the provider prompt cache can hold it.
+the provider prompt cache can hold it. An `Input` commits when it arrives, possibly during a cell. The projection
+shows it at the first `StepStarted` after it, so a new input also adds only to the end of the prompt.
 
-The steps of a turn:
+#### The commit
 
 ```scala
-def step(s: SessionState, i: Int)(using RuntimeContext)
-    : Either[DspyError, AgentLoop.Step[SessionState, Outcome]] =
-  for
-    derived <- s.strategy.update(s.log, s.derived)                     // 7.2
-    action  <- policy(s.strategy.project(s.log, derived, limits.contextBudget))
-    result  <- interpreter.run(Cell(action.output.code))
-  yield
-    val next = s.withDerived(derived)
-      .append(Entry.Acted(action.output.reasoning, action.output.code))
-      .append(Entry.Observed(result.output, result.outcome))
-    result.outcome match
-      case CellOutcome.Submitted(value) => AgentLoop.Step.Done(Outcome.Submitted(next, value))
-      case _                            => AgentLoop.Step.Continue(next)
-
-AgentLoop.run(start, limits.iterations)(onExhausted = finish)(step)
+trait Journal:
+  /** The decider checks the entries, one atomic write stores them, and the fold gives the new state. */
+  def commit(entries: Entry*)(using RuntimeContext): Either[DspyError, SessionState]
 ```
 
-The worker of a turn runs this loop outside the decider, and it sends its events back as messages (8.5).
+`commit` returns after the write reaches the backend, so an intent is in the journal before its effect starts. The
+caller gives the `Meta` of each entry, and the sketches leave it out. A stream delta to a UI is not state: a client
+can show it, and a crash can lose it.
+
+Each effect has an intent and an outcome:
+
+| Effect | Intent | Outcome |
+|---|---|---|
+| The LM call of the policy | `StepStarted` | `Acted` |
+| A cell | `Acted` with code | `Observed` |
+| A guest API call in a cell, with `llmQuery` and `rlm(...)` | `EffectStarted` | `EffectDone` |
+
+#### The steps of a turn
+
+```scala
+def step(derived: Derived, i: Int)(using RuntimeContext)
+    : Either[DspyError, AgentLoop.Step[Derived, TurnOutcome]] =
+  for
+    state  <- journal.commit(Entry.StepStarted(i))                  // the state has each new input
+    next   <- strategy.update(state.log, derived)                   // 7.2
+    reply  <- policy(strategy.project(state.log, next, limits.contextBudget))
+    _      <- journal.commit(Entry.Acted(reply.output.reasoning, reply.output.text, reply.output.code))
+    status <- reply.output.code match
+      case None       => Right(AgentLoop.Step.Done(TurnOutcome.Replied(reply.output.text)))
+      case Some(code) => runCell(code, next)
+  yield status
+
+def runCell(code: String, derived: Derived)(using RuntimeContext)
+    : Either[DspyError, AgentLoop.Step[Derived, TurnOutcome]] =
+  for
+    result <- interpreter.execute(Cell(code))                       // each guest API call commits its own entries
+    cell    = result.observation
+    _      <- journal.commit(Entry.Observed(cell.output, cell.outcome, cell.writes))
+  yield cell.outcome match
+    case CellOutcome.Submitted(value) => AgentLoop.Step.Done(TurnOutcome.Submitted(value))
+    case _                            => AgentLoop.Step.Continue(derived)
+
+def turn(start: Derived, lastStep: Derived => Either[DspyError, TurnOutcome])(using RuntimeContext)
+    : Either[DspyError, SessionState] =
+  val outcome = AgentLoop.run(start, 0, limits.iterations)(onExhausted = lastStep)(step)
+  journal.commit(Entry.TurnEnded(outcome.fold(TurnOutcome.fromError, identity)))
+```
+
+The journal holds the state of the session, so the state of the loop is only the derived data. The derived data
+has a journal of its own (8.2). The worker of a turn runs this loop outside the decider (8.5). `fromError` gives
+`Aborted` for a rejection after a stop, and `Failed` for another error.
 
 The projection cuts long observations, and it adds a note that tells the model how to read the remainder. The
 log keeps the full output.
 
-Laws:
+#### The end of a turn
+
+The same step serves a chat turn and a program call ([CODE_HARNESS_LOOPS.md](CODE_HARNESS_LOOPS.md), 5.2 and 5.3).
+Only the caller differs:
+
+| Event | Chat turn | Program call (`harness(input)`) |
+|---|---|---|
+| A cell calls `submit(...)` | The turn ends with `Submitted`. | The value is the output. |
+| A reply with no cell | The turn ends with `Replied`. The text is the answer. | The `finisher` leaf makes the output, as the forced submit of `ReActV2` does. |
+| The step limit | `lastStep` makes one more policy call with a note to answer. The harness does not run a cell from this call, as in atc. | `lastStep` gives `Exhausted`, and the `finisher` leaf makes the output. |
+
+#### Input and stop
+
+The decider of the session (8.5) has two commands for a turn that runs. They come from the mailbox of the session:
+
+```scala
+enum Command:
+  case Send(request: RequestId, text: String, source: Source, taint: Taint) // a soft preemption
+  case Commit(entries: Vector[Entry])                                       // from the worker
+  case Abort(reason: String)                                                // a hard abort
+```
+
+| Phase | `Send` | `Commit` | `Abort` |
+|---|---|---|---|
+| `Idle` | Commits `Input` and `TurnStarted`. | Rejected | No effect |
+| `InTurn` | Commits `Input`. | Accepted | Commits `StopRequested`. |
+| `Stopping` | Commits `Input`. | Accepted only for an outcome: `EffectDone`, `Observed`, `TurnEnded`. | No effect |
+| `Closed` | Rejected. The session must reopen first. | Rejected | No effect |
+
+- **A soft preemption** lets the model decide. `Send` adds a message, and the policy reads it at the next step
+  (Codex, uniichat, deepseek-harness). A `Send` with a known `RequestId` adds nothing, so a repeated input runs one
+  time (`pi-durable`). If an `Input` waits when `TurnEnded` commits, `TurnStarted` commits with it.
+- **A hard abort** stops the work. The host stops the LM transport, the REPL (the stop flag and an interrupt) and
+  the process groups. The next intent of the worker gets a rejection, and the worker ends with `Aborted`.
+- **A stop does not cut a commit.** A journal write and the `Observed` of a cell complete after a stop. The worker
+  commits `TurnEnded` only after the REPL and the processes are quiet (deepseek-harness, Codex).
+- **A cell that does not stop.** After a grace period, the host marks the process as unclean (guard 3 in section
+  11), and the decider commits `TurnEnded` itself. A later commit from that worker gets a rejection.
+
+#### State between cells
+
+The session has two kinds of state between cells:
+
+| State | What it holds | After a restart |
+|---|---|---|
+| The store | Values with a `Schema`, under a key. It is a fold of the `writes` in `Observed`. | It comes back from the journal. |
+| The REPL state | Definitions and live objects. It is a cache. | A new REPL starts. Replay (8.4) can rebuild the definitions. |
+
+- `store(key, value)` and `load(key)` are guest functions (F2). A cell sees a snapshot of the store and its own
+  writes. The writes commit only if the cell completes (Codex), and the journal keeps them (pi).
+- A cell changes the REPL definitions only if it completes (F1). There is no rollback for the effects of a
+  cell, or for a change to a mutable object that an earlier cell made.
+- After a restart with no replay, the model gets a note with the names that it lost. `stored` shows what it can
+  `load`, so the model knows what it must compute again.
+- A value with no `Schema`, for example a process handle, cannot go into the store. The type checks this.
+
+#### After a crash
+
+The fold gives the state, and the harness repairs the log with new entries. The old entries do not change:
+
+1. An `EffectStarted` with no `EffectDone` gets `EffectDone(id, EffectResult.Unknown)`. Nothing runs the effect
+   again automatically (8.3).
+2. A cell with no `Observed` gets `Observed` with the outcome `Failed` and no writes.
+3. An open turn gets `TurnEnded(Crashed)`.
+
+The user can then continue the work, or a new turn with a note can. The rules for that decision are still open
+([CODE_HARNESS_DURABILITY.md](CODE_HARNESS_DURABILITY.md), section 6).
+
+#### Laws
 
 | Law | Statement |
 |---|---|
+| Commit | A reader sees an entry only after its commit. |
+| Fold | `SessionState` is the fold of the log with `evolve` (8.5). The worker keeps no other session state. |
+| Effect | An intent commits before its effect, and the outcome commits after the effect. |
+| Store | The store is the fold of the `writes` of `Observed`. A cell that does not complete has no `writes`. |
+| Input | Two `Send` commands with one `RequestId` give one `Input`. |
+| Stop | After `StopRequested`, the decider accepts no new intent in that turn. |
 | Projection | `project` depends only on the log and the derived data (7.2). |
 | Log | No part of the harness changes or removes an entry of the log. |
 | Fork | A fork at entry `k` starts with the first `k` entries of the parent log. |
@@ -798,7 +977,6 @@ Laws:
 | Handlers | The laws of F2. |
 | Mode | The mode of a child is at most the mode of its parent (F5). |
 | Budget | The `subQuery` calls of one call tree, with the children, are at most `LlmCallLimit`. |
-| Decider | The state of a session is `events.foldLeft(initial)(evolve)` (8.5). |
 
 ### 4.3 The module
 
@@ -811,7 +989,7 @@ enum Strategy:
 final case class Harness[I, O](
     signature: Signature[I, O],
     policy   : Predict[PolicyInput, PolicyStep],  // the step
-    finisher : Predict[FinishInput, O],           // the RLM extract fallback when the budget ends
+    finisher : Predict[FinishInput, O],           // the fallback of a program call (4.2)
     subQuery : Predict[Query, Answer],            // F4
     goal     : Predict[GoalInput, GoalVerdict],   // the goal check (4.4)
     strategy : Strategy,                          // its leaves join the leaves of the harness
@@ -829,7 +1007,8 @@ final case class Harness[I, O](
 
 Two entry points use the same kernel:
 
-- `harness(input)`: one task in one session, in a workspace fork (F6). The optimizers use this entry point.
+- `harness(input)`: one task in one session, in a workspace fork (F6). The journal is in memory or in a file, and
+  no actor is necessary. The optimizers use this entry point.
 - The session actor (8.5): interactive turns, the controller, and `tell`.
 
 ### 4.4 RLM, subagents and the goal check
@@ -866,6 +1045,10 @@ only after three turns with the same blocker.
 
 - **It is functional.** The log is a value, the projection is pure, and the decider is pure. The effects go
   through handlers. Only the handlers, the builder of the derived data, and the REPL have effects.
+- **One journal holds the truth.** The phase of a session, its store, and its effects are folds of one event
+  type. Only a commit makes a change visible, so a live session and a reopened session have one model.
+- **A restart needs no replay.** The store comes back from the journal, and the REPL state is a cache. Replay
+  (8.4) is an addition that also brings back the definitions.
 - **No entry of a log is lost.** A context strategy changes only what the model sees. The memory tree can give
   back each detail with `zoom`.
 - **The compiler checks the authority of each session.** Its mode is a set of givens (F2).
@@ -878,13 +1061,15 @@ only after three turns with the same blocker.
 The costs:
 
 - There is more new code than in an RLM configuration (5.1).
+- Each guest API call costs two commits, and the worker waits for each commit. This cost is not measured yet.
+- The journal stores the result of each guest API call, so a large `read` or `exec` result costs storage (8.4).
 - The builder of the derived data runs in the background, so it adds concurrency.
 - In a session with the memory tree, each message costs one compaction call on a cheaper model (6.5).
 - `LmRequest` has no prompt-cache marks (gap 6). An Anthropic provider needs them.
 
 ### 4.6 What is open
 
-The decisions so far are in 7.10 and 8.7. The open questions are in 9.4 and in section 11.
+The decisions so far are in 7.10 and 8.7. The open questions are in 8.7, 9.4 and section 11.
 
 ## 5. Design history
 
@@ -1146,7 +1331,7 @@ The controller has two kinds of access to a session, with different effects:
 
 Rules for `tell`:
 
-- The message has its own kind, `controller`, so the user and the agent know who sent it.
+- The message has the source `Controller` (4.2), so the user and the agent know who sent it.
 - If a turn runs, the message goes in between two steps, as in uniichat. If the session is idle, the message
   starts a turn, also when the user is not in the session.
 - The reply goes back to the controller as an event.
@@ -1339,6 +1524,7 @@ A session holds different resources, and an end means something different for ea
 |---|---|
 | The log | No. The memory tree, the graph, and the links from the controller come from it. |
 | Derived data (memory tree, graph) | Yes, from the log. |
+| The store | Yes. It is a fold of the log (4.2). |
 | The live REPL | Partly. The definitions are lost, but the log still has the cells. Replay (8.4) can rebuild them. |
 | A worktree with no changes | Yes, from the branch. |
 | A worktree with uncommitted changes | No. |
@@ -1457,7 +1643,7 @@ kyo-ai also models agents as long-lived actors (`docs/refactor/kyo-ai-comparison
 | Section 7 | Event sourcing term |
 |---|---|
 | The log is the truth, and it is append-only | The event journal |
-| `Entry` (`Input`, `Acted`, `Observed`, `Ended`, `Reopened`, `ScopeSnapshot`) | Events |
+| `Entry` (4.2): one type for all events of a session | Events |
 | Derivations: the memory tree, the graph, `SessionCard` | Projections (read models) |
 | Reopen a session | Recover the state by replay |
 
@@ -1465,18 +1651,24 @@ There is one difference from standard event sourcing. An LM makes the memory tre
 again costs money, and the result is not the same. So the harness stores the derived data too, in a journal of
 its own. uniichat also keeps its messages (`main/`) and its summary nodes (`tree/`) in separate files.
 
+Each `Logged` record has a `required` mark (4.2). A reader that cannot decode an entry stops a rebuild if the mark is
+`true`, and it skips the entry if the mark is `false` (deepseek-harness). Thus a later version can add optional
+entries, and an earlier reader can still read the log.
+
 ### 8.3 Events inside a cell
 
-An `Acted(code)` entry holds the full cell, and one cell can do many actions. But each action of a cell goes
-through a handler (F2). So the `recorded` handler writes one event for each guest API call, at the time of the
-call:
+An `Acted` entry holds the full cell, and one cell can do many actions. But each action of a cell goes through a
+handler (F2). So the `recorded` handler commits two entries for each guest API call, at the time of the call. The
+cell events of a cell are its `Acted`, each `EffectStarted` and `EffectDone`, and its `Observed` (4.2). They use
+these types:
 
 ```scala
-enum CellEvent:
-  case CellStarted(code: String)
-  case EffectStarted(id: EffectId, op: String, args: DynamicValue.Record)
-  case EffectDone(id: EffectId, result: EffectResult)
-  case CellEnded(output: String, outcome: CellOutcome)
+final case class EffectId(cell: Long, n: Int)         // `cell` is the `seq` of the `Acted` entry
+
+enum EffectResult derives Schema:
+  case Value(value: DynamicValue, rendered: String)   // the typed value for a replay, and the text for a reader
+  case Error(message: String)                         // the call failed
+  case Unknown                                        // a crash cut the call
 ```
 
 - The unit of an event is a guest API call, not a line of code.
@@ -1485,9 +1677,11 @@ enum CellEvent:
 - This is the model of durable execution, as in Temporal: the cell is the workflow function, and each guest API
   call is an activity.
 
-A write needs one more rule. `EffectStarted` goes into the journal before the effect, and `EffectDone` goes in
-after it. After a crash, a start with no done marks an effect whose result is unknown. The harness then asks the
-user, or it uses an idempotent operation. uniichat has the same rule for its acts.
+Each effect needs one more rule. `EffectStarted` goes into the journal before the effect, and `EffectDone` goes in
+after it. After a crash, a start with no done marks an effect whose result is unknown. The harness appends
+`EffectDone(id, EffectResult.Unknown)`, so the log stays consistent (deepseek-harness). Nothing runs the effect again
+automatically. The harness then asks the user, or it uses an idempotent operation. uniichat has the same rule for
+its acts.
 
 ### 8.4 REPL replay
 
@@ -1497,6 +1691,9 @@ session that reopens the next day, or a session that moves to another machine. T
 in later cells, so its next cell fails with an error such as `Not found: counts`. atc adds the note "the REPL
 restarted", and the model must do the work again. With a memory tree, the code of an old cell is a one-line
 summary, so the model cannot see the exact code that it must run again.
+
+The store of 4.2 gives back the values that the model saved with `store`. Replay gives back the remainder: the
+definitions and the values in REPL variables. So replay is optional, and the store is enough for a restart.
 
 **The mechanism.** Replay starts a new REPL and runs each recorded cell again, in order. The cell code is the
 same, but the `replayed` handler takes the place of each real handler. When a cell calls the guest API, the
@@ -1523,6 +1720,8 @@ again:
 - Each `exec` gives the recorded output. No process starts.
 - `llmQuery` gives the recorded answer. No LM call occurs, so the replay costs nothing.
 - `write` gives its recorded result. The file already has that content, so no write occurs.
+- `load` gives the value from the store at that point in the log. The store is a fold of the log, so `load` needs
+  no event.
 
 After the replay, `build`, `modules`, `testsOf` and `counts` exist again, and cell 3 works. The REPL state after
 replay is a function of the journal only, not of the files now. So replay restores the REPL to its exact state
@@ -1553,7 +1752,7 @@ live code needs.
 
 **The cost.**
 
-- Storage: the journal must hold each result that the code saw. Small results (`write`, `llmQuery`) cost little.
+- Storage: the journal holds each result that the code saw (4.2). Small results (`write`, `llmQuery`) cost little.
   Large `read` and `exec` results cost the most. A content store can keep each content one time only. Decision
   10 of section 7 records no content for writes; replay needs the content of reads.
 - Time: each cell compiles again. Phase 0 measured 12 ms to 55 ms (median) for a cell in a warm REPL, and 73 ms
@@ -1576,10 +1775,10 @@ change:
 
 1. Send all nondeterminism through handlers: a `Clock`, a `Random`, and a fixed order for `parallel` results.
    This also helps the tests.
-2. Write the cell events of 8.3, with the metadata of each effect.
-3. Record the compiler version and the guest API version in the journal.
+2. Write the cell events of 8.3, with the typed value of each result (4.2).
+3. Record the compiler version and the guest API version in the journal (`Started` and `Reopened`, 4.2).
 
-The later change is then to store the results, and to add the replay of cells.
+The later change is then only to add the replay of cells.
 
 ### 8.5 The decider and the runtime
 
@@ -1597,9 +1796,10 @@ Laws:
 - The state is `events.foldLeft(initial)(evolve)`.
 - Two deciders compose into one decider.
 
-The decider owns the state machine of the session (idle, in a turn, ended, reopened) and the release plan of
-7.9. The long turn (the LM calls and the REPL) runs in a worker outside the decider. The worker sends its events
-back as messages.
+The decider owns the state machine of the session (the phases and the commands of 4.2) and the release plan of
+7.9. The long turn (the LM calls and the REPL) runs in a worker outside the decider. The worker commits its entries
+through the `Journal` of 4.2, and it waits for each commit. With an actor, a commit is a message to the actor, and
+the actor is the one writer of the journal.
 
 | Runtime | What it gives | Cost |
 |---|---|---|
@@ -1629,22 +1829,31 @@ Decisions, 2026-10-21:
 1. The first runtime uses direct style (8.5). A Pekko interpreter can come later.
 2. Distribution is an advanced feature for a later version (8.6).
 
-Recommendations that are not decisions yet:
+Decisions, 2026-11-01:
 
-- Model the session as a pure decider with laws (8.5).
-- Write the cell events of 8.3 from the first version.
+3. The session is a pure decider with laws (8.5).
+4. `Entry` is the one event type of a session, and the cell events of 8.3 are in the first version. Only committed
+   state is observable (4.2).
+5. A cell changes state only if it completes. A typed `store` and `load` hold the state that must survive, and the
+   REPL state is a cache (4.2, F1, F2).
+6. The journal stores the typed value of each result and the rendered text (8.3).
+7. The kernel has both stop rules: `submit(...)` and a reply with no cell (4.2).
+8. An `Input` commits when it arrives, and the policy reads it at the next step. `Send` and `Abort` are separate
+   commands (4.2).
+9. Each entry has a source, a taint and a `required` mark, and each input has a request id (4.2).
 
 Open questions:
 
-1. Is REPL replay a first-version feature, with the stored results of reads? Or is it a later feature, with the
-   three preparations of 8.4 in the first version? Data from Phase 0 (section 11): replay worked with a small
-   amount of code (one handler that records and one that replays), and two guards of the REPL in the same JVM
-   need it. One guard restarts an unclean host. The other guard limits a REPL to about 300 cells.
+1. Is REPL replay a first-version feature? Or is it a later feature, with the three preparations of 8.4 in the first
+   version? The store of 4.2 makes a restart possible with no replay. Data from Phase 0 (section 11): replay worked
+   with a small amount of code (one handler that records and one that replays). Two guards of the REPL in the same
+   JVM start a new REPL, and replay keeps the definitions across that change. One guard restarts an unclean host.
+   The other guard limits a REPL to about 300 cells.
 
 ## 9. Findings from deepseek-harness, Codex and tacit
 
-This section lists what the three harnesses of 2.4 to 2.6 mean for the design. The proposals are not decisions
-yet. 9.4 lists the questions.
+This section lists what the three harnesses of 2.4 to 2.6 mean for the design. Section 8.7 lists the proposals that
+are now decisions, and 9.4 lists the open questions.
 
 ### 9.1 What they confirm
 
@@ -1674,6 +1883,8 @@ proposal combines these ideas:
 - Then REPL replay (8.4) is useful, but not necessary. After a restart, `load` gives the important state back at
   once.
 
+Section 4.2 now has this design (decision 5 of 8.7).
+
 **Cells that run longer than a step.** Codex returns from `exec` after a time budget, with a cell id and the
 output so far, and the model calls `wait(cellId)` later. F1 now stops a cell at its timeout. The proposal adds
 `CellOutcome.Running(cellId, partialOutput)` and a guest function `wait(cellId)`. Then a turn can have cells that
@@ -1682,7 +1893,7 @@ still run, and the decider of 8.5 must know about them.
 **Typed values for replay.** deepseek-harness stores only the rendered text of a result, so its replay cannot
 rebuild the values that code saw. For the replay of 8.4, the journal must store the typed value of each result,
 with its `Schema`, and also the rendered text. Each effect gets a deterministic id `(cell, n)`, as in Codex, and
-replay finds a recorded result by that id.
+replay finds a recorded result by that id. Section 8.3 now has this design (decision 6 of 8.7).
 
 ### 9.3 Proposals by area
 
@@ -1698,11 +1909,11 @@ replay finds a recorded result by that id.
 | Context | A fourth strategy: fresh windows, with tools that read the earlier windows | Codex | 7.2 |
 | Context | Speculative compaction with a generation check, for the prefix-summary strategy | Codex | 7.2 |
 | Context | Cheap steps first: cut tool outputs with no LM call, then summarize; reject a summary that does not shrink | deepseek-harness | 7.2 |
-| Journal | An unknown required event stops a rebuild, and optional events carry a mark | deepseek-harness | 8.2 |
-| Journal | Crash repair by append. An effect with no end has an unknown outcome and never retries automatically. | deepseek-harness | 8.3 |
+| Journal | An unknown required event stops a rebuild, and optional events carry a mark | deepseek-harness | 4.2, 8.2 (done) |
+| Journal | Crash repair by append. An effect with no end has an unknown outcome and never retries automatically. | deepseek-harness | 4.2, 8.3 (done) |
 | Journal | A fork points into the immutable log of its parent | Codex | 4.2, 8.2 |
 | Journal | Raw events first, a deterministic reducer later; edges between sessions carry item ids | Codex | 7.4 |
-| Journal | Metadata on each item that the model never sees: source and taint | Codex | 7.5 |
+| Journal | Metadata on each item that the model never sees: source and taint | Codex | 4.2 (done), 7.5 |
 | Controller | Typed `tell` modes with an expected turn id, and typed rejection reasons | Codex | 7.3 |
 | Controller | The inbox algebra (target and wake), and the message kind and form | deepseek-harness | 7.3 |
 | Controller | `observe` as one answer on a fork with no tools, next to the RLM probe | Codex | 7.4 |
@@ -1722,11 +1933,12 @@ replay finds a recorded result by that id.
 
 ### 9.4 Decisions and open questions
 
-There are no decisions yet. Open questions:
+Questions 1 and 3 have a decision (8.7). The other questions are open:
 
-1. Does the harness add a typed `store`/`load` with commit-on-success, next to the persistent REPL (9.2)?
+1. Does the harness add a typed `store`/`load` with commit-on-success, next to the persistent REPL (9.2)? Yes (4.2).
 2. Does the first version have the yield protocol, with `Running` and `wait` (9.2)?
-3. Does the journal store the typed value of each result, which replay needs, or only the rendered text (9.2)?
+3. Does the journal store the typed value of each result, which replay needs, or only the rendered text (9.2)? It
+   stores both (8.3).
 4. Does the harness expose the REPL and the guest API as an MCP server early, before its own loop exists (9.3)?
 5. Do the derivations see only masked `Classified` values, with an optional trusted LM for the classified parts
    (9.3)?
@@ -1773,13 +1985,13 @@ tree exists. Design A (5.1) stays available as an early check of the foundation.
 |---|---|---|
 | 0. Experiment | Embed the `ReplDriver` of the build (the 3.10 nightly) in a test. Check the persistent state, the interrupt at a timeout, a separate output for each REPL, and two REPLs on parallel threads. Measure the start time and the memory of one REPL. | Done on 2026-10-21: a REPL in the same JVM, with guards (see the Phase 0 results). |
 | 1. Foundation | F1, F2 (`read`, `write`, `edit`, `exec`), F3, F6. F7 and F8: `exec` runs only in a sandbox. The guards of the Phase 0 results. Capture checking and safe mode for guest code, the modes of F2, the notation header, and the error hints. Phase 0 did not test capture checking in guest code, so this phase tests it first. | A REPL that runs model code against the guest API, in each mode. |
-| 2. Kernel | The log, the policy leaf, `Harness` on `AgentLoop`, the window strategy (the full log as `History`), the laws, `OptimizableStructure`, `ProgramRunner`. The session decider and the cell events with metadata (8.3, 8.5). `Clock` and `Random` handlers. | A harness for one task that the optimizers accept. |
+| 2. Kernel | The journal with the commit rule, `Entry` and `Meta`, `store` and `load`, the policy leaf, `Harness` on `AgentLoop`, both stop rules, the window strategy (the full log as `History`), the laws, `OptimizableStructure`, `ProgramRunner`. The session decider with `Send` and `Abort`, and the cell events (4.2, 8.3, 8.5). `Clock` and `Random` handlers. | A harness for one task that the optimizers accept. |
 | 3. RLM | F4, F5: variables, `llmQuery` through `subQuery`, `rlm(...)` children, the shared budget, the depth limit. | RLM in the harness. |
 | 4. Memory tree | `Memory`, `View`, the memory laws, the `compress` and `merge` leaves, the builder, `zoom` and `date` as guest functions. The memory-tree strategy (section 6). | A memory that loses no detail. |
 | 5. Optimization | A `FeedbackMetric` from tests, the memory metric, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
 | 6. Work sessions | `Derivation`, `ContextStrategy` (window, prefix summary, memory tree), scopes (directory, worktree, scratch), a CLI that opens one session, steering, the goal check, `ScopeSnapshot`, the end of a session and its release plans (7.9). The direct-style runtime: one virtual thread and one queue for each session (8.5). | A coding agent for daily use, one session at a time. |
 | 7. Controller | The controller API (7.3), the ledger events, pluggable ontologies, the extraction at the end of each turn, the time queries (7.6), the `Graph` guest API in sessions (7.7), probes, `SessionCard`, the graph metric. | One controller above all sessions. |
-| Later | A forked JVM for isolation. MCP tools as guest functions (`McpTools`). A policy variant with `run_scala` as a native tool through the adapter. Prompt-cache marks in `LmRequest`. RLM on the kernel. REPL replay with stored results (8.4), if it is not in the first version. A Pekko interpreter of the decider, and distribution (8.6). | |
+| Later | A forked JVM for isolation. MCP tools as guest functions (`McpTools`). A policy variant with `run_scala` as a native tool through the adapter. Prompt-cache marks in `LmRequest`. RLM on the kernel. REPL replay (8.4), if it is not in the first version. A Pekko interpreter of the decider, and distribution (8.6). | |
 
 ### Phase 0 results
 
@@ -1824,8 +2036,9 @@ The recommendation is a REPL in the same JVM, behind the `ScalaRepl` contract (F
    did not test this guard.
 5. Limit a REPL to about 300 cells. Then start a new REPL and replay the cells into it.
 
-Guards 3 and 5 need replay (8.4). A forked JVM stays the fallback: use it if unclean restarts occur often, or if
-the harness must run code from a source that it does not trust.
+Guards 3 and 5 use replay (8.4) to rebuild the definitions. With no replay, the new REPL has only the store of 4.2,
+and the model gets a note. A forked JVM stays the fallback: use it if unclean restarts occur often, or if the harness
+must run code from a source that it does not trust.
 
 The experiment did not test a journal on disk, the order of `parallel` results in a replay, capture checking in
 guest code, a forked JVM with a protocol for the guest calls, guard 4, Linux, or Windows.
@@ -1834,8 +2047,7 @@ guest code, a forked JVM with a protocol for the guest calls, guard 4, Linux, or
 
 1. **REPL host.** Phase 0 recommends a REPL in the same JVM, with the guards of the Phase 0 results. A forked
    JVM is the fallback.
-2. **End signal.** Only `submit(...)`, as in RLM? Or also a reply with no code, as in atc and uniichat? For
-   interactive turns, a reply with no code is natural.
+2. **End signal.** Decided: both `submit(...)` and a reply with no cell (4.2, decision 7 of 8.7).
 3. **RLM.** Does the current `RLM` move onto the kernel later, so that dspy4s has one code program?
 4. **Log shape.** Section 7 answers this question with both shapes: a session for each task, and one controller
    log that never ends. For the optimizer, an episode is a fork and one task.

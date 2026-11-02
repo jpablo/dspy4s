@@ -329,7 +329,8 @@ Ideas for dspy4s:
 
 ### 5.1 For the harness design
 
-The design of [CODE_HARNESS.md](CODE_HARNESS.md) agrees with most of these findings. These points need attention:
+The design of [CODE_HARNESS.md](CODE_HARNESS.md) agrees with most of these findings. These points need attention.
+On 2026-11-01, section 4.2 of that document took the first four points. The last two points are still open:
 
 - **Two kinds of cancellation.** A `tell` to a turn that runs (7.3) is a soft preemption. A stop is a hard abort.
   The decider of 8.5 needs both as separate commands.
@@ -485,7 +486,8 @@ the small parts, and Pekko gives no help with the hardest parts.
 **What would change this answer:**
 
 - Fresh cells with an explicit store in place of the persistent REPL. The replay row goes away, and the store is
-  plain data in the fold.
+  plain data in the fold. Section 4.2 of CODE_HARNESS.md now has the store next to the persistent REPL, so replay
+  is optional, and the row applies only to that option.
 - No forks of a session log. The contortion row goes away. With this change and the one above, the full harness
   moves to answer 2.
 - Sessions that are not tied to one machine, for example with remote devices (CODE_HARNESS.md, 8.6). Cluster

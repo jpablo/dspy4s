@@ -664,9 +664,8 @@ A persistent REPL is the less common choice. Three of the six code runtimes star
 (pi, deepseek-harness, Codex), and two of them give an explicit store with commit on success (pi, Codex). With a
 fresh cell, no state stays in a process between cells. The log, the files, and the store hold all of it.
 
-The harness of CODE_HARNESS.md keeps a persistent REPL (F1). Then the REPL state is a second state next to the log.
-A replay must rebuild it (CODE_HARNESS.md, 8.4), and 9.2 of CODE_HARNESS.md asks if an explicit store goes next to
-it.
+The harness of CODE_HARNESS.md keeps a persistent REPL (F1) as a cache. A typed store with commit on success holds
+the state that must survive (CODE_HARNESS.md, 4.2), and a replay can rebuild the definitions (8.4).
 
 ### 5.9 Tests
 
@@ -675,13 +674,13 @@ tests its executor with no model.
 
 ## 6. Consequences for the harness
 
-- Use `AgentLoop.run` for the step loop. The step of design B (CODE_HARNESS.md, section 5) already has the ReAct
-  form: a middleware, the policy, the interpreter, two log entries, and a decision.
+- Use `AgentLoop.run` for the step loop. The step of CODE_HARNESS.md, 4.2 has the ReAct form: the policy, the
+  interpreter, the commits, and a decision.
 - Support both stop rules. A reply with no cell ends a chat turn, and `submit` ends a program call (5.2).
 - Keep a step limit and a fallback for a program call. For a chat turn, give the model one last step to answer, as
   atc does (5.3).
-- Read the inbox between steps. A message from the controller API (CODE_HARNESS.md, 7.3) goes into the log before
-  the next step. The middleware of design B is the place for this (5.6).
+- Read new input between steps. A message from the controller API (CODE_HARNESS.md, 7.3) commits when it arrives,
+  and the policy reads it at the next step (CODE_HARNESS.md, 4.2).
 - Put the turn loop in the session actor (CODE_HARNESS.md, 8.1). It starts a turn for a user message, a subagent
   report, or a goal check (5.6).
 - Decide how the policy gives its thought: the `reasoning` field, native reasoning, or both. The optimizers read
