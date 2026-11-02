@@ -225,7 +225,7 @@ Ideas for dspy4s:
 |---|---|
 | Runtime base | The Kyo scheduler: a work-stealing pool with adaptive concurrency. A fiber is a promise and a scheduled task, and `KyoApp` runs a program. `kyo-scheduler-zio` and `kyo-scheduler-pekko` put ZIO and Pekko on the Kyo pool. Kyo does not run on their pools. |
 | Effects | `A < S` values. kyo-ai defines the effect `LLM` (a GADT of operations) and one handler, `LLM.run`, which adds `Async & Abort[AIGenException]`. A test checks at compile time that `LLM` never implies `Async` (`NotGiven[LLM <:< Async]`). So a program is a value until a runner executes it. |
-| A turn | The handler runs the generation loop: it makes the result tool, calls the provider, runs the tools in order, and decodes the result. Two HTTP wires (OpenAI style and Anthropic) on kyo-http, and two CLI harnesses (Claude Code and Codex) that call back through a local MCP server. |
+| A turn | The handler runs the generation loop: it makes the result tool, calls the provider, runs the tools in order, and decodes the result. Two HTTP wires (OpenAI style and Anthropic) on kyo-http, and two CLI harnesses: Claude Code calls back through a local MCP server, and Codex through its `dynamicTools`. |
 | Concurrency | `Isolate` decides how the conversation state crosses a fork: copy in, merge with no duplicates, keep the settings of the parent. `Async.foreach` and `race` work on `< LLM`. A `Meter` limits the rate. An agent is an actor: a bounded mailbox and one fiber, inside one `LLM.run`. |
 | Cancellation | Fiber interruption. One deadline for each model call covers its retries; when it expires, a sleep fiber interrupts the call. Interruption reaches the HTTP connect. The code admits that an abandoned stream connection can stay open. Processes are registered with a `Scope` and killed when it closes. |
 | Context | The settings live in the state of the handler (get, set, run, restore), not in `Local` or `Env`. |
@@ -367,18 +367,19 @@ The next document compares the Scala runtimes on the second layer.
 ### 5.3 A first map from the mechanisms to the Scala runtimes
 
 This table is an *(inference)* from the reports. The next document must check each cell.
+[CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md) checked the Kyo column on 2026-11-01.
 
 | Mechanism | ZIO | Kyo | Cats Effect | Ox | Pekko |
 |---|---|---|---|---|---|
 | Spawn with cleanup at drop | `forkScoped`, `Scope` | `Fiber.init`, `Scope` | `Resource`, `background` | `fork` in `supervised` | child actor |
 | Hard cancellation | interruption | `Fiber.interrupt` | `cancel` | scope interruption | stop message, `KillSwitch` (Streams) |
 | Soft preemption | `Promise` or `Ref` signal | `Promise`, `Channel` | `Deferred`, `SignallingRef` | `Channel` | a message |
-| Region that cancellation does not cut | `uninterruptible` | `Sync` region *(to check)* | `uncancelable` | code outside the scope | actor finishes its message |
+| Region that cancellation does not cut | `uninterruptible` | `Async.uninterruptible`, which forks the body, and the caller does not wait | `uncancelable` | code outside the scope | actor finishes its message |
 | Bounded queue | `Queue.bounded` | `Channel` | `Queue.bounded` | `Channel.buffered` | bounded mailbox, `Source.queue` |
 | Broadcast to many views | `Hub` | `Hub` | fs2 `Topic` | by hand | `BroadcastHub` (Streams) |
 | One local value | `FiberRef` | `Local` | `IOLocal` | `ForkLocal` | message metadata |
 | Retry with backoff | `Schedule` | `Retry` and `Schedule` | cats-retry | `retry` | `RestartSource` (Streams) |
-| Actor with a journal | `Queue` and a loop | `Actor` (kyo-actor) | `Queue` and a stream | `Actor` | Pekko Persistence, `EventSourcedBehavior` |
+| Actor with a journal | `Queue` and a loop | `Actor` (kyo-actor), with no journal | `Queue` and a stream | `Actor` | Pekko Persistence, `EventSourcedBehavior` |
 | Distribution | none in the core | `kyo-aeron` topics | none in the core | none | Cluster, Cluster Sharding |
 
 ### 5.4 Questions for the next step
