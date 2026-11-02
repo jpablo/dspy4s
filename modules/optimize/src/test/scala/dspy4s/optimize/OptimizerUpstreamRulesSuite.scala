@@ -18,7 +18,8 @@ import dspy4s.evaluate.contracts.Metric
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse}
 import dspy4s.optimize.propose.{GroundedProposer, GroundedProposerConfig}
 import dspy4s.programs.optimization.OptimizableStructure
-import dspy4s.programs.strategies.DynamicPredict
+import dspy4s.programs.strategies.{ChainOfThought, DynamicPredict}
+import dspy4s.signatures.Signature
 import munit.FunSuite
 
 import java.io.ByteArrayOutputStream
@@ -402,4 +403,63 @@ class OptimizerUpstreamRulesSuite extends FunSuite:
     val report = withLm(answering(_ => " "))(mipro(CandidateCount(1), TrialCount(3)).compile(student, trainset(1)))
     val found  = report.toOption.get.candidates.map(candidate => leaf(candidate.program).instructions).distinct
     assertEquals(found, Vector(None))
+  }
+
+  // ── The text of a ChainOfThought leaf ─────────────────────────────────────────────────────────────────────────────
+
+  private type CoT = ChainOfThought[(question: String), (answer: String)]
+
+  private def cot: CoT = ChainOfThought(Signature.fromString("question -> answer"))
+
+  // Upstream `signature.prepend("reasoning", ...)` keeps the instructions of the base signature.
+  private def baseText: String = "Given the fields `question`, produce the fields `answer`."
+
+  test("a prompt shows the base text of a ChainOfThought leaf with no instructions") {
+    val lm     = answering()
+    val config = GroundedProposerConfig(numInstructions = CandidateCount(1), useDatasetSummary = false)
+    assert(withLm(lm)(new GroundedProposer[CoT](config).proposeInstructions(cot, trainset(1))).isRight)
+    val prompt = text(lm.requests.find(isGeneration).get)
+    assert(prompt.contains(s"[[ ## basic_instruction ## ]]\n$baseText\n"), prompt)
+  }
+
+  test("the rules follow the base text of a ChainOfThought leaf with no instructions") {
+    val lm = new Lm(request =>
+      Right(
+        if isRules(request) then chat("natural_language_rules" -> "1. Be brief.")
+        else chat("reasoning"                                  -> "r", "answer" -> "a")
+      )
+    )
+    val config = InferRulesConfig(
+      metric = metric(),
+      numCandidates = CandidateCount(1),
+      bootstrap = BootstrapFewShotConfig(maxBootstrappedDemos = DemoCount(0), maxLabeledDemos = DemoCount(0))
+    )
+    val report = withLm(lm)(new InferRules[CoT](config).compile(cot, trainset(2))).toOption.get
+    val found  = summon[OptimizableStructure[CoT]].read(report.bestProgram).head.instructions.getOrElse("")
+    assert(found.startsWith(s"$baseText\n\nPlease adhere"), found)
+  }
+
+  // ── The proposals of MIPROv2 (`mipro_optimizer_v2.py`) ────────────────────────────────────────────────────────────
+
+  test("numCandidates sets the proposals of MIPROv2, and the current instruction takes the place of the first") {
+    val counter = java.util.concurrent.atomic.AtomicInteger(0)
+    val lm      = answering(_ => s"Proposal ${counter.incrementAndGet()}.")
+    val report  = withLm(lm)(mipro(CandidateCount(3), TrialCount(40)).compile(student, trainset(4))).toOption.get
+    assertEquals(lm.requests.count(isGeneration), 3)
+    val found = report.candidates.map(candidate => leaf(candidate.program).instructions).distinct.toSet
+    assertEquals(found, Set(None, Some("Proposal 2."), Some("Proposal 3.")))
+  }
+
+  // ── The random search (`random_search.py`) ────────────────────────────────────────────────────────────────────────
+
+  test("the random search scores seed -2 also with no labeled demos, as upstream LabeledFewShot(k=0)") {
+    val config = RandomSearchConfig(
+      metric = metric(),
+      numCandidates = SearchCandidateCount(0),
+      maxLabeledDemos = DemoCount(0)
+    )
+    val report = withLm(answering()) {
+      new BootstrapFewShotWithRandomSearch[DynamicPredict](config).compile(student, trainset(2))
+    }.toOption.get
+    assertEquals(report.candidates.flatMap(_.metadata.get("seed")).toSet, Set[Any](-3, -2, -1))
   }

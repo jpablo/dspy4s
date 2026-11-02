@@ -135,7 +135,7 @@ final class InferRules[P: {OptimizableStructure, ProgramRunner}](config: InferRu
                )
       program = rules.zipWithIndex.foldLeft(base) { case (prog, (induced, leafIdx)) =>
                   val augmented = induced.map(text =>
-                    s"${leaves(leafIdx).layout.effectiveInstructions}\n\n" +
+                    s"${leaves(leafIdx).effectiveInstructions}\n\n" +
                       s"Please adhere to the following rules when making your prediction:\n$text"
                   )
                   OptimizerSupport.applyInstruction(prog, leafIdx, augmented)

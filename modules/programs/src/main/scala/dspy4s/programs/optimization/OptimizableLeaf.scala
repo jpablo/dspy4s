@@ -22,7 +22,13 @@ import dspy4s.signatures.OutputAugmentation.PrependField
 trait OptimizableLeaf[P] extends Lens[P, OptimizableParameters]:
   def metadata(program: P): PredictorKey
 
-  final def inspect(program: P): OptimizableView = OptimizableView(metadata(program), get(program))
+  /** The text of a leaf whose default text differs from the default text of its structure. `None` means that the
+    * default text of the structure is correct.
+    */
+  def defaultInstructions(program: P): Option[String] = None
+
+  final def inspect(program: P): OptimizableView =
+    OptimizableView(metadata(program), get(program), defaultInstructions(program))
 
   @Law("frame: writing parameters never changes the read-only metadata")
   def frame(program: P, updated: OptimizableParameters): IsEq[PredictorKey] =
@@ -81,6 +87,10 @@ object OptimizableLeaf:
     * Optimizable parameters remain instructions, demos, config, and the decision settings. The augmented signature
     * structure is metadata only; writing parameters changes the base signature's instructions, from which the same
     * augmented structure is rebuilt.
+    *
+    * The default text of this leaf is the text of the base signature, because the augmented signature keeps that text
+    * (upstream `signature.prepend`). The default text of the augmented structure also names `reasoning`, and the
+    * program does not run it.
     */
   given chainOfThoughtOptimizableLeaf[I, O](using
       prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O]
@@ -90,6 +100,9 @@ object OptimizableLeaf:
 
     def metadata(program: ChainOfThought[I, O]): PredictorKey =
       PredictorKey.from(program.moduleName, program.signature.layout)
+
+    override def defaultInstructions(program: ChainOfThought[I, O]): Option[String] =
+      Some(program.baseSignature.layout.effectiveInstructions)
 
     def set(program: ChainOfThought[I, O], updated: OptimizableParameters): ChainOfThought[I, O] =
       if updated == get(program) then program

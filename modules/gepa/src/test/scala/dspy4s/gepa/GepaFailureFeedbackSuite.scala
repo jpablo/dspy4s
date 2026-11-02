@@ -23,7 +23,8 @@ import dspy4s.programs.ProgramRunner
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.optimization.OptimizableId
 import dspy4s.programs.optimization.OptimizableStructure
-import dspy4s.programs.strategies.DynamicPredict
+import dspy4s.programs.strategies.{ChainOfThought, DynamicPredict}
+import dspy4s.signatures.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
@@ -243,6 +244,15 @@ class GepaFailureFeedbackSuite extends FunSuite:
     val feedback = records(finisherId).head.feedback
     assert(feedback.contains("Answer in one word."), feedback)
     assert(!feedback.contains("Answer with the note."), feedback)
+  }
+
+  test("the structure in the feedback of a ChainOfThought leaf with no instructions has the base text") {
+    val program: ChainOfThought[(question: String), (answer: String)] =
+      ChainOfThought(Signature.fromString("question -> answer"))
+    val records  = reflect(program, new FormatLm(failFinisher = true), new RecordingMetric, addFailureAsFeedback = true)
+    val feedback = records(stepperId).head.feedback
+    assert(feedback.contains("Given the fields `question`, produce the fields `answer`."), feedback)
+    assert(!feedback.contains("produce the fields `reasoning`"), feedback)
   }
 
   test("with the option on, a failed call wins over the calls of the same leaf that passed") {

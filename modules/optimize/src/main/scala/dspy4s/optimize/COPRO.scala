@@ -131,7 +131,7 @@ final class COPRO[P: {OptimizableStructure, ProgramRunner}](config: COPROConfig)
   private def optimizeLeaf(program: P, idx: Int, evalset: Vector[Example])(using
       RuntimeContext
   ): Either[DspyError, Searched] =
-    val basic = ps.inspect(program)(idx).layout.effectiveInstructions
+    val basic = ps.inspect(program)(idx).effectiveInstructions
 
     // The best score of each candidate of this leaf, and the whole-program candidates of the report.
     type Attempts = (VectorMap[Option[String], Double], Vector[CandidateProgram[P]])

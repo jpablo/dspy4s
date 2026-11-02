@@ -33,7 +33,8 @@ final case class RandomSearchConfig(
 /** BootstrapFewShotWithRandomSearch makes candidate programs with different seeds, scores each one on the validation
   * set, and keeps the best one (upstream `dspy/teleprompt/random_search.py`). The seeds, in order:
   *   - -3: the student with no demos.
-  *   - -2: the labeled demos of [[LabeledFewShot]], when `maxLabeledDemos` is more than 0.
+  *   - -2: the labeled demos of [[LabeledFewShot]], with `maxLabeledDemos` as its `k`. The value 0 gives a program with
+  *     no demos, and the search scores it, as upstream `LabeledFewShot(k=0)`.
   *   - -1: [[BootstrapFewShot]] on the trainset, in its order.
   *   - 0 to `numCandidates - 1`: [[BootstrapFewShot]] on the whole trainset in a shuffled order, with a random size
   *     between 1 and `maxBootstrappedDemos` as its `maxBootstrappedDemos` (`OptimizerSupport.shuffledBootstrap`). The
@@ -90,44 +91,26 @@ final class BootstrapFewShotWithRandomSearch[P: {OptimizableStructure, ProgramRu
     def loop(seed: Int, done: Vector[CandidateProgram[P]]): Either[DspyError, Vector[CandidateProgram[P]]] =
       if seed >= config.numCandidates then Right(done)
       else
-        candidateOf(seed, student, trainset, teacher, evalset) match
-          case Left(error)            => Left(error)
-          case Right(None)            => loop(seed + 1, done)
-          case Right(Some(candidate)) =>
+        programOf(seed, student, trainset, teacher).flatMap(scored(seed, _, evalset)) match
+          case Left(error)      => Left(error)
+          case Right(candidate) =>
             if config.stopAtScore.exists(candidate.score >= _) then Right(done :+ candidate)
             else loop(seed + 1, done :+ candidate)
     loop(-3, Vector.empty)
 
-  /** The candidate of one seed, or `None` when the seed gives no candidate. */
-  private def candidateOf(
-      seed    : Int,
-      student : P,
-      trainset: Vector[Example],
-      teacher : Option[P],
-      evalset : Vector[Example]
-  )(using RuntimeContext): Either[DspyError, Option[CandidateProgram[P]]] =
-    programOf(seed, student, trainset, teacher).flatMap {
-      case Some(program) => scored(seed, program, evalset).map(Some(_))
-      case None          => Right(None)
-    }
-
-  /** The program of one seed, or `None` when the seed gives no candidate. */
+  /** The program of one seed. */
   private def programOf(seed: Int, student: P, trainset: Vector[Example], teacher: Option[P])(using
       RuntimeContext
-  ): Either[DspyError, Option[P]] =
+  ): Either[DspyError, P] =
     seed match
       case -3 =>
         val ps = summon[OptimizableStructure[P]]
-        Right(Some(ps.replace(student, ps.read(student).map(_.copy(demos = Vector.empty)))))
-      case -2 if config.maxLabeledDemos > 0 =>
-        new LabeledFewShot[P](LabeledFewShotConfig(k = config.maxLabeledDemos, seed = config.seed))
+        Right(ps.replace(student, ps.read(student).map(_.copy(demos = Vector.empty))))
+      case -2 => new LabeledFewShot[P](LabeledFewShotConfig(k = config.maxLabeledDemos, seed = config.seed))
           .compile(student, trainset)
-          .map(report => Some(report.bestProgram))
-      case -2 => Right(None)
-      case -1 => new BootstrapFewShot[P](bootstrapConfig).compile(student, trainset, teacher).map(report =>
-          Some(report.bestProgram)
-        )
-      case _ =>
+          .map(_.bestProgram)
+      case -1 => new BootstrapFewShot[P](bootstrapConfig).compile(student, trainset, teacher).map(_.bestProgram)
+      case _  =>
         val candidateSeed = config.seed + seed
         OptimizerSupport
           .shuffledBootstrap(
@@ -137,7 +120,7 @@ final class BootstrapFewShotWithRandomSearch[P: {OptimizableStructure, ProgramRu
             trainset,
             teacher
           )
-          .map(report => Some(report.bestProgram))
+          .map(_.bestProgram)
 
   /** The candidate of `program`, with its score on `evalset`. */
   private def scored(seed: Int, program: P, evalset: Vector[Example])(using

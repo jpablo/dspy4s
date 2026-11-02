@@ -7,6 +7,7 @@ import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
 import dspy4s.optimize.CandidateCount
+import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.strategies.DynamicPredict
 import munit.FunSuite
 
@@ -211,8 +212,12 @@ class GroundedProposerSuite extends FunSuite:
 
   // ── 6. task_demos (upstream `GenerateModuleInstruction.forward`) ──────────
 
-  /** The prompts of `proposeInstructions` for two proposals of one leaf, with `demos` as its demo set. */
-  private def promptsWith(demos: Vector[Example]): Vector[String] =
+  /** The prompts of `proposeInstructions` for `program`, with `demoCandidates` indexed by set and then by leaf. */
+  private def promptsOf[P: OptimizableStructure](
+      program        : P,
+      demoCandidates : Vector[Vector[Vector[Example]]],
+      numInstructions: CandidateCount
+  ): Vector[String] =
     val prompts = java.util.concurrent.ConcurrentLinkedQueue[String]()
     val lm      = new LanguageModel:
       override val id: String                                                                    = "recording"
@@ -220,15 +225,26 @@ class GroundedProposerSuite extends FunSuite:
       override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
         val _ = prompts.add(request.messages.lastOption.flatMap(_.text).getOrElse(""))
         Right(LmResponse(outputs = Vector(LmOutput(text = "A candidate."))))
-    val proposer = new GroundedProposer[DynamicPredict](
-      config(numInstructions = CandidateCount(2), useDatasetSummary = false, useTips = false)
+    val proposer = new GroundedProposer[P](
+      config(numInstructions = numInstructions, useDatasetSummary = false, useTips = false)
     )
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(GroundingAwareAdapter))) {
-      val program = DynamicPredict(layout = taskLayout("QA", "INSTR_INITIAL"))
-      val result  = proposer.proposeInstructions(program, trainset, Vector(demos))(using RuntimeEnvironment.current)
+      val result = proposer.proposeInstructions(program, trainset, demoCandidates)(using RuntimeEnvironment.current)
       assert(result.isRight, result.toString)
     }
     prompts.toArray(Array.empty[String]).toVector
+
+  /** The prompts of a program with one leaf, with `demoSets` as the demo sets of that leaf. */
+  private def promptsOfSets(demoSets: Vector[Vector[Example]], numInstructions: CandidateCount): Vector[String] =
+    val program = DynamicPredict(layout = taskLayout("QA", "INSTR_INITIAL"))
+    promptsOf(program, demoSets.map(Vector(_)), numInstructions)
+
+  /** The prompts of two proposals of one leaf: two demo sets give two proposals, and each set has `demos`. */
+  private def promptsWith(demos: Vector[Example]): Vector[String] =
+    promptsOfSets(Vector(demos, demos), CandidateCount(2))
+
+  private def traced(question: String): Example =
+    Example(rec("question" := question, "answer" := "y"), Set("question"), augmented = true)
 
   test("the input task_demos has the upstream text when a proposal has no bootstrapped demo") {
     val labeled = Example(rec("question" := "a labeled demo", "answer" := "x"), inputKeys = Set("question"))
@@ -243,6 +259,38 @@ class GroundedProposerSuite extends FunSuite:
     assert(prompts(0).contains(noDemos), prompts(0))
     assert(prompts(1).contains("a traced demo"), prompts(1))
     assert(!prompts(1).contains("a labeled demo"), prompts(1))
+  }
+
+  test("the demo sets limit the proposals, and a proposal starts from the demo set with its index") {
+    val demoSets = Vector(Vector(traced("the demo of set 0")), Vector(traced("the demo of set 1")))
+    val prompts  = promptsOfSets(demoSets, CandidateCount(5))
+    assertEquals(prompts.size, 2)
+    assert(prompts(0).contains(noDemos), prompts(0))
+    val ofSet1 = prompts(1).indexOf("the demo of set 1")
+    val ofSet0 = prompts(1).indexOf("the demo of set 0")
+    assert(ofSet1 >= 0 && ofSet1 < ofSet0, prompts(1))
+  }
+
+  test("a proposal gathers at most three bootstrapped demos over the demo sets") {
+    val demoSets = Vector(Vector(traced("demo a0"), traced("demo a1")), Vector(traced("demo b0"), traced("demo b1")))
+    val prompt   = promptsOfSets(demoSets, CandidateCount(2))(1)
+    Vector("demo b0", "demo b1", "demo a0").foreach(demo => assert(prompt.contains(demo), prompt))
+    assert(!prompt.contains("demo a1"), prompt)
+  }
+
+  test("the demo candidates have the index of the set first, and then the index of the leaf") {
+    val program = TwoStage(
+      first = DynamicPredict(layout = taskLayout("First", "INSTR_FIRST")),
+      second = DynamicPredict(layout = taskLayout("Second", "INSTR_SECOND"))
+    )
+    val demoCandidates = Vector(
+      Vector(Vector(traced("first leaf, set 0")), Vector(traced("second leaf, set 0"))),
+      Vector(Vector(traced("first leaf, set 1")), Vector(traced("second leaf, set 1")))
+    )
+    val prompts = promptsOf(program, demoCandidates, CandidateCount(2))
+    assertEquals(prompts.size, 4)
+    assert(prompts(1).contains("first leaf, set 1") && !prompts(1).contains("second leaf"), prompts(1))
+    assert(prompts(3).contains("second leaf, set 1") && !prompts(3).contains("first leaf"), prompts(3))
   }
 
   // ── 7. numInstructions <= 0 is rejected ───────────────────────────────────

@@ -228,9 +228,10 @@ final class GepaAdapter[P](
     yield components.iterator.map { component =>
       component -> leafIndexById.get(component).toVector.flatMap { index =>
         val leaf = leaves(index)
-        // The layout that the candidate gives to this leaf (gepa's `build_program(candidate)`).
-        val layout =
-          leaf.metadata.structure.withInstructions(candidate.getOrElse(component, leaf.parameters.instructions))
+        // The layout that the candidate gives to this leaf (gepa's `build_program(candidate)`). With no instructions,
+        // it has the default text that the leaf runs, not the default text of its structure.
+        val instructions = candidate.getOrElse(component, leaf.parameters.instructions)
+        val layout       = leaf.metadata.structure.withInstructions(instructions.orElse(leaf.view.defaultInstructions))
         runs.flatMap { case (traj, calls) => recordFor(leaf, layout, traj, calls(index), random) }
       }
     }.toMap

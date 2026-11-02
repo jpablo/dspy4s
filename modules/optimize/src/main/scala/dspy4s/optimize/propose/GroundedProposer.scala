@@ -21,7 +21,8 @@ import dspy4s.programs.optimization.OptimizableView
   * `dspy.propose.grounded_proposer.GroundedProposer.__init__`).
   *
   * @param numInstructions
-  *   the number of candidate instructions for each predictor (upstream `N`)
+  *   the number of candidate instructions for each predictor (upstream `N`). With demo sets, the number of sets is also
+  *   a limit
   * @param useDatasetSummary
   *   when true, make one dataset summary for each [[GroundedProposer.proposeInstructions]] call, and show it in each
   *   proposal (upstream `use_dataset_summary`)
@@ -48,13 +49,16 @@ final case class GroundedProposerConfig(
 /** GroundedProposer proposes candidate INSTRUCTIONS for each predictor from the task data and from bootstrapped demos.
   * A v1 port of a part of upstream `dspy.propose` (`grounded_proposer.py`, `dataset_summary_generator.py`).
   *
-  * '''What it does.''' For each predictor of [[OptimizableStructure.read]], in read order, it makes
-  * `config.numInstructions` candidate instructions with a [[DynamicPredict]] (upstream `GenerateModuleInstruction`).
-  * The inputs of each proposal, in the upstream order:
+  * '''What it does.''' For each predictor of [[OptimizableStructure.read]], in read order, it makes candidate
+  * instructions with a [[DynamicPredict]] (upstream `GenerateModuleInstruction`). With no demo sets, a predictor gets
+  * `config.numInstructions` candidates. With demo sets, it gets `min(numInstructions, sets)` candidates (upstream
+  * `range(num_demos)[:min(N, num_demos)]`). The inputs of each proposal, in the upstream order:
   *   1. `dataset_description`: a dataset summary, made one time for each call from a sample of the trainset (upstream
   *      `create_dataset_summary`), when `useDatasetSummary` is true and the summary did not fail;
   *   1. `module`: the name of the module, and its field names (`name(inputs) -> outputs`);
-  *   1. `task_demos`: the bootstrapped demos of the predictor, or "No task demos provided.";
+  *   1. `task_demos`: at most 3 bootstrapped demos of the predictor, or "No task demos provided.". Proposal `i` reads
+  *      the demo sets in the order `i, i + 1, ..., the last set, 0, ..., i - 1` (upstream `adjacent_sets`). The first
+  *      proposal shows no demos (upstream `demo_set_i == 0`);
   *   1. `basic_instruction`: the effective instructions of the predictor;
   *   1. `tip`: a tip from a fixed list, when `useTips` is true.
   *
@@ -72,10 +76,7 @@ final case class GroundedProposerConfig(
   *     `view_data_batch_size`, adds to its observations (`DatasetDescriptorWithPriorObservations`), and makes a last
   *     `ObservationSummarizer` call. dspy4s makes one `DatasetDescriptor` call on `datasetSampleSize` examples. The
   *     examples are `field: value` text, not the `repr` of the Python list.
-  *   - '''One demo set for each predictor.''' Upstream gives the demo sets of all candidates, and each proposal starts
-  *     from another set. dspy4s gives one set for each predictor. As upstream, a proposal shows only bootstrapped
-  *     demos, at most 3, and the first proposal shows none. A demo is `field: value` text, not the prefix form of
-  *     upstream `create_example_string`.
+  *   - '''A demo is `field: value` text''', not the prefix form of upstream `create_example_string`.
   *   - '''The tip list has no empty tip, and the tip follows the index of the candidate''', not a random choice
   *     (`set_tip_randomly`). A run is repeatable for a seed.
   *   - '''One `rolloutId`-varied call for each candidate''', not a random `rollout_id`.
@@ -84,26 +85,27 @@ final case class GroundedProposerConfig(
   */
 final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: OptimizableStructure[P]):
 
-  /** The `config.numInstructions` candidate instructions of EACH optimizable leaf of `program`, in
-    * [[OptimizableStructure.read]] order.
+  /** The candidate instructions of EACH optimizable leaf of `program`, in [[OptimizableStructure.read]] order:
+    * `config.numInstructions` candidates with no demo sets, else `min(numInstructions, sets)` candidates.
     *
     * @param program
     *   the program whose leaves get proposals
     * @param trainset
     *   the task data. A sample of it goes to the dataset summary
     * @param demoCandidates
-    *   the demo set of each leaf, in read order. Empty (the default) means that the proposals show no demos
+    *   the demo sets, indexed by set and then by leaf in read order. Empty (the default) means that the proposals show
+    *   no demos
     * @return
     *   for each leaf, in read order, the proposals, or the first [[DspyError]]. A blank proposal is an empty text
     */
   def proposeInstructions(
       program       : P,
       trainset      : Vector[Example],
-      demoCandidates: Vector[Vector[Example]] = Vector.empty
+      demoCandidates: Vector[Vector[Vector[Example]]] = Vector.empty
   )(using RuntimeContext): Either[DspyError, Vector[Vector[String]]] =
     val summary = datasetSummary(trainset)
     Traverse.either(ps.inspect(program).zipWithIndex) { (leaf, idx) =>
-      proposeForLeaf(leaf, idx, summary, demoCandidates.lift(idx).getOrElse(Vector.empty))
+      proposeForLeaf(leaf, idx, summary, demoCandidates.map(_.lift(idx).getOrElse(Vector.empty)))
     }
 
   // ── Dataset summary (upstream `create_dataset_summary`) ─────────────────────────────────────────────────────────────
@@ -130,25 +132,31 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
 
   // ── The proposals of one leaf (upstream `GenerateModuleInstruction`) ────────────────────────────────────────────────
 
-  /** The `config.numInstructions` proposals of one leaf. The rollout ids `seedBase + 1 + idx * numInstructions + i` do
-    * not overlap, for any size, and the dataset summary has `seedBase`. As upstream `forward`, the first proposal shows
-    * no demos (`demo_set_i == 0`), and also a proposal with no bootstrapped demo. As upstream, a proposal goes through
-    * `strip_prefix` two times: in `forward` and in `propose_instruction_for_predictor`.
+  /** The proposals of one leaf: `numInstructions` proposals with no demo sets, else `min(numInstructions, sets)`.
+    * `demoSets` has the demos of this leaf in each set. `i` is less than `numInstructions`, so the rollout ids
+    * `seedBase + 1 + idx * numInstructions + i` do not overlap, for any size, and the dataset summary has `seedBase`.
+    * As upstream `forward`, the first proposal shows no demos (`demo_set_i == 0`), and also a proposal with no
+    * bootstrapped demo. As upstream, a proposal goes through `strip_prefix` two times: in `forward` and in
+    * `propose_instruction_for_predictor`.
     */
   private def proposeForLeaf(
-      leaf   : OptimizableView,
-      idx    : Int,
-      summary: Option[String],
-      demoSet: Vector[Example]
+      leaf    : OptimizableView,
+      idx     : Int,
+      summary : Option[String],
+      demoSets: Vector[Vector[Example]]
   )(using RuntimeContext): Either[DspyError, Vector[String]] =
-    val demos   = demoSet.filter(_.augmented).take(GroundedProposer.NumDemosInContext).map(renderExample)
+    val count: Int =
+      if demoSets.isEmpty then config.numInstructions else math.min(config.numInstructions, demoSets.size)
     val base    = OptimizerSupport.seedBase(config.seed) + 1 + idx * config.numInstructions
     val predict = DynamicPredict(
       layout = GroundedProposer.instructionLayout(useSummary = summary.isDefined, useTip = config.useTips),
       name = Some("grounded_instruct")
     )
 
-    Traverse.either((0 until config.numInstructions).toVector) { i =>
+    Traverse.either((0 until count).toVector) { i =>
+      // Upstream `adjacent_sets` and `gather_examples_from_sets`.
+      val adjacent  = demoSets.drop(i) ++ demoSets.take(i)
+      val demos     = adjacent.flatten.filter(_.augmented).take(GroundedProposer.NumDemosInContext).map(renderExample)
       val taskDemos =
         if i == 0 || demos.isEmpty then GroundedProposer.NoTaskDemos else demos.mkString("", "\n\n", "\n\n")
       val tip    = Option.when(config.useTips)(GroundedProposer.tips(i % GroundedProposer.tips.size))
@@ -157,7 +165,7 @@ final class GroundedProposer[P](config: GroundedProposerConfig)(using ps: Optimi
           Vector(
             "module"            := describeModule(leaf),
             "task_demos"        := taskDemos,
-            "basic_instruction" := leaf.layout.effectiveInstructions
+            "basic_instruction" := leaf.effectiveInstructions
           ) ++
           tip.map("tip" := _)
       )

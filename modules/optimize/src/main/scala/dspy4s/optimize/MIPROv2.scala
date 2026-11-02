@@ -24,10 +24,10 @@ import scala.util.Random
   * @param metric
   *   task metric used to score whole-program candidates on the valset (or trainset)
   * @param numCandidates
-  *   the total number of demo sets (upstream `num_fewshot_candidates`). The first three seeds are the fixed sets of
-  *   upstream `create_n_fewshot_demo_sets`, so the value 5 gives the zero-shot set, the labeled set, the unshuffled
-  *   bootstrap, and two shuffled bootstraps. `proposerConfig.numInstructions` gives the number of proposed
-  *   instructions.
+  *   the number of demo sets and the number of proposals for each predictor (upstream `num_candidates`). The first
+  *   three seeds are the fixed sets of upstream `create_n_fewshot_demo_sets`, so the value 5 gives the zero-shot set,
+  *   the labeled set, the unshuffled bootstrap, and two shuffled bootstraps. The current instruction takes the place of
+  *   the first proposal, so a predictor has `numCandidates` instruction candidates in all when no proposal is blank.
   * @param numTrials
   *   number of search trials over (demo-assignment, per-predictor instruction) choices (upstream's `num_trials`). Must
   *   be `> 0`.
@@ -40,7 +40,8 @@ import scala.util.Random
   *   RNG seed; deterministic for a fixed seed. It gives the shuffled demo sets, the seed of the proposer (it replaces
   *   `proposerConfig.seed`, as upstream gives one `rng` to the proposer), and the trial search RNG
   * @param proposerConfig
-  *   configuration for the [[GroundedProposer]] phase (instruction proposal)
+  *   configuration for the [[GroundedProposer]] phase (instruction proposal). `numCandidates` replaces its
+  *   `numInstructions`, and `seed` replaces its `seed`
   */
 final case class MIPROv2Config(
     metric              : Metric,
@@ -61,14 +62,15 @@ final case class MIPROv2Config(
   *      [[LabeledFewShot]]. Seed -1 is [[BootstrapFewShot]] on the trainset in its order. Each other seed, also -2 with
   *      no labeled demos, is [[BootstrapFewShot]] on the shuffled trainset with a random size between 1 and
   *      `maxBootstrappedDemos`. The result is a `Vector` of demo-assignments, each a per-predictor
-  *      `Vector[Vector[Example]]` of length == predictor count. 2. '''Instruction candidates''' (Step 2,
-  *      GroundedProposer). Calls [[GroundedProposer.proposeInstructions]]`(student, trainset, demoCandidates = <first
-  *      assignment with a bootstrapped demo, or empty>)` → `Vector[Vector[String]]` (per predictor,
-  *      `proposerConfig.numInstructions` instructions). Each predictor's CURRENT instruction is prepended as an extra
-  *      candidate. 3. '''Search''' (Step 3, "find optimal prompt parameters"). For `numTrials` trials with a seeded
-  *      RNG, randomly picks one demo-assignment index (applied whole-program) and, per predictor, one
-  *      instruction-candidate index. The trial program is built with a single [[OptimizableStructure.replace]] applying
-  *      each chosen instruction AND chosen demos. Each trial is scored on the valset (falling back to the trainset) via
+  *      `Vector[Vector[Example]]` of length == predictor count.
+  *   1. '''Instruction candidates''' (Step 2, GroundedProposer). Calls
+  *      [[GroundedProposer.proposeInstructions]]`(student, trainset, demoCandidates)` with all demo-assignments →
+  *      `Vector[Vector[String]]` (per predictor, `numCandidates` instructions). Each predictor's CURRENT instruction
+  *      takes the place of the first proposal (upstream `instruction_candidates[i][0]`).
+  *   1. '''Search''' (Step 3, "find optimal prompt parameters"). For `numTrials` trials with a seeded RNG, randomly
+  *      picks one demo-assignment index (applied whole-program) and, per predictor, one instruction-candidate index.
+  *      The trial program is built with a single [[OptimizableStructure.replace]] applying each chosen instruction AND
+  *      chosen demos. Each trial is scored on the valset (falling back to the trainset) via
   *      [[dspy4s.evaluate.Evaluate]] + [[ProgramRunner]] + the metric. A baseline candidate (the unmodified student) is
   *      always scored too. The best-scoring candidate is returned as `bestProgram`; all scored candidates (trials +
   *      baseline) are returned sorted descending.
@@ -93,8 +95,8 @@ final case class MIPROv2Config(
   *     same prompt. A blank proposal gives no candidate.
   *   - '''No surrogate model / no successive halving.''' Beyond dropping Optuna, there is no early stopping, promotion,
   *     or candidate pruning between trials.
-  *   - '''Two knobs, with no `auto` mode.''' `numCandidates` is `num_fewshot_candidates`, and
-  *     `proposerConfig.numInstructions` is `num_instruct_candidates`. dspy4s has no `auto` run modes that derive them.
+  *   - '''No `auto` mode.''' `numCandidates` sets the two values `num_fewshot_candidates` and
+  *     `num_instruct_candidates`, as upstream `num_candidates`. dspy4s has no `auto` run modes that derive them.
   *   - '''A demo cap of 0.''' A `maxBootstrappedDemos` of 0 gives the size 0, where upstream `randint(1, 0)` raises.
   *   - '''Dataset split / `auto` settings omitted.''' No automatic train/val splitting or `light/medium/heavy` presets;
   *     the caller supplies `valset` explicitly (else the trainset is reused).
@@ -169,24 +171,24 @@ final class MIPROv2[P: {OptimizableStructure, ProgramRunner}](config: MIPROv2Con
   // ── Phase 2 ─────────────────────────────────────────────────────────────
 
   /** The instruction candidates of each predictor: `None` means "keep the current instructions", so the baseline is
-    * always reachable and a leaf with no instructions keeps `None`. After it come the proposals of
-    * [[GroundedProposer]]. A blank proposal gives no candidate.
+    * always reachable and a leaf with no instructions keeps `None`. It takes the place of the first proposal of
+    * [[GroundedProposer]] (upstream `instruction_candidates[i][0] = get_signature(pred).instructions`). The call for
+    * that proposal still occurs, as upstream. After it come the other proposals. A blank proposal gives no candidate.
     */
   private def proposeInstructionCandidates(
       student       : P,
       trainset      : Vector[Example],
       demoCandidates: Vector[Vector[Vector[Example]]]
   )(using RuntimeContext): Either[DspyError, Vector[Vector[Option[String]]]] =
-    // Upstream gives one `rng` to the proposer and to the optimizer.
-    val proposer = new GroundedProposer[P](config.proposerConfig.copy(seed = config.seed))
-    // Ground the proposer on the first assignment with a bootstrapped demo. A labeled set has none.
-    val seedDemos: Vector[Vector[Example]] =
-      demoCandidates.find(_.exists(_.exists(_.augmented))).getOrElse(Vector.empty)
-    val effective: Vector[String] = ps.inspect(student).map(_.layout.effectiveInstructions)
+    // Upstream gives one `rng` to the proposer and to the optimizer, and `num_candidates` sets the two counts.
+    val proposer = new GroundedProposer[P](
+      config.proposerConfig.copy(numInstructions = config.numCandidates, seed = config.seed)
+    )
+    val effective: Vector[String] = ps.inspect(student).map(_.effectiveInstructions)
 
-    proposer.proposeInstructions(student, trainset, seedDemos).map { proposed =>
+    proposer.proposeInstructions(student, trainset, demoCandidates).map { proposed =>
       proposed.zip(effective).map { (perLeaf, current) =>
-        val found = perLeaf.filter(text => PythonText.strip(text).nonEmpty)
+        val found = perLeaf.drop(1).filter(text => PythonText.strip(text).nonEmpty)
         (None +: found.map(OptimizerSupport.instructionCandidate(_, current))).distinct
       }
     }
