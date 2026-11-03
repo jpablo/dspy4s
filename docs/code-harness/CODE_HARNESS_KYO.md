@@ -16,7 +16,8 @@ recommendation in section 7 is not a decision.
   4.2 of CODE_HARNESS.md. This check found two problems, which section 4.1 describes. One problem was an error in that
   section 4.2.
 - One commit to SQLite, from a plain thread through an actor and back, took about 140 µs. So the two commits of each
-  guest API call are small next to a cell compile.
+  guest API call are small next to a cell compile. This number has no full flush of the disk cache. With
+  `PRAGMA fullfsync`, a separate check measured 5 to 9 ms.
 - Kyo RC7 needs JDK 25. dspy4s compiles on JDK 25, and all its tests pass there.
 - Kyo is still a release candidate. So the recommendation keeps Kyo types out of the contracts of the harness.
 
@@ -66,6 +67,33 @@ number comes from one run, so it gives only the order of size.
 
 The SQLite numbers do not show durability after a host crash. On macOS, `fsync` does not force the data through the
 disk cache, and the check did not set `PRAGMA fullfsync`.
+
+A later check compared two layouts of the journal: one file for each session, and one shared file. The script is
+`tmp/kyo-check/sqlite_layouts.py`. It used Python's SQLite 3.49.1 on the same Mac, and not the Kyo driver, which vendors
+SQLite 3.53.4. The settings were WAL and `synchronous=FULL`, with `BEGIN IMMEDIATE` and two rows of 1 KB in each commit.
+Each writer had its own connection. Python threads add delay when there are many writers, so compare only the
+approximate sizes. Each row is one run.
+
+| Measurement | One file for each session | One shared file |
+|---|---|---|
+| 1 writer: median commit | 75 µs | 74 µs |
+| 1 writer: commits per second | 10,500 | 7,700 |
+| 8 writers: commits per second | 14,400 | 9,000 |
+| 8 writers: longest wait | 22 ms | 465 ms |
+| 64 writers: commits per second | 5,300 | 3,500 |
+| 64 writers: longest wait | 45 ms | 2.7 s |
+| 256 writers: commits per second | 4,200 | 2,600 |
+| 256 writers: longest wait | 377 ms | 4.0 s |
+| `fullfsync`, 1 writer: median commit | 9.4 ms | 4.9 ms |
+| `fullfsync`, 8 writers: commits per second | 224 | 200 |
+| `fullfsync`, 8 writers: longest wait | 110 ms | 2.1 s |
+| Start a new session: median | 1 ms | 0.1 ms |
+| Disk size of a session with two rows | 16 KB | 9 KB |
+| List 2,000 sessions | 687 ms | 2.4 ms |
+| Remove 1,000 sessions | 47 ms | 558 ms, then a `VACUUM` of 50 ms on 18 MB |
+
+With one writer the two layouts do the same work, and they still differ by 30%. So the differences in throughput mean
+little. The longest wait differs by ten times or more, because the lock of SQLite has no fair order.
 
 ## 3. The fit for each part of the harness
 
@@ -186,8 +214,11 @@ Limits:
   `--enable-native-access=ALL-UNNAMED` in a future release.
 - An interrupt of a write rolls back the whole transaction (`kyo-sql-sqlite/README.md:488`). So the commit must run in
   the actor, and a stop must stay a message.
-- SQLite has one writer for the full file (`kyo-sql-sqlite/README.md:464`). One file for each session avoids a queue.
-  One shared file gives a commit across sessions (RUNTIME 5.5). This is an open question.
+- SQLite has one writer for the full file (`kyo-sql-sqlite/README.md:464`), and its lock has no fair order. In the
+  check of section 2, a writer on one shared file waited for up to 2.7 s. So the design uses one file for each session
+  ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), 10.2).
+- `DB.run` opens one pool for each URL (`kyo-sql-sqlite/README.md:108`), with ten connections by default
+  (`kyo-sql-sqlite/README.md:125`). So each session needs a smaller pool. No check has run this.
 - `kyo-sql` depends on `kyo-schema-json`, but rows use `SqlSchema`. An entry can be a JSON string from zio-blocks, so
   the codec rule of dspy4s still holds.
 
@@ -372,8 +403,8 @@ Guest API handlers: LM, files, shell, network                   <- pluggable; ea
    loop needs the REPL stop flag in any case.
 2. **Build the session host on `kyo-actor`.** It has a bounded mailbox, `ask`, finalizers, and a scheduler that
    tolerates blocked work. This changes decision 1 of 8.7, but only for the host.
-3. **Put `Journal` on `kyo-sql-sqlite`.** It gives the atomic write and the fence with little code. The contract also
-   takes a JSONL file.
+3. **Put `Journal` on `kyo-sql-sqlite`, with one file for each session.** It gives the atomic write and the fence with
+   little code. The contract also takes a JSONL file.
 4. **Use `kyo-mcp` for the early MCP server,** if question 4 of 9.4 gets a yes.
 5. **Keep Kyo types out of `Entry`, `Journal`, the guest API and `Module`.** Then an API change in Kyo stays in the
    adapters. A ZIO or Pekko host also stays possible.
@@ -385,6 +416,7 @@ This does not make `A < S` the program type of dspy4s. That is the separate ques
 
 - A session host with a real REPL. The check used plain threads and a flag in place of the REPL instrumentation.
 - A session host with SQLite as its journal under the stress check. The stress check used a log in memory.
+- The Kyo driver with one file for each session. The check of the layouts used Python's SQLite.
 - A hard stop that reaches the LM transport and a process group.
 - The guards of Phase 0 on JDK 25. Only one simple REPL cell ran there.
 - A real `kyo-mcp` server, and `kyo-pod`, `kyo-browser` and `kyo-lsp` on the nightly.

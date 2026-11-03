@@ -31,11 +31,11 @@ configuration. So the design has one kernel.
 | Project | What this design takes | What it leaves |
 |---|---|---|
 | atc | One action language, the API source as the reference, capabilities as `using` parameters, compile errors as observations, safe mode | The lock for the full JVM, compaction that loses detail |
-| pi | The session as an append-only list, the context as a pure projection, `store` and `load` kept in the session | JSON tools as the action language |
+| pi | The session as an append-only list, one file for each session, the context as a pure projection, `store` and `load` kept in the session | JSON tools as the action language |
 | `pi-durable` | "Only committed state is observable", an intent and an outcome for each effect, request ids, version checks | Each task as a state machine, a deterministic JavaScript sandbox |
 | uniichat | The memory tree, `zoom`, a cheaper model for summaries, the goal check, a report as a message | JSON tools, one chat for all work |
 | deepseek-harness | Crash repair by append, the mark for optional entries, a sandbox that fails closed, recorded model streams, tests that kill a process | Agent teams with a task graph, the opt-in REPL that is never durable |
-| Codex | Commit on success for the store, soft and hard stops as two commands, world-state diffs, taint, an LLM reviewer, best-of-N | Four levels of loops, the yield protocol, the message board |
+| Codex | Commit on success for the store, soft and hard stops as two commands, world-state diffs, taint, an LLM reviewer, best-of-N, a SQLite view that the session files can rebuild | Four levels of loops, the yield protocol, the message board |
 | tacit | Results that show that capability-safe Scala works for agents, a timed-out cell that keeps the earlier state, an early MCP server | A validator as a boundary |
 | dspy4s `RLM` | Inputs as REPL values, `llmQuery`, recursion that returns a typed value | The Python interpreter |
 | dspy4s | `Predict`, `History`, `Module`, the optimizers | `AgentLoop.run` for this loop (`next` holds the limit) |
@@ -56,6 +56,7 @@ These words settle section 4 of [CODE_HARNESS_CONCEPTS.md](CODE_HARNESS_CONCEPTS
 | Journal | The append-only list of the entries of a session | `History`, the transcript, the trace |
 | Entry | One fact in a journal | An event for clients, which is a published event |
 | Commit | One atomic write of entries to a journal | A git commit, which is always "git commit" |
+| Catalog | The derived list of the sessions, with one row for each session | The journal |
 | Turn | From `TurnStarted` to `TurnEnded` | One model reply |
 | Step | One policy call and what it starts | The result of `AgentLoop` |
 | Cell | One unit of code that the REPL runs | |
@@ -66,6 +67,7 @@ These words settle section 4 of [CODE_HARNESS_CONCEPTS.md](CODE_HARNESS_CONCEPTS
 | Scope | The place of the work of a session: a directory, a worktree or a scratch directory | The range of a graph query, which is a `GraphRange` |
 | Task | The work that a session gets at its start | A row of a task set, which is a rollout task |
 | Goal | A condition that the work must meet | |
+| Report | The message that a session sends to the session that owns it, after a turn | The value of `rlm` |
 | Steer | A message that enters between two steps (`Send` in a turn) | |
 | Abort | The hard stop of a turn | `Thread.interrupt`, which is the only meaning of "interrupt" |
 | Fork | Say which one: a journal fork, a workspace fork or a session fork | |
@@ -122,10 +124,13 @@ Step  ::= StepStarted [ Acted [ Cell ] ]
 Cell  ::= ( EffectStarted | EffectDone )* Observed
 ```
 
-Two rules about the journal:
+Three rules about the journal:
 
 - **The commit.** `commit` returns after the write reaches the backend, so an intent is in the journal before its
   effect starts. A stream delta to a client is not state: a client can show it, and a crash can lose it.
+- **One journal.** One commit writes to one journal. A commit across sessions needs all sessions in one database.
+  Without it, each backend of `Journal` stays possible: a file on a local disk, a Pekko journal or a server database.
+  Section 8.6 says how a message goes from one journal to another.
 - **Unknown entries.** A reader that cannot decode an entry stops a rebuild if `required` is true, and it skips the
   entry if `required` is false.
 
@@ -266,6 +271,7 @@ def decide(command: Command, s: SessionState): Either[Rejection, Vector[Entry]]
 |---|---|
 | `Activate` | `repair(s)`, then `Activated`. If an input waits, also `TurnStarted`. |
 | `Send` with a known request id | Nothing |
+| `Send` to a session that has ended | Nothing. The command gets the rejection `SessionClosed`. |
 | `Send` with no open turn | `Input` and `TurnStarted` |
 | `Send` in a turn | `Input`. The projection shows it at the next `StepStarted`. |
 | `Commit` | The entries, if each one is valid at that position (the rules below). |
@@ -349,7 +355,9 @@ TurnEnded(Aborted)
 | Commit | A reader sees an entry only after its commit. |
 | Effect | An intent commits before its effect, and the outcome commits after the effect. Each intent has exactly one outcome after a repair. |
 | Stop | After `StopRequested`, `next` starts no new work, and `decide` accepts no new intent. |
+| One journal | One commit writes to one journal. |
 | Input | Two `Send` commands with one request id give one `Input`. |
+| Report | After the report pass of 8.6, each `TurnEnded` that needs a report has exactly one `Input` in the journal of an open owner. |
 | Rest | With no open turn, no input waits. |
 | Repair | `repair` closes each open part, and `repair(state after repair)` is empty. |
 | Store | The store holds only the writes of cells that completed. |
@@ -480,6 +488,9 @@ wrote. So each command runs in an OS sandbox, with a profile from the capabiliti
 Law: `profile` is monotone in the mode, and the authority of a child process is at most the authority of the
 capabilities at its `exec` call.
 
+The folder of the journals is closed to each profile and to `Files`. So `zoom` and `observe`, through `Sessions`, are
+the only ways to read another session.
+
 Seatbelt on macOS and bubblewrap on Linux come first. `kyo-pod` is a possible later backend for rollouts.
 
 ### 5.5 Approvals: a cell never waits for a person
@@ -567,7 +578,7 @@ final case class SessionConfig(
     ceiling : Mode,              // the most that a session started from here can get
     strategy: StrategyName,
     scope   : Scope,
-    owner   : Owner,             // the user, or the session that started this one
+    owner   : Owner,             // the user, an optimizer, a session (`start`) or a cell (`rlm`)
     model   : ModelChoice,
     goal    : Option[String]
 )
@@ -585,11 +596,11 @@ final case class SessionConfig(
 | Function | Needs | Meaning |
 |---|---|---|
 | `rlm[A: Data](task, inputs): A` | `Sessions^` | Runs a child inside the cell and gives its value. It is one effect of the parent, and the child has its own journal. |
-| `start(goal, scope, strategy): SessionRef` | `Sessions^` | Starts a session in the background. Its report comes back as an `Input` with `Source.Child`, and this starts a turn. |
-| `tell(session, message)` | `Sessions^` | `Send` to that session, with `Source.Controller` or `Source.Child`. |
+| `start(goal, scope, strategy): SessionRef` | `Sessions^` | Starts a session in the background. Its report comes back as an `Input` with `Source.Child`, and this starts a turn (8.6). |
+| `tell(session, message)` | `Sessions^` | `Send` to that session, with `Source.Controller` or `Source.Child`. It returns after the receiver commits (8.6). |
 | `observe(session, question): String` | `Sessions`, `Llm^` | A read-only `rlm` with the journal of that session as an input. It changes nothing in that session. |
 | `zoom(session, ref): String` | `Sessions` | Reads a part of a journal. |
-| `list(): Vector[SessionCard]` | `Sessions` | The cards of the sessions. |
+| `list(): Vector[SessionCard]` | `Sessions` | The cards of the sessions. The catalog gives the deterministic part (10.2). |
 
 `rlm` shares the budget of the parent and has a depth limit. `start` has no budget of its parent. There is no third
 form of subagent.
@@ -620,6 +631,41 @@ irreversible needs a `Grant`. Section 7.9 of [CODE_HARNESS.md](CODE_HARNESS.md) 
 A goal stays in the configuration, but the permission to continue by itself is live, and a person must give it again
 after a restart. After a turn, the `goal` leaf answers "is the goal met now?". On `false`, the harness sends a message
 with `Source.Harness`, and this starts a turn. A goal is "blocked" after three turns with the same blocker.
+
+### 8.6 Messages between sessions
+
+One commit writes to one journal (4.1). So a message between two sessions is two commits, and a crash can occur
+between them. A second send is safe, because `Send` with a known request id commits nothing (4.5).
+
+| Operation | The order of the commits | After a crash between them |
+|---|---|---|
+| `tell` | The sender commits `EffectStarted`, the receiver commits `Input`, and the sender commits `EffectDone`. | The effect gets `Unknown`. Nothing sends the message again automatically, and the model sees the outcome. |
+| `start` | The parent commits `EffectStarted`, the new session commits `Activated` and its task in one commit, and the parent commits `EffectDone`. | The effect gets `Unknown`. The new session can exist, and its reports still reach the parent. |
+| `rlm` | The parent commits `EffectStarted`, the child runs until `submit`, and the parent commits `EffectDone`. | The effect gets `Unknown`, as in scenario 6 of section 11. |
+| A report | The session commits `TurnEnded`, and its owner commits `Input`. | The report pass sends the report again. |
+
+The handler of `tell` waits for the commit of the receiver through `Journal.run`. So `EffectDone` with a value means
+that the `Input` is in the journal of the receiver.
+
+A report is a pure function of the journal of the session. So a second send has the same request id and the same text:
+
+```scala
+// One `Send` for each `TurnEnded` of a turn that has an `Input` from the owner.
+// The request id holds the session and the `seq` of that entry.
+def reports(session: SessionId, journal: Vector[Logged]): Vector[Command.Send]
+
+def missing(session: SessionId, journal: Vector[Logged], owner: SessionState): Vector[Command.Send] =
+  reports(session, journal).filterNot(send => owner.requests(send.request))
+```
+
+A person can also type into a session that has an owner. That turn has no report, and the ledger of 8.3 shows the
+work. A child of `rlm` and a rollout have no report. The owner of a child is a cell, which gets the value through the
+effect. The owner of a rollout is an optimizer, which reads the journal.
+
+**The report pass.** The host runs `missing`, in the order of `seq`, for each session that has a session as its owner.
+It does this at its own start, and again when an owner opens. A session with an open turn first gets `Activate`, so
+the repair commits `TurnEnded(Crashed)`, and the report says so. An owner that has ended rejects `Send` with
+`SessionClosed`, and the pass sends the report when that owner opens.
 
 ## 9. Programs and optimization
 
@@ -694,9 +740,29 @@ possible, and an API change in Kyo stays in the adapters.
 - **`kyo-actor`.** One actor for each session is the one writer of its journal. A worker commit is an `ask` across the
   bridge (`KyoApp.Unsafe.runAndBlock`). Each reply needs `Abort.run[Closed](...)`, because an interrupted `ask` closes
   its reply subject.
-- **`kyo-sql-sqlite` for the journal.** One row for each entry, with a primary key on the session and `seq`. The
-  primary key rejects a stale writer. A JSONL file stays possible behind `Journal`.
+- **`kyo-sql-sqlite` for the journal.** One file for each session, at `<root>/sessions/<id>.db`, and the actor of the
+  session is its one writer. One row for each entry, with a primary key on the session and `seq`. The primary key
+  rejects a stale writer of that file. The `session` column stays in each file, so a copy of the rows moves a session
+  to another file or to a server database. A JSONL file stays possible behind `Journal`.
+- **A catalog for `list` and search.** `<root>/catalog.db` has one row for each session: the id, the owner, the parent
+  of a fork, the status and the last `seq`. This row is the deterministic part of a `SessionCard`, so it is a `Fold`
+  of the journal. The actor writes the row after a turn ends or when the status changes. After a crash a row can lag,
+  so the host lists the folder at its start and folds each journal that differs from its row. A removal of the catalog
+  file loses nothing.
 - **JDK 25.** Kyo RC7 needs it. dspy4s compiles and passes its tests on it.
+
+One file for each session makes a session one item on disk. A person can remove or archive it as one file. A corrupt
+file, a stuck transaction or a large WAL stops only one session, and two terminals need no coordination. The graph of
+a session can stay in its file.
+
+Throughput does not decide this, because an LM step takes seconds. The wait time does. The lock of SQLite has no fair
+order. In the check of section 12, a writer on one shared file waited for up to 2.7 s. A shared file would need one
+writer actor for all sessions, and that works only inside one process.
+
+The costs: `list` needs the catalog, and a report needs the report pass of 8.6. The parent of a journal fork must stay
+until each fork has copied its prefix. 10,000 rollouts also make 10,000 files of at least 16 KB. The primary key holds
+the session, so a later version can put the rollouts of one optimizer run into one file. Phase 6 shows if this is
+necessary.
 
 [CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md) has the measurements and the limits.
 
@@ -724,19 +790,25 @@ Distribution comes later. "Sessions in a cluster" means three different things:
 | Many sessions on many hosts, addressed by id | One writer for each session, and routing | Yes |
 
 Only a multi-user server needs the third meaning. An idle session with a clean scope has its state in the journal and
-in a git commit, so it can reopen on another host. A session in a turn cannot move. The primary key of the journal is
-the fence.
+in a git commit, so it can reopen on another host. A session in a turn cannot move.
+
+With files, this move is a copy of one file. The host closes the file first, and SQLite then moves the WAL into it. A
+copy has no fence, because each host then has its own file. So the first host must stop all writes to that session.
+The files stay on a local disk, because WAL needs one host.
+
+The third meaning needs one store that all hosts can reach: a server database behind `Journal`, with the same table.
+The primary key of the journal is the fence there. The Kyo repository has `kyo-sql-postgres`, but no check has run it.
 
 ### 10.5 The modules
 
 | Module | Contents | Depends on |
 |---|---|---|
 | `harness-guest` | The guest API traits, `Data`. The source text is the API reference. | zio-blocks only |
-| `harness-kernel` | `Entry`, `SessionState`, `evolve`, `next`, `decide`, `repair`, `Fold`, `Mode`, `ContextStrategy`, the memory tree | zio-blocks only |
+| `harness-kernel` | `Entry`, `SessionState`, `evolve`, `next`, `decide`, `repair`, `reports`, `Fold`, `Mode`, `ContextStrategy`, the memory tree | zio-blocks only |
 | `harness-repl` | `ScalaRepl`, the guards of Phase 0 | `harness-guest`, `scala3-repl` |
 | `harness-sandbox` | Seatbelt, bubblewrap, the profiles | `harness-kernel` |
 | `harness` | `Harness`, `drive`, the handlers, the leaves | The modules above, dspy4s `programs` |
-| `harness-host-kyo` | The session host, the SQLite journal, the MCP server | `harness`, Kyo |
+| `harness-host-kyo` | The session host, the SQLite journal, the catalog, the report pass, the MCP server | `harness`, Kyo |
 | `harness-cli` | The terminal client | `harness-host-kyo` |
 
 ## 11. The kinds of state, and the questions that test them
@@ -760,7 +832,7 @@ The answers to the scenarios of [CODE_HARNESS_CONCEPTS.md](CODE_HARNESS_CONCEPTS
 |---|---|---|
 | 1 | A message during a 10-minute cell | The cell does not see it and does not stop. The `Input` commits at once, and the policy reads it at the next step. |
 | 2 | `sbt ~test` with `spawn`, and the turn ends | The session owns the job. It stays until `stopJob` or the end of the session. |
-| 3 | A session closes and opens the next day on another machine | It is the same session: one id and one journal. A new activation and a new REPL start, and the store comes back. The scope comes from `ScopeRecorded` if it was clean. |
+| 3 | A session closes and opens the next day on another machine | It is the same session: one id and one journal, which moves as one file (10.4). A new activation and a new REPL start, and the store comes back. The scope comes from `ScopeRecorded` if it was clean. |
 | 4 | `val x`, then the next line throws | A later cell gets `Not found: x`, and it still sees the earlier definitions. |
 | 5 | A rollout forks a session at entry `k` | A journal fork is a pointer to the parent and `k`. The workspace fork starts at the last clean `ScopeRecorded` at or before `k`. The REPL is new, and the store is the fold up to `k`. No process comes along, and the prompt prefix stays the same. |
 | 6 | `rlm(...)`, and the parent crashes during the call | Both views hold: it is an effect of the parent, and a session of its own. The effect gets `Unknown`. The child gets `Crashed` at its next activation, and nothing runs it again. |
@@ -783,7 +855,9 @@ The checks used Scala `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` and JDK 25.0.5. 
 | Modes as givens in a real REPL, with capture checking and safe mode | Read-only mode: `read` compiles, and `write`, `exec`, `spawn` and `tell` do not. Controller: `tell` compiles, and `write` and `exec` do not. Local: all compile. |
 | Safe mode in the same REPL | It rejects `asInstanceOf`, the name of the host, `caps.unsafe`, `@assumeSafe`, `Thread`, `System.exit`, `java.io.File`, `Predef.println` and the `Schema` of zio-blocks. |
 | A session host on `kyo-actor` with threads | 2,000 sessions with a stop at a random time: no violation ([CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md), 4.1). |
-| A commit through an actor to SQLite | About 140 µs from a plain thread and back. |
+| A commit through an actor to SQLite | About 140 µs from a plain thread and back, with no full flush of the disk cache. |
+| The two file layouts of 10.2, with Python's SQLite 3.49.1 and not the Kyo driver | 64 writers: 5,300 commits per second and a longest wait of 45 ms with one file for each session, and 3,500 and 2.7 s with one shared file. Section 2 of [CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md) has all the numbers. |
+| `PRAGMA fullfsync` in the same check | One writer: 5 to 9 ms for each commit, against 75 µs without it. |
 | dspy4s on JDK 25 | A compile from no classes passes, and 2,172 tests have no failures (6 skipped). |
 
 These checks found errors in the earlier design. They are fixed here:
@@ -800,6 +874,8 @@ What did not run:
 - The OS sandbox.
 - A process kill during a commit, and durability after a host crash.
 - `Data` with `decode`, and `rlm`, `start`, `observe` and `zoom`.
+- The Kyo driver with one file for each session, and its connection pools.
+- The catalog, `reports`, `missing` and the report pass.
 - The full `SessionConfig` of 8.1. The kernel check has only `kind` and `steps`.
 - Any metric or optimizer run.
 
@@ -820,7 +896,7 @@ What did not run:
 ## 14. The choices
 
 The decisions of [CODE_HARNESS.md](CODE_HARNESS.md), 7.10 and 8.7 stay, except decision 1 of 8.7, as item 7 says.
-These choices are new in this document, and they are not yet confirmed:
+These choices are new in this document. Only choice 13 is confirmed:
 
 | # | Choice | Answers |
 |---|---|---|
@@ -836,14 +912,17 @@ These choices are new in this document, and they are not yet confirmed:
 | 10 | The early MCP server uses `kyo-mcp`, and it comes after the guest API. | Question 4 of 9.4 |
 | 11 | A derivation sees only masked `Classified` values. | Question 5 of 9.4 |
 | 12 | The words of section 3. | Section 4 of the concept inventory |
+| 13 | Confirmed on 2026-11-03. One commit writes to one journal (4.1). The journal has one SQLite file for each session, with a catalog that a fold can rebuild (10.2). The report pass sends again a report that a crash cut (8.6). | Open question 1 below |
 
 Open questions:
 
-1. Does the journal use one SQLite file for each session, or one shared file? One shared file gives a commit across
-   sessions, and it has one writer for all sessions.
+1. Closed by choice 13: one SQLite file for each session.
 2. How long does a `Grant` last: one call, one turn, or the session?
 3. Does an `Abort` also stop the jobs of the turn, if the user asks for it?
 4. Is the `Mirror` derivation of `Data` enough for sum types and for the values that models write?
+5. Does a commit use `PRAGMA fullfsync` on macOS? With it, a cell with 100 guest API calls spends 1 to 2 s in commits.
+   Without it, a host crash can lose the last commits, and an effect that ran can then have no intent in the journal.
+   A process crash does not depend on this setting, because the OS keeps the written data.
 
 ## 15. The plan
 
@@ -857,9 +936,9 @@ Each phase ends with something that runs.
 | 4. One task | `Harness`, `drive`, the window strategy, `OptimizableStructure`, `ProgramRunner`. | A harness for one task that the optimizers accept. |
 | 5. RLM | `llmQuery`, `rlm`, the shared budget, the depth limit. | RLM in the harness. |
 | 6. Optimization | A metric from tests, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
-| 7. The session host | `harness-host-kyo`: the actor, SQLite, the path of a hard stop, crash tests with SIGKILL. `harness-cli`. | A coding agent for daily use, one session at a time. |
+| 7. The session host | `harness-host-kyo`: the actor, one SQLite file for each session, the catalog, the path of a hard stop, crash tests with SIGKILL. `harness-cli`. | A coding agent for daily use, one session at a time. |
 | 8. Memory | The memory tree and its metric. | Long sessions that lose no detail. |
-| 9. The controller | `Sessions`, the ledger, the graph, probes, release plans. | One controller above all sessions. |
+| 9. The controller | `Sessions`, the report pass with a crash test, the ledger, the graph, probes, release plans. | One controller above all sessions. |
 | Later | Replay, the reviewer, jobs across a restart, a container backend, LSP as a guest API, the early MCP server if phase 2 needs it, prompt-cache marks. | |
 
 Phase 6 comes before the session host on purpose. The optimizers are what makes this harness different from the
