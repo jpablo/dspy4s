@@ -174,7 +174,7 @@ class GivenContextCompileSuite extends FunSuite:
     }
 
     assert(result.isRight, result.toString)
-    // The instruction generator ran with the installed adapter, so no call failed with "Missing 'adapter'".
+    // The instruction generator ran with the installed adapter, and not with the default ChatAdapter.
     assert(installed.outputs.contains(Vector("proposed_instruction")), installed.outputs.toString)
   }
 

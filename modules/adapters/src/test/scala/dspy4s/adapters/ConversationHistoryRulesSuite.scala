@@ -64,7 +64,7 @@ class ConversationHistoryRulesSuite extends FunSuite:
     ToolCall(name = "lookup", args = DynamicValues.record("key" := "dogs"), id = Some("call_2"))
 
   private val chat: Adapter = ChatAdapter()
-  private val json: Adapter = JSONAdapter()
+  private val json: Adapter = JSONAdapter(native = NativeTools.Off)
   private val xml: Adapter  = XMLAdapter()
 
   private val textAdapters: Vector[(String, Adapter)] =

@@ -387,7 +387,8 @@ schema kept as fallback; malformed schema → prose only).
 **Resolution (G-7b, native function-calling).** Ported faithfully from dspy `adapters/base.py`
 (verified against upstream v3.3.0b1): native calling is an **adapter-level** feature, NOT a
 ReAct change — dspy keeps ReAct on the text protocol in every version, so dspy4s ReAct is
-unchanged. `ChatAdapter`/`JSONAdapter` gained the `native` option (a `NativeTools`: `enabled`, off by default,
+unchanged. `ChatAdapter`/`JSONAdapter` gained the `native` option (a `NativeTools`: `enabled`, as upstream off by
+default in `ChatAdapter` and on by default in `JSONAdapter`,
 + `parallelToolCalls` and `toolChoice`); the shared `NativeTools` rules inject `tools` (built by
 `ToolSchemaBridge.toOpenAiToolsDynamic`) into `requestOptions` and fills a `TypeRef.toolCalls`
 output field from the provider's `tool_calls`, gated on `supportsFunctionCalling`. Tools reach
@@ -583,8 +584,8 @@ Track and port `InferRules`. Tier 2.
 
 **Status:** Resolved — GEPA is algorithmically complete for dspy parity in `modules/gepa` (`dspy4s-gepa`):
 reflective mutation + instance-Pareto selection, round-robin/all component selection, epoch-shuffled minibatch,
-merge crossover, eval cache, run-dir resume, opt-in perfect-score early stop; live-model validated. Multi-objective
-frontiers are deliberately not ported (dspy's scalar metric never uses them — see below). History:
+merge crossover, eval cache, run-dir resume, opt-in perfect-score early stop; live-model validated. The multi-objective
+frontiers came later (the update below, and G-45). History:
 prerequisites **P-d** (`FeedbackMetric`/`ScoreWithFeedback`), **P-a** (`captureFailureTraces` → failure
 `TraceEntry`), **P-b** (`ParseError.raw`); and the engine — `Candidate` mapping, `GepaAdapter`
 (`evaluate`/`makeReflectiveDataset`), `InstructionProposer` (reflective mutation), `GepaState` + Pareto
@@ -1348,7 +1349,8 @@ function calling is off, `tool_calls` stays a text field (`base.py:91-119`).
   (`modules/programs/.../runtime/PredictEngine.scala:68-94`).
 - Demos omit the missing fields (`modules/adapters/.../ChatAdapterPrompt.scala:24-34`).
 - `tool_calls` is always removed from the prompt (`ChatAdapterPrompt.scala:17`) and comes from provider calls only.
-  Native function calling is off by default (now `NativeTools.Off`), so the field is always empty by default.
+  Native function calling is off by default, so the field is always empty by default. (Since then, `JSONAdapter` has
+  it on by default, as upstream. `ChatAdapter` keeps `NativeTools.Off`.)
 - A coercion failure is a `ValidationError` with no field name and no raw text
   (`modules/adapters/.../internal/AdapterTextSupport.scala:92-102`). Upstream raises a parse error with both.
 - Duplicate headers concatenate (`ChatAdapterParser.scala:51-57`); upstream uses the first.
@@ -2131,7 +2133,7 @@ of the thread, and the trace and the history of the call stay with the caller, a
 The work of the entry point gets the effective context as its `using` value: the context that
 `RuntimeEnvironment.current` gives in the call. Thus the program resolves its model and its adapter from the same
 context as the callbacks and the workers. For example, a given context with only a model gets the adapter of the
-installed context, and a `Predict` call does not fail with "Missing 'adapter'".
+installed context, and not the default `ChatAdapter`.
 
 The helper does nothing in two cases: the given context is the current one (a reference check), or each field that
 the given context sets already has its value in the current context (the same object for a service, the callback

@@ -24,14 +24,14 @@ An adapter writes the prompt of a signature and reads the response of the model.
 | `Adapter` | The interface: `format`, `parse`, `execute`, `streamingState`, and `fallback` (the adapter to try after a parse error). |
 | `DelegatingAdapter` | The base of an adapter that wraps another adapter. It forwards each member of `Adapter` to its `delegate`, so a wrapper overrides only what it changes. `DecisionAdapter` and the hint adapter of `Refine` extend it. |
 | `ChatAdapter` | The marker format. Its options are the native tool calls (`native`, a `NativeTools`) and the JSON fallback. |
-| `JSONAdapter` | The JSON format. It adds a `response_format` to the request options when the model supports a response schema. |
+| `JSONAdapter` | The JSON format. It adds a `response_format` to the request options when the model supports a response schema. Its native tool calls (`native`) are on by default. |
 | `XMLAdapter` | The XML format. It has no native tool calls. |
 | `TwoStepAdapter` | Asks the main model for an answer in natural language. Then a `ChatAdapter` call to the `extractionModel` reads the output fields from that answer. It shows a `History` input as a field value. |
 | `AdapterInvocation` | The input of `format`: the layout, the demos, the inputs, the `LmRequest`, the output JSON schema, and the tool specs. |
 | `FormattedPrompt` | The result of `format`: the messages, the `requestOptions` of the adapter, and the `removedOptions` (the keys that the request must not have). The options of the request win over `requestOptions`. |
 | `ParsedOutput` | The result of `parse`: the `values` record, and the decision evidence of a `DecisionAdapter` parse. |
 | `AdapterStreamingState` / `FieldChunk` | The state of one streamed call. `receive(delta)` and `finish()` give a `FieldChunk` for each part of the text of a field. The last part of a field has `isLast`. |
-| `NativeTools` | The native tool call options of an adapter: `enabled`, `parallelToolCalls`, and `toolChoice`. It decides if native tool calls are active for a call, which fields the prompt shows, and which tool options (`tools`, `parallel_tool_calls`, and `tool_choice`) the request gets or must not have. `NativeTools.Off` is the default. |
+| `NativeTools` | The native tool call options of an adapter: `enabled`, `parallelToolCalls`, and `toolChoice`. It decides if native tool calls are active for a call, which fields the prompt shows, and which tool options (`tools`, `parallel_tool_calls`, and `tool_choice`) the request gets or must not have. As upstream, `NativeTools.Off` is the default of `ChatAdapter`, and `JSONAdapter` has `enabled` on by default. |
 | `ToolSpec` / `ToolChoice` | The data of a tool, with the JSON schema of its arguments, and of the `tool_choice` value. `ToolSchemaBridge` writes a tool as an OpenAI function schema. |
 
 ## Design notes

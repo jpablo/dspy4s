@@ -44,10 +44,10 @@ final case class XMLAdapter(
   override def name: String = "xml"
 
   /** A [[JSONAdapter]] when [[useJsonAdapterFallback]] is on. This adapter has no native function calling, so the
-    * fallback adapter has none too.
+    * fallback adapter has none too (upstream `_make_json_adapter_fallback` passes the flag of this adapter).
     */
   override def fallback: Option[Adapter] =
-    Option.when(useJsonAdapterFallback)(JSONAdapter())
+    Option.when(useJsonAdapterFallback)(JSONAdapter(native = NativeTools.Off))
 
   // This adapter has no native function calling: a turn of the history with tool calls stays text, and the request
   // has no tool options (upstream `Adapter._call_preprocess`).

@@ -201,7 +201,7 @@ with a structured error ADT:
 
 - `ValidationError` — signature / input shape problems
 - `ParseError` — adapter parse failures with field context
-- `ConfigurationError` — missing LM / adapter / setting
+- `ConfigurationError`: missing LM or setting, or an adapter of the wrong type
 - `NotFoundError` — missing field / resource
 - `RuntimeError` — unexpected provider failures
 

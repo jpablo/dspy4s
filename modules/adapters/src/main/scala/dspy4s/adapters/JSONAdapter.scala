@@ -14,10 +14,10 @@ import dspy4s.lm.contracts.LmOutput
 
 final case class JSONAdapter(
     allowTextFallbackForSingleOutput: Boolean = true,
-    /** The native function calling options ([[NativeTools]]), with the same rules as for [[ChatAdapter.native]]. Off by
-      * default.
+    /** The native function calling options ([[NativeTools]]), with the same rules as for [[ChatAdapter.native]]. On by
+      * default, as upstream `JSONAdapter`. [[NativeTools.isActive]] still checks that the LM supports function calling.
       */
-    native: NativeTools = NativeTools.Off
+    native: NativeTools = NativeTools(enabled = true)
 ) extends Adapter:
   override def name: String = "json"
 

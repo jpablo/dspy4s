@@ -66,6 +66,20 @@ class JSONAdapterNativeToolsSuite extends FunSuite:
       case r: DynamicValue.Record => DynamicValues.recordGet(r, key).getOrElse(fail(s"missing key '$key' in $r"))
       case other                  => fail(s"expected a record to read '$key' from, got $other")
 
+  test("JSONAdapter uses native function calling by default, as upstream") {
+    given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = true)))
+
+    val prompt = JSONAdapter().format(invocation).toOption.get
+    assert(DynamicValues.recordGet(prompt.requestOptions, "tools").isDefined, "tools must be injected")
+  }
+
+  test("JSONAdapter sends no tools by default to a model with no function calling") {
+    given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = false)))
+
+    val prompt = JSONAdapter().format(invocation).toOption.get
+    assert(DynamicValues.recordGet(prompt.requestOptions, "tools").isEmpty, "tools must not be injected")
+  }
+
   test("JSONAdapter native function-calling injects tools and omits the tool_calls key from the instruction") {
     val adapter          = JSONAdapter(native = NativeTools(enabled = true))
     given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = true)))

@@ -182,14 +182,14 @@ class AdapterOutputRulesSuite extends FunSuite:
   // ── A2: the adapter of the fallback ─────────────────────────────────────────────────────────────────────────
 
   test("a chat adapter falls back to a JSON adapter with its native function-calling options") {
-    assertEquals(ChatAdapter().fallback, Some(JSONAdapter()))
+    assertEquals(ChatAdapter().fallback, Some(JSONAdapter(native = NativeTools.Off)))
     val tools  = NativeTools(enabled = true, parallelToolCalls = Some(true), toolChoice = Some(ToolChoice.Required))
     val native = ChatAdapter(native = tools)
     assertEquals(native.fallback, Some(JSONAdapter(native = tools)))
     assertEquals(ChatAdapter(useJsonAdapterFallback = false).fallback, None)
     assertEquals(JSONAdapter().fallback, None)
     // Upstream `XMLAdapter` extends `ChatAdapter`, so it has the JSON fallback too.
-    assertEquals(XMLAdapter().fallback, Some(JSONAdapter()))
+    assertEquals(XMLAdapter().fallback, Some(JSONAdapter(native = NativeTools.Off)))
     assertEquals(XMLAdapter(useJsonAdapterFallback = false).fallback, None)
   }
 

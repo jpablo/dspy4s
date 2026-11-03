@@ -82,6 +82,12 @@ class ProgramRuntimeSuite extends FunSuite:
     assertEquals(RuntimeResolver.resolveAdapter, Right(DummyAdapter))
   }
 
+  test("resolve adapter gives a ChatAdapter when the context has none, as upstream") {
+    given RuntimeContext = RuntimeContext(lm = Some(DummyLanguageModel))
+
+    assert(RuntimeResolver.resolveAdapter.exists(_.isInstanceOf[dspy4s.adapters.ChatAdapter]))
+  }
+
   test("resolve model fails with wrong setting type") {
     given RuntimeContext = RuntimeContext(lm = Some(new dspy4s.core.contracts.LanguageModelRef {}))
 

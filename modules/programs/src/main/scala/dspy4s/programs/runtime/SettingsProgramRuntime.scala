@@ -20,6 +20,7 @@ trait SettingsProgramRuntime extends ProgramRuntime:
         )
       case None => Left(ConfigurationError("Missing 'lm' in runtime context"))
 
+  /** The adapter of the context, else a default [[ChatAdapter]] (upstream `settings.adapter or ChatAdapter()`). */
   override def resolveAdapter(using RuntimeContext): Either[DspyError, Adapter] =
     summon[RuntimeContext].adapter match
       case Some(adapter: Adapter) => Right(adapter)
@@ -28,7 +29,7 @@ trait SettingsProgramRuntime extends ProgramRuntime:
             s"Configured 'adapter' must be an Adapter, found: ${other.getClass.getSimpleName}"
           )
         )
-      case None => Left(ConfigurationError("Missing 'adapter' in runtime context"))
+      case None => Right(ChatAdapter())
 
 object SettingsProgramRuntime:
   /** The canonical default runtime instance. Modules default to this SHARED value (rather than `new

@@ -6,7 +6,6 @@ import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
-import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.LmUsage
 import dspy4s.core.contracts.RuntimeContext
@@ -149,19 +148,23 @@ class PredictSuite extends FunSuite:
     )
   }
 
-  test("predict fails with configuration error when adapter is missing") {
+  test("predict uses a ChatAdapter when the context has no adapter, as upstream") {
     val signature = SignatureDsl.parse("question -> answer").toOption.get
+    val chatModel = new LanguageModel:
+      override val id: String   = "chat-lm"
+      override val mode: LmMode = LmMode.Chat
 
-    RuntimeEnvironment.withSettings(
-      RuntimeContext(
-        lm = Some(DummyLanguageModel)
-      )
-    ) {
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        Right(LmResponse(outputs = Vector(LmOutput(text = "[[ ## answer ## ]]\nParis\n\n[[ ## completed ## ]]"))))
+
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(chatModel))) {
       given RuntimeContext = RuntimeEnvironment.current
       val result           = DynamicPredict(signature)(ProgramCall(input = rec("question" := "x")))
 
-      assert(result.isLeft)
-      assert(result.left.toOption.get.isInstanceOf[ConfigurationError])
+      assertEquals(
+        result.fold(error => fail(error.message), _.raw).get("answer"),
+        Some(DynamicValues.string("Paris"))
+      )
     }
   }
 

@@ -25,10 +25,11 @@ enum ToolChoice derives CanEqual:
   * the text protocol, as upstream. See PORT_GAPS G-7b.
   *
   * @param enabled
-  *   use the function calling of the provider. Off by default, as upstream. The request gets the tools when four
-  *   conditions are true: this flag is on, the call has tool specs, the layout has a tool calls field, and the LM of
-  *   the context supports function calling ([[toolOptions]]). The provider tool calls then fill the tool calls field,
-  *   and the prompt does not ask for it. Else the tool calls field is a text output field
+  *   use the function calling of the provider. As upstream, [[dspy4s.adapters.ChatAdapter]] has this flag off by
+  *   default, and [[dspy4s.adapters.JSONAdapter]] has it on by default. The request gets the tools when four conditions
+  *   are true: this flag is on, the call has tool specs, the layout has a tool calls field, and the LM of the context
+  *   supports function calling ([[toolOptions]]). The provider tool calls then fill the tool calls field, and the
+  *   prompt does not ask for it. Else the tool calls field is a text output field
   *   ([[NativeFunctionCalling.isToolCallsField]]). The flag also sets how the adapter replays a turn of a conversation
   *   history that has tool calls ([[isActive]]).
   * @param parallelToolCalls
@@ -88,7 +89,7 @@ final case class NativeTools(
 
 object NativeTools:
 
-  /** No native function calling: the default of the adapters. */
+  /** No native function calling: the default of [[dspy4s.adapters.ChatAdapter]]. */
   val Off: NativeTools = NativeTools()
 
   /** The tool options of one request ([[NativeTools.toolOptions]]).
