@@ -97,6 +97,7 @@ enum Entry derives Schema:
   case EffectDone(id: EffectId, result: EffectResult)          // the outcome of the guest API call
   case Observed(output: String, outcome: CellOutcome, writes: Map[String, DynamicValue]) // the outcome of the cell
   case StopRequested(reason: String)
+  case JobsStopRequested(which: JobSelector, reason: String)   // a stop of jobs, apart from the turn (10.3)
   case Granted(rule: GuardRule, lifetime: GrantLifetime)       // a person widened the guard (5.5)
   case ScopeRecorded(head: String, clean: Boolean)             // the git head of the scope, at the end of each turn
   case TurnEnded(outcome: TurnOutcome)
@@ -116,8 +117,8 @@ enum TurnOutcome derives Schema:
   case Failed(error: String)
 ```
 
-The entries of one turn form a small language. `Input`, `StopRequested`, `Granted` and `ScopeRecorded` can occur at
-any place:
+The entries of one turn form a small language. `Input`, `StopRequested`, `JobsStopRequested`, `Granted` and
+`ScopeRecorded` can occur at any place:
 
 ```text
 Turn  ::= TurnStarted Step* TurnEnded
@@ -162,7 +163,9 @@ final case class SessionState(
     open    : Map[EffectId, OpenCall],   // effects with an intent and no outcome
     store   : Map[String, DynamicValue],
     requests: Set[RequestId],
-    grants  : Set[ActiveGrant]
+    grants  : Set[ActiveGrant],
+    lastTurn: Long,                      // the `seq` of the last `TurnStarted`
+    jobs    : Map[EffectId, JobRecord]   // each `spawn` that has an intent
 )
 
 def evolve(s: SessionState, logged: Logged): SessionState   // total and pure
@@ -262,6 +265,7 @@ enum Command:
   case Send(request: RequestId, text: String)
   case Commit(entries: Vector[Entry])
   case Abort(reason: String)
+  case StopJobs(which: JobSelector, reason: String)
   case Grant(rule: GuardRule, lifetime: GrantLifetime)
   case Close(outcome: SessionOutcome, reason: String)
 
@@ -276,7 +280,8 @@ def decide(command: Command, s: SessionState): Either[Rejection, Vector[Entry]]
 | `Send` with no open turn | `Input` and `TurnStarted` |
 | `Send` in a turn | `Input`. The projection shows it at the next `StepStarted`. |
 | `Commit` | The entries, if each one is valid at that position (the rules below). |
-| `Abort` in a turn | `StopRequested`, which also clears the inputs that wait |
+| `Abort` in a turn | `StopRequested`, which also clears the inputs that wait. It changes no job. |
+| `StopJobs` | `JobsStopRequested`. It needs no open turn, and it changes no turn. |
 | `Grant` | `Granted`. A grant alone starts no turn. |
 | `Close` | `Ended`, only with no open turn |
 
@@ -361,6 +366,7 @@ TurnEnded(Aborted)
 | Report | After the report pass of 8.6, each `TurnEnded` that needs a report has exactly one `Input` in the journal of an open owner. |
 | Rest | With no open turn, no input waits. |
 | Grant | A `Once` grant covers one call. A `Turn` grant ends at the next `TurnEnded`. No grant stays after `Ended`, and a journal fork starts with no grants. |
+| Job | An `Abort` changes no job. A stop covers only the jobs with an intent before it. After `Abort` and then `StopJobs(OfLastTurn)`, no job of that turn starts or runs. `Ended` stops all jobs, and a journal fork starts with no jobs. |
 | Repair | `repair` closes each open part, and `repair(state after repair)` is empty. |
 | Store | The store holds only the writes of cells that completed. |
 | Log | No part of the harness changes or removes an entry. |
@@ -383,6 +389,7 @@ definition that a cell can use has `@assumeSafe`, because safe mode rejects the 
   def exec(command: String)(using Files^): String
   def spawn(command: String)(using Files^): JobId
   def jobOutput(job: JobId): String
+  def stopJob(job: JobId): Unit
 
 @assumeSafe trait Store extends Cap:
   def keys: Vector[String]
@@ -515,7 +522,7 @@ enum GrantLifetime derives Schema:
 
 final case class ActiveGrant(rule: GuardRule, lifetime: GrantLifetime) derives Schema
 
-def forked(prefix: Vector[Logged]): SessionState = SessionState.of(prefix).copy(grants = Set.empty)
+def forked(prefix: Vector[Logged]): SessionState = SessionState.of(prefix).copy(grants = Set.empty, jobs = Map.empty)
 
 // Three examples. `args` gives the `DynamicValue` of the arguments of the call.
 Grant(GuardRule("exec", ArgMatch.Exact(args("git push origin main"))), GrantLifetime.Once)
@@ -567,9 +574,11 @@ The session has two kinds of state between cells:
 | The REPL state | Definitions and live objects. It is a cache. | A new REPL starts, and the model gets a note with the names that it lost. |
 
 **Long work is a job.** A build or a test run can take minutes, and a cell must stay short. `spawn(command)` starts a
-job and gives a `JobId`, which is plain data, so it stays valid in a later cell and after a restart. The session owns
-each job: an `Abort` does not stop a job, and the end of the session does. This takes the place of the yield protocol
-of Codex. A cell has a timeout, and no second cell runs at the same time.
+job and gives a `JobId`, which is plain data that holds the `EffectId` of the `spawn`. So it stays valid in a later
+cell, and the store can hold it. The session owns each job: an `Abort` does not stop a job, and `StopJobs` and the end
+of the session do (10.3). After a crash of the host, the process of a job is gone in the first version, and `status`
+reports the job as lost. This takes the place of the yield protocol of Codex. A cell has a timeout, and no second cell
+runs at the same time.
 
 **Replay comes later.** Replay of cells ([CODE_HARNESS.md](CODE_HARNESS.md), 8.4) can rebuild the definitions. It is
 possible because the journal already holds each typed result and the versions. The first version does not need it.
@@ -599,8 +608,9 @@ final case class PolicyStep(text: String, code: Option[String])
 
 - **Cheap steps first.** A strategy cuts long observations with no LM call, and it adds a note that says how to read
   the remainder. A summary that does not shrink is rejected.
-- **The status section.** `status` holds the names in the REPL, the keys of the store, the jobs and the scope. It is
-  typed, and it renders only its changes, so the prompt prefix stays the same.
+- **The status section.** `status` holds the names in the REPL, the keys of the store, the scope, and the jobs with
+  their states: running, exited, stopped or lost. It is typed, and it renders only its changes, so the prompt prefix
+  stays the same.
 - **Laws.** `project` depends only on the journal and the derived data. Two updates give the same structure as one
   update on the full journal. The memory tree has the laws Coverage, Zoom, Prefix, Immutability, Order, Size and Roots
   ([CODE_HARNESS.md](CODE_HARNESS.md), 6.2).
@@ -820,6 +830,38 @@ necessary.
 
 A stop never cuts a commit, because the commit runs in the actor.
 
+**The stop of a job.** An `Abort` stops no job, because a job must be able to outlive a turn, for example `sbt ~test`.
+`StopJobs` stops jobs, and it also works with no open turn:
+
+```scala
+enum JobSelector derives Schema:
+  case One(job: EffectId)
+  case OfLastTurn                   // the open turn, or the last turn if no turn is open
+  case All
+
+final case class JobRecord(turn: Long, stopRequested: Boolean) derives Schema
+```
+
+1. The actor commits `JobsStopRequested`, and `evolve` marks the jobs that the selector covers.
+2. The host copies the marks to its job table. It stops the process groups of these jobs: TERM, a grace period, then
+   KILL.
+3. A `spawn` in flight finds the mark in the job table. It does not start its process, and it returns an error.
+
+The list of jobs is a fold of the journal: `EffectStarted` with the op `spawn` adds a job. So a stop also covers a
+`spawn` that has an intent and no process yet. It also covers a `spawn` that a stop cut, whose `EffectDone` is
+`Unknown`. The job table holds only the live part: the process groups, the output and the marks. `stopJob(job)` in a
+cell is `StopJobs(One(job))`, and `Ended` marks all jobs.
+
+A client has two controls:
+
+- **Stop** sends `Abort`. If a job of that turn still runs, the client says so and offers to stop it.
+- **Stop all** sends `Abort`, then `StopJobs(OfLastTurn)`. After `StopRequested`, `decide` accepts no new intent, so
+  no job of that turn can start later.
+
+**A crash of the host.** A process can outlive its host. So each job runs under a small wrapper that holds a pipe to
+the host. When the pipe closes, the wrapper stops the process group. After a restart the job table is empty, and
+`status` reports a job with no mark and no row as lost.
+
 ### 10.4 Distribution
 
 Distribution comes later. "Sessions in a cluster" means three different things:
@@ -872,7 +914,7 @@ The answers to the scenarios of [CODE_HARNESS_CONCEPTS.md](CODE_HARNESS_CONCEPTS
 | # | Scenario | Answer |
 |---|---|---|
 | 1 | A message during a 10-minute cell | The cell does not see it and does not stop. The `Input` commits at once, and the policy reads it at the next step. |
-| 2 | `sbt ~test` with `spawn`, and the turn ends | The session owns the job. It stays until `stopJob` or the end of the session. |
+| 2 | `sbt ~test` with `spawn`, and the turn ends | The session owns the job. It stays until `stopJob`, `StopJobs` or the end of the session. An `Abort` does not stop it. |
 | 3 | A session closes and opens the next day on another machine | It is the same session: one id and one journal, which moves as one file (10.4). A new activation and a new REPL start, and the store comes back. The scope comes from `ScopeRecorded` if it was clean. |
 | 4 | `val x`, then the next line throws | A later cell gets `Not found: x`, and it still sees the earlier definitions. |
 | 5 | A rollout forks a session at entry `k` | A journal fork is a pointer to the parent and `k`. The workspace fork starts at the last clean `ScopeRecorded` at or before `k`. The REPL is new, and the store is the fold up to `k`. The fork has no grants. No process comes along, and the prompt prefix stays the same. |
@@ -889,11 +931,11 @@ The checks used Scala `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` and JDK 25.0.5. 
 
 | Check | Result |
 |---|---|
-| The kernel under random schedules, with no threads | 200,000 runs with 317,779 crashes, 206,587 stops, 129,992 late messages, 842,586 grants and 97,136 calls under a `Once` grant. No run broke a checked law of 4.7. The laws One journal and Report did not run. |
-| The check of that check | Seven mutants: keep the waiting inputs after a stop (54,037 runs fail), accept an effect of any cell (8,015), keep a late outcome (28,272), remove a `Once` grant at `EffectStarted` (70,366), keep a `Once` grant after its call (44,995), keep a `Turn` grant after its turn (125,678), keep a grant after `Ended` (52,289). |
+| The kernel under random schedules, with no threads | 200,000 runs with 317,035 crashes, 220,209 stops, 89,444 late messages, 845,607 grants, 71,546 calls under a `Once` grant, 63,328 jobs and 18,590 `spawn` calls that a stop refused. No run broke a checked law of 4.7. The laws One journal and Report did not run. |
+| The check of that check | Eleven mutants: keep the waiting inputs after a stop (76,391 runs fail), accept an effect of any cell (8,017), keep a late outcome (25,874), remove a `Once` grant at `EffectStarted` (54,496), keep a `Once` grant after its call (27,042), keep a `Turn` grant after its turn (126,694), keep a grant after `Ended` (50,347), let an `Abort` stop jobs (48,294), keep the jobs after `Ended` (10,983), let `OfLastTurn` reach other turns (15,291), take the list of jobs only from the live table (9,104). |
 | `drive` with scripts | A chat answer, `submit`, the step limit of both kinds, a failed cell, a failed LM call, a stop during a cell, and a crash during a cell give the expected journals. |
 | `Mode` | The semilattice laws hold over 81 modes. |
-| Modes as givens in a real REPL, with capture checking and safe mode | Read-only mode: `read` compiles, and `write`, `exec`, `spawn` and `tell` do not. Controller: `tell` compiles, and `write` and `exec` do not. Local: all compile. |
+| Modes as givens in a real REPL, with capture checking and safe mode | Read-only mode: `read` compiles, and `write`, `exec`, `spawn`, `stopJob` and `tell` do not. Controller: `tell` compiles, and `write`, `exec` and `stopJob` do not. Local: all compile. |
 | Safe mode in the same REPL | It rejects `asInstanceOf`, the name of the host, `caps.unsafe`, `@assumeSafe`, `Thread`, `System.exit`, `java.io.File`, `Predef.println` and the `Schema` of zio-blocks. |
 | A session host on `kyo-actor` with threads | 2,000 sessions with a stop at a random time: no violation ([CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md), 4.1). |
 | A commit through an actor to SQLite | About 140 µs from a plain thread and back, with no full flush of the disk cache. |
@@ -917,6 +959,8 @@ What did not run:
 - `Data` with `decode`, and `rlm`, `start`, `observe` and `zoom`.
 - The Kyo driver with one file for each session, and its connection pools.
 - The catalog, `reports`, `missing` and the report pass.
+- A real job: `spawn`, `stopJob`, the job table, the process groups and the wrapper. The kernel check has the job
+  table as a small value, with no process.
 - `guarded` as a real handler, and a client that sends `Grant`. The kernel check has only the view of the state that
   `guarded` will read.
 - The full `SessionConfig` of 8.1. The kernel check has only `kind` and `steps`.
@@ -939,7 +983,7 @@ What did not run:
 ## 14. The choices
 
 The decisions of [CODE_HARNESS.md](CODE_HARNESS.md), 7.10 and 8.7 stay, except decision 1 of 8.7, as item 7 says.
-These choices are new in this document. Only choices 13 and 14 are confirmed:
+These choices are new in this document. Only choices 13, 14 and 15 are confirmed:
 
 | # | Choice | Answers |
 |---|---|---|
@@ -957,12 +1001,13 @@ These choices are new in this document. Only choices 13 and 14 are confirmed:
 | 12 | The words of section 3. | Section 4 of the concept inventory |
 | 13 | Confirmed on 2026-11-03. One commit writes to one journal (4.1). The journal has one SQLite file for each session, with a catalog that a fold can rebuild (10.2). The report pass sends again a report that a crash cut (8.6). | Open question 1 below |
 | 14 | Confirmed on 2026-11-03. Each `Grant` holds a lifetime: `Once` (the default), `Turn` or `Session`. `GuardRule` is data with a pure `matches`. A journal fork has no grants (5.5). | Open question 2 below |
+| 15 | Confirmed on 2026-11-03. An `Abort` does not stop jobs. `StopJobs` does, also with no open turn, and a client can send both with one key. The list of jobs is a fold of the journal (10.3). After a crash, a job is lost in the first version. | Open question 3 below |
 
 Open questions:
 
 1. Closed by choice 13: one SQLite file for each session.
 2. Closed by choice 14: each grant holds its lifetime.
-3. Does an `Abort` also stop the jobs of the turn, if the user asks for it?
+3. Closed by choice 15: an `Abort` does not stop jobs, and `StopJobs` does.
 4. Is the `Mirror` derivation of `Data` enough for sum types and for the values that models write?
 5. Does a commit use `PRAGMA fullfsync` on macOS? With it, a cell with 100 guest API calls spends 1 to 2 s in commits.
    Without it, a host crash can lose the last commits, and an effect that ran can then have no intent in the journal.
@@ -980,7 +1025,7 @@ Each phase ends with something that runs.
 | 4. One task | `Harness`, `drive`, the window strategy, `OptimizableStructure`, `ProgramRunner`. | A harness for one task that the optimizers accept. |
 | 5. RLM | `llmQuery`, `rlm`, the shared budget, the depth limit. | RLM in the harness. |
 | 6. Optimization | A metric from tests, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
-| 7. The session host | `harness-host-kyo`: the actor, one SQLite file for each session, the catalog, the path of a hard stop, crash tests with SIGKILL. `harness-cli`. | A coding agent for daily use, one session at a time. |
+| 7. The session host | `harness-host-kyo`: the actor, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs` and the job table, crash tests with SIGKILL that also check that no job process stays. `harness-cli`. | A coding agent for daily use, one session at a time. |
 | 8. Memory | The memory tree and its metric. | Long sessions that lose no detail. |
 | 9. The controller | `Sessions`, the report pass with a crash test, the ledger, the graph, probes, release plans. | One controller above all sessions. |
 | Later | Replay, the reviewer, jobs across a restart, a container backend, LSP as a guest API, the early MCP server if phase 2 needs it, prompt-cache marks. | |
