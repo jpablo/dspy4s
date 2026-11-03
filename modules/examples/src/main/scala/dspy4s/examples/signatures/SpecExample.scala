@@ -36,10 +36,10 @@ trait CitedQASpec extends Spec:
 
 object SpecExample:
 
-  /** Spec-derived signature for the emotion-classification task. The resulting runtime `SignatureLayout` is
-    * structurally identical to the one produced by `CaseClassExample.signature.layout` and to one built via
-    * `Signature.builder("Emotion").input[String]("sentence")...`. Cross-surface parity is proven by the signatures
-    * module's test suite.
+  /** Spec-derived signature for the emotion-classification task. The fields of its runtime `SignatureLayout` match the
+    * fields of `CaseClassExample.signature.layout` and of a builder signature with the same fields. The name and the
+    * instructions differ: the name here is `EmotionSpec`, and this signature has no instructions. The parity tests of
+    * the signatures module compare the names and the wire types of the fields of the three forms.
     */
   val emotion = Signature.of[EmotionSpec]
 

@@ -10,7 +10,8 @@
   * their structure across the schema boundary (enum → wire string, case class / list → JSON, `Optional` → `Option`).
   * Python's `class EmailProcessor(dspy.Module)` composing four `ChainOfThought`s becomes a plain class threading their
   * outputs through an `Either` for-comprehension. DSPy's per-field `desc=` is not part of the dspy4s `Spec` surface, so
-  * those hints are dropped.
+  * those hints are dropped. A `Spec` trait has no docstring, so the docstring of each signature goes in the
+  * `instructions` argument of `Signature.of`.
   */
 package dspy4s.examples.tutorials.email_extraction
 
@@ -104,10 +105,20 @@ object EmailExtraction:
   // |     def forward(self, email_subject, email_body, sender=""): ...
   // --8<-- [start:processor]
   final class EmailProcessor:
-    private val classifier      = ChainOfThought(Signature.of[ClassifyEmail])
-    private val entityExtractor = ChainOfThought(Signature.of[ExtractEntities])
-    private val actionGenerator = ChainOfThought(Signature.of[GenerateActionItems])
-    private val summarizer      = ChainOfThought(Signature.of[SummarizeEmail])
+    private val classifier = ChainOfThought(
+      Signature.of[ClassifyEmail](instructions = "Classify the type and urgency of an email based on its content.")
+    )
+    private val entityExtractor = ChainOfThought(
+      Signature.of[ExtractEntities](instructions = "Extract key entities and information from email content.")
+    )
+    private val actionGenerator = ChainOfThought(
+      Signature.of[GenerateActionItems](
+        instructions = "Determine what actions are needed based on the email content and extracted information."
+      )
+    )
+    private val summarizer = ChainOfThought(
+      Signature.of[SummarizeEmail](instructions = "Create a concise summary of the email content.")
+    )
 
     def forward(
         emailSubject: String,

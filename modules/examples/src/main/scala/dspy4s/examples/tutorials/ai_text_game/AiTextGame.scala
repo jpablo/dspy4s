@@ -9,7 +9,8 @@
   *
   * `dspy.Signature` classes become `Spec` traits; `list[str]` → `OutputField[List[String]]`, `dict[str, int]` →
   * `OutputField[Map[String, Int]]`, `bool`/`int` map directly. The `GameAI` `dspy.Module` (three `ChainOfThought`s)
-  * becomes a plain class threading their outputs.
+  * becomes a plain class threading their outputs. A `Spec` trait has no text, so the docstring of a signature goes in
+  * the `instructions` argument of `Signature.of`, and the `desc=` hints of the fields are not in this file.
   */
 package dspy4s.examples.tutorials.ai_text_game
 
@@ -85,9 +86,15 @@ object AiTextGame:
   // |     self.action_resolver = dspy.ChainOfThought(ActionResolver)
   final class GameAI:
     // --8<-- [start:module]
-    private val storyGen       = ChainOfThought(Signature.of[StoryGenerator])
-    private val dialogueGen    = ChainOfThought(Signature.of[DialogueGenerator])
-    private val actionResolver = ChainOfThought(Signature.of[ActionResolver])
+    private val storyGen = ChainOfThought(
+      Signature.of[StoryGenerator](instructions = "Generate dynamic story content based on current game state.")
+    )
+    private val dialogueGen = ChainOfThought(
+      Signature.of[DialogueGenerator](instructions = "Generate NPC dialogue and responses.")
+    )
+    private val actionResolver = ChainOfThought(
+      Signature.of[ActionResolver](instructions = "Resolve player actions and determine outcomes.")
+    )
     // --8<-- [end:module]
 
     /** NPC personality lookup Python builds inline in `handle_dialogue`. */

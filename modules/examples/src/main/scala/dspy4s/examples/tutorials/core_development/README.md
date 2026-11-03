@@ -14,7 +14,7 @@ notes why it's blocked):
 | Streaming | ✅ [`streaming/Streaming.scala`](../streaming/Streaming.scala) — synchronous `streamify` → `ClosableIterator[StreamEvent]`. |
 | Async | ✅ [`async/Async.scala`](../async/Async.scala) — `Module.applyAsync` / `ContextPropagation.future`. |
 | Debugging & Observability | ✅ [`observability/Observability.scala`](../observability/Observability.scala) — `CallbackHandler` over the event stream. |
-| Use MCP in DSPy | 🚫 [notes](../mcp/README.md) — no MCP client/tool bridge. |
-| Saving and Loading | 🚫 [dir](../saving/) — programs have no `.save`/`.load`. |
+| Use MCP in DSPy | ✅ [`mcp/Mcp.scala`](../mcp/Mcp.scala): the tools of an MCP server as `ToolFunction` values (`McpTools.fromClient`). |
+| Saving and Loading | ✅ [`saving/Saving.scala`](../saving/Saving.scala): `ProgramPersistence.save` and `load` write and read the state of a program as JSON. |
 | Deployment | 🚫 [dir](../deployment/) — no FastAPI/MLflow serving; wrap a program in your own HTTP layer. |
-| Tracking DSPy Optimizers | 🚫 [dir](../optimizer_tracking/) — no MLflow integration. |
+| Tracking DSPy Optimizers | ✅ [`optimizer_tracking/OptimizerTracking.scala`](../optimizer_tracking/OptimizerTracking.scala): a `CallbackHandler` observes the optimizer. dspy4s has no MLflow integration. |

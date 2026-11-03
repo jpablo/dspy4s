@@ -31,9 +31,10 @@ full step-by-step trajectory is available on the prediction's `.raw`.
 
 ## Native function calling
 
-By default, tools reach the model through the text protocol. If your model
-supports native function calling, enable it at the adapter level and tools are
-sent as a structured `tools` array instead:
+With the default `ChatAdapter`, tools reach the model through the text protocol.
+If your model supports native function calling, enable it at the adapter level
+and tools are sent as a structured `tools` array instead. `JSONAdapter` has this
+setting on by default, and `NativeTools(enabled = false)` turns it off:
 
 ```scala
 --8<-- "learn/programming/Tools.scala:native-fc"

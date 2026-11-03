@@ -23,11 +23,10 @@ OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.email_extr
 ```
 
 - Give the full name of the `@main`: `dspy4s.examples.<package>.<name>`. The tables below show the two parts.
-- Most examples get the model from `Demo.withLm` in `Demo.scala`. It reads `OPENAI_API_KEY` and `DSPY_MODEL` (the
-  default is `gpt-5.5`).
+- Most examples get the model from `Demo.withLm` in `Demo.scala`. It reads `OPENAI_API_KEY`, `DSPY_MODEL` (the
+  default is `gpt-5.5`), and `OPENAI_BASE_URL` (the default is the OpenAI API). The `verify` runs use the same setup,
+  with the default model `gpt-4o-mini`.
 - The examples marked "offline" make no LM call and need no key.
-- Give the two MCP examples a class path as the argument. Use the output of
-  `sbt -error "export examples/Runtime/fullClasspath"`.
 
 ## Translations
 
@@ -37,17 +36,17 @@ OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.email_extr
 |------|---------|-------|
 | Signatures | `main` | String signatures use `Signature.fromType`. Class signatures become `Spec` traits. |
 | LanguageModels | `languageModelsMain` | The LM setup, direct calls, more than one LM, and the Responses API. |
-| Modules | `modulesMain` | dspy4s has no API for the `n=5` completions. |
-| Tools | `toolsMain` | `ReAct` with `ToolFunction.fromMethod`, and native tool calls. |
+| Modules | `modulesMain` | `Predict` and `ChainOfThought`. The header names the upstream blocks that the file leaves out. |
+| Tools | `toolsMain` | `ReAct` with `ToolFunction.fromMethod`, the manual tool path, and native tool calls. |
 | Adapters | `adaptersMain` | `adapter.format`, `ChatAdapter` and `JSONAdapter`, and `RuntimeEnvironment.inspectHistory`. |
-| Mcp | `mcpMain` | The tools of an MCP server as `ToolFunction` values (`McpTools.fromClient`), and a `ReAct` agent. The agent starts the server `mcpArithmeticServer`. |
+| Mcp | `mcpMain` | The tools of an MCP server as `ToolFunction` values (`McpTools.fromClient`), a `ReAct` agent, and a `ReActV2` agent. The `ReActV2` agent starts the server `mcpArithmeticServer`. |
 
 ### `learn.evaluation`
 
 | Page | `@main` | Notes |
 |------|---------|-------|
 | Data | `dataMain` (offline) | `Example`, the inputs, and the labels. `DataLoader` is not translated. |
-| Metrics | `metricsMain` (offline), `metricsJudgeMain` | `FunctionMetric`, `Evaluate`, and the LM judge `SemanticF1`. |
+| Metrics | `metricsMain` (offline), `metricsJudgeMain` | `FunctionMetric`, `Evaluate`, a metric that runs an LM judge, and `SemanticF1`. |
 
 ### `learn.optimization`
 
@@ -59,7 +58,7 @@ OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.email_extr
 
 | Page | `@main` | Notes |
 |------|---------|-------|
-| Examples | `examplesMain` (offline) | The `Example` API. An `Example` is immutable, so `withValue` returns a copy. |
+| Examples | `examplesMain` (offline) | The `Example` API. An `Example` is immutable, so `withRawValue` returns a copy. |
 | LoadingCustomData | `loadingCustomDataMain` (offline) | `Example` values from rows, and a split into a train set and a dev set. |
 
 ### `tutorials.<name>`
@@ -77,7 +76,7 @@ OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.email_extr
 | `ai_text_game` | `aiTextGameMain` | Three signatures and the `GameAI` module. The console game is not translated. |
 | `yahoo_finance_react` | `yahooFinanceReactMain` | `ReAct` with finance tools. The tools return static data. |
 | `llms_txt_generation` | `llmsTxtMain` | Signatures in a pipeline. The GitHub HTTP calls are not translated. |
-| `saving` | `savingMain` (offline) | `save` and `load` with `ProgramPersistence`. A small trainset replaces GSM8K. |
+| `saving` | `savingMain` (offline) | `save` and `load` with `ProgramPersistence`. The main attaches two demos by hand and does not call `compile`, which needs a model and a trainset. |
 | `optimizer_tracking` | `optimizerTrackingMain` | `MIPROv2` with a `CallbackHandler` that counts the LM calls. |
 | `mcp` | `mcpTutorialMain` | The airline MCP server `airlineMcpServer`, and a `ReAct` agent that uses its tools. The agent starts the server in a child JVM. |
 
@@ -94,7 +93,7 @@ OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.email_extr
 | `signatures` | `builderMain` (offline), `caseClassMain`, `functionMain`, `specMain` | The four ways to declare a signature: `Signature.builder`, `Signature.derived`, `Signature.fromType`, and `Signature.of`. |
 | `tutorials.react_vs_rlm` | `reactVsRlmMain` | `ReAct` and `RLM` do one task with the same tools. The source is the MIT project [react2rlm](https://github.com/RamXX/react2rlm). `RLM` needs Deno. |
 | `tutorials.talk_to_your_data` | `talkToYourDataMain`, `tytdSelfCheckMain` (offline) | An analytics agent with `RLM` and `GEPA`. The agent needs Deno. Its [README](./src/main/scala/dspy4s/examples/tutorials/talk_to_your_data/README.md) gives the details. |
-| `verify` | `optimizerSmokeMain`, `gepaSmokeMain` | Runs of `COPRO`, `MIPROv2`, and `GEPA` with a real model. They read `OPENAI_MODEL` (the default is `gpt-4o-mini`). |
+| `verify` | `optimizerSmokeMain`, `gepaSmokeMain` | Runs of `COPRO`, `MIPROv2`, and `GEPA` with a real model. They read `DSPY_MODEL` (the default is `gpt-4o-mini`, because they pin temperature 0). A failure stops the run with an error. |
 
 ## Prose pages
 
@@ -116,6 +115,8 @@ These pages need a feature that dspy4s does not have yet. The header of each fil
 | File | Feature that it needs | Alternative |
 |------|-----------------------|-------------|
 | `deep_dive/data_handling/BuiltInDatasets` | the dataset loaders (`dspy.datasets`) | `LoadingCustomData` |
-| `learn/programming/Assertions7` | `dspy.Assert` and `dspy.Suggest` | `Refine` and `BestOfN` (`output_refinement`) |
 | `tutorials/deployment` | a server for a program (FastAPI, MLflow) | Put the program in your own HTTP layer. |
 | `tutorials/mem0_react_agent` | the mem0 memory store | `ReAct` (`learn/programming/Tools`) |
+
+Upstream removed `dspy.Assert` and `dspy.Suggest`, so its page `learn/programming/7-assertions.md` has no file here, and
+`Refine` and `BestOfN` (`tutorials/output_refinement`) are the alternative.

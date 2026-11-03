@@ -584,46 +584,59 @@ Simplify 2 (rank 12). Code-review 3 (rank 10). 396 main lines, 586 test lines.
 ## examples
 
 Source root: `modules/examples/src/main/scala/dspy4s/examples/`. The paths below are relative to it.
-Simplify 6 (rank 6). Code-review 3 (rank 11). 6433 main lines, no tests.
+Simplify 6 (rank 6). Code-review 3 (rank 11). 6433 main lines, and no tests before this pass. The pass added four test suites.
 
 ### Passes
 
 The shared-setup fix in (a) also touches `tutorials/talk_to_your_data/TalkToYourData.scala` in (c).
 
+One reviewer did the simplify angle and the code-review angle for each of these five groups.
+
 - (a) The shared setup, about 740 lines: `Demo.scala`, `verify/`, `tutorials/react_vs_rlm/ReactVsRlm.scala`.
-  - [ ] /simplify
-  - [ ] /code-review
+  - [x] /simplify
+  - [x] /code-review
 - (b) The two MCP files, about 880 lines: `learn/programming/Mcp.scala`, `tutorials/mcp/Mcp.scala`.
-  - [ ] /simplify
-  - [ ] /code-review
+  - [x] /simplify
+  - [x] /code-review
 - (c) Talk to your data, about 875 lines: `tutorials/talk_to_your_data/`.
-  - [ ] /simplify
-  - [ ] /code-review
+  - [x] /simplify
+  - [x] /code-review
 - (d) The guides, about 1890 lines: the other files in `learn/`, and `deep_dive/`, `signatures/`, `Cheatsheet.scala`.
-  - [ ] /simplify
-  - [ ] /code-review
+  - [x] /simplify
+  - [x] /code-review
 - (e) The other tutorials, about 2050 lines: the other directories in `tutorials/`.
-  - [ ] /simplify
-  - [ ] /code-review
+  - [x] /simplify
+  - [x] /code-review
 
 ### Simplify findings
 
-- [ ] `verify/GepaSmokeTest.scala:106-123`, `verify/OptimizerSmokeTest.scala:128-145`, and `tutorials/talk_to_your_data/TalkToYourData.scala:65-75` each copy the LM setup of `Demo.scala:18-24`. The two smoke tests read `OPENAI_MODEL` (default `gpt-4o-mini`), but `Demo` reads `DSPY_MODEL` (default `gpt-5.5`).
-- [ ] Other copies:
+- [x] `verify/GepaSmokeTest.scala:106-123`, `verify/OptimizerSmokeTest.scala:128-145`, and `tutorials/talk_to_your_data/TalkToYourData.scala:65-75` each copy the LM setup of `Demo.scala:18-24`. The two smoke tests read `OPENAI_MODEL` (default `gpt-4o-mini`), but `Demo` reads `DSPY_MODEL` (default `gpt-5.5`). `Demo.withOpenAi` is the one setup. All read `DSPY_MODEL` and `OPENAI_BASE_URL`, and the smoke runs keep the default `gpt-4o-mini`, because they pin temperature 0. `learn/programming/Signatures.scala` keeps its own setup, because the site quickstart shows it as a lesson.
+- [x] Other copies: `Demo.envInt`, `Demo.denoAvailable`, and `verify/ProgressLmCallback.scala`.
   - `envInt`: `verify/GepaSmokeTest.scala:91`, `verify/OptimizerSmokeTest.scala:103`, `tutorials/talk_to_your_data/TalkToYourData.scala:41`.
   - `ProgressLmCallback`: `verify/GepaSmokeTest.scala:95`, `verify/OptimizerSmokeTest.scala:110`.
   - `denoAvailable`: `tutorials/react_vs_rlm/ReactVsRlm.scala:321`, `tutorials/talk_to_your_data/TalkToYourData.scala:44`.
-- [ ] The two MCP files hold the same code:
+- [x] The two MCP files hold the same code: `McpToolClient.using` and `Demo.childJvmTransport` replace the copies. The server builders stay, because each builder is the lesson of its page.
   - the client wrapper: `learn/programming/Mcp.scala:60-64` and `tutorials/mcp/Mcp.scala:475-480`.
   - the child-JVM transport: `learn/programming/Mcp.scala:240-246` and `tutorials/mcp/Mcp.scala:468-470`.
   - the server builders, which are almost the same.
-- [ ] `Cheatsheet.scala:66` and `learn/programming/Adapters.scala:43` each define a private `rec`, which is the same as `DynamicValues.record`. `tutorials/react_vs_rlm/ReactVsRlm.scala:160` uses `fromAny` on a String.
-- [ ] Four files are only TODO stubs with quoted Python: `deep_dive/data_handling/BuiltInDatasets.scala`, `tutorials/deployment/Deployment.scala`, `learn/programming/Assertions7.scala`, `tutorials/mem0_react_agent/Mem0ReactAgent.scala`. They hold all 19 TODO markers.
-- [ ] In `tutorials/mcp/Mcp.scala`, 299 of 566 lines are quoted Python. Snippet 1 (`:56-232`) quotes the same code as snippets 3 to 5.
+- [x] `Cheatsheet.scala:66` and `learn/programming/Adapters.scala:43` each define a private `rec`, which is the same as `DynamicValues.record`. `tutorials/react_vs_rlm/ReactVsRlm.scala:160` uses `fromAny` on a String.
+- [x] Four files are only TODO stubs with quoted Python: `deep_dive/data_handling/BuiltInDatasets.scala`, `tutorials/deployment/Deployment.scala`, `learn/programming/Assertions7.scala`, `tutorials/mem0_react_agent/Mem0ReactAgent.scala`. They hold all 19 TODO markers. `Assertions7.scala` is deleted, because upstream removed `dspy.Assert`. The other three stay: their reasons are still true, and the README table names them. To delete them is a decision about the convention of one file for each page.
+- [x] In `tutorials/mcp/Mcp.scala`, 299 of 566 lines are quoted Python. Snippet 1 (`:56-232`) quotes the same code as snippets 3 to 5. Each part of snippet 1 now comes before its Scala, and one-line pointers replace the repeated snippets.
 
 ### Code-review findings
 
-- [ ] `learn/programming/Mcp.scala:11-12`, `:236-237` say that ReActV2 is not ported (G-19), but programs `strategies/ReActV2.scala` exists. Thus the comment is out of date, and snippet 4 uses `ReAct` in place of the upstream agent.
-- [ ] `learn/programming/Mcp.scala:169-172`: when an `add` argument is missing or is not a number, the tool uses 0 and gives no error.
-- [ ] `tutorials/talk_to_your_data/QueryEngine.scala:88`, `:109`: an unknown column becomes `total` with no error, and `>` or `<` on a label becomes equality. This engine is the GEPA oracle, so a wrong plan can get a correct score.
-- [ ] `verify/GepaSmokeTest.scala:120` calls `.toOption.get` on a parse result. The input is a constant, so the risk is low.
+- [x] `learn/programming/Mcp.scala:11-12`, `:236-237` say that ReActV2 is not ported (G-19), but programs `strategies/ReActV2.scala` exists. Thus the comment is out of date, and snippet 4 uses `ReAct` in place of the upstream agent. Snippet 4 now runs `ReActV2` on the native path. A test with a real server shows it.
+- [x] `learn/programming/Mcp.scala:169-172`: when an `add` argument is missing or is not a number, the tool uses 0 and gives no error. The lead was wrong at run time: the SDK checks the input first (`validateToolInputs`), so the fallback was dead code, and it is gone.
+- [x] `tutorials/talk_to_your_data/QueryEngine.scala:88`, `:109`: an unknown column becomes `total` with no error, and `>` or `<` on a label becomes equality. This engine is the GEPA oracle, so a wrong plan can get a correct score. It was worse than the lead: `unit_price` and `order_id`, the names in the schema, also read `total`, and a correct plan with date filters got a score of 0. `QueryEngine.run` now gives a `Left` for a bad plan, and `QueryEngineSuite` compares with values from the data.
+- [x] `verify/GepaSmokeTest.scala:120` calls `.toOption.get` on a parse result. The input is a constant, so the risk is low. `Signature.fromString` replaces the parse in the two smoke runs.
+- [x] (code-review (a)) The two smoke runs printed success and exited with 0 when each LM call failed. They now call `sys.error`. `ReactVsRlm`: a drug tool with a missing argument answered "NONE: ..." for empty drug names, and it now gives a `Left`. The site claim "Any OpenAI-compatible endpoint works" is now true through `OPENAI_BASE_URL`.
+- [x] (code-review (b)) `pick_flight` had no `required` list, so a call with no flights looked like "no flights exist". The stderr of the child JVM was lost, so a bad class path gave an error with no cause. `Compile / run / fork` removes the class path argument of the two MCP mains.
+- [x] (code-review (c)) GEPA tuned a `DynamicPredict` with no output schema, and the agent ran a `Predict`, so GEPA measured another prompt. `Sort.by` had no effect. The metric gave a score of 1 to a wrong plan with the same label, or with a value that rounds to the gold text. The refine feedback gave the JVM answer to the sandbox. A failed LM call looked like a wrong plan in the accuracy. The temperature 0 of the planner can fail each call of the default model. The tie order and the number text depended on the map order and on the locale. `SelfCheck` could not detect a defect of the engine.
+- [x] (code-review (d)) False "dspy4s has no X" statements: LM-judged metrics, retrievers, async programs, program persistence, a `ToolCalls` output. `validateAnswerOnly` and snippet 6 of `Metrics.scala` were not translations, and they are now. Old quotes of `Modules.scala` and of the cheatsheet are current.
+- [x] (code-review (e)) 13 upstream docstrings of signatures never reached the model, and the guides had the same defect. `Streaming` used `tool.invoke`, which sends no tool event, so its status messages never came. `cacheMain` showed no cache hit, and `customCached` could not share a cache. A failed judge call was a reward of 0, so `Refine` gave `Right`. False README rows and false site text on `failCount` and on a plain `Future`.
+- [x] (found in this pass, adapters) `JSONAdapter()` had native function calling off. Upstream has it on (`json_adapter.py:46`). `XMLAdapter` falls back with it off, as upstream.
+- [x] (found in this pass, programs) `Predict` with no adapter in the context gave `Missing 'adapter'`. Upstream uses `settings.adapter or ChatAdapter()`.
+- [ ] (not run) No example that needs a model ran against a real model in this pass. The tests use a scripted model, and the smoke runs ran against an address with no server.
+- [ ] (kept) `McpToolClient.using` with a bad class path waits for the 20 s of the SDK, and its `Left` has no cause. The stderr of the child JVM now shows the cause. To fail at once, `using` needs a wrapper around the transport.
+- [ ] (kept) `pick_flight` with `flights: null` still gives "There is no flight to pick.", because the derived schema allows `null` for a list.
+- [ ] (kept) `QueryPlan.limit` has an effect only in the sandbox, because the engine reads the first group. `QueryEngine.sameResult` treats a gold label that is a number as a number. No gold plan has either case.

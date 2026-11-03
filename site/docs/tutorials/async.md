@@ -8,7 +8,7 @@ This example runs dspy4s programs off the calling thread and returns a `scala.co
 --8<-- "tutorials/async/Async.scala:ask-async"
 ```
 
-`ContextPropagation.future` captures the active `RuntimeContext` (LM, adapter, callbacks) and runs the synchronous program on a context-propagating `ExecutionContext`, returning a `Future`. A plain `Future { ... }` would run on a thread that has no `RuntimeContext`, so the program could not resolve its model. The result type stays `Either[DspyError, String]`, with the `Future` carrying only the off-thread scheduling.
+`ContextPropagation.future` runs the synchronous program on a worker thread and gives a `Future`. It captures the installed `RuntimeContext` and the carriers of the calling thread, for example the usage trackers, and it installs them on the worker thread. A plain `Future { ... }` loses the carriers and the scope: a `UsageTracking` tracker around the call gets no usage, and the call has no parent call id. It still finds the model, because `Module.apply` installs its `using RuntimeContext` on the worker thread. The result type stays `Either[DspyError, String]`, and the `Future` only moves the work to another thread.
 
 ## Chaining predictors in an async module
 
@@ -16,7 +16,7 @@ This example runs dspy4s programs off the calling thread and returns a `scala.co
 --8<-- "tutorials/async/Async.scala:simplifier-module"
 ```
 
-`aforward` mirrors a module that runs two steps in sequence. Both `ChainOfThought` predicts execute in order inside a single off-thread computation. The for-comprehension threads the `Either`, so a failure in the first step short-circuits and the second step is skipped. The whole sequence is returned as one `Future`.
+`aforward` runs two steps in sequence. `>>>` makes one program from the two `ChainOfThought` predictors, and that program runs in one computation on a worker thread. A `Left` from the first step stops the program, so the second step does not run. The whole sequence gives one `Future`.
 
 ## Running it
 

@@ -13,7 +13,7 @@ Once you have an initial system, evaluate it systematically instead of by eyebal
    `Metric` trait — `score(example, prediction, trace): Either[DspyError, Double]` — and `FunctionMetric(name) { (ex, pred) => … }`
    wraps a plain function. For long-form outputs, a good metric is itself a small program checking several
    properties; start simple and iterate.
-3. **Run development evaluations.** `Evaluate(EvaluateConfig(devset, metric, …))` runs your program over the
+3. **Run development evaluations.** `Evaluate(devset, metric, …)` runs your program over the
    dev set and reports scores, giving you a baseline and surfacing major issues.
 
 ### Runnable examples in this folder
@@ -21,8 +21,4 @@ Once you have an initial system, evaluate it systematically instead of by eyebal
 | File | Topic |
 |---|---|
 | [`Data.scala`](./Data.scala) | Building `Example`s; inputs/labels partitioning. |
-| [`Metrics.scala`](./Metrics.scala) | `FunctionMetric` + running `Evaluate`. |
-
-Note on differences from DSPy: a dspy4s `Metric.score` does not receive a `RuntimeContext`, so a metric cannot
-itself call an LM — LLM-as-judge metrics aren't expressible at the metric layer (use a judge *program* and
-score its output). There is also no built-in retriever, so retrieval-trace metrics don't apply.
+| [`Metrics.scala`](./Metrics.scala) | `FunctionMetric`, a metric that runs an LM judge, `SemanticF1`, and `Evaluate`. |

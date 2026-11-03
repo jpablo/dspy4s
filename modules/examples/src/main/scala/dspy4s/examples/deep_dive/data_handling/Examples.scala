@@ -3,7 +3,7 @@
   * Source: docs/docs/deep-dive/data-handling/examples.md Upstream:
   * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/deep-dive/data-handling/examples.md Status: translated (the
   * full `dspy.Example` API, snippets 1–6). The one shape difference: a dspy4s `Example` is an immutable `case class`,
-  * so Python's in-place `example.context = "..."` (snippet 5) becomes `withValue("context", ...)`, which returns an
+  * so Python's in-place `example.context = "..."` (snippet 5) becomes `withRawValue("context", ...)`, which returns an
   * updated copy.
   *
   * `dspy.Example(question=...)` → `Example("question" := ...)`; `with_inputs` / `inputs()` / `labels()` /
@@ -56,8 +56,7 @@ object Examples:
   // ── Snippet 6 (lines 103–106) — iterate key/value pairs ──
   // | for k, v in article_summary.items(): print(f"{k} = {v}")
   def items(example: Example): Vector[(String, String)] =
-    DynamicValues.recordKeys(example.values)
-      .map(k => k -> example.get(k).map(DynamicValues.renderText).getOrElse(""))
+    DynamicValues.recordEntries(example.values).map((k, v) => k -> DynamicValues.renderText(v))
 
 // Pure (no LM). Run with: sbt "examples/runMain dspy4s.examples.deep_dive.data_handling.examplesMain"
 @main def examplesMain(): Unit =

@@ -4,8 +4,9 @@
   * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/saving/index.md Status: translated — program state
   * `save` / `load` is now ported (PORT_GAPS G-4, `dspy4s.programs.optimization.ProgramPersistence`). dspy4s serializes
   * each leaf's writable `OptimizableParameters` (instructions + demos + module config) to clean JSON — the analogue of
-  * Python's `save(..., save_program=False)`. The GSM8K dataset (snippet 1) is swapped for a small hand-built trainset
-  * (no `dspy.datasets`, PORT_GAPS G-21).
+  * Python's `save(..., save_program=False)`. `compile` translates snippet 1, and its caller gives the trainset, because
+  * dspy4s has no GSM8K (no `dspy.datasets`, PORT_GAPS G-21). `savingMain` does not call `compile`. It attaches two
+  * demos by hand, so it needs no model.
   *
   * Out of scope: the "whole-program" `save_program=True` directory form (snippets 6–8). That cloudpickles the program's
   * *architecture/code* so it can be reloaded without re-declaring it. dspy4s programs are immutable Scala values — you
@@ -20,7 +21,6 @@ import dspy4s.evaluate.contracts.Metric
 import dspy4s.optimize.{BootstrapFewShot, BootstrapFewShotConfig, DemoCount, RoundCount}
 import dspy4s.programs.optimization.ProgramPersistence
 import dspy4s.programs.strategies.DynamicPredict
-import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.signatures.Signature
 
 import java.nio.file.Files
@@ -59,7 +59,8 @@ object Saving:
   // ── Snippets 2/3 — save the compiled program's state to disk ──
   // | compiled_dspy_program.save("./dspy_program/program.json", save_program=False)
   // | compiled_dspy_program.save("./dspy_program/program.pkl", save_program=False)   # .pkl variant: N/A in dspy4s
-  // `ProgramPersistence.save` writes OptimizableParameters keyed by leaf ordinals (`predictor-0`, ...) as JSON.
+  // `ProgramPersistence.save` writes JSON. Under the key `optimizableParameters`, each leaf has its parameters under
+  // its ordinal (`optimizable-0`, ...).
   // --8<-- [start:save]
   def save(program: DynamicPredict, path: String): Either[DspyError, Unit] =
     ProgramPersistence.save(program, path)
@@ -69,6 +70,8 @@ object Saving:
   // | loaded_dspy_program = dspy.ChainOfThought("question -> answer")   # recreate the architecture
   // | loaded_dspy_program.load("./dspy_program/program.json")
   // | assert len(compiled_dspy_program.demos) == len(loaded_dspy_program.demos)
+  // | for original_demo, loaded_demo in zip(compiled_dspy_program.demos, loaded_dspy_program.demos):
+  // |     assert original_demo.toDict() == loaded_demo
   // dspy4s `load` takes the freshly-recreated program and returns a NEW immutable value with the saved
   // instructions/demos/config written back. Architecture, names, runtime bindings, schemas, LMs, and tools stay fresh.
   // --8<-- [start:load]
@@ -104,10 +107,7 @@ object Saving:
   roundTrip match
     case Left(err)     => sys.error(s"save/load failed: ${err.message}")
     case Right(loaded) =>
-      val ps     = summon[OptimizableStructure[DynamicPredict]]
-      val before = ps.read(compiled).head.demos.size
-      val after  = ps.read(loaded).head.demos.size
       println(s"saved program state to: $path")
-      println(s"demos before save: $before, after load: $after")
-      assert(before == after, "demo count must round-trip")
+      println(s"demos before save: ${compiled.demos.size}, after load: ${loaded.demos.size}")
+      assert(compiled.demos.sameElements(loaded.demos), "the loaded demos must equal the saved demos")
       println("✓ program state round-tripped (demos preserved)")

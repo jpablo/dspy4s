@@ -23,6 +23,7 @@ import dspy4s.core.data.RawPrediction
 import dspy4s.examples.Demo
 import dspy4s.programs.strategies.{DynamicPredict, ReAct}
 import dspy4s.programs.contracts.{DynamicModule, ProgramCall, ToolFunction, description}
+import dspy4s.programs.runtime.ToolExecutor
 import dspy4s.streaming.{StatusMessageProvider, Streamify}
 import dspy4s.streaming.contracts.{ErrorEvent, PredictionEvent, StatusEvent, StreamEvent, StreamListener, TokenEvent}
 import dspy4s.signatures.Signature
@@ -36,12 +37,14 @@ object Streaming:
   // --8<-- [start:stream-consume]
   def consume(stream: ClosableIterator[StreamEvent]): Option[RawPrediction] =
     var finalPrediction: Option[RawPrediction] = None
-    while stream.hasNext do
-      stream.next() match
-        case t: TokenEvent      => println(s"Output token of field ${t.fieldName}: ${t.chunk}")
-        case s: StatusEvent     => println(s.message)
-        case p: PredictionEvent => finalPrediction = Some(p.prediction)
-        case e: ErrorEvent      => println(s"Error: ${e.error.message}")
+    // The close stops the producer thread when a handler throws. After the end of the stream, it has no effect.
+    try while stream.hasNext do
+        stream.next() match
+          case t: TokenEvent      => println(s"Output token of field ${t.fieldName}: ${t.chunk}")
+          case s: StatusEvent     => println(s.message)
+          case p: PredictionEvent => finalPrediction = Some(p.prediction)
+          case e: ErrorEvent      => println(s"Error: ${e.error.message}")
+    finally stream.close()
     finalPrediction
   // --8<-- [end:stream-consume]
 
@@ -59,7 +62,7 @@ object Streaming:
       program = predict,
       streamListeners = Vector(StreamListener("answer"))
     )
-    consume(streamPredict(DynamicValues.recordFromEntries(Vector("question" := question))))
+    consume(streamPredict(DynamicValues.record("question" := question)))
   // --8<-- [end:stream-basic]
 
   // ── Snippet 4 — a composite module, listeners on two different fields ──
@@ -80,7 +83,7 @@ object Streaming:
       for
         step1 <- predict1(call)
         answer = textField(step1.output, "answer")
-        step2 <- predict2(ProgramCall(input = DynamicValues.recordFromEntries(Vector("answer" := answer))))
+        step2 <- predict2(ProgramCall(input = DynamicValues.record("answer" := answer)))
       yield step2.raw
   // --8<-- [end:compose-module]
 
@@ -89,7 +92,7 @@ object Streaming:
       program = new SimplifyModule,
       streamListeners = Vector(StreamListener("answer"), StreamListener("simplified_answer"))
     )
-    consume(streamPredict(DynamicValues.recordFromEntries(Vector("question" := question))))
+    consume(streamPredict(DynamicValues.record("question" := question)))
 
   // ── Snippet 5 — stream a ReAct agent's built-in `next_thought` field ──
   // | def fetch_user_info(user_name): """Get user information like name, birthday, etc."""
@@ -115,7 +118,7 @@ object Streaming:
       program = react,
       streamListeners = Vector(StreamListener("next_thought", allowReuse = true))
     )
-    consume(streamReact(DynamicValues.recordFromEntries(Vector("question" := question))))
+    consume(streamReact(DynamicValues.record("question" := question)))
 
   // ── Snippet 6 — two predictors emitting the SAME field name, disambiguated by predict_name ──
   // | self.predict1 = dspy.Predict("question->answer"); self.predict2 = dspy.Predict("question, answer->answer, score")
@@ -135,9 +138,7 @@ object Streaming:
         step1   <- predict1(call)
         question = textField(call.input, "question")
         answer   = textField(step1.output, "answer")
-        step2   <- predict2(ProgramCall(input =
-                   DynamicValues.recordFromEntries(Vector("question" := question, "draft" := answer))
-                 ))
+        step2   <- predict2(ProgramCall(input = DynamicValues.record("question" := question, "draft" := answer)))
       yield step2.raw
 
   def streamScoring(question: String)(using RuntimeContext): Option[RawPrediction] =
@@ -148,9 +149,10 @@ object Streaming:
         StreamListener("answer", predictName = Some("predict2"))
       )
     )
-    consume(streamPredict(DynamicValues.recordFromEntries(Vector("question" := question))))
+    consume(streamPredict(DynamicValues.record("question" := question)))
 
   // ── Snippets 7/8 — a custom status-message provider + a tool + a reasoning field ──
+  // Upstream gives the tool result to a `num1, num2 -> sum` predictor. This example gives it to the question predictor.
   // | class MyStatusMessageProvider(dspy.streaming.StatusMessageProvider):
   // |     def tool_start_status_message(self, instance, inputs): return f"Calling Tool {instance.name} ..."
   // |     def tool_end_status_message(self, outputs): return f"Tool finished with output: {outputs}!"
@@ -164,8 +166,8 @@ object Streaming:
   def double_the_number(x: Int): Int = 2 * x
 
   def streamReasoningWithTool(question: String)(using RuntimeContext): Option[RawPrediction] =
-    // ChainOfThought's built-in `reasoning` field is modelled by naming it in the layout; the tool runs in
-    // `forward`, so its start/end status messages flow through the custom provider.
+    // The layout names `reasoning`, the field that `ChainOfThought` adds. `ToolExecutor.run` opens the tool callback
+    // scope, so the custom provider gets the start and the end of the tool. A direct `tool.invoke` sends no tool event.
     val tool    = ToolFunction.fromMethod(double_the_number)
     val program = new DynamicModule:
       override val moduleName: String = "reasoning_module"
@@ -175,10 +177,11 @@ object Streaming:
           RuntimeContext
       ): Either[DspyError, RawPrediction] =
         for
-          doubled <- tool.invoke(DynamicValues.recordFromEntries(Vector("x" := 21)))
+          doubled <- ToolExecutor.run(tool, DynamicValues.record("x" := 21))
           out     <- predict(ProgramCall(input =
-                   DynamicValues.recordFromEntries(
-                     Vector("question" := question, "doubled" := DynamicValues.renderText(doubled))
+                   DynamicValues.record(
+                     "question" := textField(call.input, "question"),
+                     "doubled"  := DynamicValues.renderText(doubled)
                    )
                  ))
         yield out.raw
@@ -188,12 +191,25 @@ object Streaming:
       statusMessageProvider = Some(new MyStatusMessageProvider),
       streamListeners = Vector(StreamListener("reasoning"))
     )
-    consume(streamPredict(DynamicValues.recordFromEntries(Vector("question" := question))))
+    consume(streamPredict(DynamicValues.record("question" := question)))
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.streaming.streamingMain"
 @main def streamingMain(): Unit =
   Demo.withLm {
+    val question = "Why did a chicken cross the kitchen?"
+
     println("=== single Predict, streaming `answer` ===")
-    val out = Streaming.streamAnswer("Why did a chicken cross the kitchen?")
-    println("Final output: " + out)
+    println("Final output: " + Streaming.streamAnswer(question))
+
+    println("\n=== two predictors, streaming `answer` and `simplified_answer` ===")
+    println("Final output: " + Streaming.streamSimplify(question))
+
+    println("\n=== ReAct, streaming `next_thought` ===")
+    println("Final output: " + Streaming.streamReactThoughts("What sports news happened in the year Adam was born?"))
+
+    println("\n=== two predictors with the field `answer`, streaming each by `predictName` ===")
+    println("Final output: " + Streaming.streamScoring(question))
+
+    println("\n=== a tool and a custom status provider, streaming `reasoning` ===")
+    println("Final output: " + Streaming.streamReasoningWithTool("What is 21 doubled?"))
   }

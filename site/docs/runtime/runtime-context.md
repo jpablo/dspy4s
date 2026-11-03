@@ -7,12 +7,14 @@ configure once and every program in scope picks it up.
 
 ## Setting it
 
-There are two ways to install a context:
+There are three ways to install a context:
 
-- `RuntimeEnvironment.configure(ctx)` sets a global default for the current
-  thread.
+- `RuntimeEnvironment.configure(ctx)` sets the default of the process. Only the
+  first thread that calls it can call it again.
 - `RuntimeEnvironment.withSettings(ctx) { ... }` installs a context just for the
   duration of a block.
+- `RuntimeEnvironment.withInstalled(ctx) { ... }` does the same, and it gives
+  the block the context as a `given`.
 
 The [Quickstart](../get-started/quickstart.md) shows the full wiring of a model
 and adapter into a context.

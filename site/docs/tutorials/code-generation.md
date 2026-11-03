@@ -16,7 +16,7 @@ A `Spec` trait declares the input and output fields. An `OutputField[List[String
 --8<-- "tutorials/sample_code_generation/SampleCodeGeneration.scala:agent-predictors"
 ```
 
-`DocumentationLearningAgent` holds one `ChainOfThought` predictor per signature, built from `Signature.of[T]`. Each predictor is a field on the class; the agent's methods call them and map their outputs into the `LibraryInfo` and `GeneratedExample` case classes.
+`DocumentationLearningAgent` holds one `ChainOfThought` predictor per signature, built from `Signature.of[T]`. The `instructions` argument gives the task text that the model gets. Each predictor is a field on the class; the agent's methods call them and map their outputs into the `LibraryInfo` and `GeneratedExample` case classes.
 
 ## Threading outputs
 

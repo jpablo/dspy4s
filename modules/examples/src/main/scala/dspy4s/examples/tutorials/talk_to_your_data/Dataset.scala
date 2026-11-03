@@ -2,9 +2,9 @@
   *
   * A seeded generator produces ~10k e-commerce orders, so the data (and therefore every gold answer) is reproducible
   * and license-clean to ship. The agent only ever sees the data as CSV text (too big to put in a prompt, which is
-  * exactly why the RLM stage writes code to crunch it). The gold answers are computed by the Scala [[QueryEngine]] from
-  * a hand-written plan per question, so the answer key is correct *by construction* (no LLM judge). That is the
-  * foundation that makes the GEPA optimization measurable.
+  * exactly why the RLM stage writes code to crunch it). The answer key comes from one hand-written plan for each
+  * question and from the same [[QueryEngine]] that scores a planner, with no LLM judge. A defect of a plan or of the
+  * engine can thus reach the answer key, so [[SelfCheck]] compares some answers with a direct computation.
   */
 package dspy4s.examples.tutorials.talk_to_your_data
 
@@ -63,7 +63,8 @@ object Dataset:
   lazy val csv: String =
     val header = "order_id,date,region,category,product,quantity,unit_price,discount,total"
     val rows   = orders.iterator.map { o =>
-      f"${o.orderId},${o.date},${o.region},${o.category},${o.product},${o.quantity},${o.unitPrice}%.2f,${o.discount}%.2f,${o.total}%.2f"
+      val numbers = Vector(o.unitPrice, o.discount, o.total).map(QueryEngine.decimal).mkString(",")
+      s"${o.orderId},${o.date},${o.region},${o.category},${o.product},${o.quantity},$numbers"
     }
     (Iterator(header) ++ rows).mkString("\n")
 
@@ -83,9 +84,13 @@ object Dataset:
 
   /** A question paired with the plan that answers it; the gold answer is whatever the Scala engine computes. */
   final case class GoldQuestion(question: String, plan: QueryPlan):
-    def answer(data: Vector[Order]): String = QueryEngine.run(plan, data).answer
+    /** The gold result. A problem of a gold plan is a defect of this file, so it is an exception. */
+    def result(data: Vector[Order]): QueryEngine.EvalResult =
+      QueryEngine.run(plan, data).fold(problem => sys.error(s"""The gold plan of "$question": $problem"""), identity)
 
-  private def num(
+    def answer(data: Vector[Order]): String = result(data).answer
+
+  private[talk_to_your_data] def num(
       agg      : Agg,
       column   : Option[String]    = None,
       filters  : List[Filter]      = Nil,
@@ -100,7 +105,7 @@ object Dataset:
       column    : Option[String] = None,
       descending: Boolean        = true
   ): QueryPlan =
-    QueryPlan(agg, column, List(by), Nil, None, Some(Sort("value", descending)), Some(1), answerKind)
+    QueryPlan(agg, column, List(by), Nil, None, Some(Sort(descending)), Some(1), answerKind)
 
   private def f(col: String, op: FilterOp, v: String): Filter = Filter(col, op, v)
   private def q1                                              = Some(TimeRange("date", Some("2024-01-01"), Some("2024-03-31")))

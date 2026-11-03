@@ -20,6 +20,7 @@ results should live:
 
 You can also give `ManagedLanguageModel` a `cacheKey` function to control the
 cache key, for example to key only on the messages and ignore the model name.
+Two models then share their results when you give them one cache value.
 To keep the results in another store, implement `LmCache` yourself: it gets and
 puts a response for a `CacheKey`.
 
@@ -33,6 +34,11 @@ cache hit adds no usage:
 ```scala
 --8<-- "tutorials/cache/Cache.scala:cache-usage"
 ```
+
+The first call is a miss, so its result has the usage of the call. The second call
+is a hit, so its result has no usage, and the total of the tracker has the first
+call only. `withLm` binds the cached model to the predictor, and the adapter comes
+from the context.
 
 The framework records the usage when a program calls a model
 (`LanguageModel.callAndRecordUsage`). Thus a model with no

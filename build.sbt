@@ -227,7 +227,15 @@ lazy val examples = (project in file("modules/examples"))
   .settings(commonSettings)
   .settings(name := "dspy4s-examples")
   .settings(
-    publish / skip := true
+    publish / skip                         := true,
+    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test,
+    // The MCP examples start their servers with the class path of their JVM. The class path of the sbt JVM is not the
+    // class path of the examples, so `run` and `runMain` fork. The output of the fork has no sbt prefix.
+    Compile / run / fork           := true,
+    Compile / run / outputStrategy := Some(StdoutOutput),
+    // The MCP tests start the servers of the examples in a child JVM with the class path of the tests.
+    Test / fork := true,
+    Test / javaOptions += "-Dfile.encoding=UTF-8"
   )
 
 // JMH stays outside the root aggregate. Normal compile and test runs do not pay for benchmark generation.

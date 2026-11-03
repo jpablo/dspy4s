@@ -9,6 +9,7 @@ import zio.blocks.schema.DynamicValue
 
 import scala.annotation.tailrec
 import scala.jdk.CollectionConverters.*
+import scala.util.Using
 import scala.util.control.NonFatal
 
 /** An [[McpToolClient]] over a client of the MCP Java SDK (see [[McpToolClient.fromSync]]). Each call blocks until the
@@ -17,6 +18,7 @@ import scala.util.control.NonFatal
   * `InterruptedException`. Each other exception of the SDK becomes a `Left`.
   */
 private[mcp] final class SdkToolClient(client: McpSyncClient) extends McpToolClient:
+  import SdkToolClient.guarded
 
   private val mapper: McpJsonMapper = McpJsonDefaults.getMapper()
 
@@ -83,6 +85,17 @@ private[mcp] final class SdkToolClient(client: McpSyncClient) extends McpToolCli
 
   private def jsonObject(value: AnyRef): DynamicValue.Record =
     DynamicValues.asRecord(jsonValue(value)).getOrElse(throw IllegalStateException(s"Not a JSON object: $value"))
+
+private[mcp] object SdkToolClient:
+
+  /** Initialize `client`, run `body` with it, and close it (see [[McpToolClient.using]]). */
+  def using[A](client: => McpSyncClient)(body: McpToolClient => Either[DspyError, A]): Either[DspyError, A] =
+    guarded("client") {
+      Using.resource(client) { opened =>
+        val _ = opened.initialize()
+        body(SdkToolClient(opened))
+      }
+    }
 
   /** `body`, with an exception of the SDK as a `Left`. `Mono.block` of the SDK wraps an interrupt in a
     * `RuntimeException` and sets the interrupt status. The interrupt goes up as the `InterruptedException`, with the

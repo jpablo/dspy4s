@@ -2,12 +2,12 @@
   *
   * Source: docs/docs/learn/programming/language_models.md Upstream:
   * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/language_models.md Status: translated (LM
-  * setup, direct calls, use-with-modules, multiple LMs, generation config, usage/errors). dspy4s ships a single
-  * OpenAI-compatible provider ([[OpenAiLanguageModel]]), so the LiteLLM provider matrix collapses: OpenAI and any
-  * OpenAI-compatible endpoint (Azure / Ollama / vLLM / SGLang / OpenRouter) are supported via the `baseUrl` overload;
-  * Gemini / Anthropic / Vertex / Databricks (LiteLLM-only) are out of scope. The Responses API
-  * (`model_type="responses"`) is `OpenAiLanguageModel(mode = LmMode.Responses)`. Out of scope: custom-LM save/load
-  * (`dump_state`/`load_state`/`copy`, since dspy4s has no program persistence).
+  * setup, direct calls, use-with-modules, multiple LMs, generation config, usage/errors). For text generation, dspy4s
+  * ships one OpenAI-compatible provider ([[OpenAiLanguageModel]]), so the LiteLLM provider matrix collapses: OpenAI and
+  * any OpenAI-compatible endpoint (Azure / Ollama / vLLM / SGLang / OpenRouter) are supported via the `baseUrl`
+  * overload; Gemini / Anthropic / Vertex / Databricks (LiteLLM-only) are out of scope. The Responses API
+  * (`model_type="responses"`) is the method `responses` below. Upstream `dump_state` and `load_state` of a custom LM
+  * have no port: `ProgramPersistence` saves the program, but the saved state does not hold the LM.
   *
   * Key shape differences:
   *   - `dspy.configure(lm=…)` → `RuntimeEnvironment.configure(RuntimeContext(lm = Some(lm), adapter = Some(…)))`; `with
@@ -31,11 +31,12 @@ import dspy4s.core.contracts.{
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
 import dspy4s.core.contracts.LmUsage
-import dspy4s.lm.contracts.{LanguageModel, LmRequest, Message, MessageRole}
+import dspy4s.lm.contracts.{LanguageModel, LmMode, LmRequest, Message, MessageRole}
 import dspy4s.lm.providers.{HttpTimeouts, JdkHttpTransport, OpenAiLanguageModel}
 import scala.concurrent.duration.DurationInt
 import dspy4s.programs.strategies.ChainOfThought
 import dspy4s.programs.contracts.ProgramCall
+import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.signatures.Signature
 
 object LanguageModels:
@@ -55,8 +56,9 @@ object LanguageModels:
   // ── A few different LMs (lines 15–146) ──
   // | lm = dspy.LM('openai/gpt-4o-mini', api_key='YOUR_OPENAI_API_KEY')      # OpenAI
   // | lm = dspy.LM('openai/your-model', api_key='…', api_base='YOUR_URL')    # any OpenAI-compatible endpoint
-  // dspy4s has ONE provider type — OpenAiLanguageModel — that speaks the /chat/completions shape, so it covers
-  // OpenAI and every OpenAI-compatible server (Azure, Ollama, vLLM, SGLang, LM Studio, OpenRouter, …):
+  // For text generation, dspy4s has one provider type, OpenAiLanguageModel. It speaks the /chat/completions shape, so
+  // it covers OpenAI and every OpenAI-compatible server (Azure, Ollama, vLLM, SGLang, LM Studio, OpenRouter, …). The
+  // other provider type, `TypeSafeModel`, is experimental and accepts only decision requests.
   // --8<-- [start:lm-openai]
   def openAi(model: String, apiKey: String): LanguageModel =
     OpenAiLanguageModel(model, apiKey)
@@ -88,15 +90,14 @@ object LanguageModels:
   // the text off `response.outputs`. Per-call generation params go in the `options` bag (provider-bound) — see
   // `askWithConfig` below; omitted here so the call works regardless of the model's accepted `temperature` range.
   // --8<-- [start:lm-direct]
-  def callDirect(prompt: String)(using ctx: RuntimeContext): Either[DspyError, String] =
-    ctx.lm match
-      case Some(lm: LanguageModel) =>
-        val request = LmRequest(
-          model = lm.id,
-          messages = Vector(Message(role = MessageRole.User, text = Some(prompt)))
-        )
-        lm.call(request).map(_.outputs.headOption.map(_.text).getOrElse(""))
-      case _ => Left(dspy4s.core.contracts.ConfigurationError("no LanguageModel configured"))
+  def callDirect(prompt: String)(using RuntimeContext): Either[DspyError, String] =
+    SettingsProgramRuntime.default.resolveModel.flatMap { lm =>
+      val request = LmRequest(
+        model = lm.id,
+        messages = Vector(Message(role = MessageRole.User, text = Some(prompt)))
+      )
+      lm.call(request).map(_.outputs.headOption.map(_.text).getOrElse(""))
+    }
   // --8<-- [end:lm-direct]
 
   // ── Using the LM with DSPy modules (lines 157–168) ──
@@ -156,12 +157,11 @@ object LanguageModels:
   // dspy4s has no global `lm.history`. Per-call usage rides on `LmResponse.usage`; aggregate usage across the model
   // calls of the programs is via `UsageTracking` (see tutorials/cache/Cache.scala). A direct call counts in no tracker
   // (use `LanguageModel.callAndRecordUsage` to count it). Here we read the usage of a single direct call:
-  def callWithUsage(prompt: String)(using ctx: RuntimeContext): Either[DspyError, (String, Option[LmUsage])] =
-    ctx.lm match
-      case Some(lm: LanguageModel) =>
-        lm.call(LmRequest(model = lm.id, messages = Vector(Message(MessageRole.User, Some(prompt)))))
-          .map(r => (r.outputs.headOption.map(_.text).getOrElse(""), r.usage))
-      case _ => Left(dspy4s.core.contracts.ConfigurationError("no LanguageModel configured"))
+  def callWithUsage(prompt: String)(using RuntimeContext): Either[DspyError, (String, Option[LmUsage])] =
+    SettingsProgramRuntime.default.resolveModel.flatMap { lm =>
+      lm.call(LmRequest(model = lm.id, messages = Vector(Message(MessageRole.User, Some(prompt)))))
+        .map(r => (r.outputs.headOption.map(_.text).getOrElse(""), r.usage))
+    }
 
   // ── Handling LM errors (lines 253–269) ──
   // | try: answer = qa(question="…")
@@ -187,12 +187,18 @@ object LanguageModels:
       case Left(err) => s"Failed: code=${err.code}, message=${err.message}"
   // --8<-- [end:lm-errors]
 
-  // ── Responses API (lines 271–298) / Advanced custom LMs (lines 301–345) ──
-  // The Responses API is `OpenAiLanguageModel(mode = LmMode.Responses)`: the request goes to `/responses`, and the
-  // reply gives one output with its tool calls and its reasoning. A streamed call in that mode reads the events of the
-  // Responses stream.
-  // You can write a custom provider by implementing the `LanguageModel` trait, but there is no
-  // `dump_state`/`load_state`/`copy` persistence — dspy4s programs aren't serialized.
+  // ── Responses API (lines 271–298) ──
+  // | dspy.configure(lm=dspy.LM("openai/gpt-5-mini", model_type="responses", temperature=1.0, max_tokens=16000))
+  // In this mode, the request goes to `/responses`, and the reply gives one output with its tool calls and its
+  // reasoning. A streamed call in this mode reads the events of the Responses stream.
+  def responses(model: String): Either[DspyError, LanguageModel] =
+    OpenAiLanguageModel.fromEnv(model).map(_.copy(mode = LmMode.Responses))
+
+  // ── Advanced custom LMs (lines 301–345) ──
+  // You can write a custom provider with the `LanguageModel` trait. Upstream `dump_state` and `load_state` have no
+  // port: `ProgramPersistence` saves the instructions, the demos, and the config, and the saved state does not hold the
+  // LM. The fresh program keeps its own LM. Upstream `copy` is the `copy` of a provider, because a provider is a case
+  // class. `withGenerationDefaults` above uses it.
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.languageModelsMain"
 @main def languageModelsMain(): Unit =

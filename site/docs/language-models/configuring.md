@@ -1,9 +1,9 @@
 # Configuring a language model
 
-A program needs a language model to run. dspy4s ships one provider,
-`OpenAiLanguageModel`, which speaks the OpenAI `/chat/completions` shape. That
-covers OpenAI and every OpenAI-compatible server (Azure, Ollama, vLLM, SGLang,
-LM Studio, OpenRouter).
+A program needs a language model to run. For text generation, dspy4s ships one
+provider, `OpenAiLanguageModel`, which speaks the OpenAI `/chat/completions`
+shape. That covers OpenAI and every OpenAI-compatible server (Azure, Ollama,
+vLLM, SGLang, LM Studio, OpenRouter).
 
 ## Constructing a model
 
@@ -27,7 +27,7 @@ which is what the bundled examples use.
 
 A model becomes active by putting it in the [runtime
 context](../runtime/runtime-context.md). The [Quickstart](../get-started/quickstart.md)
-shows the full wiring with `RuntimeEnvironment.withSettings`.
+shows the full wiring with `RuntimeEnvironment.withInstalled`.
 
 ## Calling a model directly
 

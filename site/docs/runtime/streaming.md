@@ -15,6 +15,9 @@ prediction, and errors:
 --8<-- "tutorials/streaming/Streaming.scala:stream-consume"
 ```
 
+The `finally` closes the iterator, also when a handler throws an exception. Thus the
+producer thread does not stay parked. After the end of the stream, the close has no effect.
+
 ## Streaming a program
 
 Wrap a program with `Streamify.streamify` and declare which output fields to

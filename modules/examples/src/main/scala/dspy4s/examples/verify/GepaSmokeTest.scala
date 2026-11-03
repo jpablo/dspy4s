@@ -2,41 +2,26 @@
  * Real-LM smoke / efficacy harness for GEPA (Genetic-Pareto reflective prompt evolution, PORT_GAPS G-12).
  *
  * Mirrors OptimizerSmokeTest: an instruction-SENSITIVE classification task (does the text contain a digit ->
- * "HAS_NUM" / "NO_NUM"). The vague baseline instruction under-scores; GEPA must reflect on its mistakes (via a
- * FeedbackMetric that explains the rule) and evolve a better instruction. Validates the whole tower —
- * FeedbackMetric -> GepaAdapter (failure-aware traces) -> reflective dataset -> reflection LM -> Pareto loop —
- * against a real model.
+ * "HAS_NUM" / "NO_NUM"). The vague baseline instruction usually has a low score. GEPA must reflect on its mistakes
+ * (through a FeedbackMetric that explains the rule) and evolve a better instruction. The run covers
+ * FeedbackMetric -> GepaAdapter (failure-aware traces) -> reflective dataset -> reflection LM -> Pareto loop
+ * against a real model. It calls sys.error for an error of GEPA, and when each LM call failed.
  *
  * Run:  OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.verify.gepaSmokeMain"
- * Tune: OPENAI_MODEL (default gpt-4o-mini), GEPA_METRIC_CALLS (default 60), GEPA_MINIBATCH (default 3).
+ * Tune: DSPY_MODEL (default gpt-4o-mini), OPENAI_BASE_URL, GEPA_METRIC_CALLS (default 60), GEPA_MINIBATCH (default 3).
  */
 package dspy4s.examples.verify
 
-import dspy4s.adapters.ChatAdapter
-import dspy4s.core.contracts.{
-  CallbackEvent,
-  CallbackHandler,
-  DspyError,
-  DynamicValues,
-  LmEndEvent,
-  RuntimeContext,
-  TraceEntry
-}
-import dspy4s.core.data.{RawPrediction, Example}
-import dspy4s.core.contracts.:=
-import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.core.signatures.SignatureDsl
+import dspy4s.core.contracts.{:=, DspyError, DynamicValues, RuntimeContext, TraceEntry}
+import dspy4s.core.data.{Example, RawPrediction}
+import dspy4s.examples.Demo
 import dspy4s.gepa.{Gepa, GepaBudget, GepaConfig, MetricCallCount, MinibatchSize}
 import dspy4s.gepa.contracts.{FeedbackMetric, ScoreWithFeedback}
-import dspy4s.lm.providers.OpenAiLanguageModel
 import dspy4s.programs.strategies.DynamicPredict
-import dspy4s.programs.optimization.OptimizableId
-
-import java.util.concurrent.atomic.AtomicInteger
+import dspy4s.signatures.Signature
 
 object GepaSmokeTest:
 
-  val signatureDsl             = "text -> label"
   val vagueBaselineInstruction = "Answer the question."
 
   private def example(text: String, label: String): Example =
@@ -63,7 +48,7 @@ object GepaSmokeTest:
     "The soup is salty"
   )
 
-  // 5 of each for training (reflection minibatches), 3 of each held out for validation (frontier scoring).
+  // 5 of each for training (reflection minibatches), 3 of each for validation (frontier scores and the best candidate).
   val trainset: Vector[Example] = withNum.take(5).map(example(_, "HAS_NUM")) ++ noNum.take(5).map(example(_, "NO_NUM"))
   val valset: Vector[Example]   = withNum.drop(5).map(example(_, "HAS_NUM")) ++ noNum.drop(5).map(example(_, "NO_NUM"))
 
@@ -88,70 +73,47 @@ object GepaSmokeTest:
             "The label must be exactly HAS_NUM when the text contains a digit, and NO_NUM otherwise."
       Right(ScoreWithFeedback(if correct then 1.0 else 0.0, fb))
 
-  def envInt(name: String, default: Int): Int =
-    sys.env.get(name).flatMap(_.toIntOption).filter(_ > 0).getOrElse(default)
-
-  /** Prints a char per LM call so the otherwise-silent reflective loop visibly makes progress. */
-  final class ProgressLmCallback extends CallbackHandler:
-    private val calls                                                      = new AtomicInteger(0)
-    def count: Int                                                         = calls.get()
-    override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
-      event match
-        case _: LmEndEvent => val _ = calls.incrementAndGet(); System.out.print("."); System.out.flush()
-        case _             => ()
-
 @main def gepaSmokeMain(): Unit =
   import GepaSmokeTest.*
 
-  val model         = sys.env.getOrElse("OPENAI_MODEL", "gpt-4o-mini")
-  val metricCalls   = envInt("GEPA_METRIC_CALLS", 60)
-  val minibatchSize = envInt("GEPA_MINIBATCH", 3)
+  val metricCalls   = Demo.envInt("GEPA_METRIC_CALLS", 60)
+  val minibatchSize = Demo.envInt("GEPA_MINIBATCH", 3)
+  val progress      = new ProgressLmCallback
 
-  OpenAiLanguageModel.fromEnv(model) match
-    case Left(err) =>
-      println(s"[gepa-smoke] Skipping — no live LM: ${err.message}")
-      println(
-        """[gepa-smoke] Set OPENAI_API_KEY and re-run: sbt "examples/runMain dspy4s.examples.verify.gepaSmokeMain""""
+  // The default model is gpt-4o-mini, because this run pins temperature 0, and a reasoning model rejects that value.
+  Demo.withOpenAi(defaultModel = "gpt-4o-mini", callbacks = Vector(progress)) { lm =>
+    val baseLayout = Signature.fromString("text -> label", vagueBaselineInstruction).layout
+    val student    = DynamicPredict(layout = baseLayout, config = DynamicValues.record("temperature" := 0.0))
+
+    // GEPA uses the same model as both task LM (ambient) and reflection LM here; pass a stronger model as the
+    // reflection LM in real use.
+    // Opt in to the perfect-score early stop so the harness doesn't burn its post-convergence budget on
+    // skip-perfect minibatches (the library default is off, matching upstream gepa's run-to-budget behavior).
+    val gepa = new Gepa[DynamicPredict](
+      metric,
+      reflectionLm = lm,
+      GepaConfig(
+        budget = GepaBudget.MetricCalls(MetricCallCount.applyUnsafe(metricCalls)),
+        reflectionMinibatchSize = MinibatchSize.applyUnsafe(minibatchSize),
+        stopOnPerfectScore = true,
+        seed = 0L
       )
+    )
 
-    case Right(lm) =>
-      val baseLayout = SignatureDsl.parse(signatureDsl).toOption.get.withInstructions(Some(vagueBaselineInstruction))
-      // Pin temperature=0 so before/after scores are real, not sampling noise.
-      val student  = DynamicPredict(layout = baseLayout, config = DynamicValues.record("temperature" := 0.0))
-      val progress = new ProgressLmCallback
+    println(s"[gepa-smoke] model=${lm.model}  budget=$metricCalls metric calls  minibatch=$minibatchSize")
+    println(s"""[gepa-smoke] task: HAS_NUM/NO_NUM   baseline instruction: "$vagueBaselineInstruction"""")
+    println(s"[gepa-smoke] train=${trainset.size}, val=${valset.size}   (one '.' per LM call, 'x' = a failed call)\n")
 
-      RuntimeEnvironment.withSettings(
-        RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()), callbacks = Some(Vector(progress)))
-      ) {
-        given RuntimeContext = RuntimeEnvironment.current
-
-        // GEPA uses the same model as both task LM (ambient) and reflection LM here; pass a stronger model as the
-        // reflection LM in real use.
-        // Opt in to the perfect-score early stop so the harness doesn't burn its post-convergence budget on
-        // skip-perfect minibatches (the library default is off, matching upstream gepa's run-to-budget behavior).
-        val gepa = new Gepa[DynamicPredict](
-          metric,
-          reflectionLm = lm,
-          GepaConfig(
-            budget = GepaBudget.MetricCalls(MetricCallCount.applyUnsafe(metricCalls)),
-            reflectionMinibatchSize = MinibatchSize.applyUnsafe(minibatchSize),
-            stopOnPerfectScore = true,
-            seed = 0L
-          )
-        )
-
-        println(s"[gepa-smoke] model=$model  budget=$metricCalls metric calls  minibatch=$minibatchSize")
-        println(s"""[gepa-smoke] task: HAS_NUM/NO_NUM   baseline instruction: "$vagueBaselineInstruction"""")
-        println(s"[gepa-smoke] train=${trainset.size}, val=${valset.size}   (one '.' per LM call)\n")
-
-        gepa.compile(student, trainset = trainset, valset = valset) match
-          case Left(error)   => println(s"\n\n[gepa-smoke] GEPA stopped with an error: ${error.message}")
-          case Right(result) =>
-            println(s"\n\n[gepa-smoke] ${progress.count} LM calls; ${result.numCandidates} candidates explored.")
-            println(
-              f"[gepa-smoke] best validation score: ${result.bestScore}%.3f / 1.0 (${result.bestScore * 100}%.1f%%)"
-            )
-            val discovered = result.bestCandidate.get(OptimizableId(0)).flatten.getOrElse("(none)")
-            println(s"""[gepa-smoke] discovered instruction:\n    "$discovered"""")
-            println("[gepa-smoke] done — GEPA ran end-to-end against a live model.")
-      }
+    gepa.compile(student, trainset = trainset, valset = valset) match
+      case Left(error)   => sys.error(s"[gepa-smoke] GEPA stopped with an error: ${error.message}")
+      case Right(result) =>
+        println(s"\n\n[gepa-smoke] ${progress.count} LM calls; ${result.numCandidates} candidates explored.")
+        println(f"[gepa-smoke] seed validation score: ${result.state.aggregateScore(0)}%.3f / 1.0")
+        println(f"[gepa-smoke] best validation score: ${result.bestScore}%.3f / 1.0 (${result.bestScore * 100}%.1f%%)")
+        println(s"[gepa-smoke] stop reason: ${result.stopReason}")
+        val discovered = result.bestProgram.layout.instructions.getOrElse("(none)")
+        println(s"""[gepa-smoke] discovered instruction:\n    "$discovered"""")
+        if progress.count > 0 && progress.errorCount == progress.count then
+          sys.error(s"[gepa-smoke] each of the ${progress.count} LM calls failed.")
+        println("[gepa-smoke] done: GEPA ran end-to-end against a live model.")
+  }

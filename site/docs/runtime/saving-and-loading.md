@@ -66,7 +66,7 @@ execution resources. Recreate and configure those normally, then load state into
 
 ## OptimizableLeaf IDs and compatibility
 
-The JSON object keys are `predictor-0`, `predictor-1`, and so on. They are ordinal
+The keys under `optimizableParameters` are `optimizable-0`, `optimizable-1`, and so on. They are ordinal
 IDs derived from the root `OptimizableStructure` leaf order:
 
 - JSON object order does not matter.

@@ -25,11 +25,11 @@ How to start:
 | File | Topic |
 |---|---|
 | [`Signatures.scala`](./Signatures.scala) | Declaring signatures (string / function / case-class / `Spec`). |
-| [`Modules.scala`](./Modules.scala) | `Predict`, `ChainOfThought`, and composing modules. |
-| [`Tools.scala`](./Tools.scala) | `ReAct` agents over `ToolFunction`s (incl. `ToolFunction.fromMethod`). |
+| [`Modules.scala`](./Modules.scala) | `Predict` and `ChainOfThought`. The header names the upstream blocks that the file leaves out. |
+| [`Tools.scala`](./Tools.scala) | `ReAct` agents over `ToolFunction`s (incl. `ToolFunction.fromMethod`), and the manual tool path. |
 | [`Adapters.scala`](./Adapters.scala) | `ChatAdapter` / `JSONAdapter`, and inspecting the formatted prompt. |
 | [`LanguageModels.scala`](./LanguageModels.scala) | Configuring the LM, direct calls, generation params, usage, errors. |
 | [`Mcp.scala`](./Mcp.scala) | The tools of an MCP server as `ToolFunction`s (`McpTools.fromClient`), with `ReAct`. |
 
-Not yet portable here: `Assertions7.scala` (no `Assert`/`Suggest` — use `Refine`/`BestOfN`). See the
+Upstream removed `dspy.Assert` and `dspy.Suggest`, so its page `7-assertions.md` has no file here. See the
 [module README](../../../../../../../../README.md) for the full status table.

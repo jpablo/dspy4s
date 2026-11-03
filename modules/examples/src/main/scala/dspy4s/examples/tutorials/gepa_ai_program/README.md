@@ -14,8 +14,10 @@ dspy4s ships a self-contained GEPA implementation in the **`dspy4s-gepa`** modul
 ([`modules/gepa`](../../../../../../../../gepa)) — the engine is ported directly (upstream's is a thin adapter over
 the external `gepa` package), so there is no external dependency. It covers reflective mutation + instance-Pareto
 candidate selection, round-robin/all component selection, the epoch-shuffled minibatch sampler, merge (crossover)
-proposals, an evaluation cache, run-dir resume, and an opt-in perfect-score early stop. Multi-objective frontiers
-are deliberately not ported (DSPy's metric is a scalar `ScoreWithFeedback`). See `PORT_GAPS.md` **G-12**.
+proposals, an evaluation cache, run-dir resume, and an opt-in perfect-score early stop. It also has the multi-objective
+frontiers: `GepaConfig.frontierType` selects `Instance` (the default), `Objective`, `Hybrid`, or `Cartesian`. Each type
+other than `Instance` needs objective scores from the metric (`ScoreWithFeedback.objectiveScores`). See `PORT_GAPS.md`
+**G-12** and **G-45**.
 
 ## What GEPA needs that other optimizers don't
 
@@ -58,9 +60,13 @@ harness exercises the whole tower — `FeedbackMetric` → failure-aware traces 
 OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.verify.gepaSmokeMain"
 ```
 
-See [`examples/verify/GepaSmokeTest.scala`](../../verify/GepaSmokeTest.scala): a vague baseline instruction
-("Answer the question.") is evolved into a precise HAS_NUM/NO_NUM classifier, lifting the held-out validation
-score to 1.0.
+The run reads `DSPY_MODEL` (the default is `gpt-4o-mini`, because it pins temperature 0), and `OPENAI_BASE_URL` for
+another OpenAI-compatible endpoint.
+
+See [`examples/verify/GepaSmokeTest.scala`](../../verify/GepaSmokeTest.scala): GEPA evolves a vague baseline
+instruction ("Answer the question.") for a HAS_NUM/NO_NUM classifier. The run prints the validation score of the seed
+candidate, the best validation score, and the stop reason. It stops with an error when GEPA gives an error, or when
+each LM call fails.
 
 For the few-shot/instruction optimizers, see [`learn/optimization`](../../learn/optimization/README.md)
 (`BootstrapFewShot*`, `COPRO`, `MIPROv2`).

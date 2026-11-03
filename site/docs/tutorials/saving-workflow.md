@@ -45,7 +45,7 @@ name, runtime, output schema, bound LM, and tools. For the complete contract and
 sbt "examples/runMain dspy4s.examples.tutorials.saving.savingMain"
 ```
 
-The runnable `savingMain` performs the round-trip offline. It hand-attaches a couple of demos in place of `compile`, saves to a temp file, loads into a fresh program, and asserts the demo count is preserved, so no LM is required to run it.
+The runnable `savingMain` does the round trip with no model. It attaches two demos by hand in place of `compile`, saves to a temporary file, loads into a fresh program, and asserts that the loaded demos equal the saved demos.
 
 ## Notes
 

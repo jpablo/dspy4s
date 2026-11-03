@@ -18,8 +18,8 @@ There's no dspy4s port of the notebook, but the building blocks exist:
   and [llms.txt](../llms_txt_generation/LlmsTxtGeneration.scala) examples thread several `ChainOfThought`s).
 - A small local LM: point `OpenAiLanguageModel` at an OpenAI-compatible endpoint (Ollama/vLLM) — see
   [`learn/programming/LanguageModels.scala`](../../learn/programming/LanguageModels.scala).
-- A judge-as-metric: implement the `Metric` trait around a judge program (note the metric layer can't itself
-  call an LM — run the judge program and score its output; see [`learn/evaluation`](../../learn/evaluation/README.md)).
-
-The teacher-led optimization of a local student is **not** reproducible yet — dspy4s's optimizers are
-`BootstrapFewShot*` only (no teacher-distillation / finetuning).
+- A judge-as-metric: implement the `Metric` trait around a judge program. `Metric.score` gets a `RuntimeContext`, so a
+  metric can call an LM. `evaluate/metrics/AutoEvaluation.scala` has metrics that run a judge, and
+  [`learn/evaluation`](../../learn/evaluation/README.md) shows them.
+- A teacher for a local student: `Teleprompter.compile` takes a `teacher`, so a large model can teach a small local LM.
+  [`optimize_ai_program`](../optimize_ai_program/README.md) lists the optimizers. dspy4s has no finetuning.

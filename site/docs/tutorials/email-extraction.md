@@ -24,7 +24,7 @@ Each signature is a trait extending `Spec` with `InputField` and `OutputField` m
 --8<-- "tutorials/email_extraction/EmailExtraction.scala:processor"
 ```
 
-`EmailProcessor` holds one `ChainOfThought` per signature, built with `Signature.of[...]`. Each call returns `Either[DspyError, ...]`, so `forward` threads the steps through a for-comprehension: a `Left` from any step short-circuits, and the success path reads fields from each step's `output` to assemble the final `EmailAnalysis`. The classification result feeds entity extraction, both feed the summary, and the three together feed action generation.
+`EmailProcessor` holds one `ChainOfThought` per signature, built with `Signature.of[...]`. The `instructions` argument gives the task text that the model gets. With no `instructions`, the model gets a default text that only names the fields. Each call returns `Either[DspyError, ...]`, so `forward` threads the steps through a for-comprehension: a `Left` from any step short-circuits, and the success path reads fields from each step's `output` to assemble the final `EmailAnalysis`. The classification result feeds entity extraction, both feed the summary, and the three together feed action generation.
 
 ## Running it
 

@@ -8,7 +8,7 @@ This example runs the MIPROv2 optimizer over a small trainset and counts the LM 
 --8<-- "tutorials/optimizer_tracking/OptimizerTracking.scala:tracking-callback"
 ```
 
-`CompileTrackingCallback` implements `CallbackHandler` and reacts to `CallbackEvent`s. It increments a counter on every `LmEndEvent`, giving a running total of LM calls. The same seam carries a logger, a tracer, or a metrics exporter when you need richer observation.
+`CompileTrackingCallback` implements `CallbackHandler` and reacts to `CallbackEvent`s. It increments a counter on every `LmEndEvent`, giving a running total of LM calls. A `CallbackHandler` can also be a logger, a tracer, or a metrics exporter.
 
 ## Running the optimizer with tracking
 

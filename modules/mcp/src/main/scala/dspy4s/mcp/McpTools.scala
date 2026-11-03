@@ -3,7 +3,8 @@ package dspy4s.mcp
 import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.{:=, DspyError, DynamicValues, PythonText, RuntimeError, TypeRef}
 import dspy4s.programs.contracts.ToolFunction
-import io.modelcontextprotocol.client.McpSyncClient
+import io.modelcontextprotocol.client.{McpClient, McpSyncClient}
+import io.modelcontextprotocol.spec.McpClientTransport
 import zio.blocks.schema.DynamicValue
 
 /** One tool of an MCP server, as the server lists it (`tools/list`).
@@ -67,6 +68,17 @@ object McpToolClient:
     * as an `InterruptedException`. Each other exception of the SDK becomes a `Left`.
     */
   def fromSync(client: McpSyncClient): McpToolClient = SdkToolClient(client)
+
+  /** Open a client of the MCP Java SDK on `transport` with the default settings of the SDK, initialize it, run `body`,
+    * and close it. A converted tool uses the open client for each call, so the agent must run in `body` (upstream:
+    * "Keep the agent call inside the open MCP session").
+    *
+    * A failure to connect is a `Left` with the message `MCP client failed: <cause>`. The session of the SDK only logs a
+    * failure to start the transport, so a command that does not exist gives the `Left` when the initialization timeout
+    * of the SDK ends (20 seconds). An interrupt of the caller goes up as an `InterruptedException`.
+    */
+  def using[A](transport: McpClientTransport)(body: McpToolClient => Either[DspyError, A]): Either[DspyError, A] =
+    SdkToolClient.using(McpClient.sync(transport).build())(body)
 
 /** The conversion of MCP tools to dspy4s tools (upgrade item I10, PORT_GAPS G-47; upstream `convert_mcp_tool` in
   * `dspy/utils/mcp.py`).

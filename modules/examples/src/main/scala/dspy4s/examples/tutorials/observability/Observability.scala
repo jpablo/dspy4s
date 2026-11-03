@@ -73,10 +73,10 @@ object Observability:
   // ── Snippet 3 — `dspy.inspect_history(n=5)` ──
   // dspy4s's analogue is `RuntimeEnvironment.inspectHistory(n)` / `printHistory(n)`, reading the per-thread
   // `RuntimeContext.history` (populated by a `ManagedLanguageModel`) — see learn/programming/Adapters. The
-  // `CallbackHandler` (above) is the richer observability seam, and the one this tutorial focuses on.
+  // `CallbackHandler` (above) is the richer observability hook, and the one this tutorial focuses on.
   //
   // ── Snippets 4 / 5 — MLflow autolog (`mlflow.dspy.autolog()`, tracking server, Tavily search) ──
-  // Not portable: dspy4s has no MLflow integration. The callback stream is the observability seam.
+  // Not portable: dspy4s has no MLflow integration. The callback stream is the observability hook.
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.observability.observabilityMain"
 @main def observabilityMain(): Unit =

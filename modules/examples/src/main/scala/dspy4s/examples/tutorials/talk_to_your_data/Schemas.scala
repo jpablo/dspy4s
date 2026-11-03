@@ -36,8 +36,8 @@ final case class Filter(column: String, op: FilterOp, value: String) derives Sch
 /** Inclusive date window over a date column (ISO `yyyy-MM-dd` strings; lexicographic compare is correct). */
 final case class TimeRange(column: String, start: Option[String], end: Option[String]) derives Schema
 
-/** Ordering for grouped results; `by = "value"` sorts by the aggregate, otherwise by a group column. */
-final case class Sort(by: String, descending: Boolean) derives Schema
+/** Sorts the groups by the aggregate value. */
+final case class Sort(descending: Boolean) derives Schema
 
 /** The structured intent of a natural-language question: the "plan" the agent commits to before computing anything.
   * This is the heart of the type-safety story. An English question becomes a structured, inspectable value that the
@@ -71,7 +71,7 @@ final case class AnalysisResult(
 ) derives Schema
 
 /** The verifier's verdict over an [[AnalysisResult]]. */
-final case class Verdict(ok: Boolean, issues: List[String]) derives Schema
+final case class Verdict(ok: Boolean, issues: List[String])
 
 /** One row of the synthetic e-commerce dataset. Pure Scala (not `derives Schema`), the internal data the Scala query
   * engine operates on; the agent sees the data as CSV text.

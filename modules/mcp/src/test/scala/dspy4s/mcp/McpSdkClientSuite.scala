@@ -33,6 +33,7 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Paths
 import java.time.Duration
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicReference
 import scala.jdk.CollectionConverters.*
 import scala.util.control.NonFatal
 
@@ -47,23 +48,31 @@ class McpSdkClientSuite extends FunSuite:
   /** The lines that the server writes to stderr. A failure shows them. */
   private val serverErrors = new ConcurrentLinkedQueue[String]()
 
+  /** A new transport that starts [[McpTestServer]] in a child JVM. */
+  private def serverTransport(): StdioClientTransport =
+    val javaBin    = Paths.get(System.getProperty("java.home"), "bin", "java").toString
+    val parameters = ServerParameters
+      .builder(javaBin)
+      .args("-cp", System.getProperty("java.class.path"), "dspy4s.mcp.McpTestServer")
+      .build()
+    val transport = new StdioClientTransport(parameters, McpJsonDefaults.getMapper())
+    transport.setStdErrorHandler { line =>
+      val _ = serverErrors.add(line)
+    }
+    transport
+
+  /** A new transport with a command that does not exist. */
+  private def missingCommandTransport(): StdioClientTransport =
+    new StdioClientTransport(ServerParameters.builder("/no/such/command").build(), McpJsonDefaults.getMapper())
+
   private val server = new Fixture[McpSyncClient]("mcp-server"):
     @volatile private var client: Option[McpSyncClient] = None
 
     override def apply(): McpSyncClient = client.getOrElse(fail(s"the MCP client is not open; stderr: $stderr"))
 
     override def beforeAll(): Unit =
-      val javaBin    = Paths.get(System.getProperty("java.home"), "bin", "java").toString
-      val parameters = ServerParameters
-        .builder(javaBin)
-        .args("-cp", System.getProperty("java.class.path"), "dspy4s.mcp.McpTestServer")
-        .build()
-      val transport = new StdioClientTransport(parameters, McpJsonDefaults.getMapper())
-      transport.setStdErrorHandler { line =>
-        val _ = serverErrors.add(line)
-      }
       val opened = McpClient
-        .sync(transport)
+        .sync(serverTransport())
         .requestTimeout(Duration.ofSeconds(30))
         .initializationTimeout(Duration.ofSeconds(60))
         .build()
@@ -259,4 +268,43 @@ class McpSdkClientSuite extends FunSuite:
         assert(message.contains("Unknown tool"), message)
         assert(message.contains("missing"), message)
       case other => fail(s"not a Left of the mcp component: $other")
+  }
+
+  // ── McpToolClient.using ─────────────────────────────────────────────────────────────────────────────────────────
+
+  test("using runs a tool of the real server") {
+    given RuntimeContext = RuntimeContext()
+    val result           = McpToolClient.using(serverTransport()) { client =>
+      McpTools.fromClient(client).flatMap { converted =>
+        converted.find(_.name == "echo").getOrElse(fail("no echo tool")).invoke(DynamicValues.record("text" := "hi"))
+      }
+    }
+    assertEquals(result, Right(DynamicValues.string("hi")))
+  }
+
+  test("a transport with a command that does not exist is a Left, not an exception") {
+    // The session of the SDK only logs the failure to start the command, so the client waits for its initialization
+    // timeout. The default is 20 seconds, so this test gives its own client to the method under `McpToolClient.using`.
+    val client = McpClient.sync(missingCommandTransport()).initializationTimeout(Duration.ofMillis(200)).build()
+    SdkToolClient.using(client)(_ => Right(())) match
+      case Left(RuntimeError(component, message)) =>
+        assertEquals(component, "mcp")
+        assert(message.startsWith("MCP client failed: "), message)
+      case other => fail(s"not a Left of the mcp component: $other")
+  }
+
+  test("an interrupt of the caller while the client initializes goes up as an InterruptedException") {
+    val outcome = new AtomicReference[String]("no outcome")
+    val caller  = new Thread(() =>
+      outcome.set(
+        try McpToolClient.using(missingCommandTransport())(_ => Right(())).toString
+        catch
+          case _: InterruptedException =>
+            s"InterruptedException, interrupt status ${Thread.currentThread().isInterrupted}"
+      )
+    )
+    caller.start()
+    caller.interrupt()
+    caller.join(10000)
+    assertEquals(outcome.get(), "InterruptedException, interrupt status false")
   }
