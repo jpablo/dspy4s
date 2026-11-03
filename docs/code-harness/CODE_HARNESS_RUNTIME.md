@@ -420,6 +420,9 @@ in the next table, are *(inference)*.
 | Fork of a session | 3. Contortion | A persistence id is one linear stream. A fork needs a full copy, or a parent pointer that custom recovery code follows. That code duplicates the Pekko recovery. |
 | REPL replay, and a cell that continues after a crash | 4. No fit | The event handler must be pure, and it also runs after each write. A replay compiles and runs code, and it makes live objects. So the replay must run outside, and Pekko gives only the event list. |
 
+The current design has no commit across sessions ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), 4.1 and 8.6). So
+each host uses the same small saga, and the row "Commit across sessions" is no longer a cost of Pekko.
+
 An LM output that becomes an event is not a mismatch. A command can carry an external result, so the step loop is
 a normal composition of Pekko concepts.
 

@@ -207,6 +207,7 @@ harness must do:
 | View | A cut through the memory tree | Derived | Fold, from the tree |
 | Knowledge graph | The facts that an LM extracts from the log | Derived | Stored (LM) |
 | `SessionCard` | A short description of a session for the controller | Derived | Stored (LM) |
+| Catalog | One row for each session: the deterministic part of its `SessionCard` | Derived | Fold, from the logs |
 | Usage totals | The sums of the usage records | Derived | Fold |
 
 ### 3.7 The interaction
