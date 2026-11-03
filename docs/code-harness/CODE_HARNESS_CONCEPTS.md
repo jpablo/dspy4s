@@ -222,6 +222,7 @@ harness must do:
 | Cancel handle | The object that stops running work | Live | Lost |
 | Request id | The key that finds a repeated input | Data | Stored |
 | Approval | A question to a person about one action, with its answer | Control and Record | The question is Stored, but a waiting cell thread is Lost |
+| Grant | The answer to an approval: a guard rule and a lifetime | Record | Stored |
 | Sleep | A wait for a time (`pi-durable`: stored; Codex: a `sleep` tool) | Control | Stored in `pi-durable` |
 | Client | A terminal or a page that shows a session | Live | Lost |
 | Published event | A message from the session to its clients and to the controller | Transient | Fold, for the stored part |
