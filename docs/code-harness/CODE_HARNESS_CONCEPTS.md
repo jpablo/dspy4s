@@ -236,6 +236,7 @@ harness must do:
 | Work session | A session with a scope, which the user talks to directly | Composite | The same as a session |
 | Child session | A session that a cell starts with `rlm(...)` | Composite | The same as a session |
 | Subagent | A short background worker that reports as a message (uniichat, Codex, deepseek-harness) | Composite | Its log, if it has one |
+| Job | A command that runs after its cell ends | Record and Live | The record is a fold of the log, and the process is Lost |
 | Owner | The session or the cell that a child belongs to | Data | Stored |
 | Role | A limit on the authority of a child (Codex) | Data | Stored |
 | `tell` | A message from the controller into a session | Record | Stored |
