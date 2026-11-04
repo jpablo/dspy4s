@@ -151,7 +151,7 @@ harness must do:
 | API reference | The source text of the guest API in the prompt | Derived | Config |
 | Capability | A value that gives permission for one kind of effect | Live | Config (the preamble binds it again) |
 | Handler | The value that decides what a guest API call does | Live | Config |
-| Guard rules | The allow rules and the deny rules of the `guarded` handler | Data | Config |
+| Guard rules | The rules of the `guarded` handler. Each says `Allow`, `Ask` or `Deny` for the calls that it matches. | Data | Config |
 | Sandbox profile | The OS policy of a child process | Derived | Fold, from the mode |
 | Limits | Iterations, LM calls, output size, depth, cell timeout | Data | Config |
 | Middleware | A function that changes the session before a step | Data | Config |
@@ -222,7 +222,7 @@ harness must do:
 | Interrupt | A request to stop the current work (`Abort`, 4.2) | Record | Stored, as `StopRequested` |
 | Cancel handle | The object that stops running work | Live | Lost |
 | Request id | The key that finds a repeated input | Data | Stored |
-| Approval | A question to a person about one action, with its answer | Control and Record | The question is Stored, but a waiting cell thread is Lost |
+| Approval | A question to a person about one action, with its answer | Control and Record | The question is Stored, as `EffectResult.NeedsApproval` and `pending`. A waiting cell thread would be Lost, so no thread waits. |
 | Grant | The answer to an approval: a guard rule and a lifetime | Record | Stored |
 | Sleep | A wait for a time (`pi-durable`: stored; Codex: a `sleep` tool) | Control | Stored in `pi-durable` |
 | Client | A terminal or a page that shows a session | Live | Lost |
