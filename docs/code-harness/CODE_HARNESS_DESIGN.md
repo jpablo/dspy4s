@@ -417,8 +417,10 @@ definition that a cell can use has `@assumeSafe`, because safe mode rejects the 
   update def store[A: Data](key: String, value: A): Unit
 
 @assumeSafe trait Sessions extends Cap:
-  def list(): Vector[String]
-  update def tell(session: String, message: String): Unit
+  def list(): Vector[String]  update def tell(session: String, message: String): Unit
+
+@assumeSafe trait Children extends Cap:
+  update def rlm[A: Data](task: String, inputs: Map[String, String]): A
 
 @assumeSafe object api:
   def println(value: Any): Unit = scala.Console.println(value)
@@ -497,25 +499,30 @@ product of chains `None < Read < Full`.
 enum Access:
   case None, Read, Full
 
-final case class Mode(files: Access, shell: Access, network: Access, llm: Access, sessions: Access, store: Access):
+final case class Mode(files: Access, shell: Access, network: Access, llm: Access, sessions: Access, children: Access, store: Access):
   def <=(that: Mode): Boolean
   def meet(that: Mode): Mode
 ```
 
 | Mode | Givens in the preamble |
 |---|---|
-| Full | `files: Files^`, `shell: Shell^`, `net: Network^`, `llm: Llm^`, `peers: Sessions^`, `state: Store^` |
-| Local | `files: Files^`, `shell: Shell^`, `llm: Llm^`, `peers: Sessions^`, `state: Store^` |
+| Full | `files: Files^`, `shell: Shell^`, `net: Network^`, `llm: Llm^`, `peers: Sessions^`, `children: Children^`, `state: Store^` |
+| Local | `files: Files^`, `shell: Shell^`, `llm: Llm^`, `peers: Sessions^`, `children: Children^`, `state: Store^` |
 | Read-only | `files: Files`, `llm: Llm^`, `peers: Sessions`, `state: Store^` |
-| Controller | `files: Files`, `llm: Llm^`, `peers: Sessions^`, `state: Store^` |
+| Controller | `files: Files`, `llm: Llm^`, `peers: Sessions^`, `children: Children^`, `state: Store^` |
+| A child, a rollout | The givens of its base mode, with the bare `peers: Sessions` and with `children: Children^` |
 
 Each mode has `Store^`, because the store changes only the state of the session. A change of mode needs a new REPL,
 because the preamble changes, so it is a new activation.
 
-**The ceiling law.** A `Sessions^` capability holds a ceiling. The mode of a new session is at most that ceiling. For
-a work session, the ceiling is its own mode, so a child never has more authority than its parent. For the controller,
-the ceiling comes from the configuration of the user. So the controller can start a session with `Files^`, but it
-cannot write a file itself.
+**The ceiling law.** A `Sessions^` or a `Children^` capability holds a ceiling. The mode of a new session is at most
+that ceiling. For a work session, the ceiling is its own mode, so a child never has more authority than its parent.
+For the controller, the ceiling comes from the configuration of the user. So the controller can start a session with
+`Files^`, but it cannot write a file itself.
+
+**The closed law.** A child and a rollout have the mode `base.meet(Mode.closed)`, where `Mode.closed` is `Mode.full`
+with `sessions = Read`. They keep `rlm`, with its depth limit, and the compiler rejects `start` and `tell`. So nothing
+that they start can outlive them, and an optimizer run stays inside its own fork.
 
 ### 5.3 Handlers
 
@@ -720,22 +727,23 @@ configuration. Neither one cut any work.
 |---|---|---|---|---|---|
 | Controller | Controller | Memory tree | The home of the user | Never ends | The harness, one for each user |
 | Work session | Full or local | The choice of the user | A directory, a worktree or a scratch directory | Until the user closes it | The user or `start` |
-| Child | At most the mode of the parent | Window | The scope of the parent, or a fork | Until `submit` | `rlm(...)` |
-| Rollout | Local | Window | A workspace fork | One task | An optimizer |
+| Child | At most the mode of the parent, and closed | Window | The scope of the parent, or a fork | Until `submit` | `rlm(...)` |
+| Rollout | Local, and closed | Window | A workspace fork | One task | An optimizer |
 
 ### 8.2 The operations
 
 | Function | Needs | Meaning |
 |---|---|---|
-| `rlm[A: Data](task, inputs): A` | `Sessions^` | Runs a child inside the cell and gives its value. It is one effect of the parent, and the child has its own journal. |
+| `rlm[A: Data](task, inputs): A` | `Children^` | Runs a child inside the cell and gives its value. It is one effect of the parent, and the child has its own journal. |
 | `start(goal, scope, strategy): SessionRef` | `Sessions^` | Starts a session in the background. Its report comes back as an `Input` with `Source.Child`, and this starts a turn (8.6). |
 | `tell(session, message)` | `Sessions^` | `Send` to that session, with `Source.Controller` or `Source.Child`. It returns after the receiver commits (8.6). |
 | `observe(session, question): String` | `Sessions`, `Llm^` | A read-only `rlm` with the journal of that session as an input. It changes nothing in that session. |
 | `zoom(session, ref): String` | `Sessions` | Reads a part of a journal. |
 | `list(): Vector[SessionCard]` | `Sessions` | The cards of the sessions. The catalog gives the deterministic part (10.2). |
 
-`rlm` shares the budget of the parent and has a depth limit. `start` has no budget of its parent. There is no third
-form of subagent.
+`rlm` shares the budget of the parent and has a depth limit. `start` has no budget of its parent, and the new session
+knows only its goal: it has no view of the conversation of its parent. There is no third form of subagent. The
+`spawn(command)` of `Shell` is a job (10.3), and it stays.
 
 ### 8.3 What the controller sees
 
@@ -1019,8 +1027,8 @@ The checks used Scala `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` and JDK 25.0.5. 
 | The kernel under random schedules, with no threads | 200,000 runs with 317,035 crashes, 220,209 stops, 89,444 late messages, 845,607 grants, 71,546 calls under a `Once` grant, 63,328 jobs and 18,590 `spawn` calls that a stop refused. Each crash read the journal through the JSON codec of `Logged`: 7,829,217 entries, with no change. No run broke a checked law of 4.7. A second phase of 50,000 runs had 132,520 power losses, which cut the journal at the last flush, and no run broke a law. The laws One journal and Report did not run. |
 | The check of that check | Fifteen mutants: keep the waiting inputs after a stop (76,391 runs fail), accept an effect of any cell (8,017), keep a late outcome (25,874), remove a `Once` grant at `EffectStarted` (54,496), keep a `Once` grant after its call (27,042), keep a `Turn` grant after its turn (126,694), keep a grant after `Ended` (50,347), let an `Abort` stop jobs (48,294), keep the jobs after `Ended` (10,983), let `OfLastTurn` reach other turns (15,291), take the list of jobs only from the live table (9,104), no flush at all (43,814 runs of the second phase fail), a flush at the outcome in place of the intent (461), no flush for `Input` (32,416), no flush for `Activated` (14,059). |
 | `drive` with scripts | A chat answer, `submit`, the step limit of both kinds, a failed cell, a failed LM call, a stop during a cell, and a crash during a cell give the expected journals. |
-| `Mode` | The semilattice laws hold over 81 modes. |
-| Modes as givens in a real REPL, with capture checking and safe mode | Read-only mode: `read` compiles, and `write`, `exec`, `spawn`, `stopJob` and `tell` do not. Controller: `tell` compiles, and `write`, `exec` and `stopJob` do not. Local: all compile. |
+| `Mode` | The semilattice laws hold over 81 modes. A meet with `Mode.closed` never gives `Sessions^`, and it keeps `Children^`. |
+| Modes as givens in a real REPL, with capture checking and safe mode | Read-only mode: `read` compiles, and `write`, `exec`, `spawn`, `stopJob` and `tell` do not. Controller: `tell` compiles, and `write`, `exec` and `stopJob` do not. Local: all compile. Read-only also rejects `rlm` and `start`. Controller: `rlm` and `start` compile. Closed: `rlm`, `write` and `exec` compile, and `start` and `tell` do not. |
 | Safe mode in the same REPL | It rejects `asInstanceOf`, the name of the host, `caps.unsafe`, `@assumeSafe`, `Thread`, `Future`, `CompletableFuture`, `Executors`, `System.exit`, `System.currentTimeMillis`, `System.nanoTime`, `System.getenv`, `sys.env`, `java.io.File`, `java.nio.file.Files`, `scala.io.Source`, `Runtime`, `Predef.println`, `java.util.Random`, `UUID.randomUUID` and the `Schema` of zio-blocks. It allows `java.time.Instant.now()`, `java.time.Clock`, `scala.util.Random`, `Math.random()` and `Object.hashCode`. |
 | The JSON codec of `DynamicValue` | 19 of 30 kinds of value change or throw. `Long(5)` comes back as `Int(5)`, `Double(2.5)` as a `BigDecimal`, a `Variant` and a `Map` as a `Record`. NaN, the infinities and a record as a map key throw at the encode. A `GuardRule` with `Exact` matches its call before the codec, and it does not match after the codec. |
 | `Data` with `decode`, in a real REPL | Enums, sealed traits, recursion, mutual recursion, generic types, tuples, named tuples and maps come back equal through the journal text. The compiler rejects capabilities, functions, `Any`, plain classes, iterators, lazy lists and mutable buffers. |
@@ -1102,13 +1110,13 @@ What did not run:
 ## 14. The choices
 
 The decisions of [CODE_HARNESS.md](CODE_HARNESS.md), 7.10 and 8.7 stay, except decision 1 of 8.7, as item 7 says.
-These choices are new in this document. Only choices 1, 2, 13, 14, 15, 16 and 17 are confirmed:
+These choices are new in this document. Only choices 1, 2, 3, 13, 14, 15, 16 and 17 are confirmed:
 
 | # | Choice | Answers |
 |---|---|---|
 | 1 | Confirmed on 2026-11-03. The kernel has four pure functions, and `drive` takes the place of `AgentLoop.run` in the harness. RLM stays on `AgentLoop` for now. | |
 | 2 | Confirmed on 2026-11-04. `Activated` takes the place of `Started` and `Reopened`, and it holds the configuration. `Child` and `Submitted` are not entries. | |
-| 3 | All work is a session. `Sessions` takes the place of `Agents`, and it holds a ceiling. `spawn` for subagents goes away. | Question 5 of section 11 |
+| 3 | Confirmed on 2026-11-04. All work is a session. `Sessions` and `Children` take the place of `Agents`, and each holds a ceiling. `spawn` for subagents goes away. `rlm` needs `Children^`, and `start` and `tell` need `Sessions^`. A child and a rollout have only `Children^` (5.2). | Question 5 of section 11 |
 | 4 | Long work is a job. There is no yield protocol. | Question 2 of 9.4 |
 | 5 | A cell never waits for a person. Approvals use `Grant`. | |
 | 6 | `Data` is the type of a value that leaves a cell. | |
@@ -1144,7 +1152,7 @@ Each phase ends with something that runs.
 | 2. Guest API and REPL | `harness-guest`, `harness-repl`, the modes, the guards of Phase 0 on JDK 25, the laws of `Data` as properties, the second try of a cell, the catch around `ReplDriver.run`, the error hints, and negative tests for modes. | Model code runs against the guest API in each mode. |
 | 3. Sandbox | `harness-sandbox`: Seatbelt and bubblewrap, profiles from modes, and escape tests. | `exec` runs only in a sandbox. |
 | 4. One task | `Harness`, `drive`, the window strategy, `OptimizableStructure`, `ProgramRunner`. | A harness for one task that the optimizers accept. |
-| 5. RLM | `llmQuery`, `rlm`, the shared budget, the depth limit. | RLM in the harness. |
+| 5. RLM | `llmQuery`, `rlm` behind `Children^`, the shared budget, the depth limit. | RLM in the harness. |
 | 6. Optimization | A metric from tests, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
 | 7. The session host | `harness-host-kyo`: the actor, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs` and the job table, crash tests with SIGKILL that also check that no job process stays. `harness-cli`. | A coding agent for daily use, one session at a time. |
 | 8. Memory | The memory tree and its metric. | Long sessions that lose no detail. |

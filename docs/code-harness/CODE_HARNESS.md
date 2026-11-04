@@ -465,8 +465,8 @@ object api:
 
 `Data` is a type class that the guest API owns. Safe code cannot name the `Schema` of zio-blocks
 ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), 5.1). A value in an entry is now `Json`, in place of the
-`DynamicValue` in the code of this document, because the JSON codec of `DynamicValue` changes values (same document,
-4.1 and 12).
+`DynamicValue` in the code of this document, because the JSON codec of `DynamicValue` changes values (same document, 4.1 and 12). `Sessions` and `Children` also
+take the place of `Agents` in the code of this document (same document, 5.2).
 
 The rules:
 
@@ -601,7 +601,7 @@ LM. An overload for `Classified` values, as in atc and tacit, depends on questio
 - `rlm(task, inputs)` is a recursive call of the same program. The child gets a new REPL, a depth limit that is
   one less than the limit of the parent, and the shared LM call budget. The child gives its submitted value to
   the parent code.
-- `rlm` takes the capability `Agents^` (F2). The mode of the child is at most the mode of the parent: the child
+- `rlm` takes the capability `Children^` (F2). The mode of the child is at most the mode of the parent: the child
   can get fewer capabilities or read-only views, but never more. Codex roles and deepseek-harness providers have
   the same rule (2.4, 2.5).
 - The budgets are Iron types: the current `IterationLimit`, `LlmCallLimit` and `OutputCharLimit`, and two new
@@ -1033,14 +1033,15 @@ Two entry points use the same kernel:
 
 - The inputs of `I` enter the REPL as typed values, and the prompt shows a summary of each value (F5).
 - `llmQuery` and `llmQueryBatched` take `Llm^` and run the `subQuery` leaf (F4).
-- `rlm(task, inputs)` takes `Agents^`. It starts a child session with the same `Harness` value, a new REPL, and a
+- `rlm(task, inputs)` takes `Children^`. It starts a child session with the same `Harness` value, a new REPL, and a
   mode that is at most the mode of the parent. The child uses the same leaves, so its calls have the same keys.
   The parent log has one effect with the result, as for each guest API call. The child log stays separate, so the
   parent context stays small.
 - Later, the current `RLM` program can become a `Harness` with the Python REPL handler and the RLM prompt. Then
   dspy4s has one code program, as decision D1 intends.
 
-There are two kinds of subagents:
+An earlier draft had two kinds of subagents. Choice 3 of [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md) removes
+`spawn(task)`, and `start` takes its place:
 
 | Function | Semantics | Use |
 |---|---|---|
@@ -2075,8 +2076,8 @@ guest code, a forked JVM with a protocol for the guest calls, guard 4, Linux, or
 3. **RLM.** Does the current `RLM` move onto the kernel later, so that dspy4s has one code program?
 4. **Log shape.** Section 7 answers this question with both shapes: a session for each task, and one controller
    log that never ends. For the optimizer, an episode is a fork and one task.
-5. **Subagents.** `rlm(...)` stays. With the sessions of section 7, is `spawn(...)` still necessary, or does the
-   controller `start` replace it?
+5. **Subagents.** Decided: `rlm(...)` stays, and `start` takes the place of `spawn(...)`
+   ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), choice 3).
 6. **Memory access.** Is `zoom` the only way to read the memory, as in uniichat? Or can code also search the
    memory, for example with `llmQuery` over a subtree?
 7. **Permissions.** F7 and F8 answer the main part: a `guarded` handler with a policy (atc), and an OS sandbox
