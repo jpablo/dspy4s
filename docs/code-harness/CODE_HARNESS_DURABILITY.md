@@ -304,7 +304,8 @@ these rules:
    and Codex.
 7. **Crash loops.** Count the restarts of each session, and park the session after a limit.
 8. **A disk policy.** Decide where `fsync` is necessary. At least, flush before each effect, as deepseek-harness
-   does.
+   does. Choice 17 of [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md) decides this: a flush before each effect that
+   can change something outside the session.
 9. **Crash tests.** Kill a process with SIGKILL during a model request and during a guest API call, as the
    deepseek-harness tests do.
 

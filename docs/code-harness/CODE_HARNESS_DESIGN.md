@@ -126,13 +126,17 @@ Step  ::= StepStarted [ Acted [ Cell ] ]
 Cell  ::= ( EffectStarted | EffectDone )* Observed
 ```
 
-Four rules about the journal:
+Five rules about the journal:
 
 - **The commit.** `commit` returns after the write reaches the backend, so an intent is in the journal before its
   effect starts. A stream delta to a client is not state: a client can show it, and a crash can lose it.
 - **One journal.** One commit writes to one journal. A commit across sessions needs all sessions in one database.
   Without it, each backend of `Journal` stays possible: a file on a local disk, a Pekko journal or a server database.
   Section 8.6 says how a message goes from one journal to another.
+- **The flush.** A normal commit survives a crash of the process, and a power loss can remove it. A commit with an
+  entry that `needsFlush` also reaches the disk before `commit` returns. A flush covers all earlier commits, so after
+  a power loss the journal is a prefix. A read that a power loss removes does no harm, because nothing outside
+  changed.
 - **Unknown entries.** A reader that cannot decode an entry stops a rebuild if `required` is true, and it skips the
   entry if `required` is false.
 - **The values.** A value in an entry is `Json`, which has only the six JSON cases. `Data` gives each value its form
@@ -144,6 +148,16 @@ Four rules about the journal:
 | The LM call of the policy | `StepStarted` | `Acted` |
 | A cell | `Acted` with code | `Observed` |
 | A guest API call, with `llmQuery` and `rlm(...)` | `EffectStarted` | `EffectDone` |
+
+```scala
+// The operations that change nothing outside the session. Each other operation flushes, so a new one is safe.
+val readOnlyOps = Set("read", "keys", "load", "sessions", "jobOutput", "now", "zoom", "observe", "llmQuery")
+
+def needsFlush(entry: Entry): Boolean = entry match
+  case Entry.EffectStarted(_, op, _)             => !readOnlyOps(op)
+  case Entry.Input(_, _) | Entry.Activated(_, _) => true   // a sender has an answer, or a parent has a child
+  case _                                         => false
+```
 
 ### 4.2 The state is a fold
 
@@ -362,6 +376,7 @@ TurnEnded(Aborted)
 | Homomorphism | `state(a ++ b)` is the fold of `b` from `state(a)`. |
 | Language | Each journal is a word of the language of 4.1. |
 | Commit | A reader sees an entry only after its commit. |
+| Flush | After a power loss, the journal is a prefix that ends at the last flush. Each effect that changed the world has its intent in it, and so does each `Input` for which a sender got an answer. |
 | Effect | An intent commits before its effect, and the outcome commits after the effect. Each intent has exactly one outcome after a repair. |
 | Stop | After `StopRequested`, `next` starts no new work, and `decide` accepts no new intent. |
 | One journal | One commit writes to one journal. |
@@ -609,9 +624,10 @@ knows how much they trust that call.
 - **One cell at a time, on its own thread,** with `Console.withOut` and the stop flag.
 - **A cell commits only if it completes.** After `CompileError`, `Failed` or `TimedOut`, a later cell sees only the
   definitions from before the cell, and the store writes are gone.
-- **A second try in two parts.** The capture checker can reject a cell that defines a type and uses a capability. The error says "is not included in the allowed capture set of the enclosing object". The same code compiles when the type
-  definitions come first. So after this error, the host parses the cell, and it compiles the type definitions and then
-  the rest. The host compiles all other cells as written, because a class can use a `val` of its own cell.
+- **A second try in two parts.** The capture checker can reject a cell that defines a type and uses a capability. The
+  error says "is not included in the allowed capture set of the enclosing object". The same code compiles when the
+  type definitions come first. So after this error, the host parses the cell, and it compiles the type definitions and
+  then the rest. The host compiles all other cells as written, because a class can use a `val` of its own cell.
 - **A failed second part.** The host adds the first part to `invalidObjectIndexes`, and it keeps the `objectIndex` of
   the REPL. If a later cell uses that index again, the REPL throws `NoClassDefFoundError` from a class that did not
   initialize.
@@ -860,6 +876,10 @@ possible, and an API change in Kyo stays in the adapters.
   of the journal. The actor writes the row after a turn ends or when the status changes. After a crash a row can lag,
   so the host lists the folder at its start and folds each journal that differs from its row. A removal of the catalog
   file loses nothing.
+- **The flush on SQLite.** Each file uses WAL, `synchronous=NORMAL` and `fullfsync=ON`. For a commit that `needsFlush`
+  (4.1), the writer sets `synchronous=FULL` and then sets `NORMAL` again. `synchronous` belongs to a connection, so
+  the actor holds one connection. On macOS `fullfsync` uses `F_FULLFSYNC`. On other systems it has no effect, and
+  `FULL` uses a plain `fsync`.
 - **JDK 25.** Kyo RC7 needs it. dspy4s compiles and passes its tests on it.
 
 One file for each session makes a session one item on disk. A person can remove or archive it as one file. A corrupt
@@ -991,8 +1011,8 @@ The checks used Scala `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` and JDK 25.0.5. 
 
 | Check | Result |
 |---|---|
-| The kernel under random schedules, with no threads | 200,000 runs with 317,035 crashes, 220,209 stops, 89,444 late messages, 845,607 grants, 71,546 calls under a `Once` grant, 63,328 jobs and 18,590 `spawn` calls that a stop refused. Each crash read the journal through the JSON codec of `Logged`: 7,829,217 entries, with no change. No run broke a checked law of 4.7. The laws One journal and Report did not run. |
-| The check of that check | Eleven mutants: keep the waiting inputs after a stop (76,391 runs fail), accept an effect of any cell (8,017), keep a late outcome (25,874), remove a `Once` grant at `EffectStarted` (54,496), keep a `Once` grant after its call (27,042), keep a `Turn` grant after its turn (126,694), keep a grant after `Ended` (50,347), let an `Abort` stop jobs (48,294), keep the jobs after `Ended` (10,983), let `OfLastTurn` reach other turns (15,291), take the list of jobs only from the live table (9,104). |
+| The kernel under random schedules, with no threads | 200,000 runs with 317,035 crashes, 220,209 stops, 89,444 late messages, 845,607 grants, 71,546 calls under a `Once` grant, 63,328 jobs and 18,590 `spawn` calls that a stop refused. Each crash read the journal through the JSON codec of `Logged`: 7,829,217 entries, with no change. No run broke a checked law of 4.7. A second phase of 50,000 runs had 132,520 power losses, which cut the journal at the last flush, and no run broke a law. The laws One journal and Report did not run. |
+| The check of that check | Fifteen mutants: keep the waiting inputs after a stop (76,391 runs fail), accept an effect of any cell (8,017), keep a late outcome (25,874), remove a `Once` grant at `EffectStarted` (54,496), keep a `Once` grant after its call (27,042), keep a `Turn` grant after its turn (126,694), keep a grant after `Ended` (50,347), let an `Abort` stop jobs (48,294), keep the jobs after `Ended` (10,983), let `OfLastTurn` reach other turns (15,291), take the list of jobs only from the live table (9,104), no flush at all (43,814 runs of the second phase fail), a flush at the outcome in place of the intent (461), no flush for `Input` (32,416), no flush for `Activated` (14,059). |
 | `drive` with scripts | A chat answer, `submit`, the step limit of both kinds, a failed cell, a failed LM call, a stop during a cell, and a crash during a cell give the expected journals. |
 | `Mode` | The semilattice laws hold over 81 modes. |
 | Modes as givens in a real REPL, with capture checking and safe mode | Read-only mode: `read` compiles, and `write`, `exec`, `spawn`, `stopJob` and `tell` do not. Controller: `tell` compiles, and `write`, `exec` and `stopJob` do not. Local: all compile. |
@@ -1007,6 +1027,8 @@ The checks used Scala `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` and JDK 25.0.5. 
 | A commit through an actor to SQLite | About 140 µs from a plain thread and back, with no full flush of the disk cache. |
 | The two file layouts of 10.2, with Python's SQLite 3.49.1 and not the Kyo driver | 64 writers: 5,300 commits per second and a longest wait of 45 ms with one file for each session, and 3,500 and 2.7 s with one shared file. Section 2 of [CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md) has all the numbers. |
 | `PRAGMA fullfsync` in the same check | One writer: 5 to 9 ms for each commit, against 75 µs without it. |
+| A flush for only some commits, with the same SQLite and one writer | A commit that flushes: a median of 4.4 ms. A normal commit: a median of 48 µs, and 266 µs right after a flush. A cell of 100 `write` calls spends 0.54 s in commits, and a cell of 100 `read` calls spends 0.03 s. |
+| SIGKILL of a writer with normal commits, with the same SQLite | 50 rounds with 29,016 commits that got an answer: none lost, and no corrupt file. |
 | dspy4s on JDK 25 | A compile from no classes passes, and 2,172 tests have no failures (6 skipped). |
 
 The cells that models wrote. A cell counts if it compiled, so the table does not say that the cell does its task. The
@@ -1020,8 +1042,10 @@ last column has this `Data` and the second try of section 6:
 | Sonnet, the reference of 5.1 | Not run | 29 of 30 |
 | Haiku, the reference of 5.1 | Not run | 30 of 30 |
 
-None of the 128 cells had a `Data` error with this `Data`, and the 96 values that reached `store` came back equal. Twelve other cells failed. Seven used `System.currentTimeMillis` or `nanoTime`, three had model errors or a cut, and two have the forms in the hints of section 6. With the reference of 5.1, no cell used `System` or `derives Data`, and each recursive
-type had its given. A cell took a median of 265 ms and at most 813 ms, with no baseline for comparison.
+None of the 128 cells had a `Data` error with this `Data`, and the 96 values that reached `store` came back equal.
+Twelve other cells failed. Seven used `System.currentTimeMillis` or `nanoTime`, three had model errors or a cut, and
+two have the forms in the hints of section 6. With the reference of 5.1, no cell used `System` or `derives Data`, and
+each recursive type had its given. A cell took a median of 265 ms and at most 813 ms, with no baseline for comparison.
 
 These checks found errors in the earlier design. They are fixed here:
 
@@ -1038,7 +1062,10 @@ What did not run:
 - The stop flag and the guards of Phase 0 on JDK 25.
 - A hard stop that reaches the LM transport and a process group.
 - The OS sandbox.
-- A process kill during a commit, and durability after a host crash.
+- A real power loss. The kernel check only cuts the journal at the last flush, and the SQLite check only measures the
+  time. That a flush reaches the disk and covers the earlier commits comes from the SQLite documentation.
+- The flush on the Kyo driver and on Linux, and a `tell` across two journals with a power loss.
+- A process kill of the real host during a commit.
 - `load` after a real restart, in a new REPL. The check has one REPL and text from the same process.
 - `rlm`, `start`, `observe` and `zoom`. The check has a stub of `rlm`, so its cells only compile.
 - `now()` through `recorded`. The check calls the clock directly.
@@ -1070,7 +1097,7 @@ What did not run:
 ## 14. The choices
 
 The decisions of [CODE_HARNESS.md](CODE_HARNESS.md), 7.10 and 8.7 stay, except decision 1 of 8.7, as item 7 says.
-These choices are new in this document. Only choices 13, 14, 15 and 16 are confirmed:
+These choices are new in this document. Only choices 13, 14, 15, 16 and 17 are confirmed:
 
 | # | Choice | Answers |
 |---|---|---|
@@ -1090,6 +1117,7 @@ These choices are new in this document. Only choices 13, 14, 15 and 16 are confi
 | 14 | Confirmed on 2026-11-03. Each `Grant` holds a lifetime: `Once` (the default), `Turn` or `Session`. `GuardRule` is data with a pure `matches`. A journal fork has no grants (5.5). | Open question 2 below |
 | 15 | Confirmed on 2026-11-03. An `Abort` does not stop jobs. `StopJobs` does, also with no open turn, and a client can send both with one key. The list of jobs is a fold of the journal (10.3). After a crash, a job is lost in the first version. | Open question 3 below |
 | 16 | Confirmed on 2026-11-03. `Data` derives from `Mirror.Of`, and a guest does not write `derives Data` (5.1). A value in an entry is `Json` (4.1). The guest API has `now()`. After one capture error, the host compiles the type definitions of a cell first (6). | Open question 4 below |
+| 17 | Confirmed on 2026-11-03. A commit does a full flush for the intent of a call that can change something outside the session, for each `Input` and for each `Activated` (4.1, 10.2). A power loss can remove the other commits, and a process crash cannot. | Open question 5 below |
 
 Open questions:
 
@@ -1097,9 +1125,7 @@ Open questions:
 2. Closed by choice 14: each grant holds its lifetime.
 3. Closed by choice 15: an `Abort` does not stop jobs, and `StopJobs` does.
 4. Closed by choice 16: `Mirror` is enough, with `Json` in the entries.
-5. Does a commit use `PRAGMA fullfsync` on macOS? With it, a cell with 100 guest API calls spends 1 to 2 s in commits.
-   Without it, a host crash can lose the last commits, and an effect that ran can then have no intent in the journal.
-   A process crash does not depend on this setting, because the OS keeps the written data.
+5. Closed by choice 17: a commit does a full flush only where a power loss can do harm.
 6. Which check closes the clock and random numbers for a later replay? Safe mode allows `java.time.Instant.now()`,
    `scala.util.Random`, `Math.random()` and `Object.hashCode`, so a cell is not deterministic by its type.
 
