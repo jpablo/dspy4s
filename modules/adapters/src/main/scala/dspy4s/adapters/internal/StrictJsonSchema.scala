@@ -25,6 +25,13 @@ private[adapters] object StrictJsonSchema:
   /** The schema name of a structured output request (upstream: the name of the generated pydantic model). */
   val Name: String = "DSPyProgramOutputs"
 
+  /** `schema` with no property in `names`. [[shape]] writes `required` again from the properties. */
+  def withoutProperties(schema: DynamicValue.Record, names: Set[String]): DynamicValue.Record =
+    DynamicValues.recordGet(schema, "properties") match
+      case Some(properties: DynamicValue.Record) if names.nonEmpty =>
+        schema.updated("properties", DynamicValues.recordFilterKeys(properties, name => !names.contains(name)))
+      case _ => schema
+
   /** `schema` in strict shape. The rules apply at each level: in `$defs` and `definitions`, in `properties`, in
     * `items`, in `prefixItems` (a tuple; a port rule, because upstream does not go into it), in `anyOf`, and in
     * `allOf`.

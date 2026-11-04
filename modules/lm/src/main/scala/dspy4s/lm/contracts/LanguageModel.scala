@@ -21,7 +21,10 @@ trait LanguageModel extends LanguageModelRef:
     */
   def supportsResponseSchema: Boolean = false
 
-  /** Whether this model exposes reasoning/thinking output (e.g. reasoning-token models). Defaults to `false`. */
+  /** Whether this model takes the option `reasoning_effort` and gives its reasoning in [[LmOutput.reasoning]] (upstream
+    * `supports_reasoning`). An adapter call then asks for no [[dspy4s.core.contracts.Reasoning]] output in its prompt,
+    * and takes that output from the reply. Defaults to `false`.
+    */
   def supportsReasoning: Boolean = false
 
   /** Experimental. Whether this model is a System One model: it answers decision requests ([[DecisionRequests]]) with

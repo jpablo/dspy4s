@@ -278,9 +278,26 @@ private[adapters] object AdapterTextSupport:
       case TypeRef.json | TypeRef.list => PythonText.parseJson(raw).left.map(_ =>
           ValidationError(s"Field could not be parsed as JSON from '$raw'")
         )
-      case TypeRef.union            => Right(PythonText.parseJson(raw).getOrElse(DynamicValues.string(raw)))
+      case TypeRef.union     => Right(PythonText.parseJson(raw).getOrElse(DynamicValues.string(raw)))
+      case TypeRef.reasoning => Right(
+          PythonText.parseJson(raw).toOption.flatMap(reasoningValue(_).toOption).getOrElse(DynamicValues.string(raw))
+        )
       case other if isListOf(other) => listOfValue(other, PythonText.parseJson(raw).toOption, raw)
       case _                        => Right(DynamicValues.string(raw))
+
+  /** The value of a reasoning field from its JSON value `value` (upstream `Reasoning.validate_input`): a text, or the
+    * text under `content` of a record. Each other value is an error. For a text of the reply, [[coerceText]] keeps the
+    * text as it is after such an error, because upstream `parse_value` then validates the text itself.
+    */
+  def reasoningValue(value: DynamicValue): Either[DspyError, DynamicValue] =
+    value match
+      case DynamicValue.Primitive(_: PrimitiveValue.String) => Right(value)
+      case record: DynamicValue.Record                      => DynamicValues.recordGet(record, "content") match
+          case Some(content @ DynamicValue.Primitive(_: PrimitiveValue.String)) => Right(content)
+          case Some(other)                                                      =>
+            Left(ValidationError(s"`content` field must be a string, but received: ${PythonText.json(other)}"))
+          case None => Left(ValidationError("`content` field is required for `dspy.Reasoning`"))
+      case other => Left(ValidationError(s"Received invalid value for `dspy.Reasoning`: ${PythonText.json(other)}"))
 
   /** `true` for a list type with an item type ([[TypeRef.collection]]), for example the type `list[str]` of a string
     * signature. A `tuple[...]`, a `set[...]`, and a `frozenset[...]` are list types too: upstream `parse_value` gives a
@@ -335,6 +352,7 @@ private[adapters] object AdapterTextSupport:
       case TypeRef.string                              => item match
           case DynamicValue.Primitive(_: PrimitiveValue.String) => Right(item)
           case _                                                => Left(wrongItem)
+      case TypeRef.reasoning          => reasoningValue(item)
       case nested if isListOf(nested) => listOfValue(nested, Some(item), PythonText.json(item))
       case _                          => Right(item)
 

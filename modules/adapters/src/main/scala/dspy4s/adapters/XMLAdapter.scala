@@ -82,7 +82,9 @@ final case class XMLAdapter(
         parseXml(xml).left.map(error => ParseError("adapter", s"Failed to parse XML: $error", raw = Some(output.text)))
           .flatMap(document => parseFields(fields, document, output))
       case None =>
-        if allowTextFallbackForSingleOutput && fields.size == 1 then
+        // A signature with only a reasoning output asks for no field, so a reply with no tags gives no value.
+        if fields.isEmpty then Right(DynamicValue.Record.empty)
+        else if allowTextFallbackForSingleOutput && fields.size == 1 then
           AdapterTextSupport.singleOutputTextFallback(fields.head, output)
         else Left(ParseError("adapter", "Could not find XML document in model output", raw = Some(output.text)))
 

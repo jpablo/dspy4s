@@ -5,6 +5,7 @@ import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.NativeFunctionCalling
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.adapters.internal.AdapterTextSupport
+import dspy4s.adapters.internal.NativeReasoning
 import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -78,9 +79,11 @@ private[dspy4s] object AdapterCall:
     }
 
   /** Format with `adapter`, call the model, and parse. The result keeps the result of the parse step apart, so the
-    * caller can tell a parse error from an error of the other steps. The usage of the reply goes to the usage scope of
-    * the call before the parse ([[LanguageModel.callAndRecordUsage]]), so an attempt whose reply fails to parse counts
-    * too (upstream records the usage of each LM call, `dspy/clients/execution.py`, `finalize`).
+    * caller can tell a parse error from an error of the other steps. The format, the request, and the parse read the
+    * invocation of the native reasoning step ([[NativeReasoning.planned]]), as each attempt of upstream runs
+    * `_call_preprocess`. The usage of the reply goes to the usage scope of the call before the parse
+    * ([[LanguageModel.callAndRecordUsage]]), so an attempt whose reply fails to parse counts too (upstream records the
+    * usage of each LM call, `dspy/clients/execution.py`, `finalize`).
     */
   private def callModel(
       adapter    : Adapter,
@@ -88,33 +91,36 @@ private[dspy4s] object AdapterCall:
       invocation : AdapterInvocation,
       checkOutput: OutputCheck
   )(using RuntimeContext): Either[DspyError, Attempt] =
+    val planned = NativeReasoning.planned(model, invocation)
     for
       prompt <- CallbackDispatcher.withAdapter(
                   adapterName = adapter.name,
                   inputs = DynamicValues.record("phase" := "format", "signature" := invocation.layout.name)
                 ) {
-                  adapter.format(invocation)
+                  adapter.format(planned)
                 }
       // G-7: merge the adapter-contributed request options (e.g. `response_format`) UNDER the existing request
       // options, so explicit per-call/module config wins on key collision. The options that the adapter removes
       // (`FormattedPrompt.removedOptions`) go first.
       response <- LanguageModel.callAndRecordUsage(
                     model,
-                    invocation.request.copy(
+                    planned.request.copy(
                       messages = prompt.messages,
-                      options = prompt.options(invocation.request.options)
+                      options = prompt.options(planned.request.options)
                     )
                   )
-    yield Attempt(response, parseOutputs(adapter, invocation, response.outputs, checkOutput))
+    yield Attempt(response, parseOutputs(adapter, invocation, planned, response.outputs, checkOutput))
 
-  /** Parse each output with `adapter` (`Adapter.parse` with `invocation`, the invocation of the request), and check its
-    * values with `checkOutput`. The two steps are one parse phase for the callbacks. An empty reply gets the parse
-    * error of upstream in that phase, and no parse. The first output that fails gives the result, so one empty output
-    * of a reply with some outputs is a parse error of the reply.
+  /** Parse each output with `adapter` (`Adapter.parse` with `planned`, the invocation of the request), fill its
+    * reasoning fields ([[NativeReasoning.filled]]), and check its values with `checkOutput`. `invocation` has the
+    * output fields of the caller. The steps are one parse phase for the callbacks. An empty reply gets the parse error
+    * of upstream in that phase, and no parse. The first output that fails gives the result, so one empty output of a
+    * reply with some outputs is a parse error of the reply.
     */
   private def parseOutputs(
       adapter    : Adapter,
       invocation : AdapterInvocation,
+      planned    : AdapterInvocation,
       outputs    : Vector[LmOutput],
       checkOutput: OutputCheck
   )(using RuntimeContext): Either[DspyError, Vector[ParsedOutput]] =
@@ -124,7 +130,10 @@ private[dspy4s] object AdapterCall:
         inputs = DynamicValues.record("phase" := "parse", "index" := index)
       ) {
         if isEmptyReply(invocation, output) then Left(ParseError("adapter", EmptyReplyMessage, raw = Some(output.text)))
-        else adapter.parse(invocation, output).flatMap(checked(invocation, output, _, checkOutput))
+        else
+          adapter.parse(planned, output)
+            .map(parsed => parsed.copy(values = NativeReasoning.filled(invocation.layout, output, parsed.values)))
+            .flatMap(checked(invocation, output, _, checkOutput))
       }
     }
 
@@ -145,7 +154,11 @@ private[dspy4s] object AdapterCall:
       case Left(error) => Option
           .when(isToolTurn(invocation, output))(
             parsed.copy(values =
-              AdapterTextSupport.toolTurnValues(invocation.layout, output.toolCalls, DynamicValue.Record.empty)
+              NativeReasoning.filled(
+                invocation.layout,
+                output,
+                AdapterTextSupport.toolTurnValues(invocation.layout, output.toolCalls, DynamicValue.Record.empty)
+              )
             )
           )
           .filter(noText => checkOutput(noText.values).isRight)

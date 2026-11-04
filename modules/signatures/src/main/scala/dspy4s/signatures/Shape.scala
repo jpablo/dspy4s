@@ -1,7 +1,7 @@
 package dspy4s.signatures
 
 import dspy4s.core.collections.Traverse
-import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, NotFoundError}
+import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, NotFoundError, Reasoning}
 import dspy4s.algebra.{IsEq, Law, <->}
 import zio.blocks.chunk.Chunk
 import zio.blocks.maybe.Maybe
@@ -58,10 +58,10 @@ object Shape:
     *
     * zio-blocks' `Schema.derived` deliberately reuses schemas found in the expansion scope. The two ambiguous generic
     * blockers below make those open-world searches fail, causing the derivation macro to recurse structurally instead.
-    * Exact schemas for the closed primitive leaf set remain available; the `DynamicValue.Record` exception is the
-    * framework's canonical narrowing of zio-blocks' dynamic schema. Array-like types are deliberately excluded because
-    * their schema derivation consumes an open `ClassTag`; custom array semantics belong behind an explicitly branded
-    * shape. Consequently ambient evidence cannot change the meaning of the same object type.
+    * Exact schemas for the closed primitive leaf set and `Reasoning` remain available; the `DynamicValue.Record`
+    * exception is the framework's canonical narrowing of zio-blocks' dynamic schema. Array-like types are deliberately
+    * excluded because their schema derivation consumes an open `ClassTag`; custom array semantics belong behind an
+    * explicitly branded shape. Consequently ambient evidence cannot change the meaning of the same object type.
     */
   transparent inline def canonicalSchema[A]: Schema[A] =
     @annotation.unused
@@ -70,6 +70,8 @@ object Shape:
     given Schema[DynamicValue.Record] = dspy4s.core.contracts.recordSchema
     @annotation.unused
     given Schema[Unit] = Schema.unit
+    @annotation.unused
+    given Schema[Reasoning] = Reasoning.schema
     @annotation.unused
     given Schema[Boolean] = Schema.boolean
     @annotation.unused

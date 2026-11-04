@@ -95,7 +95,7 @@ private[adapters] object JSONAdapterPrompt:
       // not show that field.
       val (toolCalls, fields) = outputFields.partition(NativeFunctionCalling.isToolCallsField)
       val schema              = invocation.outputJsonSchema.fold(StrictJsonSchema.fromFields(fields))(
-        withoutProperties(_, toolCalls.map(_.name).toSet)
+        StrictJsonSchema.withoutProperties(_, toolCalls.map(_.name).toSet)
       )
       if StrictJsonSchema.hasFieldOpenMap(schema) then JsonMode
       else
@@ -114,13 +114,6 @@ private[adapters] object JSONAdapterPrompt:
 
   /** The warning when the schema build fails (upstream `JSONAdapter._prepare_response_format`). */
   private val SchemaBuildWarning: String = "Failed to build structured output schema; using JSON mode before execution."
-
-  /** `schema` with no property in `names`. [[StrictJsonSchema.shape]] writes `required` again from the properties. */
-  private def withoutProperties(schema: DynamicValue.Record, names: Set[String]): DynamicValue.Record =
-    DynamicValues.recordGet(schema, "properties") match
-      case Some(properties: DynamicValue.Record) if names.nonEmpty =>
-        schema.updated("properties", DynamicValues.recordFilterKeys(properties, name => !names.contains(name)))
-      case _ => schema
 
   /** Add each output field's constraints to the corresponding JSON Schema property. */
   private def embedConstraints(

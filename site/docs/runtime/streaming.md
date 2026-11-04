@@ -48,6 +48,10 @@ with `predictName`.
 - By default, a listener stops after one field. Pass `allowReuse = true` to get
   the field from each model call, for example `next_thought` from each step of
   `ReAct`.
+- A listener on a `Reasoning` output gets the reasoning of the model, when the
+  model gives it apart from its answer. Such tokens do not end the field, so the
+  listener gets them from each model call. These tokens do not hide the final
+  prediction, which holds the other outputs.
 - Close the iterator if you stop before the end of the stream. The close stops
   the program and the model stream. If you stop and do not close, the producer
   thread stays parked on the full queue.

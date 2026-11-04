@@ -165,8 +165,8 @@ final case class ReActV2[I, O](
     *   - the inputs: each input of `baseSignature` except the start-history field, as an optional field with its
     *     description; then `history` ([[dspy4s.core.contracts.TypeRef.history]]) and `tools`
     *     ([[dspy4s.core.contracts.TypeRef.tools]]);
-    *   - the outputs: `next_thought` (a string; upstream `dspy.Reasoning`, point 4) and `tool_calls`
-    *     ([[dspy4s.core.contracts.TypeRef.toolCalls]]);
+    *   - the outputs: `next_thought` ([[dspy4s.core.contracts.TypeRef.reasoning]]; upstream `dspy.Reasoning`) and
+    *     `tool_calls` ([[dspy4s.core.contracts.TypeRef.toolCalls]]);
     *   - the instructions: these lines, with `\n` between them and the whole text stripped: the effective instructions
     *     of the base layout without the start-history field; "You are an Agent. Use the supplied tools to produce
     *     <outputs> from <inputs>."; "Call tools when more information is needed."; "When the final answer is ready,
@@ -302,9 +302,10 @@ final case class ReActV2[I, O](
       .updated(HistoryField.name, summon[Schema[History]].toDynamicValue(history))
       .updated(ToolsField.name, toolTexts)
     reactPredict(call.mapInput(_ => input).copy(config = config)).flatMap { prediction =>
+      // A reply with no reasoning gives an empty text for this field, and the event of the turn then has no thought.
       val thought = DynamicValues.recordGet(prediction.output, NextThoughtField.name).filter {
         case _: DynamicValue.Null.type => false
-        case _                         => true
+        case value                     => !DynamicValues.asString(value).contains("")
       }
       toolCallsOf(prediction.output).map(Step(thought, _))
     }
@@ -403,7 +404,7 @@ object ReActV2:
 
   private val HistoryField: FieldSpec     = FieldSpec.normalize(FieldSpec("history", TypeRef.history))
   private val ToolsField: FieldSpec       = FieldSpec.normalize(FieldSpec("tools", TypeRef.tools))
-  private val NextThoughtField: FieldSpec = FieldSpec.normalize(FieldSpec("next_thought"))
+  private val NextThoughtField: FieldSpec = FieldSpec.normalize(FieldSpec("next_thought", TypeRef.reasoning))
   private val ToolCallsField: FieldSpec   = FieldSpec.normalize(FieldSpec("tool_calls", TypeRef.toolCalls))
 
   /** The names of the fields that the step predictor adds to the inputs of the task. */
@@ -415,7 +416,8 @@ object ReActV2:
     Set(NextThoughtField.name, ToolCallsField.name, History.ToolCallResultsKey)
 
   /** The types of the outputs whose argument of `submit` has the JSON type of the `TypeRef`. */
-  private val PrimitiveTypes: Set[TypeRef] = Set(TypeRef.string, TypeRef.int, TypeRef.double, TypeRef.bool)
+  private val PrimitiveTypes: Set[TypeRef] =
+    Set(TypeRef.string, TypeRef.reasoning, TypeRef.int, TypeRef.double, TypeRef.bool)
 
   /** The call config `tool_choice` of the forced submit: the function `submit` (upstream `_forced_submit`). */
   private val SubmitToolChoice: DynamicValue = NativeTools.encodeToolChoice(ToolChoice.Function(SubmitToolName))

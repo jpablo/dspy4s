@@ -24,5 +24,15 @@ final case class AdapterInvocation(
       * ([[NativeTools.toolOptions]]). Else the prompt shows them as an input field ([[NativeTools.promptInvocation]]).
       * Empty by default. The executable tool bodies stay on the program; only the schema goes to the adapter.
       */
-    tools: Vector[ToolSpec] = Vector.empty
-)
+    tools: Vector[ToolSpec] = Vector.empty,
+    /** The layout of the signature of the caller. [[dspy4s.adapters.AdapterCall]] sets it, because each step of a call
+      * can change [[layout]]: the native reasoning step removes the reasoning fields, and a decision output becomes an
+      * evidence field. See [[fullLayout]].
+      */
+    signatureLayout: Option[SignatureLayout] = None
+):
+
+  /** The layout of the signature of the caller, else [[layout]]. A wrapper of an adapter that acts on a signature reads
+    * this layout, as an upstream wrapper runs before `Adapter._call_preprocess`.
+    */
+  def fullLayout: SignatureLayout = signatureLayout.getOrElse(layout)

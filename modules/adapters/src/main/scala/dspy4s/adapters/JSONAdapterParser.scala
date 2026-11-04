@@ -98,8 +98,9 @@ private[adapters] object JSONAdapterParser:
     * `int`, a `double`, and a `bool` field take the rule of `LenientValues.valueOf`, as a text does: a whole number,
     * also a whole float, keeps its exact value as an `Int`, a `Long`, or a `BigInt`, and the number 1 or 0 is a bool. A
     * `json` field, a `list` field, a `union` field, and an evidence field of the decision adapter
-    * ([[DecisionAdapter.isEvidenceType]]) keep the value as it is. A field of another type takes the JSON text of the
-    * value as its text. The parser encodes the JSON text one time, only when a rule reads it.
+    * ([[DecisionAdapter.isEvidenceType]]) keep the value as it is. A reasoning field takes the rule of
+    * `AdapterTextSupport.reasoningValue`. A field of another type takes the JSON text of the value as its text. The
+    * parser encodes the JSON text one time, only when a rule reads it.
     */
   private def coerce(typeRef: TypeRef, value: DynamicValue): Either[DspyError, DynamicValue] =
     lazy val text                 = jsonText(value)
@@ -110,6 +111,7 @@ private[adapters] object JSONAdapterParser:
       case TypeRef.double                                       => lenient("numeric")
       case TypeRef.bool                                         => lenient("boolean")
       case TypeRef.json | TypeRef.list | TypeRef.union          => Right(value)
+      case TypeRef.reasoning                                    => AdapterTextSupport.reasoningValue(value)
       case evidence if DecisionAdapter.isEvidenceType(evidence) => Right(value)
       // A string signature type such as `list[str]`: the rule of the chat format (`AdapterTextSupport.listOfValue`).
       case other if AdapterTextSupport.isListOf(other) => AdapterTextSupport.listOfValue(other, Some(value), text)

@@ -3,6 +3,7 @@ package dspy4s.streaming
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FieldChunk
+import dspy4s.adapters.internal.NativeReasoning
 import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.LmError
@@ -148,7 +149,7 @@ final class StreamingLanguageModelWrapper private[streaming] (
 
   /** The result of [[stream]]. [[call]] reads the same iterator. */
   private def openChunks(request: LmRequest)(using RuntimeContext): ClosableIterator[LmChunk] =
-    val ctx    = activeContext()
+    val ctx    = activeContext(request)
     val opened =
       try delegate.stream(request)
       catch case NonFatal(error) => Iterator.single(LmChunk.failure(ManagedLanguageModel.unexpected(error, request)))
@@ -230,18 +231,33 @@ final class StreamingLanguageModelWrapper private[streaming] (
     * governs every chunk in that invocation, even if nested context pushes happen meanwhile.
     */
   private final case class CallContext(
-      predictName: String,
-      state      : Option[AdapterStreamingState]
+      predictName    : String,
+      state          : Option[AdapterStreamingState],
+      reasoningFields: Vector[String] = Vector.empty
   )
 
-  private def activeContext()(using RuntimeContext): CallContext =
+  /** The context of a call with the request `request`. The stream state reads the layout that the prompt shows
+    * ([[NativeReasoning.shownLayout]]), so the stream follows the parser.
+    */
+  private def activeContext(request: LmRequest)(using RuntimeContext): CallContext =
     ActivePredictContext.current match
       case Some(active) =>
-        val state = session.adapter.flatMap(_.streamingState(active.layout))
-        CallContext(active.name, state)
+        val shown = NativeReasoning.shownLayout(this, request.options, active.layout)
+        val state = session.adapter.flatMap(_.streamingState(shown))
+        CallContext(active.name, state, NativeReasoning.fieldNames(active.layout))
       case None => CallContext(predictName = "", state = None)
 
+  /** Give the reasoning of `chunk` to each reasoning field that a listener accepts (upstream
+    * `Reasoning.parse_stream_chunk` in `StreamListener.receive`), then the text to the stream state. Upstream gives
+    * such a chunk with `is_last_chunk` false, and the reasoning has no end marker. Thus the listener stays open.
+    */
   private def emit(ctx: CallContext, chunk: LmChunk): Unit =
+    if chunk.reasoning.nonEmpty then
+      ctx.reasoningFields.filter(session.listenerAccepts(ctx.predictName, _)).foreach { field =>
+        session.offerReasoningToken(
+          TokenEvent(predictName = ctx.predictName, fieldName = field, chunk = chunk.reasoning, isLastChunk = false)
+        )
+      }
     ctx.state match
       case Some(s) => if chunk.text.nonEmpty then
           s.receive(chunk.text).foreach(emitFieldChunk(ctx, _, isFinalChunk = chunk.isFinal))

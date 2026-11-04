@@ -14,8 +14,6 @@ which is the upstream text with these changes:
 
 ReActV2 shows the text of each tool in its `tools` input, with the arguments as JSON text, as ReAct. Its inputs are
 optional fields, and an optional field shows the type text of its element: ``str``, not ``UnionType[str, NoneType]``.
-``next_thought`` has no hint in the output reminder: upstream types it as ``dspy.Reasoning``, and the port types it as
-a ``str`` field (point 4 of P10), which has no hint.
 
 RLM runs with the local interpreter of each side (upstream ``LocalInterpreter``, the port ``LocalPythonInterpreter``).
 Upstream adds the sub-agent text of the sandbox ``dspy`` facade to each action prompt. The port has no facade (upgrade
@@ -116,8 +114,7 @@ def main():
     cases.append({"id": "react", "calls": calls, "answer": prediction.answer})
 
     # ReActV2 shows the text of each tool in the `tools` input at each call, so the port form of the tool text must be
-    # active for the whole run. An optional input shows the type text of its element (the boundary rule of D3), and
-    # `next_thought` is a `str` field with no hint (point 4 of P10).
+    # active for the whole run. An optional input shows the type text of its element (the boundary rule of D3).
     Tool.__str__ = tool_text
     try:
         prediction, calls = run(
@@ -137,9 +134,7 @@ def main():
                 },
             ],
             {"question": "How many cats?"},
-            transform=lambda text: text.replace("(UnionType[str, NoneType])", "(str)").replace(
-                "`[[ ## next_thought ## ]]` (must be formatted as a valid Python str)", "`[[ ## next_thought ## ]]`"
-            ),
+            transform=lambda text: text.replace("(UnionType[str, NoneType])", "(str)"),
         )
     finally:
         Tool.__str__ = original

@@ -99,7 +99,7 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Del
   private def withTaskExamples(invocation: AdapterInvocation, evidence: SignatureLayout): SignatureLayout =
     if invocation.demos.isEmpty then evidence
     else
-      val names    = invocation.layout.fields.map(_.name).toSet
+      val names    = invocation.fullLayout.fields.map(_.name).toSet
       val examples = invocation.demos.map(demo => DynamicValues.recordFilterKeys(demo.values, names.contains))
       evidence.withInstructions(
         Some(

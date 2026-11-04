@@ -13,7 +13,7 @@ import scala.util.Try
   * @param responseSchema
   *   the model can follow a JSON response schema (the `response_format` of OpenAI)
   * @param reasoning
-  *   the model gives reasoning output
+  *   the model takes the option `reasoning_effort` and gives reasoning output
   */
 final case class LmCapabilities(
     functionCalling: Boolean = false,
@@ -27,7 +27,8 @@ object LmCapabilities:
   val none: LmCapabilities = LmCapabilities()
 
   /** The capabilities of the OpenAI API: native tool calls and a JSON response schema. Reasoning output depends on the
-    * model, so it is not declared.
+    * model, so it is not declared. Upstream reads it for each model from the data of LiteLLM, and the port has no such
+    * data. A user of a reasoning model declares it in the `capabilities` field of `OpenAiLanguageModel`.
     */
   val openAi: LmCapabilities = LmCapabilities(functionCalling = true, responseSchema = true)
 

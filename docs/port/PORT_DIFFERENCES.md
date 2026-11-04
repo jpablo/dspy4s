@@ -439,8 +439,6 @@ constraints. The port has no model of Python types, so a few places of a prompt 
 - After whitespace before a chat header, upstream `ChatAdapter.parse` keeps a part of the header in the value, because
   it cuts the rest of the line with the offset of the stripped line (`line[match.end():]`). The port cuts the rest of
   the stripped line, so the value is the text after the header.
-- ReActV2 (experimental) types `next_thought` as a `str` field, so the output reminder has no type hint for it.
-  Upstream types it as `dspy.Reasoning`, which the port does not have.
 - The RLM action prompt has no text about the sub-agents of the sandbox `dspy` facade, because the port has no facade
   (upgrade item P8).
 - The evidence request of a decision output (experimental) shows the evidence JSON schema in the form of the port.
@@ -798,6 +796,37 @@ The port has this input field (`TypeRef.tools`, which `ReActV2` uses), and `Pred
 A chat reply and a chat stream give `reasoning_content`, else `reasoning`, as the reasoning, as upstream does
 (`dspy/_vendor/lm15/providers/openai_chat.py:977` and `:2085`). The one difference: upstream applies `str(...)` to each
 truthy value, so `{"reasoning": 7}` gives `"7"`, and the port takes a text only.
+
+## 28. The `Reasoning` type
+
+**Convention.**
+
+A `Reasoning` output has the rules of upstream `dspy.Reasoning`. On a model that supports reasoning, the prompt and the
+schema of the outputs do not show the field, and the request has `reasoning_effort`: the effort of the request, else the
+effort of the model, else `low`. A null effort and a `gpt-5` model on the chat API keep a text field. On each call, a
+reasoning in the reply replaces the value of the field. An optional field stays a text field. `ChainOfThought` keeps a
+`str` field by default, and `nativeReasoning = true` is upstream `rationale_field_type=dspy.Reasoning`. `ReActV2` types
+`next_thought` as `Reasoning`.
+
+The differences:
+
+- `Reasoning` is an opaque subtype of `String`, so each operation of a text works on it and gives a `String`. Upstream
+  has a class that forwards to `str`, and the sum of two values is a `Reasoning`.
+- A reply with no reasoning gives a field with no default the empty text. Upstream gives `None`. A typed output has the
+  type `Reasoning`, not an `Option`. `ReActV2` shows no `next_thought` in the event of a turn with an empty text.
+  Upstream shows an empty section for a text reply with an empty section.
+- A call with native reasoning has no reasoning field in its strict `response_format`. Upstream builds that schema
+  before `_call_preprocess`, so it requires the field, and the parse then ignores it. Thus a strict model of upstream
+  writes the reasoning two times, and the port asks for it one time.
+- The output of `ChainOfThought` with `nativeReasoning = true` has the Scala type `String`, because the type of the output
+  does not depend on the value of an option. A `Reasoning` is a `String`.
+- Upstream reads `supports_reasoning` for each model from the data of LiteLLM. The port has no such data, so the
+  capability is off until a user declares it, for example
+  `capabilities = Some(LmCapabilities.openAi.copy(reasoning = true))`.
+- The port has no `native_response_types`, because `Citations` has no port. To keep a text field, set `reasoning_effort`
+  to null, or do not declare the capability.
+- With no stream listener, the port gives each reasoning chunk as a token of the reasoning field. Upstream gives raw
+  chunks with no listener.
 
 ## What this means in practice
 

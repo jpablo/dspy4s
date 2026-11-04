@@ -122,6 +122,7 @@ private[adapters] object PromptText:
     else
       field.typeRef match
         case TypeRef.string               => None
+        case TypeRef.reasoning            => None
         case TypeRef.bool                 => Some("must be True or False")
         case TypeRef.int                  => Some("must be a single int value")
         case TypeRef.double               => Some("must be a single float value")
@@ -137,16 +138,17 @@ private[adapters] object PromptText:
       typeRef.collection.exists((kind, _) => kind == TypeRef.Collection.List)
 
   /** The type hint of `field` in the output reminder of the Chat and JSON adapters (upstream
-    * `user_message_output_requirements`): empty for a `str` field. A type that only a typed signature has
-    * ([[isScalaType]]) is not a Python type, so its hint does not say Python.
+    * `user_message_output_requirements`): empty for a `str` field. A reasoning field has the hint of a `str`, because
+    * upstream compares the annotation with `str`. A type that only a typed signature has ([[isScalaType]]) is not a
+    * Python type, so its hint does not say Python.
     */
   def reminderHint(field: FieldSpec): String =
     if field.typeRef == TypeRef.toolCalls then ToolCallsReminder
     else
       typeName(field) match
-        case "str"                              => ""
-        case name if isScalaType(field.typeRef) => s" (must be formatted as a valid $name)"
-        case name                               => s" (must be formatted as a valid Python $name)"
+        case "str" if field.typeRef != TypeRef.reasoning => ""
+        case name if isScalaType(field.typeRef)          => s" (must be formatted as a valid $name)"
+        case name                                        => s" (must be formatted as a valid Python $name)"
 
   /** `true` for `union` and for the opaque type of a typed signature, whose name is the name of a Scala type
     * (`Instant`, `BigDecimal`). The evidence types of a decision output are Python types in upstream. A type of the

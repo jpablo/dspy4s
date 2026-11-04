@@ -62,8 +62,17 @@ final class StreamSession(
     * `NonFatal` rejects this exception, so it passes the catches of the program layers, and the program stops.
     */
   private[streaming] def offerToken(event: TokenEvent): Unit =
-    if !queue.offer(event) then throw new InterruptedException("The consumer closed the stream")
+    offer(event)
     tokenGiven = true
+
+  /** Give a token of the reasoning of the model to the listeners. It stops the fallback, as each token does. It does
+    * not count for [[gaveToken]]: upstream `StreamListener.receive` gives such a chunk before it starts a field, so the
+    * stream still has the prediction, which holds the other outputs.
+    */
+  private[streaming] def offerReasoningToken(event: TokenEvent): Unit = offer(event)
+
+  private def offer(event: TokenEvent): Unit =
+    if !queue.offer(event) then throw new InterruptedException("The consumer closed the stream")
     StreamProgress.markEmitted()
 
   /** `true` when no listener narrows the stream, or when a listener matches the field and can still get a token. A

@@ -146,11 +146,12 @@ object Refine:
   /** Wrapper [[Adapter]] that injects each predictor's OWN advice into ITS call, mirroring Python's `WrapperAdapter`
     * (`inputs["hint_"] = advice.get(signature2name[signature], "N/A")`). The predictor is identified by its
     * [[SignatureLayout]] (dspy4s's stand-in for Python's `signature` object identity); `adviceByLayout` maps each
-    * predictor's layout to its advice. `format` looks up the invocation's layout: on a real (non-`N/A`, non-empty)
-    * advice it appends a `hint_` INPUT field carrying that advice and delegates to `baseAdapter.format`; otherwise (no
-    * advice for this predictor) it delegates unchanged. Each member other than `name` and `format` comes from the base
-    * adapter ([[DelegatingAdapter]]). The lookup compares the fields and the name of the layouts, and not their
-    * instructions.
+    * predictor's layout to its advice. `format` looks up the layout of the signature of the call
+    * ([[dspy4s.adapters.contracts.AdapterInvocation.fullLayout]]), because upstream adds the hint before
+    * `_call_preprocess`: on a real (non-`N/A`, non-empty) advice it appends a `hint_` INPUT field carrying that advice
+    * and delegates to `baseAdapter.format`; otherwise (no advice for this predictor) it delegates unchanged. Each
+    * member other than `name` and `format` comes from the base adapter ([[DelegatingAdapter]]). The lookup compares the
+    * fields and the name of the layouts, and not their instructions.
     */
   private[programs] final case class HintInjectingAdapter(
       baseAdapter   : Adapter,
@@ -169,7 +170,7 @@ object Refine:
     override protected def wrap(next: Adapter): Adapter = copy(baseAdapter = next)
 
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-      adviceByStructure.get(invocation.layout.withInstructions(None)).map(_.trim)
+      adviceByStructure.get(invocation.fullLayout.withInstructions(None)).map(_.trim)
         .filter(a => a.nonEmpty && a != "N/A") match
         case None         => baseAdapter.format(invocation) // no advice routed to this predictor
         case Some(advice) =>

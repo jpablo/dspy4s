@@ -33,6 +33,16 @@ explanation and the answer with direct dot access:
 The signature did not change. Swapping `Predict` for `ChainOfThought` is the
 only edit, and the extra `reasoning` field appears on the output.
 
+Some models give their reasoning apart from their answer. To use that reasoning,
+set `nativeReasoning = true`, and declare the capability on the model with
+`capabilities = Some(LmCapabilities.openAi.copy(reasoning = true))`. The prompt then does
+not ask for the field, the request has `reasoning_effort`, and the field takes
+the reasoning of the reply. On a model with no such capability, the model writes
+the field as text.
+
+A signature can also have its own output of the type `Reasoning`, which is a
+`String` with the same rule.
+
 !!! tip "Verified snippet"
     This example is extracted from
     [`Modules.scala`](https://github.com/jpablo/dspy4s/blob/main/modules/examples/src/main/scala/dspy4s/examples/learn/programming/Modules.scala).

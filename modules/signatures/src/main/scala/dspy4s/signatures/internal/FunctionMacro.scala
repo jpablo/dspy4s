@@ -1,6 +1,6 @@
 package dspy4s.signatures.internal
 
-import dspy4s.core.contracts.{FieldSpec, History, SignatureLayout, TypeRef}
+import dspy4s.core.contracts.{FieldSpec, History, Reasoning, SignatureLayout, TypeRef}
 import dspy4s.signatures.{Shape, Signature}
 import scala.quoted.*
 import MacroSignatureSupport.functionSignatureExpr
@@ -126,10 +126,11 @@ private[signatures] object FunctionMacro:
         case "int"                => TypeRepr.of[Int]
         case "double"             => TypeRepr.of[Double]
         case "bool"               => TypeRepr.of[Boolean]
+        case "reasoning"          => TypeRepr.of[Reasoning]
         case "history" if isInput => TypeRepr.of[History]
         case other                => report.errorAndAbort(
             s"Signature.fromString: field '${field.name}' has type '$other', which the string DSL does " +
-              "not support (supported: str, int, float, bool, and History for an input field). For richer field " +
+              "not support (supported: str, int, float, bool, Reasoning, and History for an input field). For richer field " +
               "types use Signature.of[Spec], a case class, or Signature.fromStringDynamic."
           )
 

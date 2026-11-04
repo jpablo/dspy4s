@@ -1232,8 +1232,9 @@ official address only (`LmCapabilities.forBaseUrl`); an other server has none un
 **Resolution (reasoning of a chat reply, 2026-11-04).** `ChatWire` and `OpenAiStreamChunk` fill `LmOutput.reasoning`
 and `LmChunk.reasoning` with `reasoning_content`, else `reasoning`, with the same rule in the plain path and in the
 stream. A value that is not a text is no reasoning. The output of a history entry has the key `reasoning_content` when
-the reasoning is not empty. Nothing reads `supportsReasoning` still: the wires read the reasoning of each reply. Tests:
-`ChatReasoningSuite`, `LmHistoryEntrySuite`, `ManagedStreamSuite`, `StreamingFallbackSuite`.
+the reasoning is not empty. The wires read the reasoning of each reply, with no check of `supportsReasoning`. The
+`Reasoning` type reads that flag (G-32). Tests: `ChatReasoningSuite`, `LmHistoryEntrySuite`, `ManagedStreamSuite`,
+`StreamingFallbackSuite`.
 
 **Direction (open).** Reasoning-model parameters and custom headers remain. `close` is resolved in batch 22
 (`CloseLifecycleSuite`).
@@ -1470,9 +1471,10 @@ the first.
 **Status:** Open. Nested XML is not mirrored (decision A6, 2026-10-18). · **Verification:** R · **Upgrade item:**
 A6
 
-- **Custom types.** `Image`, `Audio`, `File`, `Document`, `Citations`, `Code`, and `Reasoning` have no port.
+- **Custom types.** `Image`, `Audio`, `File`, `Document`, `Citations`, and `Code` have no port.
   `ContentPart` encodes `type`, `text`, and `metadata` only (`ChatWire.encodePart` in `modules/lm/.../providers/ChatWire.scala`), and no
-  adapter makes parts. `Reasoning` alone is a small item (`dspy/adapters/types/reasoning.py:46-83`).
+  adapter makes parts. `Reasoning` has a port (2026-11-04, `NativeReasoning`, PORT_DIFFERENCES section 28). Tests:
+  `ReasoningSuite`, `ReasoningFieldSuite`, `NativeReasoningSuite`, `NativeReasoningProgramsSuite`, `ReasoningStreamSuite`.
 - **JSON mode.** Upstream can send `{"type": "json_object"}` (`dspy/adapters/json_adapter.py:58-63`). dspy4s sends
   `json_schema` or nothing.
 - **Nested XML.** Upstream parses nested elements for list, dict, and model outputs

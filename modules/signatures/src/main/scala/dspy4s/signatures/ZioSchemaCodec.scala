@@ -6,6 +6,7 @@ import dspy4s.core.contracts.{
   FieldSpec,
   LenientValues,
   PythonText,
+  Reasoning,
   TypeMarker,
   TypeRef,
   ValidationError
@@ -728,14 +729,16 @@ private[signatures] object ZioSchemaCodec:
 
     override lazy val toJsonSchema: JsonSchema = schema
 
-  /** The wire type of a primitive. A primitive with a text form ([[Reflects.hasTextForm]]) and a `BigDecimal` have an
-    * opaque type with their type name, for example `Instant`. A prompt shows that name and the JSON schema of the
-    * field, and the adapters keep a bare text for such a type. Thus a `BigDecimal` keeps each digit of a text.
+  /** The wire type of a primitive. A `Reasoning` (a text with the type id of that type) is [[TypeRef.reasoning]]. A
+    * primitive with a text form ([[Reflects.hasTextForm]]) and a `BigDecimal` have an opaque type with their type name,
+    * for example `Instant`. A prompt shows that name and the JSON schema of the field, and the adapters keep a bare
+    * text for such a type. Thus a `BigDecimal` keeps each digit of a text.
     */
   private def primitiveTypeRef(prim: Reflect.Primitive[Binding, ?]): TypeRef =
     prim.primitiveType match
-      case _: PrimitiveType.String | _: PrimitiveType.Char => TypeRef.string
-      case _: PrimitiveType.Boolean                        => TypeRef.bool
+      case _: PrimitiveType.String if Reasoning.hasTypeId(prim.typeId) => TypeRef.reasoning
+      case _: PrimitiveType.String | _: PrimitiveType.Char             => TypeRef.string
+      case _: PrimitiveType.Boolean                                    => TypeRef.bool
       case _: PrimitiveType.Int | _: PrimitiveType.Long | _: PrimitiveType.Short | _: PrimitiveType.Byte |
           _: PrimitiveType.BigInt => TypeRef.int
       case _: PrimitiveType.Float | _: PrimitiveType.Double => TypeRef.double

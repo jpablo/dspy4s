@@ -53,7 +53,13 @@ final case class ChainOfThought[I, O](
     /** Experimental. The explicit settings of the decision outputs, by output name (upstream `Predict.fields` of the
       * inner predictor), as [[Predict.decisions]]. The `reasoning` output stays a text output.
       */
-    decisions: Map[String, DecisionSettings] = Map.empty
+    decisions: Map[String, DecisionSettings] = Map.empty,
+    /** Give the `reasoning` output the wire type [[TypeRef.reasoning]] (upstream
+      * `rationale_field_type=dspy.Reasoning`). On a model that supports reasoning, the prompt then does not ask for the
+      * field, and the field takes the reasoning of the reply. Off by default, as upstream: the model writes the field
+      * as text. The Scala type of the output stays `String`, because a [[dspy4s.core.contracts.Reasoning]] is a text.
+      */
+    nativeReasoning: Boolean = false
 )(using prepend: PrependField.Of[ChainOfThought.ReasoningName, String, O])
     extends Module[I, ChainOfThought.WithReasoning[O]],
       DecisionOutputs[ChainOfThought[I, O]],
@@ -67,8 +73,11 @@ final case class ChainOfThought[I, O](
   /** The signature that the inner [[Predict]] runs: the base signature with the `reasoning` output first, when the base
     * output has no `reasoning` field. See [[Signature.prependOutput]].
     */
-  val signature: Signature[I, Out] =
-    baseSignature.prependOutput(ChainOfThought.reasoningName, ChainOfThought.reasoningField)
+  val signature: Signature[I, Out] = baseSignature.prependOutput(
+    ChainOfThought.reasoningName,
+    if nativeReasoning then ChainOfThought.reasoningField.copy(typeRef = TypeRef.reasoning)
+    else ChainOfThought.reasoningField
+  )
 
   // The key uses the augmented layout, as the metadata of this leaf does. The inner `Predict` runs inside
   // this predictor, so it records no key of its own.

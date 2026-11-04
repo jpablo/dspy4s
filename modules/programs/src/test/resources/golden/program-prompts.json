@@ -107,7 +107,7 @@
             },
             {
               "role": "user",
-              "content": "[[ ## question ## ]]\nHow many cats?\n\n[[ ## tools ## ]]\n[\"search, whose description is <desc>Search the web for a query.</desc>. It takes arguments {\\\"query\\\": {\\\"type\\\": \\\"string\\\"}}.\", \"add. It takes arguments {\\\"a\\\": {\\\"type\\\": \\\"integer\\\"}, \\\"b\\\": {\\\"type\\\": \\\"integer\\\"}}.\", \"submit, whose description is <desc>Submit the final outputs for the task.</desc>. It takes arguments {\\\"answer\\\": {\\\"type\\\": \\\"string\\\"}, \\\"count\\\": {\\\"type\\\": \\\"integer\\\"}}.\"]\n\nRespond with the corresponding output fields, starting with the field `[[ ## next_thought ## ]]`, then `[[ ## tool_calls ## ]]` (must be a JSON object like {\"tool_calls\": [{\"name\": \"...\", \"args\": {...}}]}), and then ending with the marker for `[[ ## completed ## ]]`."
+              "content": "[[ ## question ## ]]\nHow many cats?\n\n[[ ## tools ## ]]\n[\"search, whose description is <desc>Search the web for a query.</desc>. It takes arguments {\\\"query\\\": {\\\"type\\\": \\\"string\\\"}}.\", \"add. It takes arguments {\\\"a\\\": {\\\"type\\\": \\\"integer\\\"}, \\\"b\\\": {\\\"type\\\": \\\"integer\\\"}}.\", \"submit, whose description is <desc>Submit the final outputs for the task.</desc>. It takes arguments {\\\"answer\\\": {\\\"type\\\": \\\"string\\\"}, \\\"count\\\": {\\\"type\\\": \\\"integer\\\"}}.\"]\n\nRespond with the corresponding output fields, starting with the field `[[ ## next_thought ## ]]` (must be formatted as a valid Python str), then `[[ ## tool_calls ## ]]` (must be a JSON object like {\"tool_calls\": [{\"name\": \"...\", \"args\": {...}}]}), and then ending with the marker for `[[ ## completed ## ]]`."
             }
           ],
           "output": "[[ ## next_thought ## ]]\nI should search and add.\n\n[[ ## tool_calls ## ]]\n{\"tool_calls\": [{\"name\": \"search\", \"args\": {\"query\": \"cats\"}}, {\"name\": \"add\", \"args\": {\"a\": 2, \"b\": 3}}]}"
@@ -120,7 +120,7 @@
             },
             {
               "role": "user",
-              "content": "[[ ## question ## ]]\nHow many cats?\n\nRespond with the corresponding output fields, starting with the field `[[ ## next_thought ## ]]`, then `[[ ## tool_calls ## ]]` (must be a JSON object like {\"tool_calls\": [{\"name\": \"...\", \"args\": {...}}]}), and then ending with the marker for `[[ ## completed ## ]]`."
+              "content": "[[ ## question ## ]]\nHow many cats?\n\nRespond with the corresponding output fields, starting with the field `[[ ## next_thought ## ]]` (must be formatted as a valid Python str), then `[[ ## tool_calls ## ]]` (must be a JSON object like {\"tool_calls\": [{\"name\": \"...\", \"args\": {...}}]}), and then ending with the marker for `[[ ## completed ## ]]`."
             },
             {
               "role": "assistant",
@@ -132,7 +132,7 @@
             },
             {
               "role": "user",
-              "content": "[[ ## tools ## ]]\n[\"search, whose description is <desc>Search the web for a query.</desc>. It takes arguments {\\\"query\\\": {\\\"type\\\": \\\"string\\\"}}.\", \"add. It takes arguments {\\\"a\\\": {\\\"type\\\": \\\"integer\\\"}, \\\"b\\\": {\\\"type\\\": \\\"integer\\\"}}.\", \"submit, whose description is <desc>Submit the final outputs for the task.</desc>. It takes arguments {\\\"answer\\\": {\\\"type\\\": \\\"string\\\"}, \\\"count\\\": {\\\"type\\\": \\\"integer\\\"}}.\"]\n\nRespond with the corresponding output fields, starting with the field `[[ ## next_thought ## ]]`, then `[[ ## tool_calls ## ]]` (must be a JSON object like {\"tool_calls\": [{\"name\": \"...\", \"args\": {...}}]}), and then ending with the marker for `[[ ## completed ## ]]`."
+              "content": "[[ ## tools ## ]]\n[\"search, whose description is <desc>Search the web for a query.</desc>. It takes arguments {\\\"query\\\": {\\\"type\\\": \\\"string\\\"}}.\", \"add. It takes arguments {\\\"a\\\": {\\\"type\\\": \\\"integer\\\"}, \\\"b\\\": {\\\"type\\\": \\\"integer\\\"}}.\", \"submit, whose description is <desc>Submit the final outputs for the task.</desc>. It takes arguments {\\\"answer\\\": {\\\"type\\\": \\\"string\\\"}, \\\"count\\\": {\\\"type\\\": \\\"integer\\\"}}.\"]\n\nRespond with the corresponding output fields, starting with the field `[[ ## next_thought ## ]]` (must be formatted as a valid Python str), then `[[ ## tool_calls ## ]]` (must be a JSON object like {\"tool_calls\": [{\"name\": \"...\", \"args\": {...}}]}), and then ending with the marker for `[[ ## completed ## ]]`."
             }
           ],
           "output": "[[ ## next_thought ## ]]\nI can answer now.\n\n[[ ## tool_calls ## ]]\n{\"tool_calls\": [{\"name\": \"submit\", \"args\": {\"answer\": \"5 cats\", \"count\": 5}}]}"

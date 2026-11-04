@@ -50,6 +50,7 @@ Its fields have narrow responsibilities:
 | `name` | Outer module identity; defaults to `chain_of_thought` |
 | `config` | Default LM request options; per-call options may override them |
 | `tools` | Tool schemas that the inner `Predict` gets, for a signature with a tool calls output |
+| `nativeReasoning` | Off by default. On a model that supports reasoning, the prompt does not ask for `reasoning`, and the field takes the reasoning of the reply |
 
 `PrependField` is compile-time evidence that dspy4s knows how to construct the augmented output type from `String` and
 `O`. Callers normally do not summon or pass it; Scala derives the appropriate instance from the concrete output type.
