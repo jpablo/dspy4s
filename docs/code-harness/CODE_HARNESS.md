@@ -463,7 +463,9 @@ object api:
 ```
 
 `Data` is a type class that the guest API owns. Safe code cannot name the `Schema` of zio-blocks
-([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), 5.1).
+([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), 5.1). A value in an entry is now `Json`, in place of the
+`DynamicValue` in the code of this document, because the JSON codec of `DynamicValue` changes values (same document,
+4.1 and 12).
 
 The rules:
 

@@ -93,9 +93,9 @@ enum Entry derives Schema:
   case TurnStarted
   case StepStarted(step: Int)                                  // the intent of the LM call
   case Acted(reasoning: String, text: String, code: Option[String]) // the LM outcome, and the intent of the cell
-  case EffectStarted(id: EffectId, op: String, args: DynamicValue)  // the intent of a guest API call
+  case EffectStarted(id: EffectId, op: String, args: Json)     // the intent of a guest API call
   case EffectDone(id: EffectId, result: EffectResult)          // the outcome of the guest API call
-  case Observed(output: String, outcome: CellOutcome, writes: Map[String, DynamicValue]) // the outcome of the cell
+  case Observed(output: String, outcome: CellOutcome, writes: Map[String, Json]) // the outcome of the cell
   case StopRequested(reason: String)
   case JobsStopRequested(which: JobSelector, reason: String)   // a stop of jobs, apart from the turn (10.3)
   case Granted(rule: GuardRule, lifetime: GrantLifetime)       // a person widened the guard (5.5)
@@ -106,13 +106,13 @@ enum Entry derives Schema:
 final case class EffectId(cell: Long, n: Int)                  // `cell` is the `seq` of the `Acted` entry
 
 enum EffectResult derives Schema:
-  case Value(value: DynamicValue, rendered: String)            // the typed value for a replay, and the text for a reader
+  case Value(value: Json, rendered: String)                    // the value for a replay, and the text for a reader
   case Error(message: String)
   case Unknown                                                 // a stop or a crash cut the call
 
 enum TurnOutcome derives Schema:
   case Replied(text: String)
-  case Submitted(value: DynamicValue)
+  case Submitted(value: Json)
   case Exhausted, Aborted, Crashed
   case Failed(error: String)
 ```
@@ -126,7 +126,7 @@ Step  ::= StepStarted [ Acted [ Cell ] ]
 Cell  ::= ( EffectStarted | EffectDone )* Observed
 ```
 
-Three rules about the journal:
+Four rules about the journal:
 
 - **The commit.** `commit` returns after the write reaches the backend, so an intent is in the journal before its
   effect starts. A stream delta to a client is not state: a client can show it, and a crash can lose it.
@@ -135,6 +135,9 @@ Three rules about the journal:
   Section 8.6 says how a message goes from one journal to another.
 - **Unknown entries.** A reader that cannot decode an entry stops a rebuild if `required` is true, and it skips the
   entry if `required` is false.
+- **The values.** A value in an entry is `Json`, which has only the six JSON cases. `Data` gives each value its form
+  (5.1), and `parse(print(j)) == j` for that form. So a state from the journal equals the live state. The JSON codec
+  of `DynamicValue` does not have this law (12).
 
 | Effect | Intent | Outcome |
 |---|---|---|
@@ -151,7 +154,7 @@ enum Position:
   case InPolicy(step: Int)
   case InCell(step: Int, cell: Long, code: String)
   case Answered(text: String)
-  case Finished(value: DynamicValue)
+  case Finished(value: Json)
 
 final case class SessionState(
     config  : SessionConfig,
@@ -161,7 +164,7 @@ final case class SessionState(
     closed  : Boolean,
     waiting : Int,                       // inputs that no step has seen, since the last stop
     open    : Map[EffectId, OpenCall],   // effects with an intent and no outcome
-    store   : Map[String, DynamicValue],
+    store   : Map[String, Json],
     requests: Set[RequestId],
     grants  : Set[ActiveGrant],
     lastTurn: Long,                      // the `seq` of the last `TurnStarted`
@@ -369,6 +372,8 @@ TurnEnded(Aborted)
 | Job | An `Abort` changes no job. A stop covers only the jobs with an intent before it. After `Abort` and then `StopJobs(OfLastTurn)`, no job of that turn starts or runs. `Ended` stops all jobs, and a journal fork starts with no jobs. |
 | Repair | `repair` closes each open part, and `repair(state after repair)` is empty. |
 | Store | The store holds only the writes of cells that completed. |
+| Data | `decode(encode(v)) == Right(v)` for each value with a `Data`. An `encode` never throws. |
+| Text | `parse(print(encode(v))) == encode(v)`. So a commit changes no value. |
 | Log | No part of the harness changes or removes an entry. |
 
 ## 5. Authority
@@ -393,6 +398,7 @@ definition that a cell can use has `@assumeSafe`, because safe mode rejects the 
 
 @assumeSafe trait Store extends Cap:
   def keys: Vector[String]
+  def load[A: Data](key: String): Option[A]
   update def store[A: Data](key: String, value: A): Unit
 
 @assumeSafe trait Sessions extends Cap:
@@ -404,7 +410,9 @@ definition that a cell can use has `@assumeSafe`, because safe mode rejects the 
   def read(path: String)(using f: Files): String = f.read(path)
   def write(path: String, content: String)(using f: Files^): Unit = f.write(path, content)
   def exec(command: String)(using s: Shell^, f: Files^): String = s.exec(command)
+  def load[A: Data](key: String)(using s: Store): Option[A] = s.load[A](key)
   def store[A: Data](key: String, value: A)(using s: Store^): Unit = s.store(key, value)
+  def now(): Long                                              // milliseconds since the epoch
   // and the other functions
 ```
 
@@ -413,22 +421,57 @@ The sketch shows the shape. The full API also has `edit`, `httpGet`, `llmQuery`,
 function and the reference on demand can come later, for a large API.
 
 **`Data` is the type of a value that can leave a cell.** Safe code cannot name the `Schema` of zio-blocks: `store("k",
-1)` with `A: Schema` gives "Cannot refer to value int in object Schema from safe code". So the guest API owns a small
-type class, and the host converts its values to `DynamicValue`:
+1)` with `A: Schema` gives "Cannot refer to value int in object Schema from safe code". A `Schema.derived` inside an
+inline of the guest API also fails: in a capture-checked cell, the macro crashes the compiler with
+`RecursionOverflow`. So the guest API owns a small type class, which derives from `Mirror`:
 
 ```scala
 @assumeSafe trait Data[A]:
-  def encode(value: A): DynamicValue
-  // and `decode`, for `load` and `rlm`
+  def encode(value: A): Json
+  def decode(value: Json, path: String): Either[DataError, A]
 
-@assumeSafe object Data:
-  given Data[Int] = v => DynamicValue.Primitive(PrimitiveValue.Int(v))
-  given Data[String] = v => DynamicValue.Primitive(PrimitiveValue.String(v))
-  given [A](using element: Data[A]): Data[Vector[A]] = v => DynamicValue.Sequence(Chunk.from(v.map(element.encode)))
-  inline def derived[A](using m: Mirror.ProductOf[A]): Data[A] = // from the names and the elements of `m`
+@assumeSafe trait DataAuto:
+  inline given auto[A](using m: Mirror.Of[A]): Data[A] = Data.derived[A]
+
+@assumeSafe object Data extends DataAuto:
+  given Data[Int] = ...                            // and the other numbers, String, Char, Boolean, Unit, Instant, Duration
+  given [A: Data]: Data[Vector[A]] = ...           // and List, Seq, IndexedSeq, Set
+  given [K: Data, V: Data]: Data[Map[K, V]] = ...
+  given [H: Data, T <: Tuple: Data]: Data[H *: T] = ...
+  given [A: Data]: Data[Option[A]] = ...           // and Some, None, Either, Left, Right
+  inline def derived[A](using m: Mirror.Of[A]): Data[A] = // from the names and the elements of `m`
 ```
 
-A cell can write `case class Point(x: Int, y: String) derives Data`, and then `store("p", Point(1, "a"))`.
+A case class or an enum needs no other code. A cell can write `case class Point(x: Int, y: String)`, and then
+`store("p", Point(1, "a"))`. A recursive type needs one more line, because the inline given does not end on it: `case
+class Dir(name: String, kids: Vector[Dir])`, and then `given Data[Dir] = Data.derived`.
+
+| Value | Its `Json` form |
+|---|---|
+| A number | A number. NaN, the infinities and -0.0 are strings. A `BigInt` or a `BigDecimal` with more than 34 digits is a string, because the reader rounds to 34 digits. |
+| `Char`, `Instant`, `Duration` | A string |
+| `Vector`, `List`, `Seq`, `IndexedSeq`, `Set`, a tuple | An array |
+| A case class | An object with one field for each parameter |
+| An enum, a sealed trait, `Option`, `Either` | An object with one field, the name of the case: `{"Failed":{"reason":"x"}}` |
+| `Map[String, V]` | An object |
+| Another `Map` | An array of pairs |
+
+The rules of `Data`:
+
+- A capability, a function, `Any`, a plain class, an `Array`, an `Iterator`, a `LazyList` and a mutable collection
+  have no `Data`. The compile error names the type and says what can leave a cell. A `var` in a case class does not
+  pass the capture checker, so a value has no cycle.
+- `load` gives `None` for a key with no value. A value that does not fit the type throws a `DataError` with its path,
+  and the cell fails: `at a.y: expected a field of P, found {x}`. `load` ignores an extra field.
+- The journal holds no type. `load` reads a value with the type of the cell that calls it, so a later cell can define
+  the type again.
+- A cell can also write `derives Data`, but the reference does not show it. The capture checker rejects `derives Data`
+  in a cell that also has a `def` or a lambda with a capability. The second try of section 6 covers this case.
+
+**`now()` gives the time.** Safe mode rejects `System.currentTimeMillis` and `System.nanoTime`, and models write them.
+`now()` is a guest API call like the others, so `recorded` stores its value. It closes nothing: safe mode allows
+`java.time.Instant.now()`, `scala.util.Random` and `Math.random()`, so a cell is not deterministic by its type (open
+question 6).
 
 ### 5.2 Modes
 
@@ -511,11 +554,11 @@ because a grant alone starts no turn. A cell in that turn can then make the call
 
 ```scala
 enum ArgMatch derives Schema:
-  case Exact(value: DynamicValue)                              // only these arguments
+  case Exact(value: Json)                                      // only these arguments
   case AnyArgs                                                 // each call of `op`
 
 final case class GuardRule(op: String, args: ArgMatch) derives Schema:
-  def matches(callOp: String, callArgs: DynamicValue): Boolean // pure and total
+  def matches(callOp: String, callArgs: Json): Boolean         // pure and total
 
 enum GrantLifetime derives Schema:
   case Once, Turn, Session
@@ -524,7 +567,7 @@ final case class ActiveGrant(rule: GuardRule, lifetime: GrantLifetime) derives S
 
 def forked(prefix: Vector[Logged]): SessionState = SessionState.of(prefix).copy(grants = Set.empty, jobs = Map.empty)
 
-// Three examples. `args` gives the `DynamicValue` of the arguments of the call.
+// Three examples. `args` gives the `Json` of the arguments of the call.
 Grant(GuardRule("exec", ArgMatch.Exact(args("git push origin main"))), GrantLifetime.Once)
 Grant(GuardRule("write", ArgMatch.AnyArgs), GrantLifetime.Turn)
 Grant(GuardRule("exec", ArgMatch.Exact(args("sbt test"))), GrantLifetime.Session)
@@ -548,6 +591,7 @@ knows how much they trust that call.
 - The calls of one cell run one at a time, so the next call sees the removal. A later version with parallel guest
   calls must change this rule.
 - A `Once` grant that no call uses stays until `Ended`.
+- `Exact` compares `Json` values, so a grant matches its call before and after a restart.
 - A grant belongs to one session. A child or a session from `start` does not get it, and `forked` drops all grants of
   a journal fork. So a rollout never gets an approval that a person gave for other work.
 
@@ -565,12 +609,28 @@ knows how much they trust that call.
 - **One cell at a time, on its own thread,** with `Console.withOut` and the stop flag.
 - **A cell commits only if it completes.** After `CompileError`, `Failed` or `TimedOut`, a later cell sees only the
   definitions from before the cell, and the store writes are gone.
+- **A second try in two parts.** The capture checker can reject a cell that defines a type and uses a capability. The error says "is not included in the allowed capture set of the enclosing object". The same code compiles when the type
+  definitions come first. So after this error, the host parses the cell, and it compiles the type definitions and then
+  the rest. The host compiles all other cells as written, because a class can use a `val` of its own cell.
+- **A failed second part.** The host adds the first part to `invalidObjectIndexes`, and it keeps the `objectIndex` of
+  the REPL. If a later cell uses that index again, the REPL throws `NoClassDefFoundError` from a class that did not
+  initialize.
+- **A compiler crash.** `ReplDriver.run` can throw, for example `RecursionOverflow`. The host catches this at the
+  cell, or the process stops.
+- **Error hints.** The host adds a hint to the compile errors that models cannot read:
+
+| The error | The cause | The hint |
+|---|---|---|
+| "Maximal number of successive inlines (32) exceeded" | A recursive type with no given | `given Data[T] = Data.derived` |
+| "is not included in the allowed capture set" after the second try | A capability in a place that must be pure | The name of the capability |
+| "Found: (x$1: (String, Vector[String]{val prefix1: ..." | A `Vector` in a pair, for example `groupBy(f).map { case (k, v) => ... }` | `.view.mapValues`, `groupMapReduce` or `.toList` |
+| "Found: ((Array[(String)?]^{any.rd}))?^{x1.rd}" | `case Array(x, y)` inside `collect` | `.toList`, and then `case List(x, y)` |
 
 The session has two kinds of state between cells:
 
 | State | What it holds | After a restart |
 |---|---|---|
-| The store | `Data` values under a key. It is a fold of the journal. | It comes back from the journal. |
+| The store | `Data` values under a key, as `Json`. It is a fold of the journal. | It comes back from the journal, and `load` reads it with the type of the cell. |
 | The REPL state | Definitions and live objects. It is a cache. | A new REPL starts, and the model gets a note with the names that it lost. |
 
 **Long work is a job.** A build or a test run can take minutes, and a cell must stay short. `spawn(command)` starts a
@@ -931,23 +991,46 @@ The checks used Scala `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` and JDK 25.0.5. 
 
 | Check | Result |
 |---|---|
-| The kernel under random schedules, with no threads | 200,000 runs with 317,035 crashes, 220,209 stops, 89,444 late messages, 845,607 grants, 71,546 calls under a `Once` grant, 63,328 jobs and 18,590 `spawn` calls that a stop refused. No run broke a checked law of 4.7. The laws One journal and Report did not run. |
+| The kernel under random schedules, with no threads | 200,000 runs with 317,035 crashes, 220,209 stops, 89,444 late messages, 845,607 grants, 71,546 calls under a `Once` grant, 63,328 jobs and 18,590 `spawn` calls that a stop refused. Each crash read the journal through the JSON codec of `Logged`: 7,829,217 entries, with no change. No run broke a checked law of 4.7. The laws One journal and Report did not run. |
 | The check of that check | Eleven mutants: keep the waiting inputs after a stop (76,391 runs fail), accept an effect of any cell (8,017), keep a late outcome (25,874), remove a `Once` grant at `EffectStarted` (54,496), keep a `Once` grant after its call (27,042), keep a `Turn` grant after its turn (126,694), keep a grant after `Ended` (50,347), let an `Abort` stop jobs (48,294), keep the jobs after `Ended` (10,983), let `OfLastTurn` reach other turns (15,291), take the list of jobs only from the live table (9,104). |
 | `drive` with scripts | A chat answer, `submit`, the step limit of both kinds, a failed cell, a failed LM call, a stop during a cell, and a crash during a cell give the expected journals. |
 | `Mode` | The semilattice laws hold over 81 modes. |
 | Modes as givens in a real REPL, with capture checking and safe mode | Read-only mode: `read` compiles, and `write`, `exec`, `spawn`, `stopJob` and `tell` do not. Controller: `tell` compiles, and `write`, `exec` and `stopJob` do not. Local: all compile. |
-| Safe mode in the same REPL | It rejects `asInstanceOf`, the name of the host, `caps.unsafe`, `@assumeSafe`, `Thread`, `System.exit`, `java.io.File`, `Predef.println` and the `Schema` of zio-blocks. |
+| Safe mode in the same REPL | It rejects `asInstanceOf`, the name of the host, `caps.unsafe`, `@assumeSafe`, `Thread`, `Future`, `CompletableFuture`, `Executors`, `System.exit`, `System.currentTimeMillis`, `System.nanoTime`, `System.getenv`, `sys.env`, `java.io.File`, `java.nio.file.Files`, `scala.io.Source`, `Runtime`, `Predef.println`, `java.util.Random`, `UUID.randomUUID` and the `Schema` of zio-blocks. It allows `java.time.Instant.now()`, `java.time.Clock`, `scala.util.Random`, `Math.random()` and `Object.hashCode`. |
+| The JSON codec of `DynamicValue` | 19 of 30 kinds of value change or throw. `Long(5)` comes back as `Int(5)`, `Double(2.5)` as a `BigDecimal`, a `Variant` and a `Map` as a `Record`. NaN, the infinities and a record as a map key throw at the encode. A `GuardRule` with `Exact` matches its call before the codec, and it does not match after the codec. |
+| `Data` with `decode`, in a real REPL | Enums, sealed traits, recursion, mutual recursion, generic types, tuples, named tuples and maps come back equal through the journal text. The compiler rejects capabilities, functions, `Any`, plain classes, iterators, lazy lists and mutable buffers. |
+| The laws of `Data` on random values | 300,000 values, with 0 failures. The first run found that the reader rounds a number to 34 digits. |
+| Cells that models wrote, from 30 tasks | Haiku and Sonnet did not know the design, and each wrote the 30 cells twice. A local model wrote 8. See the table after this one. |
+| `Schema.derived` inside an inline of the guest API | In a capture-checked cell, the compiler crashes with `RecursionOverflow`, and the exception stops the process. |
+| The second try, with the parser of the compiler | After a failed second part, a later cell cannot use the class, as a term or as a type, and it can define the name again. A class that needs a `val` of its cell compiles only with no split, so the host does not split each cell. |
 | A session host on `kyo-actor` with threads | 2,000 sessions with a stop at a random time: no violation ([CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md), 4.1). |
 | A commit through an actor to SQLite | About 140 µs from a plain thread and back, with no full flush of the disk cache. |
 | The two file layouts of 10.2, with Python's SQLite 3.49.1 and not the Kyo driver | 64 writers: 5,300 commits per second and a longest wait of 45 ms with one file for each session, and 3,500 and 2.7 s with one shared file. Section 2 of [CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md) has all the numbers. |
 | `PRAGMA fullfsync` in the same check | One writer: 5 to 9 ms for each commit, against 75 µs without it. |
 | dspy4s on JDK 25 | A compile from no classes passes, and 2,172 tests have no failures (6 skipped). |
 
+The cells that models wrote. A cell counts if it compiled, so the table does not say that the cell does its task. The
+last column has this `Data` and the second try of section 6:
+
+| Model and reference | The earlier `Data` | This `Data` |
+|---|---|---|
+| Sonnet, the earlier reference | 4 of 30 | 27 of 30 |
+| Haiku, the earlier reference | 9 of 30 | 25 of 30 |
+| A local model, the earlier reference | 0 of 8 | 5 of 8 |
+| Sonnet, the reference of 5.1 | Not run | 29 of 30 |
+| Haiku, the reference of 5.1 | Not run | 30 of 30 |
+
+None of the 128 cells had a `Data` error with this `Data`, and the 96 values that reached `store` came back equal. Twelve other cells failed. Seven used `System.currentTimeMillis` or `nanoTime`, three had model errors or a cut, and two have the forms in the hints of section 6. With the reference of 5.1, no cell used `System` or `derives Data`, and each recursive
+type had its given. A cell took a median of 265 ms and at most 813 ms, with no baseline for comparison.
+
 These checks found errors in the earlier design. They are fixed here:
 
 - A stop before the first step started a new turn.
 - An interrupted `ask` ended the session actor.
 - `store[A: Schema]` cannot compile in safe mode.
+- `DynamicValue` in an entry changed values at a commit, and a grant with `Exact` did not match after a restart.
+- A NaN or a record as a map key threw at the encode. So a value of a model could stop a commit.
+- The `Data` of the earlier design had no sum types and no `decode`, and it rejected most cells that models wrote.
 
 What did not run:
 
@@ -956,7 +1039,9 @@ What did not run:
 - A hard stop that reaches the LM transport and a process group.
 - The OS sandbox.
 - A process kill during a commit, and durability after a host crash.
-- `Data` with `decode`, and `rlm`, `start`, `observe` and `zoom`.
+- `load` after a real restart, in a new REPL. The check has one REPL and text from the same process.
+- `rlm`, `start`, `observe` and `zoom`. The check has a stub of `rlm`, so its cells only compile.
+- `now()` through `recorded`. The check calls the clock directly.
 - The Kyo driver with one file for each session, and its connection pools.
 - The catalog, `reports`, `missing` and the report pass.
 - A real job: `spawn`, `stopJob`, the job table, the process groups and the wrapper. The kernel check has the job
@@ -979,11 +1064,13 @@ What did not run:
 | Agent teams, shared boards | The controller and `tell` cover them. |
 | A merge of graphs across sessions | The first version has one graph for each session. |
 | Pekko and Cluster Sharding | The session host contract keeps the option (RUNTIME 5.5). |
+| `Data` as a wrapper around `Schema` | The macro crashes the compiler in a capture-checked cell (12). |
+| `DynamicValue` in an entry | Its JSON codec changes most kinds of value (12). |
 
 ## 14. The choices
 
 The decisions of [CODE_HARNESS.md](CODE_HARNESS.md), 7.10 and 8.7 stay, except decision 1 of 8.7, as item 7 says.
-These choices are new in this document. Only choices 13, 14 and 15 are confirmed:
+These choices are new in this document. Only choices 13, 14, 15 and 16 are confirmed:
 
 | # | Choice | Answers |
 |---|---|---|
@@ -1002,16 +1089,19 @@ These choices are new in this document. Only choices 13, 14 and 15 are confirmed
 | 13 | Confirmed on 2026-11-03. One commit writes to one journal (4.1). The journal has one SQLite file for each session, with a catalog that a fold can rebuild (10.2). The report pass sends again a report that a crash cut (8.6). | Open question 1 below |
 | 14 | Confirmed on 2026-11-03. Each `Grant` holds a lifetime: `Once` (the default), `Turn` or `Session`. `GuardRule` is data with a pure `matches`. A journal fork has no grants (5.5). | Open question 2 below |
 | 15 | Confirmed on 2026-11-03. An `Abort` does not stop jobs. `StopJobs` does, also with no open turn, and a client can send both with one key. The list of jobs is a fold of the journal (10.3). After a crash, a job is lost in the first version. | Open question 3 below |
+| 16 | Confirmed on 2026-11-03. `Data` derives from `Mirror.Of`, and a guest does not write `derives Data` (5.1). A value in an entry is `Json` (4.1). The guest API has `now()`. After one capture error, the host compiles the type definitions of a cell first (6). | Open question 4 below |
 
 Open questions:
 
 1. Closed by choice 13: one SQLite file for each session.
 2. Closed by choice 14: each grant holds its lifetime.
 3. Closed by choice 15: an `Abort` does not stop jobs, and `StopJobs` does.
-4. Is the `Mirror` derivation of `Data` enough for sum types and for the values that models write?
+4. Closed by choice 16: `Mirror` is enough, with `Json` in the entries.
 5. Does a commit use `PRAGMA fullfsync` on macOS? With it, a cell with 100 guest API calls spends 1 to 2 s in commits.
    Without it, a host crash can lose the last commits, and an effect that ran can then have no intent in the journal.
    A process crash does not depend on this setting, because the OS keeps the written data.
+6. Which check closes the clock and random numbers for a later replay? Safe mode allows `java.time.Instant.now()`,
+   `scala.util.Random`, `Math.random()` and `Object.hashCode`, so a cell is not deterministic by its type.
 
 ## 15. The plan
 
@@ -1020,7 +1110,7 @@ Each phase ends with something that runs.
 | Phase | Work | Result |
 |---|---|---|
 | 1. Kernel | `harness-kernel`, with the laws as ScalaCheck properties and the mutants of section 12. No REPL and no LM. | The laws of 4.7 run in CI. |
-| 2. Guest API and REPL | `harness-guest`, `harness-repl`, the modes, the guards of Phase 0 on JDK 25, the error hints, and negative tests for modes. | Model code runs against the guest API in each mode. |
+| 2. Guest API and REPL | `harness-guest`, `harness-repl`, the modes, the guards of Phase 0 on JDK 25, the laws of `Data` as properties, the second try of a cell, the catch around `ReplDriver.run`, the error hints, and negative tests for modes. | Model code runs against the guest API in each mode. |
 | 3. Sandbox | `harness-sandbox`: Seatbelt and bubblewrap, profiles from modes, and escape tests. | `exec` runs only in a sandbox. |
 | 4. One task | `Harness`, `drive`, the window strategy, `OptimizableStructure`, `ProgramRunner`. | A harness for one task that the optimizers accept. |
 | 5. RLM | `llmQuery`, `rlm`, the shared budget, the depth limit. | RLM in the harness. |

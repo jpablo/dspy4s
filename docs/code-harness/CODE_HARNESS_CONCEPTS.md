@@ -11,7 +11,7 @@ It uses the kernel of section 4.2 of the proposal, as it was on 2026-11-01.
 - The units of work nest: session, turn, step, cell, effect. Each unit is a mix of kinds. Only its status is a small
   state machine (section 2).
 - "The session state" is the largest mix. It holds a status, a log, values, a live REPL, and files on a disk.
-- The inventory has 102 concepts in ten groups (section 3).
+- The inventory has 106 concepts in ten groups (section 3).
 - Many terms have more than one meaning, for example "turn", "policy", "scope", "replay" and "fork" (section 4).
 - Ten scenarios test the boundaries between the concepts. The proposal now answers three of them, and the others are
   open questions (section 5).
@@ -169,7 +169,8 @@ harness must do:
 | Cell thread | The thread that runs a cell, with its stack | Live | Lost, or Replay |
 | Input variables | The inputs of the signature as REPL values (F5) | Data | Stored |
 | Explicit store | Values that go from cell to cell through `store` and `load`. It holds the `writes` of the cells that completed (4.2). | Data | Fold |
-| Clock and random | The time and the random numbers that a cell sees | World | Stored, if a replay needs them |
+| `Data` value | A value that can leave a cell. The journal holds it as `Json` | Data | Stored |
+| Clock and random | The time and the random numbers that a cell sees. Safe mode does not close them | World | Stored, if a replay needs them |
 | Language versions | The compiler version and the guest API version | Data | Stored |
 
 ### 3.4 The world
