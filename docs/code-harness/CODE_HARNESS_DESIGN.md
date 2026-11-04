@@ -1097,11 +1097,11 @@ What did not run:
 ## 14. The choices
 
 The decisions of [CODE_HARNESS.md](CODE_HARNESS.md), 7.10 and 8.7 stay, except decision 1 of 8.7, as item 7 says.
-These choices are new in this document. Only choices 13, 14, 15, 16 and 17 are confirmed:
+These choices are new in this document. Only choices 1, 13, 14, 15, 16 and 17 are confirmed:
 
 | # | Choice | Answers |
 |---|---|---|
-| 1 | The kernel has four pure functions, and `drive` takes the place of `AgentLoop.run`. | |
+| 1 | Confirmed on 2026-11-03. The kernel has four pure functions, and `drive` takes the place of `AgentLoop.run` in the harness. RLM stays on `AgentLoop` for now. | |
 | 2 | `Activated` takes the place of `Started` and `Reopened`, and it holds the configuration. `Child` and `Submitted` are not entries. | |
 | 3 | All work is a session. `Sessions` takes the place of `Agents`, and it holds a ceiling. `spawn` for subagents goes away. | Question 5 of section 11 |
 | 4 | Long work is a job. There is no yield protocol. | Question 2 of 9.4 |

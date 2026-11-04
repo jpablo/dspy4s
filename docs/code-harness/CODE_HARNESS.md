@@ -48,8 +48,9 @@ document exists in the code of dspy4s yet.
 The `harness` module gives a coding agent with these properties:
 
 - **Code mode only.** The model acts only through Scala code that it writes. A Scala REPL runs the code.
-- **Reuse.** The harness uses the current modules: signatures, `Predict`, `AgentLoop`, the interpreter contract,
-  `History`, and the optimizers.
+- **Reuse.** The harness uses the current modules: signatures, `Predict`, the interpreter contract, `History`, and
+  the optimizers. Its loop is `drive`, in place of `AgentLoop` ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md),
+  choice 1).
 - **Optimizable.** BootstrapFewShot, COPRO, MIPROv2 and GEPA can tune the harness as they tune any other program.
 - **RLM in the first version.** Large inputs stay in the REPL. Code can call the LM, and code can start a child
   agent.
@@ -866,6 +867,9 @@ Each effect has an intent and an outcome:
 
 #### The steps of a turn
 
+The code in this part uses `AgentLoop`. In [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), 4.6, `drive` now takes its
+place.
+
 ```scala
 def step(derived: Derived, i: Int)(using RuntimeContext)
     : Either[DspyError, AgentLoop.Step[Derived, TurnOutcome]] =
@@ -987,7 +991,7 @@ The user can then continue the work, or a new turn with a note can. The rules fo
 | Projection | `project` depends only on the log and the derived data (7.2). |
 | Log | No part of the harness changes or removes an entry of the log. |
 | Fork | A fork at entry `k` starts with the first `k` entries of the parent log. |
-| Loop | At most `limits.iterations` policy calls in one turn (the current `AgentLoop` laws). |
+| Loop | At most `limits.iterations` policy calls in one turn. `next` holds this limit ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), 4.3). |
 | Handlers | The laws of F2. |
 | Mode | The mode of a child is at most the mode of its parent (F5). |
 | Budget | The `subQuery` calls of one call tree, with the children, are at most `LlmCallLimit`. |
@@ -2006,7 +2010,7 @@ tree exists. Design A (5.1) stays available as an early check of the foundation.
 |---|---|---|
 | 0. Experiment | Embed the `ReplDriver` of the build (the 3.10 nightly) in a test. Check the persistent state, the interrupt at a timeout, a separate output for each REPL, and two REPLs on parallel threads. Measure the start time and the memory of one REPL. | Done on 2026-10-21: a REPL in the same JVM, with guards (see the Phase 0 results). |
 | 1. Foundation | F1, F2 (`read`, `write`, `edit`, `exec`), F3, F6. F7 and F8: `exec` runs only in a sandbox. The guards of the Phase 0 results. Capture checking and safe mode for guest code, the modes of F2, the notation header, and the error hints. Phase 0 did not test capture checking in guest code, so this phase tests it first. | A REPL that runs model code against the guest API, in each mode. |
-| 2. Kernel | The journal with the commit rule, `Entry` and `Meta`, `store` and `load`, the policy leaf, `Harness` on `AgentLoop`, both stop rules, the window strategy (the full log as `History`), the laws, `OptimizableStructure`, `ProgramRunner`. The session decider with `Send` and `Abort`, and the cell events (4.2, 8.3, 8.5). `Clock` and `Random` handlers. | A harness for one task that the optimizers accept. |
+| 2. Kernel | The journal with the commit rule, `Entry` and `Meta`, `store` and `load`, the policy leaf, `Harness` on `drive`, both stop rules, the window strategy (the full log as `History`), the laws, `OptimizableStructure`, `ProgramRunner`. The session decider with `Send` and `Abort`, and the cell events (4.2, 8.3, 8.5). `Clock` and `Random` handlers. | A harness for one task that the optimizers accept. |
 | 3. RLM | F4, F5: variables, `llmQuery` through `subQuery`, `rlm(...)` children, the shared budget, the depth limit. | RLM in the harness. |
 | 4. Memory tree | `Memory`, `View`, the memory laws, the `compress` and `merge` leaves, the builder, `zoom` and `date` as guest functions. The memory-tree strategy (section 6). | A memory that loses no detail. |
 | 5. Optimization | A `FeedbackMetric` from tests, the memory metric, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
