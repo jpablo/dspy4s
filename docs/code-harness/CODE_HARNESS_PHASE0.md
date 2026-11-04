@@ -7,8 +7,8 @@ This document is the full report of "Phase 0. Experiment" in `docs/code-harness/
 The experiment embeds `dotty.tools.repl.ReplDriver` in a JVM, and it measures seven properties. The data answers
 open question 1 of section 11: a REPL in the same JVM, or a forked JVM.
 
-The code of the experiment is a separate sbt project in `tmp/repl-experiment/` of the main checkout. It is not
-committed.
+The code of the experiment is a separate sbt project in `experiments/repl-phase0/`. The build of the repository
+does not include it.
 
 ## Short answer
 
@@ -43,20 +43,20 @@ The recommendation is a REPL in the same JVM, with the guards of the section "Re
 | Scala | `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` and `org.scala-lang:scala3-repl_3` of the same version |
 | REPL options | `-color:never -Xrepl-interrupt-instrumentation:true` |
 
-Run all experiments, from the root of the main checkout:
+Run all experiments, from the root of the repository:
 
 ```bash
-cd tmp/repl-experiment && sbt run
+cd experiments/repl-phase0 && sbt run
 ```
 
 Run some experiments (the names are `cost`, `growth`, `state`, `timeout`, `output`, `parallel`, `host`, `replay`,
 `fork`, `oom` and `stuck`):
 
 ```bash
-cd tmp/repl-experiment && sbt "run state timeout"
+cd experiments/repl-phase0 && sbt "run state timeout"
 ```
 
-The file `tmp/repl-experiment/results-raw.txt` is the full output of the run that this document reports. The
+The file `experiments/repl-phase0/results-raw.txt` is the full output of the run that this document reports. The
 program does all checks, so a new run makes a new report. The times change between runs, in some cases by a factor
 of 2. The checks gave the same result in each run.
 
@@ -65,7 +65,7 @@ The nightly repository was not reachable on 2026-10-21, and the coursier cache h
 
 ## How the experiment works
 
-The paths are relative to `tmp/repl-experiment/`.
+The paths are relative to `experiments/repl-phase0/`.
 
 | File | Purpose |
 |---|---|

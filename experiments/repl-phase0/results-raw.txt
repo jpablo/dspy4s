@@ -1,0 +1,206 @@
+[info] running (fork) experiment.Main 
+
+==== Environment ====
+  java 21.0.1, 14 cores, max heap 4096 MiB
+  scala 3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY
+  compiler arguments: -color:never -Xrepl-interrupt-instrumentation:true
+
+==== 7. Cost ====
+  before any REPL: heap 2 MiB, metaspace 4 MiB, rss 60 MiB, 1458 classes
+  first REPL in the JVM (cold): driver 318 ms, initialState 2 ms, first cell 457 ms, total 787 ms
+  with 1 REPL: heap 18 MiB (+16), metaspace 38 MiB (+34), rss 222 MiB (+162)
+  second REPL (warm): driver 19 ms, initialState 0 ms, first cell 65 ms, total 85 ms
+  with 2 REPLs: heap 24 MiB (+6 for the second), rss 227 MiB (+5)
+  warm cell time, small cell: median 12 ms, p90 21 ms
+  warm cell time, cell with a case class and collections: median 55 ms, p90 93 ms
+  heap growth of one REPL after 60 more cells: +28 MiB (478 KiB for each cell)
+  4 REPLs started at the same time on 4 threads: wall time 83 ms; each: 81, 81, 81, 81 ms
+  with 2 + 4 REPLs: heap 77 MiB (+25 for the 4), metaspace 50 MiB, rss 432 MiB (+205 for the 4)
+  8 more REPLs started at the same time: wall time 113 ms; heap 125 MiB (+48 for the 8), rss 426 MiB (+-6)
+  after all REPLs are closed and out of scope: heap 16 MiB (start 2, with the REPLs 125), metaspace 49 MiB, 6670 classes, rss 280 MiB
+  [PASS] the heap returns near the start value after the REPLs are dropped: +14 MiB
+
+==== 7c. Heap growth of a long session ====
+  after the start: heap 19 MiB (+3)
+  after 50 cells: heap 48 MiB (+29 for 50 cells), median cell time 21 ms
+  after 100 cells: heap 60 MiB (+12 for 50 cells), median cell time 17 ms
+  after 150 cells: heap 75 MiB (+15 for 50 cells), median cell time 17 ms
+  after 200 cells: heap 93 MiB (+18 for 50 cells), median cell time 16 ms
+  after 250 cells: heap 114 MiB (+21 for 50 cells), median cell time 16 ms
+  after 300 cells: heap 138 MiB (+24 for 50 cells), median cell time 15 ms
+  after 350 cells: heap 165 MiB (+27 for 50 cells), median cell time 16 ms
+  after 400 cells: heap 195 MiB (+30 for 50 cells), median cell time 20 ms
+  after 450 cells: heap 229 MiB (+34 for 50 cells), median cell time 16 ms
+  after 500 cells: heap 265 MiB (+36 for 50 cells), median cell time 16 ms
+  after 550 cells: heap 305 MiB (+40 for 50 cells), median cell time 18 ms
+  after 600 cells: heap 348 MiB (+43 for 50 cells), median cell time 18 ms
+
+==== 1. Persistent state ====
+  --- cell 1 ---
+  | val x: Int = 21
+  --- cell 2 ---
+  | y = 42
+  | val y: Int = 42
+  [PASS] a val of cell 1 is visible in cell 2
+  [PASS] a class and a def of cell 3 are visible in cell 4
+  [PASS] the state stays after a compile error
+  [PASS] the state stays after a runtime failure
+  cell times (ms): 38, 30, 60, 5, 275, 5, 8, 4
+
+==== 2. Timeout ====
+  --- output of the loop cell ---
+  | start of cell
+  | one million
+  [PASS] a top-level infinite loop stops after 2 s: outcome TimedOut(2 seconds,true,0), cell time 2012 ms, the stop took 0 ms
+  [PASS] the output before the timeout comes back
+  [PASS] the REPL accepts a later cell: 8
+  [PASS] a loop inside a def stops: the stop took 0 ms
+  [PASS] a deep recursion stops: the stop took 1 ms
+  [PASS] a library loop that calls a guest lambda stops: the stop took 0 ms
+  --- output of the sleep cell ---
+  | sleeping
+  | java.lang.InterruptedException: sleep interrupted
+  |   at java.lang.Thread.sleep0(Thread.java:-2)
+  |   at java.lang.Thread.sleep(Thread.java:509)
+  |   ... 34 elided
+  [PASS] a blocking call stops (Thread.interrupt): the stop took 0 ms
+  [PASS] the REPL accepts a cell after five stops: 14
+
+==== 3. Output ====
+  [PASS] REPL A has its 2000 lines and no line of B: 2000 lines
+  [PASS] REPL B has its 2000 lines and no line of A: 2000 lines
+  [PASS] the two guest runs overlapped in time: overlap 119 ms
+  --- a type error ---
+  | -- [E007] Type Mismatch Error: -------------------------------------------------
+  | 1 |val n: Int = "text"
+  |   |             ^^^^^^
+  |   |             Found:    ("text" : String)
+  |   |             Required: Int
+  |   |
+  |   | longer explanation available when compiling with `-explain`
+  | 1 error found
+  [PASS] a type error comes back as text
+  --- a syntax error ---
+  | CompileError(Line 1: an identifier expected, but '=' found)
+  [PASS] a syntax error comes back as text
+  --- a runtime failure ---
+  | java.lang.ArithmeticException: / by zero
+  |   ... 34 elided
+  [PASS] a runtime failure comes back as text
+  --- a warning ---
+  | 1 warning found
+  | def old: Int
+  | -- Deprecation Warning: --------------------------------------------------------
+  | 2 |val useOld = old
+  |   |             ^^^
+  |   |             method old is deprecated since 1: old
+  | val useOld: Int = 1
+  [PASS] a warning comes back as text
+via System.out
+  [PASS] without routing, a guest System.out.println does not reach the buffer (it goes to the host stdout)
+  [PASS] with the one-time routing of System.out, the guest System.out reaches its own buffer
+  global ExecutionContext: buffer A has 50 A lines and 50 B lines; buffer B has 0 B lines
+  [FAIL] a Future of REPL B prints to the buffer of B: a thread of the global pool keeps the Console.out of the REPL that started it
+  [PASS] with an ExecutionContext for each REPL (bound in the preamble), each buffer has its own 50 task lines: C buffer: 50 C, 0 D; D buffer: 50 D, 0 C
+
+==== 4. Parallel REPLs ====
+  [PASS] each REPL loader has its own StopRepl class
+  [PASS] REPL 1 stops at its timeout of 2 s: cell time 2005 ms
+  --- REPL 2 output ---
+  | P2 done after 4000 ms
+  | val t0: Long = 3590268548749583L
+  | var n: Long = 394682305L
+  [PASS] REPL 2 ends normally, after the stop of REPL 1
+  [PASS] both REPLs accept a later cell
+  round 3: 1 REPLs in parallel, 40 cells each: wall time 269 ms, 149 cells per second, GC 0 ms
+  round 3: 4 REPLs in parallel, 40 cells each: wall time 305 ms, 525 cells per second, GC 12 ms
+  round 3: 8 REPLs in parallel, 40 cells each: wall time 431 ms, 742 cells per second, GC 61 ms
+  round 4: 1 REPLs in parallel, 40 cells each: wall time 302 ms, 132 cells per second, GC 0 ms
+  round 4: 4 REPLs in parallel, 40 cells each: wall time 291 ms, 550 cells per second, GC 0 ms
+  round 4: 8 REPLs in parallel, 40 cells each: wall time 358 ms, 894 cells per second, GC 21 ms
+  1 REPLs, thread states of the cell threads in 103 samples: RUNNABLE: 98
+  4 REPLs, thread states of the cell threads in 99 samples: RUNNABLE: 366; BLOCKED on java.lang.Object@28e3493f: 3; BLOCKED on dotty.tools.dotc.core.Names$@4faa19fb: 3; BLOCKED on jdk.internal.jimage.ImageReader$SharedImageReader@1416f863: 1; WAITING in jdk.internal.misc.Unsafe.park: 1
+  8 REPLs, thread states of the cell threads in 96 samples: RUNNABLE: 679; BLOCKED on dotty.tools.dotc.core.Names$@4faa19fb: 52; BLOCKED on jdk.internal.jimage.ImageReader$SharedImageReader@1416f863: 4; BLOCKED on java.lang.Object@28e3493f: 3
+  [PASS] 40 cells in each of 1, 4 and 8 parallel REPLs give correct results
+
+==== 5. Host API ====
+  [PASS] the registry has no entry after the two preambles: size 0
+  --- REPL 1 output ---
+  | tags: [H1
+  | H1 ran ls
+  | H1 answers hello
+  | val tags: IndexedSeq[String] = Vector("[H1")
+  [PASS] REPL 1 sees only its own handler
+  [PASS] REPL 2 sees only its own handler
+  [PASS] each host handler got its own 5000 calls: 5000, 5000
+  1,000,000 direct guest calls of read: ns per call: 115
+  [PASS] the guest trait is the same class as in the host (no second copy)
+  --- a wrong argument type ---
+  | -- [E007] Type Mismatch Error: -------------------------------------------------
+  | 1 |read(42)
+  |   |     ^^
+  |   |     Found:    (42 : Int)
+  |   |     Required: String
+  |   |
+  |   | longer explanation available when compiling with `-explain`
+  | 1 error found
+  [PASS] a wrong argument type is a compile error
+
+==== 6. Replay (section 8.4) ====
+  cell 1: ok true, 1 effects: read
+  cell 2: ok true, 3 effects: exec, exec, exec
+  cell 3: ok true, 2 effects: llmQuery, write
+  live run of cells 1-3: 187 ms; real effects: 1 reads, 3 processes, 1 LM calls, 1 writes
+  the journal holds 6 effects, 494 characters of arguments and results
+  --- cell 4 in the live REPL ---
+  | List(docs)
+  [PASS] replay of cell 1 is ok, uses all its records, and gives the recorded output: 32 ms
+  [PASS] replay of cell 2 is ok, uses all its records, and gives the recorded output: 20 ms
+  [PASS] replay of cell 3 is ok, uses all its records, and gives the recorded output: 17 ms
+  replay of cells 1-3: 73 ms (the live run took 187 ms)
+  [PASS] the replay did no real effect: 0 reads, 0 writes, 0 processes, 0 LM calls
+  [PASS] the replay did not write summary.txt again
+  --- cell 4 after the replay ---
+  | List(docs)
+  [PASS] cell 4 works after the replay, with the same output
+  [PASS] the definitions come from the journal, not from the files now: modules = Vector(core, programs, docs); the disk now has core and extra
+  --- a divergent cell ---
+  | experiment.Divergence: No recorded effect for read(other.sbt)
+  |   at experiment.Gate.experiment$Gate$$call(Effects.scala:82)
+  |   at experiment.Gate$$anon$1.read(Effects.scala:86)
+  |   at harness.guest.Api$package$.read(Api.scala:47)
+  |   ... 34 elided
+  [PASS] a divergence fails the cell with a clear message and no real effect
+
+==== 7b. Cost of a forked JVM ====
+  forked JVM: process start to the result line 992 ms, to the process end 1511 ms; child says: RESULT ok=true repl+cell=949ms since-jvm-start=991ms MEMORY heap-after-gc=19MiB rss=198MiB
+  forked JVM: process start to the result line 905 ms, to the process end 1422 ms; child says: RESULT ok=true repl+cell=869ms since-jvm-start=904ms MEMORY heap-after-gc=19MiB rss=196MiB
+  forked JVM: process start to the result line 991 ms, to the process end 1519 ms; child says: RESULT ok=true repl+cell=955ms since-jvm-start=989ms MEMORY heap-after-gc=19MiB rss=209MiB
+  forked JVM, process start to the result line, median of 3: 991 ms
+
+==== 9. Memory isolation (in a child JVM, 4 runs with -Xmx1g and 4 runs with -Xmx4g) ====
+  --- child output of run 1 ---
+  | STEP before: REPL 2 allocates, ok true
+  | STEP hog: REPL 1 outcome Failed(java.lang.OutOfMemoryError: Java heap space
+  |   ... 32 elided
+  | )
+  | STEP during: REPL 2 allocates while REPL 1 holds the heap, ok false, Failed(java.lang.NullPointerException: Cannot invoke "java.lang.CharSequence.length()" because "raw" is null)
+  | STEP after: REPL 2 allocates after REPL 1 is closed and out of scope, ok true
+  run 1 (-Xmx1g): host survived true, REPL 2 failed during the hog true, REPL 2 recovered true, exit 0
+  run 2 (-Xmx1g): host survived true, REPL 2 failed during the hog true, REPL 2 recovered true, exit 0
+  run 3 (-Xmx1g): host survived true, REPL 2 failed during the hog true, REPL 2 recovered true, exit 0
+  run 4 (-Xmx1g): host survived true, REPL 2 failed during the hog true, REPL 2 recovered true, exit 0
+  run 5 (-Xmx4g): host survived false, REPL 2 failed during the hog false, REPL 2 recovered false, exit 1; last lines: Exception: java.lang.OutOfMemoryError thrown from the UncaughtExceptionHandler in thread "repl-oom-hog" / Exception in thread "main" java.lang.OutOfMemoryError: Java heap space
+  run 6 (-Xmx4g): host survived false, REPL 2 failed during the hog false, REPL 2 recovered false, exit 1; last lines: Exception: java.lang.OutOfMemoryError thrown from the UncaughtExceptionHandler in thread "repl-oom-hog" / Exception in thread "main" java.lang.OutOfMemoryError: Java heap space
+  run 7 (-Xmx4g): host survived false, REPL 2 failed during the hog false, REPL 2 recovered false, exit 1; last lines: Exception: java.lang.OutOfMemoryError thrown from the UncaughtExceptionHandler in thread "repl-oom-hog" / Exception in thread "main" java.lang.OutOfMemoryError: Java heap space
+  run 8 (-Xmx4g): host survived false, REPL 2 failed during the hog false, REPL 2 recovered false, exit 1; last lines: Exception: java.lang.OutOfMemoryError thrown from the UncaughtExceptionHandler in thread "repl-oom-hog" / Exception in thread "main" java.lang.OutOfMemoryError: Java heap space
+  [FAIL] the host JVM survives a guest that fills the heap, in all runs: 4 of 8
+
+==== 8. A loop that the stop flag cannot reach ====
+  [FAIL] a loop inside library code with no guest call stops: TimedOut(1 second,false,5004)
+  [PASS] the REPL accepts a later cell while the old thread runs
+  the thread repl-stuck still runs (alive true): 1994 ms of CPU in 2000 ms
+
+==== Summary ====
+  3 checks failed: a Future of REPL B prints to the buffer of B; the host JVM survives a guest that fills the heap, in all runs; a loop inside library code with no guest call stops
+[success] Total time: 87 s (0:01:27.0), completed Oct 21, 2026, 11:36:28 PM
