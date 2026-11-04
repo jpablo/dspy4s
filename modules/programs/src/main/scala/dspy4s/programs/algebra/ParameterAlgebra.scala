@@ -1,6 +1,6 @@
 package dspy4s.programs.algebra
 
-import dspy4s.algebra.{AnyObject, Category, Delooped, Functor, Id, Monoid, NatGradedCategory, delooping}
+import dspy4s.algebra.{AnyObject, Category, Delooped, Functor, Id, NatGradedCategory, delooping}
 import dspy4s.core.collections.SizedVector
 import dspy4s.core.collections.SizedVector.*
 import dspy4s.programs.optimization.OptimizableParameters
@@ -8,29 +8,15 @@ import dspy4s.programs.optimization.OptimizableView
 
 import scala.compiletime.ops.int.+
 
-/** The free monoid of optimizer views under stable-order concatenation. */
-given viewsMonoid: Monoid[Vector[OptimizableView]] with
-  def empty: Vector[OptimizableView] = Vector.empty
-  extension (a: Vector[OptimizableView])
-    infix def combine(b: Vector[OptimizableView]): Vector[OptimizableView] = a ++ b
-
-/** Morphisms in the one-object category induced by [[viewsMonoid]]. */
+/** Morphisms in the one-object category induced by the free monoid of optimizer views. */
 type ViewsHom = Delooped[Vector[OptimizableView]]
 
 /** The optimizer-view monoid delooped into a category. This is the target of [[InspectFunctor]]. */
 given viewsDeloop: Category[AnyObject, ViewsHom] = delooping[Vector[OptimizableView]]
 
-/** The free monoid of homogeneous optimizable parameters under concatenation.
-  *
-  * This is the codomain of the parameter projection induced by `OptimizableStructure` and makes parameter composition
-  * explicit rather than encoding it in an ad-hoc category whose composition merely happens to be `++`.
+/** Morphisms in the one-object category induced by the free monoid of optimizable parameters. The projection that
+  * `OptimizableStructure` induces has this codomain, so composition of parameters is a monoid operation.
   */
-given paramsMonoid: Monoid[Vector[OptimizableParameters]] with
-  def empty: Vector[OptimizableParameters] = Vector.empty
-  extension (a: Vector[OptimizableParameters])
-    infix def combine(b: Vector[OptimizableParameters]): Vector[OptimizableParameters] = a ++ b
-
-/** Morphisms in the one-object category induced by [[paramsMonoid]]. */
 type ParamsHom = Delooped[Vector[OptimizableParameters]]
 
 /** The parameter monoid delooped into a category. This is the target of [[ReadFunctor]]. */

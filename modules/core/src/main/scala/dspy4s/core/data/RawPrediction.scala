@@ -90,7 +90,7 @@ final case class RawPrediction(
     asDouble("score")
 
 object RawPrediction:
-  def empty: RawPrediction = RawPrediction(values = DynamicValue.Record.empty)
+  val empty: RawPrediction = RawPrediction(values = DynamicValue.Record.empty)
 
   given monoid: Monoid[RawPrediction] with
     def empty: RawPrediction = RawPrediction.empty

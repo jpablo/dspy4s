@@ -43,24 +43,42 @@ The module sections below are in the order of the sbt dependencies.
 ## algebra
 
 Source root: `modules/algebra/src/main/scala/dspy4s/algebra/`. The paths below are relative to it.
-Simplify 3 (rank 11). Code-review 1 (rank 12). 992 main lines, 213 test lines.
+Simplify 3 (rank 11). Code-review 1 (rank 12). 992 main lines, 213 test lines at the base, 943 main lines after the passes.
+
+Result of the passes: the code has no defect that a user can see. A bytecode check found that no production class calls `Category.>>>`, `ScalaMonad`, a `Functor`, a graded category, or an optic. Production uses `Lens.get` and `Lens.set` through `OptimizableLeaf`. Only tests call `Program.>>>` and `fanout`. Thus the open items below are a design choice for the maintainer, and each one has a proposal.
 
 ### Passes
 
 - (a) The whole module, 992 lines.
-  - [ ] /simplify
-  - [ ] /code-review
+  - [x] /simplify
+  - [x] /code-review
 
 ### Simplify findings
 
-- [ ] `CopyDiscardCategory.scala:9-147`: the Monoidal, Symmetric, CopyDiscard, Markov, and Cartesian traits have no production instance. Only tests use them. `Isomorphism.scala` exists only for these traits. To remove them is a design decision, not a cleanup.
-- [ ] `NaturalTransformation.scala:75-131`: no code outside the module calls `leftWhisker` or `rightWhisker`. They only state the Monad laws (`Monad.scala:27-48`).
-- [ ] `Monad.scala:92-115`: `fromComponents` builds three wrapper objects only to get `pure` and `flatMap`.
-- [ ] `MonoidAction.scala:13` (`functor`) and `NatGradedCategory.scala:39-50` (`underlyingCategory`, `forgetGrade`): only tests use them.
+- [ ] (design) `CopyDiscardCategory.scala`: the Monoidal, Symmetric, CopyDiscard, Markov, and Cartesian traits have one instance, a private object of a test on `Function1`. `Isomorphism.scala` exists only for these traits. Proposal: remove both, or move them to the test sources. About 170 main lines and 93 test lines. The equations that are true for `Module` only under a condition (interchange, copy naturality) stay in `OrderedTensorOpsSuite`.
+- [ ] (design) `Monad.scala`, `NaturalTransformation.scala`, and `Functor.scala` (`identity`, `andThen`, `EndofunctorIn`): `Monad` has one child, and `fromComponents` builds a functor, an identity functor, a composite functor, two natural transformations, and a wrapper to get `pure` and `flatMap`. No code outside the module calls `leftWhisker` or `rightWhisker`. Proposal: a flat `ScalaMonad` with `pure` and `flatMap`, the three bind laws, and a law for `map`. About 250 main lines. A sketch by a reviewer of this form compiled and ran on the two kinds of carrier.
+- [ ] (design) `programs/algebra`: `InspectFunctor`, `ReadFunctor`, `ForgetMetadataFunctor`, `readFunctor`, `GradePreservingFunctor`, `sizedParamsCategory`, `viewsDeloop`, `paramsDeloop`, and `delooping` state one fact four times: composition concatenates the parameters. Their laws also test `Vector.++`. Proposal: state that fact directly, in the form of `paramsFanout`. About 230 lines in `programs` and `algebra`.
+- [ ] (design) `Optic.scala`: `Lens` is the only `Optic`, and `Tuple2` is the only carrier. Proposal: a flat `Lens` with `get`, `set`, and `modify`. About 100 lines.
+- [ ] (design) `NatGradedCategory.scala` (`AnyGrade`, `underlyingCategory`, `forgetGrade`, `GradedFunctor`): a second form of grade erasure, next to `SomeProgram`. Proposal: `SomeProgram` is the one erasure. About 60 lines.
+- [ ] (design) `MonoidAction.functor` and `Opposite.scala`: the two functor laws are the two action laws with the arguments in the other order. Proposal: remove both. 29 main lines and 21 test lines.
+- [ ] (design, last) The constraint `P`, `AnyObject`, and `mapObject`: each instance uses `AnyObject`. Commit `411e6474` (2026-08-05) removed the last real constraint. Proposal: `Category[Hom]` and `Functor[F, Source, Target]`. This has the fewest lines left to change after the other items.
+- [ ] (design, small) `Category` could have an abstract `compose` and a final `>>>`, as `NatGradedCategory` has. `Parameterization.replace` and `replaceUnsized` have one body in `Program`. `paramsId` and `paramsCompose` only forward to `readFunctor`. Other items remove most of these lines, thus they wait.
+- [x] Dead members. Fixed: `Composer`, `morph`, `Monad.category`, `ScalaMonad.map`, `Profunctor.contramap`, `Profunctor.map`, the two category accessors of `GradePreservingFunctor`, `OptimizableStructure.parameterLens`, and the summoner methods of `Monad`, `ScalaMonad`, `Functor`, `Lens`, `Profunctor`, `Monoid`, `MonoidAction`, and `OptimizableStructure`. A test uses `summon`.
+- [x] Duplicates. Fixed: `moduleCategory` repeated `orderedProgram`, `viewsMonoid` and `paramsMonoid` are now `Monoid.vector`, and `Program.packageModule` repeated `Program.of`.
+- [x] `RawPrediction.empty` built a value on each call. Fixed: a `val`, as `RuntimeDelta.empty`.
+- [ ] (skipped, low) `RawPrediction.followedBy` goes through `Iterable` for two options, and `programRunner.run` makes a runner on each run. Each cost is very small next to a model call.
 
 ### Code-review findings
 
-- [ ] `Kleisli.scala:16` and `Category.scala:34` put closures in closures. A very long chain can overflow the stack.
+- [x] `Kleisli.scala:16` and `Category.scala:34` put closures in closures. A very long chain can overflow the stack. Closed: no code builds such a chain. The deepest chain has two closures, in a law statement. `DeepProgramStackSafetySuite` runs `AndThen` data, which uses a heap stack.
+- [x] The gate for `CDCategory[Module]` accepted each compile error, thus also a renamed type. Fixed: it asserts the missing given.
+- [x] No test ran get-put, put-get, or put-put in this module, and no fixture showed that they reject a bad lens. Fixed.
+- [x] No test ran the category statements on the `Module` instance. `ComposeLawSuite` writes them by hand over `Compose`. Fixed: `OrderedTensorOpsSuite` runs them for a value and for a failure.
+- [x] `ScalaMonad.either` ran only the bind laws, at a `Right`. Fixed: the functor, natural transformation, and monad laws run at each form of a value.
+- [x] `Program.md` had a broken link to `Lens`, and the README said that `OptimizableStructure` is a `Lens`. Fixed. A scaladoc block in `Monoid.scala` attached to nothing. Removed.
+- [x] `Program.reparam` throws `IllegalArgumentException` on a wrong length. Kept, because the sized form is the checked one and optimizers check the size. Now it has a test, and the docs state it.
+- [ ] (design) The law checks of `forgetGrade` compare one expression with itself, so they check nothing. This goes with the item on grade erasure.
+- [ ] (open, limit) `OptimizableStructure.read` builds each name and key and drops them. A left-nested chain of 20,000 leaves needs about 1.2 GB for one read. The suite tests 300 leaves, and no program is near that size.
 
 ## core
 
@@ -355,11 +373,11 @@ Simplify 7 (rank 1). Code-review 6 (rank 4). 8004 main lines, 11858 test lines.
 - [x] `DynamicValues.fromAny` on typed values, against the single-codec rule: `compose/Mode.scala`, `strategies/MultiChainComparison.scala`, `strategies/Refine.scala`, and `strategies/RLMSandboxTools.scala`. Fixed.
 - [x] Small items: the stale comment in `runtime/PredictEngine.scala`, `Parallel.apply` the same as `Parallel.run`, and `ErrorLimit(10)` two times in `runtime/ParallelExecutor.scala`. Fixed. `Evaluate.scala`, `BootstrapFewShot.scala`, and `BootstrapFewShotWithRandomSearch.scala` still have the literal (their module passes).
 - [x] optimization/CompositeOptimizableStructureInstances.scala (removed) wrote single-leaf instances by hand, while Refine used `ParameterOptic`: three styles for one job. Fixed: one `given` in each companion, over `OptimizableStructure.leaf`, `pair`, and `unary`. One override type is skipped, because an `Option[Predict]` carries a bound LM.
-- [x] (simplify (c)) optimization/ParameterOptic.scala (removed) had one main caller, Refine, and a second pair implementation. Fixed: `Refine` calls `pair`, so its `replace` is stack-safe. The forwarders in `compose/` are gone. The `Composer` and `AssociativeFunctor` type classes in `algebra` have no user now (the algebra pass).
+- [x] (simplify (c)) optimization/ParameterOptic.scala (removed) had one main caller, Refine, and a second pair implementation. Fixed: `Refine` calls `pair`, so its `replace` is stack-safe. The forwarders in `compose/` are gone. `Composer` is gone (the algebra pass). `AssociativeFunctor` is part of the `Optic` item of the algebra section.
 - [x] (simplify (c)) `optimization/OptimizableStructure.scala` had three abstract members for one fact. Fixed: only `inspectNamed` and `replace` are abstract. `OptimizableMetadata` is core `PredictorKey`. `contracts/ModuleLifecycle.scala` has one `Observed(inputs, predictor)`. `compose/Transform.scala` has `Lift` and `Dimap` nodes only. `ProgramRunner.scala` has one decode helper and one signature-backed `given`.
 - [ ] (simplify (c), design) `contracts/ProgramRuntime.scala` has one implementation and one main override (`InstructionProposer.scala`). The same item as `runtime/SettingsProgramRuntime.scala` above.
 - [ ] (simplify (c), design) `TraceEntry.withinPredictor`, `RuntimeScope.predictor`, and the `nested` check of `contracts/Module.scala` serve one case: `ChainOfThought` over its inner `Predict`. If the inner `Predict` owns the key, the three go, but the module name of the key changes.
-- [ ] (simplify (c), algebra pass) Abstractions that only their law suites use: `CopyDiscardCategory.scala` and `Isomorphism`, `Opposite`, `MonoidAction`, `NaturalTransformation` beyond `ScalaMonad`; in programs `algebra/Parameterization.scala`, `algebra/ParameterAlgebra.scala`, `algebra/ModuleAlgebra.scala`, `algebra/OrderedExecution.scala`, and `OptimizableStructure.parameterLens`. This is a design question for the algebra module.
+- [ ] (simplify (c), algebra pass) Abstractions that only their law suites use: `CopyDiscardCategory.scala` and `Isomorphism`, `Opposite`, `MonoidAction`, `NaturalTransformation` beyond `ScalaMonad`; in programs `algebra/Parameterization.scala`, `algebra/ParameterAlgebra.scala`, `algebra/ModuleAlgebra.scala`, and `algebra/OrderedExecution.scala`. `OptimizableStructure.parameterLens` is gone. The design items of the algebra section hold the proposals.
 - [x] (simplify (b)) `runtime/PredictEngine.scala` held the decision routing, about 120 of 379 lines. Fixed: the `DecisionAdapter` companion and `DecisionPlan`, as upstream `dspy/adapters/decision.py`. One `strategies/DecisionOutputs.scala` trait replaces three copies of three forwarders. `Predict.erase`, `boundLm`, and `DynamicPredict.outputJsonSchema` are gone.
 - [x] (simplify (b)) `runtime/AttemptSelection.scala` `bestOf` had six nesting levels and three copies of the failure charge, and `strategies/BestOfN.scala` and `strategies/Refine.scala` repeated the sample loop. Fixed: one `for`, and `AttemptSelection.sample`. The `OfferFeedback` types moved to `strategies/RefineFeedback.scala`, and the four forwarders of Refine are gone.
 - [x] (simplify (b)) `ParallelExecutionResult` had three views of one result and forced dead arms. Fixed: `results: Vector[Either[DspyError, A]]`.

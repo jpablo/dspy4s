@@ -49,8 +49,8 @@ class SignatureOpsLawSuite extends munit.ScalaCheckSuite:
     Gen.oneOf(genOutField.map(OutputTransform.prepend), genOutFields.map(OutputTransform.replace))
   private val genInT: Gen[InputTransform] = genInField.map(InputTransform.append)
 
-  private val OT: Monoid[OutputTransform] = Monoid[OutputTransform]
-  private val IT: Monoid[InputTransform]  = Monoid[InputTransform]
+  private val OT: Monoid[OutputTransform] = summon[Monoid[OutputTransform]]
+  private val IT: Monoid[InputTransform]  = summon[Monoid[InputTransform]]
 
   /** Execute a stated `Monoid[OutputTransform]` law under output-observational equality of the transform. */
   private def outEq(eq: IsEq[OutputTransform], s: SignatureLayout): Boolean = obsEq(eq.lhs.runOn(s), eq.rhs.runOn(s))

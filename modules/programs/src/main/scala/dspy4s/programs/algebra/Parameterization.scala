@@ -24,7 +24,9 @@ trait Parameterization[P[_], Hom[_, _, _ <: Int]]:
       parameters: SizedVector[OptimizableParameters, N]
   ): Hom[A, B, N]
 
-  /** Compatibility boundary for callers that have erased the vector's size. */
+  /** Compatibility boundary for callers that have erased the vector's size. It throws `IllegalArgumentException` if the
+    * vector does not have one value for each parameter.
+    */
   def replaceUnsized[A, B, N <: Int](
       f         : Hom[A, B, N],
       parameters: Vector[OptimizableParameters]

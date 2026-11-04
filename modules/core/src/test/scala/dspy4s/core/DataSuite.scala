@@ -130,7 +130,7 @@ class DataSuite extends FunSuite:
     )
     val c = RawPrediction(values = DynamicValues.record("stage" := "c"))
 
-    val M = Monoid[RawPrediction]
+    val M = summon[Monoid[RawPrediction]]
     assertEquals(M.identityLeft(a).lhs, M.identityLeft(a).rhs)
     assertEquals(M.identityRight(a).lhs, M.identityRight(a).rhs)
     assertEquals(M.associativity(a, b, c).lhs, M.associativity(a, b, c).rhs)

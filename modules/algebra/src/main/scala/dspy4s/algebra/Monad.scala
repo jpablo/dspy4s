@@ -5,9 +5,7 @@ package dspy4s.algebra
   * The three laws state that `F` is a monoid object in the category of endofunctors. [[ScalaMonad]] derives the usual
   * `pure`, `flatten`, and `flatMap` operations when the base category is Scala types and total functions.
   */
-trait Monad[F[_], ObjectConstraint[_], Hom[_, _]](using
-    val category: Category[ObjectConstraint, Hom]
-):
+trait Monad[F[_], ObjectConstraint[_], Hom[_, _]]:
 
   val endofunctor: EndofunctorIn[F, ObjectConstraint, Hom]
 
@@ -47,11 +45,6 @@ trait Monad[F[_], ObjectConstraint[_], Hom[_, _]](using
         .rightWhisker(multiplication, endofunctor)
         .andThen(multiplication)
 
-object Monad:
-  def apply[F[_], ObjectConstraint[_], Hom[_, _]](using
-      monad: Monad[F, ObjectConstraint, Hom]
-  ): Monad[F, ObjectConstraint, Hom] = monad
-
 /** A categorical monad specialized to Scala types and total functions. */
 trait ScalaMonad[F[_]] extends Monad[F, AnyObject, Function1]:
 
@@ -61,8 +54,6 @@ trait ScalaMonad[F[_]] extends Monad[F, AnyObject, Function1]:
 
   final def flatMap[A, B](value: F[A])(f: A => F[B]): F[B] =
     flatten(endofunctor.map(f)(value))
-
-  final def map[A, B](f: A => B): F[A] => F[B] = endofunctor.map(f)
 
   @Law("bind left identity")
   def bindIdentityLeft[A, B](value: A, f: A => F[B]): IsEq[F[B]] =
@@ -77,8 +68,6 @@ trait ScalaMonad[F[_]] extends Monad[F, AnyObject, Function1]:
     flatMap(flatMap(value)(f))(g) <-> flatMap(value)(a => flatMap(f(a))(g))
 
 object ScalaMonad:
-
-  def apply[F[_]](using monad: ScalaMonad[F]): ScalaMonad[F] = monad
 
   /** The error monad: the first `Left` short-circuits, while `Right` values compose normally. */
   given either[E]: ScalaMonad[[A] =>> Either[E, A]] =
@@ -96,7 +85,7 @@ object ScalaMonad:
   ): ScalaMonad[F] =
     given Category[AnyObject, Function1] = functionCategory
 
-    val functor: Endofunctor[F] = new Functor[F, AnyObject, Function1, AnyObject, Function1]:
+    val functor: Endofunctor[F] = new Endofunctor[F]:
       def mapObject[A](using AnyObject[A]): AnyObject[F[A]] = summon
       def map[A, B](f: A => B): F[A] => F[B]                = mapComponent[A, B](f)
 

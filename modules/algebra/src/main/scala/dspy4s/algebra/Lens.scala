@@ -48,7 +48,3 @@ trait Lens[S, A] extends Optic[S, S, A, A, Tuple2]:
   @Law("set-modify consistency: setting a value equals a constant modification")
   def consistentSetModify(s: S, a: A): IsEq[S] =
     set(s, a) <-> this.modify(s)(_ => a)
-
-object Lens:
-  /** Summon the instance focusing `S` onto `A`. */
-  def apply[S, A](using l: Lens[S, A]): Lens[S, A] = l

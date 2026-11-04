@@ -42,30 +42,25 @@ type SomeProgram[I, O] = Program[I, O, ?]
 
 object Program:
 
-  private def packageModule[I, O, M <: Module[I, O]](
-      module: M
-  )(using structure: OptimizableStructure[M]): Program[I, O, structure.Arity] { type Rep = M } =
+  /** Package a module while retaining its exact parameter grade. */
+  def of[I, O, M <: Module[I, O]](module: M)(using
+      structure: OptimizableStructure[M]
+  ): Program[I, O, structure.Arity] { type Rep = M } =
     new Program[I, O, structure.Arity]:
       type Rep = M
       val program               = module
       val optimizableParameters = structure
 
-  /** Package a module while retaining its exact parameter grade. */
-  def of[I, O, M <: Module[I, O]](module: M)(using
-      structure: OptimizableStructure[M]
-  ): Program[I, O, structure.Arity] { type Rep = M } =
-    packageModule(module)
-
   /** Naturals grade program composition: identity contributes zero leaves and composition adds leaf counts. */
   given gradedProgramCategory: NatGradedCategory[AnyObject, Program] with
     def id[A: AnyObject]: Program[A, A, 0] =
-      Program.packageModule(Compose.id[A])
+      Program.of(Compose.id[A])
 
     def compose[A, B, C, N <: Int, M <: Int](
         f: Program[A, B, N],
         g: Program[B, C, M]
     ): Program[A, C, N + M] =
-      Program.packageModule(f.program.andThen(g.program))(using
+      Program.of(f.program.andThen(g.program))(using
         AndThen.andThenOptimizableStructure[A, B, C, f.Rep, g.Rep, N, M](using
           f.optimizableParameters,
           g.optimizableParameters
@@ -78,7 +73,7 @@ object Program:
         f: Program[I, A, N],
         g: Program[I, B, M]
     ): Program[I, (A, B), N + M] =
-      Program.packageModule(f.program &&& g.program)(using
+      Program.of(f.program &&& g.program)(using
         Both.bothOptimizableStructure[I, A, B, f.Rep, g.Rep, N, M](using
           f.optimizableParameters,
           g.optimizableParameters
@@ -96,13 +91,13 @@ object Program:
         f         : Program[A, B, N],
         parameters: SizedVector[OptimizableParameters, N]
     ): Program[A, B, N] =
-      Program.packageModule(f.optimizableParameters.replaceSized(f.program, parameters))(using f.optimizableParameters)
+      Program.of(f.optimizableParameters.replaceSized(f.program, parameters))(using f.optimizableParameters)
 
     def replaceUnsized[A, B, N <: Int](
         f         : Program[A, B, N],
         parameters: Vector[OptimizableParameters]
     ): Program[A, B, N] =
-      Program.packageModule(f.optimizableParameters.replace(f.program, parameters))(using f.optimizableParameters)
+      Program.of(f.optimizableParameters.replace(f.program, parameters))(using f.optimizableParameters)
 
   /** The parameterization supplies the canonical fixed-grade lens. */
   given programParameterLens[I, O, N <: Int]

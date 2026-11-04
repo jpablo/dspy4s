@@ -77,7 +77,7 @@ class ModeLawSuite extends FunSuite:
     samples.foreach(c => assertEquals(eq.lhs.transform(c), eq.rhs.transform(c)))
 
   test("Mode is a lawful monoid: the Monoid[Mode] instance's laws, executed") {
-    val M       = Monoid[Mode]
+    val M       = summon[Monoid[Mode]]
     val m1      = Mode.temperature(0.5)
     val m2      = Mode.setConfig("top_p" := 0.5)
     val m3      = Mode.rolloutId(3)
@@ -103,7 +103,7 @@ class ModeLawSuite extends FunSuite:
   }
 
   test("the Module action executes its stated identity and compatibility laws") {
-    val action = MonoidAction[Mode, Module[Int, Int]]
+    val action = summon[MonoidAction[Mode, Module[Int, Int]]]
     val m1     = Mode.temperature(0.5)
     val m2     = Mode.temperature(0.9)
 
@@ -124,7 +124,7 @@ class ModeLawSuite extends FunSuite:
   }
 
   test("the Module action is a lawful functor from the opposite Mode delooping") {
-    val action = MonoidAction[Mode, Module[Int, Int]]
+    val action = summon[MonoidAction[Mode, Module[Int, Int]]]
     val F      = action.functor
     val m1     = Mode.temperature(0.5)
     val m2     = Mode.temperature(0.9)

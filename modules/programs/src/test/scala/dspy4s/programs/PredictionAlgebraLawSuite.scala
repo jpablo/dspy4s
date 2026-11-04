@@ -18,7 +18,7 @@ class PredictionAlgebraLawSuite extends FunSuite:
     Prediction(output, RawPrediction(DynamicValues.record("stage" := stage)))
 
   test("Prediction's Monad instance preserves identity and composition") {
-    val M              = ScalaMonad[Prediction]
+    val M              = summon[ScalaMonad[Prediction]]
     val initial        = prediction(3, "initial")
     val identityLaw    = M.endofunctor.identities[Int]
     val compositionLaw = M.endofunctor.composition((n: Int) => n + 1, (n: Int) => n * 2)
@@ -28,7 +28,7 @@ class PredictionAlgebraLawSuite extends FunSuite:
   }
 
   test("Prediction's flatMap obeys the Monad laws and accumulates raw evidence in execution order") {
-    val M                          = ScalaMonad[Prediction]
+    val M                          = summon[ScalaMonad[Prediction]]
     val initial                    = prediction(3, "initial")
     def f(n: Int): Prediction[Int] = prediction(n + 1, "f")
     def g(n: Int): Prediction[Int] = prediction(n * 2, "g")
@@ -45,7 +45,7 @@ class PredictionAlgebraLawSuite extends FunSuite:
   }
 
   test("Prediction's unit and multiplication are natural and obey the categorical Monad laws") {
-    val M       = ScalaMonad[Prediction]
+    val M       = summon[ScalaMonad[Prediction]]
     val initial = prediction(3, "initial")
     val nested  = prediction(prediction(prediction(3, "inner"), "middle"), "outer")
 

@@ -1,6 +1,6 @@
 package dspy4s.programs.optimization
 
-import dspy4s.algebra.{IsEq, Law, Lens, <->}
+import dspy4s.algebra.{IsEq, Law, <->}
 import dspy4s.core.collections.SizedVector
 
 import scala.annotation.implicitNotFound
@@ -69,9 +69,6 @@ object OptimizableStructure extends LowPriorityOptimizableStructure:
   trait Of[P, N <: Int] extends OptimizableStructure[P]:
     final type Arity = N
 
-  /** Summon the optimizable structure. */
-  def apply[P](using structure: OptimizableStructure[P]): OptimizableStructure[P] = structure
-
   // The factories of the composite structures. The interpreter keeps them stack-safe.
   export StackSafeOptimizableStructure.{pair, unary}
 
@@ -80,14 +77,6 @@ object OptimizableStructure extends LowPriorityOptimizableStructure:
     */
   private[optimization] def qualifiedName(prefix: String, name: String): String =
     if name == "self" then prefix else s"$prefix.$name"
-
-  /** The structure induces the canonical lawful lens onto its complete parameter vector. */
-  given parameterLens[P, N <: Int](using
-      structure: WithArity[P, N]
-  ): Lens[P, SizedVector[OptimizableParameters, N]] with
-    def get(program: P): SizedVector[OptimizableParameters, N]             = structure.readSized(program)
-    def set(program: P, updates: SizedVector[OptimizableParameters, N]): P =
-      structure.replaceSized(program, updates)
 
   /** Lifts a single [[OptimizableLeaf]] leaf to a 1-element [[OptimizableStructure]]. A type that is itself a leaf
     * (e.g. [[dspy4s.programs.strategies.DynamicPredict]], which is also a `Product`) resolves here and is not torn into

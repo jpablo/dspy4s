@@ -32,10 +32,6 @@ trait Functor[
     map(f >>> g) <-> (map(f) >>> map(g))
 
 object Functor:
-  def apply[F[_], SourceConstraint[_], Source[_, _], TargetConstraint[_], Target[_, _]](using
-      functor: Functor[F, SourceConstraint, Source, TargetConstraint, Target]
-  ): Functor[F, SourceConstraint, Source, TargetConstraint, Target] = functor
-
   /** The identity functor on a category. */
   def identity[ObjectConstraint[_], Hom[_, _]](using
       category: Category[ObjectConstraint, Hom]

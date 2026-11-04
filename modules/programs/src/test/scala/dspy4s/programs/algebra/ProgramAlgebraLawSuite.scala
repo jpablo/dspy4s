@@ -217,6 +217,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
     // Behavior riders: reparameterization changes parameters, never the shape's computation.
     assertEquals(ab.reparam(ab.params)(ProgramCall(5)).map(_.output), ab(ProgramCall(5)).map(_.output))
     assertEquals(ab.reparam(fresh)(ProgramCall(5)).map(_.output), Right(2))
+    val _ = intercept[IllegalArgumentException](ab.reparam(fresh.take(1)))
   }
 
   test("a packaged fixed-shape program has a lawful statically sized parameter lens") {
@@ -284,7 +285,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
 
   // ── The parameter monoid, and its delooping as a lawful Category instance (checked with real ==) ─────────
   test("the parameter monoid Monoid[Vector[OptimizableParameters]] satisfies the monoid laws") {
-    val M  = Monoid[Vector[OptimizableParameters]]
+    val M  = summon[Monoid[Vector[OptimizableParameters]]]
     val v1 = Vector(predict("a -> b").optimizableParameters)
     val v2 = Vector(predict("b -> c").optimizableParameters)
     val v3 = Vector(predict("c -> d").optimizableParameters)
@@ -294,7 +295,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
   }
 
   test("paramsDeloop is that monoid delooped: Category laws hold, and id delegates to the monoid's empty") {
-    val M  = Monoid[Vector[OptimizableParameters]]
+    val M  = summon[Monoid[Vector[OptimizableParameters]]]
     val v1 = Vector(predict("a -> b").optimizableParameters)
     val v2 = Vector(predict("b -> c").optimizableParameters)
     val v3 = Vector(predict("c -> d").optimizableParameters)
