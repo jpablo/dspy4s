@@ -160,6 +160,9 @@ object UsageTracking:
   * gets the total on its error ([[dspy4s.core.contracts.LmErrorDetails.usage]]) when the total is not empty and the
   * error is an LM error. An error that is not an LM error stays as it is. A cache hit has no usage.
   *
+  * The cache stores each successful reply, also a reply with an empty text, as upstream `_store` does
+  * (`dspy/clients/execution.py`). The adapter call then gives the parse error for that reply on each cache hit.
+  *
   * A delegate that throws a non-fatal exception gives an [[dspy4s.core.contracts.LmUnexpectedError]] with the message
   * of the exception, on the call path and on the stream path (upstream `error_boundary(..., unexpected=True)` in
   * `dspy/clients/errors.py`). The retry policy decides on that error as on each other error, and the call gets the

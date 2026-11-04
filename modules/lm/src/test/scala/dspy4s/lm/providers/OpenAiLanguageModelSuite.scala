@@ -378,3 +378,28 @@ class OpenAiLanguageModelSuite extends FunSuite:
         assert(!error.isTransient)
       case other => fail(s"expected an LmProviderResponseError, got $other")
   }
+
+  test("a reply with an empty content and only reasoning is a successful response with the usage of the reply") {
+    val (model, _) = recordingModel(
+      """{"model": "openai/test", "usage": {"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 3},
+        |"choices": [{"message": {"role": "assistant", "content": "", "reasoning_content": "why"},
+        |"finish_reason": "stop"}]}""".stripMargin
+    )
+    given RuntimeContext = RuntimeEnvironment.current
+    model.call(LmRequest(model = "openai/test", messages = Vector(Message(MessageRole.User, Some("Q?"))))) match
+      case Right(response) =>
+        assertEquals(response.outputs.map(_.text), Vector(""))
+        assertEquals(response.usage.map(_.totalTokens), Some(3L))
+      case other => fail(s"expected a response, got $other")
+  }
+
+  test("a Responses reply with only reasoning is a successful response with the reasoning") {
+    val (model, _) = recordingModel(
+      """{"model": "openai/test", "output": [{"type": "reasoning", "content": [{"text": "why"}]}]}""",
+      mode = LmMode.Responses
+    )
+    given RuntimeContext = RuntimeEnvironment.current
+    model.call(LmRequest(model = "openai/test", messages = Vector(Message(MessageRole.User, Some("Q?"))))) match
+      case Right(response) => assertEquals(response.outputs.map(o => (o.text, o.reasoning)), Vector(("", "why")))
+      case other           => fail(s"expected a response, got $other")
+  }

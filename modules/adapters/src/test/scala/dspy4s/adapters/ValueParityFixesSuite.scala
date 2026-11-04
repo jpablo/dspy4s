@@ -84,6 +84,12 @@ class ValueParityFixesSuite extends FunSuite:
     assert(ChatAdapter().parse(layout, LmOutput(text = "[[ ## items ## ]]\n3")).isLeft)
   }
 
+  test("a list[T] item of the wrong type is a parse error in the JSON and the chat format") {
+    val layout = layoutWith(FieldSpec("items", typeRef = TypeRef("list[int]")))
+    assert(JSONAdapter().parse(layout, LmOutput(text = """{"items": ["a"]}""")).isLeft)
+    assert(ChatAdapter().parse(layout, LmOutput(text = "[[ ## items ## ]]\n[\"a\"]")).isLeft)
+  }
+
   test("a tuple, a set, or a frozenset field of a string signature is a list in each parser, as the list rule") {
     // Upstream `parse_value` validates the JSON list with the annotation: `tuple[...]` gives a tuple, and `set[...]`
     // and `frozenset[...]` give a set (`dspy/adapters/utils.py`). A Python set has no order, and it keeps the first

@@ -4,8 +4,18 @@ import dspy4s.core.contracts.{DspyError, FieldSpec, LenientValues, PythonText, T
 import dspy4s.core.contracts.Reflects.{caseNames, withoutDeferred}
 import zio.blocks.chunk.{Chunk, ChunkMap, NonEmptyChunk}
 import zio.blocks.docs.Doc
-import zio.blocks.schema.binding.{Binding, BindingType}
-import zio.blocks.schema.json.{Json, JsonCodec, JsonFormat, JsonReader, JsonSchema, JsonWriter}
+import zio.blocks.schema.binding.{Binding, BindingType, HasBinding}
+import zio.blocks.schema.derive.{Deriver, InstanceOverride}
+import zio.blocks.schema.json.{
+  Json,
+  JsonCodec,
+  JsonCodecDeriver,
+  JsonReader,
+  JsonSchema,
+  JsonSchemaType,
+  JsonWriter,
+  SchemaType
+}
 import zio.blocks.schema.{
   DynamicOptic,
   DynamicValue,
@@ -27,8 +37,8 @@ import zio.blocks.typeid.{Owner, TypeId}
   *     type), and then uses `Schema.fromDynamicValue`.
   *   - [[fieldSpecsFromReflect]] gives the `FieldSpec` list of a `Reflect.Record`.
   *   - [[normalize]] coerces a `DynamicValue` to a target `Reflect`.
-  *   - [[jsonSchemaForModel]] gives the JSON schema of a `Schema[A]` for a prompt, with no `id` in a `ToolCall`, and
-  *     with `$defs` for a recursive type.
+  *   - [[jsonSchemaForModel]] gives the JSON schema of a `Schema[A]` for a prompt, with no `id` in a `ToolCall`, with
+  *     `$defs` for a recursive type, and with the null and `required` rules of the decode.
   *
   * The codec finds the framework types (`History`, `ToolCall`, and the decision types) by their marker ([[TypeMarker]])
   * in the modifiers of a reflect, not by their structure or their type id.
@@ -288,13 +298,18 @@ private[signatures] object ZioSchemaCodec:
     * recursive type its `toJsonSchema` (a `lazy val`) reads itself and waits forever. Thus this function cuts each
     * cycle before zio-blocks makes the schema. When the root type is recursive, the root is a `$ref` to its definition.
     *
+    * The schema and the decode agree on a null and on an absent field ([[ModelSchemaDeriver]]) for the sequences, maps,
+    * options, and records that `ModelSchemaContractSuite` covers. Some other types have a schema that the decode does
+    * not accept. `docs/port/PORT_DIFFERENCES.md` section 14 lists them.
+    *
     * The result is the record of [[schemaRecord]], or `None` when the schema is not a JSON object.
     */
   def jsonSchemaForModel[A](schema: Schema[A]): Option[DynamicValue.Record] =
     val shown     = schema.reflect.transform(DynamicOptic.root, HideToolCallId).force
     val recursive = recursiveTypes(shown)
     schemaRecord(
-      if recursive.isEmpty then Schema(shown).toJsonSchema.toJson else withDefinitions(shown, recursive).toJson
+      if recursive.isEmpty then Schema(shown).deriving(ModelSchemaDeriver).derive.toJsonSchema.toJson
+      else withDefinitions(shown, recursive).toJson
     )
 
   /** The JSON object `json` as a record, or `None` when `json` is not an object. The record has the value of the JSON
@@ -306,16 +321,18 @@ private[signatures] object ZioSchemaCodec:
     PythonText.parseJson(json.toString).toOption.collect { case record: DynamicValue.Record => record }
 
   /** The JSON schema of `root`, with a definition in `$defs` for each type in `recursive`. In each schema, each
-    * reference to a type in `recursive` is a placeholder whose JSON schema is a `$ref` ([[RefSchemaCodec]]).
+    * reference to a type in `recursive` is a placeholder whose JSON schema is a `$ref` ([[SchemaOnlyCodec]]).
     */
   private def withDefinitions(root: Reflect.Bound[?], recursive: Vector[Reflect.Bound[?]]): JsonSchema =
     val names = definitionNames(recursive)
     val cut   = CutCycles(names)
 
     def jsonSchemaOf[B](reflect: Reflect.Bound[B]): JsonSchema =
-      val builder = Schema(reflect.transform(DynamicOptic.root, cut).force).deriving(JsonFormat.deriver)
+      val builder = Schema(reflect.transform(DynamicOptic.root, cut).force).deriving(ModelSchemaDeriver)
       names.valuesIterator
-        .foldLeft(builder)((acc, name) => acc.instance(refTypeId[Any](name), RefSchemaCodec(name)))
+        .foldLeft(builder)((acc, name) =>
+          acc.instance(refTypeId[Any](name), SchemaOnlyCodec[Any](JsonSchema.refString(refOf(name))))
+        )
         .derive
         .toJsonSchema
 
@@ -428,16 +445,68 @@ private[signatures] object ZioSchemaCodec:
       val shown = shownTypeId(path, typeId)
       super.transformWrapper(path, wrapped, shown, metadata, doc, modifiers, storedDefaultValue, storedExamples)
 
-  /** The JSON codec of a placeholder: its JSON schema is a `$ref` to the definition `name`. The codec is only for the
-    * JSON schema, so its encoder and its decoder fail.
+  /** The deriver of the JSON schema that a model sees. The decode ([[decodeValue]]) rejects a null and an absent field
+    * for a sequence or a map. The JSON codec of zio-blocks reads both as an empty collection, and its JSON schema says
+    * so. This deriver gives the rules of the decode, which are also the rules of upstream pydantic, and each other part
+    * of the schema stays:
+    *
+    *   - `withRequireCollectionFields` puts a collection field in `required`, except when it has a default value.
+    *   - A sequence has the type `array`, and a map has the type `object`, with no `null`.
+    *
+    * An `Option` adds the `null` to the schema of its element (`JsonSchema.withNullable`), so an `Option[List[A]]`
+    * permits a null. The change is in the schema of the collection, so it applies at each level and needs no walk over
+    * the schema. The codecs of this deriver are only for the JSON schema ([[SchemaOnlyCodec]]).
     */
-  private final class RefSchemaCodec(name: String) extends JsonCodec[Any]:
-    override def decodeValue(in: JsonReader): Any = error(s"The placeholder of '${refOf(name)}' has no decoder")
+  private object ModelSchemaDeriver extends Deriver[JsonCodec]:
+    private val base = JsonCodecDeriver.withRequireCollectionFields(true)
 
-    override def encodeValue(x: Any, out: JsonWriter): Unit =
-      error(s"The placeholder of '${refOf(name)}' has no encoder")
+    export base.{deriveDynamic, derivePrimitive, deriveRecord, deriveVariant, deriveWrapper}
 
-    override def toJsonSchema: JsonSchema = JsonSchema.refString(refOf(name))
+    // Each derivation calls this function, and with this call the base deriver clears its cache of recursive records.
+    override def instanceOverrides: IndexedSeq[InstanceOverride] = base.instanceOverrides
+
+    override def deriveSequence[F[_, _], C[_], A](
+        element     : Reflect[F, A],
+        typeId      : TypeId[C[A]],
+        binding     : Binding.Seq[C, A],
+        doc         : Doc,
+        modifiers   : Seq[Modifier.Reflect],
+        defaultValue: Option[C[A]],
+        examples    : Seq[C[A]]
+    )(implicit F: HasBinding[F], D: HasInstance[F]): Lazy[JsonCodec[C[A]]] =
+      base.deriveSequence(element, typeId, binding, doc, modifiers, defaultValue, examples)
+        .map(withType(_, JsonSchemaType.Array))
+
+    override def deriveMap[F[_, _], M[_, _], K, V](
+        key         : Reflect[F, K],
+        value       : Reflect[F, V],
+        typeId      : TypeId[M[K, V]],
+        binding     : Binding.Map[M, K, V],
+        doc         : Doc,
+        modifiers   : Seq[Modifier.Reflect],
+        defaultValue: Option[M[K, V]],
+        examples    : Seq[M[K, V]]
+    )(implicit F: HasBinding[F], D: HasInstance[F]): Lazy[JsonCodec[M[K, V]]] =
+      base.deriveMap(key, value, typeId, binding, doc, modifiers, defaultValue, examples)
+        .map(withType(_, JsonSchemaType.Object))
+
+    /** A codec with the JSON schema of `codec`, with `jsonType` as the type of the schema. */
+    private def withType[A](codec: JsonCodec[A], jsonType: JsonSchemaType): JsonCodec[A] =
+      SchemaOnlyCodec[A](
+        codec.toJsonSchema match
+          case schema: JsonSchema.Object => schema.copy(`type` = Some(SchemaType.Single(jsonType)))
+          case other                     => other
+      )
+
+  /** A JSON codec that has the JSON schema `schema`. The codec is only for the JSON schema, so its encoder and its
+    * decoder fail. A placeholder of a recursive type is such a codec, with a `$ref` as its schema.
+    */
+  private final class SchemaOnlyCodec[A](schema: => JsonSchema) extends JsonCodec[A]:
+    override def decodeValue(in: JsonReader): A = error("A codec for a JSON schema has no decoder")
+
+    override def encodeValue(x: A, out: JsonWriter): Unit = error("A codec for a JSON schema has no encoder")
+
+    override lazy val toJsonSchema: JsonSchema = schema
 
   private def primitiveTypeRef(prim: PrimitiveType[?]): TypeRef =
     prim match
@@ -448,10 +517,11 @@ private[signatures] object ZioSchemaCodec:
       case _                                                                                             => TypeRef.json
 
   /** Decode `dv` as an `A`. [[normalize]] first coerces `dv` to the reflect of `schema`, then `Schema.fromDynamicValue`
-    * decodes it. An error of zio-blocks becomes a `ValidationError`.
+    * decodes it. An error of zio-blocks becomes a `ValidationError` with the message of that error, which has the path
+    * of the value.
     */
   def decodeValue[A](dv: DynamicValue)(using schema: Schema[A]): Either[DspyError, A] =
-    schema.fromDynamicValue(normalize(dv, schema.reflect)).left.map(err => ValidationError(err.toString))
+    schema.fromDynamicValue(normalize(dv, schema.reflect)).left.map(err => ValidationError(DspyError.messageOf(err)))
 
   /** Make a `Shape[A]` from a zio-blocks `Schema[A]`. The encode uses `Schema.toDynamicValue`. The decode first checks
     * that the record has each required field, and then uses [[decodeValue]].

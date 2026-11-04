@@ -400,6 +400,11 @@ output (`content:null` + `tool_calls`). Commits 671a37f, 1f50818, 09fa2b5, 221b4
 function via the object `tool_choice` form, a `ToolCalls` output shape) are net-new features,
 not gaps. (JSON-Schema constraint embedding is tracked under G-9, not here.)
 
+Since 2026-11-03 (found in a live run), the tool specs of a predictor do not disappear when the request has no provider
+tools. The prompt shows them as an input field `tools` (`NativeTools.promptInvocation`, `ToolsInPromptSuite`), and with
+`NativeTools.enabled` on, a tool calls output with no tools is a `ConfigurationError` (`NativeTools.checkTools`, upstream
+`_call_preprocess`). See PORT_DIFFERENCES section 26.
+
 **Summary.** Adapters did not use native provider function-calling preprocessing,
 and `JSONAdapter` did not emit `response_format` structured outputs. The
 capability flags that would gate these now exist, but the adapters didn't consume
@@ -1367,7 +1372,15 @@ the key.
 - `ChatAdapter` falls back to a `JSONAdapter` after a parse error of the parse step (`useJsonAdapterFallback`, on by
   default). An LM error or a configuration error gives no second call, and a call that streamed visible output gets
   no second call. The predictor runs the second call (`Adapter.fallback`).
-- A value that does not fit the type of its field is a `ParseError` with the field name and the raw response.
+- A value that does not fit the type of its field is a `ParseError` with the field name and the raw response. Since
+  2026-11-03 the typed decode of a `Predict` is a part of the parse step (`checkOutput` of `AdapterCall.run`), so a
+  wrong list item or a wrong nested value is also a `ParseError` with the raw response, and it gets the fallback
+  (`ReplyFallbackRulesSuite`).
+- A reply with no text is a `ParseError` with the upstream text "The LM returned an empty or null response." Since
+  2026-11-03 the wires keep each choice as an output with an empty text (upstream `_process_completion` and
+  `responses_outputs`), and `AdapterCall` has the check of `_call_postprocess`, so such a reply gets the fallback.
+  Before that date, it was an `LmProviderResponseError`. Only a reply with no choices is that error now
+  (`EmptyReplyWireSuite`).
 - In the chat format, the first header of a field wins.
 - An incomplete demo comes first, with the upstream prefix, and a missing output shows "Not supplied for this
   particular example." A demo with no input or no output is dropped. A field default no longer fills a demo; it

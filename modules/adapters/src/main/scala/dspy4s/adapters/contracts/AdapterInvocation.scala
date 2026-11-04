@@ -18,10 +18,11 @@ final case class AdapterInvocation(
     inputs          : Example,
     request         : LmRequest,
     outputJsonSchema: Option[DynamicValue.Record] = None,
-    /** Tool definitions (pure [[ToolSpec]] data — name / description / parameter schema, no invoke closures) the caller
-      * makes available to the model. An adapter with native function-calling enabled renders these into the provider
-      * `tools` request option; adapters without it ignore them. Empty by default. The executable tool bodies stay on
-      * the program (e.g. ReAct's `ToolFunction`s); only the schema travels to the adapter.
+    /** The tools that the caller makes available to the model: pure [[ToolSpec]] data (name, description, and parameter
+      * schema, with no invoke closures). They apply only to a layout with a tool calls field. When native function
+      * calling is active ([[NativeTools.isActive]]), the request has them as provider tools
+      * ([[NativeTools.toolOptions]]). Else the prompt shows them as an input field ([[NativeTools.promptInvocation]]).
+      * Empty by default. The executable tool bodies stay on the program; only the schema goes to the adapter.
       */
     tools: Vector[ToolSpec] = Vector.empty
 )

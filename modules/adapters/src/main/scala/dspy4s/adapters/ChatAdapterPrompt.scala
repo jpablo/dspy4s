@@ -14,7 +14,7 @@ private[adapters] object ChatAdapterPrompt:
   def format(invocation: AdapterInvocation, native: NativeTools)(using
       RuntimeContext
   ): Either[DspyError, FormattedPrompt] =
-    Right(ConversationHistory.prompt(invocation, native, Turns))
+    ConversationHistory.prompt(invocation, native, Turns)
 
   /** The text of a user turn (upstream `ChatAdapter.format_user_message_content`): the marker form of each input field
     * that `values` has, then the reminder.

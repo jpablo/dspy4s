@@ -308,6 +308,17 @@ class TutorialBehaviorSuite extends FunSuite:
       case Right(text) => fail(s"the server accepted the call: $text")
   }
 
+  test("pick_flight does not take a null for its flights argument") {
+    val checked = AirlineMcp.withAirlineTools { tools =>
+      val tool             = tools.find(_.name == "pick_flight").getOrElse(fail("no pick_flight tool"))
+      given RuntimeContext = RuntimeContext()
+      Right(tool.invoke(DynamicValues.record("flights" -> DynamicValue.Null)))
+    }.fold(error => fail(error.message), identity)
+    checked match
+      case Left(error) => assert(!error.message.contains("There is no flight to pick"), error.message)
+      case Right(text) => fail(s"the server accepted the call: $text")
+  }
+
   test("the airline tools run a booking with a real server") {
     val answer = AirlineMcp.withAirlineTools { tools =>
       given RuntimeContext = RuntimeContext()

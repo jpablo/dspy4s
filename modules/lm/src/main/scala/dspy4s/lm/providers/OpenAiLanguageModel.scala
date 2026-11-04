@@ -92,11 +92,12 @@ final case class OpenAiLanguageModel(
       case LmMode.Responses => ResponsesWire.request(request, defaultOptions)
 
   /** The response of the reply body `raw` on the wire of [[mode]]. A reply with an `error` object is the typed error of
-    * its code, also with a success status ([[OpenAiErrors.fromReplyError]]). A reply with no output (no text and no
-    * tool call) is an [[dspy4s.core.contracts.LmProviderResponseError]] ([[OpenAiErrors.noOutputs]]), with the usage of
-    * the reply in its details: the provider can bill the prompt of such a reply, for example when a content filter
-    * stops it. The error is not transient, so a retry policy does not retry it. The usage and the model name come from
-    * the `usage` and `model` keys of the reply.
+    * its code, also with a success status ([[OpenAiErrors.fromReplyError]]). A choice with no text and no tool call is
+    * a successful output with an empty text (upstream `_process_completion`), and the adapter call gives the parse
+    * error for it. Only a reply with no choices has no output. It is an
+    * [[dspy4s.core.contracts.LmProviderResponseError]] ([[OpenAiErrors.noOutputs]]), with the usage of the reply in its
+    * details: the provider can bill the prompt of such a reply. The error is not transient, so a retry policy does not
+    * retry it. The usage and the model name come from the `usage` and `model` keys of the reply.
     *
     * @param requestModel
     *   the model of the request, for the details of an error

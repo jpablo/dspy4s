@@ -504,6 +504,7 @@ class ReActSuite extends FunSuite:
     withLmAndAdapter(lm, ChatAdapter()) {
       val result = react((question = "capital?"))
       assert(result.left.exists(_.isInstanceOf[ParseError]), result.toString)
+      assertEquals(lm.calls.get(), 2, "the chat step and its JSON fallback")
       assertEquals(search.calls.get(), 0)
     }
   }

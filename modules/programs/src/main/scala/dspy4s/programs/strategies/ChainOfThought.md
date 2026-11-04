@@ -49,6 +49,7 @@ Its fields have narrow responsibilities:
 | `runtime` | Resolves the model and adapter used by the inner prediction |
 | `name` | Outer module identity; defaults to `chain_of_thought` |
 | `config` | Default LM request options; per-call options may override them |
+| `tools` | Tool schemas that the inner `Predict` gets, for a signature with a tool calls output |
 
 `PrependField` is compile-time evidence that dspy4s knows how to construct the augmented output type from `String` and
 `O`. Callers normally do not summon or pass it; Scala derives the appropriate instance from the concrete output type.

@@ -48,6 +48,7 @@ private[programs] object RLMSandboxTools:
       else if counter.compareAndSet(count, count + n) then Right(())
       else checkAndIncrement(n)
 
+    // A reply with no text is an error (upstream `_query_lm` raises when the text of the sub-LM is not a string).
     def queryLm(prompt: String): Either[DspyError, String] =
       val lm = subLm.orElse(ctx.lm.collect { case m: LanguageModel => m })
       lm match
@@ -57,7 +58,12 @@ private[programs] object RLMSandboxTools:
               model,
               LmRequest(model = model.id, messages = Vector(Message(role = MessageRole.User, text = Some(prompt))))
             )(using ctx)
-            .flatMap(_.outputs.headOption.map(_.text).toRight(RuntimeError("rlm", "The sub-LM returned no outputs.")))
+            .flatMap(
+              _.outputs.headOption
+                .map(_.text)
+                .filter(_.nonEmpty)
+                .toRight(RuntimeError("rlm", "The sub-LM returned no outputs."))
+            )
 
     val llmQuery = SandboxTool(
       name = "llm_query",

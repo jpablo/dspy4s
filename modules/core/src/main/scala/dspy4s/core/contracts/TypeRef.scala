@@ -41,7 +41,8 @@ final case class TypeRef(repr: String) derives CanEqual:
 
   /** The kind and the item type text of a collection type with an item type, as [[TypeRef.fromToken]] gives it:
     * `list[T]`, `tuple[T, ...]`, `set[T]`, or `frozenset[T]`. For example, `list[str]` gives
-    * `(Collection.List, "str")`. `None` for each other type, also for [[TypeRef.list]], which has no item type.
+    * `(Collection.List, "str")`, and `tuple[int, ...]` gives `(Collection.Tuple, "int, ...")`. `None` for each other
+    * type, also for [[TypeRef.list]], which has no item type.
     */
   def collection: Option[(TypeRef.Collection, String)] =
     TypeRef.Collection.values.collectFirst {
@@ -88,9 +89,11 @@ object TypeRef:
   val history: TypeRef = TypeRef("history")
 
   /** The type of the input field that holds the tools of a call (the analogue of Python dspy's `list[dspy.Tool]` input
-    * annotation; experimental, for `ReActV2`). The value is a list with the text of each tool. When native function
-    * calling is active for the call, the adapter does not show the field: the request has the tools as provider tools
-    * (upstream `Adapter._call_preprocess` deletes the field). Else the adapter shows the value as a JSON list.
+    * annotation; experimental, for `ReActV2`). The value is a list with the text of each tool, so it cannot become
+    * provider tools. When native function calling is active for the call, the adapter does not show the field (upstream
+    * `Adapter._call_preprocess` deletes the field), and the provider tools come from the tool specs of the call. With
+    * no tool specs, such a call is an error (`NativeTools.checkTools`). Upstream makes the provider tools from the
+    * value of the field. Else the adapter shows the value as a JSON list.
     */
   val tools: TypeRef = TypeRef("tools")
 

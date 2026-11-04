@@ -228,7 +228,7 @@ final case class ReActV2[I, O](
     startHistoryField.flatMap(field => DynamicValues.recordGet(inputs, field.name)) match
       case None | Some(_: DynamicValue.Null.type) => Right(History.empty)
       case Some(value)                            => summon[Schema[History]].fromDynamicValue(value).left.map(error =>
-          ValidationError(s"The start history of ReActV2 is not a History: $error")
+          ValidationError(s"The start history of ReActV2 is not a History: ${DspyError.messageOf(error)}")
         )
 
   /** One turn of the loop (upstream `ReActV2.forward`). See the rules of the loop in the class documentation. */

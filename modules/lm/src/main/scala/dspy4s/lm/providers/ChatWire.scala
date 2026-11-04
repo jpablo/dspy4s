@@ -112,9 +112,11 @@ private[lm] object ChatWire:
 
   // ── The reply ───────────────────────────────────────────────────────────────────────────────────────────────
 
-  /** The outputs of a chat reply: one output for each choice that has text or tool calls. A function-calling reply
-    * usually has `content: null` and only a `tool_calls` array, so a choice with tool calls and no text gives an output
-    * too. The metadata of an output has the keys of its choice other than `message` and `text`.
+  /** The outputs of a chat reply: one output for each choice, in the order of the choices (upstream
+    * `_process_completion`). A choice with an empty, a null, or a blank text gives an output with an empty text, so the
+    * later choices keep their places. A function-calling reply usually has `content: null` and only a `tool_calls`
+    * array, and its output has an empty text and the tool calls. The adapter call decides what an empty text means
+    * (`AdapterCall.run`). The metadata of an output has the keys of its choice other than `message` and `text`.
     *
     * A reply with an `error` object is the error of [[OpenAiErrors.fromReplyError]], also with a success status
     * (upstream `_response_from_chat_body`).
@@ -127,30 +129,32 @@ private[lm] object ChatWire:
 
   private def choiceOutputs(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
     seqField(raw, WireKeys.choices).map { choices =>
-      choices.flatMap { choice =>
+      choices.map { choice =>
         val rec             = asRecord(choice)
         val textFromMessage = rec.flatMap(r => recordGet(r, WireKeys.message)).flatMap(extractText)
         val textFromChoice  = rec.flatMap(r => recordGet(r, WireKeys.text)).flatMap(asString)
-        val text            = textFromMessage.orElse(textFromChoice).map(_.trim).filter(_.nonEmpty)
+        val text            = textFromMessage.orElse(textFromChoice).map(_.trim).getOrElse("")
         val toolCalls       =
           rec.flatMap(r => recordGet(r, WireKeys.message)).flatMap(asRecord).map(parseToolCalls).getOrElse(Vector.empty)
-        Option.when(text.nonEmpty || toolCalls.nonEmpty) {
-          val metadata = rec
-            .map(r => DynamicValues.recordFilterKeys(r, k => k != WireKeys.message && k != WireKeys.text))
-            .getOrElse(DynamicValue.Record.empty)
-          LmOutput(text = text.getOrElse(""), toolCalls = toolCalls, metadata = metadata)
-        }
+        val metadata = rec
+          .map(r => DynamicValues.recordFilterKeys(r, k => k != WireKeys.message && k != WireKeys.text))
+          .getOrElse(DynamicValue.Record.empty)
+        LmOutput(text = text, toolCalls = toolCalls, metadata = metadata)
       }
     }
 
   /** The outputs of a reply in the text mode: the top-level `text`, else the outputs of the choices ([[outputs]]). A
-    * reply with an `error` object is an error, as in [[outputs]].
+    * reply with a blank top-level `text` and no choices gives one output with an empty text. A reply with an `error`
+    * object is an error, as in [[outputs]].
     */
   def textOutputs(raw: DynamicValue, model: Option[String] = None): Either[DspyError, Vector[LmOutput]] =
     OpenAiErrors.fromReplyError(raw, model).toLeft(()).flatMap { _ =>
-      recordGet(raw, WireKeys.text).flatMap(asString).map(_.trim).filter(_.nonEmpty) match
+      val topLevel = recordGet(raw, WireKeys.text).flatMap(asString).map(_.trim)
+      topLevel.filter(_.nonEmpty) match
         case Some(text) => Right(Vector(LmOutput(text = text)))
-        case None       => choiceOutputs(raw)
+        case None       => choiceOutputs(raw).map { outputs =>
+            if outputs.isEmpty then topLevel.map(text => LmOutput(text = text)).toVector else outputs
+          }
     }
 
   private def parseToolCalls(message: DynamicValue.Record): Vector[ToolCall] =

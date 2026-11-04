@@ -193,7 +193,7 @@ class SignatureFieldOpsSuite extends FunSuite:
     val schema = parsed(withReasoning(Signature.derived[SfQuestion, SfNode]("Tree")).outputShape.jsonSchema)
     assertEquals(at(schema, "$ref"), None)
     assertEquals(keysAt(schema, "properties"), Vector("reasoning", "label", "children"))
-    assertEquals(names(at(schema, "required")), Vector("reasoning", "label"))
+    assertEquals(names(at(schema, "required")), Vector("reasoning", "label", "children"))
     assertEquals(at(schema, "properties", "children", "items"), Some(rec("$ref" -> str("#/$defs/SfNode"))))
     assertEquals(keysAt(schema, "$defs", "SfNode", "properties"), Vector("label", "children"))
   }

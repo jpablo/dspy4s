@@ -126,15 +126,15 @@ class RefinePerModuleAdviceSuite extends FunSuite:
       if prompt.contains("advice") then
         val dict = s"""{"hinter": "Always include $HinterToken.", "answerer": "Always include $AnswererToken."}"""
         Right(LmResponse(outputs =
-          Vector(LmOutput(text = "", metadata = rec("discussion" := "blame", "advice" := dict)))
+          Vector(LmOutput(text = "scripted", metadata = rec("discussion" := "blame", "advice" := dict)))
         ))
       else if prompt.contains("OUTPUTS=hint") then
         val hint = if prompt.contains(HinterToken) then "good" else "bad"
-        Right(LmResponse(outputs = Vector(LmOutput(text = "", metadata = rec("hint" := hint)))))
+        Right(LmResponse(outputs = Vector(LmOutput(text = "scripted", metadata = rec("hint" := hint)))))
       else
         val ok     = prompt.contains(AnswererToken) && prompt.contains("good")
         val answer = if ok then "Paris" else "Wrong"
-        Right(LmResponse(outputs = Vector(LmOutput(text = "", metadata = rec("answer" := answer)))))
+        Right(LmResponse(outputs = Vector(LmOutput(text = "scripted", metadata = rec("answer" := answer)))))
 
   private def predict(sig: String): DynamicPredict =
     DynamicPredict(layout = SignatureLayout.parse(sig).toOption.get.withInstructions(Some("Do the task.")))

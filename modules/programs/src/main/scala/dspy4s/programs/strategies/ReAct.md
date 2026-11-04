@@ -109,8 +109,8 @@ final case class ReactStep(
 The decoder for this step is lenient for the text fields. Missing thought or tool-name fields become empty strings, so
 the control loop decides how to proceed. Tool arguments may arrive as a record or as the JSON text of an object. A
 missing value, a null, or an empty text gives an empty record. Each other value is not a dict (upstream type
-`dict[str, Any]`), so the decoder gives a `ParseError`, the whole call fails, and no tool runs. This error comes after
-the adapter, so it has no JSON fallback.
+`dict[str, Any]`), so the decoder gives a `ParseError`, and no tool runs. The decoder runs in the parse step of the
+call, so the chat adapter tries its JSON fallback first. When that also fails, the whole call fails.
 
 The adapter parser comes before this decoder. The tool names are the allowed values of `next_tool_name`, so the
 parsers of the port reject an empty name and a name that is not a tool, as upstream `parse_value` rejects a value

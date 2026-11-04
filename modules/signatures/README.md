@@ -45,7 +45,7 @@ in a field `result`.
 | `RoundTripShape[A]` | A `Shape[A]` with a law: `decode(encode(a)) == Right(a)`. Each shape that comes from a `Schema` has this type. |
 | `Shape.MapShape` | The shape of `fromStringDynamic`. Its `decode` only checks that each field of the layout is in the record. |
 | `OutputAugmentation` | The output type of `Signature.prependOutput`: `WithField[O, Name, T]` is a named tuple, and the `PrependField` evidence makes and splits its values. |
-| `SchemaInterop` | Gives other modules `decodeValue[A]` and `typeRef[A]`, for example to decode the arguments of a tool. |
+| `SchemaInterop` | Gives other modules `decodeValue[A]`, `typeRef[A]`, and `jsonSchema[A]`, for example to decode the arguments of a tool. |
 | `ZioSchemaCodec` | The internal object that makes a `RoundTripShape`, the `FieldSpec` values, and the JSON schema from a `Schema`. |
 
 ## Field operations
@@ -100,6 +100,13 @@ and this case.
   `Choice[O]` field has the cases of `O` as its options, from the type of its `value: O` field.
 - **The JSON schema has no `ToolCall.id`.** `Shape.jsonSchema` removes the `id` of each `ToolCall` from the
   schema that a model sees. The id comes from the provider.
+- **The JSON schema and the decode agree on a null and on an absent field,** for the sequences, maps, options, and
+  records that `ModelSchemaContractSuite` covers. A sequence has the type `array` and a map has the type `object`, with
+  no `null`, and a field of these types is in `required`. Only an `Option` permits a `null` and an absent field, and a
+  field with a default value is not in `required`. The default JSON codec of zio-blocks has other rules: it reads a
+  `null` and an absent field as an empty collection, so `Shape.jsonSchema` does not use its schema as it is. Some other
+  types have a schema that the decode does not accept: a sealed trait with fields, a tuple, `Instant`, `UUID`, and a
+  `Schema.transform` of a record with an `Option` field. `docs/port/PORT_DIFFERENCES.md` section 14 has these open items.
 
 ## Source layout
 

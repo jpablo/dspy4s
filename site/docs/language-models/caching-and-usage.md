@@ -24,6 +24,9 @@ Two models then share their results when you give them one cache value.
 To keep the results in another store, implement `LmCache` yourself: it gets and
 puts a response for a `CacheKey`.
 
+The cache stores each successful reply, also a reply with an empty text, so a
+later call with the same key gets that reply and the same parse error.
+
 ## Tracking usage
 
 Wrap a block in `UsageTracking.withNewTracker`. The tracker gets the token
@@ -49,10 +52,11 @@ events. To count such a call and send its events, use
 
 A failed call counts too when the provider reported a usage for it, because
 the provider bills these tokens. Examples are a stream that fails after its
-usage chunk, and a reply with a usage and no output. The LM error then carries
-the usage (`LmError.usage(error)`). When `ManagedLanguageModel` retries a call,
-the usage of the call is the total of each attempt that reported a usage. This
-rule applies to a successful call and to a failed call.
+usage chunk, and a reply with a usage and no choices. The LM error then carries
+the usage (`LmError.usage(error)`). A reply with an empty text is a successful
+call, and its usage counts as for each other reply. When `ManagedLanguageModel`
+retries a call, the usage of the call is the total of each attempt that
+reported a usage. This rule applies to a successful call and to a failed call.
 
 The LM usage of a program result (`raw.lmUsage`) comes from the same records.
 `trackUsage` is on by default. With `trackUsage = Some(false)` in the context,

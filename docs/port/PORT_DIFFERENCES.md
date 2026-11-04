@@ -211,6 +211,25 @@ failures to the `Predict.apply` boundary instead of surfacing them
 via lazy field access — a decode failure is a `Left`, not a
 `Throwable` at first field read.
 
+An empty reply has one form in the port: an `LmOutput` with an empty text. Upstream keeps a null and an empty text
+apart, and a blank text stays as it is. This gives three differences:
+
+- `llm_query` of `RLM` gives an error for each form, and `llm_query_batched` puts the text
+  `[ERROR] The sub-LM returned no outputs.` in its list for each form. Upstream gives an error only for a null, and each
+  of the two functions gives `""` for an empty text. The port has one text for an empty and a null content, so it cannot
+  tell them apart.
+- A chat content of only white space gives the error of an empty reply, and the fallback. Upstream parses that text. The
+  parse of its chat format fails, unless each output has a default. Upstream then succeeds with one call.
+- The raw response of the error is the text of the output. Upstream has the text of the whole output record.
+
+The parse step of a `Predict` call runs the decode of the output type on each output of the reply. Thus a value that
+the decode rejects is a `ParseError` with the raw response, as an upstream `AdapterParseError`, and it gets the JSON
+fallback. This rule has one difference. A reply with provider tool calls gives a null to each output that its text does
+not give. Upstream keeps that `None` for each annotation. A Scala `String` output has no null, so the decode rejects
+the reply, and the call fails after the fallback. An `Option[String]` output takes the null. When the decode rejects the
+values of such a reply, the decode runs again on the provider tool calls with each default and a null for each other
+output (upstream `except AdapterParseError: value = {}`), so a reply that passes this second decode gets no second call.
+
 ## 7. Save / load: Python state/program modes → state restore
 
 **Convention.**
@@ -370,6 +389,19 @@ What genuinely remains:
 - **Multimodal reliability matrix** — out of scope for v1.
 - **Per-token streaming chunks** — see §5; tracked in
   [STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md).
+- **A typed output that is a sealed trait with fields.** The schema shows a `oneOf` with the case name as a key, for
+  example `{"Circle": {"radius": 1}}`. The decode rejects that form with "Expected a variant", in a list and as a direct
+  field. A direct field also has the wire type `string`, so the prompt shows `str`. A case name alone gives "Missing
+  field". A sealed trait with only cases that have no fields is not in this item.
+- **A typed output that is a tuple.** The schema of `(Int, String)` is an array with `prefixItems`. The decode rejects
+  `[1, "a"]` with "Expected a record". Only `{"_1": 1, "_2": "a"}` decodes, and the schema does not show that form.
+- **A typed output that is an `Instant` or a `UUID`.** The schema is a string with the `format` `date-time` or `uuid`,
+  and the wire type is `json`. The JSON adapter rejects the string with "Field could not be parsed as JSON". The decode
+  alone also rejects it, with "Expected Instant" or "Expected UUID".
+- **A `Schema.transform` of a record with an `Option` field, through `Shape.derived`.** The schema lets the model leave
+  out the field, or give a null. The decode rejects each form: an absent field gives "Missing field", and a null or a
+  value gives "Expected a variant". `Signature.derived` does not read such a schema. It derives the record of the class,
+  and that form decodes.
 
 The non-architectural gaps live in [PORT_BACKLOG.md](PORT_BACKLOG.md);
 the streaming-specific ones in [STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md);
@@ -456,6 +488,11 @@ The port does not read these forms, and upstream reads them:
 
 A form that only Java reads (`3d`, `3f`, `0x1p3`) is no number on each path, as upstream.
 
+An item of a list type of a string signature has the same rule: `list[int]`, `list[float]`, and `list[bool]` read each
+item with `LenientValues`, and `list[str]` takes only a string. A tuple of any length, for example `tuple[int, ...]`, has
+the rule of its item type. The port has no check for each other item type, for example `Optional[int]`, `dict`, or the
+items of `tuple[int, str]`. Upstream validates each annotation.
+
 ## 18. Sandbox tools and ReActV2 names
 
 **Convention.**
@@ -469,8 +506,6 @@ A form that only Java reads (`3d`, `3f`, `0x1p3`) is no number on each path, as 
 - ReActV2 rejects an output with the name `next_thought`, `tool_calls`, or `tool_call_results` at construction,
   because the history event of a turn has these keys and the final outputs go over them. Upstream does not check
   these names.
-- ReAct finds a `next_tool_args` value that is not a dict in the decode of the step, after the adapter. The call fails
-  with one model call. Upstream finds it in `parse_value`, so the chat adapter tries its JSON fallback first.
 
 ## 19. The errors of the `TwoStepAdapter` extraction step
 
@@ -483,6 +518,11 @@ the raw text of the error is the completion of the main LM. Two errors differ fr
   list, and that raises an `IndexError`.
 - A `ParseError` of the model, for example a provider reply that is not JSON, also gets that text. Upstream wraps only
   an `AdapterParseError`, and a model call does not raise it.
+
+The extraction step has no check of the output type of a typed signature: the check runs after the step, for the output
+of the main call. Thus a value that the typed decode rejects is a `ParseError` with the completion of the main LM as its
+raw text, with no JSON fallback on the extraction model and without the text of the wrapper. Upstream `parse_value`
+rejects that value in the extraction step, so its JSON fallback comes first.
 
 ## 20. The trace limit, and the failure budget and the controls of `BestOfN` and `Refine`
 
@@ -612,6 +652,38 @@ differ from upstream:
   `PythonInterpreter._extract_parameters` (`dspy/primitives/python_interpreter.py:461-475`) reads the Python signature
   of the tool. For an MCP tool the signature is `func(*args, **kwargs)`, so the upstream wrapper has the two parameters
   `args` and `kwargs` (`dspy/predict/rlm.py`, `_make_interpreter_tool`).
+
+## 26. The tool specs of a predictor
+
+**Python.** The tools of a call are an input field of the type `list[dspy.Tool]`. `Adapter._call_preprocess`
+(`dspy/adapters/base.py:91-120`) reads that field. The request gets the tools, or the prompt shows the field. Upstream
+has no other way to give tools to a predictor.
+
+**Convention.**
+
+The port has this input field (`TypeRef.tools`, which `ReActV2` uses), and `Predict` and `DynamicPredict` also have
+`tools`, a list of `ToolSpec` values apart from the layout. A layout with a tool calls output has these rules:
+
+- When native function calling is active, the request has the tool specs as provider tools, and the prompt hides a
+  tools input.
+- Else, the prompt shows the tool specs as one more input field `tools` at the end of the inputs, with the text of each
+  tool (`ToolSpec.text`, the port form of `Tool.__str__`). The text has the form of a tools input of the layout.
+- A layout with a tools input shows that input, and gets no second field. A layout with an other field with the name
+  `tools` keeps that field, and the prompt does not show the tool specs. Upstream reads only the type of a field, so it
+  has no such case.
+- With native function calling on, a tool calls output with no tool specs and no tools input is a `ConfigurationError`
+  from `format`. Upstream raises a `ValueError`. Upstream does this check before it reads the support of the model, so
+  the port reads the flag only. Upstream has this check in `__call__`, so its `format` alone does not raise.
+- With native function calling active, a tool calls output with no tool specs is a `ConfigurationError` also when the
+  layout has a tools input. A tools input of the port holds only text, so it cannot become provider tools. Upstream
+  makes the provider tools from the `Tool` values of that input. When native function calling is not active, the prompt
+  shows such an input, and there is no error.
+- A demo with no value for the input field `tools` is an incomplete demo when the prompt shows the field, as upstream
+  for a demo with no value for a tools input. A replayed turn of a history does not show the tools.
+- A layout with no tool calls output does not show the tool specs, because the model has no field for a call.
+- `TwoStepAdapter` has native function calling off, so its prompt shows the tool specs of a layout with a tool calls
+  output, as a `tools: ...` block of the user message, and it gives no error with no tools. The value is JSON text,
+  where upstream writes the Python `repr` of a tools input.
 
 ## What this means in practice
 

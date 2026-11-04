@@ -30,7 +30,7 @@ class AutoEvaluationSuite extends FunSuite:
     override val id: String                                                                    = "dummy-judge-lm"
     override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-      Right(LmResponse(outputs = Vector(LmOutput(text = ""))))
+      Right(LmResponse(outputs = Vector(LmOutput(text = "scripted"))))
 
   /** A scripted adapter: ignores the prompt and emits the supplied output fields (e.g. recall/precision) verbatim as
     * the parsed record, so the judge sub-program's outputs are deterministic and offline.

@@ -5,6 +5,7 @@ import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.ToolCall
 import dspy4s.core.contracts.:=
 import dspy4s.lm.contracts.ContentPart
+import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
@@ -243,10 +244,10 @@ class ResponsesWireSuite extends FunSuite:
       case Left(error) => fail(s"the chat parse failed: $error")
   }
 
-  test("a Responses body with no text and no tool call gives no output, and a body with no output array is an error") {
+  test("a Responses body with no text and no tool call gives one empty output, and no output array is an error") {
     assertEquals(
       ResponsesWire.outputs(record("""{"output": [{"type": "reasoning", "summary": []}]}""")),
-      Right(Vector.empty)
+      Right(Vector(LmOutput(text = "")))
     )
     assert(ResponsesWire.outputs(record("""{"output": "x"}""")).left.exists(_.isInstanceOf[ParseError]))
   }

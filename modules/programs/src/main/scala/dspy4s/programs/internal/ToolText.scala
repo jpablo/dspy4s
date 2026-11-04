@@ -1,5 +1,6 @@
 package dspy4s.programs.internal
 
+import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.{:=, DynamicValues, PythonText, TypeRef}
 import dspy4s.programs.contracts.ToolFunction
 import zio.blocks.schema.DynamicValue
@@ -15,19 +16,12 @@ private[programs] object ToolText:
     */
   def args(tool: ToolFunction): DynamicValue.Record =
     tool.inputSchema match
-      case Some(schema) =>
-        DynamicValues.recordGet(schema, "properties").collect { case properties: DynamicValue.Record => properties }
-          .getOrElse(DynamicValue.Record.empty)
-      case None => DynamicValues.recordFromEntries(tool.argSchema.map((name, typeRef) => name -> argument(typeRef)))
+      case Some(schema) => ToolSpec.arguments(schema)
+      case None         => DynamicValues.recordFromEntries(tool.argSchema.map((name, typeRef) => name -> argument(typeRef)))
 
-  /** The text of `tool` in a list of tools (upstream `Tool.__str__`): the name, the description, and the arguments as
-    * JSON text. A tool with no description has no description part.
-    */
+  /** The text of `tool` in a list of tools (upstream `Tool.__str__`, [[ToolSpec.describe]]). */
   def describe(tool: ToolFunction): String =
-    val desc =
-      if tool.description.nonEmpty then s", whose description is <desc>${tool.description}</desc>.".replace("\n", "  ")
-      else "."
-    s"${tool.name}$desc It takes arguments ${PythonText.json(args(tool))}."
+    ToolSpec.describe(tool.name, tool.description, args(tool))
 
   /** The parameters of `tool` as `name: type` texts (upstream `RLM._format_tool_docs`). An argument with no `type` has
     * the type `Any`.

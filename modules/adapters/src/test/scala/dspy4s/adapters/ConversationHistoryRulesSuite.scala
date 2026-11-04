@@ -4,6 +4,7 @@ import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.NativeFunctionCalling
 import dspy4s.adapters.contracts.NativeTools
+import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
@@ -112,19 +113,27 @@ class ConversationHistoryRulesSuite extends FunSuite:
       adapter        : Adapter,
       layout         : SignatureLayout,
       inputs         : DynamicValue.Record,
-      demos          : Vector[Example] = Vector.empty,
-      functionCalling: Boolean         = true
+      demos          : Vector[Example]  = Vector.empty,
+      functionCalling: Boolean          = true,
+      tools          : Vector[ToolSpec] = Vector.empty
   ): Vector[Message] =
     given RuntimeContext = RuntimeContext(lm = Some(StubLm(functionCalling)))
     val invocation       = AdapterInvocation(
       layout = layout,
       demos = demos,
       inputs = Example(values = inputs, inputKeys = DynamicValues.recordKeys(inputs).toSet),
-      request = LmRequest(model = "stub")
+      request = LmRequest(model = "stub"),
+      tools = tools
     )
     adapter.format(invocation) match
       case Right(prompt) => prompt.messages
       case Left(error)   => fail(s"format failed: $error")
+
+  /** The messages of `agentWithHistory` with one tool spec: with native function calling on, a tool calls field needs
+    * tools.
+    */
+  private def agentMessagesOf(adapter: Adapter, inputs: DynamicValue.Record): Vector[Message] =
+    messagesOf(adapter, agentWithHistory, inputs, tools = Vector(ToolSpec("search", None, DynamicValue.Record.empty)))
 
   private def withHistory(question: String, history: History): DynamicValue.Record =
     DynamicValues.record("question" := question, "history" -> historyValue(history))
@@ -309,9 +318,8 @@ class ConversationHistoryRulesSuite extends FunSuite:
   // ── Tool calls with native function calling ─────────────────────────────────────────────────────────────────
 
   test("ChatAdapter (native): the assistant text has the fields of the message with no tool calls field") {
-    val messages = messagesOf(
+    val messages = agentMessagesOf(
       ChatAdapter(native = NativeTools(enabled = true)),
-      agentWithHistory,
       withHistory("Q2", History.empty :+ toolTurn)
     )
     assertEquals(roles(messages), Vector(System, User, Assistant, Tool, User))
@@ -320,9 +328,8 @@ class ConversationHistoryRulesSuite extends FunSuite:
   }
 
   test("JSONAdapter (native): the assistant text has the fields of the message with no tool calls field") {
-    val messages = messagesOf(
+    val messages = agentMessagesOf(
       JSONAdapter(native = NativeTools(enabled = true)),
-      agentWithHistory,
       withHistory("Q2", History.empty :+ toolTurn)
     )
     assertEquals(roles(messages), Vector(System, User, Assistant, Tool, User))
@@ -340,7 +347,7 @@ class ConversationHistoryRulesSuite extends FunSuite:
         ),
         searchResult
       )
-      val messages = messagesOf(adapter, agentWithHistory, withHistory("Q2", History.empty :+ message))
+      val messages = agentMessagesOf(adapter, withHistory("Q2", History.empty :+ message))
       assertEquals(roles(messages), Vector(System, User, Assistant, Tool, User))
       assertEquals(messages(2).text, None)
     }
@@ -361,7 +368,7 @@ class ConversationHistoryRulesSuite extends FunSuite:
         ),
         results
       )
-      val messages = messagesOf(adapter, agentWithHistory, withHistory("Q2", History.empty :+ message))
+      val messages = agentMessagesOf(adapter, withHistory("Q2", History.empty :+ message))
       assertEquals(roles(messages), Vector(System, User, Assistant, User))
       assert(messages.forall(_.toolCalls.isEmpty), messages.toString)
       assert(textOf(messages(2)).contains("Two searches."), textOf(messages(2)))
@@ -370,7 +377,7 @@ class ConversationHistoryRulesSuite extends FunSuite:
     test(s"$name (native): tool calls with no content and no matched results give no assistant message") {
       val message =
         DynamicValues.record("question" := "Q1", "tool_calls" -> NativeFunctionCalling.encodeToolCalls(Vector(search)))
-      val messages = messagesOf(adapter, agentWithHistory, withHistory("Q2", History.empty :+ message))
+      val messages = agentMessagesOf(adapter, withHistory("Q2", History.empty :+ message))
       assertEquals(roles(messages), Vector(System, User, User))
     }
 
@@ -378,7 +385,7 @@ class ConversationHistoryRulesSuite extends FunSuite:
       // Upstream formats the text turn with the signature of the request, which has no tool calls field when native
       // function calling is active (`Adapter._call_preprocess`). Thus the value does not show.
       val message  = DynamicValues.record("question" := "Q1", "tool_calls" := "search the web")
-      val messages = messagesOf(adapter, agentWithHistory, withHistory("Q2", History.empty :+ message))
+      val messages = agentMessagesOf(adapter, withHistory("Q2", History.empty :+ message))
       assertEquals(roles(messages), Vector(System, User, Assistant, User))
       assert(!textOf(messages(2)).contains("search the web"), textOf(messages(2)))
       assert(textOf(messages(2)).contains("next_thought") && textOf(messages(2)).contains("summary"))

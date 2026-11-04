@@ -17,12 +17,12 @@
   */
 package dspy4s.examples.tutorials.mcp
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, RuntimeError}
+import dspy4s.core.contracts.{DspyError, DynamicValues, PythonText, RuntimeContext, RuntimeError}
 import dspy4s.examples.Demo
 import dspy4s.mcp.{McpToolClient, McpTools}
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.strategies.ReAct
-import dspy4s.signatures.{InputField, OutputField, Signature, Spec}
+import dspy4s.signatures.{InputField, OutputField, SchemaInterop, Signature, Spec}
 import io.modelcontextprotocol.json.{McpJsonDefaults, McpJsonMapper}
 import io.modelcontextprotocol.server.{McpServer, McpServerFeatures, McpSyncServer}
 import io.modelcontextprotocol.server.transport.StdioServerTransportProvider
@@ -306,20 +306,22 @@ object AirlineServer:
 
   private lazy val mapper: McpJsonMapper = McpJsonDefaults.getMapper()
 
-  /** An MCP tool that runs `run` (FastMCP `@mcp.tool()`). The input schema is the JSON schema of `A`. As upstream, a
-    * collection field is in the `required` list, so the codec has `requireCollectionFields`: its default leaves the
-    * field out. The type of the field stays `["array", "null"]`, where upstream has `"array"`, and a `null` decodes as
-    * an empty list. The result is the JSON text of the value. A `Left` gives a result that the server marks as an
-    * error, as FastMCP does for an exception.
+  /** An MCP tool that runs `run` (FastMCP `@mcp.tool()`). The input schema is the JSON schema of `A` as a model sees it
+    * ([[SchemaInterop.jsonSchema]]). As upstream, a collection field has the type `array` and it is in the `required`
+    * list. The server checks the arguments against this schema before the decode, so it rejects a `null` and an absent
+    * field for a collection. The result is the JSON text of the value. A `Left` gives a result that the server marks as
+    * an error, as FastMCP does for an exception.
     */
   private def tool[A, B](name: String, description: String)(run: A => Either[String, B])(using
       input : Schema[A],
       output: Schema[B]
   ): McpServerFeatures.SyncToolSpecification =
-    val inputCodec = input.deriving(JsonCodecDeriver.withRequireCollectionFields(true)).derive
+    val inputCodec  = input.deriving(JsonCodecDeriver.withRequireCollectionFields(true)).derive
+    val inputSchema =
+      SchemaInterop.jsonSchema[A].getOrElse(sys.error(s"The arguments of the tool '$name' are not a JSON object"))
     McpServerFeatures.SyncToolSpecification
       .builder()
-      .tool(McpSchema.Tool.builder(name, mapper, inputCodec.toJsonSchema.toJson.print).description(description).build())
+      .tool(McpSchema.Tool.builder(name, mapper, PythonText.json(inputSchema)).description(description).build())
       .callHandler { (_, request) =>
         val arguments =
           mapper.writeValueAsString(Option(request.arguments()).getOrElse(java.util.Map.of[String, AnyRef]()))

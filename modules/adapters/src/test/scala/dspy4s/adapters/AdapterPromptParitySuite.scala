@@ -2,6 +2,7 @@ package dspy4s.adapters
 
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.core.contracts.Constraint
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.FieldSpec
@@ -57,8 +58,11 @@ class AdapterPromptParitySuite extends FunSuite:
 
   private def adapterOf(name: String, extraction: CapturingLm): Adapter =
     name match
-      case "ChatAdapter"    => ChatAdapter()
-      case "JSONAdapter"    => JSONAdapter()
+      case "ChatAdapter" => ChatAdapter()
+      // The generator calls upstream `format`, which does not run the check of `_call_preprocess`. The port has that
+      // check in `format`, so this adapter has native function calling off for the case `tool_calls`. The text is the
+      // same as with the flag on, because the stub model has no function calling.
+      case "JSONAdapter"    => JSONAdapter(native = NativeTools.Off)
       case "XMLAdapter"     => XMLAdapter()
       case "TwoStepAdapter" => TwoStepAdapter(extractionModel = extraction)
       case other            => fail(s"no adapter $other")

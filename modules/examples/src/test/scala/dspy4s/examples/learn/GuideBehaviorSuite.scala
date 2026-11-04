@@ -16,11 +16,11 @@ import scala.concurrent.duration.DurationInt
 /** Behavior of the guide examples, with a scripted model. */
 class GuideBehaviorSuite extends FunSuite:
 
-  private final class Script(reply: LmRequest => LmOutput) extends LanguageModel:
+  private final class Script(reply: LmRequest => LmOutput, functionCalling: Boolean = true) extends LanguageModel:
     @volatile var requests: Vector[LmRequest]                                                  = Vector.empty
     override val id: String                                                                    = "script"
     override val mode: LmMode                                                                  = LmMode.Chat
-    override def supportsFunctionCalling: Boolean                                              = true
+    override def supportsFunctionCalling: Boolean                                              = functionCalling
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       synchronized { requests = requests :+ request }
       Right(LmResponse(outputs = Vector(reply(request))))
@@ -143,6 +143,39 @@ class GuideBehaviorSuite extends FunSuite:
     )
     assert(DynamicValues.recordGet(lm.requests.head.options, "tools").isDefined, "the request has no provider tools")
     assert(promptOf(lm.requests.head).contains("Signature for manual tool handling."), promptOf(lm.requests.head))
+  }
+
+  test("the manual tool path shows the tools in the prompt of a model with no function calling") {
+    val lm = Script(
+      _ =>
+        LmOutput(
+          "[[ ## outputs ## ]]\n{\"tool_calls\": [{\"name\": \"weather\", \"args\": {\"city\": \"New York\"}}]}" +
+            "\n\n[[ ## completed ## ]]"
+        ),
+      functionCalling = false
+    )
+    val calls = Tools.ManualToolExample.call("What's the weather in New York?")(using contextOf(lm))
+      .fold(error => fail(error.message), identity)
+    assertEquals(
+      calls.map((_, result) => result.map(DynamicValues.renderText).toOption),
+      Vector(Some("The weather in New York is sunny"))
+    )
+    assert(DynamicValues.recordGet(lm.requests.head.options, "tools").isEmpty, "the request has provider tools")
+    val prompt = promptOf(lm.requests.head)
+    assert(prompt.contains("weather, whose description is"), prompt)
+    // The description also has the word "city", so the test reads the arguments in the form of the JSON list.
+    assert(prompt.contains("""It takes arguments {\"city\": {\"type\": \"string\"}}."""), prompt)
+  }
+
+  test("the prompt of a model with no function calling shows the arguments of each tool of the manual path") {
+    val lm = Script(
+      _ => LmOutput("[[ ## outputs ## ]]\n{\"tool_calls\": []}\n\n[[ ## completed ## ]]"),
+      functionCalling = false
+    )
+    assert(Tools.ManualToolExample.call("What's the weather?")(using contextOf(lm)).isRight)
+    val prompt = promptOf(lm.requests.head)
+    assert(prompt.contains("""It takes arguments {\"city\": {\"type\": \"string\"}}."""), prompt)
+    assert(prompt.contains("""It takes arguments {\"expression\": {\"type\": \"string\"}}."""), prompt)
   }
 
   test("the manual tool path gives an error for a name that is not a tool") {

@@ -149,6 +149,21 @@ class DiskCacheRecordSuite extends FunSuite:
     }
   }
 
+  test("an output with an empty text round trips, with the text key in the record") {
+    val empty = LmResponse(
+      outputs = Vector(LmOutput(text = "", reasoning = "why")),
+      usage = Some(LmUsage(totalTokens = 3, promptTokens = 1, completionTokens = 2))
+    )
+    withDirectory { directory =>
+      DiskLmCache(directory).put(key, empty)
+      assertEquals(
+        objectOf(readJson(jsonFile(directory))).get("outputs"),
+        Some(Vector(Map("text" -> "", "reasoning" -> "why", "metadata" -> Map.empty[String, Any])))
+      )
+      assertEquals(DiskLmCache(directory).get(key), Some(empty))
+    }
+  }
+
   test("a file that is not JSON is a miss, and get removes it") {
     withDirectory { directory =>
       val _ = Files.writeString(jsonFile(directory), "not json")

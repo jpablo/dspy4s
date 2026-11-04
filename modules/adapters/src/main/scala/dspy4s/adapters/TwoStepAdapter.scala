@@ -47,14 +47,18 @@ final case class TwoStepAdapter(extractionModel: LanguageModel) extends Adapter:
   /** The system message, the demos, and the current request (upstream `TwoStepAdapter.format`). A turn shows each field
     * that its values have as `name: value`. An incomplete demo shows the output fields that it has only. The request
     * has no tool options, because this adapter has no native function calling (upstream `Adapter._call_preprocess`).
+    * The prompt shows the tool specs of `invocation` as an input field when the layout has a tool calls field
+    * ([[NativeTools.promptInvocation]]). A tool calls field with no tools is no error, because native function calling
+    * is off in this adapter, as upstream.
     */
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-    val layout = invocation.layout
-    val demos  = DemoMessages.messages(layout, invocation.demos, missingOutput = None)(
+    val prompted = NativeTools.Off.promptInvocation(invocation)
+    val layout   = prompted.layout
+    val demos    = DemoMessages.messages(layout, prompted.demos, missingOutput = None)(
       fieldsText(layout.inputFields, _),
       fieldsText(layout.outputFields, _)
     )
-    val inputs = AdapterTextSupport.withInputDefaults(layout.inputFields, invocation.inputs.values)
+    val inputs = AdapterTextSupport.withInputDefaults(layout.inputFields, prompted.inputs.values)
     Right(FormattedPrompt(
       messages = (Message(role = MessageRole.System, text = Some(taskDescription(layout))) +: demos) :+
         Message(role = MessageRole.User, text = Some(fieldsText(layout.inputFields, inputs))),
@@ -73,8 +77,9 @@ final case class TwoStepAdapter(extractionModel: LanguageModel) extends Adapter:
     * callback events inside the parse scope of this adapter, and its model call goes to the usage scope of the call.
     *
     * The result is the first parsed output (upstream `parsed_result[0]`). A reply with no outputs is a [[ParseError]]
-    * ("Extraction model returned no output"), with no second call: the chat adapter parses each output, so an empty
-    * reply is no parse error of the chat adapter. Each [[ParseError]] of the step becomes the error of
+    * ("Extraction model returned no output"), with no second call: the chat adapter parses each output, so a reply with
+    * no outputs is no parse error of the chat adapter. An output with an empty text is such a parse error, and it gets
+    * the fallback of the chat adapter ([[AdapterCall.run]]). Each [[ParseError]] of the step becomes the error of
     * [[originalCompletionError]]. Each other error stays as it is, as upstream catches only `AdapterParseError`.
     */
   override def parse(invocation: AdapterInvocation, output: LmOutput)(using

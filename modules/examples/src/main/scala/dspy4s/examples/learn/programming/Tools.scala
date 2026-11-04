@@ -23,7 +23,8 @@ import zio.blocks.schema.DynamicValue
 // |     question: str = dspy.InputField()
 // |     tools: list[dspy.Tool] = dspy.InputField()
 // |     outputs: dspy.ToolCalls = dspy.OutputField()
-// `dspy.ToolCalls` becomes `Vector[ToolCall]`. The tools are not an input field: they go to `Predict` as `ToolSpec`s.
+// `dspy.ToolCalls` becomes `Vector[ToolCall]`. This signature has no tools input: the tools go to `Predict` as
+// `ToolSpec`s, and the adapter gives them to the model.
 // The docstring goes to `instructions`, where `ManualToolExample` makes the signature.
 trait ToolSignature extends Spec:
   def question: InputField[String]
@@ -122,8 +123,9 @@ object Tools:
   //
   // A `ToolCall` has no `execute`, and dspy4s has no automatic discovery. `execute` below looks up the tool in
   // `ToolFunction.byName(tools)`, which is the dict of options 2 and 4. The `Predict` gets a `ToolSpec` for each tool.
-  // `ReActV2` makes its specs in a private method, so this example writes them. The call needs an adapter with native
-  // function calling and a model that supports it, because the tools reach the model only as provider tools.
+  // `ReActV2` makes its specs in a private method, so this example writes them. With native function calling on and a
+  // model that supports it, the tools go to the provider. Else the prompt shows them as an input field `tools`, and the
+  // model writes the calls as JSON text.
   object ManualToolExample:
     @description("Get weather information for a city.")
     def weather(city: String): String = s"The weather in $city is sunny"
@@ -239,6 +241,7 @@ object Tools:
   // by default, and `JSONAdapter` has it on by default. When it is on and `supportsFunctionCalling` of the LM is true,
   // the tools go to the provider as a native `tools` array (from the `ToolSpec`s of the predictor, through
   // `AdapterInvocation.tools`), and the `tool_calls` of the provider fill the output field of the type `Vector[ToolCall]`.
+  // Else the prompt shows the tools as text.
   // Decision G-7b: ReAct stays on the text protocol, as upstream.
   object NativeFunctionCallingExample:
     // --8<-- [start:native-fc]

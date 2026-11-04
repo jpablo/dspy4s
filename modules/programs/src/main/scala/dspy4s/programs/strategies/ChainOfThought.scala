@@ -1,5 +1,6 @@
 package dspy4s.programs.strategies
 
+import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.{DspyError, FieldSpec, PredictorKey, RuntimeContext, SignatureLayout, TypeRef}
 import dspy4s.core.data.Example
 import dspy4s.core.decisions.DecisionSettings
@@ -45,6 +46,10 @@ final case class ChainOfThought[I, O](
       * Per-call config still wins on key collisions.
       */
     config: DynamicValue.Record = DynamicValue.Record.empty,
+    /** The tools of the model, which the inner [[Predict]] gets, with the rules of [[Predict.tools]]. They apply only
+      * to a signature with a tool calls output (`Vector[ToolCall]`). Not serialized state.
+      */
+    tools: Vector[ToolSpec] = Vector.empty,
     /** Experimental. The explicit settings of the decision outputs, by output name (upstream `Predict.fields` of the
       * inner predictor), as [[Predict.decisions]]. The `reasoning` output stays a text output.
       */
@@ -78,8 +83,14 @@ final case class ChainOfThought[I, O](
   /** The inner `Predict`, built once (memoized) — the analog of Python's `self.predict = Predict(extended_signature)`.
     * Left unnamed so it surfaces as a nested `predict` event under this program's `chain_of_thought` event.
     */
-  private lazy val predict: Predict[I, Out] =
-    Predict(signature = signature, demos = demos, runtime = runtime, config = config, decisions = decisions)
+  private lazy val predict: Predict[I, Out] = Predict(
+    signature = signature,
+    demos = demos,
+    runtime = runtime,
+    config = config,
+    tools = tools,
+    decisions = decisions
+  )
 
   override protected def decisionLayout: SignatureLayout = signature.layout
 

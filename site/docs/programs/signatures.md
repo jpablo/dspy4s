@@ -69,9 +69,10 @@ does not have the field, the value is `None`, and the call does not fail. In an
 inline signature, write the type as `Optional[T]` or `T | None`, for example
 `"question -> answer, note: Optional[str]"`.
 
-A required field that the response does not have is a parse error. With the
-default `ChatAdapter`, and with `XMLAdapter`, a parse error gives one more call
-in the JSON format (`useJsonAdapterFallback`).
+A required field that the response does not have is a parse error. A reply with
+no text is also a parse error, except a reply with tool calls for a signature
+with a `tool_calls` output. With the default `ChatAdapter`, and with `XMLAdapter`,
+a parse error gives one more call in the JSON format (`useJsonAdapterFallback`).
 
 ## Building a signature programmatically
 

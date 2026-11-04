@@ -151,9 +151,11 @@ private[lm] object ResponsesWire:
     *     `cited_text`, else `text`, else `supported_text`; `title` is `document_title`, else `title`; `metadata` has
     *     the other keys of the annotation that are not null).
     *
-    * The result is an empty vector when the response has no text (or only white space) and no tool call. A body with no
-    * `output` array is a `ParseError`. A body with an `error` object is the error of [[OpenAiErrors.fromReplyError]],
-    * also with a success status (upstream `OpenAILM.parse_response`).
+    * The result always has one output when the body has an `output` array. A response with no text, or with only white
+    * space, gives the empty text, and the output keeps its tool calls, its reasoning, and its citations. The adapter
+    * call decides what an empty text means (`AdapterCall.run`). A body with no `output` array is a `ParseError`. A body
+    * with an `error` object is the error of [[OpenAiErrors.fromReplyError]], also with a success status (upstream
+    * `OpenAILM.parse_response`).
     *
     * @param model
     *   the model of the request, for the details of an error
@@ -171,10 +173,8 @@ private[lm] object ResponsesWire:
         val toolCalls = records.filter(isKind(_, Kinds.functionCall)).map(toolCall)
         val reasoning = records.filter(isKind(_, Kinds.reasoning)).flatMap(reasoningTexts).mkString
         val citations = parts.flatMap(part => sequenceAt(part, Keys.annotations)).flatMap(asRecord).map(citation)
-        Right(
-          if text.trim.isEmpty && toolCalls.isEmpty then Vector.empty
-          else Vector(LmOutput(text = text, toolCalls = toolCalls, reasoning = reasoning, citations = citations))
-        )
+        val visible   = if text.trim.isEmpty then "" else text
+        Right(Vector(LmOutput(text = visible, toolCalls = toolCalls, reasoning = reasoning, citations = citations)))
       case _ => Left(ParseError("lm", "The Responses body has no output array"))
 
   /** The chunk of one event of a Responses stream (upstream lm15 `OpenAILM.parse_stream_events` and

@@ -57,7 +57,8 @@ private[adapters] object PromptText:
     * layout, also when the prompt does not show each field of the layout.
     *
     * @param layout
-    *   the full layout of the signature
+    *   the full layout of the signature, with the input field of
+    *   [[dspy4s.adapters.contracts.NativeTools.promptInvocation]] when the prompt shows the tool specs of the call
     * @param shown
     *   the layout that the prompt shows: with native function calling active, it has no tool calls field
     */

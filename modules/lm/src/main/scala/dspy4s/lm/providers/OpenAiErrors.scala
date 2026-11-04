@@ -263,8 +263,9 @@ private[lm] object OpenAiErrors:
   def streamAssembly(message: String, model: Option[String]): LmStreamAssemblyError =
     LmStreamAssemblyError(message, LmErrorDetails(model = model, provider = Some(provider)))
 
-  /** The error for a reply with no output, for example a reply that a content filter stopped. The details hold the
-    * model, the provider, and the usage of the reply: the provider can bill the prompt of such a reply.
+  /** The error for a reply with no output: a reply with no choices. A choice with no text is an output with an empty
+    * text, not this error. The details hold the model, the provider, and the usage of the reply: the provider can bill
+    * the prompt of such a reply.
     */
   def noOutputs(model: Option[String], usage: Option[LmUsage]): LmProviderResponseError =
     LmProviderResponseError(

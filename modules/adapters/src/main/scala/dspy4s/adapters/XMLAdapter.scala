@@ -49,10 +49,10 @@ final case class XMLAdapter(
   override def fallback: Option[Adapter] =
     Option.when(useJsonAdapterFallback)(JSONAdapter(native = NativeTools.Off))
 
-  // This adapter has no native function calling: a turn of the history with tool calls stays text, and the request
-  // has no tool options (upstream `Adapter._call_preprocess`).
+  // This adapter has no native function calling: a turn of the history with tool calls stays text, the request has no
+  // tool options (upstream `Adapter._call_preprocess`), and the prompt shows the tool specs as text.
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
-    Right(ConversationHistory.prompt(invocation, NativeTools.Off, Turns))
+    ConversationHistory.prompt(invocation, NativeTools.Off, Turns)
 
   override def streamingState(layout: SignatureLayout)(using RuntimeContext): Option[AdapterStreamingState] =
     Some(new XmlStreamingState(layout.outputFields))

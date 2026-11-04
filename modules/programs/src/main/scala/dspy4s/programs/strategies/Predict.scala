@@ -22,6 +22,10 @@ import zio.blocks.schema.DynamicValue
   *      through `signature.outputShape` into a `Prediction[O]`; decode failures surface as `Left(DspyError)` from
   *      `apply`, never via lazy field access.
   *
+  * The parse step of the call also runs the decode on each output of the reply (upstream `parse_value` validates each
+  * field in the parse step). Thus a value that the decode rejects is a [[dspy4s.core.contracts.ParseError]] with the
+  * raw response, and it gets the fallback of the adapter.
+  *
   * `Predict[I, O]` is a `Module[I, O]` — the domain-valued analog of `dspy.Predict`. It is a *sibling* of the
   * record-valued [[DynamicPredict]] rather than a wrapper around it: both are thin `Module`s over the shared
   * [[dspy4s.programs.runtime.PredictEngine PredictEngine]]. So a `Predict` call emits exactly one module event (named
@@ -44,9 +48,10 @@ final case class Predict[I, O](
       * predictors. `None` (the default) falls back to ambient resolution. See PORT_GAPS G-3.
       */
     lm: Option[LanguageModel] = None,
-    /** Tool schemas exposed to the model, passed through to the adapter. Acted on only by an adapter with native
-      * function-calling enabled and a `tool_calls` output field in the signature. Pure [[ToolSpec]] data; not
-      * serialized state. See PORT_GAPS G-7b.
+    /** The tools of the model, which go to the adapter. They apply only to a signature with a tool calls output
+      * (`Vector[ToolCall]`). When native function calling is active, the request has them as provider tools. Else the
+      * prompt shows the text of each tool as an input field `tools` ([[dspy4s.adapters.contracts.NativeTools]]). Pure
+      * [[ToolSpec]] data; not serialized state. See PORT_GAPS G-7b.
       */
     tools: Vector[ToolSpec] = Vector.empty,
     /** Experimental. The explicit settings of the decision outputs, by output name (upstream `Predict.fields`). Each
@@ -77,7 +82,8 @@ final case class Predict[I, O](
     lm = lm,
     tools = tools,
     decisions = decisions,
-    nestedDecisionFields = signature.outputShape.nestedDecisionFields
+    nestedDecisionFields = signature.outputShape.nestedDecisionFields,
+    checkOutput = values => signature.outputShape.decode(values).map(_ => ())
   )
 
   /** Pin a bound LM to this predictor (immutable `set_lm`): returns a copy that resolves to `model` instead of the

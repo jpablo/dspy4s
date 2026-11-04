@@ -10,6 +10,10 @@ OpenAI-compatible servers, a wrapper that adds a cache and retries to a model, a
   the chat mode and of the text mode from an `LmRequest`, and `ResponsesWire` makes the body of the Responses mode.
   Each wire also reads the reply into the outputs of an `LmResponse`. The bodies are `DynamicValue.Record` values. A
   request has no mode.
+- **A reply with no text.** A choice with an empty, a null, or a blank text is an output with an empty text, in its
+  place among the choices, and a Responses body with an `output` array always gives one output. Such a reply is a
+  success, so the cache stores it and its usage counts. The adapter call then gives the parse error. Only a reply with
+  no choices is an `LmProviderResponseError`.
 - **Provider options and control values.** `LmRequest.options` holds the provider options, for example `temperature`
   and `max_tokens`. The provider gets these options with no change. A framework value such as `rolloutId` is a
   separate field. It changes the cache key, and it does not go to the provider.

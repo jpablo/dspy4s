@@ -6,6 +6,7 @@ import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.NativeFunctionCalling
 import dspy4s.adapters.contracts.NativeTools
 import dspy4s.adapters.internal.PromptText.OutputSchema
+import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.History
@@ -84,7 +85,9 @@ private[adapters] object ConversationHistory:
 
   /** The prompt of the Chat, JSON, and XML adapters (upstream `Adapter.format`): the [[messages]] of the request, with
     * the system message of [[PromptText.systemMessage]] and the structure of `turns`, and the tool options of `native`
-    * ([[NativeTools.toolOptions]]).
+    * ([[NativeTools.toolOptions]]). The messages and the system message show the invocation of
+    * [[NativeTools.promptInvocation]], so a call with tool specs and no provider tools shows them as an input field. A
+    * call that fails [[NativeTools.checkTools]] is an error.
     *
     * @param options
     *   the request options of the adapter, for example the response format of the JSON adapter. The tool options come
@@ -95,16 +98,19 @@ private[adapters] object ConversationHistory:
       native    : NativeTools,
       turns     : TurnText,
       options   : DynamicValue.Record = DynamicValue.Record.empty
-  )(using RuntimeContext): FormattedPrompt =
-    val schema = OutputSchema(invocation.outputJsonSchema)
-    val tools  = native.toolOptions(invocation)
-    FormattedPrompt(
-      messages = messages(invocation, native, turns) { shown =>
-        PromptText.systemMessage(invocation.layout, shown, turns.structure(shown, schema))
-      },
-      requestOptions = DynamicValues.mergeRecords(options, tools.request),
-      removedOptions = tools.removed
-    )
+  )(using RuntimeContext): Either[DspyError, FormattedPrompt] =
+    native.checkTools(invocation).map { _ =>
+      val prompted = native.promptInvocation(invocation)
+      val schema   = OutputSchema(invocation.outputJsonSchema)
+      val tools    = native.toolOptions(invocation)
+      FormattedPrompt(
+        messages = messages(prompted, native, turns) { shown =>
+          PromptText.systemMessage(prompted.layout, shown, turns.structure(shown, schema))
+        },
+        requestOptions = DynamicValues.mergeRecords(options, tools.request),
+        removedOptions = tools.removed
+      )
+    }
 
   /** The input field that holds the conversation history: the first input field with [[TypeRef.history]]. */
   def historyField(layout: SignatureLayout): Option[FieldSpec] =
@@ -116,10 +122,13 @@ private[adapters] object ConversationHistory:
     *     ([[NativeTools.promptLayout]]). It has the history field.
     *   - A demo shows each field of the render layout. A demo that has a value for the history field shows that value
     *     as a field. The history of a demo is not replayed. [[DemoMessages]] gives the order of the demos and the text
-    *     of an incomplete demo.
+    *     of an incomplete demo. A demo with no value for a tools input is incomplete ([[AdapterDemos]]).
     *   - The current request, and each replayed turn, use the render layout without the history field. Only the current
-    *     request takes the default value of an input field that it does not have.
+    *     request takes the default value of an input field that it does not have. A replayed turn shows a tools input
+    *     only when its message has that key, so only the current request shows the tool specs of the call.
     *
+    * @param invocation
+    *   the invocation that the prompt shows ([[NativeTools.promptInvocation]])
     * @param native
     *   the native function calling options of the adapter. A turn with tool calls becomes an assistant message with
     *   `toolCalls` and one [[MessageRole.Tool]] message for each result only when native function calling is active

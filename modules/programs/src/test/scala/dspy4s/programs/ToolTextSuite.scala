@@ -1,6 +1,6 @@
 package dspy4s.programs
 
-import dspy4s.core.contracts.{:=, DspyError, DynamicValues, RuntimeContext, TypeRef}
+import dspy4s.core.contracts.{:=, DspyError, DynamicValues, PythonText, RuntimeContext, TypeRef}
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.internal.ToolText
 import munit.FunSuite
@@ -10,6 +10,36 @@ import zio.blocks.schema.DynamicValue
   * (`dspy/adapters/types/tool.py`, decision D3). The arguments are JSON text.
   */
 class ToolTextSuite extends FunSuite:
+
+  test("the prompt of a predictor with no provider tools shows the text of ToolText.describe") {
+    val schema = DynamicValues.record(
+      "type"       := "object",
+      "properties" -> DynamicValues.record("city" -> DynamicValues.record("type" := "string")),
+      "required"   := List("city")
+    )
+    val tool =
+      new TestTool("weather", "Get the weather.\nFor one city.", Vector("city" -> TypeRef.string), Some(schema))
+    val spec   = dspy4s.adapters.contracts.ToolSpec(tool.name, Some(tool.description), schema)
+    val layout = dspy4s.core.contracts.SignatureLayout.create(
+      name = "Manual",
+      inputFields = Vector(dspy4s.core.contracts.FieldSpec("question")),
+      outputFields = Vector(dspy4s.core.contracts.FieldSpec("outputs", typeRef = TypeRef.toolCalls))
+    ).fold(error => fail(error.toString), identity)
+    given RuntimeContext = RuntimeContext()
+    val prompt           = dspy4s.adapters.ChatAdapter()
+      .format(dspy4s.adapters.contracts.AdapterInvocation(
+        layout = layout,
+        demos = Vector.empty,
+        inputs = dspy4s.core.data.Example(
+          values = DynamicValues.record("question" := "Weather?"),
+          inputKeys = Set("question")
+        ),
+        request = dspy4s.lm.contracts.LmRequest(model = "stub"),
+        tools = Vector(spec)
+      ))
+      .fold(error => fail(error.toString), _.messages.flatMap(_.text).mkString("\n"))
+    assert(prompt.contains(PythonText.json(DynamicValues.string(ToolText.describe(tool)))), prompt)
+  }
 
   private final class TestTool(
       override val name       : String,

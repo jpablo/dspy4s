@@ -13,6 +13,10 @@ package dspy4s.adapters.contracts
   * the TwoStep adapter shows the output fields that the demo has only (upstream
   * `TwoStepAdapter.format_assistant_message_content`). A field default
   * ([[dspy4s.core.contracts.FieldSpec.defaultValue]]) does not fill a demo.
+  *
+  * The input field `tools` of [[NativeTools.promptInvocation]] counts as a field of the signature, as a tools input of
+  * upstream. Thus a demo with no value for it is incomplete when the prompt shows the tools as text, and it can be
+  * complete when the request has provider tools.
   */
 object AdapterDemos:
 

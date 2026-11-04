@@ -5,6 +5,9 @@ import zio.blocks.schema.DynamicValue
 
 /** One output of a reply.
   *
+  * @param text
+  *   the text of the output. An output with no text has the empty text, for example a reply with only tool calls or
+  *   only reasoning, or a reply with an empty, a null, or a blank content.
   * @param reasoning
   *   the reasoning text of the output (upstream `reasoning_content`), else an empty text. The Responses wire and the
   *   assembly of a stream fill it.

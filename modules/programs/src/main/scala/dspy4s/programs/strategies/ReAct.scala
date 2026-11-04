@@ -47,9 +47,9 @@ import scala.collection.immutable.VectorMap
   * the whole call fails, with no extract step. Upstream does the same: `AdapterParseError` is a `DSPyError`, not a
   * `ValueError`, so the `except ValueError` of `ReAct.forward` (`dspy/predict/react.py:104`) does not catch it.
   *
-  * A `next_tool_args` value that is not a dict (upstream type `dict[str, Any]`) also fails the whole call, and no tool
-  * runs. The port finds this problem in the decode of [[ReActProtocol.reactStepShape]], after the adapter, so this
-  * error has no JSON fallback.
+  * A `next_tool_args` value that is not a dict (upstream type `dict[str, Any]`) has the same result, and no tool runs.
+  * The decode of [[ReActProtocol.reactStepShape]] finds this problem in the parse step of the call, so the JSON
+  * fallback comes first, as upstream `parse_value`.
   */
 final case class ReAct[I, O](
     baseSignature: Signature[I, O],

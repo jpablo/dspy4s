@@ -43,6 +43,13 @@ final case class ZsPipeline(stage: ZsStage, summary: Option[String]) derives Sch
 
 final case class ZsToolPlan(thought: String, toolCalls: Vector[ToolCall], last: Option[ToolCall]) derives Schema
 
+// A collection in a list, in a map, and with a default value. An `Option` in a list.
+final case class ZsCollections(
+    rows  : List[Option[List[String]]],
+    byName: Map[String, List[String]],
+    scores: Map[String, Boolean] = Map.empty
+) derives Schema
+
 // Recursive types: through a list, through an `Option`, and through a sealed trait.
 final case class ZsNode(label: String, children: List[ZsNode]) derives Schema
 final case class ZsChain(label: String, next: Option[ZsChain]) derives Schema
@@ -249,15 +256,47 @@ class ZioSchemaCodecSuite extends FunSuite:
     assertEquals(Shape.canonicalDerived[ZsToolPlan].jsonSchema, Shape.derived[ZsToolPlan].jsonSchema)
   }
 
-  test("the JSON schema of a type with no tool call is the JSON schema of its Schema") {
+  test("the JSON schema of a type with no tool call and no collection is the JSON schema of its Schema") {
     assertEquals(
-      Shape.derived[ZsPipeline].jsonSchema,
-      jsonObject(summon[Schema[ZsPipeline]].toJsonSchema.toJson.toString)
+      Shape.derived[ZsOptionProbe].jsonSchema,
+      jsonObject(summon[Schema[ZsOptionProbe]].toJsonSchema.toJson.toString)
     )
     import ZsClassifyOutput.given
     assertEquals(
       ZioSchemaCodec.derivedFromZioSchema[ZsClassifyOutput].jsonSchema,
       jsonObject(summon[Schema[ZsClassifyOutput]].toJsonSchema.toJson.toString)
+    )
+  }
+
+  test("the JSON schema of a collection field is the required array or object of the decode") {
+    // The JSON schema of the `Schema` has `["array", "null"]` for `steps`, and `steps` is not in `required`.
+    assertEquals(
+      Shape.derived[ZsPipeline].jsonSchema,
+      jsonObject(
+        """{"properties": {"stage": {"properties": {"label": {"type": "string"},
+          |"steps": {"items": {"properties": {"action": {"type": "string"}, "comment": {"type": ["null", "string"]}},
+          |"type": "object", "required": ["action"], "title": "ZsStep"}, "type": "array", "title": "Vector[ZsStep]"},
+          |"owner": {"type": ["null", "string"]}}, "type": "object", "required": ["label", "steps"], "title": "ZsStage"},
+          |"summary": {"type": ["null", "string"]}}, "type": "object", "required": ["stage"],
+          |"title": "ZsPipeline"}""".stripMargin
+      )
+    )
+  }
+
+  test(
+    "only an Option has a null in the JSON schema, in a list and in a map too, and a default keeps a field optional"
+  ) {
+    val list = """{"items": {"type": "string"}, "type": "array", "title": "List[String]"}"""
+    assertEquals(
+      ZioSchemaCodec.jsonSchemaForModel(summon[Schema[ZsCollections]]),
+      jsonObject(
+        s"""{"properties": {
+           |"rows": {"items": {"items": {"type": "string"}, "type": ["null", "array"], "title": "List[String]"},
+           |  "type": "array", "title": "List[Option[List[String]]]"},
+           |"byName": {"additionalProperties": $list, "type": "object", "title": "Map[String, List[String]]"},
+           |"scores": {"additionalProperties": {"type": "boolean"}, "type": "object", "title": "Map[String, Boolean]"}},
+           |"type": "object", "required": ["rows", "byName"], "title": "ZsCollections"}""".stripMargin
+      )
     )
   }
 
@@ -312,4 +351,12 @@ class ZioSchemaCodecSuite extends FunSuite:
     }.getOrElse(fail("no ZsAdd case in the definition of ZsExpr"))
     assertEquals(keys(get(add, "properties", "ZsAdd", "properties")), Set("left", "right"))
     assertEquals(get(add, "properties", "ZsAdd", "properties", "left"), Some(refTo("ZsExpr")))
+  }
+
+  test("the error of a decode has the path of the value and no class name") {
+    ZioSchemaCodec.decodeValue[ZsStep](DynamicValues.record("action" := 1)) match
+      case Left(error) =>
+        assert(error.message.contains(".action"), error.message)
+        assert(!error.message.contains("SchemaError"), error.message)
+      case Right(value) => fail(s"expected an error, got $value")
   }

@@ -38,6 +38,9 @@ use `LanguageModel.call`, which returns `Either[DspyError, LmResponse]`:
 --8<-- "learn/programming/LanguageModels.scala:lm-direct"
 ```
 
+A reply with no text is not an error of a direct call: its output has an empty
+text. A module gives a parse error for such a reply.
+
 ## Per-call generation settings
 
 Generation parameters such as `temperature` go in a per-call config bag.

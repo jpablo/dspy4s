@@ -45,6 +45,15 @@ only how tool definitions are transmitted to the provider differs. It applies to
 any program whose predictor declares tools, and is gated on the model reporting
 function-calling support.
 
+A `Predict` with `tools` and an output of the type `Vector[ToolCall]` has the same
+rule. When native function calling is active, the provider gets the tools. Else
+the prompt shows each tool as an input field `tools`, and the model writes the
+calls as JSON text. With the setting on, such an output with no tools is a
+`ConfigurationError`. Give the tools in the `tools` of the predictor. An input
+field of the type `tools` holds only text, so it cannot become provider tools.
+It gives tools only when native function calling is not active. When it is
+active, such an input with no `tools` of the predictor is also this error.
+
 ## When to use it
 
 | You want | Reach for |

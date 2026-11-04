@@ -267,7 +267,7 @@ class TypedBestOfNSuite extends FunSuite:
         offerFeedbackCalls.incrementAndGet()
         Right(LmResponse(outputs =
           Vector(LmOutput(
-            text = "",
+            text = "scripted",
             metadata = DynamicValues.record("discussion" := "needs a hint", "advice" := AdviceText)
           ))
         ))

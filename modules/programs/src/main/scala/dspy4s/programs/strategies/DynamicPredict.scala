@@ -65,9 +65,11 @@ final case class DynamicPredict(
       * `runtime`). See PORT_GAPS G-3.
       */
     lm: Option[LanguageModel] = None,
-    /** Tool schemas this predictor exposes to the model. Passed through to the adapter; only an adapter with native
-      * function-calling enabled and a `tool_calls` output field acts on them. Pure [[ToolSpec]] data (no invoke
-      * closures) — the executable bodies stay on the calling program. Not serialized state. See G-7b.
+    /** The tools of the model, which go to the adapter. They apply only to a layout with a tool calls output field.
+      * When native function calling is active, the request has them as provider tools. Else the prompt shows the text
+      * of each tool as an input field `tools`, unless the layout already has such an input
+      * ([[dspy4s.adapters.contracts.NativeTools]]). Pure [[ToolSpec]] data (no invoke closures): the executable bodies
+      * stay on the calling program. Not serialized state. See G-7b.
       */
     tools: Vector[ToolSpec] = Vector.empty,
     /** Experimental. The explicit settings of the decision outputs, by output name (upstream `Predict.fields`). See

@@ -12,8 +12,8 @@ An adapter writes the prompt of a signature and reads the response of the model.
   object. `XMLAdapter` puts each field in a `<name>` tag. `TwoStepAdapter` asks for an answer in natural language, and
   then a second model reads the fields from that answer.
 - **Native tool calls.** The Chat and JSON adapters can send the tools to the provider. The provider then gives the
-  tool calls in a structured form, and the adapter puts them in the `tool_calls` output field. Else the model writes
-  the tool calls as JSON text in that field.
+  tool calls in a structured form, and the adapter puts them in the `tool_calls` output field. Else the prompt shows
+  the tools as an input field, and the model writes the tool calls as JSON text in that output field.
 - **Conversation history.** A signature can have an input field of type `History`. The Chat, JSON, and XML adapters
   send its messages as earlier turns, between the demos and the current request.
 
@@ -31,8 +31,8 @@ An adapter writes the prompt of a signature and reads the response of the model.
 | `FormattedPrompt` | The result of `format`: the messages, the `requestOptions` of the adapter, and the `removedOptions` (the keys that the request must not have). The options of the request win over `requestOptions`. |
 | `ParsedOutput` | The result of `parse`: the `values` record, and the decision evidence of a `DecisionAdapter` parse. |
 | `AdapterStreamingState` / `FieldChunk` | The state of one streamed call. `receive(delta)` and `finish()` give a `FieldChunk` for each part of the text of a field. The last part of a field has `isLast`. |
-| `NativeTools` | The native tool call options of an adapter: `enabled`, `parallelToolCalls`, and `toolChoice`. It decides if native tool calls are active for a call, which fields the prompt shows, and which tool options (`tools`, `parallel_tool_calls`, and `tool_choice`) the request gets or must not have. As upstream, `NativeTools.Off` is the default of `ChatAdapter`, and `JSONAdapter` has `enabled` on by default. |
-| `ToolSpec` / `ToolChoice` | The data of a tool, with the JSON schema of its arguments, and of the `tool_choice` value. `ToolSchemaBridge` writes a tool as an OpenAI function schema. |
+| `NativeTools` | The native tool call options of an adapter: `enabled`, `parallelToolCalls`, and `toolChoice`. It decides if native tool calls are active for a call, if the call has the tools that it needs, which fields the prompt shows, and which tool options (`tools`, `parallel_tool_calls`, and `tool_choice`) the request gets or must not have. As upstream, `NativeTools.Off` is the default of `ChatAdapter`, and `JSONAdapter` has `enabled` on by default. |
+| `ToolSpec` / `ToolChoice` | The data of a tool, with the JSON schema of its arguments, and of the `tool_choice` value. `ToolSchemaBridge` writes a tool as an OpenAI function schema, and `ToolSpec.text` is the text of a tool in a prompt. |
 
 ## Design notes
 
@@ -40,9 +40,21 @@ An adapter writes the prompt of a signature and reads the response of the model.
   the request has tools, the signature has a `tool_calls` output field, and the model supports native tool calls. In
   each other case, `tool_calls` is a text output field. The prompt then asks for `{"tool_calls": [{"name", "args"}]}`,
   and the parser reads that object or a JSON list of calls. The Chat, JSON, and XML adapters read the text tool calls.
+- **Tools in the prompt.** When the request has no provider tools, each adapter shows the tools of the call
+  (`AdapterInvocation.tools`) as one more input field `tools` of the type `TypeRef.tools`, with the text of each tool
+  (`NativeTools.promptInvocation`). The layout does not change if it has an input of that type, or a field with the
+  name `tools`. A layout with no `tool_calls` output field does not show the tools.
+- **A `tool_calls` output with no tools.** With `NativeTools.enabled` on, this is a `ConfigurationError` from `format`
+  (`NativeTools.checkTools`), as upstream. The tools are the `tools` of the predictor or an input of the type
+  `TypeRef.tools`. With no such input, the check reads the flag only, not the support of the model. An input of that
+  type holds only text, so it cannot become provider tools: when native tool calls are active, such an input with no
+  `tools` of the predictor is also this error. With the flag off, there is no error.
+  `XMLAdapter` and `TwoStepAdapter` have no native tool calls, so they do not give this error.
 - **An output that the response does not have.** The output takes the `defaultValue` of its field. Else it is a null
   when the field is `optional`. Else it is a `ParseError`. A value that does not fit the type of its field is also a
   `ParseError`. The `ParseError` keeps the raw response.
+- **The items of a list.** A `list[T]`, `tuple[T, ...]`, `set[T]`, or `frozenset[T]` field of a string signature checks each
+  item when `T` is `int`, `float`, `bool`, `str`, or a list type with an item type. Each other `T` has no check.
 - **One rule for a number and a bool.** An `int`, a `float`, and a `bool` field take the rule of core
   `LenientValues.valueOf`, in each adapter, for a required field and for an optional field. Thus `$1,200`, `1_000`, and
   `3.0` are integers, and `yes` is a bool. A form that only Java reads (`3d`) is an error. An optional field also takes
@@ -53,6 +65,13 @@ An adapter writes the prompt of a signature and reads the response of the model.
 - **The JSON fallback.** After a `ParseError` of a `ChatAdapter` response, the predictor formats, calls, and parses
   one more time with a `JSONAdapter`. `useJsonAdapterFallback` controls this, and it is on by default. An LM error, a
   configuration error, or a call that streamed output to a listener gives no second call.
+- **An empty reply.** `AdapterCall.run` gives the `ParseError` "The LM returned an empty or null response." for an
+  output with a blank text and no typed answers, except a tool turn. A tool turn has provider tool calls, and the
+  signature has a `tool_calls` output field. The check comes before `Adapter.parse` in each attempt, so the rule is the
+  same in each format, and the reply gets the JSON fallback.
+- **The output type is a part of the parse.** `AdapterCall.run` takes an output check, and it runs the check on the
+  values of each output, after `Adapter.parse`. A `Predict` gives the decode of its output type as the check. Thus a
+  value that the typed decode rejects is a `ParseError` with the raw response, and it gets the JSON fallback.
 - **Demos.** The adapters drop a demo that does not have one input field and one output field at least. A demo that
   does not have a value for each field comes first, and its text tells the model that some fields are not supplied.
 - **History turns.** The messages come in this order: the system message, the demos, the history turns, and the

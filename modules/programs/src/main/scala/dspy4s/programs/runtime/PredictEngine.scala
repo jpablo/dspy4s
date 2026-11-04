@@ -57,9 +57,7 @@ private[dspy4s] final case class PredictEngine(
       * `None` falls back to ambient resolution. See PORT_GAPS G-3.
       */
     lm: Option[LanguageModel],
-    /** Tool schemas surfaced to the adapter via [[AdapterInvocation.tools]]. Only an adapter with native
-      * function-calling enabled (and a `tool_calls` output field in the layout) acts on them; others ignore them. See
-      * PORT_GAPS G-7b.
+    /** The tools that go to the adapter in [[AdapterInvocation.tools]]. That field gives the rules. See PORT_GAPS G-7b.
       */
     tools: Vector[ToolSpec],
     /** Experimental. The explicit settings of the decision outputs, by output name (upstream `Predict.fields`). The
@@ -69,7 +67,12 @@ private[dspy4s] final case class PredictEngine(
     /** Experimental. The output fields whose type holds a decision type inside an `Option`, a collection, or a map
       * ([[dspy4s.signatures.Shape.nestedDecisionFields]]). Each call warns that they get no evidence decoding.
       */
-    nestedDecisionFields: Vector[String] = Vector.empty
+    nestedDecisionFields: Vector[String] = Vector.empty,
+    /** The check of the values of each output in the parse step ([[AdapterCall.run]]). `Predict` decodes the values
+      * with its output shape, so a value that the decode rejects gets the same fallback as a parse error of the
+      * adapter. `DynamicPredict` has no output type, so it keeps the default.
+      */
+    checkOutput: AdapterCall.OutputCheck = AdapterCall.acceptAnyOutput
 ):
   // The layout is immutable for the engine's lifetime, so the declared-input key set is computed once, not per call.
   private val inputKeys: Set[String] = layout.inputFields.map(_.name).toSet
@@ -105,7 +108,7 @@ private[dspy4s] final case class PredictEngine(
           for
             base       <- runtime.resolveAdapter
             adapter    <- DecisionAdapter.resolve(base, decisionPlan, layout, nestedDecisionFields, moduleName, model)
-            answer     <- AdapterCall.run(adapter, model, buildInvocation(call, model, options, rolloutId))
+            answer     <- AdapterCall.run(adapter, model, buildInvocation(call, model, options, rolloutId), checkOutput)
             _           = answer.parsed.map(_.evidence).foreach(DecisionAdapter.recordEvidence(moduleName, layout, _))
             prediction <- buildPrediction(
                             answer.parsed.map(_.values),

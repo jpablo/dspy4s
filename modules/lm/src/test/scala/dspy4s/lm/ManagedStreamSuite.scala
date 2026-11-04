@@ -131,6 +131,22 @@ class ManagedStreamSuite extends FunSuite:
     assertEquals(delegate.streams, 1)
   }
 
+  test("a complete stream with no text and no tool call is a success, and the cache stores its empty output") {
+    val delegate         = ScriptedStreams(Vector(Vector(LmChunk(reasoning = "why"), LmChunk(finishReason = Some("stop")))))
+    val model            = managed(delegate, cached = true)
+    given RuntimeContext = RuntimeEnvironment.current
+
+    val first = streamAll(model)
+    assertEquals(first.flatMap(_.reportedFailure), Vector.empty)
+
+    val second = streamAll(model)
+    assertEquals(
+      second.flatMap(_.cachedResponse).flatMap(_.outputs).map(o => (o.text, o.reasoning)),
+      Vector(("", "why"))
+    )
+    assertEquals(delegate.streams, 1)
+  }
+
   test("the cache does not store a failed stream") {
     val failed           = Vector(LmChunk(text = "Hi"), LmChunk.failure(LmServerError("busy")))
     val delegate         = ScriptedStreams(Vector(failed, complete))

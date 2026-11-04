@@ -3,8 +3,8 @@ package dspy4s.programs
 import zio.blocks.schema.Schema
 
 import dspy4s.adapters.ChatAdapter
-import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
-import dspy4s.core.contracts.{:=, DspyError, DynamicValues, LmUsage, NotFoundError, RuntimeContext, ValidationError}
+import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, NativeTools, ParsedOutput, ToolSpec}
+import dspy4s.core.contracts.{:=, DspyError, DynamicValues, LmUsage, ParseError, RuntimeContext, ToolCall}
 import zio.blocks.schema.DynamicValue
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
@@ -28,6 +28,11 @@ trait TcotHasReasoningSpec extends Spec:
   def question: InputField[String]
   def reasoning: OutputField[String]
   def answer: OutputField[String]
+
+// A signature with a tool calls output.
+trait TcotToolCallsSpec extends Spec:
+  def question: InputField[String]
+  def calls: OutputField[Vector[ToolCall]]
 
 // Case-class I/O fixtures for the negative-path test that exercises
 // the case-class-output rejection in ChainOfThought.
@@ -229,20 +234,20 @@ class ChainOfThoughtSuite extends FunSuite:
 
   // ── Failure modes ───────────────────────────────────────────────────────
 
-  test("ChainOfThought surfaces missing reasoning as a structured DspyError") {
+  test("ChainOfThought surfaces missing reasoning as a parse error") {
     val sig     = Signature.of[TcotSummarizeSpec]
     val adapter = new NoReasoningAdapter(Map("summary" -> "summary without reasoning"))
     RuntimeEnvironment.withSettings(settings(adapter)) {
       given RuntimeContext = RuntimeEnvironment.current
       val result           = ChainOfThought(sig)((document = "..."))
       result match
-        case Left(_: NotFoundError) => () // expected
-        case Left(other)            => fail(s"expected NotFoundError, got: $other")
-        case Right(tp)              => fail(s"expected failure, got: $tp")
+        case Left(error: ParseError) => assert(error.message.contains("reasoning"), error.message)
+        case Left(other)             => fail(s"expected ParseError, got: $other")
+        case Right(tp)               => fail(s"expected failure, got: $tp")
     }
   }
 
-  test("ChainOfThought surfaces non-string reasoning as a ValidationError") {
+  test("ChainOfThought surfaces non-string reasoning as a parse error") {
     val sig = Signature.of[TcotSummarizeSpec]
     // Adapter emits reasoning as an Int -- decoding should reject it.
     val brokenAdapter = new Adapter:
@@ -265,8 +270,8 @@ class ChainOfThoughtSuite extends FunSuite:
       val result           = ChainOfThought(sig)((document = "..."))
       assert(result.isLeft, s"expected failure, got: $result")
       result match
-        case Left(_: ValidationError) => ()
-        case other                    => fail(s"expected ValidationError, got: $other")
+        case Left(_: ParseError) => ()
+        case other               => fail(s"expected ParseError, got: $other")
     }
   }
 
@@ -304,4 +309,31 @@ class ChainOfThoughtSuite extends FunSuite:
     val layout    = ChainOfThought.augmentLayout(sig.layout)
     val reasoning = layout.outputFields.find(_.name == "reasoning").get
     assertEquals(reasoning.prefix, Some("Reasoning:"))
+  }
+
+  test("ChainOfThought: a tool spec reaches the request as a provider tool, and the provider call fills the output") {
+    val toolCall = ToolCall("search", rec("query" := "cats"))
+    final class NativeLm extends LanguageModel:
+      @volatile var requests: Vector[LmRequest]                                                  = Vector.empty
+      override val id: String                                                                    = "native"
+      override val mode: LmMode                                                                  = LmMode.Chat
+      override def supportsFunctionCalling: Boolean                                              = true
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        synchronized { requests = requests :+ request }
+        Right(LmResponse(outputs =
+          Vector(LmOutput(text = "[[ ## reasoning ## ]]\nSearch.", toolCalls = Vector(toolCall)))
+        ))
+    val lm      = NativeLm()
+    val program = ChainOfThought(
+      Signature.of[TcotToolCallsSpec],
+      tools = Vector(ToolSpec("search", Some("Search."), DynamicValue.Record.empty))
+    )
+    val context = RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter(native = NativeTools(enabled = true))))
+    val output  = RuntimeEnvironment.withSettings(context) {
+      given RuntimeContext = RuntimeEnvironment.current
+      program((question = "Find cats.")).fold(error => fail(error.message), _.output)
+    }
+    assertEquals(output.reasoning, "Search.")
+    assertEquals(output.calls, Vector(toolCall))
+    assert(DynamicValues.recordGet(lm.requests.head.options, "tools").isDefined, lm.requests.head.toString)
   }

@@ -17,6 +17,8 @@ import dspy4s.core.contracts.updated
 import dspy4s.lm.contracts.LmOutput
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
+import scala.util.matching.Regex
+
 /** Prompt-text helpers shared across the adapters. One implementation guarantees the adapters render demo / input
   * fields, coerce string field values, and apply the single-output text fallback identically — fixing a defect in one
   * adapter can no longer silently miss the others.
@@ -63,18 +65,28 @@ private[adapters] object AdapterTextSupport:
           parseText(fields) match
             case Left(_: ParseError) => Right(DynamicValue.Record.empty)
             case other               => other
-      val calls = NativeFunctionCalling.encodeToolCalls(output.toolCalls)
-      parsed.map { values =>
-        ParsedOutput(DynamicValues.recordFromEntries(layout.outputFields.map { field =>
-          if NativeFunctionCalling.isToolCallsField(field) then field.name -> calls
-          else
-            field.name ->
-              DynamicValues
-                .recordGet(values, field.name)
-                .orElse(field.defaultValue)
-                .getOrElse(DynamicValue.Null)
-        }))
-      }
+      parsed.map(values => ParsedOutput(toolTurnValues(layout, output.toolCalls, values)))
+
+  /** The record of the output fields of `layout` for a reply with the provider tool calls `calls` and the text values
+    * `values`: the calls fill the tool calls field, and each other field takes its value in `values`, else its default,
+    * else a null (upstream `apply_output_field_defaults` and `value.setdefault(name, None)`). With an empty `values`,
+    * this is the record of a tool turn with no text.
+    */
+  def toolTurnValues(
+      layout: SignatureLayout,
+      calls : Vector[ToolCall],
+      values: DynamicValue.Record
+  ): DynamicValue.Record =
+    val encoded = NativeFunctionCalling.encodeToolCalls(calls)
+    DynamicValues.recordFromEntries(layout.outputFields.map { field =>
+      if NativeFunctionCalling.isToolCallsField(field) then field.name -> encoded
+      else
+        field.name ->
+          DynamicValues
+            .recordGet(values, field.name)
+            .orElse(field.defaultValue)
+            .getOrElse(DynamicValue.Null)
+    })
 
   /** The output fields of `layout` that the text of the reply gives: each output field, less the tool calls field when
     * `providerCalls` is `true`. The provider tool calls then fill that field ([[parseOutputs]]). The stream states of
@@ -273,25 +285,55 @@ private[adapters] object AdapterTextSupport:
     */
   def isListOf(typeRef: TypeRef): Boolean = typeRef.collection.isDefined
 
-  /** The value of a field of the list type `typeRef` ([[isListOf]]) from its JSON value `value`: the value when it is a
-    * list, else an error (upstream `parse_value` validates a list). The items stay as they are. The Chat, JSON, and XML
-    * adapters use this function, so a list value has the same rule in each format.
+  /** The value of a field of the list type `typeRef` ([[isListOf]]) from its JSON value `value`: the list with each
+    * item after [[listItem]], else an error when `value` is not a list (upstream `parse_value` validates a list and its
+    * items). The Chat, JSON, and XML adapters use this function, so a list value has the same rule in each format. The
+    * item type of a tuple of any length, `tuple[T, ...]`, is `T`.
     *
-    * A set type keeps the first copy of each equal value, in the order of the list: `["b", "a", "b"]` gives
-    * `["b", "a"]`. A Python set has no order (the order of a set of texts changes with the hash seed of the process),
-    * so only its rule for equal values applies: a set keeps the copy that it got first. Two values are equal when their
-    * `DynamicValue`s are equal.
+    * A set type keeps the first copy of each equal value, after the rule of the items, in the order of the list:
+    * `["b", "a", "b"]` gives `["b", "a"]`, and `set[int]` with `["1", 1]` gives `[1]`. A Python set has no order (the
+    * order of a set of texts changes with the hash seed of the process), so only its rule for equal values applies: a
+    * set keeps the copy that it got first. Two values are equal when their `DynamicValue`s are equal.
     *
     * @param raw
     *   the text of the value, for the error only
     */
   def listOfValue(typeRef: TypeRef, value: Option[DynamicValue], raw: => String): Either[DspyError, DynamicValue] =
-    value
-      .collect { case list: DynamicValue.Sequence =>
-        if typeRef.collection.exists((kind, _) => kind.isSet) then DynamicValue.Sequence(list.elements.distinct)
-        else list
-      }
-      .toRight(ValidationError(s"Expected a JSON list for ${typeRef.repr} from '$raw'"))
+    (value, typeRef.collection) match
+      case (Some(list: DynamicValue.Sequence), Some((kind, item))) =>
+        val itemType = TypeRef.fromToken(item match
+          case AnyLengthTuple(first) if kind == TypeRef.Collection.Tuple => first
+          case other                                                     => other)
+        Traverse
+          .either(list.elements)(listItem(typeRef, itemType, _))
+          .map(items => DynamicValues.sequence(if kind.isSet then items.distinct else items))
+      case _ => Left(ValidationError(s"Expected a JSON list for ${typeRef.repr} from '$raw'"))
+
+  /** The item text of a tuple of any length, for example `int, ...` of the type `tuple[int, ...]`. Its group is the
+    * item type.
+    */
+  private val AnyLengthTuple: Regex = """(.+?)\s*,\s*\.\.\.\s*""".r
+
+  /** The value of the item `item` of a list of the type `listType`, for the item type `itemType` (pydantic lax mode, as
+    * upstream `parse_value` validates the items):
+    *   - An `int`, a `double`, or a `bool` takes the rule of [[LenientValues.valueOf]].
+    *   - A string type takes only a string. Pydantic lax mode rejects a number and a null for `str`.
+    *   - A list type with an item type ([[isListOf]]) takes the rule of [[listOfValue]].
+    *   - Each other item type stays as it is, because the port has no rule for it: `optional[int]`, `dict`, and the
+    *     item text `int, str` of the type `tuple[int, str]`.
+    */
+  private def listItem(listType: TypeRef, itemType: TypeRef, item: DynamicValue): Either[DspyError, DynamicValue] =
+    def wrongItem =
+      ValidationError(
+        s"Expected an item of the type ${itemType.repr} for ${listType.repr}, found: ${PythonText.json(item)}"
+      )
+    itemType match
+      case TypeRef.int | TypeRef.double | TypeRef.bool => LenientValues.valueOf(item, itemType).toRight(wrongItem)
+      case TypeRef.string                              => item match
+          case DynamicValue.Primitive(_: PrimitiveValue.String) => Right(item)
+          case _                                                => Left(wrongItem)
+      case nested if isListOf(nested) => listOfValue(nested, Some(item), PythonText.json(item))
+      case _                          => Right(item)
 
   /** The single-output text fallback (a port rule) of the Chat, JSON, and XML adapters: the record of the one text
     * output field `field` for a reply with no structure. The text of the reply, with the line ends and the strip of

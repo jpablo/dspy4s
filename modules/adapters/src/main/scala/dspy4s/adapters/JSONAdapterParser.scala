@@ -58,7 +58,8 @@ private[adapters] object JSONAdapterParser:
     * calls field takes a JSON list of calls, or the JSON text of such a list. A JSON string for a field whose type is
     * not a string goes through the text coercion of the chat format (`AdapterTextSupport.outputTextValue`), as upstream
     * `parse_value` reads a string with `json_repair`: `"3"` for an `int` field is `3`, and `"[1, 2]"` for a `list`
-    * field is a list. A JSON value for a `list[T]` field of a string signature must be a list, as in the chat format.
+    * field is a list. A JSON value for a `list[T]` field of a string signature must be a list whose items fit `T`, as
+    * in the chat format (`AdapterTextSupport.listOfValue`).
     *
     * A field with allowed values takes the rule of `AdapterTextSupport.allowedJsonValue` (decision D7): a JSON string
     * only. Each other JSON value is an error: upstream `parse_value` validates a value that is not a string against the

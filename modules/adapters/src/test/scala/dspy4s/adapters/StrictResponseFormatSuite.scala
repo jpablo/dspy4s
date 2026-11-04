@@ -2,6 +2,7 @@ package dspy4s.adapters
 
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.NativeTools
+import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.adapters.internal.StrictJsonSchema
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
@@ -67,7 +68,9 @@ class StrictResponseFormatSuite extends FunSuite:
       demos = Vector.empty,
       inputs = Example(values = DynamicValues.record("question" := "x"), inputKeys = Set("question")),
       request = LmRequest(model = "stub"),
-      outputJsonSchema = schema.map(parsed)
+      outputJsonSchema = schema.map(parsed),
+      // With native function calling on, a tool calls field needs tools.
+      tools = if native then Vector(ToolSpec("search", None, DynamicValue.Record.empty)) else Vector.empty
     )
     val options = JSONAdapter(native = NativeTools(enabled = native)).format(invocation)
       .fold(error => fail(s"format failed: $error"), _.requestOptions)
@@ -79,20 +82,20 @@ class StrictResponseFormatSuite extends FunSuite:
 
   private val jsonMode: ujson.Value = json("""{"type": "json_object"}""")
 
-  // Schemas that zio-blocks writes for typed outputs (see `ZioSchemaCodec.jsonSchemaForModel`).
+  // Schemas that `ZioSchemaCodec.jsonSchemaForModel` writes for typed outputs.
   private val optionSchema: String =
     """{"properties":{"amount":{"type":["null","number"]},"note":{"type":"string"}},"type":"object","required":["note"],"title":"ZsOptionProbe"}"""
 
   private val nestedSchema: String =
-    """{"properties":{"stage":{"properties":{"label":{"type":"string"},"steps":{"items":{"properties":{"action":{"type":"string"},"comment":{"type":["null","string"]}},"type":"object","required":["action"],"title":"ZsStep"},"type":["array","null"],"title":"Vector[ZsStep]"},"owner":{"type":["null","string"]}},"type":"object","required":["label"],"title":"ZsStage"},"summary":{"type":["null","string"]}},"type":"object","required":["stage"],"title":"ZsPipeline"}"""
+    """{"properties":{"stage":{"properties":{"label":{"type":"string"},"steps":{"items":{"properties":{"action":{"type":"string"},"comment":{"type":["null","string"]}},"type":"object","required":["action"],"title":"ZsStep"},"type":"array","title":"Vector[ZsStep]"},"owner":{"type":["null","string"]}},"type":"object","required":["label","steps"],"title":"ZsStage"},"summary":{"type":["null","string"]}},"type":"object","required":["stage"],"title":"ZsPipeline"}"""
 
   private val mapSchema: String =
-    """{"properties":{"scores":{"additionalProperties":{"type":"integer"},"type":["object","null"],"title":"Map[String,Int]"},"kind":{"enum":["Bad","Good"],"title":"TmpKind"}},"type":"object","required":["kind"],"title":"TmpMapProbe"}"""
+    """{"properties":{"scores":{"additionalProperties":{"type":"integer","maximum":2147483647,"minimum":-2147483648},"type":"object","title":"Map[String, Int]"},"kind":{"enum":["Bad","Good"],"title":"TmpKind"}},"type":"object","required":["scores","kind"],"title":"TmpMapProbe"}"""
 
   // A recursive type is in `$defs`, and the root is a `$ref` to it (zio-blocks writes no `$ref`, so
   // `jsonSchemaForModel` cuts the cycle).
   private val recursiveSchema: String =
-    """{"$ref":"#/$defs/ZsNode","$defs":{"ZsNode":{"properties":{"label":{"type":"string"},"children":{"items":{"$ref":"#/$defs/ZsNode"},"type":["array","null"],"title":"List[ZsNode]"}},"type":"object","required":["label"],"title":"ZsNode"}}}"""
+    """{"$ref":"#/$defs/ZsNode","$defs":{"ZsNode":{"properties":{"label":{"type":"string"},"children":{"items":{"$ref":"#/$defs/ZsNode"},"type":"array","title":"List[ZsNode]"}},"type":"object","required":["label","children"],"title":"ZsNode"}}}"""
 
   // ── Strict mode ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -314,6 +317,25 @@ class StrictResponseFormatSuite extends FunSuite:
     assertEquals(result("properties")("a"), json("""{"anyOf": [{"type": "string"}, {"type": "null"}]}"""))
     assertEquals(result("properties")("b"), json("""{"type": ["null", "string"]}"""))
     assertEquals(result("properties")("c"), json("""{"type": "string"}"""))
+  }
+
+  test("an Option of a collection keeps its one null, and a collection that is not an Option gets no null") {
+    val result = shaped(
+      """{"type": "object", "required": ["b"], "properties": {
+        |  "a": {"items": {"type": "string"}, "type": ["null", "array"], "title": "List[String]"},
+        |  "b": {"items": {"type": "string"}, "type": "array", "title": "List[String]"}
+        |}}""".stripMargin,
+      optional = Set("a")
+    )
+    assertEquals(result("required"), json("""["a", "b"]"""))
+    assertEquals(
+      result("properties")("a"),
+      json("""{"items": {"type": "string"}, "type": ["null", "array"], "title": "List[String]"}""")
+    )
+    assertEquals(
+      result("properties")("b"),
+      json("""{"items": {"type": "string"}, "type": "array", "title": "List[String]"}""")
+    )
   }
 
   test("a oneOf goes out as an anyOf, with each schema in strict shape") {

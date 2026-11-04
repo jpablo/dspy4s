@@ -68,7 +68,7 @@ class StructuredTypeTextSuite extends FunSuite:
     assert(system.contains(s"{address}${note}must adhere to the JSON schema: $address\n"), system)
     assert(
       system.contains(
-        s"""{words}${note}must adhere to the JSON schema: {"items": {"type": "string"}, "type": ["array", "null"], "title": "List[String]"}\n"""
+        s"""{words}${note}must adhere to the JSON schema: {"items": {"type": "string"}, "type": "array", "title": "List[String]"}\n"""
       ),
       system
     )

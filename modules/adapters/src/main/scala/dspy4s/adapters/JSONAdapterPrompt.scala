@@ -18,7 +18,7 @@ private[adapters] object JSONAdapterPrompt:
   def format(invocation: AdapterInvocation, native: NativeTools)(using
       RuntimeContext
   ): Either[DspyError, FormattedPrompt] =
-    Right(ConversationHistory.prompt(invocation, native, Turns, responseFormatOptions(invocation, native.isActive)))
+    ConversationHistory.prompt(invocation, native, Turns, responseFormatOptions(invocation, native.isActive))
 
   /** The text of a turn: the marker form of the chat adapter for a user turn, with the JSON reminder in a current
     * request, and one JSON object for an assistant turn (upstream `JSONAdapter.format_assistant_message_content`).
