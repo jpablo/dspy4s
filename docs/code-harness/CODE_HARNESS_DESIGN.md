@@ -151,7 +151,8 @@ Five rules about the journal:
 
 ```scala
 // The operations that change nothing outside the session. Each other operation flushes, so a new one is safe.
-val readOnlyOps = Set("read", "keys", "load", "sessions", "jobOutput", "now", "zoom", "observe", "llmQuery")
+val readOnlyOps = Set("read", "keys", "load", "sessions", "jobOutput", "waitJob", "now", "zoom", "observe", "llmQuery",
+  "llmQueryBatched")
 
 def needsFlush(entry: Entry): Boolean = entry match
   case Entry.EffectStarted(_, op, _)             => !readOnlyOps(op)
@@ -406,9 +407,9 @@ definition that a cell can use has `@assumeSafe`, because safe mode rejects the 
   update def write(path: String, content: String): Unit
 
 @assumeSafe trait Shell extends caps.ExclusiveCapability:
-  def exec(command: String)(using Files^): String
-  def spawn(command: String)(using Files^): JobId
+  def exec(command: String)(using Files^): String  def spawn(command: String, report: Boolean = false)(using Files^): JobId
   def jobOutput(job: JobId): String
+  def waitJob(job: JobId, maxSeconds: Int): JobStatus
   def stopJob(job: JobId): Unit
 
 @assumeSafe trait Store extends Cap:
@@ -419,8 +420,8 @@ definition that a cell can use has `@assumeSafe`, because safe mode rejects the 
 @assumeSafe trait Sessions extends Cap:
   def list(): Vector[String]  update def tell(session: String, message: String): Unit
 
-@assumeSafe trait Children extends Cap:
-  update def rlm[A: Data](task: String, inputs: Map[String, String]): A
+@assumeSafe trait Children extends Cap:  update def rlm[A: Data](task: String, inputs: Map[String, String]): A
+  update def rlmBatched[A: Data](tasks: Vector[String]): Vector[A]
 
 @assumeSafe object api:
   def println(value: Any): Unit = scala.Console.println(value)
@@ -433,9 +434,9 @@ definition that a cell can use has `@assumeSafe`, because safe mode rejects the 
   // and the other functions
 ```
 
-The sketch shows the shape. The full API also has `edit`, `httpGet`, `llmQuery`, `rlm`, `start`, `observe`, `zoom` and
-`submit`. The source text of these traits, with a notation header, is the API reference in the prompt. A search
-function and the reference on demand can come later, for a large API.
+The sketch shows the shape. The full API also has `edit`, `httpGet`, `llmQuery`, `llmQueryBatched`, `rlm`, `start`,
+`observe`, `zoom` and `submit`. The source text of these traits, with a notation header, is the API reference in the
+prompt. A search function and the reference on demand can come later, for a large API.
 
 **`Data` is the type of a value that can leave a cell.** Safe code cannot name the `Schema` of zio-blocks: `store("k",
 1)` with `A: Schema` gives "Cannot refer to value int in object Schema from safe code". A `Schema.derived` inside an
@@ -631,6 +632,12 @@ knows how much they trust that call.
 - **One cell at a time, on its own thread,** with `Console.withOut` and the stop flag.
 - **A cell commits only if it completes.** After `CompileError`, `Failed` or `TimedOut`, a later cell sees only the
   definitions from before the cell, and the store writes are gone.
+- **One call at a time in a cell.** Safe mode rejects `Thread`, `Future`, `Executors` and `CompletableFuture`, so
+  model code cannot start concurrent work. The guest API has two batch calls for this need: `llmQueryBatched` and
+  `rlmBatched`. Each is one guest API call with one result, and the host runs its work at the same time, with a limit.
+- **The clock of a cell.** The timeout counts only the time of guest code, as in atc. It stops during a guest API
+  call, and each call has its own limit: `timeoutSeconds` for `exec`, `maxSeconds` for `waitJob`, and the budget and
+  the depth limit for `rlm`.
 - **A second try in two parts.** The capture checker can reject a cell that defines a type and uses a capability. The
   error says "is not included in the allowed capture set of the enclosing object". The same code compiles when the
   type definitions come first. So after this error, the host parses the cell, and it compiles the type definitions and
@@ -660,8 +667,13 @@ The session has two kinds of state between cells:
 job and gives a `JobId`, which is plain data that holds the `EffectId` of the `spawn`. So it stays valid in a later
 cell, and the store can hold it. The session owns each job: an `Abort` does not stop a job, and `StopJobs` and the end
 of the session do (10.3). After a crash of the host, the process of a job is gone in the first version, and `status`
-reports the job as lost. This takes the place of the yield protocol of Codex. A cell has a timeout, and no second cell
-runs at the same time.
+reports the job as lost. This takes the place of the yield protocol of Codex.
+
+Two calls make a job useful. `waitJob(job, maxSeconds)` blocks until the job ends or the time is up. Safe mode rejects
+`Thread.sleep`, and a model that polls pays for each step and uses up its step limit. `spawn(command, report = true)`
+also sends a message when the job ends: a `Send` with `Source.Harness` and a request id from the `JobId`. So a repeat
+gives one `Input`, and the message can start a turn. The default is no message. A job that a stop ended sends no
+message. A cell has a timeout, and no second cell runs at the same time.
 
 **Replay comes later.** Replay of cells ([CODE_HARNESS.md](CODE_HARNESS.md), 8.4) can rebuild the definitions. It is
 possible because the journal already holds each typed result and the versions. The first version does not need it.
@@ -735,6 +747,7 @@ configuration. Neither one cut any work.
 | Function | Needs | Meaning |
 |---|---|---|
 | `rlm[A: Data](task, inputs): A` | `Children^` | Runs a child inside the cell and gives its value. It is one effect of the parent, and the child has its own journal. |
+| `rlmBatched[A: Data](tasks): Vector[A]` | `Children^` | Runs several children at the same time inside the cell. It is one effect of the parent, and each child has its own journal. |
 | `start(goal, scope, strategy): SessionRef` | `Sessions^` | Starts a session in the background. Its report comes back as an `Input` with `Source.Child`, and this starts a turn (8.6). |
 | `tell(session, message)` | `Sessions^` | `Send` to that session, with `Source.Controller` or `Source.Child`. It returns after the receiver commits (8.6). |
 | `observe(session, question): String` | `Sessions`, `Llm^` | A read-only `rlm` with the journal of that session as an input. It changes nothing in that session. |
@@ -1028,13 +1041,15 @@ The checks used Scala `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` and JDK 25.0.5. 
 | The check of that check | Fifteen mutants: keep the waiting inputs after a stop (76,391 runs fail), accept an effect of any cell (8,017), keep a late outcome (25,874), remove a `Once` grant at `EffectStarted` (54,496), keep a `Once` grant after its call (27,042), keep a `Turn` grant after its turn (126,694), keep a grant after `Ended` (50,347), let an `Abort` stop jobs (48,294), keep the jobs after `Ended` (10,983), let `OfLastTurn` reach other turns (15,291), take the list of jobs only from the live table (9,104), no flush at all (43,814 runs of the second phase fail), a flush at the outcome in place of the intent (461), no flush for `Input` (32,416), no flush for `Activated` (14,059). |
 | `drive` with scripts | A chat answer, `submit`, the step limit of both kinds, a failed cell, a failed LM call, a stop during a cell, and a crash during a cell give the expected journals. |
 | `Mode` | The semilattice laws hold over 81 modes. A meet with `Mode.closed` never gives `Sessions^`, and it keeps `Children^`. |
-| Modes as givens in a real REPL, with capture checking and safe mode | Read-only mode: `read` compiles, and `write`, `exec`, `spawn`, `stopJob` and `tell` do not. Controller: `tell` compiles, and `write`, `exec` and `stopJob` do not. Local: all compile. Read-only also rejects `rlm` and `start`. Controller: `rlm` and `start` compile. Closed: `rlm`, `write` and `exec` compile, and `start` and `tell` do not. |
+| Modes as givens in a real REPL, with capture checking and safe mode | Read-only mode: `read` compiles, and `write`, `exec`, `spawn`, `stopJob` and `tell` do not. Controller: `tell` compiles, and `write`, `exec` and `stopJob` do not. Local: all compile. Read-only also rejects `rlm` and `start`. Controller: `rlm` and `start` compile. Closed: `rlm`, `write` and `exec` compile, and `start` and `tell` do not. `rlmBatched` follows `rlm`, `waitJob` needs `Shell^`, and `llmQueryBatched` compiles in all four modes. |
 | Safe mode in the same REPL | It rejects `asInstanceOf`, the name of the host, `caps.unsafe`, `@assumeSafe`, `Thread`, `Future`, `CompletableFuture`, `Executors`, `System.exit`, `System.currentTimeMillis`, `System.nanoTime`, `System.getenv`, `sys.env`, `java.io.File`, `java.nio.file.Files`, `scala.io.Source`, `Runtime`, `Predef.println`, `java.util.Random`, `UUID.randomUUID` and the `Schema` of zio-blocks. It allows `java.time.Instant.now()`, `java.time.Clock`, `scala.util.Random`, `Math.random()` and `Object.hashCode`. |
 | The JSON codec of `DynamicValue` | 19 of 30 kinds of value change or throw. `Long(5)` comes back as `Int(5)`, `Double(2.5)` as a `BigDecimal`, a `Variant` and a `Map` as a `Record`. NaN, the infinities and a record as a map key throw at the encode. A `GuardRule` with `Exact` matches its call before the codec, and it does not match after the codec. |
 | `Data` with `decode`, in a real REPL | Enums, sealed traits, recursion, mutual recursion, generic types, tuples, named tuples and maps come back equal through the journal text. The compiler rejects capabilities, functions, `Any`, plain classes, iterators, lazy lists and mutable buffers. |
 | The laws of `Data` on random values | 300,000 values, with 0 failures. The first run found that the reader rounds a number to 34 digits. |
 | Cells that models wrote, from 30 tasks | Haiku and Sonnet did not know the design, and each wrote the 30 cells twice. A local model wrote 8. See the table after this one. |
 | `Schema.derived` inside an inline of the guest API | In a capture-checked cell, the compiler crashes with `RecursionOverflow`, and the exception stops the process. |
+| `parallelMap(items)(f)` on real threads, in a real REPL with the stop flag | The work runs at the same time: 8 tasks of 200 ms took 389 ms, and 16 took 591 ms with a limit of 8. The results keep their order, a failed task waits for the others, and a stop ended a loop and a blocked call in a task, with no task left. It has three problems. A task that uses a `val` of its own cell hangs until the stop, and so does a `def` of the cell that holds the call. A thread dump shows the cause: the cell runs in the class initializer of its wrapper object and waits for the tasks, and each task waits on the class initialization monitor of that object. The capture checker accepts a local `var` that tasks share, and 8 tasks gave 840,409 of 1,600,000 updates. It also accepts two tasks that write with one `Files^`. |
+| Batch calls and job calls in the same REPL | `llmQueryBatched`, `rlmBatched`, `waitJob` and `spawn(..., report = true)` compile, and a batch has no hang with a definition of its cell. Their handlers are stubs. |
 | The second try, with the parser of the compiler | After a failed second part, a later cell cannot use the class, as a term or as a type, and it can define the name again. A class that needs a `val` of its cell compiles only with no split, so the host does not split each cell. |
 | A session host on `kyo-actor` with threads | 2,000 sessions with a stop at a random time: no violation ([CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md), 4.1). |
 | A commit through an actor to SQLite | About 140 µs from a plain thread and back, with no full flush of the disk cache. |
@@ -1068,6 +1083,8 @@ These checks found errors in the earlier design. They are fixed here:
 - `DynamicValue` in an entry changed values at a commit, and a grant with `Exact` did not match after a restart.
 - A NaN or a record as a map key threw at the encode. So a value of a model could stop a commit.
 - The `Data` of the earlier design had no sum types and no `decode`, and it rejected most cells that models wrote.
+- A job had no way to wait and no message at its end. The timeout of a cell had no rule for a long guest API call.
+- The design had dropped `llmQueryBatched` from the guest API with no decision, and RLM needs it.
 
 What did not run:
 
@@ -1082,6 +1099,8 @@ What did not run:
 - `load` after a real restart, in a new REPL. The check has one REPL and text from the same process.
 - `rlm`, `start`, `observe` and `zoom`. The check has a stub of `rlm`, so its cells only compile.
 - `now()` through `recorded`. The check calls the clock directly.
+- A real `waitJob`, a real batch, a message at the end of a job, and the clock rule of a cell.
+- The kernel with several open calls in one cell, because the test of `parallel` stopped at the REPL.
 - The Kyo driver with one file for each session, and its connection pools.
 - The catalog, `reports`, `missing` and the report pass.
 - A real job: `spawn`, `stopJob`, the job table, the process groups and the wrapper. The kernel check has the job
@@ -1104,20 +1123,22 @@ What did not run:
 | Agent teams, shared boards | The controller and `tell` cover them. |
 | A merge of graphs across sessions | The first version has one graph for each session. |
 | Pekko and Cluster Sharding | The session host contract keeps the option (RUNTIME 5.5). |
+| `parallel` in the first version | The hang and the lost updates of section 12. Batch calls cover the main need. |
+| Code that outlives its cell | A cell commits only if it completes. A job or `start` covers this need. |
 | `Data` as a wrapper around `Schema` | The macro crashes the compiler in a capture-checked cell (12). |
 | `DynamicValue` in an entry | Its JSON codec changes most kinds of value (12). |
 
 ## 14. The choices
 
 The decisions of [CODE_HARNESS.md](CODE_HARNESS.md), 7.10 and 8.7 stay, except decision 1 of 8.7, as item 7 says.
-These choices are new in this document. Only choices 1, 2, 3, 13, 14, 15, 16 and 17 are confirmed:
+These choices are new in this document. Only choices 1, 2, 3, 4, 13, 14, 15, 16, 17 and 18 are confirmed:
 
 | # | Choice | Answers |
 |---|---|---|
 | 1 | Confirmed on 2026-11-03. The kernel has four pure functions, and `drive` takes the place of `AgentLoop.run` in the harness. RLM stays on `AgentLoop` for now. | |
 | 2 | Confirmed on 2026-11-04. `Activated` takes the place of `Started` and `Reopened`, and it holds the configuration. `Child` and `Submitted` are not entries. | |
 | 3 | Confirmed on 2026-11-04. All work is a session. `Sessions` and `Children` take the place of `Agents`, and each holds a ceiling. `spawn` for subagents goes away. `rlm` needs `Children^`, and `start` and `tell` need `Sessions^`. A child and a rollout have only `Children^` (5.2). | Question 5 of section 11 |
-| 4 | Long work is a job. There is no yield protocol. | Question 2 of 9.4 |
+| 4 | Confirmed on 2026-11-04. Long work is a job. There is no yield protocol. A job has `waitJob` and an optional message at its end, and the clock of a cell stops during a guest API call (6). | Question 2 of 9.4 |
 | 5 | A cell never waits for a person. Approvals use `Grant`. | |
 | 6 | `Data` is the type of a value that leaves a cell. | |
 | 7 | The session host is on `kyo-actor`, and the journal is on `kyo-sql-sqlite`, behind contracts. The turn stays on plain threads. | Question 2 of 8.7, decision 1 of 8.7 for the host |
@@ -1131,6 +1152,7 @@ These choices are new in this document. Only choices 1, 2, 3, 13, 14, 15, 16 and
 | 15 | Confirmed on 2026-11-03. An `Abort` does not stop jobs. `StopJobs` does, also with no open turn, and a client can send both with one key. The list of jobs is a fold of the journal (10.3). After a crash, a job is lost in the first version. | Open question 3 below |
 | 16 | Confirmed on 2026-11-03. `Data` derives from `Mirror.Of`, and a guest does not write `derives Data` (5.1). A value in an entry is `Json` (4.1). The guest API has `now()`. After one capture error, the host compiles the type definitions of a cell first (6). | Open question 4 below |
 | 17 | Confirmed on 2026-11-03. A commit does a full flush for the intent of a call that can change something outside the session, for each `Input` and for each `Activated` (4.1, 10.2). A power loss can remove the other commits, and a process crash cannot. | Open question 5 below |
+| 18 | Confirmed on 2026-11-04. A cell runs one call at a time. `llmQueryBatched` and `rlmBatched` are one call each, and the host runs their work at the same time. `parallel` is not in the first version (12). | |
 
 Open questions:
 
@@ -1141,6 +1163,8 @@ Open questions:
 5. Closed by choice 17: a commit does a full flush only where a power loss can do harm.
 6. Which check closes the clock and random numbers for a later replay? Safe mode allows `java.time.Instant.now()`,
    `scala.util.Random`, `Math.random()` and `Object.hashCode`, so a cell is not deterministic by its type.
+7. What must change before `parallel` can come? A task must be able to use a `val` of its own cell. A shared `var`
+   needs a rule, and the `Once` rule of 5.5 must change.
 
 ## 15. The plan
 
@@ -1149,15 +1173,15 @@ Each phase ends with something that runs.
 | Phase | Work | Result |
 |---|---|---|
 | 1. Kernel | `harness-kernel`, with the laws as ScalaCheck properties and the mutants of section 12. No REPL and no LM. | The laws of 4.7 run in CI. |
-| 2. Guest API and REPL | `harness-guest`, `harness-repl`, the modes, the guards of Phase 0 on JDK 25, the laws of `Data` as properties, the second try of a cell, the catch around `ReplDriver.run`, the error hints, and negative tests for modes. | Model code runs against the guest API in each mode. |
+| 2. Guest API and REPL | `harness-guest`, `harness-repl`, the modes, the guards of Phase 0 on JDK 25, the laws of `Data` as properties, the second try of a cell, the catch around `ReplDriver.run`, the clock of a cell, the error hints, and negative tests for modes. | Model code runs against the guest API in each mode. |
 | 3. Sandbox | `harness-sandbox`: Seatbelt and bubblewrap, profiles from modes, and escape tests. | `exec` runs only in a sandbox. |
 | 4. One task | `Harness`, `drive`, the window strategy, `OptimizableStructure`, `ProgramRunner`. | A harness for one task that the optimizers accept. |
-| 5. RLM | `llmQuery`, `rlm` behind `Children^`, the shared budget, the depth limit. | RLM in the harness. |
+| 5. RLM | `llmQuery`, `llmQueryBatched`, `rlm` and `rlmBatched` behind `Children^`, the shared budget, the depth limit. | RLM in the harness. |
 | 6. Optimization | A metric from tests, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
-| 7. The session host | `harness-host-kyo`: the actor, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs` and the job table, crash tests with SIGKILL that also check that no job process stays. `harness-cli`. | A coding agent for daily use, one session at a time. |
+| 7. The session host | `harness-host-kyo`: the actor, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `harness-cli`. | A coding agent for daily use, one session at a time. |
 | 8. Memory | The memory tree and its metric. | Long sessions that lose no detail. |
 | 9. The controller | `Sessions`, the report pass with a crash test, the ledger, the graph, probes, release plans. | One controller above all sessions. |
-| Later | Replay, the reviewer, jobs across a restart, a container backend, LSP as a guest API, the early MCP server if phase 2 needs it, prompt-cache marks. | |
+| Later | Replay, the reviewer, jobs across a restart, `parallel` if batch calls are not enough, a container backend, LSP as a guest API, the early MCP server if phase 2 needs it, prompt-cache marks. | |
 
 Phase 6 comes before the session host on purpose. The optimizers are what makes this harness different from the
 others, so the design must meet them early.
