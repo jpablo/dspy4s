@@ -67,7 +67,8 @@ These words settle section 4 of [CODE_HARNESS_CONCEPTS.md](CODE_HARNESS_CONCEPTS
 | Scope | The place of the work of a session: a directory, a worktree or a scratch directory | The range of a graph query, which is a `GraphRange` |
 | Task | The work that a session gets at its start | A row of a task set, which is a rollout task |
 | Goal | A condition that the work must meet | |
-| Grant | The answer of a person to an approval request: a guard rule and a lifetime | A change of mode |
+| Question | A rule in `pending`: a call that needs the answer of a person | A plain question in the text of the model |
+| Grant | The answer of a person to a question, or a permission in advance: a guard rule and a lifetime | A change of mode |
 | Report | The message that a session sends to the session that owns it, after a turn | The value of `rlm` |
 | Steer | A message that enters between two steps (`Send` in a turn) | |
 | Abort | The hard stop of a turn | `Thread.interrupt`, which is the only meaning of "interrupt" |
@@ -98,7 +99,7 @@ enum Entry derives Schema:
   case Observed(output: String, outcome: CellOutcome, writes: Map[String, Json]) // the outcome of the cell
   case StopRequested(reason: String)
   case JobsStopRequested(which: JobSelector, reason: String)   // a stop of jobs, apart from the turn (10.3)
-  case Granted(rule: GuardRule, lifetime: GrantLifetime)       // a person widened the guard (5.5)
+  case Granted(request: RequestId, rule: GuardRule, lifetime: GrantLifetime) // a person widened the guard (5.5)
   case ScopeRecorded(head: String, clean: Boolean)             // the git head of the scope, at the end of each turn
   case TurnEnded(outcome: TurnOutcome)
   case Ended(outcome: SessionOutcome, reason: String)
@@ -108,6 +109,7 @@ final case class EffectId(cell: Long, n: Int)                  // `cell` is the 
 enum EffectResult derives Schema:
   case Value(value: Json, rendered: String)                    // the value for a replay, and the text for a reader
   case Error(message: String)
+  case NeedsApproval(rule: GuardRule)                          // a question to a person (5.5)
   case Unknown                                                 // a stop or a crash cut the call
 
 enum TurnOutcome derives Schema:
@@ -182,6 +184,7 @@ final case class SessionState(
     store   : Map[String, Json],
     requests: Set[RequestId],
     grants  : Set[ActiveGrant],
+    pending : Set[GuardRule],            // the questions to a person that have no answer (5.5)
     lastTurn: Long,                      // the `seq` of the last `TurnStarted`
     jobs    : Map[EffectId, JobRecord]   // each `spawn` that has an intent
 )
@@ -284,7 +287,7 @@ enum Command:
   case Commit(entries: Vector[Entry])
   case Abort(reason: String)
   case StopJobs(which: JobSelector, reason: String)
-  case Grant(rule: GuardRule, lifetime: GrantLifetime)
+  case Grant(request: RequestId, rule: GuardRule, lifetime: GrantLifetime)
   case Close(outcome: SessionOutcome, reason: String)
 
 def decide(command: Command, s: SessionState): Either[Rejection, Vector[Entry]]
@@ -300,7 +303,10 @@ def decide(command: Command, s: SessionState): Either[Rejection, Vector[Entry]]
 | `Commit` | The entries, if each one is valid at that position (the rules below). |
 | `Abort` in a turn | `StopRequested`, which also clears the inputs that wait. It changes no job. |
 | `StopJobs` | `JobsStopRequested`. It needs no open turn, and it changes no turn. |
-| `Grant` | `Granted`. A grant alone starts no turn. |
+| `Grant` with a known request id | Nothing |
+| `Grant` to a session that has ended | Nothing. The command gets the rejection `SessionClosed`. |
+| `Grant` that answers a question in `pending` | `Granted` and an `Input` from the harness. With no open turn, also `TurnStarted`. |
+| `Grant` with no question | `Granted`. It starts no turn. |
 | `Close` | `Ended`, only with no open turn |
 
 The rules for `Commit`:
@@ -384,7 +390,9 @@ TurnEnded(Aborted)
 | Input | Two `Send` commands with one request id give one `Input`. |
 | Report | After the report pass of 8.6, each `TurnEnded` that needs a report has exactly one `Input` in the journal of an open owner. |
 | Rest | With no open turn, no input waits. |
-| Grant | A `Once` grant covers one call. A `Turn` grant ends at the next `TurnEnded`. No grant stays after `Ended`, and a journal fork starts with no grants. |
+| Grant | A `Once` grant covers one call. A `Turn` grant ends at the next `TurnEnded`. No grant stays after `Ended`, and a journal fork starts with no grants. A repeat of a `Grant` commits nothing. |
+| Question | A question in `pending` has no active grant that covers it. `TurnStarted` and `Ended` empty `pending`, and a journal fork starts with no questions. A session with no person never gets a question. |
+| Guard | `verdict` is a homomorphism from `Guard` to `Verdict`. A grant changes only `Ask`, and more grants never make a result stronger. |
 | Job | An `Abort` changes no job. A stop covers only the jobs with an intent before it. After `Abort` and then `StopJobs(OfLastTurn)`, no job of that turn starts or runs. `Ended` stops all jobs, and a journal fork starts with no jobs. |
 | Repair | `repair` closes each open part, and `repair(state after repair)` is empty. |
 | Store | The store holds only the writes of cells that completed. |
@@ -528,7 +536,7 @@ that they start can outlive them, and an optimizer run stays inside its own fork
 ### 5.3 Handlers
 
 The value behind each given is a handler. Handler transformers form a monoid under composition, for example
-`recorded(guarded(Files.overlay(base), rules))`.
+`recorded(guarded(Files.overlay(base), guard))`.
 
 | Handler | Purpose |
 |---|---|
@@ -537,7 +545,7 @@ The value behind each given is a handler. Handler transformers form a monoid und
 | `Store.snapshot(state)` | A snapshot for one cell and a write buffer. `CellResult.writes` holds the buffer. |
 | `recorded(h)` | Commits `EffectStarted` before each call and `EffectDone` after it |
 | `replayed(journal)` | Answers each call from a journal |
-| `guarded(h, rules)` | Checks the guard rules and the grants before each call. A deny rule wins. |
+| `guarded(h, guard)` | Calls `guardCheck` before each call (5.5). A deny rule wins. |
 | `reviewed(h, leaf)` | Asks a `Predict` leaf about a call that the rules do not settle. It fails closed. |
 
 Laws:
@@ -570,30 +578,61 @@ Seatbelt on macOS and bubblewrap on Linux come first. `kyo-pod` is a possible la
 
 ### 5.5 Approvals: a cell never waits for a person
 
-A guard or a reviewer that needs a person denies the call, and the cell gets a `NeedsApproval` error with a rule for
-that call. The model ends its turn and asks. The person answers through a client, which sends `Grant(rule, lifetime)`.
-The grant commits as `Granted`, and the handler reads the grants from the state. The client also sends a message,
-because a grant alone starts no turn. A cell in that turn can then make the call.
+Each rule of a session says `Allow`, `Ask` or `Deny` for the calls that it matches. The strongest verdict wins, and a
+call that no rule matches is allowed. A grant changes only `Ask` to `Allow`.
+
+A call with `Ask` and no grant does not run. The cell gets a `NeedsApproval` error, and `EffectDone` holds the rule of
+that call as `EffectResult.NeedsApproval`. The rule stays in `pending` as a question to the person. A client reads the
+question from the journal, so a `catch` in the cell cannot hide it. The model ends its turn and asks. The person
+answers through a client, which sends `Grant(request, rule, lifetime)`. The new turn makes the call again.
 
 ```scala
 enum ArgMatch derives Schema:
   case Exact(value: Json)                                      // only these arguments
+  case Prefix(field: String, text: String)                     // a text argument that starts with `text`
   case AnyArgs                                                 // each call of `op`
 
 final case class GuardRule(op: String, args: ArgMatch) derives Schema:
   def matches(callOp: String, callArgs: Json): Boolean         // pure and total
+  def covers(question: GuardRule): Boolean                     // a grant of this rule allows the call of that question
+
+enum Verdict derives Schema:                                   // a chain, so `join` is a semilattice
+  case Allow, Ask, Deny
+  def join(that: Verdict): Verdict                             // the stronger verdict
+
+final case class VerdictRule(rule: GuardRule, verdict: Verdict) derives Schema
+
+final case class Guard(rules: Vector[VerdictRule]) derives Schema: // `and` is a monoid, and `allowAll` is its identity
+  def verdict(op: String, args: Json): Verdict                 // the join of the rules that match, or `Allow`
+  def and(that: Guard): Guard = Guard(rules ++ that.rules)
 
 enum GrantLifetime derives Schema:
   case Once, Turn, Session
 
 final case class ActiveGrant(rule: GuardRule, lifetime: GrantLifetime) derives Schema
 
-def forked(prefix: Vector[Logged]): SessionState = SessionState.of(prefix).copy(grants = Set.empty, jobs = Map.empty)
+enum GuardResult:
+  case Run
+  case NeedsPerson(rule: GuardRule)
+  case Refused(reason: String)
+
+// The handler `guarded` calls this after the commit of `EffectStarted`.
+def guardCheck(s: SessionState, op: String, args: Json): GuardResult =
+  val granted = s.grants.exists(_.rule.matches(op, args))
+  s.config.guard.verdict(op, args) match
+    case Verdict.Allow                           => GuardResult.Run
+    case Verdict.Deny                            => GuardResult.Refused("a rule denies this call")
+    case Verdict.Ask if granted                  => GuardResult.Run
+    case Verdict.Ask if s.config.owner.hasPerson => GuardResult.NeedsPerson(GuardRule(op, ArgMatch.Exact(args)))
+    case Verdict.Ask                             => GuardResult.Refused("no person can answer in this session")
+
+def forked(prefix: Vector[Logged]): SessionState =
+  SessionState.of(prefix).copy(grants = Set.empty, pending = Set.empty, jobs = Map.empty)
 
 // Three examples. `args` gives the `Json` of the arguments of the call.
-Grant(GuardRule("exec", ArgMatch.Exact(args("git push origin main"))), GrantLifetime.Once)
-Grant(GuardRule("write", ArgMatch.AnyArgs), GrantLifetime.Turn)
-Grant(GuardRule("exec", ArgMatch.Exact(args("sbt test"))), GrantLifetime.Session)
+Grant(request, GuardRule("exec", ArgMatch.Exact(args("git push origin main"))), GrantLifetime.Once)
+Grant(request, GuardRule("write", ArgMatch.AnyArgs), GrantLifetime.Turn)
+Grant(request, GuardRule("exec", ArgMatch.Prefix("command", "git push")), GrantLifetime.Session)
 ```
 
 | Lifetime | Use | `evolve` removes the grant at |
@@ -605,9 +644,31 @@ Grant(GuardRule("exec", ArgMatch.Exact(args("sbt test"))), GrantLifetime.Session
 `Ended` removes all grants, so a reopened session asks again. The lifetime is in the grant, because only the person
 knows how much they trust that call.
 
+**The answer.** A `Grant` that answers a question commits `Granted`, an `Input` and, with no open turn, `TurnStarted`
+in one commit. So the client sends one command. The harness writes the text of the `Input`, and `meta.source` is
+`Source.Harness`, so an owner gets a report of that turn (8.6). A repeat with the same request id commits nothing, so
+one OK gives one grant. To refuse, a person sends a plain message. A new turn empties `pending`, and the model asks
+again if it still needs the call.
+
+**A session with no person.** `hasPerson` is true for an owner that is the user or a session. It is false for a cell
+and an optimizer. So in a child and a rollout, `Ask` gives a plain error, and `pending` stays empty. The model of a
+child can try another way. If it cannot finish, `rlm` fails in the parent, and the parent can make the call with its
+own approval.
+
+**The first rules.** `SessionConfig.guard` holds the rules, so a change of rules is a new `Activated`, as a change of
+mode is. The default has one rule, only in a mode with `Network^`: `exec` with the prefix `git push` gets `Ask`. In
+local mode the sandbox already stops a push. A rule on the text of a command is only a help, because `sh -c` goes
+around it. The sandbox is the real limit (5.4), and a grant cannot open what the sandbox closes.
+
+**The cost.** One approval costs two more LM calls: one to ask and one to continue. A cell with no `catch` also loses
+its values, and a `catch` of `NeedsApproval` keeps them (12). `Turn` and `Session` grants make repeats rare. A short
+wait in the handler can come later with no kernel change, because `Granted` can already commit during a cell.
+
 - No thread waits for days, so a restart loses nothing.
 - Only a client of the user can send `Grant`. The model and the controller cannot.
 - A grant widens the guard rules. It does not change the mode, and a deny rule still wins.
+- A cell cannot make a `NeedsApproval` error, because safe mode rejects its constructor (12).
+- A power loss can remove a `Granted` with no `Input`. The next call then asks again, so this does no harm.
 - The `NeedsApproval` error holds the narrowest rule, with `Exact`. A client can offer a wider rule.
 - `guarded` reads the state after the commit of `EffectStarted`, so a `Once` grant must stay until the outcome. A
   crash still uses up the grant, because `closing` commits `EffectDone(Unknown)`. The call then needs a new approval.
@@ -725,6 +786,7 @@ final case class SessionConfig(
     strategy: StrategyName,
     scope   : Scope,
     owner   : Owner,             // the user, an optimizer, a session (`start`) or a cell (`rlm`)
+    guard   : Guard,             // the rules of 5.5
     model   : ModelChoice,
     goal    : Option[String]
 )
@@ -783,7 +845,8 @@ irreversible needs a `Grant`. Section 7.9 of [CODE_HARNESS.md](CODE_HARNESS.md) 
 
 A goal stays in the configuration, but the permission to continue by itself is live, and a person must give it again
 after a restart. After a turn, the `goal` leaf answers "is the goal met now?". On `false`, the harness sends a message
-with `Source.Harness`, and this starts a turn. A goal is "blocked" after three turns with the same blocker.
+with `Source.Harness`, and this starts a turn. A goal is "blocked" after three turns with the same blocker. The check
+does not run while `pending` has a question, so a session that waits for a person uses no LM calls.
 
 ### 8.6 Messages between sessions
 
@@ -803,7 +866,8 @@ that the `Input` is in the journal of the receiver.
 A report is a pure function of the journal of the session. So a second send has the same request id and the same text:
 
 ```scala
-// One `Send` for each `TurnEnded` of a turn that has an `Input` from the owner.
+// One `Send` for each `TurnEnded` of a turn that saw an `Input` from the owner or from the harness.
+// A stop that clears an `Input` counts as a step that saw it.
 // The request id holds the session and the `seq` of that entry.
 def reports(session: SessionId, journal: Vector[Logged]): Vector[Command.Send]
 
@@ -811,8 +875,10 @@ def missing(session: SessionId, journal: Vector[Logged], owner: SessionState): V
   reports(session, journal).filterNot(send => owner.requests(send.request))
 ```
 
-A person can also type into a session that has an owner. That turn has no report, and the ledger of 8.3 shows the
-work. A child of `rlm` and a rollout have no report. The owner of a child is a cell, which gets the value through the
+A turn that a message of the harness started has a report: the message at the end of a job, a goal message and the
+message after a grant. So an owner gets the result of work that a person approved. A person can also type into a
+session that has an owner. That turn has no report, and the ledger of 8.3 shows the work (open question 8 of section
+14). A child of `rlm` and a rollout have no report. The owner of a child is a cell, which gets the value through the
 effect. The owner of a rollout is an optimizer, which reads the journal.
 
 **The report pass.** The host runs `missing`, in the order of `seq`, for each session that has a session as its owner.
@@ -1037,9 +1103,11 @@ The checks used Scala `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` and JDK 25.0.5. 
 
 | Check | Result |
 |---|---|
-| The kernel under random schedules, with no threads | 200,000 runs with 317,035 crashes, 220,209 stops, 89,444 late messages, 845,607 grants, 71,546 calls under a `Once` grant, 63,328 jobs and 18,590 `spawn` calls that a stop refused. Each crash read the journal through the JSON codec of `Logged`: 7,829,217 entries, with no change. No run broke a checked law of 4.7. A second phase of 50,000 runs had 132,520 power losses, which cut the journal at the last flush, and no run broke a law. The laws One journal and Report did not run. |
-| The check of that check | Fifteen mutants: keep the waiting inputs after a stop (76,391 runs fail), accept an effect of any cell (8,017), keep a late outcome (25,874), remove a `Once` grant at `EffectStarted` (54,496), keep a `Once` grant after its call (27,042), keep a `Turn` grant after its turn (126,694), keep a grant after `Ended` (50,347), let an `Abort` stop jobs (48,294), keep the jobs after `Ended` (10,983), let `OfLastTurn` reach other turns (15,291), take the list of jobs only from the live table (9,104), no flush at all (43,814 runs of the second phase fail), a flush at the outcome in place of the intent (461), no flush for `Input` (32,416), no flush for `Activated` (14,059). |
+| The kernel under random schedules, with no threads | 200,000 runs with 318,283 crashes, 223,402 stops, 70,885 late messages, 684,647 grants, 55,191 calls under a `Once` grant, 65,382 jobs and 19,289 `spawn` calls that a stop refused. The calls go through `guardCheck`: 50,606 gave a question, 11,733 grants answered a question, and 189,989 grants were repeats from a client. Each crash read the journal through the JSON codec of `Logged`: 7,785,588 entries, with no change. No run broke a checked law of 4.7. A second phase of 50,000 runs had 132,952 power losses, which cut the journal at the last flush, and no run broke a law. The law One journal did not run. For the law Report, only `reports` ran: 618,665 reports match the turns that owe one. |
+| The check of that check | Twenty-four mutants. Fifteen for the kernel: keep the waiting inputs after a stop (78,443 runs fail), accept an effect of any cell (8,584), keep a late outcome (17,704), remove a `Once` grant at `EffectStarted` (45,405), keep a `Once` grant after its call (21,636), keep a `Turn` grant after its turn (117,250), keep a grant after `Ended` (48,318), let an `Abort` stop jobs (50,090), keep the jobs after `Ended` (11,205), let `OfLastTurn` reach other turns (15,957), take the list of jobs only from the live table (9,548), no flush at all (43,719 runs of the second phase fail), a flush at the outcome in place of the intent (205), no flush for `Input` (32,374), no flush for `Activated` (13,946). Nine for approvals: no question in `pending` (33,116), keep a question after a new turn (17,465), no check of a repeated `Grant` (98,346), no `Input` after an answer (14,913), reports only for the owner (136,829), a question in a session with no person (33,430), a grant above a deny rule (14,216), the first rule wins (39,446), and a goal check while a question waits. Only the fixed flows find the last one: 6 turns in place of 1. |
 | `drive` with scripts | A chat answer, `submit`, the step limit of both kinds, a failed cell, a failed LM call, a stop during a cell, and a crash during a cell give the expected journals. |
+| The fixed flows of an approval | A session from `start` asks, the person approves, and the owner gets two reports, the last with the result. A repeat of the `Grant` commits nothing, also after the call. A typed message gives no report. A session with a goal uses one turn while it waits. A child and a rollout get a plain error. `Verdict` is a semilattice, `verdict` is a homomorphism from `Guard`, and a grant never widens a deny rule. |
+| A denied call in a real REPL with safe mode, with a stub of the handler | With no `catch`, the cell stops, and a later cell does not see its `val`. With a `catch` of `NeedsApproval` or `Exception`, or with `scala.util.Try`, the cell continues and keeps its values. Safe mode rejects `NeedsApproval(...)` in a cell. |
 | `Mode` | The semilattice laws hold over 81 modes. A meet with `Mode.closed` never gives `Sessions^`, and it keeps `Children^`. |
 | Modes as givens in a real REPL, with capture checking and safe mode | Read-only mode: `read` compiles, and `write`, `exec`, `spawn`, `stopJob` and `tell` do not. Controller: `tell` compiles, and `write`, `exec` and `stopJob` do not. Local: all compile. Read-only also rejects `rlm` and `start`. Controller: `rlm` and `start` compile. Closed: `rlm`, `write` and `exec` compile, and `start` and `tell` do not. `rlmBatched` follows `rlm`, `waitJob` needs `Shell^`, and `llmQueryBatched` compiles in all four modes. |
 | Safe mode in the same REPL | It rejects `asInstanceOf`, the name of the host, `caps.unsafe`, `@assumeSafe`, `Thread`, `Future`, `CompletableFuture`, `Executors`, `System.exit`, `System.currentTimeMillis`, `System.nanoTime`, `System.getenv`, `sys.env`, `java.io.File`, `java.nio.file.Files`, `scala.io.Source`, `Runtime`, `Predef.println`, `java.util.Random`, `UUID.randomUUID` and the `Schema` of zio-blocks. It allows `java.time.Instant.now()`, `java.time.Clock`, `scala.util.Random`, `Math.random()` and `Object.hashCode`. |
@@ -1085,6 +1153,9 @@ These checks found errors in the earlier design. They are fixed here:
 - The `Data` of the earlier design had no sum types and no `decode`, and it rejected most cells that models wrote.
 - A job had no way to wait and no message at its end. The timeout of a cell had no rule for a long guest API call.
 - The design had dropped `llmQueryBatched` from the guest API with no decision, and RLM needs it.
+- A reading of 5.5 found more errors. The journal held a question only as text. A goal repeated the question. A child
+  could never get an answer. A repeat of a `Grant` could allow a second call. An owner missed the result of an
+  approved turn. The rules had no verdict and no default.
 
 What did not run:
 
@@ -1102,12 +1173,14 @@ What did not run:
 - A real `waitJob`, a real batch, a message at the end of a job, and the clock rule of a cell.
 - The kernel with several open calls in one cell, because the test of `parallel` stopped at the REPL.
 - The Kyo driver with one file for each session, and its connection pools.
-- The catalog, `reports`, `missing` and the report pass.
+- The catalog, `missing` and the report pass.
 - A real job: `spawn`, `stopJob`, the job table, the process groups and the wrapper. The kernel check has the job
   table as a small value, with no process.
-- `guarded` as a real handler, and a client that sends `Grant`. The kernel check has only the view of the state that
-  `guarded` will read.
-- The full `SessionConfig` of 8.1. The kernel check has only `kind` and `steps`.
+- `guarded` as a real handler, and a client that sends `Grant`. The kernel check has only `guardCheck`, with no effect
+  behind it.
+- What real models do after `NeedsApproval`. No test shows that a model ends its turn and asks.
+- A denied call in a real child of `rlm`.
+- The full `SessionConfig` of 8.1. The kernel check has only `kind`, `steps`, `guard` and `owner`.
 - Any metric or optimizer run.
 
 ## 13. What the design leaves out
@@ -1123,6 +1196,7 @@ What did not run:
 | Agent teams, shared boards | The controller and `tell` cover them. |
 | A merge of graphs across sessions | The first version has one graph for each session. |
 | Pekko and Cluster Sharding | The session host contract keeps the option (RUNTIME 5.5). |
+| A cell that waits for a person | A wait of two days holds a thread, and a restart loses it. The cost of the other way is in 5.5. |
 | `parallel` in the first version | The hang and the lost updates of section 12. Batch calls cover the main need. |
 | Code that outlives its cell | A cell commits only if it completes. A job or `start` covers this need. |
 | `Data` as a wrapper around `Schema` | The macro crashes the compiler in a capture-checked cell (12). |
@@ -1131,7 +1205,7 @@ What did not run:
 ## 14. The choices
 
 The decisions of [CODE_HARNESS.md](CODE_HARNESS.md), 7.10 and 8.7 stay, except decision 1 of 8.7, as item 7 says.
-These choices are new in this document. Only choices 1, 2, 3, 4, 13, 14, 15, 16, 17 and 18 are confirmed:
+These choices are new in this document. Only choices 1, 2, 3, 4, 5, 13, 14, 15, 16, 17 and 18 are confirmed:
 
 | # | Choice | Answers |
 |---|---|---|
@@ -1139,7 +1213,7 @@ These choices are new in this document. Only choices 1, 2, 3, 4, 13, 14, 15, 16,
 | 2 | Confirmed on 2026-11-04. `Activated` takes the place of `Started` and `Reopened`, and it holds the configuration. `Child` and `Submitted` are not entries. | |
 | 3 | Confirmed on 2026-11-04. All work is a session. `Sessions` and `Children` take the place of `Agents`, and each holds a ceiling. `spawn` for subagents goes away. `rlm` needs `Children^`, and `start` and `tell` need `Sessions^`. A child and a rollout have only `Children^` (5.2). | Question 5 of section 11 |
 | 4 | Confirmed on 2026-11-04. Long work is a job. There is no yield protocol. A job has `waitJob` and an optional message at its end, and the clock of a cell stops during a guest API call (6). | Question 2 of 9.4 |
-| 5 | A cell never waits for a person. Approvals use `Grant`. | |
+| 5 | Confirmed on 2026-11-04. A cell never waits for a person. A rule says `Allow`, `Ask` or `Deny`. A call with `Ask` fails with `NeedsApproval`, and the journal holds the question. A `Grant` with a request id answers it and starts a turn (5.5). A child and a rollout cannot ask. A goal waits for the answer (8.5), and the turn after a grant has a report (8.6). | |
 | 6 | `Data` is the type of a value that leaves a cell. | |
 | 7 | The session host is on `kyo-actor`, and the journal is on `kyo-sql-sqlite`, behind contracts. The turn stays on plain threads. | Question 2 of 8.7, decision 1 of 8.7 for the host |
 | 8 | dspy4s moves to JDK 25. | |
@@ -1165,6 +1239,8 @@ Open questions:
    `scala.util.Random`, `Math.random()` and `Object.hashCode`, so a cell is not deterministic by its type.
 7. What must change before `parallel` can come? A task must be able to use a `val` of its own cell. A shared `var`
    needs a rule, and the `Once` rule of 5.5 must change.
+8. How does an owner get the result when a person answers a plain question by typing? That turn has no report (8.6),
+   so the owner can wait for a result that it never gets. Choice 5 fixes this only for an answer through `Grant`.
 
 ## 15. The plan
 
@@ -1172,13 +1248,13 @@ Each phase ends with something that runs.
 
 | Phase | Work | Result |
 |---|---|---|
-| 1. Kernel | `harness-kernel`, with the laws as ScalaCheck properties and the mutants of section 12. No REPL and no LM. | The laws of 4.7 run in CI. |
+| 1. Kernel | `harness-kernel`, with `pending`, `Guard` and `guardCheck`, the laws as ScalaCheck properties and the mutants of section 12. No REPL and no LM. | The laws of 4.7 run in CI. |
 | 2. Guest API and REPL | `harness-guest`, `harness-repl`, the modes, the guards of Phase 0 on JDK 25, the laws of `Data` as properties, the second try of a cell, the catch around `ReplDriver.run`, the clock of a cell, the error hints, and negative tests for modes. | Model code runs against the guest API in each mode. |
 | 3. Sandbox | `harness-sandbox`: Seatbelt and bubblewrap, profiles from modes, and escape tests. | `exec` runs only in a sandbox. |
 | 4. One task | `Harness`, `drive`, the window strategy, `OptimizableStructure`, `ProgramRunner`. | A harness for one task that the optimizers accept. |
 | 5. RLM | `llmQuery`, `llmQueryBatched`, `rlm` and `rlmBatched` behind `Children^`, the shared budget, the depth limit. | RLM in the harness. |
 | 6. Optimization | A metric from tests, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
-| 7. The session host | `harness-host-kyo`: the actor, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `harness-cli`. | A coding agent for daily use, one session at a time. |
+| 7. The session host | `harness-host-kyo`: the actor, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `guarded`, and the client side of `Grant`. `harness-cli`. | A coding agent for daily use, one session at a time. |
 | 8. Memory | The memory tree and its metric. | Long sessions that lose no detail. |
 | 9. The controller | `Sessions`, the report pass with a crash test, the ledger, the graph, probes, release plans. | One controller above all sessions. |
 | Later | Replay, the reviewer, jobs across a restart, `parallel` if batch calls are not enough, a container backend, LSP as a guest API, the early MCP server if phase 2 needs it, prompt-cache marks. | |
