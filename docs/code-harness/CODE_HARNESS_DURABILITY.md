@@ -311,5 +311,8 @@ these rules:
 Section 4.2 of CODE_HARNESS.md now has rules 3, 4 and 5, and the first part of rule 1. The other rules are still
 open.
 
-An open question: can safe mode keep model code away from the system clock and random numbers? If it can, the type
-system can make the cells deterministic, and replay is safe.
+An earlier question: can safe mode keep model code away from the system clock and random numbers? A check on the 3.10
+nightly says no. Safe mode rejects `System.currentTimeMillis`, `System.nanoTime`, `java.util.Random` and
+`UUID.randomUUID`. It allows `java.time.Instant.now()`, `java.time.Clock`, `scala.util.Random`, `Math.random()` and
+`Object.hashCode`. So the type system does not make a cell deterministic. Open question 6 of
+[CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), section 14, asks which check closes them for a later replay.
