@@ -1962,7 +1962,8 @@ replay finds a recorded result by that id. Section 8.3 now has this design (deci
 Questions 1 and 3 have a decision (8.7). The other questions are open:
 
 1. Does the harness add a typed `store`/`load` with commit-on-success, next to the persistent REPL (9.2)? Yes (4.2).
-2. Does the first version have the yield protocol, with `Running` and `wait` (9.2)?
+2. Does the first version have the yield protocol, with `Running` and `wait` (9.2)? No. Long work is a job
+   ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), choice 4).
 3. Does the journal store the typed value of each result, which replay needs, or only the rendered text (9.2)? It
    stores both (8.3).
 4. Does the harness expose the REPL and the guest API as an MCP server early, before its own loop exists (9.3)?

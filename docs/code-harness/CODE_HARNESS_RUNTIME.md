@@ -343,7 +343,8 @@ On 2026-11-01, section 4.2 of that document took the first four points. The last
 - **A replay policy for each tool.** The idea of pi (`replay: "safe"` or `"unsafe"`) fits the guest API. An
   operation that is not safe to repeat gets the outcome "unknown" after a crash.
 - **Parallel calls with ordered results.** A `parallel` in the guest API can run bodies at the same time and
-  record their events in a fixed order (Codex, deepseek-harness).
+  record their events in a fixed order (Codex, deepseek-harness). A test on 2026-11-04 found a hang and lost updates,
+  so the first version has only batch calls ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), choice 18).
 
 ### 5.2 For "the same program on several runtimes"
 
