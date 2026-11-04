@@ -1076,8 +1076,8 @@ The costs:
 
 - There is more new code than in an RLM configuration (5.1).
 - Each guest API call costs two commits, and the caller waits for each commit. On SQLite, a check measured about
-  140 µs for each commit with no full flush of the disk cache, and 5 to 9 ms with `PRAGMA fullfsync`
-  ([CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md), section 2).
+  140 µs for each commit with no full flush of the disk cache, and 5 to 9 ms with `PRAGMA fullfsync` ([CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md), section 2). Choice 17 of
+  [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md) uses the full flush only for some commits.
 - The journal stores the result of each guest API call, so a large `read` or `exec` result costs storage (8.4).
 - The builder of the derived data runs in the background, so it adds concurrency.
 - In a session with the memory tree, each message costs one compaction call on a cheaper model (6.5).

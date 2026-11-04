@@ -16,8 +16,8 @@ recommendation in section 7 is not a decision.
   4.2 of CODE_HARNESS.md. This check found two problems, which section 4.1 describes. One problem was an error in that
   section 4.2.
 - One commit to SQLite, from a plain thread through an actor and back, took about 140 µs. So the two commits of each
-  guest API call are small next to a cell compile. This number has no full flush of the disk cache. With
-  `PRAGMA fullfsync`, a separate check measured 5 to 9 ms.
+  guest API call are small next to a cell compile. This number has no full flush of the disk cache. With `PRAGMA fullfsync`, a separate check measured 5 to 9 ms. The design uses it only for some commits
+  ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), choice 17).
 - Kyo RC7 needs JDK 25. dspy4s compiles on JDK 25, and all its tests pass there.
 - Kyo is still a release candidate. So the recommendation keeps Kyo types out of the contracts of the harness.
 
