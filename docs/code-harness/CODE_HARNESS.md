@@ -1035,8 +1035,8 @@ Two entry points use the same kernel:
 - `llmQuery` and `llmQueryBatched` take `Llm^` and run the `subQuery` leaf (F4).
 - `rlm(task, inputs)` takes `Agents^`. It starts a child session with the same `Harness` value, a new REPL, and a
   mode that is at most the mode of the parent. The child uses the same leaves, so its calls have the same keys.
-  The parent log gets one `Child` entry with the result. The child log stays separate, so the parent context
-  stays small.
+  The parent log has one effect with the result, as for each guest API call. The child log stays separate, so the
+  parent context stays small.
 - Later, the current `RLM` program can become a `Harness` with the Python REPL handler and the RLM prompt. Then
   dspy4s has one code program, as decision D1 intends.
 
@@ -1555,7 +1555,7 @@ A session holds different resources, and an end means something different for ea
 Three principles come from this table.
 
 **1. The end is an event, not a deletion.** The harness appends `Ended(outcome, reason)` to the log, and the log
-stays. The user can reopen a closed session. The harness then appends `Reopened`, and it makes the scope again
+stays. The user can reopen a closed session. The harness then appends `Activated`, and it makes the scope again
 if necessary. uniichat has the same rule: nothing is lost.
 
 **2. Make a plan first, then remove.** A pure function makes a plan from the state of the scope:
@@ -1796,7 +1796,7 @@ change:
 1. Send all nondeterminism through handlers: a `Clock`, a `Random`, and a fixed order for `parallel` results.
    This also helps the tests.
 2. Write the cell events of 8.3, with the typed value of each result (4.2).
-3. Record the compiler version and the guest API version in the journal (`Started` and `Reopened`, 4.2).
+3. Record the compiler version and the guest API version in the journal (`Activated`, [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), 4.1).
 
 The later change is then only to add the replay of cells.
 

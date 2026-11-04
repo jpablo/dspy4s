@@ -711,6 +711,11 @@ final case class SessionConfig(
 )
 ```
 
+`Activated` holds this value, so a journal keeps it for good, and it must hold no secret (5.6). The entry before an
+`Activated` says why the session came alive: nothing for a start, `Ended` for a reopen, and `TurnEnded(Crashed)` for a
+return after a crash in a turn. A crash with no open turn and a change of mode look alike, apart from the new
+configuration. Neither one cut any work.
+
 | Session | Mode | Strategy | Scope | Lifetime | Started by |
 |---|---|---|---|---|---|
 | Controller | Controller | Memory tree | The home of the user | Never ends | The harness, one for each user |
@@ -1097,12 +1102,12 @@ What did not run:
 ## 14. The choices
 
 The decisions of [CODE_HARNESS.md](CODE_HARNESS.md), 7.10 and 8.7 stay, except decision 1 of 8.7, as item 7 says.
-These choices are new in this document. Only choices 1, 13, 14, 15, 16 and 17 are confirmed:
+These choices are new in this document. Only choices 1, 2, 13, 14, 15, 16 and 17 are confirmed:
 
 | # | Choice | Answers |
 |---|---|---|
 | 1 | Confirmed on 2026-11-03. The kernel has four pure functions, and `drive` takes the place of `AgentLoop.run` in the harness. RLM stays on `AgentLoop` for now. | |
-| 2 | `Activated` takes the place of `Started` and `Reopened`, and it holds the configuration. `Child` and `Submitted` are not entries. | |
+| 2 | Confirmed on 2026-11-04. `Activated` takes the place of `Started` and `Reopened`, and it holds the configuration. `Child` and `Submitted` are not entries. | |
 | 3 | All work is a session. `Sessions` takes the place of `Agents`, and it holds a ceiling. `spawn` for subagents goes away. | Question 5 of section 11 |
 | 4 | Long work is a job. There is no yield protocol. | Question 2 of 9.4 |
 | 5 | A cell never waits for a person. Approvals use `Grant`. | |
