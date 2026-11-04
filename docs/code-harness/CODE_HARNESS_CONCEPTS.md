@@ -79,7 +79,7 @@ Each unit is a mix of kinds. This table splits each one.
 | Cell | Status | `Acted` with the code, `Observed` with the store writes | Effect counter | The thread, its stack, its local values | Only through its effects |
 | Effect | Status | `EffectStarted`, `EffectDone` | Effect id, operation, arguments | The running call | The file, the process, or the service that it changes |
 | Process | Status | Its output, its exit code | Command, working directory | The OS handle, the streams | The OS process |
-| Child session | The same as a session, and an owner | Its own log, and a `Child` entry in the parent | The same as a session | Its own activation | Its own scope |
+| Child session | The same as a session, and an owner | Its own log, and one effect in the parent | The same as a session | Its own activation | Its own scope |
 
 ### 2.3 Candidate states
 
@@ -128,7 +128,7 @@ harness must do:
 | Concept | What it is | Kind | After a restart |
 |---|---|---|---|
 | Log | The append-only list of the entries of one session | Record | Stored |
-| Entry | One fact in the log: `Started`, `Input`, `TurnStarted`, `StepStarted`, `Acted`, `EffectStarted`, `EffectDone`, `Observed`, `Child`, `StopRequested`, `TurnEnded`, `Ended`, `Reopened`, `ScopeSnapshot` | Record | Stored |
+| Entry | One fact in the log: `Activated`, `Input`, `TurnStarted`, `StepStarted`, `Acted`, `EffectStarted`, `EffectDone`, `Observed`, `StopRequested`, `JobsStopRequested`, `Granted`, `ScopeRecorded`, `TurnEnded`, `Ended` | Record | Stored |
 | Entry metadata | The source, the taint and the `required` mark of an entry. The model never sees them. | Record | Stored |
 | Cell event | An entry of one cell: `Acted`, `EffectStarted`, `EffectDone`, `Observed` | Record | Stored |
 | Ledger | The sources that a session read and the artifacts that it made | Record | Stored |
