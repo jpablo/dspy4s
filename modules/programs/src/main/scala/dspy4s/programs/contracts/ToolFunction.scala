@@ -1,6 +1,6 @@
 package dspy4s.programs.contracts
 
-import dspy4s.core.contracts.{DspyError, RuntimeContext, TypeRef}
+import dspy4s.core.contracts.{DspyError, Reflects, RuntimeContext, TypeRef}
 import zio.blocks.schema.{DynamicValue, Schema}
 
 import scala.collection.immutable.VectorMap
@@ -56,12 +56,12 @@ object ToolFunction:
   def byName(tools: Vector[ToolFunction]): VectorMap[String, ToolFunction] =
     VectorMap.from(tools.map(tool => tool.name -> tool))
 
-  /** Lift a return value with a `Schema` into the `DynamicValue` a tool yields, so authors can write
+  /** Lift a return value with a `Schema` into the `DynamicValue` a tool yields, in the wire form, so authors can write
     * `Right(ToolFunction.result("Brussels"))` (or return any case class with a `Schema`) instead of hand-constructing
     * `DynamicValue.Primitive(...)`.
     */
-  def result[A](value: A)(using schema: Schema[A]): DynamicValue =
-    schema.toDynamicValue(value)
+  def result[A](value: A)(using Schema[A]): DynamicValue =
+    Reflects.wireOf(value)
 
   /** Build a tool from a plain function over the call args, instead of an anonymous `new ToolFunction`. The body may
     * use the ambient `RuntimeContext` (it's a context function, so it's available but not required) and returns the
@@ -111,7 +111,8 @@ object ToolFunction:
   /** Build a tool from a **method** — the dspy4s analogue of Python's `dspy.Tool(fn)`. The macro reads the method's
     * name, its `@description` annotation, and its parameters, and produces a `ToolFunction` that (1) decodes each
     * argument from the call `Record` by name/type, (2) calls the method, lifting its result via its `Schema`, and (3)
-    * carries an [[argSchema]] so tool-using programs can tell the model what arguments the tool takes:
+    * carries an [[argSchema]] so tool-using programs can tell the model what arguments the tool takes. An argument that
+    * is not a text, a number, or a bool also gives the tool an [[inputSchema]] with the JSON schema of that argument:
     *
     * {{{
     * @description("Get the current weather for a city.")

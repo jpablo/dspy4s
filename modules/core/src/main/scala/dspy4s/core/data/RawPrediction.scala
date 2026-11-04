@@ -1,6 +1,8 @@
 package dspy4s.core.data
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, LenientValues, LmUsage, NotFoundError, ValidationError}
+import dspy4s.core.contracts.{
+  DspyError, DynamicValues, LenientValues, LmUsage, NotFoundError, Reflects, ValidationError
+}
 import dspy4s.core.contracts.updated
 import dspy4s.algebra.Monoid
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
@@ -49,8 +51,8 @@ final case class RawPrediction(
     copy(values = values.updated(key, value))
 
   /** Convenience overload for callers passing a Scala value; lifts it via its `Schema`. */
-  def withRawValue[A](key: String, value: A)(using schema: Schema[A]): RawPrediction =
-    withValue(key, schema.toDynamicValue(value))
+  def withRawValue[A](key: String, value: A)(using Schema[A]): RawPrediction =
+    withValue(key, Reflects.wireOf(value))
 
   /** Sequentially accumulate the observable evidence of two program stages.
     *

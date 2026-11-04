@@ -33,6 +33,7 @@ changes how the prompt is built and how the reply is decoded.
 
 For structured outputs, the output type is just a `case class` or `enum` that
 `derives Schema`, exactly as on the [Signatures](../programs/signatures.md) page.
-The adapter handles turning it into a prompt and back.
+The adapter handles turning it into a prompt and back. Each adapter reads the same
+forms for a sealed trait, a tuple, and a time value.
 
 Next: [Caching & usage](caching-and-usage.md).

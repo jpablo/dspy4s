@@ -16,8 +16,10 @@ import scala.util.matching.Regex
   * The parsers also read a JSON text as Python `json.loads` reads it, and a JSON string and a Python string literal as
   * upstream `parse_value` reads them. The object also has the rules of Python `round` and of Python `sum`.
   *
-  * A value is a `DynamicValue`. An `Option` value of a typed record (the `Some` and `None` variants) prints as its
-  * element or as `None`. An enum case with no fields prints as its case name.
+  * A value is a `DynamicValue`. A typed value comes here in its wire form ([[Reflects.wireValue]]), so its text is the
+  * text of a plain value. A record is always an object. A value that does not come through such a boundary can still
+  * have a typed form, for example a framework type: an `Option` value (the `Some` and `None` variants) prints as its
+  * element or as `None`, and an enum case with no fields prints as its case name.
   */
 private[dspy4s] object PythonText:
 

@@ -167,12 +167,8 @@ class ZioSchemaCodecSuite extends FunSuite:
     val value = ZsClassifyOutput(sentiment = ZsSentiment.joy, confidence = 0.42)
 
     val encoded = shape.encode(value)
-    // Native: the record holds a Variant for the enum (not a flat string).
-    val sentiment = DynamicValues.recordGet(encoded, "sentiment")
-    assert(
-      sentiment.exists(_.isInstanceOf[DynamicValue.Variant]),
-      s"expected Variant for sentiment, got: $sentiment"
-    )
+    // The wire form: the record holds the text of the enum.
+    assertEquals(DynamicValues.recordGet(encoded, "sentiment"), Some(DynamicValues.string("joy")))
 
     val decoded = shape.decode(encoded)
     assertEquals(decoded, Right(value))

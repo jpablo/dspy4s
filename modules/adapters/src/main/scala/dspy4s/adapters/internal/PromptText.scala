@@ -1,5 +1,6 @@
 package dspy4s.adapters.internal
 
+import dspy4s.adapters.DecisionAdapter
 import dspy4s.core.contracts.{DynamicValues, FieldSpec, JsonSchemaRefs, PythonText, SignatureLayout, ToolCall, TypeRef}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
@@ -9,8 +10,8 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   *
   * The type text of a field (the type slots):
   *   - The type name is `str`, `int`, `float`, `bool`, `dict` ([[TypeRef.json]]), `list` ([[TypeRef.list]]), `History`,
-  *     `list[Tool]` ([[TypeRef.tools]]), or `ToolCalls`. An other [[TypeRef]] shows its `repr`. A field with enum
-  *     values shows `str`. An optional field shows the name of its type.
+  *     `list[Tool]` ([[TypeRef.tools]]), or `ToolCalls`. An other [[TypeRef]] shows its `repr`, for example `union` and
+  *     `Instant`. A field with enum values shows `str`. An optional field shows the name of its type.
   *   - The note of an output field: `True or False` for a bool, `a single int value` or `a single float value` for a
   *     number, the `Literal` note for a field with enum values, and a JSON schema for a structured field and for a tool
   *     calls field. A field of an other type (an opaque [[TypeRef]], for example the evidence type of a decision
@@ -136,14 +137,25 @@ private[adapters] object PromptText:
       typeRef.collection.exists((kind, _) => kind == TypeRef.Collection.List)
 
   /** The type hint of `field` in the output reminder of the Chat and JSON adapters (upstream
-    * `user_message_output_requirements`): empty for a `str` field.
+    * `user_message_output_requirements`): empty for a `str` field. A type that only a typed signature has
+    * ([[isScalaType]]) is not a Python type, so its hint does not say Python.
     */
   def reminderHint(field: FieldSpec): String =
     if field.typeRef == TypeRef.toolCalls then ToolCallsReminder
     else
       typeName(field) match
-        case "str" => ""
-        case name  => s" (must be formatted as a valid Python $name)"
+        case "str"                              => ""
+        case name if isScalaType(field.typeRef) => s" (must be formatted as a valid $name)"
+        case name                               => s" (must be formatted as a valid Python $name)"
+
+  /** `true` for `union` and for the opaque type of a typed signature, whose name is the name of a Scala type
+    * (`Instant`, `BigDecimal`). The evidence types of a decision output are Python types in upstream. A type of the
+    * string DSL has a name in lower case.
+    */
+  private def isScalaType(typeRef: TypeRef): Boolean =
+    typeRef == TypeRef.union ||
+      (typeRef.pythonTypeName.isEmpty && typeRef.repr.headOption.exists(_.isUpper) &&
+        !DecisionAdapter.isEvidenceType(typeRef))
 
   // ── Values ─────────────────────────────────────────────────────────────────────────────────────────────────────
 

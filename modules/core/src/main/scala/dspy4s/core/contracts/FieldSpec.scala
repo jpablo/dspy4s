@@ -17,7 +17,7 @@ import scala.util.matching.Regex
   *     field, it is the value of the field when the response of the model does not have the field (dspy's
   *     `apply_output_field_defaults`). A demo does not use it: a demo with no value for a field is an incomplete demo.
   *     Carried as a `DynamicValue`, the value type of the interchange format, so adapters render it through the same
-  *     path as live values; lift plain Scala values via `Schema.toDynamicValue` (the `:=` machinery).
+  *     path as live values; lift plain Scala values with the `:=` machinery, which gives the wire form.
   *   - [[optional]] is `true` for a field whose type permits no value (dspy's `Optional[T]` or `T | None`, an
   *     `Option[T]` field of a typed signature). An output field that the response does not have takes its
   *     [[defaultValue]], else a null when the field is optional. Else the response is a parse error.

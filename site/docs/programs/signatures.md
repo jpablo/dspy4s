@@ -74,6 +74,29 @@ no text is also a parse error, except a reply with tool calls for a signature
 with a `tool_calls` output. With the default `ChatAdapter`, and with `XMLAdapter`,
 a parse error gives one more call in the JSON format (`useJsonAdapterFallback`).
 
+### Sealed traits, tuples, and time values
+
+A prompt shows the JSON schema of a structured field, and each typed value has one form:
+
+| Field type | The form of the value |
+|---|---|
+| A sealed trait or an `enum` with only cases with no fields | The case name: `beta`. |
+| A sealed trait with fields | The case name as a key: `{"Circle": {"radius": 1.5}}`, and `{"Dot": {}}` for a case with no fields. |
+| A tuple | A JSON array: `[1, "a"]`. |
+| An `Option` | The value, or a null. |
+| `Instant`, `LocalDate`, `UUID`, and the other time types | A text: `2024-01-02T03:04:05Z`. |
+| `BigDecimal` | A number. Write it as a text to keep each digit of a fraction. |
+
+Each form also works in a `List`, a `Map` value, a case, and a tuple. An input field, a demo, and a saved demo show these
+forms, and the variables of `RLM` have these forms.
+
+The output also decodes from a bare case name (`Dot`), and from a record for a tuple (`{"_1": 1, "_2": "a"}`). The schema
+shows a case of a nested sealed trait with its own name, and a value in a prompt shows the path of the cases:
+`{"Animal": {"Cat": {"name": "a"}}}`. The output decodes from each form.
+
+`Signature.derived` makes the record of each class from its structure. To use a `Schema.transform`, give the signature a
+shape with `Signature.fromShapes` and `Shape.derived`. The field then has the form of the value behind the transform.
+
 ## Building a signature programmatically
 
 When a case class per signature is overkill (exploration, shapes assembled from

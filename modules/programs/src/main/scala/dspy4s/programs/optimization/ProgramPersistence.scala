@@ -3,6 +3,7 @@ package dspy4s.programs.optimization
 import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.ValidationError
 import zio.blocks.schema.DynamicValue
@@ -24,7 +25,8 @@ import java.nio.file.Paths
   * target program and are preserved during loading. Loading therefore requires the same optimizable-leaf structure and
   * order, plus a compatible architecture; ordinal IDs detect missing or extra entries, not a same-cardinality reorder.
   *
-  * The `DynamicValue` JSON codec of zio-blocks writes the JSON. The JSON is clean, and it has no ADT tags.
+  * The `DynamicValue` JSON codec of zio-blocks writes the JSON. A value in the wire form has no ADT tags. A framework
+  * type and an `Option` directly in an `Option` keep their typed form, so their JSON has the tags `Some` and `None`.
   */
 object ProgramPersistence:
 
@@ -93,9 +95,13 @@ object ProgramPersistence:
   def dumpJson[P](program: P)(using OptimizableStructure[P]): String =
     DynamicValues.encodeJson(dumpState(program))
 
-  /** Rebuild a program from the JSON string produced by [[dumpJson]]. */
+  /** Rebuild a program from the JSON string produced by [[dumpJson]]. The reader has the rules of Python `json.loads`
+    * ([[PythonText.parseJson]]), as upstream `load` has, so the float `2.0` of a demo stays a float. It also keeps the
+    * last value of a duplicate key, so a file with a duplicate key loads that value. The check for a duplicate
+    * optimizable id reaches only a record that a caller gives to [[loadState]].
+    */
   def loadJson[P](program: P, json: String)(using OptimizableStructure[P]): Either[DspyError, P] =
-    DynamicValues.tryDecodeJson(json) match
+    PythonText.parseJson(json).left.map(_.message) match
       case Right(rec: DynamicValue.Record) => loadState(program, rec)
       case Right(other)                    => Left(ValidationError(s"Expected a JSON object for program state, got: $other"))
       case Left(err)                       => Left(ValidationError(s"Invalid program-state JSON: $err"))

@@ -1,6 +1,16 @@
 package dspy4s.signatures
 
-import dspy4s.core.contracts.{DspyError, FieldSpec, LenientValues, PythonText, TypeMarker, TypeRef, ValidationError}
+import dspy4s.core.contracts.{
+  DspyError,
+  DynamicValues,
+  FieldSpec,
+  LenientValues,
+  PythonText,
+  TypeMarker,
+  TypeRef,
+  ValidationError
+}
+import dspy4s.core.contracts.Reflects
 import dspy4s.core.contracts.Reflects.{caseNames, withoutDeferred}
 import zio.blocks.chunk.{Chunk, ChunkMap, NonEmptyChunk}
 import zio.blocks.docs.Doc
@@ -32,9 +42,9 @@ import zio.blocks.typeid.{Owner, TypeId}
 
 /** The bridge between a zio-blocks `Schema[A]` and a dspy4s `Shape[A]`.
   *
-  *   - [[derivedFromZioSchema]] makes the `Shape[A]` of a `Schema[A]`. The encode uses `Schema.toDynamicValue`. The
-  *     decode first coerces the record (for example, the LM text `"true"` or `"42"` becomes a primitive of the target
-  *     type), and then uses `Schema.fromDynamicValue`.
+  *   - [[derivedFromZioSchema]] makes the `Shape[A]` of a `Schema[A]`. The encode gives the wire form
+  *     ([[Reflects.wireValue]]). The decode first coerces the record (for example, the LM text `"true"` or `"42"`
+  *     becomes a primitive of the target type), and then uses `Schema.fromDynamicValue`.
   *   - [[fieldSpecsFromReflect]] gives the `FieldSpec` list of a `Reflect.Record`.
   *   - [[normalize]] coerces a `DynamicValue` to a target `Reflect`.
   *   - [[jsonSchemaForModel]] gives the JSON schema of a `Schema[A]` for a prompt, with no `id` in a `ToolCall`, with
@@ -47,13 +57,21 @@ import zio.blocks.typeid.{Owner, TypeId}
   */
 private[signatures] object ZioSchemaCodec:
 
-  /** Coerce a `DynamicValue` to the form that the target `Reflect` expects. These are the two important coercions:
+  /** Coerce a `DynamicValue` to the form that the target `Reflect` expects. A model writes the forms of the JSON schema
+    * ([[jsonSchemaForModel]]), an encode gives the wire form ([[Reflects.wireValue]]), and `Schema.fromDynamicValue`
+    * reads other forms. These are the coercions:
     *
     *   - A primitive: the lenient rules of [[LenientValues]] apply. For example, the LM text `"yes"` becomes
     *     `Primitive(Boolean(true))` when the target field is `Boolean`, and the texts `"$1,200"` and `"3.0"` become an
     *     `Int`. A text that only Java reads as a number (`"3d"`) stays a text, thus the decode fails.
-    *   - A variant field: a bare `Primitive(String("joy"))` becomes `Variant("joy", Record.empty)`, so that
-    *     `Schema.fromDynamicValue` can select the correct case.
+    *   - A primitive with a text form, for example an `Instant` or a `UUID`: [[fromTextForm]] reads a text.
+    *   - A variant: a text is a case with no fields, and a record with one field is the case with the name of that
+    *     field ([[caseValue]]). `{"Circle": {"radius": 1}}` becomes `Variant("Circle", Record(radius))`. Thus
+    *     `Schema.fromDynamicValue` can select the correct case. A text or a record that names no case stays, and the
+    *     decode gives the error.
+    *   - A tuple: a sequence with one item for each field becomes a record with the fields `_1`, `_2`, and so on. A
+    *     record with these fields also stays valid.
+    *   - A transform (`Reflect.Wrapper`): the coercion goes to the value behind it.
     *
     * The coercion goes into each field of a record that the target has. A field that the target does not have stays as
     * it is. The coercion also goes into each element of a sequence and each entry of a map. Each other value, and a
@@ -65,15 +83,18 @@ private[signatures] object ZioSchemaCodec:
   def normalize(dv: DynamicValue, target: Reflect.Bound[?]): DynamicValue =
     // zio-blocks defers the reflect of some nested fields. The coercion needs the reflect behind it.
     (dv, withoutDeferred(target)) match
+      // This rule comes before the rule of a null, because an `Option` behind a wrapper reads a null.
+      case (value, wrapper: Reflect.Wrapper[Binding, ?, ?])                     => normalize(value, wrapper.wrapped)
       case (prim @ DynamicValue.Primitive(_), p: Reflect.Primitive[Binding, ?]) =>
-        LenientValues.coerce(prim, p.primitiveType)
+        fromTextForm(LenientValues.coerce(prim, p.primitiveType), p)
       // An `Option` field: put a bare value, a null, or a text into `Some` or `None` before the general rules below.
-      case (value, OptionOf(element))                                                   => normalizeOption(value, element)
-      case (_: DynamicValue.Null.type, _)                                               => DynamicValue.Null
-      case (DynamicValue.Primitive(PrimitiveValue.String(s)), _: Reflect.Variant[?, ?]) =>
-        DynamicValue.Variant(s, DynamicValue.Record.empty)
-      case (rec: DynamicValue.Record, recTarget: Reflect.Record[Binding, ?])        => mapRecordFields(rec, recTarget)
-      case (seq: DynamicValue.Sequence, seqTarget: Reflect.Sequence[Binding, ?, ?]) =>
+      case (value, OptionOf(element))                                                         => normalizeOption(value, element)
+      case (_: DynamicValue.Null.type, _)                                                     => DynamicValue.Null
+      case (DynamicValue.Primitive(PrimitiveValue.String(s)), v: Reflect.Variant[Binding, ?]) => variantFromText(s, v)
+      case (rec: DynamicValue.Record, v: Reflect.Variant[Binding, ?])                         => variantFromRecord(rec, v)
+      case (rec: DynamicValue.Record, recTarget: Reflect.Record[Binding, ?])                  => mapRecordFields(rec, recTarget)
+      case (seq: DynamicValue.Sequence, recTarget: Reflect.Record[Binding, ?])                => tupleFromSequence(seq, recTarget)
+      case (seq: DynamicValue.Sequence, seqTarget: Reflect.Sequence[Binding, ?, ?])           =>
         DynamicValue.Sequence(seq.elements.map(normalize(_, seqTarget.element)))
       case (m: DynamicValue.Map, mapTarget: Reflect.Map[Binding, ?, ?, ?]) =>
         DynamicValue.Map(m.entries.map((k, v) => normalize(k, mapTarget.key) -> normalize(v, mapTarget.value)))
@@ -85,19 +106,94 @@ private[signatures] object ZioSchemaCodec:
         })
       case _ => dv
 
+  /** The case `text` of `variant`, with no fields of its own. A text that names no case gets the error of an unknown
+    * case in the decode.
+    */
+  private def variantFromText(text: String, variant: Reflect.Variant[Binding, ?]): DynamicValue =
+    caseValue(variant, text, DynamicValue.Record.empty).getOrElse(DynamicValue.Variant(text, DynamicValue.Record.empty))
+
+  /** The case with the name of the one field of `rec`, as the JSON schema shows it: `{"Circle": {"radius": 1}}`. Each
+    * other record stays, and the decode gives the error.
+    */
+  private def variantFromRecord(rec: DynamicValue.Record, variant: Reflect.Variant[Binding, ?]): DynamicValue =
+    rec.fields.headOption
+      .filter(_ => rec.fields.length == 1)
+      .flatMap((name, value) => caseValue(variant, name, value))
+      .getOrElse(rec)
+
+  /** The record of the tuple `target` from a sequence with one item for each field, as the JSON schema shows it:
+    * `[1, "a"]`. Each other sequence stays, and the decode gives the error. A record that is not a tuple also takes no
+    * sequence.
+    */
+  private def tupleFromSequence(seq: DynamicValue.Sequence, target: Reflect.Record[Binding, ?]): DynamicValue =
+    if target.typeId.isTuple && seq.elements.length == target.fields.length then
+      mapRecordFields(DynamicValue.Record(Chunk.from(target.fields.map(_.name).zip(seq.elements))), target)
+    else seq
+
+  /** The `Variant` value of the case `name` of `variant`, with `value` in the form of that case. A case of `variant`
+    * itself wins over a case of a nested variant. The JSON schema shows the flat names of the leaf cases of a nested
+    * sealed trait, and `Schema.fromDynamicValue` reads the path of the cases. Thus a leaf case gets its path:
+    * `Variant("Animal", Variant("Cat", ...))`. When two leaf cases have one name, the first wins. `None` when `variant`
+    * has no such case.
+    */
+  private def caseValue(
+      variant: Reflect.Variant[Binding, ?],
+      name   : String,
+      value  : DynamicValue
+  ): Option[DynamicValue] =
+    variant.caseByName(name) match
+      case Some(term) => Some(DynamicValue.Variant(name, normalize(value, term.value)))
+      case None       => variant.cases.iterator.flatMap { term =>
+          unwrapped(term.value) match
+            case nested: Reflect.Variant[Binding, ?] =>
+              caseValue(nested, name, value).map(DynamicValue.Variant(term.name, _))
+            case _ => None
+        }.nextOption()
+
+  /** `value` as a value of the primitive `target`, when `value` is still a text and `target` has a text form
+    * ([[Reflects.hasTextForm]]). The JSON codec of the primitive reads the text, because the JSON schema of the
+    * primitive comes from that codec. A model often writes a quoted text in the chat format, so one pair of double
+    * quotes at the two ends goes first. A text that the codec does not read stays, and the decode gives the error.
+    */
+  private def fromTextForm[A](value: DynamicValue, target: Reflect.Primitive[Binding, A]): DynamicValue =
+    value match
+      case DynamicValue.Primitive(PrimitiveValue.String(text)) if Reflects.hasTextForm(target.primitiveType) =>
+        val json = PythonText.json(DynamicValues.string(PythonText.quotedBody(text, '"').getOrElse(text)))
+        Schema(target).jsonCodec.decode(json).fold(_ => value, target.toDynamicValue)
+      case _ => value
+
   /** Coerce a value to the `Some` or `None` variant that zio-blocks expects for an `Option` field. `valueReflect` is
     * the reflect of the `value` field of `Some`. Thus a value in `Some` goes through [[normalize]] again and gets the
-    * usual coercion (for example, the text `"2399.0"` becomes a `Double`). A null, and a null text of
-    * [[LenientValues.NullTexts]], become `None`.
+    * usual coercion (for example, the text `"2399.0"` becomes a `Double`). A null becomes `None`, and a null text of
+    * [[LenientValues.NullTexts]] too, when the element does not take that text ([[takesText]]). The typed `Some` and
+    * `None` also stay valid, and the value in `Some` gets the coercion: the wire form of an `Option` in an `Option`
+    * keeps the outer case. A variant with another case name is the element, for example a case of a sealed trait.
     */
   private def normalizeOption(value: DynamicValue, valueReflect: Reflect.Bound[?]): DynamicValue =
     def some(v: DynamicValue): DynamicValue =
       DynamicValue.Variant("Some", DynamicValue.Record(Chunk.single("value" -> normalize(v, valueReflect))))
     value match
-      case _: DynamicValue.Null.type                                                       => none
-      case variant: DynamicValue.Variant                                                   => variant
-      case DynamicValue.Primitive(PrimitiveValue.String(s)) if LenientValues.isNullText(s) => none
-      case other                                                                           => some(other)
+      case _: DynamicValue.Null.type                                 => none
+      case DynamicValue.Variant("None", _)                           => none
+      case DynamicValue.Variant("Some", DynamicValue.Record(fields)) =>
+        fields.headOption.fold(value)((_, inner) => some(inner))
+      case DynamicValue.Primitive(PrimitiveValue.String(s))
+          if LenientValues.isNullText(s) && !takesText(valueReflect, s) => none
+      case other => some(other)
+
+  /** `true` when `reflect` reads the text `text` as a value: a text, or a variant with a case of that name. The wire
+    * form of `Some("none")` is the text `none`, and upstream `parse_value` keeps each text for an `Optional[str]`.
+    */
+  private def takesText(reflect: Reflect.Bound[?], text: String): Boolean =
+    reflect match
+      case OptionOf(element) => takesText(element, text)
+      case _                 => unwrapped(reflect) match
+          case wrapper: Reflect.Wrapper[Binding, ?, ?] => takesText(wrapper.wrapped, text)
+          case variant: Reflect.Variant[Binding, ?]    => caseValue(variant, text, DynamicValue.Record.empty).isDefined
+          case prim: Reflect.Primitive[Binding, ?]     => prim.primitiveType match
+              case _: PrimitiveType.String => true
+              case _                       => false
+          case _ => false
 
   /** The `None` case of an `Option`, in the Variant shape that zio-blocks expects. */
   private def none: DynamicValue = DynamicValue.Variant("None", DynamicValue.Record.empty)
@@ -116,31 +212,30 @@ private[signatures] object ZioSchemaCodec:
     if absent.isEmpty then DynamicValue.Record(fields)
     else DynamicValue.Record(fields ++ Chunk.from(absent))
 
-  /** The default value of a field in the wire form, from the reflect of the field: zio-blocks keeps the default value
-    * of a case-class parameter there. The wire form of an `Option` is its element, thus a default `Some(x)` is `x`, and
-    * a default `None` is no default (an absent `Option` field is `None`).
+  /** The default value of a field in the wire form ([[Reflects.wireValue]]), from the reflect of the field: zio-blocks
+    * keeps the default value of a case-class parameter there. The wire form of an `Option` is its element, thus a
+    * default `Some(x)` is `x`, and a default `None` is no default (an absent `Option` field is `None`).
     */
   private def wireDefault(reflect: Reflect.Bound[?]): Option[DynamicValue] =
-    storedDefault(reflect).flatMap { default =>
-      if !isOption(reflect) then Some(default)
-      else
-        default match
-          case DynamicValue.Variant("Some", DynamicValue.Record(fields)) => fields.collectFirst {
-              case ("value", value) => value
-            }
-          case _ => None
-    }
+    storedDefault(reflect).map(Reflects.wireValue(_, reflect)).filterNot(default =>
+      isOption(reflect) && DynamicValues.isNull(PythonText.unwrap(default))
+    )
 
   private def storedDefault[A](reflect: Reflect.Bound[A]): Option[DynamicValue] =
     reflect.getDefaultValue.map(reflect.toDynamicValue)
 
-  /** The field specs of a `Reflect.Record`, in the order of its fields, with no input or output role. Empty for each
-    * other reflect.
+  /** The field specs of the record behind `reflect` ([[recordOf]]), in the order of its fields, with no input or output
+    * role. Empty for each other reflect.
     */
   def fieldSpecsFromReflect(reflect: Reflect.Bound[?]): Vector[FieldSpec] =
-    reflect match
-      case rec: Reflect.Record[Binding, ?] => rec.fields.toVector.map(term => fieldSpecOf(term.name, term.value))
-      case _                               => Vector.empty
+    recordOf(reflect).fold(Vector.empty)(_.fields.toVector.map(term => fieldSpecOf(term.name, term.value)))
+
+  /** The record behind `reflect`: `reflect` itself, or the record behind a deferred reflect or a wrapper. */
+  private def recordOf(reflect: Reflect.Bound[?]): Option[Reflect.Record[Binding, ?]] =
+    unwrapped(reflect) match
+      case rec: Reflect.Record[Binding, ?]         => Some(rec)
+      case wrapper: Reflect.Wrapper[Binding, ?, ?] => recordOf(wrapper.wrapped)
+      case _                                       => None
 
   /** The field spec of the field `name` with the reflect `reflect`. An `Option` field is an optional field, with the
     * type and the enum values of its element. A field with a default value (a case-class parameter with a default) has
@@ -155,37 +250,24 @@ private[signatures] object ZioSchemaCodec:
       optional = isOption(reflect)
     )
 
-  /** The case names that an enum field accepts: the cases of a `Reflect.Variant`. Empty for each reflect that is not a
-    * variant. The wire `typeRef` of a variant stays `TypeRef.string`, because the LM sees a plain label. The adapters
-    * use these values to tell the LM which labels are valid. An `Option` has the enum values of its element. A `Score`
-    * field has its levels, and a `Choice` field has its option labels (see [[decisionField]]).
+  /** The case names that an enum field accepts: the cases of a `Reflect.Variant` with no fields ([[caseNames]]). Empty
+    * for each other reflect. The wire `typeRef` of such a variant is `TypeRef.string`, because the LM sees a plain
+    * label. The adapters use these values to tell the LM which labels are valid. An `Option` and a wrapper have the
+    * enum values of what they hold. A `Score` field has its levels, and a `Choice` field has its option labels (see
+    * [[decisionField]]).
     */
   private def enumValuesOf(reflect: Reflect.Bound[?]): Vector[String] =
-    reflect match
-      case OptionOf(element) => enumValuesOf(element)
-      case _                 => decisionField(reflect).fold(caseNames(reflect))(_._2)
+    unwrapped(reflect) match
+      case OptionOf(element)                       => enumValuesOf(element)
+      case wrapper: Reflect.Wrapper[Binding, ?, ?] => enumValuesOf(wrapper.wrapped)
+      case _                                       => decisionField(reflect).fold(caseNames(reflect))(_._2)
 
-  /** Matches the reflect of an `Option`: a variant with a `None` case (an empty record) and a `Some` case, whose record
-    * has one field with the name `value`. The result is the reflect of that `value` field, so that [[normalize]] can
-    * coerce the value in `Some` to the correct target.
+  /** Matches the reflect of an `Option`, also behind a wrapper: a variant with a `None` case (an empty record) and a
+    * `Some` case, whose record has one field with the name `value`. The result is the reflect of that `value` field, so
+    * that [[normalize]] can coerce the value in `Some` to the correct target.
     */
   private object OptionOf:
-    def unapply(reflect: Reflect.Bound[?]): Option[Reflect.Bound[?]] =
-      withoutDeferred(reflect) match
-        case variant: Reflect.Variant[Binding, ?] if variant.cases.size == 2 =>
-          val hasNone = variant.caseByName("None").exists(term => isEmptyRecord(term.value))
-          val value   = variant.caseByName("Some").flatMap { term =>
-            term.value match
-              case rec: Reflect.Record[Binding, ?] if rec.fields.size == 1 => rec.fieldByName("value").map(_.value)
-              case _                                                       => None
-          }
-          if hasNone then value else None
-        case _ => None
-
-    private def isEmptyRecord(reflect: Reflect[?, ?]): Boolean =
-      reflect match
-        case rec: Reflect.Record[?, ?] => rec.fields.isEmpty
-        case _                         => false
+    def unapply(reflect: Reflect.Bound[?]): Option[Reflect.Bound[?]] = Reflects.optionElement(reflect)
 
   private def isOption(reflect: Reflect.Bound[?]): Boolean = OptionOf.unapply(reflect).isDefined
 
@@ -208,11 +290,9 @@ private[signatures] object ZioSchemaCodec:
     * record, as upstream does not go into the fields of a model.
     */
   def nestedDecisionFieldsOf(reflect: Reflect.Bound[?]): Vector[String] =
-    withoutDeferred(reflect) match
-      case rec: Reflect.Record[Binding, ?] => rec.fields.toVector.collect {
-          case term if decisionField(term.value).isEmpty && holdsDecision(term.value) => term.name
-        }
-      case _ => Vector.empty
+    recordOf(reflect).fold(Vector.empty)(_.fields.toVector.collect {
+      case term if decisionField(term.value).isEmpty && holdsDecision(term.value) => term.name
+    })
 
   /** `true` when `reflect` is a decision type, or an `Option`, a collection, or a map that holds one. */
   private def holdsDecision(reflect: Reflect.Bound[?]): Boolean =
@@ -221,6 +301,7 @@ private[signatures] object ZioSchemaCodec:
       case found if decisionField(found).isDefined => true
       case seq: Reflect.Sequence[Binding, ?, ?]    => holdsDecision(seq.element)
       case map: Reflect.Map[Binding, ?, ?, ?]      => holdsDecision(map.key) || holdsDecision(map.value)
+      case wrapper: Reflect.Wrapper[Binding, ?, ?] => holdsDecision(wrapper.wrapped)
       case _                                       => false
 
   /** The reflect behind a deferred reflect, with a wildcard value type. A match on the result of `withoutDeferred`
@@ -245,22 +326,23 @@ private[signatures] object ZioSchemaCodec:
     * has the cases of `E`. Empty when the record has no such field.
     */
   private def casesOfField(reflect: Reflect.Bound[?], name: String): Vector[String] =
-    withoutDeferred(reflect) match
-      case rec: Reflect.Record[Binding, ?] =>
-        rec.fieldByName(name).fold(Vector.empty[String])(t => enumValuesOf(t.value))
-      case _ => Vector.empty
+    recordOf(reflect).flatMap(_.fieldByName(name)).fold(Vector.empty[String])(t => enumValuesOf(t.value))
 
   /** The wire type of a reflect that is not a decision type. A `History` record (by its marker) is [[TypeRef.history]],
-    * and a sequence whose element is a `ToolCall` (by its marker) is [[TypeRef.toolCalls]].
+    * and a sequence whose element is a `ToolCall` (by its marker) is [[TypeRef.toolCalls]]. A variant with only cases
+    * with no fields is a label, so it is a [[TypeRef.string]], and each other variant is a [[TypeRef.union]]. A tuple
+    * is a [[TypeRef.list]], because its schema is an array. A wrapper has the type of what it wraps.
     */
-  private def typeRefOfValue(reflect: Reflect[?, ?]): TypeRef =
-    withoutDeferred(reflect) match
-      case prim: Reflect.Primitive[?, ?]                                                => primitiveTypeRef(prim.primitiveType)
-      case _: Reflect.Variant[?, ?]                                                     => TypeRef.string
-      case rec: Reflect.Record[?, ?] if isMarked(rec, TypeMarker.history)               => TypeRef.history
-      case seq: Reflect.Sequence[?, ?, ?] if isMarked(seq.element, TypeMarker.toolCall) => TypeRef.toolCalls
-      case _: Reflect.Sequence[?, ?, ?]                                                 => TypeRef.list
-      case _                                                                            => TypeRef.json
+  private def typeRefOfValue(reflect: Reflect.Bound[?]): TypeRef =
+    unwrapped(reflect) match
+      case prim: Reflect.Primitive[Binding, ?]                                                => primitiveTypeRef(prim)
+      case variant: Reflect.Variant[Binding, ?]                                               => if variant.isEnumeration then TypeRef.string else TypeRef.union
+      case rec: Reflect.Record[Binding, ?] if isMarked(rec, TypeMarker.history)               => TypeRef.history
+      case rec: Reflect.Record[Binding, ?] if rec.typeId.isTuple                              => TypeRef.list
+      case seq: Reflect.Sequence[Binding, ?, ?] if isMarked(seq.element, TypeMarker.toolCall) => TypeRef.toolCalls
+      case _: Reflect.Sequence[Binding, ?, ?]                                                 => TypeRef.list
+      case wrapper: Reflect.Wrapper[Binding, ?, ?]                                            => typeRefFor(wrapper.wrapped)
+      case _                                                                                  => TypeRef.json
 
   /** `true` when the type of `reflect` has the marker `marker`. */
   private def isMarked(reflect: Reflect[?, ?], marker: String): Boolean = TypeMarker.of(reflect).contains(marker)
@@ -298,9 +380,13 @@ private[signatures] object ZioSchemaCodec:
     * recursive type its `toJsonSchema` (a `lazy val`) reads itself and waits forever. Thus this function cuts each
     * cycle before zio-blocks makes the schema. When the root type is recursive, the root is a `$ref` to its definition.
     *
-    * The schema and the decode agree on a null and on an absent field ([[ModelSchemaDeriver]]) for the sequences, maps,
-    * options, and records that `ModelSchemaContractSuite` covers. Some other types have a schema that the decode does
-    * not accept. `docs/port/PORT_DIFFERENCES.md` section 14 lists them.
+    * The decode reads the forms of the schema, through [[normalize]]. The schema and the decode agree on a null and on
+    * an absent field ([[ModelSchemaDeriver]]) for the sequences, maps, options, and records that
+    * `ModelSchemaContractSuite` covers. They also agree on a sealed trait (a case name as a key, and flat leaf names),
+    * a tuple (an array), a primitive with a text form (a string with a `format`), and a transform (the schema of the
+    * value behind it), which `TypedValueFormsSuite` covers. When two leaf cases of a nested sealed trait have one name,
+    * the schema has two equal names, and the decode takes the first case. An enum encodes to the name of its leaf case,
+    * so the law `decode(encode(a)) == Right(a)` does not hold for the second case of such a type.
     *
     * The result is the record of [[schemaRecord]], or `None` when the schema is not a JSON object.
     */
@@ -508,13 +594,19 @@ private[signatures] object ZioSchemaCodec:
 
     override lazy val toJsonSchema: JsonSchema = schema
 
-  private def primitiveTypeRef(prim: PrimitiveType[?]): TypeRef =
-    prim match
-      case _: PrimitiveType.String | _: PrimitiveType.Char                                               => TypeRef.string
-      case _: PrimitiveType.Boolean                                                                      => TypeRef.bool
-      case _: PrimitiveType.Int | _: PrimitiveType.Long | _: PrimitiveType.Short | _: PrimitiveType.Byte => TypeRef.int
-      case _: PrimitiveType.Float | _: PrimitiveType.Double                                              => TypeRef.double
-      case _                                                                                             => TypeRef.json
+  /** The wire type of a primitive. A primitive with a text form ([[Reflects.hasTextForm]]) and a `BigDecimal` have an
+    * opaque type with their type name, for example `Instant`. A prompt shows that name and the JSON schema of the
+    * field, and the adapters keep a bare text for such a type. Thus a `BigDecimal` keeps each digit of a text.
+    */
+  private def primitiveTypeRef(prim: Reflect.Primitive[Binding, ?]): TypeRef =
+    prim.primitiveType match
+      case _: PrimitiveType.String | _: PrimitiveType.Char => TypeRef.string
+      case _: PrimitiveType.Boolean                        => TypeRef.bool
+      case _: PrimitiveType.Int | _: PrimitiveType.Long | _: PrimitiveType.Short | _: PrimitiveType.Byte |
+          _: PrimitiveType.BigInt => TypeRef.int
+      case _: PrimitiveType.Float | _: PrimitiveType.Double => TypeRef.double
+      case _: PrimitiveType.Unit.type                       => TypeRef.json
+      case _                                                => TypeRef(prim.typeId.name)
 
   /** Decode `dv` as an `A`. [[normalize]] first coerces `dv` to the reflect of `schema`, then `Schema.fromDynamicValue`
     * decodes it. An error of zio-blocks becomes a `ValidationError` with the message of that error, which has the path
@@ -523,8 +615,9 @@ private[signatures] object ZioSchemaCodec:
   def decodeValue[A](dv: DynamicValue)(using schema: Schema[A]): Either[DspyError, A] =
     schema.fromDynamicValue(normalize(dv, schema.reflect)).left.map(err => ValidationError(DspyError.messageOf(err)))
 
-  /** Make a `Shape[A]` from a zio-blocks `Schema[A]`. The encode uses `Schema.toDynamicValue`. The decode first checks
-    * that the record has each required field, and then uses [[decodeValue]].
+  /** Make a `Shape[A]` from a zio-blocks `Schema[A]`. The encode gives each field in the wire form
+    * ([[Reflects.wireRecord]]). The root stays a record, also for a tuple, because its fields are the fields of a
+    * signature. The decode first checks that the record has each required field, and then uses [[decodeValue]].
     */
   def derivedFromZioSchema[A](using schema: Schema[A]): RoundTripShape[A] =
     val rootReflect   = schema.reflect
@@ -534,13 +627,15 @@ private[signatures] object ZioSchemaCodec:
     new RoundTripShape[A]:
       override val fieldSpecs: Vector[FieldSpec] = specs
 
-      override lazy val jsonSchema: Option[DynamicValue.Record] = jsonSchemaForModel(schema)
+      // A tuple at the top is the record of the output fields. On the wire it is a JSON object, not the array of its schema.
+      override lazy val jsonSchema: Option[DynamicValue.Record] =
+        if recordOf(rootReflect).exists(_.typeId.isTuple) then None else jsonSchemaForModel(schema)
 
       override lazy val nestedDecisionFields: Vector[String] = nestedDecisionFieldsOf(rootReflect)
 
       override def encode(value: A): DynamicValue.Record =
         schema.toDynamicValue(value) match
-          case rec: DynamicValue.Record => rec
+          case rec: DynamicValue.Record => Reflects.wireRecord(rec, rootReflect)
           case other                    => throw new IllegalStateException(
               s"zio-blocks Schema did not encode to a Record: $other"
             )

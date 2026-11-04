@@ -352,6 +352,16 @@ class ConversationHistoryRulesSuite extends FunSuite:
       assertEquals(messages(2).text, None)
     }
 
+    test(s"$name (native): a tool call lifted with its schema keeps the results of its turn") {
+      val message = History.withToolCallResults(
+        DynamicValues.record("question" := "Q1", "tool_calls" := Vector(search)),
+        searchResult
+      )
+      val messages = agentMessagesOf(adapter, withHistory("Q2", History.empty :+ message))
+      assertEquals(roles(messages), Vector(System, User, Assistant, Tool, User))
+      assertEquals(messages(3).toolCallId, Some("call_1"))
+    }
+
     test(s"$name (native): results in a different order from the calls are dropped") {
       val results = ToolCallResult
         .forCalls(

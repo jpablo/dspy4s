@@ -26,7 +26,8 @@ private[adapters] object StrictJsonSchema:
   val Name: String = "DSPyProgramOutputs"
 
   /** `schema` in strict shape. The rules apply at each level: in `$defs` and `definitions`, in `properties`, in
-    * `items`, in `anyOf`, and in `allOf`.
+    * `items`, in `prefixItems` (a tuple; a port rule, because upstream does not go into it), in `anyOf`, and in
+    * `allOf`.
     *
     *   - An object schema (its `type` is `object`, or a list that has `object`) with no `additionalProperties` gets
     *     `additionalProperties: false`.
@@ -120,7 +121,8 @@ private[adapters] object StrictJsonSchema:
       closed    <- close(defined)
       withProps <- shapeProperties(closed, shaping, refs)
       withItems <- shapeItems(withProps, shaping, refs)
-      withAnyOf <- shapeEach(oneOfAsAnyOf(withItems), "anyOf", shaping, refs)
+      withTuple <- shapeEach(withItems, "prefixItems", shaping, refs)
+      withAnyOf <- shapeEach(oneOfAsAnyOf(withTuple), "anyOf", shaping, refs)
       withAllOf <- mergeAllOf(withAnyOf, shaping, refs)
       resolved  <- resolveRef(dropNullDefault(withAllOf), shaping, refs)
     yield resolved
@@ -196,7 +198,7 @@ private[adapters] object StrictJsonSchema:
         shapeAt(items, shaping, refs).map(shaped => schema.updated("items", shaped))
       case _ => Right(schema)
 
-  /** Each schema in the list under `key` (`anyOf` or `allOf`) in strict shape. */
+  /** Each schema in the list under `key` (`prefixItems`, `anyOf`, or `allOf`) in strict shape. */
   private def shapeEach(
       schema : DynamicValue.Record,
       key    : String,
@@ -328,14 +330,15 @@ private[adapters] object StrictJsonSchema:
       )
     }
 
-  /** The schema of a field type. `json` has no schema: it is an open map. `list` and `list[T]` give an array, and
-    * `string`, `int`, `double`, and `bool` give their JSON type ([[TypeRef.jsonType]]).
+  /** The schema of a field type. `json` has no schema: it is an open map. `union` has no schema here, because only the
+    * typed schema of a signature knows its cases. `list` and `list[T]` give an array, and `string`, `int`, `double`,
+    * and `bool` give their JSON type ([[TypeRef.jsonType]]).
     */
   private def typeSchema(typeRef: TypeRef): Option[DynamicValue.Record] =
     typeRef match
-      case TypeRef.json => None
-      case TypeRef.list => Some(array(DynamicValue.Record.empty))
-      case _            => typeRef.collection match
+      case TypeRef.json | TypeRef.union => None
+      case TypeRef.list                 => Some(array(DynamicValue.Record.empty))
+      case _                            => typeRef.collection match
           case Some((TypeRef.Collection.List, item)) => typeSchema(TypeRef.fromToken(item)).map(array)
           case Some(_)                               => None
           case None                                  => typeRef.jsonType.map(typed)

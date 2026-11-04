@@ -264,7 +264,9 @@ private[adapters] object AdapterTextSupport:
     * adapters so a `json` / `list` field decodes identically regardless of which adapter parsed it. An `int`, a
     * `double`, and a `bool` field take the rule of [[LenientValues.valueOf]]. A `json` or a `list` field reads the text
     * as JSON with the rules of Python `json.loads` ([[PythonText.parseJson]]): an integer keeps its exact value, and a
-    * float stays a float.
+    * float stays a float. A `union` field also reads the text as JSON, and it keeps a text that is not JSON, because a
+    * case with no fields of a sealed trait with fields can be a bare name. The typed decode then gives the case or the
+    * error.
     */
   private def coerceText(typeRef: TypeRef, raw: String): Either[DspyError, DynamicValue] =
     def lenient(error: => String) =
@@ -276,6 +278,7 @@ private[adapters] object AdapterTextSupport:
       case TypeRef.json | TypeRef.list => PythonText.parseJson(raw).left.map(_ =>
           ValidationError(s"Field could not be parsed as JSON from '$raw'")
         )
+      case TypeRef.union            => Right(PythonText.parseJson(raw).getOrElse(DynamicValues.string(raw)))
       case other if isListOf(other) => listOfValue(other, PythonText.parseJson(raw).toOption, raw)
       case _                        => Right(DynamicValues.string(raw))
 

@@ -35,6 +35,10 @@ private[programs] object ToolText:
           .fold("Any")(value => DynamicValues.asString(value).getOrElse(PythonText.json(value)))
       case _ => "Any"
 
-  /** The schema of an argument: its JSON type ([[TypeRef.jsonType]], the types of upstream `Tool._parse_function`). */
-  private def argument(typeRef: TypeRef): DynamicValue.Record =
-    typeRef.jsonType.fold(DynamicValue.Record.empty)(name => DynamicValues.record("type" := name))
+  /** The schema of an argument: its JSON type ([[TypeRef.jsonType]], the types of upstream `Tool._parse_function`). A
+    * list has the empty `items` of a Python `list`, because a provider can reject an array with no `items`.
+    */
+  private[programs] def argument(typeRef: TypeRef): DynamicValue.Record =
+    typeRef match
+      case TypeRef.list => DynamicValues.record("items" -> DynamicValue.Record.empty, "type" := "array")
+      case _            => typeRef.jsonType.fold(DynamicValue.Record.empty)(name => DynamicValues.record("type" := name))

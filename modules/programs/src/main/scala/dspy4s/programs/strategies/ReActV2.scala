@@ -474,7 +474,9 @@ object ReActV2:
     * type of its `TypeRef`, else `{"type": "string"}`.
     */
   private def argumentSchema(field: FieldSpec, outputSchema: ProgramPromptText.OutputSchemaText): DynamicValue =
-    def jsonType: DynamicValue = DynamicValues.record("type" := field.typeRef.jsonType.getOrElse("string"))
+    def jsonType: DynamicValue =
+      if field.typeRef.jsonType.isDefined then ToolText.argument(field.typeRef)
+      else DynamicValues.record("type" := "string")
     if isPlainPrimitive(field) then jsonType
     else outputSchema.property(field.name).getOrElse(jsonType)
 

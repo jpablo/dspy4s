@@ -88,8 +88,9 @@ and this case.
   into a `Boolean`, and `"42"` and `"3.0"` into an `Int`. It also removes a currency symbol, commas, and a `_` between
   digits from a number, and changes a text into an enum case. The parsers of the adapters have the same rule (core
   `LenientValues`). A text that only Java reads as a number (`"3d"`) makes the decode fail.
-- **An absent `Option` field is `None`,** also in a nested record. The values `null`, `"none"`, and `"n/a"` are also
-  `None`. An absent field that is not an `Option` makes the decode fail.
+- **An absent `Option` field is `None`,** also in a nested record. A null is also `None`, and the texts `"none"` and
+  `"n/a"` too, when the type of the element does not read the text. An `Option[String]` keeps each text, and an enum with
+  a case of that name keeps the case. An absent field that is not an `Option` makes the decode fail.
 - **A `History` field gets `TypeRef.history`** from each entry point and from the builder.
 - **A sequence of `ToolCall` values gets `TypeRef.toolCalls`,** for example a `Vector[ToolCall]` output field. The
   adapter with native tool calls fills that field from the tool calls of the provider.
@@ -104,9 +105,21 @@ and this case.
   records that `ModelSchemaContractSuite` covers. A sequence has the type `array` and a map has the type `object`, with
   no `null`, and a field of these types is in `required`. Only an `Option` permits a `null` and an absent field, and a
   field with a default value is not in `required`. The default JSON codec of zio-blocks has other rules: it reads a
-  `null` and an absent field as an empty collection, so `Shape.jsonSchema` does not use its schema as it is. Some other
-  types have a schema that the decode does not accept: a sealed trait with fields, a tuple, `Instant`, `UUID`, and a
-  `Schema.transform` of a record with an `Option` field. `docs/port/PORT_DIFFERENCES.md` section 14 has these open items.
+  `null` and an absent field as an empty collection, so `Shape.jsonSchema` does not use its schema as it is.
+- **`Shape.encode` gives the wire form,** the JSON shape that the schema shows (`Reflects.wireValue`). A sealed trait with
+  fields is an object with the case name as a key, and an enum is the text of its leaf case. A tuple is an array, an
+  `Option` is its element or a null, a time value and a `UUID` are a text, and a map with primitive keys is a record. A
+  `Schema.transform` has the form of the value behind it. The root stays a record, also for a tuple. A framework type stays in its typed form. The `:=` lift,
+  `withRawValue`, `ToolFunction.result`, and a default value give the same form, and `TypedValueFormsSuite` covers them.
+- **The decode reads the wire form,** and `ZioSchemaCodec.normalize` makes the form that `Schema.fromDynamicValue` reads.
+  It also reads a bare case name, the record of a tuple, and the flat name of a leaf case, which is what the schema shows
+  for a nested sealed trait. An annotation that changes a name or a form, and a `Maybe` field, are the open items of this
+  rule: the schema shows a form that the decode does not read (`docs/port/PORT_DIFFERENCES.md` section 14).
+- **The wire type agrees with the form.** A sealed trait with fields has the type `union`, and a sealed trait with only
+  cases with no fields has the type `string` and its leaf case names as `enumValues`. A tuple has the type `list`. A time
+  value, a `UUID`, and a `BigDecimal` have an opaque `TypeRef` with the type name, so a prompt shows `Instant`, and a
+  `BigDecimal` keeps each digit of a text. A `BigInt` has the type `int`. A `Schema.transform` has the type of what it
+  wraps.
 
 ## Source layout
 

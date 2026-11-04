@@ -78,7 +78,7 @@ class ToolTextSuite extends FunSuite:
       ToolText.describe(typed),
       "typed, whose description is <desc>One line.  Two lines.</desc>. It takes arguments " +
         """{"s": {"type": "string"}, "i": {"type": "integer"}, "d": {"type": "number"}, "b": {"type": "boolean"}, """ +
-        """"l": {"type": "array"}, "j": {"type": "object"}, "h": {}}."""
+        """"l": {"items": {}, "type": "array"}, "j": {"type": "object"}, "h": {}}."""
     )
   }
 

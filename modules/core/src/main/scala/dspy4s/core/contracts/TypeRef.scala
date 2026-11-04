@@ -8,8 +8,10 @@ import scala.util.matching.Regex
   * enum, for instance, has Scala type `Sentiment` but [[TypeRef.string]] at the wire level (the LM sees a flat string
   * like `"joy"`).
   *
-  * The twelve well-known refs of the companion object cover the common cases. Each other token passes through as an
-  * opaque token, and an adapter that does not know the token renders it as a free-form string.
+  * The thirteen well-known refs of the companion object cover the common cases. Each other token passes through as an
+  * opaque token, and an adapter that does not know the token renders it as a free-form string. A time value, a `UUID`,
+  * or a `BigDecimal` of a typed signature has such a token, with its type name (`Instant`). A sealed trait with fields
+  * is a [[TypeRef.union]] field.
   */
 final case class TypeRef(repr: String) derives CanEqual:
 
@@ -27,7 +29,8 @@ final case class TypeRef(repr: String) derives CanEqual:
       case _         => None
 
   /** The JSON schema type of this wire type (the types of upstream `Tool._parse_function`): `string`, `integer`,
-    * `number`, `boolean`, `array` for [[TypeRef.list]], and `object` for [[TypeRef.json]]. `None` for each other type.
+    * `number`, `boolean`, `array` for [[TypeRef.list]], and `object` for [[TypeRef.json]] and [[TypeRef.union]]. `None`
+    * for each other type.
     */
   def jsonType: Option[String] =
     this match
@@ -37,6 +40,7 @@ final case class TypeRef(repr: String) derives CanEqual:
       case TypeRef.bool   => Some("boolean")
       case TypeRef.list   => Some("array")
       case TypeRef.json   => Some("object")
+      case TypeRef.union  => Some("object")
       case _              => None
 
   /** The kind and the item type text of a collection type with an item type, as [[TypeRef.fromToken]] gives it:
@@ -69,6 +73,12 @@ object TypeRef:
   val bool: TypeRef   = TypeRef("bool")
   val json: TypeRef   = TypeRef("json")
   val list: TypeRef   = TypeRef("list")
+
+  /** The type of a sealed trait with fields of a typed signature: an object with a case name as its key, or the bare
+    * name of a case with no fields. A reply can have each form, so an adapter keeps a text that is not JSON. A
+    * [[TypeRef.json]] field does not.
+    */
+  val union: TypeRef = TypeRef("union")
 
   /** The wire type of the JSON schema type `name`, the inverse of [[TypeRef.jsonType]]. `None` for each other name. */
   def fromJsonType(name: String): Option[TypeRef] =

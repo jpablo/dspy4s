@@ -10,13 +10,13 @@ import scala.collection.immutable.VectorMap
 import scala.util.control.NonFatal
 
 /** `"name" := value` builds a schema-lifted `(name, DynamicValue)` entry for the data-bag constructors (`Example(...)`,
-  * [[DynamicValues.recordFromEntries]], the dynamic `ProgramRuntime.run`). The value is converted with zio-blocks'
-  * `Schema.toDynamicValue`, so it is lifted losslessly and a value type without a `Schema` is a compile error (contrast
-  * the legacy `Any`-based [[DynamicValues.fromAny]]). Import via `dspy4s.core.contracts.:=`. A value that is already a
-  * `DynamicValue` can use the plain `"name" -> value`.
+  * [[DynamicValues.recordFromEntries]], the dynamic `ProgramRuntime.run`). The value gets its wire form
+  * ([[Reflects.wireOf]]), so a tuple is a list and an enum is a text. A value type without a `Schema` is a compile
+  * error (contrast the legacy `Any`-based [[DynamicValues.fromAny]]). Import via `dspy4s.core.contracts.:=`. A value
+  * that is already a `DynamicValue` can use the plain `"name" -> value`.
   */
 extension (key: String)
-  infix def :=[A](value: A)(using schema: Schema[A]): (String, DynamicValue) = (key, schema.toDynamicValue(value))
+  infix def :=[A](value: A)(using Schema[A]): (String, DynamicValue) = (key, Reflects.wireOf(value))
 
 /** `record.updated(name, value)` updates or appends a field by name. When the record has fields with that name, each of
   * them takes `value` in its position. Else the new field goes at the end. Import via `dspy4s.core.contracts.updated`.
@@ -253,12 +253,13 @@ object DynamicValues:
       case DynamicValue.Primitive(PrimitiveValue.Byte(n))      => n
       case DynamicValue.Primitive(PrimitiveValue.Char(c))      => c
       case DynamicValue.Primitive(_: PrimitiveValue.Unit.type) => ()
-      case DynamicValue.Primitive(other)                       => other.toString
-      case variant: DynamicValue.Variant                       => variant.caseName.getOrElse(toAny(variant.value))
-      case seq: DynamicValue.Sequence                          => seq.elements.iterator.map(toAny).toList
-      case rec: DynamicValue.Record                            => rec.fields.iterator.map((k, v) => k -> toAny(v)).toMap
-      case m: DynamicValue.Map                                 => m.entries.iterator.map((k, v) => toAny(k) -> toAny(v)).toMap
-      case _: DynamicValue.Null.type                           => null
+      // A time value, a `UUID`, a `BigInt`, and so on. Thus `renderText` gives the text of the value itself.
+      case primitive @ DynamicValue.Primitive(other) => other.primitiveType.fromDynamicValue(primitive).getOrElse(other)
+      case variant: DynamicValue.Variant             => variant.caseName.getOrElse(toAny(variant.value))
+      case seq: DynamicValue.Sequence                => seq.elements.iterator.map(toAny).toList
+      case rec: DynamicValue.Record                  => rec.fields.iterator.map((k, v) => k -> toAny(v)).toMap
+      case m: DynamicValue.Map                       => m.entries.iterator.map((k, v) => toAny(k) -> toAny(v)).toMap
+      case _: DynamicValue.Null.type                 => null
 
   /** Convenience: `toAny` specialized to a `Record`, returning a `Map[String, Any]`. */
   def recordToMap(rec: DynamicValue.Record): Map[String, Any] =

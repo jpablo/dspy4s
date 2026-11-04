@@ -252,6 +252,16 @@ This means: a model trained in Python DSPy cannot be loaded into
 dspy4s and vice-versa. Training pipelines that need both runtimes
 have to export to a portable format at the integration boundary.
 
+A saved demo has the wire form of section 17, so a prompt shows the same text after a load, with these limits. The reader
+has the rules of `json.loads`:
+
+- A `BigDecimal` with more digits than a float, and `1.50`, have the value of a float after a load.
+- A typed `Some(Some(x))` and a framework type such as `Noul` with `None` keep the typed form, so after a load they show
+  `{"Some": ...}` or `{"None": {}}` in a demo. The typed decode reads the typed value before a save. It rejects these
+  records after a load ("Expected Int"), and only a prompt reads a demo. An RLM variable of a nested `Option` is a dict.
+- A file with a duplicate key loads the last value. The check for a duplicate optimizable id reaches only a record that a
+  caller gives to `loadState`.
+
 ## 8. Utility namespace: `dspy/utils/*` → folded into consumers
 
 **Convention.**
@@ -389,19 +399,16 @@ What genuinely remains:
 - **Multimodal reliability matrix** — out of scope for v1.
 - **Per-token streaming chunks** — see §5; tracked in
   [STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md).
-- **A typed output that is a sealed trait with fields.** The schema shows a `oneOf` with the case name as a key, for
-  example `{"Circle": {"radius": 1}}`. The decode rejects that form with "Expected a variant", in a list and as a direct
-  field. A direct field also has the wire type `string`, so the prompt shows `str`. A case name alone gives "Missing
-  field". A sealed trait with only cases that have no fields is not in this item.
-- **A typed output that is a tuple.** The schema of `(Int, String)` is an array with `prefixItems`. The decode rejects
-  `[1, "a"]` with "Expected a record". Only `{"_1": 1, "_2": "a"}` decodes, and the schema does not show that form.
-- **A typed output that is an `Instant` or a `UUID`.** The schema is a string with the `format` `date-time` or `uuid`,
-  and the wire type is `json`. The JSON adapter rejects the string with "Field could not be parsed as JSON". The decode
-  alone also rejects it, with "Expected Instant" or "Expected UUID".
-- **A `Schema.transform` of a record with an `Option` field, through `Shape.derived`.** The schema lets the model leave
-  out the field, or give a null. The decode rejects each form: an absent field gives "Missing field", and a null or a
-  value gives "Expected a variant". `Signature.derived` does not read such a schema. It derives the record of the class,
-  and that form decodes.
+- **The annotations `@Modifier.rename`, `@Modifier.alias`, `@Modifier.discriminator`, `@Modifier.fieldNaming`, and
+  `@Modifier.caseNaming` on a typed output.** The macro of `Schema.derived` reads them, also for `Signature.derived`. The
+  JSON schema comes from the JSON codec of zio-blocks, so it shows the new name or the discriminator field. The field
+  specs, the encode, and `Schema.fromDynamicValue` know only the original names and the case name as a key. A reply in
+  the form of the schema gets "Missing required fields" for a field name, and "Expected a variant" for a case name and
+  for a discriminator. A reply with the original form decodes. After a rename, the schema does not show that form.
+- **A `Maybe` field.** The schema of a `Maybe[String]` field permits a text and a null, and the field is not in
+  `required`. The decode rejects each form: a null gives "Expected a variant", a text gives "Unknown case", and an absent
+  field gives "Missing required fields". Only `{"Present": {"value": "x"}}` decodes, and the schema does not show that
+  form. The wire type is `union`, and the field is not optional. The law `decode(encode(a)) == Right(a)` stays true.
 
 The non-architectural gaps live in [PORT_BACKLOG.md](PORT_BACKLOG.md);
 the streaming-specific ones in [STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md);
@@ -474,7 +481,10 @@ The port also reads these forms, and upstream rejects them:
 
 - A currency symbol (`$ € £ ¥`) and thousands commas: `$1,200` and `1,200`. A comma that does not separate the
   thousands makes the text no number, so a decimal comma (`3,5`) is an error, not `35`.
-- The null texts of an optional field: `n/a`, `none`, and the empty text. Upstream reads only `None` and `null`.
+- The null texts of an optional field whose type does not read the text: `n/a`, `none`, and the empty text. Upstream
+  reads only `None` and `null` for such a field. An `Option[String]` keeps each text in each format, as upstream keeps it
+  for an `Optional[str]` (`dspy/adapters/utils.py:217-219`). In a typed decode, an enum with a case of that name keeps the
+  case. The adapter reads the text `None` of an optional enum as a null first, as upstream does for an `Optional[K]`.
 - Spaces around a bool word: ` yes `.
 - A whole float text out of the range of a 64-bit integer: `1e19`.
 
@@ -492,6 +502,63 @@ An item of a list type of a string signature has the same rule: `list[int]`, `li
 item with `LenientValues`, and `list[str]` takes only a string. A tuple of any length, for example `tuple[int, ...]`, has
 the rule of its item type. The port has no check for each other item type, for example `Optional[int]`, `dict`, or the
 items of `tuple[int, str]`. Upstream validates each annotation.
+
+**A typed value with a form of its own.** The JSON schema of a typed signature comes from the JSON codec of zio-blocks,
+not from pydantic. A typed value gets its wire form one time, at the boundary from a typed value to a `DynamicValue`
+(`Reflects.wireValue`): `Shape.encode`, `:=`, `withRawValue`, `ToolFunction.result`, and a default value. Thus the JSON
+text of a prompt, a demo, a variable of the RLM sandbox, and the text of a value all have the same form. A saved demo has
+it too, with the limits of section 7. A framework type (`History`, `ToolCall`, and the decision types) stays in its typed
+form, because its readers use `Schema.fromDynamicValue`.
+
+| Type | The wire form | The wire type |
+|---|---|---|
+| A sealed trait with fields | The case name as a key: `{"Circle": {"radius": 1}}`, and `{"Dot": {}}` for a case with no fields. A nested sealed trait keeps its path: `{"Animal": {"Cat": {...}}}`. Upstream writes a union of models, with no key. | `union` |
+| A sealed trait with only cases with no fields | The name of the leaf case. | `string` |
+| A tuple | An array, with `prefixItems` in the schema. | `list` |
+| An `Option` | The element, or a null. An `Option` directly in an `Option` keeps the outer case in the encode, so `Some(None)` is not `None` on the direct path. Its JSON text is a null, which decodes to `None`, and an absent field `x: Option[Option[Int]] = Some(None)` decodes to `None`. | The type of the element |
+| A `Map` | A record with text keys, when each key has a primitive wire form: an enum, a number, a `UUID`, or a text. A tuple key or a record key keeps the map, and it has no JSON text that the decode reads. | `json` |
+| A time value, a `UUID`, or a `Currency` | A text, with a `format` in the schema for some of them. | An opaque type with its type name, for example `Instant` |
+| `BigInt` | A number, with each digit. | `int` |
+| `BigDecimal` | A number. | `BigDecimal` |
+| `Char` | A text with one character. | `string` |
+| A `Schema.transform` | The form of the value behind it. | The type of the value behind it |
+
+The typed decode (`ZioSchemaCodec.normalize`) reads the wire form, and it is lenient in three ways. It reads a bare case
+name for a case with no fields of a sealed trait with fields (`Dot`). It reads the record of a tuple
+(`{"_1": 1, "_2": "a"}`). It reads the flat name of a leaf case of a nested sealed trait (`{"Cat": {...}}`), which is the
+form that the schema shows. Only a nested sealed trait with fields has one form in the schema and another in the JSON
+text of a value, and the decode reads each. A record with the fields `_1` and `_2` that is not a tuple stays an object.
+
+An enum encodes to the name of its leaf case. When two nested leaf cases have one name, the first wins, and the law
+`decode(encode(a)) == Right(a)` does not hold for the second.
+
+Three small limits: a `Unit` field does not decode (its schema is an empty object, and its JSON text is a null), `Double.NaN`
+has a JSON text that `parseJson` rejects, and `enum E { case None; case Some(value: Int) }` counts as an `Option` by its
+structure.
+
+A `BigDecimal` keeps each digit of a text and of a JSON integer. A JSON number with a fraction has the value of a float,
+because the JSON reader has the rules of Python `json.loads`: `1.23456789012345678901` gives `1.2345678901234567`. A text
+in the chat format and a JSON string keep each digit.
+
+A typed demo with a `None` has a null, so it is an incomplete demo, as a demo with a Python `None` is in upstream. An
+input with a `None` shows `None`, as upstream.
+
+`Signature.derived` and the signature macros ignore a custom `Schema`, so only `Shape.derived` reads a
+`Schema.transform`.
+
+The port sends `anyOf` for a sealed trait and `prefixItems` for a tuple in the strict response format, as upstream does for
+a tuple. Each object in `prefixItems` is closed, and upstream does not go into `prefixItems`. The port also sends
+`items: false`, and upstream pydantic does not. No OpenAI server has checked these schemas. After a provider rejects a
+schema there is no fallback, as in upstream ("schema fallback never encloses an LM call").
+
+A tool of `ToolFunction.fromMethod` has an input schema when an argument is not a text, a number, or a bool: such an
+argument has its JSON schema, and each other argument has the schema of its wire type, because a zio-blocks schema of an
+integer also has `minimum` and `maximum`. Upstream `Tool.args` has the pydantic schema of each argument. A recursive type
+has its `$defs` at the root of the input schema, and the text of the tool shows the `$ref`. Upstream expands each `$ref`.
+An enum argument has `enum` and `"type": "string"`, as pydantic writes it. A hand-written tool with a `list` argument has
+`{"items": {}, "type": "array"}`, as upstream has for a `list`. `fromMethod` ignores a default value of a parameter: the
+schema marks the parameter as required, and `invoke` rejects its absence. Upstream (`tool.py:113-114,165`) leaves it out
+of `required`.
 
 ## 18. Sandbox tools and ReActV2 names
 

@@ -26,7 +26,9 @@ import scala.util.matching.Regex
   *   - The texts `true`, `yes`, `on`, `t`, and `y`, and the texts `false`, `no`, `off`, `f`, and `n`, in any case,
   *     become a `Boolean`. The number 1 and a number text with the value 1 are true. The number 0 and a number text
   *     with the value 0 are false. Each other number is no `Boolean`.
-  *   - The texts of [[NullTexts]], in any case, are a null for an optional field.
+  *   - A text with exactly one character becomes a `Char`.
+  *   - The texts of [[NullTexts]], in any case, are a null for an optional field whose type does not read the text as a
+  *     value. An `Option[String]` keeps each text, as upstream keeps it for an `Optional[str]`.
   */
 private[dspy4s] object LenientValues:
 
@@ -77,6 +79,7 @@ private[dspy4s] object LenientValues:
       case _: PrimitiveType.Float      => toFloat(value).map(PrimitiveValue.Float(_))
       case _: PrimitiveType.Double     => toDouble(value).map(PrimitiveValue.Double(_))
       case _: PrimitiveType.BigDecimal => toBigDecimal(value).map(PrimitiveValue.BigDecimal(_))
+      case _: PrimitiveType.Char       => toChar(value).map(PrimitiveValue.Char(_))
       case _                           => None
     coerced.fold(value)(DynamicValue.Primitive(_))
 
@@ -100,6 +103,12 @@ private[dspy4s] object LenientValues:
       else if whole.isValidLong then PrimitiveValue.Long(whole.toLong)
       else PrimitiveValue.BigInt(whole)
     )
+
+  /** A text with exactly one character. The JSON schema of a `Char` is such a string. */
+  private def toChar(value: DynamicValue): Option[Char] =
+    value match
+      case DynamicValue.Primitive(PrimitiveValue.String(s)) if s.length == 1 => s.headOption
+      case _                                                                 => None
 
   /** A `Boolean`, a bool text in any case, or a number or a number text with the value 1 or 0. */
   def toBoolean(value: DynamicValue): Option[Boolean] =

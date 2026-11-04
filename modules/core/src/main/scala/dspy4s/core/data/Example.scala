@@ -1,7 +1,7 @@
 package dspy4s.core.data
 
 import dspy4s.core.collections.Traverse
-import dspy4s.core.contracts.{DspyError, DynamicValues, ValidationError}
+import dspy4s.core.contracts.{DspyError, DynamicValues, Reflects, ValidationError}
 import dspy4s.core.contracts.updated
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
@@ -40,8 +40,8 @@ final case class Example(
   /** Convenience overload for callers passing a Scala value; lifts it via its `Schema`. A value type without a `Schema`
     * is a compile error.
     */
-  def withRawValue[A](key: String, value: A)(using schema: Schema[A]): Example =
-    withValue(key, schema.toDynamicValue(value))
+  def withRawValue[A](key: String, value: A)(using Schema[A]): Example =
+    withValue(key, Reflects.wireOf(value))
 
   def without(keys: Set[String]): Example =
     copy(

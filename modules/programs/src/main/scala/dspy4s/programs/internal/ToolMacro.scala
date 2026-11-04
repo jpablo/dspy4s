@@ -1,6 +1,6 @@
 package dspy4s.programs.internal
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, NotFoundError, RuntimeContext, ValidationError}
+import dspy4s.core.contracts.{:=, DspyError, DynamicValues, NotFoundError, RuntimeContext, ValidationError}
 import dspy4s.core.contracts.TypeRef as DspyTypeRef
 import dspy4s.programs.contracts.{ToolFunction, description}
 import dspy4s.signatures.SchemaInterop
@@ -8,6 +8,11 @@ import dspy4s.signatures.internal.MethodResolution
 import zio.blocks.schema.{DynamicValue, Schema}
 
 import scala.quoted.*
+
+/** One parameter of a method of [[dspy4s.programs.contracts.ToolFunction.fromMethod]]: its name, its wire type, and its
+  * JSON schema when its wire type does not say its form ([[SchemaInterop.argumentSchema]]).
+  */
+final case class ToolArg(name: String, typeRef: DspyTypeRef, schema: Option[DynamicValue.Record])
 
 /** Runtime support for [[dspy4s.programs.contracts.ToolFunction.fromMethod]]: decode one named argument from the tool's
   * call record, coercing LM-shaped values (string primitives → the field's type) the same way the `Predict` path does.
@@ -18,6 +23,41 @@ object ToolArgs:
       case Some(dv) =>
         SchemaInterop.decodeValue[A](dv).left.map(err => ValidationError(s"tool argument '$name': ${err.message}"))
       case None => Left(NotFoundError("tool_argument", s"missing required tool argument '$name'"))
+
+  def arg[A](name: String)(using Schema[A]): ToolArg =
+    ToolArg(name, SchemaInterop.typeRef[A], SchemaInterop.argumentSchema[A])
+
+  /** The object schema of the arguments of a tool (upstream `Tool._parse_function` gives the JSON schema of each
+    * annotation), when an argument has a JSON schema of its own. A text, a number, and a bool keep the schema of their
+    * wire type ([[ToolText.argument]]). The definitions of a recursive type go to the root of the schema, because each
+    * `$ref` is a path from the root, and the first definition of each name stays. `None` when each argument is a text,
+    * a number, or a bool.
+    */
+  def inputSchema(args: Vector[ToolArg]): Option[DynamicValue.Record] =
+    Option.when(args.exists(_.schema.isDefined)) {
+      val properties = args.map { arg =>
+        arg.name -> arg.schema.fold(ToolText.argument(arg.typeRef))(DynamicValues.recordFilterKeys(_, _ != Definitions))
+      }
+      val definitions = args.flatMap(_.schema).flatMap(schema =>
+        DynamicValues.recordGet(
+          schema,
+          Definitions
+        ).flatMap(DynamicValues.asRecord).fold(Vector.empty)(DynamicValues.recordEntries)
+      ).distinctBy(_._1)
+      val root = DynamicValues.record(
+        "type"       := "object",
+        "properties" -> DynamicValues.recordFromEntries(properties),
+        "required"   -> DynamicValues.sequence(args.map(arg => DynamicValues.string(arg.name)))
+      )
+      if definitions.isEmpty then root
+      else
+        DynamicValues.mergeRecords(
+          root,
+          DynamicValues.record(Definitions -> DynamicValues.recordFromEntries(definitions))
+        )
+    }
+
+  private val Definitions: String = "$defs"
 
 object ToolMacro:
 
@@ -55,14 +95,14 @@ object ToolMacro:
 
     val returnType: TypeRepr = defdef.returnTpt.tpe
 
-    // argSchema: Vector[(name, TypeRef)]
-    val argSchemaExprs: List[Expr[(String, DspyTypeRef)]] = params.map { (name, tpe) =>
+    // The wire type and the JSON schema of each parameter.
+    val argExprs: List[Expr[ToolArg]] = params.map { (name, tpe) =>
       tpe.asType match
         case '[t] =>
           val s = Expr.summon[Schema[t]].getOrElse(report.errorAndAbort(s"No Schema for '$name: ${tpe.show}'"))
-          '{ (${ Expr(name) }, SchemaInterop.typeRef[t](using $s)) }
+          '{ ToolArgs.arg[t](${ Expr(name) })(using $s) }
     }
-    val argSchemaExpr: Expr[Vector[(String, DspyTypeRef)]] = '{ Vector(${ Varargs(argSchemaExprs) }*) }
+    val argsExpr: Expr[Vector[ToolArg]] = '{ Vector(${ Varargs(argExprs) }*) }
 
     // invoke body: decode each arg, apply the method, lift the result via its Schema
     def buildBody(record: Expr[DynamicValue.Record], remaining: List[(String, TypeRepr)], decoded: List[Term])
@@ -87,10 +127,12 @@ object ToolMacro:
               }
 
     '{
+      val args = $argsExpr
       new ToolFunction:
         override val name: String                                                                             = ${ Expr(toolName) }
         override val description: String                                                                      = ${ Expr(toolDesc) }
-        override val argSchema: Vector[(String, DspyTypeRef)]                                                 = $argSchemaExpr
+        override val argSchema: Vector[(String, DspyTypeRef)]                                                 = args.map(arg => arg.name -> arg.typeRef)
+        override lazy val inputSchema: Option[DynamicValue.Record]                                            = ToolArgs.inputSchema(args)
         override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
           ${ buildBody('args, params, Nil) }
     }

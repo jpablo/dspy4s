@@ -1,13 +1,46 @@
 package dspy4s.programs
 
+import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.{CodeInterpreter, CodeResult, DspyError, DynamicValues, RuntimeContext, TypeRef}
-import dspy4s.core.runtime.{DenoPyodideInterpreter, LocalPythonInterpreter}
+import dspy4s.core.contracts.{
+  CodeInterpreter,
+  CodeResult,
+  DspyError,
+  DynamicValues,
+  ReplInterpreterFactory,
+  RuntimeContext,
+  TypeRef
+}
+import dspy4s.core.runtime.{DenoPyodideInterpreter, LocalPythonInterpreter, RuntimeEnvironment}
+import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse}
 import dspy4s.programs.contracts.ToolFunction
-import dspy4s.programs.strategies.RLMSandboxTools
+import dspy4s.programs.strategies.{RLM, RLMSandboxTools}
+import dspy4s.signatures.Signature
 import munit.FunSuite
+import zio.blocks.schema.Schema
+
+import java.time.Instant
+import scala.collection.mutable.ArrayBuffer
 
 import scala.util.control.NonFatal
+
+enum RstKind:
+  case alpha, beta
+object RstKind:
+  given Schema[RstKind] = Schema.derived
+
+final case class RstInput(
+    pair  : (Int, String),
+    kind  : RstKind,
+    some  : Option[String],
+    none  : Option[String],
+    at    : Instant,
+    counts: Map[RstKind, Int]
+)
+object RstInput:
+  given Schema[RstInput] = Schema.derived
+
+final case class RstOutput(answer: String) derives Schema
 
 /** A tool with a JSON schema in the two sandboxes of `RLM`. Each test runs real Python, and skips when the sandbox is
   * not installed. A tool gives back the JSON text of its arguments, so a test sees what the host gets.
@@ -17,6 +50,57 @@ class RLMSandboxToolsSuite extends FunSuite:
   override def munitTimeout: scala.concurrent.duration.Duration = scala.concurrent.duration.Duration(180, "s")
 
   private given RuntimeContext = RuntimeContext()
+
+  /** The Python code that gives the Python type and the value of each input of [[RstInput]]. */
+  private val typesCode: String = """import json
+      |SUBMIT(answer=json.dumps([type(pair).__name__, pair, type(kind).__name__, kind, type(some).__name__, some,
+      |  type(none).__name__, none, type(at).__name__, at, type(counts).__name__, counts]))""".stripMargin
+
+  private final class ScriptedCode extends LanguageModel:
+    override val id: String              = "scripted"
+    override val mode: LmMode            = LmMode.Chat
+    val requests: ArrayBuffer[LmRequest] = ArrayBuffer.empty
+
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+      requests += request
+      val reply = s"[[ ## reasoning ## ]]\nr\n\n[[ ## code ## ]]\n$typesCode\n\n[[ ## completed ## ]]"
+      Right(LmResponse(outputs = Vector(LmOutput(text = reply))))
+
+  /** The real sandbox of `factory` gets a typed input in the wire form, and the preview says the same type. */
+  private def assertTypedInput(factory: ReplInterpreterFactory): Unit =
+    val signature = Signature.derived[RstInput, RstOutput](name = "Typed", instructions = "Give the types.")
+    val rlm       = RLM(baseSignature = signature, interpreterFactory = Some(factory))
+    val model     = new ScriptedCode
+    val input     =
+      RstInput((1, "a"), RstKind.beta, Some("x"), None, Instant.parse("2024-01-02T03:04:05Z"), Map(RstKind.beta -> 1))
+    val result = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(model), adapter = Some(ChatAdapter()))) {
+      rlm(input)(using RuntimeEnvironment.current)
+    }
+    assertEquals(
+      result.map(_.output.answer),
+      Right(
+        """["list", [1, "a"], "str", "beta", "str", "x", "NoneType", null, "str", "2024-01-02T03:04:05Z", """ +
+          """"dict", {"beta": 1}]"""
+      )
+    )
+    val prompt = model.requests.head.messages.flatMap(_.text).mkString("\n")
+    // The prompt shows each variable as a blob of a numbered list, so each line after the first has an indent.
+    assert(prompt.contains("Variable: `pair` (access it in your code)\n    Type: list"), prompt)
+    assert(prompt.contains("Variable: `kind` (access it in your code)\n    Type: str"), prompt)
+    assert(prompt.contains("Variable: `some` (access it in your code)\n    Type: str"), prompt)
+    assert(prompt.contains("Variable: `none` (access it in your code)\n    Type: NoneType"), prompt)
+    assert(prompt.contains("Variable: `at` (access it in your code)\n    Type: str"), prompt)
+    assert(prompt.contains("Variable: `counts` (access it in your code)\n    Type: dict"), prompt)
+
+  test("Local: a typed input reaches the sandbox in the form that the preview shows") {
+    assume(pythonAvailable, "python3 not installed")
+    assertTypedInput((tools, outputs) => new LocalPythonInterpreter(tools = tools, outputFields = Some(outputs)))
+  }
+
+  test("Deno: a typed input reaches the sandbox in the form that the preview shows") {
+    assume(denoAvailable, "deno not installed")
+    assertTypedInput((tools, outputs) => new DenoPyodideInterpreter(tools = tools, outputFields = outputs))
+  }
 
   private lazy val denoAvailable: Boolean = commandWorks("deno", "--version")
 

@@ -54,8 +54,9 @@ object ToolCall:
     */
   def fromRecord(record: DynamicValue.Record): Option[ToolCall] =
     def get(from: DynamicValue.Record, key: String): Option[DynamicValue] = DynamicValues.recordGet(from, key)
-    def text(from: DynamicValue.Record, key: String): Option[String]      =
-      get(from, key).flatMap(DynamicValues.asString).filter(_.nonEmpty)
+    // A `ToolCall` that a schema lifted keeps its typed form, so its id is in a typed `Some`.
+    def text(from: DynamicValue.Record, key: String): Option[String] =
+      get(from, key).map(PythonText.unwrap).flatMap(DynamicValues.asString).filter(_.nonEmpty)
     val function  = get(record, "function").collect { case nested: DynamicValue.Record => nested }
     val name      = function.flatMap(text(_, "name")).orElse(text(record, "name"))
     val arguments = function.flatMap(get(_, "arguments")).orElse(get(record, "args")).orElse(get(record, "arguments"))

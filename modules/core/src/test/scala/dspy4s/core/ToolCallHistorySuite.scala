@@ -26,6 +26,11 @@ class ToolCallHistorySuite extends FunSuite:
     assertEquals(roundTrip(search.copy(id = None)), Right(search.copy(id = None)))
   }
 
+  test("a tool call lifted with its schema keeps its id in its typed form, and the reader finds the id") {
+    val lifted = ("tool_calls" := Vector(search, search.copy(id = None)))._2
+    assertEquals(ToolCall.fromDynamic(lifted), Some(Vector(search, search.copy(id = None))))
+  }
+
   test("a tool call has a record form, with the id only when the call has one") {
     val args = DynamicValues.record("query" := "cats")
     assertEquals(search.toRecord, DynamicValues.record("id" := "call_1", "name" := "search", "args" -> args))
