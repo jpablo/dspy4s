@@ -27,6 +27,25 @@ class OpenAiStreamChunkSuite extends FunSuite:
     )
   }
 
+  test("the typed codec reads the reasoning keys of a delta: a null is no value, and an empty text stays a text") {
+    val delta =
+      decode("""{"choices":[{"delta":{"reasoning_content":null,"reasoning":"two"}}]}""").choices.flatMap(_.delta)
+    assertEquals(delta.map(d => (d.reasoningContent, d.reasoning)), Vector((None, Some("two"))))
+    val empty =
+      decode("""{"choices":[{"delta":{"reasoning_content":"","reasoning":"two"}}]}""").choices.flatMap(_.delta)
+    assertEquals(empty.map(d => (d.reasoningContent, d.reasoning)), Vector((Some(""), Some("two"))))
+    assertEquals(empty.map(_.reasoningText), Vector("two"))
+  }
+
+  test("a reasoning value that is not a text fails the typed codec, and the lenient reader drops only that value") {
+    // The lenient reader keeps only the first choice. Thus one choice here shows that the typed codec rejected the text.
+    val chunk =
+      decode("""{"choices":[{"delta":{"content":"a","reasoning":{"effort":"low"}}},{"delta":{"content":"b"}}]}""")
+    assertEquals(chunk.choices.size, 1)
+    assertEquals(chunk.toLmChunk.text, "a")
+    assertEquals(chunk.toLmChunk.reasoning, "")
+  }
+
   test("decodes tool-call deltas with index fallback and partial function fragments") {
     val calls = decode(
       """{"choices":[{"delta":{"tool_calls":[{"id":"call_1","function":{"name":"get_weather","arguments":""}},{"function":{"arguments":"{\"q\":1}"}}]}}]}"""

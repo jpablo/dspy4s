@@ -116,7 +116,8 @@ private[lm] object ChatWire:
     * `_process_completion`). A choice with an empty, a null, or a blank text gives an output with an empty text, so the
     * later choices keep their places. A function-calling reply usually has `content: null` and only a `tool_calls`
     * array, and its output has an empty text and the tool calls. The adapter call decides what an empty text means
-    * (`AdapterCall.run`). The metadata of an output has the keys of its choice other than `message` and `text`.
+    * (`AdapterCall.run`). The reasoning of an output is the reasoning of its message ([[reasoning]]). The metadata of
+    * an output has the keys of its choice other than `message` and `text`.
     *
     * A reply with an `error` object is the error of [[OpenAiErrors.fromReplyError]], also with a success status
     * (upstream `_response_from_chat_body`).
@@ -131,17 +132,30 @@ private[lm] object ChatWire:
     seqField(raw, WireKeys.choices).map { choices =>
       choices.map { choice =>
         val rec             = asRecord(choice)
-        val textFromMessage = rec.flatMap(r => recordGet(r, WireKeys.message)).flatMap(extractText)
+        val message         = rec.flatMap(r => recordGet(r, WireKeys.message))
+        val textFromMessage = message.flatMap(extractText)
         val textFromChoice  = rec.flatMap(r => recordGet(r, WireKeys.text)).flatMap(asString)
         val text            = textFromMessage.orElse(textFromChoice).map(_.trim).getOrElse("")
-        val toolCalls       =
-          rec.flatMap(r => recordGet(r, WireKeys.message)).flatMap(asRecord).map(parseToolCalls).getOrElse(Vector.empty)
-        val metadata = rec
+        val toolCalls       = message.flatMap(asRecord).map(parseToolCalls).getOrElse(Vector.empty)
+        val metadata        = rec
           .map(r => DynamicValues.recordFilterKeys(r, k => k != WireKeys.message && k != WireKeys.text))
           .getOrElse(DynamicValue.Record.empty)
-        LmOutput(text = text, toolCalls = toolCalls, metadata = metadata)
+        LmOutput(text = text, toolCalls = toolCalls, reasoning = messageReasoning(message), metadata = metadata)
       }
     }
+
+  /** The reasoning of a chat message or of a delta of a chat stream, from the values of its keys `reasoning_content`
+    * and `reasoning`: the first value that is not empty, else the empty text. A value keeps its white space. Upstream
+    * reads the two keys of a message and of a delta (`dspy/_vendor/lm15/providers/openai_chat.py:977` and `:2085`), and
+    * it also takes a value that is not a text. See PORT_DIFFERENCES section 27.
+    */
+  private[providers] def reasoning(reasoningContent: Option[String], other: Option[String]): String =
+    reasoningContent.filter(_.nonEmpty).orElse(other.filter(_.nonEmpty)).getOrElse("")
+
+  /** The [[reasoning]] of a message. A value that is not a text is no reasoning. */
+  private def messageReasoning(message: Option[DynamicValue]): String =
+    def text(key: String): Option[String] = message.flatMap(recordGet(_, key)).flatMap(asString)
+    reasoning(text(WireKeys.reasoningContent), text(WireKeys.reasoning))
 
   /** The outputs of a reply in the text mode: the top-level `text`, else the outputs of the choices ([[outputs]]). A
     * reply with a blank top-level `text` and no choices gives one output with an empty text. A reply with an `error`

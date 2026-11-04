@@ -119,6 +119,12 @@ object OutputAugmentation:
     * output of `base` has no static fields (the `DynamicValue.Record` output of `Signature.fromStringDynamic`), the
     * decode gives a `ValidationError`. `signatureName` names the signature in the errors.
     *
+    * The type-level [[WithField]] compares the names in the code, and this shape and the layout compare the wire names.
+    * For a base field `@Modifier.rename("why") reasoning`, the type has no new field, and the layout and this shape
+    * have `reasoning` and `why`: the output `reasoning` has the value of `why`. For a base field
+    * `@Modifier.rename("reasoning") why`, the type has a new field, and the layout and this shape have one field: the
+    * two outputs have its value.
+    *
     * The JSON schema is the schema of `base` with the property of `field` first, in the order of the layout (upstream
     * builds the schema from the augmented signature). The name of `field` is first in `required` when the layout
     * requires the field. The JSON adapter sends this schema as a strict `response_format`. If the schema does not have

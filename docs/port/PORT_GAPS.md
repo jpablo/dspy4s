@@ -1182,8 +1182,9 @@ the usage of a call is the total of its attempts, also for a failure; see `Faile
 ## G-26 — LM request surface: strict schema, capabilities, Responses endpoint, reasoning models, timeouts
 
 **Status:** In progress. The strict schema (2026-10-14, batch 12), the timeouts (batch 17), the Responses shapes
-(batch 20), `close` (batch 22), and the capabilities (2026-10-18, batch 23) are resolved; the reasoning-model
-parameters are open. · **Verification:** C (strict flag), R (others) · **Upgrade items:** L4 to L8
+(batch 20), `close` (batch 22), the capabilities (2026-10-18, batch 23), and the reasoning of a chat reply (2026-11-04)
+are resolved; the reasoning-model parameters are open. · **Verification:** C (strict flag), R (others) · **Upgrade
+items:** L4 to L8
 
 **Upstream.** `strict: true` with a schema shaped for strict mode (`dspy/clients/legacy_requests.py:13-48`,
 `execution.py:176-183`). Capabilities are data, declared for each server (`dspy/clients/capabilities.py:22-27`,
@@ -1198,7 +1199,8 @@ parameters are open. · **Verification:** C (strict flag), R (others) · **Upgra
 - `LmMode` selects no endpoint and no body (`modules/lm/.../runtime/ProviderLanguageModel.scala:48-53`). Responses
   `function_call` and `reasoning` items are not parsed.
 - No mapping to `max_completion_tokens` and no temperature rule for OpenAI reasoning models.
-- Nothing reads `supportsReasoning`, and the `message` is dropped from the metadata (`ProviderLanguageModel.scala:110-112`).
+- Nothing reads `supportsReasoning`. The `message` is dropped from the metadata, with its `reasoning_content`
+  (`ProviderLanguageModel.scala:110-112`). The reasoning of a chat reply has a resolution below.
 - One 60 s value covers connect and request, and a stream has no idle limit
   (`modules/lm/.../providers/HttpTransport.scala:28`, `JdkHttpTransport.scala:17,64`).
 - No custom headers and no `User-Agent` (`OpenAiClient.scala:19-21`). The transport has no `close`.
@@ -1226,6 +1228,12 @@ stream events.
 `Capabilities`), and an undeclared capability is `false`. `OpenAiLanguageModel` has the OpenAI capabilities at the
 official address only (`LmCapabilities.forBaseUrl`); an other server has none until the user declares them in the
 `capabilities` field (decision L5, 2026-10-18). Test: `LmCapabilitiesSuite`.
+
+**Resolution (reasoning of a chat reply, 2026-11-04).** `ChatWire` and `OpenAiStreamChunk` fill `LmOutput.reasoning`
+and `LmChunk.reasoning` with `reasoning_content`, else `reasoning`, with the same rule in the plain path and in the
+stream. A value that is not a text is no reasoning. The output of a history entry has the key `reasoning_content` when
+the reasoning is not empty. Nothing reads `supportsReasoning` still: the wires read the reasoning of each reply. Tests:
+`ChatReasoningSuite`, `LmHistoryEntrySuite`, `ManagedStreamSuite`, `StreamingFallbackSuite`.
 
 **Direction (open).** Reasoning-model parameters and custom headers remain. `close` is resolved in batch 22
 (`CloseLifecycleSuite`).

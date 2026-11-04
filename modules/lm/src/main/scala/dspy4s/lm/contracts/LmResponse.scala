@@ -9,8 +9,8 @@ import zio.blocks.schema.DynamicValue
   *   the text of the output. An output with no text has the empty text, for example a reply with only tool calls or
   *   only reasoning, or a reply with an empty, a null, or a blank content.
   * @param reasoning
-  *   the reasoning text of the output (upstream `reasoning_content`), else an empty text. The Responses wire and the
-  *   assembly of a stream fill it.
+  *   the reasoning text of the output (upstream `reasoning_content`), else an empty text. The chat wire, the Responses
+  *   wire, and the assembly of a stream fill it.
   * @param citations
   *   the citations of the output, in order (upstream `citations`). The Responses wire and the assembly of a stream fill
   *   it. The Responses wire gives each citation the form `{"type": "citation", "text", "title", "url", "metadata"}`,

@@ -250,7 +250,7 @@ object Signature:
     *
     * Output rules:
     *   - named tuple returns keep their names, e.g. `(sentiment: Emotion)`
-    *   - case-class / product returns keep their product field names
+    *   - case-class / product returns keep the wire names of their product fields (`Modifier.rename`, `fieldNaming`)
     *   - scalar returns, decision types (`Noul`, `Score`, `Choice`), and `History` become a single output field named
     *     `result`
     *

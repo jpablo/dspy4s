@@ -68,8 +68,11 @@ final case class Predict[I, O](
 
   private[programs] def baseSignature: Signature[I, O] = signature
 
-  // The declared input names, computed once: `forward` checks them on every call.
-  private val requiredInputs: Set[String] = signature.layout.inputFields.iterator.map(_.name).toSet
+  // The names of the inputs with no default that are not optional, computed once: `forward` checks them on every call.
+  // These are wire names. An adapter gives an absent input with a default its default (`AdapterTextSupport.withInputDefaults`).
+  private val requiredInputs: Set[String] = signature.layout.inputFields.iterator.filterNot(field =>
+    field.optional || field.defaultValue.isDefined
+  ).map(_.name).toSet
 
   // The same engine `DynamicPredict` builds; `Predict` adds only the encode/decode around it.
   private val engine = PredictEngine(
@@ -104,8 +107,8 @@ final case class Predict[I, O](
     val inputRecord = call.encodedInput(signature.inputShape)
     // Defensive: shape implementations that don't statically guarantee full coverage of declared input fields
     // (notably the Map-based shape used by trait specs) could let a caller silently omit a required input.
-    // Validate before spending an LM call. Case-class derivations always produce a complete record, so the
-    // check never fires for them; cost is one Set.diff per call.
+    // Validate before spending an LM call. A case-class derivation gives a complete record, except for a field with
+    // `Modifier.encodeTransient`, so the check fires only for such a field with no default; cost is one Set.diff per call.
     val presentInputs = DynamicValues.recordKeys(inputRecord).toSet
     val missing       = requiredInputs.diff(presentInputs)
     if missing.nonEmpty then

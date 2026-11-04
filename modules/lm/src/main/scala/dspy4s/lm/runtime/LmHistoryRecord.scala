@@ -35,8 +35,8 @@ import java.util.UUID
   *   - `decision`: for a decision request, `{"state", "questions"}` of its payload ([[LmRequest.decision]]). Upstream
   *     `TypeSafe._finish` in `dspy/clients/typesafe.py` keeps them under `request` and `prompt`. A request with no
   *     payload has no such key;
-  *   - `outputs`: one object for each output, with `text` and `tool_calls`. The text of a decision reply is the JSON
-  *     text of its answers (upstream `outputs`);
+  *   - `outputs`: one object for each output, with `text` and `tool_calls`, and `reasoning_content` when the output has
+  *     reasoning. The text of a decision reply is the JSON text of its answers (upstream `outputs`);
   *   - `usage`: `prompt_tokens`, `completion_tokens`, `total_tokens`, then each extra under its wire name, or `null`;
   *   - `cost`: the estimated cost in US dollars, or `null` when the estimate is unknown (decision L10);
   *   - `cost_details`: `{"kind": "estimate", "currency": "USD", "model", "source": "declared"}` for an estimate, else
@@ -120,7 +120,10 @@ object LmHistoryRecord:
     DynamicValues.record("kind" := value.kind, "payload" := value.payload)
 
   private def output(value: LmOutput): DynamicValue =
-    DynamicValues.record("text" := value.text, "tool_calls" -> toolCalls(value.toolCalls))
+    DynamicValues.recordFromEntries(
+      Vector[(String, DynamicValue)]("text" := value.text, "tool_calls" -> toolCalls(value.toolCalls))
+        ++ Option.when(value.reasoning.nonEmpty)("reasoning_content" := value.reasoning)
+    )
 
   private def toolCalls(calls: Vector[ToolCall]): DynamicValue =
     DynamicValues.sequence(calls.map(_.toRecord))

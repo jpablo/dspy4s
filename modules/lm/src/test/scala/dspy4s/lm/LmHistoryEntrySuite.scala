@@ -232,6 +232,33 @@ class LmHistoryEntrySuite extends FunSuite:
     }
   }
 
+  test("an output of an entry has reasoning_content only when its reasoning is not empty") {
+    given RuntimeContext = RuntimeEnvironment.current
+    val reasoned         = LmResponse(outputs = Vector(LmOutput(text = "a", reasoning = "  why\n"), LmOutput(text = "b")))
+    assert(ManagedLanguageModel(delegate = Fixed(Right(reasoned))).call(request).isRight)
+    assertEquals(
+      value(lmEntries.lastOption.getOrElse(fail("no LM entry")), "outputs"),
+      Vector(
+        Map("text" -> "a", "tool_calls" -> Vector.empty, "reasoning_content" -> "  why\n"),
+        Map("text" -> "b", "tool_calls" -> Vector.empty)
+      )
+    )
+  }
+
+  test("the output of the entry of a streamed call has the joined reasoning") {
+    given RuntimeContext = RuntimeEnvironment.current
+    val chunks           = Vector(
+      LmChunk(reasoning = "why "),
+      LmChunk(reasoning = "so"),
+      LmChunk(text = "a", finishReason = Some("stop"))
+    )
+    val _ = ManagedLanguageModel(delegate = Streams(chunks)).stream(request).toVector
+    assertEquals(
+      value(lmEntries.lastOption.getOrElse(fail("no LM entry")), "outputs"),
+      Vector(Map("text" -> "a", "tool_calls" -> Vector.empty, "reasoning_content" -> "why so"))
+    )
+  }
+
   test("the entry of a streamed call has the assembled outputs and the usage of the chunks") {
     given RuntimeContext = RuntimeEnvironment.current
     val chunks           = Vector(

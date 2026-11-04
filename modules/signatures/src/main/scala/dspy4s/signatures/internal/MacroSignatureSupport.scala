@@ -2,7 +2,7 @@ package dspy4s.signatures.internal
 
 import dspy4s.core.contracts.TypeMarker
 import dspy4s.signatures.{Shape, Signature}
-import zio.blocks.schema.Modifier
+import zio.blocks.schema.{Modifier, NameMapper}
 
 import scala.deriving.Mirror
 import scala.quoted.*
@@ -36,7 +36,7 @@ private[signatures] object MacroSignatureSupport:
     *
     * The return type gives the outputs:
     *   - a named tuple keeps its names, and a tuple gets the names `_1`, `_2`, and so on
-    *   - a case class or another product keeps the names of its fields
+    *   - a case class or another product keeps the wire names of its fields ([[wireFieldNames]])
     *   - a single-value type (see [[isSingleValue]]) and each type that is not a product become one output field with
     *     the name `result`
     */
@@ -59,10 +59,27 @@ private[signatures] object MacroSignatureSupport:
       case None        =>
         val isProduct = returnType.asType match
           case '[o] => Expr.summon[Mirror.ProductOf[o]].isDefined
-        if isProduct && !isSingleValue(returnType) then (returnType, returnType.typeSymbol.caseFields.map(_.name))
+        if isProduct && !isSingleValue(returnType) then (returnType, wireFieldNames(returnType))
         else (namedTupleType(List("result" -> returnType)), List("result"))
     requireUniqueNames(owner, inputs.map(_._1), outputNames)
     signatureExpr(nameExpr, instructionsExpr, namedTupleType(inputs), outputType)
+
+  /** The wire names of the fields of the case class `tpe`, with the rule of `Reflects.fieldWireName`, and with no
+    * transient field: the check of the names compares what the layout has at run time.
+    */
+  private def wireFieldNames(using quotes: Quotes)(tpe: quotes.reflect.TypeRepr): List[String] =
+    import quotes.reflect.*
+    def argument(annotations: List[Term], annotation: TypeRepr): Option[String] =
+      annotations.filter(_.tpe <:< annotation).collectFirst { case Apply(_, List(value)) =>
+        constantText(value)
+      }.flatten
+    val symbol = tpe.dealias.typeSymbol
+    val naming = argument(symbol.annotations, TypeRepr.of[Modifier.fieldNaming]).map(NameMapper.fromString)
+    symbol.caseFields
+      .filterNot(_.annotations.exists(_.tpe <:< TypeRepr.of[Modifier.transient]))
+      .map(field =>
+        argument(field.annotations, TypeRepr.of[Modifier.rename]).getOrElse(naming.fold(field.name)(_(field.name)))
+      )
 
   /** True for a case class that the framework reads as one value, not as a record of fields: a type whose marker
     * ([[TypeMarker]]) is in [[TypeMarker.singleValue]], for example `Noul`, `Score`, `Choice`, or `History`. The macro
@@ -75,15 +92,21 @@ private[signatures] object MacroSignatureSupport:
   /** The marker of the type `tpe`: the value of its `Modifier.config` annotation with the key [[TypeMarker.Key]]. */
   private def markerOf(using quotes: Quotes)(tpe: quotes.reflect.TypeRepr): Option[String] =
     import quotes.reflect.*
-    // An annotation argument is a literal, or a reference to a constant: its type is then a constant type.
-    def text(argument: Term): Option[String] =
-      argument.tpe.widenTermRefByName match
-        case ConstantType(StringConstant(value)) => Some(value)
-        case _                                   => None
     tpe.dealias.typeSymbol.annotations
       .filter(_.tpe <:< TypeRepr.of[Modifier.config])
-      .collectFirst { case Apply(_, List(key, value)) if text(key).contains(TypeMarker.Key) => text(value) }
+      .collectFirst {
+        case Apply(_, List(key, value)) if constantText(key).contains(TypeMarker.Key) => constantText(value)
+      }
       .flatten
+
+  /** The text of the annotation argument `argument`: a literal, or a reference to a constant, whose type is then a
+    * constant type.
+    */
+  private def constantText(using quotes: Quotes)(argument: quotes.reflect.Term): Option[String] =
+    import quotes.reflect.*
+    argument.tpe.widenTermRefByName match
+      case ConstantType(StringConstant(value)) => Some(value)
+      case _                                   => None
 
   /** Stop the compilation when two field names are the same: two inputs, two outputs, or an input and an output.
     * `owner` names the declaration in the compile error.

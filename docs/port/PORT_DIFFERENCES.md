@@ -399,16 +399,6 @@ What genuinely remains:
 - **Multimodal reliability matrix** — out of scope for v1.
 - **Per-token streaming chunks** — see §5; tracked in
   [STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md).
-- **The annotations `@Modifier.rename`, `@Modifier.alias`, `@Modifier.discriminator`, `@Modifier.fieldNaming`, and
-  `@Modifier.caseNaming` on a typed output.** The macro of `Schema.derived` reads them, also for `Signature.derived`. The
-  JSON schema comes from the JSON codec of zio-blocks, so it shows the new name or the discriminator field. The field
-  specs, the encode, and `Schema.fromDynamicValue` know only the original names and the case name as a key. A reply in
-  the form of the schema gets "Missing required fields" for a field name, and "Expected a variant" for a case name and
-  for a discriminator. A reply with the original form decodes. After a rename, the schema does not show that form.
-- **A `Maybe` field.** The schema of a `Maybe[String]` field permits a text and a null, and the field is not in
-  `required`. The decode rejects each form: a null gives "Expected a variant", a text gives "Unknown case", and an absent
-  field gives "Missing required fields". Only `{"Present": {"value": "x"}}` decodes, and the schema does not show that
-  form. The wire type is `union`, and the field is not optional. The law `decode(encode(a)) == Right(a)` stays true.
 
 The non-architectural gaps live in [PORT_BACKLOG.md](PORT_BACKLOG.md);
 the streaming-specific ones in [STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md);
@@ -513,9 +503,10 @@ form, because its readers use `Schema.fromDynamicValue`.
 | Type | The wire form | The wire type |
 |---|---|---|
 | A sealed trait with fields | The case name as a key: `{"Circle": {"radius": 1}}`, and `{"Dot": {}}` for a case with no fields. A nested sealed trait keeps its path: `{"Animal": {"Cat": {...}}}`. Upstream writes a union of models, with no key. | `union` |
+| A sealed trait with a discriminator | A flat record: `{"kind": "Circle", "radius": 1}`, and `{"kind": "Dot"}` for a case with no fields. A leaf of a nested sealed trait has its flat name. | `union` |
 | A sealed trait with only cases with no fields | The name of the leaf case. | `string` |
 | A tuple | An array, with `prefixItems` in the schema. | `list` |
-| An `Option` | The element, or a null. An `Option` directly in an `Option` keeps the outer case in the encode, so `Some(None)` is not `None` on the direct path. Its JSON text is a null, which decodes to `None`, and an absent field `x: Option[Option[Int]] = Some(None)` decodes to `None`. | The type of the element |
+| An `Option` or a `Maybe` | The element, or a null. An `Option` directly in an `Option` keeps the outer case in the encode, so `Some(None)` is not `None` on the direct path. Its JSON text is a null, which decodes to `None`, and an absent field `x: Option[Option[Int]] = Some(None)` decodes to `None`. | The type of the element |
 | A `Map` | A record with text keys, when each key has a primitive wire form: an enum, a number, a `UUID`, or a text. A tuple key or a record key keeps the map, and it has no JSON text that the decode reads. | `json` |
 | A time value, a `UUID`, or a `Currency` | A text, with a `format` in the schema for some of them. | An opaque type with its type name, for example `Instant` |
 | `BigInt` | A number, with each digit. | `int` |
@@ -532,9 +523,57 @@ text of a value, and the decode reads each. A record with the fields `_1` and `_
 An enum encodes to the name of its leaf case. When two nested leaf cases have one name, the first wins, and the law
 `decode(encode(a)) == Right(a)` does not hold for the second.
 
-Three small limits: a `Unit` field does not decode (its schema is an empty object, and its JSON text is a null), `Double.NaN`
-has a JSON text that `parseJson` rejects, and `enum E { case None; case Some(value: Int) }` counts as an `Option` by its
-structure.
+Two small limits: a `Unit` field does not decode (its schema is an empty object, and its JSON text is a null), and
+`Double.NaN` has a JSON text that `parseJson` rejects. The type id finds an `Option` and a `Maybe`, as in the codec, so
+`enum E { case None; case Some(value: Int) }` is no `Option`, also with a rename.
+
+**An annotation of zio-blocks.** The JSON schema comes from the JSON codec, so an annotation changes what the schema shows.
+The name rules of that codec are in `Reflects`, and the field specs, the wire form, and the decode use only these rules.
+`FieldSpec.name` is the wire name, so the prompt, the parsers, and the settings of a decision output use it. The typed
+value keeps the name in the code.
+
+| Annotation | The rule |
+|---|---|
+| `rename` | The name on the wire, for a field and for a case. It wins over a naming strategy. |
+| `alias` | One more name that the decode reads. The schema does not show it, as upstream pydantic shows one name, and because the form of the codec (`allOf` with `oneOf` of `not` schemas) breaks the strict shape. |
+| `fieldNaming` | A naming strategy for each field of that record. An unknown strategy throws when the shape is made. |
+| `caseNaming` | A naming strategy for each leaf case. The strategy of the outer sealed trait applies to a nested leaf, and the strategy of a nested sealed trait applies only when it is the type of a field. |
+| `discriminator` | The flat record of the table. Only the outer sealed trait counts. It has no effect on an enum (a text) or on a sealed trait with a case that is not a record (a case name as a key), as in the codec. |
+| `transient` | Not a field spec, not in the schema, not in the encode. The decode ignores a value and gives the default. The macro of zio-blocks gives a compile error for such a field with no default, except for an `Option` (the decode gives `None`) and a collection (the decode gives an empty one, as the codec does). |
+| `encodeTransient` | A field spec, in the schema, and read by the decode, but not in the encode. Thus the law `decode(encode(a)) == Right(a)` holds only for its default. An input with no default that is not optional is always a missing input. |
+| `noExtraFields` | The schema has `additionalProperties: false`. The decode ignores an extra field, as `Schema.fromDynamicValue` does. The codec rejects it. |
+
+These rules of the port have no form in the codec:
+
+- A sealed trait with a case with a field with the wire name of the discriminator keeps a case name as a key, in the schema
+  too. The codec writes the key two times there, and its decode rejects its own output.
+- The decode finds a field and a case by the wire name, an alias, or the name in the code, in this order. A key belongs to
+  one field or one case, so a name in the code does not read the wire name or the alias of another field. When a record
+  has two names of one field, the first in this order wins. The codec rejects such a record.
+- An adapter reads an output field only by its wire name, so a reply with an alias or a name in the code of an output is a
+  parse error. The allowed values of an enum are its wire names, so a chat reply with an alias or a name in the code of a
+  case is a parse error too, and the chat adapter then tries its JSON fallback. Each nested value reaches the decode.
+- A wire name of a field of a signature must be a valid identifier, as each field name of a layout. A signature with
+  `kebab-case` on its record is an error when the layout is made. A nested record has no such limit.
+- `Signature.from` compares the wire names of an output with the inputs. An output type of `prependOutput` compares the names
+  in the code, and its layout compares the wire names. Thus `ChainOfThought` over `@rename("why") reasoning: String` asks for
+  `reasoning` and `why`, and the output `reasoning` has the value of `why`. Over `@rename("reasoning") why: String`, it asks
+  for `reasoning`, and the two outputs have that value.
+- The macro of zio-blocks does not read an annotation on a simple case of a Scala `enum`, so it has no effect, in the schema
+  too. It reads an annotation on a case object of a sealed trait, on a case with fields, and `caseNaming` on the `enum`.
+- A `Maybe` has each rule of an `Option`. `Signature.derived` and the signature macros have no schema for a `Maybe` of a
+  record, because they ignore each custom schema, so that is a compile error. `Shape.derived` reads it.
+
+Three limits of the wire names:
+
+- A labeled example, a demo, a history message, and a metric read by the wire name, so use the wire name in a data set. With
+  `@Modifier.rename("ans") answer`, `Example("answer" := "x")` and `ExactMatch()` give a metric error, and a demo or a
+  history message with `answer` shows no value of that field, with no error.
+- The `submit` tool of `ReActV2` decodes, encodes, and decodes again, so an `encodeTransient` output has its default, and with
+  no default the run ends with "Missing required fields".
+- In `Signature.prependOutput` and `ChainOfThought`, an output named `reasoning` with `Modifier.transient` or
+  `Modifier.rename` conflicts with the added field. With `@rename("why") reasoning`, `encode` then `decode` gives an error,
+  because the encode has no `reasoning`.
 
 A `BigDecimal` keeps each digit of a text and of a JSON integer. A JSON number with a fraction has the value of a float,
 because the JSON reader has the rules of Python `json.loads`: `1.23456789012345678901` gives `1.2345678901234567`. A text
@@ -547,7 +586,7 @@ input with a `None` shows `None`, as upstream.
 `Schema.transform`.
 
 The port sends `anyOf` for a sealed trait and `prefixItems` for a tuple in the strict response format, as upstream does for
-a tuple. Each object in `prefixItems` is closed, and upstream does not go into `prefixItems`. The port also sends
+a tuple. A text `const` and an `enum` of texts get `"type": "string"`, as pydantic writes them. Each object in `prefixItems` is closed, and upstream does not go into `prefixItems`. The port also sends
 `items: false`, and upstream pydantic does not. No OpenAI server has checked these schemas. After a provider rejects a
 schema there is no fallback, as in upstream ("schema fallback never encloses an LM call").
 
@@ -751,6 +790,14 @@ The port has this input field (`TypeRef.tools`, which `ReActV2` uses), and `Pred
 - `TwoStepAdapter` has native function calling off, so its prompt shows the tool specs of a layout with a tool calls
   output, as a `tools: ...` block of the user message, and it gives no error with no tools. The value is JSON text,
   where upstream writes the Python `repr` of a tools input.
+
+## 27. The reasoning of a plain chat reply
+
+**Convention.**
+
+A chat reply and a chat stream give `reasoning_content`, else `reasoning`, as the reasoning, as upstream does
+(`dspy/_vendor/lm15/providers/openai_chat.py:977` and `:2085`). The one difference: upstream applies `str(...)` to each
+truthy value, so `{"reasoning": 7}` gives `"7"`, and the port takes a text only.
 
 ## What this means in practice
 

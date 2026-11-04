@@ -39,18 +39,21 @@ private[providers] final case class OpenAiStreamChunk(
   def errorObject: Option[DynamicValue.Record] =
     error.flatMap(DynamicValues.asRecord)
 
-  /** The text, the finish reason, and the tool-call deltas come from the first choice: OpenAI sends one choice in each
-    * chunk. The usage comes in the last chunk, which has no choice.
+  /** The text, the reasoning, the finish reason, and the tool-call deltas come from the first choice: OpenAI sends one
+    * choice in each chunk. The usage comes in the last chunk, which has no choice.
     */
   def toLmChunk: LmChunk = lmChunk(choices.headOption.flatMap(_.delta).flatMap(_.content))
 
-  /** The `LmChunk` of a completions chunk: as [[toLmChunk]], but the text is the `text` of the first choice. */
+  /** The `LmChunk` of a completions chunk: as [[toLmChunk]], but the text is the `text` of the first choice. A
+    * completions choice has no `delta`, so its chunk has no reasoning.
+    */
   def toTextLmChunk: LmChunk = lmChunk(choices.headOption.flatMap(_.text))
 
   private def lmChunk(text: Option[String]): LmChunk =
     val choice = choices.headOption
     LmChunk(
       text = text.getOrElse(""),
+      reasoning = choice.flatMap(_.delta).fold("")(_.reasoningText),
       finishReason = choice.flatMap(_.finishReason).filter(_.nonEmpty),
       usage = usage.map(_.toLmUsage),
       toolCalls = choice.flatMap(_.delta).map(_.toLmToolCallDeltas).getOrElse(Vector.empty)
@@ -63,10 +66,20 @@ private[providers] final case class OpenAiStreamChoice(
     finishReason: Option[String]            = None
 ) derives Schema
 
+/** One delta of a chat stream.
+  *
+  * A `reasoning` value that is not a text fails the typed codec, as each field of the wrong type does. Thus
+  * [[OpenAiStreamChunk.parse]] reads that chunk with [[OpenAiStreamChunk.lenient]], which removes only that value.
+  */
 private[providers] final case class OpenAiStreamDelta(
-    content  : Option[String]               = None,
-    toolCalls: Vector[OpenAiStreamToolCall] = Vector.empty
+    content         : Option[String]               = None,
+    reasoningContent: Option[String]               = None,
+    reasoning       : Option[String]               = None,
+    toolCalls       : Vector[OpenAiStreamToolCall] = Vector.empty
 ) derives Schema:
+
+  /** The reasoning of this delta ([[ChatWire.reasoning]]). */
+  def reasoningText: String = ChatWire.reasoning(reasoningContent, reasoning)
 
   /** OpenAI does not send the `index` of each delta. A delta with no `index` gets its position in the array. */
   def toLmToolCallDeltas: Vector[LmToolCallDelta] =
@@ -114,7 +127,8 @@ private[providers] object OpenAiStreamChunk:
     * with an `isinstance` check):
     *
     *   - The choice is the first element of `choices` when `choices` is an array and the element is an object.
-    *   - `delta` must be an object, and `content` a string. The `text` of the choice must be a string.
+    *   - `delta` must be an object, and `content`, `reasoning_content`, and `reasoning` strings. The `text` of the
+    *     choice must be a string.
     *   - Each element of `tool_calls` that is an object gives a tool call. An `index` that is not a number (or the text
     *     of a number) gives the position of the call in the array, as the typed codec does. `id`, `function.name`, and
     *     `function.arguments` follow `str(value or "")` ([[PythonStr.orEmpty]]): a string stays, a value that is false
@@ -144,6 +158,8 @@ private[providers] object OpenAiStreamChunk:
     val calls = DynamicValues.sequenceAt(delta, WireKeys.toolCalls)
     OpenAiStreamDelta(
       content = textOf(delta, WireKeys.content),
+      reasoningContent = textOf(delta, WireKeys.reasoningContent),
+      reasoning = textOf(delta, WireKeys.reasoning),
       toolCalls =
         calls.zipWithIndex.flatMap((call, position) => DynamicValues.asRecord(call).map(lenientCall(_, position)))
     )

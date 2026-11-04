@@ -113,8 +113,13 @@ and this case.
   `withRawValue`, `ToolFunction.result`, and a default value give the same form, and `TypedValueFormsSuite` covers them.
 - **The decode reads the wire form,** and `ZioSchemaCodec.normalize` makes the form that `Schema.fromDynamicValue` reads.
   It also reads a bare case name, the record of a tuple, and the flat name of a leaf case, which is what the schema shows
-  for a nested sealed trait. An annotation that changes a name or a form, and a `Maybe` field, are the open items of this
-  rule: the schema shows a form that the decode does not read (`docs/port/PORT_DIFFERENCES.md` section 14).
+  for a nested sealed trait.
+- **One place holds the name rules of an annotation of zio-blocks.** `Reflects` has the rules of the JSON codec, for the
+  schema, the field specs, the encode, and the decode: `Modifier.rename`, `fieldNaming`, and `caseNaming` give the wire name, which is
+  `FieldSpec.name`. A `Modifier.discriminator` makes a case a flat record, and `Modifier.transient` removes a field. The
+  typed value keeps the name in the code. The decode also reads a `Modifier.alias` and the name in the code, and the schema
+  shows neither. A key belongs to one field or one case. A `Maybe` has the rules of an `Option`. `AnnotatedFormsSuite` and `AnnotatedPositionsSuite` cover them, and
+  `docs/port/PORT_DIFFERENCES.md` section 17 has each rule.
 - **The wire type agrees with the form.** A sealed trait with fields has the type `union`, and a sealed trait with only
   cases with no fields has the type `string` and its leaf case names as `enumValues`. A tuple has the type `list`. A time
   value, a `UUID`, and a `BigDecimal` have an opaque `TypeRef` with the type name, so a prompt shows `Instant`, and a

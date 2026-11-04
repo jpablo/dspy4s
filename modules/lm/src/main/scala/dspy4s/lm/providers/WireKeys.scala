@@ -41,6 +41,11 @@ private[lm] object WireKeys:
   final val name      = "name"
   final val arguments = "arguments"
 
+  // The keys of the reasoning text of a chat message and of a delta of a chat stream ([[ChatWire.reasoning]]). The
+  // servers do not agree on the key.
+  final val reasoningContent = "reasoning_content"
+  final val reasoning        = "reasoning"
+
   // The id of a tool call. The Responses API names the id of a call `call_id`. A tool message names the call that it
   // answers with `tool_call_id`.
   final val id         = "id"

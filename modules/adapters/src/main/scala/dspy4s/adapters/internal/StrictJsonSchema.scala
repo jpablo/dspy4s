@@ -36,6 +36,9 @@ private[adapters] object StrictJsonSchema:
     *   - A `default` of `null` is removed.
     *   - A `oneOf` becomes an `anyOf`, because OpenAI strict mode does not take `oneOf` (a port rule: zio-blocks writes
     *     `oneOf` for a sealed trait whose cases have fields, and upstream pydantic writes `anyOf` for a union).
+    *   - A `const` text or an `enum` of texts with no `type` gets `"type": "string"`, because OpenAI strict mode
+    *     requires a `type` (a port rule: zio-blocks writes neither `type`, and upstream pydantic writes it). A `const`
+    *     stays: it is the discriminator of a sealed trait.
     *   - A `$ref` with other keys is replaced by the schema that it names (an internal `#/...` path from the root of
     *     `schema`), in strict shape, and the other keys win. A `$ref` with no other keys stays.
     *   - Each top-level property in `optionalFields` whose schema does not permit `null` becomes
@@ -118,7 +121,7 @@ private[adapters] object StrictJsonSchema:
       defined <- DefinitionKeys.foldLeft[Either[DspyError, DynamicValue.Record]](Right(schema))((acc, key) =>
                    acc.flatMap(shapeNamed(_, key, shaping, refs))
                  )
-      closed    <- close(defined)
+      closed    <- close(textTyped(defined))
       withProps <- shapeProperties(closed, shaping, refs)
       withItems <- shapeItems(withProps, shaping, refs)
       withTuple <- shapeEach(withItems, "prefixItems", shaping, refs)
@@ -138,6 +141,17 @@ private[adapters] object StrictJsonSchema:
       case Some(named: DynamicValue.Record) =>
         shapeEntries(named, shaping, refs).map(shaped => schema.updated(key, shaped))
       case _ => Right(schema)
+
+  /** `schema` with `"type": "string"` when it has no `type`, and its `const` or each value of its `enum` is a text. */
+  private def textTyped(schema: DynamicValue.Record): DynamicValue.Record =
+    def isText(value: DynamicValue): Boolean = DynamicValues.asString(value).isDefined
+    val texts                                = DynamicValues.recordGet(schema, "const").exists(isText) ||
+      (DynamicValues.recordGet(schema, "enum") match
+        case Some(list: DynamicValue.Sequence) => list.elements.forall(isText)
+        case _                                 => false)
+    if texts && DynamicValues.recordGet(schema, "type").isEmpty then
+      schema.updated("type", DynamicValues.string("string"))
+    else schema
 
   /** An object schema with no `additionalProperties` gets `additionalProperties: false`. An open map is a `Left`. */
   private def close(schema: DynamicValue.Record): Either[DspyError, DynamicValue.Record] =

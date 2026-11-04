@@ -220,6 +220,18 @@ class ManagedStreamSuite extends FunSuite:
     assertEquals(delegate.streams, 1)
   }
 
+  test("a failure after the first chunk with only reasoning ends the stream with no retry") {
+    val failed           = Vector(LmChunk(reasoning = "why"), LmChunk.failure(LmServerError("busy")))
+    val delegate         = ScriptedStreams(Vector(failed, complete))
+    val model            = managed(delegate, retry = twoRetries)
+    given RuntimeContext = RuntimeEnvironment.current
+
+    val chunks = streamAll(model)
+    assertEquals(chunks.map(_.reasoning).mkString, "why")
+    assert(lastError(chunks).isInstanceOf[LmServerError])
+    assertEquals(delegate.streams, 1)
+  }
+
   test("an error that is not transient gets no retry") {
     val delegate         = ScriptedStreams(Vector(Vector(LmChunk.failure(LmAuthError("bad key"))), complete))
     val model            = managed(delegate, retry = twoRetries)

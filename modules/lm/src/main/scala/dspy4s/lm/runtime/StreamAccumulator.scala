@@ -15,8 +15,8 @@ import scala.collection.mutable
   *   - The text is the joined text of the chunks.
   *   - The tool calls come from the tool-call deltas of the chunks, with the rule of `mode`
   *     ([[ToolCallAssembler.assemble]]).
-  *   - The reasoning is the joined reasoning of the chunks, and the citations are the citations of the chunks in order,
-  *     as the output of a plain call in the Responses mode.
+  *   - The reasoning is the joined reasoning of the chunks, as the output of a plain call. The citations are the
+  *     citations of the chunks in order, as the output of a plain call in the Responses mode.
   *   - The answers of a decision reply are the answers of the last chunk that has them ([[LmChunk.answers]]).
   *
   * [[ManagedLanguageModel]] and the stream wrapper of `streamify` use this class, so the two give the same output.

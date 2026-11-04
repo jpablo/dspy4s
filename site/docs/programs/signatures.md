@@ -97,6 +97,47 @@ shows a case of a nested sealed trait with its own name, and a value in a prompt
 `Signature.derived` makes the record of each class from its structure. To use a `Schema.transform`, give the signature a
 shape with `Signature.fromShapes` and `Shape.derived`. The field then has the form of the value behind the transform.
 
+### Annotations
+
+The annotations of zio-blocks change the names and the forms of a typed value. Only the field of a Scala value keeps its name
+in the code. The new name is the name in the prompt, the schema, a raw prediction, a labeled example, a demo, a history
+message, and a metric, so use it in a data set:
+
+```scala
+final case class Person(
+    @Modifier.rename("full_name") name: String,
+    @Modifier.alias("years") age: Int,
+    @Modifier.transient() cached: Int = 0
+)
+
+@Modifier.discriminator("kind")
+sealed trait Shape
+final case class Circle(radius: Double) extends Shape
+case object Dot extends Shape
+```
+
+| Annotation | The effect |
+|---|---|
+| `@Modifier.rename("x")` on a field or a case | The name is `x`. |
+| `@Modifier.fieldNaming("snake_case")` on a class | Each field has a name in that form, except a field with a `rename`. |
+| `@Modifier.caseNaming("snake_case")` on a sealed trait or an `enum` | Each case has a name in that form, except a case with a `rename`. The cases of a nested sealed trait take the form of the outer one. |
+| `@Modifier.alias("x")` on a field or a case | The decode also reads `x`. The prompt does not show it. |
+| `@Modifier.discriminator("kind")` on a sealed trait with fields | The value is flat: `{"kind": "Circle", "radius": 1.5}`, and `{"kind": "Dot"}` for a case with no fields. |
+| `@Modifier.transient()` on a field | The field is not in the prompt, and the output has its default. |
+| `@Modifier.encodeTransient()` on a field | A value in your code does not reach the prompt. The model writes the field in an output, and an input shows its default. |
+| `@Modifier.noExtraFields()` on a class | The schema closes the object. The decode ignores an extra field. |
+
+An annotation on a simple case of a Scala `enum` has no effect. Use a sealed trait with case objects for such a case, or
+`caseNaming` on the `enum`.
+
+The strategies are `snake_case`, `camelCase`, `kebab-case`, `PascalCase`, and `identity`. A field of a signature needs a name
+that is an identifier, so use `kebab-case` only on a nested class.
+
+The name in the code of a nested field or case also decodes, and a `Maybe` field works as an `Option` field. A model must
+write an output field and an `enum` value with the name that the prompt shows: another name is a parse error. Keep the
+discriminator name different from each field name of the cases. If a case has a field with that name, the value keeps the
+case name as a key.
+
 ## Building a signature programmatically
 
 When a case class per signature is overkill (exploration, shapes assembled from

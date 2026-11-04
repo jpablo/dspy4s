@@ -14,11 +14,14 @@ OpenAI-compatible servers, a wrapper that adds a cache and retries to a model, a
   place among the choices, and a Responses body with an `output` array always gives one output. Such a reply is a
   success, so the cache stores it and its usage counts. The adapter call then gives the parse error. Only a reply with
   no choices is an `LmProviderResponseError`.
+- **The reasoning of a reply.** `LmOutput.reasoning` has the reasoning text of a reply, for a plain reply and for a
+  stream. In the chat mode, it is `reasoning_content`, else `reasoning`. The reasoning is not the text of the output, so
+  a reply with only reasoning has an empty text, and a stream listener gets no token of it.
 - **Provider options and control values.** `LmRequest.options` holds the provider options, for example `temperature`
   and `max_tokens`. The provider gets these options with no change. A framework value such as `rolloutId` is a
   separate field. It changes the cache key, and it does not go to the provider.
 - **Capabilities.** A model tells if it supports native tool calls, a response schema, and `reasoning` output. The
-  adapters read these flags. `OpenAiLanguageModel` declares the OpenAI capabilities only for `api.openai.com`. For
+  adapters read the first two flags. `OpenAiLanguageModel` declares the OpenAI capabilities only for `api.openai.com`. For
   another server, declare them in the `capabilities` field, for example with `copy(capabilities = Some(...))`.
 
 ## Main types
@@ -33,7 +36,7 @@ OpenAI-compatible servers, a wrapper that adds a cache and retries to a model, a
 | `Message` / `MessageRole` | A chat message with a text or multimodal `parts`. An assistant message can have tool calls, and a `Tool` message names the call that it answers. |
 | `LmCapabilities` | What a model can do: native tool calls, a response schema, and `reasoning` output. |
 | `LmPrice` / `LmCost` | The price of the tokens of a model, and the cost estimate of one call. You declare the price, because the module has no price list. |
-| `LmChunk` / `LmToolCallDelta` | One chunk of a stream (text, a finish reason, usage, a typed error, or a cache hit), and one part of a tool call. |
+| `LmChunk` / `LmToolCallDelta` | One chunk of a stream (text, reasoning, a finish reason, usage, a typed error, or a cache hit), and one part of a tool call. |
 | `StreamSink` | The stream of one `streamify` call, in the context. `LanguageModel.callAndRecordUsage` applies it to each model that it calls. |
 | `Embedder` | `embed(texts)` gives one vector for each text. `Embedder.cached` keeps the vector of each text. |
 
@@ -65,7 +68,7 @@ OpenAI-compatible servers, a wrapper that adds a cache and retries to a model, a
 - **Streams.** A failure comes as the last chunk of the stream, with a typed error. A stream is complete when a chunk
   has a finish reason. Else the stream gives an `LmStreamAssemblyError`. `ManagedLanguageModel.stream` applies the
   rules of `call`, and the cache stores only a complete stream. The retry policy applies only before the first chunk
-  with text or a tool call.
+  with text, reasoning, a citation, or a tool call.
 - **Tool call ids.** The reply parsers of the wires and `ToolCallAssembler` keep the provider id of each tool call in
   `ToolCall.id`. The wires send the ids back, so a request can replay a tool turn.
 - **Typed failures.** A failed provider call gives an `LmError` from `core`, for example `LmRateLimitError` or

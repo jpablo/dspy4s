@@ -4,6 +4,7 @@ import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, NotFoundError}
 import dspy4s.algebra.{IsEq, Law, <->}
 import zio.blocks.chunk.Chunk
+import zio.blocks.maybe.Maybe
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 /** A schema-aware view of a user type `A`, used as the input or output of a `Signature`. Lists fields in declaration
@@ -127,6 +128,28 @@ object Shape:
     given Schema[java.util.Currency] = Schema.currency
     @annotation.unused
     given Schema[java.util.UUID] = Schema.uuid
+    // A `Maybe` is an opaque type, so the macro has no structure to derive. Each `Maybe` of a type with an exact schema
+    // above has an exact schema too. A `Maybe` of a record has none here, thus it is a compile error.
+    @annotation.unused
+    given maybeUnit: Schema[Maybe[Unit]] = Schema.maybeUnit
+    @annotation.unused
+    given maybeBoolean: Schema[Maybe[Boolean]] = Schema.maybeBoolean
+    @annotation.unused
+    given maybeByte: Schema[Maybe[Byte]] = Schema.maybeByte
+    @annotation.unused
+    given maybeShort: Schema[Maybe[Short]] = Schema.maybeShort
+    @annotation.unused
+    given maybeInt: Schema[Maybe[Int]] = Schema.maybeInt
+    @annotation.unused
+    given maybeLong: Schema[Maybe[Long]] = Schema.maybeLong
+    @annotation.unused
+    given maybeFloat: Schema[Maybe[Float]] = Schema.maybeFloat
+    @annotation.unused
+    given maybeDouble: Schema[Maybe[Double]] = Schema.maybeDouble
+    @annotation.unused
+    given maybeChar: Schema[Maybe[Char]] = Schema.maybeChar
+    @annotation.unused
+    given maybeReference[T <: AnyRef](using Schema[T]): Schema[Maybe[T]] = Schema.maybe[T]
 
     // Both definitions are intentionally applicable. An ambient Schema[T] is therefore not selected by
     // zio-blocks' nested implicit search; its macro falls back to structural derivation for T instead.
@@ -227,17 +250,20 @@ object Shape:
         yield (a, b)
 
   /** The check that a record has each required field of `fieldSpecs`. The wire does not require an optional field or a
-    * field with a default value: the decode gives the default to such an absent field. The check finds the names of the
-    * required fields one time, before it reads a record. For a missing field, the result is a `NotFoundError` that
-    * names each missing field.
+    * field with a default value: the decode gives the default to such an absent field. A field is also present under a
+    * name that `otherNames` has for its name: a shape with a schema reads an alias and the name in the code. The check
+    * finds the names of the required fields one time, before it reads a record. For a missing field, the result is a
+    * `NotFoundError` that names each missing field by its name in `fieldSpecs`.
     */
   private[signatures] def requiredFieldsCheck(
-      fieldSpecs: Vector[FieldSpec]
+      fieldSpecs: Vector[FieldSpec],
+      otherNames: Map[String, Vector[String]] = Map.empty
   ): DynamicValue.Record => Either[DspyError, Unit] =
     val required = fieldSpecs.filterNot(field => field.optional || field.defaultValue.isDefined).map(_.name)
     raw =>
       val present = raw.fields.iterator.map(_._1).toSet
-      val missing = required.filterNot(present.contains)
+      val missing =
+        required.filterNot(name => present(name) || otherNames.getOrElse(name, Vector.empty).exists(present))
       if missing.isEmpty then Right(())
       else
         Left(NotFoundError(

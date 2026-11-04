@@ -6,7 +6,8 @@ import scala.util.matching.Regex
 
 /** Per-field metadata inside a [[SignatureLayout]]. Adapters consume this to render prompts and parse responses.
   *
-  *   - [[name]] is the canonical field key used in input / output records.
+  *   - [[name]] is the canonical field key used in input / output records. For a field of a typed signature, it is the
+  *     wire name ([[Reflects.fieldWireName]]), which a `Modifier.rename` or a `Modifier.fieldNaming` can change.
   *   - [[typeRef]] is the wire-format type the LM sees in the prompt (see [[TypeRef]]).
   *   - [[description]] is a per-field hint shown in adapter prompts (e.g. `"the question to answer"`). When `None`,
   *     [[FieldSpec.normalize]] defaults it to a placeholder like `"${question}"` so the prompt always names the slot.
