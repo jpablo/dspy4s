@@ -3,7 +3,7 @@
 Status: analysis, 2026-11-01. This document says which parts of Kyo the dspy4s harness can reuse. It adds to
 [CODE_HARNESS_RUNTIME.md](CODE_HARNESS_RUNTIME.md) and to section 8 of [CODE_HARNESS.md](CODE_HARNESS.md). Choice 7
 of [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), on 2026-11-05, did not take the recommendation of section 7. The
-first session host is plain, and section 9 says why.
+first session host is plain, and section 9 says why. Choice 8 keeps dspy4s on JDK 21.
 
 ## Summary
 
@@ -420,7 +420,6 @@ This does not make `A < S` the program type of dspy4s. That is the separate ques
 
 - A session host with a real REPL. The check used plain threads and a flag in place of the REPL instrumentation.
 - A hard stop that reaches the LM transport and a process group.
-- The guards of Phase 0 on JDK 25. Only one simple REPL cell ran there.
 - A real `kyo-mcp` server, and `kyo-pod`, `kyo-browser` and `kyo-lsp` on the nightly.
 - Durability after a host crash, and a process kill during a commit.
 - A comparison with ZIO or Ox at the same depth.

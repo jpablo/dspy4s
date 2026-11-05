@@ -43,6 +43,9 @@ The recommendation is a REPL in the same JVM, with the guards of the section "Re
 | Scala | `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` and `org.scala-lang:scala3-repl_3` of the same version |
 | REPL options | `-color:never -Xrepl-interrupt-instrumentation:true` |
 
+A later run on 2026-11-05 used Temurin 21.0.11 and Temurin 25.0.5. Both gave the same 43 passes and the same three
+failures ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), section 12).
+
 Run all experiments, from the root of the repository:
 
 ```bash

@@ -1060,15 +1060,16 @@ Pekko host stays possible.
   the writer holds one connection. On macOS `fullfsync` uses `F_FULLFSYNC`. On other systems it has no effect, and
   `FULL` uses a plain `fsync`.
 - **The end of a session.** The writer sets a flag and then fails each message in the mailbox. A caller checks the
-  flag after its put, so a message after the last drain also fails. So a call after the end gets an error, and it
-  does not wait for ever.
+  flag after its put, so a message after the last drain also fails. So a call after the end gets an error, and it does
+  not wait for ever.
 - **A failed write.** It ends this session only. Each caller that waits gets the error, and the other sessions go on.
 - **Feeds.** The writer publishes an entry only after its commit, and it never waits for a client. If the queue of a
   client is full, the writer empties it and marks the client as `Behind`. The client subscribes again, reads the
   journal from its last `seq`, and skips each entry with a `seq` that it has. So it misses nothing.
 - **Timers.** A stop starts a timer for the grace period of 10.3. The timer only puts a message in the mailbox, so the
   writer stays the one place that commits.
-- **The JDK.** The host needs no Kyo and no JDK 25. The checks of section 12 ran on JDK 21 and on JDK 25.
+- **The JDK.** The host needs no Kyo and no JDK 25. The checks of section 12 ran on JDK 21 and on JDK 25, and dspy4s
+  stays on JDK 21 (choice 8).
 
 One file for each session makes a session one item on disk. A person can remove or archive it as one file. A corrupt
 file, a stuck transaction or a large WAL stops only one session, and two terminals need no coordination. The graph of
@@ -1194,8 +1195,9 @@ The answers to the scenarios of [CODE_HARNESS_CONCEPTS.md](CODE_HARNESS_CONCEPTS
 
 ## 12. What ran
 
-The checks used Scala `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` and JDK 25.0.5, and the plain host also ran on JDK
-21.0.11. The code is in `tmp/design-check/`, `tmp/kyo-check/` and `tmp/plain-host/`, and it is not committed.
+The checks used Scala `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` and JDK 25.0.5, and the plain host, Phase 0 and the
+start probe also ran on JDK 21.0.11. The code is in `tmp/design-check/`, `tmp/kyo-check/` and `tmp/plain-host/`, and
+it is not committed.
 
 | Check | Result |
 |---|---|
@@ -1229,6 +1231,9 @@ The checks used Scala `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` and JDK 25.0.5, 
 | A flush for only some commits, with the same SQLite and one writer | A commit that flushes: a median of 4.4 ms. A normal commit: a median of 48 µs, and 266 µs right after a flush. A cell of 100 `write` calls spends 0.54 s in commits, and a cell of 100 `read` calls spends 0.03 s. |
 | SIGKILL of a writer with normal commits, with the same SQLite | 50 rounds with 29,016 commits that got an answer: none lost, and no corrupt file. |
 | dspy4s on JDK 25 | A compile from no classes passes, and 2,172 tests have no failures (6 skipped). |
+| The Phase 0 experiment on JDK 21.0.11 and on JDK 25.0.5 | The same 43 checks pass on both, and the same 3 known problems fail. The first REPL in a JVM: 1,048 ms and 1,026 ms. The heap after 600 cells: 349 MiB and 348 MiB. |
+| A new JVM up to the end of the first harness cell, with the preamble of 5.2 | JDK 21: 2.51 s. JDK 25: 2.51 s. JDK 25 with an AOT cache from one training run: 1.69 s, and the cache file has 64 MB. Each number is a median of 5 runs. |
+| `sqlite-jdbc` on JDK 25 | It prints a warning about native access, and the warning names the flag `--enable-native-access=ALL-UNNAMED`. JDK 21 prints no warning. |
 
 The cells that models wrote. A cell counts if it compiled, so the table does not say that the cell does its task. The
 last column has this `Data` and the second try of section 6:
@@ -1267,7 +1272,7 @@ These checks found errors in the earlier design. They are fixed here:
 What did not run:
 
 - The kernel with a real REPL and a real LM.
-- The stop flag and the guards of Phase 0 on JDK 25.
+- The AOT cache with a real CLI, on Linux, and after a change of the class path.
 - A hard stop that reaches the LM transport and a process group.
 - The OS sandbox.
 - A real power loss. The kernel check only cuts the journal at the last flush, and the SQLite check only measures the
@@ -1307,6 +1312,7 @@ What did not run:
 | Agent teams, shared boards | The controller and `tell` cover them. |
 | A merge of graphs across sessions | The first version has one graph for each session. |
 | Pekko and Cluster Sharding | The session host contract keeps the option (RUNTIME 5.5). |
+| A move to JDK 25 in the first version | It gives only a faster start of a new process, and the CLI comes in phase 7 (12). |
 | Kyo for the first session host | The plain host has the same safety and about the same code, with no pool, no bridge and no release candidate (12). The contracts keep Kyo possible. |
 | A cell that waits for a person | A wait of two days holds a thread, and a restart loses it. The cost of the other way is in 5.5. |
 | `parallel` in the first version | The hang and the lost updates of section 12. Batch calls cover the main need. |
@@ -1320,7 +1326,7 @@ What did not run:
 ## 14. The choices
 
 The decisions of [CODE_HARNESS.md](CODE_HARNESS.md), 7.10 and 8.7 stay, except decision 1 of 8.7, as item 7 says.
-These choices are new in this document. Only choices 1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 17 and 18 are confirmed:
+These choices are new in this document. Only choices 1 to 8 and 13 to 18 are confirmed:
 
 | # | Choice | Answers |
 |---|---|---|
@@ -1331,7 +1337,7 @@ These choices are new in this document. Only choices 1, 2, 3, 4, 5, 6, 7, 13, 14
 | 5 | Confirmed on 2026-11-04. A cell never waits for a person. A rule says `Allow`, `Ask` or `Deny`. A call with `Ask` fails with `NeedsApproval`, and the journal holds the question. A `Grant` with a request id answers it and starts a turn (5.5). A child and a rollout cannot ask. A goal waits for the answer (8.5), and the turn after a grant has a report (8.6). | |
 | 6 | Confirmed on 2026-11-05. `Data` is the type of a value that a later cell, another session or the host reads back with a type. Only `Data` reads its form. `Data` has `shape`, and the preamble of a session holds its types and `submit`. An `Input` holds the values of a program call. A child with no `submit` makes `rlm` fail (5.1). | |
 | 7 | Confirmed on 2026-11-05. The session host is one plain thread and one mailbox for each session, and the journal is on `sqlite-jdbc`, behind contracts. The turn stays on plain threads. Decision 1 of 8.7 stays, and a Kyo host stays possible (10.2). | Question 2 of 8.7 |
-| 8 | dspy4s moves to JDK 25. Choice 7 no longer needs this. | |
+| 8 | Confirmed on 2026-11-05. dspy4s stays on JDK 21 in the first version. The CLI of phase 7 can run on JDK 25 with an AOT cache, and that decision comes with the CLI (12). | |
 | 9 | Replay is not in the first version. | Question 1 of 8.7 |
 | 10 | The early MCP server uses `kyo-mcp`, and it comes after the guest API. After choice 7, this alone would bring in Kyo and JDK 25. | Question 4 of 9.4 |
 | 11 | A derivation sees only masked `Classified` values. | Question 5 of 9.4 |
@@ -1366,12 +1372,12 @@ Each phase ends with something that runs.
 | Phase | Work | Result |
 |---|---|---|
 | 1. Kernel | `harness-kernel`, with `pending`, `inputs`, `Guard` and `guardCheck`, the laws as ScalaCheck properties and the mutants of section 12. No REPL and no LM. | The laws of 4.7 run in CI. |
-| 2. Guest API and REPL | `harness-guest`, `harness-repl`, the modes, the guards of Phase 0 on JDK 25, the laws of `Data` as properties, `shape` and the preamble, the second try of a cell, the catch around `ReplDriver.run`, the clock of a cell, the error hints, and negative tests for modes. | Model code runs against the guest API in each mode. |
+| 2. Guest API and REPL | `harness-guest`, `harness-repl`, the modes, the guards of Phase 0, the laws of `Data` as properties, `shape` and the preamble, the second try of a cell, the catch around `ReplDriver.run`, the clock of a cell, the error hints, and negative tests for modes. | Model code runs against the guest API in each mode. |
 | 3. Sandbox | `harness-sandbox`: Seatbelt and bubblewrap, profiles from modes, and escape tests. | `exec` runs only in a sandbox. |
 | 4. One task | `Harness`, `drive`, the window strategy, `OptimizableStructure`, `ProgramRunner`. | A harness for one task that the optimizers accept. |
 | 5. RLM | `llmQuery`, `llmQueryBatched`, `rlm` and `rlmBatched` behind `Children^`, a child from a `shape`, the shared budget, the depth limit. | RLM in the harness. |
 | 6. Optimization | A metric from tests, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
-| 7. The session host | `harness-host`: the writer, feeds, timers, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `guarded`, and the client side of `Grant`. `harness-cli`. | A coding agent for daily use, one session at a time. |
+| 7. The session host | `harness-host`: the writer, feeds, timers, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `guarded`, and the client side of `Grant`. `harness-cli`, its JDK and an AOT cache (choice 8). | A coding agent for daily use, one session at a time. |
 | 8. Memory | The memory tree and its metric. | Long sessions that lose no detail. |
 | 9. The controller | `Sessions`, the report pass with a crash test, the ledger, the graph, probes, release plans. | One controller above all sessions. |
 | Later | Replay, the reviewer, jobs across a restart, `parallel` if batch calls are not enough, a container backend, LSP as a guest API, the early MCP server if phase 2 needs it, prompt-cache marks. | |
