@@ -165,11 +165,11 @@ harness must do:
 | Definition | A `val`, `def`, `class` or `import` that a cell made | Live | Replay |
 | Value | An object that a definition holds in memory | Live | Replay, if the code is deterministic |
 | Class loader | The loader of the guest code, with the shared guest API package | Live | Config |
-| Preamble | The code that the REPL compiles before the first cell | Data | Config |
+| Preamble | The code that the REPL compiles before the first cell: the capabilities of the mode, and the types, `submit` and the inputs from `shape`. It holds no value. | Data | Config |
 | Cell thread | The thread that runs a cell, with its stack | Live | Lost, or Replay |
-| Input variables | The inputs of the signature as REPL values (F5) | Data | Stored |
+| Input variables | The inputs of the signature as REPL values (F5). The `Input` entry holds their values, and a new REPL reads them again. | Data | Stored |
 | Explicit store | Values that go from cell to cell through `store` and `load`. It holds the `writes` of the cells that completed (4.2). | Data | Fold |
-| `Data` value | A value that can leave a cell. The journal holds it as `Json` | Data | Stored |
+| `Data` value | A value that a later cell, another session or the host reads back with a type. The journal holds it as `Json` | Data | Stored |
 | Clock and random | The time and the random numbers that a cell sees. Safe mode does not close them | World | Stored, if a replay needs them |
 | Language versions | The compiler version and the guest API version | Data | Stored |
 

@@ -571,7 +571,7 @@ def submit(summary: String, changedFiles: List[String]): Nothing
 
 A wrong argument type is a compile error. The model sees the error and corrects the code in the next step. RLM
 finds a type error only after the run, and it returns a `[Type Error]` observation. The host decodes the
-submitted record with the output shape, as RLM does.
+submitted record with `Data[O]` ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), 5.1).
 
 ### F4. LM calls from code that the optimizers see
 
@@ -597,7 +597,8 @@ LM. An overload for `Classified` values, as in atc and tacit, depends on questio
   become Scala values. The prompt shows only a summary of each value: the name, the type, the size, and a
   preview (the RLM `variables_info`).
 - `llmQuery` and `llmQueryBatched` (F4).
-- `rlm(task, inputs)` is a recursive call of the same program. The child gets a new REPL, a depth limit that is
+- `rlm[A](task, inputs)` is a recursive call of the same program, with the output type `A`
+  ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), 5.1). The child gets a new REPL, a depth limit that is
   one less than the limit of the parent, and the shared LM call budget. The child gives its submitted value to
   the parent code.
 - `rlm` takes the capability `Children^` (F2). The mode of the child is at most the mode of the parent: the child

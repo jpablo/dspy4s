@@ -67,6 +67,7 @@ These words settle section 4 of [CODE_HARNESS_CONCEPTS.md](CODE_HARNESS_CONCEPTS
 | Scope | The place of the work of a session: a directory, a worktree or a scratch directory | The range of a graph query, which is a `GraphRange` |
 | Task | The work that a session gets at its start | A row of a task set, which is a rollout task |
 | Goal | A condition that the work must meet | |
+| Preamble | The text that a new REPL compiles before its first cell: the types, `submit` and the inputs of a session | A prompt |
 | Question | A rule in `pending`: a call that needs the answer of a person | A plain question in the text of the model |
 | Grant | The answer of a person to a question, or a permission in advance: a guard rule and a lifetime | A change of mode |
 | Report | The message that a session sends to the session that owns it, after a turn | The value of `rlm` |
@@ -90,7 +91,7 @@ final case class Meta(atMillis: Long, source: Source, taint: Taint, required: Bo
 
 enum Entry derives Schema:
   case Activated(versions: Versions, config: SessionConfig)    // a start, a reopen, or the first entry after a crash
-  case Input(request: RequestId, text: String)                 // `meta.source` is the sender
+  case Input(request: RequestId, text: String, values: Map[String, Json]) // `meta.source` is the sender
   case TurnStarted
   case StepStarted(step: Int)                                  // the intent of the LM call
   case Acted(reasoning: String, text: String, code: Option[String]) // the LM outcome, and the intent of the cell
@@ -158,7 +159,7 @@ val readOnlyOps = Set("read", "keys", "load", "sessions", "jobOutput", "waitJob"
 
 def needsFlush(entry: Entry): Boolean = entry match
   case Entry.EffectStarted(_, op, _)             => !readOnlyOps(op)
-  case Entry.Input(_, _) | Entry.Activated(_, _) => true   // a sender has an answer, or a parent has a child
+  case Entry.Input(_, _, _) | Entry.Activated(_, _) => true   // a sender has an answer, or a parent has a child
   case _                                         => false
 ```
 
@@ -182,6 +183,7 @@ final case class SessionState(
     waiting : Int,                       // inputs that no step has seen, since the last stop
     open    : Map[EffectId, OpenCall],   // effects with an intent and no outcome
     store   : Map[String, Json],
+    inputs  : Map[String, Json],         // the values of the inputs, apart from the store (5.1)
     requests: Set[RequestId],
     grants  : Set[ActiveGrant],
     pending : Set[GuardRule],            // the questions to a person that have no answer (5.5)
@@ -283,7 +285,7 @@ unknown outcome again automatically.
 ```scala
 enum Command:
   case Activate(versions: Versions, config: SessionConfig)
-  case Send(request: RequestId, text: String)
+  case Send(request: RequestId, text: String, values: Map[String, Json])
   case Commit(entries: Vector[Entry])
   case Abort(reason: String)
   case StopJobs(which: JobSelector, reason: String)
@@ -398,6 +400,9 @@ TurnEnded(Aborted)
 | Store | The store holds only the writes of cells that completed. |
 | Data | `decode(encode(v)) == Right(v)` for each value with a `Data`. An `encode` never throws. |
 | Text | `parse(print(encode(v))) == encode(v)`. So a commit changes no value. |
+| Form | Only `Data` reads the form of `Data`. The host reads the value of `submit` with `Data[O]`. |
+| Shape | A type that a preamble defines from `shape` reads each value of the first type, and it writes the same `Json`. |
+| Inputs | `inputs` is the fold of the `values` of the `Input` entries. A repeat adds nothing, a fork keeps them, and the store does not hold them. |
 | Log | No part of the harness changes or removes an entry. |
 
 ## 5. Authority
@@ -439,22 +444,32 @@ definition that a cell can use has `@assumeSafe`, because safe mode rejects the 
   def load[A: Data](key: String)(using s: Store): Option[A] = s.load[A](key)
   def store[A: Data](key: String, value: A)(using s: Store^): Unit = s.store(key, value)
   def now(): Long                                              // milliseconds since the epoch
+  def input[A: Data](name: String): A                          // the value of an input of this session
   // and the other functions
 ```
 
 The sketch shows the shape. The full API also has `edit`, `httpGet`, `llmQuery`, `llmQueryBatched`, `rlm`, `start`,
-`observe`, `zoom` and `submit`. The source text of these traits, with a notation header, is the API reference in the
-prompt. A search function and the reference on demand can come later, for a large API.
+`observe` and `zoom`. `submit` comes from the preamble of the session. The source text of these traits, with a
+notation header, is the API reference in the prompt. A search function and the reference on demand can come later, for
+a large API.
 
-**`Data` is the type of a value that can leave a cell.** Safe code cannot name the `Schema` of zio-blocks: `store("k",
-1)` with `A: Schema` gives "Cannot refer to value int in object Schema from safe code". A `Schema.derived` inside an
-inline of the guest API also fails: in a capture-checked cell, the macro crashes the compiler with
-`RecursionOverflow`. So the guest API owns a small type class, which derives from `Mirror`:
+**`Data` is the type of a value that a later cell, another session or the host reads back with a type.** Text has no
+`Data`: `println`, the printed result of a cell, `write`, `exec` and `tell` take text. Safe code cannot name the
+`Schema` of zio-blocks: `store("k", 1)` with `A: Schema` gives "Cannot refer to value int in object Schema from safe
+code". A `Schema.derived` inside an inline of the guest API also fails: in a capture-checked cell, the macro crashes
+the compiler with `RecursionOverflow`. So the guest API owns a small type class, which derives from `Mirror`:
 
 ```scala
 @assumeSafe trait Data[A]:
   def encode(value: A): Json
   def decode(value: Json, path: String): Either[DataError, A]
+  def shape: DataShape                             // what a value looks like, for the preamble of a new REPL
+
+enum DataShape:                                    // a record and a union are lazy, because a type can hold itself
+  case Plain(name: String)
+  case Applied(name: String, args: Vector[DataShape])
+  case Record(name: String, fields: () => Vector[(String, DataShape)])
+  case Union(name: String, cases: () => Vector[(String, DataShape)])
 
 @assumeSafe trait DataAuto:
   inline given auto[A](using m: Mirror.Of[A]): Data[A] = Data.derived[A]
@@ -493,6 +508,69 @@ The rules of `Data`:
   the type again.
 - A cell can also write `derives Data`, but the reference does not show it. The capture checker rejects `derives Data`
   in a cell that also has a `def` or a lambda with a capability. The second try of section 6 covers this case.
+
+**Where a typed value crosses.** Both ends use `Data`:
+
+| Place | From and to | The reader |
+|---|---|---|
+| `store`, `load` | A cell to a later cell | `Data` in the later cell |
+| `submit` in a program call | A cell to the host | `Data[O]` in the host |
+| `submit` in a child | A child to its parent | `Data[A]` in the parent |
+| The input of a program call | The host to a cell | `Data` in the cell, through `input` |
+| The `inputs` of `rlm` | A parent to a child | `input[String]` in the child |
+
+**Only `Data` reads the form of `Data`.** `Data` and `Schema` write different JSON, and each fails on the text of the
+other:
+
+| Value | `Data` writes | `Schema` writes |
+|---|---|---|
+| `Some("n")` | `{"Some":"n"}` | `"n"` |
+| `None` | `{"None":{}}` | No field |
+| An enum case with no fields | `{"Fix":{}}` | `"Fix"` |
+| `Map(1 -> "a")` | `[[1,"a"]]` | `{"1":"a"}` |
+| `Right(1)` | `{"Right":1}` | `{"Right":{"value":1}}` |
+| `NaN` | `"NaN"` | The encode throws |
+
+So `Harness[I: Data, O: Data]` reads the value of `submit` with `Data[O]` (9), and the compiler derives it.
+`Schema[O]` stays for the LM side, so the `finisher` leaf gives an `O` as before. This takes the place of the decode
+in F3. `Data` is a second codec next to `Schema`, only at the boundary of a cell. A field with a hand-written `Schema`
+needs a hand-written `Data`, and the compile error names the type.
+
+**The preamble.** A new REPL compiles a text before its first cell. The harness writes this text from `shape`, because
+the REPL of a child has none of the types of its parent:
+
+```scala
+// the cell of the parent
+case class Point(x: Int, note: Option[String])
+val p = rlm[Point]("find the point", Map("doc" -> text))
+
+// the preamble of the child: the types, one given for each type, `submit`, and one `val` for each input
+case class Point(x: Int, note: Option[String])
+given Data[Point] = Data.derived
+def submit(x: Int, note: Option[String]): Nothing = ...
+val doc: String = input[String]("doc")
+```
+
+- `SessionConfig.preamble` holds the text (8.1), and the journal holds no `DataShape`. A new REPL after a crash or a
+  reopen compiles the same text. The text holds no value, so it holds no secret.
+- The API reference in the prompt also shows the preamble, so the model sees the types and `submit`.
+- A program makes its preamble from `Data[O].shape` and `Data[I].shape` when it is built. A child gets its preamble
+  from `Data[A].shape` when `rlm` is called. A session with no output type has `submit(value: String)`.
+- A record gives `submit` one parameter for each field (F3). Another type gives `submit(value: T)`.
+- The JSON of a value does not hold the name of a type. So the preamble can write `Box[Int]` as a class with an `Int`
+  field, and a sealed trait as an enum, with the same form.
+- Three things have no preamble: two types with one name and two forms, a sealed trait inside a sealed trait, and an
+  input with the name of a guest API function. A program fails at its build, and `rlm` fails with a plain error.
+
+**The values of the inputs.** The input of a program call and the `inputs` of `rlm` are in the `values` of the `Input`
+entry. `SessionState.inputs` is their fold, apart from the store, so a `store` cannot change an input.
+`input[A](name)` reads this fold. It needs no capability, because it reads only what the session got. It is not an
+effect, because the journal already holds the value. The `inputs` of `rlm` stay `Map[String, String]` in the first
+version. A typed input can come later by the same route.
+
+**A child that gives no value.** `rlm[A]` gets its value only from `submit`. The `finisher` leaf makes an `O` and not
+an `A`, so it cannot help. A child that ends with `Replied` or `Exhausted` makes the call fail, and the error holds
+the last text of the child. `rlmBatched` fails if one child fails, and the error names the task.
 
 **`now()` gives the time.** Safe mode rejects `System.currentTimeMillis` and `System.nanoTime`, and models write them.
 `now()` is a guest API call like the others, so `recorded` stores its value. It closes nothing: safe mode allows
@@ -681,7 +759,9 @@ wait in the handler can come later with no kernel change, because `Granted` can 
 
 ### 5.6 Secrets and taint
 
-- A `Classified` value never enters a journal in clear text, and a derivation sees only masked values.
+- A `Classified` value never enters a journal in clear text, and a derivation sees only masked values. `Classified` is
+  a plain class, so it has no `Data` (5.1), and the compiler keeps it out of `store`, `submit` and the `values` of an
+  `Input`.
 - `Meta.taint` marks each entry from external content. The model does not see this mark. The reviewer and the graph
   read it.
 - Real secrets stay out of cells. A handler adds them to a request (`secretHeaders`).
@@ -787,6 +867,7 @@ final case class SessionConfig(
     scope   : Scope,
     owner   : Owner,             // the user, an optimizer, a session (`start`) or a cell (`rlm`)
     guard   : Guard,             // the rules of 5.5
+    preamble: String,            // the types, `submit` and the inputs of this session (5.1)
     model   : ModelChoice,
     goal    : Option[String]
 )
@@ -808,7 +889,7 @@ configuration. Neither one cut any work.
 
 | Function | Needs | Meaning |
 |---|---|---|
-| `rlm[A: Data](task, inputs): A` | `Children^` | Runs a child inside the cell and gives its value. It is one effect of the parent, and the child has its own journal. |
+| `rlm[A: Data](task, inputs): A` | `Children^` | Runs a child inside the cell and gives its value. It is one effect of the parent, and the child has its own journal. A child that ends with no `submit` makes the call fail (5.1). |
 | `rlmBatched[A: Data](tasks): Vector[A]` | `Children^` | Runs several children at the same time inside the cell. It is one effect of the parent, and each child has its own journal. |
 | `start(goal, scope, strategy): SessionRef` | `Sessions^` | Starts a session in the background. Its report comes back as an `Input` with `Source.Child`, and this starts a turn (8.6). |
 | `tell(session, message)` | `Sessions^` | `Send` to that session, with `Source.Controller` or `Source.Child`. It returns after the receiver commits (8.6). |
@@ -891,7 +972,7 @@ the repair commits `TurnEnded(Crashed)`, and the report says so. An owner that h
 `Harness` is a dspy4s `Module`, so the current optimizers can tune it:
 
 ```scala
-final case class Harness[I, O](
+final case class Harness[I: Data, O: Data](
     signature: Signature[I, O],
     policy   : Predict[PolicyInput, PolicyStep],
     finisher : Predict[FinishInput, O],
@@ -903,9 +984,9 @@ final case class Harness[I, O](
 ) extends Module[I, O]
 ```
 
-`forward` makes a journal in memory and a REPL in a workspace fork. It sends the input, runs `drive`, and reads the
-last `TurnEnded`. `Submitted` gives the output. `Replied` and `Exhausted` run the `finisher` leaf. This path needs no
-actor and no thread other than the cell thread.
+`forward` makes a journal in memory and a REPL in a workspace fork. It sends the input with its values (5.1), runs
+`drive`, and reads the last `TurnEnded`. `Submitted` gives the output through `Data[O]`. `Replied` and `Exhausted` run
+the `finisher` leaf. This path needs no actor and no thread other than the cell thread.
 
 | Leaf | Where | What it decides |
 |---|---|---|
@@ -1103,8 +1184,8 @@ The checks used Scala `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` and JDK 25.0.5. 
 
 | Check | Result |
 |---|---|
-| The kernel under random schedules, with no threads | 200,000 runs with 318,283 crashes, 223,402 stops, 70,885 late messages, 684,647 grants, 55,191 calls under a `Once` grant, 65,382 jobs and 19,289 `spawn` calls that a stop refused. The calls go through `guardCheck`: 50,606 gave a question, 11,733 grants answered a question, and 189,989 grants were repeats from a client. Each crash read the journal through the JSON codec of `Logged`: 7,785,588 entries, with no change. No run broke a checked law of 4.7. A second phase of 50,000 runs had 132,952 power losses, which cut the journal at the last flush, and no run broke a law. The law One journal did not run. For the law Report, only `reports` ran: 618,665 reports match the turns that owe one. |
-| The check of that check | Twenty-four mutants. Fifteen for the kernel: keep the waiting inputs after a stop (78,443 runs fail), accept an effect of any cell (8,584), keep a late outcome (17,704), remove a `Once` grant at `EffectStarted` (45,405), keep a `Once` grant after its call (21,636), keep a `Turn` grant after its turn (117,250), keep a grant after `Ended` (48,318), let an `Abort` stop jobs (50,090), keep the jobs after `Ended` (11,205), let `OfLastTurn` reach other turns (15,957), take the list of jobs only from the live table (9,548), no flush at all (43,719 runs of the second phase fail), a flush at the outcome in place of the intent (205), no flush for `Input` (32,374), no flush for `Activated` (13,946). Nine for approvals: no question in `pending` (33,116), keep a question after a new turn (17,465), no check of a repeated `Grant` (98,346), no `Input` after an answer (14,913), reports only for the owner (136,829), a question in a session with no person (33,430), a grant above a deny rule (14,216), the first rule wins (39,446), and a goal check while a question waits. Only the fixed flows find the last one: 6 turns in place of 1. |
+| The kernel under random schedules, with no threads | 200,000 runs with 318,283 crashes, 223,402 stops, 70,885 late messages, 684,647 grants, 55,191 calls under a `Once` grant, 65,382 jobs and 19,289 `spawn` calls that a stop refused. The calls go through `guardCheck`: 50,606 gave a question, 11,733 grants answered a question, and 189,989 grants were repeats from a client. Each crash read the journal through the JSON codec of `Logged`: 7,785,588 entries, with no change. No run broke a checked law of 4.7. A second phase of 50,000 runs had 132,952 power losses, which cut the journal at the last flush, and no run broke a law. The 485,904 values of inputs stayed a fold of the journal. The law One journal did not run. For the law Report, only `reports` ran: 618,665 reports match the turns that owe one. |
+| The check of that check | Thirty mutants. Fifteen for the kernel: keep the waiting inputs after a stop (78,443 runs fail), accept an effect of any cell (8,584), keep a late outcome (17,704), remove a `Once` grant at `EffectStarted` (45,405), keep a `Once` grant after its call (21,636), keep a `Turn` grant after its turn (117,250), keep a grant after `Ended` (48,318), let an `Abort` stop jobs (50,090), keep the jobs after `Ended` (11,205), let `OfLastTurn` reach other turns (15,957), take the list of jobs only from the live table (9,548), no flush at all (43,719 runs of the second phase fail), a flush at the outcome in place of the intent (205), no flush for `Input` (32,374), no flush for `Activated` (13,946). Nine for approvals: no question in `pending` (33,116), keep a question after a new turn (17,465), no check of a repeated `Grant` (98,346), no `Input` after an answer (14,913), reports only for the owner (136,829), a question in a session with no person (33,430), a grant above a deny rule (14,216), the first rule wins (39,446), and a goal check while a question waits. Only the fixed flows find the last one: 6 turns in place of 1. Six for the values: a wrong field in a preamble (17 problems), a preamble with no givens (2), a host that reads with `Schema` (1), no values in the state (138,589 runs), values in the store (138,589), and a fork with no values (138,589). |
 | `drive` with scripts | A chat answer, `submit`, the step limit of both kinds, a failed cell, a failed LM call, a stop during a cell, and a crash during a cell give the expected journals. |
 | The fixed flows of an approval | A session from `start` asks, the person approves, and the owner gets two reports, the last with the result. A repeat of the `Grant` commits nothing, also after the call. A typed message gives no report. A session with a goal uses one turn while it waits. A child and a rollout get a plain error. `Verdict` is a semilattice, `verdict` is a homomorphism from `Guard`, and a grant never widens a deny rule. |
 | A denied call in a real REPL with safe mode, with a stub of the handler | With no `catch`, the cell stops, and a later cell does not see its `val`. With a `catch` of `NeedsApproval` or `Exception`, or with `scala.util.Try`, the cell continues and keeps its values. Safe mode rejects `NeedsApproval(...)` in a cell. |
@@ -1114,6 +1195,9 @@ The checks used Scala `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` and JDK 25.0.5. 
 | The JSON codec of `DynamicValue` | 19 of 30 kinds of value change or throw. `Long(5)` comes back as `Int(5)`, `Double(2.5)` as a `BigDecimal`, a `Variant` and a `Map` as a `Record`. NaN, the infinities and a record as a map key throw at the encode. A `GuardRule` with `Exact` matches its call before the codec, and it does not match after the codec. |
 | `Data` with `decode`, in a real REPL | Enums, sealed traits, recursion, mutual recursion, generic types, tuples, named tuples and maps come back equal through the journal text. The compiler rejects capabilities, functions, `Any`, plain classes, iterators, lazy lists and mutable buffers. |
 | The laws of `Data` on random values | 300,000 values, with 0 failures. The first run found that the reader rounds a number to 34 digits. |
+| The forms of `Data` and `Schema` | Of 13 kinds of value, 7 differ, and each reader fails on the text of the other. A plain record, an enum case with fields, a `Map` with string keys, a `Set`, an `Instant` and a tuple have one form. |
+| A child from a `shape`, in two real REPLs with capture checking and safe mode | 15 kinds of value: records, `Option`, enums, nested types, recursion, mutual recursion, generic types, reserved words, maps, tuples, named tuples, `Either`, `Set`, `Instant` and sealed traits. 13 go from the parent to the child and back, and they come back equal. 2 give the plain error of 5.1. |
+| A program call in a real REPL | The host has `In` and `Out`, and the REPL has only the preamble. The cell sees the inputs as typed values, a wrong argument is a compile error, and `Data[Out]` reads the value. `Schema[Out]` fails on the same text. A new REPL with the same text gives the same output. |
 | Cells that models wrote, from 30 tasks | Haiku and Sonnet did not know the design, and each wrote the 30 cells twice. A local model wrote 8. See the table after this one. |
 | `Schema.derived` inside an inline of the guest API | In a capture-checked cell, the compiler crashes with `RecursionOverflow`, and the exception stops the process. |
 | `parallelMap(items)(f)` on real threads, in a real REPL with the stop flag | The work runs at the same time: 8 tasks of 200 ms took 389 ms, and 16 took 591 ms with a limit of 8. The results keep their order, a failed task waits for the others, and a stop ended a loop and a blocked call in a task, with no task left. It has three problems. A task that uses a `val` of its own cell hangs until the stop, and so does a `def` of the cell that holds the call. A thread dump shows the cause: the cell runs in the class initializer of its wrapper object and waits for the tasks, and each task waits on the class initialization monitor of that object. The capture checker accepts a local `var` that tasks share, and 8 tasks gave 840,409 of 1,600,000 updates. It also accepts two tasks that write with one `Files^`. |
@@ -1156,6 +1240,8 @@ These checks found errors in the earlier design. They are fixed here:
 - A reading of 5.5 found more errors. The journal held a question only as text. A goal repeated the question. A child
   could never get an answer. A repeat of a `Grant` could allow a second call. An owner missed the result of an
   approved turn. The rules had no verdict and no default.
+- A reading of 5.1 found more errors. The host read the value of `submit` with `Schema`, which cannot read the form of
+  `Data`. A child could not know the type that its parent wants. The design had no route for a typed input.
 
 What did not run:
 
@@ -1180,6 +1266,9 @@ What did not run:
   behind it.
 - What real models do after `NeedsApproval`. No test shows that a model ends its turn and asks.
 - A denied call in a real child of `rlm`.
+- How `submit` ends a cell. The checks have `submit` as a normal call, and F3 says `Nothing` (open question 9).
+- A model that reads a preamble, a real child with an LM, and a child that ends with no value.
+- The values of a real `Send`. In the REPL checks they come from a system property.
 - The full `SessionConfig` of 8.1. The kernel check has only `kind`, `steps`, `guard` and `owner`.
 - Any metric or optimizer run.
 
@@ -1200,12 +1289,15 @@ What did not run:
 | `parallel` in the first version | The hang and the lost updates of section 12. Batch calls cover the main need. |
 | Code that outlives its cell | A cell commits only if it completes. A job or `start` covers this need. |
 | `Data` as a wrapper around `Schema` | The macro crashes the compiler in a capture-checked cell (12). |
+| `Data` that writes the form of `Schema` | `Schema` throws on NaN and on a record as a map key, so a value from a model could stop a commit (12). |
+| `rlm` that gives only text, or only the output type of the program | A parent cell then parses text, and the compiler cannot check it. |
+| A `finisher` leaf for a child | It needs a `Schema[A]`, and a type from a cell has none. |
 | `DynamicValue` in an entry | Its JSON codec changes most kinds of value (12). |
 
 ## 14. The choices
 
 The decisions of [CODE_HARNESS.md](CODE_HARNESS.md), 7.10 and 8.7 stay, except decision 1 of 8.7, as item 7 says.
-These choices are new in this document. Only choices 1, 2, 3, 4, 5, 13, 14, 15, 16, 17 and 18 are confirmed:
+These choices are new in this document. Only choices 1, 2, 3, 4, 5, 6, 13, 14, 15, 16, 17 and 18 are confirmed:
 
 | # | Choice | Answers |
 |---|---|---|
@@ -1214,7 +1306,7 @@ These choices are new in this document. Only choices 1, 2, 3, 4, 5, 13, 14, 15, 
 | 3 | Confirmed on 2026-11-04. All work is a session. `Sessions` and `Children` take the place of `Agents`, and each holds a ceiling. `spawn` for subagents goes away. `rlm` needs `Children^`, and `start` and `tell` need `Sessions^`. A child and a rollout have only `Children^` (5.2). | Question 5 of section 11 |
 | 4 | Confirmed on 2026-11-04. Long work is a job. There is no yield protocol. A job has `waitJob` and an optional message at its end, and the clock of a cell stops during a guest API call (6). | Question 2 of 9.4 |
 | 5 | Confirmed on 2026-11-04. A cell never waits for a person. A rule says `Allow`, `Ask` or `Deny`. A call with `Ask` fails with `NeedsApproval`, and the journal holds the question. A `Grant` with a request id answers it and starts a turn (5.5). A child and a rollout cannot ask. A goal waits for the answer (8.5), and the turn after a grant has a report (8.6). | |
-| 6 | `Data` is the type of a value that leaves a cell. | |
+| 6 | Confirmed on 2026-11-05. `Data` is the type of a value that a later cell, another session or the host reads back with a type. Only `Data` reads its form. `Data` has `shape`, and the preamble of a session holds its types and `submit`. An `Input` holds the values of a program call. A child with no `submit` makes `rlm` fail (5.1). | |
 | 7 | The session host is on `kyo-actor`, and the journal is on `kyo-sql-sqlite`, behind contracts. The turn stays on plain threads. | Question 2 of 8.7, decision 1 of 8.7 for the host |
 | 8 | dspy4s moves to JDK 25. | |
 | 9 | Replay is not in the first version. | Question 1 of 8.7 |
@@ -1241,6 +1333,8 @@ Open questions:
    needs a rule, and the `Once` rule of 5.5 must change.
 8. How does an owner get the result when a person answers a plain question by typing? That turn has no report (8.6),
    so the owner can wait for a result that it never gets. Choice 5 fixes this only for an answer through `Grant`.
+9. How does `submit` end a cell? F3 says `Nothing`, so a throw is the plain way. A cell with a `catch` of `Throwable`
+   can stop that throw, and a test must show what the host does then.
 
 ## 15. The plan
 
@@ -1248,11 +1342,11 @@ Each phase ends with something that runs.
 
 | Phase | Work | Result |
 |---|---|---|
-| 1. Kernel | `harness-kernel`, with `pending`, `Guard` and `guardCheck`, the laws as ScalaCheck properties and the mutants of section 12. No REPL and no LM. | The laws of 4.7 run in CI. |
-| 2. Guest API and REPL | `harness-guest`, `harness-repl`, the modes, the guards of Phase 0 on JDK 25, the laws of `Data` as properties, the second try of a cell, the catch around `ReplDriver.run`, the clock of a cell, the error hints, and negative tests for modes. | Model code runs against the guest API in each mode. |
+| 1. Kernel | `harness-kernel`, with `pending`, `inputs`, `Guard` and `guardCheck`, the laws as ScalaCheck properties and the mutants of section 12. No REPL and no LM. | The laws of 4.7 run in CI. |
+| 2. Guest API and REPL | `harness-guest`, `harness-repl`, the modes, the guards of Phase 0 on JDK 25, the laws of `Data` as properties, `shape` and the preamble, the second try of a cell, the catch around `ReplDriver.run`, the clock of a cell, the error hints, and negative tests for modes. | Model code runs against the guest API in each mode. |
 | 3. Sandbox | `harness-sandbox`: Seatbelt and bubblewrap, profiles from modes, and escape tests. | `exec` runs only in a sandbox. |
 | 4. One task | `Harness`, `drive`, the window strategy, `OptimizableStructure`, `ProgramRunner`. | A harness for one task that the optimizers accept. |
-| 5. RLM | `llmQuery`, `llmQueryBatched`, `rlm` and `rlmBatched` behind `Children^`, the shared budget, the depth limit. | RLM in the harness. |
+| 5. RLM | `llmQuery`, `llmQueryBatched`, `rlm` and `rlmBatched` behind `Children^`, a child from a `shape`, the shared budget, the depth limit. | RLM in the harness. |
 | 6. Optimization | A metric from tests, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
 | 7. The session host | `harness-host-kyo`: the actor, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `guarded`, and the client side of `Grant`. `harness-cli`. | A coding agent for daily use, one session at a time. |
 | 8. Memory | The memory tree and its metric. | Long sessions that lose no detail. |
