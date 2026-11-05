@@ -67,7 +67,7 @@ class GivenContextSuite extends FunSuite:
 
   /** A context with the language model `lm`, the chat adapter, and the callback `recorder`. */
   private def givenContext(lm: LanguageModel, recorder: Recorder): RuntimeContext =
-    RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()), callbacks = Vector(recorder))
+    RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()), callbacks = Some(Vector(recorder)))
 
   private lazy val pythonAvailable: Boolean =
     try
@@ -148,7 +148,7 @@ class GivenContextSuite extends FunSuite:
     val result = Parallel(numThreads = Some(ThreadCount(2))).run(Vector.fill(3)(program -> ProgramCall(question)))
 
     assertEquals(
-      result.map(_.results.flatten.map(raw => lookupString(raw.values, "answer"))),
+      result.map(_.results.flatMap(_.toOption).map(raw => lookupString(raw.values, "answer"))),
       Right(Vector.fill(3)("Paris"))
     )
     assertEquals(recorder.moduleStarts, Vector.fill(3)("predict"))
@@ -166,14 +166,14 @@ class GivenContextSuite extends FunSuite:
       )(using context)
     }
 
-    assertEquals(result.map(_.results.flatten), Right(Vector(true, true, true)))
+    assertEquals(result.map(_.results.flatMap(_.toOption)), Right(Vector(true, true, true)))
   }
 
   // ── Tools ───────────────────────────────────────────────────────────────────────────────────────────────────
 
   test("ToolExecutor.run sends the tool scope to the callbacks of the given context") {
     val recorder         = Recorder()
-    given RuntimeContext = RuntimeContext(callbacks = Vector(recorder))
+    given RuntimeContext = RuntimeContext(callbacks = Some(Vector(recorder)))
     val tool             = ToolFunction("lookup")(_ => Right(DynamicValues.fromAny("found")))
 
     val result = ToolExecutor.run(tool, DynamicValue.Record.empty)

@@ -3,9 +3,9 @@ package dspy4s.streaming
 import dspy4s.core.contracts.ClosableIterator
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
-import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.lm.contracts.ForwardingLanguageModel
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmRequest
@@ -19,13 +19,9 @@ import dspy4s.lm.providers.HttpTransport
 import dspy4s.lm.providers.OpenAiClient
 import dspy4s.lm.providers.OpenAiLanguageModel
 import dspy4s.lm.runtime.ManagedLanguageModel
-import dspy4s.lm.runtime.ProviderLanguageModel
 import dspy4s.streaming.contracts.StreamEvent
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
-import zio.blocks.schema.Schema
-
-import java.nio.charset.StandardCharsets
 
 /** The `streamify` wrapper assembles the response of a model in the Responses mode with the reasoning and the citations
   * of a plain call (upstream lm15 `StreamAccumulator` in `dspy/_vendor/lm15/result.py`, read through `legacy_output` in
@@ -77,7 +73,6 @@ class StreamingResponsesSuite extends FunSuite:
 
   private val request = LmRequest(
     model = "gpt-test",
-    mode = LmMode.Responses,
     messages = Vector(Message(role = MessageRole.User, text = Some("Capital of France?")))
   )
 
@@ -100,16 +95,19 @@ class StreamingResponsesSuite extends FunSuite:
       case Right(response) => response
       case Left(error)     => fail(s"the plain call failed: $error")
 
-  private def decode(text: String): Either[DspyError, DynamicValue] =
-    Schema.dynamic.jsonCodec.decode(text.getBytes(StandardCharsets.UTF_8)).left.map(err =>
-      ParseError("json", err.toString)
-    )
+  /** A model that cannot stream: it forwards each call to `delegate`. */
+  private final class PlainOnly(override val delegate: OpenAiLanguageModel) extends ForwardingLanguageModel:
+    override val id: String                                                                    = delegate.id
+    override val mode: LmMode                                                                  = delegate.mode
+    override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] = delegate.call(request)
 
   test("the wrapper gives the reasoning, the citations, and the partial arguments of a Responses stream") {
     given RuntimeContext = RuntimeEnvironment.current
     val plain            = plainCall(openAi(Scripted(body, Vector.empty)))
     val streamed         = wrapped(openAi(Scripted(body, lines)))
     assertEquals(streamed.outputs.map(_.text), plain.outputs.map(_.text))
+    assertEquals(streamed.outputs.map(_.reasoning), plain.outputs.map(_.reasoning))
+    assertEquals(streamed.outputs.map(_.citations), plain.outputs.map(_.citations))
     assertEquals(streamed.outputs.map(_.metadata), plain.outputs.map(_.metadata))
     // Upstream lm15 `_parse_json_best_effort`: streamed arguments that are not JSON give `{"partial_json": raw}`.
     assertEquals(
@@ -120,14 +118,16 @@ class StreamingResponsesSuite extends FunSuite:
 
   test("the wrapper gives the reasoning and the citations of a Responses model that cannot stream") {
     given RuntimeContext = RuntimeEnvironment.current
-    val provider         = ProviderLanguageModel(id = "gpt-test", mode = LmMode.Responses, invoke = _ => decode(body))
+    val provider         = PlainOnly(openAi(Scripted(body, Vector.empty)))
     val plain            = plainCall(provider)
-    assert(plain.outputs.exists(_.metadata.fields.nonEmpty), plain.toString)
+    assert(plain.outputs.exists(output => output.reasoning.nonEmpty && output.citations.nonEmpty), plain.toString)
     val streamed = wrapped(ManagedLanguageModel(delegate = provider))
+    assertEquals(streamed.outputs.map(_.reasoning), plain.outputs.map(_.reasoning))
+    assertEquals(streamed.outputs.map(_.citations), plain.outputs.map(_.citations))
     assertEquals(streamed.outputs.map(_.metadata), plain.outputs.map(_.metadata))
   }
 
-  test("a stream with no reasoning and no citation keeps an empty metadata") {
+  test("a stream with no reasoning and no citation gives an empty reasoning, no citation, and an empty metadata") {
     given RuntimeContext = RuntimeEnvironment.current
     val textOnly         = Vector(
       """data: {"type":"response.output_text.delta","output_index":0,"delta":"Paris"}""",
@@ -136,5 +136,7 @@ class StreamingResponsesSuite extends FunSuite:
     )
     val streamed = wrapped(openAi(Scripted(body, textOnly)))
     assertEquals(streamed.outputs.map(_.text), Vector("Paris"))
+    assertEquals(streamed.outputs.map(_.reasoning), Vector(""))
+    assertEquals(streamed.outputs.map(_.citations), Vector(Vector.empty))
     assertEquals(streamed.outputs.map(_.metadata), Vector(DynamicValue.Record.empty))
   }

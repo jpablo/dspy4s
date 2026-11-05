@@ -27,6 +27,3 @@ trait MonoidAction[M, A](using monoid: Monoid[M]):
   @Law("combined actions compose")
   def compatibility(first: M, second: M, value: A): IsEq[A] =
     act(first.combine(second), value) <-> act(first, act(second, value))
-
-object MonoidAction:
-  def apply[M, A](using action: MonoidAction[M, A]): MonoidAction[M, A] = action

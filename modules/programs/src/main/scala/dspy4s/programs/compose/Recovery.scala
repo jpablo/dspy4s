@@ -67,10 +67,10 @@ object RecoverWith:
       primary: OptimizableStructure.WithArity[P, NP],
       fallback: OptimizableStructure.WithArity[F, NF]
   ): OptimizableStructure.Of[RecoverWith[I, O, P, F], NP + NF] =
-    PairOptimizableStructure.structure[RecoverWith[I, O, P, F], P, F, NP, NF](
+    OptimizableStructure.pair[RecoverWith[I, O, P, F], P, F, NP, NF](
       "RecoverWith",
-      "primary",
-      "fallback",
+      Some("primary"),
+      Some("fallback"),
       _.primary,
       _.fallback,
       (program, nextPrimary, nextFallback) =>

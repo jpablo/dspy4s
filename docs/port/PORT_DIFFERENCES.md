@@ -128,7 +128,7 @@ read-only metadata separately from the exact optimizable parameters:
 ```scala
 trait OptimizableLeaf[P]:
   def get(program: P): OptimizableParameters
-  def metadata(program: P): OptimizableMetadata
+  def metadata(program: P): PredictorKey
   def set(program: P, parameters: OptimizableParameters): P
 ```
 
@@ -176,13 +176,13 @@ plug into it yet.
 
 Per-chunk granularity also differs: dspy4s emits one chunk per
 field at the value boundary (JSON), at the close-tag boundary
-(XML), or via a holdback window (Chat). Concatenated content
+(XML), or after the hold of a tail that can still become a marker
+(Chat). Concatenated content
 matches Python; per-chunk shape doesn't. See
 [STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md) for the per-token
 refactor that would close the gap, and
 [PORT_MAP §4](PORT_MAP.md#4-behavioral-deltas) for the other
-documented streaming deltas (completion-chunk emission,
-`allowReuse` default).
+documented streaming deltas (completion-chunk emission).
 
 ## 6. Error handling: exceptions → `Either[DspyError, A]` at boundaries
 
@@ -201,7 +201,7 @@ with a structured error ADT:
 
 - `ValidationError` — signature / input shape problems
 - `ParseError` — adapter parse failures with field context
-- `ConfigurationError` — missing LM / adapter / setting
+- `ConfigurationError`: missing LM or setting, or an adapter of the wrong type
 - `NotFoundError` — missing field / resource
 - `RuntimeError` — unexpected provider failures
 
@@ -210,6 +210,25 @@ checked. The layer additionally elevates adapter-parse
 failures to the `Predict.apply` boundary instead of surfacing them
 via lazy field access — a decode failure is a `Left`, not a
 `Throwable` at first field read.
+
+An empty reply has one form in the port: an `LmOutput` with an empty text. Upstream keeps a null and an empty text
+apart, and a blank text stays as it is. This gives three differences:
+
+- `llm_query` of `RLM` gives an error for each form, and `llm_query_batched` puts the text
+  `[ERROR] The sub-LM returned no outputs.` in its list for each form. Upstream gives an error only for a null, and each
+  of the two functions gives `""` for an empty text. The port has one text for an empty and a null content, so it cannot
+  tell them apart.
+- A chat content of only white space gives the error of an empty reply, and the fallback. Upstream parses that text. The
+  parse of its chat format fails, unless each output has a default. Upstream then succeeds with one call.
+- The raw response of the error is the text of the output. Upstream has the text of the whole output record.
+
+The parse step of a `Predict` call runs the decode of the output type on each output of the reply. Thus a value that
+the decode rejects is a `ParseError` with the raw response, as an upstream `AdapterParseError`, and it gets the JSON
+fallback. This rule has one difference. A reply with provider tool calls gives a null to each output that its text does
+not give. Upstream keeps that `None` for each annotation. A Scala `String` output has no null, so the decode rejects
+the reply, and the call fails after the fallback. An `Option[String]` output takes the null. When the decode rejects the
+values of such a reply, the decode runs again on the provider tool calls with each default and a null for each other
+output (upstream `except AdapterParseError: value = {}`), so a reply that passes this second decode gets no second call.
 
 ## 7. Save / load: Python state/program modes → state restore
 
@@ -233,6 +252,16 @@ This means: a model trained in Python DSPy cannot be loaded into
 dspy4s and vice-versa. Training pipelines that need both runtimes
 have to export to a portable format at the integration boundary.
 
+A saved demo has the wire form of section 17, so a prompt shows the same text after a load, with these limits. The reader
+has the rules of `json.loads`:
+
+- A `BigDecimal` with more digits than a float, and `1.50`, have the value of a float after a load.
+- A typed `Some(Some(x))` and a framework type such as `Noul` with `None` keep the typed form, so after a load they show
+  `{"Some": ...}` or `{"None": {}}` in a demo. The typed decode reads the typed value before a save. It rejects these
+  records after a load ("Expected Int"), and only a prompt reads a demo. An RLM variable of a nested `Option` is a dict.
+- A file with a duplicate key loads the last value. The check for a duplicate optimizable id reaches only a record that a
+  caller gives to `loadState`.
+
 ## 8. Utility namespace: `dspy/utils/*` → folded into consumers
 
 **Convention.**
@@ -244,9 +273,9 @@ its primary consumer:
 | Python | dspy4s |
 |---|---|
 | `utils/callback.py` | `core/contracts/Callbacks.scala` (because every module depends on it) |
-| `utils/caching.py` | `lm/runtime/CacheRuntime.scala` (LM-specific) |
+| `utils/caching.py` | `lm/contracts/LmCache.scala`, with `InMemoryLmCache.scala`, `DiskLmCache.scala`, and `CompositeLmCache.scala` in `lm/runtime/` (LM-specific) |
 | `utils/parallelizer.py` | `programs/runtime/ParallelExecutor.scala` (lives with `Parallel` / `BestOfN` / `Evaluate`) |
-| `utils/usage_tracker.py` | inside `lm/runtime/ManagedLanguageModel.scala` (per-call accumulator) |
+| `utils/usage_tracker.py` | `core/runtime/UsageScope.scala` (the usage scopes and `UsageTracker`); the user facade `UsageTracking` is in `lm/runtime/ManagedLanguageModel.scala` |
 
 The convention is **no catch-all utility namespace**. Each helper
 lives in the module that owns its lifecycle, which makes ownership
@@ -264,8 +293,9 @@ Scala has no decorator equivalent that composes well with generic
 signatures. Behavior layers are explicit wrapper objects that
 decorate a `LanguageModel` and conform to the same trait:
 
-- `ManagedLanguageModel` wraps a base LM with cache + retry + usage
-  + history.
+- `ManagedLanguageModel` wraps a base LM with cache + retry + history.
+  It records no usage and sends no LM callback events:
+  `LanguageModel.callAndRecordUsage` is the one record point.
 - `StreamingLanguageModelWrapper` wraps a streaming LM with the
   stream-pump + per-call queue + callback bridging.
 
@@ -280,7 +310,7 @@ ordinary function composition.
 When the LM returns tool-call `arguments` that aren't a JSON object,
 Python keeps the raw string under the `arguments` key. dspy4s wraps
 the raw value as `Map("input" -> raw)` for uniformity with the
-non-streaming path's `ProviderResponseParser.parseArgs`. Documented
+non-streaming path (`ToolCallAssembler.decodeArguments` in `ChatWire`). Documented
 in [PORT_MAP §4](PORT_MAP.md#4-behavioral-deltas).
 
 ## 11. `Aggregation.majority` normalizer
@@ -334,8 +364,10 @@ adapter/LM/callback dance that Python has spread across
 `DynamicPredict` is the prediction leaf for record-valued programs: it executes runtime-built signatures while
 `Predict` is its sibling over the shared engine. Some agent internals construct dynamic prediction passes, but
 programs do not delegate through a universal `DynamicPredict` substrate. Three pieces made this clean:
-- **`OutputAugmentation`** (`dspy4s.signatures`) — the shared `WithField[O, Name, T]` + `PrependField` typeclass that
-  output-augmenting programs use to prepend `reasoning` / `rationale` (idempotent, cast-free, always a named tuple).
+- **`Signature.prependOutput`** (`dspy4s.signatures`), with the `WithField[O, Name, T]` type and the `PrependField`
+  evidence of `OutputAugmentation`. The output-augmenting programs use it to prepend `reasoning` or `rationale`. The
+  operation does not add a field that the output has, uses no cast, and always gives a named tuple. It changes the
+  layout and the output shape in one call, as `Signature.appendInput` does for an input.
 - **`Signature.fromString`** — a `transparent inline` macro that parses a literal DSL at compile time into
   `NamedTuple` I/O, so the string DSL is compiler-checked; `fromStringDynamic` is the runtime (`Record`) version.
 - **`Streamable[P]`** (`dspy4s.streaming`) — `Streamify` takes any program through this typeclass, so
@@ -407,13 +439,440 @@ constraints. The port has no model of Python types, so a few places of a prompt 
 - After whitespace before a chat header, upstream `ChatAdapter.parse` keeps a part of the header in the value, because
   it cuts the rest of the line with the offset of the stripped line (`line[match.end():]`). The port cuts the rest of
   the stripped line, so the value is the text after the header.
-- ReActV2 (experimental) types `next_thought` as a `str` field, so the output reminder has no type hint for it.
-  Upstream types it as `dspy.Reasoning`, which the port does not have.
 - The RLM action prompt has no text about the sub-agents of the sandbox `dspy` facade, because the port has no facade
   (upgrade item P8).
 - The evidence request of a decision output (experimental) shows the evidence JSON schema in the form of the port.
   Upstream shows the pydantic form, with title-cased labels. A decision value prints with the field order of the
   port (`value`, `confidence`, ...); upstream prints `confidence` first.
+- The decode of a Score output (experimental) gives its `level` as the name of the level, and a typed `Score[L]`
+  has `level: Option[L]`, a case of the level enum. Upstream gives the zero-based level index. The probabilities of
+  both are keyed by the level index.
+
+## 17. Output values: one lenient rule for numbers and bools
+
+**Convention.**
+
+Upstream `parse_value` reads an output value with `json_repair`, then `ast.literal_eval`, then pydantic lax mode. The
+port reads a number and a bool with one rule, `LenientValues`. The Chat, JSON, and XML adapters, the typed decode, and
+the accessors of `RawPrediction` use this rule. Thus one text has one value on each path, and a lenient form needs no
+second call of the model.
+
+Each number text and each bool text that upstream reads for its type, the port reads with the same value:
+
+| Type | The text forms |
+|---|---|
+| `int` | Digits with a sign, a `_` between digits (`1_000`), and a whole float text (`3.0`, `5.`, `1e3`), of any size. |
+| `float` | Decimal forms with a sign (`.5`, `5.`, `1e3`), a `_` between digits, and `inf`, `infinity`, and `nan` in any case. `1e400` is an infinite float. |
+| `bool` | `true`, `false`, `yes`, `no`, `on`, `off`, `t`, `f`, `y`, and `n` in any case, and a number or a number text with the value 1 or 0. |
+
+The port also reads these forms, and upstream rejects them:
+
+- A currency symbol (`$ € £ ¥`) and thousands commas: `$1,200` and `1,200`. A comma that does not separate the
+  thousands makes the text no number, so a decimal comma (`3,5`) is an error, not `35`.
+- The null texts of an optional field whose type does not read the text: `n/a`, `none`, and the empty text. Upstream
+  reads only `None` and `null` for such a field. An `Option[String]` keeps each text in each format, as upstream keeps it
+  for an `Optional[str]` (`dspy/adapters/utils.py:217-219`). In a typed decode, an enum with a case of that name keeps the
+  case. The adapter reads the text `None` of an optional enum as a null first, as upstream does for an `Optional[K]`.
+- Spaces around a bool word: ` yes `.
+- A whole float text out of the range of a 64-bit integer: `1e19`.
+
+The port does not read these forms, and upstream reads them:
+
+- The Python integer literals `0x10`, `0o7`, and `0b11`. Upstream reads them through `ast.literal_eval`. A model does
+  not write them.
+- A bool for an `int` or a `float` field. Upstream gives `1` or `1.0` for `true`, and `0` or `0.0` for `false`.
+- A space between a sign and the digits: `- 5`.
+- A `_` next to a decimal point: `1_.5` for a `float`.
+
+A form that only Java reads (`3d`, `3f`, `0x1p3`) is no number on each path, as upstream.
+
+An item of a list type of a string signature has the same rule: `list[int]`, `list[float]`, and `list[bool]` read each
+item with `LenientValues`, and `list[str]` takes only a string. A tuple of any length, for example `tuple[int, ...]`, has
+the rule of its item type. The port has no check for each other item type, for example `Optional[int]`, `dict`, or the
+items of `tuple[int, str]`. Upstream validates each annotation.
+
+**A typed value with a form of its own.** The JSON schema of a typed signature comes from the JSON codec of zio-blocks,
+not from pydantic. A typed value gets its wire form one time, at the boundary from a typed value to a `DynamicValue`
+(`Reflects.wireValue`): `Shape.encode`, `:=`, `withRawValue`, `ToolFunction.result`, and a default value. Thus the JSON
+text of a prompt, a demo, a variable of the RLM sandbox, and the text of a value all have the same form. A saved demo has
+it too, with the limits of section 7. A framework type (`History`, `ToolCall`, and the decision types) stays in its typed
+form, because its readers use `Schema.fromDynamicValue`.
+
+| Type | The wire form | The wire type |
+|---|---|---|
+| A sealed trait with fields | The case name as a key: `{"Circle": {"radius": 1}}`, and `{"Dot": {}}` for a case with no fields. A nested sealed trait keeps its path: `{"Animal": {"Cat": {...}}}`. Upstream writes a union of models, with no key. | `union` |
+| A sealed trait with a discriminator | A flat record: `{"kind": "Circle", "radius": 1}`, and `{"kind": "Dot"}` for a case with no fields. A leaf of a nested sealed trait has its flat name. | `union` |
+| A sealed trait with only cases with no fields | The name of the leaf case. | `string` |
+| A tuple | An array, with `prefixItems` in the schema. | `list` |
+| An `Option` or a `Maybe` | The element, or a null. An `Option` directly in an `Option` keeps the outer case in the encode, so `Some(None)` is not `None` on the direct path. Its JSON text is a null, which decodes to `None`, and an absent field `x: Option[Option[Int]] = Some(None)` decodes to `None`. | The type of the element |
+| A `Map` | A record with text keys, when each key has a primitive wire form: an enum, a number, a `UUID`, or a text. A tuple key or a record key keeps the map, and it has no JSON text that the decode reads. | `json` |
+| A time value, a `UUID`, or a `Currency` | A text, with a `format` in the schema for some of them. | An opaque type with its type name, for example `Instant` |
+| `BigInt` | A number, with each digit. | `int` |
+| `BigDecimal` | A number. | `BigDecimal` |
+| `Char` | A text with one character. | `string` |
+| A `Schema.transform` | The form of the value behind it. | The type of the value behind it |
+
+The typed decode (`ZioSchemaCodec.normalize`) reads the wire form, and it is lenient in three ways. It reads a bare case
+name for a case with no fields of a sealed trait with fields (`Dot`). It reads the record of a tuple
+(`{"_1": 1, "_2": "a"}`). It reads the flat name of a leaf case of a nested sealed trait (`{"Cat": {...}}`), which is the
+form that the schema shows. Only a nested sealed trait with fields has one form in the schema and another in the JSON
+text of a value, and the decode reads each. A record with the fields `_1` and `_2` that is not a tuple stays an object.
+
+An enum encodes to the name of its leaf case. When two nested leaf cases have one name, the first wins, and the law
+`decode(encode(a)) == Right(a)` does not hold for the second.
+
+Two small limits: a `Unit` field does not decode (its schema is an empty object, and its JSON text is a null), and
+`Double.NaN` has a JSON text that `parseJson` rejects. The type id finds an `Option` and a `Maybe`, as in the codec, so
+`enum E { case None; case Some(value: Int) }` is no `Option`, also with a rename.
+
+**An annotation of zio-blocks.** The JSON schema comes from the JSON codec, so an annotation changes what the schema shows.
+The name rules of that codec are in `Reflects`, and the field specs, the wire form, and the decode use only these rules.
+`FieldSpec.name` is the wire name, so the prompt, the parsers, and the settings of a decision output use it. The typed
+value keeps the name in the code.
+
+| Annotation | The rule |
+|---|---|
+| `rename` | The name on the wire, for a field and for a case. It wins over a naming strategy. |
+| `alias` | One more name that the decode reads. The schema does not show it, as upstream pydantic shows one name, and because the form of the codec (`allOf` with `oneOf` of `not` schemas) breaks the strict shape. |
+| `fieldNaming` | A naming strategy for each field of that record. An unknown strategy throws when the shape is made. |
+| `caseNaming` | A naming strategy for each leaf case. The strategy of the outer sealed trait applies to a nested leaf, and the strategy of a nested sealed trait applies only when it is the type of a field. |
+| `discriminator` | The flat record of the table. Only the outer sealed trait counts. It has no effect on an enum (a text) or on a sealed trait with a case that is not a record (a case name as a key), as in the codec. |
+| `transient` | Not a field spec, not in the schema, not in the encode. The decode ignores a value and gives the default. The macro of zio-blocks gives a compile error for such a field with no default, except for an `Option` (the decode gives `None`) and a collection (the decode gives an empty one, as the codec does). |
+| `encodeTransient` | A field spec, in the schema, and read by the decode, but not in the encode. Thus the law `decode(encode(a)) == Right(a)` holds only for its default. An input with no default that is not optional is always a missing input. |
+| `noExtraFields` | The schema has `additionalProperties: false`. The decode ignores an extra field, as `Schema.fromDynamicValue` does. The codec rejects it. |
+
+These rules of the port have no form in the codec:
+
+- A sealed trait with a case with a field with the wire name of the discriminator keeps a case name as a key, in the schema
+  too. The codec writes the key two times there, and its decode rejects its own output.
+- The decode finds a field and a case by the wire name, an alias, or the name in the code, in this order. A key belongs to
+  one field or one case, so a name in the code does not read the wire name or the alias of another field. When a record
+  has two names of one field, the first in this order wins. The codec rejects such a record.
+- An adapter reads an output field only by its wire name, so a reply with an alias or a name in the code of an output is a
+  parse error. The allowed values of an enum are its wire names, so a chat reply with an alias or a name in the code of a
+  case is a parse error too, and the chat adapter then tries its JSON fallback. Each nested value reaches the decode.
+- A wire name of a field of a signature must be a valid identifier, as each field name of a layout. A signature with
+  `kebab-case` on its record is an error when the layout is made. A nested record has no such limit.
+- `Signature.from` compares the wire names of an output with the inputs. An output type of `prependOutput` compares the names
+  in the code, and its layout compares the wire names. Thus `ChainOfThought` over `@rename("why") reasoning: String` asks for
+  `reasoning` and `why`, and the output `reasoning` has the value of `why`. Over `@rename("reasoning") why: String`, it asks
+  for `reasoning`, and the two outputs have that value.
+- The macro of zio-blocks does not read an annotation on a simple case of a Scala `enum`, so it has no effect, in the schema
+  too. It reads an annotation on a case object of a sealed trait, on a case with fields, and `caseNaming` on the `enum`.
+- A `Maybe` has each rule of an `Option`. `Signature.derived` and the signature macros have no schema for a `Maybe` of a
+  record, because they ignore each custom schema, so that is a compile error. `Shape.derived` reads it.
+
+Three limits of the wire names:
+
+- A labeled example, a demo, a history message, and a metric read by the wire name, so use the wire name in a data set. With
+  `@Modifier.rename("ans") answer`, `Example("answer" := "x")` and `ExactMatch()` give a metric error, and a demo or a
+  history message with `answer` shows no value of that field, with no error.
+- The `submit` tool of `ReActV2` decodes, encodes, and decodes again, so an `encodeTransient` output has its default, and with
+  no default the run ends with "Missing required fields".
+- In `Signature.prependOutput` and `ChainOfThought`, an output named `reasoning` with `Modifier.transient` or
+  `Modifier.rename` conflicts with the added field. With `@rename("why") reasoning`, `encode` then `decode` gives an error,
+  because the encode has no `reasoning`.
+
+A `BigDecimal` keeps each digit of a text and of a JSON integer. A JSON number with a fraction has the value of a float,
+because the JSON reader has the rules of Python `json.loads`: `1.23456789012345678901` gives `1.2345678901234567`. A text
+in the chat format and a JSON string keep each digit.
+
+A typed demo with a `None` has a null, so it is an incomplete demo, as a demo with a Python `None` is in upstream. An
+input with a `None` shows `None`, as upstream.
+
+`Signature.derived` and the signature macros ignore a custom `Schema`, so only `Shape.derived` reads a
+`Schema.transform`.
+
+The port sends `anyOf` for a sealed trait and `prefixItems` for a tuple in the strict response format, as upstream does for
+a tuple. A text `const` and an `enum` of texts get `"type": "string"`, as pydantic writes them. Each object in `prefixItems` is closed, and upstream does not go into `prefixItems`. The port also sends
+`items: false`, and upstream pydantic does not. No OpenAI server has checked these schemas. After a provider rejects a
+schema there is no fallback, as in upstream ("schema fallback never encloses an LM call").
+
+A tool of `ToolFunction.fromMethod` has an input schema when an argument is not a text, a number, or a bool: such an
+argument has its JSON schema, and each other argument has the schema of its wire type, because a zio-blocks schema of an
+integer also has `minimum` and `maximum`. Upstream `Tool.args` has the pydantic schema of each argument. A recursive type
+has its `$defs` at the root of the input schema, and the text of the tool shows the `$ref`. Upstream expands each `$ref`.
+An enum argument has `enum` and `"type": "string"`, as pydantic writes it. A hand-written tool with a `list` argument has
+`{"items": {}, "type": "array"}`, as upstream has for a `list`. `fromMethod` ignores a default value of a parameter: the
+schema marks the parameter as required, and `invoke` rejects its absence. Upstream (`tool.py:113-114,165`) leaves it out
+of `required`.
+
+## 18. Sandbox tools and ReActV2 names
+
+**Convention.**
+
+- The vendored `runner.js` differs from the upstream file in the tool wrappers. A tool with no declared parameters
+  (`ToolFunction(...)`, `ToolFunction.of(...)`) has an unknown argument list, so its wrapper is `def name(**kwargs):`,
+  as in the local interpreter. Upstream generates `def name():`, and that function rejects each argument. Each wrapper
+  calls one shared helper, so an argument can have the name `json` or `run_sync`. Upstream puts the call in each
+  wrapper, so such an argument hides the module or the function. A parameter can be optional (section 25). The port
+  does not send a `default` for a parameter, so the runner has no such case.
+- A value of the code that JSON cannot hold does not end the session, in the two sandboxes. A SUBMIT value or an
+  exception argument becomes its `repr`, or `<unprintable NAME>` when `repr` raises, as `jsonable` of the local worker
+  does. `RLM` then gives the observation `[Error] FINAL returned str`. In upstream `runner.js`, `JSON.parse` rejects
+  such a value in a catch block, and the Deno process ends. In the upstream local worker, a `RecursionError` or a
+  `__repr__` that raises ends the session.
+- A JSON-RPC line of the Deno sandbox that the JSON reader of the client rejects ends the session with a `Left`. A lone
+  surrogate or a text over 4,194,304 characters gives such a line. The reader of upstream accepts these lines.
+- Limits. In Pyodide, `repr` or `json.dumps` of a value with several thousand levels overflows the JavaScript stack
+  before Python raises a `RecursionError`. Python cannot catch this, so the session ends with a `Left`. In the local
+  worker, the result depends on the version of Python: a `RecursionError` gives the fixed text, and a line that the JSON
+  reader of the client rejects ends the session with a `Left`. Python 3.14 writes such a line for a list with 100000
+  levels, and Python 3.12 and 3.13 raise the error. An int with more
+  than 307 digits ends a local session with a `Left`, and it becomes a null in Deno, because JavaScript reads it as
+  `Infinity`. Upstream has the Deno limits.
+- ReActV2 rejects an output with the name `next_thought`, `tool_calls`, or `tool_call_results` at construction,
+  because the history event of a turn has these keys and the final outputs go over them. Upstream does not check
+  these names.
+
+## 19. The errors of the `TwoStepAdapter` extraction step
+
+**Convention.**
+
+The extraction step gives each `ParseError` the text "Failed to parse response from the original completion: ", and
+the raw text of the error is the completion of the main LM. Two errors differ from upstream:
+
+- An extraction reply with no outputs is a `ParseError` with that text. Upstream takes `parsed_result[0]` of an empty
+  list, and that raises an `IndexError`.
+- A `ParseError` of the model, for example a provider reply that is not JSON, also gets that text. Upstream wraps only
+  an `AdapterParseError`, and a model call does not raise it.
+
+The extraction step has no check of the output type of a typed signature: the check runs after the step, for the output
+of the main call. Thus a value that the typed decode rejects is a `ParseError` with the completion of the main LM as its
+raw text, with no JSON fallback on the extraction model and without the text of the wrapper. Upstream `parse_value`
+rejects that value in the extraction step, so its JSON fallback comes first.
+
+A reply of the main LM with provider tool calls, for a layout with a tool calls output, has the rule of upstream
+`Adapter._call_postprocess`: the calls fill that field, a reply with no text gets no extraction, and a `ParseError` of
+the extraction gives no text values. Three parts differ from upstream:
+
+- The extraction asks only for the other output fields, in its layout and in its response schema, because the model has
+  nothing to extract for the calls. Upstream keeps the tool calls field in the signature of the extraction, so a reply
+  that gives only the other fields is a parse error, and upstream loses their values.
+- A layout with only a tool calls output gets no extraction. Upstream runs the extraction when the reply has text.
+- One other output field takes a reply with no markers as its value (the single-output rule of the chat adapter).
+  Upstream gives `None`.
+
+Upstream `TwoStepAdapter.acall` has no such rule: it always runs the extraction. The port has one path.
+
+## 20. The trace limit, and the failure budget and the controls of `BestOfN` and `Refine`
+
+**Convention.**
+
+- `maxTraceSize` has the default and the rule of upstream `max_trace_size`: the default is 10000, the oldest entry
+  drops, and 0 keeps no entry. The port records each module call. Upstream records only each predictor call. Thus a
+  limit holds fewer predictor calls than upstream.
+- `failCount` of `BestOfN` and `Refine` is the number of failures that the program can take, and the next failure
+  gives a `Left`. Upstream checks `idx > fail_count`, which mixes the index of the attempt and the count. Upstream also
+  lowers `self.fail_count` at each failure, so the lower value applies to all later calls of the same module.
+- A call with no successful attempt gives a `Left` with the last error. Upstream returns `None`.
+- The controls of an attempt are the temperature 1.0 and the rollout id of the attempt. They are in
+  `RuntimeScope.lmDefaults`, for the extent of the attempt. The port has no copy of the LM. Upstream sets them on a copy
+  (`lm.copy(rollout_id=rid, temperature=1.0)`, `mod.set_lm(lm_)`). `PredictEngine` reads them under the config of a
+  predictor and under a per-call config, so they stay under these two values as in upstream. They also reach each
+  predictor when a composite builds a new `ProgramCall`. A retry round of `BootstrapFewShot` uses the same field.
+- A predictor with a bound LM keeps its LM and gets the controls. In `BestOfN` and `Refine`, upstream `set_lm` replaces
+  each bound LM with a copy of one LM. In `BootstrapFewShot`, upstream sets the LM with `dspy.context(lm=lm)`, so a
+  predictor with a bound LM gets no rollout. The port gives the controls to this predictor too, because a repeat of the
+  same request adds nothing.
+- Inside a nested attempt, the critic of `Refine` and a reward function have the controls of the outer attempt. Upstream
+  gives them `dspy.settings.lm`, which does not have the controls.
+- A System One model rejects the temperature of an attempt, so an attempt on this model gives a `Left`. In upstream the
+  call also fails: `TypeSafe` has no `kwargs`, and `TypeSafe.copy` does not accept `temperature`.
+
+## 21. Optimizer rules with no upstream form
+
+**Convention.**
+
+The optimizers follow the failure rule of upstream: a `Left` stops the compile where upstream raises. These rules differ
+from upstream:
+
+- A `maxBootstrappedDemos` of 0 gives a shuffled bootstrap the size 0. Upstream `randint(1, 0)` raises a `ValueError`.
+- The current instruction of a leaf stays a candidate of COPRO and MIPROv2 that writes nothing, so a leaf with no
+  instructions keeps `None`. A prompt shows its effective instructions. Upstream reads the default text and writes it
+  back, which gives the same prompt.
+- A blank proposal gives no candidate, and a blank rule text of InferRules keeps the instructions of the leaf. Upstream
+  writes the blank text.
+- The check of ReAnchor for a cache reads only the model of the context. Upstream reads the bound LM of each predictor,
+  else `dspy.settings.lm`, and its `cache` config.
+
+## 22. Evaluate rules with no upstream form
+
+**Convention.**
+
+The `evaluate` module follows `dspy/evaluate/`. These rules differ from upstream:
+
+- A number or a bool answer reads as its text, and a list prediction reads as its JSON text. Upstream raises in
+  `normalize_text`.
+- The columns of `saveAsCsv` are the union of the keys of the rows, in first-seen order. Upstream takes the keys of the
+  first row, and `csv.DictWriter` raises on another key.
+- The table is plain text, with a column `<error>` when a result has an error. A metric cell has the form `%.3f`.
+  Upstream prints a pandas table, and a metric cell has a check mark.
+- `ExampleEvaluation.error` always holds the failure as `[code] message`, and there is no `provideTraceback`, because an
+  `Either` has no stack trace. Upstream logs each error, and its `provide_traceback` adds the stack trace to the log.
+
+## 23. Streaming rules with no upstream form
+
+**Convention.**
+
+The `streaming` module follows `dspy/streaming/`. These rules differ from upstream:
+
+- A listener on a field that is not unique, or on an unknown field, gives a warning through `warningSink`. The port gives
+  a warning because `streamify` gives a function and not an `Either`. For a field that is not unique, upstream raises a
+  `ValueError`. For an unknown field, upstream also raises: its `ValueError` branch cannot run, so the error is a
+  `TypeError`.
+- The port streams the text of any field. Upstream also accepts any field, but it gives a field of a streamable
+  `dspy.Type` to `parse_stream_chunk`. The port has no such hook.
+- A direct `call` or `stream` of a model by user code does not stream, because only
+  `LanguageModel.callAndRecordUsage` applies the sink. Upstream streams each call of an `LM`.
+- The stream rules come from the adapter at the start of the stream, so a scope with another adapter inside a program
+  still uses the first rules. Upstream reads `settings.adapter` for each chunk.
+- A model chunk that holds a whole field gives a token to the listener. Upstream reads this chunk as `cache_hit`: the
+  listener gets no token, and the stream keeps the prediction with `include_final_prediction_in_output_stream=False`.
+- The stream of a raw provider with no finish reason fails with `LmStreamAssemblyError`, as in `ManagedLanguageModel`.
+  The stream wrapper has this check because a raw provider can be the model of the wrapper. Upstream has this check in
+  `checked_stream`, below each model.
+- A later copy of a key in a JSON reply gives no token, with a listener or with no listener. The chat and XML stream
+  states have the same rule. The JSON parser keeps the last copy, so the tokens can differ from the final value. Upstream
+  gets this result for a listener with `allow_reuse=False`, and a listener with `allow_reuse=True` streams each copy.
+- During the extraction step of `TwoStepAdapter`, the stream wrapper reads the layout of the extraction. Thus the
+  reasoning of the extraction model gives a token only when that layout has a reasoning field, and the extraction then
+  fills the final value. Upstream sends each chunk of each model to a listener, but `StreamListener.receive` rejects this
+  adapter (`ADAPTER_SUPPORT_STREAMING`), so upstream has no rule for a listener here.
+
+## 24. GEPA rules with no upstream form
+
+**Convention.**
+
+The `gepa` module follows `dspy/teleprompt/gepa/`, `dspy/teleprompt/bootstrap_trace.py`, and the `gepa` package. These
+rules differ from upstream:
+
+- A score that is not finite counts as a metric failure: the example gets the failure score and no trajectory. The
+  adapter drops each objective score that is not finite, and it keeps the finite ones. Upstream keeps a float NaN. The
+  port saves the state as JSON, and JSON has no such number.
+- With `addFormatFailureAsFeedback`, a parse failure that a program caught, in a run that passed, gives a record. The
+  trace of the port holds an entry for that call. Upstream has no such entry, because it adds a failed entry only when
+  the exception leaves the program.
+- A parse failure with a partial result keeps a trajectory. Upstream computes `present / expected` on two lists
+  (`bootstrap_trace.py`), so it raises a `TypeError` and drops that example. The port does not follow this defect.
+- A fatal error in a worker of the executor gives each example of the batch the failure score, with a warning. In
+  upstream, a `BaseException` of a worker goes to the caller of the evaluation, because `utils/parallelizer.py` catches
+  only `Exception`.
+
+## 25. MCP rules with no upstream form
+
+**Convention.**
+
+The `mcp` module follows `dspy/utils/mcp.py` and the schema functions of `dspy/adapters/types/tool.py`. These rules
+differ from upstream:
+
+- The `required` list of a tool is the list of the server. Upstream `format_as_litellm_function_call`
+  (`tool.py:162-166`) marks each argument with no `default` as required, so it also marks an optional argument with no
+  default.
+- The port does not check the arguments on the client. Upstream `_validate_and_parse_args` (`tool.py:124-151`) checks
+  each argument with `jsonschema` and parses it before the call. In the port, the server checks the arguments, and its
+  error text goes to the model. A server with no check runs with the value of the model.
+- A `$ref` with no definition and a recursive definition give `{}`, the schema of any value. Upstream
+  `_resolve_json_schema_reference` (`tool.py:523-546`) raises `KeyError` and `RecursionError` at conversion. A `type`
+  that is a list gives `Any`. Upstream `convert_input_schema_to_tool_args` (`tool.py:573`) raises `TypeError`.
+- An explicit null `structuredContent` through the Java SDK gives the text fallback, because the record of the SDK has
+  `null` for a null and for an absent field. Upstream returns `None` (`mcp.py:48-49`). `resultValue` gives the null when
+  the client sends `Some(DynamicValue.Null)`.
+- The error text of several text parts is JSON text, under the boundary rule of section 16. Upstream writes the Python
+  list text (`mcp.py:46`).
+- The Java client has a request timeout of 20 seconds by default (`McpClient.java:167`). It does not check structured
+  content against the output schema by default, because `enableCallToolSchemaCaching` is false (`McpClient.java:201`,
+  `McpAsyncClient.java:703`). The Python client has no default read timeout (`mcp/shared/session.py:284-288`), and it
+  checks structured content (`mcp/client/session.py:412-441`). The caller owns the client.
+- A part that is not text is its JSON object. Upstream keeps the pydantic object (`mcp.py:39`).
+- In the sandbox of `RLM`, a tool with a JSON schema has a wrapper with the names of the schema, and the code can leave
+  out an optional argument. A tool with an argument name that is not a Python name takes keyword arguments. Upstream
+  `PythonInterpreter._extract_parameters` (`dspy/primitives/python_interpreter.py:461-475`) reads the Python signature
+  of the tool. For an MCP tool the signature is `func(*args, **kwargs)`, so the upstream wrapper has the two parameters
+  `args` and `kwargs` (`dspy/predict/rlm.py`, `_make_interpreter_tool`).
+
+## 26. The tool specs of a predictor
+
+**Python.** The tools of a call are an input field of the type `list[dspy.Tool]`. `Adapter._call_preprocess`
+(`dspy/adapters/base.py:91-120`) reads that field. The request gets the tools, or the prompt shows the field. Upstream
+has no other way to give tools to a predictor.
+
+**Convention.**
+
+The port has this input field (`TypeRef.tools`, which `ReActV2` uses), and `Predict` and `DynamicPredict` also have
+`tools`, a list of `ToolSpec` values apart from the layout. A layout with a tool calls output has these rules:
+
+- When native function calling is active, the request has the tool specs as provider tools, and the prompt hides a
+  tools input.
+- Else, the prompt shows the tool specs as one more input field `tools` at the end of the inputs, with the text of each
+  tool (`ToolSpec.text`, the port form of `Tool.__str__`). The text has the form of a tools input of the layout.
+- A layout with a tools input shows that input, and gets no second field. A layout with an other field with the name
+  `tools` keeps that field, and the prompt does not show the tool specs. Upstream reads only the type of a field, so it
+  has no such case.
+- With native function calling on, a tool calls output with no tool specs and no tools input is a `ConfigurationError`
+  from `format`. Upstream raises a `ValueError`. Upstream does this check before it reads the support of the model, so
+  the port reads the flag only. Upstream has this check in `__call__`, so its `format` alone does not raise.
+- With native function calling active, a tool calls output with no tool specs is a `ConfigurationError` also when the
+  layout has a tools input. A tools input of the port holds only text, so it cannot become provider tools. Upstream
+  makes the provider tools from the `Tool` values of that input. When native function calling is not active, the prompt
+  shows such an input, and there is no error.
+- A demo with no value for the input field `tools` is an incomplete demo when the prompt shows the field, as upstream
+  for a demo with no value for a tools input. A replayed turn of a history does not show the tools.
+- A layout with no tool calls output does not show the tool specs, because the model has no field for a call.
+- `TwoStepAdapter` has native function calling off, so its prompt shows the tool specs of a layout with a tool calls
+  output, as a `tools: ...` block of the user message, and it gives no error with no tools. The value is JSON text,
+  where upstream writes the Python `repr` of a tools input.
+
+A program holds the tool specs of its inner predictor, because the signature does not hold them:
+
+- `ChainOfThought` and `MultiChainComparison` have `tools`, and they give the value to their predictor. The tools of
+  `MultiChainComparison` are a constructor argument, so they cannot change for each call. Upstream reads them from an
+  input value of each call.
+- The default extractor of `ReAct` and the default extract step of `RLM` get the tools of the program. `ReAct` gives one
+  tool for each name and no `finish` tool. An override predictor keeps its own tools. A plain output gets no change in
+  its request or its prompt. With native function calling not active, the prompt of such a step shows the tools.
+- Upstream `ReAct` reads the tools of its extractor from an input of the signature, not from the tools of `ReAct`, and
+  upstream `RLM` has no tools input in its extract signature. Thus upstream raises the `ValueError` above where these
+  two steps of the port work, when the signature has no tools input.
+
+## 27. The reasoning of a plain chat reply
+
+**Convention.**
+
+A chat reply and a chat stream give `reasoning_content`, else `reasoning`, as the reasoning, as upstream does
+(`dspy/_vendor/lm15/providers/openai_chat.py:977` and `:2085`). The one difference: upstream applies `str(...)` to each
+truthy value, so `{"reasoning": 7}` gives `"7"`, and the port takes a text only.
+
+## 28. The `Reasoning` type
+
+**Convention.**
+
+A `Reasoning` output has the rules of upstream `dspy.Reasoning`. On a model that supports reasoning, the prompt and the
+schema of the outputs do not show the field, and the request has `reasoning_effort`: the effort of the request, else the
+effort of the model, else `low`. A null effort and a `gpt-5` model on the chat API keep a text field. On each call, a
+reasoning in the reply replaces the value of the field. An optional field stays a text field. `ChainOfThought` keeps a
+`str` field by default, and `nativeReasoning = true` is upstream `rationale_field_type=dspy.Reasoning`. `ReActV2` types
+`next_thought` as `Reasoning`.
+
+The differences:
+
+- `Reasoning` is an opaque subtype of `String`, so each operation of a text works on it and gives a `String`. Upstream
+  has a class that forwards to `str`, and the sum of two values is a `Reasoning`.
+- A reply with no reasoning gives a field with no default the empty text. Upstream gives `None`. A typed output has the
+  type `Reasoning`, not an `Option`. `ReActV2` shows no `next_thought` in the event of a turn with an empty text.
+  Upstream shows an empty section for a text reply with an empty section.
+- A call with native reasoning has no reasoning field in its strict `response_format`. Upstream builds that schema
+  before `_call_preprocess`, so it requires the field, and the parse then ignores it. Thus a strict model of upstream
+  writes the reasoning two times, and the port asks for it one time.
+- The output of `ChainOfThought` with `nativeReasoning = true` has the Scala type `String`, because the type of the output
+  does not depend on the value of an option. A `Reasoning` is a `String`.
+- Upstream reads `supports_reasoning` for each model from the data of LiteLLM. The port has no such data, so the
+  capability is off until a user declares it, for example
+  `capabilities = Some(LmCapabilities.openAi.copy(reasoning = true))`.
+- The port has no `native_response_types`, because `Citations` has no port. To keep a text field, set `reasoning_effort`
+  to null, or do not declare the capability.
+- With no stream listener, the port gives each reasoning chunk as a token of the reasoning field. Upstream gives raw
+  chunks with no listener.
 
 ## What this means in practice
 

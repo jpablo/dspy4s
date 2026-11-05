@@ -2,20 +2,33 @@
   *
   * Source: docs/docs/learn/programming/tools.md Upstream:
   * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/tools.md Status: translated (ReAct +
-  * tools, snippets 1/2/9; native-function-calling toggle, snippet 6). The manual-tool-call path (snippets 3/5) and
-  * async tools (7/8) aren't part of dspy4s's surface — dspy4s's ReAct selects tools via output fields and
-  * `ToolFunction` is synchronous.
+  * tools, snippets 1/2/9; the manual path, snippets 3/5; the properties of a tool, snippet 4; native function calling,
+  * snippet 6). Snippets 7 and 8 (async tools) have a note and no code, because `ToolFunction.invoke` is synchronous.
   */
 package dspy4s.examples.learn.programming
 
 import dspy4s.adapters.{ChatAdapter, JSONAdapter}
-import dspy4s.adapters.contracts.Adapter
-import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext}
+import dspy4s.adapters.contracts.{Adapter, NativeTools, ToolSpec}
+import dspy4s.core.contracts.{DspyError, DynamicValues, NotFoundError, RuntimeContext, ToolCall, TypeRef, :=}
 import dspy4s.examples.Demo
 import dspy4s.programs.IterationLimit
-import dspy4s.programs.strategies.ReAct
+import dspy4s.programs.strategies.{Predict, ReAct}
 import dspy4s.programs.contracts.{ToolFunction, description}
-import dspy4s.signatures.Signature
+import dspy4s.signatures.{InputField, OutputField, Signature, Spec}
+import zio.blocks.schema.DynamicValue
+
+// ── Snippet 3 (lines 74–118): the signature of the manual path ──
+// | class ToolSignature(dspy.Signature):
+// |     """Signature for manual tool handling."""
+// |     question: str = dspy.InputField()
+// |     tools: list[dspy.Tool] = dspy.InputField()
+// |     outputs: dspy.ToolCalls = dspy.OutputField()
+// `dspy.ToolCalls` becomes `Vector[ToolCall]`. This signature has no tools input: the tools go to `Predict` as
+// `ToolSpec`s, and the adapter gives them to the model.
+// The docstring goes to `instructions`, where `ManualToolExample` makes the signature.
+trait ToolSignature extends Spec:
+  def question: InputField[String]
+  def outputs: OutputField[Vector[ToolCall]]
 
 object Tools:
 
@@ -60,36 +73,181 @@ object Tools:
       reactAgent((question = question)).map(_.output.answer)
     // --8<-- [end:react-agent]
 
+  // ── Snippet 3 (lines 74–118): the manual path. The model gives the tool calls, and the program runs them ──
+  // | def weather(city: str) -> str:
+  // |     """Get weather information for a city."""
+  // |     return f"The weather in {city} is sunny"
+  // |
+  // | def calculator(expression: str) -> str:
+  // |     """Evaluate a mathematical expression."""
+  // |     try:
+  // |         result = eval(expression)  # Note: Use safely in production
+  // |         return f"The result is {result}"
+  // |     except:
+  // |         return "Invalid expression"
+  // |
+  // | # Create tool instances
+  // | tools = {
+  // |     "weather": dspy.Tool(weather),
+  // |     "calculator": dspy.Tool(calculator)
+  // | }
+  // |
+  // | # Create predictor
+  // | predictor = dspy.Predict(ToolSignature)
+  // |
+  // | # Make a prediction
+  // | response = predictor(
+  // |     question="What's the weather in New York?",
+  // |     tools=list(tools.values())
+  // | )
+  // |
+  // | # Execute the tool calls
+  // | for call in response.outputs.tool_calls:
+  // |     # Execute the tool call
+  // |     result = call.execute()
+  // |     # For versions earlier than 3.0.4b2, use: result = tools[call.name](**call.args)
+  // |     print(f"Tool: {call.name}")
+  // |     print(f"Args: {call.args}")
+  // |     print(f"Result: {result}")
+  //
+  // ── Snippet 5 (lines 147–167): the options of `call.execute` ──
+  // | # Option 1: Automatic discovery (finds functions in locals/globals)
+  // | result = call.execute()  # Automatically finds functions by name
+  // | # Option 2: Pass tools as a dict (most explicit)
+  // | result = call.execute(functions={"weather": weather, "calculator": calculator})
+  // | # Option 3: Pass Tool objects as a list
+  // | result = call.execute(functions=[dspy.Tool(weather), dspy.Tool(calculator)])
+  // | # Option 4: For versions earlier than 3.0.4b2 (manual tool lookup)
+  // | # tools_dict = {"weather": weather, "calculator": calculator}
+  // | # result = tools_dict[call.name](**call.args)
+  //
+  // A `ToolCall` has no `execute`, and dspy4s has no automatic discovery. `execute` below looks up the tool in
+  // `ToolFunction.byName(tools)`, which is the dict of options 2 and 4. The `Predict` gets a `ToolSpec` for each tool.
+  // `ReActV2` makes its specs in a private method, so this example writes them. With native function calling on and a
+  // model that supports it, the tools go to the provider. Else the prompt shows them as an input field `tools`, and the
+  // model writes the calls as JSON text.
+  object ManualToolExample:
+    @description("Get weather information for a city.")
+    def weather(city: String): String = s"The weather in $city is sunny"
+
+    // The JVM has no `eval`, so this tool only adds numbers.
+    @description("Evaluate a mathematical expression.")
+    def calculator(expression: String): String =
+      val terms = expression.split('+').toVector.map(_.trim.toDoubleOption)
+      if terms.forall(_.isDefined) then s"The result is ${terms.flatten.sum}" else "Invalid expression"
+
+    val tools: Vector[ToolFunction] = Vector(ToolFunction.fromMethod(weather), ToolFunction.fromMethod(calculator))
+
+    // Each argument of these two tools is a string.
+    private def specOf(tool: ToolFunction): ToolSpec =
+      val arguments = tool.argSchema.map((name, _) => name)
+      ToolSpec(
+        name = tool.name,
+        description = Some(tool.description),
+        inputSchema = DynamicValues.record(
+          "type"       := "object",
+          "properties" -> DynamicValues.recordFromEntries(arguments.map(_ -> DynamicValues.record("type" := "string"))),
+          "required"   := arguments
+        )
+      )
+
+    val predictor = Predict(
+      signature = Signature.of[ToolSignature](instructions = "Signature for manual tool handling."),
+      tools = tools.map(specOf)
+    )
+
+    /** The result of one call of the model, or an error for a name that is not a tool. */
+    def execute(call: ToolCall)(using RuntimeContext): Either[DspyError, DynamicValue] =
+      ToolFunction.byName(tools).get(call.name)
+        .toRight(NotFoundError("tool", s"No tool with the name '${call.name}'"))
+        .flatMap(_.invoke(call.args))
+
+    /** Each call of the model with its result. A failed prediction is an error. */
+    def call(question: String)(using
+        ctx: RuntimeContext
+    ): Either[DspyError, Vector[(ToolCall, Either[DspyError, DynamicValue])]] =
+      predictor((question = question))(using
+        ctx.copy(adapter = Some(ChatAdapter(native = NativeTools(enabled = true))))
+      )
+        .map(_.output.outputs.map(call => call -> execute(call)))
+
+  // ── Snippet 4 (lines 125–136): the properties of a tool ──
+  // | def my_function(param1: str, param2: int = 5) -> str:
+  // |     """A sample function with parameters."""
+  // |     return f"Processed {param1} with value {param2}"
+  // |
+  // | # Create a tool
+  // | tool = dspy.Tool(my_function)
+  // |
+  // | # Tool properties
+  // | print(tool.name)        # "my_function"
+  // | print(tool.desc)        # The function's docstring
+  // | print(tool.args)        # Parameter schema
+  // | print(str(tool))        # Full tool description
+  // `tool.desc` becomes `description`, and `tool.args` becomes `argSchema`. `str(tool)` has no public counterpart.
+  // `fromMethod` rejects a missing argument, so the default of `param2` has no port.
+  object ToolPropertiesExample:
+    @description("A sample function with parameters.")
+    def my_function(param1: String, param2: Int): String = s"Processed $param1 with value $param2"
+
+    val tool: ToolFunction = ToolFunction.fromMethod(my_function)
+
+    def properties: (String, String, Vector[(String, TypeRef)]) = (tool.name, tool.description, tool.argSchema)
+
   // ── Snippet 9 (lines 270–288) — what makes a good tool ──────────────────────
   // | def good_tool(city: str, units: str = "celsius") -> str:
-  // |     """Get weather information for a specific city. Args: city, units. Returns: ..."""
-  // |     if not city.strip(): return "Error: City name cannot be empty"
+  // |     """
+  // |     Get weather information for a specific city.
+  // |
+  // |     Args:
+  // |         city: The name of the city to get weather for
+  // |         units: Temperature units, either 'celsius' or 'fahrenheit'
+  // |
+  // |     Returns:
+  // |         A string describing the current weather conditions
+  // |     """
+  // |     # Implementation with proper error handling
+  // |     if not city.strip():
+  // |         return "Error: City name cannot be empty"
+  // |
+  // |     # Weather logic here...
   // |     return f"Weather in {city}: 25°{units[0].upper()}, sunny"
-  // A clear `name` + `description` and defensive arg handling carry over directly to `ToolFunction`:
+  // A clear description, a list of the arguments, and careful checks of the arguments carry over to `ToolFunction`.
+  // `argSchema` lists the arguments for the model: with no `argSchema`, ReAct says "It takes arguments {}". `fromMethod`
+  // rejects a missing argument, so it cannot give `units` its default.
   object GoodToolExample:
-    val goodTool: ToolFunction =
-      ToolFunction.of("good_tool", "Get weather information for a specific city (units: celsius | fahrenheit).") {
-        args =>
-          val city  = DynamicValues.recordGet(args, "city").map(DynamicValues.renderText).getOrElse("").trim
-          val units = DynamicValues.recordGet(args, "units").map(DynamicValues.renderText).getOrElse("celsius")
-          if city.isEmpty then "Error: City name cannot be empty"
-          else s"Weather in $city: 25°${units.take(1).toUpperCase}, sunny"
-      }
+    val goodTool: ToolFunction = ToolFunction(
+      name = "good_tool",
+      description = "Get weather information for a specific city. The argument `city` is the name of the city. " +
+        "The argument `units` is optional, and it is either 'celsius' (the default) or 'fahrenheit'.",
+      argSchema = Vector("city" -> TypeRef.string, "units" -> TypeRef.string)
+    ) { args =>
+      val city  = DynamicValues.recordGet(args, "city").map(DynamicValues.renderText).getOrElse("").trim
+      val units = DynamicValues.recordGet(args, "units").map(DynamicValues.renderText).getOrElse("celsius")
+      Right(ToolFunction.result(
+        if city.isEmpty then "Error: City name cannot be empty"
+        else s"Weather in $city: 25°${units.take(1).toUpperCase}, sunny"
+      ))
+    }
 
-  // ── Snippets 3 / 5 — manual `dspy.Tool` input field + `ToolCalls` output + `call.execute()` ──
-  // Not portable: dspy4s selects tools via output fields inside an agent (ReAct), not by passing a
-  // `list[dspy.Tool]` input and reading a `ToolCalls` output, and it has no `call.execute()` surface.
+  // ── Snippet 6 (lines 191–202): native function calling ──
+  // | # ChatAdapter with native function calling enabled
+  // | chat_adapter_native = dspy.ChatAdapter(use_native_function_calling=True)
+  // |
+  // | # JSONAdapter with native function calling disabled
+  // | json_adapter_manual = dspy.JSONAdapter(use_native_function_calling=False)
   //
-  // ── Snippet 6 — `ChatAdapter(use_native_function_calling=True)` / `JSONAdapter(...)` ──
-  // Ported (PORT_GAPS G-7b): native function-calling is an adapter-level toggle, exactly as upstream. Set
-  // `useNativeFunctionCalling = true`; tools then reach the provider as a native `tools` array (built from the
-  // predictor's `ToolSpec`s, threaded via `AdapterInvocation.tools`) and the provider's `tool_calls` fill a
-  // `tool_calls` output field — gated on the LM's `supportsFunctionCalling`. Per the G-7b decision, ReAct
-  // itself stays on the text protocol (native calling is adapter-level, not a ReAct rewrite — matching upstream).
+  // Ported (PORT_GAPS G-7b): native function calling is an option of the adapter, as upstream. `ChatAdapter` has it off
+  // by default, and `JSONAdapter` has it on by default. When it is on and `supportsFunctionCalling` of the LM is true,
+  // the tools go to the provider as a native `tools` array (from the `ToolSpec`s of the predictor, through
+  // `AdapterInvocation.tools`), and the `tool_calls` of the provider fill the output field of the type `Vector[ToolCall]`.
+  // Else the prompt shows the tools as text.
+  // Decision G-7b: ReAct stays on the text protocol, as upstream.
   object NativeFunctionCallingExample:
     // --8<-- [start:native-fc]
-    val nativeChatAdapter: Adapter = ChatAdapter(useNativeFunctionCalling = true)
-    val nativeJsonAdapter: Adapter = JSONAdapter(useNativeFunctionCalling = true)
+    val nativeChatAdapter: Adapter = ChatAdapter(native = NativeTools(enabled = true))
+    val nativeJsonAdapter: Adapter = JSONAdapter() // on by default
+    val manualJsonAdapter: Adapter = JSONAdapter(native = NativeTools(enabled = false))
     // --8<-- [end:native-fc]
 
   // ── Snippets 7 / 8 — async tools (`tool.acall`, async→sync conversion) ──
@@ -99,4 +257,5 @@ object Tools:
 @main def toolsMain(): Unit =
   Demo.withLm {
     println("ReAct: " + Tools.WeatherAgentExample.call("What's the weather like in Tokyo?"))
+    println("Manual: " + Tools.ManualToolExample.call("What's the weather in New York?"))
   }

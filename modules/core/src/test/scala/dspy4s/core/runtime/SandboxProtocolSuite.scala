@@ -5,6 +5,7 @@ import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.CodeInterpreterErrors
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SandboxTool
@@ -12,7 +13,6 @@ import dspy4s.core.contracts.ToolEndEvent
 import dspy4s.core.contracts.ToolStartEvent
 import dspy4s.core.runtime.DenoPyodideProtocol.OutOfBand
 import munit.FunSuite
-import zio.blocks.schema.DynamicValue
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -93,6 +93,11 @@ class SandboxProtocolSuite extends FunSuite:
       |    elif code == "user_error":
       |        data = {"type": "NameError", "args": ["name 'x' is not defined"]}
       |        send({"jsonrpc": "2.0", "error": {"code": -32001, "message": "boom", "data": data}, "id": request_id})
+      |    elif code == "stderr_flood":
+      |        # More text than an operating-system pipe holds (about 64 KB).
+      |        sys.stderr.write("x" * 1000000)
+      |        sys.stderr.flush()
+      |        result("after flood\n", request_id)
       |    elif code.startswith("flood "):
       |        for _ in range(int(code.split()[1])):
       |            send({"jsonrpc": "2.0", "method": "unhandled_error", "params": {"message": "boom"}})
@@ -119,6 +124,98 @@ class SandboxProtocolSuite extends FunSuite:
       new DenoPyodideInterpreter(tools = tools, denoCommand = Some(Vector("python3", script.toString) ++ scriptArgs))
     try body(interpreter)
     finally interpreter.close()
+
+  test("a sandbox that writes much text to its standard error does not block the session") {
+    withSandbox() { interpreter =>
+      val result = BoundedWait.within(20)(interpreter.execute("stderr_flood").map(_.stdout.trim))
+      assertEquals(result, Some(Right("after flood")))
+    }
+  }
+
+  test("a write path in a directory that does not exist gives a Left") {
+    assume(pythonAvailable, "python3 not installed: the scripted sandbox cannot run")
+    val missing     = Files.createTempDirectory("dspy4s-mount").resolve("absent").resolve("out.txt")
+    val interpreter = new DenoPyodideInterpreter(
+      enableWritePaths = Vector(missing.toString),
+      denoCommand = Some(Vector("python3", script.toString))
+    )
+    try
+      val result = BoundedWait.within(20)(interpreter.execute("hello"))
+      assert(result.exists(_.isLeft), s"expected a Left, got $result")
+    finally interpreter.close()
+  }
+
+  test("a launch command that cannot run gives the cause of the failure") {
+    // A new temporary file has no execute permission.
+    val command     = Files.createTempFile("dspy4s-not-executable", ".sh")
+    val interpreter = new DenoPyodideInterpreter(denoCommand = Some(Vector(command.toString)))
+    try interpreter.execute("hello") match
+        case Left(error)  => assert(error.message.contains("Permission denied"), error.message)
+        case Right(other) => fail(s"expected a Left, got $other")
+    finally interpreter.close()
+  }
+
+  test("code text with a lone surrogate gives a Left, not an exception") {
+    withSandbox() { interpreter =>
+      // The first half of an emoji, for example from a text that was cut at a fixed length.
+      val result = BoundedWait.within(20)(interpreter.execute("cut \uD83D"))
+      assert(result.exists(_.isLeft), s"expected a Left, got $result")
+    }
+  }
+
+  test("a tool error with a lone surrogate in its message gives a tool error reply, not an exception") {
+    val tool = SandboxTool(
+      name = "explode",
+      parameters = Vector.empty,
+      invoke = _ => throw new IllegalStateException("cut \uD83D")
+    )
+    withSandbox(Vector(tool)) { interpreter =>
+      val result = BoundedWait.within(20)(interpreter.execute("call_tool"))
+      assert(result.exists(_.isRight), s"expected a Right, got $result")
+    }
+  }
+
+  test("after code text with a lone surrogate, the session continues and the Left names the cause") {
+    withSandbox() { interpreter =>
+      val results = BoundedWait.within(20) {
+        val rejected = interpreter.execute("cut \uD83D")
+        (rejected, interpreter.execute("hello").map(_.stdout.trim))
+      }
+      results match
+        case Some((Left(error), next)) =>
+          assert(error.message.contains("Unable to encode the code text as JSON"), error.message)
+          assertEquals(next, Right("echo hello"))
+        case other => fail(s"expected a Left and then a Right, got $other")
+    }
+  }
+
+  test("the tool error reply with a lone surrogate in its message has the cause of the encode failure") {
+    val tool = SandboxTool(
+      name = "explode",
+      parameters = Vector.empty,
+      invoke = _ => throw new IllegalStateException("cut \uD83D")
+    )
+    withSandbox(Vector(tool)) { interpreter =>
+      val result = BoundedWait.within(20)(interpreter.execute("call_tool").map(_.stdout.trim))
+      assert(
+        result.exists(_.exists(_.startsWith("tool error: Unable to encode the tool error as JSON"))),
+        s"expected the cause of the encode failure, got $result"
+      )
+      assertEquals(interpreter.execute("hello").map(_.stdout.trim), Right("echo hello"))
+    }
+  }
+
+  test("a tool result with a lone surrogate gives a tool error reply, not an exception") {
+    val tool =
+      SandboxTool(name = "explode", parameters = Vector.empty, invoke = _ => Right(DynamicValues.fromAny("cut \uD83D")))
+    withSandbox(Vector(tool)) { interpreter =>
+      val result = BoundedWait.within(20)(interpreter.execute("call_tool").map(_.stdout.trim))
+      assert(
+        result.exists(_.exists(_.startsWith("tool error: Unable to encode the tool result as JSON"))),
+        s"expected a tool error reply, got $result"
+      )
+    }
+  }
 
   test("the scripted sandbox answers an ordinary execute request") {
     withSandbox() { interpreter =>
@@ -265,9 +362,9 @@ class SandboxProtocolSuite extends FunSuite:
   }
 
   private def classify(json: String): OutOfBand =
-    DenoPyodideProtocol.decodeJson(json) match
-      case Some(msg: DynamicValue.Record) => DenoPyodideProtocol.outOfBand(msg)
-      case other                          => fail(s"expected a JSON object, got $other")
+    DenoPyodideProtocol.decodeRecord(json) match
+      case Some(msg) => DenoPyodideProtocol.outOfBand(msg)
+      case None      => fail(s"expected a JSON object, got $json")
 
   test("outOfBand: a notification and an error without an id are out of band") {
     assertEquals(

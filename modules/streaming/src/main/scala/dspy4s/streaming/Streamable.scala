@@ -18,12 +18,11 @@ import zio.blocks.schema.DynamicValue
   * `Module[DynamicValue.Record, DynamicValue.Record]` values and `Module[I, O]` values with statically known I/O can be
   * streamed through the same entry point. `Streamify` requires exactly two things of a program:
   *
-  *   1. a shared [[ProgramRunner]] — invoke the program from a record of inputs, yielding its `RawPrediction` for the
-  *      final `PredictionEvent`. Token streaming itself is orthogonal: it's driven by the wrapped
-  *      `StreamingLanguageModel` consulting `ActivePredictContext`, which each `PredictEngine` execution scopes for
-  *      both `Predict` and `DynamicPredict` modules — independent of how the outer program is invoked. 2.
-  *      [[knownSignatures]] — best-effort `(predictName, signature)` pairs used *only* for stream-listener validation
-  *      (warnings). An opaque program returns empty and validation is skipped.
+  *   1. A shared [[ProgramRunner]]. It runs the program from a record of inputs, and gives its `RawPrediction` for the
+  *      final `PredictionEvent`. The tokens do not depend on this runner: the wrapped `StreamingLanguageModel` reads
+  *      `ActivePredictContext`, which each `PredictEngine` execution sets for `Predict` and `DynamicPredict` modules.
+  *   2. [[knownSignatures]]. These are the `(predictName, signature)` pairs that the code can see. Only the warnings of
+  *      the stream-listener validation use them. An opaque program gives none, and the validation does nothing.
   */
 trait Streamable[P]:
   protected def runner: ProgramRunner[P]
@@ -55,10 +54,7 @@ object Streamable:
 
   /** `ChainOfThought` delegates to an inner `Predict` whose runtime signature contains the reasoning field. */
   given chainOfThought[I, O](using ProgramRunner[ChainOfThought[I, O]]): Streamable[ChainOfThought[I, O]] =
-    from { program =>
-      val layout = ChainOfThought.augmentLayout(program.baseSignature.layout)
-      Vector("predict" -> layout)
-    }
+    from(program => Vector("predict" -> program.signature.layout))
 
   /** `ReAct`: decode the record into the input, run it, and emit the raw prediction. Its two sub-predicts (the per-step
     * react predict and the final extractor) are the stream-listener targets.
@@ -66,10 +62,9 @@ object Streamable:
   given reAct[I, O](using ProgramRunner[ReAct[I, O]]): Streamable[ReAct[I, O]] =
     from { program =>
       Vector(
-        (program.reactProgramName, program.reactSignature),
-        // The extractor runs the CoT-AUGMENTED layout (a `reasoning` output prepended). Report that — not the
-        // un-augmented extractorSignature — so a `reasoning` stream listener isn't wrongly told it'll never fire.
-        (program.extractorProgramName, program.extractorPredict.signature.layout)
+        (program.reactPredict.moduleName, program.reactSignature.layout),
+        // The extractor layout has the `reasoning` output first. Thus a `reasoning` stream listener can find its field.
+        (program.extractorPredict.moduleName, program.extractorPredict.signature.layout)
       )
     }
 

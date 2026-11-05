@@ -4,6 +4,8 @@ import dspy4s.core.contracts.{DspyError, DynamicValues, ValidationError}
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 
+import scala.collection.immutable.VectorMap
+
 /** A column-oriented view of N candidate completions for one LM call. Each field name maps to a vector of N values (one
   * per candidate). All columns must have the same length, which defines [[size]]. [[at]] converts a single column index
   * back to row form when a call site wants a per-candidate record.
@@ -25,22 +27,24 @@ final case class Completions(fields: Map[String, Vector[DynamicValue]]):
     if index < 0 || index >= size then
       Left(ValidationError(s"Completion index $index out of bounds for size $size"))
     else
-      val row = DynamicValue.Record(Chunk.from(fields.iterator.map((k, vs) => k -> vs(index)).toSeq))
+      val row = DynamicValue.Record(Chunk.from(fields.iterator.map((k, vs) => k -> vs(index))))
       Right(RawPrediction(values = row))
 
 object Completions:
-  /** Convert N row-shaped records into the columnar layout. Fails if any row's key set differs from the first row's —
-    * since `Completions.at(i)` is supposed to return a row whose fields are uniform across all candidates, missing
-    * fields would corrupt that invariant. An empty input is the empty completion (`size == 0`).
+  /** Convert N row-shaped records into the columnar layout. Fails if any row's key set differs from the first row's.
+    * `Completions.at(i)` must return a row with the same fields for each candidate, and a missing field breaks that
+    * invariant. An empty input is the empty completion (`size == 0`). The columns keep the field order of the first
+    * row, so `at(i)` gives the fields in that order.
     */
   def fromRows(rows: Vector[DynamicValue.Record]): Either[DspyError, Completions] =
     if rows.isEmpty then Right(Completions(Map.empty))
     else
-      val expectedKeys = DynamicValues.recordKeys(rows.head).toSet
+      val keys         = DynamicValues.recordKeys(rows.head)
+      val expectedKeys = keys.toSet
       if rows.exists(r => DynamicValues.recordKeys(r).toSet != expectedKeys) then
         Left(ValidationError("All completion rows must include the same set of fields"))
       else
-        val columns = expectedKeys.iterator.map { key =>
+        val columns = keys.iterator.map { key =>
           key -> rows.map(r => DynamicValues.recordGet(r, key).getOrElse(DynamicValue.Null))
-        }.toMap
+        }.to(VectorMap)
         Right(Completions(columns))

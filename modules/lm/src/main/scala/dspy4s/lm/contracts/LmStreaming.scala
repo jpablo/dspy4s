@@ -1,8 +1,6 @@
 package dspy4s.lm.contracts
 
-import dspy4s.core.contracts.{DspyError, LmUsage, RuntimeContext, RuntimeError, ToolCall}
-import dspy4s.lm.providers.DynamicJson
-import dspy4s.lm.providers.ResponsesWire
+import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, RuntimeContext, RuntimeError, StreamSinkRef, ToolCall}
 import zio.blocks.schema.DynamicValue
 
 /** A single tool-call delta extracted from one streaming LM chunk. OpenAI emits `id`/`function.name` on the first delta
@@ -17,9 +15,8 @@ final case class LmToolCallDelta(
 
 /** One chunk of a streamed LM call.
   *
-  * A producer reports a failure as a terminal chunk, not as an exception. That chunk has
-  * `finishReason = Some("error")`, the message under `raw` (`Map("error" -> message)`), and the typed failure in
-  * `error`. Build it with [[LmChunk.failure]].
+  * A producer reports a failure as a terminal chunk, not as an exception. That chunk has `finishReason = Some("error")`
+  * and the typed failure in `error`. Build it with [[LmChunk.failure]].
   *
   * A stream is complete when one of its chunks has a finish reason that is not `error` (upstream: the stream has its
   * end event). A chunk with only usage can come after that chunk. A stream that ends with no such chunk is not
@@ -28,11 +25,14 @@ final case class LmToolCallDelta(
   *
   * @param reasoning
   *   a part of the reasoning text (upstream lm15 `ThinkingDelta` in `dspy/_vendor/lm15/types.py`). The assembled output
-  *   has the joined parts under the metadata key `reasoning_content`.
+  *   has the joined parts in [[LmOutput.reasoning]].
   * @param citations
-  *   the citations that this chunk adds (upstream lm15 `CitationDelta`). Each citation has the form of a citation in
-  *   the metadata of a Responses output. The assembled output has the citations of all chunks, in order, under the
-  *   metadata key `citations`.
+  *   the citations that this chunk adds (upstream lm15 `CitationDelta`). Each citation has the form of a citation of
+  *   [[LmOutput.citations]]. The assembled output has the citations of all chunks, in order.
+  * @param answers
+  *   experimental. The typed answers of a decision reply ([[LmOutput.answers]]). Only the chunk of a whole response
+  *   ([[LmChunk.cached]], and the chunk of a model that cannot stream) has them: a System One model has no stream. The
+  *   assembled output has the answers of the last chunk that has them.
   * @param cachedResponse
   *   the complete response of a cache hit. A chunk with this field is the only chunk of its stream. A consumer returns
   *   this response, and gives no token of it to a stream listener (upstream: a cache hit sends no stream chunk). The
@@ -46,7 +46,7 @@ final case class LmChunk(
     toolCalls     : Vector[LmToolCallDelta]     = Vector.empty,
     reasoning     : String                      = "",
     citations     : Vector[DynamicValue.Record] = Vector.empty,
-    raw           : Option[Any]                 = None,
+    answers       : Option[DynamicValue.Record] = None,
     error         : Option[DspyError]           = None,
     cachedResponse: Option[LmResponse]          = None
 ):
@@ -54,10 +54,10 @@ final case class LmChunk(
 
   /** The failure that this chunk reports, if any. The typed `error` wins, so a consumer gets the same `DspyError` that
     * the provider produced (a `ContextWindowExceededError` stays one). A chunk that has only `finishReason = "error"`
-    * gives a `RuntimeError("streaming_lm", ...)` with the message from `raw`.
+    * gives a generic `RuntimeError("streaming_lm", ...)`.
     */
   def reportedFailure: Option[DspyError] =
-    error.orElse(Option.when(finishReason.contains("error"))(RuntimeError("streaming_lm", LmChunk.errorMessage(raw))))
+    error.orElse(Option.when(finishReason.contains("error"))(LmChunk.UnknownFailure))
 
 object LmChunk:
 
@@ -65,30 +65,43 @@ object LmChunk:
     * `DspyError` that the provider produced.
     */
   def failure(error: DspyError): LmChunk =
-    LmChunk(finishReason = Some("error"), raw = Some(Map("error" -> error.message)), error = Some(error))
+    LmChunk(finishReason = Some("error"), error = Some(error))
+
+  /** The metadata key of the finish reason of an output (see [[LmOutput.metadata]]). */
+  private val FinishReasonKey = "finish_reason"
+
+  /** The failure of a chunk with the finish reason `error` and no typed `error`. */
+  private val UnknownFailure: DspyError = RuntimeError("streaming_lm", "LM stream terminated with an error")
 
   /** The only chunk of a stream that the cache answered. `response` is the stored response, with `cacheHit = true`. The
-    * chunk has the finish reason `stop`, no usage, and the text, the reasoning, the citations, and the tool calls of
-    * the first output of `response`. Each tool call is one complete delta, so `ToolCallAssembler.assemble` gives the
-    * call back with its id.
+    * chunk has the finish reason of [[fromResponse]], no usage, and the text, the reasoning, the citations, the tool
+    * calls, and the answers of the first output of `response`. Each tool call is one complete delta, so
+    * `ToolCallAssembler.assemble` gives the call back with its id.
     */
   def cached(response: LmResponse): LmChunk =
     fromResponse(response).copy(cachedResponse = Some(response.copy(cacheHit = true)))
 
-  /** One terminal chunk for a whole response: the text, the reasoning, the citations, and the tool calls of the first
-    * output of `response`, and the finish reason `stop`. The reasoning and the citations come from the metadata keys
-    * `reasoning_content` and `citations` of the output. The chunk has no usage. Each tool call is one complete delta,
-    * so `ToolCallAssembler.assemble` gives the call back with its id.
+  /** One terminal chunk for a whole response: the text, the reasoning, the citations, the tool calls, and the answers
+    * of the first output of `response`. The chunk has no usage. Each tool call is one complete delta, so
+    * `ToolCallAssembler.assemble` gives the call back with its id.
+    *
+    * The finish reason is the `finish_reason` text of the metadata of the first output, for example `length` for a chat
+    * reply that the token limit stopped. When the metadata has no such text, the finish reason is `stop`. The text
+    * `error` also gives `stop`, because the chunk of a response is not a failure.
     */
   private[lm] def fromResponse(response: LmResponse): LmChunk =
-    val output   = response.outputs.headOption
-    val metadata = output.fold(DynamicValue.Record.empty)(_.metadata)
+    val output = response.outputs.headOption
+    val reason = output
+      .flatMap(found => DynamicValues.recordGet(found.metadata, FinishReasonKey))
+      .flatMap(DynamicValues.asString)
+      .filter(text => text.nonEmpty && text != "error")
     LmChunk(
       text = output.map(_.text).getOrElse(""),
-      finishReason = Some("stop"),
+      finishReason = Some(reason.getOrElse("stop")),
       toolCalls = output.map(_.toolCalls).getOrElse(Vector.empty).zipWithIndex.map(toolCallDelta),
-      reasoning = ResponsesWire.reasoningOf(metadata),
-      citations = ResponsesWire.citationsOf(metadata)
+      reasoning = output.map(_.reasoning).getOrElse(""),
+      citations = output.map(_.citations).getOrElse(Vector.empty),
+      answers = output.flatMap(_.answers)
     )
 
   /** One complete tool call as a stream delta: the id, the name, and the JSON text of the arguments. */
@@ -97,16 +110,8 @@ object LmChunk:
       index = index,
       id = call.id,
       name = Some(call.name),
-      argumentsFragment = Some(DynamicJson.encodeExact(call.args))
+      argumentsFragment = Some(DynamicValues.encodeJson(call.args))
     )
-
-  /** The error message of a failure chunk from its `raw` payload (`Map("error" -> message)` by convention). */
-  private def errorMessage(raw: Option[Any]): String =
-    raw match
-      case Some(m: Map[?, ?]) =>
-        m.collectFirst { case (k, v) if String.valueOf(k) == "error" => String.valueOf(v) }.getOrElse(m.toString)
-      case Some(other) => other.toString
-      case None        => "LM stream terminated with an error"
 
 trait StreamingLanguageModel extends LanguageModel:
   def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk]
@@ -116,6 +121,22 @@ trait StreamingLanguageModel extends LanguageModel:
     * cannot stream its output, for example a predictor with decision outputs, fails such a call before the request.
     *
     * The default is `false`: a model gives its output to a listener only in a `streamify` call, where the wrapper of
-    * the streaming module is the model.
+    * the streaming module wraps the model ([[StreamSink.applied]]).
     */
   def streamsToListener(predictName: String, outputFields: Vector[String]): Boolean = false
+
+/** The stream of one `streamify` call (upstream `settings.send_stream`). The context holds it
+  * ([[dspy4s.core.contracts.RuntimeContext.streamSink]]), and each model call of the framework reads it
+  * ([[LanguageModel.callAndRecordUsage]]). Thus each model streams: the model of the context, the own model of a
+  * predictor, and each other model that a program calls with that function. The streaming module implements this trait.
+  */
+trait StreamSink extends StreamSinkRef:
+  /** `model` with its tokens given to this sink. A model that does not stream stays as it is. */
+  def wrap(model: LanguageModel): LanguageModel
+
+object StreamSink:
+  /** `model`, wrapped by the sink of the context when the context has one. */
+  def applied(model: LanguageModel)(using context: RuntimeContext): LanguageModel =
+    context.streamSink match
+      case Some(sink: StreamSink) => sink.wrap(model)
+      case _                      => model

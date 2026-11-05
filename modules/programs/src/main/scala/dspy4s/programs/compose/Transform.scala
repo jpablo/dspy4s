@@ -2,7 +2,6 @@ package dspy4s.programs.compose
 
 import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.programs.contracts.Module
@@ -24,22 +23,15 @@ private[compose] object TransformResult:
     catch
       case NonFatal(error) => Left(RuntimeError(
           component,
-          Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getSimpleName)
+          DspyError.messageOf(error)
         ))
-
-/** Shared optimizable structure for a transparent unary wrapper. */
-private[compose] object UnaryOptimizableStructure:
-  def passthrough[W, P, N <: Int](get: W => P)(replaceInner: (W, P) => W)(using
-      inner: OptimizableStructure.WithArity[P, N]
-  ): OptimizableStructure.Of[W, N] =
-    ParameterOptic.throughStructure("Transparent wrapper", get, replaceInner, inner)
 
 /** Lift a total Scala function into a parameter-free, lifecycle-transparent program. */
 final case class Lift[I, O](run: I => O) extends TransparentModule[I, O]:
   override val moduleName: String = "lift"
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    TransformResult.guard("program_lift")(Right(Prediction(run(call.input), RawPrediction.empty)))
+    TransformResult.guard("program_lift")(Right(Prediction.pure(run(call.input))))
 
 object Lift:
   given liftOptimizableStructure[I, O]: OptimizableStructure.WithArity[Lift[I, O], 0] = OptimizableStructure.empty
@@ -50,47 +42,11 @@ final case class LiftEither[I, O](run: I => Either[DspyError, O])
   override val moduleName: String = "lift_either"
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    TransformResult.guard("program_lift_either")(run(call.input).map(Prediction(_, RawPrediction.empty)))
+    TransformResult.guard("program_lift_either")(run(call.input).map(Prediction.pure(_)))
 
 object LiftEither:
   given liftEitherOptimizableStructure[I, O]: OptimizableStructure.WithArity[LiftEither[I, O], 0] =
     OptimizableStructure.empty
-
-/** Covariantly transform a program's semantic output while preserving its raw prediction envelope. */
-final case class MapOutput[I, O, B, P <: Module[I, O]](program: P, map: O => B)
-    extends TransparentModule[I, B]:
-  override val moduleName: String = "map_output"
-
-  override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[B]] =
-    program(call).flatMap { prediction =>
-      TransformResult.guard("program_map_output")(Right(prediction.map(map)))
-    }
-
-object MapOutput:
-  given mapOutputOptimizableStructure[I, O, B, P <: Module[I, O], N <: Int](using
-      inner: OptimizableStructure.WithArity[P, N]
-  ): OptimizableStructure.Of[MapOutput[I, O, B, P], N] =
-    UnaryOptimizableStructure.passthrough[MapOutput[I, O, B, P], P, N](_.program)((wrapper, updated) =>
-      wrapper.copy(program = updated)
-    )
-
-/** Contravariantly adapt a program's input, forwarding the outer call controls unchanged. */
-final case class ContramapInput[J, I, O, P <: Module[I, O]](program: P, contramap: J => I)
-    extends TransparentModule[J, O]:
-  override val moduleName: String = "contramap_input"
-
-  override protected def forward(call: ProgramCall[J])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    TransformResult.guard("program_contramap_input")(Right(contramap(call.input))).flatMap { input =>
-      program(call.mapInput(_ => input))
-    }
-
-object ContramapInput:
-  given contramapInputOptimizableStructure[J, I, O, P <: Module[I, O], N <: Int](using
-      inner: OptimizableStructure.WithArity[P, N]
-  ): OptimizableStructure.Of[ContramapInput[J, I, O, P], N] =
-    UnaryOptimizableStructure.passthrough[ContramapInput[J, I, O, P], P, N](_.program)((wrapper, updated) =>
-      wrapper.copy(program = updated)
-    )
 
 /** Adapt both sides of a program in one transparent node, preserving the inner prediction envelope. */
 final case class Dimap[J, I, O, B, P <: Module[I, O]](
@@ -111,16 +67,19 @@ object Dimap:
   given dimapOptimizableStructure[J, I, O, B, P <: Module[I, O], N <: Int](using
       inner: OptimizableStructure.WithArity[P, N]
   ): OptimizableStructure.Of[Dimap[J, I, O, B, P], N] =
-    UnaryOptimizableStructure.passthrough[Dimap[J, I, O, B, P], P, N](_.program)((wrapper, updated) =>
-      wrapper.copy(program = updated)
+    OptimizableStructure.unary(
+      "Transparent wrapper",
+      _.program,
+      (wrapper, updated) => wrapper.copy(program = updated),
+      inner
     )
 
 extension [I, O, P <: Module[I, O]](self: P)
   /** Transform the semantic output and retain the program's raw prediction. */
-  def mapOutput[B](f: O => B): MapOutput[I, O, B, P] = MapOutput(self, f)
+  def mapOutput[B](f: O => B): Dimap[I, I, O, B, P] = Dimap(self, identity, f)
 
-  /** Adapt a new input type into the program's input type. */
-  def contramapInput[J](f: J => I): ContramapInput[J, I, O, P] = ContramapInput(self, f)
+  /** Adapt a new input type into the program's input type. The outer call controls go to the program unchanged. */
+  def contramapInput[J](f: J => I): Dimap[J, I, O, O, P] = Dimap(self, f, identity)
 
   /** Adapt input and output in one transparent, optimizer-addressable wrapper. */
   def dimap[J, B](before: J => I)(after: O => B): Dimap[J, I, O, B, P] = Dimap(self, before, after)

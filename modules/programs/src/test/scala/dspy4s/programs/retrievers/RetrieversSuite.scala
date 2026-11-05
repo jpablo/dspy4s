@@ -129,3 +129,16 @@ class RetrieversSuite extends FunSuite:
     val retriever = EmbeddingsRetriever.create(corpus("alpha", "beta"), embedder, k = NeighborCount(1)).toOption.get
     assert(retriever.search("query").isLeft, "empty embedder rows must surface as Left, not throw")
   }
+
+  test("KNN serializes a value with its Python text, as upstream f\"{key}: {value}\"") {
+    val record = DynamicValues.record("flag" := true, "text" := "q1")
+    assertEquals(KNN.serialize(record), "flag: True | text: q1")
+  }
+
+  test("a query vector of another size is a Left, as numpy raises") {
+    val embedder = Embedder.fromFunction("short-query") { texts =>
+      if texts.sizeIs == 1 then Vector(Vector(1.0f)) else texts.map(_ => Vector(1.0f, 0.0f))
+    }
+    val retriever = EmbeddingsRetriever.create(corpus("alpha", "beta"), embedder, k = NeighborCount(1)).toOption.get
+    assert(retriever.search("query").isLeft, "a dot product over part of each vector gives a wrong score")
+  }

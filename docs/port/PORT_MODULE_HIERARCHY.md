@@ -58,9 +58,11 @@ layer internally and decode the result back to the output. `MultiChainComparison
 `forward(completions, **kwargs)` without introducing a second invocation envelope.
 
 Output-augmenting programs (`ChainOfThought`, `ReAct`, `MultiChainComparison`)
-prepend a field to the output via the shared
-[`OutputAugmentation`](../../modules/signatures/src/main/scala/dspy4s/signatures/OutputAugmentation.scala) helper
-(`WithField[O, Name, T]` + the `PrependField` typeclass — idempotent, cast-free, always a named tuple). Every
+prepend a field to the output with
+[`Signature.prependOutput`](../../modules/signatures/src/main/scala/dspy4s/signatures/Signature.scala), which changes
+the layout and the output shape in one call. Its output type comes from
+[`OutputAugmentation`](../../modules/signatures/src/main/scala/dspy4s/signatures/OutputAugmentation.scala)
+(`WithField[O, Name, T]` and the `PrependField` evidence: no second field, no cast, always a named tuple). Every
 signature surface (`of` / `fromType` / `from` / a **literal** `fromString`) yields a product type, so these
 programs uniformly carry their domain types; only the genuinely-runtime `Signature.fromStringDynamic` (Record I/O) is outside
 the `Signature` API.
@@ -86,7 +88,7 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
 | Learnable-leaf marker | `Parameter` | — *(typeclass `OptimizableLeaf[P]`; writable carrier `OptimizableParameters`)* |
 | Enumerate sub-predictors | `named_predictors()` / `named_parameters()` | `OptimizableStructure[P].inspect` / `inspectNamed` |
 | Attach demos | mutate `predictor.demos` | update `OptimizableParameters.demos`, then immutable `replace` |
-| Set the LM | `set_lm` / `get_lm` | ambient LM or immutable per-module `Predict.withLm` / `boundLm` |
+| Set the LM | `set_lm` / `get_lm` | ambient LM or immutable per-module `Predict.withLm` / `lm` |
 | Where cross-cutting wrapping lives | `Module.__call__` (universal, non-bypassable) | `Module.apply` (`final`; universal, non-bypassable — [G-2 resolved](PORT_GAPS.md)) |
 
 ## Per-class side-by-side
@@ -123,7 +125,7 @@ There is **no `BaseModule`** and **no `Parameter`** in dspy4s — see [PORT_GAPS
 4. **`Predict` is a `Parameter`; dspy4s uses a lawful state lens.** Python's
    `Predict` is simultaneously a `Module` and a mutable `Parameter`. dspy4s has
    no marker base class: `OptimizableLeaf[P]` exposes the leaf's writable
-   `OptimizableParameters` (instructions, demos, config), while `OptimizableMetadata`
+   `OptimizableParameters` (instructions, demos, config), while the metadata (`PredictorKey`)
    keeps signature structure and module identity read-only. `OptimizableStructure[P]`
    derives composite structure and immutable replacement (G-1).
 
@@ -171,7 +173,7 @@ overridable hook); it doesn't carry or fire its own callback list or call log.
 
 - **History/trace** are owned by `RuntimeEnvironment` — `Module.apply`
   calls `RuntimeEnvironment.appendTrace`/`appendHistory`, and the environment
-  enforces `maxHistorySize` / `disableHistory`.
+  enforces `maxHistorySize` / `maxTraceSize` / `disableHistory`.
 - **Callbacks** are dispatched by `CallbackDispatcher` off the ambient
   `RuntimeContext.callbacks` (`withModule`/`withTool`/…), not off a list hanging
   on each program.

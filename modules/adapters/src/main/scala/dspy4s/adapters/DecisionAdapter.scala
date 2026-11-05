@@ -1,12 +1,23 @@
 package dspy4s.adapters
 
-import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, NativeFunctionCalling, ParsedOutput}
-import dspy4s.adapters.internal.{AdapterTextSupport, JsonDynamic, PromptText, PythonText, StrictJsonSchema}
+import dspy4s.adapters.contracts.{
+  Adapter,
+  AdapterInvocation,
+  DelegatingAdapter,
+  FormattedPrompt,
+  NativeFunctionCalling,
+  ParsedOutput
+}
+import dspy4s.adapters.internal.{AdapterTextSupport, PromptText, StrictJsonSchema}
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.{
+  :=,
+  ConfigurationError,
   DspyError,
   DynamicValues,
-  FieldSpec,
-  ParseError,
+  JsonSchemaRefs,
+  PredictorKey,
+  PythonText,
   RuntimeContext,
   SignatureLayout,
   TypeRef,
@@ -14,16 +25,16 @@ import dspy4s.core.contracts.{
   updated
 }
 import dspy4s.core.data.Example
-import dspy4s.core.decisions.{DecisionEvidence, DecisionKind, DecisionPlan}
-import dspy4s.lm.contracts.LmOutput
-import zio.blocks.chunk.Chunk
+import dspy4s.core.decisions.{DecisionEvidence, DecisionEvidenceLog, DecisionKind, DecisionPlan}
+import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.lm.contracts.{DecisionRequests, LanguageModel, LmOutput, StreamSink, StreamingLanguageModel}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** Experimental. The adapter that asks a generative model for the evidence of the decision outputs of `plan`, and
   * decodes it (upstream `DecisionAdapter` for a model that is not a System One model, in `dspy/adapters/decision.py`).
   * Each other part of the request comes from `inner`, so the same rules hold for the Chat, JSON, and XML adapters. A
-  * System One model gets no prompt: `Predict` sends it the state and the questions of the companion functions
-  * [[DecisionAdapter.systemOneState]] and [[DecisionAdapter.systemOneQuestions]].
+  * System One model gets no prompt: [[DecisionAdapter.decide]] sends it the state and the questions of the companion
+  * functions [[DecisionAdapter.systemOneState]] and [[DecisionAdapter.systemOneQuestions]].
   *
   * The request (upstream `DecisionAdapter._prepare`):
   *   - Each decision output of `plan` becomes an evidence field ([[DecisionAdapter.evidenceLayout]]): the same name,
@@ -47,30 +58,30 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
   * of the adapter). An error of the decode (for example a distribution with a total of zero) is not a parse error:
   * upstream `_decode` raises it after the adapter call.
   */
-final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Adapter:
+final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends DelegatingAdapter:
 
-  override def name: String = inner.name
+  override def delegate: Adapter = inner
 
-  /** The fallback of `inner`, with the same plan. */
-  override def fallback: Option[Adapter] = inner.fallback.map(DecisionAdapter(_, plan))
+  /** The fallback of `inner` gets the same plan. */
+  override protected def wrap(next: Adapter): Adapter = DecisionAdapter(next, plan)
 
   override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
     DecisionAdapter.evidenceLayout(invocation.layout, plan).flatMap { evidence =>
       inner.format(evidenceInvocation(invocation, evidence).copy(layout = withTaskExamples(invocation, evidence)))
     }
 
-  override def parse(layout: SignatureLayout, output: LmOutput)(using
-      RuntimeContext
-  ): Either[DspyError, ParsedOutput] =
-    decodeWith(layout, output)(evidence => inner.parse(evidence, output))
-
-  /** The parse of `inner` gets the invocation of the request: the evidence layout, and the output schema with the
-    * evidence schemas.
+  /** The output values of `output`: `inner` parses it with the invocation of the request (the evidence layout, and the
+    * output schema with the evidence schemas), then the evidence gives the decisions.
     */
   override def parse(invocation: AdapterInvocation, output: LmOutput)(using
       RuntimeContext
   ): Either[DspyError, ParsedOutput] =
-    decodeWith(invocation.layout, output)(evidence => inner.parse(evidenceInvocation(invocation, evidence), output))
+    for
+      evidence <- DecisionAdapter.evidenceLayout(invocation.layout, plan)
+      parsed   <- inner.parse(evidenceInvocation(invocation, evidence), output)
+      answers  <- answersOf(parsed.values, output.text)
+      decoded  <- plan.decode(answers.toMap)
+    yield parsed.copy(values = DynamicValues.mergeRecords(parsed.values, decoded), evidence = answers)
 
   /** The invocation of `inner` for the evidence layout `evidence`: no demos, and the output schema with the evidence
     * schemas ([[outputSchema]]).
@@ -79,27 +90,8 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
     invocation.copy(
       layout = evidence,
       demos = Vector.empty,
-      outputJsonSchema = Some(PythonText.json(outputSchema(invocation, evidence)))
+      outputJsonSchema = Some(outputSchema(invocation, evidence))
     )
-
-  /** The output values of `output`: `parseEvidence` parses it with the evidence layout of `layout`, then the evidence
-    * gives the decisions.
-    */
-  private def decodeWith(layout: SignatureLayout, output: LmOutput)(
-      parseEvidence: SignatureLayout => Either[DspyError, ParsedOutput]
-  ): Either[DspyError, ParsedOutput] =
-    for
-      evidence <- DecisionAdapter.evidenceLayout(layout, plan)
-      parsed   <- parseEvidence(evidence)
-      answers  <- answersOf(parsed.values, output.text)
-      decoded  <- plan.decode(answers)
-    yield parsed.copy(
-      values = decoded.fields.foldLeft(parsed.values)((values, entry) => values.updated(entry._1, entry._2)),
-      evidence = plan.kinds.flatMap((name, _) => answers.get(name).map(name -> _))
-    )
-
-  override def formatUserMessageContent(layout: SignatureLayout, values: DynamicValue.Record): String =
-    inner.formatUserMessageContent(layout, values)
 
   /** `evidence` with the task examples of the demos of `invocation` after the effective instructions of its layout.
     * With no demos, `evidence` stays as it is.
@@ -107,73 +99,53 @@ final case class DecisionAdapter(inner: Adapter, plan: DecisionPlan) extends Ada
   private def withTaskExamples(invocation: AdapterInvocation, evidence: SignatureLayout): SignatureLayout =
     if invocation.demos.isEmpty then evidence
     else
-      val names    = invocation.layout.fields.map(_.name).toSet
-      val examples = invocation.demos.map(demo =>
-        DynamicValue.Record(demo.values.fields.filter((name, _) => names.contains(name)))
-      )
+      val names    = invocation.fullLayout.fields.map(_.name).toSet
+      val examples = invocation.demos.map(demo => DynamicValues.recordFilterKeys(demo.values, names.contains))
       evidence.withInstructions(
         Some(
           invocation.layout.effectiveInstructions + DecisionAdapter.TaskExamplesHeader +
-            PythonText.jsonAscii(DynamicValue.Sequence(Chunk.from(examples)))
+            PythonText.jsonAscii(DynamicValues.sequence(examples))
         )
       )
 
   /** The output JSON schema of the request: the output schema of `invocation` with the evidence schema as the property
     * of each evidence field. When the root of the output schema is a `$ref` (a recursive output type), the schema that
-    * it names replaces it first ([[StrictJsonSchema.inlineRootRef]]), so that the other properties stay. With no output
+    * it names replaces it first ([[JsonSchemaRefs.inlineRoot]]), so that the other properties stay. With no output
     * schema, the schema of the fields of `evidence` ([[StrictJsonSchema.fromFields]]), with the evidence schemas. When
-    * a field has a type with no schema there, the result has the evidence properties, the open map schema of each field
-    * of the type `json`, and `"additionalProperties": true` at the root. The JSON adapter then sends JSON mode, as it
-    * does for that field with no decision outputs: with no warning for an open map, else with the warning of a failed
-    * schema build (upstream `JSONAdapter._prepare_response_format` with the evidence signature).
+    * a field has a type with no schema there, the result is the open root of `fromFields`, with the evidence
+    * properties. The JSON adapter then sends JSON mode, as it does for that field with no decision outputs: with no
+    * warning for an open map, else with the warning of a failed schema build (upstream
+    * `JSONAdapter._prepare_response_format` with the evidence signature).
     */
   private def outputSchema(invocation: AdapterInvocation, evidence: SignatureLayout): DynamicValue.Record =
     val schemas = plan.kinds.map((name, kind) => name -> DecisionAdapter.evidenceSchema(kind))
-    invocation.outputJsonSchema.flatMap(PythonText.parseJson) match
-      case Some(parsed: DynamicValue.Record) =>
-        val typed      = StrictJsonSchema.inlineRootRef(parsed)
+    invocation.outputJsonSchema match
+      case Some(schema) =>
+        val typed      = JsonSchemaRefs.inlineRoot(schema)
         val properties = DynamicValues.recordGet(typed, "properties") match
           case Some(record: DynamicValue.Record) => record
           case _                                 => DynamicValue.Record.empty
-        typed.updated("properties", schemas.foldLeft(properties)((acc, entry) => acc.updated(entry._1, entry._2)))
-      case _ =>
-        val fields   = evidence.outputFields.filterNot(NativeFunctionCalling.isToolCallsField)
-        val openMaps = fields.filter(_.typeRef == TypeRef.json).map(_.name -> StrictJsonSchema.OpenMapSchema)
-        StrictJsonSchema.fromFields(fields, schemas.toMap).getOrElse(
-          DynamicValue.Record(
-            "type"                 -> DecisionAdapter.text("object"),
-            "properties"           -> DynamicValue.Record(Chunk.from(schemas ++ openMaps)),
-            "additionalProperties" -> DynamicValue.Primitive(PrimitiveValue.Boolean(true))
-          )
+        typed.updated("properties", DynamicValues.mergeRecords(properties, DynamicValues.recordFromEntries(schemas)))
+      case None => StrictJsonSchema.fromFields(
+          evidence.outputFields.filterNot(NativeFunctionCalling.isToolCallsField),
+          schemas.toMap
         )
 
-  /** The evidence of each decision output in the parsed `values`. A value that is not evidence is a [[ParseError]] that
-    * names the field and has the raw response `raw`.
+  /** The evidence of each decision output in the parsed `values`, by output name, in the order of the layout. The value
+    * of an evidence field is a JSON object, or the JSON text of one ([[PythonText.parseJson]]): a chat reply gives the
+    * text of the object. A value that is not evidence is a [[dspy4s.core.contracts.ParseError]] that names the field
+    * and has the raw response `raw`.
     */
-  private def answersOf(values: DynamicValue.Record, raw: String): Either[DspyError, Map[String, DecisionEvidence]] =
-    plan.kinds.foldLeft[Either[DspyError, Map[String, DecisionEvidence]]](Right(Map.empty)) {
-      case (acc, (name, _)) =>
-        val answer =
-          for
-            value    <- evidenceValue(name, DynamicValues.recordGet(values, name))
-            evidence <- plan.evidence(name, value)
-          yield evidence
-        for
-          found    <- acc
-          evidence <- answer.left.map(error =>
-                        ParseError("adapter", s"Failed to parse field $name: ${error.message}", raw = Some(raw))
-                      )
-        yield found.updated(name, evidence)
-    }
-
-  /** The JSON value of an evidence field: a JSON object as it is, or the JSON value of a text. A chat reply gives the
-    * text of the object.
-    */
-  private def evidenceValue(name: String, value: Option[DynamicValue]): Either[DspyError, DynamicValue] =
-    value.toRight(ValidationError(s"The reply has no evidence for '$name'")).flatMap {
-      case DynamicValue.Primitive(PrimitiveValue.String(text)) => JsonDynamic.parse(text)
-      case other                                               => Right(other)
-    }
+  private def answersOf(
+      values: DynamicValue.Record,
+      raw   : String
+  ): Either[DspyError, Vector[(String, DecisionEvidence)]] =
+    DecisionAdapter
+      .evidenceOf(plan, values, name => s"The reply has no evidence for '$name'") {
+        case DynamicValue.Primitive(PrimitiveValue.String(text)) => PythonText.parseJson(text)
+        case other                                               => Right(other)
+      }
+      .left.map((name, error) => AdapterTextSupport.fieldError(name, raw, error))
 
 object DecisionAdapter:
 
@@ -216,36 +188,31 @@ object DecisionAdapter:
     * properties stay.
     */
   def evidenceLayout(layout: SignatureLayout, plan: DecisionPlan): Either[DspyError, SignatureLayout] =
-    plan.kinds
-      .foldLeft[Either[DspyError, Map[String, FieldSpec]]](Right(Map.empty)) { case (acc, (name, kind)) =>
-        for
-          fields   <- acc
-          question <- plan.question(name)
-        yield fields ++ layout.outputFields.find(_.name == name).map(field =>
-          name -> field.copy(
-            typeRef = evidenceType(kind),
-            description = Some("\n" + PythonText.json(question, indent = Some(2))),
-            defaultValue = None,
-            enumValues = Vector.empty,
-            optional = false
+    Traverse
+      .either(plan.kinds) { (name, kind) =>
+        plan.question(name).map { question =>
+          layout.outputFields.find(_.name == name).map(field =>
+            name -> field.copy(
+              typeRef = evidenceType(kind),
+              description = Some("\n" + PythonText.json(question, indent = Some(2))),
+              defaultValue = None,
+              enumValues = Vector.empty,
+              optional = false
+            )
           )
-        )
+        }
       }
-      .map(fields => layout.withOutputFields(layout.outputFields.map(field => fields.getOrElse(field.name, field))))
+      .map { found =>
+        val fields = found.flatten.toMap
+        layout.withOutputFields(layout.outputFields.map(field => fields.getOrElse(field.name, field)))
+      }
 
   /** The questions of a System One request (upstream `DecisionAdapter._prepare` with `system_one`): the question of
     * each decision output of `plan` ([[DecisionPlan.question]]), by output name, in the order of the layout. A question
     * that the plan cannot give is a `Left`.
     */
   def systemOneQuestions(plan: DecisionPlan): Either[DspyError, DynamicValue.Record] =
-    plan.kinds
-      .foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) { case (acc, (name, _)) =>
-        for
-          questions <- acc
-          question  <- plan.question(name)
-        yield questions :+ (name -> question)
-      }
-      .map(entries => DynamicValue.Record(Chunk.from(entries)))
+    Traverse.either(plan.kinds)((name, _) => plan.question(name).map(name -> _)).map(DynamicValues.recordFromEntries)
 
   /** The state of a System One request (upstream `DecisionAdapter._prepare` with `system_one`). Its keys, in this
     * order:
@@ -269,18 +236,15 @@ object DecisionAdapter:
       inputNames.contains
     )
     val examples = Option.when(demos.nonEmpty)(
-      "demos" -> DynamicValue.Sequence(
-        Chunk.from(demos.map(demo => DynamicValues.recordFilterKeys(demo.values, fieldNames.contains)))
-      )
+      "demos" ->
+        DynamicValues.sequence(demos.map(demo => DynamicValues.recordFilterKeys(demo.values, fieldNames.contains)))
     )
-    DynamicValue.Record(
-      Chunk.from(
-        Vector[(String, DynamicValue)](
-          "instructions" -> text(layout.effectiveInstructions),
-          "input_fields" -> text(PromptText.descriptions(layout.inputFields)),
-          "inputs"       -> declared
-        ) ++ examples
-      )
+    DynamicValues.recordFromEntries(
+      Vector[(String, DynamicValue)](
+        "instructions" := layout.effectiveInstructions,
+        "input_fields" := PromptText.descriptions(layout.inputFields),
+        "inputs"       -> declared
+      ) ++ examples
     )
 
   /** The evidence of each decision output of `plan` in the answers of a System One model, by question name, in the
@@ -291,14 +255,131 @@ object DecisionAdapter:
       plan   : DecisionPlan,
       answers: DynamicValue.Record
   ): Either[DspyError, Vector[(String, DecisionEvidence)]] =
-    plan.kinds.foldLeft[Either[DspyError, Vector[(String, DecisionEvidence)]]](Right(Vector.empty)) {
-      case (acc, (name, _)) =>
+    evidenceOf(plan, answers, name => s"The reply of the System One model has no answer for '$name'")(Right(_))
+      .left.map(_._2)
+
+  /** The adapter of a call with the decision outputs of the layout (upstream `resolve_adapter` in
+    * `dspy/adapters/decision.py`): `adapter` itself when `layout` has no decision output, else a [[DecisionAdapter]]
+    * around `adapter`. Its fallback is the fallback of `adapter`, in a [[DecisionAdapter]] too. These errors fail the
+    * call before the request:
+    *   - settings that the plan rejects (`plan`, from [[DecisionPlan.of]]);
+    *   - a call that streams to a listener (upstream `DecisionAdapter._prepare`: "Streaming decision evidence is not
+    *     supported.");
+    *   - a decision output with no question: no description and no instructions ([[DecisionPlan.question]]).
+    *
+    * The call warns about each output in `nestedFields` (an output with a nested decision type), with the text of
+    * upstream `resolve_adapter`.
+    */
+  def resolve(
+      adapter     : Adapter,
+      plan        : Either[DspyError, DecisionPlan],
+      layout      : SignatureLayout,
+      nestedFields: Vector[String],
+      moduleName  : String,
+      model       : LanguageModel
+  )(using RuntimeContext): Either[DspyError, Adapter] =
+    nestedFields.foreach(name => RuntimeEnvironment.warn(s"Predict '${layout.name}'", nestedDecisionWarning(name)))
+    plan.flatMap { resolved =>
+      if resolved.kinds.isEmpty then Right(adapter)
+      else
         for
-          found  <- acc
-          answer <- DynamicValues.recordGet(answers, name)
-                      .toRight(ValidationError(s"The reply of the System One model has no answer for '$name'"))
-          evidence <- plan.evidence(name, answer)
-        yield found :+ (name -> evidence)
+          _ <- rejectStream(model, moduleName, layout)
+          _ <- evidenceLayout(layout, resolved)
+        yield DecisionAdapter(adapter, resolved)
+    }
+
+  /** The call of a System One model (upstream `DecisionAdapter.__call__` with `system_one`, in
+    * `dspy/adapters/decision.py`), for the System One plan of `layout` ([[DecisionPlan.forSystemOne]]): no adapter, and
+    * no prompt. These errors fail the call before the request:
+    *   - a call that streams to a listener ("Streaming decision evidence is not supported."): Jev has no stream;
+    *   - a decision output with no question ([[DecisionPlan.question]]);
+    *   - request options: `options` must be empty ("Unsupported TypeSafe generation settings: [...]").
+    *
+    * The request is [[DecisionRequests.request]] with the state of [[systemOneState]] and the questions of
+    * [[systemOneQuestions]], and `rolloutId` (it changes only the cache key). The call dispatches the LM callback
+    * events. The typed answers of the reply ([[DecisionRequests.answers]]) give the evidence ([[systemOneEvidence]]),
+    * which goes to the evidence log before the decode, as upstream. The result is the decode: the output values. The
+    * usage of the reply goes to the usage scope of the call ([[LanguageModel.callAndRecordUsage]]). Each nested
+    * decision output fails the plan first, so a System One call gives no warning for it (upstream `resolve_adapter`
+    * makes the `DecisionState` before the warnings).
+    */
+  def decide(
+      plan      : DecisionPlan,
+      layout    : SignatureLayout,
+      demos     : Vector[Example],
+      moduleName: String,
+      model     : LanguageModel,
+      inputs    : DynamicValue.Record,
+      options   : DynamicValue.Record,
+      rolloutId : Option[Int]
+  )(using RuntimeContext): Either[DspyError, DynamicValue.Record] =
+    val optionKeys  = DynamicValues.recordKeys(options)
+    def unsupported = ConfigurationError(DecisionRequests.unsupportedSettings(optionKeys))
+    for
+      _         <- rejectStream(model, moduleName, layout)
+      questions <- systemOneQuestions(plan)
+      _         <- Either.cond(optionKeys.isEmpty, (), unsupported)
+      request    = DecisionRequests
+                  .request(model.id, systemOneState(layout, demos, inputs), questions)
+                  .copy(rolloutId = rolloutId)
+      response <- LanguageModel.callAndRecordUsage(model, request)
+      answers  <- DecisionRequests.answers(response)
+      evidence <- systemOneEvidence(plan, answers)
+      _         = recordEvidence(moduleName, layout, evidence)
+      values   <- plan.decode(evidence.toMap)
+    yield values
+
+  /** Add the decision evidence of one completion to the evidence log (upstream `DecisionAdapter._decode` with
+    * `record_evidence`). The key is the key of the predictor that runs ([[RuntimeEnvironment.activePredictor]]), so
+    * that the evidence of the `Predict` inside `ChainOfThought` belongs to the `ChainOfThought` leaf, as its trace
+    * entry does. With no such predictor, the key of the module `moduleName` with `layout`.
+    */
+  def recordEvidence(moduleName: String, layout: SignatureLayout, evidence: Vector[(String, DecisionEvidence)]): Unit =
+    if evidence.nonEmpty then
+      val key = RuntimeEnvironment.activePredictor.getOrElse(PredictorKey.from(moduleName, layout))
+      evidence.foreach((field, value) => DecisionEvidenceLog.record(key, field, value))
+
+  /** A `Left` when a call of `model` gives the stream output of the predictor to a listener
+    * ([[StreamingLanguageModel]]): the decision outputs cannot stream (upstream `DecisionAdapter._prepare`). The check
+    * asks `model` as the call sees it, with the sink of the context ([[StreamSink.applied]]). Thus a predictor with its
+    * own model gets the same error. A model that does not stream stays as it is, and the check does not reject it.
+    */
+  private def rejectStream(model: LanguageModel, moduleName: String, layout: SignatureLayout)(using
+      RuntimeContext
+  ): Either[DspyError, Unit] =
+    val streams = StreamSink.applied(model) match
+      case streaming: StreamingLanguageModel => streaming.streamsToListener(moduleName, layout.outputFields.map(_.name))
+      case _                                 => false
+    Either.cond(!streams, (), ConfigurationError("Streaming decision evidence is not supported."))
+
+  /** The warning for an output with a nested decision type (upstream `resolve_adapter`). */
+  private def nestedDecisionWarning(name: String): String =
+    s"Decision evidence decoding is not implemented for nested output '$name'. The LM generates values and " +
+      "confidence directly; thresholds, cuts, and weights are not applied. Use top-level decision output fields " +
+      "instead."
+
+  /** `true` for the type of an evidence field ([[NoulEvidence]], [[ScoreEvidence]], and [[ChoiceEvidence]]). The JSON
+    * adapter keeps the JSON value of such a field as it is.
+    */
+  private[adapters] def isEvidenceType(typeRef: TypeRef): Boolean =
+    typeRef == NoulEvidence || typeRef == ScoreEvidence || typeRef == ChoiceEvidence
+
+  /** The evidence of each decision output of `plan` in `values`, by output name, in the order of the layout
+    * ([[DecisionPlan.evidence]]). `json` gives the JSON value of the evidence from the value of an output. A `Left` has
+    * the name of the first output that has no evidence: `values` does not have it (`missing` gives the text of the
+    * error), or its value is not evidence.
+    */
+  private def evidenceOf(plan: DecisionPlan, values: DynamicValue.Record, missing: String => String)(
+      json: DynamicValue => Either[DspyError, DynamicValue]
+  ): Either[(String, DspyError), Vector[(String, DecisionEvidence)]] =
+    Traverse.either(plan.kinds) { (name, _) =>
+      DynamicValues
+        .recordGet(values, name)
+        .toRight(ValidationError(missing(name)))
+        .flatMap(json)
+        .flatMap(plan.evidence(name, _))
+        .map(name -> _)
+        .left.map(name -> _)
     }
 
   private def evidenceType(kind: DecisionKind): TypeRef =
@@ -327,27 +408,17 @@ object DecisionAdapter:
       properties : Vector[(String, DynamicValue)],
       description: Option[String]
   ): DynamicValue.Record =
-    DynamicValue.Record(
-      Chunk.from(
-        Vector(
-          "type"                 -> text("object"),
-          "properties"           -> DynamicValue.Record(Chunk.from(properties)),
-          "required"             -> DynamicValue.Sequence(Chunk.from(properties.map((name, _) => text(name)))),
-          "additionalProperties" -> DynamicValue.Primitive(PrimitiveValue.Boolean(false))
-        ) ++ description.map("description" -> text(_))
-      )
+    DynamicValues.recordFromEntries(
+      Vector(
+        "type"                 := "object",
+        "properties"           -> DynamicValues.recordFromEntries(properties),
+        "required"             -> DynamicValues.sequence(properties.map((name, _) => DynamicValues.string(name))),
+        "additionalProperties" := false
+      ) ++ description.map("description" := _)
     )
 
   /** The schema of a number in [0, 1] (upstream `Probability`). */
   private def probability(description: Option[String]): DynamicValue.Record =
-    DynamicValue.Record(
-      Chunk.from(
-        Vector(
-          "type"    -> text("number"),
-          "minimum" -> DynamicValue.Primitive(PrimitiveValue.Int(0)),
-          "maximum" -> DynamicValue.Primitive(PrimitiveValue.Int(1))
-        ) ++ description.map("description" -> text(_))
-      )
+    DynamicValues.recordFromEntries(
+      Vector("type" := "number", "minimum" := 0, "maximum" := 1) ++ description.map("description" := _)
     )
-
-  private def text(value: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(value))

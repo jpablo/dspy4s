@@ -6,6 +6,27 @@ sealed trait DspyError extends Product with Serializable:
   def code: String
   def message: String
 
+/** The text of an exception, for the message of an error. Each module uses these rules, so one exception gives one
+  * text.
+  */
+object DspyError:
+
+  /** The message of `error` when it is not null and not empty, else the name of its class ([[className]]). */
+  def messageOf(error: Throwable): String =
+    Option(error.getMessage).filter(_.nonEmpty).getOrElse(className(error))
+
+  /** `<Type>: <message>` (upstream `describe`), or `<Type>` when the message is null or empty. `<Type>` is the name of
+    * the class of `error` ([[className]]).
+    */
+  def describe(error: Throwable): String =
+    val name = className(error)
+    Option(error.getMessage).filter(_.nonEmpty).fold(name)(message => s"$name: $message")
+
+  /** The simple name of the class of `error`. An anonymous class has no simple name, so it gives the full class name.
+    */
+  private def className(error: Throwable): String =
+    Some(error.getClass.getSimpleName).filter(_.nonEmpty).getOrElse(error.getClass.getName)
+
 final case class ConfigurationError(message: String) extends DspyError:
   val code: String = "configuration_error"
 
@@ -35,6 +56,10 @@ final case class RuntimeError(component: String, message: String) extends DspyEr
   *   the request id of the provider
   * @param retryAfter
   *   the delay that the provider asked for before the next attempt
+  * @param usage
+  *   the usage that the provider reported for the failed call. The record point of the usage
+  *   (`LanguageModel.callAndRecordUsage`) records it, because the provider bills these tokens also when the call fails
+  *   (upstream `_account_failed_call` in `dspy/clients/execution.py`).
   */
 final case class LmErrorDetails(
     model       : Option[String]         = None,
@@ -42,7 +67,8 @@ final case class LmErrorDetails(
     providerCode: Option[String]         = None,
     status      : Option[Int]            = None,
     requestId   : Option[String]         = None,
-    retryAfter  : Option[FiniteDuration] = None
+    retryAfter  : Option[FiniteDuration] = None,
+    usage       : Option[LmUsage]        = None
 )
 
 object LmErrorDetails:
@@ -76,6 +102,22 @@ object LmError:
     error match
       case lm: LmError => lm.details.retryAfter
       case _           => None
+
+  /** The usage that the provider reported for the failed call, if the error carries one ([[LmErrorDetails.usage]]). An
+    * error that is not an [[LmError]] has none.
+    */
+  def usage(error: DspyError): Option[LmUsage] =
+    error match
+      case lm: LmError => lm.details.usage
+      case _           => None
+
+  /** `error` with `usage` as the usage of the failed call ([[LmErrorDetails.usage]]). The usage replaces the usage that
+    * the error had. An error that is not an [[LmError]], and a `usage` of `None`, give `error` as it is.
+    */
+  def withUsage(error: DspyError, usage: Option[LmUsage]): DspyError =
+    (error, usage) match
+      case (lm: LmError, Some(value)) => lm.withDetails(lm.details.copy(usage = Some(value)))
+      case _                          => error
 
 /** The request failed before the provider returned a response: network, DNS, TLS, or a connection reset. */
 final case class LmTransportError(message: String, details: LmErrorDetails = LmErrorDetails.empty) extends LmError:

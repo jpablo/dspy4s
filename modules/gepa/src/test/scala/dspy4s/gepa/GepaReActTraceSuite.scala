@@ -25,6 +25,7 @@ import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable.ArrayBuffer
+import scala.util.Random
 
 /** GEPA on a `ReAct` program. The first leaf (the react step) runs in a loop before the second leaf (the extractor)
   * runs, so the position of a trace entry does not tell the leaf (PORT_GAPS G-44, item "trace association"). `RLM` has
@@ -98,7 +99,7 @@ class GepaReActTraceSuite extends FunSuite:
       assertEquals(trace.filter(_.predictor.isEmpty).map(_.component), Vector("react"))
 
       val records = adapter
-        .makeReflectiveDataset(seed, batch, Vector(reactId, extractorId))
+        .makeReflectiveDataset(seed, batch, Vector(reactId, extractorId), new Random(GepaRandom.mix(0L)))
         .fold(error => fail(error.message), identity)
 
       assertEquals(records(extractorId).size, 1)

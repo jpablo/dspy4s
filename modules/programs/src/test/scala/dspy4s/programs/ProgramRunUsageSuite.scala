@@ -145,7 +145,7 @@ class ProgramRunUsageSuite extends FunSuite:
       chat("reasoning" -> "ask the sub-LM", "code" -> "query"),
       chat("reasoning" -> "done", "code"           -> "submit")
     ))
-    val subLm = UsageScript(Vector.empty, scale = 100L)
+    val subLm = UsageScript(Vector("one", "two", "three"), scale = 100L)
     run(lm) {
       val rlm = RLM(
         baseSignature = rlmSignature,

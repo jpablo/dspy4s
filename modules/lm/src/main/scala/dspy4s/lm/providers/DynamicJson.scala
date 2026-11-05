@@ -1,81 +1,35 @@
 package dspy4s.lm.providers
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, ParseError, ValidationError}
-import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, Schema}
+import dspy4s.core.contracts.{DspyError, DynamicValues, ParseError}
+import zio.blocks.schema.DynamicValue
 
-import java.nio.charset.StandardCharsets
-import scala.util.control.NonFatal
-
-/** JSON (de)serialization and navigation for the provider layer, on `DynamicValue` — the principled replacement for the
-  * hand-rolled `Any`-based `JsonCodec`. Serialization delegates to zio-blocks' total `DynamicValue` JSON codec;
-  * [[stripNull]] mirrors the old `stripNone` (providers distinguish an absent field from `null`). The navigation
-  * helpers replace the `asMap`/`asVector`/`asLong` projections the `Map[String, Any]` parser used.
+/** The JSON rules of the provider layer. The option bag of a provider body has no null field, because a provider can
+  * read an absent option and a null option in different ways ([[encode]]). A body from the network can be any text
+  * ([[decode]]). The generic JSON helpers are in [[dspy4s.core.contracts.DynamicValues]].
   */
 private[lm] object DynamicJson:
-  private val codec = Schema.dynamic.jsonCodec
 
-  /** Render a `DynamicValue` to a JSON string, dropping `Null` fields first (provider-bound: absent != null). */
+  /** The JSON text of a provider body. Each field of the top-level record with a null value is removed first: these
+    * fields are the option bag, and a null option means "no option". A nested null stays, because it has a meaning on
+    * the wire. For example, an assistant message with tool calls and no text has `"content": null`, and a JSON schema
+    * can have `"default": null`.
+    */
   def encode(value: DynamicValue): String =
-    new String(codec.encode(stripNull(value)), StandardCharsets.UTF_8)
+    value match
+      case rec: DynamicValue.Record => DynamicValues.encodeJson(withoutNullFields(rec))
+      case other                    => DynamicValues.encodeJson(other)
 
-  /** Render a `DynamicValue` to a JSON string and keep each `Null` field. Use it for a value that must keep its exact
-    * content, for example the arguments of a tool call.
+  /** `rec` with no field that has a null value. Only the fields of `rec` change: a nested null stays. This is the rule
+    * of [[encode]]. A wire can use it to give the record that [[encode]] sends.
     */
-  def encodeExact(value: DynamicValue): String =
-    new String(codec.encode(value), StandardCharsets.UTF_8)
+  def withoutNullFields(rec: DynamicValue.Record): DynamicValue.Record =
+    if rec.fields.exists((_, field) => DynamicValues.isNull(field)) then
+      DynamicValue.Record(rec.fields.filterNot((_, field) => DynamicValues.isNull(field)))
+    else rec
 
-  /** Render a value like [[encodeExact]], or give a `ValidationError` when the value has no JSON text. The codec is
-    * recursive, so a value that is nested too deep for the stack of the thread gives the error, as in [[decode]]. A
-    * value that the codec rejects, for example a NaN, gives the error too.
-    */
-  def encodeExactChecked(value: DynamicValue): Either[DspyError, String] =
-    try Right(encodeExact(value))
-    catch
-      case _: StackOverflowError => Left(ValidationError("The value has no JSON text: the value is nested too deep"))
-      case NonFatal(error)       =>
-        Left(ValidationError(s"The value has no JSON text: ${Option(error.getMessage).getOrElse(error.toString)}"))
-
-  /** Parse a JSON string. Text that is not JSON gives a `ParseError`. The codec is recursive, so a value that is nested
-    * too deep for the stack of the thread gives a `ParseError` too: a body from the network must not stop the caller
-    * with a `StackOverflowError`.
+  /** Parse a JSON string. Text that is not JSON gives a `ParseError` with the cause, and so does a value that is nested
+    * too deep for the stack of the thread ([[dspy4s.core.contracts.DynamicValues.tryDecodeJson]]). A caller that needs
+    * no cause uses `DynamicValues.decodeJson`.
     */
   def decode(json: String): Either[DspyError, DynamicValue] =
-    try
-      codec.decode(json.getBytes(StandardCharsets.UTF_8)) match
-        case Right(dv) => Right(dv)
-        case Left(err) => Left(ParseError("json", s"Invalid JSON: ${err.toString.take(200)}"))
-    catch case _: StackOverflowError => Left(ParseError("json", "Invalid JSON: the value is nested too deep"))
-
-  /** Recursively drop record fields whose value is `Null`. */
-  def stripNull(value: DynamicValue): DynamicValue =
-    value match
-      case rec: DynamicValue.Record => DynamicValue.Record(Chunk.from(rec.fields.iterator.collect {
-          case (k, v) if !isNull(v) => k -> stripNull(v)
-        }.toSeq))
-      case seq: DynamicValue.Sequence => DynamicValue.Sequence(Chunk.from(seq.elements.iterator.map(stripNull).toSeq))
-      case other                      => other
-
-  private def isNull(v: DynamicValue): Boolean =
-    v match
-      case _: DynamicValue.Null.type => true
-      case _                         => false
-
-  // ── Navigation (replacing Map's asMap / asVector / asLong / string extraction) ──────────────────
-
-  def field(value: DynamicValue, name: String): Option[DynamicValue] =
-    asRecord(value).flatMap(rec => DynamicValues.recordGet(rec, name))
-
-  def asRecord(value: DynamicValue): Option[DynamicValue.Record] =
-    value match
-      case rec: DynamicValue.Record => Some(rec)
-      case _                        => None
-
-  def asSequence(value: DynamicValue): Vector[DynamicValue] =
-    value match
-      case seq: DynamicValue.Sequence => seq.elements.iterator.toVector
-      case _                          => Vector.empty
-
-  def asString(value: DynamicValue): Option[String] = DynamicValues.asString(value)
-
-  def asLong(value: DynamicValue): Option[Long] = DynamicValues.asLong(value)
+    DynamicValues.tryDecodeJson(json).left.map(cause => ParseError("json", s"Invalid JSON: ${cause.take(200)}"))

@@ -2,7 +2,17 @@ package dspy4s.optimize
 
 import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.{
-  :=, DspyError, DynamicValues, FieldSpec, RuntimeContext, RuntimeError, SignatureLayout, TraceEntry, TypeRef
+  :=,
+  DspyError,
+  DynamicValues,
+  FieldSpec,
+  RuntimeContext,
+  RuntimeError,
+  SignatureLayout,
+  ThreadCount,
+  TraceEntry,
+  TypeRef,
+  ValidationError
 }
 import dspy4s.core.data.{Example, RawPrediction}
 import dspy4s.core.decisions.{DecisionEvidence, DecisionEvidenceLog, DecisionSettings}
@@ -17,6 +27,7 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.util.concurrent.{CountDownLatch, TimeUnit}
 
 /** ReAnchor (experimental; upstream `dspy.experimental.ReAnchor` and `calibrate`, with the cases of
   * `tests/teleprompt/reanchor/test_reanchor_calibrate.py` and `test_reanchor.py`). A fake System One model answers each
@@ -54,8 +65,8 @@ class ReAnchorSuite extends FunSuite:
     override def supportsDecisionRequests: Boolean                                             = true
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       synchronized { requests = requests :+ request }
-      DecisionRequests.parts(request).map { (state, questions) =>
-        val answers = DynamicValues.recordKeys(questions).map(name => name -> answer(state, name))
+      request.decision.toRight(ValidationError("not a decision request")).map { payload =>
+        val answers = DynamicValues.recordKeys(payload.questions).map(name => name -> answer(payload.state, name))
         DecisionRequests.response(DynamicValues.recordFromEntries(answers), None, Some("jev-test"))
       }
 
@@ -71,7 +82,7 @@ class ReAnchorSuite extends FunSuite:
     FieldSpec("rating", TypeRef.score, description = Some("How good is it?"), enumValues = Vector("low", "mid", "high"))
   )
 
-  /** A metric that compares the value of `field` with the label (a level index for a Score). */
+  /** A metric that compares the value of `field` with the label (a level name for a Score). */
   private def equalOn(field: String, level: Boolean = false): Metric =
     new Metric:
       override val name: String = s"equal_$field"
@@ -104,7 +115,7 @@ class ReAnchorSuite extends FunSuite:
       trainset: Vector[Example],
       metric  : Metric,
       model   : LanguageModel,
-      config  : ReAnchorConfig = ReAnchorConfig(numThreads = 2)
+      config  : ReAnchorConfig = ReAnchorConfig(numThreads = Some(ThreadCount(2)))
   ): (DynamicPredict, ReAnchorReport) =
     RuntimeEnvironment.withSettings(context(model)) {
       ReAnchor[DynamicPredict](metric, config).calibrate(program, trainset)(using RuntimeEnvironment.current)
@@ -180,7 +191,8 @@ class ReAnchorSuite extends FunSuite:
   test("Score cuts move to fit a metric on the level") {
     val model = FakeSystemOne((state, _) => leaningLevels(input(state, "item")))
     val train = items(
-      Seq.fill(3)(Seq("lo" -> 0, "hi" -> 2)).flatten.map((k, v) => k -> DynamicValue.Primitive(PrimitiveValue.Int(v))),
+      Seq.fill(3)(Seq("lo" -> "low", "hi" -> "high")).flatten
+        .map((k, v) => k -> DynamicValue.Primitive(PrimitiveValue.String(v))),
       "rating"
     )
     val (program, report) = calibrate(DynamicPredict(rateLayout), train, equalOn("rating", level = true), model)
@@ -195,7 +207,7 @@ class ReAnchorSuite extends FunSuite:
   test("each distinct request goes once to the model, however many settings are tried") {
     val model = FakeSystemOne(leaningPair)
     val _     = calibrate(DynamicPredict(matchLayout), pairs(Seq("same", "different")), equalOn("match"), model)
-    assertEquals(model.requests.map(_.options).distinct.size, 2)
+    assertEquals(model.requests.map(_.decision).distinct.size, 2)
     assertEquals(model.requests.size, 2, "the cache serves each repeated request")
   }
 
@@ -229,7 +241,7 @@ class ReAnchorSuite extends FunSuite:
     assertEquals(program.decisions.get("match").flatMap(_.threshold), Some(0.99))
     assertEquals(
       report.fitted.map(_.observed),
-      Vector(Map("calls" -> 8.0, "distinct" -> 2.0, "min" -> 0.98, "max" -> 1.0, "candidates" -> 2.0))
+      Vector(ReAnchorRow.Observed(calls = 8, distinct = Some(2), min = Some(0.98), max = Some(1.0), candidates = 2))
     )
   }
 
@@ -252,11 +264,11 @@ class ReAnchorSuite extends FunSuite:
     val (lone, loneTrain)    = loneOutlier(1)
     val (stayed, stayReport) = calibrate(DynamicPredict(matchLayout), loneTrain, equalOn("match"), lone)
     assertEquals(stayed.decisions, Map.empty[String, DecisionSettings])
-    assertEquals(stayReport.fitted.map(_.foldCheck), Vector((0, 1)))
+    assertEquals(stayReport.fitted.map(_.foldCheck), Vector(ReAnchorRow.FoldCheck(0, 1)))
     val (many, manyTrain)   = loneOutlier(6)
     val (moved, moveReport) = calibrate(DynamicPredict(matchLayout), manyTrain, equalOn("match"), many)
     assertEquals(moved.decisions.get("match").flatMap(_.threshold), Some(0.2))
-    assertEquals(moveReport.fitted.map(_.foldCheck), Vector((1, 0)))
+    assertEquals(moveReport.fitted.map(_.foldCheck), Vector(ReAnchorRow.FoldCheck(1, 0)))
   }
 
   // ── compile ───────────────────────────────────────────────────────────────────────────────────────────────────
@@ -270,7 +282,7 @@ class ReAnchorSuite extends FunSuite:
 
   test("compile fits the threshold, reports the training scores, and puts the report in the result") {
     val result = RuntimeEnvironment.withSettings(context(FakeSystemOne(tricky))) {
-      ReAnchor[DynamicPredict](equalOn("match"), ReAnchorConfig(numThreads = 2))
+      ReAnchor[DynamicPredict](equalOn("match"), ReAnchorConfig(numThreads = Some(ThreadCount(2))))
         .compile(DynamicPredict(matchLayout), trickyTrain)(using RuntimeEnvironment.current)
     }.fold(error => fail(error.message), identity)
     assertEquals(result.bestProgram.decisions.get("match").flatMap(_.threshold), Some(0.8))
@@ -280,6 +292,25 @@ class ReAnchorSuite extends FunSuite:
     assertEquals((report.trainScoreBefore, report.trainScore), (0.5556, 0.7778))
     assertEquals(report.fitted.map(_.parameter), Vector("threshold"))
     assertEquals((report.valScoreBefore, report.valScore), (None, None))
+  }
+
+  // Upstream `scores` has `num_threads=None` (`dspy/teleprompt/reanchor/calibrate.py`), so the context gives the count.
+  test("a pass takes its thread count from the context when the config sets none") {
+    // Each metric call waits for the other one, so the score is 1.0 only when the two examples run at the same time.
+    val both   = new CountDownLatch(2)
+    val metric = new Metric:
+      override val name: String = "both_at_once"
+      override def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry])(using
+          RuntimeContext
+      ): Either[DspyError, Double] =
+        both.countDown()
+        Right(if both.await(3, TimeUnit.SECONDS) then 1.0 else 0.0)
+    val settings    = context(FakeSystemOne(leaningPair)).copy(numThreads = Some(ThreadCount(2)))
+    val (_, report) = RuntimeEnvironment.withSettings(settings) {
+      ReAnchor[DynamicPredict](metric, ReAnchorConfig())
+        .calibrate(DynamicPredict(matchLayout), pairs(Seq("same", "different")))(using RuntimeEnvironment.current)
+    }.fold(error => fail(error.message), identity)
+    assertEquals(report.trainScoreBefore, 1.0)
   }
 
   test(
@@ -304,7 +335,10 @@ class ReAnchorSuite extends FunSuite:
   test("the validation set is scored before and after, and the log folder holds report.json") {
     val folder = Files.createTempDirectory("reanchor")
     val result = RuntimeEnvironment.withSettings(context(FakeSystemOne(tricky))) {
-      ReAnchor[DynamicPredict](equalOn("match"), ReAnchorConfig(numThreads = 2, logDir = Some(folder)))
+      ReAnchor[DynamicPredict](
+        equalOn("match"),
+        ReAnchorConfig(numThreads = Some(ThreadCount(2)), logDir = Some(folder))
+      )
         .calibrate(DynamicPredict(matchLayout), trickyTrain, valset = Some(trickyTrain.take(10)))(using
           RuntimeEnvironment.current
         )

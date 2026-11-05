@@ -73,7 +73,7 @@ class GepaObjectiveFrontierSuite extends FunSuite:
     val sparse = state(FrontierType.Instance)(Vector((0.75, Map("quality" -> 1.0, "cost" -> 0.5)), (0.25, Map.empty)))
     assertEquals(sparse.objectiveAggregates(0), Map("quality" -> 1.0, "cost" -> 0.5))
     assertEquals(
-      sparse.objectiveScoresOf(0),
+      sparse.valObjectiveScores(0),
       Vector(Map("quality" -> 1.0, "cost" -> 0.5), Map.empty[String, Double])
     )
 
@@ -108,31 +108,29 @@ class GepaObjectiveFrontierSuite extends FunSuite:
 
   // ── The forms of the objective data ─────────────────────────────────────────────────────────────────────────
 
-  test("a state with no objective score has no objective data") {
-    val seed = GepaState.seed(candidate("c0"), Vector(0.5, 0.5), metricCalls = 2)
-    assertEquals(seed.valObjectiveScores, Vector.empty)
+  test("a state with no objective score has a row of empty maps for each candidate") {
+    val noScores = Vector(Map.empty[String, Double], Map.empty[String, Double])
+    val seed     = GepaState.seed(candidate("c0"), Vector(0.5, 0.5), metricCalls = 2)
+    assertEquals(seed.valObjectiveScores, Vector(noScores))
     assertEquals(
       seed,
-      GepaState(
+      GepaStateFixtures.state(
         CandidatePool.applyUnsafe(Vector(candidate("c0"))),
         Vector(Vector(0.5, 0.5)),
         Vector(Vector.empty),
-        MetricCallCount(2),
-        // The seed has the discovery count 0 (batch 9).
-        discoveryCalls = Vector(0)
+        MetricCallCount(2)
       )
     )
 
     val grown = seed.add(candidate("c1"), Vector(1.0, 0.5), parents = Vector(0), metricCalls = 2)
-    assertEquals(grown.valObjectiveScores, Vector.empty)
-    assertEquals(grown.objectiveScoresOf(1), Vector(Map.empty[String, Double], Map.empty[String, Double]))
+    assertEquals(grown.valObjectiveScores, Vector(noScores, noScores))
     assertEquals(grown.objectiveAggregates(1), Map.empty[String, Double])
     assertEquals(grown.objectiveNames, Vector.empty)
     assertEquals(grown.objectiveBest, Map.empty[String, Set[Int]])
     assertEquals(grown.objectiveFront, Map.empty[String, Double])
   }
 
-  test("the first objective score gives each candidate a row") {
+  test("a candidate with an objective score and a candidate with none each have a row") {
     val grown = GepaState.seed(candidate("c0"), Vector(0.5, 0.5), metricCalls = 2)
       .add(candidate("c1"), Vector(1.0, 0.5), Vector(0), 2, Vector(Map("quality" -> 1.0), Map.empty))
     assertEquals(
@@ -161,7 +159,6 @@ class GepaObjectiveFrontierSuite extends FunSuite:
   test("the instance type has one front for each validation example, and it is the default") {
     val s = twoCandidates(FrontierType.Instance)
     assertEquals(s.fronts, Vector[(FrontierKey, Set[Int])](Instance(0) -> Set(1), Instance(1) -> Set(0, 1)))
-    assertEquals(s.frontier, s.paretoFrontier)
     assertEquals(GepaState.seed(candidate("c0"), Vector(0.5), metricCalls = 1).frontierType, FrontierType.Instance)
   }
 
@@ -171,7 +168,6 @@ class GepaObjectiveFrontierSuite extends FunSuite:
       s.fronts,
       Vector[(FrontierKey, Set[Int])](Objective("correctness") -> Set(1), Objective("incorrectness") -> Set(0))
     )
-    assertEquals(s.frontier, Map(0 -> Set(1), 1 -> Set(0)))
   }
 
   test("the hybrid type has the instance fronts and then the objective fronts") {
@@ -185,7 +181,6 @@ class GepaObjectiveFrontierSuite extends FunSuite:
         Objective("incorrectness") -> Set(0)
       )
     )
-    assertEquals(s.frontier, Map(0 -> Set(1), 1 -> Set(0, 1), 2 -> Set(1), 3 -> Set(0)))
   }
 
   test("the cartesian type has one front for each pair of an example and an objective") {
@@ -199,7 +194,6 @@ class GepaObjectiveFrontierSuite extends FunSuite:
         Cartesian(1, "incorrectness") -> Set(0, 1)
       )
     )
-    assertEquals(s.frontier, Map(0 -> Set(1), 1 -> Set(0), 2 -> Set(0, 1), 3 -> Set(0, 1)))
   }
 
   test("a cartesian pair that no candidate has a score for has no front") {
@@ -219,7 +213,7 @@ class GepaObjectiveFrontierSuite extends FunSuite:
 
     val objective = withSilent(FrontierType.Objective)
     assertEquals(objective.objectiveAggregates(2), Map.empty[String, Double])
-    assertEquals(objective.objectiveScoresOf(2), Vector(Map.empty[String, Double], Map.empty[String, Double]))
+    assertEquals(objective.valObjectiveScores(2), Vector(Map.empty[String, Double], Map.empty[String, Double]))
     assertEquals(objective.objectiveBest, Map("correctness" -> Set(1), "incorrectness" -> Set(0)))
     assertEquals(objective.fronts, twoCandidates(FrontierType.Objective).fronts)
     assertEquals(withSilent(FrontierType.Cartesian).fronts, twoCandidates(FrontierType.Cartesian).fronts)
@@ -235,23 +229,23 @@ class GepaObjectiveFrontierSuite extends FunSuite:
 
   test("the instance type removes the dominated candidate, and the objective type keeps the two candidates") {
     // Candidate 0 is in one instance front only, with candidate 1, which has the larger mean score.
-    assertEquals(twoCandidates(FrontierType.Instance).nonDominatedFrontier, Map(0 -> Set(1), 1 -> Set(1)))
+    assertEquals(twoCandidates(FrontierType.Instance).nonDominatedFrontier, Vector(Set(1), Set(1)))
     assertEquals(draws(twoCandidates(FrontierType.Instance)), Set(1))
 
     // Candidate 0 is alone in the front of `incorrectness`.
-    assertEquals(twoCandidates(FrontierType.Objective).nonDominatedFrontier, Map(0 -> Set(1), 1 -> Set(0)))
+    assertEquals(twoCandidates(FrontierType.Objective).nonDominatedFrontier, Vector(Set(1), Set(0)))
     assertEquals(draws(twoCandidates(FrontierType.Objective)), Set(0, 1))
   }
 
   test("the hybrid type and the cartesian type keep a candidate that is alone in one front") {
     assertEquals(
       twoCandidates(FrontierType.Hybrid).nonDominatedFrontier,
-      Map(0 -> Set(1), 1 -> Set(0, 1), 2 -> Set(1), 3 -> Set(0))
+      Vector(Set(1), Set(0, 1), Set(1), Set(0))
     )
     assertEquals(draws(twoCandidates(FrontierType.Hybrid)), Set(0, 1))
     assertEquals(
       twoCandidates(FrontierType.Cartesian).nonDominatedFrontier,
-      Map(0 -> Set(1), 1 -> Set(0), 2 -> Set(0, 1), 3 -> Set(0, 1))
+      Vector(Set(1), Set(0), Set(0, 1), Set(0, 1))
     )
     assertEquals(draws(twoCandidates(FrontierType.Cartesian)), Set(0, 1))
   }
@@ -279,28 +273,10 @@ class GepaObjectiveFrontierSuite extends FunSuite:
     }
   }
 
-  test("a state that an older version saved has the instance type and no objective data") {
-    val older =
-      """{"candidates":[{"optimizable-0":"c0"}],"valSubscores":[[0.5,0.5]],"parents":[[]],"totalMetricCalls":2}"""
-    val restored = GepaStatePersistence.fromJson(older)
-    assertEquals(restored.map(_.frontierType), Right(FrontierType.Instance))
-    assertEquals(restored.map(_.valObjectiveScores), Right(Vector.empty))
-    // An older snapshot has no discovery counts.
-    assertEquals(
-      restored,
-      Right(GepaState.seed(candidate("c0"), Vector(0.5, 0.5), metricCalls = 2).copy(discoveryCalls = Vector.empty))
-    )
-  }
-
   test("a saved state with a frontier type that does not exist is rejected") {
-    val unknown =
-      """{"candidates":[{"optimizable-0":"c0"}],"valSubscores":[[0.5]],"parents":[[]],"totalMetricCalls":1,"frontierType":"Lexicographic"}"""
-    assert(GepaStatePersistence.fromJson(unknown).isLeft)
-  }
-
-  test("a frontier type has a name that parses back") {
-    FrontierType.values.foreach(frontierType =>
-      assertEquals(FrontierType.parse(frontierType.toString), Some(frontierType))
-    )
-    assertEquals(FrontierType.parse("instance"), None)
+    def snapshot(frontierType: String): String =
+      s"""{"candidates":[{"optimizable-0":"c0"}],"valSubscores":[[0.5]],"parents":[[]],"totalMetricCalls":1,"nextComponent":[0],"valObjectiveScores":[[{}]],"discoveryCalls":[0],"frontierType":"$frontierType"}"""
+    // The other fields are valid, so the frontier type is the reason for the rejection.
+    assertEquals(GepaStatePersistence.fromJson(snapshot("Hybrid")).map(_.frontierType), Right(FrontierType.Hybrid))
+    assert(GepaStatePersistence.fromJson(snapshot("Lexicographic")).isLeft)
   }

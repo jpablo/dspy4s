@@ -1,30 +1,25 @@
 package dspy4s.lm.providers
 
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.{
   :=,
   DspyError,
   DynamicValues,
   LmAuthError,
-  LmBillingError,
-  LmError,
   LmErrorDetails,
   LmInvalidRequestError,
-  LmNotConfiguredError,
   LmProviderError,
   LmProviderResponseError,
-  LmRateLimitError,
   LmServerError,
-  LmTimeoutError,
   LmUnsupportedModelError,
   LmUsage,
   RuntimeContext
 }
-import dspy4s.lm.contracts.{DecisionRequests, LanguageModel, LmMode, LmRequest, LmResponse}
+import dspy4s.lm.contracts.{DecisionPayload, DecisionRequests, LanguageModel, LmMode, LmRequest, LmResponse}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import java.time.Instant
 import java.util.Locale
-import scala.util.control.NonFatal
 
 /** Experimental. The client of the TypeSafe System One API, for the Jev models (decision 4 of D6; upstream
   * `dspy.experimental.TypeSafe` in `dspy/clients/typesafe.py`, and the wire rules of the vendored lm15 provider in
@@ -40,8 +35,9 @@ import scala.util.control.NonFatal
   *     finite `noul` in [0, 1]; a `score` or `choice` answer has `probabilities` with one finite number in [0, 1] for
   *     each declared key and no other key; a `choice` answer has a `choice` that is a declared key. A reply that breaks
   *     a rule is an [[dspy4s.core.contracts.LmProviderResponseError]] with the path of the fault.
-  *   - The response has one output with the JSON text of the answers as the reply gave them, the usage (the input
-  *     tokens as prompt tokens, the output tokens as completion tokens), and the model of the reply.
+  *   - The response has one output with the answers as the reply gave them ([[dspy4s.lm.contracts.LmOutput.answers]])
+  *     and their JSON text, the usage (the input tokens as prompt tokens, the output tokens as completion tokens), and
+  *     the model of the reply.
   *   - The header `x-typesafe-request-id` gives the request id of an error.
   *   - An error status maps as upstream `normalize_error`: 401 (or the code `authentication_error`) is an
   *     [[dspy4s.core.contracts.LmAuthError]]; 429 is an [[dspy4s.core.contracts.LmRateLimitError]]; 400 with "unknown
@@ -49,10 +45,10 @@ import scala.util.control.NonFatal
   *     [[dspy4s.core.contracts.LmInvalidRequestError]]; 500 or more is an [[dspy4s.core.contracts.LmServerError]]. The
   *     message is `detail.message` of the body, or `<loc>: <msg>` of the first entry of a `detail` list (with the
   *     `body` part of `loc` left out), else the body text.
-  *   - A request that is not a decision request (it has messages, or it lacks the state or the questions) is an
-  *     [[dspy4s.core.contracts.LmInvalidRequestError]] before the wire: Jev generates no text. A request with other
-  *     options (for example `temperature`) is an [[dspy4s.core.contracts.LmInvalidRequestError]] too (upstream
-  *     "Unsupported TypeSafe generation settings").
+  *   - A request that is not a decision request (it has no payload, [[dspy4s.lm.contracts.LmRequest.decision]], or it
+  *     has messages) is an [[dspy4s.core.contracts.LmInvalidRequestError]] before the wire: Jev generates no text. A
+  *     request with an option (for example `temperature`) is an [[dspy4s.core.contracts.LmInvalidRequestError]] too
+  *     (upstream "Unsupported TypeSafe generation settings"). The message names each option.
   *
   * The other rules of the vendored provider:
   *   - The keys of a `score` question are the level indexes `"0"` to `"N-1"` of its `criteria` array; the keys of a
@@ -61,10 +57,12 @@ import scala.util.control.NonFatal
   *     (upstream `_questions`).
   *   - A reply with no `usage` (or a null `usage`) gives no usage. A token count that the reply does not give is zero.
   *     A reply with no `model` (or a null `model`) has the model of the request (upstream `parse_response`).
-  *   - Each other error status maps as upstream `map_http_error`: 403 is an [[dspy4s.core.contracts.LmAuthError]], 402
-  *     an [[dspy4s.core.contracts.LmBillingError]], 408 an [[dspy4s.core.contracts.LmTimeoutError]], 404, 409, or 413
-  *     an [[dspy4s.core.contracts.LmInvalidRequestError]], and each other status an
-  *     [[dspy4s.core.contracts.LmProviderResponseError]].
+  *   - Each other error status maps as upstream `map_http_error` (`OpenAiErrors.byStatus`): 403 is an
+  *     [[dspy4s.core.contracts.LmAuthError]], 402 an [[dspy4s.core.contracts.LmBillingError]], 408 an
+  *     [[dspy4s.core.contracts.LmTimeoutError]], 404, 409, or 413 an [[dspy4s.core.contracts.LmInvalidRequestError]],
+  *     and each other status an [[dspy4s.core.contracts.LmProviderResponseError]]. The rule for 500 or more comes
+  *     first, so 504 and each status of 600 or more give an [[dspy4s.core.contracts.LmServerError]] here, not the class
+  *     of the shared table.
   *   - An error gets the status, the provider `typesafe`, the code `detail.error_type`, the request id (the header
   *     `x-typesafe-request-id`, else a request id header of `_attach_error_metadata`), and the retry hint of the
   *     `Retry-After` header (upstream `_attach_retry_after`).
@@ -99,21 +97,22 @@ final case class TypeSafeModel(
       wire     <- TypeSafeModel.wireRequest(request)
       reply    <- send(wire.body, request)
       response <-
-        if reply.status < 200 || reply.status >= 300 then Left(TypeSafeModel.statusError(reply, request))
-        else TypeSafeModel.parseReply(reply, wire.questions, request)
+        if reply.isSuccess then TypeSafeModel.parseReply(reply, wire.questions, request)
+        else Left(TypeSafeModel.statusError(reply, request))
     yield response
 
   /** Send `body`. A failure of the transport gets the model and the provider. */
   private def send(body: String, request: LmRequest): Either[DspyError, HttpResponse] =
-    transport.sendJson(endpoint, headers, body).left.map(TypeSafeModel.withRequestDetails(_, request))
+    transport.sendJson(endpoint, headers, body)
+      .left.map(OpenAiErrors.withRequestDetails(_, Some(request.model), TypeSafeModel.Provider))
 
-  /** The base URL with no slash at its end (upstream `base_url.rstrip("/")`). */
-  private def root: String = baseUrl.reverse.dropWhile(_ == '/').reverse
+  /** The base URL with no slash at its end ([[BaseUrl.root]]). */
+  private val root: String = BaseUrl.root(baseUrl)
 
   /** The URL of the System One API. */
-  private def endpoint: String = s"$root/v1/systemone"
+  private val endpoint: String = s"$root/v1/systemone"
 
-  private def headers: Map[String, String] =
+  private val headers: Map[String, String] =
     Map("Authorization" -> s"Bearer $apiKey", "Content-Type" -> "application/json")
 
   /** Close the transport. */
@@ -148,10 +147,7 @@ object TypeSafeModel:
           apiKey = key,
           baseUrl = setting("TYPESAFE_BASE_URL").getOrElse(DefaultBaseUrl)
         ))
-      case None => Left(LmNotConfiguredError(
-          s"Missing '$ApiKeyVariable' environment variable",
-          LmErrorDetails(provider = Some(Provider))
-        ))
+      case None => Left(OpenAiErrors.notConfigured(ApiKeyVariable, Provider))
 
   private val ApiKeyVariable: String = "TYPESAFE_API_KEY"
 
@@ -181,31 +177,27 @@ object TypeSafeModel:
     * send.
     */
   private def wireRequest(request: LmRequest): Either[DspyError, Wire] =
-    def invalid(message: String): DspyError = LmInvalidRequestError(message, details(request))
+    def invalid(message: String): DspyError   = LmInvalidRequestError(message, details(request))
+    def notDecision(cause: String): DspyError =
+      invalid(s"TypeSafe Jev answers decision requests only, and generates no text: $cause")
+    val settings = DynamicValues.recordKeys(request.options)
     for
-      parts <- DecisionRequests.parts(request).left.map(error =>
-                 invalid(s"TypeSafe Jev answers decision requests only, and generates no text: ${error.message}")
-               )
-      extra = DynamicValues.recordKeys(request.options)
-                .filterNot(key => key == DecisionRequests.StateKey || key == DecisionRequests.QuestionsKey)
-      _         <- Either.cond(extra.isEmpty, (), invalid(DecisionRequests.unsupportedSettings(extra)))
-      questions <- questionsOf(parts._2).left.map(invalid)
-      body      <- encode(request.model, parts._1, parts._2).left.map(invalid)
+      payload   <- request.decision.toRight(notDecision("the request has no decision payload"))
+      _         <- Either.cond(request.messages.isEmpty, (), notDecision("a decision request has no messages"))
+      _         <- Either.cond(settings.isEmpty, (), invalid(DecisionRequests.unsupportedSettings(settings)))
+      questions <- questionsOf(payload.questions).left.map(invalid)
+      body      <- encode(request.model, payload).left.map(invalid)
     yield Wire(body, questions)
 
   /** The questions of a request, or the text of the fault. */
   private def questionsOf(questions: DynamicValue.Record): Either[String, Vector[(String, Question)]] =
     if questions.fields.isEmpty then Left("A decision request needs at least one question: Jev cannot generate values")
     else
-      DynamicValues.recordEntries(questions).foldLeft[Either[String, Vector[(String, Question)]]](Right(Vector.empty)) {
-        case (acc, (name, value)) =>
-          acc.flatMap(read => questionOf(name, value).map(question => read :+ (name -> question)))
-      }
+      Traverse.either(questions.fields)((name, value) => questionOf(name, value).map(name -> _))
 
   private def questionOf(name: String, value: DynamicValue): Either[String, Question] =
-    val record   = DynamicJson.asRecord(value)
-    val kind     = record.flatMap(DynamicJson.field(_, "type")).flatMap(DynamicJson.asString)
-    val criteria = record.flatMap(DynamicJson.field(_, "criteria"))
+    val kind     = DynamicValues.recordGet(value, "type").flatMap(DynamicValues.asString)
+    val criteria = DynamicValues.recordGet(value, "criteria")
     (kind, criteria) match
       case (Some("noul"), _)                                    => Right(Question.Noul)
       case (Some("score"), Some(levels: DynamicValue.Sequence)) =>
@@ -217,15 +209,12 @@ object TypeSafeModel:
             "question with a criteria object"
         )
 
-  /** The JSON text of the body. Each null stays: a choice criterion with no description is a JSON null. */
-  private def encode(model: String, state: DynamicValue, questions: DynamicValue.Record): Either[String, String] =
-    val body = DynamicValues.record(
-      "model"                       := model,
-      DecisionRequests.StateKey     -> state,
-      DecisionRequests.QuestionsKey -> questions
-    )
-    try Right(DynamicJson.encodeExact(body))
-    catch case NonFatal(_) => Left("The decision request has a value with no JSON text, for example a NaN")
+  /** The JSON text of the body. Each null stays: a choice criterion with no description is a JSON null. A body with no
+    * JSON text (for example one with a NaN, or one nested too deep) gives the cause of `DynamicValues.tryEncodeJson`.
+    */
+  private def encode(model: String, payload: DecisionPayload): Either[String, String] =
+    val body = DynamicValues.record("model" := model, "state" -> payload.state, "questions" -> payload.questions)
+    DynamicValues.tryEncodeJson(body).left.map(cause => s"The value has no JSON text: $cause")
 
   /** The response of a reply with a status from 200 to 299, with the reply rules of upstream `parse_response`. */
   private def parseReply(
@@ -238,35 +227,32 @@ object TypeSafeModel:
 
     def probability(value: Option[DynamicValue], path: String): Either[DspyError, Unit] =
       Either.cond(
-        value.flatMap(numberOf).exists(p => p >= 0 && p <= 1),
+        value.flatMap(DynamicValues.asDouble).exists(p => p >= 0 && p <= 1),
         (),
         invalid(path, "expected a finite number in [0, 1]")
       )
 
     def distribution(answer: DynamicValue.Record, keys: Vector[String], path: String): Either[DspyError, Unit] =
-      DynamicJson.field(answer, "probabilities") match
+      DynamicValues.recordGet(answer, "probabilities") match
         case Some(probabilities: DynamicValue.Record) if DynamicValues.recordKeys(probabilities).toSet == keys.toSet =>
-          keys.foldLeft[Either[DspyError, Unit]](Right(())) { (acc, key) =>
-            acc.flatMap(_ =>
-              probability(DynamicJson.field(probabilities, key), s"$path.probabilities.$key")
-            )
-          }
+          def check(key: String) = probability(DynamicValues.recordGet(probabilities, key), s"$path.probabilities.$key")
+          Traverse.either(keys)(check).map(_ => ())
         case _ =>
           Left(invalid(s"$path.probabilities", "expected one probability for every declared key, and no other keys"))
 
     def checkAnswer(name: String, question: Question, answer: Option[DynamicValue]): Either[DspyError, Unit] =
       val path = s"answers.$name"
-      answer.flatMap(DynamicJson.asRecord) match
+      answer.flatMap(DynamicValues.asRecord) match
         case None         => Left(invalid(path, "expected an answer object"))
         case Some(record) =>
-          val kind = DynamicJson.field(record, "type").flatMap(DynamicJson.asString)
+          val kind = DynamicValues.recordGet(record, "type").flatMap(DynamicValues.asString)
           if !kind.contains(question.typeName) then Left(invalid(s"$path.type", s"expected '${question.typeName}'"))
           else
             question match
-              case Question.Noul         => probability(DynamicJson.field(record, "noul"), s"$path.noul")
+              case Question.Noul         => probability(DynamicValues.recordGet(record, "noul"), s"$path.noul")
               case Question.Score(keys)  => distribution(record, keys, path)
               case Question.Choice(keys) => distribution(record, keys, path).flatMap { _ =>
-                  val pick = DynamicJson.field(record, "choice").flatMap(DynamicJson.asString)
+                  val pick = DynamicValues.recordGet(record, "choice").flatMap(DynamicValues.asString)
                   Either.cond(
                     pick.exists(keys.contains),
                     (),
@@ -276,14 +262,14 @@ object TypeSafeModel:
 
     def tokens(usage: DynamicValue.Record, key: String): Either[DspyError, Long] =
       val wrong = invalid("usage", s"expected '$key' to be an integer that is not negative")
-      DynamicJson.field(usage, key) match
+      DynamicValues.recordGet(usage, key) match
         case None | Some(_: DynamicValue.Null.type)                         => Right(0L)
         case Some(DynamicValue.Primitive(PrimitiveValue.Int(n))) if n >= 0  => Right(n.toLong)
         case Some(DynamicValue.Primitive(PrimitiveValue.Long(n))) if n >= 0 => Right(n)
         case Some(_)                                                        => Left(wrong)
 
     def usageOf(data: DynamicValue): Either[DspyError, Option[LmUsage]] =
-      DynamicJson.field(data, "usage") match
+      DynamicValues.recordGet(data, "usage") match
         case None | Some(_: DynamicValue.Null.type) => Right(None)
         case Some(usage: DynamicValue.Record)       =>
           for
@@ -293,79 +279,63 @@ object TypeSafeModel:
         case Some(_) => Left(invalid("usage", "expected an object or null"))
 
     def modelOf(data: DynamicValue): Either[DspyError, String] =
-      DynamicJson.field(data, "model") match
+      DynamicValues.recordGet(data, "model") match
         case None | Some(_: DynamicValue.Null.type) => Right(request.model)
         case Some(value)                            =>
-          DynamicJson.asString(value).filter(_.nonEmpty).toRight(invalid("model", "expected a non-empty string"))
+          DynamicValues.asString(value).filter(_.nonEmpty).toRight(invalid("model", "expected a non-empty string"))
 
     for
-      data    <- DynamicJson.decode(reply.body).left.map(_ => invalid("$", "the reply is not JSON"))
-      _       <- DynamicJson.asRecord(data).toRight(invalid("$", "expected an object"))
-      answers <- DynamicJson.field(data, "answers").flatMap(DynamicJson.asRecord)
+      data    <- DynamicValues.decodeJson(reply.body).toRight(invalid("$", "the reply is not JSON"))
+      _       <- DynamicValues.asRecord(data).toRight(invalid("$", "expected an object"))
+      answers <- DynamicValues.recordGet(data, "answers").flatMap(DynamicValues.asRecord)
                    .toRight(invalid("answers", "expected an object containing every declared judgment"))
       _ <- Either.cond(
              DynamicValues.recordKeys(answers).toSet == questions.map(_._1).toSet,
              (),
              invalid("answers", "keys must match the declared judgments exactly")
            )
-      _ <- questions.foldLeft[Either[DspyError, Unit]](Right(())) { case (acc, (name, question)) =>
-             acc.flatMap(_ => checkAnswer(name, question, DynamicJson.field(answers, name)))
-           }
+      _ <- Traverse.either(questions)((name, question) =>
+             checkAnswer(name, question, DynamicValues.recordGet(answers, name))
+           )
       usage     <- usageOf(data)
       modelName <- modelOf(data)
     yield DecisionRequests.response(answers, usage, Some(modelName))
 
-  /** The error of a reply with a status outside 200 to 299 (upstream `normalize_error`, then `map_http_error`). */
+  /** The error of a reply with a status outside 200 to 299 (upstream `normalize_error`, then `map_http_error`). The
+    * checks of `normalize_error` come first: 401 or the code `authentication_error`, 400 with "unknown model" in the
+    * message, and 500 or more. Each other status gets the class of the shared table (`OpenAiErrors.byStatus`).
+    */
   private def statusError(reply: HttpResponse, request: LmRequest): LmProviderError =
     val (message, code) = errorText(reply.status, reply.body)
     val details         = replyDetails(reply, request).copy(providerCode = code)
-    if reply.status == 401 || code.contains("authentication_error") then LmAuthError(message, details)
-    else
-      reply.status match
-        case 429                                                               => LmRateLimitError(message, details)
-        case 400 if message.toLowerCase(Locale.ROOT).contains("unknown model") =>
-          LmUnsupportedModelError(message, details)
-        case 400 | 422 | 404 | 409 | 413 => LmInvalidRequestError(message, details)
-        case status if status >= 500     => LmServerError(message, details)
-        case 403                         => LmAuthError(message, details)
-        case 402                         => LmBillingError(message, details)
-        case 408                         => LmTimeoutError(message, details)
-        case _                           => LmProviderResponseError(message, details)
+    val status          = reply.status
+    if status == 401 || code.contains("authentication_error") then LmAuthError(message, details)
+    else if status == 400 && message.toLowerCase(Locale.ROOT).contains("unknown model") then
+      LmUnsupportedModelError(message, details)
+    else if status >= 500 then LmServerError(message, details)
+    else OpenAiErrors.byStatus(status)(message, details)
 
   /** The message and the provider code of an error body (upstream `normalize_error`). */
   private def errorText(status: Int, body: String): (String, Option[String]) =
     val excerpt  = body.strip().take(ExcerptLength)
     val fallback = if excerpt.isEmpty then s"HTTP $status" else excerpt
-    DynamicJson.decode(body).toOption.flatMap(DynamicJson.field(_, "detail")) match
+    DynamicValues.decodeJson(body).flatMap(DynamicValues.recordGet(_, "detail")) match
       case Some(detail: DynamicValue.Record) =>
-        val message = DynamicJson.field(detail, "message").flatMap(DynamicJson.asString).getOrElse(fallback)
-        (message, DynamicJson.field(detail, "error_type").flatMap(DynamicJson.asString))
+        val message = DynamicValues.recordGet(detail, "message").flatMap(DynamicValues.asString).getOrElse(fallback)
+        (message, DynamicValues.recordGet(detail, "error_type").flatMap(DynamicValues.asString))
       case Some(detail: DynamicValue.Sequence) if detail.elements.nonEmpty =>
-        val first = detail.elements.headOption.flatMap(DynamicJson.asRecord).getOrElse(DynamicValue.Record.empty)
-        val loc   = DynamicJson.field(first, "loc").map(DynamicJson.asSequence).getOrElse(Vector.empty)
-          .filterNot(part => DynamicJson.asString(part).contains("body"))
+        val first = detail.elements.headOption.flatMap(DynamicValues.asRecord).getOrElse(DynamicValue.Record.empty)
+        val loc   = DynamicValues.sequenceAt(first, "loc")
+          .filterNot(part => DynamicValues.asString(part).contains("body"))
           .map(pythonText)
           .mkString(".")
-        val text = DynamicJson.field(first, "msg").map(pythonText)
+        val text = DynamicValues.recordGet(first, "msg").map(pythonText)
         (if loc.nonEmpty then s"$loc: ${text.getOrElse("validation error")}" else text.getOrElse(fallback), None)
       case _ => (fallback, None)
 
   /** The text of a JSON value, as Python `str` gives it for a string or a number. */
   private def pythonText(value: DynamicValue): String =
-    DynamicJson.asString(value).getOrElse(DynamicValues.renderText(value))
-
-  /** The value of a JSON number. A Boolean is not a number. */
-  private def numberOf(value: DynamicValue): Option[Double] =
-    value match
-      case DynamicValue.Primitive(primitive) => primitive match
-          case PrimitiveValue.Int(n)        => Some(n.toDouble)
-          case PrimitiveValue.Long(n)       => Some(n.toDouble)
-          case PrimitiveValue.Double(n)     => Some(n)
-          case PrimitiveValue.Float(n)      => Some(n.toDouble)
-          case PrimitiveValue.BigDecimal(n) => Some(n.toDouble)
-          case PrimitiveValue.BigInt(n)     => Some(n.toDouble)
-          case _                            => None
-      case _ => None
+    DynamicValues.asString(value).getOrElse(DynamicValues.renderText(value))
 
   /** The details of an error before the wire. */
   private def details(request: LmRequest): LmErrorDetails =
@@ -373,19 +343,9 @@ object TypeSafeModel:
 
   /** The details of an error of a reply: the status, the request id, and the retry hint of the headers. */
   private def replyDetails(reply: HttpResponse, request: LmRequest): LmErrorDetails =
-    val lowered = reply.headers.map((name, value) => name.toLowerCase(Locale.ROOT) -> value)
+    val lowered = OpenAiErrors.lowerCase(reply.headers)
     details(request).copy(
       status = Some(reply.status),
-      requestId = ("x-typesafe-request-id" +: OpenAiErrors.requestIdHeaders).iterator.flatMap(lowered.get)
-        .map(_.trim).find(_.nonEmpty),
+      requestId = OpenAiErrors.requestId(lowered, preferred = Seq("x-typesafe-request-id")),
       retryAfter = OpenAiErrors.retryAfter(lowered, Instant.now())
     )
-
-  /** A failure of the transport, with the model and the provider. A field that is already set stays. */
-  private def withRequestDetails(error: DspyError, request: LmRequest): DspyError =
-    error match
-      case lm: LmError => lm.withDetails(lm.details.copy(
-          model = lm.details.model.orElse(Some(request.model)),
-          provider = lm.details.provider.orElse(Some(Provider))
-        ))
-      case other => other

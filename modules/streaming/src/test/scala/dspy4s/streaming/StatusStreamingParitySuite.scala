@@ -7,7 +7,6 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
-import dspy4s.programs.contracts.ToolCallRequest
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.runtime.ToolExecutor
 import dspy4s.streaming.contracts.StatusEvent
@@ -41,7 +40,7 @@ class StatusStreamingParitySuite extends FunSuite:
       override protected def forwardDynamic(input: ProgramCall[DynamicValue.Record])(using
           RuntimeContext
       ): Either[DspyError, RawPrediction] =
-        ToolExecutor.invoke(ToolCallRequest(name = tool.name, args = toolArgs), Vector(tool)).map { _ =>
+        ToolExecutor.run(tool, toolArgs).map { _ =>
           RawPrediction(values = rec("answer" := "ok"))
         }
 

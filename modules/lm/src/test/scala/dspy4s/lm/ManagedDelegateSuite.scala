@@ -8,6 +8,7 @@ import dspy4s.core.contracts.LmUnexpectedError
 import dspy4s.core.contracts.LmUsage
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.lm.contracts.CacheKey
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmCache
 import dspy4s.lm.contracts.LmChunk
@@ -18,7 +19,6 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.lm.runtime.CacheCapacity
 import dspy4s.lm.runtime.InMemoryLmCache
-import dspy4s.lm.runtime.LmCacheRegistry
 import dspy4s.lm.runtime.ManagedLanguageModel
 import dspy4s.lm.runtime.RetryCount
 import dspy4s.lm.runtime.RetryPolicies
@@ -33,13 +33,8 @@ import zio.blocks.schema.PrimitiveValue
   */
 class ManagedDelegateSuite extends FunSuite:
 
-  override def beforeEach(context: BeforeEach): Unit =
-    RuntimeEnvironment.resetForTests()
-    LmCacheRegistry.resetDefault()
-
-  override def afterEach(context: AfterEach): Unit =
-    RuntimeEnvironment.resetForTests()
-    LmCacheRegistry.resetDefault()
+  override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private val request: LmRequest = LmRequest(model = "test-model")
 
@@ -103,12 +98,12 @@ class ManagedDelegateSuite extends FunSuite:
 
   /** A cache that counts its stores. */
   private final class CountingCache extends LmCache:
-    private val store                                                = new InMemoryLmCache(CacheCapacity(16))
-    var puts                                                         = 0
-    override def get(request: LmRequest): Option[LmResponse]         = store.get(request)
-    override def put(request: LmRequest, response: LmResponse): Unit =
+    private val store                                           = new InMemoryLmCache(CacheCapacity(16))
+    var puts                                                    = 0
+    override def get(key: CacheKey): Option[LmResponse]         = store.get(key)
+    override def put(key: CacheKey, response: LmResponse): Unit =
       puts += 1
-      store.put(request, response)
+      store.put(key, response)
 
   private def lmHistory: Vector[HistoryEntry] =
     RuntimeEnvironment.current.history.filter(_.component == "lm:stub")
@@ -134,7 +129,8 @@ class ManagedDelegateSuite extends FunSuite:
     val outer            = ManagedLanguageModel(inner, cache = Some(outerCache))
     assert(inner.call(request).isRight)
 
-    val (result, recorded) = UsageTracking.withNewTracker(tracker => (outer.call(request), tracker.totalUsage))
+    val (result, recorded) =
+      UsageTracking.withNewTracker(tracker => (LanguageModel.callAndRecordUsage(outer, request), tracker.totalUsage))
     assertEquals(result.map(_.cacheHit), Right(true))
     assertEquals(result.map(_.outputs.map(_.text)), Right(Vector("Hello")))
     assertEquals(outerCache.puts, 0, "the outer model must not store a hit of the inner model")

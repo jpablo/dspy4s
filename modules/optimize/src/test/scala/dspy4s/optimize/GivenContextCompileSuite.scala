@@ -12,7 +12,6 @@ import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.CompileStartEvent
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
@@ -68,26 +67,21 @@ class GivenContextCompileSuite extends FunSuite:
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       val _ = formatted.synchronized(formatted += invocation.layout.outputFields.map(_.name))
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("question")))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      Right(ParsedOutput(values = rec(layout.outputFields.map(_.name := output.text)*)))
+      Right(ParsedOutput(values = rec(invocation.layout.outputFields.map(_.name := output.text)*)))
 
   /** An optimizer that records the adapter of the context of its `compile` body, and runs the student one time. */
   private final class ProbeOptimizer extends Teleprompter[DynamicPredict]:
     override val name: String           = "probe"
     var bodyAdapter: Option[AdapterRef] = None
-    override def compile(
+    override protected[optimize] def compileInScope(
         student : DynamicPredict,
         trainset: Vector[Example],
-        teacher : Option[DynamicPredict]  = None,
-        valset  : Option[Vector[Example]] = None
-    )(using RuntimeContext): Either[DspyError, OptimizationReport[DynamicPredict]] =
-      Teleprompter.withCompileCallbacks(this, trainset, valset)(probe(student))
-
-    private def probe(student: DynamicPredict)(using
-        context: RuntimeContext
-    ): Either[DspyError, OptimizationReport[DynamicPredict]] =
+        teacher : Option[DynamicPredict],
+        valset  : Option[Vector[Example]]
+    )(using context: RuntimeContext): Either[DspyError, OptimizationReport[DynamicPredict]] =
       bodyAdapter = context.adapter
       student(ProgramCall(rec("question" := "q1"))).map(_ => OptimizationReport(student, Vector.empty))
 
@@ -99,7 +93,7 @@ class GivenContextCompileSuite extends FunSuite:
 
   test("compile sends its compile scope to the callbacks of the given context") {
     val recorder         = Recorder()
-    given RuntimeContext = RuntimeContext(callbacks = Vector(recorder))
+    given RuntimeContext = RuntimeContext(callbacks = Some(Vector(recorder)))
     val optimizer        = LabeledFewShot[DynamicPredict](LabeledFewShotConfig(k = DemoCount(2), seed = 1L))
 
     val result = optimizer.compile(DynamicPredict(layout = signature), trainset)
@@ -138,7 +132,7 @@ class GivenContextCompileSuite extends FunSuite:
     val installed        = RuntimeContext(
       lm = Some(FixedLm(answer = "wrong", id = "installed")),
       adapter = Some(ChatAdapter()),
-      callbacks = Vector(recorder)
+      callbacks = Some(Vector(recorder))
     )
 
     val result = RuntimeEnvironment.withSettings(installed) {
@@ -180,7 +174,7 @@ class GivenContextCompileSuite extends FunSuite:
     }
 
     assert(result.isRight, result.toString)
-    // The instruction generator ran with the installed adapter, so no call failed with "Missing 'adapter'".
+    // The instruction generator ran with the installed adapter, and not with the default ChatAdapter.
     assert(installed.outputs.contains(Vector("proposed_instruction")), installed.outputs.toString)
   }
 

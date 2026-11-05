@@ -28,10 +28,11 @@ import java.util.UUID
   * scope attempts exactly one start and one matching end emission. Non-fatal observer failures are reported and
   * isolated: they neither abort the work nor prevent delivery to later observers.
   *
-  * '''Producer.''' [[dspy4s.core.runtime.CallbackDispatcher]] is the sole producer; its `withModule` / `withLm` /
-  * `withAdapter` / `withTool` scopes open a call id, push it as the active id for the thread, emit the start event, run
-  * the wrapped thunk, and attempt one end event (with `Left(RuntimeError("callback_dispatch", ...))` if the thunk
-  * threw, then rethrow). User code does not emit events directly.
+  * '''Producer.''' [[dspy4s.core.runtime.CallbackDispatcher]] is the sole producer; its `with*` scopes (`withModule`,
+  * `withLm`, `withAdapter`, `withTool`, `withEvaluate`, `withCompile`, `withInterpreter`) open a call id, push it as
+  * the active id for the thread, emit the start event, run the wrapped thunk, and attempt one end event (with
+  * `Left(RuntimeError("callback_dispatch", ...))` if the thunk threw, then rethrow). User code does not emit events
+  * directly.
   *
   * '''Consumer.''' Implement [[CallbackHandler]] and register it via
   * [[dspy4s.core.runtime.RuntimeEnvironment.withCallbacks]] or by setting the `callbacks` field on a
@@ -39,7 +40,7 @@ import java.util.UUID
   *
   * '''Note on default ids.''' The `callId = UUID.randomUUID().toString` default exists only as a fallback for
   * hand-constructed events. The dispatcher always overrides it with a sequential, prefixed id (`module-N`, `lm-N`,
-  * `adapter-N`, `tool-N`) for readability.
+  * `adapter-N`, `tool-N`, `evaluate-N`, `compile-N`, `interpreter-N`) for readability.
   */
 sealed trait CallbackEvent extends Product with Serializable:
   /** When the event was created. Set by the dispatcher; useful for latency measurements when pairing a Start with its
@@ -231,9 +232,8 @@ final case class InterpreterEndEvent(
 /** Consumer side of the [[CallbackEvent]] stream. Implementations receive every event from every scope opened in the
   * current `RuntimeContext`, in registration order.
   *
-  * The `RuntimeContext` `using` parameter lets a handler read live settings (e.g. the active LM, the call stack via
-  * [[dspy4s.core.runtime.ActivePredictContext]]) while reacting. It is the same context that wrapped the originating
-  * scope.
+  * The `RuntimeContext` `using` parameter lets a handler read live settings (e.g. the active LM, or the call stack in
+  * [[RuntimeContext.callStack]]) while reacting. It is the same context that wrapped the originating scope.
   *
   * Handlers run on the producer thread inline with the work being observed. Two consequences:
   *

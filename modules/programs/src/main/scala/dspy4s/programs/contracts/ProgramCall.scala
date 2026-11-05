@@ -13,8 +13,9 @@ import zio.blocks.schema.DynamicValue
   *   - `call.mapInput(f).mapInput(g) == call.mapInput(g compose f)`
   *
   * [[config]] is the provider option bag forwarded to the LM; framework controls remain dedicated fields. [[rolloutId]]
-  * is the cache-busting selector used by repeated sampling. Modules normally receive `ProgramCall[I]` and map it
-  * through their input `Shape`; the engine receives `ProgramCall[DynamicValue.Record]`.
+  * is the per-call cache-busting selector. It wins over the rollout id of `RuntimeScope.lmDefaults`, which the attempts
+  * of `BestOfN` and `Refine` use. Modules normally receive `ProgramCall[I]` and map it through their input `Shape`; the
+  * engine receives `ProgramCall[DynamicValue.Record]`.
   */
 final case class ProgramCall[I](
     input       : I,

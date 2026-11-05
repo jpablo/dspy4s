@@ -1,5 +1,6 @@
 package dspy4s.programs.algebra
 
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.programs.optimization.{optimizableParameters, optimizableView, withOptimizableParameters}
 
 import dspy4s.core.contracts.:=
@@ -19,11 +20,9 @@ import dspy4s.programs.strategies.ChainOfThought
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.DynamicSignature
 import dspy4s.programs.optimization.OptimizableLeaf
-import dspy4s.programs.optimization.OptimizableMetadata
 import dspy4s.programs.optimization.OptimizableParameters
 import dspy4s.programs.ProgramRunner
 import dspy4s.programs.RecordCodec
-import dspy4s.programs.RecordObject
 import dspy4s.programs.contracts.Module
 import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
@@ -65,7 +64,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
 
     override val moduleName: String = s"step_$tag"
 
-    override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[I] = ModuleLifecycle.typedWithoutInputs
 
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), RawPrediction(values = DynamicValues.record("tag" := tag))))
@@ -73,7 +72,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
   private object Step:
     given stepOptimizable[I, O]: OptimizableLeaf[Step[I, O]] with
       def get(program     : Step[I, O]): OptimizableParameters                 = program.predict.optimizableParameters
-      def metadata(program: Step[I, O]): OptimizableMetadata                   = program.predict.optimizableView.metadata
+      def metadata(program: Step[I, O]): PredictorKey                          = program.predict.optimizableView.metadata
       def set(program: Step[I, O], updated: OptimizableParameters): Step[I, O] =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
@@ -82,7 +81,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
     */
   private final class Opaque extends Module[Int, Int]:
     override val moduleName: String                                                                                  = "opaque"
-    override protected val lifecycle: ModuleLifecycle[Int, Int]                                                      = ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[Int]                                                           = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
       Right(Prediction(call.input, RawPrediction.empty))
 
@@ -116,7 +115,6 @@ class ProgramAlgebraLawSuite extends FunSuite:
   private val recordLayout = SignatureLayout.parse("question -> s").toOption.get
   @annotation.unused
   private val recordSignature = Signature[DynamicValue.Record, Wrapped](
-    name = "RecordInput",
     layout = recordLayout,
     inputShape = Shape.MapShape(recordLayout.inputFields),
     outputShape = Shape.derived[Wrapped]
@@ -219,6 +217,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
     // Behavior riders: reparameterization changes parameters, never the shape's computation.
     assertEquals(ab.reparam(ab.params)(ProgramCall(5)).map(_.output), ab(ProgramCall(5)).map(_.output))
     assertEquals(ab.reparam(fresh)(ProgramCall(5)).map(_.output), Right(2))
+    val _ = intercept[IllegalArgumentException](ab.reparam(fresh.take(1)))
   }
 
   test("a packaged fixed-shape program has a lawful statically sized parameter lens") {
@@ -229,7 +228,8 @@ class ProgramAlgebraLawSuite extends FunSuite:
       SizedVector[OptimizableParameters, 1]
     ]]
     val current: SizedVector[OptimizableParameters, 1]            = lens.get(program)
-    val updated                                                   = SizedVector.one(current.unsized.head.copy(instructions = Some("statically sized update")))
+    val changed                                                   = current.unsized.head.copy(instructions = Some("statically sized update"))
+    val updated: SizedVector[OptimizableParameters, 1]            = SizedVector.assumeSize(Vector(changed))
     val second                                                    = Program.of(step[Wrapped, Boxed]("q", "s -> b")(_ => Boxed(2)))
     val composed: Program[Boxed, Boxed, 2]                        = program >>> second
     val composedParameters: SizedVector[OptimizableParameters, 2] = composed.sizedParams
@@ -285,7 +285,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
 
   // ── The parameter monoid, and its delooping as a lawful Category instance (checked with real ==) ─────────
   test("the parameter monoid Monoid[Vector[OptimizableParameters]] satisfies the monoid laws") {
-    val M  = Monoid[Vector[OptimizableParameters]]
+    val M  = summon[Monoid[Vector[OptimizableParameters]]]
     val v1 = Vector(predict("a -> b").optimizableParameters)
     val v2 = Vector(predict("b -> c").optimizableParameters)
     val v3 = Vector(predict("c -> d").optimizableParameters)
@@ -295,7 +295,7 @@ class ProgramAlgebraLawSuite extends FunSuite:
   }
 
   test("paramsDeloop is that monoid delooped: Category laws hold, and id delegates to the monoid's empty") {
-    val M  = Monoid[Vector[OptimizableParameters]]
+    val M  = summon[Monoid[Vector[OptimizableParameters]]]
     val v1 = Vector(predict("a -> b").optimizableParameters)
     val v2 = Vector(predict("b -> c").optimizableParameters)
     val v3 = Vector(predict("c -> d").optimizableParameters)

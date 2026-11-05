@@ -1,9 +1,15 @@
 package dspy4s.core.runtime
 
 import dspy4s.core.contracts.CodeInterpreterErrors
+import dspy4s.core.contracts.CodeInterpreterErrors.failure
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DspyError.describe
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.DynamicValues.asString
+import dspy4s.core.contracts.DynamicValues.encodeJson
+import dspy4s.core.contracts.DynamicValues.isNull
+import dspy4s.core.contracts.DynamicValues.recordGet as field
 import dspy4s.core.contracts.InterpreterOperation
 import dspy4s.core.contracts.ReplCodeInterpreter
 import dspy4s.core.contracts.ReplInterpreterFactory
@@ -12,15 +18,17 @@ import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.contracts.SandboxOutputField
 import dspy4s.core.contracts.SandboxTool
 import dspy4s.core.contracts.:=
+import dspy4s.core.runtime.InterpreterSupport.ProbeFailure
+import dspy4s.core.runtime.InterpreterSupport.ProbeRun
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.json.WriterConfig
 
 import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.nio.charset.StandardCharsets
-import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
@@ -37,7 +45,8 @@ import scala.util.control.NonFatal
 
 /** Runs Python in a persistent local subprocess (upstream `LocalInterpreter` in `dspy/primitives/local_interpreter.py`,
   * d58c3007e and 453823209). The worker script is the vendored upstream `local_interpreter_worker.py` (resource
-  * `/dspy4s/core/runtime/local_interpreter_worker.py`), started as `<python> -I <script>`.
+  * `/dspy4s/core/runtime/local_interpreter_worker.py`), started as `<python> -I <script>`. It has one change: bad data
+  * of the code does not end the session (PORT_DIFFERENCES section 18).
   *
   * This interpreter separates the generated code from the memory and the output of the JVM, but it is not a security
   * sandbox: the worker has the files, the environment, the credentials, the subprocesses, and the network of the user.
@@ -48,7 +57,8 @@ import scala.util.control.NonFatal
   *   - State, imports, functions, and variables persist from one `execute` to the next.
   *   - `execute(code, variables)` first defines `variables` (JSON values) in the namespace. A variable name that is not
   *     a Python identifier, that is a keyword, that is `SUBMIT` or `__builtins__`, or that is the name of a tool is a
-  *     `Left` with no effect on the session.
+  *     `Left` with no effect on the session. A value that the JSON writer cannot encode, for example a text with a lone
+  *     UTF-16 surrogate, is also a `Left` with no effect on the session.
   *   - The `stdout` of the result is the text of the value of the last expression of the code when that value is not
   *     `None` (a string value as its text, each other value as JSON), else the captured output (stdout and stderr of
   *     the code). Upstream returns the value in place of the output in the same way.
@@ -58,7 +68,8 @@ import scala.util.control.NonFatal
   *   - An exception of the code, or a syntax error, is a `Right` with a non-zero `exitCode` and the text
   *     `<Type>: <message>` in `stderr`. The session continues.
   *   - A host tool runs when the code calls it. Positional arguments take the names of the tool parameters in order. A
-  *     tool `Left` raises a `RuntimeError` in the code with its message.
+  *     tool `Left` raises a `RuntimeError` in the code with its message. A tool result that the JSON writer cannot
+  *     encode also raises a `RuntimeError`, with the cause.
   *   - `executionTimeout` bounds one `execute`, the host tool calls included. When the time is over, the interpreter
   *     kills the worker and its descendants (see the process below), the result is a `Left` with the component
   *     [[dspy4s.core.contracts.CodeInterpreterErrors.Timeout]], and the session ends.
@@ -111,10 +122,6 @@ final class LocalPythonInterpreter(
     python          : String                             = "python3"
 ) extends ReplCodeInterpreter:
   import LocalPythonInterpreter.*
-  import DenoPyodideProtocol.asString
-  import DenoPyodideProtocol.decodeJson
-  import DenoPyodideProtocol.encodeJson
-  import DenoPyodideProtocol.field
 
   // The `interpreterName` of the callback events.
   private val interpreterName: String = getClass.getSimpleName
@@ -122,24 +129,24 @@ final class LocalPythonInterpreter(
   // value.
   private val session = new AtomicReference[Session](Session.NotStarted)
   // True while an `execute` call runs.
-  private val active = new AtomicBoolean(false)
-
-  override def execute(code: String): Either[DspyError, CodeResult] = execute(code, Map.empty)
+  private val active    = new AtomicBoolean(false)
+  private val toolNames = tools.map(_.name)
+  // The checks of the constructor values. Upstream makes them in its constructor.
+  private val configCheck: Either[DspyError, Unit] = checkToolNames().flatMap(_ => checkOutputFields())
 
   override def execute(code: String, variables: Map[String, DynamicValue]): Either[DspyError, CodeResult] =
-    val inputs =
-      DynamicValues.record("code" := code, "variables" -> DynamicValues.recordFromEntries(variables.toVector))
+    val inputs = InterpreterSupport.executeInputs(code, variables)
     CallbackDispatcher.withInterpreter(interpreterName, InterpreterOperation.Execute, inputs) {
       if !active.compareAndSet(false, true) then failure("LocalPythonInterpreter already has an active execution.")
       else
         try
           for
-            _      <- checkSessionActive()
-            _      <- checkToolNames()
-            _      <- checkOutputFields()
-            _      <- checkVariables(variables)
-            worker <- ensureWorker()
-            result <- run(worker, executeRequest(code, variables))
+            _       <- checkSessionActive()
+            _       <- configCheck
+            _       <- checkVariables(variables)
+            request <- executeRequest(code, variables)
+            worker  <- ensureWorker()
+            result  <- run(worker, request)
           yield result
         finally active.set(false)
     }
@@ -156,9 +163,6 @@ final class LocalPythonInterpreter(
 
   // ── Checks ──────────────────────────────────────────────────────────────────────────────────────────────────
 
-  private def failure[A](message: String): Either[DspyError, A] =
-    Left(RuntimeError(CodeInterpreterErrors.Interpreter, message))
-
   private def checkSessionActive(): Either[DspyError, Unit] =
     if session.get() == Session.Ended then sessionEnded() else Right(())
 
@@ -167,22 +171,22 @@ final class LocalPythonInterpreter(
 
   /** Upstream `_validate_tool_names`. */
   private def checkToolNames(): Either[DspyError, Unit] =
-    val invalid = tools.map(_.name).filterNot(name => isPythonName(name) && !ReservedNames.contains(name))
+    val invalid = toolNames.filterNot(name => PythonNames.isBindable(name) && !ReservedNames.contains(name))
     if invalid.isEmpty then Right(())
     else failure(s"Tool names must be non-reserved Python identifiers; invalid names: ${invalid.mkString(", ")}")
 
   /** Upstream `_validate_output_fields`. */
   private def checkOutputFields(): Either[DspyError, Unit] =
     val names = outputFields.getOrElse(Vector.empty).map(_.name)
-    if !names.forall(isPythonName) then failure("Output field names must be non-keyword Python identifiers.")
+    if !names.forall(PythonNames.isBindable) then failure("Output field names must be non-keyword Python identifiers.")
     else if names.distinct.sizeIs != names.size then failure("Output field names must be unique.")
     else Right(())
 
   /** The variable check of upstream `execute`. */
   private def checkVariables(variables: Map[String, DynamicValue]): Either[DspyError, Unit] =
-    val toolNames = tools.map(_.name).toSet
-    val invalid   = variables.keys.toVector.sorted
-      .filterNot(name => isPythonName(name) && !ReservedNames.contains(name) && !toolNames.contains(name))
+    val invalid = variables.keys.toVector
+      .filterNot(name => PythonNames.isBindable(name) && !ReservedNames.contains(name) && !toolNames.contains(name))
+      .sorted
     if invalid.isEmpty then Right(())
     else
       failure(
@@ -214,24 +218,26 @@ final class LocalPythonInterpreter(
 
   /** Check the Python version, start the worker, and wait for its `ready` message. Each failure ends the session. */
   private def startWorker(): Either[DspyError, Worker] =
-    WorkerScript.path().flatMap(script => PythonVersion.check(python).map(_ => script)) match
-      case Left(message) => terminal(message)
-      case Right(script) =>
-        val builder                          = new ProcessBuilder(python, "-I", script.toString)
-        val started: Either[String, Process] =
-          try Right(builder.redirectError(ProcessBuilder.Redirect.DISCARD).start())
-          catch case NonFatal(error) => Left(describe(error))
-        started match
-          case Left(message)  => terminal(s"Unable to start the Python worker '$python': $message")
-          case Right(process) =>
-            val worker = new Worker(process)
-            if session.compareAndSet(Session.NotStarted, Session.Running(worker)) then
-              worker.startReader()
-              awaitReady(worker)
-            else
-              // `close` ran on a different thread while the worker started.
-              worker.kill()
-              sessionEnded()
+    val started =
+      for
+        script  <- WorkerScript.path()
+        _       <- PythonVersion.check(python)
+        process <- spawnWorker(script)
+      yield new Worker(process)
+    started match
+      case Left(message)                                                                       => terminal(message)
+      case Right(worker) if session.compareAndSet(Session.NotStarted, Session.Running(worker)) =>
+        worker.startReader()
+        awaitReady(worker)
+      case Right(worker) =>
+        // `close` ran on a different thread while the worker started.
+        worker.kill()
+        sessionEnded()
+
+  private def spawnWorker(script: Path): Either[String, Process] =
+    val builder = new ProcessBuilder(python, "-I", script.toString).redirectError(ProcessBuilder.Redirect.DISCARD)
+    try Right(builder.start())
+    catch case NonFatal(error) => Left(s"Unable to start the Python worker '$python': ${describe(error)}")
 
   private def awaitReady(worker: Worker): Either[DspyError, Worker] =
     val deadline = Some(System.nanoTime() + StartupTimeout.toNanos)
@@ -242,21 +248,30 @@ final class LocalPythonInterpreter(
 
   // ── The execute request ─────────────────────────────────────────────────────────────────────────────────────
 
-  /** The `execute` request: the code, the variables, the tool names, and the output fields (or `null`). */
-  private def executeRequest(code: String, variables: Map[String, DynamicValue]): String =
+  /** The `execute` request: the code, the variables, the tool names, and the output fields (or `null`). A request that
+    * the JSON writer cannot encode is a `Left` with no effect on the session. The message names the first variable that
+    * the writer cannot encode, when there is one.
+    */
+  private def executeRequest(code: String, variables: Map[String, DynamicValue]): Either[DspyError, String] =
     val fields = outputFields.fold[DynamicValue](DynamicValue.Null) { all =>
-      DynamicValue.Sequence(Chunk.from(all.map { f =>
-        val entries = Vector("name" := f.name) ++ f.pythonType.map(t => "type" := t).toVector
-        DynamicValues.recordFromEntries(entries): DynamicValue
-      }))
+      DynamicValue.Sequence(Chunk.from(all.map(f => InterpreterSupport.nameAndType(f.name, f.pythonType))))
     }
-    encode(DynamicValues.record(
+    val request = DynamicValues.record(
       "type"          := "execute",
       "code"          := code,
       "variables"     -> DynamicValues.recordFromEntries(variables.toVector),
-      "tools"         := tools.map(_.name),
+      "tools"         := toolNames,
       "output_fields" -> fields
-    ))
+    )
+    encode(request) match
+      case Right(line) => Right(line)
+      case Left(cause) =>
+        // The search runs only after a failure. Thus a call that passes encodes each value one time.
+        val variable =
+          variables.toVector.sortBy(_._1).collectFirst { case (name, value) if encode(value).isLeft => name }
+        failure(variable.fold(s"Unable to encode the execute request as JSON: $cause") { name =>
+          s"Unable to encode the variable '$name' as JSON: $cause"
+        })
 
   /** Send the request, serve the tool requests, wait for the tool calls, and decode the reply (upstream `execute`). */
   private def run(worker: Worker, request: String): Either[DspyError, CodeResult] =
@@ -318,15 +333,14 @@ final class LocalPythonInterpreter(
       request : DynamicValue.Record,
       captured: ContextPropagation.Captured
   ): CompletableFuture[ToolOutcome] =
-    val outcome      = new CompletableFuture[ToolOutcome]()
-    def body(): Unit =
+    val outcome = new CompletableFuture[ToolOutcome]()
+    val _       = InterpreterSupport.startDaemon("dspy4s-local-python-tool") {
       try
         val delta = captured.run {
-          RuntimeEnvironment.withContext(RuntimeEnvironment.current.withDelta(RuntimeDelta.empty)) {
+          RuntimeEnvironment.isolatedAttempt(RuntimeEnvironment.current) {
             // A reply that the worker does not get blocks the code, so the session ends (upstream `_send`).
-            if !worker.send(toolReply(request)) then endSession()
-            RuntimeEnvironment.current.delta
-          }
+            if !toolReply(request).exists(worker.send) then endSession()
+          }.delta
         }
         val _ = outcome.complete(ToolOutcome.Done(delta))
       catch
@@ -334,37 +348,43 @@ final class LocalPythonInterpreter(
           // Upstream 453823209: wake `execute`, because the worker cannot reply while this tool has no answer.
           worker.post(Inbound.Fatal(error))
           val _ = outcome.complete(ToolOutcome.Fatal(error))
-    val thread = new Thread(() => body(), "dspy4s-local-python-tool")
-    thread.setDaemon(true)
-    thread.start()
+    }
     outcome
 
   /** The `tool_result` or `tool_error` reply to one tool request (upstream `_handle_tool`). Each call is a `ToolCall`
     * scope (upstream `invoke_tool`), also for an unknown tool. The scope holds the `ToolStartEvent` / `ToolEndEvent`
     * pair of the tool. The inputs are `tool` and `args`, and `args` has the keyword record of the call.
+    *
+    * A tool result or an error message that the JSON writer cannot encode gives a `tool_error` reply with the cause.
+    * `None` when the writer cannot encode a reply with the `id` of the request. Thus no encode failure leaves the tool
+    * thread as an exception.
     */
-  private def toolReply(request: DynamicValue.Record): String =
+  private def toolReply(request: DynamicValue.Record): Option[String] =
     val id   = field(request, "id").getOrElse(DynamicValue.Null)
     val name = field(request, "name").flatMap(asString).getOrElse("")
     val args = field(request, "args").collect { case s: DynamicValue.Sequence => s.elements.toVector }
       .getOrElse(Vector.empty)
     val kwargs =
       field(request, "kwargs").collect { case r: DynamicValue.Record => r }.getOrElse(DynamicValue.Record.empty)
-    val tool   = tools.find(_.name == name)
-    val bound  = tool.fold[Either[DspyError, DynamicValue.Record]](Right(kwargs))(bind(_, args, kwargs))
-    val inputs = DynamicValues.record("tool" := name, "args" -> bound.getOrElse(kwargs))
+    val bound =
+      tools.find(_.name == name).fold[Either[DspyError, DynamicValue.Record]](Right(kwargs))(bind(_, args, kwargs))
     val result =
       try
-        CallbackDispatcher.withInterpreter[DynamicValue](interpreterName, InterpreterOperation.ToolCall, inputs) {
-          tool match
-            case None        => failure(s"Unknown tool: $name")
-            case Some(found) =>
-              bound.flatMap(record => CallbackDispatcher.withTool(toolName = name, args = record)(found.invoke(record)))
-        }.left.map(_.message)
+        InterpreterSupport.invokeTool(interpreterName, tools, name, bound.getOrElse(kwargs), bound).left.map(_.message)
       catch case NonFatal(error) => Left(describe(error))
-    result match
-      case Right(value)  => encode(DynamicValues.record("type" := "tool_result", "id" -> id, "value" -> value))
-      case Left(message) => encode(DynamicValues.record("type" := "tool_error", "id" -> id, "error" := message))
+    val reply = result.flatMap { value =>
+      encode(DynamicValues.record("type" := "tool_result", "id" -> id, "value" -> value)).left.map { cause =>
+        s"Unable to encode the tool result as JSON: $cause"
+      }
+    }
+    reply.fold(toolError(id, _), Some(_))
+
+  /** The `tool_error` reply with `message`. A message that the JSON writer cannot encode gives a reply with the cause
+    * of the failure. `None` when the writer cannot encode the two replies.
+    */
+  private def toolError(id: DynamicValue, message: String): Option[String] =
+    def line(text: String) = encode(DynamicValues.record("type" := "tool_error", "id" -> id, "error" := text))
+    line(message).left.flatMap(cause => line(s"Unable to encode the tool error as JSON: $cause")).toOption
 
   /** The keyword record of a tool call: each positional argument takes the name of the tool parameter at its position.
     */
@@ -438,11 +458,11 @@ final class LocalPythonInterpreter(
     }
 
   private def decodeMessage(line: String): Either[DspyError, Message] =
-    decodeJson(line) match
-      case Some(record: DynamicValue.Record) => field(record, "type").flatMap(asString) match
+    DynamicValues.parseJsonRecord(line.trim) match
+      case Some(record) => field(record, "type").flatMap(asString) match
           case Some(kind) => Right(Message(kind, record, line))
           case None       => terminal(s"Python worker returned an invalid message: ${clip(line)}")
-      case _ => terminal(s"Python worker returned invalid JSON: ${clip(line)}")
+      case None => terminal(s"Python worker returned invalid JSON: ${clip(line)}")
 
   /** An interrupt of the waiting thread ends the session. The thread keeps its interrupt state. */
   private def interrupted[A](): Either[DspyError, A] =
@@ -535,9 +555,7 @@ object LocalPythonInterpreter:
 
     /** Start the daemon thread that puts each output line in `inbound`, then `End` at the end of the output. */
     def startReader(): Unit =
-      val reader = new Thread(() => read(), s"dspy4s-local-python-reader-${process.pid()}")
-      reader.setDaemon(true)
-      reader.start()
+      val _ = InterpreterSupport.startDaemon(s"dspy4s-local-python-reader-${process.pid()}")(read())
 
     private def read(): Unit =
       val stdout = new BufferedReader(new InputStreamReader(process.getInputStream, StandardCharsets.UTF_8))
@@ -572,15 +590,8 @@ object LocalPythonInterpreter:
       */
     def kill(): Unit =
       stopped = true
-      try
-        process.descendants().forEach { child =>
-          val _ = child.destroyForcibly()
-        }
-      catch case NonFatal(_) => ()
-      val _ = process.destroyForcibly()
-      try
-        val _ = process.waitFor(ExitWaitMillis, TimeUnit.MILLISECONDS)
-      catch case _: InterruptedException => Thread.currentThread().interrupt()
+      InterpreterSupport.killTree(process)
+      val _ = InterpreterSupport.exitedIn(process, ExitWaitMillis)
       if sendLock.tryLock() then
         try closeStdin()
         finally sendLock.unlock()
@@ -643,127 +654,52 @@ object LocalPythonInterpreter:
                 s"LocalPythonInterpreter needs Python $NeededMajor.$NeededMinor or later."
             )
 
-    /** The output of the probe, with its standard error, when the process exits with the code 0. */
+    /** The output of the probe, with its standard error and with no white space at the two ends, when the process exits
+      * with the code 0.
+      */
     private def output(python: String): Either[String, String] =
-      val file: Either[String, Path] =
-        try Right(Files.createTempFile("dspy4s-python-version", ".txt"))
-        catch case NonFatal(error) => Left(s"Unable to check the version of '$python': ${describe(error)}")
-      file.flatMap { path =>
+      val builder                          = new ProcessBuilder(python, "-I", "-c", Probe).redirectErrorStream(true)
+      val probed: Either[String, ProbeRun] =
         try
-          for
-            code <- run(python, path)
-            text <- read(python, path)
-            _    <- Either.cond(
-                   code == 0,
-                   (),
-                   s"The version check of the Python executable '$python' failed with the exit code $code: " +
-                     clip(text)
-                 )
-          yield text
-        finally
-          try
-            val _ = Files.deleteIfExists(path)
-          catch case NonFatal(_) => ()
+          InterpreterSupport.probe(builder, StartupTimeout.toMillis, MaxOutputBytes).left.map {
+            case ProbeFailure.NoTempFile(error) => s"Unable to check the version of '$python': ${describe(error)}"
+            case ProbeFailure.NotStarted(error) => s"Unable to start the Python worker '$python': ${describe(error)}"
+            case ProbeFailure.TimedOut          =>
+              s"The Python executable '$python' did not report its version within $StartupTimeout."
+            case ProbeFailure.NotRead(error) => s"Unable to read the version of '$python': ${describe(error)}"
+          }
+        catch
+          case _: InterruptedException =>
+            Thread.currentThread().interrupt()
+            Left("The thread was interrupted while it waited for the Python worker.")
+      probed.flatMap { run =>
+        val text = run.output.trim
+        Either.cond(
+          run.exitCode == 0,
+          text,
+          s"The version check of the Python executable '$python' failed with the exit code ${run.exitCode}: " +
+            clip(text)
+        )
       }
-
-    /** Run the probe with its output in `path`, and give its exit code. */
-    private def run(python: String, path: Path): Either[String, Int] =
-      val builder                          = new ProcessBuilder(python, "-I", "-c", Probe).redirectErrorStream(true).redirectOutput(path.toFile)
-      val started: Either[String, Process] =
-        try Right(builder.start())
-        catch case NonFatal(error) => Left(s"Unable to start the Python worker '$python': ${describe(error)}")
-      started.flatMap { process =>
-        // The probe reads no input.
-        try process.getOutputStream.close()
-        catch case NonFatal(_) => ()
-        val exited: Either[String, Boolean] =
-          try Right(process.waitFor(StartupTimeout.toMillis, TimeUnit.MILLISECONDS))
-          catch
-            case _: InterruptedException =>
-              Thread.currentThread().interrupt()
-              Left("The thread was interrupted while it waited for the Python worker.")
-        exited match
-          case Right(true)  => Right(process.exitValue())
-          case Right(false) =>
-            kill(process)
-            Left(s"The Python executable '$python' did not report its version within $StartupTimeout.")
-          case Left(message) =>
-            kill(process)
-            Left(message)
-      }
-
-    /** The start of the output in `path`, with no white space at the two ends. */
-    private def read(python: String, path: Path): Either[String, String] =
-      try
-        val stream = Files.newInputStream(path)
-        try Right(new String(stream.readNBytes(MaxOutputBytes), StandardCharsets.UTF_8).trim)
-        finally stream.close()
-      catch case NonFatal(error) => Left(s"Unable to read the version of '$python': ${describe(error)}")
-
-    private def kill(process: Process): Unit =
-      try
-        process.descendants().forEach { child =>
-          val _ = child.destroyForcibly()
-        }
-      catch case NonFatal(_) => ()
-      val _ = process.destroyForcibly()
 
   /** The vendored worker script as a file. The script is written once per JVM, and again when the file was removed. */
-  private object WorkerScript:
-    private val Resource             = "/dspy4s/core/runtime/local_interpreter_worker.py"
-    private var cached: Option[Path] = None
-
-    def path(): Either[String, Path] =
-      synchronized {
-        cached.filter(Files.isRegularFile(_)) match
-          case Some(file) => Right(file)
-          case None       => extract().map { file =>
-              cached = Some(file)
-              file
-            }
-      }
-
-    private def extract(): Either[String, Path] =
-      Option(getClass.getResourceAsStream(Resource)) match
-        case None         => Left(s"The resource $Resource is missing from dspy4s-core.")
-        case Some(stream) =>
-          try
-            val file = Files.createTempFile("dspy4s-local-interpreter-worker", ".py")
-            file.toFile.deleteOnExit()
-            try
-              val _ = Files.write(file, stream.readAllBytes())
-            finally stream.close()
-            Right(file)
-          catch case NonFatal(error) => Left(s"Unable to write the Python worker script: ${describe(error)}")
-
-  /** A Python identifier that is not a keyword. */
-  private def isPythonName(name: String): Boolean =
-    PythonNames.isIdentifier(name) && !PythonNames.Keywords.contains(name)
+  private val WorkerScript = InterpreterSupport.ResourceFile(
+    "/dspy4s/core/runtime/local_interpreter_worker.py",
+    "dspy4s-local-interpreter-worker",
+    ".py",
+    error => s"Unable to write the Python worker script: ${describe(error)}"
+  )
 
   /** The text of a value: a string as its text, each other value as JSON. */
-  private def text(value: DynamicValue): String =
-    DynamicValues.asString(value).getOrElse(DenoPyodideProtocol.encodeJson(value))
+  private def text(value: DynamicValue): String = asString(value).getOrElse(encodeJson(value))
 
-  private def isNull(value: DynamicValue): Boolean =
-    value match
-      case _: DynamicValue.Null.type => true
-      case _                         => false
+  /** The JSON writer option that escapes each character that is not ASCII. */
+  private val AsciiOnly: WriterConfig = WriterConfig.withEscapeUnicode(true)
 
   /** The JSON text of `value`, with a JSON escape for each character that is not ASCII. Such a character can only occur
-    * in a JSON string, so the escape keeps the value.
+    * in a JSON string, so the escape keeps the value. `Left` has the cause when the JSON writer cannot write the value.
     */
-  private def encode(value: DynamicValue): String =
-    val json = DenoPyodideProtocol.encodeJson(value)
-    if json.forall(_ < 0x80) then json
-    else
-      val builder = new StringBuilder(json.length + 16)
-      json.foreach(c => if c < 0x80 then builder.append(c) else builder.append(f"\\u${c.toInt}%04x"))
-      builder.toString
-
-  /** `<Type>: <message>` (upstream `describe`). */
-  private def describe(error: Throwable): String =
-    val name = error.getClass.getSimpleName
-    Option(error.getMessage).filter(_.nonEmpty).fold(name)(message => s"$name: $message")
+  private def encode(value: DynamicValue): Either[String, String] = DynamicValues.tryEncodeJson(value, AsciiOnly)
 
   private def clip(line: String): String = line.take(DiagnosticLength)
 

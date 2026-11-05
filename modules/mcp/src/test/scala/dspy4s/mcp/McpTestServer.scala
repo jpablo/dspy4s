@@ -10,7 +10,8 @@ import io.modelcontextprotocol.spec.McpSchema
   *   - `echo` gives the text `text`, `times` times (a text result);
   *   - `fail` gives a result that it marks as an error;
   *   - `count` gives the number of words of `text` as structured content, and the same value as text;
-  *   - `pixel` gives an image.
+  *   - `pixel` gives an image;
+  *   - `reflect` gives its arguments as structured content.
   */
 object McpTestServer:
 
@@ -72,6 +73,11 @@ object McpTestServer:
             .builder()
             .addContent(McpSchema.ImageContent.builder(pixelData, "image/png").build())
             .build()
+      )
+      .toolCall(
+        tool(mapper, "reflect", "Give the arguments back.", emptySchema),
+        (_, request) =>
+          McpSchema.CallToolResult.builder().addTextContent("ok").structuredContent(request.arguments()).build()
       )
       .build()
     // The threads of the transport keep the JVM alive. The client stops the process when it closes.

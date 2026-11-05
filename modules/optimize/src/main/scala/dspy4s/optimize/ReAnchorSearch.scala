@@ -1,6 +1,8 @@
 package dspy4s.optimize
 
-import java.math.{BigDecimal as JBigDecimal, RoundingMode}
+import dspy4s.core.contracts.PythonText
+
+import java.math.BigDecimal as JBigDecimal
 
 /** The search rules of [[ReAnchor]] (upstream `dspy/teleprompt/reanchor/calibrate.py`): the candidate settings, the
   * fold check, and the number rules of Python that the search uses, so that the port keeps the same settings as
@@ -51,31 +53,24 @@ private[optimize] object ReAnchorSearch:
     * (upstream `_tidy`).
     */
   def tidy(x: Double, lo: Double, hi: Double): Double =
-    val inside = (1 until 12).iterator.map(roundTo(x, _)).find(r => lo < r && r < hi)
+    val inside = (1 until 12).iterator.map(PythonText.round(x, _)).find(r => lo < r && r < hi)
     inside.getOrElse(x)
 
-  /** `x` rounded to `digits` decimal places, as Python `round(x, digits)`: the exact binary value of `x` rounds to the
-    * nearest decimal, with a half to the even digit.
-    */
-  def roundTo(x: Double, digits: Int): Double =
-    new JBigDecimal(x).setScale(digits, RoundingMode.HALF_EVEN).doubleValue
-
   /** The mean of `values` rounded to 4 decimal places (upstream `_mean`). */
-  def mean(values: Vector[Double]): Double = roundTo(fsum(values) / values.size, 4)
+  def mean(values: Vector[Double]): Double = PythonText.round(fsum(values) / values.size, 4)
 
   /** The count of the values, and for values that are not empty, the count of the distinct values and the smallest and
-    * the largest value rounded to 4 decimal places (upstream `_summary`).
+    * the largest value rounded to 4 decimal places (upstream `_summary`). The count of candidates is 0.
     */
-  def summary(values: Vector[Double]): Vector[(String, Double)] =
+  def summary(values: Vector[Double]): ReAnchorRow.Observed =
     val distinct = values.distinct.sorted
-    if distinct.isEmpty then Vector("calls" -> 0.0)
-    else
-      Vector(
-        "calls"    -> values.size.toDouble,
-        "distinct" -> distinct.size.toDouble,
-        "min"      -> roundTo(distinct.head, 4),
-        "max"      -> roundTo(distinct.last, 4)
-      )
+    ReAnchorRow.Observed(
+      calls = values.size,
+      distinct = Option.when(distinct.nonEmpty)(distinct.size),
+      min = distinct.headOption.map(PythonText.round(_, 4)),
+      max = distinct.lastOption.map(PythonText.round(_, 4)),
+      candidates = 0
+    )
 
   /** The candidate of `tried` with the best total on the examples `rows`, or `None` when no candidate has a total that
     * is strictly higher than the total of `start` there (upstream `_pick`). Among equal totals, the larger key wins,
@@ -115,49 +110,11 @@ private[optimize] object ReAnchorSearch:
     val k     = math.min(Folds, n)
     (0 until k).toVector.map(i => order.drop(i).grouped(k).map(_.head).toVector)
 
-  /** The exactly rounded sum of `values`, as Python `math.fsum` (the partial sums of Shewchuk, with the last rounding
-    * of CPython). The search compares totals with it, so that the order of the examples does not change a result.
+  /** The exactly rounded sum of the finite `values`, as Python `math.fsum`. The search compares totals with it, so that
+    * the order of the examples does not change a result.
     */
   def fsum(values: Iterable[Double]): Double =
-    val partials = scala.collection.mutable.ArrayBuffer.empty[Double]
-    values.foreach { value =>
-      var x = value
-      var i = 0
-      partials.indices.foreach { j =>
-        var y = partials(j)
-        if math.abs(x) < math.abs(y) then
-          val t = x
-          x = y
-          y = t
-        val hi = x + y
-        val lo = y - (hi - x)
-        if lo != 0.0 then
-          partials(i) = lo
-          i += 1
-        x = hi
-      }
-      partials.remove(i, partials.size - i)
-      partials += x
-    }
-    if partials.isEmpty then 0.0
-    else
-      var n  = partials.size - 1
-      var hi = partials(n)
-      var lo = 0.0
-      var go = true
-      while go && n > 0 do
-        val x = hi
-        val y = partials(n - 1)
-        n -= 1
-        hi = x + y
-        lo = y - (hi - x)
-        if lo != 0.0 then go = false
-      // Half-even rounding across more than one partial (CPython `math_fsum`).
-      if n > 0 && ((lo < 0.0 && partials(n - 1) < 0.0) || (lo > 0.0 && partials(n - 1) > 0.0)) then
-        val y = lo * 2.0
-        val x = hi + y
-        if y == x - hi then hi = x
-      hi
+    values.foldLeft(JBigDecimal.ZERO)((sum, value) => sum.add(new JBigDecimal(value))).doubleValue
 
   /** The lexicographic order of two keys of the same length. As in Python, `-0.0` and `0.0` are equal. */
   private def compare(a: Vector[Double], b: Vector[Double]): Int =

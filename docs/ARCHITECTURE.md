@@ -120,7 +120,7 @@ graph TD
      `Prediction.dynamic` at the module boundary.
    - `DynamicPredict` — record-valued predict, extends `DynamicModule`
    - `Predict[I, O]` — domain-valued predict, a `Module[I, O]`; a *sibling*
-     of `DynamicPredict` over the shared `PredictEngine`, with explicit one-way `erase`
+     of `DynamicPredict` over the shared `PredictEngine`
    - `ChainOfThought[I, O]` — `Module` that composes an inner `Predict`
      (prepends `reasoning`; output is always a named tuple)
    - All other programs are `Module[I, …]` too:
@@ -128,8 +128,10 @@ graph TD
      data-bag layer internally, decodes to `WithField[O,"reasoning",String]`), `MultiChainComparison[I,O]`
      (`MultiChainInput[I]` inside the uniform `ProgramCall`; `WithField[O,"rationale",String]`), and
      `BestOfN[I,O]` / `Refine[I,O]`
-     (output-preserving best-of-n over an inner program). Output-augmenting programs share the
-     `dspy4s.signatures.OutputAugmentation` helper. `DynamicPredict` is the prediction leaf for record-valued programs.
+     (output-preserving best-of-n over an inner program). Output-augmenting programs add their fields with the
+     field operations of `Signature` (`appendInput`, `appendInputs`, `prependOutput`, `withOutputs`), which change
+     the layout and the shapes in one call. `dspy4s.signatures.OutputAugmentation` gives the output type.
+     `DynamicPredict` is the prediction leaf for record-valued programs.
    - `Parallel` / `Aggregation` — batch/combinator utilities (not `Module`s).
    - `contracts/ProgramCall.scala` — generic `ProgramCall[I]` (input + `config` /
      `traceEnabled` / `rolloutId`)
@@ -144,8 +146,14 @@ graph TD
    `OptimizableParameters` (instructions, demos, config), and rebuild candidates;
    `ProgramRunner[P]` supplies uniform static/dynamic execution.
 
-9. **`streaming`** — `Streamify`, `StreamingLanguageModelWrapper`,
-   `StreamingQueue`, `StatusStreamingCallback`. Per-LM-call routing keyed
+9. **`streaming`** — `Streamify`, `StreamSession`,
+   `StreamingLanguageModelWrapper`, `StreamingQueue`,
+   `StatusStreamingCallback`. `Streamify` puts a `StreamSession` in the
+   context (`RuntimeContext.streamSink`, the analog of upstream
+   `settings.send_stream`). The model of the context does not change.
+   `LanguageModel.callAndRecordUsage` wraps each model that it calls with
+   that session, so each model of the program streams, also the own model
+   of a predictor. Per-LM-call routing keyed
    off `ActivePredictContext`. `Streamify` accepts any program via a
    `Streamable[P]` typeclass (run-from-record + best-effort sub-signatures),
    so programs stream without a record-valued twin.
@@ -207,7 +215,8 @@ extra wire fields, so encoding the decoded value may canonicalize the record.
 
 The case-class, method, function-type, trait-spec, and literal `fromString` forms expose their concrete I/O types at
 compile time. `fromString` parses its literal DSL into `NamedTuple` I/O (fields without an annotation default to
-`String`; `int`/`float`/`bool` map to scalars). The builder returns a runtime `SignatureLayout`, while
+`String`; `int`/`float`/`bool` map to scalars; `Optional[T]` maps to `Option[T]`; the layout keeps the DSL attributes,
+such as the enum values of a `Literal`). The builder returns a runtime `SignatureLayout`, while
 `fromStringDynamic` is the escape hatch for a DSL string only known at runtime.
 
 ## Canonical `Predict` call flow
@@ -229,7 +238,8 @@ When `Predict[I, O].apply(input)` fires:
    3. `adapter.format(invocation)` inside
       `CallbackDispatcher.withAdapter("format")` → `FormattedPrompt`.
    4. `model.call(request)` inside `CallbackDispatcher.withLm` →
-      `LmResponse`.
+      `LmResponse` (`LanguageModel.callAndRecordUsage`). Under `Streamify`,
+      this function wraps the model with the stream of the context.
    5. `adapter.parse(layout, output)` inside
       `CallbackDispatcher.withAdapter("parse")` for each output →
       `Vector[ParsedOutput]`.
@@ -292,7 +302,7 @@ code:
 - **New optimizer** — use `OptimizableStructure[P].inspect` for layout/name metadata,
   `read` / `replace` for writable `OptimizableParameters`, and `ProgramRunner[P]` for
   execution. `BootstrapFewShot` is the template.
-- **New stream listener** — implement `StreamListener[A]`, pass to
+- **New stream listener**: build a `StreamListener`, and pass it to
   `Streamify.streamify`. The streaming wrapper routes via
   `ActivePredictContext`.
 
@@ -329,10 +339,7 @@ For comparison with the upstream Python DSPy architecture:
 ## Where to look in the source
 
 - `core/contracts/SignatureLayout.scala` — the layout case class +
-  factories (`parse`, `create`) and persistence delegates. Mutation helpers are
-  `private[dspy4s]`.
-- `core/contracts/SignatureLayoutStateCodec.scala` — state/JSON encoding and
-  decoding behind `dumpState`, `dumpJson`, `fromState`, and `fromJson`.
+  factories (`parse`, `create`). Mutation helpers are `private[dspy4s]`.
 - `core/data/` — individual `Example`, `RawPrediction`, and `Completions`
   files. All field values live in a `DynamicValue.Record`.
 - `core/contracts/DynamicValues.scala` — boundary helpers for lifting
@@ -343,10 +350,11 @@ For comparison with the upstream Python DSPy architecture:
 - `core/runtime/ActivePredictContext.scala` — thread-local stack.
 - `signatures/Signature.scala` — wrapper + six factory entry points.
 - `signatures/Shape.scala` — the general `Shape[A]` boundary, lawful
-  `RoundTripShape[A]`, `MapShape` for runtime string-DSL signatures,
-  `SchemaTupleShape` for named-tuple outputs, and the product shape produced
-  by `ZioSchemaCodec.derivedFromZioSchema`. All speak `DynamicValue.Record` natively in
-  `encode` / `decode` — there is no `Map[String, Any]` shim.
+  `RoundTripShape[A]`, `MapShape` for runtime string-DSL signatures, and
+  `canonicalDerived`, the product shape of `ZioSchemaCodec.derivedFromZioSchema`
+  for case classes, tuples, and the named tuples of the signature macros. Each
+  shape uses `DynamicValue.Record` in `encode` and `decode`, with no
+  `Map[String, Any]` step.
 - `signatures/ZioSchemaCodec.scala` — the `zio-blocks-schema` integration:
   the product `RoundTripShape[A]` factory (`derivedFromZioSchema`), `FieldSpec`
   derivation from `Reflect.Record`, and `normalize(dv, target)` which

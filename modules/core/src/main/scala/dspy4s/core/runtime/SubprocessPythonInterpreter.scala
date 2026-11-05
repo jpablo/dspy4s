@@ -4,15 +4,16 @@ import dspy4s.core.contracts.CodeInterpreter
 import dspy4s.core.contracts.CodeInterpreterErrors
 import dspy4s.core.contracts.CodeResult
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.InterpreterOperation
 import dspy4s.core.contracts.RuntimeError
-import dspy4s.core.contracts.:=
 import zio.blocks.schema.DynamicValue
 
 import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.InputStream
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
+import scala.util.Using
 import scala.util.control.NonFatal
 
 /** Plain-`python3` [[CodeInterpreter]]: each `execute(code)` spawns a fresh `python3 -c "<code>"` subprocess, captures
@@ -27,9 +28,15 @@ import scala.util.control.NonFatal
   * For untrusted LM output, use [[DenoPyodideInterpreter]] (sandboxed via WASM, ports Python DSPy's `PythonInterpreter`
   * 1:1) or supply your own sandboxed [[CodeInterpreter]] implementation.
   *
-  * '''No REPL state across calls.''' Each `execute` is independent — variables defined in one call vanish before the
-  * next. [[DenoPyodideInterpreter]] provides a stateful alternative without a long-lived unrestricted `python3 -i`
-  * subprocess.
+  * '''No REPL state across calls.''' Each `execute` is independent: variables defined in one call vanish before the
+  * next. [[DenoPyodideInterpreter]] (sandboxed) and [[LocalPythonInterpreter]] (a persistent local subprocess, not
+  * sandboxed) keep the state from one call to the next.
+  *
+  * '''Process lifetime.''' After the exit of the Python process, `execute` waits 1 second at most for the end of the
+  * output. A child process of the code can keep the output open. Then the result has the output that `execute` got in
+  * that time. A timeout kills the process tree: first the descendants, then the Python process. An interrupt of the
+  * caller thread also kills the process tree. Then `execute` gives a `RuntimeError(CodeInterpreterErrors.Interpreter,
+  * …)`, and the thread keeps its interrupt state.
   *
   * '''Callback events.''' Each `execute` call is an `Execute` interpreter scope (its `variables` input is empty), and
   * each `close` call is a `Shutdown` interpreter scope. There is no long-lived process, so there are no `Startup`
@@ -39,7 +46,7 @@ import scala.util.control.NonFatal
   *   the executable to invoke (default `"python3"`; override for `python`, `python3.11`, virtualenv paths, etc.)
   * @param timeoutMillis
   *   kill the subprocess if it runs longer than this. Returns a `RuntimeError(CodeInterpreterErrors.Timeout, …)` and
-  *   destroys the process. 0 = no timeout.
+  *   kills the process tree. 0 = no timeout.
   */
 final class SubprocessPythonInterpreter(
     pythonCommand: String = "python3",
@@ -52,7 +59,7 @@ final class SubprocessPythonInterpreter(
   @volatile private var closed = false
 
   override def execute(code: String): Either[DspyError, CodeResult] =
-    val inputs = DynamicValues.record("code" := code, "variables" -> DynamicValue.Record.empty)
+    val inputs = InterpreterSupport.executeInputs(code, Map.empty)
     CallbackDispatcher.withInterpreter(interpreterName, InterpreterOperation.Execute, inputs)(run(code))
 
   override def close(): Unit =
@@ -63,79 +70,82 @@ final class SubprocessPythonInterpreter(
       }
 
   private def run(code: String): Either[DspyError, CodeResult] =
-    if closed then Left(RuntimeError(CodeInterpreterErrors.Interpreter, "Interpreter is closed"))
+    if closed then CodeInterpreterErrors.failure("Interpreter is closed")
     else
-      try
-        val pb = new ProcessBuilder(pythonCommand, "-c", code)
-        pb.redirectErrorStream(false)
-        val process = pb.start()
-        process.getOutputStream.close() // we don't write to stdin
+      val started =
+        try Right(new ProcessBuilder(pythonCommand, "-c", code).start())
+        catch
+          case e: IOException => CodeInterpreterErrors.failure(
+              s"Failed to spawn '$pythonCommand': ${DspyError.messageOf(e)}. Is Python installed and on PATH?"
+            )
+          case NonFatal(other) => CodeInterpreterErrors.failure(DspyError.messageOf(other))
+      started.flatMap(await)
 
-        val stdoutBuf = new ByteArrayOutputStream()
-        val stderrBuf = new ByteArrayOutputStream()
-
-        // Drain stdout/stderr on dedicated threads so neither pipe fills its
-        // OS buffer and deadlocks the child.
-        val stdoutThread = drainTo(process.getInputStream, stdoutBuf, "stdout-pump")
-        val stderrThread = drainTo(process.getErrorStream, stderrBuf, "stderr-pump")
-
-        val finishedInTime =
-          if timeoutMillis > 0 then process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
-          else
-            process.waitFor(); true
-
-        if !finishedInTime then
-          process.destroyForcibly()
-          stdoutThread.join(500)
-          stderrThread.join(500)
-          Left(RuntimeError(
-            CodeInterpreterErrors.Timeout,
-            s"Python subprocess exceeded ${timeoutMillis}ms timeout and was forcibly terminated"
-          ))
-        else
-          stdoutThread.join()
-          stderrThread.join()
-          Right(CodeResult(
-            stdout = stdoutBuf.toString("UTF-8"),
-            stderr = stderrBuf.toString("UTF-8"),
-            exitCode = process.exitValue()
-          ))
-      catch
-        case e: IOException => Left(RuntimeError(
-            CodeInterpreterErrors.Interpreter,
-            s"Failed to spawn '$pythonCommand': ${e.getMessage}. Is Python installed and on PATH?"
-          ))
-        case NonFatal(other) => Left(RuntimeError(
-            CodeInterpreterErrors.Interpreter,
-            Option(other.getMessage).getOrElse(other.getClass.getSimpleName)
-          ))
-
-  /** Spawn a daemon pump thread that copies bytes from `in` into `out` until EOF. Returns immediately; caller
-    * `.join()`s when ready.
+  /** Wait for the exit of `process` and collect its output. A timeout, an interrupt, or a failure kills the process
+    * tree.
     */
-  private def drainTo(in: java.io.InputStream, out: ByteArrayOutputStream, name: String): Thread =
-    val thread = new Thread(
-      () =>
-        val buf = new Array[Byte](4096)
-        try
-          var n = in.read(buf)
-          while n >= 0 do
-            out.write(buf, 0, n)
-            n = in.read(buf)
-        catch case NonFatal(_) => ()
-        finally
-          try in.close()
-          catch
-            case NonFatal(_) =>
-              ()
-      ,
-      name
-    )
-    thread.setDaemon(true)
-    thread.start()
-    thread
+  private def await(process: Process): Either[DspyError, CodeResult] =
+    try
+      process.getOutputStream.close() // we don't write to stdin
+
+      val stdoutBuf = new ByteArrayOutputStream()
+      val stderrBuf = new ByteArrayOutputStream()
+
+      // Drain stdout/stderr on dedicated threads so neither pipe fills its
+      // OS buffer and deadlocks the child.
+      val stdoutThread = drainTo(process.getInputStream, stdoutBuf, "stdout-pump")
+      val stderrThread = drainTo(process.getErrorStream, stderrBuf, "stderr-pump")
+
+      val finishedInTime =
+        if timeoutMillis > 0 then process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
+        else
+          process.waitFor(); true
+
+      if !finishedInTime then
+        InterpreterSupport.killTree(process)
+        stdoutThread.join(500)
+        stderrThread.join(500)
+        Left(RuntimeError(
+          CodeInterpreterErrors.Timeout,
+          s"Python subprocess exceeded ${timeoutMillis}ms timeout and was forcibly terminated"
+        ))
+      else
+        // A child process of the code can keep the pipes open after the exit, so the wait for the pumps has a limit.
+        val deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(SubprocessPythonInterpreter.PumpGraceMillis)
+        joinBefore(stdoutThread, deadline)
+        joinBefore(stderrThread, deadline)
+        Right(CodeResult(
+          stdout = stdoutBuf.toString(StandardCharsets.UTF_8),
+          stderr = stderrBuf.toString(StandardCharsets.UTF_8),
+          exitCode = process.exitValue()
+        ))
+    catch
+      case _: InterruptedException =>
+        InterpreterSupport.killTree(process)
+        Thread.currentThread().interrupt()
+        CodeInterpreterErrors.failure("The thread was interrupted while it waited for the Python subprocess.")
+      case NonFatal(other) =>
+        InterpreterSupport.killTree(process)
+        CodeInterpreterErrors.failure(DspyError.messageOf(other))
+
+  /** Wait for the end of `thread` until the `System.nanoTime` value `deadline`. */
+  private def joinBefore(thread: Thread, deadline: Long): Unit =
+    val millis = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
+    if millis > 0 then thread.join(millis)
+
+  /** Start a daemon pump thread that copies the bytes of `in` to `out` until the end of the stream, then closes `in`.
+    * The call returns at once; the caller joins the thread when it needs the bytes.
+    */
+  private def drainTo(in: InputStream, out: ByteArrayOutputStream, name: String): Thread =
+    InterpreterSupport.startDaemon(name) {
+      val _ = Using(in)(_.transferTo(out))
+    }
 
 object SubprocessPythonInterpreter:
+
+  /** The time in milliseconds that `execute` waits for the end of the output after the exit of the Python process. */
+  private val PumpGraceMillis: Long = 1_000L
+
   /** Cheap "does `python3` exist on PATH?" probe. Useful for tests to skip when no interpreter is available.
     */
   def isAvailable(command: String = "python3"): Boolean =

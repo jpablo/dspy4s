@@ -1,6 +1,8 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.adapters.contracts.NativeTools
+import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
@@ -8,6 +10,7 @@ import dspy4s.core.contracts.FieldSpec
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.:=
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmMode
@@ -131,4 +134,62 @@ class TwoStepAdapterSuite extends FunSuite:
     val result           = TwoStepAdapter(failing).parse(layout, LmOutput(text = "anything"))
     assert(result.isLeft)
     assertEquals(result.left.toOption.get.message, "boom")
+  }
+
+  // ── The tool specs of a call ──
+
+  private def weather: ToolSpec =
+    ToolSpec(
+      "weather",
+      Some("Get the weather."),
+      DynamicValues.record(
+        "type"       := "object",
+        "properties" -> DynamicValues.record("city" -> DynamicValues.record("type" := "string"))
+      )
+    )
+
+  private def toolInvocation(outputs: FieldSpec, tools: Vector[ToolSpec]): AdapterInvocation =
+    AdapterInvocation(
+      layout = SignatureLayout.create(
+        name = "Manual",
+        inputFields = Vector(FieldSpec("question")),
+        outputFields = Vector(outputs)
+      ).fold(error => fail(error.toString), identity),
+      demos = Vector.empty,
+      inputs = Example(values = DynamicValues.record("question" := "Weather?"), inputKeys = Set("question")),
+      request = LmRequest(model = "main"),
+      tools = tools
+    )
+
+  test("with a tool calls output, the user message shows the text of each tool, and the request has no tools") {
+    given RuntimeContext = RuntimeContext(lm = Some(new ScriptedLm("")))
+    val prompt           = TwoStepAdapter(new ScriptedLm(""))
+      .format(toolInvocation(FieldSpec("outputs", typeRef = TypeRef.toolCalls), Vector(weather)))
+      .fold(error => fail(error.toString), identity)
+    val user = prompt.messages.last.text.getOrElse("")
+    assert(
+      user.endsWith(
+        """tools: ["weather, whose description is <desc>Get the weather.</desc>. """ +
+          """It takes arguments {\"city\": {\"type\": \"string\"}}."]"""
+      ),
+      user
+    )
+    assert(prompt.messages.head.text.getOrElse("").contains("`tools` (list[Tool])"), prompt.toString)
+    assertEquals(prompt.removedOptions, NativeTools.OptionKeys)
+    assert(DynamicValues.recordGet(prompt.requestOptions, "tools").isEmpty, prompt.toString)
+  }
+
+  test("with no tool calls output, the prompt does not show the tools") {
+    given RuntimeContext = RuntimeContext(lm = Some(new ScriptedLm("")))
+    val text             = TwoStepAdapter(new ScriptedLm(""))
+      .format(toolInvocation(FieldSpec("answer"), Vector(weather)))
+      .fold(error => fail(error.toString), _.messages.flatMap(_.text).mkString("\n"))
+    assert(!text.contains("weather"), text)
+    assert(!text.contains("tools"), text)
+  }
+
+  test("a tool calls output with no tools is no error, because native function calling is off") {
+    given RuntimeContext = RuntimeContext(lm = Some(new ScriptedLm("")))
+    val adapter          = TwoStepAdapter(new ScriptedLm(""))
+    assert(adapter.format(toolInvocation(FieldSpec("outputs", typeRef = TypeRef.toolCalls), Vector.empty)).isRight)
   }

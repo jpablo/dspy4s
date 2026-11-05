@@ -1,8 +1,9 @@
 /** Signatures
   *
   * Source: docs/docs/learn/programming/signatures.md Upstream:
-  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/signatures.md Status: translated (8/8
-  * python snippets)
+  * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/learn/programming/signatures.md Status: translated (snippets
+  * 1–8 of the 11 Python blocks). Snippets 9 and 10 (type checks of input fields) and snippet 11 (optional output
+  * fields) have a note and no code.
   *
   * Translation rule:
   *   - Python **string-based** signatures (e.g. `dspy.Predict("a -> b")`, `dspy.ChainOfThought("a -> b")`, or
@@ -18,16 +19,16 @@
   * 3, 4, and 6 use it directly.
   *
   * Structure note: each snippet is a self-contained block — heading comment + python original + supporting types (when
-  * any) + example object. Supporting types (enums, case classes, spec traits) must stay at the package level for
-  * zio-blocks-schema / Mirror derivation and for the trait-spec macro to see them, so the per-snippet block places them
-  * immediately above the example object that uses them.
+  * any) + example object. Most supporting types (enums, case classes, spec traits) are at the package level,
+  * immediately above the example object that uses them. A type in an object also works, as `MyContainer.Query` below
+  * shows.
   */
 package dspy4s.examples.learn.programming
 
 import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.lm.providers.OpenAiLanguageModel
+import dspy4s.lm.providers.{OpenAiClient, OpenAiLanguageModel}
 import dspy4s.programs.strategies.{ChainOfThought, Predict}
 import dspy4s.signatures.{InputField, OutputField, Spec, Signature}
 import zio.blocks.schema.Schema
@@ -182,10 +183,10 @@ object FaithfulnessExample:
 // |
 // | image_url = "https://picsum.photos/id/237/200/300"
 // | classify = dspy.Predict(DogPictureSignature)
-// | classify(image_1=dspy.Image.from_url(image_url))
+// | classify(image_1=dspy.Image(image_url))
 
-/** Placeholder for `dspy.Image`. dspy4s does not yet ship a built-in `Image` value type with adapter support; this
-  * local case class keeps the spec trait compilable. Replace with a real Image type when one lands.
+/** A stand-in for `dspy.Image`, so that the spec trait compiles. dspy4s has no port of `dspy.Image` (PORT_GAPS, "Custom
+  * types"), and this case class is not image support.
   */
 case class Image(url: String) derives Schema
 
@@ -200,6 +201,10 @@ object DogPictureExample:
 
   val program = Predict(signature)
 
+  /** This call does not show the image to the model. The adapter writes the `Image` value as the text of the field
+    * `image_1` in the user message, and no message has an image part (`Message.parts`). The model gets the URL as text,
+    * so its answer can be a guess.
+    */
   def call(imageUrl: String)(using RuntimeContext): Either[DspyError, String] =
     program((image_1 = Image(imageUrl))).map(_.output.answer)
 
@@ -242,28 +247,67 @@ object CustomTypesExample:
 // --8<-- [end:custom-types]
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ProgramRunner entrypoint
+// Snippets 9 + 10 (lines 214–235): Type Checking for Input Fields
 // ═══════════════════════════════════════════════════════════════════════════
-// The example objects above only declare programs; running them needs a
-// `RuntimeContext` carrying a live LM + adapter. This wires the real OpenAI
-// provider (reading `OPENAI_API_KEY` from the environment) plus a `ChatAdapter`,
-// installs them as the active context, and exposes it as the `given` the
-// `call` methods require.
+// Python (class-based and string-based):
+// | class MathSignature(dspy.Signature):
+// |     """Perform a mathematical operation."""
+// |     number: int = dspy.InputField()
+// |     result: str = dspy.OutputField()
+// |
+// | predictor = dspy.Predict(MathSignature)
+// |
+// | # This will trigger a warning because we're passing a string instead of an int
+// | predictor(number="42")  # Warning: Type mismatch for field 'number': expected int, but provided value is incompatible
+// |
+// | # Disable type mismatch warnings globally
+// | dspy.configure(warn_on_type_mismatch=False)
+// |
+// | predictor = dspy.Predict("number: int -> result: str")
+// | predictor(number="42")  # No warning
+//
+// No port: dspy4s has no such warning and no such setting. With a typed signature, the compiler rejects
+// `predictor((number = "42"))`. A `DynamicPredict` takes a record, so the compiler does not check its values.
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Snippet 11 (lines 242–250): Optional Output Fields
+// ═══════════════════════════════════════════════════════════════════════════
+// Python (class-based):
+// | class Extract(dspy.Signature):
+// |     """Extract structured information from text."""
+// |     text: str = dspy.InputField()
+// |     title: str = dspy.OutputField()                                # required: missing -> AdapterParseError
+// |     note: str | None = dspy.OutputField(default="No note")         # missing -> "No note"
+// |     tags: list[str] = dspy.OutputField(default_factory=list)      # missing -> []
+// |     subtitle: str | None = dspy.OutputField()                      # missing -> None
+//
+// dspy4s has these rules, and this file has no code for them. An `Option[T]` output field is optional: a missing field
+// gives `None`. With `Signature.derived`, a case-class parameter with a default value gives that value. A required field
+// that is missing is a parse error. The site page "Signatures" describes optional outputs.
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Entry point
+// ═══════════════════════════════════════════════════════════════════════════
+// The example objects above only declare programs. To run them, this main makes a
+// `RuntimeContext` with a live LM and an adapter: the real OpenAI provider (it reads
+// `OPENAI_API_KEY` from the environment, and `OPENAI_BASE_URL` selects an other
+// OpenAI-compatible endpoint) and a `ChatAdapter`. `withInstalled` installs
+// the context for its block, and it gives the block the `given` that the `call`
+// methods require.
 //
 // Run with:  OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.main"
 // --8<-- [start:run]
 @main def main(): Unit =
-  val model = sys.env.getOrElse("DSPY_MODEL", "gpt-5.5")
+  val model   = sys.env.getOrElse("DSPY_MODEL", "gpt-5.5")
+  val baseUrl = sys.env.getOrElse("OPENAI_BASE_URL", OpenAiClient.defaultBaseUrl)
 
-  val lm = OpenAiLanguageModel.fromEnv(model) match
+  val lm = OpenAiLanguageModel.fromEnv(model, baseUrl) match
     case Right(m)  => m
     case Left(err) => sys.error(s"Could not initialize LM (is OPENAI_API_KEY set?): $err")
 
   val settings = RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))
 
-  RuntimeEnvironment.withSettings(settings) {
-    given RuntimeContext = RuntimeEnvironment.current
-
+  RuntimeEnvironment.withInstalled(settings) {
     println("Toxicity:  " + ToxicityExample.call("you are beautiful."))
     println("Sentiment: " + SentimentExample.call("it's a charming and often affecting journey."))
     println("Emotion:   " + EmotionExample.call("i started feeling a little vulnerable"))

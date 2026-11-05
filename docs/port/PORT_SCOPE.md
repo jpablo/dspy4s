@@ -13,7 +13,7 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
 
 ## Parity Model
 - `Tier 0 (must-match)`: core signatures, module runtime semantics, adapters, LM behavior, tracing/settings/callbacks, evaluation, and first optimizers.
-- `Tier 1 (supported with explicit deltas)`: streaming (v1 minimal: raw token + status events; per-field `StreamListener` deferred — see `../STREAMING_POSTPONED.md`), advanced adapters/types, additional retrieval helpers.
+- `Tier 1 (supported with explicit deltas)`: streaming (tokens of each field through `StreamListener`, and status events; see `../STREAMING_POSTPONED.md` and `PORT_DIFFERENCES.md` section 23), advanced adapters/types, additional retrieval helpers.
 - `Tier 2 (deferred)`: heavy/experimental optimizers, full fine-tuning providers, Python-specific interpreter features.
 
 ## In Scope (v1)
@@ -46,7 +46,7 @@ Reference source: `/Users/jpablo/GitHub/dspy` (version `3.1.3` from `pyproject.t
   wiring.)
 - Caching (memory + disk), retries, rollout behavior, history updates
 - `ChatAdapter`, `JSONAdapter`, `XMLAdapter` (TwoStepAdapter not yet ported)
-- Tool-calling bridge (`ToolFunction`, `ToolCallRequest` / `ToolCallResult`)
+- Tool-calling bridge (`ToolFunction`, `ToolExecutor`)
 
 4. Program modules
 - `Predict[I, O]` (domain-valued) and `DynamicPredict` (erased), backed by a

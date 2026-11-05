@@ -6,18 +6,21 @@ import dspy4s.adapters.contracts.FormattedPrompt
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.{
-  CodeResult, DspyError, DynamicValues, FieldSpec, ReplCodeInterpreter, RuntimeContext, RuntimeError, SandboxTool,
-  SignatureLayout, TypeRef
+  CallbackEvent, CallbackHandler, CodeResult, DspyError, DynamicValues, FieldSpec, LmEndEvent, LmStartEvent,
+  ModuleStartEvent, ReplCodeInterpreter, RuntimeContext, RuntimeError, SandboxTool, TypeRef
 }
-import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.core.runtime.{CallbackDispatcher, RuntimeEnvironment}
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
 import dspy4s.signatures.Signature
+import dspy4s.programs.strategies.{RLMModel, RLMReplProtocol, RLMSandboxTools}
 import dspy4s.programs.support.ScriptedLm
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
+import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch, TimeUnit}
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
+import scala.jdk.CollectionConverters.*
 
 class RLMSuite extends FunSuite:
 
@@ -49,10 +52,10 @@ class RLMSuite extends FunSuite:
         DynamicValues.recordGet(invocation.inputs.values, "repl_history")
           .map(DynamicValues.renderText).foreach(actionHistories += _)
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      val names = layout.outputFields.map(_.name)
+      val names = invocation.layout.outputFields.map(_.name)
       if names.contains("code") then
         val parts     = output.text.split("\\|\\|", 2)
         val reasoning = if parts.length >= 1 then parts(0).trim else ""
@@ -136,7 +139,7 @@ class RLMSuite extends FunSuite:
       assert(result.isRight, result.toString)
       assertEquals(result.toOption.get.output.answer, "right")
       val traj = result.toOption.get.raw.asString("trajectory").toOption.getOrElse("")
-      assert(traj.contains("[Error] Missing output fields: [answer]"), traj)
+      assert(traj.contains("[Error] Missing output fields: ['answer']"), traj)
     }
   }
 
@@ -168,16 +171,16 @@ class RLMSuite extends FunSuite:
   }
 
   test("stripCodeFences ports upstream: decorative fences, bare/py tags, non-Python rejection") {
-    assertEquals(RLM.stripCodeFences("print(1)"), Right("print(1)"))
-    assertEquals(RLM.stripCodeFences("```python\nprint(1)\n```"), Right("print(1)"))
-    assertEquals(RLM.stripCodeFences("```\nprint(2)\n```"), Right("print(2)"))
-    assertEquals(RLM.stripCodeFences("```py\nprint(3)\n```"), Right("print(3)"))
+    assertEquals(RLMReplProtocol.stripCodeFences("print(1)"), Right("print(1)"))
+    assertEquals(RLMReplProtocol.stripCodeFences("```python\nprint(1)\n```"), Right("print(1)"))
+    assertEquals(RLMReplProtocol.stripCodeFences("```\nprint(2)\n```"), Right("print(2)"))
+    assertEquals(RLMReplProtocol.stripCodeFences("```py\nprint(3)\n```"), Right("print(3)"))
     // Outer decorative pair around a tagged fence.
-    assertEquals(RLM.stripCodeFences("```\n```python\nprint(4)\n```\n```"), Right("print(4)"))
+    assertEquals(RLMReplProtocol.stripCodeFences("```\n```python\nprint(4)\n```\n```"), Right("print(4)"))
     // Explicit non-Python tag is rejected.
-    assert(RLM.stripCodeFences("```javascript\nconsole.log(1)\n```").isLeft)
+    assert(RLMReplProtocol.stripCodeFences("```javascript\nconsole.log(1)\n```").isLeft)
     // Unclosed fence: take the remainder.
-    assertEquals(RLM.stripCodeFences("```python\nprint(5)"), Right("print(5)"))
+    assertEquals(RLMReplProtocol.stripCodeFences("```python\nprint(5)"), Right("print(5)"))
   }
 
   test("llm_query tools: shared counter caps total calls; batched returns per-item [ERROR] entries") {
@@ -192,7 +195,7 @@ class RLMSuite extends FunSuite:
 
     RuntimeEnvironment.withSettings(RuntimeContext()) {
       given ctx: RuntimeContext = RuntimeEnvironment.current
-      val tools                 = RLM.makeLlmTools(maxLlmCalls = LlmCallLimit(3), subLm = Some(subLm), ctx)
+      val tools                 = RLMSandboxTools.build(maxLlmCalls = LlmCallLimit(3), subLm = Some(subLm), ctx)
       val query                 = tools.find(_.name == "llm_query").get
       val batched               = tools.find(_.name == "llm_query_batched").get
 
@@ -206,6 +209,193 @@ class RLMSuite extends FunSuite:
       // Empty prompt is rejected.
       assert(query.invoke(rec("prompt" := "")).isLeft)
     }
+  }
+
+  test("the preview of a variable is the text of upstream: Python str, or json.dumps with an indent of 2") {
+    def text(value: DynamicValue): RLMModel.ReplVariable = RLMModel.ReplVariable.fromValue("v", value, None)
+
+    assertEquals(text(DynamicValues.fromAny(true)).preview, "True")
+    assertEquals(text(DynamicValue.Null).preview, "None")
+    assertEquals(text(DynamicValues.string("hello")).preview, "hello")
+    val record = rec("a" := 1, "b" -> DynamicValues.sequence(Vector(DynamicValues.string("caf\u00e9"))))
+    val json   = "{\n  \"a\": 1,\n  \"b\": [\n    \"caf\\u00e9\"\n  ]\n}"
+    assertEquals(text(record).preview, json)
+    assertEquals(text(record).totalLength, json.length)
+  }
+
+  test("the preview of a list with a NaN is a text, as upstream json.dumps, not an exception") {
+    val value = DynamicValues.sequence(Vector(DynamicValues.fromAny(Double.NaN)))
+    assertEquals(RLMModel.ReplVariable.fromValue("v", value, None).preview, "[\n  NaN\n]")
+  }
+
+  test("the budget of llm_query is atomic: two threads cannot take the last unit") {
+    val subLm = new LanguageModel:
+      override val id: String                                                                    = "sub"
+      override val mode: LmMode                                                                  = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        Right(LmResponse(outputs = Vector(LmOutput(text = "reply"))))
+
+    RuntimeEnvironment.withSettings(RuntimeContext()) {
+      given ctx: RuntimeContext = RuntimeEnvironment.current
+      (1 to 300).foreach { _ =>
+        val query   = RLMSandboxTools.build(LlmCallLimit(1), Some(subLm), ctx).find(_.name == "llm_query").get
+        val start   = new java.util.concurrent.CountDownLatch(1)
+        val granted = new AtomicInteger(0)
+        val threads = Vector.fill(4)(new Thread(() =>
+          start.await()
+          if query.invoke(rec("prompt" := "hi")).isRight then
+            val _ = granted.incrementAndGet()
+        ))
+        threads.foreach(_.start())
+        start.countDown()
+        threads.foreach(_.join())
+        assertEquals(granted.get(), 1)
+      }
+    }
+  }
+
+  test("a batch where each prompt throws gives one [ERROR] item for each prompt, with the cause") {
+    val subLm = new LanguageModel:
+      override val id: String                                                                    = "sub"
+      override val mode: LmMode                                                                  = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        throw new IllegalStateException("boom")
+
+    RuntimeEnvironment.withSettings(RuntimeContext()) {
+      given ctx: RuntimeContext = RuntimeEnvironment.current
+      val batched               = RLMSandboxTools.build(LlmCallLimit(3), Some(subLm), ctx).find(_.name == "llm_query_batched").get
+      val answer                = batched.invoke(rec("prompts" -> DynamicValues.fromAny(List("a", "b"))))
+      assertEquals(
+        answer.map(DynamicValues.asSequence(_).map(DynamicValues.renderText)),
+        Right(Vector("[ERROR] boom", "[ERROR] boom"))
+      )
+    }
+  }
+
+  test("llm_query rejects a null prompt with no call, and a reply with no outputs is an error") {
+    val calls = new AtomicInteger(0)
+    val subLm = new LanguageModel:
+      override val id: String                                                                    = "sub"
+      override val mode: LmMode                                                                  = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        val _ = calls.incrementAndGet()
+        Right(LmResponse(outputs = Vector.empty))
+
+    RuntimeEnvironment.withSettings(RuntimeContext()) {
+      given ctx: RuntimeContext = RuntimeEnvironment.current
+      val query                 = RLMSandboxTools.build(LlmCallLimit(3), Some(subLm), ctx).find(_.name == "llm_query").get
+      val rejected              = query.invoke(rec("prompt" -> DynamicValue.Null))
+      assert(rejected.left.exists(_.message.contains("prompt cannot be empty")), rejected.toString)
+      assertEquals(calls.get(), 0)
+      val empty = query.invoke(rec("prompt" := "hi"))
+      assert(empty.left.exists(_.message.contains("no outputs")), empty.toString)
+    }
+  }
+
+  // Upstream `target_lm(prompt)` is a `BaseLM.__call__`, which sends the LM events (`dspy/clients/base_lm.py`).
+  test("llm_query sends one LmStartEvent and one LmEndEvent for its model call") {
+    val events   = ArrayBuffer.empty[CallbackEvent]
+    val callback = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit = events += event
+
+    RuntimeEnvironment.withCallbacks(Vector(callback)) {
+      given ctx: RuntimeContext = RuntimeEnvironment.current
+      val subLm                 = new ScriptedLm(Vector("reply"), id = "sub")
+      val tools                 = RLMSandboxTools.build(LlmCallLimit(3), Some(subLm), ctx)
+      val query                 = tools.find(_.name == "llm_query").get
+      assertEquals(query.invoke(rec("prompt" := "hi")).map(DynamicValues.renderText), Right("reply"))
+    }
+
+    events.toVector match
+      case Vector(start: LmStartEvent, end: LmEndEvent) =>
+        assertEquals(start.modelId, "sub")
+        assertEquals(end.modelId, "sub")
+        assertEquals(end.callId, start.callId)
+        assert(end.response.isRight, end.response.toString)
+      case other => fail(s"expected one LM start and one LM end, got $other")
+  }
+
+  test("each model call of llm_query_batched is a scope under the caller scope, on its worker thread") {
+    val prompts = Vector("a", "b", "c")
+    // Each call waits for the other calls, so that the scopes of the calls overlap on the workers.
+    val overlap = new CountDownLatch(prompts.size)
+    val subLm   = new LanguageModel:
+      override val id: String                                                                    = "sub"
+      override val mode: LmMode                                                                  = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        overlap.countDown()
+        val text = if overlap.await(30, TimeUnit.SECONDS) then "reply" else "no overlap"
+        Right(LmResponse(outputs = Vector(LmOutput(text = text))))
+    val events   = new ConcurrentLinkedQueue[(CallbackEvent, Long)]()
+    val callback = new CallbackHandler:
+      override def onEvent(event: CallbackEvent)(using RuntimeContext): Unit =
+        val _ = events.add(event -> Thread.currentThread().threadId())
+
+    RuntimeEnvironment.withCallbacks(Vector(callback)) {
+      given ctx: RuntimeContext = RuntimeEnvironment.current
+      val tools                 = RLMSandboxTools.build(LlmCallLimit(3), Some(subLm), ctx)
+      val batched               = tools.find(_.name == "llm_query_batched").get
+      val answer                = CallbackDispatcher.withModule("rlm", DynamicValue.Record.empty) {
+        batched.invoke(rec("prompts" -> DynamicValues.fromAny(prompts.toList)))
+      }
+      assertEquals(
+        answer.map(DynamicValues.asSequence(_).map(DynamicValues.renderText)),
+        Right(prompts.map(_ => "reply"))
+      )
+      // The scopes of the workers leave nothing on the thread of the caller.
+      assertEquals(RuntimeEnvironment.activeCallId, None)
+    }
+
+    val recorded = events.asScala.toVector
+    val module   = recorded.collectFirst { case (start: ModuleStartEvent, _) => start }.getOrElse(fail("no module"))
+    val workers  = recorded.filter(_._2 != Thread.currentThread().threadId()).groupMap(_._2)(_._1)
+    assertEquals(workers.size, prompts.size)
+    workers.values.foreach {
+      case Vector(start: LmStartEvent, end: LmEndEvent) =>
+        assertEquals(end.callId, start.callId)
+        assertEquals(start.parentCallId, Some(module.callId))
+        assertEquals(end.parentCallId, Some(module.callId))
+      case other => fail(s"expected one LM start and one LM end on each worker, got $other")
+    }
+  }
+
+  test("the result of a SUBMIT holds the declared outputs only, as upstream _process_final_output") {
+    val repl = new ScriptedRepl(Vector(
+      Right(CodeResult("", "", 0, finalOutput = Some("""{"answer": "42", "note": "extra"}""")))
+    ))
+    val lm = new ScriptedLm(Vector("done||SUBMIT(answer='42', note='extra')"))
+
+    withRlm(lm, new ProbeAdapter) {
+      val prediction = rlm(repl)((context = "c", query = "q")).toOption.get
+      assertEquals(prediction.output.answer, "42")
+      assert(!DynamicValues.recordKeys(prediction.raw.values).contains("note"), prediction.raw.values.toString)
+    }
+  }
+
+  test("a SUBMIT that is not a dict gives the observation of upstream, with the type name") {
+    val repl = new ScriptedRepl(Vector(
+      Right(CodeResult("", "", 0, finalOutput = Some("[1, 2]"))),
+      Right(CodeResult("", "", 0, finalOutput = Some("""{"answer": "ok"}""")))
+    ))
+    val lm    = new ScriptedLm(Vector("try||SUBMIT([1, 2])", "fix||SUBMIT(answer='ok')"))
+    val probe = new ProbeAdapter
+
+    withRlm(lm, probe) {
+      val result = rlm(repl)((context = "c", query = "q"))
+      assert(result.isRight, result.toString)
+      assert(
+        probe.actionHistories(1).contains("[Error] FINAL returned list, expected dict with fields: ['answer']"),
+        probe.actionHistories(1)
+      )
+    }
+  }
+
+  test("a SUBMIT value that JSON cannot hold arrives as text, and it gives the observation of upstream with str") {
+    // The two sandboxes write the repr of such a value, for example of `SUBMIT(answer=float('nan'))`, as a JSON string.
+    assertEquals(
+      RLMReplProtocol.parseSubmitted("\"{'answer': nan}\"", Vector("answer")),
+      Left("[Error] FINAL returned str, expected dict with fields: ['answer']")
+    )
   }
 
   test("reserved tool names are rejected at construction") {
@@ -258,7 +448,7 @@ class RLMSuite extends FunSuite:
 
   test("ReplVariable.fromValue renders metadata with a head+tail preview, not the full value") {
     val long = "x" * 3000
-    val v    = RLM.ReplVariable.fromValue(
+    val v    = RLMModel.ReplVariable.fromValue(
       "context",
       DynamicValues.fromAny(long),
       Some(FieldSpec("context", description = Some("the corpus")))
@@ -292,7 +482,7 @@ class RLMSuite extends FunSuite:
         assertEquals(result.toOption.get.output.answer, "FALLBACK")
       }
     }
-    val warnings = captured.toString.linesIterator.filter(_.contains("ignoring unexpected input field")).toVector
+    val warnings = captured.toString.linesIterator.filter(_.contains("Input contains fields not in signature")).toVector
     assertEquals(warnings, Vector.empty)
   }
 

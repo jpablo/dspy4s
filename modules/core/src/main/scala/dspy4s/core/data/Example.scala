@@ -1,6 +1,7 @@
 package dspy4s.core.data
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, ValidationError}
+import dspy4s.core.collections.Traverse
+import dspy4s.core.contracts.{DspyError, DynamicValues, Reflects, ValidationError}
 import dspy4s.core.contracts.updated
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
@@ -39,8 +40,8 @@ final case class Example(
   /** Convenience overload for callers passing a Scala value; lifts it via its `Schema`. A value type without a `Schema`
     * is a compile error.
     */
-  def withRawValue[A](key: String, value: A)(using schema: Schema[A]): Example =
-    withValue(key, schema.toDynamicValue(value))
+  def withRawValue[A](key: String, value: A)(using Schema[A]): Example =
+    withValue(key, Reflects.wireOf(value))
 
   def without(keys: Set[String]): Example =
     copy(
@@ -50,10 +51,10 @@ final case class Example(
 
   def withAugmented(flag: Boolean): Example = copy(augmented = flag)
 
-  /** Serialize to a [[zio.blocks.schema.DynamicValue.Record]] -- the interchange format used everywhere else in dspy4s.
+  /** Serialize to a [[zio.blocks.schema.DynamicValue.Record]], the interchange format used everywhere else in dspy4s.
     * Round-trips with [[Example.fromState]] and serializes to clean JSON via the `DynamicValue` JSON codec. The record
     * has three fields: `values` (the field-value record verbatim), `inputKeys` (a sequence of the input field-name
-    * strings), and `augmented` (a boolean). Mirrors `SignatureLayout.dumpState`.
+    * strings), and `augmented` (a boolean).
     */
   def dumpState: DynamicValue.Record =
     val keyValues: Seq[DynamicValue] =
@@ -65,9 +66,9 @@ final case class Example(
     )))
 
 object Example:
-  /** Convenience constructor: `Example("q" -> "...", "a" -> "...")`. Produces an example with no declared input keys;
-    * call `withInputs(...)` to mark a subset as inputs. [[DynamicValues.fromAny]] lifts the values into the interchange
-    * format.
+  /** Convenience constructor: `Example("q" := "...", "a" := "...")`. Produces an example with no declared input keys;
+    * call `withInputs(...)` to mark a subset as inputs. The `:=` extension lifts each value into the interchange format
+    * with its `Schema`.
     */
   def apply(entries: (String, DynamicValue)*): Example =
     Example(values = DynamicValues.recordFromEntries(entries))
@@ -88,14 +89,10 @@ object Example:
     def readInputKeys: Either[DspyError, Set[String]] =
       DynamicValues.recordGet(state, "inputKeys") match
         case None | Some(_: DynamicValue.Null.type) => Right(Set.empty)
-        case Some(seq: DynamicValue.Sequence)       =>
-          seq.elements.iterator.foldLeft[Either[DspyError, Set[String]]](Right(Set.empty)) { (acc, raw) =>
-            acc.flatMap { keys =>
-              raw match
-                case DynamicValue.Primitive(PrimitiveValue.String(s)) => Right(keys + s)
-                case _                                                => Left(ValidationError("Example state 'inputKeys' must be a sequence of strings"))
-            }
-          }
+        case Some(seq: DynamicValue.Sequence)       => Traverse.either(seq.elements) {
+            case DynamicValue.Primitive(PrimitiveValue.String(s)) => Right(s)
+            case _                                                => Left(ValidationError("Example state 'inputKeys' must be a sequence of strings"))
+          }.map(_.toSet)
         case Some(_) => Left(ValidationError("Example state 'inputKeys' must be a sequence"))
 
     def readAugmented: Either[DspyError, Boolean] =

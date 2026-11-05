@@ -40,7 +40,7 @@ the runtime context, the errors, and the events. It uses only the `algebra` modu
 
 | Type | Description |
 |------|-------------|
-| `RuntimeContext` | The active context, in four parts: `RuntimeServices` (the model, the adapter, and the handlers), `RuntimeConfig` (the settings), `RuntimeScope` (the call stack), and `RuntimeDelta`. |
+| `RuntimeContext` | The active context, in four parts: `RuntimeServices` (the model, the adapter, the handlers, and the stream of `streamify`), `RuntimeConfig` (the settings), `RuntimeScope` (the call stack), and `RuntimeDelta`. |
 | `RuntimeDelta` / `Executed[A]` | `RuntimeDelta` is the trace and the history that a call adds. `Executed[A]` is a value together with its `RuntimeDelta`. |
 | `RuntimeEnvironment` | Holds the global default context and the context of each thread. `configure` sets the global default. It also sends the events to the handlers. |
 | `CallbackEvent` / `CallbackHandler` | The start events and the end events, and the interface of a handler that gets them. |
@@ -67,7 +67,7 @@ the runtime context, the errors, and the events. It uses only the `algebra` modu
 |---------|----------|
 | `data/` | `Example`, `Completions`, and `RawPrediction` |
 | `collections/` | `SizedVector`, a vector that has its length in its type |
-| `contracts/` | the signature layout, the runtime context, the errors, the events, the tool calls, the history, and the interpreter interfaces |
+| `contracts/` | the signature layout, the runtime context, the errors, the events, the tool calls, the history, the interpreter interfaces, and the Python text forms of a value (`PythonText`, `PythonRepr`), with the JSON reader that keeps the number rule of Python `json.loads` |
 | `signatures/` | the parser for signature text such as `"question -> answer"` |
 | `runtime/` | `RuntimeEnvironment`, `CallbackDispatcher`, `ContextPropagation` (gives the context to other threads), and the three Python interpreters |
 

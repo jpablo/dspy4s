@@ -18,7 +18,6 @@ import dspy4s.lm.contracts.MessageRole
 import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.lm.runtime.CacheCapacity
 import dspy4s.lm.runtime.InMemoryLmCache
-import dspy4s.lm.runtime.LmCacheRegistry
 import dspy4s.lm.runtime.ManagedLanguageModel
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.streaming.contracts.PredictionEvent
@@ -34,13 +33,8 @@ import scala.collection.mutable.ArrayBuffer
   */
 class StreamingCacheSuite extends FunSuite:
 
-  override def beforeEach(context: BeforeEach): Unit =
-    RuntimeEnvironment.resetForTests()
-    LmCacheRegistry.resetDefault()
-
-  override def afterEach(context: AfterEach): Unit =
-    RuntimeEnvironment.resetForTests()
-    LmCacheRegistry.resetDefault()
+  override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   /** A stream model that gives `chunks` for each stream request, and counts the requests. */
   private final class CountingStreams(chunks: Vector[LmChunk]) extends StreamingLanguageModel:

@@ -1,7 +1,7 @@
 package dspy4s.lm.providers
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.ParseError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmToolCallDelta
 import zio.blocks.schema.DynamicValue
@@ -10,14 +10,18 @@ import zio.blocks.schema.PrimitiveValue
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodecDeriver
 
-/** Wire model of one OpenAI Chat Completions streaming chunk (`chat.completion.chunk`), parsed straight from the SSE
-  * `data:` JSON by a derived `JsonCodec` — no by-hand `DynamicValue` navigation. The case classes mirror the wire shape
-  * (camelCase fields bridged to the JSON's snake_case by the `SnakeCase` name mapper); the codec is lenient exactly
-  * where provider chunks are loose: `Option`/defaulted fields decode from absent or `null`, and unknown fields (`id`,
-  * `object`, `role`, `type`, …) are ignored. A chunk that the codec cannot read, for example a chunk with one field of
-  * the wrong type, goes through [[OpenAiStreamChunk.lenient]], which reads the fields one at a time.
+/** One chunk of an OpenAI Chat Completions stream (`chat.completion.chunk`), or of a completions stream
+  * (`text_completion`), where each choice has a `text` and no `delta`. A derived `JsonCodec` reads the chunk from the
+  * JSON text of the SSE `data:` line. The case classes have the shape of the wire, and the `SnakeCase` name mapper
+  * gives the snake_case keys of their camelCase fields. The codec accepts the loose parts of a provider chunk: an
+  * `Option` field or a field with a default decodes from an absent key or from `null`, and the codec ignores the keys
+  * that it does not know (`id`, `object`, `role`, `type`, and others). [[OpenAiStreamChunk.parse]] reads a chunk that
+  * the codec cannot read with [[OpenAiStreamChunk.lenient]], which reads the fields one at a time. An example of such a
+  * chunk is a chunk with one field of the wrong type.
   *
-  * The domain mapping to `LmChunk` lives on the DTO, reading fields only.
+  * [[toLmChunk]] gives the `LmChunk` of a chat chunk, and [[toTextLmChunk]] the `LmChunk` of a completions chunk. They
+  * only read the fields. An empty finish reason counts as no finish reason (upstream `if finish_raw:` in
+  * `parse_stream_events`).
   *
   * @param error
   *   the `error` value of an error event. It stays JSON, because the providers do not agree on its shape: a code can be
@@ -33,31 +37,51 @@ private[providers] final case class OpenAiStreamChunk(
     * (upstream `parse_stream_events`).
     */
   def errorObject: Option[DynamicValue.Record] =
-    error.flatMap(DynamicJson.asRecord)
+    error.flatMap(DynamicValues.asRecord)
 
-  /** Text, finish reason and tool-call deltas come from the first choice (OpenAI streams one choice per chunk); usage
-    * rides the final, choice-less chunk.
+  /** The text, the reasoning, the finish reason, and the tool-call deltas come from the first choice: OpenAI sends one
+    * choice in each chunk. The usage comes in the last chunk, which has no choice.
     */
-  def toLmChunk: LmChunk =
+  def toLmChunk: LmChunk = lmChunk(choices.headOption.flatMap(_.delta).flatMap(_.content))
+
+  /** The `LmChunk` of a completions chunk: as [[toLmChunk]], but the text is the `text` of the first choice. A
+    * completions choice has no `delta`, so its chunk has no reasoning.
+    */
+  def toTextLmChunk: LmChunk = lmChunk(choices.headOption.flatMap(_.text))
+
+  private def lmChunk(text: Option[String]): LmChunk =
     val choice = choices.headOption
     LmChunk(
-      text = choice.flatMap(_.delta).flatMap(_.content).getOrElse(""),
-      finishReason = choice.flatMap(_.finishReason),
+      text = text.getOrElse(""),
+      reasoning = choice.flatMap(_.delta).fold("")(_.reasoningText),
+      finishReason = choice.flatMap(_.finishReason).filter(_.nonEmpty),
       usage = usage.map(_.toLmUsage),
       toolCalls = choice.flatMap(_.delta).map(_.toLmToolCallDeltas).getOrElse(Vector.empty)
     )
 
+/** One choice of a stream chunk. A chat choice has a `delta`, and a completions choice has a `text`. */
 private[providers] final case class OpenAiStreamChoice(
     delta       : Option[OpenAiStreamDelta] = None,
+    text        : Option[String]            = None,
     finishReason: Option[String]            = None
 ) derives Schema
 
+/** One delta of a chat stream.
+  *
+  * A `reasoning` value that is not a text fails the typed codec, as each field of the wrong type does. Thus
+  * [[OpenAiStreamChunk.parse]] reads that chunk with [[OpenAiStreamChunk.lenient]], which removes only that value.
+  */
 private[providers] final case class OpenAiStreamDelta(
-    content  : Option[String]               = None,
-    toolCalls: Vector[OpenAiStreamToolCall] = Vector.empty
+    content         : Option[String]               = None,
+    reasoningContent: Option[String]               = None,
+    reasoning       : Option[String]               = None,
+    toolCalls       : Vector[OpenAiStreamToolCall] = Vector.empty
 ) derives Schema:
 
-  /** OpenAI omits the explicit `index` on some deltas; fall back to the array position, matching the prior parser. */
+  /** The reasoning of this delta ([[ChatWire.reasoning]]). */
+  def reasoningText: String = ChatWire.reasoning(reasoningContent, reasoning)
+
+  /** OpenAI does not send the `index` of each delta. A delta with no `index` gets its position in the array. */
   def toLmToolCallDeltas: Vector[LmToolCallDelta] =
     toolCalls.zipWithIndex.map { case (call, fallbackIdx) =>
       LmToolCallDelta(
@@ -85,54 +109,65 @@ private[providers] object OpenAiStreamChunk:
   /** The finish reason that [[lenient]] gives for a `finish_reason` value that is not a string. */
   private val stop = "stop"
 
-  /** Parse one SSE `data:` JSON object into an `OpenAiStreamChunk`. */
-  def decode(json: String): Either[DspyError, OpenAiStreamChunk] =
-    codec.decode(json) match
-      case Right(chunk) => Right(chunk)
-      case Left(err)    => Left(ParseError("json", s"Invalid OpenAI stream chunk: ${err.toString.take(200)}"))
+  /** The chunk of one SSE `data:` JSON text. The typed codec reads the text first. A text that the codec cannot read
+    * gives the chunk of [[lenient]] when the text is a JSON object, and `None` when it is an other JSON value (upstream
+    * skips a JSON value that is not an object). A text that is not JSON is a `ParseError`. The stream parser reads the
+    * error object of each chunk ([[OpenAiStreamChunk.errorObject]]), so one check covers the two readers.
+    */
+  def parse(data: String): Either[DspyError, Option[OpenAiStreamChunk]] =
+    codec.decode(data) match
+      case Right(chunk) => Right(Some(chunk))
+      case Left(_)      => DynamicJson.decode(data).map {
+          case record: DynamicValue.Record => Some(lenient(record))
+          case _                           => None
+        }
 
-  /** The chunk of a JSON object that [[decode]] cannot read. Each field of the wrong type is dropped, and the other
-    * fields stay (upstream `parse_stream_events` in `dspy/_vendor/lm15/providers/openai_chat.py` reads each field with
-    * an `isinstance` check):
+  /** The chunk of a JSON object that the typed codec cannot read. Each field of the wrong type is dropped, and the
+    * other fields stay (upstream `parse_stream_events` in `dspy/_vendor/lm15/providers/openai_chat.py` reads each field
+    * with an `isinstance` check):
     *
     *   - The choice is the first element of `choices` when `choices` is an array and the element is an object.
-    *   - `delta` must be an object, and `content` a string.
+    *   - `delta` must be an object, and `content`, `reasoning_content`, and `reasoning` strings. The `text` of the
+    *     choice must be a string.
     *   - Each element of `tool_calls` that is an object gives a tool call. An `index` that is not a number (or the text
-    *     of a number) gives the position of the call in the array, as in [[decode]]. `id`, `function.name`, and
+    *     of a number) gives the position of the call in the array, as the typed codec does. `id`, `function.name`, and
     *     `function.arguments` follow `str(value or "")` ([[PythonStr.orEmpty]]): a string stays, a value that is false
     *     in Python gives no value, and each other value gives the text of Python `str`, for example `True` or `1.5`.
-    *   - A string `finish_reason` stays. Each other value that is not null and not `false` gives `stop` (upstream gives
-    *     `stop` for a finish reason that is not in `_FINISH_REASON_MAP`).
+    *   - A string `finish_reason` that is not empty stays. An empty string, null, and `false` give no finish reason.
+    *     Each other value gives `stop` (upstream gives `stop` for a finish reason that is not in `_FINISH_REASON_MAP`).
     *   - `usage` must be an object. Its counts follow [[OpenAiUsage.fromDynamic]].
-    *
-    * The `error` object is not read here: the stream parser reads it first.
+    *   - `error` stays as it is, as in the typed codec.
     */
   def lenient(chunk: DynamicValue.Record): OpenAiStreamChunk =
-    val choice = DynamicJson.field(chunk, WireKeys.choices).map(DynamicJson.asSequence).flatMap(_.headOption)
-      .flatMap(DynamicJson.asRecord)
+    val choice = DynamicValues.sequenceAt(chunk, WireKeys.choices).headOption.flatMap(DynamicValues.asRecord)
     OpenAiStreamChunk(
       choices = choice.map(lenientChoice).toVector,
-      usage = DynamicJson.field(chunk, WireKeys.usage).flatMap(DynamicJson.asRecord).map(OpenAiUsage.fromDynamic)
+      usage =
+        DynamicValues.recordGet(chunk, WireKeys.usage).flatMap(DynamicValues.asRecord).map(OpenAiUsage.fromDynamic),
+      error = DynamicValues.recordGet(chunk, WireKeys.error)
     )
 
   private def lenientChoice(choice: DynamicValue.Record): OpenAiStreamChoice =
     OpenAiStreamChoice(
-      delta = DynamicJson.field(choice, WireKeys.delta).flatMap(DynamicJson.asRecord).map(lenientDelta),
-      finishReason = DynamicJson.field(choice, WireKeys.finishReason).flatMap(finishReasonOf)
+      delta = DynamicValues.recordGet(choice, WireKeys.delta).flatMap(DynamicValues.asRecord).map(lenientDelta),
+      text = textOf(choice, WireKeys.text),
+      finishReason = DynamicValues.recordGet(choice, WireKeys.finishReason).flatMap(finishReasonOf)
     )
 
   private def lenientDelta(delta: DynamicValue.Record): OpenAiStreamDelta =
-    val calls = DynamicJson.field(delta, WireKeys.toolCalls).map(DynamicJson.asSequence).getOrElse(Vector.empty)
+    val calls = DynamicValues.sequenceAt(delta, WireKeys.toolCalls)
     OpenAiStreamDelta(
       content = textOf(delta, WireKeys.content),
+      reasoningContent = textOf(delta, WireKeys.reasoningContent),
+      reasoning = textOf(delta, WireKeys.reasoning),
       toolCalls =
-        calls.zipWithIndex.flatMap((call, position) => DynamicJson.asRecord(call).map(lenientCall(_, position)))
+        calls.zipWithIndex.flatMap((call, position) => DynamicValues.asRecord(call).map(lenientCall(_, position)))
     )
 
   private def lenientCall(call: DynamicValue.Record, position: Int): OpenAiStreamToolCall =
-    val function = DynamicJson.field(call, WireKeys.function).flatMap(DynamicJson.asRecord)
+    val function = DynamicValues.recordGet(call, WireKeys.function).flatMap(DynamicValues.asRecord)
     OpenAiStreamToolCall(
-      index = Some(DynamicJson.field(call, WireKeys.index).flatMap(DynamicJson.asLong).fold(position)(_.toInt)),
+      index = Some(DynamicValues.recordGet(call, WireKeys.index).flatMap(DynamicValues.asLong).fold(position)(_.toInt)),
       id = pythonTextOf(call, WireKeys.id),
       function = function.map(f =>
         OpenAiStreamFunction(name = pythonTextOf(f, WireKeys.name), arguments = pythonTextOf(f, WireKeys.arguments))
@@ -143,11 +178,11 @@ private[providers] object OpenAiStreamChunk:
     value match
       case _: DynamicValue.Null.type                             => None
       case DynamicValue.Primitive(PrimitiveValue.Boolean(false)) => None
-      case other                                                 => DynamicJson.asString(other).orElse(Some(stop))
+      case other                                                 => DynamicValues.asString(other).fold(Some(stop))(reason => Option.when(reason.nonEmpty)(reason))
 
   private def textOf(record: DynamicValue.Record, key: String): Option[String] =
-    DynamicJson.field(record, key).flatMap(DynamicJson.asString)
+    DynamicValues.recordGet(record, key).flatMap(DynamicValues.asString)
 
   /** The value of `key` with the rule `str(value or "")` of upstream `parse_stream_events`. */
   private def pythonTextOf(record: DynamicValue.Record, key: String): Option[String] =
-    DynamicJson.field(record, key).flatMap(PythonStr.orEmpty)
+    DynamicValues.recordGet(record, key).flatMap(PythonStr.orEmpty)

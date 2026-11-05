@@ -53,7 +53,7 @@ class ExecutionAlgebraLawSuite extends munit.ScalaCheckSuite:
     yield LmUsage(total, prompt, completion, extras)
 
   property("RuntimeDelta is an ordered monoid") {
-    val monoid = Monoid[RuntimeDelta]
+    val monoid = summon[Monoid[RuntimeDelta]]
     Prop.forAll(genDelta, genDelta, genDelta) { (a, b, c) =>
       val associativity = monoid.associativity(a, b, c)
       val leftIdentity  = monoid.identityLeft(a)
@@ -65,7 +65,7 @@ class ExecutionAlgebraLawSuite extends munit.ScalaCheckSuite:
   }
 
   property("LmUsage is a pointwise commutative monoid") {
-    val monoid = Monoid[LmUsage]
+    val monoid = summon[Monoid[LmUsage]]
     Prop.forAll(genUsage, genUsage, genUsage) { (a, b, c) =>
       val associativity = monoid.associativity(a, b, c)
       val leftIdentity  = monoid.identityLeft(a)
@@ -97,7 +97,7 @@ class ExecutionAlgebraLawSuite extends munit.ScalaCheckSuite:
 
   property("Executed obeys the categorical writer-monad laws and their derived bind form") {
     Prop.forAll(Gen.choose(-1000, 1000), genDelta) { (value, delta) =>
-      val M                        = ScalaMonad[Executed]
+      val M                        = summon[ScalaMonad[Executed]]
       val executed                 = Executed(value, delta)
       def f(n: Int): Executed[Int] = Executed(n + 1, RuntimeDelta(Vector(trace("f"))))
       def g(n: Int): Executed[Int] = Executed(n * 2, RuntimeDelta(Vector(trace("g"))))
@@ -135,8 +135,8 @@ class ExecutionAlgebraLawSuite extends munit.ScalaCheckSuite:
     val delta    = RuntimeDelta(Vector(trace("step")), Vector(history("lm")))
     val context  = RuntimeContext(
       numThreads = Some(ThreadCount(4)),
-      callbackMetadata = metadata,
-      captureFailureTraces = true,
+      callbackMetadata = Some(metadata),
+      captureFailureTraces = Some(true),
       asyncTaskId = Some("task"),
       trace = delta.trace,
       history = delta.history
@@ -144,7 +144,11 @@ class ExecutionAlgebraLawSuite extends munit.ScalaCheckSuite:
 
     assertEquals(
       context.config,
-      RuntimeConfig(numThreads = Some(ThreadCount(4)), callbackMetadata = metadata, captureFailureTraces = true)
+      RuntimeConfig(
+        numThreads = Some(ThreadCount(4)),
+        callbackMetadata = Some(metadata),
+        captureFailureTraces = Some(true)
+      )
     )
     assertEquals(context.scope, RuntimeScope(asyncTaskId = Some("task")))
     assertEquals(context.delta, delta)

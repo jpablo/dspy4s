@@ -7,11 +7,13 @@ import dspy4s.core.contracts.{
   DynamicValues,
   FieldSpec,
   PredictorKey,
+  PythonText,
   RuntimeContext,
   SignatureLayout,
   ThreadCount,
   TraceEntry,
-  TypeRef
+  TypeRef,
+  ValidationError
 }
 import dspy4s.core.data.{Example, RawPrediction}
 import dspy4s.core.decisions.{DecisionEvidence, DecisionEvidenceLog, DecisionSettings}
@@ -166,8 +168,8 @@ class ReAnchorUpstreamSuite extends FunSuite:
     override def supportsDecisionRequests: Boolean                                             = true
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       synchronized { requests = requests :+ request }
-      DecisionRequests.parts(request).map { (state, questions) =>
-        val answers = DynamicValues.recordKeys(questions).map(name => name -> answer(state, name))
+      request.decision.toRight(ValidationError("not a decision request")).map { payload =>
+        val answers = DynamicValues.recordKeys(payload.questions).map(name => name -> answer(payload.state, name))
         DecisionRequests.response(DynamicValues.recordFromEntries(answers), None, Some("jev-test"))
       }
 
@@ -194,9 +196,10 @@ class ReAnchorUpstreamSuite extends FunSuite:
   private val matchLayout = layoutOf("pair", matchField)
   private val kindField   = FieldSpec("kind", enumValues = Vector("x", "y"), description = Some("Which kind?"))
   private val kindLayout  = layoutOf("item", kindField)
+  private val rateLevels  = Vector("low", "mid", "high")
   private val rateLayout  = layoutOf(
     "item",
-    FieldSpec("rating", TypeRef.score, description = Some("How good is it?"), enumValues = Vector("low", "mid", "high"))
+    FieldSpec("rating", TypeRef.score, description = Some("How good is it?"), enumValues = rateLevels)
   )
   private val noteLayout = layoutOf("pair", FieldSpec("note", description = Some("A note.")))
 
@@ -217,10 +220,10 @@ class ReAnchorUpstreamSuite extends FunSuite:
       if textOf(values, field) == example.get(field).map(DynamicValues.renderText) then 1.0 else 0.0
     )
 
-  /** 1 when the level of the Score `rating` is the label. */
+  /** 1 when the level of the Score `rating` is the label, a level index. The decode gives the level by its name. */
   private val levelMetric: Metric = metricOf("level") { (example, values) =>
     val level = DynamicValues.recordGet(values, "rating").collect { case r: DynamicValue.Record => r }
-      .flatMap(textOf(_, "level"))
+      .flatMap(textOf(_, "level")).map(name => rateLevels.indexOf(name).toString)
     if level == example.get("rating").map(DynamicValues.renderText) then 1.0 else 0.0
   }
 
@@ -254,7 +257,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
       trainset: Vector[Example],
       metric  : Metric,
       settings: RuntimeContext,
-      config  : ReAnchorConfig = ReAnchorConfig(numThreads = 2)
+      config  : ReAnchorConfig = ReAnchorConfig(numThreads = Some(ThreadCount(2)))
   ): (P, ReAnchorReport) =
     run(settings)(ReAnchor[P](metric, config).calibrate(program, trainset)).fold(error => fail(error.message), identity)
 
@@ -292,7 +295,10 @@ class ReAnchorUpstreamSuite extends FunSuite:
   test("compile leaves the student unchanged") {
     val student = DynamicPredict(matchLayout)
     val result  = run(context(FakeSystemOne(tricky))) {
-      ReAnchor[DynamicPredict](equalOn("match"), ReAnchorConfig(numThreads = 2)).compile(student, trickyTrain)
+      ReAnchor[DynamicPredict](
+        equalOn("match"),
+        ReAnchorConfig(numThreads = Some(ThreadCount(2)))
+      ).compile(student, trickyTrain)
     }.fold(error => fail(error.message), identity)
     assertEquals(student.decisions, Map.empty[String, DecisionSettings])
     assert(!(result.bestProgram eq student))
@@ -337,7 +343,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
       trickyTrain,
       equalOn("match"),
       context(ComputedLm(generative), cached = false),
-      ReAnchorConfig(numThreads = 2, requireCache = false)
+      ReAnchorConfig(numThreads = Some(ThreadCount(2)), requireCache = false)
     )
     assertEquals(student.decisions, Map.empty[String, DecisionSettings])
     assertEquals(program.decisions, Map("match" -> DecisionSettings(threshold = Some(0.8))))
@@ -356,7 +362,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
         trickyTrain,
         equalOn("match"),
         context(ComputedLm(right), cached = false),
-        ReAnchorConfig(numThreads = 2, requireCache = false)
+        ReAnchorConfig(numThreads = Some(ThreadCount(2)), requireCache = false)
       )
       assertEquals(program.decisions, Map.empty[String, DecisionSettings], s"accurate $accurate")
       val row = onlyRow(report)
@@ -379,7 +385,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
       pairs(names),
       equalOn("match"),
       context(ComputedLm(oneMiss), cached = false),
-      ReAnchorConfig(numThreads = 2, requireCache = false)
+      ReAnchorConfig(numThreads = Some(ThreadCount(2)), requireCache = false)
     )
     assertEquals(program.decisions, Map.empty[String, DecisionSettings])
     assertEquals(onlyRow(report).skipped, Some(ReAnchor.SkippedReason))
@@ -396,7 +402,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
         trickyTrain,
         equalOn("match"),
         outer,
-        ReAnchorConfig(numThreads = 2, requireCache = false)
+        ReAnchorConfig(numThreads = Some(ThreadCount(2)), requireCache = false)
       )
       assertEquals(fitted.judge.decisions, Map("match" -> DecisionSettings(threshold = Some(0.8))), client.id)
       val different = run(outer)(runInputs(fitted, DynamicValues.record("pair" := "different")))
@@ -491,14 +497,14 @@ class ReAnchorUpstreamSuite extends FunSuite:
   }
 
   test("the calibration does not change the request") {
-    Vector(1, 2).foreach { threads =>
+    Vector(ThreadCount(1), ThreadCount(2)).foreach { threads =>
       val model = FakeSystemOne(leaning)
       val _     = calibrate(
         DynamicPredict(matchLayout),
         pairs(Seq("same", "different")),
         equalOn("match"),
         context(model, cached = false),
-        ReAnchorConfig(numThreads = threads, requireCache = false)
+        ReAnchorConfig(numThreads = Some(threads), requireCache = false)
       )
       assertEquals(model.requests.distinct.size, 2, s"$threads threads: one distinct request for each example")
     }
@@ -591,12 +597,12 @@ class ReAnchorUpstreamSuite extends FunSuite:
       train,
       equalOn("match"),
       context(model),
-      ReAnchorConfig(numThreads = 4)
+      ReAnchorConfig(numThreads = Some(ThreadCount(4)))
     )
     val row = onlyRow(report)
-    assertEquals(row.observed.get("distinct"), Some(200.0))
+    assertEquals(row.observed.distinct, Some(200))
     // The midpoints of the gaps, and the zero end.
-    assert(row.observed.getOrElse("candidates", Double.MaxValue) <= ReAnchorSearch.MaxCandidates + 1, row.toString)
+    assert(row.observed.candidates <= ReAnchorSearch.MaxCandidates + 1, row.toString)
     val t = threshold(program).getOrElse(fail("no threshold"))
     assert(0.55 < t && t <= 0.6 && row.trainScore >= 0.97, row.toString)
   }
@@ -604,7 +610,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
   test("the evidence is recorded for the predictor that decoded it") {
     val model                = FakeSystemOne((_, name) => if name == "match" then noul(0.9) else choice("x" -> 0.6, "y" -> 0.4))
     val program              = RaTwo(DynamicPredict(matchLayout), DynamicPredict(kindLayout))
-    val keys                 = summon[OptimizableStructure[RaTwo]].readIdentified(program).map(_.metadata.key)
+    val keys                 = summon[OptimizableStructure[RaTwo]].readIdentified(program).map(_.metadata)
     def call(names: String*) =
       runInputs(program, DynamicValues.record("items" -> DynamicValue.Sequence(Chunk.from(names.map(text)))))
     val (_, log) = run(context(model))(DecisionEvidenceLog.recording(call("a", "b", "c")))
@@ -664,7 +670,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
       context(model)
     )
     assertEquals(program.decisions, Map.empty[String, DecisionSettings])
-    assert(onlyRow(report).foldCheck._2 >= 1, report.toString)
+    assert(onlyRow(report).foldCheck.failed >= 1, report.toString)
   }
 
   test("Choice weights stay when their whole gain is one example") {
@@ -682,7 +688,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
       context(model)
     )
     assertEquals(program.decisions, Map.empty[String, DecisionSettings])
-    assert(onlyRow(report).foldCheck._2 >= 1, report.toString)
+    assert(onlyRow(report).foldCheck.failed >= 1, report.toString)
   }
 
   // ── the port ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -697,7 +703,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
     )
     val (answer, log) = run(context(model))(DecisionEvidenceLog.recording(program(RaPairInput("same"))))
     assertEquals(answer.map(_.output.same), Right(true))
-    val key = summon[OptimizableLeaf[ChainOfThought[RaPairInput, RaSameOutput]]].metadata(program).key
+    val key = summon[OptimizableLeaf[ChainOfThought[RaPairInput, RaSameOutput]]].metadata(program)
     assertEquals(key.moduleName, "chain_of_thought")
     assertEquals(log, Vector(DecisionEvidenceLog.Entry(key, "same", DecisionEvidence.Noul(0.9))))
   }
@@ -732,7 +738,7 @@ class ReAnchorUpstreamSuite extends FunSuite:
     )
     assertEquals(ReAnchorSearch.fsum(Vector(0.1, 0.2, 0.3, 1e100, -1e100)), 0.6)
     assertEquals(
-      Vector((0.35, 1), (0.45, 1), (0.65, 1), (2.675, 2), (0.125, 2)).map(ReAnchorSearch.roundTo),
+      Vector((0.35, 1), (0.45, 1), (0.65, 1), (2.675, 2), (0.125, 2)).map(PythonText.round),
       Vector(0.3, 0.5, 0.7, 2.67, 0.12)
     )
   }

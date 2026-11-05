@@ -2,7 +2,6 @@ package dspy4s.programs.retrievers
 
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.RuntimeError
 import dspy4s.lm.contracts.Embedder
 
 /** In-memory embedding-similarity retriever over a passage corpus (a port of `dspy.retrievers.Embeddings`, PORT_GAPS
@@ -28,18 +27,12 @@ final class EmbeddingsRetriever private (
 ):
   /** The top-`k` passages most similar to `query`, best first, with corpus indices and similarity scores. */
   def search(query: String)(using RuntimeContext): Either[DspyError, EmbeddingsRetriever.Result] =
-    embedder.embed(Vector(query)).flatMap { rows =>
-      rows.headOption.toRight(RuntimeError("embeddings_retriever", "embedder returned no rows for the query")).map {
-        row =>
-          val q      = if normalize then Similarity.normalize(row.toArray) else row.toArray
-          val scored = Vector.tabulate(corpusVectors.length)(i => (Similarity.dot(q, corpusVectors(i)), i))
-          val top    = scored.sortBy { case (score, i) => (-score, i) }.take(k)
-          EmbeddingsRetriever.Result(
-            passages = top.map { case (_, i) => corpus(i) },
-            indices = top.map(_._2),
-            scores = top.map(_._1)
-          )
-      }
+    Similarity.topK(embedder, "embeddings_retriever", query, corpusVectors, k, normalize).map { top =>
+      EmbeddingsRetriever.Result(
+        passages = top.map { case (_, i) => corpus(i) },
+        indices = top.map(_._2),
+        scores = top.map(_._1)
+      )
     }
 
 object EmbeddingsRetriever:

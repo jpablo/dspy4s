@@ -27,6 +27,7 @@ import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable.ArrayBuffer
+import scala.util.Random
 
 /** Two leaves, three predictor calls: `stepper` runs two times, then `finisher` runs one time. Top-level so
   * `OptimizableStructure.derived` sees its Mirror field labels.
@@ -86,8 +87,8 @@ class GepaTraceAssociationSuite extends FunSuite:
     finisher = predict("question, note -> answer", "Answer with the note.")
   )
 
-  private val stepperKey  = summon[OptimizableLeaf[DynamicPredict]].metadata(pipeline.stepper).key
-  private val finisherKey = summon[OptimizableLeaf[DynamicPredict]].metadata(pipeline.finisher).key
+  private val stepperKey  = summon[OptimizableLeaf[DynamicPredict]].metadata(pipeline.stepper)
+  private val finisherKey = summon[OptimizableLeaf[DynamicPredict]].metadata(pipeline.finisher)
 
   private val dataset: Vector[Example] = Vector(
     Example(
@@ -103,7 +104,7 @@ class GepaTraceAssociationSuite extends FunSuite:
       val seed             = Candidate.seed(pipeline)
       val batch            = adapter.evaluate(dataset, seed, captureTraces = true)
       adapter
-        .makeReflectiveDataset(seed, batch, Vector(OptimizableId(0), OptimizableId(1)))
+        .makeReflectiveDataset(seed, batch, Vector(OptimizableId(0), OptimizableId(1)), new Random(GepaRandom.mix(0L)))
         .fold(error => fail(error.message), identity)
     }
 

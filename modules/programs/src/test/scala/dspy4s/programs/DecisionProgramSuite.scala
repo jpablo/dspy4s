@@ -121,7 +121,6 @@ class DecisionProgramSuite extends FunSuite:
       Some(DecisionAdapter.evidenceSchema(DecisionKind.Choice(Vector("billing", "technical"))))
     )
     assertEquals(at(properties, "native_urgent"), Some(DynamicValues.record("type" := "boolean")))
-    assertEquals(program.erase.decisions, program.decisions, "erase keeps the settings")
   }
 
   test("an evidence value that does not parse gives one more call with the fallback adapter, with evidence") {

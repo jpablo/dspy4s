@@ -40,6 +40,6 @@ OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.tutorials.react_vs_r
 
 ## Notes
 
-The interaction, contraindication, and drug-class tables are small illustrative fixtures, not a real clinical database, and this example is not medical advice. The example uses the OpenAI-compatible route through `Demo` (`OPENAI_API_KEY`, with an optional `DSPY_MODEL`); any OpenAI-compatible endpoint works. The `RLM` side needs Deno on the PATH for its Pyodide sandbox; without it, the run executes the ReAct side only and prints how to enable the RLM side. Exact coverage numbers vary from run to run, so the example prints what each program achieved rather than asserting fixed totals.
+The interaction, contraindication, and drug-class tables are small illustrative fixtures, not a real clinical database, and this example is not medical advice. The example uses the OpenAI-compatible route through `Demo` (`OPENAI_API_KEY`, with an optional `DSPY_MODEL`); for another OpenAI-compatible endpoint, set `OPENAI_BASE_URL`. The `RLM` side needs Deno on the PATH for its Pyodide sandbox; without it, the run executes the ReAct side only and prints how to enable the RLM side. Exact coverage numbers vary from run to run, so the example prints what each program achieved rather than asserting fixed totals.
 
 Full source: [ReactVsRlm.scala](https://github.com/jpablo/dspy4s/blob/main/modules/examples/src/main/scala/dspy4s/examples/tutorials/react_vs_rlm/ReactVsRlm.scala)

@@ -12,7 +12,7 @@ class TruncateOnOverflowSuite extends munit.FunSuite:
 
   test("no overflow: runs once, returns the result with the original view") {
     var calls          = 0
-    val (result, used) = truncateOnOverflow(Vector(1, 2, 3), maxAttempts = 3)(_.mkString(",")) { _ =>
+    val (result, used) = truncateOnOverflow(Vector(1, 2, 3), maxAttempts = 3) { _ =>
       calls += 1
       Right("ok")
     }
@@ -22,7 +22,8 @@ class TruncateOnOverflowSuite extends munit.FunSuite:
   }
 
   test("overflow then success: drops the oldest entry and reruns on the truncated view") {
-    val (result, used) = truncateOnOverflow(Vector(1, 2, 3), maxAttempts = 3)(_.mkString(",")) { s =>
+    val (result, used) = truncateOnOverflow(Vector(1, 2, 3), maxAttempts = 3) { view =>
+      val s = view.mkString(",")
       if s == "1,2,3" then Left(cwe) else Right(s)
     }
     assertEquals(result, Right("2,3"): Either[DspyError, String])
@@ -31,7 +32,7 @@ class TruncateOnOverflowSuite extends munit.FunSuite:
 
   test("persistent overflow: exhausts maxAttempts, returns the last Left with the truncated view") {
     var calls          = 0
-    val (result, used) = truncateOnOverflow(Vector(1, 2, 3), maxAttempts = 2)(_.mkString(",")) { _ =>
+    val (result, used) = truncateOnOverflow(Vector(1, 2, 3), maxAttempts = 2) { _ =>
       calls += 1
       Left(cwe)
     }
@@ -42,7 +43,7 @@ class TruncateOnOverflowSuite extends munit.FunSuite:
 
   test("empty view overflow: stops immediately, no infinite loop") {
     var calls          = 0
-    val (result, used) = truncateOnOverflow(Vector.empty[Int], maxAttempts = 5)(_.mkString(",")) { _ =>
+    val (result, used) = truncateOnOverflow(Vector.empty[Int], maxAttempts = 5) { _ =>
       calls += 1
       Left(cwe)
     }
@@ -53,7 +54,7 @@ class TruncateOnOverflowSuite extends munit.FunSuite:
 
   test("a non-overflow error is returned immediately, without retrying") {
     var calls       = 0
-    val (result, _) = truncateOnOverflow(Vector(1, 2, 3), maxAttempts = 3)(_.mkString(",")) { _ =>
+    val (result, _) = truncateOnOverflow(Vector(1, 2, 3), maxAttempts = 3) { _ =>
       calls += 1
       Left(RuntimeError("c", "boom"))
     }
@@ -66,8 +67,8 @@ class TruncateOnOverflowSuite extends munit.FunSuite:
 
   test("overflow with one entry: stops with the overflow error and does not run on an empty view") {
     val rendered       = scala.collection.mutable.ArrayBuffer.empty[String]
-    val (result, used) = truncateOnOverflow(Vector(1), maxAttempts = 3)(_.mkString(",")) { text =>
-      rendered += text
+    val (result, used) = truncateOnOverflow(Vector(1), maxAttempts = 3) { view =>
+      rendered += view.mkString(",")
       Left(cwe)
     }
     assertEquals(result, Left(cwe): Either[DspyError, String])
@@ -77,8 +78,8 @@ class TruncateOnOverflowSuite extends munit.FunSuite:
 
   test("overflow with two entries: drops one entry, then stops at the last entry") {
     val rendered       = scala.collection.mutable.ArrayBuffer.empty[String]
-    val (result, used) = truncateOnOverflow(Vector(1, 2), maxAttempts = 5)(_.mkString(",")) { text =>
-      rendered += text
+    val (result, used) = truncateOnOverflow(Vector(1, 2), maxAttempts = 5) { view =>
+      rendered += view.mkString(",")
       Left(cwe)
     }
     assertEquals(result, Left(cwe): Either[DspyError, String])

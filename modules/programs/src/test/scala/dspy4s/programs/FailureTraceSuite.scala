@@ -38,7 +38,7 @@ class FailureTraceSuite extends FunSuite:
 
   test("captureFailureTraces records a failure entry with the raw response") {
     RuntimeEnvironment.withSettings(
-      RuntimeContext(lm = Some(new BadLm), adapter = Some(ChatAdapter()), captureFailureTraces = true)
+      RuntimeContext(lm = Some(new BadLm), adapter = Some(ChatAdapter()), captureFailureTraces = Some(true))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val result           = DynamicPredict(layout = layout)(call)

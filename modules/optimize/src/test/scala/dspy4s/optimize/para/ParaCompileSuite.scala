@@ -2,13 +2,12 @@ package dspy4s.optimize.para
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.:=
-import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, RuntimeContext, SignatureLayout}
+import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, RuntimeContext}
 import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
-import dspy4s.optimize.{COPROConfig, CoproBreadth, QAInput, QAOutput, RoundCount}
+import dspy4s.optimize.{COPRO, COPROConfig, CoproBreadth, QAInput, QAOutput, RoundCount}
 import dspy4s.programs.ProgramRunner
-import dspy4s.optimize.para.ParaCompile.*
 import dspy4s.programs.DynamicSignature
 import dspy4s.programs.strategies.Predict
 import dspy4s.programs.algebra.{Program, SomeProgram}
@@ -16,11 +15,11 @@ import dspy4s.signatures.Signature
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
-/** Offline probe of [[ParaCompile]]: COPRO driven through a packaged [[Program]] entry point, over a
-  * `Predict[QAInput, QAOutput]` student. The scripted LM / instruction-aware adapter mirror `COPROSuite` (instruction
-  * generation keyed by rolloutId; the task answers gold only under the winning instruction). Also pins the distinction
-  * between record-running and optimization: an upcast `SomeProgram[I, O]` remains runnable but has erased the arity
-  * required by optimizers, while a shape-preserving composed pipeline remains both runnable and optimizable.
+/** Offline probe of COPRO driven through a packaged [[Program]] entry point, over a `Predict[QAInput, QAOutput]`
+  * student. The scripted LM / instruction-aware adapter mirror `COPROSuite` (instruction generation keyed by rolloutId;
+  * the task answers gold only under the winning instruction). Also pins the distinction between record-running and
+  * optimization: an upcast `SomeProgram[I, O]` remains runnable but has erased the arity required by optimizers, while
+  * a shape-preserving composed pipeline remains both runnable and optimizable.
   */
 class ParaCompileSuite extends FunSuite:
 
@@ -36,7 +35,7 @@ class ParaCompileSuite extends FunSuite:
     "INSTR_E: be casual"
   )
 
-  private val instrGenMarker = "OPTIMIZE_THE_INSTRUCTION"
+  private val instrGenMarker = "You are an instruction optimizer for large language models."
 
   private val gold: Map[String, String] = Map("q1" -> "a1", "q2" -> "a2", "q3" -> "a3")
 
@@ -54,10 +53,10 @@ class ParaCompileSuite extends FunSuite:
         Vector(Message(role = MessageRole.User, text = Some(s"INSTRUCTION=[$instr] QUESTION=[$q] BASIC=[$bi]")))
       ))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      val outField = layout.outputFields.headOption.map(_.name).getOrElse("answer")
+      val outField = invocation.layout.outputFields.headOption.map(_.name).getOrElse("answer")
       Right(ParsedOutput(values = rec(outField := output.text)))
 
   private final class ScriptedLm extends LanguageModel:
@@ -104,8 +103,7 @@ class ParaCompileSuite extends FunSuite:
       metric = new dspy4s.evaluate.metrics.ExactMatch(answerField = "answer"),
       breadth = CoproBreadth(5),
       depth = RoundCount(1),
-      seed = seed,
-      instructionMarker = instrGenMarker
+      seed = seed
     )
 
   // ── 1. Happy path: the packaged entry point finds the winner; assertions via the parameterized surface ────────────
@@ -114,7 +112,7 @@ class ParaCompileSuite extends FunSuite:
     val student = Program.of(Predict[QAInput, QAOutput](taskSignature))
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result           = student.copro(config(), trainset)
+      val result           = new COPRO[Program[QAInput, QAOutput, 1]](config()).compile(student, trainset)
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val report = result.toOption.get
       // The whole assertion goes through the parameterized surface: no OptimizableStructure summon at the call site.
@@ -132,7 +130,7 @@ class ParaCompileSuite extends FunSuite:
       val student = Program.of(Predict[QAInput, QAOutput](taskSignature))
       RuntimeEnvironment.withSettings(settings) {
         given RuntimeContext = RuntimeEnvironment.current
-        student.copro(config(seed = 42L), trainset).toOption
+        new COPRO[Program[QAInput, QAOutput, 1]](config(seed = 42L)).compile(student, trainset).toOption
           .flatMap(_.bestProgram.params.headOption)
           .flatMap(_.instructions)
       }
@@ -170,8 +168,7 @@ class ParaCompileSuite extends FunSuite:
       metric = new dspy4s.evaluate.metrics.ExactMatch(answerField = "question"),
       breadth = CoproBreadth(5),
       depth = RoundCount(1),
-      seed = 0L,
-      instructionMarker = instrGenMarker
+      seed = 0L
     )
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
@@ -180,7 +177,7 @@ class ParaCompileSuite extends FunSuite:
       val ran = summon[ProgramRunner[Program[QAInput, QAInput, 2]]].run(pipeline, rec("question" := "q1"))
       assert(ran.isRight, s"record-run of the composed pipeline failed: ${ran.left.toOption}")
       // And the whole pipeline is optimizable: COPRO sees both predicts through the packaged evidence.
-      val result = pipeline.copro(pipelineConfig, trainset)
+      val result = new COPRO[Program[QAInput, QAInput, 2]](pipelineConfig).compile(pipeline, trainset)
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val report = result.toOption.get
       assertEquals(report.metadata.get("optimizable_leaves"), Some(2))
@@ -195,11 +192,11 @@ class ParaCompileSuite extends FunSuite:
     // bundle mints fresh In/Out types with their codec, so the SAME packaged entry point (OptimizableStructure +
     // ProgramRunner over Program) drives COPRO with no dynamic-specific plumbing anywhere.
     val bundle = DynamicSignature.parse("question -> answer", "INSTR_INITIAL: default").toOption.get
-    import bundle.given // the object codec, for the record-boundary runner `.copro` demands
+    import bundle.given // the object codec, for the record-boundary runner that COPRO demands
     val student = bundle.packaged()
     RuntimeEnvironment.withSettings(settings) {
       given RuntimeContext = RuntimeEnvironment.current
-      val result           = student.copro(config(), trainset)
+      val result           = new COPRO[Program[bundle.In, bundle.Out, 1]](config()).compile(student, trainset)
       assert(result.isRight, s"compile failed: ${result.left.toOption}")
       val report = result.toOption.get
       assertEquals(report.bestProgram.params.head.instructions, Some(winningInstruction))
@@ -217,7 +214,7 @@ class ParaCompileSuite extends FunSuite:
       val ran              = summon[ProgramRunner[Program[QAInput, QAOutput, 1]]]
         .run(pipeline, rec("question" := "q1"))
       assert(ran.isRight, s"record-run of the id-headed pipeline failed: ${ran.left.toOption}")
-      val report = pipeline.copro(config(), trainset).toOption.get
+      val report = new COPRO[Program[QAInput, QAOutput, 1]](config()).compile(pipeline, trainset).toOption.get
       assertEquals(report.bestProgram.params.head.instructions, Some(winningInstruction))
       assertEquals(report.metadata.get("best_score"), Some(100.0))
     }

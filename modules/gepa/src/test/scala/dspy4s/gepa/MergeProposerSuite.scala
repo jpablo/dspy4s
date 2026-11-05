@@ -79,6 +79,52 @@ class MergeProposerSuite extends FunSuite:
   private val hinter   = Map(first -> Some("Use TOKEN1 to produce a good_hint."), second -> Some("Stage two."))
   private val answerer = Map(first -> Some("Stage one."), second -> Some("Use TOKEN2 with the good_hint to answer."))
 
+  // ── The schedule ────────────────────────────────────────────────────────────────────────────────────────────────
+
+  private def merged(accepted: Boolean): MergeProposal =
+    MergeProposal(
+      candidate = Map.empty,
+      parents = Vector(1, 2),
+      accepted = accepted,
+      metricCalls = 5,
+      triplet = (1, 2, 0),
+      description = (1, 2, Vector(1, 2))
+    )
+
+  test("a reflective iteration schedules one merge for each added candidate, below the limit") {
+    val limit = MergeInvocationLimit(2)
+    assertEquals(
+      MergeSchedule.initial.afterReflective(added = 2, limit),
+      MergeSchedule(mergesDue = 2, lastIterFoundNewProgram = true)
+    )
+    assertEquals(
+      MergeSchedule(mergesDue = 2, lastIterFoundNewProgram = true).afterReflective(added = 0, limit),
+      MergeSchedule(mergesDue = 2, lastIterFoundNewProgram = false)
+    )
+    // At the limit, the iteration schedules no merge, and the frontier still changed.
+    assertEquals(
+      MergeSchedule(totalMergesTested = 2).afterReflective(added = 1, limit),
+      MergeSchedule(totalMergesTested = 2, lastIterFoundNewProgram = true)
+    )
+  }
+
+  test("a merge is due when one is scheduled and the last iteration added a candidate") {
+    assert(MergeSchedule(mergesDue = 1, lastIterFoundNewProgram = true).shouldAttempt)
+    assert(!MergeSchedule(mergesDue = 0, lastIterFoundNewProgram = true).shouldAttempt)
+    assert(!MergeSchedule(mergesDue = 1, lastIterFoundNewProgram = false).shouldAttempt)
+  }
+
+  test("an examined merge goes to the schedule, and only an accepted merge consumes a scheduled merge") {
+    val due       = MergeSchedule(mergesDue = 2, totalMergesTested = 1, lastIterFoundNewProgram = true)
+    val performed = due.copy(
+      lastIterFoundNewProgram = false,
+      performedTriplets = Set((1, 2, 0)),
+      performedDescriptions = Set((1, 2, Vector(1, 2)))
+    )
+    assertEquals(due.afterMerge(merged(accepted = false)), performed)
+    assertEquals(due.afterMerge(merged(accepted = true)), performed.copy(mergesDue = 1, totalMergesTested = 2))
+  }
+
   // ── Pure crossover helpers ──────────────────────────────────────────────────────────────────────────────────
 
   test("crossover takes each component from whichever descendant improved it (complementary gains stacked)") {
@@ -139,24 +185,17 @@ class MergeProposerSuite extends FunSuite:
     val seedCand = Map(first -> Some("Stage one."), second -> Some("Stage two."))
     val cand1    = Map(first -> Some("Use TOKEN1 to produce a good_hint."), second -> Some("Stage two."))
     val cand2    = Map(first -> Some("Stage one."), second -> Some("Use TOKEN2 with the good_hint to answer."))
-    val state    = GepaState(
+    val state    = GepaStateFixtures.state(
       candidates = CandidatePool.applyUnsafe(Vector(seedCand, cand1, cand2)),
       valSubscores = Vector(Vector(0.0, 0.0), Vector(1.0, 0.0), Vector(0.0, 1.0)),
       parents = Vector(Vector.empty, Vector(0), Vector(0)),
       totalMetricCalls = MetricCallCount(0)
     )
-    // The validation set has 2 examples, so the test sets the overlap floor below gepa's default of 5.
-    val merger = new MergeProposer[Pipeline](
-      valset,
-      maxMergeInvocations = MergeInvocationLimit(5),
-      new Random(0),
-      new GepaEvalCache(adapter),
-      valOverlapFloor = valset.size
-    )
-
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val proposal         = merger.propose(state)
+      // The validation set has 2 examples, so the test sets the overlap floor below gepa's default of 5.
+      val proposal =
+        MergeProposer.propose(state, valset, new GepaEvalCache(adapter), MergeOverlapFloor(2), new Random(0))
 
       assert(proposal.isDefined, "a mergeable triplet (1, 2, ancestor 0) should be found")
       val p = proposal.get
@@ -171,7 +210,7 @@ class MergeProposerSuite extends FunSuite:
 
   test("propose returns None when there are fewer than three candidates (no ancestor to merge over)") {
     val adapter = new GepaAdapter[Pipeline](basePipeline, metric)
-    val state   = GepaState(
+    val state   = GepaStateFixtures.state(
       candidates = CandidatePool.applyUnsafe(Vector(
         Map(first -> Some("a"), second -> Some("b")),
         Map(first -> Some("c"), second -> Some("d"))
@@ -180,15 +219,18 @@ class MergeProposerSuite extends FunSuite:
       parents = Vector(Vector.empty, Vector(0)),
       totalMetricCalls = MetricCallCount(0)
     )
-    val merger = new MergeProposer[Pipeline](
-      valset,
-      maxMergeInvocations = MergeInvocationLimit(5),
-      new Random(0),
-      new GepaEvalCache(adapter)
-    )
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      assertEquals(merger.propose(state), None)
+      assertEquals(
+        MergeProposer.propose(
+          state,
+          valset,
+          new GepaEvalCache(adapter),
+          MergeProposer.DefaultValOverlapFloor,
+          new Random(0)
+        ),
+        None
+      )
     }
   }
 
@@ -199,23 +241,19 @@ class MergeProposerSuite extends FunSuite:
     val adapter = new GepaAdapter[Pipeline](basePipeline, metric)
     // Front 0 holds c1 and c2. Front 1 holds c2 only. c2 covers the only front of c1, so c1 leaves the merge pool.
     // Without that rule, (1, 2, ancestor 0) is a valid triplet.
-    val state = GepaState(
+    val state = GepaStateFixtures.state(
       candidates = CandidatePool.applyUnsafe(Vector(seedCand, hinter, answerer)),
       valSubscores = Vector(Vector(0.0, 0.0), Vector(1.0, 0.0), Vector(1.0, 1.0)),
       parents = Vector(Vector.empty, Vector(0), Vector(0)),
       totalMetricCalls = MetricCallCount(0)
     )
-    // The overlap floor permits a merge on the 2 validation examples, so the floor is not the reason for the result.
-    val merger = new MergeProposer[Pipeline](
-      valset,
-      maxMergeInvocations = MergeInvocationLimit(5),
-      new Random(0),
-      new GepaEvalCache(adapter),
-      valOverlapFloor = valset.size
-    )
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      assertEquals(merger.propose(state), None)
+      // The overlap floor permits a merge on the 2 validation examples, so the floor is not the reason for the result.
+      assertEquals(
+        MergeProposer.propose(state, valset, new GepaEvalCache(adapter), MergeOverlapFloor(2), new Random(0)),
+        None
+      )
     }
   }
 
@@ -230,7 +268,7 @@ class MergeProposerSuite extends FunSuite:
     // Front 0 holds c1 and c3. Front 1 holds c2. Front 2 holds c3. c3 covers the only front of c1, so the merge pool is
     // {c2, c3}. Without that rule, (1, 2, ancestor 0) is also a valid triplet and some seeds select it.
     val hinter3 = Map(first -> Some("Use TOKEN1 to produce a good_hint. Be brief."), second -> Some("Stage two."))
-    val state   = GepaState(
+    val state   = GepaStateFixtures.state(
       candidates = CandidatePool.applyUnsafe(Vector(seedCand, hinter, answerer, hinter3)),
       valSubscores = Vector(Vector(0.0, 0.0, 0.0), Vector(1.0, 0.0, 0.0), Vector(0.0, 1.0, 0.0), Vector(1.0, 0.0, 1.0)),
       parents = Vector(Vector.empty, Vector(0), Vector(0), Vector(0)),
@@ -240,14 +278,9 @@ class MergeProposerSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       val parents          = (0 until 20).map { seed =>
         // The validation set has 3 examples, so the test sets the overlap floor below gepa's default of 5.
-        val merger = new MergeProposer[Pipeline](
-          valset3,
-          maxMergeInvocations = MergeInvocationLimit(5),
-          new Random(seed),
-          new GepaEvalCache(adapter),
-          valOverlapFloor = valset3.size
-        )
-        merger.propose(state).map(_.parents)
+        MergeProposer
+          .propose(state, valset3, new GepaEvalCache(adapter), MergeOverlapFloor(3), new Random(seed))
+          .map(_.parents)
       }.toSet
       assertEquals(parents, Set(Option(Vector(2, 3))))
     }
@@ -265,7 +298,7 @@ class MergeProposerSuite extends FunSuite:
     def row(best: Set[Int], rest: Double): Vector[Double] =
       Vector.tabulate(examples)(i => if best(i) then 1.0 else rest)
     def cand(a: String, b: String): Candidate = Map(first -> Some(a), second -> Some(b))
-    GepaState(
+    GepaStateFixtures.state(
       candidates = CandidatePool.applyUnsafe(Vector(
         cand("A0", "B0"), // 0: the seed
         cand("A1", "B0"), // 1: a child of 0
@@ -295,8 +328,12 @@ class MergeProposerSuite extends FunSuite:
     )
   )
 
+  /** `state` with the schedule after `proposal`, as the engine writes it. */
+  private def recorded(state: GepaState, proposal: Option[MergeProposal]): GepaState =
+    proposal.fold(state)(merge => state.copy(merge = state.merge.afterMerge(merge)))
+
   test("the frontier of the two-pair state has the two pairs and no ancestor") {
-    assertEquals(twoPairState.nonDominatedFrontier.values.flatten.toSet, Set(2, 3, 5, 6))
+    assertEquals(twoPairState.nonDominatedFrontier.flatten.toSet, Set(2, 3, 5, 6))
   }
 
   test("propose continues with a different pair when the merge of the found triplet was already made") {
@@ -306,14 +343,13 @@ class MergeProposerSuite extends FunSuite:
       // After the merge of (2, 3) over one ancestor, the other ancestor gives the same merge again. A search that stops
       // at that triplet finds no second merge for approximately one seed of three.
       val found = (0 until 100).count { seed =>
-        val merger = new MergeProposer[Pipeline](
-          valset8,
-          maxMergeInvocations = MergeInvocationLimit(5),
-          new Random(seed),
-          new GepaEvalCache(adapter)
-        )
-        val parents = Vector(merger.propose(twoPairState), merger.propose(twoPairState)).map(_.map(_.parents))
-        parents.toSet == Set(Option(Vector(2, 3)), Option(Vector(5, 6)))
+        val cache                                              = new GepaEvalCache(adapter)
+        val rng                                                = new Random(seed)
+        def proposeOn(state: GepaState): Option[MergeProposal] =
+          MergeProposer.propose(state, valset8, cache, MergeProposer.DefaultValOverlapFloor, rng)
+        val firstMerge  = proposeOn(twoPairState)
+        val secondMerge = proposeOn(recorded(twoPairState, firstMerge))
+        Set(firstMerge, secondMerge).map(_.map(_.parents)) == Set(Option(Vector(2, 3)), Option(Vector(5, 6)))
       }
       assert(found >= 95, s"the search found the two merges for $found of 100 seeds")
     }
@@ -322,7 +358,7 @@ class MergeProposerSuite extends FunSuite:
   test("propose finds no merge when each triplet that stays gives a merge that was already made") {
     val adapter = new GepaAdapter[Pipeline](basePipeline, metric)
     // The first four candidates of the two-pair state: (2, 3) is the only pair, with the ancestors 0 and 1.
-    val state = GepaState(
+    val state = GepaStateFixtures.state(
       candidates = CandidatePool.applyUnsafe(twoPairState.candidates.take(4)),
       valSubscores = twoPairState.valSubscores.take(4),
       parents = twoPairState.parents.take(4),
@@ -330,28 +366,13 @@ class MergeProposerSuite extends FunSuite:
     )
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(new PipelineLm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val merger           = new MergeProposer[Pipeline](
-        valset8,
-        maxMergeInvocations = MergeInvocationLimit(5),
-        new Random(0),
-        new GepaEvalCache(adapter)
-      )
-      assertEquals(merger.propose(state).map(_.parents), Some(Vector(2, 3)))
-      assertEquals(merger.propose(state), None)
-    }
-  }
-
-  // ── The overlap floor (PORT_GAPS G-44; gepa `val_overlap_floor`) ────────────────────────────────────────────────
-
-  test("MergeProposer rejects a negative overlap floor") {
-    val adapter = new GepaAdapter[Pipeline](basePipeline, metric)
-    intercept[IllegalArgumentException] {
-      new MergeProposer[Pipeline](
-        valset,
-        maxMergeInvocations = MergeInvocationLimit(5),
-        new Random(0),
-        new GepaEvalCache(adapter),
-        valOverlapFloor = -1
+      val cache            = new GepaEvalCache(adapter)
+      val rng              = new Random(0)
+      val first            = MergeProposer.propose(state, valset8, cache, MergeProposer.DefaultValOverlapFloor, rng)
+      assertEquals(first.map(_.parents), Some(Vector(2, 3)))
+      assertEquals(
+        MergeProposer.propose(recorded(state, first), valset8, cache, MergeProposer.DefaultValOverlapFloor, rng),
+        None
       )
     }
   }
@@ -462,7 +483,7 @@ class MergeProposerSuite extends FunSuite:
     assertEquals(state.aggregateScore(3), 1.0)
     // The pointer of the seed moved two times. Each child took the pointer that the seed had at that time, and the
     // merged candidate took the largest pointer of its two parents.
-    assertEquals(Vector.tabulate(4)(state.pointerOf), Vector(0, 1, 0, 1))
+    assertEquals(state.nextComponent, Vector(0, 1, 0, 1))
   }
 
   test("a resumed run continues the merge schedule of the checkpoint") {
@@ -498,4 +519,26 @@ class MergeProposerSuite extends FunSuite:
     val state = finalState(stageConfig)
     assertEquals(state.parents, Vector(Vector.empty, Vector(0), Vector(0)))
     assertEquals(state.aggregateScore(state.bestIndex), 0.5)
+  }
+
+  test("the search reads the common ancestors in sorted order, not in the order of the hash") {
+    // Six common ancestors, so the set is a hash set, and the weights make the pick depend on the order.
+    val ancestors = Vector.tabulate(6)(index => (Map(first -> Some("a"), second -> Some("b")), 0.1 * (index + 1)))
+    val state     = GepaStateFixtures.state(
+      candidates = CandidatePool.applyUnsafe(
+        ancestors.map(_._1) ++
+          Vector(Map(first -> Some("x"), second -> Some("b")), Map(first -> Some("a"), second -> Some("y")))
+      ),
+      valSubscores = ancestors.map(ancestor => Vector(ancestor._2)) ++ Vector(Vector(1.0), Vector(1.0)),
+      parents = ancestors.map(_ => Vector.empty[Int]) ++ Vector((0 until 6).toVector, (0 until 6).toVector),
+      totalMetricCalls = MetricCallCount(0)
+    )
+    val dominators = Vector(6, 7)
+    (0L until 40L).foreach { seed =>
+      val draws    = new Random(seed)
+      val _        = draws.shuffle(dominators)
+      val expected = MergeProposer.weightedPick((0 until 6).toVector, state.aggregateScore, draws)
+      val found    = MergeProposer.findMerge(state, dominators, 1, MergeOverlapFloor(1), new Random(seed))
+      assertEquals(found.map(_._1), Some((6, 7, expected)), s"seed: $seed")
+    }
   }

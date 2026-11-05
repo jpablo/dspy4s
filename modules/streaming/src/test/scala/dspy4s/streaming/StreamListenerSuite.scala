@@ -448,9 +448,9 @@ class StreamListenerSuite extends FunSuite:
         Iterator(LmChunk(text = perCallOutputs(idx), finishReason = Some("stop")))
 
     // Both Predicts share the same signature; they both output the "answer"
-    // field. Without allowReuse=false the listener would emit chunks from
-    // both LM calls; with allowReuse=false only the first call's chunks
-    // should appear.
+    // field. With allowReuse=true the listener would emit chunks from both
+    // LM calls; with allowReuse=false only the first call's chunks should
+    // appear.
     val sig       = SignatureDsl.parse("question -> answer").toOption.get
     val composite = new DynamicModule:
       override val moduleName: String = "my_program"
@@ -486,9 +486,9 @@ class StreamListenerSuite extends FunSuite:
     }
   }
 
-  test("allowReuse=true (default): listener keeps firing across multiple LM calls") {
-    // Same composite + scripted LM as the test above, but the default-on
-    // allowReuse means BOTH calls' answer chunks should fire.
+  test("allowReuse=true: listener keeps firing across multiple LM calls") {
+    // Same composite + scripted LM as the test above, but allowReuse=true
+    // means BOTH calls' answer chunks should fire.
     val perCallOutputs = Vector(
       "[[ ## answer ## ]]\nparis\n[[ ## completed ## ]]",
       "[[ ## answer ## ]]\nlondon\n[[ ## completed ## ]]"
@@ -526,7 +526,7 @@ class StreamListenerSuite extends FunSuite:
       given RuntimeContext = RuntimeEnvironment.current
       val stream           = Streamify.streamify(
         program = composite,
-        streamListeners = Vector(StreamListener("answer"))
+        streamListeners = Vector(StreamListener("answer", allowReuse = true))
       )(rec("question" := "x"))
 
       val tokens = collectStream(stream).collect { case e: TokenEvent => e }
@@ -566,7 +566,8 @@ class StreamListenerSuite extends FunSuite:
       LmChunk(text = "[[ ## answer ## ]]\n43\n"),
       LmChunk(text = "[[ ## completed ## ]]", finishReason = Some("stop"))
     )
-    val (tokens, answer) = streamAnswer(chunks, StreamListener("answer"))
+    // With allowReuse=false the listener goes silent after the first section, and that hides the rule of the state.
+    val (tokens, answer) = streamAnswer(chunks, StreamListener("answer", allowReuse = true))
     assertEquals(answer, "42")
     assertEquals(tokens.map(_.chunk).mkString, answer)
   }

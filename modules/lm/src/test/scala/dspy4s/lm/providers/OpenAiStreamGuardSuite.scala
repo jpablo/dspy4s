@@ -11,7 +11,9 @@ import dspy4s.core.contracts.LmRateLimitError
 import dspy4s.core.contracts.LmServerError
 import dspy4s.core.contracts.LmStreamAssemblyError
 import dspy4s.core.contracts.RuntimeError
+import dspy4s.core.contracts.:=
 import dspy4s.lm.contracts.LmChunk
+import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmToolCallDelta
 import munit.FunSuite
 
@@ -45,7 +47,7 @@ class OpenAiStreamGuardSuite extends FunSuite:
   private def chunksOf(lines: String*): (Vector[LmChunk], Lines) =
     val source = Lines(lines.toVector)
     val client = OpenAiClient(apiKey = "x", transport = OneStream(source))
-    client.stream(DynamicValues.fromAny(Map("model" -> "m"))) match
+    client.stream(LmMode.Chat, DynamicValues.record("model" := "m")) match
       case Right(stream) => (stream.toVector, source)
       case Left(error)   => fail(s"the stream did not open: $error")
 

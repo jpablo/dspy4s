@@ -51,7 +51,7 @@ class TypedPromptParitySuite extends FunSuite:
       demos = Vector.empty,
       inputs = Example(values = inputs, inputKeys = Set("question")),
       request = LmRequest(model = "stub"),
-      outputJsonSchema = signature.outputShape.jsonSchemaString
+      outputJsonSchema = signature.outputShape.jsonSchema
     )
     adapter.format(invocation) match
       case Right(prompt) => prompt.messages.map(message => roleName(message.role) -> message.text.getOrElse(""))

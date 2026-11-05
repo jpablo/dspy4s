@@ -24,11 +24,6 @@ type MergeInvocationLimit = MergeInvocationLimit.T
 
 object MergeInvocationLimit extends RefinedSubtype[Int, Positive0]
 
-/** A strictly positive merge-evaluation subsample size. */
-type MergeSubsampleSize = MergeSubsampleSize.T
-
-object MergeSubsampleSize extends RefinedSubtype[Int, Positive]
-
 /** A non-negative floor on the validation examples that the two candidates of a merge share. */
 type MergeOverlapFloor = MergeOverlapFloor.T
 
@@ -53,8 +48,3 @@ object ProposalCount extends RefinedSubtype[Int, Positive]
 type CandidatePool = CandidatePool.T
 
 object CandidatePool extends RefinedSubtype[Vector[Candidate], MinLength[1]]
-
-/** A strictly positive number of candidates in a GEPA result. */
-type GepaCandidateCount = GepaCandidateCount.T
-
-object GepaCandidateCount extends RefinedSubtype[Int, Positive]

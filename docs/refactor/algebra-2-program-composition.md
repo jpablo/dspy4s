@@ -1,8 +1,8 @@
 # Algebra 2: program composition (step-6 spec)
 
 **Status:** implemented contract. Operations and laws were hardened by a design grill (the five forks below are
-resolved), then refined against code truth. The current implementation adds the `InterpretedTrajectoryAgent`
-layer and behavioral law suites described below.
+resolved), then refined against code truth. A later simplification (2026-11-01) removed `TrajectoryAgent`,
+`InterpretedTrajectoryAgent`, and `ActionInterpreter`, because `ReAct` was their one implementation.
 **Date:** 2026-06-27
 **Relation:** the sketch and the broader ADD context live in [algebra.md](algebra.md); the step-by-step
 extraction work that precedes this is [composite-primitives.md](composite-primitives.md); the kyo-compat
@@ -68,14 +68,15 @@ recover(policy, fallback)(p)   : Program[I, O] => Program[I, O]      // selected
 //   sub-predictions' records (second wins on collision).
 
 augment[Name, T](field)(p) : Program[I, O] => Program[I, Out]                     // Thought / CoT  [IMPLEMENTED 6.4]
-//   IMPLEMENTED (opening position) as OutputAugmentation.decodeAugmented[O, Name, T, Out]: an arbitrary T
-//   read via a pluggable readField, plus an optional post-decode hook. decodePrepended (T=String, identity hook)
-//   is the instance ChainOfThought / MultiChainComparison / the agent extractors use. Out =
-//   OutputAugmentation.WithField[O, Name, T]. CLOSING position (append, self-check) stays additive (no consumer;
-//   needs an AppendField dual).
+//   IMPLEMENTED (opening position, T = String) as Signature.prependOutput, which ChainOfThought /
+//   MultiChainComparison / the agent extractors use. It changes the layout and the output shape in one call.
+//   Out = OutputAugmentation.WithField[O, Name, T].
+//   The generic decodeAugmented (a pluggable readField and a post-decode hook) had no production caller, and the
+//   signatures cleanup removed it. CLOSING position (append, self-check) stays additive (no consumer; needs an
+//   AppendField dual).
 
 mode(m: Mode)(p)               : Program[I, O] => Program[I, O]         // Monoid middleware, NON-learnable  [IMPLEMENTED 6.5]
-//   IMPLEMENTED as Mode (Controls => Controls, monoid under ++ / Mode.id) + Moded + Compose.mode: model swap /
+//   IMPLEMENTED as Mode (Controls => Controls, monoid under ++ / Mode.id) + Moded + Compose.mode:
 //   temperature / rolloutId / traceEnabled. m introduces no learnable predict (OptimizableStructure passes through);
 //   trace-transparent. Execution-wrapping modes (retry / pre-post) stay additive (no consumer yet).
 
@@ -86,7 +87,8 @@ bestOf(reward, threshold, failCount)(attempts) : M[Prediction[O]]            // 
 //   (A, trace, score) => Either[err, Option[AdapterRef]] returning the NEXT attempt's adapter override.
 
 selectBest(p, n, reward, threshold) : Program[I, O] => Program[I, O]   // bestOf over sampled attempts  [= BestOfN, DONE]
-//   n attempts varying rolloutId / temperature; ordered because early stopping and ties select the first match
+//   n attempts, each with the temperature 1.0 and its own rollout id in RuntimeScope.lmDefaults (not on the
+//   ProgramCall); ordered because early stopping and ties select the first match
 
 feedback(p, critic, n, reward, threshold) : Program[I, O] => Program[I, O]         // bestOf over a SEQUENTIAL stream  [= Refine, DONE]
 //   the carried hint is realized as the next attempt's adapter override (Refine: OfferFeedback advice routed
@@ -100,19 +102,10 @@ AgentLoop.run[St, R](state, maxIterations)(onExhausted)(step) : M[R]          //
 //   ReAct / CodeAct / RLM / PoT. CODE-TRUTH CORRECTION: the env.step/classify/render decomposition below was
 //   NOT adopted — see the correction under the acceptance table. Each module keeps its own `step` closure.
 
-TrajectoryAgent.runAndExtract[S, E](...)(step)(extract) : M[(E, String)]      // ReAct/CodeAct  [IMPLEMENTED 6.3]
-//   bounded loop building a Vector[S] trajectory (via AgentLoop.run), then the extract closure with
-//   overflow-truncation. E is the extractor's result: after the domain-valued inner-predict conversion, the extractors
-//   are Predicts, so E = Prediction[WithReasoning[O]] and the reasoning-prepended decode happens INSIDE
-//   the extractor (OutputAugmentation.prependedStringShape) rather than in the module. (= ReAct, CodeAct)
-
-InterpretedTrajectoryAgent.trajectoryStep                                  // ReAct/CodeAct action transition [IMPLEMENTED]
-//   generate model step -> prepare action -> ActionInterpreter.execute -> record outcome -> decide -> Continue/Done.
-//   Associated ModelStep / Action / Observation types preserve the two action languages instead of forcing one
-//   universal agent vocabulary. decide receives all three values after recording, so terminal behavior may depend on
-//   either the generated step/action or its interpreted outcome. Each phase is an explicit state ADT, and each private
-//   transition ADT lists only that phase's legal successors. The transition is final; ReAct and CodeAct supply only the
-//   phase operations.
+ReAct.forward                                                                 // ReAct  [IMPLEMENTED 6.3]
+//   a bounded loop building a Vector[TrajectoryEntry] (via AgentLoop.run), then the extractor with overflow-truncation.
+//   The extractor is a Predict, so its result is Prediction[WithReasoning[O]] and the reasoning-prepended decode
+//   happens INSIDE the extractor (Signature.prependOutput) rather than in the module.
 
 // retryUntil = AgentLoop.run with a regenerate-on-error step  [IMPLEMENTED 6.3, = ProgramOfThought]
 //   first attempt runs `generator`; each failure feeds (previous_code, error) into `regenerator`; first
@@ -141,16 +134,15 @@ selectBest        ordered search: early stopping and ties preserve attempt order
 
 feedback          feedback is NOT permutation-invariant       // carried hint = order matters
 
-TrajectoryAgent   Done or exhaustion runs extraction exactly once
+ReAct extract     Done or exhaustion runs extraction exactly once
                   a failed transition runs no extraction
                   extractor Prediction evidence is preserved
                   extractor-local truncation does not shorten the attached complete trajectory
 
-Interpreted step  Halted interprets nothing and records nothing
-                  Rejected interprets nothing and records one failed outcome
-                  Ready interprets, records, and decides exactly once
-                  decide is applied after recording; interpreter Left neither appends nor decides
-                  generation Left enters no later state
+ReAct step        an overflow that truncation cannot solve runs no tool, appends nothing, and ends the loop
+                  another error of the react predict ends the call with no extraction
+                  each other step runs one tool and appends one entry
+                  finish or an empty tool name ends the loop after the entry
 
 OptimizableStructure        inspect(c) = ownViews ++ children.flatMap(inspect)  // metadata + state snapshots
                   read(c) = inspect(c).map(_.parameters)                    // parameter projection
@@ -230,8 +222,8 @@ constructor and category constraints were removed. `Program.of` requires only `O
 Bare-module running is a separate concern with no coherence question (no identity morphism in sight):
 `ProgramRunner` carries signature-backed instances for the framework leaves and composites, plus a
 low-priority `RecordCodec` fallback for user composites. Named-tuple inputs (`fromString` / `fromType` /
-`of[Spec]`) get their codec from a `RecordCodec` derivation over the same `SchemaTupleShape` path those macros
-use, so codec and signature decode cohere definitionally. `Record`-input programs may be packaged, but the packaged
+`of[Spec]`) get their codec from a `RecordCodec` derivation over the same `Shape.canonicalDerived` path those
+macros use, so codec and signature decode cohere definitionally. `Record`-input programs may be packaged, but the packaged
 value has no generic record-boundary runner because `DynamicValue.Record` deliberately has no single canonical codec;
 `DynamicSignature` is the type-safe dynamic execution boundary.
 
@@ -243,15 +235,15 @@ per stable path, the path-dependent freshness the compiler enforces) and carries
 the same parse behind the abstraction. Every record-boundary execution over the bundle then decodes identically as a
 consequence of abstraction, and re-parsing the
 same string mints a distinct object (cross-bundle composition is a compile error; both pinned in
-`ProgramAlgebraLawSuite`). Because Scala widens `val alias = s`, `s.stable` captures the path's types in generic
-parameters that survive further aliases; its compile-time contract is pinned too. Cardinality-shaped value dependence uses the same idea:
+`ProgramAlgebraLawSuite`). Because Scala widens `val alias = s`, a test helper of that suite captures the path's types
+in generic parameters that survive further aliases; its compile-time contract is pinned too. Cardinality-shaped value dependence uses the same idea:
 `MultiChainComparison` owns a path-branded opaque attempt block validated against `m`. Plain `fromStringDynamic`
 remains the data-bag surface for consumers that never enter the category (optimizer helper generations, the
 evaluation judge). The second step this enabled LANDED as stage 4: with every category-entering program either carrying
 concrete I/O types or bundled, `decodeInput` left the `Program` package entirely and the `ProgramInput` law dissolved at the
 category level (see "The close" above).
 
-Usability shipped with the prototype (`DynamicSignatureSuite`): `s.predict(...)` is the path-dependent
+Usability shipped with the prototype (`DynamicSignatureSuite`): `s.predict()` is the path-dependent
 constructor (the runtime-string counterpart of `Predict(Signature.derived(...))`, outputs read from the raw
 envelope as always), and the optimizer surface (`OptimizableStructure` read/replace + the record-boundary
 `ProgramRunner`) holds over a packaged bundle program. Cross-fiber pipelines are expressed through
@@ -274,7 +266,7 @@ decoding is type-indexed at the record boundary, and the coherence law is not di
 unrepresentable. Record-running is uniform over exact `Program[I, O, N]` values and the existential
 `SomeProgram[I, O]`, while optimization deliberately retains the grade `N`. An upcast to `SomeProgram[I, O]`
 therefore remains runnable but erases the parameter shape required by `OptimizableStructure`; shape-preserving composed pipelines
-still optimize end-to-end, and `.copro` preserves their arity in its report type. Pinned by
+still optimize end-to-end, and `new COPRO[Program[I, O, N]]` preserves their arity in its report type. Pinned by
 `ProgramAlgebraLawSuite` (boundary decoding + the unrepresentability gates) and `ParaCompileSuite`
 (erasure boundary + composed-pipeline + bundle optimization).
 
@@ -348,13 +340,13 @@ plus the new combinator law suites are green:
 
 | composite | recipe |
 |---|---|
-| `ChainOfThought` | `augment["reasoning", String]` — DONE: `decodeAugmented` (the `decodePrepended` String instance) |
+| `ChainOfThought` | `augment["reasoning", String]` — DONE: `Signature.prependOutput` |
 | `MultiChainComparison` | `augment["rationale", String]` over the attempt-folded signature (holds compare-predict) — DONE: same shared decode |
 | `BestOfN` | `selectBest(p, n, reward, threshold)` — DONE (6.1): `AttemptSelection.bestOf`, `feedback = None` |
 | `Refine` | `feedback(p, critic = OfferFeedback, n, reward, threshold)` — DONE (6.1): `bestOf` + advice→adapter hook |
 | `ProgramOfThought` | `retryUntil(...)` then answer-step — DONE (6.3): `AgentLoop.run` regenerate-on-error. NOT feedback (see below). |
-| `ReAct` | DONE (6.3 + interpreted transition): `TrajectoryAgent` + `InterpretedTrajectoryAgent`; `ReactStep` lowers to a `ToolCallRequest` interpreted by the tool environment. |
-| `CodeAct` | DONE (6.3 + interpreted transition): `TrajectoryAgent` + `InterpretedTrajectoryAgent`; `CodeStep` lowers to Python interpreted by `ActionInterpreter[String, String]`. |
+| `ReAct` | DONE (6.3): `AgentLoop.run` with one private step, then the extractor. |
+| `CodeAct` | Removed on 2026-10-11 (decision D1). |
 | `RLM` | DONE (6.3): `AgentLoop.run` (SUBMIT = Done inside the loop; extract fallback = onExhausted) |
 | user pipelines | `a >>> b >>> c` (replacing hand-written `for`-comprehensions) — DONE (6.2): `AndThen` + `>>>`, plus `fanout` |
 
@@ -393,17 +385,11 @@ The grilled `agentLoop(policy, extractor, env, classify, render)` with `env.step
   indirection, not dedup.
 
 So 6.3 extracted the bounded `Continue | Done | exhausted` iteration
-([`AgentLoop.run`](../../modules/programs/src/main/scala/dspy4s/programs/runtime/AgentLoop.scala)) and the
-ReAct/CodeAct loop+extract postlude ([`TrajectoryAgent`](../../modules/programs/src/main/scala/dspy4s/programs/runtime/TrajectoryAgent.scala)).
-A later refinement extracted one more genuine common layer for those two agents:
-[`InterpretedTrajectoryAgent`](../../modules/programs/src/main/scala/dspy4s/programs/runtime/InterpretedTrajectoryAgent.scala)
-owns generate → prepare → interpret → record → decide, while associated types and protected phase operations retain
-each language's domain semantics. The phases and terminal states are explicit ADTs; state-specific transition ADTs
-encode the legal successor relation, including distinct rejection-recording and interpreted-outcome-recording states.
-The post-outcome decision can depend on the generated step, prepared action, and interpreted result without allowing a
-subclass to reorder or omit recording. RLM and PoT remain directly on `AgentLoop` because their terminal-result shapes
-still do not fit trajectory-then-extract. Same discipline as the PoT and `fanout` corrections: extract the real
-shared core, do not force a universal vocabulary the code rejects.
+([`AgentLoop.run`](../../modules/programs/src/main/scala/dspy4s/programs/runtime/AgentLoop.scala)). Later layers over
+that loop (`TrajectoryAgent` and `InterpretedTrajectoryAgent`) were removed on 2026-11-01, because `ReAct` was their one
+implementation after the removal of `CodeAct`. `ReAct`, `ReActV2`, and `RLM` each hold one step on `AgentLoop.run`.
+Same discipline as the PoT and `fanout` corrections: extract the real shared core, do not force a universal vocabulary
+the code rejects.
 
 ## Resolved on paper vs deferred (fork 5)
 
@@ -434,23 +420,22 @@ suites as the regression net:
    a thread-pool batch executor over `Vector[(DynamicModule, ProgramCall)]`, an unrelated abstraction; the
    domain-valued `fanout(a, b)` was new. Category laws are stated on the threaded `.output` value (the carrier decision),
    not the full `Prediction` envelope.
-3. **`agentLoop` (+ `retryUntil`). DONE (commit `6faa94e`, later interpreted-agent and law refinements).** Extracted `AgentLoop.run` (bounded
-   `Continue | Done | exhausted` iteration) + `TrajectoryAgent.runAndExtract` (ReAct/CodeAct loop+extract);
-   ported ReAct, CodeAct, RLM onto them and recast `ProgramOfThought`'s retry as `AgentLoop.run`
-   (regenerate-on-error). ReAct and CodeAct now also share the final `InterpretedTrajectoryAgent` transition and
-   `ActionInterpreter` boundary. `AgentLoopLawSuite`, `TrajectoryAgentLawSuite`, and
-   `InterpretedTrajectoryAgentLawSuite` pin the three layers; the four module suites remain green.
+3. **`agentLoop` (+ `retryUntil`). DONE (commit `6faa94e`).** Extracted `AgentLoop.run` (bounded
+   `Continue | Done | exhausted` iteration); ported the agents onto it and recast `ProgramOfThought`'s retry as
+   `AgentLoop.run` (regenerate-on-error). `AgentLoopLawSuite` and the module suites pin the rules.
    **Code-truth correction:** the `env.step`/`classify`/`render` decomposition was NOT adopted (see above) —
-   the shared core stops at the final loop/extraction/action-transition templates; each module supplies its
-   generation, preparation, interpretation, and recording operations.
+   the shared core stops at the loop; each module holds its own step.
 4. **`augment` generalization. DONE (commit `31aecbd`).** Raised `decodePrepended` to `decodeAugmented`
    (arbitrary field via a pluggable reader + optional post-decode hook); `decodePrepended` is its
    String/identity instance, so the five call sites are unchanged. Closing position stays additive (no
    consumer). `OutputAugmentationSuite` adds a generalized-field test, the round-trip law, and a hook accept/reject.
+   The signatures cleanup later removed `decodeAugmented` and `decodePrepended`, because no program used the
+   reader or the hook. Their code is now the decode of the output shape of `Signature.prependOutput`.
 5. **`mode`. DONE (commit `dca35e9`).** Introduced `Mode` (the `Controls => Controls` monoid) + `Moded` +
    `Compose.mode` as the home for model-swap / temperature / rolloutId; trace-transparent, OptimizableStructure
    pass-through, `ModeLawSuite` pins the monoid + identity. Execution-wrapping modes (retry / pre-post) stay
-   additive until a consumer needs them.
+   additive until a consumer needs them. A later change removed `Mode.model`, because the wire writes the model
+   of the request over a `model` option. A program selects a model through the LM.
 
 ## Status: all six steps landed
 
@@ -464,21 +449,21 @@ grilled design was over-decomposed (PoT is `retryUntil` not `feedback`; `fanout`
 shaped now runs inner `Predict`s instead of `DynamicPredict`s: Refine's OfferFeedback critic, ReAct's
 loop + extractor, CodeAct's generator + extractor, RLM's action + extract, and ProgramOfThought's
 generator / regenerator / answerer. The recipe is uniform: keep the hand-built layout verbatim (prompt
-rendering unchanged), pair it with `InputAugmentation.appendedStringInput` on the input side (the pair carrier
+rendering unchanged), pair it with `Signature.appendInput` on the input side (the pair carrier
 `(I, String)` delegates base encoding to the base shape, appending the declared field — apply twice for two
 fields) and either a derived shape (fully synthetic inputs: RLM, the critic) or a hand-written explicit output
 shape that models tolerant reads algebraically (`ProgramOfThought.CodeOut` uses `Option[String]`; `finished` coerces
 bool-or-"true", tool args accept record / JSON-string / nothing); reasoning-prepended extractors decode inside
-the predict via `OutputAugmentation.prependedStringShape` (extracted from ChainOfThought's hand-written shape).
+the predict via `Signature.prependOutput` (extracted from ChainOfThought's hand-written shape). Each of these
+`Signature` operations changes the layout and the shapes in one call, thus the two cannot get out of step.
 **Runtime arity rides a static carrier (the class-B bridge).** `MultiChainComparison` — whose field COUNT is the
-constructor parameter `m` — converts too: `InputAugmentation.appendedStringInputs` returns a bundle with a
-path-dependent opaque `Values` carrier and `Shape[(I, Values)]`. Its validating constructor is the only way to
+constructor parameter `m` — converts too: `Signature.appendInputs` returns a bundle with a
+path-dependent opaque `Values` carrier and the `Signature[(I, Values), O]`. Its validating constructor is the only way to
 obtain `Values`, so the per-instance shape total-encodes exactly the `m` numbered `reasoning_attempt_i` fields
 without truncation or a representable wrong-length value. The wire format is unchanged. The remaining
 `DynamicPredict` constructors in the framework are exactly the
 principled residue: layouts that exist only as runtime VALUES (COPRO / GroundedProposer / InferRules attempt
-injection over optimizer-assembled layouts, the evaluation judge), `Predict.erase`, and user
-`fromStringDynamic` signatures.
+injection over optimizer-assembled layouts, the evaluation judge), and user `fromStringDynamic` signatures.
 
 ## Deferred items (recorded, not lost — additive, no consumer yet)
 

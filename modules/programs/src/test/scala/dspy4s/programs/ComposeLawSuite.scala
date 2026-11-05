@@ -1,5 +1,6 @@
 package dspy4s.programs
 
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.CallbackEvent
@@ -39,7 +40,7 @@ class ComposeLawSuite extends FunSuite:
   private final case class Step[I, O](tag: String, f: I => O, predict: DynamicPredict)
       extends Module[I, O]:
     override val moduleName: String                                                                              = s"step_$tag"
-    override protected val lifecycle: ModuleLifecycle[I, O]                                                      = ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[I]                                                         = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), RawPrediction(values = DynamicValues.record("tag" := tag))))
 
@@ -47,8 +48,8 @@ class ComposeLawSuite extends FunSuite:
     * Associativity requires both syntax trees to have run the same leaves before reaching it.
     */
   private final case class TraceSize(predict: DynamicPredict) extends Module[String, Int]:
-    override val moduleName: String                                = "trace_size"
-    override protected val lifecycle: ModuleLifecycle[String, Int] = ModuleLifecycle.typedWithoutInputs
+    override val moduleName: String                           = "trace_size"
+    override protected val lifecycle: ModuleLifecycle[String] = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[String])(using
         RuntimeContext
     ): Either[DspyError, Prediction[Int]] =
@@ -57,14 +58,14 @@ class ComposeLawSuite extends FunSuite:
   private object Step:
     given stepOptimizable[I, O]: OptimizableLeaf[Step[I, O]] with
       def get(program     : Step[I, O]): OptimizableParameters                 = program.predict.optimizableParameters
-      def metadata(program: Step[I, O]): OptimizableMetadata                   = program.predict.optimizableView.metadata
+      def metadata(program: Step[I, O]): PredictorKey                          = program.predict.optimizableView.metadata
       def set(program: Step[I, O], updated: OptimizableParameters): Step[I, O] =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
   private object TraceSize:
     given traceSizeOptimizable: OptimizableLeaf[TraceSize] with
       def get(program     : TraceSize): OptimizableParameters                = program.predict.optimizableParameters
-      def metadata(program: TraceSize): OptimizableMetadata                  = program.predict.optimizableView.metadata
+      def metadata(program: TraceSize): PredictorKey                         = program.predict.optimizableView.metadata
       def set(program: TraceSize, updated: OptimizableParameters): TraceSize =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 

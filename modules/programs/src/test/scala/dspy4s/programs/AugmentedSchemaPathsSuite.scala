@@ -93,7 +93,8 @@ class AugmentedSchemaPathsSuite extends FunSuite:
   test("MultiChainComparison sends a response schema with the rationale field first") {
     val lm         = SchemaLm("""{"rationale": "Both say 4.", "answer": "4", "confidence": 0.9}""")
     val comparison = MultiChainComparison(Signature.derived[ApQuestion, ApAnswer]("QA"), m = AttemptCount(2))
-    val attempts   = Vector.fill(2)(RawPrediction(values = DynamicValues.record("rationale" := "add", "answer" := "4")))
+    val row        = DynamicValues.record("rationale" := "add", "answer" := "4", "confidence" := 0.9)
+    val attempts   = Vector.fill(2)(RawPrediction(values = row))
     val result     = run(lm)(comparison.compare(ApQuestion("2+2?"), attempts))
     assertEquals(result.map(_.output.rationale), Right("Both say 4."))
     val schema = strictSchema(lm.requests.headOption.getOrElse(fail("no request")))

@@ -80,7 +80,8 @@ lazy val algebra = (project in file("modules/algebra"))
 // zio-blocks-schema here because `DynamicValue` is the interchange format carried
 // through `Example.values`, `ProgramCall.input`, `RawPrediction.values`,
 // and `ParsedOutput.values` — the codec intermediate shared by adapters,
-// programs, evaluate, and the signatures API.
+// programs, evaluate, and the signatures API. ujson reads a JSON text with the
+// text of each number, so `PythonText.parseJson` keeps the number rule of Python.
 lazy val core = (project in file("modules/core"))
   .dependsOn(algebra)
   .settings(commonSettings)
@@ -89,6 +90,7 @@ lazy val core = (project in file("modules/core"))
     libraryDependencies ++= Seq(
       "dev.zio"            %% "zio-blocks-schema" % zioBlocksVersion,
       "io.github.iltotore" %% "iron"              % ironVersion,
+      "com.lihaoyi"        %% "ujson"             % ujsonVersion,
       "org.scalameta"      %% "munit"             % munitVersion           % Test,
       "org.scalameta"      %% "munit-scalacheck"  % munitScalacheckVersion % Test
     ),
@@ -131,7 +133,6 @@ lazy val adapters = (project in file("modules/adapters"))
   .settings(
     libraryDependencies ++= Seq(
       "org.scalameta"          %% "munit"     % munitVersion % Test,
-      "com.lihaoyi"            %% "ujson"     % ujsonVersion,
       "org.scala-lang.modules" %% "scala-xml" % scalaXmlVersion
     )
   )
@@ -145,11 +146,10 @@ lazy val programs = (project in file("modules/programs"))
       "io.github.iltotore" %% "iron"  % ironVersion,
       "org.scalameta"      %% "munit" % munitVersion % Test
     ),
-    // Keep mutation testing on the generic optic and explicit-heap implementation. Mutating all program sources hits
+    // Keep mutation testing on the explicit-heap implementation. Mutating all program sources hits
     // a current stryker4s Scala 3 parser defect on top-level extension methods before any mutant can run.
     strykerMutate := Seq(
       "src/main/scala/dspy4s/programs/compose/AndThen.scala",
-      "src/main/scala/dspy4s/programs/optimization/ParameterOptic.scala",
       "src/main/scala/dspy4s/programs/optimization/StackSafeOptimizableStructure.scala"
     )
   )
@@ -160,8 +160,7 @@ lazy val evaluate = (project in file("modules/evaluate"))
   .settings(name := "dspy4s-evaluate")
   .settings(
     libraryDependencies ++= Seq(
-      "org.scalameta" %% "munit" % munitVersion % Test,
-      "com.lihaoyi"   %% "ujson" % ujsonVersion
+      "org.scalameta" %% "munit" % munitVersion % Test
     )
   )
 
@@ -228,7 +227,17 @@ lazy val examples = (project in file("modules/examples"))
   .settings(commonSettings)
   .settings(name := "dspy4s-examples")
   .settings(
-    publish / skip := true
+    publish / skip                         := true,
+    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test,
+    // The MCP SDK logs with SLF4J. With no provider, each JVM of an MCP example prints a warning on stderr.
+    libraryDependencies += "org.slf4j" % "slf4j-nop" % "2.0.17" % Runtime,
+    // The MCP examples start their servers with the class path of their JVM. The class path of the sbt JVM is not the
+    // class path of the examples, so `run` and `runMain` fork. The output of the fork has no sbt prefix.
+    Compile / run / fork           := true,
+    Compile / run / outputStrategy := Some(StdoutOutput),
+    // The MCP tests start the servers of the examples in a child JVM with the class path of the tests.
+    Test / fork := true,
+    Test / javaOptions += "-Dfile.encoding=UTF-8"
   )
 
 // JMH stays outside the root aggregate. Normal compile and test runs do not pay for benchmark generation.

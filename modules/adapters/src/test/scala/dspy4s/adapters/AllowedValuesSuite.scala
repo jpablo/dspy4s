@@ -163,6 +163,14 @@ class AllowedValuesSuite extends FunSuite:
     }
   }
 
+  test("the error of a JSON value that is not a string shows the value in the form of Python json.dumps") {
+    parse(JSONAdapter(), literalLayout, """{"label": {"value":"pos","n":1.0}, "note": "x"}""") match
+      case Left(error) =>
+        val expected = """Value '{"value": "pos", "n": 1.0}' is not one of the allowed values: pos; neg"""
+        assert(error.message.contains(expected), error.message)
+      case other => fail(s"expected a parse error, got $other")
+  }
+
   test("a typed enum output follows the same rule as a string-signature Literal") {
     for (name, adapter, reply) <- formats do
       assertParseError(parse(adapter, enumLayout, reply("Support Request")), s"$name, a label of a person")

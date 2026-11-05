@@ -3,6 +3,7 @@ package dspy4s.lm
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ToolCall
 import dspy4s.core.contracts.:=
+import dspy4s.lm.contracts.CacheKey
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
@@ -10,12 +11,12 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.LmToolCallDelta
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
+import dspy4s.lm.providers.ChatWire
+import dspy4s.lm.providers.ResponsesWire
+import dspy4s.lm.providers.ToolCallAssembler
 import dspy4s.lm.runtime.CacheCapacity
 import dspy4s.lm.runtime.DiskLmCache
-import dspy4s.lm.runtime.ProviderRequestNormalizer
-import dspy4s.lm.runtime.ProviderResponseParser
 import dspy4s.lm.runtime.RequestHash
-import dspy4s.lm.runtime.ToolCallAssembler
 import munit.FunSuite
 import zio.blocks.schema.{DynamicValue, Schema}
 
@@ -53,7 +54,7 @@ class ToolCallWireSuite extends FunSuite:
 
   private def wireMessages(messages: Vector[Message]): Vector[DynamicValue.Record] =
     val request = LmRequest(model = "gpt-test", messages = messages)
-    sequence(get(ProviderRequestNormalizer.normalize(request), "messages")).map(record)
+    sequence(get(ChatWire.request(request), "messages")).map(record)
 
   // ── From the provider ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -64,7 +65,7 @@ class ToolCallWireSuite extends FunSuite:
         |  {"id":"call_2","type":"function","function":{"name":"search","arguments":"{\"query\":\"dogs\"}"}}
         |]},"finish_reason":"tool_calls"}]}""".stripMargin
     )
-    val calls = ProviderResponseParser.parse(raw, LmMode.Chat).map(_.outputs.flatMap(_.toolCalls))
+    val calls = ChatWire.outputs(raw).map(_.flatMap(_.toolCalls))
     assertEquals(calls.map(_.map(_.id)), Right(Vector(Some("call_1"), Some("call_2"))))
     assertEquals(calls.map(_.headOption), Right(Some(search)))
   }
@@ -76,7 +77,7 @@ class ToolCallWireSuite extends FunSuite:
         |]}}]}""".stripMargin
     )
     assertEquals(
-      ProviderResponseParser.parse(raw, LmMode.Chat).map(_.outputs.flatMap(_.toolCalls)),
+      ChatWire.outputs(raw).map(_.flatMap(_.toolCalls)),
       Right(Vector(search.copy(id = None)))
     )
   }
@@ -87,7 +88,7 @@ class ToolCallWireSuite extends FunSuite:
       """{"output":[{"type":"function_call","id":"fc_1","call_id":"call_9","name":"search",
         |  "tool_calls":[{"id":"fc_1","call_id":"call_9","name":"search","arguments":"{\"query\":\"cats\"}"}]}]}""".stripMargin
     )
-    val calls = ProviderResponseParser.parse(raw, LmMode.Responses).map(_.outputs.flatMap(_.toolCalls))
+    val calls = ResponsesWire.outputs(raw).map(_.flatMap(_.toolCalls))
     assertEquals(calls.map(_.map(_.id)), Right(Vector(Some("call_9"))))
   }
 
@@ -166,7 +167,7 @@ class ToolCallWireSuite extends FunSuite:
       toolCalls = Vector(search.copy(args = DynamicValues.record("query" := "dogs")))
     ))
     val none = requestWith(Message(role = MessageRole.Assistant))
-    assertEquals(Set(first, second, third, none).map(RequestHash.forRequest).size, 4)
+    assertEquals(Set(first, second, third, none).flatMap(RequestHash.forRequest(_, LmMode.Chat).toOption).size, 4)
   }
 
   test("the cache key covers the call id and the name of a tool message") {
@@ -176,20 +177,19 @@ class ToolCallWireSuite extends FunSuite:
       requestWith(base.copy(toolCallId = Some("call_2"))),
       requestWith(base.copy(name = Some("lookup"))),
       requestWith(base.copy(toolCallId = None, name = None))
-    ).map(RequestHash.forRequest)
+    ).flatMap(RequestHash.forRequest(_, LmMode.Chat).toOption)
     assertEquals(hashes.size, 4)
   }
 
   test("the disk cache keeps the id of a tool call") {
     val directory = Files.createTempDirectory("dspy4s-lm-disk-cache-tool-id")
     try
-      val request =
-        LmRequest(model = "gpt-test", messages = Vector(Message(role = MessageRole.User, text = Some("Q1"))))
+      val key      = CacheKey.of("gpt-test")
       val response =
         LmResponse(outputs = Vector(LmOutput(text = "", toolCalls = Vector(search, search.copy(id = None)))))
-      new DiskLmCache(directory, maxEntries = CacheCapacity(8)).put(request, response)
+      new DiskLmCache(directory, maxEntries = CacheCapacity(8)).put(key, response)
 
-      val cached = new DiskLmCache(directory, maxEntries = CacheCapacity(8)).get(request)
+      val cached = new DiskLmCache(directory, maxEntries = CacheCapacity(8)).get(key)
       assertEquals(cached.map(_.outputs.flatMap(_.toolCalls)), Some(Vector(search, search.copy(id = None))))
     finally
       Files.walk(directory).sorted(java.util.Comparator.reverseOrder()).forEach { path =>

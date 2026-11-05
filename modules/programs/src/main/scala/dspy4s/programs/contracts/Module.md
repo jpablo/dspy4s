@@ -6,7 +6,7 @@ type `I`, a semantic output type `O`, and one uniform runtime boundary:
 ```scala
 trait Module[I, O]:
   def moduleName: String
-  protected val lifecycle: ModuleLifecycle[I, O]
+  protected val lifecycle: ModuleLifecycle[I]
   protected def forward(
       call: ProgramCall[I]
   )(using RuntimeContext): Either[DspyError, Prediction[O]]
@@ -32,8 +32,8 @@ descendant in the repository. To keep the large transparent branch legible, its 
 responsibility in an attached note instead of fourteen individual class nodes and arrows. Test fixtures are excluded.
 The streaming tutorial also creates one anonymous `new DynamicModule`; because that expression declares no reusable
 class name, it is noted here but is not a class node.
-Colors match the four semantic branches in the table below: blue is direct executable, green is transparent structural,
-amber is dynamic-record, and violet is trajectory-based. The `Module` root remains neutral gray.
+Colors match the three semantic branches in the table below: blue is direct executable, green is transparent structural,
+and amber is dynamic-record. The `Module` root remains neutral gray.
 
 ```mermaid
 classDiagram
@@ -49,15 +49,10 @@ classDiagram
     class DynamicModule {
         <<trait>>
     }
-    class TrajectoryAgent {
-        <<trait>>
-    }
-    class InterpretedTrajectoryAgent {
-        <<trait>>
-    }
 
     class Predict
     class ChainOfThought
+    class ReAct
     class RLM
     class MultiChainComparison
     class BestOfN
@@ -75,16 +70,14 @@ classDiagram
         <<example>>
     }
 
-    class ReAct
-
-    note for TransparentModule "Composition<br/>Identity · AndThen · Both · Tensor<br/>Copy · Discard · Swap<br/><br/>Transformations<br/>Lift · LiftEither · MapOutput<br/>ContramapInput · Dimap<br/><br/>Control<br/>Moded · RecoverWith"
+    note for TransparentModule "Composition<br/>Identity · AndThen · Both · Tensor<br/><br/>Transformations<br/>Lift · LiftEither · Dimap<br/><br/>Control<br/>Moded · RecoverWith"
 
     Module <|-- TransparentModule
     Module <|-- DynamicModule
-    Module <|-- TrajectoryAgent
 
     Module <|-- Predict
     Module <|-- ChainOfThought
+    Module <|-- ReAct
     Module <|-- RLM
     Module <|-- MultiChainComparison
     Module <|-- BestOfN
@@ -96,13 +89,11 @@ classDiagram
     DynamicModule <|-- SimplifyModule
     DynamicModule <|-- ScoringModule
 
-    TrajectoryAgent <|-- InterpretedTrajectoryAgent
-    InterpretedTrajectoryAgent <|-- ReAct
-
     style Module fill:#F3F4F6,stroke:#4B5563,color:#111827,stroke-width:2px
 
     style Predict fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
     style ChainOfThought fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
+    style ReAct fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
     style RLM fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
     style MultiChainComparison fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
     style BestOfN fill:#DBEAFE,stroke:#2563EB,color:#172554,stroke-width:2px
@@ -115,20 +106,15 @@ classDiagram
     style EnsembledProgram fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px
     style SimplifyModule fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px
     style ScoringModule fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px
-
-    style TrajectoryAgent fill:#EDE9FE,stroke:#7C3AED,color:#4C1D95,stroke-width:2px
-    style InterpretedTrajectoryAgent fill:#EDE9FE,stroke:#7C3AED,color:#4C1D95,stroke-width:2px
-    style ReAct fill:#EDE9FE,stroke:#7C3AED,color:#4C1D95,stroke-width:2px
 ```
 
-The descendants fall into four semantic branches:
+The descendants fall into three semantic branches:
 
 | Branch | Purpose | Descendants |
 |---|---|---|
-| Direct executable programs | Implement a complete strategy directly | `Predict`, `ChainOfThought`, `RLM`, `MultiChainComparison`, `BestOfN`, `Refine` |
-| `TransparentModule` | Structural syntax whose own node must not appear in callbacks, trace, or history | `Identity`, `AndThen`, `Both`, `Tensor`, `Copy`, `Discard`, `Swap`, `Lift`, `LiftEither`, `MapOutput`, `ContramapInput`, `Dimap`, `Moded`, `RecoverWith` |
+| Direct executable programs | Implement a complete strategy directly | `Predict`, `ChainOfThought`, `ReAct`, `RLM`, `MultiChainComparison`, `BestOfN`, `Refine` |
+| `TransparentModule` | Structural syntax whose own node must not appear in callbacks, trace, or history | `Identity`, `AndThen`, `Both`, `Tensor`, `Lift`, `LiftEither`, `Dimap`, `Moded`, `RecoverWith` |
 | `DynamicModule` | Execute over runtime `DynamicValue.Record` inputs and outputs | `DynamicPredict`, `KNNFewShotProgram`, internal `EnsembledProgram`, example `SimplifyModule`, example `ScoringModule` |
-| `TrajectoryAgent` | Gather a trajectory and then extract the result | `InterpretedTrajectoryAgent`, with the concrete program `ReAct` |
 
 This is an inheritance diagram, not a catalog of every type that mentions `Module`. In particular:
 
@@ -245,24 +231,27 @@ category.
 [`ModuleLifecycle`](ModuleLifecycle.scala) is a value-level strategy:
 
 ```scala
-sealed trait ModuleLifecycle[I, O]
+sealed trait ModuleLifecycle[I]
 
 object ModuleLifecycle:
-  final case class Transparent[I, O]() extends ModuleLifecycle[I, O]
-  final case class Observed[I, O](
-      observation: CallObservation[ProgramCall[I], O]
-  ) extends ModuleLifecycle[I, O]
+  final case class Transparent[I]() extends ModuleLifecycle[I]
+  final case class Observed[I](
+      inputs   : ProgramCall[I] => DynamicValue.Record,
+      predictor: Option[PredictorKey] = None
+  ) extends ModuleLifecycle[I]
 ```
 
-`CallObservation` answers three questions for an observed boundary:
+`Observed` answers two questions for an observed boundary:
 
 1. How is the input projected into a runtime record?
-2. Does this call permit trace/history recording?
-3. How is the prediction projected into an output record?
+2. Which key does the boundary write into its trace entries, when the module is a predictor?
 
-It is a field rather than a typeclass because observation is not unique for a given `I` and `O`. A signature-backed
-`Predict[I, O]` can encode its input through its `Shape[I]`; a generic wrapper such as `BestOfN[I, O]` has the same type
-shape but may not possess an authoritative input encoder.
+The `traceEnabled` flag of the call permits trace/history recording, and the output record is the value record of the
+raw prediction, for each observed module.
+
+The input projection is a field rather than a typeclass because observation is not unique for a given `I`. A
+signature-backed `Predict[I, O]` can encode its input through its `Shape[I]`; a generic wrapper such as `BestOfN[I, O]`
+has the same type shape but may not possess an authoritative input encoder.
 
 ## Why transparent modules exist
 
@@ -322,7 +311,7 @@ This module has a domain-specific function, an explicit observation projection, 
 final case class LengthModule() extends Module[String, Int]:
   override val moduleName: String = "length"
 
-  override protected val lifecycle: ModuleLifecycle[String, Int] =
+  override protected val lifecycle: ModuleLifecycle[String] =
     ModuleLifecycle.typed(call => DynamicValues.record("text" := call.input))
 
   override protected def forward(
@@ -359,10 +348,10 @@ extend `DynamicModule`.
 | `apply(input, config, traceEnabled)` | Convenience constructor for a `ProgramCall`, followed by ordinary execution |
 | `apply(call)` | Canonical synchronous, lifecycle-wrapped boundary |
 | `applyAsync(call)` | Runs asynchronously and returns only the value; the worker's trace/history remains isolated |
-| `applyAsyncExecuted(call)` | Runs asynchronously and returns `Executed[value]`, including the worker-produced runtime delta |
 
-Both asynchronous methods propagate the runtime services, configuration, scope, and registered context carriers into
-the worker. Use `applyAsyncExecuted` when the caller must explicitly join the child's observable runtime output.
+The asynchronous method propagates the runtime services, configuration, scope, and registered context carriers into
+the worker. Use `ContextPropagation.futureExecuted` when the caller must explicitly join the child's observable runtime
+output.
 
 ## Boundary invariants
 
@@ -401,11 +390,8 @@ sbt --error \
 ## Suggested reading order
 
 1. Read `Module.apply(call)` to see the lifecycle template.
-2. Read `ModuleLifecycle` and `CallObservation` to see how values become runtime records.
+2. Read `ModuleLifecycle` to see how values become runtime records.
 3. Read `ProgramCall.mapInput` and `Prediction` to understand what composition changes and preserves.
 4. Read `TransparentModule` and then `AndThen` to see structural composition without structural trace noise.
 5. Read `DynamicModule`, `Predict`, and `DynamicPredict` to compare domain-specific and record carriers.
-6. Read `TrajectoryAgent` and `InterpretedTrajectoryAgent` for the deepest template-method branch.
-
-For the state machine beneath `ReAct`, continue with
-[`InterpretedTrajectoryAgent.md`](../runtime/InterpretedTrajectoryAgent.md).
+6. Read `ReAct.forward` and `AgentLoop.run` for a program that runs a bounded loop and then an extractor.

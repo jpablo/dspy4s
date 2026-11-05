@@ -6,7 +6,15 @@ import dspy4s.core.contracts.DspyError
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.duration.FiniteDuration
 
-final case class HttpResponse(status: Int, headers: Map[String, String], body: String)
+final case class HttpResponse(status: Int, headers: Map[String, String], body: String):
+
+  /** Whether the status is a success status ([[HttpResponse.isSuccess]]). */
+  def isSuccess: Boolean = HttpResponse.isSuccess(status)
+
+object HttpResponse:
+
+  /** Whether `status` is a success status: a status from 200 to 299. */
+  def isSuccess(status: Int): Boolean = status >= 200 && status < 300
 
 /** The reply of a stream request.
   *
@@ -16,14 +24,19 @@ final case class HttpResponse(status: Int, headers: Map[String, String], body: S
   *   [[dspy4s.core.contracts.LmTransportError]] when the connection failed during the stream. `None` when the lines
   *   ended normally. A consumer reports this failure in place of its own rule for a stream that ends early. The JDK
   *   transport also gives an [[dspy4s.core.contracts.LmUnexpectedError]] when the consumer thread gets an interrupt
-  *   during the wait for a line, or when its reader thread fails for a reason that is not an IO failure.
+  *   during the wait for a line, or when its reader thread fails for a reason that is not an IO failure. An interrupt
+  *   before the headers is not a failure of the lines: `streamSse` then gives a `Left` with an
+  *   [[dspy4s.core.contracts.LmUnexpectedError]].
   */
 final case class HttpStreamResponse(
     status   : Int,
     headers  : Map[String, String],
     dataLines: ClosableIterator[String],
     failure  : () => Option[DspyError] = () => None
-)
+):
+
+  /** Whether the status is a success status ([[HttpResponse.isSuccess]]). */
+  def isSuccess: Boolean = HttpResponse.isSuccess(status)
 
 /** The time limits of an HTTP transport (upstream lm15 `Timeouts` in `dspy/_vendor/lm15/transports/_limits.py`). Each
   * limit must be positive: a limit of zero or less is a configuration error, not "no limit".
@@ -41,6 +54,10 @@ final case class HttpTimeouts(connect: FiniteDuration = 10.seconds, read: Finite
   require(connect.toNanos > 0L, s"The connect limit must be positive, not $connect")
   require(read.toNanos > 0L, s"The read limit must be positive, not $read")
 
+/** The HTTP client of the providers. A failure with no response is a `Left`, not an exception. This includes an
+  * interrupt of the calling thread: the JDK transport gives an [[dspy4s.core.contracts.LmUnexpectedError]] for it, and
+  * the interrupt status of the thread stays set.
+  */
 trait HttpTransport:
   def sendJson(
       url    : String,

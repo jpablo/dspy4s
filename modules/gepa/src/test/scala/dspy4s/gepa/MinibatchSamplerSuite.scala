@@ -33,6 +33,23 @@ class MinibatchSamplerSuite extends FunSuite:
     assertEquals(mb.toSet, Set(0)) // only id 0 exists; padded to fill the window
   }
 
+  test("EpochShuffled: a pad that is longer than the list reads the list from its end again") {
+    // gepa `batch_sampler.py`, the venv Python: for a list [a, b] and a minibatch of 5, the pad is b, a, b.
+    val window = new MinibatchSampler.EpochShuffled(minibatchSize = MinibatchSize(5), seed = 2L).sample(2, 0)
+    assertEquals(window.toSet, Set(0, 1))
+    assertEquals(window.drop(2), Vector(window(1), window(0), window(1)))
+  }
+
+  test("EpochShuffled: an epoch counts the uses of an id from the start, with no count from the epoch before") {
+    // gepa makes a new `Counter` for each epoch, so each epoch has one pad for a trainset of 5 and a minibatch of 2.
+    val sampler = new MinibatchSampler.EpochShuffled(minibatchSize = MinibatchSize(2), seed = 4L)
+    (0 until 6).grouped(3).foreach { epoch =>
+      val walk = epoch.flatMap(sampler.sample(5, _)).toVector
+      assertEquals(walk.toSet, Set(0, 1, 2, 3, 4))
+      assertEquals(walk(5), walk(4), walk.toString)
+    }
+  }
+
   test("EpochShuffled is deterministic for a given seed") {
     def run() =
       val s = new MinibatchSampler.EpochShuffled(MinibatchSize(2), 7L)

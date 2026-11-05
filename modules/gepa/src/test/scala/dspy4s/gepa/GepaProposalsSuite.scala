@@ -1,5 +1,6 @@
 package dspy4s.gepa
 
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -23,7 +24,6 @@ import dspy4s.programs.ProgramRunner
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.optimization.OptimizableId
 import dspy4s.programs.optimization.OptimizableLeaf
-import dspy4s.programs.optimization.OptimizableMetadata
 import dspy4s.programs.optimization.OptimizableParameters
 import dspy4s.programs.strategies.DynamicPredict
 import munit.FunSuite
@@ -54,7 +54,7 @@ object Fragile:
 
     def get(program: Fragile): OptimizableParameters = leaf.get(program.inner)
 
-    def metadata(program: Fragile): OptimizableMetadata = leaf.metadata(program.inner)
+    def metadata(program: Fragile): PredictorKey = leaf.metadata(program.inner)
 
     def set(program: Fragile, updated: OptimizableParameters): Fragile =
       if updated.instructions.exists(_.contains("BOOM")) then throw IllegalStateException("BOOM")
@@ -323,7 +323,7 @@ class GepaProposalsSuite extends FunSuite:
       assertEquals(adapter.batchEvaluate(Vector.empty, captureTraces = false), Vector.empty)
       assertEquals(
         adapter.batchEvaluate(Vector(seedCandidate -> Vector.empty), captureTraces = false),
-        Vector(EvaluationBatch(Vector.empty, Vector.empty, trajectories = None))
+        Vector(EvaluationBatch(Vector.empty, trajectories = None, objectiveScores = Vector.empty))
       )
     }
   }
@@ -349,7 +349,7 @@ class GepaProposalsSuite extends FunSuite:
       instruction("Answer.")       -> Vector(example("Question two?")),
       instruction("NEAR is fine.") -> Vector(example("Question three?"))
     )
-    // Two threads: two worker threads evaluate the three items. One thread: the thread of the caller evaluates them.
+    // Two threads: two worker threads evaluate the three items. One thread: one worker thread evaluates them.
     Vector(2, 1).foreach { threads =>
       val metric  = new GradedMetric
       val context = RuntimeContext(
@@ -372,7 +372,8 @@ class GepaProposalsSuite extends FunSuite:
   test("an exception of one evaluation of a batch goes to the caller as it is") {
     // The structure of the program throws when it applies the second candidate.
     val items = Vector(instruction("Answer.") -> dataset(1), instruction("BOOM") -> dataset(1))
-    // Four threads: a worker thread evaluates each item. One thread: the thread of the caller evaluates the items.
+    // Four threads: a worker thread evaluates each item. One thread: one worker thread evaluates the items. The other
+    // item finishes before the throw.
     Vector(4, 1).foreach { threads =>
       val context = RuntimeContext(
         lm = Some(new TaskLm),
@@ -389,21 +390,22 @@ class GepaProposalsSuite extends FunSuite:
     }
   }
 
-  test("the cache evaluates more than one candidate in one batch, and equal candidates one time") {
+  test("the cache evaluates more than one candidate in one batch") {
     val lm = new TaskLm
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
       val cache            = new GepaEvalCache[DynamicPredict](new GepaAdapter(program, new GradedMetric))
       val city             = instruction("Use the CITY.")
-      val scored           = cache.scoredAll(Vector(city, seedCandidate, city), dataset(2))
-      assertEquals(scored.map(_.scores), Vector(Vector(1.0, 1.0), Vector(0.0, 0.0), Vector(1.0, 1.0)))
-      assertEquals(scored.map(_.evaluated), Vector(2, 2, 0))
-      assertEquals(lm.calls.get(), 4)
+      val near             = instruction("NEAR is fine.")
+      val scored           = cache.scoredAll(Vector(city, seedCandidate, near), dataset(2))
+      assertEquals(scored.map(_.scores), Vector(Vector(1.0, 1.0), Vector(0.0, 0.0), Vector(0.5, 0.5)))
+      assertEquals(scored.map(_.evaluated), Vector(2, 2, 2))
+      assertEquals(lm.calls.get(), 6)
 
       assertEquals(cache.scoredAll(Vector(seedCandidate, city), dataset(2)).map(_.evaluated), Vector(0, 0))
       assertEquals(cache.scored(city, dataset(2)).evaluated, 0)
       assertEquals(cache.scoredAll(Vector.empty, dataset(2)), Vector.empty)
-      assertEquals(lm.calls.get(), 4)
+      assertEquals(lm.calls.get(), 6)
     }
   }
 
@@ -658,5 +660,5 @@ class GepaProposalsSuite extends FunSuite:
       )
     )
     // The pointer of the seed moved two times. Each child takes the pointer of its parent after the two moves.
-    assertEquals(Vector(0, 1, 2).map(result.state.pointerOf), Vector(0, 0, 0))
+    assertEquals(result.state.nextComponent, Vector(0, 0, 0))
   }

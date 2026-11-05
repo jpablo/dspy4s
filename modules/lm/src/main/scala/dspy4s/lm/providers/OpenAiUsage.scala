@@ -1,16 +1,15 @@
 package dspy4s.lm.providers
 
-import dspy4s.core.contracts.{LmUsage, TokenCategory}
+import dspy4s.core.contracts.{DynamicValues, LmUsage, TokenCategory}
 import zio.blocks.schema.DynamicValue
-import zio.blocks.schema.NameMapper
 import zio.blocks.schema.Schema
-import zio.blocks.schema.json.JsonCodecDeriver
 
-/** Wire model of an OpenAI token-usage block, shared by the streaming chunk parser and the (non-streaming) response
-  * parser. Decoded by a derived `JsonCodec`, so absent fields and `null`s become `None` and unknown keys are ignored —
-  * no by-hand `DynamicValue` navigation. Both the Chat (`prompt_tokens`/`completion_tokens`) and the Responses
-  * (`input_tokens`/`output_tokens`) naming conventions are modeled; the nested `*_tokens_details` blocks carry the
-  * provider-specific extras. `toLmUsage` reconciles all of this into the domain `LmUsage`.
+/** The token usage of an OpenAI reply. The parser of the stream chunks and the parser of a plain reply use it. The
+  * typed codec of a stream chunk ([[OpenAiStreamChunk]]) decodes it with the derived `Schema`, and
+  * [[OpenAiUsage.fromDynamic]] reads it from a decoded record. The record has the names of the chat usage
+  * (`prompt_tokens`, `completion_tokens`) and of the Responses usage (`input_tokens`, `output_tokens`). The
+  * `*_tokens_details` blocks hold the extra counts of the provider. [[toLmUsage]] gives the `LmUsage` of all these
+  * fields.
   *
   * The chat usage has the blocks `prompt_tokens_details` and `completion_tokens_details` (upstream `_usage_from_chat`
   * in `dspy/_vendor/lm15/providers/openai_chat.py`). The Responses usage has the blocks `input_tokens_details` and
@@ -29,10 +28,10 @@ private[lm] final case class OpenAiUsage(
     outputTokensDetails    : Option[OpenAiTokenDetails] = None
 ) derives Schema:
 
-  /** `totalTokens` falls back to prompt + completion when absent. `extras` is the union of the prompt- and
-    * completion-side detail breakdowns (a category appearing on both sides, e.g. `audio_tokens`, is summed). The prompt
-    * side is `prompt_tokens_details`, else `input_tokens_details`. The completion side is `completion_tokens_details`,
-    * else `output_tokens_details`.
+  /** When `totalTokens` is absent, the total is the prompt count plus the completion count. `extras` has the categories
+    * of the prompt details and of the completion details. A category that is on the two sides, for example
+    * `audio_tokens`, has the sum of the two counts. The prompt details are `prompt_tokens_details`, else
+    * `input_tokens_details`. The completion details are `completion_tokens_details`, else `output_tokens_details`.
     */
   def toLmUsage: LmUsage =
     val prompt     = promptTokens.orElse(inputTokens).getOrElse(0L)
@@ -54,8 +53,8 @@ private[lm] final case class OpenAiUsage(
   ): Map[TokenCategory, Long] =
     b.foldLeft(a) { case (acc, (category, value)) => acc.updated(category, acc.getOrElse(category, 0L) + value) }
 
-/** One of OpenAI's `prompt_tokens_details` / `completion_tokens_details` / `input_tokens_details` /
-  * `output_tokens_details` sub-objects.
+/** One details object of an OpenAI usage: `prompt_tokens_details`, `completion_tokens_details`, `input_tokens_details`,
+  * or `output_tokens_details`.
   */
 private[lm] final case class OpenAiTokenDetails(
     cachedTokens            : Option[Long] = None,
@@ -75,10 +74,41 @@ private[lm] final case class OpenAiTokenDetails(
     ).collect { case (category, Some(value)) => category -> value }.toMap
 
 private[lm] object OpenAiUsage:
-  private val codec = Schema[OpenAiUsage].derive(JsonCodecDeriver.withFieldNameMapper(NameMapper.SnakeCase))
 
-  /** Decode a usage record (a subtree of an already-parsed response/chunk) into `OpenAiUsage`. Lenient: a usage block
-    * that fails to decode yields an empty `OpenAiUsage` rather than failing the whole response.
+  /** The usage of a usage record of a decoded reply or chunk. The function reads each count field by itself, so a field
+    * of the wrong type gives no count for that field only, and the other counts stay. A count is a JSON number. A
+    * string, also the text of a number, is not a count, because the wire sends a count as a number. A value that is not
+    * an object gives an empty `OpenAiUsage`, and the reply does not fail.
     */
   def fromDynamic(usage: DynamicValue): OpenAiUsage =
-    codec.decode(usage.toJson).getOrElse(OpenAiUsage())
+    def details(key: String): Option[OpenAiTokenDetails] =
+      DynamicValues.recordGet(usage, key).flatMap(DynamicValues.asRecord).map(OpenAiTokenDetails.fromDynamic)
+    OpenAiUsage(
+      promptTokens = count(usage, "prompt_tokens"),
+      completionTokens = count(usage, "completion_tokens"),
+      totalTokens = count(usage, "total_tokens"),
+      inputTokens = count(usage, "input_tokens"),
+      outputTokens = count(usage, "output_tokens"),
+      promptTokensDetails = details("prompt_tokens_details"),
+      completionTokensDetails = details("completion_tokens_details"),
+      inputTokensDetails = details("input_tokens_details"),
+      outputTokensDetails = details("output_tokens_details")
+    )
+
+  /** The count at `key` of `record`: a JSON number, as a `Long`. An absent key, a null, a string, and each other value
+    * that is not a number give `None`.
+    */
+  private[providers] def count(record: DynamicValue, key: String): Option[Long] =
+    DynamicValues.recordGet(record, key).filter(DynamicValues.asString(_).isEmpty).flatMap(DynamicValues.asLong)
+
+private[lm] object OpenAiTokenDetails:
+
+  /** The details of a details record, with the count rule of [[OpenAiUsage.fromDynamic]]. */
+  def fromDynamic(details: DynamicValue): OpenAiTokenDetails =
+    OpenAiTokenDetails(
+      cachedTokens = OpenAiUsage.count(details, "cached_tokens"),
+      audioTokens = OpenAiUsage.count(details, "audio_tokens"),
+      reasoningTokens = OpenAiUsage.count(details, "reasoning_tokens"),
+      acceptedPredictionTokens = OpenAiUsage.count(details, "accepted_prediction_tokens"),
+      rejectedPredictionTokens = OpenAiUsage.count(details, "rejected_prediction_tokens")
+    )

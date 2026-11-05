@@ -1,7 +1,7 @@
 /** Signatures — case-class surface.
   *
   * Mirrors DSPy's class-based signature style (snippet "Emotion" from docs/docs/learn/programming/signatures.md).
-  * Compiles against the dspy4s engine; no live LM calls. Run shapes below are illustrative.
+  * `caseClassMain` calls an LM.
   *
   * Status: example
   */
@@ -9,14 +9,12 @@ package dspy4s.examples.signatures
 
 import zio.blocks.schema.Schema
 
-import dspy4s.core.contracts.{DspyError, RuntimeContext, :=}
-import dspy4s.core.data.RawPrediction
+import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.examples.Demo
-import dspy4s.programs.contracts.Prediction
 import dspy4s.signatures.Signature
 
-// Top-level types: Mirror derivation needs top-level case classes, and the
-// enum's Schema must come from outside any enclosing class.
+// These types are at the top level so that their names are short. A type in an object also works, as
+// `MyContainer.Query` in learn/programming/Signatures.scala shows.
 // --8<-- [start:derived-types]
 case class EmotionInput(sentence: String) derives Schema
 
@@ -33,8 +31,9 @@ case class EmotionOutput(sentiment: Emotion) derives Schema
   *     `ProgramCall.input` record.
   *   - decode: `Prediction.output` is an `EmotionOutput`, so `tp.output.sentiment` has type `Emotion` with no runtime
   *     cast.
-  *   - enum constraints reach the LM via `Shape.jsonSchemaString` (rendered from the backing `Schema[O]`); the
-  *     `JSONAdapter` inlines that schema into its prompt.
+  *   - enum constraints reach the LM through `FieldSpec.enumValues`: the prompt of each adapter names the allowed
+  *     values of the field (`PromptText.outputNote`). The `JSONAdapter` also sends `Shape.jsonSchema` as the
+  *     `response_format` of the request, when the model supports a response schema.
   */
 object CaseClassExample:
 
@@ -45,21 +44,13 @@ object CaseClassExample:
   )
   // --8<-- [end:derived-sig]
 
-  /** Illustrative call site. With an LM and adapter configured in `RuntimeContext`, `Predict(signature)(...)` returns
+  /** With an LM and adapter configured in `RuntimeContext`, `Predict(signature)(...)` returns
     * `Either[DspyError, Prediction[EmotionOutput]]`.
     */
   def classify(sentence: String)(using RuntimeContext): Either[DspyError, Emotion] =
     import dspy4s.programs.strategies.Predict
     Predict(signature)(EmotionInput(sentence))
       .map(_.output.sentiment)
-
-  /** Offline demonstration: build a `Prediction` from a raw prediction map without invoking an LM. Useful for tests and
-    * for showing the decode boundary.
-    */
-  def fromRawValues(rawSentiment: String): Either[DspyError, Prediction[EmotionOutput]] =
-    val raw =
-      RawPrediction(values = dspy4s.core.contracts.DynamicValues.recordFromEntries(Vector("sentiment" := rawSentiment)))
-    Prediction.from(raw, signature.outputShape)
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.signatures.caseClassMain"
 @main def caseClassMain(): Unit =

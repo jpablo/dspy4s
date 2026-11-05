@@ -1,13 +1,23 @@
 package dspy4s.programs
 
 import dspy4s.adapters.ChatAdapter
-import dspy4s.adapters.internal.ProgramPromptText
-import dspy4s.core.contracts.{:=, DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout, TypeRef}
+import dspy4s.core.contracts.{
+  :=,
+  DspyError,
+  DynamicValues,
+  FieldSpec,
+  LmDefaults,
+  RuntimeContext,
+  SignatureLayout,
+  TypeRef,
+  ValidationError
+}
 import dspy4s.core.data.Example
 import dspy4s.core.decisions.{DecisionPlan, DecisionSettings}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{DecisionRequests, LanguageModel, LmMode, LmRequest, LmResponse}
 import dspy4s.lm.runtime.{CacheCapacity, InMemoryLmCache, ManagedLanguageModel}
+import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.strategies.DynamicPredict
 import munit.FunSuite
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
@@ -37,7 +47,7 @@ class PredictSystemOneSuite extends FunSuite:
     override def supportsDecisionRequests: Boolean                                             = true
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       requests = requests :+ request
-      DecisionRequests.parts(request).map { (_, questions) =>
+      request.decision.map(_.questions).toRight(ValidationError("not a decision request")).map { questions =>
         val answers = DynamicValues.recordKeys(questions).map { name =>
           val kind = DynamicValues.recordGet(questions, name).collect { case q: DynamicValue.Record => q }
             .flatMap(DynamicValues.recordGet(_, "type")).map(DynamicValues.renderText).getOrElse("")
@@ -103,24 +113,24 @@ class PredictSystemOneSuite extends FunSuite:
     run(lm)(program(DynamicValues.record("text" := text))).fold(error => fail(error.message), _.raw.values)
 
   test("the request has the state and the questions, and no setting goes to the model") {
-    val lm                 = FakeSystemOne()
-    val _                  = call(DynamicPredict(layout), lm)
-    val (state, questions) = DecisionRequests.parts(lm.requests.headOption.getOrElse(fail("no request")))
-      .fold(error => fail(error.message), identity)
+    val lm      = FakeSystemOne()
+    val _       = call(DynamicPredict(layout), lm)
+    val request = lm.requests.headOption.getOrElse(fail("no request"))
+    val payload = request.decision.getOrElse(fail("no decision payload"))
     assertEquals(
-      state,
+      payload.state,
       json("""{"instructions": "Assess the document.", "input_fields": "1. `text` (str):", "inputs": {"text": "x"}}""")
     )
     assertEquals(
-      questions,
+      payload.questions,
       json(
         """{"flag": {"instructions": "Is it relevant?", "type": "noul"},
           | "rating": {"instructions": "Rate usefulness.", "type": "score", "criteria": ["bad", "fair", "great"]},
           | "label": {"instructions": "Classify the document.", "type": "choice", "criteria": {"2": null, "other": null}}}""".stripMargin
       )
     )
-    val text = ProgramPromptText.json(lm.requests.head.options)
-    assert(!text.contains("threshold") && !text.contains("cuts") && !text.contains("weights"), text)
+    assertEquals(request.options, DynamicValue.Record.empty, "no setting goes to the model")
+    assertEquals(request.messages, Vector.empty)
   }
 
   test("the settings decode the evidence locally, and a cached answer serves new settings") {
@@ -140,8 +150,8 @@ class PredictSystemOneSuite extends FunSuite:
     assertEquals(get(second, "flag", "value"), DynamicValue.Primitive(PrimitiveValue.Boolean(false)))
     assertEqualsDouble(number(get(second, "flag", "confidence")), 1.0 / 9, 1e-12)
     assertEqualsDouble(number(get(first, "rating", "value")), 1.5, 1e-12)
-    assertEquals(get(first, "rating", "level"), DynamicValue.Primitive(PrimitiveValue.Int(2)))
-    assertEquals(get(second, "rating", "level"), DynamicValue.Primitive(PrimitiveValue.Int(1)))
+    assertEquals(get(first, "rating", "level"), DynamicValue.Primitive(PrimitiveValue.String("great")))
+    assertEquals(get(second, "rating", "level"), DynamicValue.Primitive(PrimitiveValue.String("fair")))
     assertEquals(get(first, "label", "value"), DynamicValue.Primitive(PrimitiveValue.String("2")))
     assertEquals(get(second, "label", "value"), DynamicValue.Primitive(PrimitiveValue.String("other")))
     assertEquals(fake.requests.size, 1, "the second call is a cache hit")
@@ -155,14 +165,14 @@ class PredictSystemOneSuite extends FunSuite:
       inputKeys = Set("text")
     )
     val _           = call(DynamicPredict(layout, demos = Vector(demo)), lm)
-    val (state, _)  = DecisionRequests.parts(lm.requests.head).fold(error => fail(error.message), identity)
+    val state       = lm.requests.head.decision.map(_.state).getOrElse(fail("no decision payload"))
     val stateRecord = state match
       case record: DynamicValue.Record => record
       case other                       => fail(s"not a record: $other")
     assertEquals(get(stateRecord, "demos"), json("""[{"text": "d", "flag": false, "rating": 0.0, "label": "other"}]"""))
-    val _          = call(DynamicPredict(layout), lm)
-    val (plain, _) = DecisionRequests.parts(lm.requests.last).fold(error => fail(error.message), identity)
-    val plainKeys  = plain match
+    val _         = call(DynamicPredict(layout), lm)
+    val plain     = lm.requests.last.decision.map(_.state).getOrElse(fail("no decision payload"))
+    val plainKeys = plain match
       case record: DynamicValue.Record => DynamicValues.recordKeys(record)
       case other                       => fail(s"not a record: $other")
     assertEquals(plainKeys, Vector("instructions", "input_fields", "inputs"))
@@ -203,6 +213,35 @@ class PredictSystemOneSuite extends FunSuite:
     val lm     = FakeSystemOne()
     val tuned  = DynamicPredict(layout, config = DynamicValues.record("temperature" := 0.5))
     val result = run(lm)(tuned(DynamicValues.record("text" := "x")))
+    assert(result.left.exists(_.message.contains("temperature")), result.toString)
+    assertEquals(lm.requests.size, 0)
+  }
+
+  test("the rollout id of the scope reaches the decision request") {
+    val lm = FakeSystemOne()
+    val _  = RuntimeEnvironment.withLmDefaults(LmDefaults(rolloutId = Some(4)))(call(DynamicPredict(layout), lm))
+    assertEquals(lm.requests.map(_.rolloutId), Vector(Some(4)))
+  }
+
+  test("a per-call rollout id wins over the rollout id of the scope in the decision request") {
+    val lm = FakeSystemOne()
+    val _  = RuntimeEnvironment.withLmDefaults(LmDefaults(rolloutId = Some(4))) {
+      run(lm)(DynamicPredict(layout)(ProgramCall(DynamicValues.record("text" := "x"), rolloutId = Some(9))))
+    }
+    assertEquals(lm.requests.map(_.rolloutId), Vector(Some(9)))
+  }
+
+  // Upstream: `TypeSafe` has no `kwargs`, so `BestOfN.forward` raises, and `TypeSafe.copy(temperature=...)` raises. The
+  // port gives the same result as a `Left`: the temperature of an attempt reaches the decision path, which rejects it.
+  test("an attempt of BestOfN on a System One model fails on its temperature, before the request") {
+    val lm   = FakeSystemOne()
+    val best = BestOfN[DynamicPredict, DynamicValue.Record, DynamicValue.Record](
+      DynamicPredict(layout),
+      AttemptCount(1),
+      (_, _) => 0.0,
+      threshold = 1.0
+    )
+    val result = run(lm)(best(DynamicValues.record("text" := "x")))
     assert(result.left.exists(_.message.contains("temperature")), result.toString)
     assertEquals(lm.requests.size, 0)
   }

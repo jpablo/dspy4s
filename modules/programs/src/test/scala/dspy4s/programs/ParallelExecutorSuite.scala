@@ -30,7 +30,7 @@ class ParallelExecutorSuite extends FunSuite:
       )
 
       assert(result.isRight)
-      val values = result.toOption.get.results.flatten
+      val values = result.toOption.get.results.flatMap(_.toOption)
       assertEquals(values, Vector("42", "42", "42", "42", "42"))
     }
   }
@@ -48,9 +48,9 @@ class ParallelExecutorSuite extends FunSuite:
 
     assert(result.isRight)
     val output = result.toOption.get
-    assertEquals(output.results, Vector(Some(1), Some(2), None, Some(4), Some(5)))
-    assertEquals(output.failedIndices, Vector(2))
-    assert(output.errors.get(2).exists(_.isInstanceOf[RuntimeError]))
+    assertEquals(output.results.map(_.toOption), Vector(Some(1), Some(2), None, Some(4), Some(5)))
+    assertEquals(output.results.indices.filter(output.results(_).isLeft).toVector, Vector(2))
+    assert(output.results(2).left.exists(_.isInstanceOf[RuntimeError]))
   }
 
   test("max errors met returns cancellation error") {
@@ -68,6 +68,38 @@ class ParallelExecutorSuite extends FunSuite:
     val error = result.left.toOption.get
     assert(error.isInstanceOf[RuntimeError])
     assertEquals(error.message, "Execution cancelled due to errors or interruption.")
+  }
+
+  test("each failed task writes its cause, as upstream logs each error") {
+    given RuntimeContext = RuntimeEnvironment.current
+    val captured         = new java.io.ByteArrayOutputStream
+    val executor         = ParallelExecutor(numThreads = ThreadCount(2), maxErrors = ErrorLimit(3))
+    val result           = Console.withErr(captured) {
+      executor.executeEither[Int, Int](
+        task = {
+          case 1 => Left(RuntimeError("test", "a left"))
+          case 2 => throw IllegalStateException("a throw")
+          case n => Right(n)
+        },
+        data = Vector(1, 2, 3)
+      )
+    }
+    assert(result.isRight, result.toString)
+    val written = captured.toString
+    assert(written.contains("ParallelExecutor: Error for item 0: a left"), written)
+    assert(written.contains("Error for item 1:") && written.contains("a throw"), written)
+    assert(!written.contains("item 2"), written)
+  }
+
+  test("the task that reaches the error limit writes its cause") {
+    given RuntimeContext = RuntimeEnvironment.current
+    val captured         = new java.io.ByteArrayOutputStream
+    val executor         = ParallelExecutor(numThreads = ThreadCount(1), maxErrors = ErrorLimit(1))
+    val result           = Console.withErr(captured) {
+      executor.executeEither[Int, Int](task = _ => Left(RuntimeError("test", "the cause")), data = Vector(1))
+    }
+    assertEquals(result.left.map(_.message), Left("Execution cancelled due to errors or interruption."))
+    assert(captured.toString.contains("the cause"), captured.toString)
   }
 
   test("fromSettings uses runtime numThreads and maxErrors values") {
@@ -124,7 +156,7 @@ class ParallelExecutorSuite extends FunSuite:
     assert(limited.left.exists(_.message.startsWith("Execution timed out")), limited.toString)
 
     val unlimited = ParallelExecutor(numThreads = ThreadCount(3), timeout = Duration.Inf).execute(task, data)
-    assertEquals(unlimited.map(_.results), Right(Vector(Some(1), Some(2), Some(3))))
+    assertEquals(unlimited.map(_.results.map(_.toOption)), Right(Vector(Some(1), Some(2), Some(3))))
   }
 
   // Upstream `ParallelExecutor` never fails a batch for time: its `timeout` only submits a slow task again

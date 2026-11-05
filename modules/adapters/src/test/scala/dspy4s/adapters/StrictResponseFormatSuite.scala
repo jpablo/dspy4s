@@ -1,12 +1,14 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.AdapterInvocation
-import dspy4s.adapters.internal.JsonDynamic
+import dspy4s.adapters.contracts.NativeTools
+import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.adapters.internal.StrictJsonSchema
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
@@ -19,6 +21,7 @@ import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmResponse
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.PrimitiveValue
 
 /** The strict response schema of the JSON adapter (upstream `JSONAdapter._prepare_response_format` in
   * `dspy/adapters/json_adapter.py`, and `_strict_json_schema` in `dspy/clients/legacy_requests.py`).
@@ -38,10 +41,10 @@ class StrictResponseFormatSuite extends FunSuite:
 
   private def json(text: String): ujson.Value = ujson.read(text)
 
-  private def ujsonOf(value: DynamicValue): ujson.Value = JsonDynamic.toUjson(value)
+  private def ujsonOf(value: DynamicValue): ujson.Value = ujson.read(PythonText.json(value))
 
   private def parsed(text: String): DynamicValue.Record =
-    JsonDynamic.parse(text) match
+    PythonText.parseJson(text) match
       case Right(record: DynamicValue.Record) => record
       case other                              => fail(s"not a JSON object: $other")
 
@@ -64,10 +67,12 @@ class StrictResponseFormatSuite extends FunSuite:
       layout = layout,
       demos = Vector.empty,
       inputs = Example(values = DynamicValues.record("question" := "x"), inputKeys = Set("question")),
-      request = LmRequest(model = "stub", mode = LmMode.Chat),
-      outputJsonSchema = schema
+      request = LmRequest(model = "stub"),
+      outputJsonSchema = schema.map(parsed),
+      // With native function calling on, a tool calls field needs tools.
+      tools = if native then Vector(ToolSpec("search", None, DynamicValue.Record.empty)) else Vector.empty
     )
-    val options = JSONAdapter(useNativeFunctionCalling = native).format(invocation)
+    val options = JSONAdapter(native = NativeTools(enabled = native)).format(invocation)
       .fold(error => fail(s"format failed: $error"), _.requestOptions)
     DynamicValues.recordGet(options, "response_format").map(ujsonOf).getOrElse(fail(s"no response_format: $options"))
 
@@ -77,20 +82,20 @@ class StrictResponseFormatSuite extends FunSuite:
 
   private val jsonMode: ujson.Value = json("""{"type": "json_object"}""")
 
-  // Schemas that zio-blocks writes for typed outputs (see `ZioSchemaCodec.jsonSchemaForModel`).
+  // Schemas that `ZioSchemaCodec.jsonSchemaForModel` writes for typed outputs.
   private val optionSchema: String =
     """{"properties":{"amount":{"type":["null","number"]},"note":{"type":"string"}},"type":"object","required":["note"],"title":"ZsOptionProbe"}"""
 
   private val nestedSchema: String =
-    """{"properties":{"stage":{"properties":{"label":{"type":"string"},"steps":{"items":{"properties":{"action":{"type":"string"},"comment":{"type":["null","string"]}},"type":"object","required":["action"],"title":"ZsStep"},"type":["array","null"],"title":"Vector[ZsStep]"},"owner":{"type":["null","string"]}},"type":"object","required":["label"],"title":"ZsStage"},"summary":{"type":["null","string"]}},"type":"object","required":["stage"],"title":"ZsPipeline"}"""
+    """{"properties":{"stage":{"properties":{"label":{"type":"string"},"steps":{"items":{"properties":{"action":{"type":"string"},"comment":{"type":["null","string"]}},"type":"object","required":["action"],"title":"ZsStep"},"type":"array","title":"Vector[ZsStep]"},"owner":{"type":["null","string"]}},"type":"object","required":["label","steps"],"title":"ZsStage"},"summary":{"type":["null","string"]}},"type":"object","required":["stage"],"title":"ZsPipeline"}"""
 
   private val mapSchema: String =
-    """{"properties":{"scores":{"additionalProperties":{"type":"integer"},"type":["object","null"],"title":"Map[String,Int]"},"kind":{"enum":["Bad","Good"],"title":"TmpKind"}},"type":"object","required":["kind"],"title":"TmpMapProbe"}"""
+    """{"properties":{"scores":{"additionalProperties":{"type":"integer","maximum":2147483647,"minimum":-2147483648},"type":"object","title":"Map[String, Int]"},"kind":{"enum":["Bad","Good"],"title":"TmpKind"}},"type":"object","required":["scores","kind"],"title":"TmpMapProbe"}"""
 
   // A recursive type is in `$defs`, and the root is a `$ref` to it (zio-blocks writes no `$ref`, so
   // `jsonSchemaForModel` cuts the cycle).
   private val recursiveSchema: String =
-    """{"$ref":"#/$defs/ZsNode","$defs":{"ZsNode":{"properties":{"label":{"type":"string"},"children":{"items":{"$ref":"#/$defs/ZsNode"},"type":["array","null"],"title":"List[ZsNode]"}},"type":"object","required":["label"],"title":"ZsNode"}}}"""
+    """{"$ref":"#/$defs/ZsNode","$defs":{"ZsNode":{"properties":{"label":{"type":"string"},"children":{"items":{"$ref":"#/$defs/ZsNode"},"type":"array","title":"List[ZsNode]"}},"type":"object","required":["label","children"],"title":"ZsNode"}}}"""
 
   // ── Strict mode ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -210,10 +215,6 @@ class StrictResponseFormatSuite extends FunSuite:
     assertEquals(responseFormat(layoutOf("question -> answer: Widget")), jsonMode)
   }
 
-  test("a typed schema that does not parse gives JSON mode") {
-    assertEquals(responseFormat(layoutOf("question -> answer"), Some("{not valid json")), jsonMode)
-  }
-
   /** The value of `body`, and the text that `body` writes to the standard error stream. */
   private def withStderr[A](body: => A): (A, String) =
     val buffer = java.io.ByteArrayOutputStream()
@@ -228,7 +229,6 @@ class StrictResponseFormatSuite extends FunSuite:
     val badRef  = """{"type":"object","properties":{"answer":{"$ref":"#/$defs/Missing","title":"T"}}}"""
     Vector(
       withStderr(responseFormat(layoutOf("question -> answer: Widget"))),
-      withStderr(responseFormat(layoutOf("question -> answer"), Some("{not valid json"))),
       withStderr(responseFormat(layoutOf("question -> answer"), Some(badRef)))
     ).foreach { (format, log) =>
       assertEquals(format, jsonMode)
@@ -279,6 +279,28 @@ class StrictResponseFormatSuite extends FunSuite:
     assertEquals(result("$defs")("Step")("additionalProperties"), ujson.Bool(false))
   }
 
+  test("a $ref with other keys resolves at each use, and a cycle of such references cannot take strict shape") {
+    val result = shaped(
+      """{
+        |  "type": "object",
+        |  "$defs": {"Step": {"type": "object", "properties": {"action": {"type": "string"}}}},
+        |  "properties": {
+        |    "first": {"$ref": "#/$defs/Step", "description": "the first step"},
+        |    "last": {"$ref": "#/$defs/Step", "title": "Last"}
+        |  }
+        |}""".stripMargin
+    )
+    val step =
+      """"type": "object", "properties": {"action": {"type": "string"}}, "required": ["action"], "additionalProperties": false"""
+    assertEquals(result("properties")("first"), json(s"""{$step, "description": "the first step"}"""))
+    assertEquals(result("properties")("last"), json(s"""{$step, "title": "Last"}"""))
+    val cycle = """{"type": "object", "$defs": {
+        |  "A": {"type": "object", "properties": {"b": {"$ref": "#/$defs/B", "title": "B"}}},
+        |  "B": {"type": "object", "properties": {"a": {"$ref": "#/$defs/A", "title": "A"}}}
+        |}, "properties": {"x": {"$ref": "#/$defs/A", "title": "X"}}}""".stripMargin
+    assert(StrictJsonSchema.shape(parsed(cycle)).isLeft)
+  }
+
   test("a null default is removed, and a default that is not null stays") {
     val result = shaped(
       """{"type": "object", "properties": {"a": {"type": "string", "default": null}, "b": {"type": "integer", "default": 3}}}"""
@@ -295,6 +317,25 @@ class StrictResponseFormatSuite extends FunSuite:
     assertEquals(result("properties")("a"), json("""{"anyOf": [{"type": "string"}, {"type": "null"}]}"""))
     assertEquals(result("properties")("b"), json("""{"type": ["null", "string"]}"""))
     assertEquals(result("properties")("c"), json("""{"type": "string"}"""))
+  }
+
+  test("an Option of a collection keeps its one null, and a collection that is not an Option gets no null") {
+    val result = shaped(
+      """{"type": "object", "required": ["b"], "properties": {
+        |  "a": {"items": {"type": "string"}, "type": ["null", "array"], "title": "List[String]"},
+        |  "b": {"items": {"type": "string"}, "type": "array", "title": "List[String]"}
+        |}}""".stripMargin,
+      optional = Set("a")
+    )
+    assertEquals(result("required"), json("""["a", "b"]"""))
+    assertEquals(
+      result("properties")("a"),
+      json("""{"items": {"type": "string"}, "type": ["null", "array"], "title": "List[String]"}""")
+    )
+    assertEquals(
+      result("properties")("b"),
+      json("""{"items": {"type": "string"}, "type": "array", "title": "List[String]"}""")
+    )
   }
 
   test("a oneOf goes out as an anyOf, with each schema in strict shape") {
@@ -333,9 +374,40 @@ class StrictResponseFormatSuite extends FunSuite:
 
   // ── A schema from the field types, function by function ─────────────────────────────────────────────────────
 
-  test("fromFields gives no schema for a field type that has none") {
-    assertEquals(StrictJsonSchema.fromFields(Vector(FieldSpec("a"), FieldSpec("b", typeRef = TypeRef.json))), None)
-    assertEquals(StrictJsonSchema.fromFields(Vector(FieldSpec("a", typeRef = TypeRef.toolCalls))), None)
-    assertEquals(StrictJsonSchema.fromFields(Vector(FieldSpec("a", typeRef = TypeRef("Widget")))), None)
-    assertEquals(StrictJsonSchema.fromFields(Vector(FieldSpec("a", typeRef = TypeRef("list[dict]")))), None)
+  test("fromFields gives an open root for a field type that has no schema, with the open map of a dict field") {
+    def schemaText(fields: FieldSpec*): String = PythonText.json(StrictJsonSchema.fromFields(fields.toVector))
+    val openRoot                               = """{"type": "object", "properties": {}, "additionalProperties": true}"""
+    assertEquals(
+      schemaText(FieldSpec("a"), FieldSpec("b", typeRef = TypeRef.json)),
+      """{"type": "object", "properties": {"b": {"type": "object", "additionalProperties": true}}, """ +
+        """"additionalProperties": true}"""
+    )
+    assertEquals(schemaText(FieldSpec("a", typeRef = TypeRef.toolCalls)), openRoot)
+    assertEquals(schemaText(FieldSpec("a", typeRef = TypeRef("Widget"))), openRoot)
+    assertEquals(schemaText(FieldSpec("a", typeRef = TypeRef("list[dict]"))), openRoot)
+  }
+
+  test("fromFields keeps an exact integer default, a decimal default is a number, and an enum case is its name") {
+    def number(value: PrimitiveValue): Option[DynamicValue] = Some(DynamicValue.Primitive(value))
+    val schema                                              = StrictJsonSchema.fromFields(
+      Vector(
+        FieldSpec("big", typeRef = TypeRef.int, defaultValue = number(PrimitiveValue.Long(9007199254740993L))),
+        FieldSpec(
+          "ratio",
+          typeRef = TypeRef.double,
+          defaultValue = number(PrimitiveValue.BigDecimal(BigDecimal("2.5")))
+        ),
+        FieldSpec(
+          "tone",
+          enumValues = Vector("calm", "angry"),
+          defaultValue = Some(DynamicValue.Variant("calm", DynamicValue.Record.empty))
+        )
+      )
+    )
+    assertEquals(
+      PythonText.json(schema),
+      """{"type": "object", "properties": {"big": {"type": "integer", "default": 9007199254740993}, """ +
+        """"ratio": {"type": "number", "default": 2.5}, """ +
+        """"tone": {"type": "string", "enum": ["calm", "angry"], "default": "calm"}}}"""
+    )
   }

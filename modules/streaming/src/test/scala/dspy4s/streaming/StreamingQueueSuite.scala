@@ -104,3 +104,40 @@ class StreamingQueueSuite extends FunSuite:
     assert(!producer.isAlive, "producer thread must terminate after the consumer abandons the stream")
     assert(stopped.get(), "offer must eventually return false once the consumer has abandoned the stream")
   }
+
+  test("a close on another thread wakes a consumer thread parked in take") {
+    val queue    = StreamingQueue[Int](8)
+    val iter     = queue.asIterator
+    val answer   = new AtomicBoolean(true)
+    val consumer = new Thread(() => answer.set(iter.hasNext))
+    consumer.setDaemon(true)
+    consumer.start()
+    Thread.sleep(100)
+    iter.close()
+    consumer.join(2000)
+    assert(!consumer.isAlive, "the consumer is parked after the close")
+    assertEquals(answer.get(), false)
+  }
+
+  test("an interrupt of the close does not stop the end marker for a consumer that still reads") {
+    val queue = StreamingQueue[Int](1)
+    val _     = queue.offer(1)
+    // The buffer is full, so the close waits for a place.
+    val producer = new Thread(() => queue.close())
+    producer.setDaemon(true)
+    producer.start()
+    Thread.sleep(100)
+    producer.interrupt()
+
+    val received = new java.util.concurrent.CopyOnWriteArrayList[Int]()
+    val consumer = new Thread(() =>
+      val iter = queue.asIterator
+      while iter.hasNext do
+        val _ = received.add(iter.next())
+    )
+    consumer.setDaemon(true)
+    consumer.start()
+    consumer.join(2000)
+    assert(!consumer.isAlive, "the consumer waits for an end marker that did not come")
+    assertEquals(received.size(), 1)
+  }

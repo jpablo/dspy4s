@@ -46,7 +46,7 @@ With no validation set, or with an empty one, GEPA uses the trainset for the Par
 |----------|--------------|
 | `GepaBudget.MetricCalls(n)` | `n` |
 | `GepaBudget.FullEvals(n)` | `n` × (the trainset size + the size of the validation set that you give) |
-| `GepaBudget.Auto(level)` | the formula of `GepaBudget.auto`, for `Light`, `Medium`, or `Heavy` |
+| `GepaBudget.Auto(level)` | the formula of upstream `auto_budget`, for `Light`, `Medium`, or `Heavy` |
 
 `Auto` uses the number of components, the number of candidates of the level (6, 12, or 18), and the size of the
 validation set. With no validation set, it uses the size of the trainset. For one component, `Light`, and 4
@@ -66,13 +66,18 @@ trait FeedbackMetric extends Metric:
 GEPA asks for feedback at two levels:
 
 - **Program level** (`component = None`): the score and the feedback of the full program on one example. GEPA uses
-  this score to compare candidates.
-- **Component level** (`component = Some(name)`): the feedback for one component. `componentTrace` holds the one call
-  of that component that GEPA selected. GEPA makes the reflective records from this feedback.
+  this score to compare candidates. The call gets an empty `trace`.
+- **Component level** (`component = Some(name)`): the feedback for one component. `trace` holds the trace of the run,
+  and `componentTrace` holds the one call of that component that GEPA selected. GEPA makes the reflective records from
+  this feedback.
 
 A `FeedbackMetric` is also a `Metric`: its `score` is the score of the program-level feedback. Thus you can also use
 it with `Evaluate`. Write feedback that tells what is wrong, for example the correct answer or the format error. For a
 wrong prediction, give a low score and a feedback text. Return a `Left` only when the metric cannot score the example.
+
+A program-level `Left`, an exception, or a score that is not finite gives the example `failureScore`. GEPA drops each
+objective score that is not finite, and it keeps the finite ones. A component-level `Left` or exception skips the
+proposal task (see "How a run works").
 
 ### Objective scores
 
@@ -113,10 +118,16 @@ A reflective mutation has these steps:
 7. The engine runs the child on the same minibatch. If the sum of its scores is larger than that of the parent, the
    engine evaluates the child on the validation set and adds it to the pool.
 
-If the parent has the perfect score on each example of the minibatch, the iteration makes no proposal
-(`skipPerfectScore`). An iteration with no new instruction also makes no proposal. Its minibatch evaluation still
-uses the budget. If the proposer returns a `Left`, the engine calls it one more time. After a second `Left`, the
-iteration makes no proposal, and `GepaState.failedProposals` counts it.
+These cases give no proposal, and the minibatch evaluation still uses the budget:
+
+- No run of the minibatch passed or failed to parse, so the parent has no trajectory. The pointer of the round-robin
+  selector does not move.
+- The parent has the perfect score on each example of the minibatch (`skipPerfectScore`). The pointer does not move.
+- The adapter cannot make the reflective records, because the metric returns a `Left` or an exception occurs for a
+  component. The engine writes a warning, the pointer stays moved, and the run continues.
+- The proposer gives no new instruction.
+- The proposer returns a `Left` or throws a non-fatal exception, two times. The engine calls it one more time after
+  the first failure. `GepaState.failedProposals` counts this case.
 
 `GepaEvalCache` keeps the score of each pair of a candidate and an example. A pair in the cache uses no more metric
 calls.
@@ -131,8 +142,12 @@ example gives one record for each component at most:
 - From a run that passed, GEPA selects one call at random, with the seed. The metric gets this call as
   `componentTrace`.
 - By default, a call that failed and a run that failed give no record.
-- With `addFormatFailureAsFeedback = true`, the first call that failed gives the record: the raw response of the
-  model and the output structure to follow. The metric gets no call for it.
+- With `addFormatFailureAsFeedback = true`, the first call that failed to parse gives the record: the raw response of
+  the model and the output structure to follow. The metric gets no call for it. This holds also for a parse failure
+  that the program caught, in a run that passed. A call that failed with another error gives no record.
+- GEPA keeps a run for the records only when it passed or failed to parse. An example has no records when its run
+  failed with another error, when the metric failed on it, or when it has no input keys. Such an example still has
+  `failureScore`. An example with no input keys gets no run and no model call.
 
 `compile` returns a `Left(ValidationError)` when GEPA cannot find the calls of each predictor:
 
@@ -186,9 +201,10 @@ remains.
 ## The instruction proposer
 
 `DefaultInstructionProposer` is the default proposer. For each selected component, it runs one predictor call on the
-reflection LM. The inputs are the current instruction and the reflective records as one JSON text
-(`ReflectiveRecord.toJson`). The output field is `new_instruction`, and an empty instruction is a failure. The
-proposer uses its own `JSONAdapter`, so the adapter of the context has no effect.
+reflection LM. The inputs are the current instruction and the reflective records as one list value, of the type
+`list[dict[str, Any]]`. The adapter writes the JSON text of that value, with `null` for a number that is not finite in
+it. The output field is `new_instruction`, and an empty instruction is a failure. The proposer uses its own
+`JSONAdapter`, so the adapter of the context has no effect.
 
 | Option | Effect |
 |--------|--------|
@@ -213,8 +229,9 @@ val gepa = new Gepa[MyProgram](
 ```
 
 To write your own proposer, implement `InstructionProposer.propose`. The engine calls it one time for each task,
-with the parent candidate, the reflective records, and the selected components. The language model of the context
-of that call is the reflection LM. The trace entries of the call do not go to your context. The history entries go
+with the parent candidate, the reflective records, and the selected components. In that candidate, a component with
+no instruction has the text that its leaf runs. The candidate of the pool keeps no instruction for that component.
+The language model of the context of that call is the reflection LM. The trace entries of the call do not go to your context. The history entries go
 to it.
 
 ## Stop and resume
@@ -230,8 +247,14 @@ for which the proposer failed two times.
 
 Set `GepaConfig.runDir` to save a checkpoint after the seed evaluation and after each iteration. A run with a
 checkpoint in that directory continues it. Each random draw comes from the seed and the iteration index, so a resumed
-run makes the same draws as a run with no stop. A checkpoint that cannot be read, or that does not agree with the
-program or the configuration, gives a `Left`. The file then stays unchanged.
+run makes the same draws as a run with no stop. A checkpoint gives a `Left` when it cannot be read, when its component
+ids or its frontier type are not those of the run, or when its validation rows have another size than the validation
+set. The check of the validation set compares only the sizes, so another validation set of the same size passes. The
+file then stays unchanged. A checkpoint must have the form that this version writes: an earlier form with no
+round-robin pointers, no objective rows, or no discovery counts gives a `Left`. The engine writes a temporary file and
+then moves it, so a write that fails keeps the last good checkpoint.
+
+A non-fatal exception of the run gives a `Left(RuntimeError)`. A fatal error goes up to the caller.
 
 ## Configuration (`GepaConfig`)
 
@@ -249,8 +272,8 @@ program or the configuration, gives a `Left`. The file then stays unchanged.
 | `mergeValOverlapFloor` | the smallest number of validation examples that the two candidates of a merge share (default 5) |
 | `skipPerfectScore` / `perfectScore` | no reflection on a minibatch with the perfect score (default on, and 1.0) |
 | `stopOnPerfectScore` | stop when the best candidate has the perfect score (default off) |
-| `failureScore` | the score of an example when the run or the metric fails (default 0.0) |
-| `addFormatFailureAsFeedback` | a call that failed gives a reflective record (default off) |
+| `failureScore` | the score of an example when the run or the metric fails (default 0.0); it must be finite |
+| `addFormatFailureAsFeedback` | a call that failed to parse gives a reflective record (default off) |
 | `seed` | the seed of the random sources (default 0) |
 
 ## Source layout
@@ -277,5 +300,7 @@ program or the configuration, gives a `Left`. The file then stays unchanged.
 - The budget is a hard limit. Upstream can use more metric calls than its budget.
 - A checkpoint keeps the merge schedule, and the random draws come from the seed. Upstream loses the merge schedule
   and the random state on a resume.
+- A score that is not finite counts as a metric failure, because the checkpoint is JSON. Upstream keeps a float NaN.
+- Section 24 of [PORT_DIFFERENCES](../../docs/port/PORT_DIFFERENCES.md) lists the GEPA rules with no upstream form.
 - Not ported: the `skills` and `truncate_history_outputs` options of the proposer, `track_best_outputs`, and the
   callbacks of the engine.

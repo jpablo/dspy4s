@@ -81,8 +81,9 @@ class OptimizerConfigurationErrorSuite extends FunSuite:
     val (message, _) = rejected(body)
     assert(message.contains("ModuleLifecycle"), message)
 
+  // Three demo sets: the third set (seed -1) is the first one that runs a program.
   private def miproV2[P: {OptimizableStructure, ProgramRunner}] =
-    new MIPROv2[P](MIPROv2Config(metric = metric, numCandidates = CandidateCount(2), numTrials = TrialCount(2)))
+    new MIPROv2[P](MIPROv2Config(metric = metric, numCandidates = CandidateCount(3), numTrials = TrialCount(2)))
 
   private def randomSearch[P: {OptimizableStructure, ProgramRunner}] =
     new BootstrapFewShotWithRandomSearch[P](RandomSearchConfig(
@@ -140,15 +141,15 @@ class OptimizerConfigurationErrorSuite extends FunSuite:
 
   // ── Another failure of a bootstrap run ──
 
-  test("BootstrapFewShotWithRandomSearch continues when each bootstrap run stops at its error limit") {
-    // The teacher throws in each run. The error limit gives a `RuntimeError`, which is not a configuration error. The
-    // search continues with the zero-shot candidate (seed -3) and the labeled candidate (seed -2).
+  test("BootstrapFewShotWithRandomSearch returns the Left of a bootstrap run that stops at its error limit") {
+    // The teacher throws in each run. The error limit gives a `RuntimeError`, which is the `Left` of `compile`, as
+    // upstream raises.
     val student   = ScriptedPredictProgram(Map.empty, qa)
     val teacher   = student.copy(failsWith = Some(new RuntimeException("boom")))
     val optimizer = new BootstrapFewShotWithRandomSearch[ScriptedPredictProgram](
-      RandomSearchConfig(metric = metric, numCandidates = SearchCandidateCount(2), maxErrors = ErrorLimit(2))
+      RandomSearchConfig(metric = metric, numCandidates = SearchCandidateCount(2), maxErrors = Some(ErrorLimit(2)))
     )
     given RuntimeContext = RuntimeEnvironment.current
-    val report           = optimizer.compile(student, examples, teacher = Some(teacher)).toOption.get
-    assertEquals(report.candidates.flatMap(_.metadata.get("seed")).toSet, Set[Any](-3, -2))
+    val result           = optimizer.compile(student, examples, teacher = Some(teacher))
+    assert(result.left.exists(_.message.contains("boom")), result.toString)
   }

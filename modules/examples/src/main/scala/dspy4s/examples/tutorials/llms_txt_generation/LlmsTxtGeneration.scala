@@ -7,7 +7,9 @@
   *
   * Python's `class RepositoryAnalyzer(dspy.Module)` composing four `ChainOfThought`s becomes a plain class holding four
   * `ChainOfThought` fields whose `forward` threads their outputs through an `Either` for-comprehension. `list[str]`
-  * fields map to `List[String]`.
+  * fields map to `List[String]`. A `Spec` trait has no text, so the docstring of a signature goes in the `instructions`
+  * argument of `Signature.of`, and the `desc=` hints of the fields are not in this file. `forward` returns only the
+  * text of `llms.txt`, and upstream also returns the two analyses.
   */
 package dspy4s.examples.tutorials.llms_txt_generation
 
@@ -56,10 +58,20 @@ object LlmsTxtGeneration:
   // |     def forward(self, repo_url, file_tree, readme_content, package_files): ...
   // --8<-- [start:analyzer]
   final class RepositoryAnalyzer:
-    private val analyzeRepo      = ChainOfThought(Signature.of[AnalyzeRepository])
-    private val analyzeStructure = ChainOfThought(Signature.of[AnalyzeCodeStructure])
+    private val analyzeRepo = ChainOfThought(
+      Signature.of[AnalyzeRepository](instructions = "Analyze a repository structure and identify key components.")
+    )
+    private val analyzeStructure = ChainOfThought(
+      Signature.of[AnalyzeCodeStructure](
+        instructions = "Analyze code structure to identify important directories and files."
+      )
+    )
     private val generateExamples = ChainOfThought(Signature.fromString("repo_info -> usage_examples"))
-    private val generateLlmsTxt  = ChainOfThought(Signature.of[GenerateLLMsTxt])
+    private val generateLlmsTxt  = ChainOfThought(
+      Signature.of[GenerateLLMsTxt](
+        instructions = "Generate a comprehensive llms.txt file from analyzed repository information."
+      )
+    )
 
     def forward(
         repoUrl      : String,
@@ -70,10 +82,9 @@ object LlmsTxtGeneration:
       for
         repo      <- analyzeRepo((repo_url = repoUrl, file_tree = fileTree, readme_content = readmeContent))
         structure <- analyzeStructure((file_tree = fileTree, package_files = packageFiles))
-        examples  <- generateExamples(
-                      (repo_info = s"Purpose: ${repo.output.project_purpose}\nConcepts: ${repo.output.key_concepts}")
-                    )
-        llms <- generateLlmsTxt((
+        concepts   = repo.output.key_concepts.mkString(", ")
+        examples  <- generateExamples((repo_info = s"Purpose: ${repo.output.project_purpose}\nConcepts: $concepts"))
+        llms      <- generateLlmsTxt((
                   project_purpose = repo.output.project_purpose,
                   key_concepts = repo.output.key_concepts,
                   architecture_overview = repo.output.architecture_overview,

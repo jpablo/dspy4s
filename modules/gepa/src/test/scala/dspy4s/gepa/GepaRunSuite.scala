@@ -251,15 +251,6 @@ class GepaRunSuite extends FunSuite:
     assertEquals(GepaStatePersistence.fromJson(GepaStatePersistence.toJson(state)), Right(state))
   }
 
-  test("a state that an older version saved starts at iteration 0 with the initial merge schedule") {
-    val older    = """{"candidates":[{"optimizable-0":"c0"}],"valSubscores":[[0.5]],"parents":[[]],"totalMetricCalls":1}"""
-    val restored = GepaStatePersistence.fromJson(older).fold(error => fail(error), identity)
-    assertEquals(restored.iteration, 0)
-    assertEquals(restored.merge, MergeSchedule.initial)
-    assertEquals(restored.discoveryCalls, Vector.empty)
-    assertEquals(restored.failedProposals, 0)
-  }
-
   test("a resumed run makes the same draws and gives the same state as a run with no stop") {
     val oneTask  = settings(calls(1))
     val twoTasks = oneTask.copy(

@@ -102,9 +102,6 @@ trait GradePreservingFunctor[
     source: NatGradedCategory[SourceConstraint, Source],
     target: NatGradedCategory[TargetConstraint, Target]
 ):
-  final val sourceCategory: NatGradedCategory[SourceConstraint, Source] = source
-  final val targetCategory: NatGradedCategory[TargetConstraint, Target] = target
-
   /** Evidence that valid source objects remain valid after object mapping. */
   def mapObject[A](using SourceConstraint[A]): TargetConstraint[F[A]]
 

@@ -1,5 +1,6 @@
 package dspy4s.programs
 
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.programs.optimization.*
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
@@ -45,17 +46,17 @@ class TypedBestOfNSuite extends FunSuite:
   private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
     DynamicValues.recordFromEntries(entries)
 
-  /** A program stub returning scripted `Prediction[Cand]`s, tracking call count + the rolloutIds it saw. */
+  /** A program stub returning scripted `Prediction[Cand]`s, tracking call count + the rollout ids of its scope. */
   private final class TypedStub(results: Vector[Either[DspyError, Prediction[Cand]]])
       extends Module[Q, Cand]:
     val rolloutIds: ArrayBuffer[Int]                                                                                = ArrayBuffer.empty
     val calls: AtomicInteger                                                                                        = AtomicInteger(0)
     private val counter                                                                                             = AtomicInteger(0)
     override val moduleName: String                                                                                 = "typed_stub"
-    override protected val lifecycle: ModuleLifecycle[Q, Cand]                                                      = ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[Q]                                                            = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Q])(using RuntimeContext): Either[DspyError, Prediction[Cand]] =
       calls.incrementAndGet()
-      rolloutIds += call.rolloutId.getOrElse(-1)
+      rolloutIds += summon[RuntimeContext].scope.lmDefaults.flatMap(_.rolloutId).getOrElse(-1)
       results(Math.min(counter.getAndIncrement(), results.size - 1))
 
   private def candidate(answer: String, score: Double): Prediction[Cand] =
@@ -241,11 +242,11 @@ class TypedBestOfNSuite extends FunSuite:
       if !isOfferFeedback then innerPrompts += text
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some(text)))))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
       // The LM packs each output field's value into `metadata` under its field name.
-      val entries = layout.outputFields.map { field =>
+      val entries = invocation.layout.outputFields.map { field =>
         val raw = DynamicValues.recordGet(output.metadata, field.name).getOrElse(DynamicValue.Null)
         field.name -> raw
       }
@@ -266,7 +267,7 @@ class TypedBestOfNSuite extends FunSuite:
         offerFeedbackCalls.incrementAndGet()
         Right(LmResponse(outputs =
           Vector(LmOutput(
-            text = "",
+            text = "scripted",
             metadata = DynamicValues.record("discussion" := "needs a hint", "advice" := AdviceText)
           ))
         ))
@@ -311,8 +312,8 @@ class TypedBestOfNSuite extends FunSuite:
       extends Module[Q, Cand]:
     val layout: SignatureLayout =
       SignatureLayout.parse("q -> answer, score").toOption.get.withInstructions(parameters.instructions)
-    override val moduleName: String                            = "inner_predict"
-    override protected val lifecycle: ModuleLifecycle[Q, Cand] = ModuleLifecycle.typed(call => rec("q" := call.input.q))
+    override val moduleName: String                      = "inner_predict"
+    override protected val lifecycle: ModuleLifecycle[Q] = ModuleLifecycle.typed(call => rec("q" := call.input.q))
 
     override protected def forward(call: ProgramCall[Q])(using RuntimeContext): Either[DspyError, Prediction[Cand]] =
       val ctx        = RuntimeEnvironment.current
@@ -336,9 +337,9 @@ class TypedBestOfNSuite extends FunSuite:
     * back to it without treating an executable `DynamicPredict` as optimizer parameters.
     */
   private given OptimizableLeaf[InnerPredict] with
-    def get(program: InnerPredict): OptimizableParameters    = program.parameters
-    def metadata(program: InnerPredict): OptimizableMetadata =
-      OptimizableMetadata.from(program.layout, program.moduleName)
+    def get(program: InnerPredict): OptimizableParameters = program.parameters
+    def metadata(program: InnerPredict): PredictorKey     =
+      PredictorKey.from(program.moduleName, program.layout)
     def set(program: InnerPredict, updated: OptimizableParameters): InnerPredict = program.copy(parameters = updated)
 
   test("Refine generates advice and injects it as a hint so a retry improves above threshold") {

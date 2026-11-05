@@ -109,7 +109,7 @@ final class OptimizableParametersSuite extends FunSuite:
 
   test("OptimizableParameters rejects the former signature-based executable predictor format") {
     val oldFormat = DynamicValues.record(
-      "signature" -> layout.dumpState,
+      "signature" -> DynamicValues.record("name" := "StringSignature"),
       "demos"     -> DynamicValue.Sequence(Chunk.empty),
       "config"    -> DynamicValue.Record.empty
     )
@@ -153,13 +153,12 @@ final class OptimizableParametersSuite extends FunSuite:
 
   test("DynamicPredict parameter replacement preserves every execution binding and signature structure") {
     val runtime = new SettingsProgramRuntime {}
-    val tools   = Vector(ToolSpec("search", description = Some("Search the corpus")))
+    val tools   = Vector(ToolSpec("search", Some("Search the corpus"), DynamicValue.Record.empty))
     val program = DynamicPredict(
       layout = layout,
       demos = demos,
       name = Some("bound_predict"),
       runtime = runtime,
-      outputJsonSchema = Some("{\"type\":\"object\"}"),
       config = DynamicValues.record("seed" := 1),
       lm = Some(BoundLm),
       tools = tools
@@ -172,7 +171,6 @@ final class OptimizableParametersSuite extends FunSuite:
     assertEquals(updated.layout.fields, program.layout.fields)
     assertEquals(updated.name, program.name)
     assert(updated.runtime eq runtime)
-    assertEquals(updated.outputJsonSchema, program.outputJsonSchema)
     assert(updated.lm.exists(_ eq BoundLm))
     assertEquals(updated.tools, tools)
   }

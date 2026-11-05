@@ -7,10 +7,12 @@
   * html2text), the interactive `input()` console session, and JSON file saving. `learnFromDocs` therefore takes the
   * already- combined documentation text instead of fetching it.
   *
-  * `dspy.Signature` classes with `list[str]` fields become `Spec` traits with `OutputField[List[String]]`; the
-  * inline-string signature `"code, feedback -> improved_code: str, changes_made: list[str]"` ports as a
-  * `Signature.fromString` (so `changes_made` decodes to `List[String]`). The `DocumentationLearningAgent` (a
-  * `dspy.Module` composing three `ChainOfThought`s) becomes a plain class threading their outputs.
+  * `dspy.Signature` classes with `list[str]` fields become `Spec` traits with `OutputField[List[String]]`. The inline
+  * string signature `"code, feedback -> improved_code: str, changes_made: list[str]"` becomes the `Spec` trait
+  * `RefineCode`, because `Signature.fromString` does not support a list field. The `DocumentationLearningAgent` (a
+  * `dspy.Module` composing three `ChainOfThought`s) becomes a plain class threading their outputs. A `Spec` trait has
+  * no text, so the docstring of a signature goes in the `instructions` argument of `Signature.of`, and the `desc=`
+  * hints of the fields are not in this file.
   */
 package dspy4s.examples.tutorials.sample_code_generation
 
@@ -78,9 +80,17 @@ object SampleCodeGeneration:
   // |     self.refine_code = dspy.ChainOfThought("code, feedback -> improved_code: str, changes_made: list[str]")
   // --8<-- [start:agent-predictors]
   final class DocumentationLearningAgent:
-    private val analyzeDocs  = ChainOfThought(Signature.of[LibraryAnalyzer])
-    private val generateCode = ChainOfThought(Signature.of[CodeGenerator])
-    private val refineCode   = ChainOfThought(Signature.of[RefineCode])
+    private val analyzeDocs = ChainOfThought(
+      Signature.of[LibraryAnalyzer](
+        instructions = "Analyze library documentation to understand core concepts and patterns."
+      )
+    )
+    private val generateCode = ChainOfThought(
+      Signature.of[CodeGenerator](
+        instructions = "Generate code examples for specific use cases using the target library."
+      )
+    )
+    private val refineCode = ChainOfThought(Signature.of[RefineCode])
     // --8<-- [end:agent-predictors]
 
     /** Python's `learn_from_urls`, minus the fetching: analyze already-combined documentation text. */

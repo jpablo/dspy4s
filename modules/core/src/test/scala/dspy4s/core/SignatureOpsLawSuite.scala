@@ -1,7 +1,7 @@
 package dspy4s.core
 
 import dspy4s.algebra.{IsEq, Monoid}
-import dspy4s.core.contracts.{FieldSpec, InputTransform, OutputTransform, SignatureLayout, SignatureTransformLaws}
+import dspy4s.core.contracts.{FieldSpec, SignatureLayout}
 import dspy4s.core.contracts.SignatureOps.laws
 import org.scalacheck.{Gen, Prop}
 
@@ -49,8 +49,8 @@ class SignatureOpsLawSuite extends munit.ScalaCheckSuite:
     Gen.oneOf(genOutField.map(OutputTransform.prepend), genOutFields.map(OutputTransform.replace))
   private val genInT: Gen[InputTransform] = genInField.map(InputTransform.append)
 
-  private val OT: Monoid[OutputTransform] = Monoid[OutputTransform]
-  private val IT: Monoid[InputTransform]  = Monoid[InputTransform]
+  private val OT: Monoid[OutputTransform] = summon[Monoid[OutputTransform]]
+  private val IT: Monoid[InputTransform]  = summon[Monoid[InputTransform]]
 
   /** Execute a stated `Monoid[OutputTransform]` law under output-observational equality of the transform. */
   private def outEq(eq: IsEq[OutputTransform], s: SignatureLayout): Boolean = obsEq(eq.lhs.runOn(s), eq.rhs.runOn(s))

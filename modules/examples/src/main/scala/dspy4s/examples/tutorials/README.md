@@ -14,7 +14,7 @@ dspy4s ports the *code-bearing* DSPy tutorials. The status legend and full inven
 - [Privacy-Conscious Delegation (PAPILLON)](./papillon/README.md) — external notebook; see notes.
 
 ### Optimize AI programs
-- [Overview](./optimize_ai_program/README.md) — dspy4s ports `BootstrapFewShot*`; see [`learn/optimization`](../learn/optimization/README.md).
+- [Overview](./optimize_ai_program/README.md): dspy4s ports the few-shot optimizers, `COPRO`, `MIPROv2`, `GEPA`, and others. See [`learn/optimization`](../learn/optimization/README.md).
 
 ### Reflective prompt evolution (GEPA)
 - [Overview](./gepa_ai_program/README.md) — ✅ GEPA optimizer ported (`dspy4s-gepa`); see the live smoke harness
@@ -27,7 +27,7 @@ dspy4s ports the *code-bearing* DSPy tutorials. The status legend and full inven
 - [Output Refinement](./output_refinement/BestOfNAndRefine.scala) — ✅ `BestOfN` / `Refine`.
 - [Cache](./cache/Cache.scala) — ✅ `ManagedLanguageModel` caches.
 - [Streaming](./streaming/Streaming.scala) — ✅ synchronous `streamify`.
-- [Async](./async/Async.scala) — ✅ `applyAsync`.
+- [Async](./async/Async.scala): ✅ `ContextPropagation.future`.
 - [Debugging & Observability](./observability/Observability.scala) — ✅ callback handler.
 - [Use MCP in DSPy](./mcp/Mcp.scala) ✅ MCP tools as `ToolFunction`s (`McpTools.fromClient`), with an airline MCP
   server on the MCP Java SDK.

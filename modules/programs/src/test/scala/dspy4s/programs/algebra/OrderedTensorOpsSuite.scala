@@ -1,6 +1,6 @@
 package dspy4s.programs.algebra
 
-import dspy4s.algebra.OrderedTensorOps
+import dspy4s.algebra.{IsEq, OrderedTensorOps}
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
@@ -28,29 +28,48 @@ class OrderedTensorOpsSuite extends FunSuite:
 
   test("unrestricted modules do not have a CDCategory instance") {
     val errors = compileErrors("summon[dspy4s.algebra.CDCategory[Module]]")
-    assert(errors.nonEmpty)
+    assert(errors.contains("No given instance"), errors)
   }
 
   private final case class Fn[I, O](f: I => O) extends Module[I, O]:
     override val moduleName: String                                                                              = "fn"
-    override protected val lifecycle: ModuleLifecycle[I, O]                                                      = ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[I]                                                         = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Right(Prediction(f(call.input), RawPrediction.empty))
 
   private final case class Fail[I, O](label: String) extends Module[I, O]:
     override val moduleName: String                                                                              = s"fail_$label"
-    override protected val lifecycle: ModuleLifecycle[I, O]                                                      = ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[I]                                                         = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       Left(ValidationError(label))
 
   private final class Counting extends Module[Int, String]:
-    val calls: AtomicInteger                                       = AtomicInteger(0)
-    override val moduleName: String                                = "counting"
-    override protected val lifecycle: ModuleLifecycle[Int, String] = ModuleLifecycle.typedWithoutInputs
+    val calls: AtomicInteger                               = AtomicInteger(0)
+    override val moduleName: String                        = "counting"
+    override protected val lifecycle: ModuleLifecycle[Int] = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using
         RuntimeContext
     ): Either[DspyError, Prediction[String]] =
       Right(Prediction(s"${call.input}-${calls.incrementAndGet()}", RawPrediction.empty))
+
+  private def observed[I, O](law: IsEq[Module[I, O]], input: I): Unit =
+    def run(program: Module[I, O]) = program(ProgramCall(input)).left.map(_.message).map(p => (p.output, p.raw))
+    assertEquals(run(law.lhs), run(law.rhs))
+
+  test("the category laws of the instance hold for a value and for a failure") {
+    val f = Fn[Int, String](i => s"v$i")
+    val g = Fn[String, Int](_.length)
+    val h = Fn[Int, Int](_ * 2)
+
+    observed(C.identityLeft(f), 5)
+    observed(C.identityRight(f), 5)
+    observed(C.associativity(f, g, h), 5)
+
+    val failing = Fail[String, Int]("g")
+    observed(C.identityLeft(failing), "x")
+    observed(C.identityRight(failing), "x")
+    observed(C.associativity(f, failing, h), 5)
+  }
 
   test("ordered tensor is not bifunctorial for fail-fast programs") {
     val f1 = Fn[Int, Int](identity)

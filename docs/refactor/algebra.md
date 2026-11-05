@@ -2,8 +2,8 @@
 
 **Status:** running record. Algebra 1 (signature transforms) is specified and its laws are property-tested;
 algebra 2 (program composition) is specified and fully implemented (steps 6.1–6.5 landed: `bestOf`, the
-`id`/`>>>`/`fanout` combinators, the `AgentLoop` / `TrajectoryAgent` / `InterpretedTrajectoryAgent` iteration
-layers, the `augment`, and the `mode` middleware monoid; see the status section at the bottom).
+`id`/`>>>`/`fanout` combinators, the `AgentLoop` iteration primitive, the `augment`, and the `mode` middleware monoid;
+see the status section at the bottom).
 **Method:** design the algebra first (types, operations, and the equations relating them), read law
 complexity as the fitness signal, then derive the implementation. The laws are the deliverable; the code is
 downstream. Related: [composite-primitives.md](composite-primitives.md), [kyo-ai-comparison.md](kyo-ai-comparison.md).
@@ -55,7 +55,7 @@ L6 instructions         withInstructions(a) ∘ withInstructions(b) = withInstru
 
 **Structure.** The endomorphisms under `∘` form a monoid (identity = `id`). L3 says the input-combinators
 and output-combinators are two **commuting submonoids**, now explicit `given Monoid` instances over the
-endomorphism newtypes `InputTransform` / `OutputTransform` (`SignatureOps.scala`; `empty` = the no-op
+endomorphism newtypes `InputTransform` / `OutputTransform` (test sources, `SignatureTransforms.scala`; `empty` = the no-op
 transform, `combine` = composition, generators `append` / `prepend` / `replace`), with the cross-monoid
 commuting law `SignatureTransformLaws.submonoidsCommute`. Their laws hold up to output-observational equality
 of the wrapped transform (not `==`), executed in `SignatureOpsLawSuite`. Within a cohort the generators are
@@ -205,12 +205,11 @@ be required before monoidal or Markov coherence becomes meaningful.
   `AttemptSelection.bestOf`: `BestOfN` is the independent instance (no feedback), `Refine` the sequential
   instance (feedback = advice→adapter hook). The law `refine = bestOf + critic-hint` is structural.
 - ~~`ReAct` / `CodeAct` / `RLM` are one `loop` written three times.~~ **Resolved (step 6.3).** All three (and
-  PoT's `retryUntil`) run on the shared `AgentLoop.run` bounded-iteration primitive; ReAct/CodeAct also share
-  `TrajectoryAgent.runAndExtract` (loop + extractor) and the final `InterpretedTrajectoryAgent` transition
-  (generate → prepare → interpret → record → decide), encoded as phase states with state-specific legal-successor
-  ADTs. Code-truth: the universal `env.step`/`classify`/`render` decomposition was rejected; associated
-  action/observation types preserve each language. `ProgramOfThought` is `retryUntil` (regenerate-on-error), not the
-  trajectory agent and not `feedback`.
+  PoT's `retryUntil`) ran on the shared `AgentLoop.run` bounded-iteration primitive. Code-truth: the universal
+  `env.step`/`classify`/`render` decomposition was rejected. `ProgramOfThought` was `retryUntil`
+  (regenerate-on-error), not `feedback`. A later simplification (2026-11-01) removed the trajectory templates on top
+  of the loop, because `ReAct` was their one implementation. The agents now are `ReAct`, `ReActV2`, and `RLM`, each
+  directly on `AgentLoop.run`.
 
 The conclusion: the step-6 plan and this algebra are the same object. ADD supplies the vocabulary (Category,
 Monoid, ordered fan-out) and the laws or explicit non-laws that govern each carrier.
@@ -220,13 +219,13 @@ Monoid, ordered fan-out) and the laws or explicit non-laws that govern each carr
 ## Already algebraic vs ad-hoc (current state)
 
 - **Clean / law-shaped:** `Either[DspyError, A]` (errors as values, a monad), `CIO` (monad),
-  `decodePrepended` (an augment with a round-trip law), `SignatureOps` (algebra 1, laws above),
+  the decode of `Signature.prependOutput` (an augment with a round-trip law), `SignatureOps` (algebra 1, laws above),
   schema-backed `RoundTripShape[A]` (`decode(encode(a)) = Right(a)`), and `Aggregation.majority`
   (a semilattice-flavored reduce). Plain validating `Shape[A]` deliberately makes no round-trip claim.
 - **Ad-hoc (ADD would refactor):** `BestOfN` / `Refine` / `MultiChainComparison` sharing no middleware (no
   `Mode` monoid). (Resolved already: `Refine` reimplementing the selection loop — now the shared
   `AttemptSelection.bestOf`, step 6.1; sequential composition — now `>>>`/`AndThen`, step 6.2; the three
-  hand-written agent loops + PoT's inline retry — now the shared `AgentLoop.run` / `TrajectoryAgent`, step 6.3;
+  hand-written agent loops + PoT's inline retry, now the shared `AgentLoop.run`, step 6.3;
   the `SignatureLayout` unique-name `require` — now closed by construction.)
 
 ## Testing discipline (how the laws become properties)
@@ -256,12 +255,12 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
   - **6.2 done** (commit `60d2ea5`, later law-audit correction): `id` / `>>>` / `fanout` in `Compose.scala`;
     `ComposeLawSuite` covers value-category laws, lifecycle-transparent association, ordered fan-out, and
     addressability. `fanout` is Arrow-like ordered pairing, not an Applicative or the batch-executor `Parallel`.
-  - **6.3 done** (commit `6faa94e`, later interpreted-agent and law refinements): `AgentLoop.run` +
-    `TrajectoryAgent.runAndExtract`; ReAct/CodeAct/RLM/PoT all reduced onto them. ReAct and CodeAct additionally share
-    `InterpretedTrajectoryAgent` and `ActionInterpreter` without erasing their action languages. `AgentLoopLawSuite`,
-    `TrajectoryAgentLawSuite`, and `InterpretedTrajectoryAgentLawSuite` pin the three layers.
+  - **6.3 done** (commit `6faa94e`): `AgentLoop.run`; the agents all reduced onto it. The trajectory templates that
+    followed this step were removed on 2026-11-01. `AgentLoopLawSuite` and `ReActSuite` pin the rules.
   - **6.4 done** (commit `31aecbd`): `decodeAugmented` (field via a pluggable reader + post-decode hook);
-    `decodePrepended` is its String/identity instance. Closing position left additive (no consumer).
+    `decodePrepended` is its String/identity instance. Closing position left additive (no consumer). The
+    signatures cleanup later moved this code into the decode of `prependedStringShape` and removed both functions.
+    Later, `Signature.prependOutput` took the place of `prependedStringShape`.
   - **6.5 done** (commit `dca35e9`): `Mode` (the `Controls => Controls` monoid) + `Moded` + `Compose.mode`;
     `ModeLawSuite` pins the monoid + identity + pass-through. Execution-wrapping modes left additive.
   - **Algebra 2 is complete.** Remaining work is optional/additive: the CIO substrate migration (kyo-compat),
@@ -283,15 +282,16 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `ProgramInput` coherence law and then deleted `ProgramInput` outright): only the record-boundary runner requires
     `RecordCodec[I]`, nothing decode-related is packaged, and an
     incoherent per-program decoder is unrepresentable (compile gates pin both former vehicles). Named-tuple
-    inputs derive their codec through the same `SchemaTupleShape` path the signature macros use; bare-module
+    inputs derive their codec through the same `Shape.canonicalDerived` path the signature macros use; bare-module
     running is signature-backed `ProgramRunner` instances (no identity in sight, no coherence question);
     runtime-string signatures enter through the `DynamicSignature` bundle, whose parses mint fresh
     codec-equipped types and whose generic `stable` view preserves them across aliases (see
     `algebra-2-program-composition.md`).
     `OptimizableStructure.derived` now requires evidence for every product field; deliberately parameter-free field types
     opt in with `OptimizableStructure.empty`, so an omitted learnable subtree can no longer disappear silently.
-    Pinned by `ProgramAlgebraLawSuite` / `ParaCompileSuite`. Adoption as the public optimizer entry-point API is
-    deferred to the CIO phase; see the "Parameterized program algebra" section of the step-6 spec.
+    Pinned by `ProgramAlgebraLawSuite` / `ParaCompileSuite`. The suite calls `new COPRO[Program[I, O, N]](config).compile(...)`
+    directly: the `ParaCompile` helper had no main caller, so it was removed. Adoption of a packaged entry point as the
+    public optimizer API is deferred to the CIO phase; see the "Parameterized program algebra" section of the step-6 spec.
   - **Law-statement adoption** (commits `446ccb6`, `7004627`, `d7ab930`, from jpablo/math-with-scala): laws are
     now stated ON the structures as `@Law` methods returning `IsEq` (`core.algebra.Laws`) and executed by the
     suites under per-law honest observations. Applied to the parameterized structures (`446ccb6`) and retrofitted onto
@@ -317,7 +317,7 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     every monoid in the codebase is a named instance, none left implicit. The same pattern now covers optics:
     `core.algebra.Lens[S, A]` states get-put / put-get / put-put on the trait, and `OptimizableLeaf[P] extends
     Lens[P, OptimizableParameters]` inherits them, adding only the `frame` law (writing parameters never changes the
-    read-only `OptimizableMetadata`). The focus had to be carved down to exactly the writable triple
+    read-only metadata, a `PredictorKey`). The focus had to be carved down to exactly the writable triple
     (instructions / demos / config) before these laws could hold; `OptimizableParametersSuite` executes all four
     statements per leaf instance (`DynamicPredict`, `Predict`, `ChainOfThought`).
     The same placement rule now distinguishes `RoundTripShape[A]`, which carries `decodeEncode` on the abstract trait,
@@ -346,10 +346,10 @@ From `SignatureOpsLawSuite` (the template for any further law suite):
     `CopyDiscardCategorySuite`; it is intentionally not instantiated for effectful `Module`.
   - **Domain-valued inner predicts** (the class-A conversion, then the class-B bridge): every composite now runs
     inner `Predict`s — Refine's critic, ReAct, CodeAct, RLM, ProgramOfThought (statically-shaped layouts kept
-    verbatim, `InputAugmentation.appendedStringInput` for appended input fields, lenient hand-written or derived
-    shapes on the output side, `OutputAugmentation.prependedStringShape` for the reasoning-prepended extractors),
-    and `MultiChainComparison`, whose runtime-arity attempt block rides a per-instance opaque carrier
-    (`appendedStringInputs`: validation constructs the path-branded value and the shape total-encodes the `m`
-    numbered fields). Only layouts that exist purely as runtime values
-    still construct a `DynamicPredict` inside the framework: the optimizers' own helper generations, the
-    evaluation judge, and `Predict.erase`. See `algebra-2-program-composition.md` for the recipe.
+    verbatim, `Signature.appendInput` for appended input fields, lenient hand-written or derived shapes on the
+    output side, `Signature.prependOutput` for the reasoning-prepended extractors), and `MultiChainComparison`, whose
+    runtime-arity attempt block rides a per-instance opaque carrier (`Signature.appendInputs`: validation constructs
+    the path-branded value and the shape total-encodes the `m` numbered fields). Each of these `Signature` operations
+    changes the layout and the shapes in one call. Only layouts that exist purely as runtime values
+    still construct a `DynamicPredict` inside the framework: the optimizers' own helper generations and the
+    evaluation judge. See `algebra-2-program-composition.md` for the recipe.

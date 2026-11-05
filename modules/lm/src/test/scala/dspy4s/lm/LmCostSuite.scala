@@ -19,7 +19,6 @@ import dspy4s.lm.contracts.LmResponse
 import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.lm.runtime.CacheCapacity
 import dspy4s.lm.runtime.InMemoryLmCache
-import dspy4s.lm.runtime.LmCacheRegistry
 import dspy4s.lm.runtime.ManagedLanguageModel
 import dspy4s.lm.runtime.UsageTracking
 import munit.FunSuite
@@ -32,13 +31,8 @@ import zio.blocks.schema.PrimitiveValue
   */
 class LmCostSuite extends FunSuite:
 
-  override def beforeEach(context: BeforeEach): Unit =
-    RuntimeEnvironment.resetForTests()
-    LmCacheRegistry.resetDefault()
-
-  override def afterEach(context: AfterEach): Unit =
-    RuntimeEnvironment.resetForTests()
-    LmCacheRegistry.resetDefault()
+  override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private val price = LmPrice(inputPerMillion = 0.15, outputPerMillion = 0.60)
 
@@ -221,10 +215,10 @@ class LmCostSuite extends FunSuite:
     val model            = ManagedLanguageModel(delegate = Fixed(Right(response)))
     UsageTracking.withNewTracker { outer =>
       val inner = UsageTracking.withNewTracker { inner =>
-        assert(model.call(request).isRight)
+        assert(LanguageModel.callAndRecordUsage(model, request).isRight)
         inner
       }
-      assert(model.call(request).isRight)
+      assert(LanguageModel.callAndRecordUsage(model, request).isRight)
       assertEquals(inner.usageData.get("gpt-test").map(_.size), Some(1))
       assertEquals(outer.usageData.get("gpt-test").map(_.size), Some(2))
       assertEquals(outer.totalUsage.get("gpt-test").map(_.promptTokens), Some(2000L))

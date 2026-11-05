@@ -50,3 +50,22 @@ class StreamingWrapperCloseSuite extends FunSuite:
         assert(source.closed, "the stream of the delegate is open after the close of the wrapper stream")
       case other => fail(s"the stream of the wrapper has no close: $other")
   }
+
+  test("a token for a consumer that closed stops the stream of the wrapper, and closes the stream of the delegate") {
+    given RuntimeContext = RuntimeContext()
+    val source           = Chunks()
+    val queue            = StreamingQueue[StreamEvent]()
+    val wrapper          = StreamingLanguageModelWrapper(Streams(source), queue)
+    queue.asIterator.close()
+    val stream = wrapper.stream(LmRequest(model = "streams"))
+    // `intercept` catches only non-fatal errors, so the test catches the exception itself.
+    val interrupted =
+      try
+        val _ = stream.next()
+        false
+      catch case _: InterruptedException => true
+    assert(interrupted, "the wrapper must stop at the token that the queue refuses")
+    assert(source.closed, "the stream of the delegate is open, and the caller has no close to call")
+    assertEquals(stream.hasNext, false)
+    assertEquals(wrapper.session.gaveToken, false)
+  }

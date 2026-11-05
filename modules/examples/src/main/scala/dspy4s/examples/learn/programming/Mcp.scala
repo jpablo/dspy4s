@@ -8,31 +8,26 @@
   *
   * The differences: the Java SDK has one client API, so the SDK v1 and SDK v2 forms of Python (snippets 1 and 2) are
   * the same code here. A tool call blocks until the server answers, so there is no `acall` and no `asyncio`. The server
-  * of snippet 3 uses the server API of the Java SDK in place of FastMCP. ReActV2 is not ported (PORT_GAPS G-19), so the
-  * agent of snippet 4 is a `ReAct`.
+  * of snippet 3 uses the server API of the Java SDK in place of FastMCP.
   */
 package dspy4s.examples.learn.programming
 
-import dspy4s.adapters.contracts.ToolSpec
-import dspy4s.core.contracts.{:=, DspyError, DynamicValues, NotFoundError, RuntimeContext, RuntimeError}
+import dspy4s.adapters.ChatAdapter
+import dspy4s.adapters.contracts.NativeTools
+import dspy4s.core.contracts.{:=, DspyError, DynamicValues, NotFoundError, RuntimeContext}
+import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
 import dspy4s.mcp.{McpResultMode, McpToolClient, McpToolInfo, McpTools}
 import dspy4s.programs.IterationLimit
 import dspy4s.programs.contracts.ToolFunction
-import dspy4s.programs.strategies.ReAct
+import dspy4s.programs.strategies.{ReAct, ReActV2}
 import dspy4s.signatures.{InputField, OutputField, Signature, Spec}
-import io.modelcontextprotocol.client.{McpClient, McpSyncClient}
-import io.modelcontextprotocol.client.transport.{
-  HttpClientStreamableHttpTransport, ServerParameters, StdioClientTransport
-}
+import io.modelcontextprotocol.client.transport.HttpClientStreamableHttpTransport
 import io.modelcontextprotocol.json.McpJsonDefaults
 import io.modelcontextprotocol.server.{McpServer, McpSyncServer}
 import io.modelcontextprotocol.server.transport.StdioServerTransportProvider
 import io.modelcontextprotocol.spec.{McpClientTransport, McpSchema}
 import zio.blocks.schema.DynamicValue
-
-import java.nio.file.Paths
-import scala.util.Using
 
 // Snippet 2 signature (top-level for Mirror derivation).
 // | class TaskSignature(dspy.Signature):
@@ -53,16 +48,6 @@ trait QuestionAnswer extends Spec:
 
 object Mcp:
 
-  /** Open a client on `transport`, initialize it, run `body`, and close the client. A converted tool uses the open
-    * client for each call, so the agent must run in `body` (upstream: "Keep the agent call inside the open MCP
-    * session"). A failure to connect is a `Left`.
-    */
-  def withClient[A](transport: McpClientTransport)(body: McpSyncClient => Either[DspyError, A]): Either[DspyError, A] =
-    Using(McpClient.sync(transport).build()) { client =>
-      val _ = client.initialize()
-      body(client)
-    }.toEither.left.map[DspyError](error => RuntimeError("mcp", s"MCP client failed: ${error.getMessage}")).flatten
-
   // ── Snippet 1 (lines 33–44): the tools of a remote server ──
   // | import asyncio
   // | import dspy
@@ -81,8 +66,8 @@ object Mcp:
     HttpClientStreamableHttpTransport.builder(baseUri).endpoint(endpoint).build()
 
   def remoteToolNames(): Either[DspyError, Vector[String]] =
-    withClient(httpTransport()) { client =>
-      McpTools.fromClient(McpToolClient.fromSync(client)).map(_.map(_.name))
+    McpToolClient.using(httpTransport()) { client =>
+      McpTools.fromClient(client).map(_.map(_.name))
     }
   // --8<-- [end:http-tools]
 
@@ -123,8 +108,8 @@ object Mcp:
   // | asyncio.run(main())
   // --8<-- [start:http-react]
   def checkWeather(task: String = "Check the weather in Tokyo")(using RuntimeContext): Either[DspyError, String] =
-    withClient(httpTransport()) { client =>
-      McpTools.fromClient(McpToolClient.fromSync(client)).flatMap { tools =>
+    McpToolClient.using(httpTransport()) { client =>
+      McpTools.fromClient(client).flatMap { tools =>
         val reactAgent = ReAct(
           baseSignature = Signature.of[TaskSignature],
           tools = tools,
@@ -162,14 +147,13 @@ object Mcp:
     McpServer
       .sync(new StdioServerTransportProvider(mapper))
       .serverInfo("arithmetic", "1.0.0")
-      .capabilities(McpSchema.ServerCapabilities.builder().tools(java.lang.Boolean.FALSE).build())
       .toolCall(
         McpSchema.Tool.builder("add", mapper, addSchema).description("Add two integers.").build(),
         (_, request) =>
+          // The SDK checks the arguments against `addSchema` before this handler runs, so each one is an integer.
           def integer(name: String): Long =
-            Option(request.arguments()).flatMap(arguments => Option(arguments.get(name))).collect {
+            request.arguments().get(name) match
               case number: java.lang.Number => number.longValue
-            }.getOrElse(0L)
           McpSchema.CallToolResult.builder().addTextContent((integer("a") + integer("b")).toString).build()
       )
       .build()
@@ -233,27 +217,22 @@ object Mcp:
   // | asyncio.run(main())
   //
   // The client starts the server of snippet 3 in a child JVM (`sys.executable` becomes the `java` of this JVM) and
-  // stops it when it closes. ReActV2 calls the tools through native function calling. It is not ported (PORT_GAPS
-  // G-19), and the `ReAct` of dspy4s uses the text protocol (G-7b), so the adapter keeps its default here.
-  // `Demo.withLm` (in `mcpMain`) is the `dspy.configure(lm=...)` part.
+  // stops it when it closes. `Demo.withLm` (in `mcpMain`) is the `dspy.configure(lm=...)` part. Its `ChatAdapter` has
+  // native function calling off, and then `ReActV2` writes the tools as text with no error. So the agent runs under
+  // the adapter of `dspy.configure(adapter=...)`.
   // --8<-- [start:stdio-react]
-  def stdioTransport(classPath: String): McpClientTransport =
-    val javaBin    = Paths.get(System.getProperty("java.home"), "bin", "java").toString
-    val parameters = ServerParameters
-      .builder(javaBin)
-      .args("-cp", classPath, "dspy4s.examples.learn.programming.mcpArithmeticServer")
-      .build()
-    new StdioClientTransport(parameters, McpJsonDefaults.getMapper())
-
-  def addWithAgent(classPath: String)(using RuntimeContext): Either[DspyError, Int] =
-    withClient(stdioTransport(classPath)) { client =>
-      McpTools.fromClient(McpToolClient.fromSync(client)).flatMap { tools =>
-        val reactAgent = ReAct(
-          baseSignature = Signature.of[QuestionAnswer](instructions = "Answer questions using available tools."),
-          tools = tools,
-          maxIterations = IterationLimit(5)
-        )
-        reactAgent((question = "Use the add tool to calculate 25 + 17.")).map(_.output.answer)
+  def addWithAgent(using context: RuntimeContext): Either[DspyError, Int] =
+    val adapter = ChatAdapter(native = NativeTools(enabled = true))
+    RuntimeEnvironment.withInstalled(context.copy(adapter = Some(adapter))) {
+      McpToolClient.using(Demo.childJvmTransport("dspy4s.examples.learn.programming.mcpArithmeticServer")) { client =>
+        McpTools.fromClient(client).flatMap { tools =>
+          val reactAgent = ReActV2(
+            baseSignature = Signature.of[QuestionAnswer](instructions = "Answer questions using available tools."),
+            tools = tools,
+            maxIterations = IterationLimit(5)
+          )
+          reactAgent((question = "Use the add tool to calculate 25 + 17.")).map(_.output.answer)
+        }
       }
     }
   // --8<-- [end:stdio-react]
@@ -274,20 +253,18 @@ object Mcp:
   // | # Use it like any DSPy tool
   // | result = await dspy_tool.acall(param1="value", param2=123)
   //
-  // The converted tool keeps the name, the description, the input schema of the MCP tool (`inputSchema`), and the type
-  // of each argument (`argSchema`). `invoke` blocks, so there is no async form. `McpTools.toolSpec` gives the tool to a
-  // model with native function calling, with the full input schema and the description of each argument.
+  // The converted tool keeps the name and the description of the MCP tool. `inputSchema` is the object schema of the
+  // tool: `type`, `properties` with each `$ref` expanded, and the `required` list of the server. `argSchema` has the
+  // type of each argument. `invoke` blocks, so there is no async form. The `ReActV2` of snippet 4 gives this object
+  // schema to the model, with the description of each argument.
   // --8<-- [start:tool-conversion]
-  def callFirstTool(client: McpSyncClient)(using RuntimeContext): Either[DspyError, DynamicValue] =
-    val session = McpToolClient.fromSync(client)
+  def callFirstTool(session: McpToolClient)(using RuntimeContext): Either[DspyError, DynamicValue] =
     session.listTools().flatMap { response =>
       response.headOption.toRight(NotFoundError("mcp_tool", "The server has no tool.")).flatMap { mcpTool =>
         val dspyTool = McpTools.convert(session, mcpTool)
         dspyTool.invoke(DynamicValues.record("param1" := "value", "param2" := 123))
       }
     }
-
-  def nativeToolSpec(mcpTool: McpToolInfo): ToolSpec = McpTools.toolSpec(mcpTool)
   // --8<-- [end:tool-conversion]
 
   // By default, a converted tool gives the `content` of the result. `result_mode="structured"` is
@@ -304,11 +281,8 @@ object Mcp:
 @main def mcpArithmeticServer(): Unit =
   val _ = Mcp.arithmeticServer()
 
-// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.mcpMain <class path>"
-// The agent starts `mcpArithmeticServer` in a child JVM with <class path>, the output of
-// `sbt -error "export examples/Runtime/fullClasspath"`. (Under `sbt run`, the class path of the JVM is the class path
-// of sbt, so the agent cannot use it.)
-@main def mcpMain(classPath: String): Unit =
+// Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.mcpMain"
+@main def mcpMain(): Unit =
   Demo.withLm {
-    println("25 + 17 = " + Mcp.addWithAgent(classPath))
+    println("25 + 17 = " + Mcp.addWithAgent)
   }

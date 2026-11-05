@@ -1,38 +1,118 @@
 package dspy4s.signatures.internal
 
-import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.TypeMarker
 import dspy4s.signatures.{Shape, Signature}
+import zio.blocks.schema.{Modifier, NameMapper}
 
+import scala.deriving.Mirror
 import scala.quoted.*
+import MacroTypeSupport.{namedTupleParts, namedTupleType, unnamedTupleParts}
 
-/** Runtime signature assembly emitted by the signature macros. */
+/** The signature that the signature macros emit, and the compile-time checks that they share. */
 private[signatures] object MacroSignatureSupport:
 
-  def materialize[I: Type, O: Type](
+  /** A call of `Signature.fromShapes` with the canonical shapes of `inputType` and `outputType`. */
+  def signatureExpr(using
+      quotes: Quotes
+  )(
       nameExpr        : Expr[String],
       instructionsExpr: Expr[String],
-      errorContext    : String,
-      inputShapeExpr  : Expr[Shape[I]],
-      outputShapeExpr : Expr[Shape[O]]
-  )(using Quotes): Expr[Signature[I, O]] =
-    val errorContextExpr = Expr(errorContext)
-    '{
-      val name        = ${ nameExpr }
-      val inputShape  = ${ inputShapeExpr }
-      val outputShape = ${ outputShapeExpr }
-      val layout      = SignatureLayout
-        .create(
-          name = name,
-          inputFields = inputShape.fieldSpecs,
-          outputFields = outputShape.fieldSpecs,
-          instructions = Option(${ instructionsExpr }).filter(_.nonEmpty)
-        )
-        .fold(
-          err =>
-            throw new IllegalStateException(
-              s"Internal error materializing ${${ errorContextExpr }}: ${err.message}"
-            ),
-          identity
-        )
-      Signature[I, O](name, layout, inputShape, outputShape)
-    }
+      inputType       : quotes.reflect.TypeRepr,
+      outputType      : quotes.reflect.TypeRepr
+  ): Expr[Any] =
+    inputType.asType match
+      case '[i] => outputType.asType match
+          case '[o] => '{
+              Signature.fromShapes[i, o](
+                $nameExpr,
+                $instructionsExpr,
+                Shape.canonicalDerived[i],
+                Shape.canonicalDerived[o]
+              )
+            }
+
+  /** The signature of a function with the parameters `inputs` and the return type `returnType`. `owner` names the
+    * function in the compile errors.
+    *
+    * The return type gives the outputs:
+    *   - a named tuple keeps its names, and a tuple gets the names `_1`, `_2`, and so on
+    *   - a case class or another product keeps the wire names of its fields ([[wireFieldNames]])
+    *   - a single-value type (see [[isSingleValue]]) and each type that is not a product become one output field with
+    *     the name `result`
+    */
+  def functionSignatureExpr(using
+      quotes: Quotes
+  )(
+      owner           : String,
+      nameExpr        : Expr[String],
+      instructionsExpr: Expr[String],
+      inputs          : List[(String, quotes.reflect.TypeRepr)],
+      returnType      : quotes.reflect.TypeRepr
+  ): Expr[Any] =
+    import quotes.reflect.*
+    if inputs.isEmpty then report.errorAndAbort(s"$owner requires at least one input")
+    if returnType =:= TypeRepr.of[Unit] then report.errorAndAbort(s"$owner requires an output type, not Unit")
+
+    val (outputType, outputNames) = namedTupleParts(returnType).orElse(unnamedTupleParts(returnType)) match
+      case Some(Nil)   => report.errorAndAbort(s"$owner requires at least one output field")
+      case Some(parts) => (returnType, parts.map(_._1))
+      case None        =>
+        val isProduct = returnType.asType match
+          case '[o] => Expr.summon[Mirror.ProductOf[o]].isDefined
+        if isProduct && !isSingleValue(returnType) then (returnType, wireFieldNames(returnType))
+        else (namedTupleType(List("result" -> returnType)), List("result"))
+    requireUniqueNames(owner, inputs.map(_._1), outputNames)
+    signatureExpr(nameExpr, instructionsExpr, namedTupleType(inputs), outputType)
+
+  /** The wire names of the fields of the case class `tpe`, with the rule of `Reflects.fieldWireName`, and with no
+    * transient field: the check of the names compares what the layout has at run time.
+    */
+  private def wireFieldNames(using quotes: Quotes)(tpe: quotes.reflect.TypeRepr): List[String] =
+    import quotes.reflect.*
+    def argument(annotations: List[Term], annotation: TypeRepr): Option[String] =
+      annotations.filter(_.tpe <:< annotation).collectFirst { case Apply(_, List(value)) =>
+        constantText(value)
+      }.flatten
+    val symbol = tpe.dealias.typeSymbol
+    val naming = argument(symbol.annotations, TypeRepr.of[Modifier.fieldNaming]).map(NameMapper.fromString)
+    symbol.caseFields
+      .filterNot(_.annotations.exists(_.tpe <:< TypeRepr.of[Modifier.transient]))
+      .map(field =>
+        argument(field.annotations, TypeRepr.of[Modifier.rename]).getOrElse(naming.fold(field.name)(_(field.name)))
+      )
+
+  /** True for a case class that the framework reads as one value, not as a record of fields: a type whose marker
+    * ([[TypeMarker]]) is in [[TypeMarker.singleValue]], for example `Noul`, `Score`, `Choice`, or `History`. The macro
+    * reads the marker from the `Modifier.config` annotations of the type symbol, as `Schema.derived` does. A function
+    * that returns such a type has one `result` output.
+    */
+  private def isSingleValue(using quotes: Quotes)(tpe: quotes.reflect.TypeRepr): Boolean =
+    markerOf(tpe).exists(TypeMarker.singleValue.contains)
+
+  /** The marker of the type `tpe`: the value of its `Modifier.config` annotation with the key [[TypeMarker.Key]]. */
+  private def markerOf(using quotes: Quotes)(tpe: quotes.reflect.TypeRepr): Option[String] =
+    import quotes.reflect.*
+    tpe.dealias.typeSymbol.annotations
+      .filter(_.tpe <:< TypeRepr.of[Modifier.config])
+      .collectFirst {
+        case Apply(_, List(key, value)) if constantText(key).contains(TypeMarker.Key) => constantText(value)
+      }
+      .flatten
+
+  /** The text of the annotation argument `argument`: a literal, or a reference to a constant, whose type is then a
+    * constant type.
+    */
+  private def constantText(using quotes: Quotes)(argument: quotes.reflect.Term): Option[String] =
+    import quotes.reflect.*
+    argument.tpe.widenTermRefByName match
+      case ConstantType(StringConstant(value)) => Some(value)
+      case _                                   => None
+
+  /** Stop the compilation when two field names are the same: two inputs, two outputs, or an input and an output.
+    * `owner` names the declaration in the compile error.
+    */
+  def requireUniqueNames(using quotes: Quotes)(owner: String, inputs: List[String], outputs: List[String]): Unit =
+    val names      = inputs ++ outputs
+    val duplicates = names.diff(names.distinct).distinct
+    if duplicates.nonEmpty then
+      quotes.reflect.report.errorAndAbort(s"$owner has duplicate field names: ${duplicates.mkString(", ")}")

@@ -24,8 +24,8 @@ import scala.collection.mutable.ArrayBuffer
 /** The default instruction proposer of GEPA (PORT_GAPS G-45, item O3; upstream b6c8aaf1e,
   * `dspy/teleprompt/gepa/instruction_proposal.py` and `tests/teleprompt/test_gepa_builtin_instruction_proposer.py`).
   *
-  * The prompt text of a dspy4s adapter is not equal to the upstream text, so the tests assert the content of a request
-  * and not its layout.
+  * One test compares a whole request with the upstream prompt. The other tests assert the content of a request and not
+  * its layout.
   */
 class InstructionProposerSuite extends FunSuite:
 
@@ -46,7 +46,7 @@ class InstructionProposerSuite extends FunSuite:
 
   private def scripted(replies: String*): ScriptedLm = new ScriptedLm(replies.map(Right(_))*)
 
-  import ReflectionFixtures.{reply, shortenedReply}
+  import ReflectionFixtures.{examplesText, reply, shortenedReply}
 
   private val first  = OptimizableId(0)
   private val second = OptimizableId(1)
@@ -92,11 +92,11 @@ class InstructionProposerSuite extends FunSuite:
 
   test("the JSON text of the records has the gepa keys in the gepa order, in the form of Python json.dumps") {
     assertEquals(
-      ReflectiveRecord.toJson(Vector(record)),
+      examplesText(Vector(record)),
       """[{"Inputs": {"question": "Capital of France?"}, "Generated Outputs": {"answer": "Lyon"}, """ +
         """"Feedback": "expected 'Paris', got 'Lyon'"}]"""
     )
-    assertEquals(ReflectiveRecord.toJson(Vector.empty), "[]")
+    assertEquals(examplesText(Vector.empty), "[]")
   }
 
   test("the JSON text separates the records and keeps the order of the keys of a record") {
@@ -106,7 +106,7 @@ class InstructionProposerSuite extends FunSuite:
       feedback = "ok"
     )
     assertEquals(
-      ReflectiveRecord.toJson(Vector(two, two)),
+      examplesText(Vector(two, two)),
       """[{"Inputs": {"b": "2", "a": "1"}, "Generated Outputs": {"z": "26"}, "Feedback": "ok"}, """ +
         """{"Inputs": {"b": "2", "a": "1"}, "Generated Outputs": {"z": "26"}, "Feedback": "ok"}]"""
     )
@@ -120,7 +120,7 @@ class InstructionProposerSuite extends FunSuite:
       feedback = "line 1\nline 2"
     )
     assertEquals(
-      ReflectiveRecord.toJson(Vector(special)),
+      examplesText(Vector(special)),
       """[{"Inputs": {"text": "é猫🙂"}, "Generated Outputs": "say \"hi\"\n\ta\\b", "Feedback": "line 1\nline 2"}]"""
     )
   }
@@ -133,7 +133,7 @@ class InstructionProposerSuite extends FunSuite:
       feedback = "ok"
     )
     assertEquals(
-      ReflectiveRecord.toJson(Vector(values)),
+      examplesText(Vector(values)),
       """[{"Inputs": {"count": 3, "ratio": 0.5, "ok": true, "none": null}, """ +
         """"Generated Outputs": {"items": [1, "x"], "inner": {"k": "v"}}, "Feedback": "ok"}]"""
     )
@@ -158,7 +158,6 @@ class InstructionProposerSuite extends FunSuite:
       )
     )
     assertEquals(description(layout, "new_instruction"), Some("The new instruction for the assistant."))
-    assertEquals(DefaultInstructionProposer().compressSignature, None)
   }
 
   test("each option adds its input field before the two fixed fields, in the upstream order") {
@@ -190,8 +189,8 @@ class InstructionProposerSuite extends FunSuite:
     assertEquals(both.proposeSignature.outputFields.map(_.name), Vector("new_instruction"))
   }
 
-  test("the signature that shortens an instruction exists only with a length limit") {
-    val layout = DefaultInstructionProposer(maxChars = limit(50)).compressSignature.getOrElse(fail("no signature"))
+  test("the signature that shortens an instruction has the upstream fields and instructions") {
+    val layout = DefaultInstructionProposer.CompressSignature
     assertEquals(fieldNames(layout), Vector("instruction", "length_limit"))
     assertEquals(layout.outputFields.map(_.name), Vector("shortened_instruction"))
     assertEquals(layout.instructions, Some(DefaultInstructionProposer.CompressInstructions))
@@ -215,6 +214,11 @@ class InstructionProposerSuite extends FunSuite:
     assertEquals(proposer.proposeSignature.instructions, Some(DefaultInstructionProposer.ProposeInstructions))
   }
 
+  test("an option with only a no-break space is the same as no option, as Python strip") {
+    val proposer = DefaultInstructionProposer(additionalInstructions = Some(160.toChar.toString))
+    assertEquals(fieldNames(proposer.proposeSignature), Vector("current_instruction", "examples_with_feedback"))
+  }
+
   // ── The proposal call ───────────────────────────────────────────────────────────────────────────────────────
 
   test("the proposer reads the new instruction from the JSON object of the response") {
@@ -235,9 +239,36 @@ class InstructionProposerSuite extends FunSuite:
       request
     )
     assert(request.contains("Answer the question."), request)
-    assert(request.contains(ReflectiveRecord.toJson(Vector(record))), request)
+    assert(request.contains(examplesText(Vector(record))), request)
     // The old template asked for a fence. The proposer does not.
     assert(!request.contains("Provide the new instruction within"), request)
+  }
+
+  test("the request is equal to the upstream prompt") {
+    // The text comes from the venv Python: `JSONAdapter().format(ProposeInstruction, [], inputs)` for this record, with
+    // the text of each message after the other. The JSON adapter shows the description of each field.
+    val objective = DefaultInstructionProposer.ProposeInstructions.replace("\n", "\n        ")
+    val system    = "Your input fields are:\n" +
+      "1. `current_instruction` (str): The instructions I provided to the assistant.\n" +
+      "2. `examples_with_feedback` (list[dict[str, Any]]): Task inputs provided to the assistant, the assistant's " +
+      "response for each, and feedback on how the response could be better.\n" +
+      "Your output fields are:\n" +
+      "1. `new_instruction` (str): The new instruction for the assistant.\n" +
+      "All interactions will be structured in the following way, with the appropriate values filled in.\n\n" +
+      "Inputs will have the following structure:\n\n" +
+      "[[ ## current_instruction ## ]]\n{current_instruction}\n\n" +
+      "[[ ## examples_with_feedback ## ]]\n{examples_with_feedback}\n\n" +
+      "Outputs will be a JSON object with the following fields.\n\n" +
+      "{\n  \"new_instruction\": \"{new_instruction}\"\n}\n" +
+      s"In adhering to this structure, your objective is: \n        $objective"
+    val user = "[[ ## current_instruction ## ]]\nAnswer the question.\n\n" +
+      "[[ ## examples_with_feedback ## ]]\n" +
+      """[{"Inputs": {"question": "Capital of France?"}, "Generated Outputs": {"answer": "Lyon"}, """ +
+      """"Feedback": "expected 'Paris', got 'Lyon'"}]""" + "\n\n" +
+      "Respond with a JSON object in the following order of fields: `new_instruction`."
+    val lm = scripted(reply("New text."))
+    assert(propose(DefaultInstructionProposer(), lm).isRight)
+    assertEquals(lm.requests.head, s"$system\n$user")
   }
 
   test("the proposer uses its adapter, not the adapter of the context") {
@@ -310,9 +341,9 @@ class InstructionProposerSuite extends FunSuite:
     )
     assertEquals(lm.requests.size, 2)
     assert(lm.requests(0).contains("Answer the question."), lm.requests(0))
-    assert(lm.requests(0).contains(ReflectiveRecord.toJson(Vector(record))), lm.requests(0))
+    assert(lm.requests(0).contains(examplesText(Vector(record))), lm.requests(0))
     assert(lm.requests(1).contains("Check the answer."), lm.requests(1))
-    assert(lm.requests(1).contains(ReflectiveRecord.toJson(Vector(otherRecord))), lm.requests(1))
+    assert(lm.requests(1).contains(examplesText(Vector(otherRecord))), lm.requests(1))
   }
 
   test("a component with no reflective record gets no call and no entry") {
@@ -340,6 +371,18 @@ class InstructionProposerSuite extends FunSuite:
     val from = candidate.updated(first, None)
     assertEquals(propose(DefaultInstructionProposer(), lm, from = from), Right(Map(first -> "New text.")))
     assert(!lm.requests.head.contains("None"), lm.requests.head)
+  }
+
+  test("a reply with only a no-break space is an empty instruction, as Python strip") {
+    val lm     = scripted(reply(160.toChar.toString))
+    val result = propose(DefaultInstructionProposer(), lm)
+    assert(result.isLeft, result.toString)
+  }
+
+  test("a null instruction gives the text null: a bad instruction that the proposer accepts") {
+    // Upstream `parse_value` gives `str(None)`, the text `None` (`dspy/adapters/utils.py`). It also accepts it.
+    val lm = scripted("""{"new_instruction": null}""")
+    assertEquals(propose(DefaultInstructionProposer(), lm), Right(Map(first -> "null")))
   }
 
   test("the failure of one component is the result of the call") {

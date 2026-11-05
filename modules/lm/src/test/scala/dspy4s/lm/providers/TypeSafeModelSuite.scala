@@ -14,8 +14,8 @@ import dspy4s.core.contracts.{
   LmUsage,
   RuntimeContext
 }
-import dspy4s.lm.contracts.{DecisionRequests, LmCapabilities, LmRequest, Message, MessageRole}
-import dspy4s.lm.runtime.ManagedLanguageModel
+import dspy4s.lm.contracts.{DecisionRequests, LmCapabilities, LmMode, LmRequest, Message, MessageRole}
+import dspy4s.lm.runtime.{ManagedLanguageModel, StreamAccumulator}
 import munit.FunSuite
 import zio.blocks.schema.{DynamicValue, Schema}
 
@@ -115,9 +115,8 @@ class TypeSafeModelSuite extends FunSuite:
     val model = TypeSafeModel(apiKey = "k", transport = stub)
     val chat  = LmRequest(model = "jev-test", messages = Vector(Message(MessageRole.User, text = Some("Hi"))))
     assert(model.call(chat).left.exists(_.isInstanceOf[LmInvalidRequestError]), "a chat request")
-    val tuned = request.copy(options =
-      DynamicValues.mergeRecords(request.options, DynamicValues.record("temperature" -> json("0.5")))
-    )
+    assert(model.call(LmRequest(model = "jev-test")).left.exists(_.isInstanceOf[LmInvalidRequestError]), "no payload")
+    val tuned = request.copy(options = DynamicValues.record("temperature" -> json("0.5")))
     assert(model.call(tuned).left.exists(_.isInstanceOf[LmInvalidRequestError]), "a generation setting")
     assertEquals(stub.requests, Vector.empty)
   }
@@ -211,11 +210,13 @@ class TypeSafeModelSuite extends FunSuite:
     dspy4s.core.runtime.RuntimeEnvironment.resetForTests()
   }
 
-  test("the parts of a decision request, and a request with messages has none") {
-    assertEquals(DecisionRequests.parts(request), Right((state, questions)))
-    assertEquals(DynamicValues.recordKeys(request.options), Vector("state", "questions"))
-    assert(DecisionRequests.parts(LmRequest(
-      model = "m",
-      messages = Vector(Message(MessageRole.User, text = Some("x")))
-    )).isLeft)
+  test("the stream of a managed model keeps the typed answers in its chunk and in the assembled output") {
+    dspy4s.core.runtime.RuntimeEnvironment.resetForTests()
+    val managed = ManagedLanguageModel(TypeSafeModel("jev-test", apiKey = "k", transport = Stub(ok())))
+    val chunks  = managed.stream(request).toVector
+    assertEquals(chunks.flatMap(_.answers), Vector(record(answers)))
+    val parts = StreamAccumulator(LmMode.Chat)
+    chunks.foreach(parts.push)
+    assertEquals(parts.output.answers, Some(record(answers)))
+    dspy4s.core.runtime.RuntimeEnvironment.resetForTests()
   }

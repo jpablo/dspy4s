@@ -8,7 +8,6 @@ import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
-import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.MessageRole
@@ -39,7 +38,7 @@ class ChatAdapterSuite extends FunSuite:
         )
       ),
       inputs = Example(values = rec("question" := "Capital of Belgium?"), inputKeys = Set("question")),
-      request = LmRequest(model = "openai/test", mode = LmMode.Chat)
+      request = LmRequest(model = "openai/test")
     )
 
     given RuntimeContext = RuntimeEnvironment.current
@@ -82,7 +81,7 @@ class ChatAdapterSuite extends FunSuite:
       layout = signature,
       demos = Vector.empty,
       inputs = Example(values = rec("question" := "?"), inputKeys = Set("question")),
-      request = LmRequest(model = "x", mode = LmMode.Chat)
+      request = LmRequest(model = "x")
     )
     given RuntimeContext = RuntimeEnvironment.current
     val system           = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
@@ -109,7 +108,7 @@ class ChatAdapterSuite extends FunSuite:
       layout = signature,
       demos = Vector.empty,
       inputs = Example(values = rec("q" := "?"), inputKeys = Set("q")),
-      request = LmRequest(model = "x", mode = LmMode.Chat)
+      request = LmRequest(model = "x")
     )
     given RuntimeContext = RuntimeEnvironment.current
     val mainUser         = ChatAdapter().format(invocation).toOption.get.messages.last.text.get
@@ -150,7 +149,7 @@ class ChatAdapterSuite extends FunSuite:
       layout = signature,
       demos = Vector.empty,
       inputs = Example(values = rec("q" := "?"), inputKeys = Set("q")),
-      request = LmRequest(model = "x", mode = LmMode.Chat)
+      request = LmRequest(model = "x")
     )
     given RuntimeContext = RuntimeEnvironment.current
     val system           = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
@@ -187,7 +186,7 @@ class ChatAdapterSuite extends FunSuite:
       layout = signature,
       demos = Vector.empty,
       inputs = Example(values = rec("q" := "?"), inputKeys = Set("q")),
-      request = LmRequest(model = "x", mode = LmMode.Chat)
+      request = LmRequest(model = "x")
     )
     given RuntimeContext = RuntimeEnvironment.current
     val system           = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
@@ -217,7 +216,7 @@ class ChatAdapterSuite extends FunSuite:
       layout = signature,
       demos = Vector.empty,
       inputs = Example(values = rec("q" := "?"), inputKeys = Set("q")),
-      request = LmRequest(model = "x", mode = LmMode.Chat)
+      request = LmRequest(model = "x")
     )
     given RuntimeContext = RuntimeEnvironment.current
     val system           = ChatAdapter().format(invocation).toOption.get.messages.head.text.get
@@ -365,7 +364,7 @@ class ChatAdapterSuite extends FunSuite:
         )
       ),
       inputs = Example(values = rec("question" := "naïve ou 日本語?"), inputKeys = Set("question")),
-      request = LmRequest(model = "openai/test", mode = LmMode.Chat)
+      request = LmRequest(model = "openai/test")
     )
     given RuntimeContext = RuntimeEnvironment.current
     val all              = ChatAdapter().format(invocation).toOption.get.messages.flatMap(_.text).mkString("\n")

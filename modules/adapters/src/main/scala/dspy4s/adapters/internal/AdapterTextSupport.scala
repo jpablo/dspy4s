@@ -1,20 +1,23 @@
 package dspy4s.adapters.internal
 
-import dspy4s.adapters.contracts.AdapterErrors
 import dspy4s.adapters.contracts.NativeFunctionCalling
 import dspy4s.adapters.contracts.ParsedOutput
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.LenientValues
 import dspy4s.core.contracts.ParseError
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ToolCall
 import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.ValidationError
 import dspy4s.core.contracts.updated
 import dspy4s.lm.contracts.LmOutput
-import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
+
+import scala.util.matching.Regex
 
 /** Prompt-text helpers shared across the adapters. One implementation guarantees the adapters render demo / input
   * fields, coerce string field values, and apply the single-output text fallback identically — fixing a defect in one
@@ -32,74 +35,124 @@ private[adapters] object AdapterTextSupport:
         case _                     => filled
     }
 
-  /** Decode every output field in layout order, attaching the field name exactly once at this shared boundary.
+  /** The parse of the reply `output` for the output fields of `layout`, with the tool calls rule of upstream
+    * `Adapter._call_postprocess`. The Chat, JSON, and XML adapters use this function, so the rule is the same in each
+    * format. `parseText` parses the text of the reply for the output fields that it gets.
+    *   - A tool turn: the reply has provider tool calls, and `layout` has a tool calls field. `parseText` gets the
+    *     output fields less the tool calls field ([[textFields]]). A parse error of the text gives no values (upstream
+    *     `except AdapterParseError: value = {}`). An empty text, or no text field, gives no parse. Each output field
+    *     that the parse does not give takes its default, else a null (upstream `apply_output_field_defaults` and
+    *     `value.setdefault(name, None)`). The provider tool calls fill the tool calls field.
+    *   - Native function calling is active (`nativeCalls`), and the reply has no provider tool calls: `parseText` gets
+    *     the output fields less the tool calls field, and the tool calls field gets an empty list of calls.
+    *   - Else `parseText` gets each output field. Thus a reply with provider tool calls and no tool calls field is not
+    *     a tool turn: the text must give each required output field.
+    *
+    * An error that is not a [[ParseError]] stays an error, as upstream catches only `AdapterParseError`.
+    */
+  def parseOutputs(layout: SignatureLayout, output: LmOutput, nativeCalls: Boolean)(
+      parseText: Vector[FieldSpec] => Either[DspyError, DynamicValue.Record]
+  ): Either[DspyError, ParsedOutput] =
+    val hasToolCallsField = layout.outputFields.exists(NativeFunctionCalling.isToolCallsField)
+    val toolTurn          = hasToolCallsField && output.toolCalls.nonEmpty
+    if !hasToolCallsField || !(toolTurn || nativeCalls) then parseText(layout.outputFields).map(ParsedOutput(_))
+    else
+      val fields = textFields(layout, providerCalls = true)
+      val parsed =
+        if !toolTurn then parseText(fields)
+        else if output.text.isEmpty || fields.isEmpty then Right(DynamicValue.Record.empty)
+        else
+          parseText(fields) match
+            case Left(_: ParseError) => Right(DynamicValue.Record.empty)
+            case other               => other
+      parsed.map(values => ParsedOutput(toolTurnValues(layout, output.toolCalls, values)))
+
+  /** The record of the output fields of `layout` for a reply with the provider tool calls `calls` and the text values
+    * `values`: the calls fill the tool calls field, and each other field takes its value in `values`, else its default,
+    * else a null (upstream `apply_output_field_defaults` and `value.setdefault(name, None)`). With an empty `values`,
+    * this is the record of a tool turn with no text.
+    */
+  def toolTurnValues(
+      layout: SignatureLayout,
+      calls : Vector[ToolCall],
+      values: DynamicValue.Record
+  ): DynamicValue.Record =
+    val encoded = NativeFunctionCalling.encodeToolCalls(calls)
+    DynamicValues.recordFromEntries(layout.outputFields.map { field =>
+      if NativeFunctionCalling.isToolCallsField(field) then field.name -> encoded
+      else
+        field.name ->
+          DynamicValues
+            .recordGet(values, field.name)
+            .orElse(field.defaultValue)
+            .getOrElse(DynamicValue.Null)
+    })
+
+  /** The output fields of `layout` that the text of the reply gives: each output field, less the tool calls field when
+    * `providerCalls` is `true`. The provider tool calls then fill that field ([[parseOutputs]]). The stream states of
+    * the chat and the JSON formats get the same fields, so the stream follows the parser.
+    */
+  def textFields(layout: SignatureLayout, providerCalls: Boolean): Vector[FieldSpec] =
+    layout.outputFields.filterNot(field => providerCalls && NativeFunctionCalling.isToolCallsField(field))
+
+  /** The record of the output fields `fields`, in their order, with the field name attached exactly once at this shared
+    * boundary.
     *
     * `decode` gives `None` when the response does not have the field. The field then takes the value of
     * [[missingOutput]]. An error of `decode` becomes a [[ParseError]] that names the field and has the raw response
     * `raw`.
     */
   def decodeOutputFields(
-      layout: SignatureLayout,
+      fields: Vector[FieldSpec],
       raw   : String
   )(
       decode: FieldSpec => Either[DspyError, Option[DynamicValue]]
-  ): Either[DspyError, Vector[(String, DynamicValue)]] =
-    layout.outputFields.foldLeft[Either[DspyError, Vector[(String, DynamicValue)]]](Right(Vector.empty)) {
-      (acc, field) =>
-        for
-          soFar <- acc
-          found <- decode(field).left.map(fieldError(field, raw, _))
-          value <- found.fold(missingOutput(field, raw))(Right(_))
-        yield soFar :+ (field.name -> value)
-    }
+  ): Either[DspyError, DynamicValue.Record] =
+    Traverse.either(fields) { field =>
+      for
+        found <- decode(field).left.map(fieldError(field.name, raw, _))
+        value <- found.fold(missingOutput(field, raw))(Right(_))
+      yield field.name -> value
+    }.map(DynamicValues.recordFromEntries)
 
   /** The value of an output field that the response does not have (upstream `apply_output_field_defaults`): the
     * [[FieldSpec.defaultValue]] of the field, else a null when the field is optional. Else it is a parse error that has
-    * the raw response `raw`.
+    * the raw response `raw`, so that the capture of a failure trace can show what the model wrote.
     */
-  def missingOutput(field: FieldSpec, raw: String): Either[DspyError, DynamicValue] =
+  private def missingOutput(field: FieldSpec, raw: String): Either[DspyError, DynamicValue] =
     field.defaultValue match
       case Some(default)          => Right(default)
       case None if field.optional => Right(DynamicValue.Null)
-      case None                   => Left(AdapterErrors.missingField(field.name, Some(raw)))
+      case None                   => Left(ParseError("adapter", s"Missing required output field: ${field.name}", raw = Some(raw)))
 
-  /** The parse error of a value of the output field `field` that does not fit the type of the field. */
-  private def fieldError(field: FieldSpec, raw: String, error: DspyError): DspyError =
-    ParseError("adapter", s"Failed to parse field ${field.name}: ${error.message}", raw = Some(raw))
+  /** The parse error of a value of the output field `name` that does not fit the field, with the error `error` and the
+    * raw response `raw`. The decision adapter gives this error for a value that is not evidence.
+    */
+  def fieldError(name: String, raw: String, error: DspyError): DspyError =
+    ParseError("adapter", s"Failed to parse field $name: ${error.message}", raw = Some(raw))
 
-  /** Build the common adapter parse result while preserving the model's exact raw text. */
-  def parsedOutput(
-      adapterName: String,
-      output     : LmOutput,
-      entries    : Vector[(String, DynamicValue)],
-      metadata   : Map[String, Any] = Map.empty
-  ): ParsedOutput =
-    ParsedOutput(
-      values = DynamicValue.Record(Chunk.from(entries)),
-      rawText = Some(output.text),
-      metadata = Map("adapter" -> adapterName) ++ metadata
-    )
-
-  /** The value of the output field `field` from its raw text (upstream `parse_value` with a string). A `tool_calls`
-    * field takes the JSON list of calls in the text ([[textToolCalls]]). Each other field goes to [[coerceOutputText]].
-    * The Chat, JSON, and XML adapters use this function, so a text value has the same rules in each format.
+  /** The value of the output field `field` from its raw text (upstream `parse_value` with a string). The Chat, JSON,
+    * and XML adapters use this function, so a text value has the same rules in each format:
+    *   - The text `null` or `None` of an optional field is a null, when the type of the field is not a string or the
+    *     field has allowed values ([[isNullText]]).
+    *   - A `tool_calls` field takes the JSON list of calls in the text ([[textToolCalls]]).
+    *   - A field with allowed values takes the text of [[allowedValue]].
+    *   - Each other text goes to [[coerceText]]. When [[coerceText]] gives an error for an optional field, a null text
+    *     of [[LenientValues.isNullText]] (`""`, `null`, `none`, and `n/a`, in any case) is a null.
+    *
+    * An `Option` field of a typed signature has the type of its element. Before, it was a text field, and the typed
+    * decode read these null texts. This rule keeps them for an optional field. An optional field with allowed values
+    * does not take them: upstream `parse_value` gives `None` for an `Optional[Literal[...]]` only for a text that reads
+    * as `None`, and an error for each other text that is not an allowed value.
     */
   def outputTextValue(field: FieldSpec, raw: String): Either[DspyError, DynamicValue] =
     if isNullText(field, raw) then Right(DynamicValue.Null)
     else if NativeFunctionCalling.isToolCallsField(field) then textToolCalls(raw)
-    else coerceOutputText(field, raw)
-
-  /** Coerce the raw text of the output field `field` (upstream `parse_value`). The text `null` or `None` of an optional
-    * field is a null, when the type of the field is not a string. A field with allowed values takes the text of
-    * [[allowedValue]]. Each other text goes to [[coerceText]].
-    *
-    * An optional field also takes the lenient forms of [[optionalFallback]].
-    */
-  def coerceOutputText(field: FieldSpec, raw: String): Either[DspyError, DynamicValue] =
-    if isNullText(field, raw) then Right(DynamicValue.Null)
+    else if hasAllowedValues(field) then allowedValue(field, raw)
     else
-      val value = if hasAllowedValues(field) then allowedValue(field, raw) else coerceText(field.typeRef, raw)
-      optionalFallback(field, raw, value)
+      coerceText(field.typeRef, raw) match
+        case Left(_) if field.optional && LenientValues.isNullText(raw) => Right(DynamicValue.Null)
+        case result                                                     => result
 
   /** `true` when the output field `field` takes only its allowed values: a string field with [[FieldSpec.enumValues]],
     * as a `Literal[...]` of a string signature or a Scala enum of a typed signature gives it (decision D7). The enum
@@ -132,7 +185,7 @@ private[adapters] object AdapterTextSupport:
     )
     (Iterator(raw, unwrapped) ++ literalText(unwrapped).iterator)
       .find(allowed.contains)
-      .map(text => DynamicValue.Primitive(PrimitiveValue.String(text)))
+      .map(DynamicValues.string)
       .toRight(notAllowedValue(field, raw))
 
   /** The string that upstream `parse_value` reads from `text` in its last step, after the JSON whitespace at the two
@@ -148,76 +201,51 @@ private[adapters] object AdapterTextSupport:
   /** The whitespace that `json_repair` skips around a value. */
   private val JsonWhitespace: Set[Char] = Set(' ', '\t', '\n', '\r')
 
+  /** The allowed value of the output field `field` that the JSON value `value` gives (upstream `parse_value` with a
+    * `Literal` annotation, decision D7). The JSON adapter uses this rule for a value of its JSON object, and `RLM` uses
+    * it for a value of `SUBMIT`. Use it only for a field for which [[hasAllowedValues]] is `true`:
+    *   - A null of an optional field is a null.
+    *   - A string takes the steps of [[allowedValue]], and the result is the allowed value itself.
+    *   - Each other value is an error, because each allowed value is a string. The error shows the JSON text of the
+    *     value ([[PythonText.json]]).
+    */
+  def allowedJsonValue(field: FieldSpec, value: DynamicValue): Either[DspyError, DynamicValue] =
+    value match
+      case _: DynamicValue.Null.type if field.optional         => Right(DynamicValue.Null)
+      case DynamicValue.Primitive(PrimitiveValue.String(text)) => outputTextValue(field, text)
+      case other                                               => Left(notAllowedValue(field, PythonText.json(other)))
+
   /** The error of the text or the JSON text `text` that is not an allowed value of the output field `field`. */
-  def notAllowedValue(field: FieldSpec, text: String): DspyError =
+  private def notAllowedValue(field: FieldSpec, text: String): DspyError =
     ValidationError(s"Value '$text' is not one of the allowed values: ${field.enumValues.mkString("; ")}")
 
   /** The prefixes of a wrapper that upstream `parse_value` removes from a `Literal` value. */
   private val AllowedValueWrappers: Vector[String] = Vector("Literal[", "str[")
 
-  /** `true` when `text` has two or more characters, and the same quote (`'` or `"`) at the two ends. */
-  private def isQuoted(text: String): Boolean =
-    text.length > 1 && text.head == text.last && (text.head == '\'' || text.head == '"')
-
-  /** `text` with no quotes at the two ends when [[isQuoted]] is `true`, else `text`. */
+  /** `text` with no quotes at the two ends when it has two or more characters and the same quote (`'` or `"`) at the
+    * two ends ([[PythonText.quotedBody]]), else `text`.
+    */
   private def withoutQuotes(text: String): String =
-    if isQuoted(text) then text.substring(1, text.length - 1) else text
+    PythonText.quotedBody(text, '\'').orElse(PythonText.quotedBody(text, '"')).getOrElse(text)
 
-  /** `result`, else, for an optional field, the value of the lenient forms of the typed decode
-    * (`ZioSchemaCodec.normalize`): the texts `""`, `null`, `none`, and `n/a` in any case are a null, and a number can
-    * have a currency symbol, a `+`, and thousands commas (`"$2,399.00"`). An integer can be out of the `Int` range.
-    *
-    * An `Option` field of a typed signature has the type of its element. Before, it was a text field, and the typed
-    * decode read these forms. This rule keeps them for an optional field. A text that does not fit the type, also in a
-    * lenient form, keeps the error of `result`.
-    *
-    * @param raw
-    *   the text of the value: the text of the response, or the JSON text of a JSON value
+  /** `true` when `raw` is a null text ([[NullTexts]]) of the optional field `field`. The field must have a type that is
+    * not a string, or allowed values ([[hasAllowedValues]]). For a field with allowed values, the text has no
+    * whitespace at the two ends (Python `str.strip`).
     */
-  def optionalFallback(
-      field : FieldSpec,
-      raw   : String,
-      result: Either[DspyError, DynamicValue]
-  ): Either[DspyError, DynamicValue] =
-    result match
-      case Left(error) if field.optional => lenientOptional(field.typeRef, raw.trim).toRight(error)
-      case other                         => other
-
-  private def lenientOptional(typeRef: TypeRef, text: String): Option[DynamicValue] =
-    if LenientNullTexts.exists(_.equalsIgnoreCase(text)) then Some(DynamicValue.Null)
-    else
-      val number = cleanNumeric(text)
-      typeRef match
-        case TypeRef.int => number.toLongOption.map { whole =>
-            if whole.isValidInt then DynamicValue.Primitive(PrimitiveValue.Int(whole.toInt))
-            else DynamicValue.Primitive(PrimitiveValue.Long(whole))
-          }
-        case TypeRef.double => number.toDoubleOption.map(value => DynamicValue.Primitive(PrimitiveValue.Double(value)))
-        case _              => None
-
-  /** The texts that are a null for the typed decode of an `Option` field (`ZioSchemaCodec.normalizeOption`). */
-  private val LenientNullTexts: Vector[String] = Vector("", "null", "none", "n/a")
-
-  /** A number text with no leading currency symbol (`$ € £ ¥`), no leading `+`, and no comma
-    * (`ZioSchemaCodec.cleanNumeric`).
-    */
-  private def cleanNumeric(text: String): String =
-    val noSymbol = if text.nonEmpty && "$€£¥".contains(text.head) then text.tail.trim else text
-    val noSign   = if noSymbol.startsWith("+") then noSymbol.tail else noSymbol
-    noSign.filter(_ != ',')
-
-  /** `true` when `raw` is a null text of the optional field `field` whose type is not a string. */
   private def isNullText(field: FieldSpec, raw: String): Boolean =
-    field.optional && field.typeRef != TypeRef.string && NullTexts.contains(raw.trim)
+    field.optional && (
+      if hasAllowedValues(field) then NullTexts.contains(PythonText.strip(raw))
+      else field.typeRef != TypeRef.string && NullTexts.contains(raw.trim)
+    )
 
   /** The texts that are a null for an optional field: JSON `null` and Python `None`. */
   private val NullTexts: Set[String] = Set("null", "None")
 
   /** The value of a `tool_calls` output field that the model wrote as text (native function calling is not active). The
-    * text is a JSON value in a form of [[toolCallsValue]]. Each other text is an error.
+    * text is a JSON value ([[PythonText.parseJson]]) in a form of [[toolCallsValue]]. Each other text is an error.
     */
-  def textToolCalls(raw: String): Either[DspyError, DynamicValue] =
-    JsonDynamic.parse(raw).flatMap(toolCallsValue)
+  private def textToolCalls(raw: String): Either[DspyError, DynamicValue] =
+    PythonText.parseJson(raw).flatMap(toolCallsValue)
 
   /** The value of a `tool_calls` output field from a JSON value, in a form that upstream `ToolCalls.validate_input`
     * accepts ([[ToolCall.fromDynamic]]): a list of `{"name", "args"}` objects, an object with that list under the key
@@ -233,82 +261,123 @@ private[adapters] object AdapterTextSupport:
       ))
 
   /** Coerce a raw string field value into the `DynamicValue` its declared `TypeRef` demands. Shared by the Chat and XML
-    * adapters so a `json` / `list` field decodes identically regardless of which adapter parsed it.
+    * adapters so a `json` / `list` field decodes identically regardless of which adapter parsed it. An `int`, a
+    * `double`, and a `bool` field take the rule of [[LenientValues.valueOf]]. A `json` or a `list` field reads the text
+    * as JSON with the rules of Python `json.loads` ([[PythonText.parseJson]]): an integer keeps its exact value, and a
+    * float stays a float. A `union` field also reads the text as JSON, and it keeps a text that is not JSON, because a
+    * case with no fields of a sealed trait with fields can be a bare name. The typed decode then gives the case or the
+    * error.
     */
-  def coerceText(typeRef: TypeRef, raw: String): Either[DspyError, DynamicValue] =
+  private def coerceText(typeRef: TypeRef, raw: String): Either[DspyError, DynamicValue] =
+    def lenient(error: => String) =
+      LenientValues.valueOf(DynamicValues.string(raw), typeRef).toRight(ValidationError(error))
     typeRef match
-      // Upstream `parse_value` reads the text as JSON, then pydantic lax mode accepts a whole float for an int.
-      case TypeRef.int => wholeNumber(raw.trim).toRight(ValidationError(s"Cannot parse integer output from '$raw'"))
-          .map(i => DynamicValue.Primitive(PrimitiveValue.Int(i)))
-      case TypeRef.double => raw.trim.toDoubleOption.toRight(ValidationError(s"Cannot parse double output from '$raw'"))
-          .map(d => DynamicValue.Primitive(PrimitiveValue.Double(d)))
-      case TypeRef.bool => raw.trim.toLowerCase match
-          case "true"  => Right(DynamicValue.Primitive(PrimitiveValue.Boolean(true)))
-          case "false" => Right(DynamicValue.Primitive(PrimitiveValue.Boolean(false)))
-          case other   => Left(ValidationError(s"Cannot parse boolean output from '$other'"))
-      case TypeRef.json | TypeRef.list => JsonDynamic.parse(raw).left.map(_ =>
+      case TypeRef.int                 => lenient(s"Cannot parse integer output from '$raw'")
+      case TypeRef.double              => lenient(s"Cannot parse double output from '$raw'")
+      case TypeRef.bool                => lenient(s"Cannot parse boolean output from '${raw.trim.toLowerCase}'")
+      case TypeRef.json | TypeRef.list => PythonText.parseJson(raw).left.map(_ =>
           ValidationError(s"Field could not be parsed as JSON from '$raw'")
         )
-      case other if isListOf(other) => listOfValue(other, JsonDynamic.parse(raw).toOption, raw)
-      case _                        => Right(DynamicValue.Primitive(PrimitiveValue.String(raw)))
+      case TypeRef.union     => Right(PythonText.parseJson(raw).getOrElse(DynamicValues.string(raw)))
+      case TypeRef.reasoning => Right(
+          PythonText.parseJson(raw).toOption.flatMap(reasoningValue(_).toOption).getOrElse(DynamicValues.string(raw))
+        )
+      case other if isListOf(other) => listOfValue(other, PythonText.parseJson(raw).toOption, raw)
+      case _                        => Right(DynamicValues.string(raw))
 
-  /** `true` for a list type with an item type, for example the type `list[str]` of a string signature. A `tuple[...]`,
-    * a `set[...]`, and a `frozenset[...]` are list types too: upstream `parse_value` gives a tuple or a set, and the
-    * port has no tuple or set value.
+  /** The value of a reasoning field from its JSON value `value` (upstream `Reasoning.validate_input`): a text, or the
+    * text under `content` of a record. Each other value is an error. For a text of the reply, [[coerceText]] keeps the
+    * text as it is after such an error, because upstream `parse_value` then validates the text itself.
     */
-  def isListOf(typeRef: TypeRef): Boolean = ListTypePrefixes.exists(typeRef.repr.startsWith)
+  def reasoningValue(value: DynamicValue): Either[DspyError, DynamicValue] =
+    value match
+      case DynamicValue.Primitive(_: PrimitiveValue.String) => Right(value)
+      case record: DynamicValue.Record                      => DynamicValues.recordGet(record, "content") match
+          case Some(content @ DynamicValue.Primitive(_: PrimitiveValue.String)) => Right(content)
+          case Some(other)                                                      =>
+            Left(ValidationError(s"`content` field must be a string, but received: ${PythonText.json(other)}"))
+          case None => Left(ValidationError("`content` field is required for `dspy.Reasoning`"))
+      case other => Left(ValidationError(s"Received invalid value for `dspy.Reasoning`: ${PythonText.json(other)}"))
 
-  /** The type tokens of [[isListOf]], in lower case, as [[TypeRef.fromToken]] gives them. */
-  private val ListTypePrefixes: Vector[String] = Vector("list[", "tuple[", "set[", "frozenset[")
+  /** `true` for a list type with an item type ([[TypeRef.collection]]), for example the type `list[str]` of a string
+    * signature. A `tuple[...]`, a `set[...]`, and a `frozenset[...]` are list types too: upstream `parse_value` gives a
+    * tuple or a set, and the port has no tuple or set value.
+    */
+  def isListOf(typeRef: TypeRef): Boolean = typeRef.collection.isDefined
 
-  /** The type tokens of a set type of [[isListOf]]. */
-  private val SetTypePrefixes: Vector[String] = Vector("set[", "frozenset[")
-
-  /** The value of a field of the list type `typeRef` ([[isListOf]]) from its JSON value `value`: the value when it is a
-    * list, else an error (upstream `parse_value` validates a list). The items stay as they are. The Chat, JSON, and XML
-    * adapters use this function, so a list value has the same rule in each format.
+  /** The value of a field of the list type `typeRef` ([[isListOf]]) from its JSON value `value`: the list with each
+    * item after [[listItem]], else an error when `value` is not a list (upstream `parse_value` validates a list and its
+    * items). The Chat, JSON, and XML adapters use this function, so a list value has the same rule in each format. The
+    * item type of a tuple of any length, `tuple[T, ...]`, is `T`.
     *
-    * A set type keeps the first copy of each equal value, in the order of the list: `["b", "a", "b"]` gives
-    * `["b", "a"]`. A Python set has no order (the order of a set of texts changes with the hash seed of the process),
-    * so only its rule for equal values applies: a set keeps the copy that it got first. Two values are equal when their
-    * `DynamicValue`s are equal.
+    * A set type keeps the first copy of each equal value, after the rule of the items, in the order of the list:
+    * `["b", "a", "b"]` gives `["b", "a"]`, and `set[int]` with `["1", 1]` gives `[1]`. A Python set has no order (the
+    * order of a set of texts changes with the hash seed of the process), so only its rule for equal values applies: a
+    * set keeps the copy that it got first. Two values are equal when their `DynamicValue`s are equal.
     *
     * @param raw
-    *   the text of the value, for the error
+    *   the text of the value, for the error only
     */
-  def listOfValue(typeRef: TypeRef, value: Option[DynamicValue], raw: String): Either[DspyError, DynamicValue] =
-    value
-      .collect { case list: DynamicValue.Sequence =>
-        if SetTypePrefixes.exists(typeRef.repr.startsWith) then DynamicValue.Sequence(list.elements.distinct) else list
-      }
-      .toRight(ValidationError(s"Expected a JSON list for ${typeRef.repr} from '$raw'"))
+  def listOfValue(typeRef: TypeRef, value: Option[DynamicValue], raw: => String): Either[DspyError, DynamicValue] =
+    (value, typeRef.collection) match
+      case (Some(list: DynamicValue.Sequence), Some((kind, item))) =>
+        val itemType = TypeRef.fromToken(item match
+          case AnyLengthTuple(first) if kind == TypeRef.Collection.Tuple => first
+          case other                                                     => other)
+        Traverse
+          .either(list.elements)(listItem(typeRef, itemType, _))
+          .map(items => DynamicValues.sequence(if kind.isSet then items.distinct else items))
+      case _ => Left(ValidationError(s"Expected a JSON list for ${typeRef.repr} from '$raw'"))
 
-  /** The `Int` of an integer text, or of a float text with no fraction (`3.0`). */
-  private def wholeNumber(text: String): Option[Int] =
-    text.toIntOption.orElse(
-      text.toDoubleOption.filter(d => d.isWhole && d >= Int.MinValue.toDouble && d <= Int.MaxValue.toDouble).map(
-        _.toInt
-      )
-    )
-
-  /** Single-output plain-text fallback shared by the JSON and XML adapters: when structured parsing failed at the
-    * DOCUMENT level and the signature has exactly one output field, treat the whole (trimmed, non-empty) reply as that
-    * field's value. Callers gate on their `allowTextFallbackForSingleOutput` flag and field count before invoking. A
-    * field with allowed values takes the value of [[allowedValue]], so a text outside the allowed values is a parse
-    * error, as in the other parse paths (decision D7).
+  /** The item text of a tuple of any length, for example `int, ...` of the type `tuple[int, ...]`. Its group is the
+    * item type.
     */
-  def singleOutputTextFallback(
-      adapterName: String,
-      layout     : SignatureLayout,
-      output     : LmOutput
-  ): Either[DspyError, ParsedOutput] =
-    val field   = layout.outputFields.head
-    val trimmed = output.text.trim
-    if trimmed.nonEmpty then
-      val value =
-        if hasAllowedValues(field) then allowedValue(field, trimmed).left.map(fieldError(field, output.text, _))
-        else Right(DynamicValue.Primitive(PrimitiveValue.String(trimmed)))
-      value.map(text =>
-        parsedOutput(adapterName, output, Vector(field.name -> text), metadata = Map("fallback" -> "text"))
+  private val AnyLengthTuple: Regex = """(.+?)\s*,\s*\.\.\.\s*""".r
+
+  /** The value of the item `item` of a list of the type `listType`, for the item type `itemType` (pydantic lax mode, as
+    * upstream `parse_value` validates the items):
+    *   - An `int`, a `double`, or a `bool` takes the rule of [[LenientValues.valueOf]].
+    *   - A string type takes only a string. Pydantic lax mode rejects a number and a null for `str`.
+    *   - A list type with an item type ([[isListOf]]) takes the rule of [[listOfValue]].
+    *   - Each other item type stays as it is, because the port has no rule for it: `optional[int]`, `dict`, and the
+    *     item text `int, str` of the type `tuple[int, str]`.
+    */
+  private def listItem(listType: TypeRef, itemType: TypeRef, item: DynamicValue): Either[DspyError, DynamicValue] =
+    def wrongItem =
+      ValidationError(
+        s"Expected an item of the type ${itemType.repr} for ${listType.repr}, found: ${PythonText.json(item)}"
       )
-    else Left(ParseError("adapter", "Cannot fallback from empty model output", raw = Some(output.text)))
+    itemType match
+      case TypeRef.int | TypeRef.double | TypeRef.bool => LenientValues.valueOf(item, itemType).toRight(wrongItem)
+      case TypeRef.string                              => item match
+          case DynamicValue.Primitive(_: PrimitiveValue.String) => Right(item)
+          case _                                                => Left(wrongItem)
+      case TypeRef.reasoning          => reasoningValue(item)
+      case nested if isListOf(nested) => listOfValue(nested, Some(item), PythonText.json(item))
+      case _                          => Right(item)
+
+  /** The single-output text fallback (a port rule) of the Chat, JSON, and XML adapters: the record of the one text
+    * output field `field` for a reply with no structure. The text of the reply, with the line ends and the strip of
+    * [[fallbackText]], is the text of the value, and [[outputTextValue]] gives the value. Thus an `int` field takes
+    * `42` for the reply `42`, and a field with allowed values takes the value of [[allowedValue]] (decision D7). A text
+    * that does not fit the field is a parse error that names the field. An empty text is a parse error.
+    *
+    * Each caller applies its gate first: one text output field, and, for the JSON and XML adapters, the flag
+    * `allowTextFallbackForSingleOutput`.
+    */
+  def singleOutputTextFallback(field: FieldSpec, output: LmOutput): Either[DspyError, DynamicValue.Record] =
+    val text = fallbackText(output.text)
+    if text.isEmpty then Left(ParseError("adapter", "Cannot fallback from empty model output", raw = Some(output.text)))
+    else
+      outputTextValue(field, text)
+        .left
+        .map(fieldError(field.name, output.text, _))
+        .map(value => DynamicValues.record(field.name -> value))
+
+  /** The text of the single-output fallback for the whole text `text` of a reply with no structure: the lines of `text`
+    * (Python `str.splitlines`), joined with `\n`, and stripped with Python `str.strip`. A section value of the chat
+    * format has the same line ends, so a CRLF reply gives the value of an LF reply. The chat stream state gives this
+    * text for the fallback too.
+    */
+  def fallbackText(text: String): String =
+    PythonText.strip(PythonText.splitLines(text).mkString("\n"))

@@ -1,12 +1,14 @@
 package dspy4s.programs.internal
 
-import dspy4s.adapters.internal.ProgramPromptText
-import dspy4s.core.contracts.{:=, DynamicValues, TypeRef}
+import dspy4s.adapters.contracts.ToolSpec
+import dspy4s.core.contracts.{:=, DynamicValues, PythonText, TypeRef}
 import dspy4s.programs.contracts.ToolFunction
 import zio.blocks.schema.DynamicValue
 
-/** The prompt texts of a tool, in the port form of upstream `Tool` (`dspy/adapters/types/tool.py`, decision D3).
-  * `ReAct` lists each tool with [[describe]], and `RLM` lists the parameters of each tool with [[parameters]].
+/** The prompt texts and the provider tool of a tool, in the port form of upstream `Tool`
+  * (`dspy/adapters/types/tool.py`, decision D3). `ReAct` lists each tool with [[describe]], and `RLM` lists the
+  * parameters of each tool with [[parameters]]. `ReActV2` and the extract steps of `ReAct` and `RLM` give their
+  * predictors the [[toolSpec]] of each tool.
   */
 private[programs] object ToolText:
 
@@ -16,19 +18,29 @@ private[programs] object ToolText:
     */
   def args(tool: ToolFunction): DynamicValue.Record =
     tool.inputSchema match
-      case Some(schema) =>
-        DynamicValues.recordGet(schema, "properties").collect { case properties: DynamicValue.Record => properties }
-          .getOrElse(DynamicValue.Record.empty)
-      case None => DynamicValues.recordFromEntries(tool.argSchema.map((name, typeRef) => name -> argument(typeRef)))
+      case Some(schema) => ToolSpec.arguments(schema)
+      case None         => DynamicValues.recordFromEntries(tool.argSchema.map((name, typeRef) => name -> argument(typeRef)))
 
-  /** The text of `tool` in a list of tools (upstream `Tool.__str__`): the name, the description, and the arguments as
-    * JSON text. A tool with no description has no description part.
-    */
+  /** The text of `tool` in a list of tools (upstream `Tool.__str__`, [[ToolSpec.describe]]). */
   def describe(tool: ToolFunction): String =
-    val desc =
-      if tool.description.nonEmpty then s", whose description is <desc>${tool.description}</desc>.".replace("\n", "  ")
-      else "."
-    s"${tool.name}$desc It takes arguments ${ProgramPromptText.json(args(tool))}."
+    ToolSpec.describe(tool.name, tool.description, args(tool))
+
+  /** The provider tool of `tool` (upstream `Tool.format_as_litellm_function_call`): the input schema of the tool, else
+    * an object schema with the arguments of [[args]] and each argument in `required`.
+    */
+  def toolSpec(tool: ToolFunction): ToolSpec =
+    val arguments = args(tool)
+    ToolSpec(
+      name = tool.name,
+      description = Some(tool.description).filter(_.nonEmpty),
+      inputSchema = tool.inputSchema.getOrElse(
+        DynamicValues.record(
+          "type"       := "object",
+          "properties" -> arguments,
+          "required"   -> DynamicValues.sequence(DynamicValues.recordKeys(arguments).map(DynamicValues.string))
+        )
+      )
+    )
 
   /** The parameters of `tool` as `name: type` texts (upstream `RLM._format_tool_docs`). An argument with no `type` has
     * the type `Any`.
@@ -39,19 +51,13 @@ private[programs] object ToolText:
   private def typeText(schema: DynamicValue): String =
     schema match
       case record: DynamicValue.Record => DynamicValues.recordGet(record, "type")
-          .fold("Any")(value => DynamicValues.asString(value).getOrElse(ProgramPromptText.json(value)))
+          .fold("Any")(value => DynamicValues.asString(value).getOrElse(PythonText.json(value)))
       case _ => "Any"
 
-  private def argument(typeRef: TypeRef): DynamicValue.Record =
-    jsonType(typeRef).fold(DynamicValue.Record.empty)(name => DynamicValues.record("type" := name))
-
-  /** The JSON schema type of a wire type (the types of upstream `Tool._parse_function`). */
-  private[programs] def jsonType(typeRef: TypeRef): Option[String] =
+  /** The schema of an argument: its JSON type ([[TypeRef.jsonType]], the types of upstream `Tool._parse_function`). A
+    * list has the empty `items` of a Python `list`, because a provider can reject an array with no `items`.
+    */
+  private[programs] def argument(typeRef: TypeRef): DynamicValue.Record =
     typeRef match
-      case TypeRef.string => Some("string")
-      case TypeRef.int    => Some("integer")
-      case TypeRef.double => Some("number")
-      case TypeRef.bool   => Some("boolean")
-      case TypeRef.list   => Some("array")
-      case TypeRef.json   => Some("object")
-      case _              => None
+      case TypeRef.list => DynamicValues.record("items" -> DynamicValue.Record.empty, "type" := "array")
+      case _            => typeRef.jsonType.fold(DynamicValue.Record.empty)(name => DynamicValues.record("type" := name))

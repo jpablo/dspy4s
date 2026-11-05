@@ -4,29 +4,71 @@ import scala.util.matching.Regex
 
 /** Wire-format type tag for a field, surfaced to the LM via adapter prompts (e.g. `"answer: bool"`).
   *
-  * This is the *adapter / prompt* type, not the Scala type -- `Shape[A]` carries the static Scala-side encoding. A
-  * Scala enum, for instance, has Scala type `Sentiment` but [[TypeRef.string]] at the wire level (the LM sees a flat
-  * string like `"joy"`).
+  * This is the *adapter / prompt* type, not the Scala type: `Shape[A]` carries the static Scala-side encoding. A Scala
+  * enum, for instance, has Scala type `Sentiment` but [[TypeRef.string]] at the wire level (the LM sees a flat string
+  * like `"joy"`).
   *
-  * Six well-known refs cover the common cases. Anything outside that set passes through as an opaque token -- adapters
-  * that don't recognize it fall back to rendering it as a free-form string.
+  * The fourteen well-known refs of the companion object cover the common cases. Each other token passes through as an
+  * opaque token, and an adapter that does not know the token renders it as a free-form string. A time value, a `UUID`,
+  * or a `BigDecimal` of a typed signature has such a token, with its type name (`Instant`). A sealed trait with fields
+  * is a [[TypeRef.union]] field.
   */
 final case class TypeRef(repr: String) derives CanEqual:
 
   /** Python/DSPy-facing name for well-known wire types. `None` means there is no safe direct Python equivalent. */
   def pythonTypeName: Option[String] =
     repr match
-      case "string"  => Some("str")
-      case "int"     => Some("int")
-      case "double"  => Some("float")
-      case "bool"    => Some("bool")
-      case "list"    => Some("list")
-      case "json"    => Some("dict")
-      case "history" => Some("History")
-      case "tools"   => Some("list[Tool]")
-      case _         => None
+      case "string"    => Some("str")
+      case "int"       => Some("int")
+      case "double"    => Some("float")
+      case "bool"      => Some("bool")
+      case "list"      => Some("list")
+      case "json"      => Some("dict")
+      case "history"   => Some("History")
+      case "tools"     => Some("list[Tool]")
+      case "reasoning" => Some("str")
+      case _           => None
+
+  /** The JSON schema type of this wire type (the types of upstream `Tool._parse_function`): `string`, `integer`,
+    * `number`, `boolean`, `array` for [[TypeRef.list]], and `object` for [[TypeRef.json]] and [[TypeRef.union]]. `None`
+    * for each other type.
+    */
+  def jsonType: Option[String] =
+    this match
+      case TypeRef.string    => Some("string")
+      case TypeRef.reasoning => Some("string")
+      case TypeRef.int       => Some("integer")
+      case TypeRef.double    => Some("number")
+      case TypeRef.bool      => Some("boolean")
+      case TypeRef.list      => Some("array")
+      case TypeRef.json      => Some("object")
+      case TypeRef.union     => Some("object")
+      case _                 => None
+
+  /** The kind and the item type text of a collection type with an item type, as [[TypeRef.fromToken]] gives it:
+    * `list[T]`, `tuple[T, ...]`, `set[T]`, or `frozenset[T]`. For example, `list[str]` gives
+    * `(Collection.List, "str")`, and `tuple[int, ...]` gives `(Collection.Tuple, "int, ...")`. `None` for each other
+    * type, also for [[TypeRef.list]], which has no item type.
+    */
+  def collection: Option[(TypeRef.Collection, String)] =
+    TypeRef.Collection.values.collectFirst {
+      case kind if repr.startsWith(kind.prefix) && repr.endsWith("]") && repr.length > kind.prefix.length + 1 =>
+        kind -> repr.substring(kind.prefix.length, repr.length - 1)
+    }
 
 object TypeRef:
+
+  /** The kind of a collection type with an item type ([[TypeRef.collection]]). `prefix` is the start of its type text.
+    */
+  enum Collection(val prefix: String) derives CanEqual:
+    case List      extends Collection("list[")
+    case Tuple     extends Collection("tuple[")
+    case Set       extends Collection("set[")
+    case FrozenSet extends Collection("frozenset[")
+
+    /** `true` for a set type: upstream gives a Python set, which keeps one copy of each equal value. */
+    def isSet: Boolean = this == Set || this == FrozenSet
+
   val string: TypeRef = TypeRef("string")
   val int: TypeRef    = TypeRef("int")
   val double: TypeRef = TypeRef("double")
@@ -34,9 +76,21 @@ object TypeRef:
   val json: TypeRef   = TypeRef("json")
   val list: TypeRef   = TypeRef("list")
 
+  /** The type of a sealed trait with fields of a typed signature: an object with a case name as its key, or the bare
+    * name of a case with no fields. A reply can have each form, so an adapter keeps a text that is not JSON. A
+    * [[TypeRef.json]] field does not.
+    */
+  val union: TypeRef = TypeRef("union")
+
+  /** The wire type of the JSON schema type `name`, the inverse of [[TypeRef.jsonType]]. `None` for each other name. */
+  def fromJsonType(name: String): Option[TypeRef] =
+    Vector(string, int, double, bool, list, json).find(_.jsonType.contains(name))
+
   /** Sentinel for the output field that receives native provider tool calls (the analogue of Python dspy's `ToolCalls`
     * output annotation). An adapter with native function-calling enabled fills this field from the provider's
-    * `tool_calls` instead of asking the model to emit it as text. See PORT_GAPS G-7b.
+    * `tool_calls` instead of asking the model to emit it as text. See PORT_GAPS G-7b. A typed field that is a sequence
+    * of [[ToolCall]] values, for example a `Vector[ToolCall]`, gets this type from the marker of `ToolCall` (see
+    * [[TypeMarker]]).
     */
   val toolCalls: TypeRef = TypeRef("tool_calls")
 
@@ -47,11 +101,19 @@ object TypeRef:
   val history: TypeRef = TypeRef("history")
 
   /** The type of the input field that holds the tools of a call (the analogue of Python dspy's `list[dspy.Tool]` input
-    * annotation; experimental, for `ReActV2`). The value is a list with the text of each tool. When native function
-    * calling is active for the call, the adapter does not show the field: the request has the tools as provider tools
-    * (upstream `Adapter._call_preprocess` deletes the field). Else the adapter shows the value as a JSON list.
+    * annotation; experimental, for `ReActV2`). The value is a list with the text of each tool, so it cannot become
+    * provider tools. When native function calling is active for the call, the adapter does not show the field (upstream
+    * `Adapter._call_preprocess` deletes the field), and the provider tools come from the tool specs of the call. With
+    * no tool specs, such a call is an error (`NativeTools.checkTools`). Upstream makes the provider tools from the
+    * value of the field. Else the adapter shows the value as a JSON list.
     */
   val tools: TypeRef = TypeRef("tools")
+
+  /** The type of an output that holds the reasoning of the model (the analogue of Python dspy's `Reasoning` output
+    * annotation). A prompt shows it as a `str`. A [[Reasoning]] field of a typed signature gets this type from the type
+    * id of [[Reasoning]]. The native reasoning step of the adapters reads this type.
+    */
+  val reasoning: TypeRef = TypeRef("reasoning")
 
   /** The type of a `Noul` decision output: a Boolean decision with a probability (experimental, upstream
     * `dspy.experimental.Noul`). See [[dspy4s.core.decisions]].
@@ -71,20 +133,20 @@ object TypeRef:
   /** Parse a string DSL type token (e.g. the `"bool"` in `"comment -> toxic: bool"`) into the matching well-known
     * [[TypeRef]]. Accepts a handful of synonyms (`"str"`, `"integer"`, `"float"`, `"number"`, `"dict"`, `"map"`) and is
     * case-insensitive. A `dict[...]` token is [[TypeRef.json]], as `dict` is. Unknown tokens become opaque
-    * `TypeRef(other)`. An empty / missing token defaults to [[TypeRef.string]] (DSPy convention -- fields without a
-    * type annotation are strings).
+    * `TypeRef(other)`. An empty / missing token defaults to [[TypeRef.string]] (DSPy convention: fields without a type
+    * annotation are strings).
     */
   def fromToken(token: String): TypeRef =
     token.trim.toLowerCase match
-      case "" | "str" | "string"         => string
-      case "int" | "integer"             => int
-      case "float" | "double" | "number" => double
-      case "bool" | "boolean"            => bool
-      case "json" | "dict" | "map"       => json
-      case "tool_calls" | "toolcalls"    => toolCalls
-      case "history"                     => history
-      case DictToken()                   => json
-      case other                         => TypeRef(other)
+      case "" | "str" | "string"          => string
+      case "int" | "integer"              => int
+      case "float" | "double" | "number"  => double
+      case "bool" | "boolean"             => bool
+      case "json" | "dict" | "map"        => json
+      case "tool_calls" | "toolcalls"     => toolCalls
+      case "reasoning" | "dspy.reasoning" => reasoning
+      case DictToken()                    => json
+      case other                          => TypeRef(other)
 
   /** A `dict` token with type arguments, for example `dict[str, int]` (after the token becomes lower case). */
   private val DictToken: Regex = """dict\[.*\]""".r

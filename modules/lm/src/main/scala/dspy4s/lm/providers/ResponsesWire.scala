@@ -5,11 +5,13 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.ToolCall
 import dspy4s.core.contracts.updated
+import dspy4s.lm.contracts.ContentPart
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmOutput
+import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.LmToolCallDelta
-import dspy4s.lm.runtime.ToolCallAssembler
-import zio.blocks.chunk.Chunk
+import dspy4s.lm.contracts.Message
+import dspy4s.lm.contracts.MessageRole
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.PrimitiveValue
 
@@ -18,6 +20,7 @@ import zio.blocks.schema.PrimitiveValue
   * `dspy/_vendor/lm15/providers/openai.py`).
   */
 private[lm] object ResponsesWire:
+  import DynamicValues.{asRecord, isNull, record, recordFromEntries, recordGet, sequence, sequenceAt, string}
 
   /** The keys of the Responses wire that the chat wire does not use. The shared keys are in [[WireKeys]]. */
   private object Keys:
@@ -37,28 +40,19 @@ private[lm] object ResponsesWire:
     final val jsonSchema          = "json_schema"
     final val imageUrl            = "image_url"
     final val url                 = "url"
-    final val detail              = "detail"
     final val stop                = "stop"
     final val annotations         = "annotations"
     final val citedText           = "cited_text"
     final val supportedText       = "supported_text"
     final val documentTitle       = "document_title"
     final val title               = "title"
-    final val reasoningContent    = "reasoning_content"
-    final val citations           = "citations"
     final val outputIndex         = "output_index"
     final val item                = "item"
     final val response            = "response"
     final val annotation          = "annotation"
 
-    /** The options that the Responses body does not send as null (upstream: the former config serializer omitted them).
-      */
-    val nullableOptions: Vector[String] = Vector("temperature", "top_p", "n", "logprobs", reasoning, toolChoice)
-
   /** The values of the `type` and `role` keys that the translation reads or writes. */
   private object Kinds:
-    final val assistant          = "assistant"
-    final val tool               = "tool"
     final val function           = "function"
     final val functionCall       = "function_call"
     final val functionCallOutput = "function_call_output"
@@ -75,7 +69,7 @@ private[lm] object ResponsesWire:
     /** The block types that hold text, in a request and in a response. */
     val textBlocks: Set[String] = Set(text, inputText, outputText)
 
-    /** The block types of a tool message whose text goes into the output of the call. */
+    /** The part kinds of a tool message whose text goes into the output of the call. */
     val toolTextBlocks: Set[String] = Set(text, inputText)
 
   /** The `type` values of the events of a Responses stream that the stream parser reads. */
@@ -96,26 +90,29 @@ private[lm] object ResponsesWire:
     final val toolCall = "tool_call"
     final val stop     = "stop"
 
-  /** The Responses body for the chat body `chat` (the payload of `ProviderRequestNormalizer.normalize`, with no
-    * internal key). The rules of upstream `chat_to_responses`:
+  /** The Responses body of `request`: the option bag of the request over `defaultOptions`
+    * ([[dspy4s.lm.contracts.LmRequest.effectiveOptions]]), the model, and the input items of the typed messages. The
+    * rules of upstream `chat_to_responses`:
     *
-    *   - A body that has `input` already loses `messages` and is otherwise unchanged.
-    *   - `messages` becomes `input`, one item or more for each message, in order:
-    *     - A `tool` message gives `{"type": "function_call_output", "output": <the text>, "call_id": <tool_call_id>}`.
-    *       The text of a list content is the joined `text` of its text blocks. `call_id` is absent when the message has
-    *       no `tool_call_id`.
-    *     - Each other message gives `{"role", "content": <blocks>, "name"?}`, except an `assistant` message that has
-    *       tool calls and no blocks. The blocks of a string content are one `{"type": <t>, "text"}` block, where `<t>`
-    *       is `output_text` for an `assistant` message and `input_text` for each other role. A null content gives no
-    *       block. In a list content, a `text`, `input_text`, or `output_text` block becomes a `<t>` block; an
-    *       `image_url` block becomes `{"type": "input_image", "image_url": <url>}` (the url is the `url` of an object,
-    *       else the value itself, else the `text` of the port's part; the `detail` of an object that is not null stays
-    *       too); each other block stays.
-    *     - After the item of an `assistant` message, each of its tool calls gives
-    *       `{"type": "function_call", "name", "arguments", "call_id"?}` (`arguments` is the JSON text; `call_id` is the
-    *       `call_id`, else the `id` of the call).
-    *   - `max_completion_tokens` becomes `max_tokens` when `max_tokens` is absent. A `max_tokens` that is not null
-    *     becomes `max_output_tokens`; a null `max_tokens` is removed.
+    *   - An `input` option stays, and the body then has no other change. A `messages` option is removed: the messages
+    *     of the request take its place, as on the chat wire.
+    *   - The messages become `input`, one item or more for each message, in order:
+    *     - A tool message gives
+    *       `{"type": "function_call_output", "output": <the text>, "call_id": <the tool call id>}`. The text of a
+    *       message with parts is the joined payload of its `text` and `input_text` parts. `call_id` is absent when the
+    *       message has no tool call id.
+    *     - Each other message gives `{"role", "content": <blocks>, "name"?}`, except an assistant message that has tool
+    *       calls and no blocks. The text of a message with no parts gives one `{"type": <t>, "text"}` block, where
+    *       `<t>` is `output_text` for an assistant message and `input_text` for each other role. An assistant message
+    *       with tool calls and no text has no block (the chat wire sends a null content). A `text`, `input_text`, or
+    *       `output_text` part becomes a `<t>` block, and an `image_url` part becomes
+    *       `{"type": "input_image", "image_url": <the payload>}`. Each other part has its chat form
+    *       (`ChatWire.encodePart`).
+    *     - After the item of an assistant message, each of its tool calls gives
+    *       `{"type": "function_call", "name", "arguments", "call_id"?}` (`arguments` is the JSON text of the arguments,
+    *       and `call_id` is the id of the call).
+    *   - `max_completion_tokens` becomes `max_tokens` when `max_tokens` is absent. Then `max_tokens` becomes
+    *     `max_output_tokens`.
     *   - `reasoning_effort` becomes `reasoning: {"effort": <value>, "summary": "auto"}`, unless `reasoning` is set.
     *   - A tool `{"type": "function", "function": {...}}` becomes `{"type": "function", ...<the keys of function>}`. A
     *     function tool with a null `description` loses the key. The other keys of the tool stay.
@@ -123,70 +120,62 @@ private[lm] object ResponsesWire:
     *   - `response_format` moves to `text.format`. A `{"type": "json_schema", "json_schema": {...}}` format is
     *     flattened to `{"type": "json_schema", ...<the keys of json_schema>}`, the form that the Responses API takes
     *     (upstream builds this form from a pydantic model; the port sends a record).
-    *   - A null `temperature`, `top_p`, `n`, `logprobs`, `reasoning`, or `tool_choice` is removed, and so is an empty
-    *     or null `stop`.
+    *   - An empty `stop` is removed. Each top-level field with a null value is removed too
+    *     ([[DynamicJson.withoutNullFields]], the rule of [[DynamicJson.encode]]). Upstream removes a null
+    *     `temperature`, `top_p`, `n`, `logprobs`, `reasoning`, and `tool_choice`, and the encode removes each other
+    *     null option.
     */
-  def request(chat: DynamicValue.Record): DynamicValue.Record =
-    if DynamicValues.recordGet(chat, Keys.input).isDefined then without(chat, WireKeys.messages)
+  def request(
+      request       : LmRequest,
+      defaultOptions: DynamicValue.Record = DynamicValue.Record.empty
+  ): DynamicValue.Record =
+    val options = without(
+      request.effectiveOptions(defaultOptions),
+      WireKeys.messages
+    ).updated(WireKeys.model, string(request.model))
+    if recordGet(options, Keys.input).isDefined then options
     else
-      val messages =
-        DynamicValues.recordGet(chat, WireKeys.messages).map(DynamicJson.asSequence).getOrElse(Vector.empty)
-      val body  = without(chat, WireKeys.messages).updated(Keys.input, sequence(messages.flatMap(inputItems)))
-      val steps = Vector(withTokenLimit, withReasoning, withTools, withToolChoice, withTextFormat, withoutEmptyOptions)
-      steps.foldLeft(body)((current, step) => step(current))
+      val body  = options.updated(Keys.input, sequence(request.messages.flatMap(inputItems)))
+      val steps = Vector(withTokenLimit, withReasoning, withTools, withToolChoice, withTextFormat, withoutEmptyStop)
+      DynamicJson.withoutNullFields(steps.foldLeft(body)((current, step) => step(current)))
 
   /** The outputs of a Responses body (upstream `responses_outputs`): one output for the whole response.
     *
     *   - `text` is the joined text of the `text`, `output_text`, and `input_text` parts of each `message` item.
     *   - Each `function_call` item gives a tool call with its `name`, its `arguments` (a JSON text, decoded as for the
     *     chat path, except that a text that is not JSON gives an empty record), and the id `call_id`.
-    *   - The texts of the `content` (else the `summary`) parts of each `reasoning` item, joined, go to the metadata key
-    *     `reasoning_content`.
-    *   - Each annotation of a message part gives a citation in the metadata key `citations`:
+    *   - The texts of the `content` (else the `summary`) parts of each `reasoning` item, joined, give the `reasoning`
+    *     of the output (upstream `reasoning_content`).
+    *   - Each annotation of a message part gives a citation in the `citations` of the output:
     *     `{"type": "citation", "text", "title", "url", "metadata"}`, with no key for a null value (`text` is
     *     `cited_text`, else `text`, else `supported_text`; `title` is `document_title`, else `title`; `metadata` has
     *     the other keys of the annotation that are not null).
     *
-    * The result is an empty vector when the response has no text (or only white space) and no tool call. A body with no
-    * `output` array is a `ParseError`.
+    * The result always has one output when the body has an `output` array. A response with no text, or with only white
+    * space, gives the empty text, and the output keeps its tool calls, its reasoning, and its citations. The adapter
+    * call decides what an empty text means (`AdapterCall.run`). A body with no `output` array is a `ParseError`. A body
+    * with an `error` object is the error of [[OpenAiErrors.fromReplyError]], also with a success status (upstream
+    * `OpenAILM.parse_response`).
+    *
+    * @param model
+    *   the model of the request, for the details of an error
     */
-  def outputs(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
-    DynamicJson.field(raw, WireKeys.output) match
+  def outputs(raw: DynamicValue, model: Option[String] = None): Either[DspyError, Vector[LmOutput]] =
+    OpenAiErrors.fromReplyError(raw, model).toLeft(()).flatMap(_ => outputItems(raw))
+
+  private def outputItems(raw: DynamicValue): Either[DspyError, Vector[LmOutput]] =
+    recordGet(raw, WireKeys.output) match
       case Some(items: DynamicValue.Sequence) =>
-        val records   = items.elements.iterator.flatMap(DynamicJson.asRecord).toVector
+        val records   = items.elements.iterator.flatMap(asRecord).toVector
         val messages  = records.filter(isKind(_, Kinds.message))
-        val parts     = messages.flatMap(item => listOf(item, WireKeys.content)).flatMap(DynamicJson.asRecord)
+        val parts     = messages.flatMap(item => sequenceAt(item, WireKeys.content)).flatMap(asRecord)
         val text      = parts.filter(isTextBlock).flatMap(part => stringOf(part, WireKeys.text)).mkString
         val toolCalls = records.filter(isKind(_, Kinds.functionCall)).map(toolCall)
         val reasoning = records.filter(isKind(_, Kinds.reasoning)).flatMap(reasoningTexts).mkString
-        val citations =
-          parts.flatMap(part => listOf(part, Keys.annotations)).flatMap(DynamicJson.asRecord).map(citation)
-        Right(
-          if text.trim.isEmpty && toolCalls.isEmpty then Vector.empty
-          else Vector(LmOutput(text = text, toolCalls = toolCalls, metadata = outputMetadata(reasoning, citations)))
-        )
+        val citations = parts.flatMap(part => sequenceAt(part, Keys.annotations)).flatMap(asRecord).map(citation)
+        val visible   = if text.trim.isEmpty then "" else text
+        Right(Vector(LmOutput(text = visible, toolCalls = toolCalls, reasoning = reasoning, citations = citations)))
       case _ => Left(ParseError("lm", "The Responses body has no output array"))
-
-  /** The metadata of an output with the reasoning text `reasoning` and the citations `citations`: the key
-    * `reasoning_content` when the text is not empty, and the key `citations` when there is a citation. The plain path
-    * ([[outputs]]) and the assembly of a stream ([[dspy4s.lm.runtime.StreamAccumulator]]) use it, so the two give the
-    * same metadata.
-    */
-  def outputMetadata(reasoning: String, citations: Vector[DynamicValue.Record]): DynamicValue.Record =
-    DynamicValues.recordFromEntries(
-      Option.when(reasoning.nonEmpty)(Keys.reasoningContent -> string(reasoning)).toVector ++
-        Option.when(citations.nonEmpty)(Keys.citations -> sequence(citations))
-    )
-
-  /** The reasoning text of an output metadata (the inverse of [[outputMetadata]]): the `reasoning_content` string, else
-    * an empty text.
-    */
-  def reasoningOf(metadata: DynamicValue.Record): String =
-    stringOf(metadata, Keys.reasoningContent).getOrElse("")
-
-  /** The citations of an output metadata (the inverse of [[outputMetadata]]): the objects of the `citations` array. */
-  def citationsOf(metadata: DynamicValue.Record): Vector[DynamicValue.Record] =
-    listOf(metadata, Keys.citations).flatMap(DynamicJson.asRecord)
 
   /** The chunk of one event of a Responses stream (upstream lm15 `OpenAILM.parse_stream_events` and
     * `_parse_single_stream_event` in `dspy/_vendor/lm15/providers/openai.py`). The `type` of the event selects the
@@ -215,17 +204,17 @@ private[lm] object ResponsesWire:
     * An empty id or name counts as no id or name.
     */
   def streamChunk(event: DynamicValue.Record, model: Option[String]): Either[DspyError, Option[LmChunk]] =
-    val index = DynamicValues.recordGet(event, Keys.outputIndex).flatMap(DynamicJson.asLong).fold(0)(_.toInt)
-    def delta = stringOf(event, WireKeys.delta).getOrElse("")
+    // Only the tool-call events read the index, so the parser reads it on demand.
+    lazy val index = recordGet(event, Keys.outputIndex).flatMap(DynamicValues.asLong).fold(0)(_.toInt)
+    def delta      = stringOf(event, WireKeys.delta).getOrElse("")
     stringOf(event, WireKeys.`type`).getOrElse("") match
       case Events.textDelta | Events.refusalDelta                   => Right(Some(LmChunk(text = delta)))
       case Events.reasoningSummaryDelta | Events.reasoningTextDelta => Right(Some(LmChunk(reasoning = delta)))
       case Events.annotationAdded                                   =>
-        val annotation = DynamicValues.recordGet(event, Keys.annotation).flatMap(DynamicJson.asRecord)
+        val annotation = recordGet(event, Keys.annotation).flatMap(asRecord)
         Right(annotation.map(found => LmChunk(citations = Vector(citation(found)))))
       case Events.itemAdded =>
-        val call =
-          DynamicValues.recordGet(event, Keys.item).flatMap(DynamicJson.asRecord).filter(isKind(_, Kinds.functionCall))
+        val call = recordGet(event, Keys.item).flatMap(asRecord).filter(isKind(_, Kinds.functionCall))
         Right(call.map { item =>
           val arguments = stringOf(item, WireKeys.arguments).getOrElse("")
           toolCallChunk(LmToolCallDelta(index, idOf(item), nonEmpty(item, WireKeys.name), Some(arguments)))
@@ -233,9 +222,9 @@ private[lm] object ResponsesWire:
       case Events.argumentsDelta =>
         Right(Some(toolCallChunk(LmToolCallDelta(index, idOf(event), nonEmpty(event, WireKeys.name), Some(delta)))))
       case Events.completed =>
-        val response = DynamicValues.recordGet(event, Keys.response).flatMap(DynamicJson.asRecord)
-        val usage    = response.flatMap(DynamicJson.field(_, WireKeys.usage)).flatMap(DynamicJson.asRecord)
-        val hasTool  = response.toVector.flatMap(listOf(_, WireKeys.output)).flatMap(DynamicJson.asRecord)
+        val response = recordGet(event, Keys.response).flatMap(asRecord)
+        val usage    = response.flatMap(recordGet(_, WireKeys.usage)).flatMap(asRecord)
+        val hasTool  = response.toVector.flatMap(sequenceAt(_, WireKeys.output)).flatMap(asRecord)
           .exists(isKind(_, Kinds.functionCall))
         Right(Some(LmChunk(
           finishReason = Some(if hasTool then Finish.toolCall else Finish.stop),
@@ -246,105 +235,77 @@ private[lm] object ResponsesWire:
 
   // ── The request ─────────────────────────────────────────────────────────────────────────────────────────────
 
-  /** The input items of one chat message, in order. A message that is not an object gives no item. */
-  private def inputItems(message: DynamicValue): Vector[DynamicValue] =
-    DynamicJson.asRecord(message).toVector.flatMap { rec =>
-      val role    = DynamicValues.recordGet(rec, WireKeys.role)
-      val content = DynamicValues.recordGet(rec, WireKeys.content)
-      val kind    = role.flatMap(DynamicJson.asString)
-      if kind.contains(Kinds.tool) then Vector(functionCallOutput(rec, content))
-      else
-        val assistant = kind.contains(Kinds.assistant)
-        val calls     = listOf(rec, WireKeys.toolCalls)
-        val blocks    = contentBlocks(content, if assistant then Kinds.outputText else Kinds.inputText)
-        val item      = Option.when(blocks.nonEmpty || !assistant || calls.isEmpty)(
-          record(
-            Vector(WireKeys.role -> role.getOrElse(DynamicValue.Null), WireKeys.content -> sequence(blocks)) ++
-              present(rec, WireKeys.name).map(WireKeys.name -> _)
+  /** The input items of one message, in order (the rules of [[request]]). */
+  private def inputItems(message: Message): Vector[DynamicValue] =
+    message.role match
+      case MessageRole.Tool => Vector(functionCallOutput(message))
+      case role             =>
+        val assistant = role == MessageRole.Assistant
+        val blocks    = contentBlocks(message, if assistant then Kinds.outputText else Kinds.inputText)
+        val item      = Option.when(blocks.nonEmpty || !assistant || message.toolCalls.isEmpty)(
+          recordFromEntries(
+            Vector(WireKeys.role -> string(ChatWire.roleName(role)), WireKeys.content -> sequence(blocks)) ++
+              message.name.map(name => WireKeys.name -> string(name))
           )
         )
-        item.toVector ++ (if assistant then calls.flatMap(functionCall) else Vector.empty)
-    }
+        item.toVector ++ (if assistant then message.toolCalls.map(functionCall) else Vector.empty)
 
-  /** The `function_call_output` item of a tool message. The output of a list content is the joined text of its text
-    * blocks. A null content or no content gives an empty output.
+  /** The `function_call_output` item of a tool message. The output of a message with parts is the joined payload of its
+    * text parts. A message with no text gives an empty output.
     */
-  private def functionCallOutput(message: DynamicValue.Record, content: Option[DynamicValue]): DynamicValue =
-    val output = content match
-      case Some(blocks: DynamicValue.Sequence) =>
-        string(blocks.elements.iterator.flatMap(DynamicJson.asRecord).filter(isToolTextBlock).map { block =>
-          stringOf(block, WireKeys.text).getOrElse("")
-        }.mkString)
-      case Some(value) if filled(value) => value
-      case _                            => string("")
-    record(
-      Vector(WireKeys.`type` -> string(Kinds.functionCallOutput), WireKeys.output -> output) ++
-        present(message, WireKeys.toolCallId).map(WireKeys.callId -> _)
+  private def functionCallOutput(message: Message): DynamicValue =
+    val output =
+      if message.parts.nonEmpty then
+        message.parts.filter(part => Kinds.toolTextBlocks.contains(part.kind)).map(_.payload).mkString
+      else message.text.getOrElse("")
+    recordFromEntries(
+      Vector(WireKeys.`type` -> string(Kinds.functionCallOutput), WireKeys.output -> string(output)) ++
+        message.toolCallId.map(callId => WireKeys.callId -> string(callId))
     )
 
-  /** The blocks of a content (upstream `_content`). `textType` is the type of a text block. */
-  private def contentBlocks(content: Option[DynamicValue], textType: String): Vector[DynamicValue] =
-    content match
-      case Some(DynamicValue.Primitive(PrimitiveValue.String(text))) => Vector(textBlock(textType, string(text)))
-      case Some(blocks: DynamicValue.Sequence)                       =>
-        blocks.elements.iterator.map(block => contentBlock(block, textType)).toVector
-      case _ => Vector.empty
+  /** The blocks of the content of a message (upstream `_content`). `textType` is the type of a text block. */
+  private def contentBlocks(message: Message, textType: String): Vector[DynamicValue] =
+    if message.parts.nonEmpty then message.parts.map(part => contentBlock(part, textType))
+    else if message.toolCalls.nonEmpty && !message.text.exists(_.nonEmpty) then Vector.empty
+    else Vector(textBlock(textType, message.text.getOrElse("")))
 
-  private def contentBlock(block: DynamicValue, textType: String): DynamicValue =
-    DynamicJson.asRecord(block) match
-      case Some(rec) if isTextBlock(rec) =>
-        textBlock(textType, DynamicValues.recordGet(rec, WireKeys.text).getOrElse(string("")))
-      case Some(rec) if isKind(rec, Kinds.imageUrl) => inputImage(rec)
-      case _                                        => block
+  private def contentBlock(part: ContentPart, textType: String): DynamicValue =
+    if Kinds.textBlocks.contains(part.kind) then textBlock(textType, part.payload)
+    else if part.kind == Kinds.imageUrl then
+      record(WireKeys.`type` -> string(Kinds.inputImage), Keys.imageUrl -> string(part.payload))
+    else ChatWire.encodePart(part)
 
-  private def textBlock(textType: String, text: DynamicValue): DynamicValue =
-    record(Vector(WireKeys.`type` -> string(textType), WireKeys.text -> text))
+  private def textBlock(textType: String, text: String): DynamicValue =
+    record(WireKeys.`type` -> string(textType), WireKeys.text -> string(text))
 
-  /** The `input_image` block of an `image_url` block. The port writes the url of its part under `text`. */
-  private def inputImage(block: DynamicValue.Record): DynamicValue =
-    val image         = present(block, Keys.imageUrl).orElse(DynamicValues.recordGet(block, WireKeys.text))
-    val (url, detail) = image.flatMap(DynamicJson.asRecord) match
-      case Some(rec) => (DynamicValues.recordGet(rec, Keys.url).getOrElse(string("")), present(rec, Keys.detail))
-      case None      => (image.getOrElse(string("")), None)
-    record(
-      Vector(WireKeys.`type` -> string(Kinds.inputImage), Keys.imageUrl -> url) ++ detail.map(Keys.detail -> _)
+  /** The `function_call` item of one tool call. A call with no id has no `call_id`. */
+  private def functionCall(call: ToolCall): DynamicValue =
+    recordFromEntries(
+      Vector(
+        WireKeys.`type`    -> string(Kinds.functionCall),
+        WireKeys.name      -> string(call.name),
+        WireKeys.arguments -> string(DynamicValues.encodeJson(call.args))
+      ) ++ call.id.map(callId => WireKeys.callId -> string(callId))
     )
-
-  /** The `function_call` item of one chat tool call. A tool call that is not an object gives no item. */
-  private def functionCall(call: DynamicValue): Option[DynamicValue] =
-    DynamicJson.asRecord(call).map { rec =>
-      val function = DynamicValues.recordGet(rec, WireKeys.function).flatMap(DynamicJson.asRecord).filter(filled)
-        .getOrElse(rec)
-      val callId = DynamicValues.recordGet(rec, WireKeys.callId).filter(filled)
-        .orElse(present(rec, WireKeys.id))
-      record(
-        Vector(
-          WireKeys.`type`    -> string(Kinds.functionCall),
-          WireKeys.name      -> DynamicValues.recordGet(function, WireKeys.name).getOrElse(string("")),
-          WireKeys.arguments -> DynamicValues.recordGet(function, WireKeys.arguments).getOrElse(string("{}"))
-        ) ++ callId.map(WireKeys.callId -> _)
-      )
-    }
 
   private def withTokenLimit(body: DynamicValue.Record): DynamicValue.Record =
-    val moved =
-      (DynamicValues.recordGet(body, Keys.maxCompletionTokens), DynamicValues.recordGet(body, Keys.maxTokens)) match
-        case (Some(limit), None) => without(body, Keys.maxCompletionTokens).updated(Keys.maxTokens, limit)
-        case _                   => body
-    present(moved, Keys.maxTokens) match
+    val moved = (recordGet(body, Keys.maxCompletionTokens), recordGet(body, Keys.maxTokens)) match
+      case (Some(limit), None) => without(body, Keys.maxCompletionTokens).updated(Keys.maxTokens, limit)
+      case _                   => body
+    recordGet(moved, Keys.maxTokens) match
       case Some(limit) => without(moved, Keys.maxTokens).updated(Keys.maxOutputTokens, limit)
-      case None        => without(moved, Keys.maxTokens)
+      case None        => moved
 
   private def withReasoning(body: DynamicValue.Record): DynamicValue.Record =
-    DynamicValues.recordGet(body, Keys.reasoningEffort) match
+    recordGet(body, Keys.reasoningEffort) match
       case Some(effort) =>
         val rest = without(body, Keys.reasoningEffort)
         if present(rest, Keys.reasoning).isDefined then rest
-        else rest.updated(Keys.reasoning, record(Vector(Keys.effort -> effort, Keys.summary -> string("auto"))))
+        else rest.updated(Keys.reasoning, record(Keys.effort -> effort, Keys.summary -> string("auto")))
       case None => body
 
   private def withTools(body: DynamicValue.Record): DynamicValue.Record =
-    DynamicValues.recordGet(body, Keys.tools) match
+    recordGet(body, Keys.tools) match
       case Some(entries: DynamicValue.Sequence) if entries.elements.nonEmpty =>
         body.updated(Keys.tools, sequence(entries.elements.iterator.map(tool).toVector))
       case _ => body
@@ -353,12 +314,12 @@ private[lm] object ResponsesWire:
     * no `description`, or a null one, has no `description` key.
     */
   private def tool(entry: DynamicValue): DynamicValue =
-    DynamicJson.asRecord(entry) match
+    asRecord(entry) match
       case Some(rec) =>
-        val flat = DynamicValues.recordGet(rec, WireKeys.function).flatMap(DynamicJson.asRecord) match
+        val flat = recordGet(rec, WireKeys.function).flatMap(asRecord) match
           case Some(function) =>
             val others = DynamicValues.recordFilterKeys(rec, key => key != WireKeys.`type` && key != WireKeys.function)
-            val head   = record(Vector(WireKeys.`type` -> string(Kinds.function)))
+            val head   = record(WireKeys.`type` -> string(Kinds.function))
             DynamicValues.mergeRecords(DynamicValues.mergeRecords(head, others), function)
           case None => rec
         if isKind(flat, Kinds.function) && present(flat, Keys.description).isEmpty then without(flat, Keys.description)
@@ -366,35 +327,36 @@ private[lm] object ResponsesWire:
       case None => entry
 
   private def withToolChoice(body: DynamicValue.Record): DynamicValue.Record =
-    val name = DynamicValues.recordGet(body, Keys.toolChoice)
-      .flatMap(choice => DynamicJson.field(choice, WireKeys.function))
-      .flatMap(function => DynamicJson.field(function, WireKeys.name))
+    val name = recordGet(body, Keys.toolChoice)
+      .flatMap(choice => recordGet(choice, WireKeys.function))
+      .flatMap(function => recordGet(function, WireKeys.name))
     name match
       case Some(value) =>
-        body.updated(Keys.toolChoice, record(Vector(WireKeys.`type` -> string(Kinds.function), WireKeys.name -> value)))
+        body.updated(Keys.toolChoice, record(WireKeys.`type` -> string(Kinds.function), WireKeys.name -> value))
       case None => body
 
   private def withTextFormat(body: DynamicValue.Record): DynamicValue.Record =
     val rest = without(body, Keys.responseFormat)
     present(body, Keys.responseFormat) match
       case Some(format) =>
-        val text = present(rest, WireKeys.text).flatMap(DynamicJson.asRecord).getOrElse(DynamicValue.Record.empty)
+        val text = present(rest, WireKeys.text).flatMap(asRecord).getOrElse(DynamicValue.Record.empty)
         rest.updated(WireKeys.text, text.updated(Keys.format, flatFormat(format)))
       case None => rest
 
   /** A `json_schema` format with the keys of its `json_schema` object one level up. Each other format stays. */
   private def flatFormat(format: DynamicValue): DynamicValue =
-    DynamicJson.asRecord(format) match
+    asRecord(format) match
       case Some(rec) if isKind(rec, Kinds.jsonSchema) =>
-        DynamicValues.recordGet(rec, Keys.jsonSchema).flatMap(DynamicJson.asRecord) match
+        recordGet(rec, Keys.jsonSchema).flatMap(asRecord) match
           case Some(schema) => DynamicValues.mergeRecords(without(rec, Keys.jsonSchema), schema)
           case None         => rec
       case _ => format
 
-  private def withoutEmptyOptions(body: DynamicValue.Record): DynamicValue.Record =
-    val nulls   = Keys.nullableOptions.filter(key => DynamicValues.recordGet(body, key).exists(isNull))
-    val cleared = without(body, nulls*)
-    if DynamicValues.recordGet(cleared, Keys.stop).exists(filled) then cleared else without(cleared, Keys.stop)
+  /** `body` with no `stop` when `stop` is empty (upstream `if not data.get("stop")`). A null `stop` goes with the other
+    * null fields.
+    */
+  private def withoutEmptyStop(body: DynamicValue.Record): DynamicValue.Record =
+    if recordGet(body, Keys.stop).forall(filled) then body else without(body, Keys.stop)
 
   // ── The outputs ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -406,7 +368,7 @@ private[lm] object ResponsesWire:
     ToolCall(
       name = stringOf(item, WireKeys.name).getOrElse(""),
       args = ToolCallAssembler.decodeArguments(
-        DynamicValues.recordGet(item, WireKeys.arguments),
+        recordGet(item, WireKeys.arguments),
         notJson = _ => DynamicValue.Record.empty
       ),
       id = stringOf(item, WireKeys.callId).filter(_.nonEmpty)
@@ -416,50 +378,39 @@ private[lm] object ResponsesWire:
     * skipped.
     */
   private def reasoningTexts(item: DynamicValue.Record): Vector[String] =
-    val content = listOf(item, WireKeys.content)
-    val parts   = if content.nonEmpty then content else listOf(item, Keys.summary)
-    parts.flatMap(part => DynamicJson.field(part, WireKeys.text)).flatMap(DynamicJson.asString).filter(_.nonEmpty)
+    val content = sequenceAt(item, WireKeys.content)
+    val parts   = if content.nonEmpty then content else sequenceAt(item, Keys.summary)
+    parts.flatMap(part => recordGet(part, WireKeys.text)).flatMap(DynamicValues.asString).filter(_.nonEmpty)
 
   private def citation(annotation: DynamicValue.Record): DynamicValue.Record =
     val described = Set(Keys.citedText, WireKeys.text, Keys.supportedText, Keys.documentTitle, Keys.title, Keys.url)
     val metadata  = DynamicValues.recordFilterKeys(annotation, key => !described.contains(key))
     val entries   = Vector(
       WireKeys.`type`   -> Some(string(Kinds.citation)),
-      WireKeys.metadata -> Some(record(DynamicValues.recordEntries(metadata).filterNot((_, value) => isNull(value)))),
-      WireKeys.text     -> firstFilled(annotation, Keys.citedText, WireKeys.text, Keys.supportedText),
-      Keys.title        -> firstFilled(annotation, Keys.documentTitle, Keys.title),
-      Keys.url          -> present(annotation, Keys.url)
+      WireKeys.metadata ->
+        Some(recordFromEntries(DynamicValues.recordEntries(metadata).filterNot((_, value) => isNull(value)))),
+      WireKeys.text -> firstFilled(annotation, Keys.citedText, WireKeys.text, Keys.supportedText),
+      Keys.title    -> firstFilled(annotation, Keys.documentTitle, Keys.title),
+      Keys.url      -> present(annotation, Keys.url)
     )
-    record(entries.flatMap((key, value) => value.map(key -> _)))
+    recordFromEntries(entries.flatMap((key, value) => value.map(key -> _)))
 
   /** The value of the first key whose value is [[filled]], else the value of the last key. A null value gives `None`.
     * This is the rule of Python's `a or b`.
     */
   private def firstFilled(rec: DynamicValue.Record, keys: String*): Option[DynamicValue] =
-    keys.iterator.flatMap(DynamicValues.recordGet(rec, _)).find(filled)
-      .orElse(keys.lastOption.flatMap(DynamicValues.recordGet(rec, _)))
+    keys.iterator.flatMap(recordGet(rec, _)).find(filled)
+      .orElse(keys.lastOption.flatMap(recordGet(rec, _)))
       .filterNot(isNull)
 
   // ── Helpers ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-  private def string(text: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(text))
-
-  private def sequence(values: Vector[DynamicValue]): DynamicValue = DynamicValue.Sequence(Chunk.from(values))
-
-  private def record(entries: Vector[(String, DynamicValue)]): DynamicValue.Record =
-    DynamicValue.Record(Chunk.from(entries))
-
   private def without(rec: DynamicValue.Record, keys: String*): DynamicValue.Record =
     DynamicValues.recordFilterKeys(rec, key => !keys.contains(key))
 
-  private def isNull(value: DynamicValue): Boolean =
-    value match
-      case _: DynamicValue.Null.type => true
-      case _                         => false
-
   /** The value of `key` when it is present and not null. */
   private def present(rec: DynamicValue.Record, key: String): Option[DynamicValue] =
-    DynamicValues.recordGet(rec, key).filterNot(isNull)
+    recordGet(rec, key).filterNot(isNull)
 
   /** Whether a value counts as true in Python: not null, not `false`, not an empty string, array, or object. */
   private def filled(value: DynamicValue): Boolean =
@@ -471,12 +422,8 @@ private[lm] object ResponsesWire:
       case rec: DynamicValue.Record                          => rec.fields.nonEmpty
       case _                                                 => true
 
-  /** The elements of the array at `key`. An absent key, a null, or a value that is not an array gives no element. */
-  private def listOf(value: DynamicValue, key: String): Vector[DynamicValue] =
-    DynamicJson.field(value, key).map(DynamicJson.asSequence).getOrElse(Vector.empty)
-
   private def stringOf(rec: DynamicValue.Record, key: String): Option[String] =
-    DynamicValues.recordGet(rec, key).flatMap(DynamicJson.asString)
+    recordGet(rec, key).flatMap(DynamicValues.asString)
 
   /** The string at `key` when it is not empty. */
   private def nonEmpty(rec: DynamicValue.Record, key: String): Option[String] =
@@ -493,6 +440,3 @@ private[lm] object ResponsesWire:
 
   private def isTextBlock(rec: DynamicValue.Record): Boolean =
     stringOf(rec, WireKeys.`type`).exists(Kinds.textBlocks.contains)
-
-  private def isToolTextBlock(rec: DynamicValue.Record): Boolean =
-    stringOf(rec, WireKeys.`type`).exists(Kinds.toolTextBlocks.contains)

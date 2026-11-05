@@ -96,7 +96,7 @@ class EnumConstraintSuite extends FunSuite:
       layout = signature.layout,
       demos = Vector.empty,
       inputs = Example(values = rec("subject" := "Where is my order?"), inputKeys = Set("subject")),
-      request = LmRequest(model = "openai/test", mode = LmMode.Chat)
+      request = LmRequest(model = "openai/test")
     )
     given RuntimeContext = RuntimeEnvironment.current
     val system           = ChatAdapter().format(invocation).toOption.get.messages.head.text.get

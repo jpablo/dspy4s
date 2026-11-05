@@ -20,18 +20,11 @@ type ErrorKleisli[A, B] = Kleisli[[X] =>> Either[DspyError, X], A, B]
 given errorKleisliCategory: Category[AnyObject, ErrorKleisli] =
   kleisliCategory[[X] =>> Either[DspyError, X]]
 
-/** Modules form a category under transparent sequential composition. */
-given moduleCategory: Category[AnyObject, Module] with
-  def id[A: AnyObject]: Module[A, A] = Compose.id[A]
-
-  extension [A, B](f: Module[A, B])
-    infix def >>>[C](g: Module[B, C]): Module[A, C] = Compose.andThen(f, g)
-
 /** Embeds total Scala functions as parameter-free, lifecycle-transparent modules. */
 object LiftFunctor
     extends Functor[Id, AnyObject, Function1, AnyObject, Module](using
       functionCategory,
-      moduleCategory
+      orderedProgram
     ):
   def mapObject[A](using AnyObject[A]): AnyObject[A] = summon
   def map[A, B](f: A => B): Module[A, B]             = Compose.lift(f)
@@ -40,7 +33,7 @@ object LiftFunctor
 object LiftEitherFunctor
     extends Functor[Id, AnyObject, ErrorKleisli, AnyObject, Module](using
       errorKleisliCategory,
-      moduleCategory
+      orderedProgram
     ):
   def mapObject[A](using AnyObject[A]): AnyObject[A] = summon
   def map[A, B](f: ErrorKleisli[A, B]): Module[A, B] = Compose.liftEither(f)

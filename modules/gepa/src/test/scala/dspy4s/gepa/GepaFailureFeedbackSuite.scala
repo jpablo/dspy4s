@@ -23,12 +23,18 @@ import dspy4s.programs.ProgramRunner
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.optimization.OptimizableId
 import dspy4s.programs.optimization.OptimizableStructure
-import dspy4s.programs.strategies.DynamicPredict
+import dspy4s.programs.strategies.{ChainOfThought, DynamicPredict, Predict}
+import dspy4s.signatures.Signature
 import munit.FunSuite
-import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.{DynamicValue, Schema}
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
+import scala.util.Random
+
+// Top-level fixtures (Mirror derivation needs them outside the suite).
+final case class FeedbackQuestion(question: String) derives Schema
+final case class FeedbackTags(tags: List[String]) derives Schema
 
 /** Calls `stepper` one time for each question of [[RetryPipeline.questions]] and goes on after a call that failed. Then
   * `finisher` runs. A call that failed can thus be in the trace of a run that passed. Top-level so
@@ -160,11 +166,11 @@ class GepaFailureFeedbackSuite extends FunSuite:
       dataset             : Vector[Example] = examples(1)
   )(using OptimizableStructure[P], ProgramRunner[P]): Map[OptimizableId, Vector[ReflectiveRecord]] =
     withTaskLm(lm) {
-      val adapter   = new GepaAdapter(program, metric, addFormatFailureAsFeedback = addFailureAsFeedback, seed = seed)
+      val adapter   = new GepaAdapter(program, metric, addFormatFailureAsFeedback = addFailureAsFeedback)
       val candidate = Candidate.seed(program)
       val batch     = adapter.evaluate(dataset, candidate, captureTraces = true)
       adapter
-        .makeReflectiveDataset(candidate, batch, Vector(stepperId, finisherId))
+        .makeReflectiveDataset(candidate, batch, Vector(stepperId, finisherId), new Random(GepaRandom.mix(seed)))
         .fold(error => fail(error.message), identity)
     }
 
@@ -207,6 +213,35 @@ class GepaFailureFeedbackSuite extends FunSuite:
     assert(record.feedback.contains("\nuser: Respond with the corresponding output fields"), record.feedback)
   }
 
+  test("with the option on, a reply that the typed decode rejects is a format failure with the raw response") {
+    // Upstream `parse_value` validates the value in the parse step, so the `AdapterParseError` has the `lm_response` that
+    // `make_reflective_dataset` reads.
+    val reply = """{"tags": [{"a": 1}]}"""
+    val lm    = new LanguageModel:
+      override val id: String                                                                    = "typed"
+      override val mode: LmMode                                                                  = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        Right(LmResponse(outputs = Vector(LmOutput(text = reply))))
+    val program = Predict(Signature.derived[FeedbackQuestion, FeedbackTags](name = "Tags", instructions = "Give tags."))
+    val metric  = new RecordingMetric
+    val records = withTaskLm(lm) {
+      val adapter   = new GepaAdapter(program, metric, addFormatFailureAsFeedback = true)
+      val candidate = Candidate.seed(program)
+      val batch     = adapter.evaluate(examples(1), candidate, captureTraces = true)
+      adapter
+        .makeReflectiveDataset(candidate, batch, Vector(stepperId), new Random(GepaRandom.mix(0L)))
+        .fold(error => fail(error.message), identity)
+    }
+    assertEquals(
+      records(stepperId).map(_.generatedOutputs),
+      Vector(ReflectionFixtures.string(
+        "Couldn't parse the output as per the expected output format. The model's raw response was:\n" +
+          s"```\n$reply\n```\n\n"
+      ))
+    )
+    assertEquals(metric.componentCalls.toVector, Vector.empty)
+  }
+
   test("the feedback of a failed call is the upstream text, with a line end after each message") {
     val records = reflect(loop, new FormatLm(failFinisher = true), new RecordingMetric, addFailureAsFeedback = true)
     // Upstream `make_reflective_dataset` adds `role + ": " + content + "\n"` for each message of the chat prompt
@@ -237,12 +272,21 @@ class GepaFailureFeedbackSuite extends FunSuite:
       val candidate = Candidate.seed(loop).updated(finisherId, Some("Answer in one word."))
       val batch     = adapter.evaluate(examples(1), candidate, captureTraces = true)
       adapter
-        .makeReflectiveDataset(candidate, batch, Vector(finisherId))
+        .makeReflectiveDataset(candidate, batch, Vector(finisherId), new Random(GepaRandom.mix(0L)))
         .fold(error => fail(error.message), identity)
     }
     val feedback = records(finisherId).head.feedback
     assert(feedback.contains("Answer in one word."), feedback)
     assert(!feedback.contains("Answer with the note."), feedback)
+  }
+
+  test("the structure in the feedback of a ChainOfThought leaf with no instructions has the base text") {
+    val program: ChainOfThought[(question: String), (answer: String)] =
+      ChainOfThought(Signature.fromString("question -> answer"))
+    val records  = reflect(program, new FormatLm(failFinisher = true), new RecordingMetric, addFailureAsFeedback = true)
+    val feedback = records(stepperId).head.feedback
+    assert(feedback.contains("Given the fields `question`, produce the fields `answer`."), feedback)
+    assert(!feedback.contains("produce the fields `reasoning`"), feedback)
   }
 
   test("with the option on, a failed call wins over the calls of the same leaf that passed") {
@@ -304,18 +348,24 @@ class GepaFailureFeedbackSuite extends FunSuite:
     assertEquals(stepperTraces.map(_.map(_.failure)), Vector(Vector(None)))
   }
 
-  test("with the option on, a failed call with no model response gives its error as the feedback") {
+  test("with the option on, a run that failed with no model response gives no record") {
+    // `bootstrap_trace_data` drops an example whose program raised, also for an LM error.
     val metric  = new RecordingMetric
     val lm      = new FormatLm(crashQuestions = Set("second pass"))
     val records = reflect(loop, lm, metric, addFailureAsFeedback = true)
 
-    assertEquals(records(stepperId).size, 1)
-    val record = records(stepperId).head
-    assert(ReflectionFixtures.text(record.inputs).contains("second pass"), record.inputs)
-    assertEquals(record.generatedOutputs, ReflectionFixtures.string("(no output)"))
-    assert(record.feedback.startsWith("The call failed with this error: "), record.feedback)
-    assert(record.feedback.contains("the model is down"), record.feedback)
+    assertEquals(records(stepperId), Vector.empty)
+    assertEquals(records(finisherId), Vector.empty)
     assertEquals(metric.componentCalls.toVector, Vector.empty)
+  }
+
+  test("with the option on, a failed call with no model response in a run that passed gives no failure record") {
+    // The retry pipeline goes on after the call that failed, so the run passes.
+    val metric  = new RecordingMetric
+    val lm      = new FormatLm(crashQuestions = Set("first try"))
+    val records = reflect(retry, lm, metric, addFailureAsFeedback = true)
+
+    assertEquals(records(stepperId).map(_.feedback), Vector("feedback for stepper"))
   }
 
   /** For each example, `true` when the record of the stepper comes from its second call. */

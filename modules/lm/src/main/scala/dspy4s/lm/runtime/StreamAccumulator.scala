@@ -4,7 +4,7 @@ import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmToolCallDelta
-import dspy4s.lm.providers.ResponsesWire
+import dspy4s.lm.providers.ToolCallAssembler
 import zio.blocks.schema.DynamicValue
 
 import scala.collection.mutable
@@ -15,8 +15,9 @@ import scala.collection.mutable
   *   - The text is the joined text of the chunks.
   *   - The tool calls come from the tool-call deltas of the chunks, with the rule of `mode`
   *     ([[ToolCallAssembler.assemble]]).
-  *   - The metadata has the joined reasoning of the chunks under `reasoning_content`, and the citations of the chunks
-  *     under `citations`, as the metadata of a plain call in the Responses mode. A key without a value is absent.
+  *   - The reasoning is the joined reasoning of the chunks, as the output of a plain call. The citations are the
+  *     citations of the chunks in order, as the output of a plain call in the Responses mode.
+  *   - The answers of a decision reply are the answers of the last chunk that has them ([[LmChunk.answers]]).
   *
   * [[ManagedLanguageModel]] and the stream wrapper of `streamify` use this class, so the two give the same output.
   *
@@ -28,13 +29,15 @@ final class StreamAccumulator(mode: LmMode):
   private val reasoning  = new StringBuilder
   private val citations  = mutable.ArrayBuffer.empty[DynamicValue.Record]
   private val toolDeltas = mutable.ArrayBuffer.empty[LmToolCallDelta]
+  private var answers    = Option.empty[DynamicValue.Record]
 
-  /** Add the text, the reasoning, the citations, and the tool-call deltas of `chunk`. */
+  /** Add the text, the reasoning, the citations, the tool-call deltas, and the answers of `chunk`. */
   def push(chunk: LmChunk): Unit =
     text.append(chunk.text)
     reasoning.append(chunk.reasoning)
     citations ++= chunk.citations
     toolDeltas ++= chunk.toolCalls
+    chunk.answers.foreach(found => answers = Some(found))
 
   /** Remove the parts of all chunks, for a new attempt. */
   def clear(): Unit =
@@ -42,11 +45,14 @@ final class StreamAccumulator(mode: LmMode):
     reasoning.clear()
     citations.clear()
     toolDeltas.clear()
+    answers = None
 
   /** The output of the chunks so far. */
   def output: LmOutput =
     LmOutput(
       text = text.toString,
       toolCalls = ToolCallAssembler.assemble(toolDeltas, mode),
-      metadata = ResponsesWire.outputMetadata(reasoning.toString, citations.toVector)
+      reasoning = reasoning.toString,
+      citations = citations.toVector,
+      answers = answers
     )

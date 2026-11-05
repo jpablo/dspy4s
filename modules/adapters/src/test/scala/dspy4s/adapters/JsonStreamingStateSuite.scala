@@ -119,3 +119,38 @@ class JsonStreamingStateSuite extends FunSuite:
     assert(first.nonEmpty)
     assertEquals(second, Vector.empty[FieldChunk])
   }
+
+  test("a repeated string key gives chunks for the first copy only, and one last chunk") {
+    val state = new JsonStreamingState(Vector(output("answer"), output("other")))
+    val out   = drive(state, """{"answer": "a", "other": 1, "answer": "b"}""")
+    assertEquals(collect(out).get("answer"), Some("a"))
+    assertEquals(collect(out).get("other"), Some("1"))
+    assertEquals(out.count(chunk => chunk.fieldName == "answer" && chunk.isLast), 1)
+  }
+
+  test("a repeated key with a value that is not a string gives chunks for the first copy only") {
+    val state = new JsonStreamingState(Vector(output("answer")))
+    val out   = drive(state, """{"answer": 1, "answer": [2, 3]}""")
+    assertEquals(collect(out).get("answer"), Some("1"))
+    assertEquals(out.count(_.isLast), 1)
+  }
+
+  test("a repeated key across the deltas gives no partial chunk for the second copy") {
+    val state = new JsonStreamingState(Vector(output("answer")))
+    val out   = drive(state, """{"answer": "a", "ans""", """wer": "b""", """c"}""")
+    assertEquals(collect(out).get("answer"), Some("a"))
+    assertEquals(out.count(_.isLast), 1)
+  }
+
+  test("a stream that ends in the second copy of a key gives no second last chunk") {
+    val state = new JsonStreamingState(Vector(output("answer")))
+    val out   = drive(state, """{"answer": "a", "answer": "b""")
+    assertEquals(collect(out).get("answer"), Some("a"))
+    assertEquals(out.count(_.isLast), 1)
+  }
+
+  test("a repeated key with a value that is not tracked does not stop the next field") {
+    val state = new JsonStreamingState(Vector(output("answer")))
+    val out   = drive(state, """{"note": "x", "note": "y", "answer": "z"}""")
+    assertEquals(collect(out), Map("answer" -> "z"))
+  }

@@ -1,7 +1,6 @@
 package dspy4s.programs.runtime
 
 import dspy4s.core.contracts.AdapterRef
-import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -121,11 +120,7 @@ class AttemptSelectionLawSuite extends FunSuite:
     val feedbackFired = AtomicInteger(0)
 
     // The attempt's value is whether the marker adapter is in scope; reward rewards its presence.
-    def runWithFeedback(feedback: Option[(
-        Boolean,
-        Vector[dspy4s.core.contracts.TraceEntry],
-        Double
-    ) => Either[DspyError, Option[AdapterRef]]]) =
+    def runWithFeedback(feedback: Option[AttemptSelection.Feedback[Boolean]]) =
       AttemptSelection.bestOf[Boolean](AttemptCount(2), threshold = 1.0, None, "law")(
         runAttempt = _ => Right(summon[RuntimeContext].adapter.contains(AttemptSelectionLawSuite.MarkerAdapter)),
         reward = sawMarker => Right(if sawMarker then 1.0 else 0.2),
@@ -133,9 +128,9 @@ class AttemptSelectionLawSuite extends FunSuite:
       )
 
     // With feedback: attempt 1 is sub-threshold (no marker), the hook installs the marker, attempt 2 sees it.
-    val withFeedback = runWithFeedback(Some { (_, _, _) =>
+    val withFeedback = runWithFeedback(Some { (_, _, _) => base ?=>
       feedbackFired.incrementAndGet()
-      Right(Some(AttemptSelectionLawSuite.MarkerAdapter))
+      Right(base.withServices(base.services.copy(adapter = Some(AttemptSelectionLawSuite.MarkerAdapter))))
     })
     assertEquals(withFeedback, Right(true))
     assertEquals(feedbackFired.get(), 1)

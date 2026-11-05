@@ -13,7 +13,7 @@ they rely on (signatures, `ChainOfThought`, `ReAct`) are all available.
 | Managing Conversation History | see [`tutorials/conversation_history`](../conversation_history/ConversationHistory.scala) (a `History` input field). |
 | Building AI Agents | use `ReAct` + `ToolFunction` ([`learn/programming/Tools.scala`](../../learn/programming/Tools.scala)). |
 | Customizing DSPy Modules | compose `Module[I, O]` values (see the tutorial examples that build multi-step pipelines). |
-| Retrieval-Augmented Generation / Multi-Hop / RAG-as-agent | not ported — dspy4s has no retriever; wire your own retrieval into a `ToolFunction`. |
+| Retrieval-Augmented Generation / Multi-Hop / RAG-as-agent | not ported as tutorials. `EmbeddingsRetriever` (`programs/retrievers/EmbeddingsRetriever.scala`) searches a passage corpus. Call it in your program, or put it in a `ToolFunction` for an agent. |
 | Entity Extraction | see [`tutorials/email_extraction`](../email_extraction/EmailExtraction.scala) (structured extraction). |
 | Classification | [classification notes](../classification/README.md); enum outputs (see `signatures/CaseClassExample`). |
 | Privacy-Conscious Delegation (PAPILLON) | external notebook — [notes](../papillon/README.md). |

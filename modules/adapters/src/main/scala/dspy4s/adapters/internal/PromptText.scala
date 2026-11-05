@@ -1,8 +1,8 @@
 package dspy4s.adapters.internal
 
-import dspy4s.core.contracts.{:=, DynamicValues, FieldSpec, SignatureLayout, ToolCall, TypeRef}
-import zio.blocks.chunk.Chunk
-import zio.blocks.schema.DynamicValue
+import dspy4s.adapters.DecisionAdapter
+import dspy4s.core.contracts.{DynamicValues, FieldSpec, JsonSchemaRefs, PythonText, SignatureLayout, ToolCall, TypeRef}
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 /** The prompt texts that the Chat, JSON, XML, and TwoStep adapters share (decision D3). The adapters compute each text
   * from the data of the port: the [[TypeRef]], the enum values, the optional flag, the description, and the constraints
@@ -10,8 +10,8 @@ import zio.blocks.schema.DynamicValue
   *
   * The type text of a field (the type slots):
   *   - The type name is `str`, `int`, `float`, `bool`, `dict` ([[TypeRef.json]]), `list` ([[TypeRef.list]]), `History`,
-  *     `list[Tool]` ([[TypeRef.tools]]), or `ToolCalls`. An other [[TypeRef]] shows its `repr`. A field with enum
-  *     values shows `str`. An optional field shows the name of its type.
+  *     `list[Tool]` ([[TypeRef.tools]]), or `ToolCalls`. An other [[TypeRef]] shows its `repr`, for example `union` and
+  *     `Instant`. A field with enum values shows `str`. An optional field shows the name of its type.
   *   - The note of an output field: `True or False` for a bool, `a single int value` or `a single float value` for a
   *     number, the `Literal` note for a field with enum values, and a JSON schema for a structured field and for a tool
   *     calls field. A field of an other type (an opaque [[TypeRef]], for example the evidence type of a decision
@@ -52,20 +52,19 @@ private[adapters] object PromptText:
     * `dspy/adapters/base.py`): the field description of `shown`, the structure of the adapter, and the task description
     * with the instructions of `layout`.
     *
+    * The instructions are the instructions of `layout`, else its default instructions
+    * ([[SignatureLayout.effectiveInstructions]], upstream `_default_instructions` in `dspy/signatures/signature.py`).
+    * Upstream computes the default instructions when it makes the signature, so an adapter takes them from the full
+    * layout, also when the prompt does not show each field of the layout.
+    *
     * @param layout
-    *   the full layout of the signature
+    *   the full layout of the signature, with the input field of
+    *   [[dspy4s.adapters.contracts.NativeTools.promptInvocation]] when the prompt shows the tool specs of the call
     * @param shown
     *   the layout that the prompt shows: with native function calling active, it has no tool calls field
     */
   def systemMessage(layout: SignatureLayout, shown: SignatureLayout, structure: String): String =
-    s"${fieldDescription(shown)}\n$structure\n${taskDescription(instructions(layout))}"
-
-  /** The instructions of `layout`, else its default instructions (upstream `_default_instructions` in
-    * `dspy/signatures/signature.py`). Upstream computes the default instructions when it makes the signature, so an
-    * adapter takes them from the full layout, also when the prompt does not show each field of the layout.
-    */
-  def instructions(layout: SignatureLayout): String =
-    layout.effectiveInstructions
+    s"${fieldDescription(shown)}\n$structure\n${taskDescription(layout.effectiveInstructions)}"
 
   /** The task description of the Chat, JSON, and XML adapters (upstream `ChatAdapter.format_task_description`): each
     * line of the dedented instructions on a new line, after eight spaces.
@@ -123,6 +122,7 @@ private[adapters] object PromptText:
     else
       field.typeRef match
         case TypeRef.string               => None
+        case TypeRef.reasoning            => None
         case TypeRef.bool                 => Some("must be True or False")
         case TypeRef.int                  => Some("must be a single int value")
         case TypeRef.double               => Some("must be a single float value")
@@ -132,29 +132,62 @@ private[adapters] object PromptText:
         // the output schema has a property for the field.
         case _ => schema.propertyText(field).map(text => s"must adhere to the JSON schema: $text")
 
-  /** `true` for a dict, a list, and a list with an item type (`list[str]`). */
+  /** `true` for a dict, a list, and a list with an item type (`list[str]`, [[TypeRef.collection]]). */
   private def isStructured(typeRef: TypeRef): Boolean =
-    typeRef == TypeRef.json || typeRef == TypeRef.list || typeRef.repr.startsWith("list[")
+    typeRef == TypeRef.json || typeRef == TypeRef.list ||
+      typeRef.collection.exists((kind, _) => kind == TypeRef.Collection.List)
 
   /** The type hint of `field` in the output reminder of the Chat and JSON adapters (upstream
-    * `user_message_output_requirements`): empty for a `str` field.
+    * `user_message_output_requirements`): empty for a `str` field. A reasoning field has the hint of a `str`, because
+    * upstream compares the annotation with `str`. A type that only a typed signature has ([[isScalaType]]) is not a
+    * Python type, so its hint does not say Python.
     */
   def reminderHint(field: FieldSpec): String =
     if field.typeRef == TypeRef.toolCalls then ToolCallsReminder
     else
       typeName(field) match
-        case "str" => ""
-        case name  => s" (must be formatted as a valid Python $name)"
+        case "str" if field.typeRef != TypeRef.reasoning => ""
+        case name if isScalaType(field.typeRef)          => s" (must be formatted as a valid $name)"
+        case name                                        => s" (must be formatted as a valid Python $name)"
+
+  /** `true` for `union` and for the opaque type of a typed signature, whose name is the name of a Scala type
+    * (`Instant`, `BigDecimal`). The evidence types of a decision output are Python types in upstream. A type of the
+    * string DSL has a name in lower case.
+    */
+  private def isScalaType(typeRef: TypeRef): Boolean =
+    typeRef == TypeRef.union ||
+      (typeRef.pythonTypeName.isEmpty && typeRef.repr.headOption.exists(_.isUpper) &&
+        !DecisionAdapter.isEvidenceType(typeRef))
 
   // ── Values ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
   /** The text of the value of `field` (upstream `format_field_value`). A list value of a `str` field is a numbered
-    * list. A list, a dict, or a record is JSON text. Each other value is its Python `str` text.
+    * list. A list, a dict, or a record is JSON text, with a `null` for each number that is not finite in it
+    * ([[jsonMode]]). Each other value is its Python `str` text, so a bare NaN is `nan`.
     */
   def fieldValue(field: FieldSpec, value: DynamicValue): String =
-    jsonable(field, value) match
+    jsonMode(jsonable(field, value)) match
       case sequence: DynamicValue.Sequence if isStr(field) => numberedList(sequence.elements.toVector)
       case other                                           => PythonText.str(other)
+
+  /** `value` as upstream `serialize_for_json` gives it to `json.dumps`. Pydantic JSON mode writes NaN and an infinite
+    * number in a list or in a dict as `None`, at any depth. It keeps a bare float, because the serializer of a `float`
+    * does not change the float. The rule is for prompt values only: [[PythonText.json]] keeps the form of `json.dumps`.
+    */
+  private def jsonMode(value: DynamicValue): DynamicValue =
+    if PythonText.isContainer(value) then nonFiniteAsNull(value) else value
+
+  /** `value` with a null for each number that is not finite, at any depth. A key of a map stays as it is. */
+  private def nonFiniteAsNull(value: DynamicValue): DynamicValue =
+    value match
+      case DynamicValue.Primitive(PrimitiveValue.Double(number)) if !number.isFinite => DynamicValue.Null
+      case DynamicValue.Primitive(PrimitiveValue.Float(number)) if !number.isFinite  => DynamicValue.Null
+      case record: DynamicValue.Record                                               =>
+        DynamicValue.Record(record.fields.map((name, item) => name -> nonFiniteAsNull(item)))
+      case map: DynamicValue.Map             => DynamicValue.Map(map.entries.map((key, item) => key -> nonFiniteAsNull(item)))
+      case sequence: DynamicValue.Sequence   => DynamicValue.Sequence(sequence.elements.map(nonFiniteAsNull))
+      case DynamicValue.Variant(name, inner) => DynamicValue.Variant(name, nonFiniteAsNull(inner))
+      case other                             => other
 
   /** `true` when the type of `field` is `str` in upstream: a text field with no enum values that is not optional. */
   def isStr(field: FieldSpec): Boolean =
@@ -168,11 +201,8 @@ private[adapters] object PromptText:
     if field.typeRef != TypeRef.toolCalls then value
     else
       ToolCall.fromDynamic(value).fold(value) { found =>
-        val items = found.map(call => DynamicValues.record("name" := call.name, "args" -> call.args))
-        DynamicValues.record(ToolCallsKey -> DynamicValue.Sequence(Chunk.from(items)))
+        DynamicValues.record(ToolCall.ToolCallsKey -> DynamicValues.sequence(found.map(_.copy(id = None).toRecord)))
       }
-
-  private val ToolCallsKey: String = "tool_calls"
 
   /** A list value of a `str` field (upstream `_format_input_list_field_value`): `N/A` for an empty list, one blob for
     * one item, and else one numbered blob on each line.
@@ -193,8 +223,10 @@ private[adapters] object PromptText:
 
   // ── The output schema ──────────────────────────────────────────────────────────────────────────────────────────
 
-  /** The output JSON schema of an invocation, for the schema notes of the structured fields. */
-  final class OutputSchema private (root: Option[DynamicValue.Record]):
+  /** The output JSON schema `root` of an invocation, for the schema notes of the structured fields. With no schema, no
+    * field has a property.
+    */
+  final class OutputSchema(root: Option[DynamicValue.Record]):
 
     /** The JSON text of the schema of `field`: its property in the output schema, with the `$defs` entries that the
       * property uses at the end. With no such property, the schema of a list or of a dict.
@@ -215,42 +247,43 @@ private[adapters] object PromptText:
       property(name).map(withDefinitions)
 
     private def property(name: String): Option[DynamicValue] =
-      root.flatMap(recordAt(_, "properties")).flatMap(DynamicValues.recordGet(_, name))
+      root.flatMap(DynamicValues.recordGet(_, "properties")).flatMap(DynamicValues.recordGet(_, name))
 
-    private val definitions: Vector[(String, DynamicValue)] =
-      root.flatMap(recordAt(_, "$defs")).fold(Vector.empty)(_.fields.toVector)
+    /** The `$defs` entries of the output schema, in its order. The schema of each structured field reads them, so the
+      * object computes them one time.
+      */
+    private lazy val definitions: Vector[(String, DynamicValue)] =
+      root.flatMap(DynamicValues.recordGet(_, "$defs")).flatMap(DynamicValues.asRecord)
+        .fold(Vector.empty)(DynamicValues.recordEntries)
+
+    /** The names of the definitions that each definition references, by name, computed one time. */
+    private lazy val definitionReferences: Map[String, Vector[String]] =
+      definitions.map((name, schema) => name -> references(schema)).toMap
 
     /** `schema` with a `$defs` key at the end that holds each definition that `schema` uses, also through other
       * definitions, in the order of the output schema.
       */
     private def withDefinitions(schema: DynamicValue): DynamicValue =
-      val byName                                                         = definitions.toMap
       def closure(found: Set[String], next: Vector[String]): Set[String] =
         next.filterNot(found.contains) match
           case Vector() => found
-          case fresh    => closure(found ++ fresh, fresh.flatMap(name => byName.get(name).toVector.flatMap(references)))
+          case fresh    => closure(found ++ fresh, fresh.flatMap(definitionReferences.getOrElse(_, Vector.empty)))
       val used = closure(Set.empty, references(schema))
       schema match
         case record: DynamicValue.Record if used.nonEmpty =>
           val entries = definitions.filter((name, _) => used.contains(name))
-          DynamicValue.Record(record.fields :+ ("$defs" -> DynamicValue.Record(Chunk.from(entries))))
+          DynamicValue.Record(record.fields :+ ("$defs" -> DynamicValues.recordFromEntries(entries)))
         case other => other
 
-    /** The names of the definitions that `schema` references with `{"$ref": "#/$defs/<name>"}`. */
+    /** The names of the definitions that `schema` references with `{"$ref": "#/$defs/<name>"}`. The name has its JSON
+      * pointer escapes decoded ([[JsonSchemaRefs.unescape]]).
+      */
     private def references(schema: DynamicValue): Vector[String] =
       schema match
         case record: DynamicValue.Record => record.fields.toVector.flatMap {
             case ("$ref", value) => DynamicValues.asString(value).filter(_.startsWith(DefsPrefix))
-                .map(_.stripPrefix(DefsPrefix)).toVector
+                .map(ref => JsonSchemaRefs.unescape(ref.stripPrefix(DefsPrefix))).toVector
             case (_, value) => references(value)
           }
         case sequence: DynamicValue.Sequence => sequence.elements.toVector.flatMap(references)
         case _                               => Vector.empty
-
-    private def recordAt(record: DynamicValue.Record, key: String): Option[DynamicValue.Record] =
-      DynamicValues.recordGet(record, key).collect { case found: DynamicValue.Record => found }
-
-  object OutputSchema:
-    /** The schema of the JSON text `schema`. A text that is not a JSON object gives an empty schema. */
-    def apply(schema: Option[String]): OutputSchema =
-      new OutputSchema(schema.flatMap(PythonText.parseJson).collect { case record: DynamicValue.Record => record })

@@ -82,7 +82,7 @@ class GivenContextFillSuite extends FunSuite:
   test("a parallel worker in a withSettings block uses the LM of the given context and the handler of the block") {
     val recorder = Recorder()
 
-    val result = RuntimeEnvironment.withSettings(RuntimeContext(callbacks = Vector(recorder))) {
+    val result = RuntimeEnvironment.withSettings(RuntimeContext(callbacks = Some(Vector(recorder)))) {
       ParallelExecutor(numThreads = ThreadCount(2)).execute(
         task = (_: Int) =>
           val installed = RuntimeEnvironment.current
@@ -92,7 +92,7 @@ class GivenContextFillSuite extends FunSuite:
       )
     }
 
-    assertEquals(result.map(_.results.flatten), Right(Vector(true, true, true)))
+    assertEquals(result.map(_.results.flatMap(_.toOption)), Right(Vector(true, true, true)))
   }
 
   test("Parallel.run in a withCallbacks block sends the events of each worker to the handler of the block") {
@@ -104,7 +104,7 @@ class GivenContextFillSuite extends FunSuite:
     }
 
     assertEquals(
-      result.map(_.results.flatten.map(raw => lookupString(raw.values, "answer"))),
+      result.map(_.results.flatMap(_.toOption).map(raw => lookupString(raw.values, "answer"))),
       Right(Vector.fill(3)("Paris"))
     )
     assertEquals(recorder.moduleStarts, Vector.fill(3)("predict"))
@@ -116,9 +116,10 @@ class GivenContextFillSuite extends FunSuite:
   test("the LM of the given context wins over the installed LM in a program call") {
     val recorder = Recorder()
 
-    val result = RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(installedLm), callbacks = Vector(recorder))) {
-      DynamicPredict(signature)(ProgramCall(question))
-    }
+    val result =
+      RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(installedLm), callbacks = Some(Vector(recorder)))) {
+        DynamicPredict(signature)(ProgramCall(question))
+      }
 
     assertEquals(answerOf(result), Right("Paris"))
     assertEquals(recorder.lmStarts, Vector("given"))
@@ -132,7 +133,7 @@ class GivenContextFillSuite extends FunSuite:
       )
     }
 
-    assertEquals(result.map(_.results.flatten), Right(Vector(true, true, true)))
+    assertEquals(result.map(_.results.flatMap(_.toOption)), Right(Vector(true, true, true)))
   }
 
   test("a program that reads the installed context runs with the LM of the given context") {

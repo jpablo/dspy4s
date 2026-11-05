@@ -10,7 +10,7 @@ import munit.FunSuite
 
 class SignatureParserSuite extends FunSuite:
   test("parse a simple signature without field annotations") {
-    val parser = new SignatureParser()
+    val parser = SignatureParser
     val parsed = parser.parse("question -> answer")
 
     assert(parsed.isRight)
@@ -20,7 +20,7 @@ class SignatureParserSuite extends FunSuite:
   }
 
   test("parse signature") {
-    val parser = new SignatureParser()
+    val parser = SignatureParser
     val parsed = parser.parse("question: str, top_k: int -> answer: string, score: double")
 
     assert(parsed.isRight)
@@ -33,7 +33,7 @@ class SignatureParserSuite extends FunSuite:
   }
 
   test("invalid signature with multiple arrows fails") {
-    val parser = new SignatureParser()
+    val parser = SignatureParser
     val parsed = parser.parse("a -> b -> c")
 
     assert(parsed.isLeft)
@@ -61,5 +61,24 @@ class SignatureParserSuite extends FunSuite:
     ).toOption.get
 
     assertEquals(inputThenOutput.fields, bothInputs.fields)
-    assert(!inputThenOutput.equalsByStructure(bothInputs))
+    assertNotEquals(inputThenOutput.inputFields, bothInputs.inputFields)
+    assertNotEquals(inputThenOutput.outputFields, bothInputs.outputFields)
+  }
+
+  test("an arrow inside a quoted Literal member is part of the type") {
+    val layout = SignatureParser.parse("step: Literal['a->b', 'c'] -> result")
+    assertEquals(layout.map(_.inputFields.flatMap(_.enumValues)), Right(Vector("a->b", "c")))
+  }
+
+  test("a bracket or a comma inside a quoted Literal member is part of the member") {
+    val layout = SignatureParser.parse("step: Literal['[', 'x, y'], note -> result")
+    assertEquals(layout.map(_.inputFields.map(_.name)), Right(Vector("step", "note")))
+    assertEquals(layout.map(_.inputFields.flatMap(_.enumValues)), Right(Vector("[", "x, y")))
+  }
+
+  test("a text with no arrow or with two arrows outside quotes and brackets gives the arrow error") {
+    for text <- Vector("question, answer", "a -> b -> c", "step: Literal['a->b'] -> b -> c") do
+      SignatureParser.parse(text) match
+        case Left(error)  => assert(error.message.contains("Must contain exactly one '->'"), error.message)
+        case Right(other) => fail(s"expected a Left for '$text', got $other")
   }

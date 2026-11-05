@@ -166,7 +166,7 @@ uniform result by `Prediction.dynamic`. This removes the former domain/record re
 
 ## G-3 — No per-module `config` / `set_lm` (only per-call config)
 
-**Status:** Resolved — module `config` (commit b85fe27) + per-module bound LM `withLm`/`boundLm` (commit b2d0096)
+**Status:** Resolved — module `config` (commit b85fe27) + per-module bound LM `withLm`/`lm` (commit b2d0096)
 
 **Resolution (config).** `DynamicPredict`, `Predict[I, O]`, and `ChainOfThought[I, O]` now carry an immutable
 module-level `config: DynamicValue.Record`, threaded into `PredictEngine` and merged
@@ -177,7 +177,7 @@ config is unchanged behavior.
 `lm: Option[LanguageModel]`, threaded into `PredictEngine`, which resolves the model as
 `lm.fold(runtime.resolveModel)(Right(_))` — a bound LM wins over the ambient `RuntimeContext`
 LM, so a program can pin different models to different predictors. `Predict.withLm(model)`
-(immutable `set_lm`) and `Predict.boundLm` (`get_lm`) are the accessors. The bound LM is
+(immutable `set_lm`) and the field `Predict.lm` (`get_lm`) are the accessors. The bound LM is
 an execution binding, not part of `OptimizableParameters` (like `runtime`), so `ProgramPersistence` excludes it.
 
 **Summary.** Python's `Predict` carries module-level `config` and a `set_lm`/`get_lm`
@@ -221,15 +221,19 @@ New primitives:
   (`modules/programs/.../OptimizableParameters.scala`) —
   `{ "instructions": <string|null>, "demos": [<Example state>..], "config": <record> }`.
   This is the complete writable state for `DynamicPredict`, `Predict`, and `ChainOfThought`.
-- `ProgramPersistence` (`modules/optimize/.../ProgramPersistence.scala`) —
+- `ProgramPersistence` (`modules/programs/.../optimization/ProgramPersistence.scala`) —
   `dumpState` / `loadState` / `dumpJson` / `loadJson` / `save` / `load`, all
   `OptimizableStructure`-based: `{ "optimizableParameters": { "optimizable-0": <OptimizableParameters>, ... } }`.
   Ordinal IDs are validated on load. JSON via
-  `Schema.dynamic.jsonCodec` (same codec as `SignatureLayout.dumpJson`); file IO wraps exceptions into
+  `Schema.dynamic.jsonCodec`; file IO wraps exceptions into
   `RuntimeError`.
 
+The standalone layout codec (`SignatureLayout.dumpState` / `fromState` / `dumpJson` / `fromJson`) had no
+caller in the main code. The review-and-simplify pass removed it. The sections "Summary (original)" and
+"dspy4s state before resolution" tell the state before that change.
+
 **Round-trip scope.** Instructions, demos, and module config round-trip for every supported leaf.
-Signature field structure and module name are read-only `OptimizableMetadata`; runtimes, output schemas,
+Signature field structure and module name are the read-only metadata (`PredictorKey`); runtimes, output schemas,
 bound LMs, tools, callbacks, and history are execution resources. Loading state into a fresh program
 preserves all of them. The target must have the same optimizable structure and leaf order: `optimizable-N` IDs reject
 missing/unknown ordinals and ignore JSON object order, but cannot detect a same-cardinality reorder.
@@ -374,7 +378,7 @@ Thread `RuntimeContext` (or an LM handle) into the metric scoring path. Tier 1.
 **Status:** Resolved — `response_format` (v1, commit ed2c69f) and native function-calling (G-7b) both done
 
 **Resolution (response_format / structured outputs).** Added the request-influence seam
-`FormattedPrompt.requestOptions` (+ `FormattedPrompt.mergeOptions`); `PredictEngine` and
+`FormattedPrompt.requestOptions` (+ `FormattedPrompt.options`, which merges them); `PredictEngine` and
 `Adapter.execute` (removed in b33) merge it under the per-call/module options. `JSONAdapter`, when the
 ambient LM `supportsResponseSchema` and an `outputJsonSchema` is present, emits
 `response_format: {type:"json_schema", json_schema:{name, schema, strict:false}}` (prose
@@ -383,8 +387,9 @@ schema kept as fallback; malformed schema → prose only).
 **Resolution (G-7b, native function-calling).** Ported faithfully from dspy `adapters/base.py`
 (verified against upstream v3.3.0b1): native calling is an **adapter-level** feature, NOT a
 ReAct change — dspy keeps ReAct on the text protocol in every version, so dspy4s ReAct is
-unchanged. `ChatAdapter`/`JSONAdapter` gained `useNativeFunctionCalling` (off by default,
-+ `parallelToolCalls`); the shared `NativeFunctionCalling` helper injects `tools` (built by
+unchanged. `ChatAdapter`/`JSONAdapter` gained the `native` option (a `NativeTools`: `enabled`, as upstream off by
+default in `ChatAdapter` and on by default in `JSONAdapter`,
++ `parallelToolCalls` and `toolChoice`); the shared `NativeTools` rules inject `tools` (built by
 `ToolSchemaBridge.toOpenAiToolsDynamic`) into `requestOptions` and fills a `TypeRef.toolCalls`
 output field from the provider's `tool_calls`, gated on `supportsFunctionCalling`. Tools reach
 the adapter via `AdapterInvocation.tools` (pure `ToolSpec` data); `DynamicPredict`/`Predict`/`PredictEngine`
@@ -394,6 +399,11 @@ output (`content:null` + `tool_calls`). Commits 671a37f, 1f50818, 09fa2b5, 221b4
 7838fb0, 460accf. All G-7b follow-ups closed; remaining tool-call refinements (forcing a specific
 function via the object `tool_choice` form, a `ToolCalls` output shape) are net-new features,
 not gaps. (JSON-Schema constraint embedding is tracked under G-9, not here.)
+
+Since 2026-11-03 (found in a live run), the tool specs of a predictor do not disappear when the request has no provider
+tools. The prompt shows them as an input field `tools` (`NativeTools.promptInvocation`, `ToolsInPromptSuite`), and with
+`NativeTools.enabled` on, a tool calls output with no tools is a `ConfigurationError` (`NativeTools.checkTools`, upstream
+`_call_preprocess`). See PORT_DIFFERENCES section 26.
 
 **Summary.** Adapters did not use native provider function-calling preprocessing,
 and `JSONAdapter` did not emit `response_format` structured outputs. The
@@ -463,8 +473,9 @@ Port `TwoStepAdapter`. Tier 1.
 helper builds the exact upstream strings (`gt`/`ge`/`lt`/`le`/`minLength`/`maxLength`/
 `multipleOf`, matching `PYDANTIC_CONSTRAINT_MAP`), `ChatAdapter` renders
 `Constraints: <joined>` after the field description (the `get_field_description_string`
-analog; unconstrained fields render byte-identically), and constraints round-trip through
-`SignatureLayout.dumpState`/`fromState`. **v1 follow-ups:** constraints are settable
+analog; unconstrained fields render byte-identically). (The constraints also had a round trip through
+`SignatureLayout.dumpState`/`fromState`. That layout codec had no caller in the main code, and the
+review-and-simplify pass removed it.) **v1 follow-ups:** constraints are settable
 programmatically only (deriving them from the `zio-blocks Schema` surface needs a
 constraint-annotation mechanism that doesn't exist yet). **Follow-ups now done:** constraints are a
 structured `Constraint` ADT (`.render` for prose + `.schemaKeyword`/`.schemaValue` for JSON Schema);
@@ -578,8 +589,8 @@ Track and port `InferRules`. Tier 2.
 
 **Status:** Resolved — GEPA is algorithmically complete for dspy parity in `modules/gepa` (`dspy4s-gepa`):
 reflective mutation + instance-Pareto selection, round-robin/all component selection, epoch-shuffled minibatch,
-merge crossover, eval cache, run-dir resume, opt-in perfect-score early stop; live-model validated. Multi-objective
-frontiers are deliberately not ported (dspy's scalar metric never uses them — see below). History:
+merge crossover, eval cache, run-dir resume, opt-in perfect-score early stop; live-model validated. The multi-objective
+frontiers came later (the update below, and G-45). History:
 prerequisites **P-d** (`FeedbackMetric`/`ScoreWithFeedback`), **P-a** (`captureFailureTraces` → failure
 `TraceEntry`), **P-b** (`ParseError.raw`); and the engine — `Candidate` mapping, `GepaAdapter`
 (`evaluate`/`makeReflectiveDataset`), `InstructionProposer` (reflective mutation), `GepaState` + Pareto
@@ -646,7 +657,7 @@ A verification spike (trace + failure capture) surfaced four bounded prerequisit
 - **P-a — failure-trace capture.** `Module.apply` records a `TraceEntry` only on `Right` (`case Left(_) => ()`),
   so failed predictor calls leave no trace — but reflection's signal IS failures. Record a trace entry on failure
   with the raw output.
-- **P-b — parse-failure-as-feedback.** `PredictEngine.parseOutputs` aborts on `adapter.parse → Left` and discards
+- **P-b — parse-failure-as-feedback.** `AdapterCall.run` aborts on `adapter.parse → Left` and discards
   the raw `LmOutput.text`. Need a `FailedPrediction`-style capture (raw completion + low score + format feedback),
   not an aborting error (dspy's `add_format_failure_as_feedback`).
 - **P-c — named predictors.** At the time of this prerequisite spike, `OptimizableStructure.read` was positional
@@ -1054,7 +1065,7 @@ transient classes only and obey the `Retry-After` hint (`dspy/clients/execution.
   `LmUnexpectedError` for each other failure. The client adds the model and the provider.
 - **Retry.** The default predicate of `RetryPolicies.maxRetries` and `RetryPolicies.exponentialBackoff` is
   `LmError.isRetryable`: a rate limit, a timeout, a server failure, and a transport failure. The delay is the retry
-  hint when the error carries one (upstream `_delay`).
+  hint when the error carries one (upstream `_delay`), limited to `maxHintMillis` (60 seconds by default).
 - **Missing key.** `fromEnv` gives `LmNotConfiguredError`.
 
 Tests: `ErrorsSuite`, `OpenAiErrorMappingSuite`, `OpenAiErrorEdgeCasesSuite`, `JdkHttpTransportErrorSuite`,
@@ -1073,6 +1084,8 @@ Changes in behavior to know:
 
 Deliberate differences from upstream:
 
+- The retry policies limit the retry hint to `maxHintMillis` (60 seconds by default). Upstream waits for the full
+  `Retry-After` time, so a hint of one day stops the thread for one day.
 - `ContextWindowExceededError` and `LmUnsupportedModelError` are siblings of `LmInvalidRequestError`, not
   subclasses, because a case class cannot extend a case class.
 - `LmProviderResponseError` takes the place of a direct `LMProviderError` instance.
@@ -1083,7 +1096,6 @@ Deliberate differences from upstream:
 
 Open:
 
-- No policy limits the retry hint. A large `Retry-After` makes the caller wait for that time, as upstream.
 - A streamed call that fails after the first chunk still gives `RuntimeError("streaming_lm", …)` (G-25).
 - The adapter fallback (G-29) can now use the taxonomy.
 - `JdkHttpTransport` joins duplicate headers with a comma, so a duplicate `Retry-After` gives no hint.
@@ -1107,7 +1119,7 @@ record is versioned plain data (`dspy/clients/call_result.py:11,126-138`).
   Each `put` lists and sorts the directory (`:89,139-144`), with a limit of 200,000 entries.
 
 **Resolution (key).** `LanguageModel.defaultOptions` exposes the defaults, and each wrapper forwards it.
-`ProviderRequestNormalizer.effectiveOptions` holds the merge for the wire payload and for the cache key, so the
+`LmRequest.effectiveOptions` holds the merge for the wire payload and for the cache key, so the
 two cannot differ. Tests: `LmCacheKeySuite`. A disk cache entry of a model that has defaults misses one time,
 because its key changed.
 
@@ -1161,7 +1173,8 @@ chunk. The wrapper returns the typed error. Tests: `StreamingWrapperContractSuit
 - Tests: `OpenAiStreamGuardSuite`, `ManagedStreamSuite`, `StreamingCacheSuite`.
 
 **Open points (batch 11).** A managed stream that the caller closes early gets no history, usage, or cache entry.
-No check rejects an event after the end event. The usage of a retried attempt is not recorded. An outer
+No check rejects an event after the end event. The usage of a retried attempt is not recorded (closed on 2026-10-25:
+the usage of a call is the total of its attempts, also for a failure; see `FailedCallUsageSuite`). An outer
 `ManagedLanguageModel` reads a cached chunk of an inner one as a new response. The UPGRADE file lists the details.
 
 ---
@@ -1169,8 +1182,9 @@ No check rejects an event after the end event. The usage of a retried attempt is
 ## G-26 — LM request surface: strict schema, capabilities, Responses endpoint, reasoning models, timeouts
 
 **Status:** In progress. The strict schema (2026-10-14, batch 12), the timeouts (batch 17), the Responses shapes
-(batch 20), `close` (batch 22), and the capabilities (2026-10-18, batch 23) are resolved; the reasoning-model
-parameters are open. · **Verification:** C (strict flag), R (others) · **Upgrade items:** L4 to L8
+(batch 20), `close` (batch 22), the capabilities (2026-10-18, batch 23), and the reasoning of a chat reply (2026-11-04)
+are resolved; the reasoning-model parameters are open. · **Verification:** C (strict flag), R (others) · **Upgrade
+items:** L4 to L8
 
 **Upstream.** `strict: true` with a schema shaped for strict mode (`dspy/clients/legacy_requests.py:13-48`,
 `execution.py:176-183`). Capabilities are data, declared for each server (`dspy/clients/capabilities.py:22-27`,
@@ -1185,7 +1199,8 @@ parameters are open. · **Verification:** C (strict flag), R (others) · **Upgra
 - `LmMode` selects no endpoint and no body (`modules/lm/.../runtime/ProviderLanguageModel.scala:48-53`). Responses
   `function_call` and `reasoning` items are not parsed.
 - No mapping to `max_completion_tokens` and no temperature rule for OpenAI reasoning models.
-- Nothing reads `supportsReasoning`, and the `message` is dropped from the metadata (`ProviderLanguageModel.scala:110-112`).
+- Nothing reads `supportsReasoning`. The `message` is dropped from the metadata, with its `reasoning_content`
+  (`ProviderLanguageModel.scala:110-112`). The reasoning of a chat reply has a resolution below.
 - One 60 s value covers connect and request, and a stream has no idle limit
   (`modules/lm/.../providers/HttpTransport.scala:28`, `JdkHttpTransport.scala:17,64`).
 - No custom headers and no `User-Agent` (`OpenAiClient.scala:19-21`). The transport has no `close`.
@@ -1211,8 +1226,15 @@ stream events.
 
 **Resolution (capabilities, batch 23).** `LmCapabilities` is the data behind the capability flags (upstream
 `Capabilities`), and an undeclared capability is `false`. `OpenAiLanguageModel` has the OpenAI capabilities at the
-official address only (`LmCapabilities.forBaseUrl`); an other server has none until the user declares them with
-`withCapabilities` (decision L5, 2026-10-18). Test: `LmCapabilitiesSuite`.
+official address only (`LmCapabilities.forBaseUrl`); an other server has none until the user declares them in the
+`capabilities` field (decision L5, 2026-10-18). Test: `LmCapabilitiesSuite`.
+
+**Resolution (reasoning of a chat reply, 2026-11-04).** `ChatWire` and `OpenAiStreamChunk` fill `LmOutput.reasoning`
+and `LmChunk.reasoning` with `reasoning_content`, else `reasoning`, with the same rule in the plain path and in the
+stream. A value that is not a text is no reasoning. The output of a history entry has the key `reasoning_content` when
+the reasoning is not empty. The wires read the reasoning of each reply, with no check of `supportsReasoning`. The
+`Reasoning` type reads that flag (G-32). Tests: `ChatReasoningSuite`, `LmHistoryEntrySuite`, `ManagedStreamSuite`,
+`StreamingFallbackSuite`.
 
 **Direction (open).** Reasoning-model parameters and custom headers remain. `close` is resolved in batch 22
 (`CloseLifecycleSuite`).
@@ -1293,6 +1315,8 @@ Changes in behavior to know:
 - The typed decode gives `None` for an optional field that a record lacks, at each level. Before, it failed. A
   model that writes a tool call as text gives no id, so this rule is necessary.
 - The JSON schema of an output type does not show the id of a tool call (upstream removes it too).
+- A field that is a sequence of tool calls, for example `Vector[ToolCall]`, has the type `TypeRef.toolCalls` with no
+  extra call: the derivation finds `ToolCall` by its type marker (`TypeMarker`). `Signature.markToolCalls` is gone.
 
 Deliberate differences from upstream:
 
@@ -1313,8 +1337,6 @@ Open:
 - `DynamicValues.renderText` writes a nested value with strings that have no quotes, so the history field of a
   demo is not valid JSON.
 - An `Option[History]` field is not replayed.
-- `markToolCalls` is still necessary for a `Vector[ToolCall]` field, although the derivation can now find the type
-  by its name.
 - `PredictEngine` writes the raw calls under the fixed key `tool_calls`. A signature field with a different name
   gives two keys in the raw prediction.
 - No test covers a `History` input of `ReAct`, `RLM`, `Refine`, or `BestOfN`.
@@ -1341,7 +1363,8 @@ function calling is off, `tool_calls` stays a text field (`base.py:91-119`).
   (`modules/programs/.../runtime/PredictEngine.scala:68-94`).
 - Demos omit the missing fields (`modules/adapters/.../ChatAdapterPrompt.scala:24-34`).
 - `tool_calls` is always removed from the prompt (`ChatAdapterPrompt.scala:17`) and comes from provider calls only.
-  The default is `useNativeFunctionCalling = false`, so the field is always empty by default.
+  Native function calling is off by default, so the field is always empty by default. (Since then, `JSONAdapter` has
+  it on by default, as upstream. `ChatAdapter` keeps `NativeTools.Off`.)
 - A coercion failure is a `ValidationError` with no field name and no raw text
   (`modules/adapters/.../internal/AdapterTextSupport.scala:92-102`). Upstream raises a parse error with both.
 - Duplicate headers concatenate (`ChatAdapterParser.scala:51-57`); upstream uses the first.
@@ -1358,7 +1381,15 @@ the key.
 - `ChatAdapter` falls back to a `JSONAdapter` after a parse error of the parse step (`useJsonAdapterFallback`, on by
   default). An LM error or a configuration error gives no second call, and a call that streamed visible output gets
   no second call. The predictor runs the second call (`Adapter.fallback`).
-- A value that does not fit the type of its field is a `ParseError` with the field name and the raw response.
+- A value that does not fit the type of its field is a `ParseError` with the field name and the raw response. Since
+  2026-11-03 the typed decode of a `Predict` is a part of the parse step (`checkOutput` of `AdapterCall.run`), so a
+  wrong list item or a wrong nested value is also a `ParseError` with the raw response, and it gets the fallback
+  (`ReplyFallbackRulesSuite`).
+- A reply with no text is a `ParseError` with the upstream text "The LM returned an empty or null response." Since
+  2026-11-03 the wires keep each choice as an output with an empty text (upstream `_process_completion` and
+  `responses_outputs`), and `AdapterCall` has the check of `_call_postprocess`, so such a reply gets the fallback.
+  Before that date, it was an `LmProviderResponseError`. Only a reply with no choices is that error now
+  (`EmptyReplyWireSuite`).
 - In the chat format, the first header of a field wins.
 - An incomplete demo comes first, with the upstream prefix, and a missing output shows "Not supplied for this
   particular example." A demo with no input or no output is dropped. A field default no longer fills a demo; it
@@ -1407,7 +1438,7 @@ is the same. The dspy4s tests use `contains`, so they do not detect a difference
 UPGRADE-3.2.1-to-3.4.0.md, phase 0). The Chat, JSON, XML, and two-step adapters now build each prompt as upstream
 does: the field list, the structure, the objective, the demos, the history turns, and the reminder. The type text
 comes from the data of the port only (`internal/PromptText.scala`); a value prints in the Python form
-(`internal/PythonText.scala`). A structured type shows the type name and the JSON schema of the port. The port-only
+(core `contracts/PythonText.scala`). A structured type shows the type name and the JSON schema of the port. The port-only
 texts are gone: the output schema block, the JSON key instructions, and the history note. `scripts/golden` writes
 the expected prompts from upstream. Tests: `AdapterPromptParitySuite` (28 golden cases and the two-step extraction
 prompts), `PortTypeTextSuite`, `TypedPromptParitySuite`, `StructuredTypeTextSuite`, `PythonTextSuite`. The
@@ -1440,14 +1471,17 @@ the first.
 **Status:** Open. Nested XML is not mirrored (decision A6, 2026-10-18). · **Verification:** R · **Upgrade item:**
 A6
 
-- **Custom types.** `Image`, `Audio`, `File`, `Document`, `Citations`, `Code`, and `Reasoning` have no port.
-  `ContentPart` encodes `type` and `text` only (`modules/lm/.../runtime/ProviderLanguageModel.scala:62-71`), and no
-  adapter makes parts. `Reasoning` alone is a small item (`dspy/adapters/types/reasoning.py:46-83`).
+- **Custom types.** `Image`, `Audio`, `File`, `Document`, `Citations`, and `Code` have no port.
+  `ContentPart` encodes `type`, `text`, and `metadata` only (`ChatWire.encodePart` in `modules/lm/.../providers/ChatWire.scala`), and no
+  adapter makes parts. `Reasoning` has a port (2026-11-04, `NativeReasoning`, PORT_DIFFERENCES section 28). Tests:
+  `ReasoningSuite`, `ReasoningFieldSuite`, `NativeReasoningSuite`, `NativeReasoningProgramsSuite`, `ReasoningStreamSuite`.
 - **JSON mode.** Upstream can send `{"type": "json_object"}` (`dspy/adapters/json_adapter.py:58-63`). dspy4s sends
   `json_schema` or nothing.
 - **Nested XML.** Upstream parses nested elements for list, dict, and model outputs
-  (`dspy/adapters/xml_adapter.py:95-135,159-218`). dspy4s reads the text of the first match and parses it as JSON
-  (`modules/adapters/.../XMLAdapter.scala:98`).
+  (`dspy/adapters/xml_adapter.py:95-135,159-218`). dspy4s reads the text of the first element of the field that is
+  not inside another field element, and parses it as JSON (`XMLAdapter.fieldTexts` in
+  `modules/adapters/.../XMLAdapter.scala`). A syntax error of the XML is a parse error, and the JSON fallback runs, as
+  upstream 3.4.0.
 - **BAMLAdapter.** Not ported. Low value.
 
 ---
@@ -1529,7 +1563,9 @@ launch changes.
 - **Runner.** `runner.js` is the upstream file of f1260ff14. Three comment lines keep the dspy4s wording; a `diff`
   with the upstream file shows only those lines. The file fixes Pyodide at 0.29.4, uses the private control exception
   `_DSPyFinalOutput`, reports an unhandled promise rejection as a notification, freezes `JSON` and `console`, and
-  revokes the read permission for the Deno cache directory after it loaded Pyodide.
+  revokes the read permission for the Deno cache directory after it loaded Pyodide. Later, the tool wrappers changed
+  too, so a `diff` now also shows these rules
+  ([PORT_DIFFERENCES section 18](PORT_DIFFERENCES.md#18-sandbox-tools-and-reactv2-names)).
 - **Launch.** `DenoPyodideLaunch.command` passes `--no-config`, `--no-lock`, and `--node-modules-dir=false`. After the
   runner path it always passes the list of environment variables, and then `--dspy-deno-dir=`. The process gets
   `DENO_NO_PACKAGE_JSON=1`.
@@ -1706,10 +1742,11 @@ the replacement of the second predictor to a `ReAct` test in `ProgramOptimizable
 Open after the removal:
 
 - `RLM` has no `Streamable` instance. The two removed programs had one, so `Streamify` cannot run the replacement.
-- These public items have no user in main sources: `SubprocessPythonInterpreter`, the plain `CodeInterpreter`
-  trait (`RLM` needs `ReplCodeInterpreter`), `ActionOutcome.isError`, and the rejection branch of
-  `InterpretedTrajectoryAgent` (`ActionPreparation.Rejected`). `TrajectoryAgent` and `InterpretedTrajectoryAgent`
-  have one implementation, `ReAct`.
+- These public items have no user in main sources: `SubprocessPythonInterpreter` and the plain `CodeInterpreter`
+  trait (`RLM` needs `ReplCodeInterpreter`).
+- **Resolved (2026-11-01).** `TrajectoryAgent`, `InterpretedTrajectoryAgent`, and `ActionInterpreter` had one main
+  implementation, `ReAct`, and `ActionOutcome.isError` and `ActionPreparation.Rejected` had no main user. The
+  simplification removed these types. `ReAct` is a plain `Module` that runs `AgentLoop.run` and then its extractor.
 - Entries of this ledger that are older than this one name the two programs as they were at that time.
 
 ---
@@ -1742,10 +1779,10 @@ no caller has a batch time limit by default: `Duration.Inf` is the default `time
   default is no time limit. A caller that gives a finite `timeout` still gets a `Left` for the full batch when no task
   completes in that time (`modules/programs/.../runtime/ParallelExecutor.scala`). `PORT_BACKLOG.md` defers the
   resubmission of a slow task.
-- **Typed `Parallel`.** `Parallel.run` accepts `DynamicModule` only (`modules/programs/.../Parallel.scala:30-32`), and
+- **Typed `Parallel`.** `Parallel.run` accepts `DynamicModule` only (`modules/programs/.../Parallel.scala:27-29`), and
   `fanout` is sequential (`modules/programs/.../compose/Both.scala:12-15`).
-- **Temperature for `n > 1`.** Upstream sets 0.7 when the temperature is low (`dspy/predict/predict.py:179-185`).
-  `PredictEngine.scala:96-121` has no equivalent.
+- **Temperature for `n > 1`.** Resolved: `PredictEngine.requestOptions` has the rule of upstream
+  (`dspy/predict/predict.py:180-185`). It sets 0.7 when the temperature is not set or is low.
 
 ---
 
@@ -1787,19 +1824,20 @@ discarded it. Tests: `BootstrapFewShotPerPredictorSuite`, `OptimizerConfiguratio
 
 ## G-43 — Random search and MIPROv2 candidates are less diverse than upstream
 
-**Status:** Open · **Verification:** R
+**Status:** Resolved (2026-11-01): the two optimizers share `OptimizerSupport.shuffledBootstrap`, which shuffles the
+whole trainset and changes `maxBootstrappedDemos`. · **Verification:** R
 
-- `BootstrapFewShotWithRandomSearch` gives a subset of 1 to N examples as the trainset
+- `BootstrapFewShotWithRandomSearch` gave a subset of 1 to N examples as the trainset
   (`modules/optimize/.../BootstrapFewShotWithRandomSearch.scala:82-101`). Upstream shuffles the full trainset and
   changes `max_bootstrapped_demos` (`dspy/teleprompt/random_search.py:106-112`).
-- In MIPROv2 the seed changes only the labeled shuffle (`modules/optimize/.../MIPROv2.scala:132-146`). Upstream
+- In MIPROv2 the seed changed only the labeled shuffle (`modules/optimize/.../MIPROv2.scala:132-146`). Upstream
   shuffles and changes the size (`dspy/teleprompt/utils.py:392-393`).
 
 ---
 
 ## G-44 — GEPA engine differs from the upstream engine
 
-**Status:** Resolved (2026-10-13, batch 9). Resolved: dominated candidates (batch 1); trace association, failure feedback, and empty reflective data (2026-10-11, batch 2); round-robin pointer and merge depth (batch 5); second proposal call (2026-10-12, batch 6); error limit of an evaluation (2026-10-12, batch 7); resume and the stop reason (2026-10-13, batch 9). · **Verification:** C (a second read of the two sides confirmed the open items, 2026-10-11)
+**Status:** Resolved (2026-10-13, batch 9). Resolved: dominated candidates (batch 1); trace association, failure feedback, and empty reflective data (2026-10-11, batch 2); round-robin pointer and merge depth (batch 5); second proposal call (2026-10-12, batch 6); error limit of an evaluation (2026-10-12, batch 7); resume and the stop reason (2026-10-13, batch 9); the kept runs, the skip checks, and the sums (2026-11-02). · **Verification:** C (a second read of the two sides confirmed the open items, 2026-10-11)
 
 The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.4 package.
 
@@ -1811,14 +1849,19 @@ The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.
 - **Dominated candidates (resolved).** `CandidateSelector.Pareto` and `MergeProposer` sampled from the raw
   frontier. Upstream removes dominated programs first (`gepa/gepa_utils.py:37-75,90-117`).
   `GepaState.nonDominatedFrontier` now holds that routine for the two callers. A comparison with the pinned `gepa`
-  0.1.4 on 4,000 random frontiers gave no difference. Tests: `GepaStateSuite`, `MergeProposerSuite`.
+  package on random frontiers (2026-11-02) gave no difference for pools of 2 to 8 candidates, and no difference for any
+  pool in which the scores are different. For larger pools with equal scores, the results can differ: 271 of 4,000 cases
+  for pools of 9 to 40. The cause is the order of equal scores. Upstream reads a front in the order of a Python set, and
+  the port reads it in index order. The same comparison with the order of the Python set gave no difference. This
+  difference stays, because the order of a Python set has no form in the port. Tests: `GepaStateSuite`,
+  `MergeProposerSuite`.
 - **Round-robin pointer (resolved).** The pointers were a local map of `search`, and a new candidate had no entry,
   so it started at 0. Upstream gives a new candidate the largest pointer of its parents
   (`gepa/core/state.py:539-543`). dspy4s also moved the pointer when a perfect minibatch skipped the iteration;
   upstream runs the component selector after the skip checks
   (`gepa/proposer/reflective_mutation/reflective_mutation.py:379-417`). The pointers are now in the state
   (`GepaState.nextComponent`), `GepaState.add` applies the inheritance rule, the selector runs after the
-  perfect-score check, and a saved state keeps the pointers. Tests: `GepaPointerMergeSuite`, `GepaStateSuite`,
+  two skip checks, and a saved state keeps the pointers. Tests: `GepaPointerMergeSuite`, `GepaStateSuite`,
   `GepaStatePersistenceSuite`.
 - **Empty reflective data (resolved).** dspy4s asked the reflection LM with zero examples and evaluated an unchanged
   candidate. Upstream skips the proposal (`gepa_utils.py:462-469`). A component with no record now gets no
@@ -1837,8 +1880,27 @@ The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.
   `GepaProposerEngineSuite`, `GepaFailureFeedbackSuite`.
 - **Failure feedback (resolved).** dspy4s always included failures and called the user metric with an empty
   prediction. The new option `GepaConfig.addFormatFailureAsFeedback` is `false` by default, as upstream. With the
-  option on, a failed call gives the upstream texts and the user metric gets no call. Tests:
-  `GepaFailureFeedbackSuite`.
+  option on, a call that failed to parse gives the upstream texts and the user metric gets no call. A call that failed
+  with another error gives no record. Tests: `GepaFailureFeedbackSuite`.
+- **Kept runs, skip checks, and sums (resolved, 2026-11-02).** The port differed from upstream in these rules. Tests:
+  `GepaUpstreamRulesSuite`, `GepaAdapterEvaluateSuite`, `GepaObjectiveRulesSuite`, `GepaFailureFeedbackSuite`,
+  `MergeProposerSuite`, `MinibatchSamplerSuite`, `PythonTextSuite`.
+  - The batch keeps a trajectory only for a run that passed and for a parse failure, as `bootstrap_trace_data` with
+    `capture_failed_parses=True`. Each other example has the failure score and no trajectory. An example with no input
+    keys gets no run and no model call, because upstream `Example.inputs` raises.
+  - The program-level metric call gets an empty trace on each path, as upstream `trace=None`. The component-level call
+    gets the trace of the run.
+  - A task follows `reflective_mutation.py:375-450`: no trajectory, then a perfect score, then the component selector
+    with the pointer move, then the reflective dataset. A failure of the dataset skips the task, and the pointer stays
+    moved. It writes a warning, and it does not count as a failed proposal. The key errors of decision D2 stay a `Left`
+    that stops the run.
+  - A sum of scores has the value of the Python 3.12 `sum` (`PythonText.sum`). The objective aggregate stays a plain
+    sum, because `core/state.py:432` uses `+`. The weights of `MergeProposer.weightedPick` stay a plain sum, because
+    `random.choices` uses `itertools.accumulate`.
+  - The pad of an epoch is the rule of `batch_sampler.py`: a new `Counter` for each epoch, and the least-used id that
+    comes last in the shuffled list.
+  - The parent draw and the search of a merge read a set in sorted order, so a draw depends on the seed only.
+  - A non-fatal exception of the run gives a `Left` from `GepaEngine.optimize`.
 - **API change.** `Gepa.compile` and `GepaEngine.optimize` now return `Either[DspyError, GepaResult[P]]`, because two
   leaves with the same key and a leaf type with no key are errors (decision D2).
 - **Resume (resolved, batch 9).** The iteration index and the random sources started again, `Gepa.compile` did not
@@ -1849,7 +1911,9 @@ The reference is `dspy/teleprompt/gepa/gepa_utils.py` and the pinned `gepa` 0.1.
   reflective dataset comes from the seed and fixed coordinates, so a resumed run makes the same draws as a run with
   no stop. This is a deliberate difference: it is stronger than upstream, and it changed the seeded results of the
   runs of earlier versions. Each checkpoint error and each configuration error is a `Left`, and the file stays
-  unchanged. A checkpoint that cannot be written is a `Left` too. Test: `GepaRunSuite`. One gap stays: the
+  unchanged. A checkpoint that cannot be written is a `Left` too, and an atomic move keeps the last good checkpoint
+  (`core/state.py:326-340`). The check of the validation set compares only the size of the rows, and upstream has no
+  such check. Test: `GepaRunSuite`. One gap stays: the
   checkpoint does not keep the cached scores of a merge subsample that the run rejected, so in a rare case a resumed
   run makes more metric calls than a run with no stop.
 - **Budget (resolved, batch 9).** dspy4s runs an iteration only when its worst-case cost fits. Upstream checks the
@@ -1898,19 +1962,24 @@ upstream, and their defaults agree with dspy4s. Only the instruction proposer ch
     its own `JSONAdapter` that has no fallback to plain text. `ReflectiveRecord` holds values, and a `History` input
     moves to the key `Context`. The engine calls the proposer in a context whose language model is the reflection LM,
     and one more time after a failure. The options are `additionalInstructions`, `baseInstructions`, `maxChars`, and
-    `adapter`. Tests: `InstructionProposerSuite`, `GepaProposerEngineSuite`.
+    `adapter`. A `Left` and a non-fatal exception of the proposer get the second call
+    (`GepaEngine.proposeInReflectionContext`), as upstream catches each `Exception`. A fatal error goes to the caller.
+    Tests: `InstructionProposerSuite`, `GepaProposerEngineSuite`.
   - **Differences that stay.**
-    - The proposer writes the JSON text of the records itself (`ReflectiveRecord.toJson`, in the form of Python
-      `json.dumps`), because the dspy4s `JSONAdapter` does not write a sequence as JSON. The other parts of the
-      prompt are those of the dspy4s adapter, not the upstream bytes (G-37): the JSON adapter shows no field
-      description.
     - `skills` and `truncate_history_outputs` are not ported. The skills loader needs a YAML parser. The ReAct
       trajectory of dspy4s is a string that is already rendered, so only a real `History` input can be compacted.
-    - Upstream logs each failed proposal. dspy4s has no logger in this module, so a run in which each reflection
-      call fails returns the seed with no signal. The stop reason of a run (G-44) is the place for that report.
+    - Upstream logs each failed proposal. dspy4s writes no warning for it. `GepaState.failedProposals` counts the
+      tasks whose proposer failed two times, so a run in which each reflection call fails is visible in the result.
     - A response `{"new_instruction": null}` gives the instruction `null`: `JSONAdapterParser` gives the JSON text
-      of a value that is not a string. Upstream fails there. The correction is in the adapter (decision D5).
-    - Only a `Left` of a proposer gets the second call. An exception goes to the caller; upstream catches it.
+      of a value that is not a string. Upstream gives the instruction `None`, because `parse_value` calls `str(value)`
+      for a `str` field (`dspy/adapters/utils.py:188-189`). The two accept a bad instruction. Test:
+      `InstructionProposerSuite`.
+  - **Prompt (2026-11-02).** The records go to the model as one list value in the field `examples_with_feedback` of the
+    type `list[dict[str, Any]]`, as upstream. The adapter writes the JSON text (`PromptText.fieldValue`), with `null`
+    for a number that is not finite in it, as pydantic JSON mode. A comparison with `JSONAdapter().format` of the venv
+    gave an equal prompt, also the description of each field. Test: `InstructionProposerSuite`. In a call, a component
+    with no instruction has the text that its leaf runs (dspy seeds from `pred.signature.instructions`), and the genome
+    keeps `None`.
 - **Objective-aware frontiers are an option** (`gepa_utils.py:70-79,301-310`; 638e155cf; engine `frontier_type` with
   the default `"instance"`). The metric can return `objective_scores`, and the engine can select candidates by
   `objective`, `hybrid`, or `cartesian` fronts (`gepa/core/state.py:157-236,474-601`). Acceptance and the best
@@ -1949,7 +2018,11 @@ upstream, and their defaults agree with dspy4s. Only the instruction proposer ch
     - The budget is a hard limit (decision of the owner). An iteration starts only when its largest possible cost
       fits: `2 × tasks × minibatch + limit × |distinct valset|`. Upstream checks the budget only at the start of an
       iteration, so it can go above the budget.
-    - dspy4s captures no traces for the children and for the validations. Upstream does; this changes no score.
+    - dspy4s captures no traces for the children and for the validations. Upstream does, because
+      `DspyAdapter.batch_evaluate` has the default `capture_traces=True` (`gepa_utils.py:312`). This changes no score:
+      the program-level metric call gets no trace on each path, as upstream `trace=None`, and a run that fails has the
+      failure score on each path. Before 2026-11-02, this was not true: the metric got the trace of the run only for a
+      parent, so a metric that read the trace could give a parent and an equal child different scores.
     - The selection and the acceptance are fixed sets of strategies. Upstream takes any object with the method of
       the strategy.
     - Equal minibatches are equal by the content and the order of their examples. Upstream compares the ids of the
@@ -1971,7 +2044,10 @@ upstream, and their defaults agree with dspy4s. Only the instruction proposer ch
 
 **Decisions of the owner (2026-10-12).**
 
-- The proposer writes the JSON text of the records itself.
+- The proposer writes the JSON text of the records itself. A review on 2026-11-02 changed this, and the owner has not
+  confirmed the change. The reason for the decision no longer holds: `PromptText.fieldValue` now writes a sequence as
+  JSON. The records go as a list value, and the adapter writes the text, as upstream. The prompt is equal to the
+  upstream prompt.
 - The first version has no `skills` and no `truncate_history_outputs`.
 - The budget stays a hard limit. An iteration that does not fit does not start, and the result must report why a
   run stopped (G-44). This rule also applies to an iteration with n proposals (O5).
@@ -2014,6 +2090,11 @@ server (upstream `convert_mcp_tool`); `McpTools.toolSpec` gives a `ToolSpec` for
 `ToolSpec` have a new optional `inputSchema` (the JSON schema of the arguments), which `ToolSchemaBridge` sends as
 the `parameters` of a function. The two MCP example pages are translated. Tests: `McpToolsSuite`,
 `McpSdkClientSuite` (a server of the SDK in a child JVM over stdio), `McpSdkPagingSuite`.
+
+**Correction (review of 2026-11-02).** The review changed the schema of a converted tool. Each `$ref` is expanded, and
+the schema has only `type`, `properties`, and `required`. `McpToolInfo.inputSchema` stays the raw schema of the server.
+`JavaJson` is gone: `SdkToolClient` converts through JSON text. `ToolSpec.parameters` and `ToolParameterSpec` are gone,
+and `ToolSpec.inputSchema` is required. See PORT_DIFFERENCES section 25.
 
 ---
 
@@ -2075,7 +2156,7 @@ of the thread, and the trace and the history of the call stay with the caller, a
 The work of the entry point gets the effective context as its `using` value: the context that
 `RuntimeEnvironment.current` gives in the call. Thus the program resolves its model and its adapter from the same
 context as the callbacks and the workers. For example, a given context with only a model gets the adapter of the
-installed context, and a `Predict` call does not fail with "Missing 'adapter'".
+installed context, and not the default `ChatAdapter`.
 
 The helper does nothing in two cases: the given context is the current one (a reference check), or each field that
 the given context sets already has its value in the current context (the same object for a service, the callback

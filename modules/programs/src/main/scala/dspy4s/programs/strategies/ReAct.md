@@ -43,7 +43,7 @@ final case class ReAct[I, O](
     baseSignature: Signature[I, O],
     tools: Vector[ToolFunction],
     maxIterations: IterationLimit = IterationLimit(20)
-) extends Module[I, ReAct.WithReasoning[O]]
+) extends Module[I, ChainOfThought.WithReasoning[O]]
 ```
 
 A caller supplies an `I` and receives a `Prediction` whose output contains:
@@ -84,7 +84,16 @@ reactPredict:
   Predict[(I, String), ReAct.ReactStep]
 
 extractorPredict:
-  Predict[(I, String), ReAct.WithReasoning[O]]
+  Predict[(I, String), ChainOfThought.WithReasoning[O]]
+```
+
+Their signatures come from the field operations of `Signature`. Each operation changes the layout and the shapes in
+one call:
+
+```scala
+val withTrajectory     = baseSignature.appendInput(trajectoryField)          // Signature[(I, String), O]
+val reactSignature     = withTrajectory.withOutputs(stepFields, reactStepShape)
+val extractorSignature = withTrajectory.prependOutput("reasoning", reasoningField)
 ```
 
 `ReactStep` is the stable protocol shared by every ReAct task:
@@ -97,9 +106,11 @@ final case class ReactStep(
 )
 ```
 
-The decoder for this step is deliberately lenient. Missing thought or tool-name fields become empty strings. Tool
-arguments may arrive as a record or as JSON text; malformed, missing, or non-object arguments become an empty record.
-This lets the control loop decide how to proceed instead of turning a slightly malformed action into a decoding failure.
+The decoder for this step is lenient for the text fields. Missing thought or tool-name fields become empty strings, so
+the control loop decides how to proceed. Tool arguments may arrive as a record or as the JSON text of an object. A
+missing value, a null, or an empty text gives an empty record. Each other value is not a dict (upstream type
+`dict[str, Any]`), so the decoder gives a `ParseError`, and no tool runs. The decoder runs in the parse step of the
+call, so the chat adapter tries its JSON fallback first. When that also fails, the whole call fails.
 
 The adapter parser comes before this decoder. The tool names are the allowed values of `next_tool_name`, so the
 parsers of the port reject an empty name and a name that is not a tool, as upstream `parse_value` rejects a value
@@ -125,22 +136,17 @@ flowchart TD
     budget -->|"no"| done
 ```
 
-The bounded recursion lives in [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala), while
-[`runtime/TrajectoryAgent.scala`](../runtime/TrajectoryAgent.scala) owns the loop-then-extract postlude. ReAct
-also uses [`runtime/InterpretedTrajectoryAgent.scala`](../runtime/InterpretedTrajectoryAgent.scala), whose final transition
-is:
+The bounded recursion lives in [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala). `ReAct.forward` runs that loop
+with one private step, then the extractor, and then adds the complete trajectory to the raw values of the extractor.
 
-```text
-generate model step → prepare action → interpret action → record outcome → decide → continue or stop
-```
+These rules apply to one step:
 
-ReAct supplies the concrete meanings: `ReactStep`, `ToolCallRequest`, a `ToolFunction`-backed `ActionInterpreter`, and
-`TrajectoryEntry`. The shared trait represents every phase with a state and every legal successor set with a
-transition ADT. In particular, rejected preparation and interpreted-outcome recording are different states. A halted
-generation does not invoke or record an action, a ready action executes and records exactly once, and a fatal interpreter
-error appends nothing. For a ready action, ReAct's decision runs after recording and stops when the prepared tool name is
-`finish` or empty, regardless of whether that invocation succeeded. These branches are executable in
-`InterpretedTrajectoryAgentLawSuite` rather than repeated in every concrete agent suite.
+- A context-window overflow that truncation cannot solve ends the loop with no entry, and the extractor runs.
+- Another error of the react predict is the result of the call, with no extract step.
+- Each other step runs one tool call and appends one entry. An error of the tool is the observation of the entry.
+- The tool name `finish` and an empty tool name end the loop after the entry, also when the tool fails.
+
+`ReActSuite` holds these rules.
 
 ## Tools and the synthetic `finish` tool
 
@@ -157,6 +163,15 @@ names as enum values, and `next_tool_args` is a `dict` field. The parser accepts
 
 The model does **not** use provider-native function calling here. It emits the ordinary signature fields
 `next_tool_name` and `next_tool_args`. ReAct resolves that name and invokes the corresponding `ToolFunction` locally.
+
+The extractor can use tools. A signature with a tool calls output (`Vector[ToolCall]`) needs tools in the extract step,
+and the signature does not hold them. Thus the default `extractorPredict` gets the tools that the loop can run, with one
+tool for each name and no `finish` tool. When native function calling is active, the extractor request has them as
+provider tools. Else the extractor prompt shows them as an input field `tools`. A plain output gets no change in its
+request or its prompt.
+
+An optimizer builds its `extractorPredictOverride` from the current extractor, so that override keeps the tools. An
+override that you build yourself keeps its own tools.
 
 `finish` is a control signal, not the final answer. Selecting it appends a final trajectory entry with the observation
 `Completed.`, stops the loop, and hands the trajectory to `extractorPredict`. The extractor—not the `finish` tool—creates
@@ -276,7 +291,8 @@ consequences:
 - optimizers see two independently tunable leaves named `react` and `extractor`;
 - streaming can target the per-step react output or the final extractor output;
 - callbacks and runtime tracing can observe the nested predictor and tool calls;
-- immutable overrides can replace either predictor without changing the tools, schemas, runtime, or module names.
+- immutable overrides can replace either predictor without changing the tools of the loop, schemas, runtime, or module
+  names.
 
 The optimizable structure is a two-branch tree. Its leaf order is stable: `react` is index 0 and `extractor` is
 index 1.
@@ -309,24 +325,16 @@ values. Detailed inner calls remain available through the runtime's callbacks, t
 
 A useful reading order is:
 
-1. [`ReAct.scala`](ReAct.scala): agent configuration, signatures, transition decisions, and result assembly.
+1. [`ReAct.scala`](ReAct.scala): agent configuration, signatures, the step of the loop, and result assembly.
 2. [`ReActProtocol.scala`](ReActProtocol.scala): step fields and decoding, tool-argument normalization, the synthetic
    `finish` tool, and trajectory rendering.
-3. [`runtime/InterpretedTrajectoryAgent.scala`](../runtime/InterpretedTrajectoryAgent.scala): generate, prepare, interpret,
-   record, and stop.
-4. [`contracts/ActionInterpreter.scala`](../contracts/ActionInterpreter.scala): success, recoverable failure, and fatal
-   action outcomes.
-5. [`runtime/TrajectoryAgent.scala`](../runtime/TrajectoryAgent.scala): gather a trajectory, then extract exactly once.
-6. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): the bounded continue/done recursion.
-7. [`runtime/TrajectoryTruncation.scala`](../runtime/TrajectoryTruncation.scala): context-window retry behavior.
-8. [`contracts/ToolFunction.scala`](../contracts/ToolFunction.scala): the tool abstraction and method derivation.
+3. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): the bounded continue/done recursion.
+4. [`runtime/TrajectoryTruncation.scala`](../runtime/TrajectoryTruncation.scala): context-window retry behavior.
+5. [`contracts/ToolFunction.scala`](../contracts/ToolFunction.scala): the tool abstraction and method derivation.
    [`runtime/ToolExecutor.scala`](../runtime/ToolExecutor.scala) runs one tool call and turns a non-fatal exception into
    an error.
-9. [`ReActSuite.scala`](../../../../../test/scala/dspy4s/programs/ReActSuite.scala): executable examples of finish, limits,
-   tool errors, callbacks, and truncation.
-10. [`InterpretedTrajectoryAgentLawSuite.scala`](../../../../../test/scala/dspy4s/programs/runtime/InterpretedTrajectoryAgentLawSuite.scala)
-   and [`TrajectoryAgentLawSuite.scala`](../../../../../test/scala/dspy4s/programs/runtime/TrajectoryAgentLawSuite.scala):
-   the shared transition and extraction contracts.
+6. [`ReActSuite.scala`](../../../../../test/scala/dspy4s/programs/ReActSuite.scala): executable examples of finish, limits,
+   tool errors, callbacks, truncation, and the result of the extractor.
 
 ## Scope and assumptions
 

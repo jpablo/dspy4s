@@ -1,5 +1,6 @@
 package dspy4s.lm.providers
 
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.LmErrorDetails
 import dspy4s.core.contracts.LmTransportError
 import dspy4s.core.contracts.LmUnexpectedError
@@ -61,7 +62,7 @@ class OpenAiErrorEdgeCasesSuite extends FunSuite:
     DynamicJson.decode("[" * 100000) match
       case Left(error: ParseError) => assert(error.message.contains("nested too deep"), error.message)
       case other                   => fail(s"expected a ParseError, got $other")
-    assertEquals(DynamicJson.decode("""{"ok":"yes"}""").map(DynamicJson.field(_, "ok").isDefined), Right(true))
+    assertEquals(DynamicJson.decode("""{"ok":"yes"}""").map(DynamicValues.recordGet(_, "ok").isDefined), Right(true))
   }
 
   test("a number that is out of range in the error envelope does not fail") {

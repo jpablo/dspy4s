@@ -130,7 +130,7 @@ class DataSuite extends FunSuite:
     )
     val c = RawPrediction(values = DynamicValues.record("stage" := "c"))
 
-    val M = Monoid[RawPrediction]
+    val M = summon[Monoid[RawPrediction]]
     assertEquals(M.identityLeft(a).lhs, M.identityLeft(a).rhs)
     assertEquals(M.identityRight(a).lhs, M.identityRight(a).rhs)
     assertEquals(M.associativity(a, b, c).lhs, M.associativity(a, b, c).rhs)
@@ -218,14 +218,18 @@ class DataSuite extends FunSuite:
     assertEquals(p.asBoolean("str-padded"), Right(true))
   }
 
-  test("asBoolean rejects ambiguous strings and other types") {
+  test("asBoolean has the bool rule of the typed decode") {
     val p = RawPrediction.empty
       .withRawValue("yes", "yes")
       .withRawValue("one", "1")
       .withRawValue("number", 1)
-    assert(p.asBoolean("yes").isLeft, "'yes' must not coerce to true (Phase 1: conservative only)")
-    assert(p.asBoolean("one").isLeft, "'1' must not coerce to true (Phase 1: conservative only)")
-    assert(p.asBoolean("number").isLeft)
+      .withRawValue("other-number", 2)
+      .withRawValue("other-text", "maybe")
+    assertEquals(p.asBoolean("yes"), Right(true))
+    assertEquals(p.asBoolean("one"), Right(true))
+    assertEquals(p.asBoolean("number"), Right(true))
+    assert(p.asBoolean("other-number").isLeft)
+    assert(p.asBoolean("other-text").isLeft)
   }
 
   test("completion at out-of-bounds index fails with validation error") {
@@ -240,4 +244,40 @@ class DataSuite extends FunSuite:
 
     assert(prediction.isLeft)
     assert(prediction.left.toOption.get.isInstanceOf[ValidationError])
+  }
+
+  test("completion rows keep the order of their fields") {
+    val names = Vector("question", "context", "reasoning", "answer", "confidence", "citations", "notes")
+    val row   = DynamicValues.recordFromEntries(names.map(name => name := name))
+    val first = Completions.fromRows(Vector(row, row)).flatMap(_.at(0)).toOption.get
+    assertEquals(DynamicValues.recordKeys(first.values), names)
+  }
+
+  test("the numeric accessors of a prediction accept BigDecimal and BigInt values") {
+    // The JSON codec of zio-blocks decodes a decimal number as a BigDecimal, for example in an RLM SUBMIT payload.
+    val prediction = RawPrediction(values =
+      DynamicValues.record(
+        "score" -> DynamicValue.Primitive(PrimitiveValue.BigDecimal(BigDecimal("0.8"))),
+        "count" -> DynamicValue.Primitive(PrimitiveValue.BigInt(BigInt(5)))
+      )
+    )
+    assertEquals(prediction.score, Right(0.8))
+    assertEquals(prediction.asDouble("count"), Right(5.0))
+    assertEquals(prediction.asInt("count"), Right(5))
+    assertEquals(prediction.asString("score"), Right("0.8"))
+  }
+
+  test("the accessors of a prediction use the lenient coercion of the typed decode") {
+    // The typed decode (signatures ZioSchemaCodec) reads these texts; a prediction read by name must read them too.
+    val prediction = RawPrediction(values = DynamicValues.record("count" := "$1,200", "ratio" := "+3.5"))
+    assertEquals(prediction.asInt("count"), Right(1200))
+    assertEquals(prediction.asDouble("ratio"), Right(3.5))
+  }
+
+  test("a JSON text that is nested too deep for the stack gives no value, and the next decode works") {
+    val deep = "[" * 100000
+    assert(DynamicValues.tryDecodeJson(deep).left.exists(_.contains("nested too deep")))
+    assertEquals(DynamicValues.decodeJson(deep), None)
+    assertEquals(DynamicValues.parseJsonRecord("""{"a":""" + deep), None)
+    assertEquals(DynamicValues.parseJsonRecord("""{"ok":"yes"}"""), Some(DynamicValues.record("ok" := "yes")))
   }

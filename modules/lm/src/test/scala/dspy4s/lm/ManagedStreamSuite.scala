@@ -21,7 +21,6 @@ import dspy4s.lm.contracts.RetryPolicy
 import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.lm.runtime.CacheCapacity
 import dspy4s.lm.runtime.InMemoryLmCache
-import dspy4s.lm.runtime.LmCacheRegistry
 import dspy4s.lm.runtime.ManagedLanguageModel
 import dspy4s.lm.runtime.RetryCount
 import dspy4s.lm.runtime.RetryPolicies
@@ -39,13 +38,8 @@ import scala.concurrent.duration.DurationInt
   */
 class ManagedStreamSuite extends FunSuite:
 
-  override def beforeEach(context: BeforeEach): Unit =
-    RuntimeEnvironment.resetForTests()
-    LmCacheRegistry.resetDefault()
-
-  override def afterEach(context: AfterEach): Unit =
-    RuntimeEnvironment.resetForTests()
-    LmCacheRegistry.resetDefault()
+  override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   /** A stream model that gives the chunks of the next attempt for each stream request. */
   private final class ScriptedStreams(attempts: Vector[Vector[LmChunk]]) extends StreamingLanguageModel:
@@ -137,6 +131,22 @@ class ManagedStreamSuite extends FunSuite:
     assertEquals(delegate.streams, 1)
   }
 
+  test("a complete stream with no text and no tool call is a success, and the cache stores its empty output") {
+    val delegate         = ScriptedStreams(Vector(Vector(LmChunk(reasoning = "why"), LmChunk(finishReason = Some("stop")))))
+    val model            = managed(delegate, cached = true)
+    given RuntimeContext = RuntimeEnvironment.current
+
+    val first = streamAll(model)
+    assertEquals(first.flatMap(_.reportedFailure), Vector.empty)
+
+    val second = streamAll(model)
+    assertEquals(
+      second.flatMap(_.cachedResponse).flatMap(_.outputs).map(o => (o.text, o.reasoning)),
+      Vector(("", "why"))
+    )
+    assertEquals(delegate.streams, 1)
+  }
+
   test("the cache does not store a failed stream") {
     val failed           = Vector(LmChunk(text = "Hi"), LmChunk.failure(LmServerError("busy")))
     val delegate         = ScriptedStreams(Vector(failed, complete))
@@ -210,6 +220,18 @@ class ManagedStreamSuite extends FunSuite:
     assertEquals(delegate.streams, 1)
   }
 
+  test("a failure after the first chunk with only reasoning ends the stream with no retry") {
+    val failed           = Vector(LmChunk(reasoning = "why"), LmChunk.failure(LmServerError("busy")))
+    val delegate         = ScriptedStreams(Vector(failed, complete))
+    val model            = managed(delegate, retry = twoRetries)
+    given RuntimeContext = RuntimeEnvironment.current
+
+    val chunks = streamAll(model)
+    assertEquals(chunks.map(_.reasoning).mkString, "why")
+    assert(lastError(chunks).isInstanceOf[LmServerError])
+    assertEquals(delegate.streams, 1)
+  }
+
   test("an error that is not transient gets no retry") {
     val delegate         = ScriptedStreams(Vector(Vector(LmChunk.failure(LmAuthError("bad key"))), complete))
     val model            = managed(delegate, retry = twoRetries)
@@ -248,29 +270,56 @@ class ManagedStreamSuite extends FunSuite:
 
   // ── Usage ───────────────────────────────────────────────────────────────────────────────────────────────────
 
-  test("the usage of a streamed call is recorded, and a cache hit records no usage") {
+  // The record point of the usage is `LanguageModel.callAndRecordUsage`: a direct stream counts in no tracker.
+
+  test("a direct stream counts in no tracker: the chunks carry the usage, and a cache hit has no usage") {
     val delegate         = ScriptedStreams(Vector(complete))
     val model            = managed(delegate, cached = true)
     val tracker          = new UsageTracker
     given RuntimeContext = RuntimeEnvironment.current
 
-    UsageTracking.withTracker(tracker) {
-      val _ = streamAll(model)
-      val _ = streamAll(model)
+    val (miss, hit) = UsageTracking.withTracker(tracker) {
+      (streamAll(model), streamAll(model))
     }
-    assertEquals(tracker.usageData.get("test-model").map(_.size), Some(1))
-    assertEquals(tracker.totalUsage("test-model").totalTokens, 9L)
+    assertEquals(miss.flatMap(_.usage), Vector(usage))
+    assertEquals(hit.flatMap(_.usage), Vector.empty)
+    assertEquals(hit.flatMap(_.cachedResponse).map(_.usage), Vector(None))
+    assertEquals(tracker.usageData, Map.empty)
   }
 
-  test("the usage of a chunk before a failure is recorded") {
+  test("a direct stream that fails counts in no tracker, and the caller gets the chunk with the usage") {
     val failed           = Vector(LmChunk(text = "Hi"), LmChunk(usage = Some(usage)), LmChunk.failure(LmServerError("x")))
     val delegate         = ScriptedStreams(Vector(failed))
     val model            = managed(delegate)
     val tracker          = new UsageTracker
     given RuntimeContext = RuntimeEnvironment.current
 
-    UsageTracking.withTracker(tracker) {
-      val _ = streamAll(model)
-    }
-    assertEquals(tracker.totalUsage.get("test-model").map(_.totalTokens), Some(9L))
+    val chunks = UsageTracking.withTracker(tracker)(streamAll(model))
+    assertEquals(chunks.flatMap(_.usage), Vector(usage))
+    assertEquals(tracker.usageData, Map.empty)
+  }
+
+  // The usage of a streamed call is the total of each attempt that reported a usage (upstream `combine(results)`).
+
+  test("a retried attempt with a usage: the usage chunk of the last attempt and the stored response have the total") {
+    val failed           = Vector(LmChunk(usage = Some(usage)), LmChunk.failure(LmServerError("busy")))
+    val delegate         = ScriptedStreams(Vector(failed, complete))
+    val model            = managed(delegate, retry = twoRetries)
+    given RuntimeContext = RuntimeEnvironment.current
+
+    assertEquals(streamAll(model).flatMap(_.usage), Vector(usage.combine(usage)))
+    val stored = field(lmHistory.head, "usage")
+      .flatMap(DynamicValues.recordGet(_, "total_tokens"))
+      .flatMap(DynamicValues.asLong)
+    assertEquals(stored, Some(18L))
+  }
+
+  test("a retried attempt with a usage and a last attempt with no usage chunk: one more chunk has the usage") {
+    val failed           = Vector(LmChunk(usage = Some(usage)), LmChunk.failure(LmServerError("busy")))
+    val noUsage          = Vector(LmChunk(text = "Hel"), LmChunk(text = "lo", finishReason = Some("stop")))
+    val delegate         = ScriptedStreams(Vector(failed, noUsage))
+    val model            = managed(delegate, retry = twoRetries)
+    given RuntimeContext = RuntimeEnvironment.current
+
+    assertEquals(streamAll(model), noUsage :+ LmChunk(usage = Some(usage)))
   }

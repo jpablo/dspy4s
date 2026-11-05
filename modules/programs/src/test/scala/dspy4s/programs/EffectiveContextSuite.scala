@@ -8,7 +8,6 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ThreadCount
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
@@ -53,10 +52,10 @@ class EffectiveContextSuite extends FunSuite:
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       val _ = formats.incrementAndGet()
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("question")))))
-    override def parse(signature: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      Right(ParsedOutput(values = rec(signature.outputFields.map(_.name := output.text)*)))
+      Right(ParsedOutput(values = rec(invocation.layout.outputFields.map(_.name := output.text)*)))
 
   private given RuntimeContext = RuntimeContext(lm = Some(ParisLm))
 
@@ -91,7 +90,7 @@ class EffectiveContextSuite extends FunSuite:
       )
     }
 
-    assertEquals(result.map(_.results.flatten), Right(Vector.fill(3)("Paris")))
+    assertEquals(result.map(_.results.flatMap(_.toOption)), Right(Vector.fill(3)("Paris")))
     assertEquals(installed.formats.get, 3)
   }
 
@@ -104,7 +103,7 @@ class EffectiveContextSuite extends FunSuite:
     }
 
     assertEquals(
-      result.map(_.results.flatten.map(raw => lookupString(raw.values, "answer"))),
+      result.map(_.results.flatMap(_.toOption).map(raw => lookupString(raw.values, "answer"))),
       Right(Vector.fill(3)("Paris"))
     )
     assertEquals(installed.formats.get, 3)
@@ -139,7 +138,7 @@ class EffectiveContextSuite extends FunSuite:
     }
 
     assertEquals(single.map(prediction => lookupString(prediction.output, "answer")), Right("Paris"))
-    assertEquals(parallel.map(_.results.flatten.size), Right(2))
+    assertEquals(parallel.map(_.results.flatMap(_.toOption).size), Right(2))
     assertEquals(givenAdapter.formats.get, 3)
     assertEquals(installedAdapter.formats.get, 0)
   }

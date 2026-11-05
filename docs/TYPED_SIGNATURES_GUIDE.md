@@ -76,6 +76,9 @@ validation catches methods not wrapped in the marker types, methods
 with parameters, missing `FieldCodec[X]`, duplicate field names,
 concrete methods, and empty spec traits.
 
+A spec trait can extend another spec trait. The fields of the parent
+come first, then the fields of the subtrait, each in source order.
+
 See [`modules/examples/.../signatures/SpecExample.scala`](../modules/examples/src/main/scala/dspy4s/examples/signatures/SpecExample.scala).
 
 ### 2. Function signatures — `Signature.fromType[F]`
@@ -87,6 +90,9 @@ types. Output fields come from the return type:
 - scalar return values become one output field named `result`
 - named-tuple return values keep their labels
 - case-class / product return values keep their product field names
+- the decision types (`Noul`, `Score`, `Choice`) and `History` are one
+  value, thus they become one output field named `result`
+- an input and an output with the same name are a compile error
 
 The nicest form uses named function parameters and named-tuple outputs:
 
@@ -269,17 +275,20 @@ The `FieldCodec` typeclass covers the MVP type vocabulary:
 | Type | Pass-through accepts | String coercion accepts |
 |---|---|---|
 | `String` | `String` | Boolean / numeric primitives (`.toString`) |
-| `Int` | `Int`; `Long` in `Int` range | clean integer strings like `"42"` |
-| `Double` | `Int` / `Long` / `Float` / `Double` | clean numeric strings like `"1.5"` |
-| `Boolean` | `Boolean` | `"true"` / `"false"` (case-insensitive, trimmed) |
+| `Int` | a whole number of each numeric type in `Int` range | number strings with a whole value like `"42"`, `"3.0"`, `"1e3"`, `"1_000"`, and `"$1,200"` |
+| `Double` | each numeric type | number strings like `"1.5"`, `".5"`, `"1e3"`, `"$2,399.50"`, `"inf"`, and `"nan"` |
+| `Boolean` | `Boolean`; the numbers 1 and 0 | `"true"` / `"yes"` / `"on"` / `"t"` / `"y"` / `"1"` and `"false"` / `"no"` / `"off"` / `"f"` / `"n"` / `"0"` (case-insensitive, trimmed) |
 | Scala enum (`FieldCodec.FlatEnum`) | already-decoded enum value | flat case name like `"joy"` |
 | Standard containers, e.g. `List[A]`, `Seq[A]`, `Vector[A]`, `Set[A]`, `Map[K, V]`, `Option[A]` | adapter-like `Map` / `Seq` / primitive tree, when nested types have `FieldCodec`s | clear primitive strings inside nested values |
 | Product with `zio.blocks.schema.Schema[A]` | adapter-like `Map` / `Seq` / primitive tree | clear primitive strings inside the product |
 
 Notably **not** auto-coerced:
 
-- `"yes"` / `"1"` / numerics → `Boolean` (rejected; no implicit coercion)
-- `Double` → `Int` (rejected; no silent truncation)
+- A number other than 1 and 0 → `Boolean` (rejected)
+- A number with a fraction, such as `3.5` or `"3.5"` → `Int` (rejected; no silent truncation)
+- A text that only Java reads as a number, such as `"3d"` or `"0x1p3"` → a number (rejected)
+
+[PORT_DIFFERENCES.md](port/PORT_DIFFERENCES.md) (section 17) compares this rule with upstream.
 
 Supported for structured fields:
 

@@ -1,7 +1,16 @@
 package dspy4s.programs
 
 import dspy4s.adapters.ChatAdapter
-import dspy4s.core.contracts.{:=, DspyError, DynamicValues, FieldSpec, RuntimeContext, SignatureLayout, TypeRef}
+import dspy4s.core.contracts.{
+  :=,
+  DspyError,
+  DynamicValues,
+  FieldSpec,
+  RuntimeContext,
+  SignatureLayout,
+  TypeRef,
+  ValidationError
+}
 import dspy4s.core.decisions.{Choice, DecisionSettings, Noul, Score}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{DecisionRequests, LanguageModel, LmMode, LmRequest, LmResponse}
@@ -43,7 +52,8 @@ class PredictTypeSafeSuite extends FunSuite:
     override def supportsDecisionRequests: Boolean                                             = true
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       requests = requests :+ request
-      DecisionRequests.parts(request).map(_ => DecisionRequests.response(answers, None, Some(id)))
+      request.decision.toRight(ValidationError("not a decision request"))
+        .map(_ => DecisionRequests.response(answers, None, Some(id)))
 
   /** A transport that keeps each request and gives `reply`. */
   private final class Stub(reply: HttpResponse) extends HttpTransport:
@@ -105,20 +115,19 @@ class PredictTypeSafeSuite extends FunSuite:
     assertEqualsDouble(output.urgent.confidence, 0.125, 1e-12)
     assertEquals(output.urgent.probability, Some(0.9))
     assertEqualsDouble(output.severity.value, 1.5, 1e-12)
-    assertEquals(output.severity.levelIn(PdSeverity.values.toIndexedSeq), Some(PdSeverity.Disruptive))
+    assertEquals(output.severity.level, Some(PdSeverity.Disruptive))
     assertEquals(output.severity.probabilities, Some(Map(0 -> 0.1, 1 -> 0.3, 2 -> 0.6)))
     assertEquals(output.category.value, PdTeam.technical, "the weights apply, not the pick of the model")
     assertEquals(output.category.probabilities, Some(Map("billing" -> 0.6, "technical" -> 0.4)))
-    val (state, questions) = DecisionRequests.parts(lm.requests.headOption.getOrElse(fail("no request")))
-      .fold(error => fail(error.message), identity)
+    val payload = lm.requests.headOption.flatMap(_.decision).getOrElse(fail("no decision request"))
     assertEquals(
-      state,
+      payload.state,
       json(
         """{"instructions": "Triage the ticket.", "input_fields": "1. `ticket` (str):", "inputs": {"ticket": "Checkout fails."}}"""
       )
     )
     assertEquals(
-      questions,
+      payload.questions,
       json(
         """{"urgent": {"instructions": "Is immediate action needed?", "type": "noul"},
           | "severity": {"instructions": "How severe is it?", "type": "score", "criteria": ["Minor", "Disruptive", "Critical"]},
@@ -166,7 +175,7 @@ class PredictTypeSafeSuite extends FunSuite:
     assertEquals(
       DynamicValues.recordGet(values, "rating").collect { case rating: DynamicValue.Record => rating }
         .flatMap(DynamicValues.recordGet(_, "level")),
-      Some(DynamicValue.Primitive(PrimitiveValue.Int(1)))
+      Some(text("good"))
     )
     assertEquals(first.raw.lmUsage.map(usage => (usage.promptTokens, usage.completionTokens)), Some((10L, 3L)))
     val second = run(lm)(DynamicPredict(layout)(DynamicValues.record("text" := "x")))

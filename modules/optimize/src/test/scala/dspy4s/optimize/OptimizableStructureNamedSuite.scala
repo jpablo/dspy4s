@@ -1,6 +1,6 @@
 package dspy4s.optimize
 
-import dspy4s.programs.optimization.{optimizableParameters, optimizableView}
+import dspy4s.programs.optimization.optimizableParameters
 
 import dspy4s.programs.optimization.OptimizableStructure
 
@@ -48,35 +48,6 @@ class OptimizableStructureNamedSuite extends FunSuite:
       Vector(pipeline.retrieve.optimizableParameters, pipeline.answer.optimizableParameters)
     )
     assertEquals(entries.map(_.layout), Vector(pipeline.retrieve.layout, pipeline.answer.layout))
-  }
-
-  test("identified and named reads reject a naming structure with divergent views") {
-    val canonical  = predict("canonical").optimizableView
-    val misleading = predict("misleading").optimizableView
-    val ps         = new OptimizableStructure.Of[Unit, 1]:
-      def arity(@annotation.unused program: Unit): Int                                                                 = 1
-      def inspect(program                 : Unit)                                                                      = Vector(canonical)
-      def replace(program                 : Unit, updates: Vector[dspy4s.programs.optimization.OptimizableParameters]) = program
-      override def inspectNamed(program   : Unit)                                                                      = Vector("leaf" -> misleading)
-
-    val identifiedError = intercept[IllegalArgumentException](ps.readIdentified(()))
-    val namedError      = intercept[IllegalArgumentException](ps.readNamed(()))
-    assert(identifiedError.getMessage.contains("must preserve the views and order"))
-    assert(namedError.getMessage.contains("must preserve the views and order"))
-  }
-
-  test("identified and named reads reject a naming structure with different arity") {
-    val canonical = predict("canonical").optimizableView
-    val ps        = new OptimizableStructure.Of[Unit, 1]:
-      def arity(@annotation.unused program: Unit): Int                                                                 = 1
-      def inspect(program                 : Unit)                                                                      = Vector(canonical)
-      def replace(program                 : Unit, updates: Vector[dspy4s.programs.optimization.OptimizableParameters]) = program
-      override def inspectNamed(program   : Unit)                                                                      = Vector.empty
-
-    val identifiedError = intercept[IllegalArgumentException](ps.readIdentified(()))
-    val namedError      = intercept[IllegalArgumentException](ps.readNamed(()))
-    assert(identifiedError.getMessage.contains("inspectNamed returned 0 entries but inspect returned 1"))
-    assert(namedError.getMessage.contains("inspectNamed returned 0 entries but inspect returned 1"))
   }
 
   test("optimizable IDs are preserved by replace") {

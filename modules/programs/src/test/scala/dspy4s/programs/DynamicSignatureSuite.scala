@@ -1,7 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
-import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, SignatureLayout}
+import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext}
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
@@ -30,10 +30,10 @@ class DynamicSignatureSuite extends FunSuite:
     override val name: String                                                                                    = "first-field"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("hi")))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      Right(ParsedOutput(values = DynamicValues.record(layout.outputFields.head.name := output.text)))
+      Right(ParsedOutput(values = DynamicValues.record(invocation.layout.outputFields.head.name := output.text)))
 
   private final class FixedLm(id0: String, reply: String) extends LanguageModel:
     override val id: String                                                                    = id0
@@ -84,6 +84,13 @@ class DynamicSignatureSuite extends FunSuite:
     val message = result.left.toOption.get.message
     assert(message.contains("context"), s"expected the missing fields named, got: $message")
     assert(message.contains("query"), s"expected the missing fields named, got: $message")
+  }
+
+  test("bridge accepts a target with an optional input, as its validating entry does") {
+    val target = DynamicSignature.parse("answer, note: Optional[str] -> verdict").toOption.get
+    assert(target.input(DynamicValues.record("answer" := "a")).isRight, "the entry accepts an absent optional input")
+    val result = DynamicSignature.bridge(qa, target)
+    assert(result.isRight, result.toString)
   }
 
   test("a bridged cross-fiber pipeline composes, stays parameter-transparent, and runs end-to-end") {

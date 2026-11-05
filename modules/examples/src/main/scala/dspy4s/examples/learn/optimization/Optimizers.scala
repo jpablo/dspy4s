@@ -8,7 +8,7 @@
   * (`OptimizableStructure` + `ProgramRunner`); the main below drives it with a runtime-string student built through
   * `DynamicSignature` (parse once, mint fresh types, build a `Predict` over them). `compile(student, trainset)` returns
   * an `OptimizationReport` whose `bestProgram` is the result. Program state is persisted with
-  * `dspy4s.optimize.ProgramPersistence` (PORT_GAPS G-4).
+  * `dspy4s.programs.optimization.ProgramPersistence` (PORT_GAPS G-4).
   */
 package dspy4s.examples.learn.optimization
 
@@ -20,13 +20,12 @@ import dspy4s.examples.Demo
 import dspy4s.optimize.{
   BootstrapFewShotWithRandomSearch,
   DemoCount,
-  ProgramPersistence,
   RandomSearchConfig,
   SearchCandidateCount
 }
 import dspy4s.programs.{DynamicSignature, ProgramRunner}
 import dspy4s.programs.strategies.DynamicPredict
-import dspy4s.programs.optimization.OptimizableStructure
+import dspy4s.programs.optimization.{OptimizableStructure, ProgramPersistence}
 
 object Optimizers:
 

@@ -2,7 +2,7 @@ package dspy4s.programs
 
 import dspy4s.adapters.JSONAdapter
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
-import dspy4s.core.contracts.{DspyError, RuntimeContext, SignatureLayout}
+import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.runtime.RuntimeEnvironment
@@ -35,7 +35,7 @@ class RequestOptionsMergeSuite extends FunSuite:
         messages = Vector(Message(role = MessageRole.User, text = Some("hi"))),
         requestOptions = opts
       ))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = rec("answer" := output.text)))
@@ -85,7 +85,7 @@ class RequestOptionsMergeSuite extends FunSuite:
   }
 
   test("end-to-end: Predict + JSONAdapter + capable LM puts response_format in the LM request") {
-    // The Predict path supplies outputJsonSchema (rendered from Schema[O]); JSONAdapter emits a
+    // The Predict path supplies outputJsonSchema (from the Schema[O] of the output); JSONAdapter emits a
     // response_format that the engine merges into request.options. The capturing LM declares
     // supportsResponseSchema = true.
     val sig  = dspy4s.signatures.Signature.derived[MCQAInput, MCQAOutput]("QA")

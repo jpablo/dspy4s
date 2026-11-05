@@ -1,6 +1,6 @@
 package dspy4s.programs
 
-import dspy4s.adapters.contracts.Adapter
+import dspy4s.adapters.contracts.{Adapter, NativeTools}
 import dspy4s.adapters.{ChatAdapter, JSONAdapter}
 import dspy4s.core.contracts.{
   :=,
@@ -14,8 +14,8 @@ import dspy4s.core.contracts.{
   ToolCall
 }
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, MessageRole}
-import dspy4s.lm.runtime.ProviderLanguageModel
+import dspy4s.lm.contracts.{LanguageModel, LmCapabilities, LmMode, LmOutput, LmRequest, LmResponse, MessageRole}
+import dspy4s.lm.providers.{HttpResponse, HttpStreamResponse, HttpTransport, OpenAiClient, OpenAiLanguageModel}
 import dspy4s.programs.contracts.{Prediction, ProgramCall, ToolFunction}
 import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.strategies.ReActV2
@@ -25,6 +25,7 @@ import munit.FunSuite
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicReference
 
 /** ReActV2 (experimental; upstream `dspy.ReActV2` and the cases of `tests/predict/test_react_v2.py`). The upstream
@@ -157,7 +158,7 @@ class ReActV2Suite extends FunSuite:
       chat("I can answer now.", calls("submit" -> """{"answer": "found cats"}"""))
     ))
     val result =
-      run(lm, ChatAdapter(useNativeFunctionCalling = false))(ReActV2(qa, Vector(lookup))((question = "cats")))
+      run(lm, ChatAdapter(native = NativeTools(enabled = false)))(ReActV2(qa, Vector(lookup))((question = "cats")))
         .fold(error => fail(error.message), identity)
     assertEquals(result.output.answer, "found cats")
     assertEquals(ReActV2.terminationReason(result), Some(TerminationReason.Submit))
@@ -168,8 +169,9 @@ class ReActV2Suite extends FunSuite:
     val lm = Script(Vector(
       chat("I can answer now.", """{"tool_calls": [{"name": "submit", "arguments": {"answer": "done"}}]}""")
     ))
-    val result = run(lm, ChatAdapter(useNativeFunctionCalling = false))(ReActV2(qa, Vector.empty)((question = "cats")))
-      .fold(error => fail(error.message), identity)
+    val result =
+      run(lm, ChatAdapter(native = NativeTools(enabled = false)))(ReActV2(qa, Vector.empty)((question = "cats")))
+        .fold(error => fail(error.message), identity)
     assertEquals(result.output.answer, "done")
     assertEquals(ReActV2.terminationReason(result), Some(TerminationReason.Submit))
   }
@@ -218,8 +220,9 @@ class ReActV2Suite extends FunSuite:
         """{"next_thought": "Forced final.", "tool_calls": {"tool_calls": [{"name": "submit", "args": {"answer": "forced"}}]}}"""
       ))
     ))
-    val result = run(lm, JSONAdapter(useNativeFunctionCalling = true))(ReActV2(qa, Vector.empty)((question = "cats")))
-      .fold(error => fail(error.message), identity)
+    val result =
+      run(lm, JSONAdapter(native = NativeTools(enabled = true)))(ReActV2(qa, Vector.empty)((question = "cats")))
+        .fold(error => fail(error.message), identity)
     assertEquals(result.output.answer, "forced")
     assertEquals(ReActV2.terminationReason(result), Some(TerminationReason.ForcedSubmit))
     assert(!options(lm.requests(1)).contains("tool_choice"), options(lm.requests(1)).toString)
@@ -234,8 +237,9 @@ class ReActV2Suite extends FunSuite:
       ),
       functionCalling = true
     )
-    val result = run(lm, ChatAdapter(useNativeFunctionCalling = true))(ReActV2(qa, Vector(lookup))((question = "cats")))
-      .fold(error => fail(error.message), identity)
+    val result =
+      run(lm, ChatAdapter(native = NativeTools(enabled = true)))(ReActV2(qa, Vector(lookup))((question = "cats")))
+        .fold(error => fail(error.message), identity)
     assertEquals(result.output.answer, "found cats")
     val messages = messagesOf(result)
     assertEquals(toolCallsOf(messages(0)).map(_.id), Vector(Some("call_provider_1")))
@@ -263,7 +267,7 @@ class ReActV2Suite extends FunSuite:
       ),
       functionCalling = true
     )
-    val adapter = ChatAdapter(useNativeFunctionCalling = true, parallelToolCalls = Some(true))
+    val adapter = ChatAdapter(native = NativeTools(enabled = true, parallelToolCalls = Some(true)))
     val result  = run(lm, adapter)(ReActV2(qa, Vector(lookup))((question = "cats and dogs")))
       .fold(error => fail(error.message), identity)
     assertEquals(result.output.answer, "found cats and found dogs")
@@ -280,8 +284,10 @@ class ReActV2Suite extends FunSuite:
     )
   }
 
-  test("an output named history or termination_reason, and a tool named submit, fail at construction") {
-    Vector("history", "termination_reason").foreach { reserved =>
+  test(
+    "an output with a reserved name of the result or of the history event, and a tool named submit, fail at construction"
+  ) {
+    Vector("history", "termination_reason", "next_thought", "tool_calls", "tool_call_results").foreach { reserved =>
       val error =
         intercept[IllegalArgumentException](ReActV2(dynamic(s"question -> answer, $reserved: str"), Vector.empty))
       assert(error.getMessage.contains(reserved), error.getMessage)
@@ -391,8 +397,9 @@ class ReActV2Suite extends FunSuite:
       ),
       functionCalling = true
     )
-    val result = run(lm, ChatAdapter(useNativeFunctionCalling = true))(ReActV2(qa, Vector(lookup))((question = "cats")))
-      .fold(error => fail(error.message), identity)
+    val result =
+      run(lm, ChatAdapter(native = NativeTools(enabled = true)))(ReActV2(qa, Vector(lookup))((question = "cats")))
+        .fold(error => fail(error.message), identity)
     assertEquals(result.output.answer, "forced")
     assertEquals(ReActV2.terminationReason(result), Some(TerminationReason.ForcedSubmit))
     assert(!options(lm.requests(0)).contains("tool_choice"), options(lm.requests(0)).toString)
@@ -422,16 +429,27 @@ class ReActV2Suite extends FunSuite:
       s"[[ ## next_thought ## ]]\nForced final.\n\n[[ ## tool_calls ## ]]\n${calls("submit" ->
           """{"answer": "forced"}""")}\n\n[[ ## completed ## ]]"
     )
-    val sent  = AtomicReference(Vector.empty[DynamicValue])
-    val model = ProviderLanguageModel(
-      id = "provider",
-      mode = LmMode.Chat,
-      invoke = payload =>
-        val index = sent.updateAndGet(_ :+ payload).size - 1
-        val reply = rec("role" := "assistant", "content" := replies.lift(index).getOrElse(""))
-        Right(rec("choices" -> DynamicValue.Sequence(Chunk(rec("message" -> reply)))))
-      ,
-      defaultOptions = rec("reasoning_effort" := "high")
+    val sent      = AtomicReference(Vector.empty[DynamicValue])
+    val codec     = Schema.dynamic.jsonCodec
+    val transport = new HttpTransport:
+      override def sendJson(url: String, headers: Map[String, String], body: String): Either[DspyError, HttpResponse] =
+        val payload = codec.decode(body.getBytes(StandardCharsets.UTF_8)).fold(error => fail(error.toString), identity)
+        val index   = sent.updateAndGet(_ :+ payload).size - 1
+        val reply   = rec("role" := "assistant", "content" := replies.lift(index).getOrElse(""))
+        val answer  = rec("choices" -> DynamicValue.Sequence(Chunk(rec("message" -> reply))))
+        Right(HttpResponse(200, Map.empty, new String(codec.encode(answer), StandardCharsets.UTF_8)))
+      override def streamSse(
+          url    : String,
+          headers: Map[String, String],
+          body   : String
+      ): Either[DspyError, HttpStreamResponse] =
+        Left(RuntimeError("test", "the stream path is not used"))
+    // No capability, so the adapter sends the tools in the prompt, as for the other models of this suite.
+    val model = OpenAiLanguageModel(
+      model = "provider",
+      client = OpenAiClient(apiKey = "x", transport = transport),
+      defaultOptions = rec("reasoning_effort" := "high"),
+      capabilities = Some(LmCapabilities.none)
     )
     val result = run(model)(ReActV2(qa, Vector.empty)((question = "cats"))).fold(error => fail(error.message), identity)
     assertEquals(result.output.answer, "forced")

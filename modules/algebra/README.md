@@ -102,7 +102,8 @@ state no laws that effects can break. Use a type of the strong branch only when 
 | `LmUsage`, `RawPrediction`, `RuntimeDelta` | `Monoid` |
 | `Executed`, `Prediction` | `ScalaMonad`: it runs two steps and keeps the records of the two steps. |
 | `ProgramCall`, `SizedVector` | `Endofunctor` |
-| `OptimizableLeaf`, `OptimizableStructure` | `Lens` on the parameters of a program |
+| `OptimizableLeaf` | `Lens` on the parameters of one leaf |
+| `Program` | `Lens` on the complete parameter vector, whose size is the grade |
 | `Mode` | `Monoid` and `MonoidAction` on `Module` |
 | `Module` | `OrderedTensorOps` |
 | `Program` | `NatGradedCategory` and `OrderedFanout` |

@@ -209,6 +209,14 @@ class Phase3SurfacesSuite extends FunSuite:
       case other                  => fail(s"expected NotFoundError, got: $other")
   }
 
+  test("Signature.fromStringDynamic: the decode does not require an optional field") {
+    val sig = Signature.fromStringDynamic("question -> answer, note: Optional[str]").toOption.get
+    assertEquals(sig.outputShape.decode(rec("answer" := "4")), Right(rec("answer" := "4")))
+    sig.outputShape.decode(rec("note" := "x")) match
+      case Left(err: NotFoundError) => assertEquals(err.message, "Missing required fields: answer")
+      case other                    => fail(s"expected NotFoundError, got: $other")
+  }
+
   test("Signature.fromString literal produces a named tuple with scalar field types") {
     // The literal is parsed at compile time into NamedTuple I/O: (question: String) -> (answer: Boolean).
     val sig = Signature.fromString("question -> answer: bool")

@@ -2,9 +2,9 @@
 
 **Branch:** `refactor/composite-primitives`
 **Status:** steps 1–5 and all of step 6 implemented on the branch (full `sbt test` green): 6.1 (`bestOf`),
-6.2 (`id`/`>>>`/`fanout`), 6.3 (`AgentLoop`/`TrajectoryAgent`, with `InterpretedTrajectoryAgent` for
-ReAct/CodeAct), 6.4 (generic
-`augment`), 6.5 (`mode` middleware monoid). The authoritative step-6 contract is
+6.2 (`id`/`>>>`/`fanout`), 6.3 (`AgentLoop`), 6.4 (generic
+`augment`), 6.5 (`mode` middleware monoid). A later simplification (2026-11-01) removed `TrajectoryAgent`,
+`InterpretedTrajectoryAgent`, and `ActionInterpreter`: `ReAct` is a plain `Module` on `AgentLoop.run`. The authoritative step-6 contract is
 [algebra-2-program-composition.md](algebra-2-program-composition.md); the pre-grill notes lower in this file
 are superseded where they disagree with that spec. Remaining work is optional/additive (CIO substrate, etc.).
 **Scope:** behavior-preserving extraction of the shared primitives hiding inside the composite
@@ -40,8 +40,8 @@ shrank net while the duplication was removed.
   as the general `Thought`-form so the generalization stays additive.
 
 **Step 6 (complete):** 6.1 (`Refine`↔`BestOfN` via `AttemptSelection.bestOf`), 6.2 (`id`/`>>>`/`fanout` in
-`Compose.scala`), 6.3 (`AgentLoop.run` + `TrajectoryAgent`, plus the ReAct/CodeAct
-`InterpretedTrajectoryAgent` transition; RLM and PoT use `AgentLoop` directly),
+`Compose.scala`), 6.3 (`AgentLoop.run`; `TrajectoryAgent` and `InterpretedTrajectoryAgent` existed for ReAct/CodeAct
+until the simplification of 2026-11-01),
 6.4 (`augment` via `OutputAugmentation.decodeAugmented`), and 6.5 (`mode` — the `Mode`/`Moded` control
 middleware monoid) are all landed and law-tested. Remaining is optional/additive: the kyo-compat CIO substrate
 migration, `augment` closing position, execution-wrapping modes. Sequential usage merge now ships as part of the
@@ -297,6 +297,11 @@ def truncateOnOverflow[S, A](view: Vector[S], maxAttempts: Int)(render: Vector[S
     case result => (result, view)
 ```
 
+**Later change (2026-11-01):** `truncateOnOverflow` now takes one closure over the view
+(`run: Vector[S] => Either[DspyError, A]`) and the default `TrajectoryTruncation.MaxAttempts`. `ReAct.forward` and the
+private step of `ReAct` call it directly. `reactWithTruncation`, `extractWithTruncation`, and `ReAct.renderTrajectory`
+no longer exist. The rest of this section is the plan at that time.
+
 **Migrations (semantics preserved by how each caller maps the result):**
 - `ReAct.reactWithTruncation`: `truncateOnOverflow(view, 3)(ReAct.renderTrajectory)(run)` then map
   `(Right(p), v) => (Some(p), v)`; `(Left(_: CWE), v) => (None, v)` (break the loop);
@@ -323,13 +328,11 @@ Step 6 is now underway on this branch. The authoritative contract is
 annotated with their current (post-grill, post-6.1) status.
 
 - **The agentic `loop`. DONE (6.3, commit `6faa94e`).** Extracted `AgentLoop.run` (bounded
-  `Continue | Done | exhausted` iteration) + `TrajectoryAgent.runAndExtract` (ReAct/CodeAct loop+extract);
-  ReAct/CodeAct/RLM all run on them. ReAct and CodeAct additionally share `InterpretedTrajectoryAgent`'s final
-  generate → prepare → interpret → record → decide transition, encoded as phase states with state-specific
-  legal-successor ADTs, and the `ActionInterpreter` boundary. **Corrected:** the universal
-  `env.step`/`classify`/`render` decomposition was NOT adopted (done-detection and terminal shapes still differ);
-  associated types retain each action language, while RLM and PoT stay directly on `AgentLoop`.
-  `AgentLoopLawSuite`, `TrajectoryAgentLawSuite`, and `InterpretedTrajectoryAgentLawSuite` pin these layers. The control
+  `Continue | Done | exhausted` iteration); ReAct and RLM run on it. **Corrected:** the universal
+  `env.step`/`classify`/`render` decomposition was NOT adopted (done-detection and terminal shapes still differ). The
+  trajectory templates of this step (`TrajectoryAgent`, `InterpretedTrajectoryAgent`, and `ActionInterpreter`) were
+  removed on 2026-11-01, because `ReAct` was the one implementation. `AgentLoopLawSuite` and `ReActSuite` pin the
+  rules. The control
   middleware (`mode`) and the kyo-compat substrate remain later/optional; the
   [substrate section](#step-6-substrate-kyo-compat-evaluated-not-yet-adopted) stands.
 - **Full `Refine` ↔ `BestOfN` unification. DONE (6.1, commit `96c9072`).** Both reduce to the shared

@@ -3,7 +3,7 @@ package dspy4s.programs
 import zio.blocks.schema.Schema
 
 import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, FormattedPrompt, ParsedOutput}
-import dspy4s.core.contracts.{DspyError, RuntimeContext, SignatureLayout}
+import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
@@ -23,7 +23,7 @@ class BoundLmSuite extends FunSuite:
     override val name: String                                                                                    = "echo"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("hi")))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = rec("answer" := output.text)))
@@ -63,7 +63,7 @@ class BoundLmSuite extends FunSuite:
   test("Predict[I,O]: withLm pins a bound lm used in preference to ambient") {
     val sig    = Signature.derived[BlmInput, BlmOutput]("QA")
     val module = Predict(sig).withLm(boundLm)
-    assertEquals(module.boundLm.map(_.id), Some("bound"))
+    assertEquals(module.lm.map(_.id), Some("bound"))
     val out = underAmbient(module(BlmInput("x")))
     assertEquals(out.toOption.get.output.answer, "BOUND")
   }

@@ -4,10 +4,9 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.SignatureLayout
 
 object SignatureDsl:
-  private val parser = SignatureParser()
 
-  def parse(dsl: String, name: String = "StringSignature"): Either[DspyError, SignatureLayout] =
-    parser.parse(dsl, name)
+  def parse(dsl: String, name: String = SignatureParser.DefaultName): Either[DspyError, SignatureLayout] =
+    SignatureParser.parse(dsl, name)
 
   def defaultInstructions(layout: SignatureLayout): String =
     val inputs  = layout.inputFields.map(f => s"`${f.name}`").mkString(", ")

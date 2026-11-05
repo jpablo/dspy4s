@@ -1,5 +1,6 @@
 package dspy4s.mcp
 
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeError
 import io.modelcontextprotocol.client.McpClient
 import io.modelcontextprotocol.client.McpSyncClient
@@ -15,6 +16,9 @@ import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import java.time.Duration
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicReference
 import java.util.function.Function as JFunction
 import scala.jdk.CollectionConverters.*
 
@@ -37,12 +41,17 @@ class McpSdkPagingSuite extends FunSuite:
     private val mapper                             = McpJsonDefaults.getMapper()
     @volatile private var inbound: Option[Handler] = None
 
+    /** Opens when the server gets a call of `hang`. The server does not answer that call. */
+    val hung: CountDownLatch = new CountDownLatch(1)
+
     override def connect(handler: Handler): Mono[Void] = Mono.fromRunnable(() => inbound = Some(handler))
 
     override def sendMessage(message: McpSchema.JSONRPCMessage): Mono[Void] =
       message match
-        case request: McpSchema.JSONRPCRequest => reply(answer(request))
-        case _                                 => ()
+        case request: McpSchema.JSONRPCRequest => request.params() match
+            case call: McpSchema.CallToolRequest if call.name() == "hang" => hung.countDown()
+            case _                                                        => reply(answer(request))
+        case _ => ()
       Mono.empty()
 
     override def closeGracefully(): Mono[Void] = Mono.empty()
@@ -108,7 +117,7 @@ class McpSdkPagingSuite extends FunSuite:
       body(client)
     finally client.close()
 
-  private def str(text: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(text))
+  private def primitive(value: PrimitiveValue): DynamicValue = DynamicValue.Primitive(value)
 
   test("listTools follows the next cursor to the last page") {
     val pages = Map(
@@ -138,10 +147,48 @@ class McpSdkPagingSuite extends FunSuite:
         DynamicValue.Primitive(PrimitiveValue.Double(2.5))
       )),
       "none"   -> DynamicValue.Null,
-      "nested" -> DynamicValue.Record(Chunk("z" -> str("x"), "y" -> str("w")))
+      "nested" -> DynamicValue.Record(Chunk("z" -> DynamicValues.string("x"), "y" -> DynamicValues.string("w")))
     ))
     val result = withClient(Map.empty)(client => McpToolClient.fromSync(client).callTool("echo_arguments", arguments))
-    assertEquals(result, Right(McpCallResult(Vector(McpContent.Text("ok")), structuredContent = Some(arguments))))
+    assertEquals(result, Right(McpCallResult(Vector("ok"), structuredContent = Some(arguments))))
+  }
+
+  test("a null in a list stays a null after a number or a boolean") {
+    val arguments = DynamicValue.Record(Chunk(
+      "ints" -> DynamicValue.Sequence(Chunk(
+        primitive(PrimitiveValue.Int(1)),
+        DynamicValue.Null,
+        primitive(PrimitiveValue.Int(3))
+      )),
+      "flags"   -> DynamicValue.Sequence(Chunk(primitive(PrimitiveValue.Boolean(true)), DynamicValue.Null)),
+      "doubles" -> DynamicValue.Sequence(Chunk(primitive(PrimitiveValue.Double(1.5)), DynamicValue.Null)),
+      "longs"   -> DynamicValue.Sequence(Chunk(primitive(PrimitiveValue.Long(5000000000L)), DynamicValue.Null))
+    ))
+    val result = withClient(Map.empty)(client => McpToolClient.fromSync(client).callTool("echo_arguments", arguments))
+    assertEquals(result, Right(McpCallResult(Vector("ok"), structuredContent = Some(arguments))))
+  }
+
+  test("an interrupt of the caller during a call goes up as an InterruptedException (upstream: CancelledError)") {
+    val transport = InMemoryTransport(Map.empty)
+    val client    = McpClient.sync(transport).requestTimeout(Duration.ofSeconds(30)).build()
+    try
+      val _       = client.initialize()
+      val tool    = McpToolClient.fromSync(client)
+      val outcome = new AtomicReference[String]("no outcome")
+      val caller  = new Thread(() =>
+        outcome.set(
+          try tool.callTool("hang", DynamicValue.Record.empty).toString
+          catch
+            case _: InterruptedException =>
+              s"InterruptedException, interrupt status ${Thread.currentThread().isInterrupted}"
+        )
+      )
+      caller.start()
+      assert(transport.hung.await(20, TimeUnit.SECONDS), "the server got no call")
+      caller.interrupt()
+      caller.join(20000)
+      assertEquals(outcome.get(), "InterruptedException, interrupt status false")
+    finally client.close()
   }
 
   test("a JSON-RPC error of tools/call gives a Left with the message and the data of the error") {

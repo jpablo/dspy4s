@@ -2,14 +2,15 @@
   *
   * Source: docs/docs/tutorials/optimizer_tracking/index.md Upstream:
   * https://github.com/stanfordnlp/dspy/blob/main/docs/docs/tutorials/optimizer_tracking/index.md Status: translated
-  * (the optimizer run + its observability). MLflow autolog (snippet 1) has no dspy4s equivalent; its role — observing
-  * the optimization process — maps onto a `CallbackHandler` registered in the `RuntimeContext` (the general dspy4s
-  * observability seam; see tutorials/observability). MIPROv2 (snippet 2) is ported (`dspy4s.optimize.MIPROv2`); the
-  * GSM8K dataset is swapped for a small hand-built trainset (no `dspy.datasets`, PORT_GAPS G-21). The MLflow artifact
-  * reload (snippet 3) maps onto `ProgramPersistence.load` (PORT_GAPS G-4).
+  * (the optimizer run + its observability). MLflow autolog (snippet 1) has no dspy4s equivalent. A `CallbackHandler` in
+  * the `RuntimeContext` observes the optimization process in its place (the general dspy4s observability contract; see
+  * tutorials/observability). MIPROv2 (snippet 2) is ported (`dspy4s.optimize.MIPROv2`); the GSM8K dataset is swapped
+  * for a small hand-built trainset (no `dspy.datasets`, PORT_GAPS G-21). The MLflow artifact reload (snippet 3) maps
+  * onto `ProgramPersistence.load` (PORT_GAPS G-4).
   *
   * Delta from Python: dspy4s MIPROv2 takes explicit knobs (no `auto="light"` run mode), and dspy4s has no
-  * experiment-tracking server — the callback stream is where you wire logging / metrics export.
+  * experiment-tracking server. The callback stream is where you connect logs and metrics. The student is a
+  * `DynamicPredict`, and upstream uses `ChainOfThought`.
   */
 package dspy4s.examples.tutorials.optimizer_tracking
 
@@ -19,7 +20,8 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.evaluate.metrics.ExactMatch
 import dspy4s.examples.Demo
-import dspy4s.optimize.{CandidateCount, DemoCount, MIPROv2, MIPROv2Config, ProgramPersistence, TrialCount}
+import dspy4s.optimize.{CandidateCount, DemoCount, MIPROv2, MIPROv2Config, TrialCount}
+import dspy4s.programs.optimization.ProgramPersistence
 import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.signatures.Signature
 
@@ -30,7 +32,7 @@ object OptimizerTracking:
   // ── Snippet 1 — enable tracking ──
   // | mlflow.dspy.autolog(log_compiles=True, log_evals=True, log_traces_from_compile=True)
   // | mlflow.set_tracking_uri("http://localhost:5000"); mlflow.set_experiment("DSPy-Optimization")
-  // dspy4s has no MLflow integration; the observability seam is a `CallbackHandler` in the RuntimeContext (the
+  // dspy4s has no MLflow integration; the observability contract is a `CallbackHandler` in the RuntimeContext (the
   // analogue of `dspy.configure(callbacks=[...])`). This one counts LM calls during the otherwise-silent
   // optimizer run — swap it for a logger / tracer / metrics exporter to "track" however you need.
   // --8<-- [start:tracking-callback]
@@ -79,7 +81,7 @@ object OptimizerTracking:
         maxBootstrappedDemos = DemoCount(2),
         maxLabeledDemos = DemoCount(2)
       ))
-        .compile(student, trainset, teacher = Some(student), valset = Some(trainset))
+        .compile(student, trainset)
         .map(report => (report.bestProgram, tracker.calls))
     }
   // --8<-- [end:optimize-with-tracking]
@@ -98,8 +100,6 @@ object OptimizerTracking:
 @main def optimizerTrackingMain(): Unit =
   Demo.withLm {
     OptimizerTracking.optimizeWithTracking(OptimizerTracking.student()) match
-      case Right((optimized, calls)) =>
-        println(s"optimized program: ${optimized.moduleName}")
-        println(s"tracked $calls LM calls during optimization")
-      case Left(err) => println(s"optimization failed: ${err.message}")
+      case Right((_, calls)) => println(s"tracked $calls LM calls during optimization")
+      case Left(err)         => println(s"optimization failed: ${err.message}")
   }

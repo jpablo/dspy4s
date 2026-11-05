@@ -31,9 +31,8 @@ import zio.blocks.schema.DynamicValue
   * They are siblings rather than wrappers: each configures its own shared [[PredictEngine]]. The dynamic surface is
   * needed wherever there is no static `I`/`O` to carry, including:
   *
-  *   - composite programs whose internal generations have runtime-built signatures, such as [[MultiChainComparison]]
-  *     and the internal passes in [[ReAct]];
-  *   - optimizer helper generations whose proposed signature exists only as a [[SignatureLayout]].
+  *   - composite programs whose internal generations have runtime-built signatures, such as [[ReActV2]];
+  *   - metric judges and optimizer helper generations whose signature exists only as a [[SignatureLayout]].
   *
   * For USER programs over runtime-string signatures, prefer [[DynamicSignature]] (`parse` + `predict()`): it mints
   * fresh input/output types with their decoder, so the program composes and optimizes through the same machinery as
@@ -47,8 +46,6 @@ import zio.blocks.schema.DynamicValue
   *   module name used in callbacks/trace/history (defaults to `"predict"`)
   * @param runtime
   *   resolves the model and adapter from the ambient [[dspy4s.core.contracts.RuntimeContext]]
-  * @param outputJsonSchema
-  *   see field comment below
   * @param config
   *   module-level LM option bag (see field comment below)
   */
@@ -57,14 +54,9 @@ final case class DynamicPredict(
     demos  : Vector[Example] = Vector.empty,
     name   : Option[String]  = None,
     runtime: ProgramRuntime  = SettingsProgramRuntime.default,
-    /** Optional pre-rendered JSON Schema string for the output, threaded into [[AdapterInvocation]]. A [[Predict]]
-      * derives the same input for its own engine from `signature.outputShape.jsonSchemaString`; users who construct
-      * `DynamicPredict` directly usually leave it `None`.
-      */
-    outputJsonSchema: Option[String] = None,
     /** Module-level LM option bag, the analogue of Python's `dspy.Predict(signature, **config)` `self.config`. Merged
       * *under* the per-call `ProgramCall.config` (per-call keys win on collision), so it supplies defaults a call may
-      * override. Empty by default — then the merged options are exactly the per-call config.
+      * override. Empty by default.
       */
     config: DynamicValue.Record = DynamicValue.Record.empty,
     /** Optional per-module bound LM (Python's `set_lm`/`get_lm`). When set, this predictor uses it in preference to the
@@ -73,44 +65,33 @@ final case class DynamicPredict(
       * `runtime`). See PORT_GAPS G-3.
       */
     lm: Option[LanguageModel] = None,
-    /** Tool schemas this predictor exposes to the model. Passed through to the adapter; only an adapter with native
-      * function-calling enabled and a `tool_calls` output field acts on them. Pure [[ToolSpec]] data (no invoke
-      * closures) — the executable bodies stay on the calling program. Not serialized state. See G-7b.
+    /** The tools of the model, which go to the adapter. They apply only to a layout with a tool calls output field.
+      * When native function calling is active, the request has them as provider tools. Else the prompt shows the text
+      * of each tool as an input field `tools`, unless the layout already has such an input
+      * ([[dspy4s.adapters.contracts.NativeTools]]). Pure [[ToolSpec]] data (no invoke closures): the executable bodies
+      * stay on the calling program. Not serialized state. See G-7b.
       */
     tools: Vector[ToolSpec] = Vector.empty,
     /** Experimental. The explicit settings of the decision outputs, by output name (upstream `Predict.fields`). See
       * [[Predict.decisions]].
       */
     decisions: Map[String, DecisionSettings] = Map.empty
-) extends DynamicModule:
+) extends DynamicModule,
+      DecisionOutputs[DynamicPredict]:
 
   override val moduleName: String = name.getOrElse("predict")
 
-  // The key is the data of this leaf's `OptimizableMetadata`, so an optimizer finds the trace entries of the leaf.
-  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record, DynamicValue.Record] =
+  // The key is the metadata of this leaf, so an optimizer finds the trace entries of the leaf.
+  override protected val lifecycle: ModuleLifecycle[DynamicValue.Record] =
     ModuleLifecycle.dynamicPredictor(PredictorKey.from(moduleName, layout))
 
   private val engine =
-    PredictEngine(layout, demos, moduleName, runtime, outputJsonSchema, config, lm, tools, decisions = decisions)
+    PredictEngine(layout, demos, moduleName, runtime, config = config, lm = lm, tools = tools, decisions = decisions)
 
-  /** Experimental. This predictor with the explicit `settings` of the decision output `field` (upstream
-    * `Predict.fields[field]`). The settings replace the earlier settings of the field. A `Left` comes when the plan of
-    * the layout rejects the settings ([[dspy4s.core.decisions.DecisionPlan.of]]).
-    */
-  def withDecision(field: String, settings: DecisionSettings): Either[DspyError, DynamicPredict] =
-    PredictEngine.withDecision(layout, decisions, field, settings).map(updated => copy(decisions = updated))
+  override protected def decisionLayout: SignatureLayout = layout
 
-  /** Experimental. The effective criteria of the decision output `field` (upstream `get_criteria`): the explicit
-    * criteria, else the default of its kind. A `Left` comes when `field` is not a decision output.
-    */
-  def criteria(field: String): Either[DspyError, Option[DynamicValue]] =
-    PredictEngine.criteria(layout, decisions, field)
-
-  /** Experimental. This predictor with the criteria of the decision output `field` set to `criteria` (upstream
-    * `set_criteria`). The other settings of the field stay. A `Left` comes when the plan rejects the criteria.
-    */
-  def withCriteria(field: String, criteria: DynamicValue): Either[DspyError, DynamicPredict] =
-    PredictEngine.withCriteria(layout, decisions, field, criteria).map(updated => copy(decisions = updated))
+  override protected def withDecisions(updated: Map[String, DecisionSettings]): DynamicPredict =
+    copy(decisions = updated)
 
   override protected def forwardDynamic(call: ProgramCall[DynamicValue.Record])(using
       RuntimeContext

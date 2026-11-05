@@ -1,12 +1,11 @@
 package dspy4s.programs
 
 import dspy4s.adapters.ChatAdapter
-import dspy4s.adapters.contracts.ToolParameterSpec
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.TypeRef
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
@@ -41,18 +40,23 @@ class TypedToolCallsSuite extends FunSuite:
       ))
 
   test("Predict decodes native tool_calls into a Vector[ToolCall] output field") {
-    val signature = Signature.derived[Ask, Plan]("QA").markToolCalls("toolCalls")
+    val signature = Signature.derived[Ask, Plan]("QA")
     val tools     = Vector(
       ToolSpec(
         "search",
         Some("Search the web"),
-        Vector(ToolParameterSpec("query", TypeRef.string, Some("the query"), required = true))
+        DynamicValues.record(
+          "type"       := "object",
+          "properties" ->
+            DynamicValues.record("query" -> DynamicValues.record("type" := "string", "description" := "the query")),
+          "required" := List("query")
+        )
       )
     )
     val predict = Predict(signature = signature, tools = tools)
 
     RuntimeEnvironment.withSettings(
-      RuntimeContext(lm = Some(new ToolLm), adapter = Some(ChatAdapter(useNativeFunctionCalling = true)))
+      RuntimeContext(lm = Some(new ToolLm), adapter = Some(ChatAdapter(native = NativeTools(enabled = true))))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val result           = predict(Ask("capital of belgium?"))

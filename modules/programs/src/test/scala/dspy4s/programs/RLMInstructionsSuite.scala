@@ -5,7 +5,7 @@ import dspy4s.core.contracts.{
 }
 import dspy4s.core.runtime.{LocalPythonInterpreter, RuntimeEnvironment}
 import dspy4s.programs.contracts.ToolFunction
-import dspy4s.programs.strategies.{Predict, RLM}
+import dspy4s.programs.strategies.{Predict, RLM, RLMModel}
 import dspy4s.signatures.Signature
 import munit.FunSuite
 
@@ -32,7 +32,7 @@ class RLMInstructionsSuite extends FunSuite:
 
   private val signature = Signature.fromString("context, query -> answer")
 
-  private def instructionsOf(predict: Predict[RLM.ActionInputs, RLM.ActionStep]): String =
+  private def instructionsOf(predict: Predict[RLMModel.ActionInputs, RLMModel.ActionStep]): String =
     predict.signature.layout.instructions.getOrElse("")
 
   private def withInstructions[I, O](rlm: RLM[I, O], text: String): RLM[I, O] =

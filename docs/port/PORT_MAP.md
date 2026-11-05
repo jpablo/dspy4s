@@ -65,13 +65,13 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
 | `parallel.py` | `Parallel.scala` | ✅ ported |
 | `aggregation.py` | `Aggregation.scala` | ✅ ported. `Aggregation.majority` mirrors Python; default normalizer is a minimal trim-and-blank-check (Python's default uses the heavier `normalize_text` from `dspy.evaluate`). Pass a custom normalizer for full parity. |
 | `multi_chain_comparison.py` | `MultiChainComparison.scala` | ✅ ported, `MultiChainComparison[I, O]`. Python's `__call__(attempts, **inputs)` dual input is modeled as `ProgramCall[MultiChainInput[I]]`: the semantic input contains the base input plus candidate completions, while the uniform envelope carries execution controls. `compare(input, attempts)` is the convenience entry. Output is `WithField[O, "rationale", String]`. |
-| `parameter.py` | — | **Not ported.** Python's `Parameter` / `named_parameters` introspection enables optimizers to walk a program's mutable state generically. dspy4s uses the `OptimizableStructure[P]` / `OptimizableLeaf[P]` typeclass pair instead: Scala 3 Mirror derivation enumerates `OptimizableView`s, separates read-only `OptimizableMetadata` from `OptimizableParameters` (instructions/demos/config), and immutably replaces only those parameters. An earlier `Parameter` + `BaseModule` + `ModuleGraphWalker` port shipped in Phase 1 and was removed; the interim `PredictOps` typeclass was itself superseded and removed in G-1 P6 (commit `1657f9c`), leaving `OptimizableStructure` as the sole introspection typeclass. |
+| `parameter.py` | — | **Not ported.** Python's `Parameter` / `named_parameters` introspection enables optimizers to walk a program's mutable state generically. dspy4s uses the `OptimizableStructure[P]` / `OptimizableLeaf[P]` typeclass pair instead: Scala 3 Mirror derivation enumerates `OptimizableView`s, separates read-only metadata (`PredictorKey`) from `OptimizableParameters` (instructions/demos/config), and immutably replaces only those parameters. An earlier `Parameter` + `BaseModule` + `ModuleGraphWalker` port shipped in Phase 1 and was removed; the interim `PredictOps` typeclass was itself superseded and removed in G-1 P6 (commit `1657f9c`), leaving `OptimizableStructure` as the sole introspection typeclass. |
 | `retry.py` | — | **Skipped.** The Python file is entirely commented-out dead code (no `Retry` class is exported from `dspy.predict`). Not a port gap. |
 | `knn.py` | `programs/retrievers/KNN.scala` | ✅ ported (G-10, commit `086e937`) — input-fields-only serialization, eager trainset embedding, raw-dot-product top-k. |
 | `code_act.py` | — | **Removed.** dspy4s removed `CodeAct` at the 3.4.0 target. Upstream deprecated it in 3.4 and removes it in 3.5. `RLM` is the replacement. See [PORT_DIFFERENCES §15](PORT_DIFFERENCES.md#15-codeact-and-programofthought-removed). |
 | `program_of_thought.py` | — | **Removed.** dspy4s removed `ProgramOfThought` at the 3.4.0 target. Upstream deprecated it in 3.4 and removes it in 3.5. `RLM` is the replacement. See [PORT_DIFFERENCES §15](PORT_DIFFERENCES.md#15-codeact-and-programofthought-removed). |
 | `rlm.py` | `RLM.scala` | ✅ ported (G-20) — `RLM[I, O]` over the `ReplCodeInterpreter` surface (default: a fresh `DenoPyodideInterpreter` per forward, closed afterwards). Verbatim action template, REPL variable metadata/history rendering, `llm_query`(+batched) with a shared `maxLlmCalls` counter, SUBMIT validation with continue-on-error, extract fallback. Deltas: sequential `llm_query_batched`; Schema-decode output typing; no `SandboxSerializable`/async (`verbose` ported: per-step stderr logging). Upstream marks it `@experimental`. |
-| `react_v2.py` | — | Deferred (PORT_GAPS G-19) — upstream's `@experimental` native-tool-calling ReAct; wait for it to stabilize, then port over the G-7b adapter seams. The existing `ReAct` deliberately stays text-protocol. |
+| `react_v2.py` | `ReActV2.scala` | ✅ ported (G-19, batch 32): the `@experimental` agent of upstream, which calls tools with native function calling when the adapter and the model support it. `ReAct` stays on the text protocol. |
 | `avatar/` | — | **Won't fix (by design)** (PORT_GAPS G-14, together with `AvatarOptimizer`) — `Avatar` is not in upstream's public API (deep import only), has no docs page, and sees only mechanical maintenance; the tool-agent space is covered by `ReAct`. Reopen if upstream re-exports/documents it. |
 
 ---
@@ -116,25 +116,25 @@ Python's `dspy/predict/` has 16 files. Current dspy4s coverage:
   `response_format: {type:"json_schema", …}` when the ambient LM `supportsResponseSchema` and an
   `outputJsonSchema` is present (prose schema kept as fallback), via the new `FormattedPrompt.requestOptions`
   request-influence seam. **Native function-calling (G-7b):** ✅ ported — `tools`/`tool_choice` injected via
-  the same seam (shared `NativeFunctionCalling` helper), native `tool_calls` parsed into a `tool_calls` output
+  the same request options (shared `NativeTools` rules), native `tool_calls` parsed into a `tool_calls` output
   field; gated on `supportsFunctionCalling`. ReAct stays on the text protocol (upstream parity). See PORT_GAPS G-7.
 - **Field constraints (`PYDANTIC_CONSTRAINT_MAP`).** ✅ ported (v1, commit `d8c80de`) — `FieldSpec.constraints`
   + `FieldConstraints` build the upstream constraint strings (`gt`/`ge`/`lt`/`le`/`minLength`/`maxLength`/
-  `multipleOf`); `ChatAdapter` renders `Constraints: <joined>`, and they round-trip through `SignatureLayout`
-  state. **v1 follow-ups:** constraints are settable programmatically only (deriving from the `Schema`
-  needs an annotation mechanism that doesn't exist yet); `XMLAdapter`/`JSONAdapter` don't yet embed them.
+  `multipleOf`); `ChatAdapter` renders `Constraints: <joined>`. (The `SignatureLayout` state codec that
+  kept them had no caller in the main code and is removed.) **v1 follow-ups:** constraints are settable
+  programmatically only (deriving from the `Schema` needs an annotation mechanism that doesn't exist yet); `XMLAdapter`/`JSONAdapter` don't yet embed them.
   See PORT_GAPS G-9.
 
 ### Persistence & per-module bindings
 
 - **Program `save`/`load` + `dumpState`/`loadState`.** ✅ ported (commit `9c5a6db`) via `ProgramPersistence`
-  (`modules/optimize/.../ProgramPersistence.scala`), built on `OptimizableStructure`. JSON state of
+  (`modules/programs/.../optimization/ProgramPersistence.scala`), built on `OptimizableStructure`. JSON state of
   `{ "optimizableParameters": { "optimizable-0": <OptimizableParameters>, ... } }`; ordinal IDs are validated on load.
   Instructions/demos/config round-trip; metadata and execution resources stay on the fresh target. Ordinals do not
   detect an equal-size reorder, and the former layout-bearing state format is unsupported. See PORT_GAPS G-4.
 - **Per-module `config` + bound LM.** ✅ ported — `DynamicPredict`, `Predict[I, O]`, and `ChainOfThought[I, O]`
   carry immutable module-level `config` (commit `b85fe27`, merged under per-call config). `DynamicPredict` and
-  `Predict` can also carry an optional bound LM (`Predict.withLm` / `Predict.boundLm`, commit `b2d0096`; a bound
+  `Predict` can also carry an optional bound LM (`Predict.withLm` / `Predict.lm`, commit `b2d0096`; a bound
   LM wins over the ambient `RuntimeContext` LM).
   See PORT_GAPS G-3.
 
@@ -171,11 +171,10 @@ Deliberate behavioral differences. Bugs are not deltas — bugs get fixed, not d
 | Area | Python behavior | dspy4s behavior | Why | Reference |
 |---|---|---|---|---|
 | **ChatAdapter stream completion-chunk emission** | Python's `StreamListener` emits a synthetic final chunk when it sees `[[ ## completed ## ]]`. Tests therefore index with `[-2]` to find the last *content* chunk. | dspy4s closes the active field on the marker without emitting a sentinel chunk. The last content chunk IS `tokens.last`. | Avoids a synthetic chunk that consumers immediately have to skip; the `isLast = true` flag on the prior chunk already conveys "this field is done." | `ChatStreamingState.scala`, `StreamingLiveSuite` test comments |
-| **Per-token chunk granularity (all adapters)** | Python's `StreamListener` emits one chunk per LM-delivered token using a queue + holdback discipline; `_could_form_end_identifier` decides per-token release safety. | dspy4s emits fewer, larger chunks: ChatAdapter holds back `markerMaxLen-1` chars and flushes the safe prefix on each receive; JSON emits one chunk per field at the value boundary; XML emits one chunk per field at the close-tag boundary. Concatenated content matches Python, but per-chunk shape does not. `couldFormEndIdentifier` helpers exist on each `*StreamingState` companion as pure functions ported for unit-test parity, but the state machines don't yet use them in the runtime. | The chunk-shape parity tests (Python's `test_stream_listener_returns_correct_chunk_*`) are deferred — closing them needs a state-machine refactor around the queue-and-holdback discipline. The current granularity is good enough for downstream consumers that concatenate or buffer chunks anyway. | `ChatStreamingState.scala`, `JsonStreamingState.scala`, `XmlStreamingState.scala`, [STREAMING_POSTPONED.md per-token refactor](../STREAMING_POSTPONED.md) |
+| **Per-token chunk granularity (all adapters)** | Python's `StreamListener` emits one chunk per LM-delivered token using a queue + holdback discipline; `_could_form_end_identifier` decides per-token release safety. | dspy4s emits fewer, larger chunks: ChatAdapter holds back the tail that can still become a marker of any name (from its first `[`, with no fixed length) and flushes the safe prefix on each receive; JSON emits one chunk per field at the value boundary; XML emits one chunk per field at the close-tag boundary. Concatenated content matches Python, but per-chunk shape does not. The port has no `_could_form_end_identifier` predicate, because the state machines do not use one. | The chunk-shape parity tests (Python's `test_stream_listener_returns_correct_chunk_*`) are deferred — closing them needs a state-machine refactor around the queue-and-holdback discipline. The current granularity is good enough for downstream consumers that concatenate or buffer chunks anyway. | `ChatStreamingState.scala`, `JsonStreamingState.scala`, `XmlStreamingState.scala`, [STREAMING_POSTPONED.md per-token refactor](../STREAMING_POSTPONED.md) |
 | **Streamify default async-ness** | `streamify` returns an `AsyncIterator` by default; `async_streaming=False` produces a sync iterator. | `Streamify.streamify` is sync-only (producer thread + `ClosableIterator`). No async variant yet. | Tracking under STREAMING_POSTPONED ("Async program streaming"). | `Streamify.scala`, [STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md) |
-| **StreamListener `allow_reuse` default** | `allow_reuse = False` (listener fires only on the first LM call). | `allowReuse = True` (default). Set `allowReuse = false` to opt into Python's first-call-only semantics. | Default-on matches what most consumers want; opt-out preserves parity. | `StreamListener` case class, `StreamingLanguageModelWrapper.firedListeners` |
 | **`predict_name` resolution** | Python introspects parent module field names (`self.predict1` → `"predict1"`) via reflection. | dspy4s requires explicit `Predict(signature, name = Some("predict1"))` to give a Predict a non-default name; defaults to `"predict"`. | Scala has no equivalent of Python's runtime attribute introspection — explicit naming is the closest faithful port. | `Predict.scala`, [Commit `009ee0f`](#) |
-| **Tool-call args fallback** | When `arguments` string is not a JSON object, Python keeps the raw string under `arguments`. | Wraps as `Map("input" -> raw)` (also matches `ProviderResponseParser.parseArgs` for non-streaming). | Uniformity with the non-streaming path. | `ToolCallAssembler.scala`, `../progress/PHASE3_PROGRESS.md` |
+| **Tool-call args fallback** | When `arguments` string is not a JSON object, Python keeps the raw string under `arguments`. | Wraps as `Map("input" -> raw)` (also matches `ToolCallAssembler.decodeArguments`, which `ChatWire` uses for a reply that is not a stream). | Uniformity with the non-streaming path. | `ToolCallAssembler.scala`, `../progress/PHASE3_PROGRESS.md` |
 
 ---
 

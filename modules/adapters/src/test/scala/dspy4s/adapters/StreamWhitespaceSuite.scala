@@ -2,6 +2,7 @@ package dspy4s.adapters
 
 import dspy4s.adapters.contracts.AdapterStreamingState
 import dspy4s.adapters.contracts.FieldChunk
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -172,7 +173,7 @@ class StreamWhitespaceSuite extends FunSuite:
   test("with native tool calls, the chat stream gets the text fields of the parser, also for the single-output rule") {
     val outputs          = Vector(FieldSpec("next_thought"), FieldSpec("tool_calls", typeRef = TypeRef.toolCalls))
     val layout           = layoutOf(outputs)
-    val adapter          = ChatAdapter(useNativeFunctionCalling = true)
+    val adapter          = ChatAdapter(native = NativeTools(enabled = true))
     val text             = "I can answer now."
     val output           = LmOutput(text = text, toolCalls = Vector(ToolCall("submit", DynamicValues.record("answer" := "42"))))
     given RuntimeContext = RuntimeContext(lm = Some(FunctionCallingLm))

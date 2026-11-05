@@ -1,70 +1,77 @@
 package dspy4s.signatures
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, ValidationError}
+import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, JsonSchemaRefs, ValidationError, updated}
 import zio.blocks.chunk.Chunk
-import zio.blocks.schema.json.Json
 import zio.blocks.schema.{DynamicValue, Schema}
 
 import scala.NamedTuple
 import scala.deriving.Mirror
 
-/** Reusable, type-directed output augmentation for programs: prepend a single named field `Name: T` to a program's
-  * output `O`, producing a named tuple — **idempotently** (skipped if `O` already declares `Name`) and **cast-free**.
+/** Output augmentation for programs, from the types: put one named field `Name: T` before the fields of the output `O`
+  * of a program. The result is a named tuple. When `O` already has a `Name` field, `O` stays the same. The augmentation
+  * uses no cast.
   *
-  * `O` is normalized to its named-tuple view via `NamedTuple.From` (identity for named tuples, the field tuple for case
-  * classes), so case-class outputs are supported and the result is always a named tuple. A case-class output is
-  * therefore *not* echoed back as the same nominal type — that type can't be synthesized with an extra field. The only
-  * unsupported `O` is one with no static fields (e.g. `DynamicValue.Record` from `Signature.fromStringDynamic`),
-  * handled by the low-priority [[PrependField.fallback]] returning `None`.
+  * `NamedTuple.From` gives the named-tuple view of `O`: a named tuple stays the same, and a case class gives the tuple
+  * of its fields. Thus a case-class output is supported, and the result is always a named tuple, not the case class: a
+  * nominal type cannot get an extra field. The only `O` that is not supported is an `O` with no static fields (for
+  * example, the `DynamicValue.Record` of `Signature.fromStringDynamic`). For it, the low-priority
+  * [[PrependField.fallback]] gives `None`.
   *
-  * Used by [[dspy4s.programs.strategies.ChainOfThought]] (`reasoning: String`) and available to any other program that
-  * adds an output field (e.g. a future `MultiChainComparison` with `rationale: String`).
+  * [[Signature.prependOutput]] uses it. [[dspy4s.programs.strategies.ChainOfThought]] (`reasoning: String`), `ReAct`,
+  * and `MultiChainComparison` (`rationale: String`) call that method.
   */
 object OutputAugmentation:
 
-  /** Type-level membership: is `X` one of the names in tuple `T`? Drives the idempotence check. */
+  /** `true` when `X` is one of the names in the tuple `T`. The check that `O` already has the field uses it. */
   type Contains[T <: Tuple, X] <: Boolean = T match
     case X *: _     => true
     case _ *: rest  => Contains[rest, X]
     case EmptyTuple => false
 
-  /** The augmented output type — **always a named tuple**. Normalizes `O` to its named-tuple view (`NamedTuple.From`),
-    * then prepends `Name: T` unless a `Name` field is already present (idempotent).
+  /** The augmented output type, always a named tuple. It is the named-tuple view of `O` (`NamedTuple.From`), with
+    * `Name: T` first. When `O` already has a `Name` field, it is the view of `O`.
     */
   type WithField[O, Name <: String & Singleton, T] = NamedTuple.From[O] match
     case NamedTuple.NamedTuple[n, v] => Contains[n, Name] match
         case true  => NamedTuple.NamedTuple[n, v]
         case false => NamedTuple.NamedTuple[Name *: n, T *: v]
 
-  /** Type-directed construction of [[WithField]] from a base output value, with no `asInstanceOf`. The abstract `Out`
-    * member lets each instance pin the exact type it builds (sidestepping match-type/`Mirror` alignment); consumers
-    * constrain it via `WithOutput[Name, T, O, WithField[O, Name, T]]`. Instances resolve where `O` is concrete (the
-    * program's call site), never against an abstract `O` — there only the fallback would match.
+  /** Makes a [[WithField]] value from a base output value, and gets the base output value back, from the types and with
+    * no `asInstanceOf`. With the abstract `Out` member, each instance gives the exact type that it makes, thus the
+    * match type and the `Mirror` do not have to agree. A caller sets it with `WithOutput[Name, T, O, WithField[O, Name,
+    * T]]`. The compiler finds an instance where `O` is concrete (the call site of the program). For an abstract `O`,
+    * only the fallback matches, and its `Out` is `Nothing`. Thus code with an abstract `O` must get the evidence from
+    * its caller.
     */
   trait PrependField[Name <: String & Singleton, T, O]:
     type Out
     def prepend(value: T, base: O): Option[Out]
 
-  trait LowPriorityPrependField:
-    /** Fallback for an `O` that is neither a named tuple nor a product — e.g. the `DynamicValue.Record` output of
-      * `Signature.fromStringDynamic`, which has no static fields. Unsupported: yields `None`.
+    /** The inverse of [[prepend]]: the prepended value and the base value of `out`. The prepended value is `None` when
+      * `O` already has the field, because then the base value holds it.
       */
-    given fallback[Name <: String & Singleton, T, O]
-        : (PrependField[Name, T, O] { type Out = WithField[O, Name, T] }) =
+    def split(out: Out): (Option[T], O)
+
+  trait LowPriorityPrependField:
+    /** The fallback for an `O` that is not a named tuple and not a product. Such an `O` is not supported: [[prepend]]
+      * gives `None`. Thus no augmented value exists, and `Out` is `Nothing`.
+      */
+    given fallback[Name <: String & Singleton, T, O]: (PrependField[Name, T, O] { type Out = Nothing }) =
       new PrependField[Name, T, O]:
-        type Out = WithField[O, Name, T]
+        type Out = Nothing
         def prepend(value: T, base: O): Option[Out] = None
+        def split(out    : Out): (Option[T], O)     = out
 
   object PrependField extends LowPriorityPrependField:
     type WithOutput[Name <: String & Singleton, T, O, O2] = PrependField[Name, T, O] { type Out = O2 }
 
-    /** Evidence for the canonical augmentation result [[WithField]]. Use [[WithOutput]] only when the output is
-      * intentionally pinned to some other type member.
+    /** The evidence for the canonical result [[WithField]]. Use [[WithOutput]] only for an output with a different type
+      * member.
       */
     type Of[Name <: String & Singleton, T, O] = WithOutput[Name, T, O, WithField[O, Name, T]]
 
-    /** Named-tuple output without a `Name` field: prepend it via the supported whole-tuple constructor
-      * `NamedTuple.build`.
+    /** A named-tuple output with no `Name` field: put the field first with `NamedTuple.build`, which builds the full
+      * tuple.
       */
     given ntAbsent[Name <: String & Singleton, T, N <: Tuple, V <: Tuple](using
         Contains[N, Name] =:= false
@@ -73,17 +80,21 @@ object OutputAugmentation:
         type Out = NamedTuple.NamedTuple[Name *: N, T *: V]
         def prepend(value: T, base: NamedTuple.NamedTuple[N, V]): Option[Out] =
           Some(NamedTuple.build[Name *: N]()(value *: NamedTuple.toTuple(base)))
+        def split(out: Out): (Option[T], NamedTuple.NamedTuple[N, V]) =
+          val values = NamedTuple.toTuple(out)
+          (Some(values.head), NamedTuple.build[N]()(values.tail))
 
-    /** Named-tuple output that already declares `Name`: idempotent — kept unchanged. */
+    /** A named-tuple output that already has a `Name` field: the output stays the same. */
     given ntPresent[Name <: String & Singleton, T, N <: Tuple, V <: Tuple](using
         Contains[N, Name] =:= true
     ): WithOutput[Name, T, NamedTuple.NamedTuple[N, V], NamedTuple.NamedTuple[N, V]] =
       new PrependField[Name, T, NamedTuple.NamedTuple[N, V]]:
         type Out = NamedTuple.NamedTuple[N, V]
         def prepend(value: T, base: NamedTuple.NamedTuple[N, V]): Option[Out] = Some(base)
+        def split(out    : Out): (Option[T], NamedTuple.NamedTuple[N, V])     = (None, out)
 
-    /** Any product (case class): normalize to its named-tuple view through the `Mirror` and delegate to the named-tuple
-      * instances, so case-class outputs are supported and the result is always a named tuple.
+    /** A product (a case class): the `Mirror` gives its named-tuple view, and the named-tuple instances do the rest.
+      * Thus a case-class output is supported, and the result is always a named tuple.
       */
     given product[Name <: String & Singleton, T, O <: Product, N <: Tuple, V <: Tuple](using
         m: Mirror.ProductOf[O] { type MirroredElemLabels = N; type MirroredElemTypes = V },
@@ -93,56 +104,26 @@ object OutputAugmentation:
         type Out = inner.Out
         def prepend(value: T, base: O): Option[Out] =
           inner.prepend(value, NamedTuple.build[N]()(Tuple.fromProductTyped(base)(using m)))
+        def split(out: Out): (Option[T], O) =
+          val (value, fields) = inner.split(out)
+          (value, m.fromTuple(NamedTuple.toTuple(fields)))
 
-  /** The general opening-position output augmentation decode (the realizable part of the `Thought`-shaped form): read
-    * the augment field `Name` as `T` via `readField`, decode the base output `O` via `shape`, prepend the field
-    * (idempotent, cast-free), mapping the fieldless-output case (a string-DSL `Signature`, no static fields) to a
-    * structured error, then run an optional post-decode `hook`.
+  /** The output [[Shape]] of [[Signature.prependOutput]]: the `String` field `field` first, and then the fields of
+    * `base`. The shape puts `field` before the specs of `base` only when `base` has no field with that name, as the
+    * type-level [[WithField]] and the `prependOutput` of the layout do.
     *
-    * [[decodePrepended]] is the `T = String`, identity-hook instance every composite uses today. The one piece of the
-    * `Thought` ceiling left additive is the **closing position** (append a self-check field), which needs an
-    * `AppendField` dual and currently has no consumer (see `docs/refactor/algebra-2-program-composition.md`). `label`
-    * names the producing component in errors.
-    */
-  def decodeAugmented[O, Name <: String & Singleton, T, Out](
-      raw          : DynamicValue.Record,
-      shape        : Shape[O],
-      fieldName    : Name,
-      label        : String,
-      signatureName: String,
-      readField    : (DynamicValue.Record, Name, String) => Either[DspyError, T],
-      hook         : Out => Either[DspyError, Out] = (out: Out) => Right(out)
-  )(using prepend: PrependField.WithOutput[Name, T, O, Out]): Either[DspyError, Out] =
-    for
-      value     <- readField(raw, fieldName, label)
-      baseOut   <- shape.decode(raw)
-      prepended <- prepend.prepend(value, baseOut).toRight(productOutputRequired(label, signatureName, baseOut))
-      augmented <- hook(prepended)
-    yield augmented
-
-  /** The shared decode for an opening-`String` output augmentation: the `T = String`, identity-hook instance of
-    * [[decodeAugmented]]. The value-level body shared by `ChainOfThought` / `ReAct` / `MultiChainComparison`.
-    */
-  def decodePrepended[O, Name <: String & Singleton, Out](
-      raw          : DynamicValue.Record,
-      shape        : Shape[O],
-      fieldName    : Name,
-      label        : String,
-      signatureName: String
-  )(using prepend: PrependField.WithOutput[Name, String, O, Out]): Either[DspyError, Out] =
-    decodeAugmented[O, Name, String, Out](
-      raw,
-      shape,
-      fieldName,
-      label,
-      signatureName,
-      readField = (record, field, lbl) => DynamicValues.requireString(record, field, lbl)
-    )
-
-  /** The reusable output [[Shape]] for an opening-position `String` augmentation — the shape a composite hands its
-    * inner `Predict` (`ChainOfThought`'s `reasoning` and the extractor pass of `ReAct`). `field` is prepended to
-    * `base`'s specs idempotently by name (matching the type-level [[WithField]] and the layout's `prependOutput` — an
-    * unconditional prepend would desync `encode`'s `fieldSpecs.zip(values)`); decode runs [[decodePrepended]].
+    * The encode gets the base value back with [[PrependField.split]], encodes it with `base`, and puts the `String`
+    * field first. Thus each base field has the encoding of its schema (an `Option`, a nested record).
+    *
+    * The decode reads `field` as a `String`, decodes the base output with `base`, and puts the field first. When the
+    * output of `base` has no static fields (the `DynamicValue.Record` output of `Signature.fromStringDynamic`), the
+    * decode gives a `ValidationError`. `signatureName` names the signature in the errors.
+    *
+    * The type-level [[WithField]] compares the names in the code, and this shape and the layout compare the wire names.
+    * For a base field `@Modifier.rename("why") reasoning`, the type has no new field, and the layout and this shape
+    * have `reasoning` and `why`: the output `reasoning` has the value of `why`. For a base field
+    * `@Modifier.rename("reasoning") why`, the type has a new field, and the layout and this shape have one field: the
+    * two outputs have its value.
     *
     * The JSON schema is the schema of `base` with the property of `field` first, in the order of the layout (upstream
     * builds the schema from the augmented signature). The name of `field` is first in `required` when the layout
@@ -151,100 +132,73 @@ object OutputAugmentation:
     * as it is. When the schema of `base` has no root `properties`, the shape has no schema, and the adapter builds one
     * from the layout.
     */
-  def prependedStringShape[Name <: String & Singleton, O, Out](
+  private[signatures] def prepended[Name <: String & Singleton, O, Out](
       base         : Shape[O],
-      field        : dspy4s.core.contracts.FieldSpec,
-      fieldName    : Name,
-      label        : String,
+      field        : FieldSpec,
       signatureName: String
   )(using prepend: PrependField.WithOutput[Name, String, O, Out]): Shape[Out] =
+    val baseHasField = base.fieldSpecs.exists(_.name == field.name)
+    val withField    = Shape.pair(Shape.string(field, signatureName), base)
     new Shape[Out]:
-      val fieldSpecs: Vector[dspy4s.core.contracts.FieldSpec] =
-        if base.fieldSpecs.exists(_.name == field.name) then base.fieldSpecs
-        else field +: base.fieldSpecs
+      val fieldSpecs: Vector[FieldSpec] = if baseHasField then base.fieldSpecs else withField.fieldSpecs
 
-      override lazy val jsonSchemaString: Option[String] =
-        if base.fieldSpecs.exists(_.name == field.name) then base.jsonSchemaString
+      override lazy val jsonSchema: Option[DynamicValue.Record] =
+        if baseHasField then base.jsonSchema
         else
-          base.jsonSchemaString.flatMap(
-            withLeadingProperty(_, field.name, StringProperty, field.defaultValue.isEmpty && !field.optional)
-          )
+          for
+            schema    <- base.jsonSchema
+            property  <- StringProperty
+            augmented <-
+              withLeadingProperty(schema, field.name, property, field.defaultValue.isEmpty && !field.optional)
+          yield augmented
 
       override def nestedDecisionFields: Vector[String] = base.nestedDecisionFields
 
+      // `base` encodes the base value with its schema. When `base` has the field, the base value holds it.
       def encode(value: Out): DynamicValue.Record =
-        val product: Product = value match
-          case p: Product => p
-          case _          => throw new IllegalArgumentException(
-              s"$label output must be a named-tuple value (a Product); got a non-Product. " +
-                "This shape is built only from an augmented Signature, which supplies named tuples."
-            )
-        val values  = product.productIterator.toVector
-        val entries = fieldSpecs.zip(values).map { (spec, raw) =>
-          spec.name -> DynamicValues.fromAny(raw)
-        }
-        DynamicValue.Record(zio.blocks.chunk.Chunk.from(entries))
+        prepend.split(value) match
+          case (Some(text), baseValue) => withField.encode((text, baseValue))
+          case (None, baseValue)       => base.encode(baseValue)
 
       def decode(raw: DynamicValue.Record): Either[DspyError, Out] =
-        decodePrepended[O, Name, Out](raw, base, fieldName, label, signatureName)(using prepend)
+        withField.decode(raw).flatMap { (text, baseOut) =>
+          prepend.prepend(text, baseOut).toRight(productOutputRequired(field.name, signatureName, baseOut))
+        }
 
   /** The JSON schema of a `String` field, as zio-blocks writes it for the field of a record. */
-  private lazy val StringProperty: Json = Schema.string.toJsonSchema.toJson
+  private lazy val StringProperty: Option[DynamicValue.Record] =
+    ZioSchemaCodec.schemaRecord(Schema.string.toJsonSchema.toJson)
 
-  private val DefsPrefix: String = "#/$defs/"
-
-  /** The JSON schema text `schema` with the property `name: property` first in `properties`. When `required` is true,
-    * `name` is also first in `required`. A root `$ref` to an entry of `$defs` (the schema of a recursive type) becomes
-    * that entry, and `$defs` stays: the augmented output is not the recursive type. The text has the form of
-    * [[ZioSchemaCodec.jsonSchemaForModel]]. The result is `None` when `schema` is not a JSON object with `properties`.
+  /** The JSON schema `schema` with the property `name: property` first in `properties`. When `required` is true, `name`
+    * is also first in `required`. A root `$ref` (the schema of a recursive type) becomes the schema that it names
+    * ([[JsonSchemaRefs.inlineRoot]]), and `$defs` stays: the augmented output is not the recursive type. The result is
+    * `None` when `schema` has no `properties` object.
     */
-  private def withLeadingProperty(schema: String, name: String, property: Json, required: Boolean): Option[String] =
-    for
-      root       <- Json.parse(schema).toOption.collect { case root: Json.Object => inlinedRoot(root) }
-      properties <- member(root, "properties").collect { case properties: Json.Object => properties }
-    yield
-      val others       = properties.value.filterNot((key, _) => key == name)
-      val withProperty = updated(root, "properties", Json.Object((name -> property) +: others))
-      val augmented    =
-        if !required then withProperty
-        else
-          val names = member(root, "required").collect { case names: Json.Array => names.value }
-            .getOrElse(Chunk.empty)
-            .filterNot {
-              case Json.String(other) => other == name
-              case _                  => false
-            }
-          updated(withProperty, "required", Json.Array(Json.String(name) +: names))
-      augmented.toString
+  private def withLeadingProperty(
+      schema  : DynamicValue.Record,
+      name    : String,
+      property: DynamicValue,
+      required: Boolean
+  ): Option[DynamicValue.Record] =
+    val root = JsonSchemaRefs.inlineRoot(schema)
+    DynamicValues.recordGet(root, "properties").collect { case properties: DynamicValue.Record =>
+      val others       = properties.fields.filterNot((key, _) => key == name)
+      val withProperty = root.updated("properties", DynamicValue.Record((name -> property) +: others))
+      if !required then withProperty
+      else
+        val names = DynamicValues.recordGet(root, "required")
+          .collect { case list: DynamicValue.Sequence => list.elements }
+          .getOrElse(Chunk.empty)
+          .filterNot(DynamicValues.asString(_).contains(name))
+        withProperty.updated("required", DynamicValue.Sequence(DynamicValues.string(name) +: names))
+    }
 
-  /** `root` with the entry of `$defs` that its `$ref` names in place of the `$ref`. Each other key of `root` comes
-    * after the keys of the entry. A root with no such `$ref` stays as it is.
+  /** The error for an output with no static fields. The output of a `Signature` with no static fields (the
+    * `DynamicValue.Record` output of `Signature.fromStringDynamic`) cannot hold a prepended field.
     */
-  private def inlinedRoot(root: Json.Object): Json.Object =
-    val entry =
-      for
-        ref         <- member(root, "$ref").collect { case Json.String(ref) if ref.startsWith(DefsPrefix) => ref }
-        definitions <- member(root, "$defs").collect { case definitions: Json.Object => definitions }
-        found       <- member(definitions, ref.stripPrefix(DefsPrefix)).collect { case found: Json.Object => found }
-      yield found
-    entry.fold(root)(found => Json.Object(found.value ++ root.value.filterNot((key, _) => key == "$ref")))
-
-  private def member(obj: Json.Object, key: String): Option[Json] =
-    obj.value.find((name, _) => name == key).map((_, value) => value)
-
-  /** `obj` with `value` at `key`. An existing key keeps its position, and a new key goes at the end. */
-  private def updated(obj: Json.Object, key: String, value: Json): Json.Object =
-    if obj.value.exists((name, _) => name == key) then
-      Json.Object(obj.value.map((name, old) => if name == key then name -> value else name -> old))
-    else Json.Object(obj.value :+ (key -> value))
-
-  /** The fieldless-output error shared by [[decodePrepended]]'s call sites: a `Signature` whose output has no static
-    * fields (the `DynamicValue.Record` output of `Signature.fromStringDynamic`) cannot carry a prepended field, so the
-    * augmentation is unsupported.
-    */
-  private def productOutputRequired(label: String, signatureName: String, baseOut: Any): DspyError =
+  private def productOutputRequired(fieldName: String, signatureName: String, baseOut: Any): DspyError =
     ValidationError(
-      s"$label requires a product output (named tuple or case class); the signature '$signatureName' has a " +
-        s"fieldless output (got ${baseOut.getClass.getSimpleName}). Use a signature " +
+      s"The output '$fieldName' requires a product output (named tuple or case class); the signature " +
+        s"'$signatureName' has a fieldless output (got ${baseOut.getClass.getSimpleName}). Use a signature " +
         s"(Signature.of / Signature.derived / Signature.fromType)."
     )

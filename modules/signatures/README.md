@@ -40,14 +40,34 @@ in a field `result`.
 
 | Type | Description |
 |------|-------------|
-| `Signature[I, O]` | A name, a `SignatureLayout`, a `Shape[I]`, and a `Shape[O]`. `markToolCalls(name)` gives an output field the type `TypeRef.toolCalls`. |
-| `Shape[A]` | The `Shape` codecs of one type: `fieldSpecs`, `encode`, `decode`, and `jsonSchemaString`. |
+| `Signature[I, O]` | A name, a `SignatureLayout`, a `Shape[I]`, and a `Shape[O]`. Its field operations change the layout and the shapes in one call (see below). |
+| `Shape[A]` | The `Shape` codecs of one type: `fieldSpecs`, `encode`, `decode`, and `jsonSchema` (the JSON schema as a record). |
 | `RoundTripShape[A]` | A `Shape[A]` with a law: `decode(encode(a)) == Right(a)`. Each shape that comes from a `Schema` has this type. |
 | `Shape.MapShape` | The shape of `fromStringDynamic`. Its `decode` only checks that each field of the layout is in the record. |
-| `OutputAugmentation` | Adds a field at the start of an output, for example `reasoning: String` in `ChainOfThought`. The result type `WithField[O, Name, T]` is a named tuple. |
-| `InputAugmentation` | Adds `String` fields at the end of an input, for example `trajectory` in `ReAct`. |
-| `SchemaInterop` | Gives other modules `decodeValue[A]` and `typeRef[A]`, for example to decode the arguments of a tool. |
+| `OutputAugmentation` | The output type of `Signature.prependOutput`: `WithField[O, Name, T]` is a named tuple, and the `PrependField` evidence makes and splits its values. |
+| `SchemaInterop` | Gives other modules `decodeValue[A]`, `typeRef[A]`, and `jsonSchema[A]`, for example to decode the arguments of a tool. |
 | `ZioSchemaCodec` | The internal object that makes a `RoundTripShape`, the `FieldSpec` values, and the JSON schema from a `Schema`. |
+
+## Field operations
+
+A composite program adds fields to the signature of the user. One call changes the layout and the shapes together,
+thus the layout and the shapes always agree on the names and the order of the fields. Each operation keeps the
+effective instructions of the signature.
+
+| Operation | Result | Use |
+|-----------|--------|-----|
+| `signature.appendInput(field)` | `Signature[(I, String), O]` | The `trajectory` input of `ReAct` |
+| `signature.appendInputs(fields)` | `Signature.AppendedStringInputs[I, O]` | The `reasoning_attempt_i` inputs of `MultiChainComparison` |
+| `signature.prependOutput(name, field)` | `Signature[I, WithField[O, name, String]]` | The `reasoning` output of `ChainOfThought` |
+| `signature.withOutputs(fields, shape)` | `Signature[I, O2]` | The loop step of `ReAct` |
+
+- `appendInput` and `appendInputs` reject a name that the signature has. A composite program adds the field, thus a
+  name clash is a bug of the program.
+- `appendInputs` is for a number of fields that is known only at run time. Its result holds the new `signature` and
+  the opaque type `Values`. Only `validate` gives a `Values`, thus the encode always gets one value for each field.
+- `prependOutput` changes nothing when the outputs already have the field. Else the field is first in the layout, in
+  the output shape, and in the JSON schema of the output shape.
+- `withOutputs` replaces all the outputs. The names of `shape` must be the names of `fields`, in the same order.
 
 ## The law of a shape
 
@@ -64,20 +84,53 @@ and this case.
 
 - **The schema comes from the structure of the type.** `derived` and the macros ignore a custom `Schema` in scope for
   `I`, `O`, and their fields. Thus a custom `given` cannot change the fields or the codecs of a signature.
-- **Decode accepts the text of a model.** Before the decode, `ZioSchemaCodec.normalize` changes `"true"` into a
-  `Boolean` and `"42"` into an `Int`. It also removes a currency symbol and commas from a number, and changes a text
-  into an enum case.
-- **An absent `Option` field is `None`,** also in a nested record. The values `null`, `"none"`, and `"n/a"` are also
-  `None`. An absent field that is not an `Option` makes the decode fail.
+- **Decode accepts the text of a model.** Before the decode, `ZioSchemaCodec.normalize` changes `"true"` and `"yes"`
+  into a `Boolean`, and `"42"` and `"3.0"` into an `Int`. It also removes a currency symbol, commas, and a `_` between
+  digits from a number, and changes a text into an enum case. The parsers of the adapters have the same rule (core
+  `LenientValues`). A text that only Java reads as a number (`"3d"`) makes the decode fail.
+- **An absent `Option` field is `None`,** also in a nested record. A null is also `None`, and the texts `"none"` and
+  `"n/a"` too, when the type of the element does not read the text. An `Option[String]` keeps each text, and an enum with
+  a case of that name keeps the case. An absent field that is not an `Option` makes the decode fail.
 - **A `History` field gets `TypeRef.history`** from each entry point and from the builder.
-- **The JSON schema has no `ToolCall.id`.** `Shape.jsonSchemaString` removes the `id` of each `ToolCall` from the
+- **A sequence of `ToolCall` values gets `TypeRef.toolCalls`,** for example a `Vector[ToolCall]` output field. The
+  adapter with native tool calls fills that field from the tool calls of the provider.
+- **The framework types have a marker.** `History`, `ToolCall`, `Noul`, `Score`, and `Choice` have a type-level
+  `Modifier.config` entry with the key `TypeMarker.Key` (`dspy4s.typeRef`). The codec reads the marker from the
+  schema, and the macros read it from the annotations of the type. Neither of them keeps a list of these types.
+- **A `Score[L]` field has the cases of `L` as its levels,** from the type of its `level: Option[L]` field. A
+  `Choice[O]` field has the cases of `O` as its options, from the type of its `value: O` field.
+- **The JSON schema has no `ToolCall.id`.** `Shape.jsonSchema` removes the `id` of each `ToolCall` from the
   schema that a model sees. The id comes from the provider.
+- **The JSON schema and the decode agree on a null and on an absent field,** for the sequences, maps, options, and
+  records that `ModelSchemaContractSuite` covers. A sequence has the type `array` and a map has the type `object`, with
+  no `null`, and a field of these types is in `required`. Only an `Option` permits a `null` and an absent field, and a
+  field with a default value is not in `required`. The default JSON codec of zio-blocks has other rules: it reads a
+  `null` and an absent field as an empty collection, so `Shape.jsonSchema` does not use its schema as it is.
+- **`Shape.encode` gives the wire form,** the JSON shape that the schema shows (`Reflects.wireValue`). A sealed trait with
+  fields is an object with the case name as a key, and an enum is the text of its leaf case. A tuple is an array, an
+  `Option` is its element or a null, a time value and a `UUID` are a text, and a map with primitive keys is a record. A
+  `Schema.transform` has the form of the value behind it. The root stays a record, also for a tuple. A framework type stays in its typed form. The `:=` lift,
+  `withRawValue`, `ToolFunction.result`, and a default value give the same form, and `TypedValueFormsSuite` covers them.
+- **The decode reads the wire form,** and `ZioSchemaCodec.normalize` makes the form that `Schema.fromDynamicValue` reads.
+  It also reads a bare case name, the record of a tuple, and the flat name of a leaf case, which is what the schema shows
+  for a nested sealed trait.
+- **One place holds the name rules of an annotation of zio-blocks.** `Reflects` has the rules of the JSON codec, for the
+  schema, the field specs, the encode, and the decode: `Modifier.rename`, `fieldNaming`, and `caseNaming` give the wire name, which is
+  `FieldSpec.name`. A `Modifier.discriminator` makes a case a flat record, and `Modifier.transient` removes a field. The
+  typed value keeps the name in the code. The decode also reads a `Modifier.alias` and the name in the code, and the schema
+  shows neither. A key belongs to one field or one case. A `Maybe` has the rules of an `Option`. `AnnotatedFormsSuite` and `AnnotatedPositionsSuite` cover them, and
+  `docs/port/PORT_DIFFERENCES.md` section 17 has each rule.
+- **The wire type agrees with the form.** A sealed trait with fields has the type `union`, and a sealed trait with only
+  cases with no fields has the type `string` and its leaf case names as `enumValues`. A tuple has the type `list`. A time
+  value, a `UUID`, and a `BigDecimal` have an opaque `TypeRef` with the type name, so a prompt shows `Instant`, and a
+  `BigDecimal` keeps each digit of a text. A `BigInt` has the type `int`. A `Schema.transform` has the type of what it
+  wraps.
 
 ## Source layout
 
 | Package | Contents |
 |---------|----------|
-| `signatures/` | `Signature`, `Shape`, `ZioSchemaCodec`, `SignatureBuilder`, `Spec`, the two augmentations, and `SchemaInterop` |
+| `signatures/` | `Signature`, `Shape`, `ZioSchemaCodec`, `SignatureBuilder`, `Spec`, `OutputAugmentation`, and `SchemaInterop` |
 | `signatures/internal/` | the macros: `FunctionMacro` (`from`, `fromType`, `fromString`), `SpecMacro` (`of`), and their helpers |
 
 ## Relation to dspy

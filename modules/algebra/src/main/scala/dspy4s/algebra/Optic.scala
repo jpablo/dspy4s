@@ -83,16 +83,8 @@ object AssociativeFunctor:
       val ((outerContext, innerContext), replacement) = focus
       outer.from(outerContext -> inner.from(innerContext -> replacement))
 
-/** Re-express an optic over a different carrier. One bridge replaces all pair-specific conversion overloads. */
-trait Composer[F[_, _], G[_, _]]:
-  def to[S, T, A, B](optic: Optic[S, T, A, B, F]): Optic[S, T, A, B, G]
-
 object Optic:
   extension [S, T, A, B, F[_, _]](optic: Optic[S, T, A, B, F])
     /** Apply a focus transformation when the carrier supports focus mapping. */
     def modify(source: S)(f: A => B)(using functor: FocusFunctor[F]): T =
       optic.from(functor.map(optic.to(source))(f))
-
-    /** Move this optic to another carrier through one declared bridge. */
-    def morph[G[_, _]](using composer: Composer[F, G]): Optic[S, T, A, B, G] =
-      composer.to(optic)

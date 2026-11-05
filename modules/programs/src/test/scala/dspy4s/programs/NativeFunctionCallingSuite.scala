@@ -1,7 +1,7 @@
 package dspy4s.programs
 
 import dspy4s.adapters.ChatAdapter
-import dspy4s.adapters.contracts.ToolParameterSpec
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -55,7 +55,12 @@ class NativeFunctionCallingSuite extends FunSuite:
     ToolSpec(
       "search",
       Some("Search the web"),
-      Vector(ToolParameterSpec("query", TypeRef.string, Some("the query"), required = true))
+      DynamicValues.record(
+        "type"       := "object",
+        "properties" ->
+          DynamicValues.record("query" -> DynamicValues.record("type" := "string", "description" := "the query")),
+        "required" := List("query")
+      )
     )
   )
 
@@ -64,7 +69,7 @@ class NativeFunctionCallingSuite extends FunSuite:
     val predict = DynamicPredict(layout = layout, tools = tools)
 
     RuntimeEnvironment.withSettings(
-      RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter(useNativeFunctionCalling = true)))
+      RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter(native = NativeTools(enabled = true))))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val result           = predict(ProgramCall(input = DynamicValues.record("question" := "capital of belgium?")))
@@ -72,7 +77,7 @@ class NativeFunctionCallingSuite extends FunSuite:
       assert(result.isRight, s"expected success, got: $result")
       val pred = result.toOption.get
 
-      // The injected tools reached the provider request (end-to-end through PredictEngine + mergeOptions).
+      // The injected tools reached the provider request (end-to-end through PredictEngine + FormattedPrompt.options).
       assert(
         lm.lastOptions.exists(opts => DynamicValues.recordGet(opts, "tools").isDefined),
         s"tools missing from request options: ${lm.lastOptions}"
@@ -93,7 +98,7 @@ class NativeFunctionCallingSuite extends FunSuite:
     val predict   = Predict(signature = signature, tools = tools)
 
     RuntimeEnvironment.withSettings(
-      RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter(useNativeFunctionCalling = true)))
+      RuntimeContext(lm = Some(lm), adapter = Some(ChatAdapter(native = NativeTools(enabled = true))))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       val result           = predict(DynamicValues.record("question" := "capital of belgium?"))

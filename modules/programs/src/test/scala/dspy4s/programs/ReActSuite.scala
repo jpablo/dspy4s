@@ -11,7 +11,6 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.ModuleStartEvent
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.ToolEndEvent
 import dspy4s.core.contracts.ToolStartEvent
 import dspy4s.core.contracts.:=
@@ -45,10 +44,10 @@ class ReActSuite extends FunSuite:
     override val name: String                                                                                    = "scripted-react-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      val outputNames = layout.outputFields.map(_.name).toSet
+      val outputNames = invocation.layout.outputFields.map(_.name).toSet
       val text        = output.text
       if outputNames.contains("next_tool_name") then
         val parts    = text.split("\\|\\|", -1)
@@ -64,7 +63,7 @@ class ReActSuite extends FunSuite:
           rec("next_thought" := thought, "next_tool_name" := toolName, "next_tool_args" -> args)
         ))
       else
-        Right(ParsedOutput(values = rec(layout.outputFields.map(_.name := text)*)))
+        Right(ParsedOutput(values = rec(invocation.layout.outputFields.map(_.name := text)*)))
 
   private final class SearchTool extends ToolFunction:
     val calls: AtomicInteger                                                                              = AtomicInteger(0)
@@ -210,6 +209,96 @@ class ReActSuite extends FunSuite:
     }
   }
 
+  test("with an adapter that does not check the allowed values, an empty tool name ends the loop after its entry") {
+    val search = new SearchTool
+    val lm     = new ScriptedLm(Vector("no idea||||", "done"))
+    val react  = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
+
+    withReact(lm) {
+      val result = react((question = "q?"))
+      assertEquals(result.map(_.output.answer), Right("done"))
+      assertEquals(lm.calls.get(), 2, "one react step and one extract call")
+      assertEquals(search.calls.get(), 0)
+      val traj = result.map(prediction => lookupString(prediction.raw.values, "trajectory")).getOrElse("")
+      assert(traj.contains("[[ ## observation_0 ## ]]\nNo tool was selected."), traj)
+    }
+  }
+
+  test("the result keeps the completions and the raw values of the extractor, and adds the complete trajectory") {
+    // The first call is the react step. The second call is the extractor, with two candidates.
+    val lm = new LanguageModel:
+      private val calls: AtomicInteger                                                           = AtomicInteger(0)
+      override val id: String                                                                    = "two-candidates-lm"
+      override val mode: LmMode                                                                  = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        val texts = if calls.getAndIncrement() == 0 then Vector("done||finish||") else Vector("first", "second")
+        Right(LmResponse(outputs = texts.map(text => LmOutput(text = text))))
+    val react = ReAct(baseSignature = qaSignature, tools = Vector.empty, maxIterations = IterationLimit(5))
+
+    withLmAndAdapter(lm, ScriptedAdapter) {
+      val prediction = react((question = "q?")).fold(error => fail(error.message), identity)
+      assertEquals(prediction.output.answer, "first")
+      assertEquals(prediction.raw.asString("answer"), Right("first"))
+      assertEquals(prediction.raw.asString("reasoning"), Right("first"))
+      assert(lookupString(prediction.raw.values, "trajectory").contains("[[ ## tool_name_0 ## ]]\nfinish"))
+      val completions = prediction.raw.completions.getOrElse(fail("no completions"))
+      assertEquals(completions.size, 2)
+      assertEquals(completions.at(1).flatMap(_.asString("answer")), Right("second"))
+    }
+  }
+
+  test("the injected finish tool takes the place of a user tool with the name finish") {
+    val userCalls  = AtomicInteger(0)
+    val userFinish = ToolFunction(ReAct.FinishToolName, "A user tool.") { _ =>
+      userCalls.incrementAndGet()
+      Right(ToolFunction.result("user"))
+    }
+    val search = new SearchTool
+    val lm     = new ScriptedLm(Vector("done||finish||", "answer"))
+    val react  =
+      ReAct(baseSignature = qaSignature, tools = Vector(userFinish, search), maxIterations = IterationLimit(5))
+
+    // A later tool takes the place of an earlier tool with the same name, in the position of the earlier tool.
+    val toolNames = react.reactSignature.layout.outputFields.find(_.name == "next_tool_name").map(_.enumValues)
+    assertEquals(toolNames, Some(Vector("finish", "search")))
+    val instructions = react.reactSignature.layout.effectiveInstructions
+    assert(instructions.contains("(1) finish, whose description is <desc>Marks the task as complete."), instructions)
+    assert(instructions.contains("(2) search, whose description is"), instructions)
+    assert(!instructions.contains("(3) "), instructions)
+
+    withReact(lm) {
+      val result = react((question = "q?"))
+      assertEquals(result.map(_.output.answer), Right("answer"))
+      assertEquals(userCalls.get(), 0)
+      val traj = result.map(prediction => lookupString(prediction.raw.values, "trajectory")).getOrElse("")
+      assert(traj.contains("[[ ## observation_0 ## ]]\nCompleted."), traj)
+    }
+  }
+
+  test("two user tools with the same name: the later tool runs, in the position of the earlier tool") {
+    def named(toolName: String, result: String): ToolFunction =
+      ToolFunction(toolName, s"Gives $result.")(_ => Right(ToolFunction.result(result)))
+    val lm    = new ScriptedLm(Vector("look||lookup||", "done||finish||", "answer"))
+    val react = ReAct(
+      baseSignature = qaSignature,
+      tools = Vector(named("lookup", "early"), named("other", "other"), named("lookup", "late")),
+      maxIterations = IterationLimit(5)
+    )
+
+    val toolNames = react.reactSignature.layout.outputFields.find(_.name == "next_tool_name").map(_.enumValues)
+    assertEquals(toolNames, Some(Vector("lookup", "other", "finish")))
+    val instructions = react.reactSignature.layout.effectiveInstructions
+    assert(instructions.contains("(1) lookup, whose description is <desc>Gives late.</desc>"), instructions)
+    assert(!instructions.contains("Gives early."), instructions)
+
+    withReact(lm) {
+      val result = react((question = "q?"))
+      assertEquals(result.map(_.output.answer), Right("answer"))
+      val traj = result.map(prediction => lookupString(prediction.raw.values, "trajectory")).getOrElse("")
+      assert(traj.contains("[[ ## observation_0 ## ]]\nlate"), traj)
+    }
+  }
+
   test("react emits tool callback events parented to the react module call") {
     val events   = ArrayBuffer.empty[CallbackEvent]
     val callback = new CallbackHandler:
@@ -220,7 +309,7 @@ class ReActSuite extends FunSuite:
     val react  = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
     RuntimeEnvironment.withSettings(
-      RuntimeContext(lm = Some(lm), adapter = Some(ScriptedAdapter), callbacks = Vector(callback))
+      RuntimeContext(lm = Some(lm), adapter = Some(ScriptedAdapter), callbacks = Some(Vector(callback)))
     ) {
       given RuntimeContext = RuntimeEnvironment.current
       assert(react((question = "x")).isRight)
@@ -255,10 +344,10 @@ class ReActSuite extends FunSuite:
         dspy4s.core.contracts.DynamicValues.recordGet(invocation.inputs.values, "trajectory")
           .map(dspy4s.core.contracts.DynamicValues.renderText).foreach(extractorTrajectories += _)
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("ignored")))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      ScriptedAdapter.parse(layout, output)
+      ScriptedAdapter.parse(invocation, output)
 
   private def cwError: DspyError = dspy4s.core.contracts.ContextWindowExceededError()
 
@@ -396,6 +485,20 @@ class ReActSuite extends FunSuite:
     // of the model and with no extract call.
     val search = new SearchTool
     val lm     = new ScriptedLm(Vector(chatStep("lookup"), chatStep("finish"), chatExtract))
+    val react  = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
+
+    withLmAndAdapter(lm, ChatAdapter()) {
+      val result = react((question = "capital?"))
+      assert(result.left.exists(_.isInstanceOf[ParseError]), result.toString)
+      assertEquals(lm.calls.get(), 2, "the chat step and its JSON fallback")
+      assertEquals(search.calls.get(), 0)
+    }
+  }
+
+  test("with a ChatAdapter, tool arguments that are not a dict are a parse error, and no tool runs") {
+    // Upstream types `next_tool_args` as `dict[str, Any]`, so a list does not pass `parse_value`.
+    val search = new SearchTool
+    val lm     = new ScriptedLm(Vector(chatStep("search", """["Paris"]"""), chatStep("finish"), chatExtract))
     val react  = ReAct(baseSignature = qaSignature, tools = Vector(search), maxIterations = IterationLimit(5))
 
     withLmAndAdapter(lm, ChatAdapter()) {

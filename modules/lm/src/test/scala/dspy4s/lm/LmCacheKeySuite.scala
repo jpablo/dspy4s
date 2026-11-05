@@ -3,8 +3,10 @@ package dspy4s.lm
 import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, RuntimeError, :=}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
-import dspy4s.lm.providers.{DynamicJson, HttpResponse, HttpStreamResponse, HttpTransport, OpenAiLanguageModel}
-import dspy4s.lm.runtime.{CacheCapacity, InMemoryLmCache, ManagedLanguageModel, ProviderLanguageModel}
+import dspy4s.lm.providers.{
+  DynamicJson, HttpResponse, HttpStreamResponse, HttpTransport, OpenAiClient, OpenAiLanguageModel
+}
+import dspy4s.lm.runtime.{CacheCapacity, CompositeLmCache, InMemoryLmCache, ManagedLanguageModel, RequestHash}
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
@@ -20,37 +22,47 @@ class LmCacheKeySuite extends FunSuite:
 
   private val request = LmRequest(
     model = "shared-model",
-    mode = LmMode.Chat,
     messages = Vector(Message(role = MessageRole.User, text = Some("What is the capital of Belgium?")))
   )
 
-  private def chatPayload(text: String): DynamicValue =
-    DynamicJson
-      .decode(s"""{"choices":[{"message":{"role":"assistant","content":"$text"},"finish_reason":"stop"}]}""")
-      .toOption
-      .get
+  private def json(text: String): DynamicValue =
+    DynamicJson.decode(text).fold(error => fail(s"not JSON: $error"), identity)
 
-  /** A provider that records each payload that reaches the wire. */
+  /** A transport that records the decoded body of each plain request, and answers with a chat reply of `reply`. */
+  private final class Recording(sent: ArrayBuffer[DynamicValue], reply: String) extends HttpTransport:
+    override def sendJson(url: String, headers: Map[String, String], body: String): Either[DspyError, HttpResponse] =
+      sent += json(body)
+      Right(HttpResponse(
+        200,
+        Map.empty,
+        s"""{"choices":[{"message":{"role":"assistant","content":"$reply"},"finish_reason":"stop"}]}"""
+      ))
+    override def streamSse(
+        url    : String,
+        headers: Map[String, String],
+        body   : String
+    ): Either[DspyError, HttpStreamResponse] =
+      Left(RuntimeError("test", "the stream path is not used"))
+
+  /** A provider that records each body that reaches the wire. */
   private def provider(
       sent          : ArrayBuffer[DynamicValue],
       reply         : String,
       defaultOptions: DynamicValue.Record
-  ): ProviderLanguageModel =
-    ProviderLanguageModel(
-      id = "shared-model",
-      mode = LmMode.Chat,
-      invoke = payload =>
-        sent += payload
-        Right(chatPayload(reply))
-      ,
+  ): OpenAiLanguageModel =
+    OpenAiLanguageModel(
+      model = "shared-model",
+      client = OpenAiClient(apiKey = "x", transport = Recording(sent, reply)),
       defaultOptions = defaultOptions
     )
 
   /** A model that declares default options and records each request that it receives. */
-  private final class RecordingLm(override val defaultOptions: DynamicValue.Record) extends LanguageModel:
+  private final class RecordingLm(
+      override val defaultOptions: DynamicValue.Record,
+      override val mode          : LmMode = LmMode.Chat
+  ) extends LanguageModel:
     val calls: ArrayBuffer[LmRequest] = ArrayBuffer.empty
     override val id: String           = "shared-model"
-    override val mode: LmMode         = LmMode.Chat
 
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
       calls += request
@@ -170,9 +182,9 @@ class LmCacheKeySuite extends FunSuite:
 
     assertEquals(sent.size, 2)
     sent.foreach { payload =>
-      assertEquals(DynamicJson.field(payload, "temperature"), Some(DynamicValues.fromAny(1.0)))
-      assertEquals(DynamicJson.field(payload, "rollout_id"), None)
-      assertEquals(DynamicJson.field(payload, "rolloutId"), None)
+      assertEquals(DynamicValues.recordGet(payload, "temperature"), Some(json("1.0")))
+      assertEquals(DynamicValues.recordGet(payload, "rollout_id"), None)
+      assertEquals(DynamicValues.recordGet(payload, "rolloutId"), None)
     }
   }
 
@@ -205,4 +217,33 @@ class LmCacheKeySuite extends FunSuite:
     assertEquals(cold.call(request).map(_.cacheHit), Right(false))
     assertEquals(hot.call(request).map(_.cacheHit), Right(false))
     assertEquals(sent.size, 2)
+  }
+
+  test("the managed model computes the key one time for each call, also over a composite cache") {
+    given RuntimeContext = RuntimeEnvironment.current
+    var keys             = 0
+    val model            = ManagedLanguageModel(
+      delegate = new RecordingLm(DynamicValue.Record.empty),
+      cache = Some(CompositeLmCache(InMemoryLmCache(CacheCapacity(16)), InMemoryLmCache(CacheCapacity(16)))),
+      cacheKey = (keyRequest, mode, identity) =>
+        keys += 1
+        RequestHash.forRequest(keyRequest, mode, identity)
+    )
+
+    assertEquals(model.call(request).map(_.cacheHit), Right(false))
+    assertEquals(keys, 1, "a miss and its store use one key")
+    assertEquals(model.call(request).map(_.cacheHit), Right(true))
+    assertEquals(keys, 2, "a hit uses one key")
+  }
+
+  test("the key has the mode of the model, so two models with one id and different modes do not share an entry") {
+    given RuntimeContext = RuntimeEnvironment.current
+    val cache            = Some(new InMemoryLmCache(CacheCapacity(16)))
+    val chat             = new RecordingLm(DynamicValue.Record.empty)
+    val text             = new RecordingLm(DynamicValue.Record.empty, LmMode.Text)
+
+    assertEquals(ManagedLanguageModel(delegate = chat, cache = cache).call(request).map(_.cacheHit), Right(false))
+    assertEquals(ManagedLanguageModel(delegate = text, cache = cache).call(request).map(_.cacheHit), Right(false))
+    assertEquals(ManagedLanguageModel(delegate = chat, cache = cache).call(request).map(_.cacheHit), Right(true))
+    assertEquals((chat.calls.size, text.calls.size), (1, 1))
   }

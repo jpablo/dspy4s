@@ -51,7 +51,7 @@ Its fields have distinct responsibilities:
 | `runtime` | Resolves the ambient model and adapter |
 | `config` | Default LM request options for this predictor |
 | `lm` | Optional model pinned specifically to this predictor |
-| `tools` | Provider-native tool schemas exposed to the adapter |
+| `tools` | Tool schemas for the adapter: provider tools, or an input field of the prompt |
 
 The type parameters name the semantic boundary, not the engine's wire format:
 
@@ -131,7 +131,7 @@ flowchart TD
     resolve --> invocation["Build AdapterInvocation<br/>layout + demos + inputs + schema + tools"]
     invocation --> format["Adapter.format"]
     format --> lm["LanguageModel.call"]
-    lm --> parse["Adapter.parse each completion"]
+    lm --> parse["Adapter.parse each completion<br/>and check it with Shape[O]"]
     parse --> assemble["Assemble RawPrediction<br/>completions + usage + tool_calls"]
     assemble --> decode["Decode first completion with Shape[O]"]
     decode -->|"failure"| failure["Left(DspyError)"]
@@ -148,7 +148,8 @@ The stages are:
    JSON Schema, tools, and request controls.
 4. The adapter formats the invocation into model messages.
 5. The model returns one or more outputs.
-6. The adapter parses every model output into an output record.
+6. The adapter parses every model output into an output record. `Shape[O]` checks each record in the same step. A
+   record that it rejects is a `ParseError` with the raw response, so `ChatAdapter` tries its JSON fallback.
 7. The engine preserves all parsed rows as completions and chooses the first row as `raw.values`.
 8. `Shape[O]` decodes those first values into `O`. `Prediction.from` returns both that value and the unabridged raw
    prediction.
@@ -172,6 +173,11 @@ debugging, or accounting needs information that is not part of the domain output
 If the model returns several candidates, only the first becomes `output: O`; the remaining candidates are not lost.
 They remain in `raw.completions` for evaluation or custom selection logic. (`BestOfN` performs a related kind of
 selection by making several distinct program calls rather than consuming these candidates directly.)
+
+The tools of a `Predict` apply only to a signature with a tool calls output (`Vector[ToolCall]`). When native function
+calling is active, the request has them as provider tools. Else the prompt shows the text of each tool as an input
+field `tools`, and the model writes the calls as JSON text. With `NativeTools.enabled` on, a tool calls output with no
+tools is a `ConfigurationError`.
 
 The engine also adds a synthetic `tool_calls` value to the raw prediction when the adapter and model produce
 provider-native calls. Each call keeps the `id` of the provider. `Predict` exposes tool schemas but does not
@@ -229,11 +235,12 @@ Resolution and option merging follow explicit precedence rules:
 | Concern | Highest precedence → lowest precedence |
 |---|---|
 | Language model | `predict.withLm(model)` / `lm = Some(model)` → ambient `RuntimeContext` model |
-| Request option | per-call `ProgramCall.config` → module `Predict.config` → adapter-contributed option |
+| Request option | per-call `ProgramCall.config` → module `Predict.config` → options of `RuntimeScope.lmDefaults` → adapter-contributed option |
+| Rollout id | per-call `ProgramCall.rolloutId` → rollout id of `RuntimeScope.lmDefaults` |
 | Adapter | resolved by `ProgramRuntime`, normally from the ambient `RuntimeContext` |
 
 Both `withLm` and request configuration are immutable. `withLm` returns a copy; a per-call config changes only that
-invocation.
+invocation. `RuntimeScope.lmDefaults` holds the temperature and the rollout id of an attempt of `BestOfN` and `Refine`.
 
 ## Failure and observability semantics
 
@@ -246,7 +253,7 @@ and runtime observations consistent.
 | Model or adapter cannot be resolved | `Left(ConfigurationError)` |
 | Adapter formatting or parsing fails | `Left(DspyError)` from that stage |
 | Model call fails | `Left(DspyError)` from the model |
-| Parsed values do not satisfy `Shape[O]` | `Left(DspyError)` during output decoding |
+| Parsed values do not satisfy `Shape[O]` | `Left(ParseError)` with the raw response, from the parse step, after the JSON fallback of `ChatAdapter` |
 | Successful call with `traceEnabled = true` | One `predict` module scope plus one trace and history entry |
 | Successful call with `traceEnabled = false` | Module callbacks still run; trace and history recording is suppressed |
 | Ordinary failed call | Module callbacks report the failure; no success trace or history entry is recorded |
@@ -267,16 +274,6 @@ flowchart TD
     predict["Predict[I, O]<br/>encode + decode"] --> engine
     dynamic["DynamicPredict<br/>record input + record output"] --> engine
 ```
-
-`Predict.erase` creates an immutable `DynamicPredict` snapshot with the same layout, demos, runtime, output JSON
-schema, config, bound model, and tools:
-
-```scala
-val dynamic: DynamicPredict = answerQuestion.erase
-```
-
-Erasure removes the static `I` and `O` boundary; it does not add another runtime wrapper. For valid encoded inputs and
-decodable model outputs, the `Predict` call's `.raw` value equals the erased call's `.raw` value.
 
 ## Optimization
 

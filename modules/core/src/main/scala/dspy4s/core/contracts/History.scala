@@ -1,7 +1,8 @@
 package dspy4s.core.contracts
 
+import dspy4s.core.collections.Traverse
 import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, Schema}
+import zio.blocks.schema.{DynamicValue, Modifier, Schema}
 
 /** The conversation history of a signature (upstream `dspy.History`).
   *
@@ -18,7 +19,10 @@ import zio.blocks.schema.{DynamicValue, Schema}
   * val history = History.empty :+ DynamicValues.record("question" := "What is 1+1?", "answer" := "2")
   * predict((question = "What is 2+2?", history = history))
   * }}}
+  *
+  * The type has the marker [[TypeMarker.history]], thus a field of this type has the wire type [[TypeRef.history]].
   */
+@Modifier.config(TypeMarker.Key, TypeMarker.history)
 final case class History(messages: Vector[DynamicValue.Record] = Vector.empty) derives Schema:
 
   /** This history with one more message at its end. */
@@ -41,12 +45,10 @@ object History:
     */
   def toolCallResults(message: DynamicValue.Record): Vector[ToolCallResult] =
     DynamicValues.recordGet(message, ToolCallResultsKey) match
-      case Some(sequence: DynamicValue.Sequence) =>
-        val decoded = sequence.elements.toVector.map {
+      case Some(sequence: DynamicValue.Sequence) => Traverse.option(sequence.elements) {
           case record: DynamicValue.Record => ToolCallResult.fromRecord(record)
           case _                           => None
-        }
-        if decoded.forall(_.isDefined) then decoded.flatten else Vector.empty
+        }.getOrElse(Vector.empty)
       case _ => Vector.empty
 
   /** The history that an input record holds for `fieldName`: the encoded form of a [[History]] value. `None` when the

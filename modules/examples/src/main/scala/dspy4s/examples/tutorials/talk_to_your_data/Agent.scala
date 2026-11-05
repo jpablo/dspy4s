@@ -1,18 +1,19 @@
 /** Talk to Your Data: the plan, act, verify, refine agent.
   *
-  * PLAN (Signatures) English question to a [[QueryPlan]]. The model's intent is a validated Scala value that the rest
-  * of the program reasons about directly. ACT (RLM) The dataset (10k rows of CSV, too large to put in a prompt) is
-  * injected into a sandboxed Python REPL, and the model writes code to compute the answer honoring the plan. The
-  * arithmetic happens in the sandbox, so the number is computed in code. VERIFY The same plan is re-executed
-  * independently on the JVM by [[QueryEngine]], and the two engines must agree. Two independent computations matching
-  * is a real trust signal. REFINE On a mismatch, the discrepancy is fed back and the ACT stage retries (bounded).
+  * PLAN (Signatures) English question to a [[QueryPlan]]. The intent of the model is a validated Scala value that the
+  * rest of the program reads directly. ACT (RLM) The dataset (10k rows of CSV, too large to put in a prompt) goes into
+  * a sandboxed Python REPL, and the model writes code to compute the answer that the plan asks for. Usually the code
+  * computes the number. At the iteration limit, RLM asks the model for the outputs with no more code, and the model can
+  * then write the values itself. VERIFY [[QueryEngine]] runs the same plan on the JVM, and the two answers must agree.
+  * This shows that two computations agree, and it does not show that the plan is correct. REFINE On a mismatch, the
+  * agent gives the discrepancy to the ACT stage and retries (bounded).
   *
   * The planner's INSTRUCTION is what GEPA later optimizes (Stage 3); everything else is fixed. The executor and the JVM
   * cross-check are deliberately left unoptimized, since they are the ground the optimizer is measured against.
   */
 package dspy4s.examples.tutorials.talk_to_your_data
 
-import dspy4s.core.contracts.{DspyError, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, RuntimeContext, RuntimeError}
 import dspy4s.programs.{IterationLimit, LlmCallLimit}
 import dspy4s.programs.strategies.{Predict, RLM}
 import dspy4s.signatures.Signature
@@ -41,6 +42,9 @@ object Agent:
   def plannerSignature(instructions: String): Signature[Question, QueryPlan] =
     Signature.derived[Question, QueryPlan](name = "AnalystPlanner", instructions = instructions)
 
+  /** The planner program. The agent runs it, and GEPA tunes it, so the two have the same prompt. */
+  def planner(instructions: String): Predict[Question, QueryPlan] = Predict(plannerSignature(instructions))
+
   private val actInstructions: String =
     """You answer a question about a dataset by WRITING AND RUNNING PYTHON over it, never by guessing numbers.
       |
@@ -59,8 +63,8 @@ object Agent:
       |  method  - one sentence on how you computed it
       |Always print intermediate results to check your work before SUBMIT.""".stripMargin
 
-  /** The ACT executor: an [[RLM]] producing an [[AnalysisResult]] from the SUBMIT payload. No host tools and no
-    * `llm_query`; it is pure deterministic computation in the sandbox.
+  /** The ACT executor: an [[RLM]] producing an [[AnalysisResult]] from the SUBMIT payload. It has no host tools. RLM
+    * always offers `llm_query`, and [[LlmCallLimit]] must be positive, so the code can make one sub-LM call.
     */
   val executor: RLM[ActInput, AnalysisResult] = RLM(
     baseSignature =
@@ -73,7 +77,7 @@ object Agent:
 
   // --8<-- [start:plan-act]
   def plan(question: String, instructions: String)(using RuntimeContext): Either[DspyError, QueryPlan] =
-    Predict(plannerSignature(instructions))(Question(question, Dataset.schemaDescription)).map(_.output)
+    planner(instructions)(Question(question, Dataset.schemaDescription)).map(_.output)
 
   def act(plan: QueryPlan, question: String, feedback: String)(using
       RuntimeContext
@@ -81,25 +85,33 @@ object Agent:
     executor(ActInput(Dataset.csv, describePlan(plan), question, feedback)).map(_.output)
   // --8<-- [end:plan-act]
 
-  /** Independent JVM re-computation of the same plan; the sandbox's answer must match. Pure, no LM. */
+  /** Independent JVM computation of the same plan; the answer of the sandbox must match. Pure, no LM.
+    *
+    * The text of an issue goes to the sandbox as feedback ([[ask]]), so it does not hold the JVM answer. A model could
+    * copy that answer, and a later agreement would then not be independent.
+    */
   def verify(plan: QueryPlan, result: AnalysisResult): Verdict =
-    val oracle = QueryEngine.run(plan, Dataset.orders)
-    val ok     = plan.answerKind match
-      case AnswerKind.Category => oracle.answer.trim.equalsIgnoreCase(result.answer.trim)
-      case AnswerKind.Number   =>
-        val got = result.value.orElse(normalizeNumeric(result.answer))
-        oracle.value.exists(e => got.exists(g => math.abs(e - g) <= 0.01 + 1e-6 * math.abs(e)))
-    if ok then Verdict(ok = true, issues = Nil)
-    else
-      Verdict(
-        ok = false,
-        issues = List(
-          s"Independent JVM re-computation of this plan expected '${oracle.answer}', " +
-            s"but the sandbox produced '${result.answer}'. Re-read the data and recompute carefully."
-        )
-      )
+    QueryEngine.run(plan, Dataset.orders) match
+      case Left(problem) => Verdict(ok = false, issues = List(problem))
+      case Right(oracle) =>
+        val ok = plan.answerKind match
+          case AnswerKind.Category => oracle.answer.trim.equalsIgnoreCase(result.answer.trim)
+          case AnswerKind.Number   =>
+            val got = result.value.orElse(normalizeNumeric(result.answer))
+            oracle.value.exists(e => got.exists(QueryEngine.withinCent(e, _)))
+        if ok then Verdict(ok = true, issues = Nil)
+        else
+          Verdict(
+            ok = false,
+            issues = List(
+              s"An independent JVM computation of this plan does not agree with the sandbox answer '${result.answer}'. " +
+                "Read the data again and compute the answer again."
+            )
+          )
 
-  /** Full pipeline for one question: plan once, then act→verify, refining the ACT stage up to `maxAttempts`. */
+  /** Full pipeline for one question: plan once, then act→verify, refining the ACT stage up to `maxAttempts`. A plan
+    * with a problem cannot pass verify, so it is a `Left`, and the sandbox does not run.
+    */
   def ask(
       question           : String,
       plannerInstructions: String = plannerInstructionsBaseline,
@@ -113,7 +125,9 @@ object Agent:
             val verdict = verify(qp, result)
             if verdict.ok || attempt >= maxAttempts then Right(AgentAnswer(question, qp, result, verdict, attempt))
             else loop(verdict.issues.mkString(" "), attempt + 1)
-      loop(feedback = "", attempt = 1)
+      QueryEngine.run(qp, Dataset.orders) match
+        case Left(problem) => Left(RuntimeError("planner", problem))
+        case Right(_)      => loop(feedback = "", attempt = 1)
     }
 
   // ── helpers ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -133,7 +147,9 @@ object Agent:
     p.timeRange.foreach(tr =>
       parts += s"Date window on `${tr.column}`: ${tr.start.getOrElse("(open)")} to ${tr.end.getOrElse("(open)")}."
     )
-    p.sort.foreach(s => parts += s"Sort by ${s.by} ${if s.descending then "descending" else "ascending"}.")
+    p.sort.foreach(s =>
+      parts += s"Sort the groups by the aggregate value, ${if s.descending then "descending" else "ascending"}."
+    )
     p.limit.foreach(l => parts += s"Take the top $l.")
     parts +=
       (p.answerKind match

@@ -13,12 +13,28 @@ const JSON = Object.freeze(globalThis.JSON), console = Object.freeze(globalThis.
 // provides a helper to extract exception args across the JS/Python boundary.
 const PYTHON_SETUP_CODE = `
 import sys, io, json
+import json as _dspy_json, sys as _dspy_sys
 old_stdout, old_stderr = sys.stdout, sys.stderr
 buf_stdout, buf_stderr = io.StringIO(), io.StringIO()
 sys.stdout, sys.stderr = buf_stdout, buf_stderr
 
+# dspy4s: a value that JSON cannot hold becomes its repr, as in jsonable of local_interpreter_worker.py. Upstream
+# writes NaN here, JSON.parse rejects it, and the process ends. A private name of a module stays usable when the code
+# has a variable with the name json. This text is in a template of JavaScript, so it can have no backtick.
+def _dspy_printable(value):
+    try:
+        return repr(value)
+    except Exception:
+        return f"<unprintable {type(value).__name__}>"
+
 def last_exception_args():
-    return json.dumps(sys.last_exc.args) if sys.last_exc else None
+    if not _dspy_sys.last_exc:
+        return None
+    args = _dspy_sys.last_exc.args
+    try:
+        return _dspy_json.dumps(args, allow_nan=False)
+    except Exception:
+        return _dspy_json.dumps([_dspy_printable(arg) for arg in args])
 
 class _DSPyFinalOutput(BaseException):
     # Control-flow exception to signal completion (like StopIteration)
@@ -31,37 +47,50 @@ if 'SUBMIT' not in dir():
         raise _DSPyFinalOutput({"output": output})
 `;
 
-// Generate a tool wrapper function with declared parameters.
-// Parameters is an array of {name, type?, default?} objects.
-// Convert a JavaScript/JSON value to Python literal syntax
-const toPythonLiteral = (value) => {
-  const serialized = JSON.stringify(value);
-  return `__import__("json").loads(${JSON.stringify(serialized)})`;
-};
-
-const toPythonType = (type) => type === "NoneType" ? "type(None)" : type;
-
-const makeToolWrapper = (toolName, parameters = []) => {
-  // Build signature parts: "query: str, limit: int = 10"
-  const sigParts = parameters.map(p => {
-    let part = p.name;
-    if (p.type) part += `: ${toPythonType(p.type)}`;
-    if (p.default !== undefined) part += ` = ${toPythonLiteral(p.default)}`;
-    return part;
-  });
-  const signature = sigParts.join(', ');
-  const argNames = parameters.map(p => p.name);
-  const kwargParts = argNames.map(n => `"${n}": ${n}`).join(', ');
-
-  return `
-import json
-from pyodide.ffi import run_sync, JsProxy
-def ${toolName}(${signature}):
-    result = run_sync(_js_tool_call("${toolName}", json.dumps({"kwargs": {${kwargParts}}})))
-    parsed = result.to_py() if isinstance(result, JsProxy) else result
+// dspy4s: the code that each tool wrapper calls. It runs one time, before the main loop, because a wrapper reads these
+// names when it is defined. It is not in PYTHON_SETUP_CODE: a second run makes a new `_dspy_omitted`, and the wrappers
+// keep the old one as their default value. An argument of a wrapper cannot hide a name of this code, because this code
+// has its own scope.
+const makeToolCallHelper = () => `
+import json as _dspy_json
+from pyodide.ffi import run_sync as _dspy_run_sync, JsProxy as _dspy_js_proxy
+_dspy_omitted = object()
+def _dspy_tool_call(tool_name, kwargs):
+    arguments = {name: value for name, value in kwargs.items() if value is not _dspy_omitted}
+    result = _dspy_run_sync(_js_tool_call(tool_name, _dspy_json.dumps({"kwargs": arguments})))
+    parsed = result.to_py() if isinstance(result, _dspy_js_proxy) else result
     if isinstance(parsed, dict) and parsed.get("${TOOL_BRIDGE_ERROR_KEY}"):
         raise RuntimeError(parsed.get("message", "Tool bridge error"))
     return parsed
+`;
+
+const toPythonType = (type) => type === "NoneType" ? "type(None)" : type;
+
+// Generate a tool wrapper function with declared parameters.
+// Parameters is an array of {name, type?, optional?} objects.
+const makeToolWrapper = (toolName, parameters = []) => {
+  // dspy4s: each parameter from the first optional one on has the default `_dspy_omitted`, because Python refuses a
+  // parameter with no default after one with a default. So the positions of the schema stay. Python does not check a
+  // required argument after the first optional one, so the tool or the server reports it.
+  const firstOptional = parameters.findIndex(p => p.optional);
+  // Build signature parts: "query: str, limit: int = _dspy_omitted"
+  const sigParts = parameters.map((p, index) => {
+    let part = p.name;
+    if (p.type) part += `: ${toPythonType(p.type)}`;
+    if (firstOptional >= 0 && index >= firstOptional) part += " = _dspy_omitted";
+    return part;
+  });
+  const argNames = parameters.map(p => p.name);
+  const kwargParts = argNames.map(n => `"${n}": ${n}`).join(', ');
+  // dspy4s: a tool with no declared parameters (`ToolFunction(...)`, `ToolFunction.of(...)`) has an unknown argument
+  // list, so its wrapper takes keyword arguments, as in the local interpreter. The upstream runner generates
+  // `def name():` for such a tool, and that function rejects each argument.
+  const signature = parameters.length === 0 ? "**kwargs" : sigParts.join(', ');
+  const kwargsValue = parameters.length === 0 ? "kwargs" : `{${kwargParts}}`;
+
+  return `
+def ${toolName}(${signature}):
+    return _dspy_tool_call("${toolName}", ${kwargsValue})
 `;
 };
 
@@ -208,6 +237,17 @@ async function toolCallBridge(name, argsJson) {
 
 // Expose the bridge to Python
 pyodide.globals.set("_js_tool_call", toolCallBridge);
+pyodide.runPython(makeToolCallHelper());
+
+// dspy4s: the args of the last exception. This code runs in a catch block of the main loop, so an exception here ends
+// the process. Generated code can break the helper, for example with `del last_exception_args`. The args are then empty.
+const exceptionArgs = () => {
+  try {
+    return JSON.parse(pyodide.globals.get("last_exception_args")()) || [];
+  } catch {
+    return [];
+  }
+};
 
 try {
   const env_vars = (Deno.args[0] ?? "").split(",").filter(Boolean);
@@ -354,8 +394,7 @@ while (true) {
 
       // Handle SUBMIT's control-flow exception as a success result, not an error
       if (errorType === "_DSPyFinalOutput") {
-        const last_exception_args = pyodide.globals.get("last_exception_args");
-        const errorArgs = JSON.parse(last_exception_args()) || [];
+        const errorArgs = exceptionArgs();
         const answer = errorArgs[0] || null;
         console.log(jsonrpcResult({ final: answer }, requestId));
         continue;
@@ -365,10 +404,10 @@ while (true) {
       let errorArgs = [];
       if (errorType !== "SyntaxError") {
         // Only python exceptions have args.
-        const last_exception_args = pyodide.globals.get("last_exception_args");
         // Regarding https://pyodide.org/en/stable/usage/type-conversions.html#type-translations-errors,
         // we do a additional `json.dumps` and `JSON.parse` on the values, to avoid the possible memory leak.
-        errorArgs = JSON.parse(last_exception_args()) || [];
+        // dspy4s: an error of JavaScript has no `type`. It takes its message as args, not the args of an old exception.
+        errorArgs = error.type ? exceptionArgs() : [errorMessage];
       }
 
       // Map error type to JSON-RPC error code

@@ -105,3 +105,15 @@ class XmlStreamingStateSuite extends FunSuite:
     assert(first.nonEmpty)
     assertEquals(second, Vector.empty[FieldChunk])
   }
+
+  // The parser reads the first element of a field (`XMLAdapter.fieldTexts`), so the stream does too.
+  test("the first element of a repeated field tag wins, as in the parser") {
+    val state = new XmlStreamingState(Vector(output("answer")))
+    val out   = drive(state, "<answer>Paris</answer>\n<answer>Lyon</answer>")
+    assertEquals(out, Vector(FieldChunk("answer", "Paris", isLast = true)))
+  }
+
+  test("a field value is stripped with the Python rule, as in the parser") {
+    val state = new XmlStreamingState(Vector(output("answer")))
+    assertEquals(collect(drive(state, "<answer> Paris </answer>")).get("answer"), Some("Paris"))
+  }

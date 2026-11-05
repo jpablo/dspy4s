@@ -1,20 +1,19 @@
 package dspy4s.lm.runtime
 
-import dspy4s.lm.contracts.{LmCache, LmRequest, LmResponse}
+import dspy4s.lm.contracts.{CacheKey, LmCache, LmResponse}
 
-final case class CompositeLmCache(memory: Option[LmCache], disk: Option[LmCache]) extends LmCache:
-  override def get(request: LmRequest): Option[LmResponse] =
-    memory.flatMap(_.get(request)).orElse {
-      disk.flatMap(_.get(request)).map { response =>
-        memory.foreach(_.put(request, response))
+/** A cache with two levels. `get` reads `memory` first, then `disk`, and a hit of `disk` goes into `memory` too. `put`
+  * writes the two levels.
+  */
+final case class CompositeLmCache(memory: LmCache, disk: LmCache) extends LmCache:
+  override def get(key: CacheKey): Option[LmResponse] =
+    memory.get(key).orElse {
+      disk.get(key).map { response =>
+        memory.put(key, response)
         response
       }
     }
 
-  override def put(request: LmRequest, response: LmResponse): Unit =
-    memory.foreach(_.put(request, response))
-    disk.foreach(_.put(request, response))
-
-object NoopLmCache extends LmCache:
-  override def get(request: LmRequest): Option[LmResponse]         = None
-  override def put(request: LmRequest, response: LmResponse): Unit = ()
+  override def put(key: CacheKey, response: LmResponse): Unit =
+    memory.put(key, response)
+    disk.put(key, response)

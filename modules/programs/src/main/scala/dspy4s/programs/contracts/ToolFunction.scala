@@ -1,7 +1,9 @@
 package dspy4s.programs.contracts
 
-import dspy4s.core.contracts.{DspyError, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, Reflects, RuntimeContext, TypeRef}
 import zio.blocks.schema.{DynamicValue, Schema}
+
+import scala.collection.immutable.VectorMap
 
 /** A callable tool exposed to tool-using programs (`ReAct`, ...). `invoke` receives the call arguments as a
   * `DynamicValue.Record` (the named params parsed from the LM's tool call) and returns its result as a `DynamicValue`,
@@ -17,14 +19,16 @@ trait ToolFunction:
   def description: String = ""
 
   /** The tool's parameters as `(name, wire type)` pairs, surfaced to the model by tool-using programs so it knows what
-    * arguments to supply. Empty for hand-written tools and the function factories; populated by
-    * [[ToolFunction.fromMethod]] from the method's signature.
+    * arguments to supply. Empty for hand-written tools and by default in the function factories; populated by
+    * [[ToolFunction.fromMethod]] from the method's signature. An empty list means an unknown argument list, so in the
+    * sandbox of `RLM` the tool takes keyword arguments.
     */
-  def argSchema: Vector[(String, dspy4s.core.contracts.TypeRef)] = Vector.empty
+  def argSchema: Vector[(String, TypeRef)] = Vector.empty
 
-  /** The JSON schema of the arguments, when the tool has one: an object schema with `properties` and `required`, for
-    * example the `inputSchema` of an MCP tool (upgrade item I10; upstream `Tool.args` holds the schema of each
-    * argument). [[argSchema]] stays the flat view of the same arguments. `None` for a tool that has only [[argSchema]].
+  /** The JSON schema of the arguments, when the tool has one: an object schema with `type`, `properties`, and
+    * `required`, for example the object schema of a converted MCP tool, with each `$ref` expanded (upgrade item I10;
+    * upstream `Tool.args` holds the schema of each argument). [[argSchema]] stays the flat view of the same arguments.
+    * `None` for a tool that has only [[argSchema]].
     */
   def inputSchema: Option[DynamicValue.Record] = None
 
@@ -45,12 +49,19 @@ trait ToolFunction:
 final class description(val value: String) extends scala.annotation.StaticAnnotation
 
 object ToolFunction:
-  /** Lift a return value with a `Schema` into the `DynamicValue` a tool yields, so authors can write
+  /** The tools of an agent by name, with one tool for each name, as the dict of upstream `ReAct.__init__` and
+    * `ReActV2.__init__`: a later tool with a name takes the place of the earlier one, in the position of the earlier
+    * one.
+    */
+  def byName(tools: Vector[ToolFunction]): VectorMap[String, ToolFunction] =
+    VectorMap.from(tools.map(tool => tool.name -> tool))
+
+  /** Lift a return value with a `Schema` into the `DynamicValue` a tool yields, in the wire form, so authors can write
     * `Right(ToolFunction.result("Brussels"))` (or return any case class with a `Schema`) instead of hand-constructing
     * `DynamicValue.Primitive(...)`.
     */
-  def result[A](value: A)(using schema: Schema[A]): DynamicValue =
-    schema.toDynamicValue(value)
+  def result[A](value: A)(using Schema[A]): DynamicValue =
+    Reflects.wireOf(value)
 
   /** Build a tool from a plain function over the call args, instead of an anonymous `new ToolFunction`. The body may
     * use the ambient `RuntimeContext` (it's a context function, so it's available but not required) and returns the
@@ -61,18 +72,27 @@ object ToolFunction:
     *   Right(ToolFunction.result(s"The weather in ${args.asString("city")} is sunny"))
     * }
     * }}}
+    *
+    * A tool that knows its arguments gives [[ToolFunction.argSchema]] and [[ToolFunction.inputSchema]].
     */
-  def apply(name: String, description: String = "")(
+  def apply(
+      name       : String,
+      description: String                      = "",
+      argSchema  : Vector[(String, TypeRef)]   = Vector.empty,
+      inputSchema: Option[DynamicValue.Record] = None
+  )(
       invoke: DynamicValue.Record => RuntimeContext ?=> Either[DspyError, DynamicValue]
   ): ToolFunction =
-    val toolName = name
-    val toolDesc = description
-    val toolFn   = invoke // alias: avoid the method-name shadowing the param in the body below
-    new ToolFunction:
-      override val name: String                                                                             = toolName
-      override val description: String                                                                      = toolDesc
-      override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
-        toolFn(args)
+    FunctionTool(name, description, argSchema, inputSchema, invoke)
+
+  private final class FunctionTool(
+      override val name       : String,
+      override val description: String,
+      override val argSchema  : Vector[(String, TypeRef)],
+      override val inputSchema: Option[DynamicValue.Record],
+      run                     : DynamicValue.Record => RuntimeContext ?=> Either[DspyError, DynamicValue]
+  ) extends ToolFunction:
+    override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] = run(args)
 
   /** Like [[apply]] but the body returns a value with a `Schema` directly (lifted via [[result]]) — no
     * `Right(ToolFunction.result(...))` wrapping. Use this for tools that never fail:
@@ -91,7 +111,8 @@ object ToolFunction:
   /** Build a tool from a **method** — the dspy4s analogue of Python's `dspy.Tool(fn)`. The macro reads the method's
     * name, its `@description` annotation, and its parameters, and produces a `ToolFunction` that (1) decodes each
     * argument from the call `Record` by name/type, (2) calls the method, lifting its result via its `Schema`, and (3)
-    * carries an [[argSchema]] so tool-using programs can tell the model what arguments the tool takes:
+    * carries an [[argSchema]] so tool-using programs can tell the model what arguments the tool takes. An argument that
+    * is not a text, a number, or a bool also gives the tool an [[inputSchema]] with the JSON schema of that argument:
     *
     * {{{
     * @description("Get the current weather for a city.")

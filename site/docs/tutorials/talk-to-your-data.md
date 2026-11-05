@@ -1,7 +1,7 @@
 # Talk to your data
 
-A type-safe analytics agent that answers questions about a dataset and gets the
-arithmetic right. It threads three ideas into one workflow: signatures, a
+A type-safe analytics agent that answers questions about a dataset and checks
+the arithmetic. It threads three ideas into one workflow: signatures, a
 code-writing agent, and prompt optimization with a grounded metric.
 
 ## The model's intent is a domain value
@@ -27,23 +27,26 @@ prompt cannot drift between "avg", "mean", and "average":
 The dataset is thousands of CSV rows, too large to put in a prompt. So the agent
 runs in two stages. **Plan** asks the model for a `QueryPlan`. **Act**
 hands the plan and the data to an `RLM`, which writes and runs Python in a
-sandbox to compute the answer. The arithmetic happens in code, not in the
-model's head:
+sandbox to compute the answer:
 
 ```scala
 --8<-- "tutorials/talk_to_your_data/Agent.scala:plan-act"
 ```
 
+At the iteration limit, `RLM` asks the model for the outputs with no more code,
+so the model can then write the values itself.
+
 A third stage, **verify**, re-computes the same plan independently on the JVM
-with a plain Scala query engine and requires the two answers to agree. A
-mismatch triggers a refine attempt.
+with a plain Scala query engine and requires the two answers to agree, also for
+such values. A mismatch triggers a refine attempt.
 
 ## Optimization with a grounded metric
 
 The planner's instruction starts vague. `GEPA` evolves it against a metric that
-is the deterministic Scala engine compared to a by-construction answer key, so
-the optimizer has a trustworthy signal with no human labels. This turns a weak
-baseline planner into a reliable one.
+is the deterministic Scala engine compared to an answer key. The answer key
+comes from hand-written plans, which are labels, and from the same engine. The
+offline check compares some answers with a direct computation. The metric thus
+gives the optimizer a score from code, with no LLM judge.
 
 ## Running it
 

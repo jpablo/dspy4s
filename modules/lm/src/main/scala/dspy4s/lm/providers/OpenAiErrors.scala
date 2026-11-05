@@ -16,6 +16,7 @@ import dspy4s.core.contracts.LmServerError
 import dspy4s.core.contracts.LmStreamAssemblyError
 import dspy4s.core.contracts.LmTimeoutError
 import dspy4s.core.contracts.LmUnsupportedModelError
+import dspy4s.core.contracts.LmUsage
 import zio.blocks.schema.DynamicValue
 
 import java.time.DateTimeException
@@ -28,16 +29,19 @@ import scala.concurrent.duration.NANOSECONDS
 import scala.util.matching.Regex
 
 /** Gives each failure of an OpenAI-compatible endpoint its [[dspy4s.core.contracts.LmError]] class. The chat client,
-  * the stream client, and the embedder share this object, so one response gives one class on each path.
+  * the stream client, and the embedder share this object, so one response gives one class on each path. The TypeSafe
+  * client uses the parts that do not depend on the provider: [[byStatus]], [[requestId]], [[retryAfter]],
+  * [[withRequestDetails]], and [[notConfigured]].
   *
-  * The rules mirror upstream `normalize_error` (`dspy/_vendor/lm15/providers/openai.py`), `map_http_error`
+  * The rules are the rules of upstream `normalize_error` (`dspy/_vendor/lm15/providers/openai.py`), `map_http_error`
   * (`dspy/_vendor/lm15/errors.py`), and `_attach_error_metadata` (`dspy/_vendor/lm15/providers/base.py`).
   */
 private[lm] object OpenAiErrors:
-  val provider: String = "openai"
+  /** The provider name of the errors. */
+  private val provider: String = "openai"
 
-  /** Context-window overflow markers, mirroring upstream dspy `clients/lm.py` (`is_litellm_context_window_error`).
-    * Matched case-insensitively against the HTTP 400 response body.
+  /** The texts that tell that a prompt is larger than the context window (upstream `is_litellm_context_window_error` in
+    * dspy `clients/lm.py`). The check looks for them in the body of an HTTP 400 reply, with no regard to case.
     */
   private val contextWindowMarkers: Seq[String] =
     Seq("context_length_exceeded", "maximum context length", "context window", "reduce the length")
@@ -45,20 +49,18 @@ private[lm] object OpenAiErrors:
   private val modelErrorCodes: Set[String] =
     Set("model_not_found", "model_not_available", "unsupported_model", "DeploymentNotFound")
 
-  private type ErrorClass = (String, LmErrorDetails) => LmProviderError
+  /** The class of an error: a function from the message and the details to the error. */
+  private[providers] type ErrorClass = (String, LmErrorDetails) => LmProviderError
 
-  /** The class of each code of an error event in a stream (upstream `_stream_error_code_map`, which extends
-    * `_response_error_code_map`). A code that is not in the table gives an [[LmProviderResponseError]].
+  /** The class of each code of an `error` object in a reply with a success status (upstream
+    * `_response_error_code_map`). A code that is not in the table gives an [[LmServerError]] ([[fromReplyError]]).
     */
-  private val streamErrorClasses: Map[String, ErrorClass] =
+  private val responseErrorClasses: Map[String, ErrorClass] =
     val server: ErrorClass      = LmServerError(_, _)
     val rateLimit: ErrorClass   = LmRateLimitError(_, _)
     val timeout: ErrorClass     = LmTimeoutError(_, _)
     val invalid: ErrorClass     = LmInvalidRequestError(_, _)
     val unsupported: ErrorClass = LmUnsupportedModelError(_, _)
-    val context: ErrorClass     = ContextWindowExceededError(_, _)
-    val auth: ErrorClass        = LmAuthError(_, _)
-    val billing: ErrorClass     = LmBillingError(_, _)
     val invalidCodes            = Seq(
       "invalid_prompt",
       "invalid_image",
@@ -77,22 +79,33 @@ private[lm] object OpenAiErrors:
       "image_file_not_found"
     )
     Map(
-      "server_error"                 -> server,
-      "rate_limit_exceeded"          -> rateLimit,
-      "no_capacity"                  -> rateLimit,
-      "too_many_requests"            -> rateLimit,
-      "rate_limit_error"             -> rateLimit,
-      "vector_store_timeout"         -> timeout,
+      "server_error"         -> server,
+      "rate_limit_exceeded"  -> rateLimit,
+      "no_capacity"          -> rateLimit,
+      "too_many_requests"    -> rateLimit,
+      "vector_store_timeout" -> timeout
+    ) ++ invalidCodes.map(_ -> invalid) ++ modelErrorCodes.map(_ -> unsupported)
+
+  /** The class of each code of an error event in a stream (upstream `_stream_error_code_map`): the table of
+    * [[responseErrorClasses]] and more codes. A code that is not in the table gives an [[LmProviderResponseError]].
+    */
+  private val streamErrorClasses: Map[String, ErrorClass] =
+    val context: ErrorClass   = ContextWindowExceededError(_, _)
+    val auth: ErrorClass      = LmAuthError(_, _)
+    val billing: ErrorClass   = LmBillingError(_, _)
+    val rateLimit: ErrorClass = LmRateLimitError(_, _)
+    responseErrorClasses ++ Map(
       "context_length_exceeded"      -> context,
       "invalid_api_key"              -> auth,
       "authentication_error"         -> auth,
+      "rate_limit_error"             -> rateLimit,
       "insufficient_quota"           -> billing,
       "1113"                         -> billing, // Z.AI: insufficient balance
       "exceeded_current_quota_error" -> billing  // Moonshot: balance or quota
-    ) ++ invalidCodes.map(_ -> invalid) ++ modelErrorCodes.map(_ -> unsupported)
+    )
 
-  /** The headers that can hold the request id, in the order of preference. The TypeSafe client reads them too. */
-  private[providers] val requestIdHeaders: Seq[String] =
+  /** The headers that can hold the request id, in the order of preference ([[requestId]]). */
+  private val requestIdHeaders: Seq[String] =
     Seq("x-request-id", "request-id", "x-amzn-requestid", "x-amz-request-id", "x-ms-request-id", "apim-request-id")
 
   /** The headers that hold the retry hint in milliseconds. They apply when `Retry-After` gives no hint. */
@@ -143,7 +156,7 @@ private[lm] object OpenAiErrors:
       now    : Instant = Instant.now()
   ): LmProviderError =
     val envelope = parseEnvelope(body)
-    val lowered  = headers.map((name, value) => name.toLowerCase(Locale.ROOT) -> value)
+    val lowered  = lowerCase(headers)
     val text     = envelope.message.getOrElse(body.trim.take(excerptLength))
     val message  = if text.isEmpty then s"OpenAI HTTP $status" else s"OpenAI HTTP $status: $text"
     val details  = LmErrorDetails(
@@ -151,7 +164,7 @@ private[lm] object OpenAiErrors:
       provider = Some(provider),
       providerCode = envelope.code.orElse(envelope.kind),
       status = Some(status),
-      requestId = requestIdHeaders.iterator.flatMap(lowered.get).map(_.trim).find(_.nonEmpty),
+      requestId = requestId(lowered),
       retryAfter = retryAfter(lowered, now)
     )
     def codeIs(value: String): Boolean = envelope.code.contains(value)
@@ -163,15 +176,38 @@ private[lm] object OpenAiErrors:
     else if codeIs("insufficient_quota") || kindIs("insufficient_quota") then LmBillingError(message, details)
     else if codeIs("invalid_api_key") || kindIs("authentication_error") then LmAuthError(message, details)
     else if codeIs("rate_limit_exceeded") || kindIs("rate_limit_error") then LmRateLimitError(message, details)
-    else
-      status match
-        case 401 | 403                   => LmAuthError(message, details)
-        case 402                         => LmBillingError(message, details)
-        case 408 | 504                   => LmTimeoutError(message, details)
-        case 429                         => LmRateLimitError(message, details)
-        case 400 | 404 | 409 | 413 | 422 => LmInvalidRequestError(message, details)
-        case s if s >= 500 && s <= 599   => LmServerError(message, details)
-        case _                           => LmProviderResponseError(message, details)
+    else byStatus(status)(message, details)
+
+  /** The class of an error status (upstream `map_http_error` in `dspy/_vendor/lm15/errors.py`): 401 and 403 give
+    * [[LmAuthError]], 402 [[LmBillingError]], 408 and 504 [[LmTimeoutError]], 429 [[LmRateLimitError]], 400, 404, 409,
+    * 413, and 422 [[LmInvalidRequestError]], 500 to 599 [[LmServerError]], and each other status
+    * [[LmProviderResponseError]].
+    */
+  def byStatus(status: Int): ErrorClass =
+    status match
+      case 401 | 403                   => LmAuthError(_, _)
+      case 402                         => LmBillingError(_, _)
+      case 408 | 504                   => LmTimeoutError(_, _)
+      case 429                         => LmRateLimitError(_, _)
+      case 400 | 404 | 409 | 413 | 422 => LmInvalidRequestError(_, _)
+      case s if s >= 500 && s <= 599   => LmServerError(_, _)
+      case _                           => LmProviderResponseError(_, _)
+
+  /** The headers with lower-case names, for a lookup that ignores the case of the names. */
+  def lowerCase(headers: Map[String, String]): Map[String, String] =
+    headers.map((name, value) => name.toLowerCase(Locale.ROOT) -> value)
+
+  /** The request id of a response (upstream `_attach_error_metadata`): the value of the first header of `preferred`,
+    * then of the request id headers of the providers, that is not blank. The value has no white space at its ends.
+    *
+    * @param lowered
+    *   the response headers, with lower-case names ([[lowerCase]])
+    * @param preferred
+    *   the headers of the provider that come first, with lower-case names. For example, the TypeSafe client gives
+    *   `x-typesafe-request-id`.
+    */
+  def requestId(lowered: Map[String, String], preferred: Seq[String] = Seq.empty): Option[String] =
+    (preferred ++ requestIdHeaders).iterator.flatMap(lowered.get).map(_.trim).find(_.nonEmpty)
 
   /** The error for an error event in a stream, `{"error": {"message": ..., "code": ..., "type": ...}}` (upstream
     * `parse_stream_events` and `_error_detail`). The provider code is the code, else the type, else `provider`. The
@@ -190,7 +226,7 @@ private[lm] object OpenAiErrors:
     */
   def fromResponsesStreamError(event: DynamicValue.Record, model: Option[String]): LmProviderError =
     val outer = envelopeOf(event)
-    DynamicValues.recordGet(event, WireKeys.error).flatMap(DynamicJson.asRecord) match
+    DynamicValues.recordGet(event, WireKeys.error).flatMap(DynamicValues.asRecord) match
       case Some(error) =>
         val inner = envelopeOf(error)
         streamError(inner.code.orElse(inner.kind).orElse(outer.code), inner.message.orElse(outer.message), model)
@@ -207,14 +243,47 @@ private[lm] object OpenAiErrors:
     val errorClass   = streamErrorClasses.getOrElse(providerCode, LmProviderResponseError(_, _))
     errorClass(message.getOrElse(providerCode), details)
 
+  /** The error for an `error` object in a reply with a success status (upstream `_response_error` in
+    * `dspy/_vendor/lm15/providers/openai.py`, which the chat reader and the Responses reader use). `None` when the
+    * reply has no `error` object. An `error` value that is not an object does not make an error.
+    *
+    * The class comes from the `code` of the error. A code that is not in the table of upstream
+    * `_response_error_code_map` gives an [[LmServerError]]. The message is the `message` of the error, else the JSON
+    * text of the error object. The details hold the model, the provider, and the code.
+    */
+  def fromReplyError(reply: DynamicValue, model: Option[String]): Option[LmProviderError] =
+    DynamicValues.recordGet(reply, WireKeys.error).flatMap(DynamicValues.asRecord).map { error =>
+      val envelope   = envelopeOf(error)
+      val details    = LmErrorDetails(model = model, provider = Some(provider), providerCode = envelope.code)
+      val errorClass = envelope.code.flatMap(responseErrorClasses.get).getOrElse[ErrorClass](LmServerError(_, _))
+      errorClass(envelope.message.getOrElse(DynamicValues.encodeJson(error)), details)
+    }
+
   /** The error for a stream that is not complete or not valid. */
   def streamAssembly(message: String, model: Option[String]): LmStreamAssemblyError =
     LmStreamAssemblyError(message, LmErrorDetails(model = model, provider = Some(provider)))
 
+  /** The error for a reply with no output: a reply with no choices. A choice with no text is an output with an empty
+    * text, not this error. The details hold the model, the provider, and the usage of the reply: the provider can bill
+    * the prompt of such a reply.
+    */
+  def noOutputs(model: Option[String], usage: Option[LmUsage]): LmProviderResponseError =
+    LmProviderResponseError(
+      "Provider response does not contain any outputs",
+      LmErrorDetails(model = model, provider = Some(provider), usage = usage)
+    )
+
   /** Adds the model and the provider to an LM error that the transport returned. The transport is generic, so it does
     * not know them. A field that is already set stays. An error that is not an LM error passes unchanged.
+    *
+    * @param provider
+    *   the name of the provider. The default is `openai`.
     */
-  def withRequestDetails(error: DspyError, model: Option[String]): DspyError =
+  def withRequestDetails(
+      error   : DspyError,
+      model   : Option[String],
+      provider: String = OpenAiErrors.provider
+  ): DspyError =
     error match
       case lm: LmError => lm.withDetails(lm.details.copy(
           model = lm.details.model.orElse(model),
@@ -222,8 +291,12 @@ private[lm] object OpenAiErrors:
         ))
       case other => other
 
-  /** The error for an API key variable that is absent or empty. */
-  def notConfigured(envVar: String): LmNotConfiguredError =
+  /** The error for an API key variable that is absent or empty.
+    *
+    * @param provider
+    *   the name of the provider. The default is `openai`.
+    */
+  def notConfigured(envVar: String, provider: String = OpenAiErrors.provider): LmNotConfiguredError =
     LmNotConfiguredError(s"Missing '$envVar' environment variable", LmErrorDetails(provider = Some(provider)))
 
   private def isContextWindowError(body: String): Boolean =
@@ -234,7 +307,7 @@ private[lm] object OpenAiErrors:
     * not JSON. This function does not fail for a body that it cannot read.
     */
   private def parseEnvelope(body: String): Envelope =
-    DynamicJson.decode(body).toOption.flatMap(DynamicJson.field(_, "error")) match
+    DynamicValues.decodeJson(body).flatMap(DynamicValues.recordGet(_, "error")) match
       case Some(error: DynamicValue.Record) => envelopeOf(error)
       case Some(other)                      => Envelope(message = scalarText(other))
       case None                             => Envelope()
@@ -248,7 +321,7 @@ private[lm] object OpenAiErrors:
     * string, `null`, and each other value give `None`.
     */
   private def scalarText(value: DynamicValue): Option[String] =
-    DynamicJson.asString(value).orElse(DynamicJson.asLong(value).map(_.toString)).map(_.trim).filter(_.nonEmpty)
+    DynamicValues.asString(value).orElse(DynamicValues.asLong(value).map(_.toString)).map(_.trim).filter(_.nonEmpty)
 
   /** The delay that the response asked for. `Retry-After` holds decimal seconds or an HTTP date. A date gives the time
     * that remains, and a date in the past gives zero. When `Retry-After` gives no hint, `retry-after-ms` and
@@ -256,9 +329,9 @@ private[lm] object OpenAiErrors:
     * too large for a `FiniteDuration` gives no hint. The TypeSafe client uses this rule too.
     *
     * @param lowered
-    *   the response headers, with lower-case names
+    *   the response headers, with lower-case names ([[lowerCase]])
     */
-  private[providers] def retryAfter(lowered: Map[String, String], now: Instant): Option[FiniteDuration] =
+  def retryAfter(lowered: Map[String, String], now: Instant): Option[FiniteDuration] =
     val seconds = lowered.get("retry-after")
       .flatMap(value => decimalDuration(value, nanosPerSecond).orElse(durationUntil(value, now)))
     def millis = retryAfterMillisHeaders.iterator.flatMap(lowered.get).flatMap(decimalDuration(_, nanosPerMilli))

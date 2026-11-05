@@ -5,7 +5,6 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.lm.contracts.LmMode
 import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.contracts.Message
 import dspy4s.lm.contracts.MessageRole
@@ -68,7 +67,6 @@ class OpenAiLiveSuite extends FunSuite:
 
     val request = LmRequest(
       model = model,
-      mode = LmMode.Chat,
       messages =
         Vector(Message(role = MessageRole.User, text = Some("Reply with exactly the text: integration-test-passed"))),
       options = DynamicValues.record("max_tokens" := 10, "temperature" := 0.0)
@@ -96,7 +94,6 @@ class OpenAiLiveSuite extends FunSuite:
 
     val request = LmRequest(
       model = model,
-      mode = LmMode.Chat,
       messages = Vector(
         Message(role = MessageRole.System, text = Some("Be concise.")),
         Message(role = MessageRole.User, text = Some("Describe the color of the sky in two short sentences."))

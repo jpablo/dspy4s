@@ -4,6 +4,7 @@ import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.programs.contracts.ToolFunction
 import dspy4s.programs.strategies.RLM
+import dspy4s.programs.strategies.RLMModel
 import dspy4s.programs.strategies.RLMReplProtocol
 import dspy4s.signatures.Signature
 import munit.FunSuite
@@ -88,7 +89,7 @@ class RLMNamespaceSuite extends FunSuite:
 
   test("a variable preview with an odd limit keeps exactly that many characters") {
     def preview(limit: Int): String =
-      RLM.ReplVariable.fromValue("value", DynamicValues.fromAny("abcdef"), None, limit).preview
+      RLMModel.ReplVariable.fromValue("value", DynamicValues.fromAny("abcdef"), None, limit).preview
     assertEquals(preview(5), "ab...def")
     assertEquals(preview(1), "...f")
     assertEquals(preview(6), "abcdef")

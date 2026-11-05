@@ -78,12 +78,12 @@ class GepaGivenContextSuite extends FunSuite:
     )
   )
 
-  private def parisContext(callbacks: Vector[CallbackHandler] = Vector.empty): RuntimeContext =
+  private def parisContext(callbacks: Option[Vector[CallbackHandler]] = None): RuntimeContext =
     RuntimeContext(lm = Some(ParisLm()), adapter = Some(ChatAdapter()), callbacks = callbacks)
 
   test("Gepa.compile sends its compile scope to the callbacks of the given context") {
     val recorder         = Recorder()
-    given RuntimeContext = parisContext(Vector(recorder))
+    given RuntimeContext = parisContext(Some(Vector(recorder)))
     val config           = GepaConfig(
       budget = GepaBudget.MetricCalls(MetricCallCount(2)),
       reflectionMinibatchSize = MinibatchSize(2),

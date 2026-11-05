@@ -7,14 +7,15 @@ import zio.blocks.schema.DynamicValue
 
 import java.time.Instant
 
-/** A single observed module call -- one entry per `Module.apply` (or any other module that records itself). `component`
+/** A single observed module call: one entry per `Module.apply` (or any other module that records itself). `component`
   * is the module's `moduleName` (`"predict"`, `"chain_of_thought"`, ...), `inputs` is the encoded `ProgramCall.input`
   * record, and `outputs` is the successful result projected by the module's lifecycle observation.
   *
   * Appended to [[RuntimeContext.trace]] when the underlying `ProgramCall.traceEnabled` is `true`. A successful call
   * records `failure = None`. A FAILED call is recorded only when [[RuntimeContext.captureFailureTraces]] is set (e.g.
   * by GEPA's reflective evaluation): `failure` carries the error message and `outputs` carries the raw model response
-  * (`raw_response`) when the error is a parse failure. See PORT_GAPS G-12 (P-a).
+  * (`raw_response`) when the error is a parse failure. See PORT_GAPS G-12 (P-a). The trace is capped by
+  * [[RuntimeContext.maxTraceSize]] in `RuntimeEnvironment.appendTrace`.
   *
   * `predictor` is the [[PredictorKey]] of the predictor that recorded the entry. It is `None` for a module that is not
   * a predictor (a composite such as `ReAct`), and for a module that ran inside a predictor (the `Predict` inside
@@ -48,8 +49,8 @@ object PredictorKey:
   def from(moduleName: String, layout: SignatureLayout): PredictorKey =
     PredictorKey(moduleName, layout.withInstructions(None))
 
-/** A single observed LM (or module) call's payload, kept in [[RuntimeContext.history]] for inspection and -- for LM
-  * entries -- usage accounting. `component` is the module name, or `lm:<id>` for an LM call; `payload` is the
+/** A single observed LM (or module) call's payload, kept in [[RuntimeContext.history]] for inspection and, for LM
+  * entries, for usage accounting. `component` is the module name, or `lm:<id>` for an LM call; `payload` is the
   * caller-defined snapshot. The history ring is capped by [[RuntimeContext.maxHistorySize]] in
   * `RuntimeEnvironment.appendHistory`.
   */

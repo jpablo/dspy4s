@@ -57,7 +57,7 @@ sealed ADT. The semantic content is the same; the test shape isn't.
 | `dspy.configure(lm=..., adapter=...)` (process-global mutable state) | `RuntimeEnvironment.withSettings(SettingsData(...)) { ... }` (scoped, stack-based, ThreadLocal-backed) | `core/runtime/RuntimeEnvironment.scala` |
 | `with dspy.context(lm=...): ...` | same `withSettings` block — no `with`-statement analog needed because the block already scopes the override. | — |
 | Implicit "current LM" lookup inside `Predict.forward` | `runtime.resolveModel(using RuntimeContext)` reads the current settings | `programs/Predict.scala` |
-| Reading the active LM from anywhere | `summon[RuntimeContext].settings.entries.get(SettingKeys.languageModel.name)` | `lm/runtime/ProviderLanguageModel.scala` and similar |
+| Reading the active LM from anywhere | `summon[RuntimeContext].lm` | `programs/runtime/SettingsProgramRuntime.scala` and similar |
 
 The `RuntimeContext` value travels via Scala 3 `using` parameters
 everywhere a Python function would have read from `dspy.settings`. Tests
@@ -194,7 +194,7 @@ is collapsed into thematic files (`StreamingContracts.scala` holds
 | Python | dspy4s |
 |---|---|
 | Optional type hints (`def foo(x: int) -> str:`) | Mandatory for every signature; checked by the compiler. |
-| `Any` as escape hatch | Used in dspy4s for the genuinely dynamic surfaces: `Map[String, Any]` for user inputs/outputs, `Any` for raw LM payloads in `LmChunk.raw`. |
+| `Any` as escape hatch | Used in dspy4s for the genuinely dynamic surfaces: `Map[String, Any]` for user inputs/outputs. |
 | `Optional[T]` / `T \| None` | `Option[T]`. |
 | `Union[A, B]` | Scala 3 union types `A \| B` are available; we mostly use sealed ADTs instead for closed cases. |
 | `pydantic.BaseModel` for schema-validated JSON | Currently `Map[String, Any]` + `ujson`. Pydantic-style inputs would require a per-signature codegen step (long-term TODO; not on the roadmap). |

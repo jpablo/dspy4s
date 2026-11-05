@@ -16,7 +16,7 @@ Each `Spec` declares its inputs and outputs. `List[String]` outputs such as `key
 --8<-- "tutorials/llms_txt_generation/LlmsTxtGeneration.scala:analyzer"
 ```
 
-`RepositoryAnalyzer` holds four `ChainOfThought` fields. Three are built with `Signature.of`, and `generateExamples` uses an inline string signature. `forward` runs them in sequence inside a for-comprehension over `Either[DspyError, String]`, so a failure in any step short-circuits. Each predictor's `output` feeds the next, and the final step returns the `llms_txt_content` string.
+`RepositoryAnalyzer` holds four `ChainOfThought` fields. Three are built with `Signature.of`, and `generateExamples` uses an inline string signature. The `instructions` argument gives the task text that the model gets. `forward` runs them in sequence inside a for-comprehension over `Either[DspyError, String]`, so a failure in any step short-circuits. Each predictor's `output` feeds the next, and the final step returns the `llms_txt_content` string.
 
 ## Running it
 

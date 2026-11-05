@@ -1,42 +1,18 @@
 package dspy4s.signatures.internal
 
-import dspy4s.core.contracts.{History, SignatureLayout}
-import dspy4s.signatures.{Shape, Signature as TypedSig}
-import zio.blocks.schema.Schema
-import scala.deriving.Mirror
+import dspy4s.core.contracts.{FieldSpec, History, Reasoning, SignatureLayout, TypeRef}
+import dspy4s.signatures.{Shape, Signature}
 import scala.quoted.*
-import MacroSignatureSupport.materialize
-import MacroTypeSupport.*
+import MacroSignatureSupport.functionSignatureExpr
+import MacroTypeSupport.namedTupleType
 
 private[signatures] object FunctionMacro:
 
-  /** Implementation of `Signature.from(method)`. The method itself is never called; it is a declaration surface whose
-    * parameter names/types become inputs and whose return type becomes outputs.
+  /** Implementation of `Signature.from(method)`. The macro does not call the method. The names and the types of its
+    * parameters become the inputs, and its return type gives the outputs.
     */
   def fromImpl[F: Type](fn: Expr[F])(using Quotes): Expr[Any] =
     import quotes.reflect.*
-    given CanEqual[Symbol, Symbol] = CanEqual.derived
-
-    def unwrap(term: Term): Term =
-      term match
-        case Inlined(_, _, inner) => unwrap(inner)
-        case Typed(inner, _)      => unwrap(inner)
-        case Block(Nil, inner)    => unwrap(inner)
-        case other                => other
-
-    def referencedMethod(term: Term): Symbol =
-      unwrap(term) match
-        case id: Ident if id.symbol.isDefDef                        => id.symbol
-        case sel: Select if sel.symbol.isDefDef                     => sel.symbol
-        case Block(stats, Closure(meth, _)) if meth.symbol.isDefDef =>
-          stats.collectFirst {
-            case dd: DefDef if dd.symbol == meth.symbol => dd
-          }.flatMap(_.rhs.flatMap(calledMethod)).getOrElse(meth.symbol)
-        case Closure(meth, _) if meth.symbol.isDefDef => meth.symbol
-        case other                                    => report.errorAndAbort(
-            "Signature.from expects a method reference, e.g. " +
-              "`Signature.from(emotionsSig)`; got: " + other.show
-          )
 
     def methodDef(sym: Symbol): DefDef =
       sym.tree match
@@ -45,44 +21,17 @@ private[signatures] object FunctionMacro:
             s"Signature.from could not inspect method '${sym.name}'"
           )
 
-    def calledMethod(term: Term): Option[Symbol] =
-      unwrap(term) match
-        case Apply(fn, _) if fn.symbol.isDefDef && !fn.symbol.name.startsWith("$anonfun")  => Some(fn.symbol)
-        case Apply(fn, _)                                                                  => calledMethod(fn)
-        case TypeApply(fn, _)                                                              => calledMethod(fn)
-        case id: Ident if id.symbol.isDefDef && !id.symbol.name.startsWith("$anonfun")     => Some(id.symbol)
-        case sel: Select if sel.symbol.isDefDef && !sel.symbol.name.startsWith("$anonfun") => Some(sel.symbol)
-        case _                                                                             => None
-
     def dealiasedMethod(sym: Symbol): Symbol =
       if sym.name.startsWith("$anonfun") then
-        methodDef(sym).rhs.flatMap(calledMethod).getOrElse(sym)
+        methodDef(sym).rhs.flatMap(MethodResolution.calledMethod).getOrElse(sym)
       else sym
 
-    def validateSchemas(owner: String, items: List[(String, TypeRepr)]): Unit =
-      items.foreach { (fieldName, tpe) =>
-        tpe.asType match
-          case '[t] => if Expr.summon[Schema[t]].isEmpty then
-              report.errorAndAbort(
-                s"No Schema[${tpe.show}] in scope for field '$owner.$fieldName'. Field types must have a " +
-                  "zio-blocks Schema (a primitive, an enum, or a type that `derives Schema`)."
-              )
-      }
-
-    def signatureExpr[I: Type, O: Type](
-        sigName        : String,
-        inputShapeExpr : Expr[Shape[I]],
-        outputShapeExpr: Expr[Shape[O]]
-    ): Expr[TypedSig[I, O]] =
-      materialize[I, O](
-        nameExpr = Expr(sigName),
-        instructionsExpr = Expr(""),
-        errorContext = s"function signature '$sigName'",
-        inputShapeExpr = inputShapeExpr,
-        outputShapeExpr = outputShapeExpr
+    val sym = dealiasedMethod(
+      MethodResolution.referencedMethod(
+        fn.asTerm,
+        "Signature.from expects a method reference, e.g. `Signature.from(emotionsSig)`"
       )
-
-    val sym     = dealiasedMethod(referencedMethod(fn.asTerm))
+    )
     val dd      = methodDef(sym)
     val sigName = sym.name
 
@@ -99,178 +48,63 @@ private[signatures] object FunctionMacro:
         s"Signature.from expects method '$sigName' to have exactly one parameter list"
       )
 
-    val params = termParamClauses.head.params.map { vd =>
-      vd.name -> vd.tpt.tpe
-    }
+    functionSignatureExpr(
+      owner = s"Signature.from (method '$sigName')",
+      nameExpr = Expr(sigName),
+      instructionsExpr = Expr(""),
+      inputs = termParamClauses.head.params.map(vd => vd.name -> vd.tpt.tpe),
+      returnType = dd.returnTpt.tpe
+    )
 
-    if params.isEmpty then
-      report.errorAndAbort(s"Signature.from expects method '$sigName' to declare at least one input parameter")
-
-    val duplicateInputs = params.groupBy(_._1).collect {
-      case (name, occurrences) if occurrences.size > 1 => name
-    }
-    if duplicateInputs.nonEmpty then
-      report.errorAndAbort(
-        s"Method '$sigName' has duplicate parameter names: ${duplicateInputs.mkString(", ")}"
-      )
-
-    val returnType = dd.returnTpt.tpe
-    if returnType =:= TypeRepr.of[Unit] then
-      report.errorAndAbort(s"Signature.from requires method '$sigName' to return an output type, not Unit")
-
-    validateSchemas(sigName, params)
-    val inputType = namedTupleType(params)
-
-    def scalarOutputExpr(returnType: TypeRepr): Expr[Any] =
-      val outputItems = List("result" -> returnType)
-      validateSchemas(sigName, outputItems)
-      val outputType = namedTupleType(outputItems)
-      (inputType.asType, outputType.asType) match
-        case ('[i], '[o]) => signatureExpr[i, o](
-            sigName = sigName,
-            inputShapeExpr = '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
-            outputShapeExpr = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
-          )
-        case _ => report.errorAndAbort(s"Internal error materializing scalar output for method '$sigName'")
-
-    namedTupleParts(returnType).orElse(unnamedTupleParts(returnType)) match
-      case Some(outputItems) =>
-        if outputItems.isEmpty then
-          report.errorAndAbort(s"Signature.from requires method '$sigName' to declare at least one output field")
-        validateSchemas(sigName, outputItems)
-        (inputType.asType, returnType.asType) match
-          case ('[i], '[o]) => signatureExpr[i, o](
-              sigName = sigName,
-              inputShapeExpr = '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
-              outputShapeExpr = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
-            )
-          case _ => report.errorAndAbort(s"Internal error materializing tuple output for method '$sigName'")
-      case None =>
-        if returnType.typeSymbol.flags.is(Flags.Case) || returnType <:< TypeRepr.of[Product] then
-          returnType.asType match
-            case '[o] => Expr.summon[Mirror.ProductOf[o]] match
-                case Some(_) => inputType.asType match
-                    case '[i] => signatureExpr[i, o](
-                        sigName = sigName,
-                        inputShapeExpr = '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
-                        outputShapeExpr = '{ Shape.canonicalDerived[o] }
-                      )
-                case None => scalarOutputExpr(returnType)
-        else scalarOutputExpr(returnType)
-
-  /** Implementation of `Signature.fromType[F]`. Inspects a function type rather than a method term.
-    */
+  /** Implementation of `Signature.fromType[F]`. It reads a function type, not a method term. */
   def fromTypeImpl[F: Type](
       name        : Expr[String],
       instructions: Expr[String]
   )(using Quotes): Expr[Any] =
     import quotes.reflect.*
 
-    def validateSchemas(owner: String, items: List[(String, TypeRepr)]): Unit =
-      items.foreach { (fieldName, tpe) =>
-        tpe.asType match
-          case '[t] => if Expr.summon[Schema[t]].isEmpty then
-              report.errorAndAbort(
-                s"No Schema[${tpe.show}] in scope for field '$owner.$fieldName'. Field types must have a " +
-                  "zio-blocks Schema (a primitive, an enum, or a type that `derives Schema`)."
-              )
-      }
+    def isFunction(tc: TypeRepr): Boolean = tc.typeSymbol.fullName.startsWith("scala.Function")
 
     def functionParts(tpe: TypeRepr): (List[(Option[String], TypeRepr)], TypeRepr) =
       tpe.dealias match
         case Refinement(parent, "apply", MethodType(paramNames, paramTypes, returnType)) =>
           val parentParts = parent.dealias match
-            case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Function") => args
-            case other                                                                        => report.errorAndAbort(s"Signature.fromType expects a function type, got: ${other.show}")
+            case AppliedType(tc, args) if isFunction(tc) => args
+            case other                                   => report.errorAndAbort(s"Signature.fromType expects a function type, got: ${other.show}")
           val parentInputs = parentParts.dropRight(1)
           val inputs       =
             if paramTypes.size == parentInputs.size then paramTypes
             else parentInputs
           paramNames.map(Some(_)).zip(inputs) -> returnType
-        case AppliedType(tc, args) if tc.typeSymbol.fullName.startsWith("scala.Function") =>
-          if args.size < 2 then
-            report.errorAndAbort("Signature.fromType requires at least one input type")
-          val inputTypes = args.dropRight(1)
-          val returnType = args.last
-          inputTypes.map(None -> _) -> returnType
-        case other => report.errorAndAbort(s"Signature.fromType expects a function type, got: ${other.show}")
+        case AppliedType(tc, args) if isFunction(tc) => args.dropRight(1).map(None -> _) -> args.last
+        case other                                   => report.errorAndAbort(s"Signature.fromType expects a function type, got: ${other.show}")
 
     def inputName(index: Int, total: Int, explicit: Option[String]): String =
       explicit.getOrElse(if total == 1 then "input" else s"input${index + 1}")
 
-    val sigName     = name.value.filter(_.nonEmpty).getOrElse("Signature")
-    val sigNameExpr = '{
-      val explicitName = ${ name }
-      if explicitName.isEmpty then "Signature" else explicitName
-    }
     val (rawInputs, returnType) = functionParts(TypeRepr.of[F])
+    functionSignatureExpr(
+      owner = "Signature.fromType",
+      nameExpr = '{
+        val explicitName = ${ name }
+        if explicitName.isEmpty then "Signature" else explicitName
+      },
+      instructionsExpr = instructions,
+      inputs = rawInputs.zipWithIndex.map { case ((maybeName, tpe), index) =>
+        inputName(index, rawInputs.size, maybeName) -> tpe
+      },
+      returnType = returnType
+    )
 
-    if rawInputs.isEmpty then
-      report.errorAndAbort("Signature.fromType expects at least one input type")
-    if returnType =:= TypeRepr.of[Unit] then
-      report.errorAndAbort("Signature.fromType requires an output type, not Unit")
-
-    val inputItems = rawInputs.zipWithIndex.map { case ((maybeName, tpe), index) =>
-      inputName(index, rawInputs.size, maybeName) -> tpe
-    }
-    val duplicateInputs = inputItems.groupBy(_._1).collect {
-      case (fieldName, occurrences) if occurrences.size > 1 => fieldName
-    }
-    if duplicateInputs.nonEmpty then
-      report.errorAndAbort(
-        s"Signature.fromType has duplicate input names: ${duplicateInputs.mkString(", ")}"
-      )
-
-    validateSchemas(sigName, inputItems)
-    val inputType = namedTupleType(inputItems)
-
-    def signatureExpr[I: Type, O: Type](
-        outputShapeExpr: Expr[Shape[O]]
-    ): Expr[TypedSig[I, O]] =
-      materialize[I, O](
-        nameExpr = sigNameExpr,
-        instructionsExpr = instructions,
-        errorContext = s"function signature '$sigName'",
-        inputShapeExpr = '{ new Shape.SchemaTupleShape[I](Shape.canonicalSchema[I]) },
-        outputShapeExpr = outputShapeExpr
-      )
-
-    def scalarOutputExpr(returnType: TypeRepr): Expr[Any] =
-      val outputItems = List("result" -> returnType)
-      validateSchemas(sigName, outputItems)
-      val outputType = namedTupleType(outputItems)
-      (inputType.asType, outputType.asType) match
-        case ('[i], '[o]) => signatureExpr[i, o](
-            outputShapeExpr = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
-          )
-        case _ => report.errorAndAbort("Internal error materializing scalar output for function type")
-
-    namedTupleParts(returnType).orElse(unnamedTupleParts(returnType)) match
-      case Some(outputItems) =>
-        if outputItems.isEmpty then
-          report.errorAndAbort("Signature.fromType requires at least one output field")
-        validateSchemas(sigName, outputItems)
-        (inputType.asType, returnType.asType) match
-          case ('[i], '[o]) => signatureExpr[i, o](
-              outputShapeExpr = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
-            )
-          case _ => report.errorAndAbort("Internal error materializing named-tuple output for function type")
-      case None =>
-        if returnType.typeSymbol.flags.is(Flags.Case) || returnType <:< TypeRepr.of[Product] then
-          returnType.asType match
-            case '[o] => Expr.summon[Mirror.ProductOf[o]] match
-                case Some(_) => inputType.asType match
-                    case '[i] => signatureExpr[i, o](
-                        outputShapeExpr = '{ Shape.canonicalDerived[o] }
-                      )
-                case None => scalarOutputExpr(returnType)
-        else scalarOutputExpr(returnType)
-
-  /** Implementation of `Signature.fromString("a -> b")`. The DSL string must be a compile-time literal; it is parsed at
-    * compile time (reusing the runtime `SignatureLayout.parse`) and each field becomes a named-tuple element — fields
-    * without an annotation default to `String`; `int` / `float` / `bool` map to the matching scalar. An input field
-    * with the type `History` becomes a `dspy4s.core.contracts.History` element. An invalid DSL string, or a field type
-    * the `Signature` API doesn't support, is a compile error.
+  /** Implementation of `Signature.fromString("a -> b")`. The DSL text must be a literal that the compiler knows. The
+    * macro parses it with the runtime `SignatureLayout.parse`, and each field becomes an element of a named tuple. A
+    * field with no type is a `String`, and `int`, `float`, and `bool` give the matching scalar. A `Literal[...]` field
+    * is a `String`. An optional field (`Optional[T]` or `T | None`) is an `Option[T]`. An input field with the type
+    * `History` becomes a `dspy4s.core.contracts.History` element. An invalid DSL text, or a field type that the
+    * `Signature` API does not support, is a compile error.
+    *
+    * The layout comes from the parsed DSL, thus it keeps the attributes of the text, for example the enum values of a
+    * `Literal` field. The canonical shapes of the named tuples give only the codec.
     */
   def fromStringImpl(dsl: Expr[String], instructions: Expr[String])(using Quotes): Expr[Any] =
     import quotes.reflect.*
@@ -286,18 +120,23 @@ private[signatures] object FunctionMacro:
       case Right(parsed) => parsed
       case Left(err)     => report.errorAndAbort(s"""Invalid signature DSL "$literal": ${err.message}""")
 
-    def scalaType(field: dspy4s.core.contracts.FieldSpec, isInput: Boolean): TypeRepr =
+    def valueType(field: FieldSpec, isInput: Boolean): TypeRepr =
       field.typeRef.repr match
         case "string"             => TypeRepr.of[String]
         case "int"                => TypeRepr.of[Int]
         case "double"             => TypeRepr.of[Double]
         case "bool"               => TypeRepr.of[Boolean]
+        case "reasoning"          => TypeRepr.of[Reasoning]
         case "history" if isInput => TypeRepr.of[History]
         case other                => report.errorAndAbort(
             s"Signature.fromString: field '${field.name}' has type '$other', which the string DSL does " +
-              "not support (supported: str, int, float, bool, and History for an input field). For richer field " +
+              "not support (supported: str, int, float, bool, Reasoning, and History for an input field). For richer field " +
               "types use Signature.of[Spec], a case class, or Signature.fromStringDynamic."
           )
+
+    def scalaType(field: FieldSpec, isInput: Boolean): TypeRepr =
+      val value = valueType(field, isInput)
+      if field.optional then TypeRepr.of[Option].appliedTo(value) else value
 
     val inputItems  = layout.inputFields.toList.map(field => field.name -> scalaType(field, isInput = true))
     val outputItems = layout.outputFields.toList.map(field => field.name -> scalaType(field, isInput = false))
@@ -306,12 +145,45 @@ private[signatures] object FunctionMacro:
     if outputItems.isEmpty then
       report.errorAndAbort(s"""Signature.fromString "$literal" declares no output fields""")
 
-    (namedTupleType(inputItems).asType, namedTupleType(outputItems).asType) match
-      case ('[i], '[o]) => materialize[i, o](
-          nameExpr = Expr(layout.name),
-          instructionsExpr = instructions,
-          errorContext = s"function signature '${layout.name}'",
-          inputShapeExpr = '{ new Shape.SchemaTupleShape[i](Shape.canonicalSchema[i]) },
-          outputShapeExpr = '{ new Shape.SchemaTupleShape[o](Shape.canonicalSchema[o]) }
+    layoutSignatureExpr(layout, instructions, namedTupleType(inputItems).asType, namedTupleType(outputItems).asType)
+
+  /** A call of `Signature.fromFieldSpecs` with the field specs of `layout` and the canonical shapes of `inputType` and
+    * `outputType`.
+    */
+  private def layoutSignatureExpr(
+      layout      : SignatureLayout,
+      instructions: Expr[String],
+      inputType   : Type[?],
+      outputType  : Type[?]
+  )(using Quotes): Expr[Any] =
+    inputType match
+      case '[i] => outputType match
+          case '[o] => '{
+              Signature.fromFieldSpecs[i, o](
+                ${ Expr(layout.name) },
+                $instructions,
+                ${ fieldSpecsExpr(layout.inputFields) },
+                ${ fieldSpecsExpr(layout.outputFields) },
+                Shape.canonicalDerived[i],
+                Shape.canonicalDerived[o]
+              )
+            }
+
+  /** The code that makes the field specs `fields` again at run time. It keeps each attribute that the DSL parse gives:
+    * the name, the type, the description, the prefix, the enum values, and the optional flag. The parse gives no
+    * default value and no constraint.
+    */
+  private def fieldSpecsExpr(fields: Vector[FieldSpec])(using Quotes): Expr[Vector[FieldSpec]] =
+    val specs = fields.toList.map { field =>
+      '{
+        FieldSpec(
+          name = ${ Expr(field.name) },
+          typeRef = TypeRef(${ Expr(field.typeRef.repr) }),
+          description = ${ Expr(field.description) },
+          prefix = ${ Expr(field.prefix) },
+          enumValues = Vector(${ Varargs(field.enumValues.map(Expr(_))) }*),
+          optional = ${ Expr(field.optional) }
         )
-      case _ => report.errorAndAbort(s"""Internal error materializing Signature.fromString "$literal"""")
+      }
+    }
+    '{ Vector(${ Varargs(specs) }*) }

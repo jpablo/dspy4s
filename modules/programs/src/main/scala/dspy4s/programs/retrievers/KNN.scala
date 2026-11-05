@@ -1,7 +1,7 @@
 package dspy4s.programs.retrievers
 
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeError
@@ -25,13 +25,7 @@ final class KNN private (
     * trainset index, deterministically.
     */
   def retrieve(inputs: DynamicValue.Record)(using RuntimeContext): Either[DspyError, Vector[Example]] =
-    embedder.embed(Vector(KNN.serialize(inputs))).flatMap { queryRows =>
-      queryRows.headOption.toRight(RuntimeError("knn", "embedder returned no rows for the query")).map { query =>
-        val q      = query.toArray
-        val scored = Vector.tabulate(trainVectors.length)(i => (Similarity.dot(q, trainVectors(i)), i))
-        scored.sortBy { case (score, i) => (-score, i) }.take(k).map { case (_, i) => trainset(i) }
-      }
-    }
+    Similarity.topK(embedder, "knn", KNN.serialize(inputs), trainVectors, k).map(_.map((_, i) => trainset(i)))
 
 object KNN:
   /** Embed every trainset example's input fields and assemble the retriever. */
@@ -41,11 +35,12 @@ object KNN:
     embedder.embed(trainset.map(ex => serialize(ex.inputs)))
       .map(rows => new KNN(k, trainset, embedder, Similarity.toMatrix(rows)))
 
-  /** Upstream's example-to-text casting: `"key: value | key2: value2"` over the record's fields, in field order.
-    * Callers pass the INPUT projection (`example.inputs`), matching upstream's `_input_keys` filter.
+  /** Upstream's example-to-text casting: `"key: value | key2: value2"` over the record's fields, in field order. Each
+    * value has its Python text (`f"{key}: {value}"`). Callers pass the INPUT projection (`example.inputs`), matching
+    * upstream's `_input_keys` filter.
     */
   private[retrievers] def serialize(record: DynamicValue.Record): String =
-    record.fields.iterator.map { case (key, value) => s"$key: ${DynamicValues.renderText(value)}" }.mkString(" | ")
+    record.fields.iterator.map { case (key, value) => s"$key: ${PythonText.str(value)}" }.mkString(" | ")
 
 /** Tiny shared vector math for the retrievers (corpora here are small; no BLAS needed). Vectors are held as primitive
   * `Array[Float]` internally — the retriever matrices are long-lived and on the per-query path, where boxed
@@ -56,11 +51,36 @@ private[retrievers] object Similarity:
   def toMatrix(rows: Vector[Vector[Float]]): Array[Array[Float]] =
     rows.iterator.map(_.toArray).toArray
 
+  /** Embed `query` and score it against each row of `matrix`. The result has the `k` best rows as `(score, row index)`,
+    * best first. A tie goes to the earlier row. With `normalizeQuery`, the function first normalizes the query vector
+    * (L2). `component` names the retriever in the errors: an embedder that returns no rows, and a query vector whose
+    * size differs from a row of `matrix` (numpy `np.dot` raises for such a vector).
+    */
+  def topK(
+      embedder      : Embedder,
+      component     : String,
+      query         : String,
+      matrix        : Array[Array[Float]],
+      k             : NeighborCount,
+      normalizeQuery: Boolean = false
+  )(using RuntimeContext): Either[DspyError, Vector[(Double, Int)]] =
+    embedder.embed(Vector(query)).flatMap { rows =>
+      rows.headOption.toRight(RuntimeError(component, "embedder returned no rows for the query")).flatMap { row =>
+        matrix.find(_.length != row.size) match
+          case Some(other) =>
+            Left(RuntimeError(component, s"query vector of size ${row.size}, but a row of size ${other.length}"))
+          case None =>
+            val q      = if normalizeQuery then normalize(row.toArray) else row.toArray
+            val scored = Vector.tabulate(matrix.length)(i => (dot(q, matrix(i)), i))
+            Right(scored.sortBy { case (score, i) => (-score, i) }.take(k))
+      }
+    }
+
+  /** The dot product of two vectors of the same size. */
   def dot(a: Array[Float], b: Array[Float]): Double =
     var acc = 0.0
     var i   = 0
-    val n   = math.min(a.length, b.length)
-    while i < n do
+    while i < a.length do
       acc += a(i).toDouble * b(i).toDouble
       i += 1
     acc

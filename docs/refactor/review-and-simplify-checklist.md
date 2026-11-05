@@ -1,0 +1,688 @@
+# Review and simplify checklist
+
+This checklist plans the `/simplify` and `/code-review` passes, one module or file group at a time.
+
+- **Base:** commit `6f6b9f84` (origin/main, 2026-10-21). All line numbers refer to this commit. They move when the code changes.
+- **Method:** five read-only agents read the largest files of each module and skimmed the rest. They gave each module two scores from 0 to 10. I added the size and the commit history.
+- **Status of the findings:** the findings are agent reports. They are leads, not proven bugs. I checked three of them in the source, and they are marked "(checked)".
+
+## How to use this checklist
+
+1. Select the next module from the rank tables.
+2. Run `/simplify` on one file group. Give the module path or the file list as the target, because this branch has no diff.
+3. Run `/code-review` on the same file group. The review then also checks the simplify changes.
+4. Tick the boxes of the pass and of each finding that the pass fixed.
+5. Update the line numbers in this file if a pass moves the code.
+
+Simplify core before lm and adapters. The same DynamicValue helpers (`string`, `record`, `isNull`) are in all three modules, and the shared copy belongs in core.
+
+## Rank tables
+
+| Rank | /simplify | Score | | /code-review | Score |
+|---|---|---|---|---|---|
+| 1 | programs | 7 | | core | 7 |
+| 2 | optimize | 7 | | signatures | 7 |
+| 3 | core | 6 | | adapters | 6 |
+| 4 | adapters | 6 | | programs | 6 |
+| 5 | lm | 5 | | optimize | 6 |
+| 6 | examples | 6 | | evaluate | 6 |
+| 7 | signatures | 5 | | streaming | 6 |
+| 8 | gepa | 5 | | lm | 5 |
+| 9 | evaluate | 5 | | gepa | 4 |
+| 10 | streaming | 4 | | mcp | 3 |
+| 11 | algebra | 3 | | examples | 3 |
+| 12 | mcp | 2 | | algebra | 1 |
+
+Notes on the order:
+
+- For equal scores, a module comes first when its bugs have a larger effect, or when it has more findings per line.
+- examples is below lm in the simplify list, because it is demo code.
+
+The module sections below are in the order of the sbt dependencies.
+
+## algebra
+
+Source root: `modules/algebra/src/main/scala/dspy4s/algebra/`. The paths below are relative to it.
+Simplify 3 (rank 11). Code-review 1 (rank 12). 992 main lines, 213 test lines at the base, 943 main lines after the passes.
+
+Result of the passes: the code has no defect that a user can see. A bytecode check found that no production class calls `Category.>>>`, `ScalaMonad`, a `Functor`, a graded category, or an optic. Production uses `Lens.get` and `Lens.set` through `OptimizableLeaf`. Only tests call `Program.>>>` and `fanout`. Thus the open items below are a design choice for the maintainer, and each one has a proposal.
+
+### Passes
+
+- (a) The whole module, 992 lines.
+  - [x] /simplify
+  - [x] /code-review
+
+### Simplify findings
+
+- [ ] (design) `CopyDiscardCategory.scala`: the Monoidal, Symmetric, CopyDiscard, Markov, and Cartesian traits have one instance, a private object of a test on `Function1`. `Isomorphism.scala` exists only for these traits. Proposal: remove both, or move them to the test sources. About 170 main lines and 93 test lines. The equations that are true for `Module` only under a condition (interchange, copy naturality) stay in `OrderedTensorOpsSuite`.
+- [ ] (design) `Monad.scala`, `NaturalTransformation.scala`, and `Functor.scala` (`identity`, `andThen`, `EndofunctorIn`): `Monad` has one child, and `fromComponents` builds a functor, an identity functor, a composite functor, two natural transformations, and a wrapper to get `pure` and `flatMap`. No code outside the module calls `leftWhisker` or `rightWhisker`. Proposal: a flat `ScalaMonad` with `pure` and `flatMap`, the three bind laws, and a law for `map`. About 250 main lines. A sketch by a reviewer of this form compiled and ran on the two kinds of carrier.
+- [ ] (design) `programs/algebra`: `InspectFunctor`, `ReadFunctor`, `ForgetMetadataFunctor`, `readFunctor`, `GradePreservingFunctor`, `sizedParamsCategory`, `viewsDeloop`, `paramsDeloop`, and `delooping` state one fact four times: composition concatenates the parameters. Their laws also test `Vector.++`. Proposal: state that fact directly, in the form of `paramsFanout`. About 230 lines in `programs` and `algebra`.
+- [ ] (design) `Optic.scala`: `Lens` is the only `Optic`, and `Tuple2` is the only carrier. Proposal: a flat `Lens` with `get`, `set`, and `modify`. About 100 lines.
+- [ ] (design) `NatGradedCategory.scala` (`AnyGrade`, `underlyingCategory`, `forgetGrade`, `GradedFunctor`): a second form of grade erasure, next to `SomeProgram`. Proposal: `SomeProgram` is the one erasure. About 60 lines.
+- [ ] (design) `MonoidAction.functor` and `Opposite.scala`: the two functor laws are the two action laws with the arguments in the other order. Proposal: remove both. 29 main lines and 21 test lines.
+- [ ] (design, last) The constraint `P`, `AnyObject`, and `mapObject`: each instance uses `AnyObject`. Commit `411e6474` (2026-08-05) removed the last real constraint. Proposal: `Category[Hom]` and `Functor[F, Source, Target]`. This has the fewest lines left to change after the other items.
+- [ ] (design, small) `Category` could have an abstract `compose` and a final `>>>`, as `NatGradedCategory` has. `Parameterization.replace` and `replaceUnsized` have one body in `Program`. `paramsId` and `paramsCompose` only forward to `readFunctor`. Other items remove most of these lines, thus they wait.
+- [x] Dead members. Fixed: `Composer`, `morph`, `Monad.category`, `ScalaMonad.map`, `Profunctor.contramap`, `Profunctor.map`, the two category accessors of `GradePreservingFunctor`, `OptimizableStructure.parameterLens`, and the summoner methods of `Monad`, `ScalaMonad`, `Functor`, `Lens`, `Profunctor`, `Monoid`, `MonoidAction`, and `OptimizableStructure`. A test uses `summon`.
+- [x] Duplicates. Fixed: `moduleCategory` repeated `orderedProgram`, `viewsMonoid` and `paramsMonoid` are now `Monoid.vector`, and `Program.packageModule` repeated `Program.of`.
+- [x] `RawPrediction.empty` built a value on each call. Fixed: a `val`, as `RuntimeDelta.empty`.
+- [ ] (skipped, low) `RawPrediction.followedBy` goes through `Iterable` for two options, and `programRunner.run` makes a runner on each run. Each cost is very small next to a model call.
+
+### Code-review findings
+
+- [x] `Kleisli.scala:16` and `Category.scala:34` put closures in closures. A very long chain can overflow the stack. Closed: no code builds such a chain. The deepest chain has two closures, in a law statement. `DeepProgramStackSafetySuite` runs `AndThen` data, which uses a heap stack.
+- [x] The gate for `CDCategory[Module]` accepted each compile error, thus also a renamed type. Fixed: it asserts the missing given.
+- [x] No test ran get-put, put-get, or put-put in this module, and no fixture showed that they reject a bad lens. Fixed.
+- [x] No test ran the category statements on the `Module` instance. `ComposeLawSuite` writes them by hand over `Compose`. Fixed: `OrderedTensorOpsSuite` runs them for a value and for a failure.
+- [x] `ScalaMonad.either` ran only the bind laws, at a `Right`. Fixed: the functor, natural transformation, and monad laws run at each form of a value.
+- [x] `Program.md` had a broken link to `Lens`, and the README said that `OptimizableStructure` is a `Lens`. Fixed. A scaladoc block in `Monoid.scala` attached to nothing. Removed.
+- [x] `Program.reparam` throws `IllegalArgumentException` on a wrong length. Kept, because the sized form is the checked one and optimizers check the size. Now it has a test, and the docs state it.
+- [ ] (design) The law checks of `forgetGrade` compare one expression with itself, so they check nothing. This goes with the item on grade erasure.
+- [ ] (open, limit) `OptimizableStructure.read` builds each name and key and drops them. A left-nested chain of 20,000 leaves needs about 1.2 GB for one read. The suite tests 300 leaves, and no program is near that size.
+
+## core
+
+Source root: `modules/core/src/main/scala/dspy4s/core/`. The paths below are relative to it.
+Simplify 6 (rank 3). Code-review 7 (rank 1). 6352 main lines, 4494 test lines.
+
+### Passes
+
+- (a) The interpreters, about 2030 lines: `runtime/LocalPythonInterpreter.scala`, `runtime/DenoPyodideInterpreter.scala`, `runtime/DenoPyodideLaunch.scala`, `runtime/DenoPyodideProtocol.scala`, `runtime/DenoPyodideVariables.scala`, `runtime/SubprocessPythonInterpreter.scala`, `runtime/PythonNames.scala`, `contracts/CodeInterpreter.scala`. The simplify pass added `runtime/InterpreterSupport.scala`.
+  - [x] /simplify
+  - [x] /code-review
+- (b) The context and the callbacks, about 1300 lines: `runtime/RuntimeEnvironment.scala`, `runtime/ContextPropagation.scala`, `runtime/CallbackDispatcher.scala`, `runtime/UsageScope.scala`, `runtime/StreamProgress.scala`, `runtime/ActivePredictContext.scala`, `contracts/RuntimeContext.scala`, `contracts/Callbacks.scala`. The simplify pass added `runtime/ScopedLocal.scala`.
+  - [x] /simplify
+  - [x] /code-review
+- (c) The decisions, about 800 lines: `decisions/`.
+  - [x] /simplify
+  - [x] /code-review
+- (d) The other contracts and the data, about 2200 lines: the other files in `contracts/`, and `data/`, `signatures/`, `collections/`. The simplify pass added `collections/Traverse.scala`.
+  - [x] /simplify
+  - [x] /code-review
+
+### Simplify findings
+
+- [x] Three copies of the code that kills a process and its descendants, in LocalPython and in the Deno launcher. Fixed: `InterpreterSupport.killTree`.
+- [x] Two copies of the probe with a temp file and a time limit, in LocalPython and in the Deno launcher. Fixed: `InterpreterSupport.probe`.
+- [x] `runtime/DenoPyodideProtocol.scala`: `field`, `asString`, and `asLong` only called DynamicValues, and `isNull` had two copies. LocalPython got its JSON helpers from an object with a Deno name. Fixed: `DynamicValues.encodeJson` and `DynamicValues.isNull`, and the protocol object keeps only the JSON-RPC code.
+- [x] `contracts/RuntimeContext.scala`: the doc called the flat `apply`, `copy`, and the accessors a compatibility surface. Each part has callers (the flat `apply` has about 350), so the pass kept them and fixed the doc.
+- [x] (fixed in the core follow-up: removed) The layout state codec and `Constraint.dumpState`/`fromState` were hand-written codecs that only tests called. The tolerant number read of Decisions is now `DynamicValues.asDouble`.
+- [x] Five copies of the ThreadLocal set-and-restore pattern, and two copies of the carrier code, in UsageScope, DecisionEvidenceLog, StreamProgress, ActivePredictContext, and CallbackDispatcher. Fixed: `ScopedLocal`.
+- [x] `RuntimeEnvironment.emit` did not use its own `warn`. Fixed: a callback failure is now a `WARN [dspy4s] callback: ...` line.
+
+Findings of the group (d) simplify pass that the pass did not fix:
+
+- [x] (fixed in the core follow-up: removed) The layout state codec, the four state methods of `SignatureLayout`, and `Constraint.dumpState`/`fromState` (about 190 lines) had no caller in the main code.
+- [x] (fixed in the core follow-up: the shared data is part of the enum cases) `contracts/Constraint.scala`: four parallel matches of seven cases (`render`, `schemaKeyword`, `op`, `numericValue`). An enum with parameters can hold the values. Skipped: a change of the public enum shape.
+- [ ] `data/RawPrediction.scala`: its lenient coercion is a second copy of the coercion of signatures `ZioSchemaCodec`, and the two copies do not agree (no `BigDecimal` case). Skipped: do it in the signatures pass.
+- [x] (fixed in the core follow-up: the transforms moved to the tests; `SizedVector.functor` and `FieldConstraints` stay, because the docs use them) Members that only tests use: `SignatureOps` transforms and laws, most of `SizedVector`, `SignatureLayout.equalsByStructure`, and `FieldConstraints`. Skipped: public API.
+- [ ] The "message, else the simple class name" text has about 16 copies in the modules, in two forms. One public helper in `contracts/Errors.scala` can serve them. Skipped: do it with the module passes.
+- [ ] `DynamicValues.fromAny` gets values of a static type in lm, programs, and evaluate. Skipped: each module pass changes its own calls to `:=`.
+
+Notes of the core follow-up (the API change is acceptable, because the project has no users):
+
+- [ ] `DecisionSettings.toDynamic` writes the settings as JSON text with the derived codec and reads the text again, so it throws for a number that is not finite. `DecisionPlan.of` rejects such settings, and the two callers (the ReAnchor report and `OptimizableParameters`) get validated settings. A settings value that a caller builds by hand can still reach it.
+
+Findings of the group (c) simplify pass that the pass did not fix:
+
+- [x] (fixed in the decisions follow-up: a derived Schema with the zio-blocks JSON codec, and a check of the JSON value at the boundary) `decisions/Decisions.scala`, `DecisionSettings`: a hand-written codec of about 70 lines, against the one-codec rule. A derived Schema can replace it. Skipped: the change can alter the number widening, the order of the weight keys, and the error messages.
+- [x] (fixed in the decisions follow-up: `DecisionParameter`, with `DecisionKind.parameter`, `valueIn`, and `jsonIn`) `decisions/Decisions.scala`: the parameter names "threshold", "cuts", and "weights" are string keys, also in optimize `ReAnchor.scala`. A typed `DecisionParameter` enum can replace them. Skipped: do it in the optimize pass.
+- [x] (fixed in the decisions follow-up: `DecisionPlan.checked`, with one message for each rule) `decisions/Decisions.scala`: `evidence` and `decodeOne` check the same distribution rules with different messages. One shared validation changes the messages. Skipped.
+- [x] (fixed in the signatures pass: core `contracts/Reflects.scala`) `decisions/Decisions.scala`, `Score.caseNames`: a copy of `ZioSchemaCodec.caseNamesOf` in signatures.
+- [x] (fixed in the group (d) pass: `collections/Traverse.scala` replaces the four copies) A `traverse` helper for `Either` had private copies in optimize `ReAnchor.scala`, `propose/GroundedProposer.scala`, adapters `internal/StrictJsonSchema.scala`, and lm `runtime/DiskLmCache.scala`. Skipped: one shared helper in core can serve them in the later passes.
+
+Findings of the group (b) simplify pass that the pass did not fix:
+
+- [ ] Efficiency, skipped until a JMH benchmark shows the cost (each fix adds code to the hot path):
+  - `RuntimeEnvironment.current` merges the overlay with the global context on each read, about 15 times for each Predict call. A cache of the merged context in the thread-local slot can remove this work.
+  - `CallbackDispatcher` builds each event and its input record when no handler listens. A lazy event can remove this work.
+  - The restore of `withScopeChange` and `withInstalled` allocates a new scope and a new context also when `thunk` changed nothing.
+- [x] (fixed in the group (d) pass: `RuntimeServices.keptBy` and `RuntimeConfig.keptBy`, next to `fillFrom`) `runtime/RuntimeEnvironment.scala`, `servicesKept` and `configKept`: they list each field of `RuntimeServices` and `RuntimeConfig` again, in a different file from `fillFrom`. A new field that they miss makes `withInstalled` skip an install. Skipped: move them next to `fillFrom` in the contracts pass, group (d).
+- [ ] `contracts/RuntimeContext.scala`, the flat `copy`: only the examples and three tests call it. Skipped: to remove it changes the public API, and `ctx.copy(adapter = ...)` is easier to read than the partition form.
+
+Findings of the group (a) simplify pass that the pass did not fix:
+
+- [ ] LocalPython and Deno each have their own line transport (the process, the reader, the time limit) and their own session state machine. A shared `LineProcess` and `InterpreterSession` can replace them. Skipped: it is a design change, and it changes how Deno reads its output. Look at it with the Deno hang findings in the group (a) code review.
+- [ ] Efficiency, skipped because each fix adds more code than it removes:
+  - Deno copies and JSON-escapes the cached variable prelude again on each `execute`. A cache of the escaped prelude can remove this work.
+  - LocalPython has no cache for the variables, so each `execute` encodes them again.
+  - Deno computes the canonical paths again on each startup and on each file sync, and it runs its two Deno probes one after the other.
+- [x] (fixed in the group (b) and (d) bug pass: the check uses `PythonNames.isBindable`) `runtime/DenoPyodideVariables.scala:10` accepts ASCII names only, but `PythonNames.isBindable` accepts Unicode names, as upstream `str.isidentifier` does. Skipped: a change of behavior.
+
+### Code-review findings
+
+- [x] DenoPyodideInterpreter: nothing read the stderr pipe until a failure, so more than about 64 KB of stderr stopped the sandbox forever. Fixed: a daemon thread reads the standard error into a bounded tail.
+- [ ] `runtime/DenoPyodideInterpreter.scala`, `readLine`: no time limit, so a `while True` in user code hangs `execute`. Skipped: the interpreter has no execution timeout, as upstream. A timeout is a new feature.
+- [x] SubprocessPythonInterpreter: after a normal exit, `join()` had no limit, a timeout did not kill descendants, and an interrupt escaped and left the process alive. Fixed: a 1-second limit after the exit, `killTree` on a timeout, and a `Left` on an interrupt.
+- [x] (fixed in the group (d) review, then removed with the state codec) `Constraint.numberOf` ignored `BigDecimal`, so `SignatureLayout.fromJson` dropped `gt(0.5)`.
+- [ ] `runtime/LocalPythonInterpreter.scala`, the tool threads: no test covers the fatal rethrow, a timeout in a tool call, an interrupt, or `close` from another thread. The inbound queue is not cleared between calls, so a line that arrives after a reply can become the reply of the next call. Skipped: only code that breaks the documented rule (all threads finish before the code returns) sends such a line.
+- [x] DenoPyodideInterpreter and DenoPyodideLaunch: `Files.createFile` threw out of `execute`, the runner script was never written again after a removal, and `spawn` reported each IOException as "Deno not found". Fixed: a `Left` with the cause, `InterpreterSupport.ResourceFile`, and the cause in the message.
+- [x] A value with a lone UTF-16 surrogate made the JSON writer throw out of `execute` (LocalPython and the Deno prelude). Fixed: `DynamicValues.tryEncodeJson` (first `InterpreterSupport.tryEncodeJson`) and a `Left` that names the variable.
+- [x] (fixed in the group (b) and (d) bug pass: the protocol encoders give an `Either`, code text gives a `Left` and the session continues, and a tool reply falls back to an error reply with the cause) Gaps of the lone-surrogate fix: in DenoPyodideInterpreter, code text with a lone surrogate still throws from `DenoPyodideProtocol.encodeRequest`, and a tool exception with a lone surrogate in its message throws from `encodeError` in `handleToolCall`.
+- [ ] `runtime/DenoPyodideLaunch.scala`, `denoCacheDir`: when `deno info --json` gives no directory, one launch probes again two times, each with a 10-second limit. Skipped: a new probe on each launch is deliberate, so that a Deno that the user installs later is found.
+- [x] (fixed in the group (b) and (d) bug pass: `callbacks`, `callbackMetadata`, and `captureFailureTraces` are `Option` fields, and the accessors of `RuntimeContext` give the effective values) Group (b) review, a decision for the owner: `contracts/RuntimeContext.scala`, `fillFrom`, treats an empty callback list, an empty callback metadata record, and `captureFailureTraces = false` as "not set". Thus `withCallbacks(Vector.empty)` cannot turn off the callbacks of the global context, as upstream `dspy.context(callbacks=[])` does. A fix changes the type of these fields (for example to `Option`).
+- [x] (fixed in the group (b) and (d) bug pass: the helpers restore the settings and the scope and keep the delta of the block; `withContext` stays wholesale) Group (b) review, a decision for the owner: `RuntimeEnvironment.withSettings`, `withCallbacks`, `withSetting`, and `withAsyncTask` restore the overlay wholesale, so the trace and the history of the block are gone after it. `withInstalled` keeps them, and upstream `dspy.context` keeps them too.
+- [ ] Group (b) review, skipped: `UsageScope.measure` reads its total when `body` returns, so a worker that runs after the return adds usage that no result shows. `configure` ownership stays with the first thread for the life of the process, as upstream.
+- [x] Group (c) review: `Score.levelIn` accepted the cases of an unrelated enum. Fixed: it takes only `IndexedSeq[L]`. Later, the type marker change removed `levelIn`: `Score.level` is an `Option[L]`.
+- [ ] Group (c) review, skipped: `DecisionEvidenceLog.recording` takes its snapshot when `body` returns, so a worker that records later is lost (the same rule as `UsageScope`). `DecisionSettings.fromDynamic` keeps the last value of a key that occurs two times. (The `fromDynamic` part is fixed in the decisions follow-up: a key that occurs two times is a `Left`.)
+- [x] Group (d) review: `Completions.fromRows` gave the fields of a row in a hash order, `RawPrediction.asDouble`, `asInt`, and `asString` rejected `BigDecimal` and `BigInt`, and `Constraint` rendered a whole bound at or above 2^63 as `Long.MaxValue`. Fixed, each with a test.
+- [ ] Group (d) review, skipped: the narrowing of `contracts/ToolCall.scala`, `recordSchema`, throws for a value that is not a record (check how zio-blocks reports an exception of a transform). `SignatureParser` counts a `->` inside a quoted `Literal` member. (The `SignatureParser` part is fixed in the group (b) and (d) bug pass: the parser finds the arrow outside quotes and outside brackets.)
+- [ ] (from the gepa pass, low) `Example.inputs` gives an empty record when `inputKeys` is empty, and upstream raises. GEPA has its own check. Other callers, for example `OptimizerSupport`, run the program with empty inputs.
+
+## signatures
+
+Source root: `modules/signatures/src/main/scala/dspy4s/signatures/`. The paths below are relative to it.
+Simplify 5 (rank 7). Code-review 7 (rank 2). 1969 main lines, 1958 test lines.
+
+### Passes
+
+One simplify pass fits the module. Split the review in two.
+
+- [x] /simplify on the whole module, 1969 lines. After the pass: 1672 lines.
+- (a) The codec, about 1120 lines: `ZioSchemaCodec.scala`, `Shape.scala`, `OutputAugmentation.scala`, InputAugmentation (removed later: its code is now `Signature.appendInput`), `SchemaInterop.scala`.
+  - [x] /code-review
+- (b) The macros, about 850 lines: `internal/`, `Signature.scala`, `SignatureBuilder.scala`, `Spec.scala`.
+  - [x] /code-review
+
+### Simplify findings
+
+- [x] Three copies of `validateSchemas`, and the scalar, tuple, and product choice in two macros. Fixed: one macro body in `internal/MacroSignatureSupport.scala`, and one public `Signature.fromShapes`. The schema check is gone: the canonical derivation gives the compile error, so `of`, `from`, and `fromType` accept a type with no `derives Schema`, as `derived` does.
+- [x] `Shape.SchemaTupleShape` only forwarded to the canonical derivation, and the missing-field check had two copies. Fixed: the class is gone, and `Shape.requiredFieldsCheck` is the one check (it skips the optional fields, also in `MapShape`).
+- [x] `ZioSchemaCodec.scala`: two calls of `optionSomeValueReflect`, dead cases, three forms of the deferred unwrap, and a stale doc about unknown fields. Fixed: the `OptionOf` extractor and core `Reflects`.
+- [x] `OutputAugmentation.scala`: `decodeAugmented` had parameters that only tests used. Fixed: the code is in the `decode` of the shape.
+- [x] Core `Score.caseNames` copied `ZioSchemaCodec.caseNamesOf`. Fixed: core `contracts/Reflects.scala`.
+
+Findings of the simplify pass that the pass did not fix:
+
+- [x] A design proposal: augmentation as a `Signature` operation. ChainOfThought, ReAct, and MultiChainComparison each change the layout and the shape in two steps that can get out of step. `Shape.zip`, `Shape.field`, `Signature.appendInput`, and `Signature.prependOutput` can do both in one call. Do it in the programs pass. Done: `Signature.appendInput`, `appendInputs` (with the carrier `Signature.AppendedStringInputs`), `prependOutput`, and `withOutputs` change the layout and the shapes in one call, over the private shape combinators `Shape.string`, `Shape.strings`, and `Shape.pair`. `InputAugmentation` and `OutputAugmentation.prependedStringShape` are gone, and `OutputAugmentation` keeps the output types. The four programs name each added field one time. `SignatureFieldOpsSuite` checks that the layout and the shapes agree.
+- [x] A design proposal: the decision types (History, Noul, Score, Choice, ToolCall) are a table of type ids in the codec, with a side channel for the levels of a Score. A type modifier on each type, and `Score.level: Option[L]` (as `Choice.value: O`), can replace the table and the side channel. It touches core, adapters, and optimize. Done: each type has the marker `@Modifier.config(TypeMarker.Key, ...)` (core `contracts/TypeMarker.scala`). The codec and the macros read it, and the type-id table, `isSingleValue`'s list of symbols, and `Signature.markToolCalls` are gone. `Score.level` is an `Option[L]`, and the decision decode gives the level by its name. `TypeMarkerSuite` guards the marker.
+
+### Code-review findings
+
+- [x] `OutputAugmentation.scala:183-185`: `encode` uses `DynamicValues.fromAny`, not the Schema of the base type. An `Option` becomes the text `"Some(3)"`, and a nested case class becomes its `toString`. In programs, `DynamicSignature.scala` gives this encode to the next program. No test covers it, and it breaks the single-codec rule. (checked: the `fromAny` call is there) Fixed: `PrependField.split` gives the base value back, and `base.encode` encodes it. The fallback has `Out = Nothing`, and `ReAct` and `MultiChainComparison` keep their evidence in a `copy`.
+- [x] `ZioSchemaCodec.scala:174-184`, `:535-545`: the derived FieldSpecs never carry a case-class default as `defaultValue`. A response without the field `count: Int = 3` fails with `NotFoundError`. This is against the FieldSpec contract (core `contracts/FieldSpec.scala:15-23`). Fixed: `fieldSpecOf` reads the default from the reflect, `requiredFieldsCheck` skips a field with a default, and `normalize` gives the default to an absent field.
+- [x] `internal/SpecMacro.scala:40`: `declaredMethods` does not see the fields of a parent Spec trait. A Spec that inherits fields loses them with no error. No test covers inheritance. Fixed: the macro reads each trait of the linearization that extends `Spec`. The fields of the parents come first, and the fields of one trait are in source order. A field that a subtrait declares again with the same role and type is one field. `MacroReviewSuite` covers it.
+- [x] `internal/FunctionMacro.scala:149-157`, `:259-265`: `Noul`, `Score`, `Choice`, and `History` are case classes. A method that returns one of these types gets one output field for each of their fields (`value`, `confidence`, and so on). It does not get one `result` decision field. Fixed: `MacroSignatureSupport.isSingleValue` is a set of these four type symbols, and such a return type is one `result` output. Later, `isSingleValue` reads the type marker of the type in place of the set.
+- [x] `internal/FunctionMacro.scala`, `fromStringImpl`: the layout came from the canonical shapes, thus a `Literal['a', 'b']` field lost its enum values, and an `Optional[T]` field was a required `T`. Fixed: an optional field is an `Option[T]` element, and the layout comes from the parsed DSL through the new public `Signature.fromFieldSpecs`. The shapes give only the codec.
+- [x] The macros did not check a clash between an input name and an output name, thus `SignatureLayout.create` threw an `IllegalArgumentException` at run time. Fixed: `requireUniqueNames` takes the inputs and the outputs, and `from`, `fromType`, and `of` give the compile error "duplicate field names".
+- [ ] `ZioSchemaCodec.scala:123-156`: the coercion has gaps. It does not change an Int or a Long to a BigDecimal or a BigInt, text to a Short, a Byte, or a BigDecimal, or a Double to an Int. The match on an enum label is case-sensitive (`:70`). (The numeric gaps are fixed: one rule in core `contracts/LenientValues.scala` for the codec, the adapters, and `RawPrediction`. The enum label match stays case-sensitive.)
+
+- [ ] Codec review, skipped: `normalizeOption` turns the texts "null", "none", "n/a", and blank into `None`, also for an `Option[String]` answer. A text value for a variant target must match the case name exactly (upstream matches exactly too). A missing input field gives `NotFoundError` with the resource `prediction_field`.
+- [ ] Macro review, skipped: for a lambda such as `x => classify(x).trim`, `Signature.from` takes the method of the outer call (`trim`). The usual form is a method reference.
+
+## lm
+
+Source root: `modules/lm/src/main/scala/dspy4s/lm/`. The paths below are relative to it.
+Simplify 5 (rank 5). Code-review 5 (rank 8). 4966 main lines, 6422 test lines.
+
+### Passes
+
+- (a) The providers, about 2600 lines: `providers/`.
+  - [x] /simplify
+  - [x] /code-review
+- (b) The runtime and the contracts, about 2360 lines: `runtime/`, `contracts/`.
+  - [x] /simplify
+  - [x] /code-review
+
+### Simplify findings
+
+- [x] Private copies of the `string`, `sequence`, `record`, and `isNull` helpers: `providers/ResponsesWire.scala` (the helpers at its end), `runtime/DiskLmCache.scala` (the helpers at its end), `providers/ChatWire.scala` (`string`), `runtime/LmHistoryRecord.scala:125`. Core now has `DynamicValues.isNull` and `DynamicValues.encodeJson`; `providers/DynamicJson.scala` also had an `isNull`. Fixed: `DynamicValues.string`, `sequence`, `sequenceAt`, `asRecord`, `asSequence`, and `tryEncodeJson` in core; `recordGet` takes each `DynamicValue`. `DynamicJson` keeps only the provider encode (with no null field) and the guarded decode.
+- [x] `runtime/DiskLmCache.scala`: a reader for the old Java-serialization cache format, about 175 lines. Fixed: deleted, with its tests.
+- [x] `providers/OpenAiEmbedder.scala`, `asFloat`: the same tolerant number read as the new `DynamicValues.asDouble` in core. Fixed: a derived lenient codec reads the reply (`EmbeddingsReply`), and `floatRow`, `asFloat`, and `asInt` are gone.
+- [x] `runtime/ManagedLanguageModel.scala`, `UsageTracking`: it writes its thread-local scope and its carrier by hand. Core now has `ScopedLocal` (`private[dspy4s]`) for this job. Fixed: `UsageTracking` uses `ScopedLocal`.
+- [x] (simplify (b)) `contracts` imported `providers` (`DecisionRequests` for the guarded decode, `LmStreaming` for the metadata keys). Fixed: core `DynamicValues.tryDecodeJson` has the `StackOverflowError` guard, and `contracts` has no import of `providers`.
+- [x] (simplify (b)) `LmOutput` carried the reasoning and the citations in the metadata keys `reasoning_content` and `citations`. Fixed: typed `LmOutput.reasoning` and `citations`.
+- [x] (simplify (b)) `LmChunk.raw: Option[Any]` repeated `error`. Fixed: removed.
+- [x] (simplify (b)) `LmRequest.mode` was set only by `PredictEngine`, so the history `model_type` was `chat` for a Responses model on the other paths. Fixed: removed; the key and the history take the mode of the delegate.
+- [x] (simplify (b)) The retry step was written two times (call and stream), and the history cost was computed when the history was off. Fixed: `retryAfter`, and the cost is computed only for a record. `LmHistoryRecord` uses `ToolCall.toRecord` and `ChatWire.roleName`.
+- [ ] (simplify (b), skipped) The disk put runs on the caller thread (`ManagedLanguageModel` `acceptResponse`). A background writer is faster, but a crash can lose writes. Skipped: a behavior change with a small gain.
+- [ ] (simplify (b), skipped) A stream does work that no consumer needs: `LmChunk.cached` encodes each tool call, and `ManagedStream` assembles the response when there is no cache and no history. Skipped: small gain.
+- [x] (simplify (b), design) Usage has two sinks with different rules: `UsageTracking` in `ManagedLanguageModel`, and `UsageScope` only at the callers of `LanguageModel.callAndRecordUsage`. One sink at the model-call boundary is simpler. Fixed: core `UsageScope` is the one mechanism. A user tracker (`UsageScope.track`) and a program call (`UsageScope.measure`) each open a scope with a `UsageTracker`, and `LanguageModel.callAndRecordUsage` is the one record point (with `request.model`). `trackUsage = Some(false)` stops only the user trackers. `ManagedLanguageModel` records no usage, so a direct `call` or `stream` counts in no sink. `UsageTracking` and the `UsageTracker` alias in lm are a facade.
+- [x] (from the usage sink change) Upstream `_account_failed_call` (`dspy/clients/execution.py`) records the usage of a failed call, for example a stream that fails after its usage chunk. In the port a `Left` has no usage, so `callAndRecordUsage` records nothing for it. Before the change, `ManagedStream.fail` put that usage in the user tracker. A typed usage on the LM error is one form of a fix. Fixed: `LmErrorDetails.usage` and `LmError.usage` carry the usage of a failed call, and `callAndRecordUsage` records it. In `ManagedLanguageModel`, the usage of a call is the total of each attempt that reported a usage, on the call path and on the stream path, for a success and for a failure. The `call` of the `streamify` wrapper puts the usage of the stream on its error. An OpenAI reply with no output is an `LmProviderResponseError` with the usage of the reply, not a `ParseError`. Tests: `FailedCallUsageSuite`, `StreamingFailedUsageSuite`, `ProgramUsageSinkSuite`, `ManagedStreamSuite`.
+- [x] (docs) The `utils/caching.py` row of `docs/port/PORT_DIFFERENCES.md` names a file that does not exist (CacheRuntime.scala). Fixed: the row names `LmCache.scala` and the three cache files.
+- [x] (simplify (b), design) `contracts/DecisionRequests.scala` puts the decision payload (`state`, `questions`) in the option bag under magic keys, against the rule "framework control values are typed fields". A typed input of the request is simpler. `TypeSafeModel` and `PredictEngine` each check that no other option is present. Fixed: the typed field `LmRequest.decision` (`DecisionPayload`) holds the payload, and the typed field `LmOutput.answers` holds the answers of the reply, so `DecisionRequests.answers` does not parse the text. The cache key, the disk record, the history entry (the key `decision`), and the stream chunk have the new fields. `TypeSafeModel` rejects each option of a decision request, and the message names each key.
+- [ ] (simplify (b), skipped) The `RetryPolicy` trait has one implementation, `RetryPolicies`, and `maxRetries` is `exponentialBackoff` with no delay. One case class can replace them. Skipped: many test changes for a small gain.
+- [x] `runtime/DiskLmCache.scala`: a hand-written JSON codec. Fixed: private DTOs with a derived codec (format `dspy4s-lm-result-v2`), guarded against `StackOverflowError`.
+- [x] (simplify (b)) Each cache layer hashed the request again: a composite miss hashed the prompt four times. Fixed: `CacheKey` in `contracts/LmCache.scala`; `ManagedLanguageModel` builds it once with the mode of the delegate; `LmCache` takes the key; `LmRequest.cacheIdentity` is gone. A custom key is the `cacheKey` parameter of `ManagedLanguageModel`.
+- [x] (simplify (b)) The caches set `cacheHit` again at each layer. Fixed: the caches are plain stores, and only `ManagedLanguageModel` marks a hit.
+- [x] (simplify (b)) `runtime/RequestHash.scala` built the key text by hand, with three branches for old disk keys. Fixed: a derived `KeyData` record, sorted, encoded, and hashed (120 to 45 lines). A non-finite number or a lone surrogate gives no key.
+- [x] (simplify (b)) runtime/LmCacheConfiguration.scala (removed): a global registry with no reader, which made a disk cache in the home directory in seven test suites. Fixed: deleted; `NoopLmCache` is in `contracts/LmCache.scala`, and `CompositeLmCache` takes two plain caches.
+- [x] ProviderLanguageModel (removed) writes a magic `mode` key, and `providers/OpenAiClient.scala:24-39`, `:103-113` read it and remove it. Pass the mode as a typed value. Fixed: `OpenAiClient.invoke(mode, body)` and `stream(mode, body)`.
+- [x] `providers/PythonStr.scala` copied the Python float repr of adapters internal/PythonText.scala (moved to core), with a different algorithm. Fixed: core `contracts/PythonRepr.scala` has the algorithm of `PythonText`, and `PythonStr`, `PythonText`, and gepa `ReflectiveRecord` use it. (`PythonText` moved to core `contracts/PythonText.scala` later.)
+- [x] `providers/OpenAiLanguageModel.scala:69-94` copies the pipeline of ProviderLanguageModel (removed). Fixed: `ProviderLanguageModel` had no user in the main code and is removed. Its encoders and its reply parser are `providers/ChatWire.scala`.
+
+### Code-review findings
+
+- [x] ProviderLanguageModel (removed) puts `request_id` in the payload. `providers/OpenAiClient.scala:24` removes only `mode`, so `request_id` goes into the OpenAI request body. The only test checks `mode` (`OpenAiClientSuite.scala:91`). (checked) Fixed: `LmRequest.requestId` had no producer and is removed.
+- [x] `providers/OpenAiClient.scala` sent the `prompt` body to `/chat/completions` in Text mode. The stream read only `delta.content`. Fixed: the text mode goes to `completionsEndpoint` (`/completions`), and its stream reads `choices[0].text`.
+- [x] `runtime/ManagedLanguageModel.scala`: no upper limit on `Retry-After`. A bad header can block a thread for hours. Fixed: the retry policies limit the hint to `maxHintMillis` (default 60 seconds). Upstream uses the full hint (PORT_GAPS, deliberate differences).
+- [x] (from simplify (b)) A managed model over a managed delegate runs `acceptResponse` two times on a miss: two history entries, two usage records, two stores. Fixed: an outer model over a managed delegate writes no history and records no usage for the calls of the delegate; its cache still stores a miss. With a retry policy on the outer model, the inner model writes one failure entry for each attempt.
+- [x] (code-review (b)) `DiskLmCache.get` removed the file for each read error, also a transient one. Fixed: only bytes that do not decode remove the file.
+- [x] (code-review (b)) The eviction and `get` removed a path with no check, so a record that a concurrent `put` wrote in between was lost. Fixed: the remove checks under the lock that the file did not change.
+- [x] (code-review (b)) A killed process left `.tmp` files that `clear` did not remove. Fixed: `clear` removes them, and a listing removes a `.tmp` file older than 10 minutes.
+- [x] (code-review (b)) A delegate that cannot stream always gave the finish reason `stop`. Fixed: `LmChunk.fromResponse` takes the `finish_reason` of the metadata of the first output.
+- [x] (code-review (b)) The history payload was built when the global settings or the cap then dropped it. Fixed: core `RuntimeEnvironment.historyEnabled` is the one check.
+- [ ] (code-review (b), skipped) The first count of `DiskLmCache` lists the directory with no lock, so a put in that window is not counted. The count is an estimate by design, and the next eviction lists the directory again.
+- [ ] (code-review (b), skipped) `LmChunk.cached` encodes the arguments of each tool call for a consumer that assembles the chunks, although most consumers read `cachedResponse`. Small cost, and the chunk contract needs the deltas.
+- [x] `runtime/DiskLmCache.scala`: a failed write left `<key>.json.tmp`, and `clear` never removed it. The eviction listed up to 200000 files while it held the lock. Fixed in the simplify (b) pass: a unique temp file that a `finally` removes, `get` with no lock, and one evicting thread outside the lock.
+- [x] `providers/JdkHttpTransport.scala` called `toLowerCase` with no `Locale.ROOT`. Not a real bug: the JDK client gives lower-case header names, and a test shows it. The call uses `Locale.ROOT` now.
+- [x] (code-review (a)) An `error` object in a reply with status 200 gave the ParseError "no outputs". Fixed: `OpenAiErrors.fromReplyError` gives the typed error of the code (upstream `_response_error`), on the chat path and on the Responses path.
+- [x] (code-review (a)) An empty `finish_reason` in a stream chunk counted as an end event. Fixed: it is no finish reason (upstream `if finish_raw:`).
+- [x] (code-review (a)) An interrupt before the headers threw `InterruptedException` out of the transport. Fixed: it is a `Left(LmUnexpectedError)`, as during the body.
+- [x] (code-review (a)) `DynamicJson.encode` removed each null field at each depth, so `content: null` and a schema `"default": null` did not reach the provider. Fixed: only the top-level option bag loses its null fields.
+- [x] (code-review (a)) The embedder did not check the row indexes. Fixed: the indexes must be exactly 0 to n-1.
+- [x] (code-review (a)) `OpenAiUsage.fromDynamic` encoded the usage to text and decoded it again, and one bad field gave an empty usage. Fixed: each count is read directly.
+- [x] (code-review (a)) `ResponsesWire` repeated the null-option rule, and the two clients had two base-URL rules. Fixed: `DynamicJson.withoutNullFields` and `BaseUrl.root`.
+
+## adapters
+
+Source root: `modules/adapters/src/main/scala/dspy4s/adapters/`. The paths below are relative to it.
+Simplify 6 (rank 4). Code-review 6 (rank 3). 4243 main lines, 4943 test lines.
+
+### Passes
+
+- (a) The internals and the contracts, about 2190 lines: `internal/`, `contracts/`.
+  - [x] /simplify
+  - [x] /code-review
+- (b) The adapters, the parsers, and the streaming states, about 2050 lines: the files at the top of the source root.
+  - [x] /simplify
+  - [x] /code-review
+
+### Simplify findings
+
+- [x] Private copies of `DynamicValues.string`: `DecisionAdapter.scala` (`text`), `contracts/ToolContracts.scala` (`str`), `contracts/NativeFunctionCalling.scala` (`str`), `internal/StrictJsonSchema.scala` (`str`). Use the core helper. (found in the lm pass) Fixed in the simplify (a) pass: the four copies are gone. The adapters use `DynamicValues.string`, `DynamicValues.record` with `:=`, `mergeRecords`, `recordFilterKeys`, the new `DynamicValues.present`, `Traverse`, and `History.withToolCallResults`.
+- [x] Three JSON readers with different number rules: internal/JsonDynamic.scala (removed), internal/PythonText.scala (moved to core; ujson BufferedValue), and `JSONAdapterParser.scala`. Use one reader. Fixed: core `PythonText.parseJson` is the one reader (Python number rule, one pass, a `StackOverflowError` guard), and `JsonDynamic` is gone. The ujson dependency moved from adapters to core.
+- [ ] (from simplify (a)) Core `ToolCall.argumentsRecord` reads an `arguments` JSON text with `DynamicValues.parseJsonRecord` (the zio-blocks number rule), and the text can come from a tool call that the model wrote. The adapters read the same kind of text with `PythonText.parseJson`. The lm module declares ujson in `build.sbt` but does not use it.
+- [x] `contracts/AdapterInvocation.scala`: `outputJsonSchema: Option[String]` is parsed again in `DecisionAdapter.scala`, `JSONAdapterPrompt.scala` (two times, with two readers), `internal/PromptText.scala`, and `internal/ProgramPromptText.scala` (once for each field). `DecisionAdapter.scala` writes it back to text. Fixed: `Shape.jsonSchema` and `AdapterInvocation.outputJsonSchema` are `Option[DynamicValue.Record]`, built once for each shape. Core `JsonSchemaRefs` has the one root-`$ref` rule.
+- [x] `contracts/ToolContracts.scala`: `toOpenAiTools` (`Map[String, Any]`), `ToolCallData`, and `fromOutput`. Only tests use them. Fixed in the simplify (a) pass: deleted. The JSON type of a tool parameter is core `TypeRef.jsonType`, which programs `ToolText` and `ReActV2` also use, so an `int` parameter is `integer` and a `list` parameter is `array`, as upstream.
+- [x] `ChatAdapterPrompt.scala` repeats `JSONAdapterPrompt.scala`. Three adapters repeat the same native-tool options (the flag, `parallelToolCalls`, and `toolChoice`). Four files have their own copy of the `str` helper. Fixed in the simplify (a) pass: one `NativeTools` value (`contracts/NativeFunctionCalling.scala`) with `isActive`, `promptLayout`, and `toolOptions`. The Chat and JSON adapters have one `native` field, and `ConversationHistory.messages` derives the layout of the prompt from it.
+- [x] (simplify (a)) Unused fields and aliases: `ParsedOutput.rawText` and `metadata`, `FormattedPrompt.metadata`, the `adapterName` parameter, AdapterErrors.scala, `PromptText.instructions`, and `FormattedPrompt.mergeOptions`. Fixed: removed.
+- [x] (simplify (a)) Two `parse` overloads, and each wrapper overrode both. Fixed: `parse(invocation, output)` is the one abstract method; the layout form is a final convenience.
+- [x] (simplify (a)) Three list-type rules on the text of `TypeRef`, and three TypeRef-to-JSON-type maps (one wrong: `int` to `number`). Fixed: core `TypeRef.collection` and `TypeRef.jsonType`. Each place keeps its own accepted kinds.
+- [x] (simplify (a)) Copies of core helpers (`overlay`, `removed`, `recordAt`, two "present and not null" checks, hand-written traversals, the tool-call record shapes). Fixed: the core helpers, and a new `DynamicValues.present`.
+- [x] (simplify (a)) `PythonText.dedent` compiled a regex on each call, the JSON writer called `String.format` for each escaped character, and `OutputSchema` and `StrictJsonSchema` repeated work for each field and each `$ref`. Fixed: a line loop, a hex table, lazy values, and a memo for each `shape` call. `dedent` now ends a line only at `\n`, as Python does.
+- [ ] (simplify (a), skipped) The system message, the demo messages, and the strict `response_format` depend only on the signature, but each call builds them again. A cache across calls needs a key and a place to live. Skipped: the typed schema already removed most of the repeated work.
+- [ ] (simplify (a), design) The native-tool controls (`tools`, `tool_choice`, `parallel_tool_calls`, `response_format`) go to the provider as magic keys in the option bag, and `lm/providers/ResponsesWire.scala` reads them back by name. Typed fields on `LmRequest` (with `ToolSpec` and `ToolChoice` in the lm contracts) are the typed form. Programs `ReActV2` writes the `tool_choice` shape by hand. Recommendation (2026-11-01): do not do it now. These values are provider parameters, upstream `chat_to_responses` does the same translation, and the gain today is about 50 lines of `ResponsesWire`. It comes back if a provider with a different wire arrives.
+- [x] (simplify (a), design) The adapter type coercion (`internal/AdapterTextSupport.scala` `coerceText` and the optional fallback, and `JSONAdapterParser.coerce`) has other rules than core `LenientValues` and the signatures decode: a required `int` rejects `"$1,200"` but an `Option[Int]` accepts it, `"3.0"` is an `Int` here but not in `LenientValues.toInt`, and an optional `int` out of range becomes a `Long`. One `LenientValues.coerce(value, TypeRef)` is the general form. Check the upstream rules first. Fixed: `LenientValues.valueOf` is the one rule, with one strict number grammar in each accessor. `docs/port/PORT_DIFFERENCES.md` (section 17) has the differences from upstream.
+- [ ] (from the coercion rule) Differences from upstream that stay, listed in `docs/port/PORT_DIFFERENCES.md`: `true` for an `int` or a `float` (upstream gives 1 or 1.0), `- 5`, and `1_.5` are errors in the port; a Python integer literal (`0x10`) is no number. Core `DynamicValues.asLong` still reads a text with `toLongOption`, with another rule than `LenientValues`.
+- [x] (simplify (a)) The native-tool gate cases where the old predicates disagreed, kept as they were: with the flag on, function calling, a tool-calls field, and no `tools`, the prompt hides the tool fields but no tools go to the provider; with the flag on and no function calling, the tool options of the call config stay. Check them in the code review. Since 2026-11-03, the first case is a `ConfigurationError`, also with a tools input, because a tools input holds only text (`NativeTools.checkTools`).
+- [x] (docs) The `Adapter` row of `modules/adapters/README.md` names an `execute` method that no longer exists. Fixed, also in the concept text, which now names `AdapterCall`.
+- [x] (simplify (b)) The Chat, JSON, and XML prompts repeated one skeleton, Chat and XML repeated their turn text, and the chat marker was written in five places. Fixed: `ConversationHistory.prompt`, `FramedTurns`, and `ChatAdapter.marker`.
+- [x] (simplify (b)) `DecisionAdapter` had four hand-written traversals, a `Map` of evidence that `parse` sorted again, and an open-root trick that two files shared. Fixed: `Traverse.either`, a `Vector` in plan order, and a total `StrictJsonSchema.fromFields`. An evidence object of a JSON reply needs no text round trip now.
+- [x] (simplify (b)) API with no main caller: `couldFormEndIdentifier` (three streams), the `name` parameters of the adapters, a dead branch of `TwoStepAdapter`; and the stream states kept derivable state. Fixed: removed. The JSON stream and the JSON parser share `internal/JsonTextScan.scala`.
+- [x] (simplify (b)) Wasted work: a JSON text encode for each value, a failed strict XML parse before each wrapped parse, a regex that backtracks on an open XML fence, and two buffer copies for each chunk of the chat stream. Fixed, with no change of result (checked on random inputs).
+- [x] (simplify (b), design) The format, call, parse, and fallback loop of `TwoStepAdapter` copies `PredictEngine.answerWithFallback`, with no callback events and no tool calls of the main reply. One shared loop in the adapters module is the general form. Do it in the programs pass, where `PredictEngine` is under review. Fixed: AdapterCall.run.
+- [x] (simplify (b), design) `DecisionAdapter` and the hint adapter of programs `Refine` forward each `Adapter` member by hand, and neither forwards `streamingState`. A delegating adapter base is the general form. Fixed: `contracts/DelegatingAdapter.scala`.
+
+### Code-review findings
+
+- [x] `XMLAdapter.scala` uses `XML.loadString`. A raw `&` or `<` in a value ("AT&T", "a < b") breaks the parse. Upstream 3.2.1 used a tolerant regex; upstream 3.4.0 (#10239) parses strictly with `ET.fromstring("<dspy_root>...</dspy_root>")`, reads the direct children only, and a parse error gives the JSON fallback (`XMLAdapter` extends `ChatAdapter`). With one output field, the fallback returns the whole tagged text as the value. `XmlStreamingState` accepts the same text, so the stream and the parse give different results. No test covers this. Fixed in the code review (b): a syntax error is a `ParseError`, the single-output fallback applies only to a reply with no XML document, and `XMLAdapter` falls back to the JSON adapter. A field is the first field tag that is not inside another field tag (the stream rule); the port also reads field tags inside a wrapper tag, where upstream reads the direct children only.
+- [x] internal/JsonDynamic.scala (removed) and `JSONAdapterParser.scala`: ujson kept numbers as Double. Integers above 2^53 in `json` and `list` fields changed value. `internal/StrictJsonSchema.scala` did the same to defaults. Fixed in the simplify (a) pass: the one reader keeps an exact `Long` and `BigInt`, also for a default.
+- [x] `JsonStreamingState.scala` starts at the first `{`, but the parser prefers the ```` ```json ```` fence (`JSONAdapterParser.scala`). Upstream `json_adapter.parse` has no fence rule: `json_repair` on the whole text, then the first balanced object. Duplicate keys and repeated XML tags give extra chunks, but the parser keeps one value. Fixed in the code review (b) for the object rule: the parser takes the whole text when it is one object, else the first balanced object, as the stream; a repeated XML tag keeps the first copy in the parser and the stream. A repeated JSON key still gives a chunk for each copy in the stream.
+- [x] internal/PythonText.scala (moved to core) and `JsonDynamic.fromUjson` recursed on deep LM output. `Try` does not catch `StackOverflowError`. Fixed in the simplify (a) pass: the reader has no recursion of its own and catches `StackOverflowError`.
+- [x] `JSONAdapterParser.scala` rejects an `int` above Int.MaxValue. `internal/AdapterTextSupport.scala` accepts a Long for an optional field. Fixed in the code review (a): an `int` text or JSON number gives the smallest of `Int`, `Long`, and `BigInt`, on each path (upstream Python `int`). A typed `Int` field then gets a clear decode error.
+- [x] (code-review (a)) An optional field with allowed values took `""`, `none`, `n/a`, and `null` in any case as a null. Fixed: only `None` and `null` give a null (upstream `parse_value`); each other text is an error.
+- [x] (code-review (a)) `JsonSchemaRefs.lookup` did not decode the JSON pointer escapes `~1` and `~0`. Fixed, also for the `$defs` names of the prompt schema.
+- [x] (code-review (a)) `ProgramPromptText` built a new output schema for each output field. Fixed: `ProgramPromptText.schema` once for each prompt.
+- [x] (code-review (a), skipped) With native calling on, an LM with function calling, a tool-calls field, and no tools, the prompt hides the tool fields and the request has no tools. Upstream sends the tools of the input field. Rare: ReActV2 always has tools. Since 2026-11-03, this case is a `ConfigurationError`, with or without a tools input, because a tools input holds only text (`NativeTools.checkTools`).
+- [ ] (code-review (a), skipped) `PythonText.parseJson` rejects `NaN`, `Infinity`, and `-Infinity`, which Python `json.loads` accepts and `PythonText.json` writes. The ujson reader has no option for them.
+- [x] (code-review (a)) The `int` and `float` text rules accepted Java forms (`3d`, `0x1p3`). A run of the upstream text rule shows that upstream rejects them. Fixed with the one rule of `LenientValues`.
+- [x] (from simplify (b)) The tool-turn rule is written two times with other triggers and results: `ChatAdapterParser` (any provider tool calls; a mistyped field is an error) and `JSONAdapterParser` (only with a tool-calls field; a mistyped field takes its default). `XMLAdapter` has none. Upstream `_call_postprocess` is one rule for each adapter. Fixed in the code review (b): `AdapterTextSupport.parseOutputs` is the one rule of upstream `_call_postprocess` for the Chat, JSON, and XML parsers.
+- [x] (from simplify (b)) The single-output text fallback has three forms: Chat coerces the value with `outputTextValue`; JSON and XML (`AdapterTextSupport.singleOutputTextFallback`) give a raw string with Java `trim`. A bare `42` for an `int` output is an `Int` in Chat and a string in JSON and XML. Fixed in the code review (b): one `singleOutputTextFallback` with the chat value rule (`fallbackText`, then `outputTextValue`).
+- [x] (from simplify (b)) XML and the streams strip with Java `trim`/`strip`, not `PythonText.strip` (upstream `.strip()`): a value with a no-break space differs between the formats. Fixed in the code review (b): `PythonText.strip` in the XML parser and the XML and JSON streams.
+- [x] (from simplify (b)) Format, parse, and the stream state read the capabilities of the model from the ambient context. `Predict.withLm(m)` calls `m`, but the adapter checks the context LM, so `response_format` and native tools follow the wrong model. `TwoStepAdapter` formats with the extraction model and parses with the context of the caller. Fixed in the code review (b): `PredictEngine.answerWithFallback` (now `AdapterCall.run`) runs the adapter steps with the called model as the context LM, and `TwoStepAdapter` parses with the extraction model too.
+- [x] (from simplify (b)) `ChatStreamingState`: the hold-back length counts only the markers of the output fields, but the marker match takes any name, so a long header of another name split across two chunks shows in the field text. Fixed in the code review (b): the stream holds back each tail that can still become a marker of any name, with no fixed length.
+- [x] (code-review (b)) The JSON stream tracked the tool-calls field when the provider fills it. Fixed: it gets `AdapterTextSupport.textFields`, as the chat stream.
+- [x] (code-review (b)) An empty reply of the TwoStep extraction model skipped the JSON fallback and the completion text. Fixed: it is a parse error of the parse step.
+- [x] (code-review (b)) A repeated key in a JSON reply gives a final chunk for each copy in `JsonStreamingState`, while the parser keeps the last value. Fixed: a later copy gives no chunks, the rule of the chat and XML states. The parser still keeps the last copy, so the tokens can differ from the final value (PORT_DIFFERENCES section 23). Tests: `JsonStreamingStateSuite`.
+- [ ] (from the gepa pass, low) Three other places of upstream `serialize_for_json` still write `NaN` for a number that is not finite, where pydantic JSON mode gives `null`: the assistant turn of the JSON adapter (`JSONAdapterPrompt`), the tool result text, and the tool-call arguments. `PromptText.fieldValue` has the rule.
+
+## programs
+
+Source root: `modules/programs/src/main/scala/dspy4s/programs/`. The paths below are relative to it.
+Simplify 7 (rank 1). Code-review 6 (rank 4). 8004 main lines, 11858 test lines.
+
+### Passes
+
+- (a) The agents, about 2740 lines: `strategies/ReAct.scala`, `strategies/ReActV2.scala`, `strategies/ReActProtocol.scala`, `strategies/RLM*.scala`, `runtime/AgentLoop.scala`, `runtime/TrajectoryTruncation.scala`, `runtime/ToolExecutor.scala`, `internal/`, `contracts/ToolFunction.scala`.
+  - [x] /simplify
+  - [x] /code-review
+- (b) Predict and the selection, about 2100 lines: `strategies/Predict.scala`, `strategies/DynamicPredict.scala`, `strategies/ChainOfThought.scala`, `strategies/MultiChainComparison.scala`, `strategies/BestOfN.scala`, `strategies/Refine.scala`, `strategies/RefineFeedback.scala`, `runtime/PredictEngine.scala`, `runtime/AttemptSelection.scala`, `runtime/ParallelExecutor.scala`, `runtime/SettingsProgramRuntime.scala`, `Aggregation.scala`, `Parallel.scala`, `retrievers/`.
+  - [x] /simplify
+  - [x] /code-review
+- (c) The structure, about 3150 lines: `optimization/`, `algebra/`, `compose/`, the other files in `contracts/`, and the other files at the top of the source root.
+  - [x] /simplify
+  - [x] /code-review
+
+### Simplify findings
+
+- [x] (from the adapters designs) One shared format, call, parse, and fallback loop for `PredictEngine` and adapters `TwoStepAdapter`, for example `AdapterCall.run` in the adapters module. The extraction step then sends the callback events, as upstream. `strategies/ReActV2.scala` also writes the `tool_choice` shape by hand, where `NativeTools` has the encoder (done: `ReActV2` uses `NativeTools.encodeToolChoice`). Fixed: AdapterCall.run.
+- [x] Private copies of `DynamicValues.string` in `strategies/ReActProtocol.scala` and `strategies/ReActV2.scala`. Fixed: the core helpers, also for the hand-built records and the `updated` folds.
+- [x] `strategies/RLM.scala`: a "Source-compatible facade" with type aliases and one-line forwarders to RLMModel, RLMReplProtocol, and RLMSandboxTools. The end of `strategies/ReAct.scala` repeated the pattern. Fixed: removed. `strategies/Refine.scala` still has it (group (b)).
+- [x] runtime/InterpretedTrajectoryAgent.scala and runtime/TrajectoryAgent.scala (removed) had one implementer: ReAct. `prepareAction` always gave `Ready`, so the `Rejected` path was dead. Fixed: ReAct is a plain `Module` on `AgentLoop.run`. `ActionInterpreter` and `ActionOutcome` are gone too.
+- [x] `strategies/ReAct.scala` and `strategies/ReActV2.scala` held the same tool dedup fold and the "Execution error in" text. Fixed: `ToolFunction.byName` and `ToolExecutor.errorText`. Both programs stay: ReActV2 ports upstream `dspy.ReActV2`, and ReAct ports the text protocol.
+- [x] contracts/ToolCall.scala (removed): `ToolCallRequest` and `ToolCallResult` duplicated core types. `ToolExecutor.invoke` had one caller, and its NotFound branch could not run. Fixed: removed; ReAct calls `ToolExecutor.run`.
+- [x] (simplify (a)) `RLMExecution` nested five levels and wrapped each result two times. `SandboxToolBridge` had one caller. Fixed: one `step` method; the bridge is `RLMSandboxTools.fromToolFunctions`.
+- [x] (simplify (a)) `ReActV2` had its own budget loop, unreachable branches, and a hand-written `tool_choice` shape. Fixed: `AgentLoop.run`, and `NativeTools.encodeToolChoice`. Four program-name parameters that nothing set are gone, and `AgentLoop.run` hides its `iteration`.
+- [x] (simplify (a)) `internal/ToolMacro.scala` copied the method resolution of `FunctionMacro`. Fixed: `signatures/internal/MethodResolution.scala`.
+- [ ] (simplify (a), design) RLM sends the whole input context again on each step, and the sandbox parses it again (`core/runtime/DenoPyodideInterpreter.scala`, `core/runtime/LocalPythonInterpreter.scala`). `runner.js` already has an `inject_var` that no Scala code calls. Send each variable one time for a session. This costs tens to hundreds of ms for each step for each MB, an estimate from reading the code. Long contexts are the purpose of RLM. It needs a run with Deno.
+- [ ] (simplify (a), design) Program metadata (`history`, `termination_reason`, `trajectory`, `final_reasoning`) shares `RawPrediction.values` with the outputs, so each program needs its own reserved names. A `RawPrediction.metadata` removes the lists. It changes the readers of `raw.values`.
+- [ ] (simplify (a), design) A typed `toolChoice` on `AdapterInvocation`, next to `tools`, in place of the `tool_choice` key that `ReActV2` writes in `call.config`. An adapter that builds its own `FormattedPrompt` then cannot send `tool_choice` with no `tools`.
+- [ ] (simplify (a), skipped) After the first overflow, each later step of ReAct retries a prompt that is likely too large. Remembering the overflow length changes the upstream call sequence. Only for runs that overflow.
+- [x] RecordObject.scala (moved) had no user in the main code. Fixed: it is in the test sources, next to ProgramAlgebraLawSuite, and so is the `Stable` form of `DynamicSignature.scala`.
+- [x] `DynamicValues.fromAny` on typed values, against the single-codec rule: `compose/Mode.scala`, `strategies/MultiChainComparison.scala`, `strategies/Refine.scala`, and `strategies/RLMSandboxTools.scala`. Fixed.
+- [x] Small items: the stale comment in `runtime/PredictEngine.scala`, `Parallel.apply` the same as `Parallel.run`, and `ErrorLimit(10)` two times in `runtime/ParallelExecutor.scala`. Fixed. `Evaluate.scala`, `BootstrapFewShot.scala`, and `BootstrapFewShotWithRandomSearch.scala` still have the literal (their module passes).
+- [x] optimization/CompositeOptimizableStructureInstances.scala (removed) wrote single-leaf instances by hand, while Refine used `ParameterOptic`: three styles for one job. Fixed: one `given` in each companion, over `OptimizableStructure.leaf`, `pair`, and `unary`. One override type is skipped, because an `Option[Predict]` carries a bound LM.
+- [x] (simplify (c)) optimization/ParameterOptic.scala (removed) had one main caller, Refine, and a second pair implementation. Fixed: `Refine` calls `pair`, so its `replace` is stack-safe. The forwarders in `compose/` are gone. `Composer` is gone (the algebra pass). `AssociativeFunctor` is part of the `Optic` item of the algebra section.
+- [x] (simplify (c)) `optimization/OptimizableStructure.scala` had three abstract members for one fact. Fixed: only `inspectNamed` and `replace` are abstract. `OptimizableMetadata` is core `PredictorKey`. `contracts/ModuleLifecycle.scala` has one `Observed(inputs, predictor)`. `compose/Transform.scala` has `Lift` and `Dimap` nodes only. `ProgramRunner.scala` has one decode helper and one signature-backed `given`.
+- [ ] (simplify (c), design) `contracts/ProgramRuntime.scala` has one implementation and one main override (`InstructionProposer.scala`). The same item as `runtime/SettingsProgramRuntime.scala` above.
+- [ ] (simplify (c), design) `TraceEntry.withinPredictor`, `RuntimeScope.predictor`, and the `nested` check of `contracts/Module.scala` serve one case: `ChainOfThought` over its inner `Predict`. If the inner `Predict` owns the key, the three go, but the module name of the key changes.
+- [ ] (simplify (c), algebra pass) Abstractions that only their law suites use: `CopyDiscardCategory.scala` and `Isomorphism`, `Opposite`, `MonoidAction`, `NaturalTransformation` beyond `ScalaMonad`; in programs `algebra/Parameterization.scala`, `algebra/ParameterAlgebra.scala`, `algebra/ModuleAlgebra.scala`, and `algebra/OrderedExecution.scala`. `OptimizableStructure.parameterLens` is gone. The design items of the algebra section hold the proposals.
+- [x] (simplify (b)) `runtime/PredictEngine.scala` held the decision routing, about 120 of 379 lines. Fixed: the `DecisionAdapter` companion and `DecisionPlan`, as upstream `dspy/adapters/decision.py`. One `strategies/DecisionOutputs.scala` trait replaces three copies of three forwarders. `Predict.erase`, `boundLm`, and `DynamicPredict.outputJsonSchema` are gone.
+- [x] (simplify (b)) `runtime/AttemptSelection.scala` `bestOf` had six nesting levels and three copies of the failure charge, and `strategies/BestOfN.scala` and `strategies/Refine.scala` repeated the sample loop. Fixed: one `for`, and `AttemptSelection.sample`. The `OfferFeedback` types moved to `strategies/RefineFeedback.scala`, and the four forwarders of Refine are gone.
+- [x] (simplify (b)) `ParallelExecutionResult` had three views of one result and forced dead arms. Fixed: `results: Vector[Either[DspyError, A]]`.
+- [x] (simplify (b)) `Aggregation.scala` had unreachable lines, `strategies/MultiChainComparison.scala` had four fields that nothing set, and `retrievers/KNN.scala` and `retrievers/EmbeddingsRetriever.scala` repeated the query steps. Fixed: `Similarity.topK`.
+- [ ] (simplify (b), skipped) The hand-written `Shape` of `strategies/RefineFeedback.scala`. A derived shape changes the `response_format` of the JSON adapter (a `title` and the key order) and rejects a null `discussion` and a number `advice`.
+- [ ] (simplify (b), design) `DynamicPredict` is not needed: `Predict` over `Shape.MapShape` does the same work. A `Predict.dynamic(layout, ...)` removes a field list, a leaf instance, and a `Streamable` case. Behavior: missing inputs and required outputs then fail.
+- [ ] (simplify (b), design) `runtime/SettingsProgramRuntime.scala`: `adapterOrChat` is private, so `Streamify.scala` copies its type test. A missing adapter is a `Left` in the engine and a chat adapter elsewhere. `Adapter.fromContext`, `LanguageModel.fromContext`, and `adapter: Option[Adapter]` beside `lm` remove both runtime types.
+- [ ] (simplify (b), skipped) `OpenAiEmbedder.scala` sends corpus batches in sequence, as upstream, and `Embedder.scala` boxes each float. These are one-time costs of a retriever, in the lm module.
+
+### Code-review findings
+
+- [x] `Aggregation.scala`: `keys.last` threw `NoSuchElementException` when the first completion row was an empty record. Fixed: a `Left`.
+- [x] `strategies/RLMSandboxTools.scala`: `counter.get()` and then `addAndGet` was not atomic. Fixed: a `compareAndSet` loop.
+- [x] `runtime/ParallelExecutor.scala`: the error said "0 seconds" for a timeout of less than one second. Fixed: the text of the `Duration`. The timeout for each completion is the documented rule (PORT_GAPS G-41), and it stays. `shutdownNow` interrupts a running task, and a model call that ignores the interrupt continues after the batch fails.
+- [x] `strategies/ReActV2.scala` merges the final outputs into the event record, so an output named `next_thought`, `tool_calls`, or `tool_call_results` overwrote the event fields. Fixed: construction rejects these names (PORT_DIFFERENCES section 18). The drop of a task input named `history` or `tools` is upstream field-dict parity, and it stays.
+- [x] `strategies/RLMReplProtocol.scala`: `stripCodeFences` used `var`. Fixed: a `@tailrec` helper. The cases are the cases of upstream `_strip_code_fences`.
+- [x] `runtime/AttemptSelection.scala` (`bestOf`): the failure-budget rule `remainingFailures <= 0` differs from upstream `idx > fail_count`, which mixes the index and the count and lowers `self.fail_count` for later calls. The port keeps its plain budget (PORT_DIFFERENCES section 20). A NaN reward is never selected, as upstream.
+- [x] (code-review (b)) The trace had no size limit, so a long-lived thread kept each input and output. Fixed: `maxTraceSize`, default 10000, as upstream `max_trace_size`.
+- [x] (code-review (b)) A reward function added its model calls to the trace and the history of the caller. Fixed: the reward runs in an isolated context, as upstream.
+- [x] (code-review (b)) The critic of `strategies/Refine.scala` got wrapper and nested entries, names that do not match `module_names`, and the input of the first predictor as the program input. Fixed: one named entry for each predictor, the observed inputs of the program, and JSON text with an indent of 2, as upstream. `parseAdvice` uses the one string-aware scan `JsonTextScan.firstObject`.
+- [x] (code-review (b)) `strategies/MultiChainComparison.scala` kept a multi-line answer, sent an empty text for a missing value, and overrode a per-call temperature. Fixed: the rules of upstream `forward`, and the temperature is module config.
+- [x] (code-review (b)) `runtime/PredictEngine.scala` had no rule for a low temperature with `n` above 1, no warning for a missing input of `DynamicPredict`, and the 3.2.1 text for an extra input. Fixed: the rules and the texts of upstream `_forward_preprocess`.
+- [x] (code-review (b)) `retrievers/KNN.scala` used Scala text for a value, and a query vector of another size gave a score from part of each vector. Fixed: `PythonText.str`, and a `Left`.
+- [x] (code-review (b), design) The temperature and the rollout id of an attempt of `BestOfN` and `Refine` travel on `ProgramCall`. A composite that builds a new `ProgramCall`, for example `KNNFewShot.scala`, drops them, so with a cache each attempt can give one answer. They also win over the temperature of a `Predict` config, where upstream `lm.copy` stays under it. Fixed: RuntimeScope.lmDefaults, which PredictEngine merges under config. It also serves `BootstrapFewShot`.
+- [ ] (code-review (b), no change) Under `captureFailureTraces`, a failed predictor entry is in the trajectory of the critic. Upstream has no such entries.
+- [x] (code-review (c)) `compose/Mode.scala` `Mode.model` had no effect, because the wire layer overwrites the `model` key with `request.model`. Fixed: removed. `Mode.setConfig` with a `model` key still has no effect, and its scaladoc says so.
+- [x] (code-review (c)) `DynamicSignature.scala` `bridge` rejected an optional or defaulted target input, which its validating entry accepts. Fixed: the same rule.
+- [x] (code-review (c)) `ModuleLifecycle` had a type parameter `O` that nothing read, `compose/Both.scala` and `compose/Tensor.scala` repeated one merge, and `algebra/Program.scala` forwarded `inspect`. Fixed. The `arity` of `Program` stays: the default builds each name and needs more than 1 GB for 20,000 left-nested leaves.
+- [ ] (code-review (c), skipped) `read` and `inspect` go through `inspectNamed`, so a left-nested program of 20,000 leaves builds one long name for each leaf. Names that are built only when needed remove this cost. Real programs are far smaller.
+- [ ] (code-review (c), skipped) The rule for a required field is in `Shape.scala` `requiredFieldsCheck`, `DynamicSignature.scala` `bridge`, and, in its inverse form, `OutputAugmentation.scala`. A method on `FieldSpec` can hold it in one place (the core or signatures pass).
+- [x] (code-review (a)) `RLMReplProtocol.renderValue` used compact JSON and Scala text, and a NaN in a list threw. Fixed: the text of upstream `REPLVariable.from_value` (`json.dumps` with an indent of 2, and Python `str`).
+- [x] (code-review (a)) The Deno wrapper of a tool with no declared parameters was `def name():`, so each argument raised `TypeError`. Fixed: `def name(**kwargs):` in `runner.js` (PORT_DIFFERENCES section 18).
+- [x] (code-review (a)) `llm_query_batched` gave one generic `Left` when each prompt threw. Fixed: the error limit is above the batch size, so each prompt gets its `[ERROR]` text.
+- [x] (code-review (a)) `llm_query` sent the text `null` for a null prompt, and a reply with no outputs gave an empty text. Fixed: both are errors, as upstream.
+- [x] (code-review (a)) The result of a SUBMIT kept the keys that the signature does not declare, and the observations differed from upstream (`[a]`, `a non-dict payload`). Fixed: the declared outputs only, and the texts of upstream `_process_final_output`.
+- [x] (code-review (a)) `ReActProtocol.toolArgsRecord` turned tool arguments that are not a dict into an empty record, and the tool ran. Fixed: a `ParseError`, and no tool runs. Since the live run of 2026-11-03 the decode is in the parse step, so the JSON fallback comes first, as upstream.
+- [x] (code-review (a)) `RLM.DecisionTypes` copied `DecisionKind.richTypes`. Fixed: one set.
+- [ ] (code-review (a), no change) A tool exception gives `boom` under Deno and `IllegalStateException: boom` under Local. Upstream has the same two texts (`python_interpreter.py:529`, `local_interpreter.py:225`), so the port keeps them.
+- [x] (code-review (a)) A SUBMIT dict that holds a NaN. Checked: this line was wrong in two parts. Upstream does not read the value: its local worker writes the `repr`, and in its `runner.js`, `JSON.parse` rejects the value in a catch block. The port had that `runner.js`, so a NaN ended the Deno process and the session. Fixed: the two sandboxes write the `repr`, `RLM` gives the observation `FINAL returned str`, and the loop continues. The same run found that a line that the JSON reader rejects made `execute` wait forever on Deno. Fixed: such a line ends the session with a `Left`. PORT_DIFFERENCES section 18 has the rules and the limits. Tests: `DenoPyodideInterpreterSuite`, `LocalPythonInterpreterSuite`, `RLMSuite`.
+- [x] (from the mcp pass) In the sandbox of RLM a tool with an optional argument has a wrapper with no default, so the code cannot leave out the argument (`RLMSandboxTools.fromToolFunctions`, `runner.js`). A property name that is not a Python name, for example `from`, gives invalid Python. `RLM.checkNames` checks only the tool names. Upstream gives no target, because its wrapper is broken in another way (`rlm.py`, `python_interpreter.py`). Fixed under Deno, where a test showed each defect: `SandboxTool.Param.optional`, and such a tool takes keyword arguments. The local interpreter had neither defect. A run also showed that an argument named `json` hid the module in the wrapper, so each wrapper now calls one shared helper. `RLMSandboxToolsSuite` runs real Python.
+
+## evaluate
+
+Source root: `modules/evaluate/src/main/scala/dspy4s/evaluate/`. The paths below are relative to it.
+Simplify 5 (rank 9). Code-review 6 (rank 6). 853 main lines, 701 test lines.
+
+### Passes
+
+- (a) The whole module, 853 lines.
+  - [x] /simplify
+  - [x] /code-review
+
+### Simplify findings
+
+- [x] `EvaluationResultPersistence.scala:15-26`, `:72-96`: a second JSON library (ujson) and a conversion through `Any`. Core already has the zio-blocks DynamicValue JSON codec. Fixed: `PythonText.jsonAscii` of `EvaluationResult.rows`, as upstream `json.dump`, and no ujson dependency in the module.
+- [x] `metrics/AutoEvaluation.scala:144-146`, `:230-237` call the legacy `fromAny` on Strings. The `threshold` fields (`:100`, `:171`) are not used. The layouts at `:107-131` and `:179-193` repeat the same fields. Fixed: the values go to the judge with no conversion, a trace gives the result of the `threshold`, and the layouts share one input list.
+- [x] `Evaluate.scala:67-80` rebuilds the config field by field, where `config.copy` is enough. `displayTable: Either[Boolean, Int]` (`:31`) is a strange encoding. The metadata is a `Map[String, Any]` (`:152`). The `nonEmpty` branch at `:147` is dead code. Fixed: `config.copy`, the enum `TableDisplay`, and `ParallelExecutor.fromSettings`. `metadata`, `aggregateScore`, and the dead branch had no reader, and they are gone.
+- [x] `metrics/NormalizeText.scala:11-24`: `apply` and `dpr` repeat four steps. `metrics/BuiltinMetrics.scala:118-128` repeats the same extraction two times. Fixed: `NormalizeText` has `apply` and `dprTokens`, and `MetricHelpers.textValues` is the one extraction.
+
+### Code-review findings
+
+- [x] `metrics/BuiltinMetrics.scala:30`, `:34`, `:50`, `:121`, `:127`: `toAny(Null)` gives `null`, and `.toString` then throws a NullPointerException. A null answer gives an exception, not a `Left`. Fixed: a null is a `ValidationError` that names the field, and a judged metric gives the null to the judge.
+- [x] `metrics/BuiltinMetrics.scala:136`: PassageMatch compares substrings, but upstream `has_answer` compares token sequences. With this code, "cat" matches "concatenate". Fixed: token sequences from `NormalizeText.dprTokens`, as upstream.
+- [x] `metrics/NormalizeText.scala:13-15` is different from upstream `normalize_text`. It removes accents, and it changes punctuation to a space where upstream deletes it ("U.S." gives "u s"). Thus EM and F1 can differ from dspy. Fixed: the steps of upstream `normalize_text`, and the expected values of the tests come from CPython.
+- [x] `EvaluationResultPersistence.scala`: the CSV code finds each value from the header prefix. If a field name is the metric name, or starts with `example_` or `pred_`, the code reads the wrong value. Line `:85` writes a JSON null as the string "null". Lines `:34` and `:70` catch `Throwable`. Fixed: one row form, `EvaluationResult.rows`, for JSON, CSV, and the table. A null is `null` in JSON and the empty text in CSV. The code catches `NonFatal`.
+- [x] `contracts/EvaluateContracts.scala:63-69`: an example field named `score` or `error` shows the evaluation value, not the field value. Fixed: the columns come from the rows, and the error column has a name that does not collide. A cell has at most 25 words, and the last line says how many rows the table hides.
+- [x] (code-review (a)) The score of `Evaluate` had no rounding, and upstream gives `round(100 * ncorrect / ntotal, 2)`. Fixed: `PythonText.round`, moved from `ReAnchorSearch`.
+- [x] (code-review (a)) A judged metric turned a list context into one text, and its instructions joined the lines of the upstream docstring with a space. Fixed: the value goes to the adapter as it is, and the instructions have the lines of upstream.
+- [x] (code-review (a)) `PassageMatch` with an empty context list gives `0.0`, as upstream `any` over no passages, and `TableDisplay.Rows(0)` gives no table, as upstream reads 0 as false.
+
+## optimize
+
+Source root: `modules/optimize/src/main/scala/dspy4s/optimize/`. The paths below are relative to it.
+Simplify 7 (rank 2). Code-review 6 (rank 5). 2954 main lines, 4945 test lines.
+
+### Passes
+
+- (a) The bootstrap optimizers and the shared files, about 1030 lines: `BootstrapFewShot.scala`, `BootstrapFewShotWithRandomSearch.scala`, `LabeledFewShot.scala`, `KNNFewShot.scala`, `Ensemble.scala`, `DemoCount.scala`, `OptimizerSupport.scala`, `OptimizerLimits.scala`, `contracts/`.
+  - [x] /simplify
+  - [x] /code-review
+- (b) The instruction optimizers, about 1000 lines: `COPRO.scala`, `MIPROv2.scala`, `propose/GroundedProposer.scala`, `InferRules.scala`.
+  - [x] /simplify
+  - [x] /code-review
+- (c) ReAnchor, about 800 lines: `ReAnchor.scala`, `ReAnchorSearch.scala`. ProgramPersistence moved to programs `optimization/` in the simplify pass.
+  - [x] /simplify
+  - [x] /code-review
+
+### Simplify findings
+
+- [x] Private copies of core helpers in `ReAnchor.scala` (`record`, `text`, a sequence builder). Fixed: the core helpers.
+- [x] `BootstrapFewShotWithRandomSearch.scala` used `return`, `var`, `boundary/break`, and mutable buffers, and wrote `BootstrapFewShotConfig` two times. Fixed: a lazy sequence of candidates, which stops at the stop score, so an early stop makes no more bootstrap runs, as upstream.
+- [x] The same Either `traverse` helper in ReAnchor, GroundedProposer, and adapters StrictJsonSchema. Fixed in the core group (d) pass: `Traverse.either` in core.
+- [x] `COPRO.scala`, `propose/GroundedProposer.scala`, and `InferRules.scala` repeated one generation call and the field gating. Fixed: `OptimizerSupport.generateText` and `generationLayout`. The rollout id windows are in the code review.
+- [x] `var` and `ArrayBuffer` accumulation in `MIPROv2.scala`, `COPRO.scala`, and `InferRules.scala`. Fixed: folds.
+- [x] `ReAnchor.scala` built the report JSON by hand. Fixed: `ReAnchorRow.Observed`, `ReAnchorRow.FoldCheck`, and a derived codec; `report.json` stayed byte-equal. `Ensemble.scala` keeps its `Random` in a plain class, not a case class.
+- [x] (simplify) `Teleprompter` has one `final def compile` over `compileInScope`, in place of six copies. para/ParaCompile.scala (removed) had no main caller. `CandidateProgram.evaluation` had no reader. `ReAnchorSearch.scala` `fsum` is an exact `BigDecimal` sum.
+- [x] (simplify) ProgramPersistence moved to `optimization/ProgramPersistence.scala` in programs, because it uses nothing from optimize (upstream `dspy/primitives/base_module.py`).
+- [ ] (simplify, design) `OptimizationReport` is not typed: `best_score` is a key in a `Map[String, Any]`, and LabeledFewShot and BootstrapFewShot report a score of 0.0 that nothing measured. A `score: Option[Double]` and a `bestScore` field fix both.
+- [ ] (simplify, design) ProgramPersistence keys the leaves by position, so a reorder of leaves with the same size loads with no error. Upstream keys by name. Store the signature structure of each leaf, and reject a mismatch.
+- [ ] (simplify, design) `MIPROv2.scala` scores each trial on the full set, a documented difference: about 11n runs against the 350 + 3n of upstream for its defaults. A minibatch of 35 and a full evaluation every 5 trials follow upstream, but trial scores get more noise.
+- [ ] (simplify, skipped) `KNNFewShot.scala` bootstraps the neighbors on each call, and `InferRules.scala` drops one example at a time on an overflow. Both are as upstream. A memo of each neighbor and a bisection save calls, but change the demos or the failure events.
+- [x] (evaluate pass) `ParallelExecutor.scala` gives a generic `Left` at the error limit, and nothing logs the cause of a failed task, where upstream logs each one. `Evaluate.scala` keeps errors only with `provideTraceback`. Fixed: each failed task writes its cause, as upstream, and `ExampleEvaluation.error` always holds it.
+
+### Code-review findings
+
+- [x] `BootstrapFewShotWithRandomSearch.scala` (a parity bug): seeds of 0 or more cut the trainset, and the bootstrap seed ignored `config.seed`. Fixed: the whole shuffled trainset, with the random size as `maxBootstrappedDemos`.
+- [x] A failure scored 0.0 or dropped a candidate with no error in `BootstrapFewShotWithRandomSearch.scala`, `COPRO.scala`, and `InferRules.scala`. Fixed: a `Left`, as upstream raises. `MIPROv2.scala` keeps 0.0 for a failed trial, as upstream `eval_candidate_program`, and writes a warning.
+- [x] A leaf with `instructions = None` could become `Some("")` in `MIPROv2.scala` and `COPRO.scala`, and an empty text went to the model. Fixed: prompts show the effective instructions, and the current instruction is a candidate that writes nothing. `ps.inspect` and `ps.read` now come from one list (programs simplify (c)).
+- [x] `propose/GroundedProposer.scala`, `COPRO.scala`, and `InferRules.scala`: the rollout id windows could overlap. Fixed: ids with no overlap for any size. `MIPROv2.scala` passes its seed to the proposer.
+- [x] `ReAnchorSearch.scala` holds a bit-exact port of the Python random generator. It is fragile, but ReAnchorUpstreamSuite tests it, and no other code uses it. No change.
+- [x] (code-review) `LabeledFewShot.scala` gave each predictor the same sample. Fixed: one random source, and a sample for each predictor, as upstream.
+- [x] (code-review) `MIPROv2.scala` bootstrapped the same trainset order for each demo set. Fixed: the sets of upstream `create_n_fewshot_demo_sets`, with `OptimizerSupport.shuffledBootstrap` shared with the random search.
+- [x] (code-review) `COPRO.scala`, `propose/GroundedProposer.scala`, and `InferRules.scala` used paraphrased prompts with marker settings. Fixed: the texts, the field descriptions, the input order, and `strip_prefix` of upstream. COPRO shows the best attempts up to the breadth, strips quotes, and runs no evaluation after its search.
+- [x] (code-review) `BootstrapFewShot.scala`, `BootstrapFewShotWithRandomSearch.scala`, and `ReAnchor.scala` ignored the `maxErrors` and `numThreads` of the context. Fixed: `Option` settings. A duplicate key with an empty trainset now fails. `InMemoryLmCache` holds 1000000 entries by default, as upstream.
+- [x] (code-review, open) A `ChainOfThought` leaf with no instructions shows `produce the fields `reasoning`, `answer`` in `basic_instruction`, and InferRules writes that text, because `OptimizableView.layout` rebuilds the text from the augmented structure. Upstream and the program use the base text. A read of the effective instructions on `OptimizableLeaf` fixes it. Fixed: `OptimizableLeaf.defaultInstructions` and `OptimizableView.effectiveInstructions`, read by COPRO, InferRules, MIPROv2, GroundedProposer, and the failure feedback of GEPA.
+- [x] (code-review, open) `MIPROv2.scala`: upstream `num_candidates` also sets the number of proposals, replaces the first proposal with the current instruction, and limits the proposals to `min(N, demo sets)`. The port has `proposerConfig.numInstructions` and puts the current instruction before the proposals. Random search seed -2 with no labeled demos gives no candidate, where upstream scores an empty-demo program again. Fixed: `numCandidates` sets the proposals, the current instruction takes the place of the first proposal, `GroundedProposer` takes all demo sets and rotates them, and the random search scores seed -2 for each `maxLabeledDemos`.
+- [ ] (code-review, no change) `ReAnchor.scala` checks the cache of the model of the context only (PORT_DIFFERENCES section 21).
+- [x] (code-review, open) `MIPROv2.scala` with both demo limits at 0: upstream still bootstraps up to 3 demos to ground the proposer, and then searches with no demo sets (`mipro_optimizer_v2.py`, about 257 and 424-435). The port uses the limit of 0, so its proposals show no demos. Fixed: a zero-shot optimizer makes the demo sets with `GroundedProposer.NumDemosInContext` bootstrapped demos for the proposer, then discards them, so each trial keeps the demos of the student and has no `demo_index`.
+
+## gepa
+
+Source root: `modules/gepa/src/main/scala/dspy4s/gepa/`. The paths below are relative to it.
+Simplify 5 (rank 8). Code-review 4 (rank 9). 3242 main lines, 6331 test lines.
+
+### Passes
+
+- (a) The engine core, about 1750 lines: `GepaEngine.scala`, `GepaState.scala`, `MergeProposer.scala`, `GepaProposals.scala`, `MinibatchSampler.scala`, `GepaRandom.scala`, `GepaBudget.scala`.
+  - [x] /simplify
+  - [x] /code-review
+- (b) The adapter and the I/O, about 1490 lines: `GepaAdapter.scala`, `GepaEvalCache.scala`, `InstructionProposer.scala`, `ReflectiveRecord.scala`, `GepaStatePersistence.scala`, `contracts/`, `Candidate.scala`, `EvaluationBatch.scala`, `Gepa.scala`, `GepaLimits.scala`.
+  - [x] /simplify
+  - [x] /code-review
+
+### Simplify findings
+
+- [x] `GepaAdapter.scala:326` (`text`) is a private copy of `DynamicValues.string`. (found in the lm pass) It uses `DynamicValues.string`.
+- [x] `ReflectiveRecord.scala:68-138` has its own Python `json.dumps` writer. Core `contracts/PythonText.scala` (`json`, `private[dspy4s]`) does this now. Use it. The writer is gone. The records go to the adapter as a list value, and `PromptText.fieldValue` writes the JSON text.
+- [x] `GepaAdapter.scala:174-190` builds its own `newFixedThreadPool` and context capture. This copies what ParallelExecutor in programs does. `batchEvaluate` uses `ParallelExecutor`.
+- [x] (from the optimize pass) `current_instruction` is the empty text for a leaf with no instructions, where upstream probably reads the default text of the signature. Check the upstream GEPA code, and use `view.effectiveInstructions` if it does. Upstream reads the default text. `GepaAdapter.withEffectiveInstructions` fills the candidate that the proposer gets, and the genome keeps `None`.
+- [x] Thin wrappers: `GepaEngine.scala:560` (`fullEval`) only calls `cache.scored`. `GepaEvalCache.scala` (`scores`) and the public `makeReflectiveDataset` overload (`GepaAdapter.scala:210`, with an adapter-level `rng`) are used only by tests. They are gone. One correction: `scores` also had a main caller in `MergeProposer`.
+- [x] `MergeProposer.scala:59-105`: the engine builds a mutable proposer for each iteration and copies its `MergeSchedule` back. Plain functions on the schedule are simpler. `sharedExamples` (`:203`) always equals the valset size. `MergeProposer` is plain functions on a `MergeSchedule` that the state holds.
+- [x] Code for snapshots from older versions: the "empty means older" forms in `GepaState.scala:50-77`, `:204-210`, and the `Option` fields in `GepaStatePersistence.scala:23-49`. The state keeps one form, and the snapshot fields have defaults. A checkpoint without these fields gives a `Left`.
+
+### Code-review findings
+
+- [x] `GepaState.scala:117-122`, `:217-221`: no NaN guard on the metric scores. `maxBy` ranks NaN highest, so a candidate with a NaN score becomes `bestIndex`. The `== best` check then gives an empty Pareto front. A score that is not finite counts as a metric failure in `GepaAdapter`, so no such score reaches the state.
+- [x] `GepaStatePersistence.scala`: the checkpoint is written in place, not atomically. A crash during the write leaves a corrupt file, and `load` then refuses to resume. `save` writes a temporary file and then makes an atomic move.
+- [x] `GepaState.scala` and `MergeProposer.scala:112`: the random draws read the order of a hash `Map` or `Set`. Thus a resumed run depends on the order of the library collections. The two draws read sorted orders. One correction: line 112 was already sorted, and the second place was line 189. A resume with the same library made the same draws before too.
+- [x] `GepaAdapter.scala:185-190`: an exception from one pair is thrown again, and `shutdownNow` interrupts the other pairs. The engine does not catch it, so `optimize` throws and does not return a `Left`. `optimize` gives a `Left` for a non-fatal exception. `batchEvaluate` still throws, as upstream.
+- [x] (code-review (a)) The acceptance compared two metric inputs: the trace for a parent, and an empty trace for a child. The program-level call now gets no trace on the two paths, as upstream `trace=None`.
+- [x] (code-review (a)) A component-level metric exception ended the run, and a component-level `Left` gave invented feedback. Each now skips the task, as upstream gepa, and the pointer stays moved.
+- [x] (code-review (b)) Only a run that passed and a parse failure keep a trajectory, as `bootstrap_trace_data`. A minibatch with no trajectory skips the task with no pointer move. A failed call with no raw response gives no record. An example with no input keys gets no run.
+- [x] (code-review (a)) A sum of scores uses `PythonText.sum`, the compensated sum of Python 3.12. The pad of an epoch follows upstream gepa.
+- [x] (code-review (b)) `Parallel` gives the trace and the history of each task to the caller, in task order. The field `examples_with_feedback` has the upstream type. `defaultFeedback` and `strip` have the Python forms. A number that is not finite in a list or a dict of a prompt value is `null`.
+- [x] (docs) A resume compares only the size of the validation rows, and upstream has no check. The docs now say so.
+
+## streaming
+
+Source root: `modules/streaming/src/main/scala/dspy4s/streaming/`. The paths below are relative to it.
+Simplify 4 (rank 10). Code-review 6 (rank 7). 689 main lines, 3378 test lines.
+
+### Passes
+
+- (a) The whole module, 689 lines.
+  - [x] /simplify
+  - [x] /code-review
+
+### Simplify findings
+
+- [x] (from lm simplify (b)) `StreamingLanguageModelWrapper.scala` (about lines 83-123) folds the chunks into an `LmResponse` again, with no guard for a stream with no finish reason. Over a raw provider, a stream cut before its finish chunk becomes a partial success, not an `LmStreamAssemblyError`. Share one fold with `ManagedStream`. `StreamingLanguageModelWrapper.call` reads the one iterator of `stream`. A stream with no finish reason gives `LmStreamAssemblyError` on both paths, with the text of `ManagedLanguageModel.noFinishReason`.
+- [x] `StreamingQueue.scala:8-66`: a queue of `Option` with `None` as the end marker, a nullable `pending: Option[A] | Null`, and three flags. A simpler design is possible. The iterator holds `pending: Option[A]` and one `ended` flag. The `Option` end marker of the queue stays, because it is the simplest typed marker.
+- [x] `Streamify.scala:68-71` repeats the adapter type test of programs `runtime/SettingsProgramRuntime.scala:25`, `:44`. `Streamify` uses `SettingsProgramRuntime.adapterOrChat`. A value in the adapter slot that is not an `Adapter` now gets the chat rules for the stream.
+- [x] `StreamingLanguageModelWrapper.scala:97-123`, `:164-198`: `call` and `stream` each repeat the chunk sort (cached, failure, emit) and the safe-close block. One chunk sort and one close remain, in `openChunks`.
+- [x] `StatusMessageProvider.scala` has a stale comment ("still free-form Maps"), two `@nowarn`, and `output: Any`. `StatusStreamingCallback.scala:24`, `:26` use `fold(identity, identity)`. The stale comments and `@nowarn` are gone, `output` is `Either[DspyError, Any]`, and `StatusStreamingCallback` passes the field as is.
+- [x] The Scaladoc numbered list is broken at `Streamable.scala:21-26`. `docs/STREAMING_POSTPONED.md` still describes `Streamify.signatureFor`. Repaired. `docs/STREAMING_POSTPONED.md` no longer describes `signatureFor` as current.
+
+### Code-review findings
+
+- [x] `StreamingLanguageModelWrapper.scala:251` and `Streamify.scala:99-109` ignore the `false` that `offer` returns. After the consumer closes, the program and the LM stream still run to the end. No test covers this. A refused token throws `InterruptedException`, and a close of the iterator interrupts the producer thread. `StreamingUpstreamRulesSuite` and `StreamifyHttpCloseSuite` (a local SSE server) cover this. Limit: a call with no token for a listener stops only at a blocking read or wait.
+- [x] `StreamingQueue.scala:23`: if a consumer stops reading and does not close, the daemon producer waits in `put` forever and keeps the SSE connection open. No code change, because upstream has the same need. The scaladoc of `streamify` says that a caller must close the iterator.
+- [x] `StreamingLanguageModelWrapper.scala:54`, `:257-264`: `firedListeners` is a mutable Set that is not thread-safe. Calls to parallel predictors race on it, and `allowReuse=false` then depends on timing. `firedListeners` is a concurrent set.
+- [x] `StreamingQueue.scala:26-30`: `close()` checks the flags and then acts, which is not atomic. Status callbacks from worker threads can add more producers. `close` uses `compareAndSet`, and an interrupt does not stop the end marker.
+- [x] `StreamingLanguageModelWrapper.scala:164-173`: the look-ahead in `next()` holds back each chunk until the next chunk arrives. This logic is complex, and 12 of the last 14 commits on the module were fixes. No change: the look-ahead stays, because tests pin the flush rule for a caller that uses only `next`.
+- [x] (code-review (a)) `StreamListener.allowReuse` defaults to `false`, as upstream `allow_reuse=False`.
+- [x] (code-review (a)) `includeFinalPrediction = false` keeps the prediction with no listeners, on a cache hit, or when no listener got a token, as upstream.
+- [x] (code-review (a)) A listener with no `predictName` on a field of more than one predictor gives a warning. `docs/port/PORT_DIFFERENCES.md` section 23 lists the differences from upstream.
+- [x] (design) A predictor with its own model (`Predict.withLm`) did not go through `StreamingLanguageModelWrapper`, so it streamed no token. The stream is now in the context (`RuntimeContext.streamSink`, the analog of upstream `settings.send_stream`), and `LanguageModel.callAndRecordUsage` applies it to each model. This also covers the model of a scope, the extraction model of `TwoStepAdapter`, and the sub-LM of `RLM`. `Streamify` no longer replaces the model of the context.
+
+## mcp
+
+Source root: `modules/mcp/src/main/scala/dspy4s/mcp/`. The paths below are relative to it.
+Simplify 2 (rank 12). Code-review 3 (rank 10). 396 main lines, 586 test lines.
+
+### Passes
+
+- (a) The whole module, 396 lines.
+  - [x] /simplify
+  - [x] /code-review
+
+### Simplify findings
+
+- [x] `McpTools.scala:210` (`string`) is a private copy of `DynamicValues.string`. (found in the lm pass) It uses `DynamicValues.string`.
+- [x] `JavaJson.scala:90` reads `productElement(0)` by reflection for dates and UUIDs, which is fragile. Line `:88` maps `Unit` to an empty map. `JavaJson` is gone. The JSON codec writes each primitive, with no reflection, and `Unit` stays `{}`.
+- [x] `McpTools.scala:198-206` (`typeRefOf`) is the inverse of core `TypeRef.jsonType` (before: programs `internal/ToolText.scala` `jsonType`). The two copies of one mapping can become different. `TypeRef.fromJsonType` in core is the inverse, and it reads `jsonType`, so one mapping exists.
+- [x] `McpTools.scala:90-99` (`convert`) uses alias vals and an anonymous `ToolFunction`. `ToolFunction.apply` takes `argSchema` and `inputSchema`, and `convert` is one call. The submit tool of `ReActV2` uses the same factory.
+- [x] Optional: `JavaJson.toDynamic` walks the Java JSON tree by hand. A path through JSON text and the zio-blocks codec can replace it. Done. The way in reads with `PythonText.parseJson`, because `tryDecodeJson` changes the number types and has a limit of 4 MiB. The way out writes with `DynamicValues.tryEncodeJson`.
+
+### Code-review findings
+
+- [x] `JavaJson.scala:65-70` (`fromNumber`): a `java.math.BigDecimal` becomes a `Double`, and this loses precision. The file is gone. One correction: JSON text could not reach this path, because the mapper of the SDK reads a float as a `Double`.
+- [x] `McpTools.scala:146-149`: the error text for several text parts is a JSON array. Upstream gives a Python `str(list)`. The text stays JSON, through `PythonText.str`, under the boundary rule of decision D3. One correction: this is a recorded difference and not a defect (PORT_DIFFERENCES section 25). The old writer threw on a lone surrogate, and that is fixed.
+- [x] `SdkToolClient.scala:24-31`: the class sets no timeout of its own. It relies on the request timeout of the SDK client, and a call blocks the caller thread. No change: the caller owns the client. The doc of `fromSync` gives the default of the SDK, 20 seconds, and PORT_DIFFERENCES section 25 records the difference from upstream.
+- [x] `McpTools.scala:182-195` (`resolve`): it reads only the last segment of a `$ref` and looks only in `$defs`. A ref that it cannot find gives the type `Any`. Upstream also reads only the last segment and only `$defs`. Each `$ref` now expands at each depth. A `$ref` with no definition, and a recursive one, give `{}`, where upstream raises (PORT_DIFFERENCES section 25).
+- [x] (code-review) An interrupt of the caller during a call became a `Left`, and the program went on, because `Mono.block` wraps the `InterruptedException`. It now goes up as the `InterruptedException`, as the rule of `ToolFunction.invoke` says.
+- [x] (code-review) A null in a list after a number or a boolean reached the server as `0` or `false`, because `Chunk.map` chose an array of the type of the first value. The JSON text path has no such step.
+- [x] (code-review) The model saw a `$ref` that pointed at nothing on the text path, and `ToolText.parameters` gave `Any`. The schema of a converted tool now has each `$ref` expanded.
+- [x] (code-review) A tool with no arguments went to the provider as `{"type": "object"}`. The schema of a converted tool now always has `type`, `properties`, and `required`, and no other root key, as upstream. `required` stays the list of the server (PORT_DIFFERENCES section 25).
+- [x] (simplify) `McpContent` is gone, because nothing read the order of the parts. After the schema change, no main code set `ToolSpec.parameters`, so it, `ToolParameterSpec`, and the builder in `ToolSchemaBridge` are gone. Null checks that the records of the SDK make dead are gone.
+- [x] (tests) The port of upstream `test_react_v2_native_mcp_end_to_end` runs `ReActV2` with the tools of a real server. A wire test checks each JSON type through the JSON text.
+- [ ] (code-review, kept) The port does not check the arguments on the client, and upstream `_validate_and_parse_args` does. The server checks them (PORT_DIFFERENCES section 25). Change this only if the owner asks.
+
+## examples
+
+Source root: `modules/examples/src/main/scala/dspy4s/examples/`. The paths below are relative to it.
+Simplify 6 (rank 6). Code-review 3 (rank 11). 6433 main lines, and no tests before this pass. The pass added four test suites.
+
+### Passes
+
+The shared-setup fix in (a) also touches `tutorials/talk_to_your_data/TalkToYourData.scala` in (c).
+
+One reviewer did the simplify angle and the code-review angle for each of these five groups.
+
+- (a) The shared setup, about 740 lines: `Demo.scala`, `verify/`, `tutorials/react_vs_rlm/ReactVsRlm.scala`.
+  - [x] /simplify
+  - [x] /code-review
+- (b) The two MCP files, about 880 lines: `learn/programming/Mcp.scala`, `tutorials/mcp/Mcp.scala`.
+  - [x] /simplify
+  - [x] /code-review
+- (c) Talk to your data, about 875 lines: `tutorials/talk_to_your_data/`.
+  - [x] /simplify
+  - [x] /code-review
+- (d) The guides, about 1890 lines: the other files in `learn/`, and `deep_dive/`, `signatures/`, `Cheatsheet.scala`.
+  - [x] /simplify
+  - [x] /code-review
+- (e) The other tutorials, about 2050 lines: the other directories in `tutorials/`.
+  - [x] /simplify
+  - [x] /code-review
+
+### Simplify findings
+
+- [x] `verify/GepaSmokeTest.scala:106-123`, `verify/OptimizerSmokeTest.scala:128-145`, and `tutorials/talk_to_your_data/TalkToYourData.scala:65-75` each copy the LM setup of `Demo.scala:18-24`. The two smoke tests read `OPENAI_MODEL` (default `gpt-4o-mini`), but `Demo` reads `DSPY_MODEL` (default `gpt-5.5`). `Demo.withOpenAi` is the one setup. All read `DSPY_MODEL` and `OPENAI_BASE_URL`, and the smoke runs keep the default `gpt-4o-mini`, because they pin temperature 0. `learn/programming/Signatures.scala` keeps its own setup, because the site quickstart shows it as a lesson.
+- [x] Other copies: `Demo.envInt`, `Demo.denoAvailable`, and `verify/ProgressLmCallback.scala`.
+  - `envInt`: `verify/GepaSmokeTest.scala:91`, `verify/OptimizerSmokeTest.scala:103`, `tutorials/talk_to_your_data/TalkToYourData.scala:41`.
+  - `ProgressLmCallback`: `verify/GepaSmokeTest.scala:95`, `verify/OptimizerSmokeTest.scala:110`.
+  - `denoAvailable`: `tutorials/react_vs_rlm/ReactVsRlm.scala:321`, `tutorials/talk_to_your_data/TalkToYourData.scala:44`.
+- [x] The two MCP files hold the same code: `McpToolClient.using` and `Demo.childJvmTransport` replace the copies. The server builders stay, because each builder is the lesson of its page.
+  - the client wrapper: `learn/programming/Mcp.scala:60-64` and `tutorials/mcp/Mcp.scala:475-480`.
+  - the child-JVM transport: `learn/programming/Mcp.scala:240-246` and `tutorials/mcp/Mcp.scala:468-470`.
+  - the server builders, which are almost the same.
+- [x] `Cheatsheet.scala:66` and `learn/programming/Adapters.scala:43` each define a private `rec`, which is the same as `DynamicValues.record`. `tutorials/react_vs_rlm/ReactVsRlm.scala:160` uses `fromAny` on a String.
+- [x] Four files are only TODO stubs with quoted Python: `deep_dive/data_handling/BuiltInDatasets.scala`, `tutorials/deployment/Deployment.scala`, `learn/programming/Assertions7.scala`, `tutorials/mem0_react_agent/Mem0ReactAgent.scala`. They hold all 19 TODO markers. `Assertions7.scala` is deleted, because upstream removed `dspy.Assert`. The other three stay: their reasons are still true, and the README table names them. To delete them is a decision about the convention of one file for each page.
+- [x] In `tutorials/mcp/Mcp.scala`, 299 of 566 lines are quoted Python. Snippet 1 (`:56-232`) quotes the same code as snippets 3 to 5. Each part of snippet 1 now comes before its Scala, and one-line pointers replace the repeated snippets.
+
+### Code-review findings
+
+- [x] `learn/programming/Mcp.scala:11-12`, `:236-237` say that ReActV2 is not ported (G-19), but programs `strategies/ReActV2.scala` exists. Thus the comment is out of date, and snippet 4 uses `ReAct` in place of the upstream agent. Snippet 4 now runs `ReActV2` on the native path. A test with a real server shows it.
+- [x] `learn/programming/Mcp.scala:169-172`: when an `add` argument is missing or is not a number, the tool uses 0 and gives no error. The lead was wrong at run time: the SDK checks the input first (`validateToolInputs`), so the fallback was dead code, and it is gone.
+- [x] `tutorials/talk_to_your_data/QueryEngine.scala:88`, `:109`: an unknown column becomes `total` with no error, and `>` or `<` on a label becomes equality. This engine is the GEPA oracle, so a wrong plan can get a correct score. It was worse than the lead: `unit_price` and `order_id`, the names in the schema, also read `total`, and a correct plan with date filters got a score of 0. `QueryEngine.run` now gives a `Left` for a bad plan, and `QueryEngineSuite` compares with values from the data.
+- [x] `verify/GepaSmokeTest.scala:120` calls `.toOption.get` on a parse result. The input is a constant, so the risk is low. `Signature.fromString` replaces the parse in the two smoke runs.
+- [x] (code-review (a)) The two smoke runs printed success and exited with 0 when each LM call failed. They now call `sys.error`. `ReactVsRlm`: a drug tool with a missing argument answered "NONE: ..." for empty drug names, and it now gives a `Left`. The site claim "Any OpenAI-compatible endpoint works" is now true through `OPENAI_BASE_URL`.
+- [x] (code-review (b)) `pick_flight` had no `required` list, so a call with no flights looked like "no flights exist". The stderr of the child JVM was lost, so a bad class path gave an error with no cause. `Compile / run / fork` removes the class path argument of the two MCP mains.
+- [x] (code-review (c)) GEPA tuned a `DynamicPredict` with no output schema, and the agent ran a `Predict`, so GEPA measured another prompt. `Sort.by` had no effect. The metric gave a score of 1 to a wrong plan with the same label, or with a value that rounds to the gold text. The refine feedback gave the JVM answer to the sandbox. A failed LM call looked like a wrong plan in the accuracy. The temperature 0 of the planner can fail each call of the default model. The tie order and the number text depended on the map order and on the locale. `SelfCheck` could not detect a defect of the engine.
+- [x] (code-review (d)) False "dspy4s has no X" statements: LM-judged metrics, retrievers, async programs, program persistence, a `ToolCalls` output. `validateAnswerOnly` and snippet 6 of `Metrics.scala` were not translations, and they are now. Old quotes of `Modules.scala` and of the cheatsheet are current.
+- [x] (code-review (e)) 13 upstream docstrings of signatures never reached the model, and the guides had the same defect. `Streaming` used `tool.invoke`, which sends no tool event, so its status messages never came. `cacheMain` showed no cache hit, and `customCached` could not share a cache. A failed judge call was a reward of 0, so `Refine` gave `Right`. False README rows and false site text on `failCount` and on a plain `Future`.
+- [x] (found in this pass, adapters) `JSONAdapter()` had native function calling off. Upstream has it on (`json_adapter.py:46`). `XMLAdapter` falls back with it off, as upstream.
+- [x] (found in this pass, programs) `Predict` with no adapter in the context gave `Missing 'adapter'`. Upstream uses `settings.adapter or ChatAdapter()`.
+- [x] (live run) No example that needs a model ran against a real model in this pass. The live run below did this with a local model. The OpenAI part stays open.
+- [ ] (kept) `McpToolClient.using` with a bad class path waits for the 20 s of the SDK, and its `Left` has no cause. The stderr of the child JVM now shows the cause. To fail at once, `using` needs a wrapper around the transport.
+- [x] (live run) `pick_flight` with `flights: null` gave "There is no flight to pick.", because the derived schema allowed `null` for a list. The same schema went to the model of a typed signature, and the decode then failed on the `null`. `ZioSchemaCodec.jsonSchemaForModel` now writes a collection with no `null` and as a required field, and the input schema of each tool of the airline server comes from that function.
+- [ ] (kept) `QueryPlan.limit` has an effect only in the sandbox, because the engine reads the first group. `QueryEngine.sameResult` treats a gold label that is a number as a number. No gold plan has either case.
+
+### Live run of the examples (2026-11-03)
+
+OpenAI rejected the `OPENAI_API_KEY` of the environment with a 401, so the run used the local LM Studio model `qwen3.8-9b-abliterated-mlx`. 27 mains that call a model ran. 22 passed, and 5 had failures that led to the items below.
+
+- [x] (live run) The JSON schema of a typed signature said that a list field can be null, and the typed decode rejected a null. The model sent `"groupBy": null`, and this caused each of the 3 misses of the GEPA baseline of talk-to-your-data (62.5%). `jsonSchemaForModel` now uses `ModelSchemaDeriver`: a sequence or a map has no null and is required, and only an `Option` keeps the null. In the second live run no reply had a null list, and the baseline was 100%. Test: `ModelSchemaContractSuite`.
+- [x] (live run) A value that the typed decode rejected got no JSON fallback and no raw response. The decode of a `Predict` now runs in the parse step (`checkOutput` of `AdapterCall.run`), and a list item of a string signature has a check. Tests: `ReplyFallbackRulesSuite`, `TextValueRulesSuite`. The second live run did not reach this path, so only scripted tests prove the fallback.
+- [x] (live run) A reply with no text was a provider error with no fallback, and such a choice moved the later choices of a reply with `n > 1`. The two wires now keep the output, and `AdapterCall` gives the upstream parse error. Tests: `EmptyReplyWireSuite`, `ReplyFallbackRulesSuite`.
+- [x] (live run) `Predict(tools = ...)` lost its tools with no error when the request had no provider tools. The prompt now shows them as an input field `tools`. In the second live run the model called `weather` with `city`. Test: `ToolsInPromptSuite`.
+- [x] (review of these fixes) A tool calls output with no tools under native function calling is a `ConfigurationError`, also with a tools input on a model with function calling, because such an input holds only text. A tool turn whose text the typed decode rejects keeps its calls after one call. `tuple[T, ...]` has the item rule. `ChainOfThought` has `tools`. `TwoStepAdapter` shows the tool specs. The error text of a decode has no class name.
+- [x] (second endpoint) The five mains that failed ran on a private OpenAI-compatible endpoint with `Qwen3.8-27B-NVFP4`, and each passed. A temporary suite with the OpenAI capabilities on that model also passed: provider tools, `ReActV2` with an MCP server, the forced `tool_choice` of `ReActV2`, the strict JSON schema of `QueryPlan` (8 of 8 decoded), and `n = 3`. After the typed value forms below, all 27 mains ran on this endpoint, and each exited with 0. `languageModelsMain` took 530 s: a plain request of its question took 134 s on that server and ended with `finish_reason: length`, 16384 tokens, and no content. The data agent answered 2 of 3 in that run, because the model left out `code` in one reply. `gepaSmokeMain` reached 33% with a budget of 40.
+- [ ] (open) No OpenAI server ran: the default model name `gpt-5.5`, and the check of OpenAI on the strict schema. This needs a valid key.
+- [x] (live run) The typed decode now reads the values that the schema offers: a sealed trait with fields, a tuple, a time value and a `UUID`, and a `Schema.transform`. The rule is in PORT_DIFFERENCES section 17. `TypedValueFormsSuite` and `TypedOutputFormsSuite` cover each form.
+- [x] (live run) `@Modifier.rename`, `alias`, `discriminator`, `fieldNaming`, and `caseNaming`, and a `Maybe` field: the schema showed a form that the decode did not read. Fixed: `Reflects` holds the name rules, and the field specs, the wire form, and the decode use them. PORT_DIFFERENCES section 17 has the rules. Tests: `AnnotatedFormsSuite`, `AnnotatedPositionsSuite`, `AnnotatedOutputsSuite`, `AnnotatedProgramsSuite`, `AnnotatedBootstrapSuite`.
+- [x] (live run) The chat wire and the chat stream did not read `reasoning_content` into `LmOutput.reasoning`. Upstream keeps it (`base_lm.py:352`, `openai_chat.py:2085`). The stream of upstream also reads `reasoning`, and the second endpoint sends only that key. The two paths now read `reasoning_content`, else `reasoning` (PORT_DIFFERENCES section 27), and the output of a history entry has `reasoning_content`. Tests: `ChatReasoningSuite`, `LmHistoryEntrySuite`, `ManagedStreamSuite`, `StreamingFallbackSuite`.
+- [x] (second endpoint) `talkToYourDataMain` runs RLM under its `JSONAdapter`. On the small local model the agent answered 0 of 3, because the replies had only a Python block, which the upstream parse also rejects. On `Qwen3.8-27B-NVFP4` it answered 3 of 3, and the JVM check agreed with each answer. This was a limit of the small model, so the example stays as it is.
+- [x] (typed reasoning) Ported `dspy.Reasoning`, the one use of `supportsReasoning`. `NativeReasoning` removes a `Reasoning` output from the prompt and the schema of a model that supports reasoning, sets `reasoning_effort`, and fills the field from the reply. `ReActV2` types `next_thought` with it, and `ChainOfThought` has the option `nativeReasoning`. The default of `ChainOfThought` stays a text field, as upstream. PORT_DIFFERENCES section 28 has the differences.
+- [x] (typed reasoning, review) `AdapterInvocation.fullLayout` keeps the layout of the signature. The hint of `Refine` and the task examples of a decision output read it, because they act before the native reasoning step in upstream. This also gives the hint of `Refine` to a predictor with a decision output, which lost it before. A reasoning token does not hide the final prediction of a stream.
+- [x] (low) `TwoStepAdapter` under `streamify`: when the extraction model gives reasoning chunks, they become tokens of the reasoning field of the main predictor, and the final value holds only the reasoning of the main model. Fixed: the extraction call runs with its own layout in `ActivePredictContext`, so the tokens and the final value have one source. Tests: `ReasoningStreamSuite`.
+- [x] `MultiChainComparison`, the extractor of `ReAct`, and the extraction of `RLM` have no `tools`, so a `Vector[ToolCall]` output with native function calling on gives the `ConfigurationError` there. Fixed: `MultiChainComparison` has `tools`, and the default extract steps of `ReAct` and `RLM` get the tools of the program. A plain output gets no change in its request or its prompt. Tests: `ProgramToolOutputsSuite`.
+- [x] (low) `TwoStepAdapter`: a main reply with no text and provider tool calls still goes to the extraction model, and the calls are lost. Upstream fills the field with no extraction. This needs tools in the default options of the model. Fixed, also for a reply with text (PORT_DIFFERENCES section 19). Tests: `TwoStepToolTurnSuite`.
+- [x] (typed value forms) The schema of a typed signature offered forms that the decode rejected: a sealed trait with fields (a case name as a key), a tuple (an array), a time value or a `UUID` (a text), and a `Schema.transform`. `normalize` now reads these forms, and a sealed trait with fields is a `TypeRef.union` field. Tests: `TypedValueFormsSuite`, `TypedOutputFormsSuite`. On `Qwen3.8-27B-NVFP4` each form passed in the chat, JSON, XML, and strict formats, and in tool arguments as provider tools and as text.
+- [x] (typed value forms) A typed value had a typed form in the prompt, the RLM sandbox, and a saved demo, and these forms differed from the schema. `Reflects.wireValue` now gives one wire form at each boundary from a typed value to a `DynamicValue` (`Shape.encode`, `:=`, `withRawValue`, `ToolFunction.result`).
+- [x] (typed value forms) `fromMethod` gave a `List`, a tuple, a sealed trait, or a time value argument no usable schema. It now gives an `inputSchema` for such an argument. `Some("none")` of an `Option[String]` stays the text, as upstream. A map key takes its wire form. `ToolCall.fromRecord` reads a lifted id.
+- [ ] (open, low) These limits are in PORT_DIFFERENCES sections 7 and 17: a saved nested `Option` or decision type does not decode after a load; a saved `BigDecimal` has the value of a float; `fromMethod` ignores a default value of a parameter; `Unit` and `NaN` do not round-trip in JSON text.
+- [x] (low) `learn.programming.main` does not read `OPENAI_BASE_URL`, so it did not run. The MCP examples print SLF4J warnings on stderr. Fixed: the main reads the variable, and the examples have `slf4j-nop` at run time.
+- [ ] (open, low, from the sandbox fix) These limits stay, and PORT_DIFFERENCES section 18 lists them. In Pyodide, a value with several thousand levels ends the session with a `Left`, because Python cannot catch the overflow of the JavaScript stack. In the local worker, such a value gives the fixed text or a `Left`, by the version of Python. A lone surrogate or a text over 4,194,304 characters ends a session with a `Left`. An int with more than 307 digits ends a local session with a `Left`, and it becomes a null in Deno, so a `SUBMIT` of a large factorial is a case that can occur. A larger limit of the JSON reader in `DynamicValues.tryDecodeJson` can remove some of these limits. A patch of a wider fix for these limits was rejected as too large: 136 lines in `runner.js`, with a depth check in two languages and a replacement of `traceback._safe_string`.
+- [ ] (open, low, from the tool fix) `program.copy(tools = other)` after an optimizer write leaves the old tools on the extractor of `ReAct` and `RLM`, because the override keeps its tools. No main code calls such a `copy`. No public function makes a `ToolSpec` from a `ToolFunction`, so a caller of `MultiChainComparison` with a `ToolFunction` writes the `ToolSpec` by hand, as for `Predict` and `ChainOfThought`.

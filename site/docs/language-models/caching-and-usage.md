@@ -1,8 +1,9 @@
 # Caching & usage
 
-Caching and usage tracking are per-model concerns. You wrap a language model in
-a `ManagedLanguageModel` that adds a cache, a usage tracker, or both. There is no
-global cache switch; you choose the behavior for each model you build.
+Caching is a per-model concern. You wrap a language model in a
+`ManagedLanguageModel` that adds a cache. There is no global cache switch: you
+choose the cache for each model that you build. Usage tracking needs no
+wrapper: a usage tracker gets each model call of a program.
 
 ## Caching
 
@@ -17,18 +18,49 @@ results should live:
 - `InMemoryLmCache` caches for the life of the process.
 - `DiskLmCache(dir)` persists results to a directory.
 
-You can also implement `LmCache` yourself to control the cache key, for example
-to key only on the messages and ignore the model name.
+You can also give `ManagedLanguageModel` a `cacheKey` function to control the
+cache key, for example to key only on the messages and ignore the model name.
+Two models then share their results when you give them one cache value.
+To keep the results in another store, implement `LmCache` yourself: it gets and
+puts a response for a `CacheKey`.
+
+The cache stores each successful reply, also a reply with an empty text, so a
+later call with the same key gets that reply and the same parse error.
 
 ## Tracking usage
 
-Wrap a block in `UsageTracking.withNewTracker` and set `trackUsage` on the
-context. The tracker accumulates token usage across the calls inside the block. A
-cache hit contributes no new usage:
+Wrap a block in `UsageTracking.withNewTracker`. The tracker gets the token
+usage of each model call that a program makes in the block, for each model
+name. It also gets the calls on the worker threads that the block starts. A
+cache hit adds no usage:
 
 ```scala
 --8<-- "tutorials/cache/Cache.scala:cache-usage"
 ```
+
+The first call is a miss, so its result has the usage of the call. The second call
+is a hit, so its result has no usage, and the total of the tracker has the first
+call only. `withLm` binds the cached model to the predictor, and the adapter comes
+from the context.
+
+The framework records the usage when a program calls a model
+(`LanguageModel.callAndRecordUsage`). Thus a model with no
+`ManagedLanguageModel` wrapper counts too. A direct `lm.call(...)` or
+`lm.stream(...)` in your code counts in no tracker and sends no LM callback
+events. To count such a call and send its events, use
+`LanguageModel.callAndRecordUsage(lm, request)`.
+
+A failed call counts too when the provider reported a usage for it, because
+the provider bills these tokens. Examples are a stream that fails after its
+usage chunk, and a reply with a usage and no choices. The LM error then carries
+the usage (`LmError.usage(error)`). A reply with an empty text is a successful
+call, and its usage counts as for each other reply. When `ManagedLanguageModel`
+retries a call, the usage of the call is the total of each attempt that
+reported a usage. This rule applies to a successful call and to a failed call.
+
+The LM usage of a program result (`raw.lmUsage`) comes from the same records.
+`trackUsage` is on by default. With `trackUsage = Some(false)` in the context,
+the trackers get nothing, but each result still has its usage.
 
 ## When to use it
 
@@ -36,6 +68,6 @@ cache hit contributes no new usage:
 |---|---|
 | Avoid repeat model calls in a process | `InMemoryLmCache` |
 | Persist results across runs | `DiskLmCache(dir)` |
-| Measure token cost of a workload | `UsageTracking.withNewTracker` + `trackUsage = Some(true)` |
+| Measure token cost of a workload | `UsageTracking.withNewTracker` |
 
 Next: [Evaluation](../evaluation/examples-and-data.md).

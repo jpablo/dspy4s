@@ -1,6 +1,6 @@
 package dspy4s.signatures
 
-import dspy4s.core.contracts.{:=, DynamicValues, NotFoundError, ToolCall, TypeRef, ValidationError}
+import dspy4s.core.contracts.{:=, DynamicValues, NotFoundError, PythonText, ToolCall, TypeRef, ValidationError}
 import munit.FunSuite
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
@@ -42,6 +42,13 @@ final case class ZsStage(label: String, steps: Vector[ZsStep], owner: Option[Str
 final case class ZsPipeline(stage: ZsStage, summary: Option[String]) derives Schema
 
 final case class ZsToolPlan(thought: String, toolCalls: Vector[ToolCall], last: Option[ToolCall]) derives Schema
+
+// A collection in a list, in a map, and with a default value. An `Option` in a list.
+final case class ZsCollections(
+    rows  : List[Option[List[String]]],
+    byName: Map[String, List[String]],
+    scores: Map[String, Boolean] = Map.empty
+) derives Schema
 
 // Recursive types: through a list, through an `Option`, and through a sealed trait.
 final case class ZsNode(label: String, children: List[ZsNode]) derives Schema
@@ -160,12 +167,8 @@ class ZioSchemaCodecSuite extends FunSuite:
     val value = ZsClassifyOutput(sentiment = ZsSentiment.joy, confidence = 0.42)
 
     val encoded = shape.encode(value)
-    // Native: the record holds a Variant for the enum (not a flat string).
-    val sentiment = DynamicValues.recordGet(encoded, "sentiment")
-    assert(
-      sentiment.exists(_.isInstanceOf[DynamicValue.Variant]),
-      s"expected Variant for sentiment, got: $sentiment"
-    )
+    // The wire form: the record holds the text of the enum.
+    assertEquals(DynamicValues.recordGet(encoded, "sentiment"), Some(DynamicValues.string("joy")))
 
     val decoded = shape.decode(encoded)
     assertEquals(decoded, Right(value))
@@ -231,29 +234,65 @@ class ZioSchemaCodecSuite extends FunSuite:
       case _                                         => None
     }
 
+  /** The JSON object of the JSON text `text`, with the number rule of the JSON schema of a shape. */
+  private def jsonObject(text: String): Option[DynamicValue.Record] =
+    PythonText.parseJson(text).toOption.collect { case record: DynamicValue.Record => record }
+
   private def keys(value: Option[DynamicValue]): Set[String] =
     value match
       case Some(record: DynamicValue.Record) => DynamicValues.recordKeys(record).toSet
       case other                             => fail(s"expected a record, got: $other")
 
   test("the JSON schema of an output type does not ask for the id of a tool call") {
-    val schema = Shape.derived[ZsToolPlan].jsonSchemaString.flatMap(DynamicValues.parseJsonRecord).get
+    val schema = Shape.derived[ZsToolPlan].jsonSchema.get
     assertEquals(keys(get(schema, "properties")), Set("thought", "toolCalls", "last"))
     assertEquals(keys(get(schema, "properties", "toolCalls", "items", "properties")), Set("name", "args"))
     assertEquals(keys(get(schema, "properties", "last", "properties")), Set("name", "args"))
     // The canonical derivation of `Signature.derived` gives the same schema.
-    assertEquals(Shape.canonicalDerived[ZsToolPlan].jsonSchemaString, Shape.derived[ZsToolPlan].jsonSchemaString)
+    assertEquals(Shape.canonicalDerived[ZsToolPlan].jsonSchema, Shape.derived[ZsToolPlan].jsonSchema)
   }
 
-  test("the JSON schema of a type with no tool call is the JSON schema of its Schema") {
+  test("the JSON schema of a type with no tool call and no collection is the JSON schema of its Schema") {
     assertEquals(
-      Shape.derived[ZsPipeline].jsonSchemaString,
-      Some(summon[Schema[ZsPipeline]].toJsonSchema.toJson.toString)
+      Shape.derived[ZsOptionProbe].jsonSchema,
+      jsonObject(summon[Schema[ZsOptionProbe]].toJsonSchema.toJson.toString)
     )
     import ZsClassifyOutput.given
     assertEquals(
-      ZioSchemaCodec.derivedFromZioSchema[ZsClassifyOutput].jsonSchemaString,
-      Some(summon[Schema[ZsClassifyOutput]].toJsonSchema.toJson.toString)
+      ZioSchemaCodec.derivedFromZioSchema[ZsClassifyOutput].jsonSchema,
+      jsonObject(summon[Schema[ZsClassifyOutput]].toJsonSchema.toJson.toString)
+    )
+  }
+
+  test("the JSON schema of a collection field is the required array or object of the decode") {
+    // The JSON schema of the `Schema` has `["array", "null"]` for `steps`, and `steps` is not in `required`.
+    assertEquals(
+      Shape.derived[ZsPipeline].jsonSchema,
+      jsonObject(
+        """{"properties": {"stage": {"properties": {"label": {"type": "string"},
+          |"steps": {"items": {"properties": {"action": {"type": "string"}, "comment": {"type": ["null", "string"]}},
+          |"type": "object", "required": ["action"], "title": "ZsStep"}, "type": "array", "title": "Vector[ZsStep]"},
+          |"owner": {"type": ["null", "string"]}}, "type": "object", "required": ["label", "steps"], "title": "ZsStage"},
+          |"summary": {"type": ["null", "string"]}}, "type": "object", "required": ["stage"],
+          |"title": "ZsPipeline"}""".stripMargin
+      )
+    )
+  }
+
+  test(
+    "only an Option has a null in the JSON schema, in a list and in a map too, and a default keeps a field optional"
+  ) {
+    val list = """{"items": {"type": "string"}, "type": "array", "title": "List[String]"}"""
+    assertEquals(
+      ZioSchemaCodec.jsonSchemaForModel(summon[Schema[ZsCollections]]),
+      jsonObject(
+        s"""{"properties": {
+           |"rows": {"items": {"items": {"type": "string"}, "type": ["null", "array"], "title": "List[String]"},
+           |  "type": "array", "title": "List[Option[List[String]]]"},
+           |"byName": {"additionalProperties": $list, "type": "object", "title": "Map[String, List[String]]"},
+           |"scores": {"additionalProperties": {"type": "boolean"}, "type": "object", "title": "Map[String, Boolean]"}},
+           |"type": "object", "required": ["rows", "byName"], "title": "ZsCollections"}""".stripMargin
+      )
     )
   }
 
@@ -274,8 +313,7 @@ class ZioSchemaCodecSuite extends FunSuite:
     catch case _: TimeoutException => fail(s"the call did not return in $limit")
 
   private def jsonSchemaOf[A](using schema: Schema[A]): DynamicValue.Record =
-    val json = withinTimeLimit(10.seconds)(ZioSchemaCodec.jsonSchemaForModel(schema))
-    DynamicValues.parseJsonRecord(json).getOrElse(fail(s"not a JSON object: $json"))
+    withinTimeLimit(10.seconds)(ZioSchemaCodec.jsonSchemaForModel(schema)).getOrElse(fail("not a JSON object"))
 
   private def refTo(name: String): DynamicValue = DynamicValues.record("$ref" := s"#/$$defs/$name")
 
@@ -309,4 +347,12 @@ class ZioSchemaCodecSuite extends FunSuite:
     }.getOrElse(fail("no ZsAdd case in the definition of ZsExpr"))
     assertEquals(keys(get(add, "properties", "ZsAdd", "properties")), Set("left", "right"))
     assertEquals(get(add, "properties", "ZsAdd", "properties", "left"), Some(refTo("ZsExpr")))
+  }
+
+  test("the error of a decode has the path of the value and no class name") {
+    ZioSchemaCodec.decodeValue[ZsStep](DynamicValues.record("action" := 1)) match
+      case Left(error) =>
+        assert(error.message.contains(".action"), error.message)
+        assert(!error.message.contains("SchemaError"), error.message)
+      case Right(value) => fail(s"expected an error, got $value")
   }

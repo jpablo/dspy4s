@@ -1,10 +1,12 @@
 package dspy4s.evaluate.metrics
 
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.NotFoundError
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TraceEntry
@@ -15,11 +17,10 @@ import dspy4s.programs.strategies.DynamicPredict
 import dspy4s.programs.contracts.ProgramCall
 import zio.blocks.schema.DynamicValue
 
-/** LLM-judged "auto-evaluation" metrics, ported from `dspy/evaluate/auto_evaluation.py` (dspy 3.1.3).
+/** The metrics that use a language model as a judge, from `dspy/evaluate/auto_evaluation.py` (dspy 3.1.3).
   *
-  * These are the first metrics that *call a language model* during scoring — enabled by threading a `RuntimeContext`
-  * through [[Metric.score]] (PORT_GAPS G-6). Each runs a `ChainOfThought`-style judge sub-program over a small
-  * signature, resolving the LM/adapter from the ambient `RuntimeContext`.
+  * [[Metric.score]] gets a `RuntimeContext`, so these metrics can call a language model (PORT_GAPS G-6). Each metric
+  * runs a judge in the form of `ChainOfThought` on a small signature, with the LM and the adapter of the context.
   *
   * ==Deltas from Python==
   *
@@ -29,13 +30,10 @@ import zio.blocks.schema.DynamicValue
   *     score over runtime data bags, so there is no static `I`/`O` to carry; the dynamic layer is the right substrate.
   *   - Field names are configurable. Defaults follow upstream's `example.question` / `example.response` (ground truth)
   *     / `pred.response` (system response). dspy4s has no attribute access, so the values are pulled by string key from
-  *     the [[Example]] and [[RawPrediction]] records.
-  *   - Python's `forward(..., trace=None)` returns the raw float during evaluation and `score >= threshold` (a bool)
-  *     during bootstrapping. dspy4s metrics always return a `Double`; the `threshold` is retained as a configurable
-  *     field for parity / future use but the score is returned as-is (callers apply thresholds at the optimizer layer,
-  *     as the builtin metrics do).
-  *   - The decompositional `SemanticF1(decompositional = true)` variant uses the same recall/precision outputs but a
-  *     richer instruction + intermediate key-idea fields, mirroring `DecompositionalSemanticRecallPrecision`.
+  *     the [[Example]] and [[RawPrediction]] records. A value goes to the judge with no conversion, as upstream.
+  *   - Python's `forward(..., trace=None)` returns the raw float for no trace, and `score >= threshold` (a bool) for a
+  *     trace. dspy4s metrics always return a `Double`: the score for an empty trace, and else `1.0` when the score
+  *     reaches the `threshold` and `0.0` when it does not.
   */
 object AutoEvaluation:
 
@@ -53,47 +51,68 @@ object AutoEvaluation:
   private[metrics] def textOutput(name: String, desc: String): FieldSpec =
     FieldSpec(name = name, typeRef = TypeRef.string, description = Some(desc))
 
-  /** Build the `reasoning`-augmented judge predictor for a layout (the analogue of Python's
-    * `ChainOfThought(signature)`).
-    */
+  /** The inputs of each layout that compares a system response with the ground truth. */
+  private[metrics] val comparisonInputs: Vector[FieldSpec] =
+    Vector(input("question"), input("ground_truth"), input("system_response"))
+
+  /** The key ideas of the two responses and the discussion of their overlap, for the layouts that have them. */
+  private[metrics] val keyIdeaOutputs: Vector[FieldSpec] = Vector(
+    textOutput("ground_truth_key_ideas", "enumeration of key ideas in the ground truth"),
+    textOutput("system_response_key_ideas", "enumeration of key ideas in the system response"),
+    textOutput("discussion", "discussion of the overlap between ground truth and system response")
+  )
+
+  /** The description of the output for the fraction of the ground truth in the system response. */
+  private[metrics] val groundTruthCoverage = "fraction (out of 1.0) of ground truth covered by the system response"
+
+  /** The judge predictor of a layout, with the `reasoning` field (upstream `ChainOfThought(signature)`). */
   private[metrics] def judge(layout: SignatureLayout): DynamicPredict =
     DynamicPredict(layout = ChainOfThought.augmentLayout(layout), name = Some("judge"))
 
-  /** Run a judge predictor ONCE with the given input record and read one or more `[0, 1]` Double output fields from
-    * that single prediction (returned in `readFields` order). One completion supplies every requested field — calling
-    * the judge once per field would double the LM cost AND pair numbers from different, possibly disagreeing
-    * completions. Parse failures (missing / non-numeric field) surface as `Left`.
+  /** The value of a field for a judge, with no conversion: a list stays a list and a null stays a null, as upstream
+    * gives `pred.context` to the adapter. A missing field is a `NotFoundError`.
+    */
+  private[metrics] def judgeInput(
+      value    : Option[DynamicValue],
+      fieldName: String,
+      owner    : String
+  ): Either[DspyError, DynamicValue] =
+    value.toRight(NotFoundError(fieldName, s"$owner is missing field '$fieldName'"))
+
+  /** Runs a judge predictor one time with `inputs`, and reads the `readFields` of that one prediction, in order. One
+    * completion gives each field, because more completions cost more and can give numbers that do not agree. A missing
+    * field or a field that is not a number is a `Left`.
     */
   private[metrics] def runJudge(
       predictor : DynamicPredict,
       inputs    : DynamicValue.Record,
       readFields: Seq[String]
   )(using RuntimeContext): Either[DspyError, Vector[Double]] =
-    for
-      prediction <- predictor(ProgramCall(input = inputs, traceEnabled = false))
-      values     <- readFields.foldLeft[Either[DspyError, Vector[Double]]](Right(Vector.empty)) { (acc, field) =>
-                  for
-                    soFar <- acc
-                    value <- prediction.raw.asDouble(field)
-                  yield soFar :+ value
-                }
-    yield values
+    predictor(ProgramCall(input = inputs, traceEnabled = false)).flatMap { prediction =>
+      Traverse.either(readFields)(prediction.raw.asDouble)
+    }
+
+  /** The result of a judged metric (upstream `score if trace is None else score >= self.threshold`): the score for an
+    * empty trace, and else `1.0` when the score reaches `threshold` and `0.0` when it does not.
+    */
+  private[metrics] def judged(score: Double, threshold: Double, trace: Vector[TraceEntry]): Double =
+    if trace.isEmpty then score else if score >= threshold then 1.0 else 0.0
 
 object SemanticF1:
-  // Mirrors `SemanticRecallPrecision` (non-decompositional).
-  private val recallDesc    = "fraction (out of 1.0) of ground truth covered by the system response"
   private val precisionDesc = "fraction (out of 1.0) of system response covered by the ground truth"
 
+  // Upstream `SemanticRecallPrecision`.
   private val baseInstructions =
-    "Compare a system's response to the ground truth to compute its recall and precision. If asked to reason, " +
-      "enumerate key ideas in each response, and whether they are present in the other response."
+    "Compare a system's response to the ground truth to compute its recall and precision.\n" +
+      "If asked to reason, enumerate key ideas in each response, and whether they are present in the other response."
 
+  // Upstream `DecompositionalSemanticRecallPrecision`.
   private val decompositionalInstructions =
-    "Compare a system's response to the ground truth to compute recall and precision of key ideas. You will " +
-      "first enumerate key ideas in each response, discuss their overlap, and then report recall and precision."
+    "Compare a system's response to the ground truth to compute recall and precision of key ideas.\n" +
+      "You will first enumerate key ideas in each response, discuss their overlap, and then report recall and precision."
 
-/** `SemanticF1` — judges recall and precision of a system response against the ground truth via an LM, then returns
-  * `f1_score(precision, recall)`. Port of `dspy.evaluate.SemanticF1`.
+/** Upstream `dspy.evaluate.SemanticF1`. An LM judges the recall and the precision of a system response against the
+  * ground truth. The result is `f1_score(precision, recall)`, as [[AutoEvaluation.judged]] gives it.
   */
 final case class SemanticF1(
     decompositional : Boolean = false,
@@ -105,67 +124,61 @@ final case class SemanticF1(
   val name: String = "semantic_f1"
 
   private val layout: SignatureLayout =
-    val inputs = Vector(
-      AutoEvaluation.input("question"),
-      AutoEvaluation.input("ground_truth"),
-      AutoEvaluation.input("system_response")
-    )
-    val keyIdeaFields =
-      if decompositional then
-        Vector(
-          AutoEvaluation.textOutput("ground_truth_key_ideas", "enumeration of key ideas in the ground truth"),
-          AutoEvaluation.textOutput("system_response_key_ideas", "enumeration of key ideas in the system response"),
-          AutoEvaluation.textOutput("discussion", "discussion of the overlap between ground truth and system response")
-        )
-      else Vector.empty
-    val outputs = keyIdeaFields ++ Vector(
-      AutoEvaluation.output("recall", SemanticF1.recallDesc),
+    val scores = Vector(
+      AutoEvaluation.output("recall", AutoEvaluation.groundTruthCoverage),
       AutoEvaluation.output("precision", SemanticF1.precisionDesc)
     )
-    val instructions = if decompositional then SemanticF1.decompositionalInstructions else SemanticF1.baseInstructions
-    SignatureLayout.of(
-      name = "SemanticRecallPrecision",
-      inputFields = inputs,
-      outputFields = outputs,
-      instructions = Some(instructions)
-    )
+    if decompositional then
+      SignatureLayout.of(
+        name = "DecompositionalSemanticRecallPrecision",
+        inputFields = AutoEvaluation.comparisonInputs,
+        outputFields = AutoEvaluation.keyIdeaOutputs ++ scores,
+        instructions = Some(SemanticF1.decompositionalInstructions)
+      )
+    else
+      SignatureLayout.of(
+        name = "SemanticRecallPrecision",
+        inputFields = AutoEvaluation.comparisonInputs,
+        outputFields = scores,
+        instructions = Some(SemanticF1.baseInstructions)
+      )
 
-  // Built once per metric instance — the judge layout never changes between score() calls.
+  // One predictor for each metric instance, because the layout does not change.
   private val judgePredictor: DynamicPredict = AutoEvaluation.judge(layout)
 
   override def score(example: Example, prediction: RawPrediction, trace: Vector[TraceEntry])(using
       RuntimeContext
   ): Either[DspyError, Double] =
     for
-      question       <- MetricHelpers.scoringText(example.get(questionField), questionField, "Example")
-      groundTruth    <- MetricHelpers.scoringText(example.get(groundTruthField), groundTruthField, "Example")
-      systemResponse <- MetricHelpers.scoringText(prediction.get(responseField), responseField, "Prediction")
-      inputs          = DynamicValues.recordFromEntries(Seq(
-                 "question"        -> DynamicValues.fromAny(question),
-                 "ground_truth"    -> DynamicValues.fromAny(groundTruth),
-                 "system_response" -> DynamicValues.fromAny(systemResponse)
-               ))
+      question       <- AutoEvaluation.judgeInput(example.get(questionField), questionField, "Example")
+      groundTruth    <- AutoEvaluation.judgeInput(example.get(groundTruthField), groundTruthField, "Example")
+      systemResponse <- AutoEvaluation.judgeInput(prediction.get(responseField), responseField, "Prediction")
+      inputs          = DynamicValues.record(
+                 "question"        -> question,
+                 "ground_truth"    -> groundTruth,
+                 "system_response" -> systemResponse
+               )
       scores <- AutoEvaluation.runJudge(judgePredictor, inputs, Seq("recall", "precision"))
-    yield AutoEvaluation.f1Score(precision = scores(1), recall = scores(0))
+    yield AutoEvaluation.judged(AutoEvaluation.f1Score(precision = scores(1), recall = scores(0)), threshold, trace)
 
 object CompleteAndGrounded:
+  // Upstream `AnswerCompleteness`.
   private val completenessInstructions =
-    "Estimate the completeness of a system's responses, against the ground truth. You will first enumerate key " +
-      "ideas in each response, discuss their overlap, and then report completeness."
+    "Estimate the completeness of a system's responses, against the ground truth.\n" +
+      "You will first enumerate key ideas in each response, discuss their overlap, and then report completeness."
 
+  // Upstream `AnswerGroundedness`.
   private val groundednessInstructions =
-    "Estimate the groundedness of a system's responses, against real retrieved documents written by people. You " +
-      "will first enumerate whatever non-trivial or check-worthy claims are made in the system response, and then " +
-      "discuss the extent to which some or all of them can be deduced from the retrieved context and basic " +
-      "commonsense."
+    "Estimate the groundedness of a system's responses, against real retrieved documents written by people.\n" +
+      "You will first enumerate whatever non-trivial or check-worthy claims are made in the system response, and then\n" +
+      "discuss the extent to which some or all of them can be deduced from the retrieved context and basic commonsense."
 
-/** `CompleteAndGrounded` — combines an `AnswerCompleteness` judgement (system response vs ground truth) with an
-  * `AnswerGroundedness` judgement (system response vs retrieved context) into `f1_score(groundedness, completeness)`.
-  * Port of `dspy.evaluate.CompleteAndGrounded`.
+/** Upstream `dspy.evaluate.CompleteAndGrounded`. An LM judges the completeness of a system response against the ground
+  * truth (`AnswerCompleteness`) and its groundedness against the retrieved context (`AnswerGroundedness`). The result
+  * is `f1_score(groundedness, completeness)`, as [[AutoEvaluation.judged]] gives it.
   *
-  * Delta: the groundedness half needs a retrieved-context field on the prediction (Python's `pred.context`). dspy4s has
-  * no retriever, so `contextField` is pulled by key from the prediction record and must be supplied by the program
-  * under evaluation; absent it, scoring returns `Left`.
+  * The groundedness judge needs the retrieved context (Python `pred.context`). dspy4s has no retriever, so the program
+  * must put the context in the field `contextField` of the prediction. With no such field, the result is a `Left`.
   */
 final case class CompleteAndGrounded(
     threshold       : Double = 0.66,
@@ -178,17 +191,9 @@ final case class CompleteAndGrounded(
 
   private val completenessLayout: SignatureLayout = SignatureLayout.of(
     name = "AnswerCompleteness",
-    inputFields = Vector(
-      AutoEvaluation.input("question"),
-      AutoEvaluation.input("ground_truth"),
-      AutoEvaluation.input("system_response")
-    ),
-    outputFields = Vector(
-      AutoEvaluation.textOutput("ground_truth_key_ideas", "enumeration of key ideas in the ground truth"),
-      AutoEvaluation.textOutput("system_response_key_ideas", "enumeration of key ideas in the system response"),
-      AutoEvaluation.textOutput("discussion", "discussion of the overlap between ground truth and system response"),
-      AutoEvaluation.output("completeness", "fraction (out of 1.0) of ground truth covered by the system response")
-    ),
+    inputFields = AutoEvaluation.comparisonInputs,
+    outputFields = AutoEvaluation.keyIdeaOutputs :+
+      AutoEvaluation.output("completeness", AutoEvaluation.groundTruthCoverage),
     instructions = Some(CompleteAndGrounded.completenessInstructions)
   )
 
@@ -213,8 +218,8 @@ final case class CompleteAndGrounded(
     instructions = Some(CompleteAndGrounded.groundednessInstructions)
   )
 
-  // Built once per metric instance — the judge layouts never change between score() calls. These stay two
-  // separate LM calls (unlike SemanticF1) because they judge against different layouts and inputs.
+  // One predictor for each layout of a metric instance, because the layouts do not change. These are two LM calls
+  // (SemanticF1 has one), because they have different layouts and inputs.
   private val completenessPredictor: DynamicPredict = AutoEvaluation.judge(completenessLayout)
   private val groundednessPredictor: DynamicPredict = AutoEvaluation.judge(groundednessLayout)
 
@@ -222,20 +227,20 @@ final case class CompleteAndGrounded(
       RuntimeContext
   ): Either[DspyError, Double] =
     for
-      question          <- MetricHelpers.scoringText(example.get(questionField), questionField, "Example")
-      groundTruth       <- MetricHelpers.scoringText(example.get(groundTruthField), groundTruthField, "Example")
-      systemResponse    <- MetricHelpers.scoringText(prediction.get(responseField), responseField, "Prediction")
-      context           <- MetricHelpers.scoringText(prediction.get(contextField), contextField, "Prediction")
-      completenessInputs = DynamicValues.recordFromEntries(Seq(
-                             "question"        -> DynamicValues.fromAny(question),
-                             "ground_truth"    -> DynamicValues.fromAny(groundTruth),
-                             "system_response" -> DynamicValues.fromAny(systemResponse)
-                           ))
-      groundednessInputs = DynamicValues.recordFromEntries(Seq(
-                             "question"          -> DynamicValues.fromAny(question),
-                             "retrieved_context" -> DynamicValues.fromAny(context),
-                             "system_response"   -> DynamicValues.fromAny(systemResponse)
-                           ))
+      question          <- AutoEvaluation.judgeInput(example.get(questionField), questionField, "Example")
+      groundTruth       <- AutoEvaluation.judgeInput(example.get(groundTruthField), groundTruthField, "Example")
+      systemResponse    <- AutoEvaluation.judgeInput(prediction.get(responseField), responseField, "Prediction")
+      context           <- AutoEvaluation.judgeInput(prediction.get(contextField), contextField, "Prediction")
+      completenessInputs = DynamicValues.record(
+                             "question"        -> question,
+                             "ground_truth"    -> groundTruth,
+                             "system_response" -> systemResponse
+                           )
+      groundednessInputs = DynamicValues.record(
+                             "question"          -> question,
+                             "retrieved_context" -> context,
+                             "system_response"   -> systemResponse
+                           )
       completeness <- AutoEvaluation.runJudge(completenessPredictor, completenessInputs, Seq("completeness"))
       groundedness <- AutoEvaluation.runJudge(groundednessPredictor, groundednessInputs, Seq("groundedness"))
-    yield AutoEvaluation.f1Score(groundedness.head, completeness.head)
+    yield AutoEvaluation.judged(AutoEvaluation.f1Score(groundedness.head, completeness.head), threshold, trace)

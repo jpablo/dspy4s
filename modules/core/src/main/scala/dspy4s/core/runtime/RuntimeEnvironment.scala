@@ -4,33 +4,36 @@ import dspy4s.core.contracts.CallbackEvent
 import dspy4s.core.contracts.CallbackHandler
 import dspy4s.core.contracts.ConfigurationError
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.Executed
 import dspy4s.core.contracts.HistoryEntry
 import dspy4s.core.contracts.HistoryLimit
 import dspy4s.core.contracts.HistoryRenderer
+import dspy4s.core.contracts.LmDefaults
 import dspy4s.core.contracts.PredictorKey
-import dspy4s.core.contracts.RuntimeConfig
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.RuntimeDelta
-import dspy4s.core.contracts.RuntimeServices
+import dspy4s.core.contracts.RuntimeScope
 import dspy4s.core.contracts.TraceEntry
+import dspy4s.core.contracts.TraceLimit
 
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 import scala.annotation.tailrec
 import scala.util.control.NonFatal
 
-/** The process's single source of truth for the active [[RuntimeContext]] -- the configured LM / adapter / callbacks
-  * plus the per-call accumulated trace, history, and call stack. State lives in two tiers that [[current]] merges on
-  * every read:
+/** The process's single source of truth for the active [[RuntimeContext]]: the configured LM / adapter / callbacks plus
+  * the per-call accumulated trace, history, and call stack. State lives in two tiers that [[current]] merges on every
+  * read:
   *
   *   - a process-wide global default (set via [[configure]]), shared across all threads;
   *   - a per-thread overlay installed by the scoped `with*` helpers, which owns the mutable accumulated state (trace /
   *     history / call stack) and shadows the global for the duration of a thunk.
   *
   * `current` projects the thread-local overlay onto the global, so a thread sees its own scoped overrides on top of the
-  * shared configuration. Every `with*` helper restores the prior overlay when its thunk returns, so overrides never
-  * leak past their dynamic scope.
+  * shared configuration. Every `with*` helper restores the prior settings and scope when its thunk returns, so
+  * overrides never leak past their dynamic scope. The trace and the history that the thunk adds stay, as in upstream
+  * `dspy.context`. Only [[withContext]] restores the prior overlay wholesale and thus removes them.
   *
   * The given context wins (UPGRADE-3.2.1-to-3.4.0, decision D8; PORT_GAPS G-50). A caller can give a `using
   * RuntimeContext` that is not the installed context. The callbacks ([[emit]]), the parallel workers
@@ -43,8 +46,7 @@ import scala.util.control.NonFatal
   * fan-out point for callback delivery ([[emit]]).
   *
   * Thread-safety: the global default and the id counters are atomics; the overlay is a `ThreadLocal`, so concurrent
-  * threads never share mutable context. Cross-thread / cross-async-task reconfiguration is guarded -- see
-  * [[configure]].
+  * threads never share mutable context. Cross-thread / cross-async-task reconfiguration is guarded (see [[configure]]).
   */
 object RuntimeEnvironment:
   // Process-wide default context, shared across threads and merged beneath every thread's overlay by `current`.
@@ -64,7 +66,7 @@ object RuntimeEnvironment:
   private def localContext: RuntimeContext = contextRef.get()
 
   /** Enforce the single-owner rule for [[configure]]: the first thread to call it claims ownership, and only that
-    * thread -- and, when it runs under an async task, only that same task -- may call `configure` again. Returns
+    * thread (and, when it runs under an async task, only that same task) may call `configure` again. Returns
     * `Left(ConfigurationError)` for any other caller.
     */
   @tailrec
@@ -106,19 +108,24 @@ object RuntimeEnvironment:
       ()
     }
 
-  /** Run `thunk` with `current` transformed by `update` -- a functional, thunk-scoped override of one or more context
-    * fields.
+  /** Run `thunk` with `current` transformed by `update`: a functional, thunk-scoped override of one or more settings or
+    * scope fields. On exit, the helper restores the settings and the scope of the previous overlay. The trace and the
+    * history that `thunk` adds stay, also when `thunk` throws (upstream `dspy.context`). The block adds to the trace
+    * and the history of this thread, so a change of the trace or the history in `update` has no effect.
     */
   def withSetting[A](update: RuntimeContext => RuntimeContext)(thunk: => A): A =
-    withContext(update(current))(thunk)
+    withOverlay(update(current))(thunk)
 
   /** Run `thunk` tagged with the given async-task id, used to scope [[configure]] ownership and correlate work that
-    * fans out across async tasks.
+    * fans out across async tasks. On exit, the helper restores the previous async-task id. The trace and the history
+    * that `thunk` adds stay, as in [[withSetting]].
     */
   def withAsyncTask[A](taskId: String)(thunk: => A): A =
     withSetting(ctx => ctx.withScope(ctx.scope.copy(asyncTaskId = Some(taskId))))(thunk)
 
-  /** Like [[withAsyncTask]], but mints a fresh `"$prefix-N"` id from a monotonic counter. */
+  /** Like [[withAsyncTask]], but mints a fresh `"$prefix-N"` id from a monotonic counter. The trace and the history
+    * that `thunk` adds stay, as in [[withAsyncTask]].
+    */
   def withGeneratedAsyncTask[A](prefix: String = "async-task")(thunk: => A): A =
     val taskId = s"$prefix-${asyncTaskCounter.incrementAndGet()}"
     withAsyncTask(taskId)(thunk)
@@ -129,13 +136,7 @@ object RuntimeEnvironment:
   def nextCallId(prefix: String = "call"): String =
     s"$prefix-${callbackCallCounter.incrementAndGet()}"
 
-  /** The `callId`s of the scopes currently open on this thread, outermost first. */
-  def activeCallStack: Vector[String] = current.callStack
-
-  /** How many `with*`-call scopes enclose the current point. */
-  def activeCallDepth: Int = activeCallStack.size
-
-  /** The innermost open scope's `callId`, if any -- the `parentCallId` a newly-opened scope should inherit. */
+  /** The innermost open scope's `callId`, if any: the `parentCallId` a newly-opened scope should inherit. */
   def activeCallId: Option[String] = current.activeCallId
 
   /** Push `callId` onto the call stack (making it the active call) for the duration of `thunk`, then unwind just the
@@ -143,14 +144,24 @@ object RuntimeEnvironment:
     * since those bubble up to the enclosing scope.
     */
   def withActiveCall[A](callId: String)(thunk: => A): A =
-    val previous     = localContext
-    val updatedScope = previous.scope.copy(callStack = previous.callStack :+ callId)
-    contextRef.set(previous.withScope(updatedScope))
+    withScopeChange(scope => scope.copy(callStack = scope.callStack :+ callId))((after, before) =>
+      after.copy(callStack = before.callStack)
+    )(thunk)
+
+  /** Run `thunk` with `enter` applied to the scope of this thread's overlay. On exit, `exit` gives the scope from the
+    * scope that `thunk` left and the scope before the call. Unlike [[withContext]], the trace and the history that
+    * `thunk` accumulates stay, also when `thunk` throws.
+    */
+  // `inline`, so the two functions of each call site allocate no closure on this hot path.
+  private inline def withScopeChange[A](inline enter: RuntimeScope => RuntimeScope)(
+      inline exit: (RuntimeScope, RuntimeScope) => RuntimeScope
+  )(thunk: => A): A =
+    val previous = localContext
+    contextRef.set(previous.withScope(enter(previous.scope)))
     try thunk
     finally
-      val after         = localContext
-      val restoredScope = after.scope.copy(callStack = previous.callStack)
-      contextRef.set(after.withScope(restoredScope))
+      val after = localContext
+      contextRef.set(after.withScope(exit(after.scope, previous.scope)))
 
   /** `true` while a predictor that owns a [[dspy4s.core.contracts.PredictorKey]] runs on this thread. */
   def withinPredictor: Boolean = current.scope.withinPredictor
@@ -162,22 +173,49 @@ object RuntimeEnvironment:
     * [[withActiveCall]], this keeps the trace and the history that `thunk` accumulates.
     */
   def withinPredictor[A](key: PredictorKey)(thunk: => A): A =
-    val previous = localContext
-    contextRef.set(previous.withScope(previous.scope.copy(predictor = Some(key))))
-    try thunk
-    finally
-      val after = localContext
-      contextRef.set(after.withScope(after.scope.copy(predictor = previous.scope.predictor)))
+    withScopeChange(_.copy(predictor = Some(key)))((after, before) => after.copy(predictor = before.predictor))(thunk)
+
+  /** The options and the rollout id of the extent that runs on this thread, or `None` when no extent sets them. */
+  def activeLmDefaults: Option[LmDefaults] = current.scope.lmDefaults
+
+  /** Run `thunk` with `defaults` merged into the options and the rollout id of the language-model calls, then restore
+    * the previous values (the analog of upstream `lm.copy(...)` with `mod.set_lm(...)`, and `lm.copy` keeps the kwargs
+    * of its LM). The options of `defaults` win over the enclosing options, and each other enclosing option stays. The
+    * rollout id of `defaults` wins, else the enclosing rollout id stays. The change is on the overlay of this thread,
+    * because [[withInstalled]] keeps the scope of this thread and does not read the scope of the given context. Like
+    * [[withActiveCall]], this keeps the trace and the history that `thunk` accumulates.
+    */
+  def withLmDefaults[A](defaults: LmDefaults)(thunk: => A): A =
+    val merged = activeLmDefaults.fold(defaults)(enclosing =>
+      LmDefaults(
+        options = DynamicValues.mergeRecords(enclosing.options, defaults.options),
+        rolloutId = defaults.rolloutId.orElse(enclosing.rolloutId)
+      )
+    )
+    withScopeChange(_.copy(lmDefaults = Some(merged)))((after, before) => after.copy(lmDefaults = before.lmDefaults))(
+      thunk
+    )
 
   /** Replace this thread's overlay context wholesale for the duration of `thunk`, restoring the previous overlay on
-    * exit. The low-level primitive the other `with*` helpers build on. Because the restore is wholesale, any state
-    * accumulated on the overlay inside the thunk (trace / history) does not outlive the scope.
+    * exit. The low-level primitive of [[isolatedAttempt]] and [[ContextPropagation.Captured.run]]. Because the restore
+    * is wholesale, any state accumulated on the overlay inside the thunk (trace / history) does not outlive the scope.
+    * The other `with*` helpers keep that state.
     */
   def withContext[A](context: RuntimeContext)(thunk: => A): A =
     val previous = contextRef.get()
     contextRef.set(context)
     try thunk
     finally contextRef.set(previous)
+
+  /** Run `thunk` with the settings and the scope of `context` and with the trace and the history of this thread. On
+    * exit, the helper restores the settings and the scope of the previous overlay. The trace and the history that
+    * `thunk` adds stay, also when `thunk` throws. [[withInstalled]] restores the overlay in the same way.
+    */
+  private def withOverlay[A](context: RuntimeContext)(thunk: => A): A =
+    val previous = localContext
+    contextRef.set(if context.delta eq previous.delta then context else context.withDelta(previous.delta))
+    try thunk
+    finally contextRef.set(previous.withDelta(localContext.delta))
 
   /** Run `thunk` with `context` as the installed context (decision D8: the given context wins). Each public entry point
     * that takes a `using RuntimeContext` calls this helper and runs its work with the context that `thunk` gets.
@@ -191,11 +229,12 @@ object RuntimeEnvironment:
     * and the workers thus see one context. For example, a given context with only a language model gets the adapter of
     * the installed context, also for the parts that read the `using` value.
     *
-    * The helper keeps the dynamic scope of this thread (the open call scopes, the async task, and the predictor mark)
-    * and the trace and the history of this thread. On exit, it restores the services and the configuration of the
-    * previous context, but the trace and the history that `thunk` adds stay, also when `thunk` throws. Thus, unlike
-    * [[withContext]], the restore is not wholesale, and the output of the call reaches the caller as with no helper.
-    * The usage trackers and the evidence log have their own thread-local state, so the helper does not change them.
+    * The helper keeps the dynamic scope of this thread (the open call scopes, the async task, the predictor mark, and
+    * the LM defaults) and the trace and the history of this thread. On exit, it restores the services and the
+    * configuration of the previous context, but the trace and the history that `thunk` adds stay, also when `thunk`
+    * throws. Thus, unlike [[withContext]], the restore is not wholesale, and the output of the call reaches the caller
+    * as with no helper. The usage scopes and the evidence log have their own thread-local state, so the helper does not
+    * change them.
     *
     * The helper only runs `thunk` with the current context, with no install, in two cases: the services and the
     * configuration of `context` are the current ones (a reference check), or each field that `context` sets already has
@@ -204,7 +243,7 @@ object RuntimeEnvironment:
     */
   def withInstalled[A](context: RuntimeContext)(thunk: RuntimeContext ?=> A): A =
     val previous  = localContext
-    val effective = current
+    val effective = previous.fillFrom(globalRef.get())
     if givesInstalledSettings(context, effective) then thunk(using effective)
     else
       // The fill reads the overlay of this thread, not `current`, so the global default stays a default.
@@ -215,59 +254,76 @@ object RuntimeEnvironment:
       finally contextRef.set(previous.withDelta(localContext.delta))
 
   /** `true` when `context` filled from `installed` gives the services and the configuration of `installed`. The check
-    * is cheap: it compares the parts by reference first, and then each field that `context` sets. A service, the
-    * callback list, and the callback metadata must be the same object; a number or a flag must be equal. The check does
-    * not read the trace or the history.
+    * is cheap: it compares the parts by reference first, and then each field that `context` sets. A service and the
+    * callback metadata must be the same object. A callback list must have the same callbacks in the same order, also
+    * when it is empty. A number or a flag must be equal. The check does not read the trace or the history.
     */
   private def givesInstalledSettings(context: RuntimeContext, installed: RuntimeContext): Boolean =
-    ((context.services eq installed.services) || servicesKept(context.services, installed.services)) &&
-      ((context.config eq installed.config) || configKept(context.config, installed.config))
-
-  /** `true` when `requested` sets no value, or the same object as `installed`. */
-  private def sameObject[A <: AnyRef](requested: Option[A], installed: Option[A]): Boolean =
-    requested.forall(value => installed.exists(_ eq value))
-
-  private def servicesKept(requested: RuntimeServices, installed: RuntimeServices): Boolean =
-    sameObject(requested.lm, installed.lm) && sameObject(requested.adapter, installed.adapter) &&
-      sameObject(requested.interpreterFactory, installed.interpreterFactory) &&
-      (requested.callbacks.isEmpty || (requested.callbacks eq installed.callbacks) ||
-        requested.callbacks.corresponds(installed.callbacks)(_ eq _))
-
-  private def configKept(requested: RuntimeConfig, installed: RuntimeConfig): Boolean =
-    requested.numThreads.forall(installed.numThreads.contains) &&
-      requested.maxErrors.forall(installed.maxErrors.contains) &&
-      requested.maxHistorySize.forall(installed.maxHistorySize.contains) &&
-      requested.disableHistory.forall(installed.disableHistory.contains) &&
-      requested.trackUsage.forall(installed.trackUsage.contains) &&
-      (requested.callbackMetadata.fields.isEmpty || (requested.callbackMetadata eq installed.callbackMetadata)) &&
-      (!requested.captureFailureTraces || installed.captureFailureTraces)
+    ((context.services eq installed.services) || context.services.keptBy(installed.services)) &&
+      ((context.config eq installed.config) || context.config.keptBy(installed.config))
 
   /** Run `thunk` with `settings` overlaid on `current`: `settings` wins for every field it sets and `current` supplies
     * the rest (`RuntimeContext.fillFrom`). The cross-task-safe way to install an LM / adapter / callbacks for a scope,
     * in contrast to the process-wide [[configure]].
+    *
+    * On exit, the helper restores the previous settings and scope. The trace and the history that `thunk` adds stay, as
+    * in [[withSetting]]. The trace and the history of `settings` have no effect: the block adds to the trace and the
+    * history of this thread.
     */
   def withSettings[A](settings: RuntimeContext)(thunk: => A): A =
-    withContext(settings.fillFrom(current))(thunk)
+    withOverlay(settings.fillFrom(current))(thunk)
 
-  /** Run `thunk` with the callback handler list replaced by `callbacks`, restoring it afterward. */
+  /** Run `thunk` with the callback handler list replaced by `callbacks`, restoring it afterward. An empty list turns
+    * off the callbacks, also the callbacks of the global context (upstream `dspy.context(callbacks=[])`). The trace and
+    * the history that `thunk` adds stay, as in [[withSetting]].
+    */
   def withCallbacks[A](callbacks: Vector[CallbackHandler])(thunk: => A): A =
-    withContext(current.withServices(current.services.copy(callbacks = callbacks)))(thunk)
+    withOverlay(current.withCallbacks(callbacks))(thunk)
 
-  /** Append a trace entry to this thread's overlay; visible to [[current]] for the rest of the enclosing scope. */
-  def appendTrace(entry: TraceEntry): Unit =
-    contextRef.set(localContext.appendTrace(entry))
+  /** Append a trace entry to this thread's overlay; visible to [[current]] for the rest of the enclosing scope. The
+    * `maxTraceSize` cap applies (default 10000, as upstream `settings.max_trace_size`): the oldest entries drop once
+    * the cap is exceeded, and a cap of 0 keeps no entry. Upstream records each predictor call. The port records each
+    * module call, so a cap holds fewer predictor calls than upstream.
+    */
+  def appendTrace(entry: TraceEntry): Unit = appendTraceEntries(Vector(entry))
+
+  /** The `maxTraceSize` cap of `effective` (10000 by default). */
+  private def traceCap(effective: RuntimeContext): Int =
+    effective.maxTraceSize.getOrElse(TraceLimit(10000))
+
+  /** [[appendTrace]] for each of `entries`, in order, with one write of the overlay. */
+  private def appendTraceEntries(entries: Vector[TraceEntry]): Unit =
+    val base = localContext
+    val cap  = traceCap(base.fillFrom(globalRef.get()))
+    if entries.nonEmpty && cap > 0 then contextRef.set(base.withTrace((base.trace ++ entries).takeRight(cap)))
 
   /** Append a history entry, honoring the context's `disableHistory` flag and `maxHistorySize` cap (default 10000;
     * oldest entries drop once the cap is exceeded). No-op when history is disabled or the cap is <= 0.
     */
-  def appendHistory(entry: HistoryEntry): Unit =
-    val effective       = current
-    val historyDisabled = effective.disableHistory.getOrElse(false)
-    val cap             = effective.maxHistorySize.getOrElse(HistoryLimit(10000))
-    if !historyDisabled && cap > 0 then
-      val base        = localContext
-      val nextHistory = (base.history :+ entry).takeRight(cap)
-      contextRef.set(base.withHistory(nextHistory))
+  def appendHistory(entry: HistoryEntry): Unit = appendHistoryEntries(Vector(entry))
+
+  /** `true` when [[appendHistory]] keeps an entry, and the given context does not turn off the history. A caller checks
+    * it before it builds the payload of an entry, so that it does not build a payload that [[appendHistory]] drops. The
+    * check of [[appendHistory]] uses the settings of this thread with the global settings: the `disableHistory` flag
+    * and the `maxHistorySize` cap. The `disableHistory` flag of the given context also turns off the history.
+    */
+  def historyEnabled(using context: RuntimeContext): Boolean =
+    !context.disableHistory.getOrElse(false) && keepsHistory(current)
+
+  /** `true` when `effective` lets [[appendHistory]] keep an entry: the history is on, and the cap is above 0. */
+  private def keepsHistory(effective: RuntimeContext): Boolean =
+    !effective.disableHistory.getOrElse(false) && historyCap(effective) > 0
+
+  /** The `maxHistorySize` cap of `effective` (10000 by default). */
+  private def historyCap(effective: RuntimeContext): Int =
+    effective.maxHistorySize.getOrElse(HistoryLimit(10000))
+
+  /** [[appendHistory]] for each of `entries`, in order, with one write of the overlay. */
+  private def appendHistoryEntries(entries: Vector[HistoryEntry]): Unit =
+    val base      = localContext
+    val effective = base.fillFrom(globalRef.get())
+    if entries.nonEmpty && keepsHistory(effective) then
+      contextRef.set(base.withHistory((base.history ++ entries).takeRight(historyCap(effective))))
 
   /** Run `body` under a fresh [[RuntimeDelta]] derived from `base`, returning the body's result and accumulated output
     * as an [[Executed]]. Used by the BestOfN / Refine attempt loops, which isolate each attempt (applying any
@@ -283,12 +339,13 @@ object RuntimeEnvironment:
       Executed(result, current.delta)
     }
 
-  /** Replay an explicitly captured delta into the current overlay, in order. This is the caller-controlled join
-    * operation for isolated attempts and [[ContextPropagation.futureExecuted]] workers.
+  /** Replay an explicitly captured delta into the current overlay, in order, with the caps of [[appendTrace]] and
+    * [[appendHistory]]. This is the caller-controlled join operation for isolated attempts and
+    * [[ContextPropagation.futureExecuted]] workers.
     */
   def propagate(delta: RuntimeDelta): Unit =
-    delta.trace.foreach(appendTrace)
-    delta.history.foreach(appendHistory)
+    appendTraceEntries(delta.trace)
+    appendHistoryEntries(delta.history)
 
   /** Render the last `n` LM-call history entries on the active context as a human-readable string, as upstream
     * `dspy.inspect_history(n)`. dspy4s has no global per-LM history buffer; history is the per-thread accumulation on
@@ -309,13 +366,9 @@ object RuntimeEnvironment:
     println(rendered)
     rendered
 
-  /** The callback handlers registered on the active context. */
-  def activeCallbacks: Vector[CallbackHandler] = current.callbacks
-
   /** Emit a one-off framework diagnostic to stderr under the shared `WARN [dspy4s]` convention. Diagnostics are not
-    * callback events (those are strictly Start/End scope pairs -- see [[dspy4s.core.contracts.CallbackEvent]]); this is
-    * the single seam warning sites route through, so the convention -- and any future redirection -- lives in one
-    * place.
+    * callback events (those are strictly Start/End scope pairs; see [[dspy4s.core.contracts.CallbackEvent]]). All the
+    * warnings of the framework go through this method, so the convention and any future redirection live in one place.
     */
   def warn(component: String, message: String): Unit =
     Console.err.println(s"WARN [dspy4s] $component: $message")
@@ -332,10 +385,8 @@ object RuntimeEnvironment:
         try callback.onEvent(event)
         catch
           case NonFatal(error) =>
-            val detail = Option(error.getMessage).filter(_.nonEmpty).getOrElse(error.getClass.getSimpleName)
-            Console.err.println(
-              s"dspy4s callback ${callback.getClass.getName} failed for ${event.getClass.getSimpleName}: $detail"
-            )
+            val detail = DspyError.messageOf(error)
+            warn("callback", s"${callback.getClass.getName} failed for ${event.getClass.getSimpleName}: $detail")
       }
 
   /** Reset all global and thread-local state to defaults: clears configure ownership, the id counters, the global

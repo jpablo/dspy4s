@@ -56,10 +56,10 @@ class StreamifySuite extends FunSuite:
     override val name: String                                                                                    = "passthrough"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("x")))))
-    override def parse(signature: dspy4s.core.contracts.SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
-      Right(ParsedOutput(values = rec(signature.outputFields.map(_.name := output.text)*)))
+      Right(ParsedOutput(values = rec(invocation.layout.outputFields.map(_.name := output.text)*)))
 
   override def beforeEach(context: BeforeEach): Unit =
     RuntimeEnvironment.resetForTests()

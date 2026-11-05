@@ -8,8 +8,10 @@
   * `allow_tool_async_sync_conversion`) are not portable: `ToolFunction.invoke` is synchronous and dspy4s has no async
   * tool path.
   *
-  * Note `ContextPropagation.future` (not a bare `Future`): it captures the active `RuntimeContext` (LM, adapter,
-  * callbacks) so the program still resolves its model off-thread — a plain `Future { ... }` would lose it.
+  * `ContextPropagation.future` captures the installed `RuntimeContext` and the carriers of the calling thread, and it
+  * installs them on the worker thread. A plain `Future { ... }` loses the carriers and the scope: a `UsageTracking`
+  * tracker around the call gets no usage, and the call has no parent call id. It still finds the model, because
+  * `Module.apply` installs its `using RuntimeContext` on the worker thread.
   */
 package dspy4s.examples.tutorials.async
 

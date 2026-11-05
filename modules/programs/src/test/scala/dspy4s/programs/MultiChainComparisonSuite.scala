@@ -8,7 +8,6 @@ import dspy4s.core.contracts.DspyError
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.:=
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.LanguageModel
@@ -41,7 +40,7 @@ class MultiChainComparisonSuite extends FunSuite:
     override val name: String                                                                                    = "scripted-mcc-adapter"
     override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some("q")))))
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     ): Either[DspyError, ParsedOutput] =
       Right(ParsedOutput(values = rec("rationale" := "my rationale", "answer" := "blue")))
@@ -124,7 +123,7 @@ class MultiChainComparisonSuite extends FunSuite:
     val mcc   = MultiChainComparison(baseSignature = Signature.of[MccQaSpec], m = AttemptCount(3))
     val input = MultiChainInput(
       baseInput = (question = "What is the color of the sky?"),
-      attempts = Vector.fill(3)(RawPrediction.empty)
+      attempts = Vector.fill(3)(RawPrediction(values = rec("rationale" := "r", "answer" := "blue")))
     )
 
     RuntimeEnvironment.withSettings(settings) {
@@ -153,7 +152,7 @@ class MultiChainComparisonSuite extends FunSuite:
     assert(mcc.attemptInputs.validate(Vector("one", "two")).isLeft)
 
     val attempts = mcc.attemptInputs.validate(Vector("one", "two", "three")).toOption.get
-    val encoded  = mcc.attemptInputs.shape.encode(((question = "?"), attempts))
+    val encoded  = mcc.attemptInputs.signature.inputShape.encode(((question = "?"), attempts))
     val keys     = DynamicValues.recordKeys(encoded)
     assertEquals(
       keys,

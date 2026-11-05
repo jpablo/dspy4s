@@ -18,6 +18,7 @@ import zio.blocks.schema.DynamicValue
 
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
 import scala.concurrent.duration.DurationInt
 import scala.util.control.NonFatal
@@ -268,7 +269,144 @@ class LocalPythonInterpreterSuite extends FunSuite:
     )
   }
 
+  test("a variable with a lone surrogate is a Left, not an exception") {
+    assumePython()
+    val interpreter = LocalPythonInterpreter()
+    try
+      // The first half of an emoji, for example from a text that was cut at a fixed length.
+      val cut = DynamicValue.Primitive(zio.blocks.schema.PrimitiveValue.String("cut \uD83D"))
+      assert(interpreter.execute("ctx", Map("ctx" -> cut)).isLeft)
+    finally interpreter.close()
+  }
+
   test("a Python executable that does not exist is a Left") {
     val python = Files.createTempDirectory("dspy4s-no-python").resolve("python3")
     assert(startFailure(python).startsWith(s"Unable to start the Python worker '$python': "))
+  }
+
+  // The tests below are for data of the code that JSON cannot hold. Each one ends with a check that the session is alive.
+
+  /** The code that defines the class `Foo`. Its `__repr__` raises. */
+  private def badRepr = "class Foo:\n    def __repr__(self):\n        raise RuntimeError('boom')\n"
+
+  /** Run `body` on an interpreter with the output field `answer`. Also check that the session is alive after `body`. */
+  private def withSession(body: LocalPythonInterpreter => Unit): Unit =
+    assumePython()
+    val fields = Some(Vector(SandboxOutputField("answer")))
+    withInterpreter(LocalPythonInterpreter(tools = Vector(greet), outputFields = fields)) { interpreter =>
+      body(interpreter)
+      assertEquals(ok(interpreter.execute("print('alive')")).stdout.trim, "alive")
+    }
+
+  /** Check that `code` is an error of the code with `text` in the standard error. */
+  private def assertCodeError(interpreter: LocalPythonInterpreter, code: String, text: String*): Unit =
+    val result = ok(interpreter.execute(code))
+    assertEquals(result.exitCode, 1, result.toString)
+    text.foreach(part => assert(result.stderr.contains(part), result.stderr))
+
+  private def finalOf(interpreter: LocalPythonInterpreter, code: String): Option[String] =
+    ok(interpreter.execute(code)).finalOutput
+
+  test("SUBMIT with a value that JSON cannot hold gives its repr as text, and the session continues") {
+    withSession { interpreter =>
+      assertEquals(finalOf(interpreter, "SUBMIT(answer=float('nan'))"), Some("\"{'answer': nan}\""))
+      assertEquals(finalOf(interpreter, "SUBMIT(answer=float('inf'))"), Some("\"{'answer': inf}\""))
+      assertEquals(finalOf(interpreter, "SUBMIT(answer=float('-inf'))"), Some("\"{'answer': -inf}\""))
+      assertEquals(finalOf(interpreter, "SUBMIT(answer={1})"), Some("\"{'answer': {1}}\""))
+      val plain = "class Plain:\n    def __repr__(self):\n        return 'Plain()'\nSUBMIT(answer=Plain())"
+      assertEquals(finalOf(interpreter, plain), Some("\"{'answer': Plain()}\""))
+      assertEquals(
+        finalOf(interpreter, "loop = []\nloop.append(loop)\nSUBMIT(answer=loop)"),
+        Some("\"{'answer': [[...]]}\"")
+      )
+    }
+  }
+
+  test("a RecursionError of json.dumps gives the repr as text, and the session continues") {
+    // The upstream `jsonable` runs in an `except` clause, and it does not catch this error, so the error ends the session.
+    val deep = "class Deep(dict):\n    def items(self):\n        raise RecursionError('deep')\n"
+    withSession { interpreter =>
+      assertEquals(finalOf(interpreter, deep + "SUBMIT(answer=Deep(a=1))"), Some("\"{'answer': {'a': 1}}\""))
+      assertEquals(ok(interpreter.execute(deep + "Deep(a=1)")).stdout, "{'a': 1}")
+    }
+  }
+
+  test("a very deep value gives the fixed text or a Left, and the call returns") {
+    // Python 3.12 and 3.13 raise a RecursionError in `json.dumps` for this value. Python 3.14 writes the line, and the
+    // JSON reader of the client rejects it. Each result is correct.
+    assumePython()
+    val deep   = "deep = []\nfor _ in range(100000):\n    deep = [deep]\n"
+    val fields = Some(Vector(SandboxOutputField("answer")))
+    Vector(deep + "SUBMIT(answer=deep)" -> "<unprintable dict>", deep + "deep" -> "<unprintable list>").foreach {
+      (code, text) =>
+        withInterpreter(LocalPythonInterpreter(outputFields = fields)) { interpreter =>
+          interpreter.execute(code) match
+            case Right(result) => assert(s"${result.stdout}${result.finalOutput}".contains(text), result.toString)
+            case Left(error)   => assert(error.message.contains("invalid JSON"), error.message.take(200))
+        }
+    }
+  }
+
+  test("SUBMIT with an object whose __repr__ raises gives a fixed text with the type name, and the session continues") {
+    withSession { interpreter =>
+      assertEquals(finalOf(interpreter, badRepr + "SUBMIT(answer=Foo())"), Some("\"<unprintable dict>\""))
+    }
+  }
+
+  test("an exception with a value that JSON cannot hold is an error of the code, and the session continues") {
+    withSession { interpreter =>
+      assertCodeError(interpreter, "raise ValueError(float('nan'))", "ValueError: nan")
+      assertCodeError(interpreter, "raise ValueError({1})", "ValueError: {1}")
+      assertCodeError(interpreter, "loop = []\nloop.append(loop)\nraise ValueError(loop)", "ValueError: [[...]]")
+    }
+  }
+
+  test("an exception whose text raises is an error of the code with a fixed text, and the session continues") {
+    // The upstream `describe` calls `str` on the exception with no `try`, so these exceptions end the session.
+    withSession { interpreter =>
+      assertCodeError(interpreter, badRepr + "raise ValueError(Foo())", "ValueError: <unprintable ValueError>")
+      val badStr = "class Odd(Exception):\n    def __str__(self):\n        raise RuntimeError('boom')\nraise Odd()"
+      assertCodeError(interpreter, badStr, "Odd: Odd()")
+    }
+  }
+
+  test("the last expression with a value that JSON cannot hold gives its repr or the fixed text") {
+    withSession { interpreter =>
+      def output(code: String) =
+        val result = ok(interpreter.execute(code))
+        assertEquals(result.exitCode, 0, result.toString)
+        result.stdout
+      assertEquals(output("float('nan')"), "nan")
+      assertEquals(output("{1}"), "{1}")
+      assertEquals(output("[float('nan')]"), "[nan]")
+      assertEquals(output("loop = []\nloop.append(loop)\nloop"), "[[...]]")
+      assertEquals(output(badRepr + "Foo()"), "<unprintable Foo>")
+    }
+  }
+
+  test("a tool call with an argument that JSON cannot hold is an error of the code, and the tool does not run") {
+    val invoked = new AtomicInteger
+    val counter = SandboxTool(
+      name = "count",
+      parameters = Vector(SandboxTool.Param("who", Some("str"))),
+      invoke = _ =>
+        val _ = invoked.incrementAndGet()
+        Right(DynamicValues.string("counted"))
+    )
+    assumePython()
+    withInterpreter(LocalPythonInterpreter(tools = Vector(counter))) { interpreter =>
+      assertCodeError(interpreter, "count(who=float('nan'))", "ValueError", "Out of range float")
+      assertCodeError(interpreter, "count(who={1})", "TypeError")
+      assertCodeError(interpreter, "loop = []\nloop.append(loop)\ncount(who=loop)", "ValueError", "Circular reference")
+      assertEquals(invoked.get(), 0)
+      assertEquals(ok(interpreter.execute("print(count(who='ann'))")).stdout.trim, "counted")
+    }
+  }
+
+  test("a name of the code does not change the worker, because the code has its own namespace") {
+    withSession { interpreter =>
+      assertCodeError(interpreter, "json = None\nraise ValueError('kept')", "ValueError: kept")
+      assertEquals(finalOf(interpreter, "json = None\nSUBMIT(answer=1)"), Some("{\"answer\":1}"))
+      assertEquals(finalOf(interpreter, "json = None\nSUBMIT(answer=float('nan'))"), Some("\"{'answer': nan}\""))
+    }
   }

@@ -4,6 +4,7 @@ import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.ErrorLimit
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.data.Example
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
@@ -21,17 +22,30 @@ import zio.blocks.schema.DynamicValue
 
 import scala.concurrent.duration.Duration
 
+/** The table that a run of [[Evaluate]] prints (upstream `display_table`). */
+enum TableDisplay derives CanEqual:
+
+  /** No table. */
+  case Off
+
+  /** A table of each row. */
+  case All
+
+  /** A table of the first `count` rows, and a line that says how many rows it hides. A count of 0 gives no table, as
+    * upstream reads 0 as false.
+    */
+  case Rows(count: Int)
+
 final case class EvaluateConfig(
-    devset          : Vector[Example],
-    metric          : Metric,
-    numThreads      : Option[ThreadCount]  = None,
-    maxErrors       : Option[ErrorLimit]   = None,
-    failureScore    : Double               = 0.0,
-    displayProgress : Boolean              = false,
-    displayTable    : Either[Boolean, Int] = Left(false),
-    saveAsCsv       : Option[String]       = None,
-    saveAsJson      : Option[String]       = None,
-    provideTraceback: Boolean              = false,
+    devset         : Vector[Example],
+    metric         : Metric,
+    numThreads     : Option[ThreadCount] = None,
+    maxErrors      : Option[ErrorLimit]  = None,
+    failureScore   : Double              = 0.0,
+    displayProgress: Boolean             = false,
+    displayTable   : TableDisplay        = TableDisplay.Off,
+    saveAsCsv      : Option[String]      = None,
+    saveAsJson     : Option[String]      = None,
     /** The time limit of the [[ParallelExecutor]] of a run. The default, `Duration.Inf`, gives no time limit: upstream
       * `Evaluate` never fails for time, because the `timeout` of its executor only submits a slow example again
       * (`dspy/utils/parallelizer.py`, PORT_GAPS G-41).
@@ -64,21 +78,19 @@ final class Evaluate(val config: EvaluateConfig) extends Evaluator:
       saveAsJson      : Option[String]              = None,
       callbackMetadata: Option[DynamicValue.Record] = None
   )(program: Example => Either[DspyError, RawPrediction])(using RuntimeContext): Either[DspyError, EvaluationResult] =
-    val mergedConfig = EvaluateConfig(
-      devset = devset.getOrElse(config.devset),
-      metric = metric.getOrElse(config.metric),
-      numThreads = numThreads.orElse(config.numThreads),
-      maxErrors = maxErrors.orElse(config.maxErrors),
-      failureScore = failureScore.getOrElse(config.failureScore),
-      displayProgress = config.displayProgress,
-      displayTable = config.displayTable,
-      saveAsCsv = saveAsCsv.orElse(config.saveAsCsv),
-      saveAsJson = saveAsJson.orElse(config.saveAsJson),
-      provideTraceback = config.provideTraceback,
-      timeout = config.timeout,
-      callbackMetadata = callbackMetadata.getOrElse(config.callbackMetadata)
+    applyInternal(
+      program,
+      config.copy(
+        devset = devset.getOrElse(config.devset),
+        metric = metric.getOrElse(config.metric),
+        numThreads = numThreads.orElse(config.numThreads),
+        maxErrors = maxErrors.orElse(config.maxErrors),
+        failureScore = failureScore.getOrElse(config.failureScore),
+        saveAsCsv = saveAsCsv.orElse(config.saveAsCsv),
+        saveAsJson = saveAsJson.orElse(config.saveAsJson),
+        callbackMetadata = callbackMetadata.getOrElse(config.callbackMetadata)
+      )
     )
-    applyInternal(program, mergedConfig)
 
   /** One run of the evaluation, in an evaluate scope. */
   private def applyInternal(
@@ -90,35 +102,38 @@ final class Evaluate(val config: EvaluateConfig) extends Evaluator:
     val baseCtx      = summon[RuntimeContext]
     val withMetadata =
       if cfg.callbackMetadata.fields.isEmpty then baseCtx
-      else baseCtx.withConfig(baseCtx.config.copy(callbackMetadata = cfg.callbackMetadata))
+      else baseCtx.withConfig(baseCtx.config.copy(callbackMetadata = Some(cfg.callbackMetadata)))
     // The run installs the given context (decision D8: the given context wins), and the run uses the effective context
     // of the call, also for the thread count of the inputs. It keeps the dynamic scope of this thread (the open call
     // scopes), so the evaluate scope nests under the scope that calls it, for example a compile scope, also when the
     // given context is older than that scope. The scope opens in the context of the run, so the parallel workers
     // capture its call id as their parent.
     RuntimeEnvironment.withInstalled(withMetadata) { effective ?=>
+      val executor = ParallelExecutor.fromSettings(
+        timeout = cfg.timeout,
+        numThreads = cfg.numThreads,
+        maxErrors = cfg.maxErrors
+      )(using effective)
       val inputs: DynamicValue.Record = DynamicValues.record(
         "devset_size" := cfg.devset.size,
-        "num_threads" := (resolvedNumThreads(cfg)(using effective): Int)
+        "num_threads" := (executor.numThreads: Int)
       )
-      CallbackDispatcher.withEvaluate("Evaluate", inputs)(runEvaluation(fn, cfg)(using effective))
+      CallbackDispatcher.withEvaluate("Evaluate", inputs)(runEvaluation(fn, cfg, executor)(using effective))
     }
 
   private def runEvaluation(
-      fn : Example => Either[DspyError, RawPrediction],
-      cfg: EvaluateConfig
+      fn      : Example => Either[DspyError, RawPrediction],
+      cfg     : EvaluateConfig,
+      executor: ParallelExecutor
   )(using RuntimeContext): Either[DspyError, EvaluationResult] =
     val dataset = cfg.devset
     val metric  = cfg.metric
 
     // An empty devset has no score. A score of 0.0 looks like a valid result to an optimizer, so this is an error
     // (Python raises `ValueError`).
-    if dataset.isEmpty then
-      return Left(ValidationError("devset must contain at least one example, got an empty devset."))
-
-    val execResultE =
-      val executor = buildExecutor(cfg)
-      executor.executeEither[Example, (RawPrediction, Double)](
+    if dataset.isEmpty then Left(ValidationError("devset must contain at least one example, got an empty devset."))
+    else
+      val execResultE = executor.executeEither[Example, (RawPrediction, Double)](
         task = (ex: Example) =>
           // Runs on a parallel-executor worker thread; the ambient context is restored into the thread-local
           // there, so `RuntimeEnvironment.current` is the right `RuntimeContext` to hand the metric (so
@@ -131,53 +146,50 @@ final class Evaluate(val config: EvaluateConfig) extends Evaluator:
         data = dataset
       )
 
-    execResultE.flatMap { execResult =>
-      val evaluations = dataset.indices.map { idx =>
-        execResult.results(idx) match
-          case Some((prediction, score)) => ExampleEvaluation(dataset(idx), prediction, score)
-          case None                      =>
-            val capturedError =
-              if cfg.provideTraceback then
-                execResult.errors.get(idx).map(err => s"[${err.code}] ${err.message}")
-              else None
-            ExampleEvaluation(dataset(idx), RawPrediction.empty, cfg.failureScore, error = capturedError)
-      }.toVector
-
-      val totalScore = evaluations.map(_.score).sum
-      val aggregate  = if evaluations.nonEmpty then (totalScore / evaluations.size) * 100.0 else 0.0
-      val result     = EvaluationResult(
-        score = aggregate,
-        results = evaluations,
-        metricName = metric.name,
-        metadata = Map(
-          "num_threads" -> cfg.numThreads.getOrElse("default"),
-          "max_errors"  -> cfg.maxErrors.getOrElse("default"),
-          "devset_size" -> dataset.size
-        )
-      )
-
-      def persistenceError(kind: String, message: String): DspyError =
-        RuntimeError("evaluation_persistence", s"Failed to save $kind results: $message")
-
-      val persisted = cfg.saveAsJson
-        .fold[Either[DspyError, Unit]](Right(()))(path =>
-          EvaluationResultPersistence.saveAsJson(result, path).left.map(persistenceError("JSON", _))
-        )
-        .flatMap { _ =>
-          cfg.saveAsCsv.fold[Either[DspyError, Unit]](Right(()))(path =>
-            EvaluationResultPersistence.saveAsCsv(result, path).left.map(persistenceError("CSV", _))
-          )
+      execResultE.flatMap { execResult =>
+        val evaluations = dataset.zip(execResult.results).map {
+          case (example, Right((prediction, score))) => ExampleEvaluation(example, prediction, score)
+          case (example, Left(err))                  => ExampleEvaluation(
+              example,
+              RawPrediction.empty,
+              cfg.failureScore,
+              error = Some(s"[${err.code}] ${err.message}")
+            )
         }
 
-      persisted.map { _ =>
-        if cfg.displayProgress then
-          println(f"[Evaluate] score=${aggregate}%.2f%% on ${dataset.size} examples using metric '${metric.name}'")
+        val ncorrect = evaluations.map(_.score).sum
+        val result   = EvaluationResult(
+          score = PythonText.round(100.0 * ncorrect / evaluations.size, 2),
+          results = evaluations,
+          metricName = metric.name
+        )
 
-        tableLimit(cfg.displayTable).foreach(limit => println(result.renderTable(limit)))
+        def persistenceError(kind: String, message: String): DspyError =
+          RuntimeError("evaluation_persistence", s"Failed to save $kind results: $message")
 
-        result
+        val persisted = cfg.saveAsJson
+          .fold[Either[DspyError, Unit]](Right(()))(path =>
+            EvaluationResultPersistence.saveAsJson(result, path).left.map(persistenceError("JSON", _))
+          )
+          .flatMap { _ =>
+            cfg.saveAsCsv.fold[Either[DspyError, Unit]](Right(()))(path =>
+              EvaluationResultPersistence.saveAsCsv(result, path).left.map(persistenceError("CSV", _))
+            )
+          }
+
+        persisted.map { _ =>
+          if cfg.displayProgress then
+            println(f"[Evaluate] score=${result.score}%.2f%% on ${dataset.size} examples using metric '${metric.name}'")
+
+          cfg.displayTable match
+            case TableDisplay.Off                      => ()
+            case TableDisplay.All                      => println(result.renderTable())
+            case TableDisplay.Rows(count) if count > 0 => println(result.renderTable(Some(count)))
+            case TableDisplay.Rows(_)                  => ()
+
+          result
+        }
       }
-    }
 
   override def evaluate(
       predict: Example => Either[DspyError, RawPrediction],
@@ -189,30 +201,6 @@ final class Evaluate(val config: EvaluateConfig) extends Evaluator:
       config.copy(devset = dataset, metric = metric)
     )
 
-  /** Resolves the `displayTable` config into an optional row limit to pass to `renderTable`.
-    *   - `Left(false)` -> `None` (no table)
-    *   - `Left(true)` -> `Some(None)` (render all rows)
-    *   - `Right(n)` -> `Some(Some(n))` (render at most n rows)
-    */
-  private def tableLimit(spec: Either[Boolean, Int]): Option[Option[Int]] =
-    spec match
-      case Left(false) => None
-      case Left(true)  => Some(None)
-      case Right(n)    => Some(Some(n))
-
-  /** The thread count of a run: the configured count, else the count of the context, else 8. */
-  private def resolvedNumThreads(cfg: EvaluateConfig)(using ctx: RuntimeContext): ThreadCount =
-    cfg.numThreads.getOrElse(ctx.numThreads.getOrElse(ThreadCount(8)))
-
-  private def buildExecutor(cfg: EvaluateConfig)(using RuntimeContext): ParallelExecutor =
-    val ctx               = summon[RuntimeContext]
-    val resolvedMaxErrors = cfg.maxErrors.getOrElse(ctx.maxErrors.getOrElse(ErrorLimit(10)))
-    ParallelExecutor(
-      numThreads = resolvedNumThreads(cfg),
-      maxErrors = resolvedMaxErrors,
-      timeout = cfg.timeout
-    )
-
 object Evaluate:
   def apply(
       devset          : Vector[Example],
@@ -221,13 +209,12 @@ object Evaluate:
       maxErrors       : Option[ErrorLimit]  = None,
       failureScore    : Double              = 0.0,
       displayProgress : Boolean             = false,
-      displayTable    : Int                 = 0,
+      displayTable    : TableDisplay        = TableDisplay.Off,
       saveAsCsv       : Option[String]      = None,
       saveAsJson      : Option[String]      = None,
       timeout         : Duration            = Duration.Inf,
       callbackMetadata: DynamicValue.Record = DynamicValue.Record.empty
   ): Evaluate =
-    val displaySpec: Either[Boolean, Int] = if displayTable > 0 then Right(displayTable) else Left(false)
     new Evaluate(
       EvaluateConfig(
         devset = devset,
@@ -236,7 +223,7 @@ object Evaluate:
         maxErrors = maxErrors,
         failureScore = failureScore,
         displayProgress = displayProgress,
-        displayTable = displaySpec,
+        displayTable = displayTable,
         saveAsCsv = saveAsCsv,
         saveAsJson = saveAsJson,
         timeout = timeout,

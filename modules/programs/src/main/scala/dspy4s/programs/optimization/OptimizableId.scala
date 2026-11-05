@@ -1,6 +1,6 @@
 package dspy4s.programs.optimization
 
-import dspy4s.core.contracts.SignatureLayout
+import dspy4s.core.contracts.{PredictorKey, SignatureLayout}
 import io.github.iltotore.iron.RefinedSubtype
 import io.github.iltotore.iron.constraint.numeric.Positive0
 import scala.compiletime.error
@@ -62,6 +62,6 @@ object OptimizableId:
   */
 final case class IdentifiedOptimizable(id: OptimizableId, displayName: String, view: OptimizableView) derives CanEqual:
   def parameters: OptimizableParameters = view.parameters
-  def metadata: OptimizableMetadata     = view.metadata
+  def metadata: PredictorKey            = view.metadata
   def layout: SignatureLayout           = view.layout
   def moduleName: String                = view.moduleName

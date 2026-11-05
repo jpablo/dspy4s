@@ -5,7 +5,9 @@ import munit.FunSuite
 class OpenAiStreamChunkSuite extends FunSuite:
 
   private def decode(json: String): OpenAiStreamChunk =
-    OpenAiStreamChunk.decode(json).toOption.get
+    OpenAiStreamChunk.parse(json) match
+      case Right(Some(chunk)) => chunk
+      case other              => fail(s"no chunk: $other")
 
   test("decodes content delta, tolerating null finish_reason and unknown fields") {
     val chunk = decode(
@@ -23,6 +25,25 @@ class OpenAiStreamChunkSuite extends FunSuite:
       decode("""{"choices":[{"delta":{"content":" there"},"finish_reason":"stop"}]}""").toLmChunk.finishReason,
       Some("stop")
     )
+  }
+
+  test("the typed codec reads the reasoning keys of a delta: a null is no value, and an empty text stays a text") {
+    val delta =
+      decode("""{"choices":[{"delta":{"reasoning_content":null,"reasoning":"two"}}]}""").choices.flatMap(_.delta)
+    assertEquals(delta.map(d => (d.reasoningContent, d.reasoning)), Vector((None, Some("two"))))
+    val empty =
+      decode("""{"choices":[{"delta":{"reasoning_content":"","reasoning":"two"}}]}""").choices.flatMap(_.delta)
+    assertEquals(empty.map(d => (d.reasoningContent, d.reasoning)), Vector((Some(""), Some("two"))))
+    assertEquals(empty.map(_.reasoningText), Vector("two"))
+  }
+
+  test("a reasoning value that is not a text fails the typed codec, and the lenient reader drops only that value") {
+    // The lenient reader keeps only the first choice. Thus one choice here shows that the typed codec rejected the text.
+    val chunk =
+      decode("""{"choices":[{"delta":{"content":"a","reasoning":{"effort":"low"}}},{"delta":{"content":"b"}}]}""")
+    assertEquals(chunk.choices.size, 1)
+    assertEquals(chunk.toLmChunk.text, "a")
+    assertEquals(chunk.toLmChunk.reasoning, "")
   }
 
   test("decodes tool-call deltas with index fallback and partial function fragments") {
@@ -54,5 +75,5 @@ class OpenAiStreamChunkSuite extends FunSuite:
   }
 
   test("returns Left for malformed JSON") {
-    assert(OpenAiStreamChunk.decode("{not json").isLeft)
+    assert(OpenAiStreamChunk.parse("{not json").isLeft)
   }

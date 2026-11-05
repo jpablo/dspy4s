@@ -1,5 +1,6 @@
 package dspy4s.gepa
 
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -23,13 +24,13 @@ import dspy4s.programs.contracts.DynamicModule
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.optimization.OptimizableId
 import dspy4s.programs.optimization.OptimizableLeaf
-import dspy4s.programs.optimization.OptimizableMetadata
 import dspy4s.programs.optimization.OptimizableParameters
 import dspy4s.programs.strategies.DynamicPredict
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
 
 import java.util.concurrent.atomic.AtomicInteger
+import scala.util.Random
 
 /** Two leaves that run one after the other. Top-level so `OptimizableStructure.derived` sees its Mirror field labels.
   */
@@ -52,9 +53,9 @@ final case class KeylessLeaf(layout: SignatureLayout) extends DynamicModule:
 
 object KeylessLeaf:
   given OptimizableLeaf[KeylessLeaf] with
-    def get(program: KeylessLeaf): OptimizableParameters    = OptimizableParameters(program.layout.instructions)
-    def metadata(program: KeylessLeaf): OptimizableMetadata =
-      OptimizableMetadata.from(program.layout, program.moduleName)
+    def get(program: KeylessLeaf): OptimizableParameters = OptimizableParameters(program.layout.instructions)
+    def metadata(program: KeylessLeaf): PredictorKey     =
+      PredictorKey.from(program.moduleName, program.layout)
     def set(program: KeylessLeaf, updated: OptimizableParameters): KeylessLeaf =
       program.copy(layout = program.layout.withInstructions(updated.instructions))
 
@@ -156,7 +157,12 @@ class GepaPredictorKeySuite extends FunSuite:
       val adapter = new GepaAdapter(twins, metric)
       val seed    = Candidate.seed(twins)
       val batch   = adapter.evaluate(dataset, seed, captureTraces = true)
-      assertTwinError(adapter.makeReflectiveDataset(seed, batch, Vector(OptimizableId(0), OptimizableId(1))))
+      assertTwinError(adapter.makeReflectiveDataset(
+        seed,
+        batch,
+        Vector(OptimizableId(0), OptimizableId(1)),
+        new Random(GepaRandom.mix(0L))
+      ))
     }
   }
 
@@ -176,7 +182,12 @@ class GepaPredictorKeySuite extends FunSuite:
       val adapter = new GepaAdapter(keyless, metric)
       val seed    = Candidate.seed(keyless)
       val batch   = adapter.evaluate(dataset, seed, captureTraces = true)
-      assertMissingKeyError(adapter.makeReflectiveDataset(seed, batch, Vector(OptimizableId(0))))
+      assertMissingKeyError(adapter.makeReflectiveDataset(
+        seed,
+        batch,
+        Vector(OptimizableId(0)),
+        new Random(GepaRandom.mix(0L))
+      ))
     }
   }
 

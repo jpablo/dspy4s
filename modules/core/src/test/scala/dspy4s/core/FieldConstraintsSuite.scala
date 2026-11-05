@@ -1,10 +1,11 @@
 package dspy4s.core
 
+import dspy4s.core.contracts.Constraint
 import dspy4s.core.contracts.FieldConstraints
 import dspy4s.core.contracts.FieldSpec
-import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.TypeRef
 import munit.FunSuite
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 class FieldConstraintsSuite extends FunSuite:
 
@@ -34,6 +35,19 @@ class FieldConstraintsSuite extends FunSuite:
     assertEquals(FieldConstraints.multipleOf(5).schemaKeyword, "multipleOf")
   }
 
+  test("a length is an Int schema value, a whole bound a Long, and a fractional bound a Double") {
+    def int(n   : Int)    = DynamicValue.Primitive(PrimitiveValue.Int(n))
+    def long(n  : Long)   = DynamicValue.Primitive(PrimitiveValue.Long(n))
+    def double(n: Double) = DynamicValue.Primitive(PrimitiveValue.Double(n))
+    assertEquals(FieldConstraints.gt(0).schemaValue, long(0))
+    assertEquals(FieldConstraints.ge(1).schemaValue, long(1))
+    assertEquals(FieldConstraints.lt(2.5).schemaValue, double(2.5))
+    assertEquals(FieldConstraints.le(-10).schemaValue, long(-10))
+    assertEquals(FieldConstraints.minLength(3).schemaValue, int(3))
+    assertEquals(FieldConstraints.maxLength(10).schemaValue, int(10))
+    assertEquals(FieldConstraints.multipleOf(0.25).schemaValue, double(0.25))
+  }
+
   test("FieldSpec carries constraints and normalize preserves them") {
     val field = FieldSpec(
       name = "score",
@@ -45,43 +59,11 @@ class FieldConstraintsSuite extends FunSuite:
     assertEquals(normalized.constraints.map(_.render), Vector("greater than: 0", "maximum length: 10"))
   }
 
-  test("SignatureLayout dumpState/fromState round-trips a field's constraints") {
-    val layout = SignatureLayout
-      .create(
-        name = "Constrained",
-        inputFields = Vector(FieldSpec(name = "question")),
-        outputFields = Vector(
-          FieldSpec(
-            name = "score",
-            typeRef = TypeRef.int,
-            constraints = Vector(FieldConstraints.gt(0), FieldConstraints.maxLength(10))
-          )
-        )
-      )
-      .toOption
-      .get
-
-    val rebuilt    = SignatureLayout.fromState(layout.dumpState).toOption.get
-    val scoreField = rebuilt.outputFields.find(_.name == "score").get
-    // Structured round-trip: the rebuilt constraints equal the originals (not just their rendering).
-    assertEquals(scoreField.constraints, Vector(FieldConstraints.gt(0), FieldConstraints.maxLength(10)))
-    assertEquals(scoreField.constraints.map(_.render), Vector("greater than: 0", "maximum length: 10"))
-
-    // A field without constraints round-trips to an empty vector.
-    val questionField = rebuilt.inputFields.find(_.name == "question").get
-    assertEquals(questionField.constraints, Vector.empty[dspy4s.core.contracts.Constraint])
-  }
-
-  test("SignatureLayout fromState defaults constraints to empty when absent") {
-    // dumpState from a layout with no constraints must read back as empty (not fail).
-    val layout = SignatureLayout
-      .create(
-        name = "Plain",
-        inputFields = Vector(FieldSpec(name = "question")),
-        outputFields = Vector(FieldSpec(name = "answer"))
-      )
-      .toOption
-      .get
-    val rebuilt = SignatureLayout.fromState(layout.dumpState).toOption.get
-    assert(rebuilt.fields.forall(_.constraints.isEmpty))
+  test("a whole bound at or above 2^63 renders and serializes with all its digits") {
+    assertEquals(FieldConstraints.lt(1e20).render, "less than: 100000000000000000000")
+    assertEquals(
+      Constraint.Lt(1e20).schemaValue,
+      DynamicValue.Primitive(PrimitiveValue.BigInt(BigInt("100000000000000000000")))
+    )
+    assertEquals(FieldConstraints.ge(-1e20).render, "greater than or equal to: -100000000000000000000")
   }

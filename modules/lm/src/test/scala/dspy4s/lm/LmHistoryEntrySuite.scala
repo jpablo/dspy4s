@@ -23,7 +23,6 @@ import dspy4s.lm.contracts.MessageRole
 import dspy4s.lm.contracts.StreamingLanguageModel
 import dspy4s.lm.runtime.CacheCapacity
 import dspy4s.lm.runtime.InMemoryLmCache
-import dspy4s.lm.runtime.LmCacheRegistry
 import dspy4s.lm.runtime.ManagedLanguageModel
 import munit.FunSuite
 import zio.blocks.schema.DynamicValue
@@ -36,17 +35,12 @@ import java.util.UUID
   */
 class LmHistoryEntrySuite extends FunSuite:
 
-  override def beforeEach(context: BeforeEach): Unit =
-    RuntimeEnvironment.resetForTests()
-    LmCacheRegistry.resetDefault()
+  override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
-  override def afterEach(context: AfterEach): Unit =
-    RuntimeEnvironment.resetForTests()
-    LmCacheRegistry.resetDefault()
-
-  private final class Fixed(result: Either[DspyError, LmResponse]) extends LanguageModel:
+  private final class Fixed(result: Either[DspyError, LmResponse], override val mode: LmMode = LmMode.Chat)
+      extends LanguageModel:
     override val id: String                                                                    = "fixed"
-    override val mode: LmMode                                                                  = LmMode.Chat
     override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] = result
 
   private final class Streams(chunks: Vector[LmChunk]) extends StreamingLanguageModel:
@@ -60,7 +54,6 @@ class LmHistoryEntrySuite extends FunSuite:
 
   private val request = LmRequest(
     model = "gpt-test",
-    mode = LmMode.Chat,
     messages = Vector(
       Message(role = MessageRole.System, text = Some("Be terse.")),
       Message(
@@ -173,6 +166,18 @@ class LmHistoryEntrySuite extends FunSuite:
       case other        => fail(s"the uuid is not a string: $other")
   }
 
+  test("the model_type of an entry is the mode of the model, for a success and for a failure") {
+    given RuntimeContext = RuntimeEnvironment.current
+    Vector(LmMode.Chat, LmMode.Text, LmMode.Responses).foreach { mode =>
+      assert(ManagedLanguageModel(delegate = Fixed(Right(response), mode)).call(request).isRight)
+      assert(ManagedLanguageModel(delegate = Fixed(Left(LmAuthError("bad key")), mode)).call(request).isLeft)
+    }
+    assertEquals(
+      lmEntries.map(value(_, "model_type")),
+      Vector("chat", "chat", "text", "text", "responses", "responses")
+    )
+  }
+
   test("the entry of a cache hit has cache_hit, and two entries have different uuids") {
     given RuntimeContext = RuntimeEnvironment.current
     val model            = ManagedLanguageModel(
@@ -225,6 +230,33 @@ class LmHistoryEntrySuite extends FunSuite:
         Map("temperature" -> BigDecimal(0.5), "extra_body" -> Map("api_version" -> "2024-01-01"))
       )
     }
+  }
+
+  test("an output of an entry has reasoning_content only when its reasoning is not empty") {
+    given RuntimeContext = RuntimeEnvironment.current
+    val reasoned         = LmResponse(outputs = Vector(LmOutput(text = "a", reasoning = "  why\n"), LmOutput(text = "b")))
+    assert(ManagedLanguageModel(delegate = Fixed(Right(reasoned))).call(request).isRight)
+    assertEquals(
+      value(lmEntries.lastOption.getOrElse(fail("no LM entry")), "outputs"),
+      Vector(
+        Map("text" -> "a", "tool_calls" -> Vector.empty, "reasoning_content" -> "  why\n"),
+        Map("text" -> "b", "tool_calls" -> Vector.empty)
+      )
+    )
+  }
+
+  test("the output of the entry of a streamed call has the joined reasoning") {
+    given RuntimeContext = RuntimeEnvironment.current
+    val chunks           = Vector(
+      LmChunk(reasoning = "why "),
+      LmChunk(reasoning = "so"),
+      LmChunk(text = "a", finishReason = Some("stop"))
+    )
+    val _ = ManagedLanguageModel(delegate = Streams(chunks)).stream(request).toVector
+    assertEquals(
+      value(lmEntries.lastOption.getOrElse(fail("no LM entry")), "outputs"),
+      Vector(Map("text" -> "a", "tool_calls" -> Vector.empty, "reasoning_content" -> "why so"))
+    )
   }
 
   test("the entry of a streamed call has the assembled outputs and the usage of the chunks") {

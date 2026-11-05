@@ -1,5 +1,6 @@
 package dspy4s.programs
 
+import dspy4s.core.contracts.PredictorKey
 import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DspyError
@@ -14,7 +15,7 @@ import dspy4s.programs.contracts.ModuleLifecycle
 import dspy4s.programs.contracts.ProgramCall
 import dspy4s.programs.contracts.Prediction
 import munit.FunSuite
-import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -36,7 +37,7 @@ class ModeLawSuite extends FunSuite:
   private final case class Recorder(predict: DynamicPredict) extends Module[Int, Int]:
     val seen: ArrayBuffer[Mode.Controls]                                                                             = ArrayBuffer.empty
     override val moduleName: String                                                                                  = "recorder"
-    override protected val lifecycle: ModuleLifecycle[Int, Int]                                                      = ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[Int]                                                           = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[Int])(using RuntimeContext): Either[DspyError, Prediction[Int]] =
       seen += Mode.Controls(call.config, call.traceEnabled, call.rolloutId)
       Right(Prediction(call.input, RawPrediction.empty))
@@ -44,7 +45,7 @@ class ModeLawSuite extends FunSuite:
   private object Recorder:
     given recorderOptimizable: OptimizableLeaf[Recorder] with
       def get(program     : Recorder): OptimizableParameters               = program.predict.optimizableParameters
-      def metadata(program: Recorder): OptimizableMetadata                 = program.predict.optimizableView.metadata
+      def metadata(program: Recorder): PredictorKey                        = program.predict.optimizableView.metadata
       def set(program: Recorder, updated: OptimizableParameters): Recorder =
         program.copy(predict = program.predict.withOptimizableParameters(updated))
 
@@ -52,6 +53,17 @@ class ModeLawSuite extends FunSuite:
 
   private def temp(controls: Mode.Controls): Option[String] =
     DynamicValues.recordGet(controls.config, "temperature").map(DynamicValues.renderText)
+
+  test("Mode.temperature writes a Double and Mode.setConfig writes a String into the config") {
+    val controls = Mode.Controls(DynamicValue.Record.empty, traceEnabled = true, rolloutId = None)
+    assertEquals(
+      (Mode.temperature(0.7) ++ Mode.setConfig("stop" := "END")).transform(controls).config,
+      DynamicValues.record(
+        "temperature" -> DynamicValue.Primitive(PrimitiveValue.Double(0.7)),
+        "stop"        -> DynamicValue.Primitive(PrimitiveValue.String("END"))
+      )
+    )
+  }
 
   test("mode applies the control transform — the temperature reaches the wrapped program") {
     val r = Recorder(predict("a -> b"))
@@ -65,9 +77,9 @@ class ModeLawSuite extends FunSuite:
     samples.foreach(c => assertEquals(eq.lhs.transform(c), eq.rhs.transform(c)))
 
   test("Mode is a lawful monoid: the Monoid[Mode] instance's laws, executed") {
-    val M       = Monoid[Mode]
+    val M       = summon[Monoid[Mode]]
     val m1      = Mode.temperature(0.5)
-    val m2      = Mode.model("gpt-x")
+    val m2      = Mode.setConfig("top_p" := 0.5)
     val m3      = Mode.rolloutId(3)
     val samples = Vector(
       Mode.Controls(DynamicValue.Record.empty, traceEnabled = true, rolloutId = None),
@@ -91,7 +103,7 @@ class ModeLawSuite extends FunSuite:
   }
 
   test("the Module action executes its stated identity and compatibility laws") {
-    val action = MonoidAction[Mode, Module[Int, Int]]
+    val action = summon[MonoidAction[Mode, Module[Int, Int]]]
     val m1     = Mode.temperature(0.5)
     val m2     = Mode.temperature(0.9)
 
@@ -112,7 +124,7 @@ class ModeLawSuite extends FunSuite:
   }
 
   test("the Module action is a lawful functor from the opposite Mode delooping") {
-    val action = MonoidAction[Mode, Module[Int, Int]]
+    val action = summon[MonoidAction[Mode, Module[Int, Int]]]
     val F      = action.functor
     val m1     = Mode.temperature(0.5)
     val m2     = Mode.temperature(0.9)

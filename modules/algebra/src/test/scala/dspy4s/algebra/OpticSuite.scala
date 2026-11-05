@@ -32,6 +32,16 @@ final class OpticSuite extends FunSuite:
     assertEquals(addressLens.from(alice -> Address("Broadway")), Person(Address("Broadway")))
   }
 
+  test("a lawful lens satisfies get-put, put-get, and put-put") {
+    val alice = Person(Address("Main"))
+    val first = Address("First")
+    val last  = Address("Last")
+
+    assertEquals(addressLens.getPut(alice).lhs, addressLens.getPut(alice).rhs)
+    assertEquals(addressLens.putGet(alice, first).lhs, addressLens.putGet(alice, first).rhs)
+    assertEquals(addressLens.putPut(alice, first, last).lhs, addressLens.putPut(alice, first, last).rhs)
+  }
+
   test("Lens states the modify identity, composition, and set consistency laws") {
     val alice = Person(Address("Main"))
 

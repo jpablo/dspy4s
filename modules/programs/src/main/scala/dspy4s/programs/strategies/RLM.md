@@ -58,11 +58,9 @@ final case class RLM[I, O](
     verbose: Boolean = false,
     tools: Vector[ToolFunction] = Vector.empty,
     subLm: Option[LanguageModel] = None,
-    interpreterFactory: Option[RLM.InterpreterFactory] = None,
-    actionProgramName: String = "rlm_action",
-    extractProgramName: String = "rlm_extract",
-    actionPredictOverride: Option[Predict[RLM.ActionInputs, RLM.ActionStep]] = None,
-    extractPredictOverride: Option[Predict[RLM.ExtractInputs, O]] = None
+    interpreterFactory: Option[ReplInterpreterFactory] = None,
+    actionPredictOverride: Option[Predict[RLMModel.ActionInputs, RLMModel.ActionStep]] = None,
+    extractPredictOverride: Option[Predict[RLMModel.ExtractInputs, O]] = None
 ) extends Module[I, O]
 ```
 
@@ -75,13 +73,11 @@ Its fields have distinct responsibilities:
 | `maxLlmCalls` | Per-forward budget shared by `llm_query` and `llm_query_batched` |
 | `maxOutputChars` | Head-and-tail limit for each REPL output rendered into history |
 | `verbose` | Logs each action and ordinary step output to stderr |
-| `tools` | Extra `ToolFunction` values callable from generated Python |
+| `tools` | Extra `ToolFunction` values callable from generated Python. The default `extractPredict` also has them as model tools |
 | `subLm` | Optional LM used by the in-REPL `llm_query` tools |
 | `interpreterFactory` | Creates the stateful REPL owned by one forward call. `None` selects the factory of the runtime context, then the Deno sandbox |
-| `actionProgramName` | Module name of the per-iteration predictor |
-| `extractProgramName` | Module name of the fallback predictor |
 | `actionPredictOverride` | Immutable replacement for the default action predictor |
-| `extractPredictOverride` | Immutable replacement for the default fallback predictor |
+| `extractPredictOverride` | Immutable replacement for the default fallback predictor. It keeps its own tools |
 
 The outer module name is always `rlm`. Unlike `ChainOfThought` and `ReAct`, RLM does not add a reasoning
 field to `O`. It returns the base output type directly. The final action reasoning and rendered trajectory are kept in
@@ -107,10 +103,10 @@ The inner predictor types are explicit:
 
 ```scala
 actionPredict:
-  Predict[RLM.ActionInputs, RLM.ActionStep]
+  Predict[RLMModel.ActionInputs, RLMModel.ActionStep]
 
 extractPredict:
-  Predict[RLM.ExtractInputs, O]
+  Predict[RLMModel.ExtractInputs, O]
 ```
 
 Their carrier types are:
@@ -153,7 +149,7 @@ A call to `RLM[I, O]` proceeds as follows:
 3. RLM creates the built-in sub-LM tools, bridges user tools, and creates a fresh `ReplCodeInterpreter`.
 4. `AgentLoop` starts with an empty `Vector[ReplEntry]`.
 5. `actionPredict` receives the variable metadata, rendered history, and an iteration label such as `1/20`.
-6. RLM strips an optional Python Markdown fence and interprets the resulting `ReplAction`.
+6. RLM strips an optional Python Markdown fence and runs the resulting code in the REPL.
 7. An ordinary observation is appended to history and the next iteration begins.
 8. A valid `SUBMIT` is decoded to `O` and returns immediately.
 9. If all iterations are consumed, `extractPredict` creates `O` from the metadata and history.
@@ -173,7 +169,7 @@ sequenceDiagram
     loop Until SUBMIT or maxIterations
         R->>A: ActionInputs(metadata, history, iteration)
         A-->>R: ActionStep(reasoning, code)
-        R->>P: execute ReplAction with input variables
+        R->>P: execute code with input variables
         alt ordinary observation
             P-->>R: stdout, error, or invalid SUBMIT
         else schema-valid SUBMIT
@@ -190,52 +186,29 @@ sequenceDiagram
     deactivate R
 ```
 
-## One iteration and its algebra
+## One iteration
 
-The model first produces an `ActionStep`. After fence handling, RLM turns it into a smaller execution command:
+The model first produces an `ActionStep`. `RLMExecution.step` strips the code fence, runs the code, and classifies the
+result. A step has one of these results: a `ReplEntry` at the end of the history, and the loop continues; the final
+`Prediction[O]`, and the loop ends; or a `Left(DspyError)`.
 
-```scala
-final case class ReplAction(
-    reasoning: String,
-    code: String
-)
-```
-
-The per-call interpreter has this abstract interface:
-
-```scala
-ActionInterpreter[RLM.ReplAction, RLM.ReplExecution]
-```
-
-Execution yields two independent pieces of information:
-
-- `ActionOutcome.Succeeded` or `ActionOutcome.Failed` records whether the action itself worked;
-- `ReplExecution.Observed` or `ReplExecution.Submitted` tells the loop whether to continue or finish.
-
-```scala
-enum ReplExecution:
-  case Observed(entry: ReplEntry)
-  case Submitted(entry: ReplEntry, outputs: DynamicValue.Record)
-```
-
-That separation is useful. A failed Python action can still produce an observation that helps the next action, so
-`Right(ActionOutcome.Failed(Observed(...)))` continues. A `Left(DspyError)` is reserved for a failure outside this
-recoverable action protocol. A `Left` from the REPL is such a failure: the interpreter itself failed, generated code
-cannot repair it, and the run ends with that error.
+A failed Python action can still produce an observation that helps the next action, so its `[Error]` entry continues
+the loop. A `Left(DspyError)` is reserved for a failure outside this recoverable action protocol. A `Left` from the REPL
+is such a failure: the interpreter itself failed, generated code cannot repair it, and the run ends with that error.
 
 ```mermaid
 flowchart TD
     action["ActionStep(reasoning, raw code)"] --> fence{"Python fence accepted?"}
-    fence -->|"no"| fenceError["Failed(Observed([Error] ...))"]
-    fence -->|"yes"| run["ActionInterpreter.execute(ReplAction)"]
+    fence -->|"no"| fenceError["[Error] entry"]
+    fence -->|"yes"| run["interpreter.execute(code, inputVars)"]
 
     run --> result{"Interpreter result"}
-    result -->|"stdout, exit 0"| observed["Succeeded(Observed(entry))"]
-    result -->|"stderr, non-zero"| userError["Failed(Observed([Error] ...))"]
+    result -->|"stdout, exit 0"| observed["Output entry"]
+    result -->|"stderr, non-zero"| userError["[Error] entry"]
     result -->|"Left(DspyError)"| interpreterError["Return Left(error)"]
     result -->|"finalOutput"| submit{"Complete and Shape[O]-valid?"}
-    submit -->|"no"| submitError["Failed(Observed(error entry))"]
-    submit -->|"yes"| submitted["Succeeded(Submitted(entry, record))"]
+    submit -->|"no"| submitError["[Error] or [Type Error] entry"]
+    submit -->|"yes"| submitted["FINAL entry"]
 
     fenceError --> continue["Append entry and continue"]
     observed --> continue
@@ -259,8 +232,8 @@ Preview:
 ```
 ````
 
-`ReplVariable.fromValue` uses a 1,000-character head-and-tail preview by default. Structured values are rendered as
-JSON for the purpose of computing their type, total length, and preview.
+`ReplVariable.fromValue` uses a 1,000-character head-and-tail preview by default. The total length and the preview use
+the text of upstream: `json.dumps` with an indent of 2 for a dict or a list, and Python `str` for each other value.
 
 After one action, `repl_history` resembles:
 
@@ -356,7 +329,8 @@ SUBMIT(answer=42, confidence="very")     # wrong output types
 ```
 
 The next model turn sees an `[Error] Missing output fields: ...` or `[Type Error] ...` entry and can correct the call.
-A successful submission is decoded to `O` and returned directly; the fallback predictor does not run.
+A successful submission is decoded to `O` and returned directly; the fallback predictor does not run. The result holds
+the declared outputs only, in the order of the signature.
 
 ## Fallback extraction
 
@@ -378,6 +352,14 @@ intermediate results.
 Fallback is an iteration-budget policy, not a general error handler. If `actionPredict` or `extractPredict` itself
 returns `Left`, RLM returns that error. Reaching the fallback always writes a warning to stderr, even when `verbose` is
 false.
+
+A signature with a tool calls output (`Vector[ToolCall]`) needs tools in this step, and the signature does not hold
+them. Thus the default `extractPredict` gets the tools of the program. When native function calling is active, the
+request has them as provider tools. Else the prompt shows them as an input field `tools`. A plain output gets no change
+in its request or its prompt. The action step has no tools.
+
+An optimizer builds its `extractPredictOverride` from the current predictor, so that override keeps the tools. An
+override that you build yourself keeps its own tools.
 
 ## Built-in tools and sub-LM calls
 
@@ -403,14 +385,15 @@ The sub-LM is selected as follows:
 This allows the action policy and semantic helper to use different models. For example, the action predictor can use a
 strong code-generating model while `subLm` uses a cheaper model for many targeted classifications.
 
-User `ToolFunction` values take two paths:
+User `ToolFunction` values take three paths:
 
 ```mermaid
 flowchart LR
     tools["Vector[ToolFunction]"]
     tools --> instructions["Rendered in action instructions"]
-    tools --> bridge["SandboxToolBridge.fromToolFunctions"]
+    tools --> bridge["RLMSandboxTools.fromToolFunctions"]
     bridge --> repl["Callable by name inside Python"]
+    tools --> extract["Model tools of extractPredict"]
 ```
 
 Construction rejects a user tool named `llm_query`, `llm_query_batched`, `SUBMIT`, or `print`, because shadowing a
@@ -568,10 +551,10 @@ The inner predictors are stable members, so callbacks and tracing can observe ev
 `rlm_extract` call. Direct REPL execution is not a module boundary, though its rendered result appears in later action
 inputs and in the final trajectory.
 
-The current [`Streamable.scala`](../../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala) defines
-dedicated instances for `Predict`, `ChainOfThought`, and `ReAct`, but not for `RLM`.
-Consequently, RLM does not yet have the same `Streamify` entry point and listener-signature validation as those
-programs.
+[`Streamable.scala`](../../../../../../../streaming/src/main/scala/dspy4s/streaming/Streamable.scala) has an instance
+for `RLM`, so `Streamify` can run it, and the listener validation knows `actionPredict` and `extractPredict`.
+The sub-LM tools stream too. Their tokens have no predictor name, so they reach the stream only when it has no
+listener.
 
 ## RLM compared with nearby programs
 
@@ -588,30 +571,27 @@ actions.
 
 A useful reading order is:
 
-1. [`RLM.scala`](RLM.scala): configuration, derived signatures, addressable predictors, and the public `RLM.*` facade.
-2. [`RLMModel.scala`](RLMModel.scala): action inputs/outputs, REPL commands, execution outcomes, variable metadata, and
-   history entries.
+1. [`RLM.scala`](RLM.scala): configuration, derived signatures, addressable predictors, and the name checks.
+2. [`RLMModel.scala`](RLMModel.scala): action inputs/outputs, variable metadata, and history entries.
 3. [`RLMExecution.scala`](RLMExecution.scala): one invocation's interpreter lifecycle, loop transitions, validated
    `SUBMIT`, result assembly, and extraction fallback.
 4. [`RLMReplProtocol.scala`](RLMReplProtocol.scala): prompt instructions, history rendering, code-fence handling, and
    `SUBMIT` decoding.
-5. [`RLMSandboxTools.scala`](RLMSandboxTools.scala): bounded `llm_query` and `llm_query_batched` sandbox functions.
-6. [`contracts/ActionInterpreter.scala`](../contracts/ActionInterpreter.scala): recoverable action outcomes versus fatal
-   interpreter errors.
-7. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): bounded continue/done recursion and exhaustion handling.
-8. [`CodeInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/contracts/CodeInterpreter.scala):
+5. [`RLMSandboxTools.scala`](RLMSandboxTools.scala): bounded `llm_query` and `llm_query_batched` sandbox functions, and
+   the user tools as sandbox functions.
+6. [`runtime/AgentLoop.scala`](../runtime/AgentLoop.scala): bounded continue/done recursion and exhaustion handling.
+7. [`CodeInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/contracts/CodeInterpreter.scala):
    `ReplCodeInterpreter`, `CodeResult`, and `SandboxTool` contracts.
-9. [`DenoPyodideInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/runtime/DenoPyodideInterpreter.scala):
+8. [`DenoPyodideInterpreter.scala`](../../../../../../../core/src/main/scala/dspy4s/core/runtime/DenoPyodideInterpreter.scala):
    the default stateful sandbox and host-tool bridge.
-10. [`CompositeOptimizableStructureInstances.scala`](../optimization/CompositeOptimizableStructureInstances.scala): the
-   two-leaf optimizable structure.
-11. [`RLMSuite.scala`](../../../../../test/scala/dspy4s/programs/RLMSuite.scala): executable cases for iteration, invalid
+9. The `rlmOptimizableStructure` given in the companion of [`RLM`](RLM.scala): the two-leaf optimizable structure.
+10. [`RLMSuite.scala`](../../../../../test/scala/dspy4s/programs/RLMSuite.scala): executable cases for iteration, invalid
    submissions, code errors, call limits, metadata, logging, and fallback.
-12. [`RLMLiveSuite.scala`](../../../../../test/scala/dspy4s/programs/RLMLiveSuite.scala): end-to-end execution against the
+11. [`RLMLiveSuite.scala`](../../../../../test/scala/dspy4s/programs/RLMLiveSuite.scala): end-to-end execution against the
    real Deno/Pyodide REPL.
-13. [`talk_to_your_data/Agent.scala`](../../../../../../../examples/src/main/scala/dspy4s/examples/tutorials/talk_to_your_data/Agent.scala):
+12. [`talk_to_your_data/Agent.scala`](../../../../../../../examples/src/main/scala/dspy4s/examples/tutorials/talk_to_your_data/Agent.scala):
    RLM as the execution stage over a CSV that is too large for the prompt.
-12. [`react_vs_rlm/ReactVsRlm.scala`](../../../../../../../examples/src/main/scala/dspy4s/examples/tutorials/react_vs_rlm/ReactVsRlm.scala):
+13. [`react_vs_rlm/ReactVsRlm.scala`](../../../../../../../examples/src/main/scala/dspy4s/examples/tutorials/react_vs_rlm/ReactVsRlm.scala):
     the same task and tools expressed with ReAct and RLM.
 
 ## Scope and assumptions

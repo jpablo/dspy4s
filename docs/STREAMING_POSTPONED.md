@@ -24,6 +24,15 @@ to port" list under v1.7 overlaps the tests already shipped in v1.8 (e.g.
 `*_returns_correct_chunk_*` matrix). Treat the v1.8 / per-token-refactor sections
 as authoritative for current status.
 
+## Shipped: the stream in the context
+
+`Streamify` does not change the model of the context. It puts a `StreamSession` in
+the context (`RuntimeContext.streamSink`, the analog of upstream
+`settings.send_stream`). `LanguageModel.callAndRecordUsage` wraps each model that it
+calls with that session. Thus each model of the program streams, also the own model
+of a predictor. The session holds the state that the wrappers of one `streamify`
+call share.
+
 ## Shipped in v1 (Phase 8 — minimal slice)
 
 - `LmChunk` + `StreamingLanguageModel` trait (in `lm.contracts`)
@@ -38,35 +47,30 @@ as authoritative for current status.
 
 ## Shipped in v1.5 — Compound-program routing (Slice D)
 
-- `Streamify.signatureFor` now pattern-matches `ChainOfThought` and `ReAct`
-  in addition to `Predict`. The resolver returns the **outer** program's
-  `moduleName` as the listener `predictName`, so listeners filter against
-  the user-visible program (`"chain_of_thought"`, `"react"`, `"predict"`)
-  rather than the inner Predict's name.
+- This slice added `Streamify.signatureFor`, a match on `ChainOfThought`
+  and `ReAct`. Per-call routing through `ActivePredictContext` replaced it:
+  at the start of each LM call, the wrapper reads the name and the signature
+  of the active predictor. A listener filters against that name, for example
+  `"predict"`, `"react"`, or `"react_extract"`.
 - `ChainOfThought` exposes its augmented signature (`reasoning` field
   prepended to the base outputs) via `.signature.toOption`, so listeners
   on the reasoning field receive its tokens.
-- `ReAct` recursively delegates to its inner `module`'s signature. Every
-  iteration's LM call builds a fresh adapter state, so listeners fire on
-  each iteration's matched chunks (equivalent to Python DSPy's
-  `allow_reuse=True`).
+- Every `ReAct` iteration's LM call builds a fresh adapter state, so a
+  listener with `allowReuse = true` fires on each iteration's matched chunks
+  (equivalent to Python DSPy's `allow_reuse=True`).
 - 3 new tests in `StreamListenerSuite`: ChainOfThought + listener,
   ChainOfThought + predictName filter, ReAct routing through inner
   Predict.
 
 ### Notes / behavioral deltas from Python parity
 
-- dspy4s defaults to `allow_reuse = true` semantics (every iteration's
-  matched chunks fire). Python defaults to `allow_reuse = false` (only
-  the first invocation fires). An opt-in `allowReuse: Boolean = true`
-  field on `StreamListener` would close the gap; deferred until a
-  concrete use case appears.
-- Multi-predictor programs with *different* signatures per inner predict
-  aren't in dspy4s today (none of `Predict` / `ChainOfThought` / `ReAct`
-  compose distinct predictors with distinct signatures). When such a
-  program lands, `signatureFor` will need to switch to per-LM-call
-  signature routing — see the matching note that used to live in this
-  doc and is now resolved for the current program set.
+- `StreamListener.allowReuse` defaults to `false`, as Python's
+  `allow_reuse = False`: the listener fires for one field cycle, and then
+  goes silent. Pass `allowReuse = true` for a listener that fires on each
+  iteration.
+- Per-call routing through `ActivePredictContext` replaced `signatureFor`.
+  Thus a program whose inner predictors have different signatures streams
+  each predictor under its own signature.
 
 ## Shipped in v1.4 — XML adapter streaming state (Slice C)
 
@@ -145,15 +149,15 @@ for the small residual chunk-emission delta that remains
 - 10 tests across `ToolCallAssemblerSuite`, `OpenAiClientSuite`,
   `StreamingToolCallSuite`
 
-## Shipped in v1.6 — `allowReuse` opt-out and listener field-name validation
+## Shipped in v1.6: `allowReuse` and listener field-name validation
 
-- `StreamListener` gains `allowReuse: Boolean = true`. When set `false`,
-  the listener emits chunks for one complete field cycle (up to and
+- `StreamListener` gains `allowReuse: Boolean`. The default was `true` in
+  this version. It is now `false`, as Python's `allow_reuse = False`. When
+  `false`, the listener emits chunks for one complete field cycle (up to and
   including `isLastChunk = true`) and then goes silent for the rest of
-  the `streamify` invocation. Matches Python's `allow_reuse = False`
-  default behaviour as an opt-in for users that want it.
-  Implementation: `StreamingLanguageModelWrapper.firedListeners` mutable
-  set tracks which listener indices have closed a field cycle.
+  the `streamify` invocation.
+  Implementation: `StreamSession.firedListeners`, a
+  concurrent set, tracks which listener indices have closed a field cycle.
 - `Streamify.streamify` now accepts a `warningSink: String => Unit`
   (defaults to `System.err.println`) and walks the program tree
   (`Predict` / `ChainOfThought` / `ReAct`) to warn at streamify-time
@@ -161,7 +165,8 @@ for the small residual chunk-emission delta that remains
   Predict signature, or when its `predictName` doesn't match any
   Predict's name. dspy4s's equivalent of Python's
   `find_predictor_for_stream_listeners`. Opaque user composites skip
-  validation silently.
+  validation silently. A later change added a warning for a listener with
+  no `predictName` on a field of more than one known signature.
 - 5 new tests in `StreamListenerSuite` covering both directions of
   `allowReuse`, unknown-field warning, unknown-`predictName` warning,
   and opaque-composite skip.
@@ -191,6 +196,10 @@ and `XmlStreamingState`. The helpers are not yet used by the state
 machines themselves — they exist as the foundation for a future
 per-token state-machine refactor.
 
+Removed later: only the three tests called the helpers, and the state
+machines did not use them. The port removed the three helpers and the
+three tests.
+
 Test bug fix as part of this batch: `ChatStreamingState.stripFramingNewlines`
 previously stripped at most one boundary newline. It now strips all
 leading/trailing newlines from emitted content so that real LM output
@@ -209,9 +218,10 @@ Five Python tests assert per-token chunk shape and remain unported:
 
 To port these we'd rewrite all three `*StreamingState`s around a
 queue-of-received-fragments + holdback discipline that emits each LM
-token as its own `FieldChunk`. The `couldFormEndIdentifier` helpers
-shipped in v1.8 are the per-adapter holdback predicates this refactor
-would consume.
+token as its own `FieldChunk`. The refactor must also write the
+holdback predicate of each adapter (upstream
+`_could_form_end_identifier`). The port removed the helpers of v1.8,
+because nothing used them.
 
 The work is bounded but substantial (~hundreds of lines across the
 three states + companions, plus rewriting the existing
@@ -273,7 +283,8 @@ The `StreamingLanguageModel` trait is designed to be provider-agnostic; each pro
 
 The v1 design uses direct-style Scala + a producer thread + `LinkedBlockingQueue`. This is sufficient for inference but has limits:
 
-- No structured concurrency — cancelling a stream doesn't stop the LM request
+- No structured concurrency: a close of a stream interrupts the producer
+  thread and stops the LM request, but no scope owns that thread
 - Back-pressure is only bounded by the queue capacity
 - No `Stream[IO, *]` composition with other effectful pipelines
 

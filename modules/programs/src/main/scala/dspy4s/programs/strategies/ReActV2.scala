@@ -1,6 +1,6 @@
 package dspy4s.programs.strategies
 
-import dspy4s.adapters.contracts.{NativeFunctionCalling, ToolParameterSpec, ToolSpec}
+import dspy4s.adapters.contracts.{NativeFunctionCalling, NativeTools, ToolChoice}
 import dspy4s.adapters.internal.ProgramPromptText
 import dspy4s.core.contracts.{
   :=,
@@ -21,15 +21,20 @@ import dspy4s.core.contracts.{
 }
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.programs.IterationLimit
+import dspy4s.programs.{IterationLimit, SignatureInput}
 import dspy4s.programs.contracts.{ModuleLifecycle, Prediction, ProgramCall, ToolFunction}
 import dspy4s.programs.internal.ToolText
-import dspy4s.programs.runtime.ToolExecutor
+import dspy4s.programs.optimization.{
+  OptimizableStructure,
+  optimizableParameters,
+  optimizableView,
+  withOptimizableParameters
+}
+import dspy4s.programs.runtime.{AgentLoop, ToolExecutor}
 import dspy4s.signatures.Signature
-import zio.blocks.chunk.Chunk
-import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
+import zio.blocks.schema.{DynamicValue, Schema}
 
-import scala.annotation.tailrec
+import scala.collection.immutable.VectorMap
 
 /** Experimental. An agent that calls tools until it calls `submit` with the outputs of the signature (upstream
   * `dspy.ReActV2` in `dspy/predict/react_v2.py`; upgrade item P10, the six points of P10 in the upgrade plan). It is a
@@ -38,7 +43,7 @@ import scala.annotation.tailrec
   * Each turn runs the step predictor [[reactPredict]] once. The step predictor has the layout [[reactLayout]]: it gets
   * the pending inputs, the [[History]] of the run, and the tools, and gives `next_thought` and `tool_calls`. The
   * adapter of the call decides the form of the tool calls: with native function calling (the adapter has
-  * `useNativeFunctionCalling` and the model supports function calling), the request has the tools as provider tools;
+  * `NativeTools(enabled = true)` and the model supports function calling), the request has the tools as provider tools;
   * else the prompt shows the tools as text, and the model writes the tool calls as JSON text.
   *
   * The loop (upstream `ReActV2.forward`), for each turn from 0 to `maxIterations - 1`:
@@ -51,10 +56,10 @@ import scala.annotation.tailrec
   *     the error result `Execution error in <name>: <message>`. A tool error is a `Left` of the tool or a non-fatal
   *     exception of the tool (see [[dspy4s.programs.runtime.ToolExecutor.run]]). A fatal error of a tool goes up to the
   *     caller. A `submit` call that succeeds gives the final outputs.
-  *   - The event of the turn goes at the end of the history, when it is not empty: the pending inputs, `next_thought`,
-  *     `tool_calls`, the results of the calls under [[History.ToolCallResultsKey]] (the port form; upstream keeps the
-  *     results inside its `ToolCalls` value), and the final outputs when the turn has them. The pending inputs are the
-  *     inputs of the call on the first turn, and none after it.
+  *   - The event of the turn goes at the end of the history: the pending inputs, `next_thought`, `tool_calls`, the
+  *     results of the calls under [[History.ToolCallResultsKey]] (the port form; upstream keeps the results inside its
+  *     `ToolCalls` value), and the final outputs when the turn has them. The pending inputs are the inputs of the call
+  *     on the first turn, and none after it.
   *   - The final outputs end the run with the termination reason [[ReActV2.TerminationReason.Submit]].
   *
   * The forced submit (upstream `_forced_submit`), after `maxIterations` turns (the reason `max_iters`) or a break:
@@ -85,8 +90,10 @@ import scala.annotation.tailrec
   *
   * Construction fails with an `IllegalArgumentException` when an output of `baseSignature` has the name `history` or
   * `termination_reason` ("Output field name(s) `history` are reserved by ReActV2 and attached to every returned
-  * Prediction. Rename these output fields on your signature."), or when a tool has the name `submit` ("`submit` is
-  * reserved by ReActV2 as the final-output tool.").
+  * Prediction. Rename these output fields on your signature."), when an output has the name `next_thought`,
+  * `tool_calls`, or `tool_call_results` (the event of a turn has these keys, and the final outputs go over them; this
+  * check is stricter than upstream), or when a tool has the name `submit` ("`submit` is reserved by ReActV2 as the
+  * final-output tool.").
   *
   * The upstream logger warnings go to [[dspy4s.core.runtime.RuntimeEnvironment.warn]]: "Ending ReActV2 loop after parse
   * failure: <message>", "Ending ReActV2 loop after context window exceeded.", and, for a parse error or a full context
@@ -107,12 +114,13 @@ final case class ReActV2[I, O](
     tools               : Vector[ToolFunction],
     maxIterations       : IterationLimit         = IterationLimit(20),
     reactPredictOverride: Option[DynamicPredict] = None
-) extends dspy4s.programs.contracts.Module[I, O]:
+) extends dspy4s.programs.contracts.Module[I, O],
+      SignatureInput[I]:
   import ReActV2.*
 
   override val moduleName: String = ReActV2.ModuleName
 
-  override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.typed(baseSignature.inputShape)
+  override protected val lifecycle: ModuleLifecycle[I] = ModuleLifecycle.typed(baseSignature.inputShape)
 
   private val baseLayout: SignatureLayout = baseSignature.layout
 
@@ -133,6 +141,8 @@ final case class ReActV2[I, O](
     */
   private val taskInputs: Vector[FieldSpec] = taskLayout.inputFields.filterNot(field => StepFieldNames(field.name))
 
+  private val toolsByName: VectorMap[String, ToolFunction] = ToolFunction.byName(tools :+ submitTool(baseSignature))
+
   /** The tools of the loop: [[tools]], then the tool `submit` (upstream `_make_submit_tool`). `submit` has the
     * description "Submit the final outputs for the task." and one argument for each output of `baseSignature`, with the
     * JSON schema of the output in the port form (decision D3): the JSON type of its `TypeRef` for a plain output of a
@@ -143,28 +153,20 @@ final case class ReActV2[I, O](
     * `, ` between them. A value that the output shape cannot decode is an error too (upstream: the argument types of
     * the tool).
     *
-    * The list has one tool for each name, as the dict of upstream `ReActV2.__init__`: a later tool with a name takes
-    * the place of the earlier one.
+    * The list has one tool for each name ([[ToolFunction.byName]]).
     */
-  val allTools: Vector[ToolFunction] = (tools :+ submitTool(baseSignature)).foldLeft(Vector.empty[ToolFunction]) {
-    (unique, tool) =>
-      unique.indexWhere(_.name == tool.name) match
-        case -1    => unique :+ tool
-        case index => unique.updated(index, tool)
-  }
-
-  private val toolsByName: Map[String, ToolFunction] = allTools.map(tool => tool.name -> tool).toMap
+  val allTools: Vector[ToolFunction] = toolsByName.values.toVector
 
   /** The value of the `tools` input: the text of each tool of [[allTools]]. */
   private val toolTexts: DynamicValue =
-    DynamicValue.Sequence(Chunk.from(allTools.map(tool => text(ToolText.describe(tool)))))
+    DynamicValues.sequence(allTools.map(tool => DynamicValues.string(ToolText.describe(tool))))
 
   /** The layout of the step predictor (upstream `_make_react_signature`):
     *   - the inputs: each input of `baseSignature` except the start-history field, as an optional field with its
     *     description; then `history` ([[dspy4s.core.contracts.TypeRef.history]]) and `tools`
     *     ([[dspy4s.core.contracts.TypeRef.tools]]);
-    *   - the outputs: `next_thought` (a string; upstream `dspy.Reasoning`, point 4) and `tool_calls`
-    *     ([[dspy4s.core.contracts.TypeRef.toolCalls]]);
+    *   - the outputs: `next_thought` ([[dspy4s.core.contracts.TypeRef.reasoning]]; upstream `dspy.Reasoning`) and
+    *     `tool_calls` ([[dspy4s.core.contracts.TypeRef.toolCalls]]);
     *   - the instructions: these lines, with `\n` between them and the whole text stripped: the effective instructions
     *     of the base layout without the start-history field; "You are an Agent. Use the supplied tools to produce
     *     <outputs> from <inputs>."; "Call tools when more information is needed."; "When the final answer is ready,
@@ -189,7 +191,7 @@ final case class ReActV2[I, O](
     * [[allTools]] (upstream `Tool.__str__`, in the port form of `ToolText.describe`).
     */
   val reactPredict: DynamicPredict = reactPredictOverride.getOrElse(
-    DynamicPredict(layout = reactLayout, name = Some(ReactName), tools = allTools.map(toolSpec))
+    DynamicPredict(layout = reactLayout, name = Some(ReactName), tools = allTools.map(ToolText.toolSpec))
   )
 
   /** The instructions of [[reactLayout]] (upstream `_make_react_signature`). */
@@ -214,7 +216,9 @@ final case class ReActV2[I, O](
       val pending = DynamicValues.recordFromEntries(
         taskInputs.flatMap(field => DynamicValues.recordGet(inputs, field.name).map(field.name -> _))
       )
-      loop(call, history, pending, turn = 0)
+      AgentLoop.run[LoopState, Prediction[O]]((history, pending), maxIterations)(
+        onExhausted = (history, pending) => forcedSubmit(call, history, pending, "max_iters")
+      )(turn(call))
     }
 
   /** The history at the start of the run (point 5; upstream `_coerce_history`): the value of the start-history field,
@@ -224,35 +228,35 @@ final case class ReActV2[I, O](
     startHistoryField.flatMap(field => DynamicValues.recordGet(inputs, field.name)) match
       case None | Some(_: DynamicValue.Null.type) => Right(History.empty)
       case Some(value)                            => summon[Schema[History]].fromDynamicValue(value).left.map(error =>
-          ValidationError(s"The start history of ReActV2 is not a History: $error")
+          ValidationError(s"The start history of ReActV2 is not a History: ${DspyError.messageOf(error)}")
         )
 
-  /** The turns of the loop (upstream `ReActV2.forward`). See the rules of the loop in the class documentation. */
-  @tailrec
-  private def loop(
-      call   : ProgramCall[I],
-      history: History,
-      pending: DynamicValue.Record,
-      turn   : Int
-  )(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    if turn >= maxIterations then forcedSubmit(call, history, pending, "max_iters")
-    else
-      step(call, history, pending, call.config) match
-        case Left(error: ParseError) =>
-          RuntimeEnvironment.warn(ModuleName, s"Ending ReActV2 loop after parse failure: ${error.message}")
-          forcedSubmit(call, history, pending, "parse_error")
-        case Left(_: ContextWindowExceededError) =>
-          RuntimeEnvironment.warn(ModuleName, "Ending ReActV2 loop after context window exceeded.")
-          forcedSubmit(call, history, pending, "context_window_exceeded")
-        case Left(error)                         => Left(error)
-        case Right(found) if found.calls.isEmpty => forcedSubmit(call, history, pending, "empty_tool_calls")
-        case Right(found)                        =>
-          val calls              = withIds(found.calls, turn)
-          val (results, outputs) = execute(calls)
-          val next               = append(history, event(pending, found.thought, calls, results, outputs))
-          outputs match
-            case Some(values) => finish(values, next, TerminationReason.Submit)
-            case None         => loop(call, next, DynamicValue.Record.empty, turn + 1)
+  /** One turn of the loop (upstream `ReActV2.forward`). See the rules of the loop in the class documentation. */
+  private def turn(call: ProgramCall[I])(
+      state    : LoopState,
+      iteration: Int
+  )(using RuntimeContext): Either[DspyError, AgentLoop.Step[LoopState, Prediction[O]]] =
+    val (history, pending) = state
+
+    def break(reason: String): Either[DspyError, AgentLoop.Step[LoopState, Prediction[O]]] =
+      forcedSubmit(call, history, pending, reason).map(AgentLoop.Step.Done(_))
+
+    step(call, history, pending, call.config) match
+      case Left(error: ParseError) =>
+        RuntimeEnvironment.warn(ModuleName, s"Ending ReActV2 loop after parse failure: ${error.message}")
+        break("parse_error")
+      case Left(_: ContextWindowExceededError) =>
+        RuntimeEnvironment.warn(ModuleName, "Ending ReActV2 loop after context window exceeded.")
+        break("context_window_exceeded")
+      case Left(error)                         => Left(error)
+      case Right(found) if found.calls.isEmpty => break("empty_tool_calls")
+      case Right(found)                        =>
+        val calls              = withIds(found.calls, iteration)
+        val (results, outputs) = execute(calls)
+        val next               = history :+ event(pending, found.thought, calls, results, outputs)
+        outputs match
+          case Some(values) => finish(values, next, TerminationReason.Submit).map(AgentLoop.Step.Done(_))
+          case None         => Right(AgentLoop.Step.Continue((next, DynamicValue.Record.empty)))
 
   /** The forced submit after the loop (upstream `_forced_submit`). See the rules in the class documentation. */
   private def forcedSubmit(
@@ -277,10 +281,11 @@ final case class ReActV2[I, O](
           val (results, outputs) = execute(calls)
           outputs match
             case Some(values) =>
-              val next = append(history, event(pending, found.thought, calls, results, outputs))
+              val next = history :+ event(pending, found.thought, calls, results, outputs)
               finish(values, next, TerminationReason.ForcedSubmit)
             case None =>
-              val errors = results.filter(_.isError).map(result => textOf(result.value)).mkString("\n")
+              val errors =
+                results.filter(_.isError).map(result => DynamicValues.renderText(result.value)).mkString("\n")
               Left(RuntimeError(
                 ModuleName,
                 s"ReActV2 failed to produce final outputs after $reason: submit failed.\n$errors"
@@ -296,10 +301,11 @@ final case class ReActV2[I, O](
     val input = pending
       .updated(HistoryField.name, summon[Schema[History]].toDynamicValue(history))
       .updated(ToolsField.name, toolTexts)
-    reactPredict(ProgramCall(input, config, call.traceEnabled, call.rolloutId)).flatMap { prediction =>
+    reactPredict(call.mapInput(_ => input).copy(config = config)).flatMap { prediction =>
+      // A reply with no reasoning gives an empty text for this field, and the event of the turn then has no thought.
       val thought = DynamicValues.recordGet(prediction.output, NextThoughtField.name).filter {
         case _: DynamicValue.Null.type => false
-        case _                         => true
+        case value                     => !DynamicValues.asString(value).contains("")
       }
       toolCallsOf(prediction.output).map(Step(thought, _))
     }
@@ -321,8 +327,7 @@ final case class ReActV2[I, O](
                 case record: DynamicValue.Record if request.name == SubmitToolName => Some(record)
                 case _                                                             => outputs
               (results :+ ToolCallResult(request.name, value, request.id), submitted)
-            case Left(error) =>
-              (results :+ errorResult(request, s"Execution error in ${request.name}: ${error.message}"), outputs)
+            case Left(error) => (results :+ errorResult(request, ToolExecutor.errorText(request.name, error)), outputs)
     }
 
   /** The prediction of the final outputs, with the history and the termination reason as raw values. `Module.apply`
@@ -337,12 +342,26 @@ final case class ReActV2[I, O](
       Prediction(
         output,
         RawPrediction(values = outputs)
-          .withValue(HistoryKey, summon[Schema[History]].toDynamicValue(history))
-          .withValue(TerminationReasonKey, text(reason.wireName))
+          .withRawValue(HistoryKey, history)
+          .withRawValue(TerminationReasonKey, reason.wireName)
       )
     }
 
 object ReActV2:
+
+  /** One optimizable part, the step predictor `react` (upstream `ReActV2.react`). `replace` writes the parameters
+    * through [[ReActV2.reactPredict]] into `reactPredictOverride`; parameters equal to the current ones give the same
+    * program.
+    */
+  given reactV2OptimizableStructure[I, O]: OptimizableStructure.Of[ReActV2[I, O], 1] =
+    OptimizableStructure.leaf(
+      "ReActV2",
+      "react",
+      _.reactPredict.optimizableView,
+      (program, updated) =>
+        if updated == program.reactPredict.optimizableParameters then program
+        else program.copy(reactPredictOverride = Some(program.reactPredict.withOptimizableParameters(updated)))
+    )
 
   /** The name of the program in the callbacks and the trace. */
   val ModuleName: String = "react_v2"
@@ -385,59 +404,70 @@ object ReActV2:
 
   private val HistoryField: FieldSpec     = FieldSpec.normalize(FieldSpec("history", TypeRef.history))
   private val ToolsField: FieldSpec       = FieldSpec.normalize(FieldSpec("tools", TypeRef.tools))
-  private val NextThoughtField: FieldSpec = FieldSpec.normalize(FieldSpec("next_thought"))
+  private val NextThoughtField: FieldSpec = FieldSpec.normalize(FieldSpec("next_thought", TypeRef.reasoning))
   private val ToolCallsField: FieldSpec   = FieldSpec.normalize(FieldSpec("tool_calls", TypeRef.toolCalls))
 
   /** The names of the fields that the step predictor adds to the inputs of the task. */
   private val StepFieldNames: Set[String] =
     Vector(HistoryField, ToolsField, NextThoughtField, ToolCallsField).map(_.name).toSet
 
+  /** The keys of the event of a turn that an output cannot have: [[event]] merges the final outputs over them. */
+  private val ReservedEventNames: Set[String] =
+    Set(NextThoughtField.name, ToolCallsField.name, History.ToolCallResultsKey)
+
   /** The types of the outputs whose argument of `submit` has the JSON type of the `TypeRef`. */
-  private val PrimitiveTypes: Set[TypeRef] = Set(TypeRef.string, TypeRef.int, TypeRef.double, TypeRef.bool)
+  private val PrimitiveTypes: Set[TypeRef] =
+    Set(TypeRef.string, TypeRef.reasoning, TypeRef.int, TypeRef.double, TypeRef.bool)
 
   /** The call config `tool_choice` of the forced submit: the function `submit` (upstream `_forced_submit`). */
-  private val SubmitToolChoice: DynamicValue.Record =
-    DynamicValues.record("type" := "function", "function" -> DynamicValues.record("name" := SubmitToolName))
+  private val SubmitToolChoice: DynamicValue = NativeTools.encodeToolChoice(ToolChoice.Function(SubmitToolName))
+
+  /** The state of the loop: the history of the run and the pending inputs. */
+  private type LoopState = (History, DynamicValue.Record)
 
   /** The thought and the tool calls of one step. */
   private final case class Step(thought: Option[DynamicValue], calls: Vector[ToolCall])
 
   /** The construction checks (upstream `ReActV2.__init__`). Throws an `IllegalArgumentException`. */
   private def checkNames(layout: SignatureLayout, tools: Vector[ToolFunction]): Unit =
-    val reserved = layout.outputFields.map(_.name).filter(ReservedOutputNames.contains).sorted
+    def quoted(names: Vector[String]): String = names.map(name => s"`$name`").mkString(", ")
+    val names                                 = layout.outputFields.map(_.name)
+    val reserved                              = names.filter(ReservedOutputNames.contains).sorted
     require(
       reserved.isEmpty,
-      s"Output field name(s) ${reserved.map(name => s"`$name`").mkString(", ")} are reserved by ReActV2 and attached " +
+      s"Output field name(s) ${quoted(reserved)} are reserved by ReActV2 and attached " +
         "to every returned Prediction. Rename these output fields on your signature."
+    )
+    val eventNames = names.filter(ReservedEventNames.contains).sorted
+    require(
+      eventNames.isEmpty,
+      s"Output field name(s) ${quoted(eventNames)} are reserved by ReActV2 for the history event of each turn. " +
+        "Rename these output fields on your signature."
     )
     require(!tools.exists(_.name == SubmitToolName), "`submit` is reserved by ReActV2 as the final-output tool.")
 
   /** The tool `submit` of `signature` (upstream `_make_submit_tool`). See [[ReActV2.allTools]]. */
   private def submitTool[A](signature: Signature[?, A]): ToolFunction =
-    val outputs    = signature.layout.outputFields
-    val outputJson = signature.outputShape.jsonSchemaString
-    val properties =
-      DynamicValues.recordFromEntries(outputs.map(field => field.name -> argumentSchema(field, outputJson)))
+    val outputs      = signature.layout.outputFields
+    val outputSchema = ProgramPromptText.schema(signature.outputShape.jsonSchema)
+    val properties   =
+      DynamicValues.recordFromEntries(outputs.map(field => field.name -> argumentSchema(field, outputSchema)))
     val schema = DynamicValues.record(
       "type"       := "object",
       "properties" -> properties,
-      "required"   -> DynamicValue.Sequence(Chunk.from(outputs.map(field => text(field.name))))
+      "required"   -> DynamicValues.sequence(outputs.map(field => DynamicValues.string(field.name)))
     )
-    new ToolFunction:
-      override val name: String                             = SubmitToolName
-      override val description: String                      = SubmitDescription
-      override val argSchema: Vector[(String, TypeRef)]     = outputs.map(field => field.name -> field.typeRef)
-      override val inputSchema: Option[DynamicValue.Record] = Some(schema)
-
-      override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
-        val missing = outputs.map(_.name).filter(output => DynamicValues.recordGet(args, output).isEmpty)
-        if missing.nonEmpty then
-          Left(ValidationError(s"Missing required final output field(s): ${missing.mkString(", ")}"))
-        else
-          val values = DynamicValues.recordFromEntries(
-            outputs.flatMap(field => DynamicValues.recordGet(args, field.name).map(field.name -> _))
-          )
-          signature.outputShape.decode(values).map(signature.outputShape.encode)
+    val flat = outputs.map(field => field.name -> field.typeRef)
+    ToolFunction(SubmitToolName, SubmitDescription, flat, Some(schema)) { args =>
+      val missing = outputs.map(_.name).filter(output => DynamicValues.recordGet(args, output).isEmpty)
+      if missing.nonEmpty then
+        Left(ValidationError(s"Missing required final output field(s): ${missing.mkString(", ")}"))
+      else
+        val values = DynamicValues.recordFromEntries(
+          outputs.flatMap(field => DynamicValues.recordGet(args, field.name).map(field.name -> _))
+        )
+        signature.outputShape.decode(values).map(signature.outputShape.encode)
+    }
 
   /** The JSON schema of the argument of `submit` for the output `field` (upstream `_json_schema_for_annotation`, in the
     * port form of decision D3). A plain output of a primitive type has the JSON type of its `TypeRef`, as the pydantic
@@ -445,32 +475,16 @@ object ReActV2:
     * ([[ToolText.args]]). Each other output has its property in the output JSON schema of the signature, else the JSON
     * type of its `TypeRef`, else `{"type": "string"}`.
     */
-  private def argumentSchema(field: FieldSpec, outputJsonSchema: Option[String]): DynamicValue =
-    def jsonType: DynamicValue = DynamicValues.record("type" := ToolText.jsonType(field.typeRef).getOrElse("string"))
+  private def argumentSchema(field: FieldSpec, outputSchema: ProgramPromptText.OutputSchemaText): DynamicValue =
+    def jsonType: DynamicValue =
+      if field.typeRef.jsonType.isDefined then ToolText.argument(field.typeRef)
+      else DynamicValues.record("type" := "string")
     if isPlainPrimitive(field) then jsonType
-    else ProgramPromptText.outputProperty(field.name, outputJsonSchema).getOrElse(jsonType)
+    else outputSchema.property(field.name).getOrElse(jsonType)
 
   /** `true` for an output of a primitive type that is not optional and has no enum values. */
   private def isPlainPrimitive(field: FieldSpec): Boolean =
     PrimitiveTypes.contains(field.typeRef) && !field.optional && field.enumValues.isEmpty
-
-  /** The provider tool of `tool` (upstream `Tool.format_as_litellm_function_call`): the input schema of the tool, else
-    * an object schema with the arguments of [[ToolText.args]] and each argument in `required`.
-    */
-  private def toolSpec(tool: ToolFunction): ToolSpec =
-    val args = ToolText.args(tool)
-    ToolSpec(
-      name = tool.name,
-      description = Some(tool.description).filter(_.nonEmpty),
-      parameters = tool.argSchema.map((argument, typeRef) => ToolParameterSpec(argument, typeRef)),
-      inputSchema = Some(tool.inputSchema.getOrElse(
-        DynamicValues.record(
-          "type"       := "object",
-          "properties" -> args,
-          "required"   -> DynamicValue.Sequence(Chunk.from(DynamicValues.recordKeys(args).map(text)))
-        )
-      ))
-    )
 
   /** The tool calls of the answer of a step (upstream `_coerce_tool_calls`): none for a null, and a parse error for a
     * value that is not a tool calls value.
@@ -497,21 +511,9 @@ object ReActV2:
       outputs: Option[DynamicValue.Record]
   ): DynamicValue.Record =
     val withThought = thought.fold(pending)(value => pending.updated(NextThoughtField.name, value))
-    val withCalls   =
-      if calls.isEmpty then withThought
-      else withThought.updated(ToolCallsField.name, NativeFunctionCalling.encodeToolCalls(calls))
-    val withResults = if results.isEmpty then withCalls else History.withToolCallResults(withCalls, results)
-    outputs.fold(withResults)(_.fields.foldLeft(withResults)((record, entry) => record.updated(entry._1, entry._2)))
-
-  /** `history` with `event` at its end, when the event is not empty (upstream `_append_history_event`). */
-  private def append(history: History, event: DynamicValue.Record): History =
-    if event.fields.isEmpty then history else history :+ event
+    val withCalls   = withThought.updated(ToolCallsField.name, NativeFunctionCalling.encodeToolCalls(calls))
+    val withResults = History.withToolCallResults(withCalls, results)
+    outputs.fold(withResults)(DynamicValues.mergeRecords(withResults, _))
 
   private def errorResult(call: ToolCall, message: String): ToolCallResult =
-    ToolCallResult(call.name, text(message), call.id, isError = true)
-
-  private def text(value: String): DynamicValue = DynamicValue.Primitive(PrimitiveValue.String(value))
-
-  /** The text of a result value (upstream `str(result.value)`). */
-  private def textOf(value: DynamicValue): String =
-    DynamicValues.asString(value).getOrElse(DynamicValues.renderText(value))
+    ToolCallResult(call.name, DynamicValues.string(message), call.id, isError = true)

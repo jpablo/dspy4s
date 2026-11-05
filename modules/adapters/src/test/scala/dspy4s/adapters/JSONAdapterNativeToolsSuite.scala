@@ -1,7 +1,7 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.AdapterInvocation
-import dspy4s.adapters.contracts.ToolParameterSpec
+import dspy4s.adapters.contracts.NativeTools
 import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
@@ -43,7 +43,12 @@ class JSONAdapterNativeToolsSuite extends FunSuite:
     ToolSpec(
       "search",
       Some("Search the web"),
-      Vector(ToolParameterSpec("query", TypeRef.string, Some("the query"), required = true))
+      DynamicValues.record(
+        "type"       := "object",
+        "properties" ->
+          DynamicValues.record("query" -> DynamicValues.record("type" := "string", "description" := "the query")),
+        "required" := List("query")
+      )
     )
   )
 
@@ -61,8 +66,22 @@ class JSONAdapterNativeToolsSuite extends FunSuite:
       case r: DynamicValue.Record => DynamicValues.recordGet(r, key).getOrElse(fail(s"missing key '$key' in $r"))
       case other                  => fail(s"expected a record to read '$key' from, got $other")
 
+  test("JSONAdapter uses native function calling by default, as upstream") {
+    given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = true)))
+
+    val prompt = JSONAdapter().format(invocation).toOption.get
+    assert(DynamicValues.recordGet(prompt.requestOptions, "tools").isDefined, "tools must be injected")
+  }
+
+  test("JSONAdapter sends no tools by default to a model with no function calling") {
+    given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = false)))
+
+    val prompt = JSONAdapter().format(invocation).toOption.get
+    assert(DynamicValues.recordGet(prompt.requestOptions, "tools").isEmpty, "tools must not be injected")
+  }
+
   test("JSONAdapter native function-calling injects tools and omits the tool_calls key from the instruction") {
-    val adapter          = JSONAdapter(useNativeFunctionCalling = true)
+    val adapter          = JSONAdapter(native = NativeTools(enabled = true))
     given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = true)))
 
     val prompt = adapter.format(invocation).toOption.get
@@ -74,7 +93,7 @@ class JSONAdapterNativeToolsSuite extends FunSuite:
   }
 
   test("JSONAdapter parse fills the tool_calls field and defaults other fields on a tool turn") {
-    val adapter          = JSONAdapter(useNativeFunctionCalling = true)
+    val adapter          = JSONAdapter(native = NativeTools(enabled = true))
     given RuntimeContext = RuntimeContext(lm = Some(StubLm(fnCalling = true)))
 
     val output = LmOutput(

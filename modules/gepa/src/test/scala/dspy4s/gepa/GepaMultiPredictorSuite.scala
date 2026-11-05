@@ -107,7 +107,10 @@ class GepaMultiPredictorSuite extends FunSuite:
 
   test("the pipeline's two predictors have stable IDs and retain field labels for display") {
     assertEquals(Candidate.seed(pipeline).keySet, Set(OptimizableId(0), OptimizableId(1)))
-    assertEquals(Candidate.named(pipeline, Candidate.seed(pipeline)).map(_._1), Vector("hinter", "answerer"))
+    assertEquals(
+      summon[OptimizableStructure[Pipeline]].readIdentified(pipeline).map(_.displayName),
+      Vector("hinter", "answerer")
+    )
   }
 
   test("GEPA evolves BOTH predictors of a two-stage program to lift the score") {

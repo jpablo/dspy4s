@@ -73,8 +73,9 @@ flowchart LR
     constructor --> packaged
 ```
 
-The private `packageModule` constructor ties `Rep`, its value, its optimizable structure, and `N` together. Application
-code cannot package a module with structure evidence for a different representation or claim the wrong parameter count.
+`Program.of` is the one constructor, because the trait is sealed. It ties `Rep`, its value, its optimizable structure,
+and `N` together. Application code cannot package a module with structure evidence for a different representation or
+claim the wrong parameter count.
 
 ## Parameter arity is a grade
 
@@ -140,7 +141,7 @@ Program[I, O, N]
        └── reparamSized <───── SizedVector[OptimizableParameters, N]
 ```
 
-This is a lawful [`Lens`](../../../../../../../core/src/main/scala/dspy4s/core/algebra/Lens.scala). It satisfies:
+This is a lawful [`Lens`](../../../../../../../algebra/src/main/scala/dspy4s/algebra/Lens.scala). It satisfies:
 
 | Lens law | Program meaning |
 |---|---|
@@ -160,7 +161,8 @@ These are not unrelated equations attached to the lens. `Parameterization.readFu
 grade exactly, so the interpretation cannot forget that an `N`-parameter program has an `N`-element parameter vector.
 The two equations above are its identity and composition functor laws.
 
-`params` and `reparam(Vector)` remain convenient runtime-boundary operations. Prefer `sizedParams` and `reparamSized`
+`params` and `reparam(Vector)` remain convenient runtime-boundary operations. `reparam` throws
+`IllegalArgumentException` if the vector does not have one value for each parameter. Prefer `sizedParams` and `reparamSized`
 when the parameter count should be checked statically.
 
 ## Ordered fan-out is deliberately separate

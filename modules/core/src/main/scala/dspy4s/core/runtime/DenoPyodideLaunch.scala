@@ -2,17 +2,16 @@ package dspy4s.core.runtime
 
 import dspy4s.core.contracts.CodeInterpreterErrors
 import dspy4s.core.contracts.DspyError
-import dspy4s.core.contracts.RuntimeError
-import zio.blocks.schema.DynamicValue
+import dspy4s.core.contracts.DynamicValues.asString
+import dspy4s.core.contracts.DynamicValues.recordGet as field
+import dspy4s.core.runtime.InterpreterSupport.ProbeRun
 
-import java.nio.charset.StandardCharsets
 import java.nio.file.{Files, Path, Paths}
-import java.util.concurrent.TimeUnit
 import scala.util.control.NonFatal
 
 /** Locates the bundled runner and builds the least-privilege Deno launch command for a sandbox. */
 private[runtime] object DenoPyodideLaunch:
-  import DenoPyodideProtocol.*
+  import DenoPyodideProtocol.decodeRecord
 
   /** The Deno executable of the default launch command. */
   private val Executable = "deno"
@@ -27,7 +26,20 @@ private[runtime] object DenoPyodideLaunch:
   private val InstallHint       =
     "Install a compatible Deno (https://docs.deno.com/runtime/getting_started/installation/), e.g. `brew install deno`, or pass a custom `denoCommand`."
 
+  /** The default launch command. The call writes the runner script when the file is absent. A runner script that cannot
+    * be written throws an `IllegalStateException`. [[defaultProcess]] gives a `Left` for that failure.
+    */
   def command(
+      enableReadPaths    : Vector[String],
+      enableWritePaths   : Vector[String],
+      enableEnvVars      : Vector[String],
+      enableNetworkAccess: Vector[String]
+  ): Vector[String] =
+    val runner = Runner.path().fold(message => throw new IllegalStateException(message), identity)
+    launchCommand(runner, enableReadPaths, enableWritePaths, enableEnvVars, enableNetworkAccess)
+
+  private def launchCommand(
+      runnerPath         : Path,
       enableReadPaths    : Vector[String],
       enableWritePaths   : Vector[String],
       enableEnvVars      : Vector[String],
@@ -55,8 +67,8 @@ private[runtime] object DenoPyodideLaunch:
     cacheDir.foreach(dir => args += s"--dspy-deno-dir=${canonical(dir)}")
     args.result()
 
-  /** The process of the default launch command, not started. `Left` when a write path overlaps a runtime file, or when
-    * the Deno version is not supported.
+  /** The process of the default launch command, not started. `Left` when the runner script cannot be written, when a
+    * write path overlaps a runtime file, or when the Deno version is not supported.
     */
   def defaultProcess(
       enableReadPaths    : Vector[String],
@@ -65,10 +77,17 @@ private[runtime] object DenoPyodideLaunch:
       enableNetworkAccess: Vector[String]
   ): Either[DspyError, ProcessBuilder] =
     for
-      _ <- checkWritePaths(enableWritePaths)
-      _ <- checkDefaultVersion()
+      runner <- runnerFile()
+      _      <- checkOverlaps(enableWritePaths, runner)
+      _      <- checkDefaultVersion()
     yield
-      val builder = new ProcessBuilder(command(enableReadPaths, enableWritePaths, enableEnvVars, enableNetworkAccess)*)
+      val builder = new ProcessBuilder(launchCommand(
+        runner,
+        enableReadPaths,
+        enableWritePaths,
+        enableEnvVars,
+        enableNetworkAccess
+      )*)
       isolate(builder)
       builder
 
@@ -94,14 +113,12 @@ private[runtime] object DenoPyodideLaunch:
     val order = summon[Ordering[(Int, Int, Int)]]
     version match
       case Some(found) if order.lteq(MinVersion, found) && order.lt(found, MaxVersion) => Right(())
-      case Some((major, minor, patch))                                                 => Left(RuntimeError(
-          CodeInterpreterErrors.Interpreter,
+      case Some((major, minor, patch))                                                 => CodeInterpreterErrors.failure(
           s"Unsupported Deno version $major.$minor.$patch. DenoPyodideInterpreter supports Deno $SupportedVersions. $InstallHint"
-        ))
-      case None => Left(RuntimeError(
-          CodeInterpreterErrors.Interpreter,
+        )
+      case None => CodeInterpreterErrors.failure(
           s"Unable to determine the Deno version from '$executable'. DenoPyodideInterpreter requires Deno $SupportedVersions. $InstallHint"
-        ))
+        )
 
   /** Runs `<executable> --version` and gives the version. `None` when the executable is absent, fails, gives text that
     * is not a version, or does not end in `timeoutMillis`.
@@ -121,33 +138,14 @@ private[runtime] object DenoPyodideLaunch:
       }
 
   /** Runs a command that reports data about Deno and gives its standard output. `None` when the command is absent,
-    * fails, or does not end in `timeoutMillis`. The output goes to a file, so a process that holds the output open
-    * cannot block the read. The process does not stay alive after the call.
+    * fails, or does not end in `timeoutMillis`. The process does not stay alive after the call.
     */
   private def probe(command: Vector[String], timeoutMillis: Long): Option[String] =
-    try
-      val output = Files.createTempFile("dspy4s-deno-probe", ".txt")
-      try
-        val builder = new ProcessBuilder(command*)
-        isolate(builder)
-        val process = builder.redirectOutput(output.toFile).redirectError(ProcessBuilder.Redirect.DISCARD).start()
-        try
-          process.getOutputStream.close()
-          if process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS) && process.exitValue() == 0 then
-            Some(new String(Files.readAllBytes(output), StandardCharsets.UTF_8))
-          else None
-        finally stop(process)
-      finally
-        val _ = Files.deleteIfExists(output)
-    catch case NonFatal(_) => None
-
-  /** Stops `process` and the processes that it started. No effect on a process that exited. */
-  private def stop(process: Process): Unit =
-    if process.isAlive then
-      process.descendants().forEach { child =>
-        val _ = child.destroyForcibly()
-      }
-      val _ = process.destroyForcibly()
+    val builder = new ProcessBuilder(command*).redirectError(ProcessBuilder.Redirect.DISCARD)
+    isolate(builder)
+    InterpreterSupport.probe(builder, timeoutMillis, Int.MaxValue).toOption.collect { case ProbeRun(0, output) =>
+      output
+    }
 
   /** The real path of `path` (upstream `_canonicalize_path`). Deno compares a path with its permission flags as text,
     * so each flag and each mount must name the real path. The function resolves the symbolic links of the part of
@@ -170,23 +168,23 @@ private[runtime] object DenoPyodideLaunch:
     */
   def checkMounts(paths: Vector[String]): Either[DspyError, Unit] =
     val collision = paths.groupBy(sandboxPath).values.exists(_.map(canonical).distinct.sizeIs > 1)
-    if collision then
-      Left(RuntimeError(
-        CodeInterpreterErrors.Interpreter,
-        "Mounted files must have unique basenames inside the sandbox."
-      ))
+    if collision then CodeInterpreterErrors.failure("Mounted files must have unique basenames inside the sandbox.")
     else Right(())
 
   /** `Left` when a write path overlaps a runtime file of the sandbox: the runner file or the Deno cache directory
-    * (upstream ab8a7658d). Sandboxed code that can write such a file can change code that runs with no sandbox.
+    * (upstream ab8a7658d). Sandboxed code that can write such a file can change code that runs with no sandbox. `Left`
+    * also when the runner script cannot be written.
     */
   def checkWritePaths(enableWritePaths: Vector[String]): Either[DspyError, Unit] =
-    val runtimeFiles = (Vector(runnerPath.toString) ++ denoCacheDir.toVector).map(canonical)
+    runnerFile().flatMap(checkOverlaps(enableWritePaths, _))
+
+  /** [[checkWritePaths]] with the runner script at `runner`. */
+  private def checkOverlaps(enableWritePaths: Vector[String], runner: Path): Either[DspyError, Unit] =
+    val runtimeFiles = (Vector(runner.toString) ++ denoCacheDir.toVector).map(canonical)
     enableWritePaths.find(path => runtimeFiles.exists(pathsOverlap(canonical(path), _))) match
-      case Some(path) => Left(RuntimeError(
-          CodeInterpreterErrors.Interpreter,
+      case Some(path) => CodeInterpreterErrors.failure(
           s"Write paths cannot overlap the runtime files of DenoPyodideInterpreter (the runner file and the Deno cache directory): $path"
-        ))
+        )
       case None => Right(())
 
   /** Two paths overlap when they are equal or when one contains the other (upstream `_paths_overlap`). */
@@ -194,15 +192,18 @@ private[runtime] object DenoPyodideLaunch:
     val (a, b) = (Paths.get(first), Paths.get(second))
     a.startsWith(b) || b.startsWith(a)
 
-  /** Extract the vendored `runner.js` to a temp file once per JVM (Deno needs a real path it can --allow-read). */
-  private lazy val runnerPath: Path =
-    val stream = Option(getClass.getResourceAsStream("/dspy4s/core/runtime/runner.js"))
-      .getOrElse(throw new IllegalStateException("runner.js resource missing from dspy4s-core"))
-    val file = Files.createTempFile("dspy4s-runner", ".js")
-    try Files.write(file, stream.readAllBytes())
-    finally stream.close()
-    file.toFile.deleteOnExit()
-    file
+  /** The vendored `runner.js` as a temporary file (Deno needs a real path it can --allow-read). The script is written
+    * once per JVM, and again when the file was removed.
+    */
+  private val Runner = InterpreterSupport.ResourceFile(
+    "/dspy4s/core/runtime/runner.js",
+    "dspy4s-runner",
+    ".js",
+    error => s"Unable to write the Deno runner script: ${DspyError.messageOf(error)}"
+  )
+
+  /** The path of the runner script. `Left` when the script cannot be written. */
+  private def runnerFile(): Either[DspyError, Path] = Runner.path().fold(CodeInterpreterErrors.failure[Path], Right(_))
 
   // One answer of `deno info --json` serves the JVM. A query that gave no directory runs again on the next call.
   @volatile private var queriedCacheDir: Option[String] = None
@@ -211,6 +212,6 @@ private[runtime] object DenoPyodideLaunch:
   private def denoCacheDir: Option[String] =
     sys.env.get("DENO_DIR").orElse(queriedCacheDir).orElse {
       queriedCacheDir = probe(Vector(Executable, "info", "--json"), ProbeTimeoutMillis)
-        .flatMap(decodeJson).collect { case r: DynamicValue.Record => r }.flatMap(field(_, "denoDir")).flatMap(asString)
+        .flatMap(decodeRecord).flatMap(field(_, "denoDir")).flatMap(asString)
       queriedCacheDir
     }

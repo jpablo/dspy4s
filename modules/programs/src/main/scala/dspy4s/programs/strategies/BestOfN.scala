@@ -1,7 +1,6 @@
 package dspy4s.programs.strategies
 
 import dspy4s.programs.{AttemptCount, FailureCount}
-import dspy4s.programs.compose.{Mode, mode}
 import dspy4s.programs.optimization.*
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.RuntimeContext
@@ -13,8 +12,10 @@ import dspy4s.programs.contracts.Prediction
 
 /** `BestOfN`: runs an inner program up to `n` times and keeps the highest-reward `Prediction[O]`, short-circuiting once
   * `rewardFn` reaches `threshold`. Output-preserving — it returns the inner program's `O` unchanged (a `Module[I, O]`),
-  * so it composes around any program (`Predict`, `ChainOfThought`, …). The repeated samples are made distinct by a
-  * per-attempt `rolloutId` (cache-busting); `failCount` bounds tolerated failures before giving up (defaults to `n`).
+  * so it composes around any program (`Predict`, `ChainOfThought`, …). Each attempt has the temperature 1.0 and its own
+  * rollout id (cache-busting) in `RuntimeScope.lmDefaults`. Thus they reach each predictor of the attempt, and the
+  * config of a predictor and a per-call config win over them (upstream `lm.copy(rollout_id=rid, temperature=1.0)`).
+  * `failCount` bounds tolerated failures before giving up (defaults to `n`).
   *
   * Its lifecycle observation records empty inputs: a generic wrapper has no `Signature` to encode `I` for its own trace
   * entry, so the meaningful inputs live on the nested inner program's event. The best-of-`n` selection loop lives in
@@ -40,16 +41,10 @@ final case class BestOfN[P <: Module[I, O], I, O](
 ) extends Module[I, O]:
   override val moduleName: String = "best_of_n"
 
-  override protected val lifecycle: ModuleLifecycle[I, O] = ModuleLifecycle.typedWithoutInputs
+  override protected val lifecycle: ModuleLifecycle[I] = ModuleLifecycle.typedWithoutInputs
 
   override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    val rolloutStart = call.rolloutId.getOrElse(0)
-    AttemptSelection.bestOf[Prediction[O]](n, threshold, failCount, moduleName)(
-      runAttempt = idx =>
-        module
-          .mode(Mode.temperature(1.0d) ++ Mode.rolloutId(rolloutStart + idx))(call),
-      reward = prediction => AttemptSelection.guardedReward(moduleName)(rewardFn(call.input, prediction))
-    )
+    AttemptSelection.sample(module, call, rewardFn, n, threshold, failCount, moduleName)
 
 object BestOfN:
   /** Pass-through addressability (the spec's `selectBest(p)` rule): `BestOfN` wraps without adding any learnable
@@ -58,7 +53,7 @@ object BestOfN:
   given bestOfNOptimizableStructure[P <: Module[I, O], I, O, N <: Int](using
       inner: OptimizableStructure.WithArity[P, N]
   ): OptimizableStructure.Of[BestOfN[P, I, O], N] =
-    ParameterOptic.throughStructure(
+    OptimizableStructure.unary(
       "BestOfN",
       _.module,
       (wrapper, updated) => wrapper.copy(module = updated),

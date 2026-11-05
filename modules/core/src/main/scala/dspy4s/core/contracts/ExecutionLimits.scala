@@ -18,3 +18,10 @@ object ErrorLimit extends RefinedSubtype[Int, Positive]
 type HistoryLimit = HistoryLimit.T
 
 object HistoryLimit extends RefinedSubtype[Int, Positive0]
+
+/** A non-negative cap on retained trace entries (upstream `settings.max_trace_size`). Zero keeps no entry. The port
+  * records each module call, not only each predictor call, so a limit holds fewer predictor calls than upstream.
+  */
+type TraceLimit = TraceLimit.T
+
+object TraceLimit extends RefinedSubtype[Int, Positive0]

@@ -184,11 +184,13 @@ program's parameters: Python walks `__dict__`, dspy4s uses a
 - The built-in metrics — `ExactMatch`, `ContainsMatch`, `F1Score`,
   `AnswerMatch`, `PassageMatch`, plus a `FunctionMetric` adapter —
   match Python's `evaluate/metrics.py` behavior.
-- The text-normalization utility (lowercase + strip punctuation +
-  remove articles + NFD-strip combining marks + collapse whitespace)
-  ports byte-for-byte from `dspy.evaluate.evaluate.normalize_text`.
+- The text-normalization utility (NFD + lowercase + delete punctuation +
+  remove articles + collapse whitespace) ports
+  `dspy.evaluate.metrics.normalize_text`. `PassageMatch` ports the token
+  match of `has_answer`.
 - Result persistence (`saveAsJson` / `saveAsCsv`) uses the same
-  flat-row schema with `example_` / `pred_` collision prefixes.
+  flat rows as `merge_dicts`, with the `example_` / `pred_` prefixes
+  only on a name collision.
 
 ## Streaming v1
 
@@ -206,8 +208,8 @@ The minimum-viable streaming surface ports:
 - Per-field `StreamListener` chunk routing with the same field-name
   filter semantics.
 
-The deltas — async-iterator vs producer-thread, per-token vs
-per-field chunk granularity, `allow_reuse` default — are in
+The deltas (async-iterator vs producer-thread, per-token vs
+per-field chunk granularity) are in
 `PORT_DIFFERENCES.md` §5 and the Python parity gap in
 [STREAMING_POSTPONED.md](../STREAMING_POSTPONED.md).
 

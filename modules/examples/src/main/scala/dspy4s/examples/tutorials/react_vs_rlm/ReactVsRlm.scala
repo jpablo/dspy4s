@@ -27,7 +27,8 @@
   *   - The interaction / contraindication / drug-class tables are small ILLUSTRATIVE fixtures (the original uses
   *     simulated databases too). This is not medical advice.
   *   - The original runs on Groq (`groq/openai/gpt-oss-120b`); dspy4s's OpenAI-compatible route is used here via
-  *     [[Demo]] (`OPENAI_API_KEY` + optional `DSPY_MODEL`). Any OpenAI-compatible endpoint works.
+  *     [[Demo]] (`OPENAI_API_KEY` + optional `DSPY_MODEL`). For another OpenAI-compatible endpoint, set
+  *     `OPENAI_BASE_URL`.
   *   - `RLM` requires **Deno** on the PATH for its Pyodide sandbox. Without it, this demo runs the ReAct side only and
   *     prints how to enable the RLM side.
   *   - We don't assert exact coverage numbers (a live model varies run to run); we print what each achieved.
@@ -37,7 +38,7 @@
 package dspy4s.examples.tutorials.react_vs_rlm
 
 import dspy4s.core.contracts.{
-  CallbackEvent, CallbackHandler, DspyError, DynamicValues, LmStartEvent, RuntimeContext, TypeRef
+  CallbackEvent, CallbackHandler, DynamicValues, LmStartEvent, RuntimeContext, RuntimeError, TypeRef
 }
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
@@ -49,7 +50,6 @@ import zio.blocks.schema.DynamicValue
 
 import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable
-import scala.util.control.NonFatal
 
 // ── Illustrative drug-safety fixtures (NOT medical advice) ────────────────────────────────────────────────
 object DrugSafetyData:
@@ -114,7 +114,9 @@ object DrugSafetyData:
   )
 
 // ── Records which (drug,drug) and (drug,condition) checks an agent actually performed ─────────────────────
-/** Thread-safe: `RLM`'s sandbox bridge may invoke tools off the main call stack, so all mutation is guarded. */
+/** Thread-safe: `LocalPythonInterpreter` runs each tool call of `RLM` on a new thread, so each change is guarded.
+  * `DenoPyodideInterpreter` runs a tool call on the thread of `execute`.
+  */
 final class CallRecorder:
   private val interactions      = mutable.Set.empty[String]
   private val contraindications = mutable.Set.empty[String]
@@ -146,18 +148,18 @@ object DrugSafetyTools:
   private def arg(args: DynamicValue.Record, name: String): String =
     DynamicValues.recordGet(args, name).map(DynamicValues.renderText).getOrElse("")
 
-  /** Hand-built so we control the recording side effect AND populate `argSchema` (which drives the Python parameter
-    * names in RLM's sandbox and the tool docs in ReAct's prompt — see the `tools` parameter of `RLM`).
+  /** A tool with `argSchema`, which gives the Python parameter names in the sandbox of RLM and the tool docs in the
+    * prompt of ReAct (see the `tools` parameter of `RLM`). A missing argument is an error that names it. `body` runs
+    * only with each argument, so a recording in `body` counts only a complete check.
     */
   private def tool(toolName: String, desc: String, params: (String, TypeRef)*)(
       body: DynamicValue.Record => String
   ): ToolFunction =
-    new ToolFunction:
-      override val name: String                                                                             = toolName
-      override val description: String                                                                      = desc
-      override val argSchema: Vector[(String, TypeRef)]                                                     = params.toVector
-      override def invoke(args: DynamicValue.Record)(using RuntimeContext): Either[DspyError, DynamicValue] =
-        Right(DynamicValues.fromAny(body(args)))
+    ToolFunction(toolName, desc, params.toVector) { args =>
+      params.map(_._1).find(name => !DynamicValues.present(args, name)) match
+        case Some(name) => Left(RuntimeError(toolName, s"$toolName needs the argument '$name'."))
+        case None       => Right(ToolFunction.result(body(args)))
+    }
 
   def build(recorder: CallRecorder): Vector[ToolFunction] =
     Vector(
@@ -318,10 +320,6 @@ object ReactVsRlm:
   val demoMedications: String = DrugSafetyData.drugs.mkString(", ")
   val demoConditions: String  = DrugSafetyData.conditions.mkString(", ")
 
-  private[react_vs_rlm] def denoAvailable: Boolean =
-    try new ProcessBuilder("deno", "--version").start().waitFor() == 0
-    catch case NonFatal(_) => false
-
 @main def reactVsRlmMain(): Unit =
   Demo.withLm {
     import ReactVsRlm.*
@@ -334,7 +332,7 @@ object ReactVsRlm:
     val react = runReAct(demoMedications, demoConditions)
     printResult(react)
 
-    if denoAvailable then
+    if Demo.denoAvailable then
       val rlm = runRlm(demoMedications, demoConditions)
       printResult(rlm)
       printComparison(react, rlm)

@@ -193,6 +193,13 @@ class DenoPyodideLaunchSuite extends FunSuite:
     assert(source.contains("""type === "NoneType" ? "type(None)" : type"""), "NoneType annotation")
   }
 
+  test("the launch command writes the runner script again after a removal of the file") {
+    val runner = Path.of(fromRunner(command()).head)
+    val _      = Files.deleteIfExists(runner)
+    val again  = Path.of(fromRunner(command()).head)
+    assert(Files.isRegularFile(again), s"the runner script $again is missing")
+  }
+
   test("the vendored runner keeps the three comment lines that dspy4s changed") {
     val source = runnerSource
     assert(source.contains("# Only define if not already registered with declared output fields."))

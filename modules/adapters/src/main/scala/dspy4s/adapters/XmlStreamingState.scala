@@ -2,7 +2,7 @@ package dspy4s.adapters
 
 import dspy4s.adapters.contracts.FieldChunk
 import dspy4s.adapters.internal.SingleUseAdapterStreamingState
-import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.{FieldSpec, PythonText}
 
 import scala.collection.mutable
 import scala.util.control.NonFatal
@@ -23,24 +23,33 @@ import scala.util.control.NonFatal
   * name, an entity, or content are all resumed cleanly on the next call.
   *
   * Boundary whitespace (upstream `_default_handle_stream_chunk`): the chunks of a field have no leading and no trailing
-  * whitespace of the field value. Thus the text of the chunks of a field, joined, is the value that [[XMLAdapter]]
-  * parses for that field, for each split of the response into deltas.
+  * Python whitespace of the field value ([[PythonText.strip]], as the parser). Thus the text of the chunks of a field,
+  * joined, is the value that [[XMLAdapter]] parses for that field, for each split of the response into deltas.
+  *
+  * The first element of a field wins, as in the parser: a later element of the same field gives no chunks. A field tag
+  * inside the content of a field is text of that field, and a tag of another name holds no value, so the stream reads
+  * the field tags that the parser reads.
   */
 final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUseAdapterStreamingState:
   private val fieldNames: Set[String] = outputFields.map(_.name).toSet
 
   private enum Phase derives CanEqual:
-    case PreDoc, BetweenTags, TagStart, ReadingOpenTag, SkippingAttrs,
-      ReadingCloseTag, InContent, InContentSeenLt, InEntity, PostDoc
+    case PreDoc, BetweenTags, TagStart, ReadingOpenTag, SkippingAttrs, ReadingCloseTag, InContent, InContentSeenLt,
+      InEntity
 
   import Phase.*
 
-  private var phase: Phase                                              = PreDoc
-  private var currentField: Option[String]                              = None
-  private val tagBuilder                                                = new StringBuilder
-  private val contentBuffer                                             = new StringBuilder
-  private val entityBuilder                                             = new StringBuilder
-  private var pendingTagMatch: Boolean                                  = false
+  private var phase: Phase = PreDoc
+
+  /** The output field of the open tag. A tag of another name gives no chunks. */
+  private var currentField: Option[String] = None
+
+  /** The output fields whose first element closed. A later element of such a field gives no chunks. */
+  private val closedFields: mutable.Set[String] = mutable.Set.empty
+  private val tagBuilder                        = new StringBuilder
+  private val contentBuffer                     = new StringBuilder
+  private val entityBuilder                     = new StringBuilder
+
   override protected def receiveOpen(delta: String): Vector[FieldChunk] =
     val out = mutable.ArrayBuffer.empty[FieldChunk]
     var i   = 0
@@ -58,12 +67,11 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
 
   private def emitFinal(out: mutable.ArrayBuffer[FieldChunk]): Unit =
     currentField.foreach { name =>
-      // The parser trims the field value (`XMLAdapter.extractFieldText`), so the chunk does too.
-      out += FieldChunk(name, contentBuffer.toString.trim, isLast = true)
+      // The parser strips the field value with Python `str.strip` (`XMLAdapter.fieldTexts`), so the chunk does too.
+      if closedFields.add(name) then out += FieldChunk(name, PythonText.strip(contentBuffer.toString), isLast = true)
     }
     contentBuffer.clear()
     currentField = None
-    pendingTagMatch = false
 
   private def processChar(c: Char, out: mutable.ArrayBuffer[FieldChunk]): Unit =
     phase match
@@ -82,21 +90,19 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
           case _ =>
             // Unrecognized — `<?xml ... ?>`, `<!-- ... -->`, etc. Skip to next '>'.
             phase = SkippingAttrs
-            pendingTagMatch = false
       case ReadingOpenTag =>
         if isNameChar(c) then tagBuilder.append(c)
         else
           val tag = tagBuilder.toString
-          pendingTagMatch = fieldNames.contains(tag)
-          if pendingTagMatch then
+          if fieldNames.contains(tag) then
             currentField = Some(tag)
             contentBuffer.clear()
           c match
-            case '>' => phase = if pendingTagMatch then InContent else BetweenTags
+            case '>' => phase = if currentField.isDefined then InContent else BetweenTags
             case _   => phase = SkippingAttrs
       case SkippingAttrs =>
         if c == '>' then
-          phase = if pendingTagMatch then InContent else BetweenTags
+          phase = if currentField.isDefined then InContent else BetweenTags
         // else: skip attribute chars, including self-closing '/'
       case ReadingCloseTag => c match
           case '>' =>
@@ -145,7 +151,6 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
           contentBuffer.append(entityBuilder.toString)
           contentBuffer.append(c)
           phase = InContent
-      case PostDoc => ()
 
   private def isNameStart(c : Char): Boolean = c.isLetter || c == '_'
   private def isNameChar(c  : Char): Boolean = c.isLetterOrDigit || c == '_' || c == '-' || c == '.'
@@ -166,11 +171,3 @@ final class XmlStreamingState(outputFields: Vector[FieldSpec]) extends SingleUse
         try Character.toString(Integer.parseInt(s.drop(1)))
         catch case NonFatal(_) => s"&$name;"
       case _ => s"&$name;"
-
-object XmlStreamingState:
-  /** True iff `text`'s tail could be the start of an XML closing tag that would terminate the currently-streaming
-    * field. Ported from Python `StreamListener._could_form_end_identifier` for `XMLAdapter`. Returns true when the
-    * buffer ends with `<` or `</`, or already contains `</` anywhere.
-    */
-  def couldFormEndIdentifier(text: String): Boolean =
-    text.endsWith("<") || text.endsWith("</") || text.contains("</")

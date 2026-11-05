@@ -18,7 +18,6 @@ import dspy4s.lm.runtime.{
   CacheCapacity,
   InMemoryLmCache,
   JitterFactor,
-  LmCacheRegistry,
   ManagedLanguageModel,
   RetryCount,
   RetryDelayMillis,
@@ -51,7 +50,6 @@ class LmRuntimeSuite extends FunSuite:
 
   private val baseRequest = LmRequest(
     model = "test-model",
-    mode = LmMode.Chat,
     options = DynamicValues.record("temperature" := 0.7)
   )
 
@@ -61,13 +59,8 @@ class LmRuntimeSuite extends FunSuite:
       Some(LmUsage(totalTokens = 9, promptTokens = 4, completionTokens = 5, extras = Map(TokenCategory.Cached -> 3L)))
   )
 
-  override def beforeEach(context: BeforeEach): Unit =
-    RuntimeEnvironment.resetForTests()
-    LmCacheRegistry.resetDefault()
-
-  override def afterEach(context: AfterEach): Unit =
-    RuntimeEnvironment.resetForTests()
-    LmCacheRegistry.resetDefault()
+  override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   test("LanguageModel.acall suspends the call on the supplied execution context") {
     val pending            = ArrayBuffer.empty[Runnable]
@@ -201,8 +194,8 @@ class LmRuntimeSuite extends FunSuite:
 
     given RuntimeContext = RuntimeEnvironment.current
     UsageTracking.withTracker(tracker) {
-      assert(managed.call(baseRequest).isRight)
-      assert(managed.call(baseRequest).isRight)
+      assert(LanguageModel.callAndRecordUsage(managed, baseRequest).isRight)
+      assert(LanguageModel.callAndRecordUsage(managed, baseRequest).isRight)
     }
 
     val usageData = tracker.usageData
@@ -223,7 +216,7 @@ class LmRuntimeSuite extends FunSuite:
     given RuntimeContext = RuntimeEnvironment.current
     UsageTracking.withTracker(tracker) {
       RuntimeEnvironment.withSettings(RuntimeContext(trackUsage = Some(false))) {
-        assert(managed.call(baseRequest).isRight)
+        assert(LanguageModel.callAndRecordUsage(managed, baseRequest).isRight)
       }
     }
 

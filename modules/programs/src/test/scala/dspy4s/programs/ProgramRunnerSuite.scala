@@ -25,7 +25,7 @@ class ProgramRunnerSuite extends FunSuite:
     var observed: Option[ProgramCall[RunnerInput]] = None
     val moduleName                                 = "capturing_typed"
 
-    protected val lifecycle: ModuleLifecycle[RunnerInput, String] =
+    protected val lifecycle: ModuleLifecycle[RunnerInput] =
       ModuleLifecycle.typed(call => DynamicValues.record("value" := call.input.value))
 
     protected def forward(call: ProgramCall[RunnerInput])(using

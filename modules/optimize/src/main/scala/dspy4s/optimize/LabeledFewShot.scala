@@ -15,32 +15,30 @@ final case class LabeledFewShotConfig(
     seed  : Long      = 0L
 )
 
+/** LabeledFewShot gives each predictor labeled demos from the trainset (upstream `dspy/teleprompt/vanilla.py`). With
+  * `sample`, one random source gives a new sample of `k` examples to each predictor, in read order. Without `sample`,
+  * each predictor gets the same first `k` examples.
+  */
 final class LabeledFewShot[P: OptimizableStructure](
     config: LabeledFewShotConfig = LabeledFewShotConfig()
 ) extends Teleprompter[P]:
 
   override val name: String = "labeled_few_shot"
 
-  override def compile(
+  override protected[optimize] def compileInScope(
       student : P,
       trainset: Vector[Example],
-      teacher : Option[P]               = None,
-      valset  : Option[Vector[Example]] = None
+      teacher : Option[P],
+      valset  : Option[Vector[Example]]
   )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    Teleprompter.withCompileCallbacks(this, trainset, valset)(compileInScope(student, trainset))
-
-  /** The work of [[compile]], inside its compile scope. */
-  private def compileInScope(student: P, trainset: Vector[Example]): Either[DspyError, OptimizationReport[P]] =
     val ps = summon[OptimizableStructure[P]]
 
-    val demos: Vector[Example] =
-      if trainset.isEmpty then Vector.empty
-      else if !config.sample then Vector.from(trainset.take(config.k))
-      else
-        val rng = new scala.util.Random(config.seed)
-        Vector.from(rng.shuffle(trainset).take(config.k))
+    val rng = new scala.util.Random(config.seed)
 
-    val compiled = ps.replace(student, ps.read(student).map(_.copy(demos = demos)))
+    def demos(): Vector[Example] =
+      if config.sample then rng.shuffle(trainset).take(config.k) else trainset.take(config.k)
+
+    val compiled = ps.replace(student, ps.read(student).map(_.copy(demos = demos())))
     Right(
       OptimizationReport(
         bestProgram = compiled,
@@ -50,7 +48,7 @@ final class LabeledFewShot[P: OptimizableStructure](
             score = 0.0,
             metadata = Map(
               "optimizer"     -> name,
-              "num_demos"     -> demos.size,
+              "num_demos"     -> math.min(config.k, trainset.size),
               "trainset_size" -> trainset.size
             )
           )

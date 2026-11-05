@@ -21,7 +21,7 @@ optimizers, and two in-memory retrievers. It uses `core`, `lm`, `adapters`, and 
 
 | Type | Description |
 |------|-------------|
-| `Predict[I, O]` | The base predictor. It encodes `I`, calls the LM through the adapter, and decodes the response. `withLm` binds a model to it. `erase` gives a `DynamicPredict` with the same configuration. |
+| `Predict[I, O]` | The base predictor. It encodes `I`, calls the LM through the adapter, and decodes the response. `withLm` binds a model to it. |
 | `DynamicPredict` | The predictor for a `SignatureLayout`. Its input and its output are records. |
 | `ChainOfThought[I, O]` | Runs a `Predict` that has a `reasoning: String` output first. The output is a named tuple. |
 | `ReAct[I, O]` | An agent that calls tools. In each step, the model writes `next_thought`, `next_tool_name`, and `next_tool_args`. When the model selects `finish`, or after `maxIterations` steps, an extractor writes the output with a `reasoning` field first. |
@@ -52,7 +52,7 @@ the optimizers can find their predictors.
 | `Prediction[O]` | The output `O` and its `RawPrediction` (`raw`), with the completions and the token usage. |
 | `OptimizableStructure[P]` / `OptimizableLeaf[P]` | The predictors of a program, and one predictor. The built-in composites have their own instances, and the compiler derives an instance for a case class. |
 | `ToolFunction` | A tool: `name`, `description`, `argSchema`, and `invoke(args)`. `ToolFunction.fromMethod` makes a tool from a method. |
-| `AgentLoop` / `TrajectoryAgent` | The bounded loop of the agents, and the template of `ReAct`: a loop that makes a trajectory, and then one extraction. |
+| `AgentLoop` | The bounded loop of the agents. `ReAct` runs a loop that makes a trajectory, and then one extraction. |
 | `Aggregation.majority` | Selects the most frequent value of a field in the candidate completions. |
 | `KNN` / `EmbeddingsRetriever` | `KNN` finds the nearest trainset examples by dot product. `EmbeddingsRetriever` finds the top-k passages by cosine similarity. |
 
@@ -68,8 +68,12 @@ the optimizers can find their predictors.
 - **ReAct uses a text protocol.** The model selects a tool through output fields. ReAct does not use the native
   function calls of the adapters. A tool failure becomes an observation in the trajectory. On a context window
   overflow, ReAct removes the oldest trajectory entry and tries again.
-- **Fixed agent templates.** `TrajectoryAgent.forward` and `InterpretedTrajectoryAgent.trajectoryStep` are `final`. A
-  subclass selects its action type, but it cannot change the order of the steps.
+
+## Save and load a program
+
+`ProgramPersistence` saves the instructions, the demos, and the configuration of each predictor as JSON. To load a
+state, give a new program with the same structure. The program keeps its signatures, LMs, and tools, and gets the
+saved values. The [state contract](../../site/docs/runtime/saving-and-loading.md) gives the rules and the limits.
 
 ## Source layout
 
@@ -78,8 +82,8 @@ the optimizers can find their predictors.
 | top level | `Parallel`, `Aggregation`, `ProgramRunner`, `RecordCodec`, `DynamicSignature`, and the limit types, for example `AttemptCount` |
 | `strategies/` | `Predict`, `DynamicPredict`, and the other programs |
 | `compose/` | the composition operators and `Mode` |
-| `contracts/` | `Module`, `ProgramCall`, `Prediction`, `ModuleLifecycle`, `ToolFunction`, and `ActionInterpreter` |
-| `optimization/` | `OptimizableStructure`, `OptimizableLeaf`, `OptimizableParameters`, and their instances |
+| `contracts/` | `Module`, `ProgramCall`, `Prediction`, `ModuleLifecycle`, and `ToolFunction` |
+| `optimization/` | `OptimizableStructure`, `OptimizableLeaf`, `OptimizableParameters`, their instances, and `ProgramPersistence` |
 | `algebra/` | `Program` (a module with a fixed number of predictors) and the `algebra` instances for programs |
 | `runtime/` | `PredictEngine`, the agent loops, `ParallelExecutor`, and `ToolExecutor` |
 | `retrievers/` | `KNN` and `EmbeddingsRetriever` |

@@ -16,7 +16,7 @@ A `Spec` trait declares the inputs and outputs of a generation step. `InputField
 --8<-- "tutorials/ai_text_game/AiTextGame.scala:module"
 ```
 
-`GameAI` holds one `ChainOfThought` predictor per signature, each built from `Signature.of[T]`. The class threads the predictors' outputs into its own methods rather than extending a base module type.
+`GameAI` holds one `ChainOfThought` predictor per signature, each built from `Signature.of[T]`. The `instructions` argument gives the task text that the model gets. The class threads the predictors' outputs into its own methods rather than extending a base module type.
 
 ## Results
 

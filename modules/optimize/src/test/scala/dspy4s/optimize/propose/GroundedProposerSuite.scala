@@ -7,6 +7,7 @@ import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmResponse, Message, MessageRole}
 import dspy4s.optimize.CandidateCount
+import dspy4s.programs.optimization.OptimizableStructure
 import dspy4s.programs.strategies.DynamicPredict
 import munit.FunSuite
 
@@ -16,8 +17,8 @@ import zio.blocks.schema.DynamicValue
 
 /** Offline GroundedProposer suite.
   *
-  * The scripted LM serves two distinct sub-tasks through the single ambient model, branching on markers the proposer
-  * weaves into each signature's instructions (rendered into the prompt by the test adapter):
+  * The scripted LM serves two distinct sub-tasks through the single ambient model, branching on the upstream texts of
+  * the signatures (rendered into the prompt by the test adapter):
   *
   *   1. Dataset summary. The summary `DynamicPredict` asks for `observations`. The scripted LM returns a canned summary
   *      string AND bumps a call counter (so the test can assert the summary call is skipped when
@@ -30,8 +31,9 @@ class GroundedProposerSuite extends FunSuite:
 
   // ── Fixtures ──────────────────────────────────────────────────────────────
 
-  private val summaryMarker     = "SUMMARIZE_THE_DATASET"
-  private val instructionMarker = "PROPOSE_THE_INSTRUCTION"
+  private val summaryMarker     = "Given several examples from a dataset"
+  private val instructionMarker = "Use the information below to learn about a task"
+  private val noDemos           = "task_demos=[No task demos provided.]"
 
   /** The canned dataset-summary string the scripted LM returns for summary calls; a fragment is echoed into proposals
     * so grounding is observable.
@@ -58,11 +60,11 @@ class GroundedProposerSuite extends FunSuite:
       val body = s"INSTRUCTION=[$instr] $inputs"
       Right(FormattedPrompt(messages = Vector(Message(role = MessageRole.User, text = Some(body)))))
 
-    override def parse(layout: SignatureLayout, output: LmOutput)(using
+    override def parse(invocation: AdapterInvocation, output: LmOutput)(using
         RuntimeContext
     )
         : Either[DspyError, ParsedOutput] =
-      val outField = layout.outputFields.headOption.map(_.name).getOrElse("observations")
+      val outField = invocation.layout.outputFields.headOption.map(_.name).getOrElse("observations")
       Right(ParsedOutput(values = rec(outField := output.text)))
 
   private final class ScriptedLm extends LanguageModel:
@@ -117,9 +119,7 @@ class GroundedProposerSuite extends FunSuite:
       numInstructions = numInstructions,
       useDatasetSummary = useDatasetSummary,
       useTips = useTips,
-      seed = seed,
-      summaryMarker = summaryMarker,
-      instructionMarker = instructionMarker
+      seed = seed
     )
 
   // ── 1. Single predictor: N distinct, non-empty candidates ─────────────────
@@ -210,7 +210,90 @@ class GroundedProposerSuite extends FunSuite:
     assertEquals(run(), run())
   }
 
-  // ── 6. numInstructions <= 0 is rejected ───────────────────────────────────
+  // ── 6. task_demos (upstream `GenerateModuleInstruction.forward`) ──────────
+
+  /** The prompts of `proposeInstructions` for `program`, with `demoCandidates` indexed by set and then by leaf. */
+  private def promptsOf[P: OptimizableStructure](
+      program        : P,
+      demoCandidates : Vector[Vector[Vector[Example]]],
+      numInstructions: CandidateCount
+  ): Vector[String] =
+    val prompts = java.util.concurrent.ConcurrentLinkedQueue[String]()
+    val lm      = new LanguageModel:
+      override val id: String                                                                    = "recording"
+      override val mode: LmMode                                                                  = LmMode.Chat
+      override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+        val _ = prompts.add(request.messages.lastOption.flatMap(_.text).getOrElse(""))
+        Right(LmResponse(outputs = Vector(LmOutput(text = "A candidate."))))
+    val proposer = new GroundedProposer[P](
+      config(numInstructions = numInstructions, useDatasetSummary = false, useTips = false)
+    )
+    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(GroundingAwareAdapter))) {
+      val result = proposer.proposeInstructions(program, trainset, demoCandidates)(using RuntimeEnvironment.current)
+      assert(result.isRight, result.toString)
+    }
+    prompts.toArray(Array.empty[String]).toVector
+
+  /** The prompts of a program with one leaf, with `demoSets` as the demo sets of that leaf. */
+  private def promptsOfSets(demoSets: Vector[Vector[Example]], numInstructions: CandidateCount): Vector[String] =
+    val program = DynamicPredict(layout = taskLayout("QA", "INSTR_INITIAL"))
+    promptsOf(program, demoSets.map(Vector(_)), numInstructions)
+
+  /** The prompts of two proposals of one leaf: two demo sets give two proposals, and each set has `demos`. */
+  private def promptsWith(demos: Vector[Example]): Vector[String] =
+    promptsOfSets(Vector(demos, demos), CandidateCount(2))
+
+  private def traced(question: String): Example =
+    Example(rec("question" := question, "answer" := "y"), Set("question"), augmented = true)
+
+  test("the input task_demos has the upstream text when a proposal has no bootstrapped demo") {
+    val labeled = Example(rec("question" := "a labeled demo", "answer" := "x"), inputKeys = Set("question"))
+    assert(promptsWith(Vector.empty).forall(_.contains(noDemos)))
+    assert(promptsWith(Vector(labeled)).forall(_.contains(noDemos)))
+  }
+
+  test("the first proposal shows no demos, and a later proposal shows the bootstrapped demos only") {
+    val labeled = Example(rec("question" := "a labeled demo", "answer" := "x"), inputKeys = Set("question"))
+    val traced  = Example(rec("question" := "a traced demo", "answer" := "y"), Set("question"), augmented = true)
+    val prompts = promptsWith(Vector(labeled, traced))
+    assert(prompts(0).contains(noDemos), prompts(0))
+    assert(prompts(1).contains("a traced demo"), prompts(1))
+    assert(!prompts(1).contains("a labeled demo"), prompts(1))
+  }
+
+  test("the demo sets limit the proposals, and a proposal starts from the demo set with its index") {
+    val demoSets = Vector(Vector(traced("the demo of set 0")), Vector(traced("the demo of set 1")))
+    val prompts  = promptsOfSets(demoSets, CandidateCount(5))
+    assertEquals(prompts.size, 2)
+    assert(prompts(0).contains(noDemos), prompts(0))
+    val ofSet1 = prompts(1).indexOf("the demo of set 1")
+    val ofSet0 = prompts(1).indexOf("the demo of set 0")
+    assert(ofSet1 >= 0 && ofSet1 < ofSet0, prompts(1))
+  }
+
+  test("a proposal gathers at most three bootstrapped demos over the demo sets") {
+    val demoSets = Vector(Vector(traced("demo a0"), traced("demo a1")), Vector(traced("demo b0"), traced("demo b1")))
+    val prompt   = promptsOfSets(demoSets, CandidateCount(2))(1)
+    Vector("demo b0", "demo b1", "demo a0").foreach(demo => assert(prompt.contains(demo), prompt))
+    assert(!prompt.contains("demo a1"), prompt)
+  }
+
+  test("the demo candidates have the index of the set first, and then the index of the leaf") {
+    val program = TwoStage(
+      first = DynamicPredict(layout = taskLayout("First", "INSTR_FIRST")),
+      second = DynamicPredict(layout = taskLayout("Second", "INSTR_SECOND"))
+    )
+    val demoCandidates = Vector(
+      Vector(Vector(traced("first leaf, set 0")), Vector(traced("second leaf, set 0"))),
+      Vector(Vector(traced("first leaf, set 1")), Vector(traced("second leaf, set 1")))
+    )
+    val prompts = promptsOf(program, demoCandidates, CandidateCount(2))
+    assertEquals(prompts.size, 4)
+    assert(prompts(1).contains("first leaf, set 1") && !prompts(1).contains("second leaf"), prompts(1))
+    assert(prompts(3).contains("second leaf, set 1") && !prompts(3).contains("first leaf"), prompts(3))
+  }
+
+  // ── 7. numInstructions <= 0 is rejected ───────────────────────────────────
 
   test("CandidateCount rejects non-positive instruction counts") {
     assert(compileErrors("dspy4s.optimize.CandidateCount(0)").nonEmpty)

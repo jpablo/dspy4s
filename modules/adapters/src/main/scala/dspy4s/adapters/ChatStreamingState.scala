@@ -1,8 +1,8 @@
 package dspy4s.adapters
 
 import dspy4s.adapters.contracts.FieldChunk
-import dspy4s.adapters.internal.{PythonText, SingleUseAdapterStreamingState}
-import dspy4s.core.contracts.FieldSpec
+import dspy4s.adapters.internal.{AdapterTextSupport, SingleUseAdapterStreamingState}
+import dspy4s.core.contracts.{FieldSpec, PythonText}
 
 import scala.collection.mutable
 
@@ -18,9 +18,9 @@ import scala.collection.mutable
   *     and after each line break of `str.splitlines`. The text before the buffer counts, so a marker after a header or
   *     after a long run of whitespace on the same line is text. Upstream `StreamListener` finds the markers in any
   *     place of the text; the port follows the parser, so that the chunks give the parsed values.
-  *   - Mid-stream emission holds back the tail of the buffer that could still be the start of a marker. The hold-back
-  *     window is the longest possible marker, which guarantees a partial `[[ ## foo` prefix is never emitted as
-  *     content.
+  *   - Mid-stream emission holds back the tail of the buffer that can still become a marker of any name, from its first
+  *     `[` ([[ChatStreamingState.canBecomeMarker]]). The parser ends a field at a header of any name, so the hold back
+  *     has no fixed length: a partial `[[ ## conversation_hist` is never emitted as content.
   *   - On `finish()`, anything held back is flushed to the current field and the last chunk is marked `isLast = true`.
   *   - The first header of a field wins, as in the parser (upstream `ChatAdapter.parse`). A later header of the same
   *     field starts a section that the stream drops.
@@ -34,28 +34,20 @@ import scala.collection.mutable
   *     is the value that [[ChatAdapter]] parses for that field, for each split of the response into deltas.
   *
   * @param outputFields
-  *   the output fields that the text of the reply gives ([[ChatAdapterParser.textFields]])
+  *   the output fields that the text of the reply gives (`AdapterTextSupport.textFields`)
   */
 final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUseAdapterStreamingState:
 
   private val outputNames: Set[String]               = outputFields.map(_.name).toSet
   private val singleFieldFallback: Option[FieldSpec] = Option.when(outputFields.size == 1)(outputFields.head)
 
-  // Longest possible marker — the completed sentinel or any output-field
-  // marker (`[[ ## name ## ]]`); we hold back that many trailing chars on
-  // every mid-stream emission so any partial marker is preserved for the
-  // next receive() call. Sizing to the completed sentinel alone would let a
-  // partial marker for a field name longer than `completed` be split and
-  // emitted as content, permanently losing the field boundary.
-  private val markerMaxLen: Int =
-    (outputFields.map(f => s"[[ ## ${f.name} ## ]]".length) :+ ChatAdapter.CompletedMarker.length).max
-
   private val buffer                       = new StringBuilder
   private val whitespace                   = new ChatStreamingState.BoundaryWhitespace
   private var currentField: Option[String] = None
 
   /** True when the text before the buffer has no character after its last line break, or only whitespace. Then the
-    * start of the buffer is in the indentation of a line, and a marker there can be a header.
+    * start of the buffer is in the indentation of a line, and a marker there can be a header. In [[drain]], the start
+    * of the buffer is the start of the text that the loop did not consume.
     */
   private var bufferAtLineStart: Boolean = true
 
@@ -79,25 +71,29 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
     else flushed.init :+ flushed.last.copy(isLast = true)
 
   /** The value of the single-output fallback at the end: the whole text, when the one output field had no header. The
-    * value has the line ends of the parser (`ChatAdapterParser.fallbackText`).
+    * value has the line ends of the parser (`AdapterTextSupport.fallbackText`).
     */
   private def fallbackValue: Vector[FieldChunk] =
     val out = mutable.ArrayBuffer.empty[FieldChunk]
     if fallbackOpen then
       singleFieldFallback.foreach(field =>
-        closeField(field.name, ChatAdapterParser.fallbackText(fallbackText.toString), out)
+        closeField(field.name, AdapterTextSupport.fallbackText(fallbackText.toString), out)
       )
     out.toVector
 
+  /** The chunks of the buffer. The loop reads the buffer from the offset `from`, the start of the text that it did not
+    * consume, and removes the consumed text one time at the end.
+    */
   private def drain(forceFlush: Boolean): Vector[FieldChunk] =
     val out  = mutable.ArrayBuffer.empty[FieldChunk]
+    var from = 0
     var done = false
     while !done do
-      findMarker(buffer.toString) match
+      findMarker(from) match
         case Some(MarkerHit(field, markerStart, markerEnd)) =>
           // The content before the marker is the end of the current field.
-          currentField.foreach(name => closeField(name, buffer.substring(0, markerStart), out))
-          consume(markerEnd)
+          currentField.foreach(name => closeField(name, buffer.substring(from, markerStart), out))
+          from = consume(from, markerEnd)
           currentField = Option.when(outputNames.contains(field) && !openedFields.contains(field))(field)
           currentField.foreach { name =>
             openedFields += name
@@ -105,36 +101,36 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
           }
           // Loop — there may be another marker already in the buffer.
         case None =>
+          val end = safeEnd(from, forceFlush)
           currentField match
             case None =>
               // No tracked field is open. Discard any safe prefix (text
               // before a possible marker start) and hold the tail that
               // might still become one.
-              val emittable = safeEmittablePrefixLength(buffer.toString, forceFlush)
-              if emittable > 0 then consume(emittable)
+              from = consume(from, end)
             case Some(name) =>
-              val text = buffer.toString
               if forceFlush then
-                closeField(name, text, out)
-                buffer.clear()
-              else
-                val emittable = safeEmittablePrefixLength(text, forceFlush = false)
-                if emittable > 0 then
-                  val emitted = whitespace.accept(text.substring(0, emittable))
-                  if emitted.nonEmpty then out += FieldChunk(name, emitted, isLast = false)
-                  consume(emittable)
+                closeField(name, buffer.substring(from), out)
+                from = buffer.length
+              else if end > from then
+                val emitted = whitespace.accept(buffer.substring(from, end))
+                if emitted.nonEmpty then out += FieldChunk(name, emitted, isLast = false)
+                from = consume(from, end)
           done = true
+    buffer.delete(0, from)
     out.toVector
 
-  /** Remove the first `count` characters of the buffer, and update [[bufferAtLineStart]] for them. */
-  private def consume(count: Int): Unit =
-    var index = 0
-    while index < count do
+  /** Consume the characters of the buffer from `from` to `to`, and update [[bufferAtLineStart]] for them. The result is
+    * `to`, the new start of the text that the loop did not consume.
+    */
+  private def consume(from: Int, to: Int): Int =
+    var index = from
+    while index < to do
       val char = buffer.charAt(index)
       if PythonText.isLineBreak(char) then bufferAtLineStart = true
       else if !PythonText.isSpace(char) then bufferAtLineStart = false
       index += 1
-    buffer.delete(0, count)
+    to
 
   /** End the field `name` with its last `content`. A field with text gets a last chunk with `isLast = true`, which can
     * be empty: the held whitespace at the end of a field is dropped. A field with no text gets no chunk.
@@ -144,37 +140,40 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
     if whitespace.started then out += FieldChunk(name, emitted, isLast = true)
     whitespace.reset()
 
-  /** Returns the length of the prefix of `text` that is safe to emit (or discard) without risking truncation of a
-    * partial marker. When `forceFlush` is true, the whole buffer is safe. Otherwise, we must hold back any tail that
-    * could be the start of a marker.
+  /** The end of the text from `from` that is safe to emit (or discard) without risking truncation of a partial marker.
+    * When `forceFlush` is true, the whole buffer is safe. Otherwise, the end is the first `[` from which the rest of
+    * the buffer can still become a marker of any name ([[ChatStreamingState.canBecomeMarker]]), else the end of the
+    * buffer. A complete marker there is not a header (the search of [[findMarker]] did not take it), so it is text.
     */
-  private def safeEmittablePrefixLength(text: String, forceFlush: Boolean): Int =
-    if forceFlush then text.length
+  private def safeEnd(from: Int, forceFlush: Boolean): Int =
+    if forceFlush then buffer.length
     else
-      // The safest, simplest rule: hold the trailing `markerMaxLen - 1`
-      // chars. They might still grow into a marker on the next receive.
-      math.max(0, text.length - (markerMaxLen - 1))
+      Iterator
+        .iterate(buffer.indexOf("[", from))(at => buffer.indexOf("[", at + 1))
+        .takeWhile(_ >= 0)
+        .find(ChatStreamingState.canBecomeMarker(buffer, _))
+        .getOrElse(buffer.length)
 
-  /** Find the earliest line-aligned `[[ ## name ## ]]` marker in `text`, the buffer, or `None`. A line-aligned marker
-    * has only the indentation of its line before it ([[indentStart]]).
+  /** Find the earliest line-aligned `[[ ## name ## ]]` marker in the buffer after the offset `from`, or `None`. The
+    * pattern reads the buffer in place. A line-aligned marker has only the indentation of its line before it
+    * ([[indentStart]]).
     */
-  private def findMarker(text: String): Option[MarkerHit] =
+  private def findMarker(from: Int): Option[MarkerHit] =
     var result: Option[MarkerHit] = None
-    val it                        = ChatAdapter.MarkerPattern.findAllMatchIn(text)
-    while result.isEmpty && it.hasNext do
-      val m          = it.next()
-      val start      = indentStart(text, m.start)
-      val lineStarts = if start == 0 then bufferAtLineStart else PythonText.isLineBreak(text.charAt(start - 1))
-      if lineStarts then result = Some(MarkerHit(m.group(1), markerStart = start, markerEnd = m.end))
+    val matcher                   = ChatAdapter.MarkerPattern.pattern.matcher(buffer).region(from, buffer.length)
+    while result.isEmpty && matcher.find() do
+      val start      = indentStart(from, matcher.start)
+      val lineStarts = if start == from then bufferAtLineStart else PythonText.isLineBreak(buffer.charAt(start - 1))
+      if lineStarts then result = Some(MarkerHit(matcher.group(1), markerStart = start, markerEnd = matcher.end))
     result
 
-  /** The start of the indentation before the position `markerStart` of `text`: the run of whitespace with no line break
-    * that ends at `markerStart`. The marker line starts there, so the content of the field before the marker ends
-    * there.
+  /** The start of the indentation before the position `markerStart` of the buffer: the run of whitespace with no line
+    * break that ends at `markerStart`, at the offset `from` or after. The marker line starts there, so the content of
+    * the field before the marker ends there.
     */
-  private def indentStart(text: String, markerStart: Int): Int =
+  private def indentStart(from: Int, markerStart: Int): Int =
     var start = markerStart
-    while start > 0 && isIndent(text.charAt(start - 1)) do start -= 1
+    while start > from && isIndent(buffer.charAt(start - 1)) do start -= 1
     start
 
   /** True for a Python whitespace character that is not a line break of `str.splitlines`. */
@@ -183,6 +182,40 @@ final class ChatStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
   private final case class MarkerHit(field: String, markerStart: Int, markerEnd: Int)
 
 object ChatStreamingState:
+
+  /** The start and the end of a marker `[[ ## name ## ]]` ([[ChatAdapter.MarkerPattern]]). */
+  private val MarkerOpen: String  = "[[ ## "
+  private val MarkerClose: String = " ## ]]"
+
+  /** True when the rest of `text` from `start` can still become a marker `[[ ## name ## ]]` with more text: it is a
+    * prefix of a marker of a name of one or more word characters (`\w` of a Java pattern), and not a complete marker.
+    * The stream holds such a tail back, because the next delta can complete the marker.
+    */
+  private def canBecomeMarker(text: CharSequence, start: Int): Boolean =
+    val nameStart = matchPart(text, start, MarkerOpen)
+    if nameStart == text.length then true
+    else if nameStart - start < MarkerOpen.length then false
+    else
+      var nameEnd = nameStart
+      while nameEnd < text.length && isWordChar(text.charAt(nameEnd)) do nameEnd += 1
+      if nameEnd == text.length then true
+      else if nameEnd == nameStart then false
+      else
+        val closeEnd = matchPart(text, nameEnd, MarkerClose)
+        closeEnd == text.length && closeEnd - nameEnd < MarkerClose.length
+
+  /** The end of the longest part of `text` from `start` that is a prefix of `part`. */
+  private def matchPart(text: CharSequence, start: Int, part: String): Int =
+    var index = start
+    while index < text.length && index - start < part.length && text.charAt(index) == part.charAt(index - start) do
+      index += 1
+    index
+
+  /** A word character of a Java pattern (`\w`): an ASCII letter, an ASCII digit, or `_`. */
+  private def isWordChar(char: Char): Boolean =
+    (char >= 'a' && char <= 'z') ||
+      (char >= 'A' && char <= 'Z') ||
+      (char >= '0' && char <= '9') || char == '_'
 
   /** The boundary whitespace rule for the chunks of one field (upstream `_default_handle_stream_chunk`). The rule drops
     * the leading whitespace of the field. It holds a run of whitespace until more text of the field arrives. Whitespace
@@ -214,15 +247,3 @@ object ChatStreamingState:
     def reset(): Unit =
       held.clear()
       hasText = false
-
-  /** True iff `text`'s tail or interior could still grow into a `[[ ## field_name ## ]]` (or `[[ ## completed ## ]]`)
-    * marker. Used by the per-token holdback heuristic — when this returns `false`, every pending token in the wrapper's
-    * queue is safe to flush.
-    *
-    * Ported from Python `StreamListener._could_form_end_identifier` for `ChatAdapter`. Returns true when the buffer
-    * ends with any of the marker-prefix snippets, or already contains `[[ ##` anywhere (a partial-marker tail can no
-    * longer be distinguished without further tokens).
-    */
-  def couldFormEndIdentifier(text: String): Boolean =
-    val endPrefixes = Seq("[", "[[", "[[ ", "[[ #", "[[ ##")
-    endPrefixes.exists(text.endsWith) || text.contains("[[ ##")

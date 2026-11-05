@@ -93,7 +93,7 @@ class ProgramCallUsageSuite extends FunSuite:
   private final class TwoPrograms[I, O](first: Module[I, O], second: Module[I, O]) extends Module[I, O]:
     val nested: AtomicReference[Vector[Option[LmUsage]]]                                                         = AtomicReference(Vector.empty)
     override val moduleName: String                                                                              = "both"
-    override protected val lifecycle: ModuleLifecycle[I, O]                                                      = ModuleLifecycle.typedWithoutInputs
+    override protected val lifecycle: ModuleLifecycle[I]                                                         = ModuleLifecycle.typedWithoutInputs
     override protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
       for
         one <- first(call)
@@ -113,8 +113,8 @@ class ProgramCallUsageSuite extends FunSuite:
     ): Either[DspyError, RawPrediction] =
       val tasks = (1 to count).toVector.map(i => inner -> ProgramCall(DynamicValues.record("question" := s"q$i")))
       Parallel(numThreads = Some(ThreadCount(4))).run(tasks).map { result =>
-        nested.set(result.results.map(_.flatMap(_.lmUsage)))
-        RawPrediction(values = DynamicValues.record("count" := result.results.flatten.size))
+        nested.set(result.results.map(_.toOption.flatMap(_.lmUsage)))
+        RawPrediction(values = DynamicValues.record("count" := result.results.flatMap(_.toOption).size))
       }
 
   /** A REPL that runs a small script language in place of Python: `query` calls `llm_query` one time and

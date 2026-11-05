@@ -1,17 +1,18 @@
 # Talk to Your Data
 
-A type-safe analytics agent. Ask questions about a dataset in plain English and get answers, with the arithmetic done in code and then independently re-checked. Built on dspy4s.
+A type-safe analytics agent. Ask questions about a dataset in plain English and get answers, with the arithmetic usually done in code and then computed again on the JVM. Built on dspy4s.
 
 ```
 Q: Which product category brings in the most money?
   plan:
     Aggregation: SUM of column `total`.
     Group by: category.
-    Sort by value descending. Take the top 1.
+    Sort the groups by the aggregate value, descending.
+    Take the top 1.
     Answer with the group LABEL (e.g. the category/region name).
   answer:  Electronics
   method:  Parsed the CSV, summed `total` per category, took the max.
-  verify:  JVM cross-check AGREED  (after 1 attempt)
+  verify:  JVM cross-check AGREED  (after 1 attempt(s))
 ```
 
 ## The idea
@@ -49,17 +50,19 @@ final case class QueryPlan(agg: Agg, column: Option[String], groupBy: List[Strin
 OPENAI_API_KEY=sk-... DSPY_MODEL=gpt-4o-mini \
   sbt "examples/runMain dspy4s.examples.tutorials.talk_to_your_data.talkToYourDataMain"
 
-# Offline foundation check (no LM, no Deno). Proves the dataset, engine, and gold answers are self-consistent.
+# Offline foundation check (no LM, no Deno).
 sbt "examples/runMain dspy4s.examples.tutorials.talk_to_your_data.tytdSelfCheckMain"
 ```
 
-The GEPA half runs without Deno, because its metric is the Scala engine rather than the sandbox. Only the live agent's act stage needs Deno for the Python REPL. Tune the optimizer with `GEPA_METRIC_CALLS` and `GEPA_MINIBATCH`.
+The foundation check does these checks: the totals of the engine agree with each other, four gold answers agree with a direct computation from the orders, each gold plan has no problem, and a JSON reply decodes to a `QueryPlan` and an `AnalysisResult`. It does not check the other gold answers against a direct computation, the model, or the sandbox.
+
+The GEPA half runs without Deno, because its metric is the Scala engine rather than the sandbox. Only the live agent's act stage needs Deno for the Python REPL. Tune the optimizer with `GEPA_METRIC_CALLS` and `GEPA_MINIBATCH`. For another OpenAI-compatible endpoint, set `OPENAI_BASE_URL`.
 
 ## Files
 
 - [`Schemas.scala`](Schemas.scala): the `QueryPlan`, `AnalysisResult`, and `Verdict` (with their enums).
-- [`Dataset.scala`](Dataset.scala): a deterministic synthetic e-commerce dataset (about 10k orders) and a 24-question gold set whose answers the engine computes, so the answer key is correct by construction.
-- [`QueryEngine.scala`](QueryEngine.scala): the pure-Scala plan evaluator. It serves as both the GEPA oracle and the verify-stage cross-check.
+- [`Dataset.scala`](Dataset.scala): a deterministic synthetic e-commerce dataset (about 10k orders) and a 24-question gold set. The answer key comes from hand-written plans and the same engine that scores a planner, and `SelfCheck` compares some answers with a direct computation.
+- [`QueryEngine.scala`](QueryEngine.scala): the pure-Scala plan evaluator. It serves as both the GEPA oracle and the verify-stage cross-check. It gives a problem that names each bad column of a plan.
 - [`Agent.scala`](Agent.scala): the plan, act, verify, refine loop.
 - [`Optimize.scala`](Optimize.scala): the grounded GEPA metric and the optimization driver.
 - [`TalkToYourData.scala`](TalkToYourData.scala): the runnable `@main`.
@@ -67,6 +70,7 @@ The GEPA half runs without Deno, because its metric is the Scala engine rather t
 
 ## Notes on scope
 
-- The data is synthetic and deterministic (seeded), so it is license-clean to ship and every gold answer is exact. That is what makes the GEPA before/after a real, reproducible number rather than an LLM-judge estimate.
-- The demo's questions reduce to a structured `QueryPlan`, which is why the JVM can re-verify them. RLM is the general executor and can compute things the structured vocabulary cannot express; the structured cases are the ones a second independent engine can hold honest. Verify proves the computation is correct (both engines agree). GEPA's accuracy measures whether the interpretation is right.
-- Swap the CSV for a JDBC query and the same agent talks to a real database. The dataset is just text that the act stage crunches.
+- The data is synthetic and deterministic (seeded), so it is license-clean to ship and each gold answer is reproducible. The score of a plan comes from code, not from an LLM judge. GEPA uses the val split to select the best candidate, so the accuracy on that split is not a measure on held-out data.
+- The demo's questions reduce to a structured `QueryPlan`, which is why the JVM can compute them again. RLM is the general executor and can compute things that the structured vocabulary cannot express; a second engine can check only the structured cases. Verify shows that two computations agree. It does not show that the plan is correct, because the two computations use the same plan. GEPA's accuracy measures whether the plan is correct.
+- At the iteration limit, RLM asks the model for the outputs with no more code, so the model can then write the values itself. Verify still compares these values with the JVM answer.
+- To use a database in place of the CSV, change the text that the act stage gets (`Dataset.csv`), and also change `Agent.verify` and the gold answers of `Optimize`, which read `Dataset.orders`.

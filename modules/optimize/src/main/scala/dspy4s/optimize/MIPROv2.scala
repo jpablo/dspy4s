@@ -4,9 +4,12 @@ import dspy4s.programs.ProgramRunner
 
 import dspy4s.programs.optimization.{OptimizableParameters, OptimizableStructure}
 
+import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.DspyError
+import dspy4s.core.contracts.PythonText
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.evaluate.contracts.Metric
 import dspy4s.optimize.contracts.CandidateProgram
 import dspy4s.optimize.contracts.OptimizationReport
@@ -14,7 +17,6 @@ import dspy4s.optimize.contracts.Teleprompter
 import dspy4s.optimize.propose.GroundedProposer
 import dspy4s.optimize.propose.GroundedProposerConfig
 
-import scala.collection.mutable
 import scala.util.Random
 
 /** Knobs for [[MIPROv2]], mirroring the relevant slice of upstream's `MIPROv2.__init__` / `.compile`.
@@ -22,19 +24,27 @@ import scala.util.Random
   * @param metric
   *   task metric used to score whole-program candidates on the valset (or trainset)
   * @param numCandidates
-  *   number of demo-set candidates bootstrapped AND instruction candidates proposed per predictor (upstream's
-  *   `num_candidates` / `num_fewshot_candidates` / `num_instruct_candidates`, collapsed to one knob). Must be `> 0`.
+  *   the number of demo sets and the number of proposals for each predictor (upstream `num_candidates`). The first
+  *   three seeds are the fixed sets of upstream `create_n_fewshot_demo_sets`, so the value 5 gives the zero-shot set,
+  *   the labeled set, the unshuffled bootstrap, and two shuffled bootstraps. The current instruction takes the place of
+  *   the first proposal, so a predictor has `numCandidates` instruction candidates in all when no proposal is blank.
   * @param numTrials
   *   number of search trials over (demo-assignment, per-predictor instruction) choices (upstream's `num_trials`). Must
   *   be `> 0`.
   * @param maxBootstrappedDemos
-  *   cap on bootstrapped demos per demo-set candidate (forwarded to [[BootstrapFewShot]])
+  *   cap on bootstrapped demos per demo-set candidate (forwarded to [[BootstrapFewShot]]). A shuffled set takes a
+  *   random size between 1 and this cap. When this cap and `maxLabeledDemos` are both 0, the optimizer is zero-shot
+  *   (upstream `zeroshot_opt`). The demo sets then use a cap of 3 for the proposer, and each trial keeps the demos of
+  *   the student
   * @param maxLabeledDemos
-  *   cap on labeled demos per demo-set candidate (forwarded to [[BootstrapFewShot]])
+  *   cap on labeled demos per demo-set candidate (forwarded to [[LabeledFewShot]] and [[BootstrapFewShot]]). See
+  *   `maxBootstrappedDemos` for the rule of a zero-shot optimizer
   * @param seed
-  *   RNG seed; deterministic for a fixed seed (drives bootstrap seeds, the proposer, and the trial search RNG)
+  *   RNG seed; deterministic for a fixed seed. It gives the shuffled demo sets, the seed of the proposer (it replaces
+  *   `proposerConfig.seed`, as upstream gives one `rng` to the proposer), and the trial search RNG
   * @param proposerConfig
-  *   configuration for the [[GroundedProposer]] phase (instruction proposal)
+  *   configuration for the [[GroundedProposer]] phase (instruction proposal). `numCandidates` replaces its
+  *   `numInstructions`, and `seed` replaces its `seed`
   */
 final case class MIPROv2Config(
     metric              : Metric,
@@ -46,25 +56,33 @@ final case class MIPROv2Config(
     proposerConfig      : GroundedProposerConfig = GroundedProposerConfig()
 )
 
-/** MIPROv2 — Multiprompt Instruction PRoposal Optimizer (v2). A v1 port of DSPy's `dspy.teleprompt.MIPROv2`
+/** MIPROv2, the Multiprompt Instruction PRoposal Optimizer (v2). A v1 port of DSPy's `dspy.teleprompt.MIPROv2`
   * (`dspy/teleprompt/mipro_optimizer_v2.py`).
   *
   * '''Three-phase composition (reuses, does not reinvent).'''
-  *   1. '''Demo-set candidates''' (Step 1, "bootstrap few-shot examples"). Runs [[BootstrapFewShot]] `numCandidates`
-  *      times with distinct seeds (`seed + k`), collecting each compiled program's per-predictor demos via
-  *      `OptimizableStructure.read(compiled).map(_.demos)`. A zero-shot candidate (empty demos for every predictor) is
-  *      also included. The result is a `Vector` of demo-assignments, each a per-predictor `Vector[Vector[Example]]` of
-  *      length == predictor count. 2. '''Instruction candidates''' (Step 2, GroundedProposer). Calls
-  *      [[GroundedProposer.proposeInstructions]]`(student, trainset, demoCandidates = <first bootstrapped assignment,
-  *      or empty>)` → `Vector[Vector[String]]` (per predictor, `numCandidates` instructions). Each predictor's CURRENT
-  *      instruction is prepended as an extra candidate. 3. '''Search''' (Step 3, "find optimal prompt parameters"). For
-  *      `numTrials` trials with a seeded RNG, randomly picks one demo-assignment index (applied whole-program) and, per
-  *      predictor, one instruction-candidate index. The trial program is built with a single
-  *      [[OptimizableStructure.replace]] applying each chosen instruction (`parameters.copy(instructions =
-  *      Some(instr))`) AND chosen demos (`.copy(demos = ...)`). Each trial is scored on the valset (falling back to the
-  *      trainset) via [[dspy4s.evaluate.Evaluate]] + [[ProgramRunner]] + the metric. A baseline candidate (the
-  *      unmodified student) is always scored too. The best-scoring candidate is returned as `bestProgram`; all scored
-  *      candidates (trials + baseline) are returned sorted descending.
+  *   1. '''Demo-set candidates''' (Step 1, "bootstrap few-shot examples"; upstream `create_n_fewshot_demo_sets`). The
+  *      seeds run from -3 until `numCandidates - 3`. Seed -3 is zero-shot. Seed -2 with `maxLabeledDemos > 0` is
+  *      [[LabeledFewShot]]. Seed -1 is [[BootstrapFewShot]] on the trainset in its order. Each other seed, also -2 with
+  *      no labeled demos, is [[BootstrapFewShot]] on the shuffled trainset with a random size between 1 and
+  *      `maxBootstrappedDemos`. The result is a `Vector` of demo-assignments, each a per-predictor
+  *      `Vector[Vector[Example]]` of length == predictor count. When `maxBootstrappedDemos` and `maxLabeledDemos` are
+  *      both 0, the optimizer is zero-shot (upstream `zeroshot_opt`). These sets then use a cap of 3 bootstrapped demos
+  *      and no labeled demos, and only the proposer reads them.
+  *   1. '''Instruction candidates''' (Step 2, GroundedProposer). Calls
+  *      [[GroundedProposer.proposeInstructions]]`(student, trainset, demoCandidates)` with all demo-assignments →
+  *      `Vector[Vector[String]]` (per predictor, `numCandidates` instructions). Each predictor's CURRENT instruction
+  *      takes the place of the first proposal (upstream `instruction_candidates[i][0]`).
+  *   1. '''Search''' (Step 3, "find optimal prompt parameters"). For `numTrials` trials with a seeded RNG, randomly
+  *      picks one demo-assignment index (applied whole-program) and, per predictor, one instruction-candidate index.
+  *      The trial program is built with a single [[OptimizableStructure.replace]] applying each chosen instruction AND
+  *      chosen demos. Each trial is scored on the valset (falling back to the trainset) via
+  *      [[dspy4s.evaluate.Evaluate]] + [[ProgramRunner]] + the metric. A baseline candidate (the unmodified student) is
+  *      always scored too. The best-scoring candidate is returned as `bestProgram`; all scored candidates (trials +
+  *      baseline) are returned sorted descending. A zero-shot optimizer discards the demo sets before this phase
+  *      (upstream `demo_candidates = None`). A trial then picks no demo-assignment, and each leaf keeps its demos.
+  *
+  * A failed bootstrap and a failed proposal are the `Left` of `compile`, as upstream raises. A failed evaluation of a
+  * trial or of the baseline is the score 0.0 with a warning, as upstream `eval_candidate_program`.
   *
   * '''Deltas from Python.'''
   *   - '''Random search instead of Optuna TPE.''' Python's Step 3 drives an Optuna `TPESampler` study that builds a
@@ -78,10 +96,15 @@ final case class MIPROv2Config(
   *   - '''Minibatch / full-eval distinction dropped.''' Python evaluates trials on a minibatch and periodically re-runs
   *     full evaluations (with successive promotion of the best param combo). dspy4s always does a full evaluation on
   *     the provided set every trial. No `minibatch_full_eval_steps`, no `_perform_full_evaluation`.
+  *   - '''The current instruction stays a candidate that writes nothing.''' A leaf with no instructions keeps `None`,
+  *     and a prompt shows its effective instructions. Python reads the default text and writes it back, which gives the
+  *     same prompt. A blank proposal gives no candidate.
   *   - '''No surrogate model / no successive halving.''' Beyond dropping Optuna, there is no early stopping, promotion,
   *     or candidate pruning between trials.
-  *   - '''`num_candidates` is a single knob.''' Python separates `num_fewshot_candidates` and `num_instruct_candidates`
-  *     (and `auto` run modes that derive them). dspy4s uses one `numCandidates` for both and has no `auto` mode.
+  *   - '''No `auto` mode.''' `numCandidates` sets the two values `num_fewshot_candidates` and
+  *     `num_instruct_candidates`, as upstream `num_candidates`. dspy4s has no `auto` run modes that derive them.
+  *   - '''A demo cap of 0.''' A `maxBootstrappedDemos` of 0 with `maxLabeledDemos > 0` gives the size 0, where upstream
+  *     `randint(1, 0)` raises.
   *   - '''Dataset split / `auto` settings omitted.''' No automatic train/val splitting or `light/medium/heavy` presets;
   *     the caller supplies `valset` explicitly (else the trainset is reused).
   *   - '''`track_stats`, `log_dir`, LM-call estimation, and program persistence are omitted.''' The
@@ -94,16 +117,10 @@ final class MIPROv2[P: {OptimizableStructure, ProgramRunner}](config: MIPROv2Con
   private val ps: OptimizableStructure[P] = summon[OptimizableStructure[P]]
   private val runner: ProgramRunner[P]    = summon[ProgramRunner[P]]
 
-  override def compile(
-      student : P,
-      trainset: Vector[Example],
-      teacher : Option[P]               = None,
-      valset  : Option[Vector[Example]] = None
-  )(using RuntimeContext): Either[DspyError, OptimizationReport[P]] =
-    Teleprompter.withCompileCallbacks(this, trainset, valset)(compileInScope(student, trainset, teacher, valset))
+  /** Upstream `zeroshot_opt`. */
+  private val zeroShot: Boolean = config.maxBootstrappedDemos == 0 && config.maxLabeledDemos == 0
 
-  /** The work of [[compile]], inside its compile scope. */
-  private def compileInScope(
+  override protected[optimize] def compileInScope(
       student : P,
       trainset: Vector[Example],
       teacher : Option[P],
@@ -125,63 +142,68 @@ final class MIPROv2[P: {OptimizableStructure, ProgramRunner}](config: MIPROv2Con
         instructionCandidates <- proposeInstructionCandidates(student, trainset, demoCandidates)
       yield
         // ── Phase 3: random search over (demo-assignment, per-predictor instruction) ──
-        searchTrials(student, evalset, demoCandidates, instructionCandidates, leafCount)
+        // A zero-shot optimizer discards the demo sets here (upstream `demo_candidates = None`).
+        val searchedDemos = if zeroShot then Vector.empty else demoCandidates
+        searchTrials(student, evalset, searchedDemos, instructionCandidates, leafCount)
 
   // ── Phase 1 ─────────────────────────────────────────────────────────────
 
-  /** Produce `numCandidates` whole-program demo assignments via [[BootstrapFewShot]] (distinct seeds), each read back
-    * as the per-predictor demo vectors, PLUS a zero-shot assignment (empty demos for every predictor). A bootstrap run
-    * that fails gives the zero-shot assignment. A configuration error of the bootstrap is a `Left`
-    * (`OptimizerSupport.bootstrapCandidate`).
+  /** The `numCandidates` whole-program demo assignments (upstream `create_n_fewshot_demo_sets`, with its
+    * `num_candidate_sets -= 3`), one for each seed from -3 until `numCandidates - 3`, each one the per-predictor demo
+    * vectors. One random source serves all shuffled seeds, in order. A `Left` of a bootstrap run is the `Left` of
+    * `compile`, as upstream raises. A zero-shot optimizer uses a cap of `GroundedProposer.NumDemosInContext`
+    * bootstrapped demos (upstream `BOOTSTRAPPED_FEWSHOT_EXAMPLES_IN_CONTEXT`). Its cap on labeled demos is already 0
+    * (upstream `LABELED_FEWSHOT_EXAMPLES_IN_CONTEXT`).
     */
   private def bootstrapDemoCandidates(
       student : P,
       trainset: Vector[Example],
       teacher : Option[P]
   )(using RuntimeContext): Either[DspyError, Vector[Vector[Vector[Example]]]] =
-    val leafCount = ps.read(student).size
-    val zeroShot  = Vector.fill(leafCount)(Vector.empty[Example])
-    val start     = Right(Vector.empty): Either[DspyError, Vector[Vector[Vector[Example]]]]
+    val bootstrapConfig = BootstrapFewShotConfig(
+      metric = Some(config.metric),
+      maxBootstrappedDemos = if zeroShot then GroundedProposer.NumDemosInContext else config.maxBootstrappedDemos,
+      maxLabeledDemos = config.maxLabeledDemos,
+      seed = config.seed
+    )
+    val rng = new Random(config.seed)
 
-    val bootstrapped = (0 until config.numCandidates).foldLeft(start) { (candidates, k) =>
-      candidates.flatMap { done =>
-        val bootstrap = new BootstrapFewShot[P](
-          BootstrapFewShotConfig(
-            metric = Some(config.metric),
-            maxBootstrappedDemos = config.maxBootstrappedDemos,
-            maxLabeledDemos = config.maxLabeledDemos,
-            seed = config.seed + k
-          )
-        )
-        OptimizerSupport.bootstrapCandidate(bootstrap.compile(student, trainset, teacher)).map { compiled =>
-          done :+ compiled.fold(zeroShot)(program => ps.read(program).map(_.demos))
-        }
-      }
+    def demosOf(report: OptimizationReport[P]): Vector[Vector[Example]] = ps.read(report.bestProgram).map(_.demos)
+
+    Traverse.either(-3 until config.numCandidates - 3) {
+      case -3                               => Right(Vector.fill(ps.read(student).size)(Vector.empty[Example]))
+      case -2 if config.maxLabeledDemos > 0 =>
+        new LabeledFewShot[P](LabeledFewShotConfig(k = config.maxLabeledDemos, seed = config.seed))
+          .compile(student, trainset)
+          .map(demosOf)
+      case -1   => new BootstrapFewShot[P](bootstrapConfig).compile(student, trainset, teacher).map(demosOf)
+      case seed => OptimizerSupport
+          .shuffledBootstrap(rng, bootstrapConfig.copy(seed = config.seed + seed), student, trainset, teacher)
+          .map(demosOf)
     }
-
-    bootstrapped.map(candidates => (zeroShot +: candidates).distinct)
 
   // ── Phase 2 ─────────────────────────────────────────────────────────────
 
-  /** Propose `numCandidates` instructions per predictor via [[GroundedProposer]], then prepend each predictor's CURRENT
-    * instruction as an extra candidate (so the baseline instruction is always reachable).
+  /** The instruction candidates of each predictor: `None` means "keep the current instructions", so the baseline is
+    * always reachable and a leaf with no instructions keeps `None`. It takes the place of the first proposal of
+    * [[GroundedProposer]] (upstream `instruction_candidates[i][0] = get_signature(pred).instructions`). The call for
+    * that proposal still occurs, as upstream. After it come the other proposals. A blank proposal gives no candidate.
     */
   private def proposeInstructionCandidates(
       student       : P,
       trainset      : Vector[Example],
       demoCandidates: Vector[Vector[Vector[Example]]]
-  )(using RuntimeContext): Either[DspyError, Vector[Vector[String]]] =
-    val proposer = new GroundedProposer[P](config.proposerConfig)
-    // Ground the proposer on the first bootstrapped demo assignment if present (index 0 is zero-shot), else empty.
-    val seedDemos: Vector[Vector[Example]]  = demoCandidates.lift(1).getOrElse(Vector.empty)
-    val currentInstructions: Vector[String] = ps.read(student).map(_.instructions.getOrElse(""))
+  )(using RuntimeContext): Either[DspyError, Vector[Vector[Option[String]]]] =
+    // Upstream gives one `rng` to the proposer and to the optimizer, and `num_candidates` sets the two counts.
+    val proposer = new GroundedProposer[P](
+      config.proposerConfig.copy(numInstructions = config.numCandidates, seed = config.seed)
+    )
+    val effective: Vector[String] = ps.inspect(student).map(_.effectiveInstructions)
 
-    proposer.proposeInstructions(student, trainset, seedDemos).map { proposed =>
-      proposed.zipWithIndex.map { case (perLeaf, idx) =>
-        val current = currentInstructions.lift(idx).getOrElse("")
-        (current +: perLeaf).filter(_.nonEmpty).distinct match
-          case Vector() => Vector(current) // never empty: keep the (possibly blank) baseline as the sole candidate
-          case nonEmpty => nonEmpty
+    proposer.proposeInstructions(student, trainset, demoCandidates).map { proposed =>
+      proposed.zip(effective).map { (perLeaf, current) =>
+        val found = perLeaf.drop(1).filter(text => PythonText.strip(text).nonEmpty)
+        (None +: found.map(OptimizerSupport.instructionCandidate(_, current))).distinct
       }
     }
 
@@ -189,40 +211,42 @@ final class MIPROv2[P: {OptimizableStructure, ProgramRunner}](config: MIPROv2Con
 
   /** Random search over (demo-assignment index, per-predictor instruction index). Always scores the baseline
     * (unmodified student) plus `numTrials` randomly-assembled candidates; returns the best, with all candidates sorted
-    * descending.
+    * descending. With no demo sets, a trial draws no demo index and each leaf keeps its demos. Upstream has this rule
+    * in `if demo_candidates:`.
     */
   private def searchTrials(
       student              : P,
       evalset              : Vector[Example],
       demoCandidates       : Vector[Vector[Vector[Example]]],
-      instructionCandidates: Vector[Vector[String]],
+      instructionCandidates: Vector[Vector[Option[String]]],
       leafCount            : Int
   )(using RuntimeContext): OptimizationReport[P] =
-    val rng        = new Random(config.seed)
-    val candidates = mutable.ArrayBuffer.empty[CandidateProgram[P]]
+    val rng = new Random(config.seed)
 
     // Baseline: the unmodified student.
     val baselineScore = scoreProgram(student, evalset)
-    candidates += CandidateProgram(student, baselineScore, metadata = Map("trial" -> -1, "baseline" -> true))
+    val baseline      = CandidateProgram(student, baselineScore, metadata = Map("trial" -> -1, "baseline" -> true))
 
-    // `student` is immutable, so its optimizable leaves are the same every trial — read them once.
+    // `student` is immutable, so its optimizable leaves are the same in each trial. Read them one time.
     val leaves = ps.read(student)
-    (0 until config.numTrials).foreach { trial =>
-      val demoIdx        = rng.nextInt(demoCandidates.size)
-      val demoAssignment = demoCandidates(demoIdx)
+    val trials = Vector.tabulate(config.numTrials) { trial =>
+      // The demo index comes first and the instruction indices next, so that a seed always gives the same trials.
+      val demoIdx        = Option.when(demoCandidates.nonEmpty)(rng.nextInt(demoCandidates.size))
+      val demoAssignment = demoIdx.fold(leaves.map(_.demos))(demoCandidates(_))
       val instrIndices   = (0 until leafCount).map(p => rng.nextInt(instructionCandidates(p).size)).toVector
       val chosenInstrs   = instrIndices.zipWithIndex.map { case (i, p) => instructionCandidates(p)(i) }
 
       val applied = applyTrial(leaves, student, chosenInstrs, demoAssignment)
       val score   = scoreProgram(applied, evalset)
-      candidates += CandidateProgram(
+      CandidateProgram(
         program = applied,
         score = score,
-        metadata = Map("trial" -> trial, "demo_index" -> demoIdx, "instruction_indices" -> instrIndices)
+        metadata = Map[String, Any]("trial" -> trial, "instruction_indices" -> instrIndices) ++
+          demoIdx.map("demo_index" -> _)
       )
     }
 
-    val sorted = candidates.toVector.sortBy(-_.score)
+    val sorted = (baseline +: trials).sortBy(-_.score)
     val best   = sorted.head
     OptimizationReport(
       bestProgram = best.program,
@@ -238,21 +262,27 @@ final class MIPROv2[P: {OptimizableStructure, ProgramRunner}](config: MIPROv2Con
 
   /** Build a trial program by applying, via a single [[OptimizableStructure.replace]], each predictor's chosen
     * instruction and chosen demos. `instructions(p)` and `demoAssignment(p)` line up with [[OptimizableStructure.read]]
-    * order.
+    * order. An instruction of `None` keeps the current instructions of the leaf.
     */
   private def applyTrial(
       leaves        : Vector[OptimizableParameters],
       student       : P,
-      instructions  : Vector[String],
+      instructions  : Vector[Option[String]],
       demoAssignment: Vector[Vector[Example]]
   ): P =
-    val updated = leaves.zipWithIndex.map { case (leaf, idx) =>
-      val instr = instructions.lift(idx).getOrElse(leaf.instructions.getOrElse(""))
-      val demos = demoAssignment.lift(idx).getOrElse(leaf.demos)
-      leaf.copy(instructions = Some(instr), demos = demos)
-    }
-    ps.replace(student, updated)
+    ps.replace(
+      student,
+      leaves.lazyZip(instructions).lazyZip(demoAssignment).map { (leaf, instruction, demos) =>
+        leaf.copy(instructions = instruction.orElse(leaf.instructions), demos = demos)
+      }
+    )
 
-  /** Run the whole program on the evalset and return the aggregate metric score (0..100), 0.0 on failure. */
+  /** The score of the whole program on the evalset. A failed evaluation is the score 0.0, with a warning, as upstream
+    * `eval_candidate_program` (`dspy/teleprompt/utils.py`).
+    */
   private def scoreProgram(program: P, evalset: Vector[Example])(using RuntimeContext): Double =
-    OptimizerSupport.evalScore(program, evalset, config.metric, runner).getOrElse(0.0)
+    OptimizerSupport.evalScore(program, evalset, config.metric, runner) match
+      case Right(score) => score
+      case Left(error)  =>
+        RuntimeEnvironment.warn("MIPROv2", s"An exception occurred during evaluation: ${error.message}")
+        0.0

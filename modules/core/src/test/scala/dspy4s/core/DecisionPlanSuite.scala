@@ -1,7 +1,7 @@
 package dspy4s.core
 
-import dspy4s.core.contracts.{FieldSpec, SignatureLayout, TypeRef}
-import dspy4s.core.decisions.{DecisionEvidence, DecisionKind, DecisionPlan, DecisionSettings}
+import dspy4s.core.contracts.{DspyError, DynamicValues, FieldSpec, SignatureLayout, TypeRef}
+import dspy4s.core.decisions.{DecisionEvidence, DecisionKind, DecisionParameter, DecisionPlan, DecisionSettings, Score}
 import munit.FunSuite
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
@@ -10,6 +10,14 @@ import java.nio.charset.StandardCharsets
 /** The rules of the decision outputs (experimental; upstream `DecisionState` in `dspy/adapters/decision_state.py`, with
   * the cases of `tests/predict/test_decision_parameters.py`).
   */
+/** The levels of a test score. */
+enum DpSeverity derives CanEqual:
+  case Low, High
+
+/** An enum that is not the level enum of the test score. */
+enum DpPriority derives CanEqual:
+  case First, Second
+
 class DecisionPlanSuite extends FunSuite:
 
   private def json(text: String): DynamicValue =
@@ -187,12 +195,17 @@ class DecisionPlanSuite extends FunSuite:
     }
   }
 
-  test("a Score value is the mean level index, and the cuts select the level") {
-    val cases = Vector(None -> 2, Some(Vector(0.5, 1.5)) -> 2, Some(Vector(0.5, 1.6)) -> 1, Some(Vector(0.5, 1.4)) -> 2)
+  test("a Score value is the mean level index, and the cuts select the level, which the decode gives by its name") {
+    val cases = Vector(
+      None                   -> "great",
+      Some(Vector(0.5, 1.5)) -> "great",
+      Some(Vector(0.5, 1.6)) -> "fair",
+      Some(Vector(0.5, 1.4)) -> "great"
+    )
     cases.foreach { (cuts, level) =>
       val out = decoded(plan("rating" -> DecisionSettings(cuts = cuts)))
       assertEqualsDouble(double(field(out, "rating", "value")), 1.5, 1e-12)
-      assertEquals(field(out, "rating", "level"), DynamicValue.Primitive(PrimitiveValue.Int(level)), s"cuts $cuts")
+      assertEquals(field(out, "rating", "level"), DynamicValue.Primitive(PrimitiveValue.String(level)), s"cuts $cuts")
       assertEqualsDouble(double(field(out, "rating", "confidence")), 0.61, 1e-12)
     }
     val scaled =
@@ -423,4 +436,100 @@ class DecisionPlanSuite extends FunSuite:
     assert(DecisionSettings.fromDynamic(json("""{"threshold": "high"}""")).isLeft)
     assert(DecisionSettings.fromDynamic(json("""{"weights": [1, 2]}""")).isLeft)
     assert(DecisionSettings.fromDynamic(json("""{"threshold": true}""")).isLeft)
+  }
+
+  test("the level of a Score takes only the cases of the level enum") {
+    val score = Score[DpSeverity](value = 1.0, confidence = 0.9, level = Some(DpSeverity.High))
+    assertEquals(score.level, Some(DpSeverity.High))
+    assert(
+      compileErrors("Score[DpSeverity](value = 1.0, confidence = 0.9, level = Some(DpPriority.First))").nonEmpty,
+      "the level accepted a case of an unrelated enum"
+    )
+  }
+
+  test("a decision setting that occurs two times in the JSON form is a Left") {
+    assert(DecisionSettings.fromDynamic(json("""{"threshold": 0.3, "threshold": 0.7}""")).isLeft)
+    assert(DecisionSettings.fromDynamic(json("""{"weights": {"a": 1, "a": 2}}""")).isLeft)
+  }
+
+  test("the JSON form keeps an explicit null question, and a null parameter is no value") {
+    assertEquals(
+      DecisionSettings.fromDynamic(json("""{"instructions": null, "criteria": null}""")),
+      Right(DecisionSettings(instructions = Some(DynamicValue.Null), criteria = Some(DynamicValue.Null)))
+    )
+    assertEquals(
+      DecisionSettings.fromDynamic(json("""{"threshold": null, "cuts": null, "weights": null}""")),
+      Right(DecisionSettings())
+    )
+    assert(DecisionSettings.fromDynamic(json("""{"instructions": 42}""")).isLeft)
+    assert(DecisionSettings.fromDynamic(json("""["threshold"]""")).isLeft)
+  }
+
+  test("the weights of the JSON form are in the order of their labels") {
+    val labels   = Vector("e", "b", "f", "a", "d", "c")
+    val settings = DecisionSettings(weights = Some(labels.zipWithIndex.map((label, i) => label -> i.toDouble).toMap))
+    val weights  = DynamicValues.recordGet(settings.toDynamic, "weights")
+    assertEquals(
+      weights.collect { case r: DynamicValue.Record => DynamicValues.recordKeys(r) },
+      Some(labels.sorted)
+    )
+    val reversed = DecisionSettings(weights = settings.weights.map(w => w.toVector.reverse.toMap))
+    assertEquals(reversed.toDynamic, settings.toDynamic)
+    assertEquals(DecisionSettings.fromDynamic(settings.toDynamic), Right(settings))
+  }
+
+  test("a value of the JSON form that is not JSON is a Left") {
+    val notFinite = DynamicValue.Record(zio.blocks.chunk.Chunk.single("threshold" -> num(Double.NaN)))
+    assert(DecisionSettings.fromDynamic(notFinite).isLeft)
+    val nested = DynamicValue.Record(
+      zio.blocks.chunk.Chunk.single("instructions" -> json("""{"focus": "a", "focus": "b"}"""))
+    )
+    assert(DecisionSettings.fromDynamic(nested).isLeft)
+    assert(rejected("flag" -> DecisionSettings(instructions = Some(json("""{"focus": "a", "focus": "b"}""")))))
+  }
+
+  test("each kind has one parameter, with its name and its value in the settings") {
+    val settings = DecisionSettings(threshold = Some(0.3), cuts = Some(Vector(0.5, 1.5)))
+    val kinds    = Vector(DecisionKind.Noul, DecisionKind.Score(Vector("a", "b")), DecisionKind.Choice(Vector("x")))
+    assertEquals(kinds.map(_.parameter), DecisionParameter.values.toVector)
+    assertEquals(kinds.map(_.parameter.name), Vector("threshold", "cuts", "weights"))
+    assertEquals(DecisionParameter.Threshold.valueIn(settings), Some(0.3))
+    assertEquals(DecisionParameter.Cuts.valueIn(settings), Some(Vector(0.5, 1.5)))
+    assertEquals(DecisionParameter.Weights.valueIn(settings), None)
+    assertEquals(DecisionParameter.Threshold.jsonIn(settings).flatMap(DynamicValues.asDouble), Some(0.3))
+    assertEquals(DecisionParameter.Weights.jsonIn(settings), None)
+  }
+
+  test("evidence and decode give the same message for the same fault") {
+    val p                                                = plan()
+    def message[A](result: Either[DspyError, A]): String =
+      result.fold(_.message, value => fail(s"accepted: $value"))
+    val faults = Vector(
+      ("flag", """{"noul": 1.1}""", DecisionEvidence.Noul(1.1)),
+      (
+        "rating",
+        """{"probabilities": {"0": 0.1, "1": 0.9}, "confidence": 0.6}""",
+        DecisionEvidence.Score(Map(0 -> 0.1, 1 -> 0.9), 0.6)
+      ),
+      (
+        "rating",
+        """{"probabilities": {"0": 0.1, "1": 0.3, "2": 0.6}, "confidence": 1.5}""",
+        DecisionEvidence.Score(Map(0 -> 0.1, 1 -> 0.3, 2 -> 0.6), 1.5)
+      ),
+      (
+        "label",
+        """{"probabilities": {"2": -0.2, "other": 0.2}, "confidence": 0.7}""",
+        DecisionEvidence.Choice(Map("2" -> -0.2, "other" -> 0.2), 0.7)
+      )
+    )
+    faults.foreach { (name, text, evidence) =>
+      assertEquals(message(p.evidence(name, json(text))), message(p.decode(defaults.updated(name, evidence))), text)
+    }
+  }
+
+  test("the evidence of a System One model can have a total of zero, and the decode rejects it") {
+    val p        = plan()
+    val evidence = p.evidence("rating", json("""{"probabilities": {"0": 0, "1": 0, "2": 0}, "confidence": 0.6}"""))
+    assertEquals(evidence, Right(DecisionEvidence.Score(Map(0 -> 0.0, 1 -> 0.0, 2 -> 0.0), 0.6)))
+    assert(evidence.flatMap(found => p.decode(defaults.updated("rating", found))).isLeft)
   }

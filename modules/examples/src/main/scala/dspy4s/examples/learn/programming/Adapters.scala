@@ -10,28 +10,31 @@
   *
   * Python's `adapter.format(signature, demos, inputs)` becomes `adapter.format(AdapterInvocation(layout, demos, inputs,
   * request))`, which returns a `FormattedPrompt`; the "system message" is just its first message. The adapter is
-  * selected via the ambient `RuntimeContext` (here swapped with `withAdapter`), mirroring
+  * selected via the `RuntimeContext` of the call (`Module.apply` installs the context that it gets), mirroring
   * `dspy.configure(adapter=...)`. Pydantic `BaseModel` outputs become `Schema`-deriving case classes.
   */
 package dspy4s.examples.learn.programming
 
 import dspy4s.adapters.{ChatAdapter, JSONAdapter}
-import dspy4s.adapters.contracts.{Adapter, AdapterInvocation}
-import dspy4s.core.contracts.{DspyError, DynamicValues, RuntimeContext, RuntimeError, :=}
+import dspy4s.adapters.contracts.AdapterInvocation
+import dspy4s.core.contracts.{DspyError, RuntimeContext, :=}
 import dspy4s.core.data.Example
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.examples.Demo
-import dspy4s.lm.contracts.{LanguageModel, LmMode, LmRequest}
+import dspy4s.lm.contracts.LmRequest
 import dspy4s.lm.runtime.ManagedLanguageModel
+import dspy4s.programs.runtime.SettingsProgramRuntime
 import dspy4s.programs.strategies.Predict
 import dspy4s.signatures.{InputField, OutputField, Signature, Spec}
-import zio.blocks.schema.{DynamicValue, Schema}
+import zio.blocks.schema.Schema
 
 // ── Snippet 5/6 — a Pydantic model + a multi-field signature with a structured-list output ──
 // | class ScienceNews(pydantic.BaseModel): text: str; scientists_involved: list[str]
 case class ScienceNews(text: String, scientists_involved: List[String]) derives Schema
 
 // | class NewsQA(dspy.Signature): """Get news about the given science field"""
+// The docstring goes to `instructions`, where `runNews` makes the signature. A `Spec` has no `desc` for a field, so the
+// hint `desc="science news"` of `news` has no port.
 trait NewsQA extends Spec:
   def science_field: InputField[String]
   def year: InputField[Int]
@@ -39,9 +42,6 @@ trait NewsQA extends Spec:
   def news: OutputField[List[ScienceNews]]
 
 object Adapters:
-
-  private def rec(entries: (String, DynamicValue)*): DynamicValue.Record =
-    DynamicValues.recordFromEntries(entries)
 
   // ── Snippets 1 & 2 — a basic Predict (default adapter, then an explicit ChatAdapter) ──
   // | predict = dspy.Predict("question -> answer"); result = predict(question="What is the capital of France?")
@@ -55,9 +55,9 @@ object Adapters:
   def formattedPrompt(using RuntimeContext): Either[DspyError, String] =
     val invocation = AdapterInvocation(
       layout = Signature.fromString("question -> answer").layout,
-      demos = Vector(Example(values = rec("question" := "What is 1+1?", "answer" := "2"), inputKeys = Set("question"))),
-      inputs = Example(values = rec("question" := "What is 2+2?"), inputKeys = Set("question")),
-      request = LmRequest(model = "openai/demo", mode = LmMode.Chat)
+      demos = Vector(Example("question" := "What is 1+1?", "answer" := "2").withInputs(Set("question"))),
+      inputs = Example("question" := "What is 2+2?").withInputs(Set("question")),
+      request = LmRequest(model = "openai/demo")
     )
     ChatAdapter().format(invocation).map { prompt =>
       prompt.messages.map(m => s"[${m.role}] ${m.text.getOrElse("")}").mkString("\n\n")
@@ -70,46 +70,38 @@ object Adapters:
     val invocation = AdapterInvocation(
       layout = Signature.fromString("question -> answer").layout,
       demos = Vector.empty,
-      inputs = Example(values = rec("question" := ""), inputKeys = Set("question")),
-      request = LmRequest(model = "openai/demo", mode = LmMode.Chat)
+      inputs = Example("question" := "").withInputs(Set("question")),
+      request = LmRequest(model = "openai/demo")
     )
     ChatAdapter().format(invocation).map(_.messages.headOption.flatMap(_.text).getOrElse(""))
 
-  /** Run `body` with `adapter` installed in the RuntimeContext — the dspy4s analogue of swapping
-    * `dspy.configure(adapter=...)` for snippets 5 (ChatAdapter) and 6 (JSONAdapter).
-    */
-  private def withAdapter[A](adapter: Adapter)(body: RuntimeContext ?=> A)(using ctx: RuntimeContext): A =
-    RuntimeEnvironment.withSettings(ctx.copy(adapter = Some(adapter))) {
-      body(using RuntimeEnvironment.current)
-    }
-
   // ── Snippets 5 & 6 — a structured-output Predict under ChatAdapter, then JSONAdapter ──
   // | predict = dspy.Predict(NewsQA); predict(science_field="Computer Theory", year=2022, num_of_outputs=1)
+  // Each function below gives `runNews` a context with its adapter, as `dspy.configure(adapter=...)` does.
   private def runNews(using RuntimeContext): Either[DspyError, List[ScienceNews]] =
-    Predict(Signature.of[NewsQA])((science_field = "Computer Theory", year = 2022, num_of_outputs = 1))
-      .map(_.output.news)
+    Predict(Signature.of[NewsQA](instructions = "Get news about the given science field"))(
+      (science_field = "Computer Theory", year = 2022, num_of_outputs = 1)
+    ).map(_.output.news)
 
   // --8<-- [start:adapter-select]
-  def newsWithChatAdapter(using RuntimeContext): Either[DspyError, List[ScienceNews]] =
-    withAdapter(ChatAdapter())(runNews)
+  def newsWithChatAdapter(using ctx: RuntimeContext): Either[DspyError, List[ScienceNews]] =
+    runNews(using ctx.copy(adapter = Some(ChatAdapter())))
 
-  def newsWithJsonAdapter(using RuntimeContext): Either[DspyError, List[ScienceNews]] =
-    withAdapter(JSONAdapter())(runNews)
+  def newsWithJsonAdapter(using ctx: RuntimeContext): Either[DspyError, List[ScienceNews]] =
+    runNews(using ctx.copy(adapter = Some(JSONAdapter())))
   // --8<-- [end:adapter-select]
 
   // ── Snippets 5/6 tail — `dspy.inspect_history()` ──
   // dspy4s's analogue is `RuntimeEnvironment.inspectHistory(n)` / `printHistory(n)`, rendering the per-thread
-  // `RuntimeContext.history`. That history is recorded by a `ManagedLanguageModel` (per-LM composition), so we
-  // wrap the ambient LM in one for this call, then ask + render the last entry. Returns (answer, history-render).
+  // `RuntimeContext.history`. A `ManagedLanguageModel` (per-LM composition) records that history, so this call gets a
+  // context with the LM in one. The history of the call stays after the call. Returns (answer, history-render).
   // --8<-- [start:inspect-history]
   def askThenInspect(question: String)(using ctx: RuntimeContext): Either[DspyError, (String, String)] =
-    ctx.lm match
-      case Some(lm: LanguageModel) => RuntimeEnvironment.withSettings(ctx.copy(lm = Some(ManagedLanguageModel(lm)))) {
-          given RuntimeContext = RuntimeEnvironment.current
-          Predict(Signature.fromString("question -> answer"))((question = question))
-            .map(p => (p.output.answer, RuntimeEnvironment.inspectHistory(1)))
-        }
-      case _ => Left(RuntimeError("no_lm", "no ambient LanguageModel to record history"))
+    SettingsProgramRuntime.default.resolveModel.flatMap { lm =>
+      Predict(Signature.fromString("question -> answer"))((question = question))(
+        using ctx.copy(lm = Some(ManagedLanguageModel(lm)))
+      ).map(p => (p.output.answer, RuntimeEnvironment.inspectHistory(1)))
+    }
   // --8<-- [end:inspect-history]
 
 // Run with: OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.adaptersMain"

@@ -2,6 +2,8 @@ package dspy4s.evaluate.metrics
 
 import dspy4s.core.contracts.:=
 import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.contracts.NotFoundError
+import dspy4s.core.contracts.ValidationError
 import dspy4s.core.data.Example
 import dspy4s.core.data.RawPrediction
 import dspy4s.core.contracts.RuntimeContext
@@ -100,6 +102,53 @@ class BuiltinMetricsSuite extends FunSuite:
     val ex     = Example(rec("answer" := "Paris"))
     val pred   = RawPrediction(rec("context" := Vector("Brussels is the capital.", "It has good waffles.")))
     assertEquals(metric.score(ex, pred), Right(0.0))
+  }
+
+  test("PassageMatch: an answer with no tokens matches each passage, as upstream range includes 0") {
+    val metric = new PassageMatch()
+    val ex     = Example(rec("answer" := "the"))
+    assertEquals(metric.score(ex, RawPrediction(rec("context" := Vector("any text")))), Right(1.0))
+    assertEquals(metric.score(ex, RawPrediction(rec("context" := "the"))), Right(1.0))
+  }
+
+  test("PassageMatch reads a string context as one passage, and a list answer as one answer for each item") {
+    val metric = new PassageMatch()
+    val pred   = RawPrediction(rec("context" := "The Eiffel Tower is in Paris."))
+    assertEquals(metric.score(Example(rec("answer" := Vector("Rome", "Paris"))), pred), Right(1.0))
+    assertEquals(metric.score(Example(rec("answer" := Vector("Rome", "Oslo"))), pred), Right(0.0))
+  }
+
+  test("a number or a bool answer reads as its Python text, where upstream raises") {
+    val metric = new ExactMatch()
+    assertEquals(metric.score(Example(rec("answer" := 42)), RawPrediction(rec("answer" := "42"))), Right(1.0))
+    assertEquals(metric.score(Example(rec("answer" := "42")), RawPrediction(rec("answer" := 42))), Right(1.0))
+    assertEquals(metric.score(Example(rec("answer" := true)), RawPrediction(rec("answer" := "true"))), Right(1.0))
+  }
+
+  test("a null is a ValidationError that names the field, also for an empty Option") {
+    val metric = new ExactMatch("reply")
+    val result = metric.score(Example(rec("reply" := "a")), RawPrediction(rec("reply" -> DynamicValue.Null)))
+    assert(
+      result.left.exists(error => error.isInstanceOf[ValidationError] && error.message.contains("reply")),
+      result.toString
+    )
+    assert(
+      metric.score(Example(rec("reply" := Option.empty[String])), RawPrediction(rec("reply" := "a"))).left
+        .exists(_.isInstanceOf[ValidationError])
+    )
+    val passages = new PassageMatch()
+    assert(passages.score(Example(rec("answer" := "a")), RawPrediction(rec("context" -> DynamicValue.Null))).isLeft)
+    assert(passages.score(Example(rec("answer" -> DynamicValue.Null)), RawPrediction(rec("context" := "a"))).isLeft)
+  }
+
+  test("a sequence with no string item is a NotFoundError") {
+    val result = new ExactMatch().score(Example(rec("answer" := Vector(1, 2))), RawPrediction(rec("answer" := "1")))
+    assert(result.left.exists(_.isInstanceOf[NotFoundError]), result.toString)
+  }
+
+  test("an Option answer reads as its element") {
+    val ex = Example(rec("answer" := Option("Paris")))
+    assertEquals(new ExactMatch().score(ex, RawPrediction(rec("answer" := "paris"))), Right(1.0))
   }
 
   test("FunctionMetric wraps a custom boolean predicate") {
