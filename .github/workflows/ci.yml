@@ -38,5 +38,12 @@ jobs:
           python3 -m unittest discover .github/bench -v
           python3 .github/bench/bench_tools.py validate-mapping
 
+      # The Deno sandbox tests skip when deno is not on PATH. This Deno version is the version of the development
+      # machine. The first sandbox start downloads Pyodide (16 MB, a few seconds), so the job has no Deno cache.
+      - name: Install Deno
+        uses: denoland/setup-deno@v2.0.5
+        with:
+          deno-version: "2.7.4"
+
       - name: Run all tests
         run: sbt -batch test
