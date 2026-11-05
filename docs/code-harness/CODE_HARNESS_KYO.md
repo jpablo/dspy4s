@@ -1,8 +1,9 @@
 # Code harness: what Kyo can give
 
 Status: analysis, 2026-11-01. This document says which parts of Kyo the dspy4s harness can reuse. It adds to
-[CODE_HARNESS_RUNTIME.md](CODE_HARNESS_RUNTIME.md) and to section 8 of [CODE_HARNESS.md](CODE_HARNESS.md). The
-recommendation in section 7 is not a decision.
+[CODE_HARNESS_RUNTIME.md](CODE_HARNESS_RUNTIME.md) and to section 8 of [CODE_HARNESS.md](CODE_HARNESS.md). Choice 7
+of [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), on 2026-11-05, did not take the recommendation of section 7. The
+first session host is plain, and section 9 says why.
 
 ## Summary
 
@@ -20,6 +21,8 @@ recommendation in section 7 is not a decision.
   ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), choice 17).
 - Kyo RC7 needs JDK 25. dspy4s compiles on JDK 25, and all its tests pass there.
 - Kyo is still a release candidate. So the recommendation keeps Kyo types out of the contracts of the harness.
+- A later check built a plain host with the same tests (section 9). It has the same safety and about the same code, so
+  the first version takes the plain host.
 
 ## 1. Scope and method
 
@@ -99,9 +102,9 @@ little. The longest wait differs by ten times or more, because the lock of SQLit
 
 | Part | Module | Verdict | Main limit |
 |---|---|---|---|
-| Session host: mailbox, one writer, timers, broadcast | `kyo-core`, `kyo-actor` | Reuse now | A stop must stay a message, and each reply needs a guard (4.1) |
-| Journal backend | `kyo-sql-sqlite` | Reuse now | A native library through FFI, and one writer for each database file (4.2) |
-| Early MCP server (question 4 of 9.4) | `kyo-mcp` | Reuse now | No server ran in the checks (4.3) |
+| Session host: mailbox, one writer, timers, broadcast | `kyo-core`, `kyo-actor` | Possible, not in the first version (9) | A stop must stay a message, and each reply needs a guard (4.1) |
+| Journal backend | `kyo-sql-sqlite` | Possible, not in the first version (9) | A native library through FFI, one writer for each database file, and a pool that drops the settings of an idle connection (4.2, 9) |
+| Early MCP server (question 4 of 9.4) | `kyo-mcp` | Open (choice 10) | No server ran in the checks (4.3) |
 | Container sandbox (F8) | `kyo-pod` | Later | It needs Docker or Podman, one `exec` cannot be stopped, and it has no host list (4.5) |
 | Browser guest API | `kyo-browser` | Later | It starts Chrome with `--no-sandbox` (4.7) |
 | LSP guest API | `kyo-lsp` | Later | It sends no workspace root, and it cannot start a server process (4.7) |
@@ -217,6 +220,7 @@ Limits:
 - SQLite has one writer for the full file (`kyo-sql-sqlite/README.md:464`), and its lock has no fair order. In the
   check of section 2, a writer on one shared file waited for up to 2.7 s. So the design uses one file for each session
   ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), 10.2).
+- The pool replaces an idle connection, and the settings of that connection go with it (section 9).
 - `DB.run` opens one pool for each URL (`kyo-sql-sqlite/README.md:108`), with ten connections by default
   (`kyo-sql-sqlite/README.md:125`). So each session needs a smaller pool. No check has run this.
 - `kyo-sql` depends on `kyo-schema-json`, but rows use `SqlSchema`. An entry can be a JSON string from zio-blocks, so
@@ -415,10 +419,40 @@ This does not make `A < S` the program type of dspy4s. That is the separate ques
 ## 8. What is not tested
 
 - A session host with a real REPL. The check used plain threads and a flag in place of the REPL instrumentation.
-- A session host with SQLite as its journal under the stress check. The stress check used a log in memory.
-- The Kyo driver with one file for each session. The check of the layouts used Python's SQLite.
 - A hard stop that reaches the LM transport and a process group.
 - The guards of Phase 0 on JDK 25. Only one simple REPL cell ran there.
 - A real `kyo-mcp` server, and `kyo-pod`, `kyo-browser` and `kyo-lsp` on the nightly.
 - Durability after a host crash, and a process kill during a commit.
 - A comparison with ZIO or Ox at the same depth.
+
+## 9. A comparison with a plain host
+
+Choice 7 of [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md) asked if Kyo gives enough for its costs. The earlier
+sections ask what Kyo can do, and they have no plain host to compare. So a later check built the same host twice. One
+host has one thread, one queue and `sqlite-jdbc`. The other has `kyo-actor` and `kyo-sql-sqlite`. Each has one SQLite
+file for each session, and both use SQLite 3.53.4 on JDK 25. They have the same stress test, and one reader that is
+not a host reads the files. The code is `tmp/kyo-check/src/main/scala/harnesscheck/HostCompare.scala`. Each number
+comes from one run.
+
+| Check | Plain | Kyo |
+|---|---|---|
+| 2,000 sessions with a stop at a random time | No problem, and the disk equals the live state | No problem, and the disk equals the live state |
+| SIGKILL of the writer, 20 rounds | 90,660 commits with an answer, none lost, no corrupt file | 4,961 commits with an answer, none lost, no corrupt file |
+| Lines of the host, with no feeds and no timer | 80 | 75 |
+| A normal commit, from a plain thread | 49 µs | 355 µs |
+| A commit with a flush | 4.2 ms | 5.1 ms |
+| 2,000 open sessions | Heap +15 MB, 14.9 s to open, 19.9 s to close | Heap +35 MB, 14.8 s to open, 27.3 s to close |
+| A call after the close | An error, with about 12 more lines. The first version waited for ever. | An error, with no more code |
+
+**The pool.** `SqlConfig.idleTimeout` is 10 minutes by default (`kyo-sql/shared/src/main/scala/kyo/SqlConfig.scala:88`),
+and the pool closes and replaces a connection after that time. `fullfsync` and `synchronous` belong to a connection, so
+they go with it. In the check, with an idle time of 2 s, `fullfsync` went from 1 to 0 with no error. A commit with a
+flush went from 7.5 ms to 2.0 ms, so it no longer reached the disk. Two fixes work: set `fullfsync` again before each
+flush (10.4 ms), or turn off the idle timeout (8.1 ms). The plain host has no pool, and its one connection keeps its
+settings.
+
+**The result.** The two hosts have the same safety and about the same code. Kyo gives the error after a close, timers,
+scopes and `Hub`. It also needs JDK 25, a release candidate and a bridge for each commit. The turn and the cell stay on
+plain threads in both, so the Kyo host would be a small part in a different style. The first version takes the plain
+host, and a Kyo host stays possible behind the contracts. The other modules of this document stay possible inside a
+handler.
