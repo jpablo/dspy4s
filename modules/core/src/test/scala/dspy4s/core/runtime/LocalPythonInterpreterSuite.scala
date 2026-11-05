@@ -286,9 +286,6 @@ class LocalPythonInterpreterSuite extends FunSuite:
 
   // The tests below are for data of the code that JSON cannot hold. Each one ends with a check that the session is alive.
 
-  /** The code that defines `deep`, a list with too many levels for `json.dumps` and for repr. */
-  private def deepList = "deep = []\nfor _ in range(100000):\n    deep = [deep]\n"
-
   /** The code that defines the class `Foo`. Its `__repr__` raises. */
   private def badRepr = "class Foo:\n    def __repr__(self):\n        raise RuntimeError('boom')\n"
 
@@ -325,12 +322,28 @@ class LocalPythonInterpreterSuite extends FunSuite:
     }
   }
 
-  test("SUBMIT with a very deep value gives a fixed text with the type name, and the session continues") {
-    // `json.dumps` raises a RecursionError here. The upstream `jsonable` runs in an `except` clause, and it does not
-    // catch that error, so the error ends the session.
+  test("a RecursionError of json.dumps gives the repr as text, and the session continues") {
+    // The upstream `jsonable` runs in an `except` clause, and it does not catch this error, so the error ends the session.
+    val deep = "class Deep(dict):\n    def items(self):\n        raise RecursionError('deep')\n"
     withSession { interpreter =>
-      // The value of a SUBMIT is the dict of the fields, so the text names `dict`.
-      assertEquals(finalOf(interpreter, deepList + "SUBMIT(answer=deep)"), Some("\"<unprintable dict>\""))
+      assertEquals(finalOf(interpreter, deep + "SUBMIT(answer=Deep(a=1))"), Some("\"{'answer': {'a': 1}}\""))
+      assertEquals(ok(interpreter.execute(deep + "Deep(a=1)")).stdout, "{'a': 1}")
+    }
+  }
+
+  test("a very deep value gives the fixed text or a Left, and the call returns") {
+    // Python 3.12 and 3.13 raise a RecursionError in `json.dumps` for this value. Python 3.14 writes the line, and the
+    // JSON reader of the client rejects it. Each result is correct.
+    assumePython()
+    val deep   = "deep = []\nfor _ in range(100000):\n    deep = [deep]\n"
+    val fields = Some(Vector(SandboxOutputField("answer")))
+    Vector(deep + "SUBMIT(answer=deep)" -> "<unprintable dict>", deep + "deep" -> "<unprintable list>").foreach {
+      (code, text) =>
+        withInterpreter(LocalPythonInterpreter(outputFields = fields)) { interpreter =>
+          interpreter.execute(code) match
+            case Right(result) => assert(s"${result.stdout}${result.finalOutput}".contains(text), result.toString)
+            case Left(error)   => assert(error.message.contains("invalid JSON"), error.message.take(200))
+        }
     }
   }
 
@@ -351,7 +364,6 @@ class LocalPythonInterpreterSuite extends FunSuite:
   test("an exception whose text raises is an error of the code with a fixed text, and the session continues") {
     // The upstream `describe` calls `str` on the exception with no `try`, so these exceptions end the session.
     withSession { interpreter =>
-      assertCodeError(interpreter, deepList + "raise ValueError(deep)", "ValueError: <unprintable ValueError>")
       assertCodeError(interpreter, badRepr + "raise ValueError(Foo())", "ValueError: <unprintable ValueError>")
       val badStr = "class Odd(Exception):\n    def __str__(self):\n        raise RuntimeError('boom')\nraise Odd()"
       assertCodeError(interpreter, badStr, "Odd: Odd()")
@@ -368,7 +380,6 @@ class LocalPythonInterpreterSuite extends FunSuite:
       assertEquals(output("{1}"), "{1}")
       assertEquals(output("[float('nan')]"), "[nan]")
       assertEquals(output("loop = []\nloop.append(loop)\nloop"), "[[...]]")
-      assertEquals(output(deepList + "deep"), "<unprintable list>")
       assertEquals(output(badRepr + "Foo()"), "<unprintable Foo>")
     }
   }

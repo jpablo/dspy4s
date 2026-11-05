@@ -615,7 +615,10 @@ of `required`.
 - A JSON-RPC line of the Deno sandbox that the JSON reader of the client rejects ends the session with a `Left`. A lone
   surrogate or a text over 4,194,304 characters gives such a line. The reader of upstream accepts these lines.
 - Limits. In Pyodide, `repr` or `json.dumps` of a value with several thousand levels overflows the JavaScript stack
-  before Python raises a `RecursionError`. Python cannot catch this, so the session ends with a `Left`. An int with more
+  before Python raises a `RecursionError`. Python cannot catch this, so the session ends with a `Left`. In the local
+  worker, the result depends on the version of Python: a `RecursionError` gives the fixed text, and a line that the JSON
+  reader of the client rejects ends the session with a `Left`. Python 3.14 writes such a line for a list with 100000
+  levels, and Python 3.12 and 3.13 raise the error. An int with more
   than 307 digits ends a local session with a `Left`, and it becomes a null in Deno, because JavaScript reads it as
   `Infinity`. Upstream has the Deno limits.
 - ReActV2 rejects an output with the name `next_thought`, `tool_calls`, or `tool_call_results` at construction,
