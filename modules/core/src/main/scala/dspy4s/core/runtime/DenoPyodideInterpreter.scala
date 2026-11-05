@@ -39,12 +39,13 @@ import scala.util.control.NonFatal
 
 /** Sandboxed [[CodeInterpreter]]: Python via Pyodide (WASM) inside a Deno subprocess. It is a port of Python DSPy's
   * `PythonInterpreter` (`dspy/primitives/python_interpreter.py`). The sandbox side is upstream's `runner.js`, vendored
-  * as a resource with three changed comment lines and changed tool wrappers (`dspy4s/core/runtime/runner.js`, MIT,
-  * adapted by upstream from Simon Willison's Pyodide-in-Deno TIL). The changed rules: a tool with no declared
-  * parameters takes keyword arguments, each wrapper calls one shared helper, and the code can leave out an optional
-  * argument (PORT_DIFFERENCES sections 18 and 25). This class is the JSON-RPC 2.0 client speaking to it over the
-  * subprocess's stdin/stdout, line by line. Code runs with no host filesystem / network / environment access except
-  * what the `enable*` allowlists grant via Deno permission flags.
+  * as a resource with three changed comment lines, changed tool wrappers, and a changed exception helper
+  * (`dspy4s/core/runtime/runner.js`, MIT, adapted by upstream from Simon Willison's Pyodide-in-Deno TIL). The changed
+  * rules: a tool with no declared parameters takes keyword arguments, each wrapper calls one shared helper, the code
+  * can leave out an optional argument, and a value that JSON cannot hold does not end the process (PORT_DIFFERENCES
+  * sections 18 and 25). This class is the JSON-RPC 2.0 client speaking to it over the subprocess's stdin/stdout, line
+  * by line. Code runs with no host filesystem / network / environment access except what the `enable*` allowlists grant
+  * via Deno permission flags.
   *
   * Capabilities beyond [[SubprocessPythonInterpreter]] (the unsandboxed `python3 -c` impl):
   *   - '''Sandboxed''': untrusted LM-generated code cannot touch the host.
@@ -363,6 +364,9 @@ final class DenoPyodideInterpreter(
     * package-loading messages) and out-of-band messages are skipped. Each skipped line counts against one
     * `MaxSkippedLines` bound per request, so a flood cannot block the read forever. A tool call does not count. `None`
     * when the bound is exceeded.
+    *
+    * A line with the start of a JSON-RPC message that the JSON reader rejects is a terminal error. It can be the
+    * response of the request, so a skip can wait forever. A lone surrogate or a very long text gives such a line.
     */
   @tailrec
   private def nextMessage(
@@ -374,6 +378,8 @@ final class DenoPyodideInterpreter(
       readLine() match
         case Left(err)   => Left(err)
         case Right(line) => decodeRecord(line) match
+            case None if line.startsWith(MessageStart) =>
+              terminal(s"The JSON reader rejected a sandbox message: ${snippet(line)}")
             case None                                       => nextMessage(serveTools, skipped + 1)
             case Some(msg) if serveTools && isToolCall(msg) =>
               handleToolCall(msg) match
@@ -603,6 +609,9 @@ private object DenoPyodideInterpreter:
 
   /** The length limit for a sandbox line or a result in a protocol failure message. */
   private val SnippetLength = 200
+
+  /** The start of each line that `runner.js` writes with `JSON.stringify` for a JSON-RPC message. */
+  private val MessageStart = "{\"jsonrpc\":"
 
   private def snippet(text: String): String = text.take(SnippetLength)
 

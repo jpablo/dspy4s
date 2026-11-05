@@ -41,6 +41,11 @@ import scala.collection.immutable.VectorMap
   * failures (invocation error, non-fatal exception of a tool) are recorded as trajectory observations rather than
   * failing the program, mirroring Python; an LM-call failure in the react or extract step propagates as `Left`.
   *
+  * The extractor of a signature with a tool calls output (`Vector[ToolCall]`) needs tools (upstream
+  * `Adapter._call_preprocess`). Upstream has them in an input of the signature. In the port they are not in the
+  * signature, so the default extractor gets the tools of this program ([[extractorPredict]]). The react step keeps the
+  * text protocol, and has no tools.
+  *
   * The tool names are the allowed values of `next_tool_name` (upstream `Literal[tuple(tools.keys())]`). The adapters of
   * the port reject a name that is not a tool, and an empty name, as upstream `parse_value` does (decision D7). That
   * parse error of the step gives the JSON fallback of the chat adapter, and when that also fails, the error goes up:
@@ -63,7 +68,7 @@ final case class ReAct[I, O](
     reactPredictOverride: Option[Predict[(I, String), ReAct.ReactStep]] = None,
     /** Optional override for the final extractor predict (CoT-augmented, over the base input plus the rendered
       * trajectory). When `None` (the default), it is built fail-fast from [[extractorSignature]] at construction; see
-      * [[extractorPredict]].
+      * [[extractorPredict]]. An override keeps its own tools, so a `Predict` with no tools has no tools here.
       */
     extractorPredictOverride: Option[Predict[(I, String), ChainOfThought.WithReasoning[O]]] = None
 )(using
@@ -118,10 +123,17 @@ final case class ReAct[I, O](
 
   /** The extractor predict, built one time from [[extractorSignature]]. Its output is `WithReasoning[O]`, thus the
     * predict decodes the `reasoning` output with the `prepend` evidence of this class. [[extractorPredictOverride]]
-    * replaces it.
+    * replaces it. An optimizer builds that override from this predict, so the override keeps these tools.
+    *
+    * The tools are the tools that the loop can run, with one tool for each name and no `finish` tool. They have an
+    * effect only on a tool calls output ([[Predict.tools]]).
     */
   val extractorPredict: Predict[(I, String), ChainOfThought.WithReasoning[O]] =
-    extractorPredictOverride.getOrElse(Predict(signature = extractorSignature, name = Some(ReActKeys.extractModule)))
+    extractorPredictOverride.getOrElse(Predict(
+      signature = extractorSignature,
+      name = Some(ReActKeys.extractModule),
+      tools = allTools.filterNot(_.name == ReAct.FinishToolName).map(ToolText.toolSpec)
+    ))
 
   /** The instructions of the react step (upstream `ReAct.__init__`): the effective instructions of the base signature,
     * the protocol of `next_thought`, `next_tool_name`, and `next_tool_args`, and the numbered list of the tools in the

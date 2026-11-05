@@ -14,7 +14,12 @@ import zio.blocks.schema.DynamicValue
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
+import scala.concurrent.Await
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.Future
+import scala.concurrent.duration.DurationInt
 import scala.util.control.NonFatal
 
 /** Live-gated suite for the Deno+Pyodide sandbox: skips (assume) when `deno` is not on PATH. The first-ever run on a
@@ -293,4 +298,217 @@ class DenoPyodideInterpreterSuite extends FunSuite:
         case Left(error) => assert(error.message.contains("session has ended"), error.message)
         case Right(ok)   => fail(s"expected a failure, got $ok")
     finally interp.close()
+  }
+
+  test("SUBMIT with a value that JSON cannot hold gives its repr as text, and the session continues") {
+    assumeDeno()
+    val interp = new DenoPyodideInterpreter(outputFields = Vector(SandboxOutputField("answer")))
+    try
+      val nan = interp.execute("SUBMIT(answer=float('nan'))")
+      assertEquals(nan.map(_.finalOutput), Right(Some("\"{'answer': nan}\"")))
+      val set = interp.execute("SUBMIT(answer={1})")
+      assertEquals(set.map(_.finalOutput), Right(Some("\"{'answer': {1}}\"")))
+      assertEquals(interp.execute("print(1 + 1)").map(_.stdout.trim), Right("2"))
+    finally interp.close()
+  }
+
+  test("an exception with an argument that JSON cannot hold is an error of the code, and the session continues") {
+    assumeDeno()
+    val interp = new DenoPyodideInterpreter()
+    try
+      val nan = interp.execute("raise ValueError(float('nan'))").toOption.get
+      assertEquals(nan.exitCode, 1)
+      assert(nan.stderr.contains("ValueError"), nan.stderr)
+      val set = interp.execute("raise ValueError({1})").toOption.get
+      assertEquals(set.exitCode, 1)
+      assert(set.stderr.contains("ValueError"), set.stderr)
+      assertEquals(interp.execute("print(1 + 1)").map(_.stdout.trim), Right("2"))
+    finally interp.close()
+  }
+
+  // The tests below are for data of generated code that JSON cannot hold (the rule of `jsonable` in the local worker).
+
+  /** The code that defines the class `Foo`. Its `__repr__` raises. */
+  private def badRepr = "class Foo:\n    def __repr__(self):\n        raise RuntimeError('boom')\n"
+
+  /** Run `body` on an interpreter with the output field `answer` and the tool `greet`. Also check that the session is
+    * alive after `body`.
+    */
+  private def withSession(invoked: AtomicInteger = new AtomicInteger)(body: DenoPyodideInterpreter => Unit): Unit =
+    assumeDeno()
+    val greet = SandboxTool(
+      name = "greet",
+      parameters = Vector(SandboxTool.Param("who", Some("str"))),
+      invoke = _ =>
+        val _ = invoked.incrementAndGet()
+        Right(DynamicValues.string("hello"))
+    )
+    val interp = new DenoPyodideInterpreter(tools = Vector(greet), outputFields = Vector(SandboxOutputField("answer")))
+    try
+      body(interp)
+      assertEquals(interp.execute("print(1 + 1)").map(_.stdout.trim), Right("2"))
+    finally interp.close()
+
+  /** Check that `code` is an error of the code with `text` in the standard error. */
+  private def assertCodeError(interp: DenoPyodideInterpreter, code: String, text: String*): Unit =
+    val result = interp.execute(code).fold(error => fail(s"the session failed: $error"), identity)
+    assertEquals(result.exitCode, 1, result.toString)
+    text.foreach(part => assert(result.stderr.contains(part), result.stderr))
+
+  /** Check that `code` ends the session with a `Left` that has `text`. The call must return, so it has a time limit. */
+  private def assertSessionEnds(code: String, text: String): Unit =
+    assumeDeno()
+    val interp = new DenoPyodideInterpreter(outputFields = Vector(SandboxOutputField("answer")))
+    try
+      Await.result(Future(interp.execute(code)), 120.seconds) match
+        case Left(error) => assert(error.message.contains(text), error.message)
+        case Right(ok)   => fail(s"expected a failure, got $ok")
+      interp.execute("print(1)") match
+        case Left(error) => assert(error.message.contains("session has ended"), error.message)
+        case Right(ok)   => fail(s"expected a failure, got $ok")
+    finally interp.close()
+
+  test("SUBMIT with NaN, Infinity, or -Infinity gives its repr as text, and the session continues") {
+    withSession() { interp =>
+      assertEquals(interp.execute("SUBMIT(answer=float('nan'))").map(_.finalOutput), Right(Some("\"{'answer': nan}\"")))
+      assertEquals(interp.execute("SUBMIT(answer=float('inf'))").map(_.finalOutput), Right(Some("\"{'answer': inf}\"")))
+      assertEquals(
+        interp.execute("SUBMIT(answer=float('-inf'))").map(_.finalOutput),
+        Right(Some("\"{'answer': -inf}\""))
+      )
+    }
+  }
+
+  test("SUBMIT with an object of a class gives its repr as text, and the session continues") {
+    withSession() { interp =>
+      val code = "class Plain:\n    def __repr__(self):\n        return 'Plain()'\nSUBMIT(answer=Plain())"
+      assertEquals(interp.execute(code).map(_.finalOutput), Right(Some("\"{'answer': Plain()}\"")))
+    }
+  }
+
+  test("SUBMIT with a list that contains itself gives its repr as text, and the session continues") {
+    withSession() { interp =>
+      val code = "loop = []\nloop.append(loop)\nSUBMIT(answer=loop)"
+      assertEquals(interp.execute(code).map(_.finalOutput), Right(Some("\"{'answer': [[...]]}\"")))
+    }
+  }
+
+  test("SUBMIT with an object whose __repr__ raises gives a fixed text with the type name, and the session continues") {
+    withSession() { interp =>
+      // The value of a SUBMIT is the dict of the fields, so the text names `dict`.
+      val boom = interp.execute(badRepr + "SUBMIT(answer=Foo())")
+      assertEquals(boom.map(_.finalOutput), Right(Some("\"<unprintable dict>\"")))
+    }
+  }
+
+  test("an exception with a value that JSON cannot hold gives the repr or the fixed text in its error") {
+    withSession() { interp =>
+      assertCodeError(interp, "raise ValueError(float('nan'))", "ValueError", "nan")
+      assertCodeError(interp, "raise ValueError(float('inf'))", "ValueError", "inf")
+      assertCodeError(interp, "raise ValueError({1})", "ValueError", "{1}")
+      assertCodeError(interp, "loop = []\nloop.append(loop)\nraise ValueError(loop)", "ValueError", "[[...]]")
+      assertCodeError(interp, badRepr + "raise ValueError(Foo())", "ValueError", "<unprintable Foo>")
+      val badArgs = "class Odd(Exception):\n    args = property(lambda self: 1 / 0)\nraise Odd()"
+      assertCodeError(interp, badArgs, "Odd")
+      assertCodeError(interp, "raise ValueError('text', 1)", "ValueError", "text", "1")
+    }
+  }
+
+  test("the last expression with a value that JSON cannot hold leaves the session alive") {
+    // The client reads the output only when it is a text. So these values give no output. This is not a change.
+    withSession() { interp =>
+      Vector("float('nan')", "float('inf')", "{1}", "[float('nan')]", badRepr + "Foo()").foreach { code =>
+        assertEquals(interp.execute(code).map(result => (result.stdout, result.exitCode)), Right(("", 0)), code)
+      }
+    }
+  }
+
+  test("the last expression with a list that contains itself is an error of its own, and the session continues") {
+    withSession() { interp =>
+      // The first exception must not give its args to the error of JavaScript that comes later.
+      assertCodeError(interp, "raise KeyError('old')", "KeyError", "old")
+      val loop = interp.execute("loop = []\nloop.append(loop)\nloop").fold(error => fail(error.message), identity)
+      assertEquals(loop.exitCode, 1)
+      assert(loop.stderr.contains("circular"), loop.stderr)
+      assert(!loop.stderr.contains("old"), loop.stderr)
+    }
+  }
+
+  test("a tool call with an argument that JSON cannot hold is an error of the code, and the tool does not run") {
+    val invoked = new AtomicInteger
+    withSession(invoked) { interp =>
+      assertCodeError(interp, "greet(who=float('nan'))", "RuntimeError", "Tool bridge error")
+      assertCodeError(interp, "greet(who={1})", "TypeError")
+      assertCodeError(interp, "loop = []\nloop.append(loop)\ngreet(who=loop)", "ValueError", "Circular reference")
+      assertEquals(invoked.get(), 0)
+      assertEquals(interp.execute("print(greet(who='ann'))").map(_.stdout.trim), Right("hello"))
+    }
+  }
+
+  test("a variable of the generated code with the name of a module does not change the args") {
+    withSession() { interp =>
+      assertCodeError(interp, "json = None\nraise ValueError('kept')", "ValueError", "kept")
+      assertCodeError(interp, "sys = 1\nraise ValueError('kept')", "ValueError", "kept")
+      assertEquals(interp.execute("json = None\nSUBMIT(answer=1)").map(_.finalOutput), Right(Some("{\"answer\":1}")))
+      assertEquals(
+        interp.execute("json = None\nSUBMIT(answer=float('nan'))").map(_.finalOutput),
+        Right(Some("\"{'answer': nan}\""))
+      )
+    }
+  }
+
+  test("generated code that breaks the helper gives empty args or a null SUBMIT, and the session continues") {
+    withSession() { interp =>
+      assertCodeError(interp, "del last_exception_args\nraise ValueError('lost')", "ValueError: []")
+      assertEquals(interp.execute("del last_exception_args\nSUBMIT(answer=1)").map(_.finalOutput), Right(Some("null")))
+      val break = "import json as module\nkept = module.dumps\nmodule.dumps = None\n"
+      assertEquals(interp.execute(break + "SUBMIT(answer=1)").map(_.finalOutput), Right(Some("null")))
+      assertEquals(interp.execute("module.dumps = kept").map(_.exitCode), Right(0))
+      assertCodeError(interp, break + "raise ValueError('lost')", "ValueError: []")
+      assertEquals(interp.execute("module.dumps = kept").map(_.exitCode), Right(0))
+      assertEquals(interp.execute("SUBMIT(answer=1)").map(_.finalOutput), Right(Some("{\"answer\":1}")))
+    }
+  }
+
+  test("a lone surrogate in the output ends the session with a Left, and the call returns") {
+    assertSessionEnds("print('\\ud83d')", "rejected a sandbox message")
+  }
+
+  test("a very long output ends the session with a Left, and the call returns") {
+    assertSessionEnds("print('x' * 5000000)", "rejected a sandbox message")
+  }
+
+  test("a very deep value ends the session with a Left, a limit of Pyodide") {
+    // The stack overflow is in the helper or in the code. Python cannot catch it. The session must not hide the loss.
+    val deepList = "deep = []\nfor _ in range(100000):\n    deep = [deep]\n"
+    assertSessionEnds(deepList + "SUBMIT(answer=deep)", "Deno exited")
+    assertSessionEnds(deepList + "repr(deep)", "Deno exited")
+  }
+
+  test("the local worker and the Deno sandbox write the same final text") {
+    assumeDeno()
+    val local = LocalPythonInterpreter(outputFields = Some(Vector(SandboxOutputField("answer"))))
+    val deno  = new DenoPyodideInterpreter(outputFields = Vector(SandboxOutputField("answer")))
+    try
+      assume(local.execute("print(1)").isRight, "python3 3.10+ not installed")
+      val codes = Vector(
+        "SUBMIT(answer='text')",
+        "SUBMIT(answer=[1, 2.5, None, True, {'key': 'value'}])",
+        "SUBMIT(answer=float('nan'))",
+        "SUBMIT(answer=float('inf'))",
+        "SUBMIT(answer=float('-inf'))",
+        "SUBMIT(answer={1})",
+        "SUBMIT(answer={(1, 2): 'a'})",
+        "class Plain:\n    def __repr__(self):\n        return 'Plain()'\nSUBMIT(answer=Plain())",
+        "loop = []\nloop.append(loop)\nSUBMIT(answer=loop)",
+        badRepr + "SUBMIT(answer=Foo())"
+      )
+      codes.foreach { code =>
+        val expected = local.execute(code).map(_.finalOutput)
+        assert(expected.exists(_.isDefined), expected.toString)
+        assertEquals(deno.execute(code).map(_.finalOutput), expected, code)
+      }
+    finally
+      local.close()
+      deno.close()
   }

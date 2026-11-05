@@ -3,20 +3,24 @@ package dspy4s.adapters
 import dspy4s.adapters.contracts.Adapter
 import dspy4s.adapters.contracts.AdapterInvocation
 import dspy4s.adapters.contracts.FormattedPrompt
+import dspy4s.adapters.contracts.NativeFunctionCalling
 import dspy4s.adapters.contracts.NativeTools
 import dspy4s.adapters.contracts.ParsedOutput
 import dspy4s.adapters.internal.AdapterTextSupport
 import dspy4s.adapters.internal.DemoMessages
 import dspy4s.adapters.internal.PromptText
+import dspy4s.adapters.internal.StrictJsonSchema
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.data.Example
 import dspy4s.core.contracts.FieldSpec
+import dspy4s.core.contracts.JsonSchemaRefs
 import dspy4s.core.contracts.ParseError
 import dspy4s.core.contracts.PythonText
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.contracts.:=
+import dspy4s.core.runtime.ActivePredictContext
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.lm.contracts.LmOutput
 import dspy4s.lm.contracts.LmRequest
@@ -81,8 +85,51 @@ final case class TwoStepAdapter(extractionModel: LanguageModel) extends Adapter:
     * no outputs is no parse error of the chat adapter. An output with an empty text is such a parse error, and it gets
     * the fallback of the chat adapter ([[AdapterCall.run]]). Each [[ParseError]] of the step becomes the error of
     * [[originalCompletionError]]. Each other error stays as it is, as upstream catches only `AdapterParseError`.
+    *
+    * A tool turn is a reply with provider tool calls for a layout with a tool calls field. It has the rule of upstream
+    * `Adapter._call_postprocess`. A reply with no text, or a layout with no other output field, gets no extraction.
+    * Else the extraction gives only the other output fields, because the model has nothing to extract for the calls. A
+    * [[ParseError]] of the extraction gives no values (upstream `except AdapterParseError: value = {}`), and each other
+    * error stays an error. The calls then fill the tool calls field ([[AdapterTextSupport.toolTurnValues]]), and the
+    * evidence of the extraction stays.
+    *
+    * The model call of the extraction runs in the scope of [[withActiveLayout]].
     */
   override def parse(invocation: AdapterInvocation, output: LmOutput)(using
+      RuntimeContext
+  ): Either[DspyError, ParsedOutput] =
+    val layout = invocation.layout
+    if output.toolCalls.isEmpty || !layout.outputFields.exists(NativeFunctionCalling.isToolCallsField) then
+      extract(invocation, output.text)
+    else
+      val fields = AdapterTextSupport.textFields(layout, providerCalls = true)
+      val parsed =
+        if output.text.isEmpty || fields.isEmpty then Right(ParsedOutput(DynamicValue.Record.empty))
+        else
+          extract(withOutputs(invocation, fields), output.text) match
+            case Left(_: ParseError) => Right(ParsedOutput(DynamicValue.Record.empty))
+            case other               => other
+      parsed.map(found =>
+        found.copy(values = AdapterTextSupport.toolTurnValues(layout, output.toolCalls, found.values))
+      )
+
+  /** `invocation` with only the output fields `fields`, in its layout and in its output JSON schema. Thus a response
+    * schema of the extraction asks for no other field.
+    */
+  private def withOutputs(invocation: AdapterInvocation, fields: Vector[FieldSpec]): AdapterInvocation =
+    val kept    = fields.map(_.name).toSet
+    val removed = invocation.layout.outputFields.map(_.name).filterNot(kept.contains).toSet
+    invocation.copy(
+      layout = invocation.layout.withOutputFields(fields),
+      outputJsonSchema = invocation.outputJsonSchema.map(schema =>
+        StrictJsonSchema.withoutProperties(JsonSchemaRefs.inlineRoot(schema), removed)
+      )
+    )
+
+  /** The first parsed output of the extraction model for the output fields of `invocation`, with `completion` as the
+    * text of the main LM.
+    */
+  private def extract(invocation: AdapterInvocation, completion: String)(using
       RuntimeContext
   ): Either[DspyError, ParsedOutput] =
     for
@@ -92,16 +139,25 @@ final case class TwoStepAdapter(extractionModel: LanguageModel) extends Adapter:
                      layout = extractorLayout,
                      demos = Vector.empty,
                      inputs =
-                       Example(values = DynamicValues.record(textField := output.text), inputKeys = Set(textField)),
+                       Example(values = DynamicValues.record(textField := completion), inputKeys = Set(textField)),
                      request = LmRequest(model = extractionModel.id),
                      outputJsonSchema = invocation.outputJsonSchema
                    )
-      result <- AdapterCall
-                  .run(ChatAdapter(), extractionModel, extraction)
+      result <- withActiveLayout(extractorLayout)(AdapterCall.run(ChatAdapter(), extractionModel, extraction))
                   .flatMap(_.parsed.headOption.toRight(ParseError(name, "Extraction model returned no output")))
                   .left
-                  .map(originalCompletionError(_, output.text))
+                  .map(originalCompletionError(_, completion))
     yield result
+
+  /** `body` with `layout` as the layout of the active predictor, under the same predictor name. With no active
+    * predictor, `body` gets no scope. Under `streamify`, the stream wrapper of the extraction model reads this layout
+    * ([[ActivePredictContext]]). Thus the reasoning of that model gives a token only when the extractor layout has a
+    * reasoning field, and the extraction then fills the final value of that field.
+    */
+  private def withActiveLayout[A](layout: SignatureLayout)(body: => A): A =
+    ActivePredictContext.current match
+      case Some(active) => ActivePredictContext.withActive(active.name, layout)(body)
+      case None         => body
 
   /** The error of the extraction step for the parse error `error` (upstream `TwoStepAdapter.parse`): the text "Failed
     * to parse response from the original completion: " and the message of `error`, with the completion of the main LM

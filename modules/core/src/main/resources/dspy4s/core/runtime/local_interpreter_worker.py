@@ -1,6 +1,7 @@
-# Vendored verbatim from DSPy (https://github.com/stanfordnlp/dspy), file
+# Vendored from DSPy (https://github.com/stanfordnlp/dspy), file
 # dspy/primitives/local_interpreter_worker.py at upstream commit d58c3007e.
 # DSPy is under the MIT License, Copyright (c) 2023 Stanford Future Data Systems.
+# dspy4s adds `printable` and changes `jsonable` and `describe`, so that bad data of the code does not end the session.
 # dspy4s LocalPythonInterpreter starts this script as `<python> -I <script>`.
 
 from __future__ import annotations
@@ -185,16 +186,26 @@ class Session:
         return outcome
 
 
+def printable(value: Any) -> str:
+    try:
+        return repr(value)
+    except Exception:
+        return f"<unprintable {type(value).__name__}>"
+
+
 def jsonable(value: Any) -> Any:
     try:
         json.dumps(value, allow_nan=False)
         return value
-    except (TypeError, ValueError):
-        return repr(value)
+    except Exception:
+        return printable(value)
 
 
 def describe(exc: BaseException) -> str:
-    return f"{type(exc).__name__}: {exc}"
+    try:
+        return f"{type(exc).__name__}: {exc}"
+    except Exception:
+        return f"{type(exc).__name__}: {printable(exc)}"
 
 
 def send(message: dict[str, Any]) -> None:

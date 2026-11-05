@@ -390,6 +390,14 @@ class RLMSuite extends FunSuite:
     }
   }
 
+  test("a SUBMIT value that JSON cannot hold arrives as text, and it gives the observation of upstream with str") {
+    // The two sandboxes write the repr of such a value, for example of `SUBMIT(answer=float('nan'))`, as a JSON string.
+    assertEquals(
+      RLMReplProtocol.parseSubmitted("\"{'answer': nan}\"", Vector("answer")),
+      Left("[Error] FINAL returned str, expected dict with fields: ['answer']")
+    )
+  }
+
   test("reserved tool names are rejected at construction") {
     val bad = new dspy4s.programs.contracts.ToolFunction:
       override val name: String                                            = "llm_query"

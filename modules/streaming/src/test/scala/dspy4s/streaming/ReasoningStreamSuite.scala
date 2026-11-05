@@ -1,7 +1,7 @@
 package dspy4s.streaming
 
 import dspy4s.adapters.contracts.Adapter
-import dspy4s.adapters.{ChatAdapter, JSONAdapter}
+import dspy4s.adapters.{ChatAdapter, JSONAdapter, TwoStepAdapter}
 import dspy4s.core.contracts.{:=, DspyError, DynamicValues, RuntimeContext}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.core.signatures.SignatureDsl
@@ -163,4 +163,35 @@ class ReasoningStreamSuite extends FunSuite:
     val found = events(model, JSONAdapter(), StreamListener("answer"))
     assertEquals(tokens(found, "answer").mkString, "Paris")
     assertEquals(text(prediction(found), "reasoning"), Some("why"))
+  }
+
+  test("the reasoning of the extraction model of TwoStepAdapter gives no token when the main model has reasoning") {
+    val main = Script(
+      reasoning = true,
+      Vector(reasoningChunks :+ LmChunk(text = "It is that way.", finishReason = Some("stop")))
+    )
+    val extraction = Script(
+      reasoning = true,
+      Vector(Vector(LmChunk(reasoning = "Extraction thought. ")) ++ answerChunks)
+    )
+    val found = events(main, TwoStepAdapter(extraction), StreamListener("reasoning"))
+    assertEquals(tokens(found, "reasoning"), Vector("First, think. ", "Then, consider. ", "So, cross."))
+    assertEquals(text(prediction(found), "reasoning"), Some("First, think. Then, consider. So, cross."))
+    assertEquals(text(prediction(found), "answer"), Some("To get there"))
+  }
+
+  test(
+    "the tokens of the reasoning field of TwoStepAdapter are the final value when only the extraction has reasoning"
+  ) {
+    val main = Script(
+      reasoning = false,
+      Vector(Vector(LmChunk(text = "It is that way.", finishReason = Some("stop"))))
+    )
+    val extraction = Script(
+      reasoning = true,
+      Vector(Vector(LmChunk(reasoning = "Extraction thought.")) ++ answerChunks)
+    )
+    val found = events(main, TwoStepAdapter(extraction), StreamListener("reasoning"))
+    assertEquals(tokens(found, "reasoning"), Vector("Extraction thought."))
+    assertEquals(text(prediction(found), "reasoning"), Some("Extraction thought."))
   }

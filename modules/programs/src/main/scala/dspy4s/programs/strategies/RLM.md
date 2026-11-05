@@ -73,11 +73,11 @@ Its fields have distinct responsibilities:
 | `maxLlmCalls` | Per-forward budget shared by `llm_query` and `llm_query_batched` |
 | `maxOutputChars` | Head-and-tail limit for each REPL output rendered into history |
 | `verbose` | Logs each action and ordinary step output to stderr |
-| `tools` | Extra `ToolFunction` values callable from generated Python |
+| `tools` | Extra `ToolFunction` values callable from generated Python. The default `extractPredict` also has them as model tools |
 | `subLm` | Optional LM used by the in-REPL `llm_query` tools |
 | `interpreterFactory` | Creates the stateful REPL owned by one forward call. `None` selects the factory of the runtime context, then the Deno sandbox |
 | `actionPredictOverride` | Immutable replacement for the default action predictor |
-| `extractPredictOverride` | Immutable replacement for the default fallback predictor |
+| `extractPredictOverride` | Immutable replacement for the default fallback predictor. It keeps its own tools |
 
 The outer module name is always `rlm`. Unlike `ChainOfThought` and `ReAct`, RLM does not add a reasoning
 field to `O`. It returns the base output type directly. The final action reasoning and rendered trajectory are kept in
@@ -353,6 +353,14 @@ Fallback is an iteration-budget policy, not a general error handler. If `actionP
 returns `Left`, RLM returns that error. Reaching the fallback always writes a warning to stderr, even when `verbose` is
 false.
 
+A signature with a tool calls output (`Vector[ToolCall]`) needs tools in this step, and the signature does not hold
+them. Thus the default `extractPredict` gets the tools of the program. When native function calling is active, the
+request has them as provider tools. Else the prompt shows them as an input field `tools`. A plain output gets no change
+in its request or its prompt. The action step has no tools.
+
+An optimizer builds its `extractPredictOverride` from the current predictor, so that override keeps the tools. An
+override that you build yourself keeps its own tools.
+
 ## Built-in tools and sub-LM calls
 
 Generated Python has four reserved built-in names:
@@ -377,7 +385,7 @@ The sub-LM is selected as follows:
 This allows the action policy and semantic helper to use different models. For example, the action predictor can use a
 strong code-generating model while `subLm` uses a cheaper model for many targeted classifications.
 
-User `ToolFunction` values take two paths:
+User `ToolFunction` values take three paths:
 
 ```mermaid
 flowchart LR
@@ -385,6 +393,7 @@ flowchart LR
     tools --> instructions["Rendered in action instructions"]
     tools --> bridge["RLMSandboxTools.fromToolFunctions"]
     bridge --> repl["Callable by name inside Python"]
+    tools --> extract["Model tools of extractPredict"]
 ```
 
 Construction rejects a user tool named `llm_query`, `llm_query_batched`, `SUBMIT`, or `print`, because shadowing a

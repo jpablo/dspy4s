@@ -1,5 +1,6 @@
 package dspy4s.programs.strategies
 
+import dspy4s.adapters.contracts.ToolSpec
 import dspy4s.programs.AttemptCount
 import dspy4s.core.collections.Traverse
 import dspy4s.core.contracts.DspyError
@@ -55,11 +56,16 @@ final case class MultiChainInput[I](
   * @param temperature
   *   the default temperature of the comparison call (Python's default 0.7). The comparison predict holds it as module
   *   config, thus a per-call value overrides it (upstream `Predict(signature, temperature=temperature, **config)`).
+  * @param tools
+  *   the tools of the model, which the comparison predict gets, with the rules of [[Predict.tools]]. They apply only to
+  *   a signature with a tool calls output (`Vector[ToolCall]`). This program has no tools of its own, so the caller
+  *   gives them. Upstream has them in an input of the signature (`Adapter._call_preprocess`). Not serialized state.
   */
 final case class MultiChainComparison[I, O](
     baseSignature: Signature[I, O],
-    m            : AttemptCount = AttemptCount(3),
-    temperature  : Double       = 0.7,
+    m            : AttemptCount     = AttemptCount(3),
+    temperature  : Double           = 0.7,
+    tools        : Vector[ToolSpec] = Vector.empty,
     /** Optional optimizable parameters for the comparison predictor. The executable predictor itself is built
       * internally over this instance's path-branded, arity-validated attempt carrier, so callers cannot replace it with
       * a shape that accepts arbitrary vectors. Optimizer replacement writes only this lawful parameter surface.
@@ -113,10 +119,15 @@ final case class MultiChainComparison[I, O](
 
   /** The comparison predict, built one time from the comparison signature over the opaque [[Attempts]] carrier of this
     * instance. Only [[attemptInputs.validate]] makes that carrier, thus each input encodes exactly `m` numbered fields.
-    * The optimizers inspect and replace it, thus it is package-private. A public call goes through [[compare]].
+    * The optimizers inspect and replace it, thus it is package-private. A public call goes through [[compare]]. It has
+    * [[tools]], and the optimizable parameters do not change them.
     */
   private[programs] val comparePredict: Predict[(I, Attempts), MultiChainComparison.WithRationale[O]] =
-    val base = Predict(signature = compareSignature, config = DynamicValues.record("temperature" := temperature))
+    val base = Predict(
+      signature = compareSignature,
+      config = DynamicValues.record("temperature" := temperature),
+      tools = tools
+    )
     comparePredictParametersOverride.fold(base)(base.withOptimizableParameters)
 
   override protected val lifecycle: ModuleLifecycle[MultiChainInput[I]] = ModuleLifecycle.typed(

@@ -273,7 +273,7 @@ its primary consumer:
 | Python | dspy4s |
 |---|---|
 | `utils/callback.py` | `core/contracts/Callbacks.scala` (because every module depends on it) |
-| `utils/caching.py` | `lm/runtime/CacheRuntime.scala` (LM-specific) |
+| `utils/caching.py` | `lm/contracts/LmCache.scala`, with `InMemoryLmCache.scala`, `DiskLmCache.scala`, and `CompositeLmCache.scala` in `lm/runtime/` (LM-specific) |
 | `utils/parallelizer.py` | `programs/runtime/ParallelExecutor.scala` (lives with `Parallel` / `BestOfN` / `Evaluate`) |
 | `utils/usage_tracker.py` | `core/runtime/UsageScope.scala` (the usage scopes and `UsageTracker`); the user facade `UsageTracking` is in `lm/runtime/ManagedLanguageModel.scala` |
 
@@ -607,6 +607,17 @@ of `required`.
   calls one shared helper, so an argument can have the name `json` or `run_sync`. Upstream puts the call in each
   wrapper, so such an argument hides the module or the function. A parameter can be optional (section 25). The port
   does not send a `default` for a parameter, so the runner has no such case.
+- A value of the code that JSON cannot hold does not end the session, in the two sandboxes. A SUBMIT value or an
+  exception argument becomes its `repr`, or `<unprintable NAME>` when `repr` raises, as `jsonable` of the local worker
+  does. `RLM` then gives the observation `[Error] FINAL returned str`. In upstream `runner.js`, `JSON.parse` rejects
+  such a value in a catch block, and the Deno process ends. In the upstream local worker, a `RecursionError` or a
+  `__repr__` that raises ends the session.
+- A JSON-RPC line of the Deno sandbox that the JSON reader of the client rejects ends the session with a `Left`. A lone
+  surrogate or a text over 4,194,304 characters gives such a line. The reader of upstream accepts these lines.
+- Limits. In Pyodide, `repr` or `json.dumps` of a value with several thousand levels overflows the JavaScript stack
+  before Python raises a `RecursionError`. Python cannot catch this, so the session ends with a `Left`. An int with more
+  than 307 digits ends a local session with a `Left`, and it becomes a null in Deno, because JavaScript reads it as
+  `Infinity`. Upstream has the Deno limits.
 - ReActV2 rejects an output with the name `next_thought`, `tool_calls`, or `tool_call_results` at construction,
   because the history event of a turn has these keys and the final outputs go over them. Upstream does not check
   these names.
@@ -627,6 +638,19 @@ The extraction step has no check of the output type of a typed signature: the ch
 of the main call. Thus a value that the typed decode rejects is a `ParseError` with the completion of the main LM as its
 raw text, with no JSON fallback on the extraction model and without the text of the wrapper. Upstream `parse_value`
 rejects that value in the extraction step, so its JSON fallback comes first.
+
+A reply of the main LM with provider tool calls, for a layout with a tool calls output, has the rule of upstream
+`Adapter._call_postprocess`: the calls fill that field, a reply with no text gets no extraction, and a `ParseError` of
+the extraction gives no text values. Three parts differ from upstream:
+
+- The extraction asks only for the other output fields, in its layout and in its response schema, because the model has
+  nothing to extract for the calls. Upstream keeps the tool calls field in the signature of the extraction, so a reply
+  that gives only the other fields is a parse error, and upstream loses their values.
+- A layout with only a tool calls output gets no extraction. Upstream runs the extraction when the reply has text.
+- One other output field takes a reply with no markers as its value (the single-output rule of the chat adapter).
+  Upstream gives `None`.
+
+Upstream `TwoStepAdapter.acall` has no such rule: it always runs the extraction. The port has one path.
 
 ## 20. The trace limit, and the failure budget and the controls of `BestOfN` and `Refine`
 
@@ -705,6 +729,13 @@ The `streaming` module follows `dspy/streaming/`. These rules differ from upstre
 - The stream of a raw provider with no finish reason fails with `LmStreamAssemblyError`, as in `ManagedLanguageModel`.
   The stream wrapper has this check because a raw provider can be the model of the wrapper. Upstream has this check in
   `checked_stream`, below each model.
+- A later copy of a key in a JSON reply gives no token, with a listener or with no listener. The chat and XML stream
+  states have the same rule. The JSON parser keeps the last copy, so the tokens can differ from the final value. Upstream
+  gets this result for a listener with `allow_reuse=False`, and a listener with `allow_reuse=True` streams each copy.
+- During the extraction step of `TwoStepAdapter`, the stream wrapper reads the layout of the extraction. Thus the
+  reasoning of the extraction model gives a token only when that layout has a reasoning field, and the extraction then
+  fills the final value. Upstream sends each chunk of each model to a listener, but `StreamListener.receive` rejects this
+  adapter (`ADAPTER_SUPPORT_STREAMING`), so upstream has no rule for a listener here.
 
 ## 24. GEPA rules with no upstream form
 
@@ -788,6 +819,18 @@ The port has this input field (`TypeRef.tools`, which `ReActV2` uses), and `Pred
 - `TwoStepAdapter` has native function calling off, so its prompt shows the tool specs of a layout with a tool calls
   output, as a `tools: ...` block of the user message, and it gives no error with no tools. The value is JSON text,
   where upstream writes the Python `repr` of a tools input.
+
+A program holds the tool specs of its inner predictor, because the signature does not hold them:
+
+- `ChainOfThought` and `MultiChainComparison` have `tools`, and they give the value to their predictor. The tools of
+  `MultiChainComparison` are a constructor argument, so they cannot change for each call. Upstream reads them from an
+  input value of each call.
+- The default extractor of `ReAct` and the default extract step of `RLM` get the tools of the program. `ReAct` gives one
+  tool for each name and no `finish` tool. An override predictor keeps its own tools. A plain output gets no change in
+  its request or its prompt. With native function calling not active, the prompt of such a step shows the tools.
+- Upstream `ReAct` reads the tools of its extractor from an input of the signature, not from the tools of `ReAct`, and
+  upstream `RLM` has no tools input in its extract signature. Thus upstream raises the `ValueError` above where these
+  two steps of the port work, when the signature has no tools input.
 
 ## 27. The reasoning of a plain chat reply
 

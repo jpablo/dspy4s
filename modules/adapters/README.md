@@ -7,7 +7,7 @@ An adapter writes the prompt of a signature and reads the response of the model.
 ## Main concepts
 
 - **Format and parse.** `format` makes the messages of one request. `parse` reads one model output into a record of
-  output fields. `execute` does the two steps, with the LM call between them.
+  output fields. `AdapterCall` runs the two steps, with the LM call between them, and one fallback.
 - **Four adapters.** `ChatAdapter` puts each field after a `[[ ## name ## ]]` marker. `JSONAdapter` asks for one JSON
   object. `XMLAdapter` puts each field in a `<name>` tag. `TwoStepAdapter` asks for an answer in natural language, and
   then a second model reads the fields from that answer.
@@ -21,7 +21,7 @@ An adapter writes the prompt of a signature and reads the response of the model.
 
 | Type | Description |
 |------|-------------|
-| `Adapter` | The interface: `format`, `parse`, `execute`, `streamingState`, and `fallback` (the adapter to try after a parse error). |
+| `Adapter` | The interface: `format`, `parse`, `streamingState`, and `fallback` (the adapter to try after a parse error). |
 | `DelegatingAdapter` | The base of an adapter that wraps another adapter. It forwards each member of `Adapter` to its `delegate`, so a wrapper overrides only what it changes. `DecisionAdapter` and the hint adapter of `Refine` extend it. |
 | `ChatAdapter` | The marker format. Its options are the native tool calls (`native`, a `NativeTools`) and the JSON fallback. |
 | `JSONAdapter` | The JSON format. It adds a `response_format` to the request options when the model supports a response schema. Its native tool calls (`native`) are on by default. |

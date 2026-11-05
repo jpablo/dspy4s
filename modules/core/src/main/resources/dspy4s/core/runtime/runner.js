@@ -13,12 +13,28 @@ const JSON = Object.freeze(globalThis.JSON), console = Object.freeze(globalThis.
 // provides a helper to extract exception args across the JS/Python boundary.
 const PYTHON_SETUP_CODE = `
 import sys, io, json
+import json as _dspy_json, sys as _dspy_sys
 old_stdout, old_stderr = sys.stdout, sys.stderr
 buf_stdout, buf_stderr = io.StringIO(), io.StringIO()
 sys.stdout, sys.stderr = buf_stdout, buf_stderr
 
+# dspy4s: a value that JSON cannot hold becomes its repr, as in jsonable of local_interpreter_worker.py. Upstream
+# writes NaN here, JSON.parse rejects it, and the process ends. A private name of a module stays usable when the code
+# has a variable with the name json. This text is in a template of JavaScript, so it can have no backtick.
+def _dspy_printable(value):
+    try:
+        return repr(value)
+    except Exception:
+        return f"<unprintable {type(value).__name__}>"
+
 def last_exception_args():
-    return json.dumps(sys.last_exc.args) if sys.last_exc else None
+    if not _dspy_sys.last_exc:
+        return None
+    args = _dspy_sys.last_exc.args
+    try:
+        return _dspy_json.dumps(args, allow_nan=False)
+    except Exception:
+        return _dspy_json.dumps([_dspy_printable(arg) for arg in args])
 
 class _DSPyFinalOutput(BaseException):
     # Control-flow exception to signal completion (like StopIteration)
@@ -223,6 +239,16 @@ async function toolCallBridge(name, argsJson) {
 pyodide.globals.set("_js_tool_call", toolCallBridge);
 pyodide.runPython(makeToolCallHelper());
 
+// dspy4s: the args of the last exception. This code runs in a catch block of the main loop, so an exception here ends
+// the process. Generated code can break the helper, for example with `del last_exception_args`. The args are then empty.
+const exceptionArgs = () => {
+  try {
+    return JSON.parse(pyodide.globals.get("last_exception_args")()) || [];
+  } catch {
+    return [];
+  }
+};
+
 try {
   const env_vars = (Deno.args[0] ?? "").split(",").filter(Boolean);
   for (const key of env_vars) {
@@ -368,8 +394,7 @@ while (true) {
 
       // Handle SUBMIT's control-flow exception as a success result, not an error
       if (errorType === "_DSPyFinalOutput") {
-        const last_exception_args = pyodide.globals.get("last_exception_args");
-        const errorArgs = JSON.parse(last_exception_args()) || [];
+        const errorArgs = exceptionArgs();
         const answer = errorArgs[0] || null;
         console.log(jsonrpcResult({ final: answer }, requestId));
         continue;
@@ -379,10 +404,10 @@ while (true) {
       let errorArgs = [];
       if (errorType !== "SyntaxError") {
         // Only python exceptions have args.
-        const last_exception_args = pyodide.globals.get("last_exception_args");
         // Regarding https://pyodide.org/en/stable/usage/type-conversions.html#type-translations-errors,
         // we do a additional `json.dumps` and `JSON.parse` on the values, to avoid the possible memory leak.
-        errorArgs = JSON.parse(last_exception_args()) || [];
+        // dspy4s: an error of JavaScript has no `type`. It takes its message as args, not the args of an old exception.
+        errorArgs = error.type ? exceptionArgs() : [errorMessage];
       }
 
       // Map error type to JSON-RPC error code

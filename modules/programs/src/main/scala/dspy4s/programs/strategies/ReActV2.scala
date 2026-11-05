@@ -1,6 +1,6 @@
 package dspy4s.programs.strategies
 
-import dspy4s.adapters.contracts.{NativeFunctionCalling, NativeTools, ToolChoice, ToolSpec}
+import dspy4s.adapters.contracts.{NativeFunctionCalling, NativeTools, ToolChoice}
 import dspy4s.adapters.internal.ProgramPromptText
 import dspy4s.core.contracts.{
   :=,
@@ -191,7 +191,7 @@ final case class ReActV2[I, O](
     * [[allTools]] (upstream `Tool.__str__`, in the port form of `ToolText.describe`).
     */
   val reactPredict: DynamicPredict = reactPredictOverride.getOrElse(
-    DynamicPredict(layout = reactLayout, name = Some(ReactName), tools = allTools.map(toolSpec))
+    DynamicPredict(layout = reactLayout, name = Some(ReactName), tools = allTools.map(ToolText.toolSpec))
   )
 
   /** The instructions of [[reactLayout]] (upstream `_make_react_signature`). */
@@ -485,23 +485,6 @@ object ReActV2:
   /** `true` for an output of a primitive type that is not optional and has no enum values. */
   private def isPlainPrimitive(field: FieldSpec): Boolean =
     PrimitiveTypes.contains(field.typeRef) && !field.optional && field.enumValues.isEmpty
-
-  /** The provider tool of `tool` (upstream `Tool.format_as_litellm_function_call`): the input schema of the tool, else
-    * an object schema with the arguments of [[ToolText.args]] and each argument in `required`.
-    */
-  private def toolSpec(tool: ToolFunction): ToolSpec =
-    val args = ToolText.args(tool)
-    ToolSpec(
-      name = tool.name,
-      description = Some(tool.description).filter(_.nonEmpty),
-      inputSchema = tool.inputSchema.getOrElse(
-        DynamicValues.record(
-          "type"       := "object",
-          "properties" -> args,
-          "required"   -> DynamicValues.sequence(DynamicValues.recordKeys(args).map(DynamicValues.string))
-        )
-      )
-    )
 
   /** The tool calls of the answer of a step (upstream `_coerce_tool_calls`): none for a null, and a parse error for a
     * value that is not a tool calls value.

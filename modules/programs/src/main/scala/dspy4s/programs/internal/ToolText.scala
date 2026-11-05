@@ -5,8 +5,10 @@ import dspy4s.core.contracts.{:=, DynamicValues, PythonText, TypeRef}
 import dspy4s.programs.contracts.ToolFunction
 import zio.blocks.schema.DynamicValue
 
-/** The prompt texts of a tool, in the port form of upstream `Tool` (`dspy/adapters/types/tool.py`, decision D3).
-  * `ReAct` lists each tool with [[describe]], and `RLM` lists the parameters of each tool with [[parameters]].
+/** The prompt texts and the provider tool of a tool, in the port form of upstream `Tool`
+  * (`dspy/adapters/types/tool.py`, decision D3). `ReAct` lists each tool with [[describe]], and `RLM` lists the
+  * parameters of each tool with [[parameters]]. `ReActV2` and the extract steps of `ReAct` and `RLM` give their
+  * predictors the [[toolSpec]] of each tool.
   */
 private[programs] object ToolText:
 
@@ -22,6 +24,23 @@ private[programs] object ToolText:
   /** The text of `tool` in a list of tools (upstream `Tool.__str__`, [[ToolSpec.describe]]). */
   def describe(tool: ToolFunction): String =
     ToolSpec.describe(tool.name, tool.description, args(tool))
+
+  /** The provider tool of `tool` (upstream `Tool.format_as_litellm_function_call`): the input schema of the tool, else
+    * an object schema with the arguments of [[args]] and each argument in `required`.
+    */
+  def toolSpec(tool: ToolFunction): ToolSpec =
+    val arguments = args(tool)
+    ToolSpec(
+      name = tool.name,
+      description = Some(tool.description).filter(_.nonEmpty),
+      inputSchema = tool.inputSchema.getOrElse(
+        DynamicValues.record(
+          "type"       := "object",
+          "properties" -> arguments,
+          "required"   -> DynamicValues.sequence(DynamicValues.recordKeys(arguments).map(DynamicValues.string))
+        )
+      )
+    )
 
   /** The parameters of `tool` as `name: type` texts (upstream `RLM._format_tool_docs`). An argument with no `type` has
     * the type `Any`.

@@ -28,7 +28,7 @@ package dspy4s.examples.learn.programming
 import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.lm.providers.OpenAiLanguageModel
+import dspy4s.lm.providers.{OpenAiClient, OpenAiLanguageModel}
 import dspy4s.programs.strategies.{ChainOfThought, Predict}
 import dspy4s.signatures.{InputField, OutputField, Spec, Signature}
 import zio.blocks.schema.Schema
@@ -290,16 +290,18 @@ object CustomTypesExample:
 // ═══════════════════════════════════════════════════════════════════════════
 // The example objects above only declare programs. To run them, this main makes a
 // `RuntimeContext` with a live LM and an adapter: the real OpenAI provider (it reads
-// `OPENAI_API_KEY` from the environment) and a `ChatAdapter`. `withInstalled` installs
+// `OPENAI_API_KEY` from the environment, and `OPENAI_BASE_URL` selects an other
+// OpenAI-compatible endpoint) and a `ChatAdapter`. `withInstalled` installs
 // the context for its block, and it gives the block the `given` that the `call`
 // methods require.
 //
 // Run with:  OPENAI_API_KEY=sk-... sbt "examples/runMain dspy4s.examples.learn.programming.main"
 // --8<-- [start:run]
 @main def main(): Unit =
-  val model = sys.env.getOrElse("DSPY_MODEL", "gpt-5.5")
+  val model   = sys.env.getOrElse("DSPY_MODEL", "gpt-5.5")
+  val baseUrl = sys.env.getOrElse("OPENAI_BASE_URL", OpenAiClient.defaultBaseUrl)
 
-  val lm = OpenAiLanguageModel.fromEnv(model) match
+  val lm = OpenAiLanguageModel.fromEnv(model, baseUrl) match
     case Right(m)  => m
     case Left(err) => sys.error(s"Could not initialize LM (is OPENAI_API_KEY set?): $err")
 

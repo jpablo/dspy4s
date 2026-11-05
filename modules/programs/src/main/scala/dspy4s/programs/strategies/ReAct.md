@@ -164,6 +164,15 @@ names as enum values, and `next_tool_args` is a `dict` field. The parser accepts
 The model does **not** use provider-native function calling here. It emits the ordinary signature fields
 `next_tool_name` and `next_tool_args`. ReAct resolves that name and invokes the corresponding `ToolFunction` locally.
 
+The extractor can use tools. A signature with a tool calls output (`Vector[ToolCall]`) needs tools in the extract step,
+and the signature does not hold them. Thus the default `extractorPredict` gets the tools that the loop can run, with one
+tool for each name and no `finish` tool. When native function calling is active, the extractor request has them as
+provider tools. Else the extractor prompt shows them as an input field `tools`. A plain output gets no change in its
+request or its prompt.
+
+An optimizer builds its `extractorPredictOverride` from the current extractor, so that override keeps the tools. An
+override that you build yourself keeps its own tools.
+
 `finish` is a control signal, not the final answer. Selecting it appends a final trajectory entry with the observation
 `Completed.`, stops the loop, and hands the trajectory to `extractorPredict`. The extractor—not the `finish` tool—creates
 the requested output fields.
@@ -282,7 +291,8 @@ consequences:
 - optimizers see two independently tunable leaves named `react` and `extractor`;
 - streaming can target the per-step react output or the final extractor output;
 - callbacks and runtime tracing can observe the nested predictor and tool calls;
-- immutable overrides can replace either predictor without changing the tools, schemas, runtime, or module names.
+- immutable overrides can replace either predictor without changing the tools of the loop, schemas, runtime, or module
+  names.
 
 The optimizable structure is a two-branch tree. Its leaf order is stable: `react` is index 0 and `extractor` is
 index 1.

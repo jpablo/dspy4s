@@ -21,6 +21,10 @@ import scala.util.control.NonFatal
   *     internal `{` or `,` characters do not terminate the value early.
   *   - Keys not present in the signature's output fields are parsed but produce no [[FieldChunk]]s. The state buffers
   *     each value, and only the emission checks the key.
+  *   - After the first copy of a field closes, each later copy of that key gives no chunks. [[XmlStreamingState]] and
+  *     [[ChatStreamingState]] have the same rule, and upstream gets this result from a `StreamListener` with
+  *     `allow_reuse=False`. The parser keeps the last copy ([[PythonText.parseJson]]), so the final prediction can
+  *     differ from the tokens.
   *   - `finish()` flushes any in-progress field with `isLast = true` — useful when the model stops mid-value or omits
   *     the closing brace.
   *
@@ -50,6 +54,9 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
   private var otherDepth: Int = 0
   private val otherScan       = new JsonTextScan
 
+  /** The output fields whose first copy closed. A later copy of such a field gives no chunks. */
+  private val closedFields: mutable.Set[String] = mutable.Set.empty
+
   override protected def receiveOpen(delta: String): Vector[FieldChunk] =
     val out = mutable.ArrayBuffer.empty[FieldChunk]
     var i   = 0
@@ -71,10 +78,12 @@ final class JsonStreamingState(outputFields: Vector[FieldSpec]) extends SingleUs
     if phase == InStringValue || phase == InOtherValue then emitFinal(out)
     out.toVector
 
-  private def isCurrentTracked: Boolean = fieldNames.contains(currentKey)
+  /** `true` when the current key is an output field whose first copy did not close. */
+  private def isCurrentTracked: Boolean = fieldNames.contains(currentKey) && !closedFields.contains(currentKey)
 
   private def emitFinal(out: mutable.ArrayBuffer[FieldChunk]): Unit =
     if isCurrentTracked then
+      closedFields += currentKey
       out += FieldChunk(currentKey, finalContent(), isLast = true)
     contentBuffer.clear()
 

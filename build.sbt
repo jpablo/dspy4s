@@ -229,6 +229,8 @@ lazy val examples = (project in file("modules/examples"))
   .settings(
     publish / skip                         := true,
     libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test,
+    // The MCP SDK logs with SLF4J. With no provider, each JVM of an MCP example prints a warning on stderr.
+    libraryDependencies += "org.slf4j" % "slf4j-nop" % "2.0.17" % Runtime,
     // The MCP examples start their servers with the class path of their JVM. The class path of the sbt JVM is not the
     // class path of the examples, so `run` and `runMain` fork. The output of the fork has no sbt prefix.
     Compile / run / fork           := true,

@@ -45,7 +45,8 @@ import scala.util.control.NonFatal
 
 /** Runs Python in a persistent local subprocess (upstream `LocalInterpreter` in `dspy/primitives/local_interpreter.py`,
   * d58c3007e and 453823209). The worker script is the vendored upstream `local_interpreter_worker.py` (resource
-  * `/dspy4s/core/runtime/local_interpreter_worker.py`), started as `<python> -I <script>`.
+  * `/dspy4s/core/runtime/local_interpreter_worker.py`), started as `<python> -I <script>`. It has one change: bad data
+  * of the code does not end the session (PORT_DIFFERENCES section 18).
   *
   * This interpreter separates the generated code from the memory and the output of the JVM, but it is not a security
   * sandbox: the worker has the files, the environment, the credentials, the subprocesses, and the network of the user.

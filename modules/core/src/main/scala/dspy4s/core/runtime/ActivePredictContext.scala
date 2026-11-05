@@ -12,7 +12,7 @@ final case class ActivePredict(name: String, layout: SignatureLayout)
 /** Thread-local stack of [[ActivePredict]] entries. A predictor's `execute` (in `PredictEngine`) pushes its entry via
   * [[withActive]] for the duration of the body and pops it on exit; downstream components (notably
   * `StreamingLanguageModelWrapper`) read [[current]] to learn which predictor's signature applies to the LM call they
-  * are observing.
+  * are observing. `TwoStepAdapter` also pushes an entry for its extraction call, with the layout of the extraction.
   *
   * Stack semantics handle nested calls (e.g. a `DynamicPredict` invoked from inside another via a custom composite
   * module): the most recent push wins via [[current]], and the caller resurfaces when the inner scope exits.

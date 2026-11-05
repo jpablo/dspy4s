@@ -50,6 +50,10 @@ import java.util.concurrent.atomic.AtomicBoolean
   *   - The async path is omitted.
   *   - The action prompt has no sub-agent text (upstream `SUB_AGENT_INSTRUCTIONS`): the port has no sandbox `dspy`
   *     facade (upgrade item P8). The interpreter rules hold the execution text of the factory only (I7).
+  *   - The default extract predict has the tools of this program, for a tool calls output (`Vector[ToolCall]`).
+  *     Upstream `extract_sig` has only the output fields of the signature, `repl_history`, and `variables_info`. It has
+  *     no tools input, so upstream `Adapter._call_preprocess` raises a `ValueError` for such an output with native
+  *     function calling on.
   *
   * @param baseSignature
   *   the task signature; inputs become REPL variables, outputs the SUBMIT fields
@@ -74,7 +78,8 @@ import java.util.concurrent.atomic.AtomicBoolean
   *   - an output field named `trajectory` or `final_reasoning` (the result keeps these two names on `.raw`).
   *
   * @param tools
-  *   extra [[ToolFunction]]s callable from generated code (documented in the prompt); see the name checks
+  *   extra [[ToolFunction]]s callable from generated code (documented in the prompt); see the name checks. The default
+  *   extract predict also has them as model tools ([[extractPredict]]). The action step has no tools.
   * @param subLm
   *   LM for `llm_query` — defaults to the ambient context's LM (pass a cheaper model here)
   * @param interpreterFactory
@@ -97,7 +102,8 @@ final case class RLM[I, O](
       */
     actionPredictOverride: Option[Predict[RLMModel.ActionInputs, RLMModel.ActionStep]] = None,
     /** Optional override for the max-iterations extract-fallback predict — a `Predict` over the two declared meta
-      * inputs, producing the base outputs `O` directly (the base output shape's decode, as before).
+      * inputs, producing the base outputs `O` directly (the base output shape's decode, as before). An override keeps
+      * its own tools, so a `Predict` with no tools has no tools here.
       */
     extractPredictOverride: Option[Predict[RLMModel.ExtractInputs, O]] = None,
     /** The execution text of the factory of the runtime context at the first construction, or of
@@ -183,7 +189,9 @@ final case class RLM[I, O](
   ))
 
   /** The extract-fallback predict — a `Predict[ExtractInputs, O]`: synthetic meta inputs, base outputs `O` decoded
-    * through the base output shape (the same decode the dynamic path ran on `extracted.values`).
+    * through the base output shape (the same decode the dynamic path ran on `extracted.values`). It has the tools of
+    * this program, which have an effect only on a tool calls output ([[Predict.tools]]). [[extractPredictOverride]]
+    * replaces it. An optimizer builds that override from this predict, so the override keeps these tools.
     */
   val extractPredict: Predict[RLMModel.ExtractInputs, O] = extractPredictOverride.getOrElse(Predict(
     signature = Signature(
@@ -191,7 +199,8 @@ final case class RLM[I, O](
       inputShape = Shape.derived[RLMModel.ExtractInputs],
       outputShape = baseSignature.outputShape
     ),
-    name = Some(RLM.ExtractModuleName)
+    name = Some(RLM.ExtractModuleName),
+    tools = tools.map(ToolText.toolSpec)
   ))
 
   /** The action instructions (upstream `RLM._build_signatures`): the effective instructions of the base signature, the
