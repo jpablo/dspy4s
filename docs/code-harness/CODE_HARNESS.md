@@ -2027,7 +2027,8 @@ tree exists. Design A (5.1) stays available as an early check of the foundation.
 
 ### Phase 0 results
 
-The experiment ran on 2026-10-21, with the 3.10 nightly and JDK 21 on an Apple M4 Pro. The full report is
+The experiment ran on 2026-10-21, with the 3.10 nightly and JDK 21 on an Apple M4 Pro. A run on
+2026-11-05 gave the same results on JDK 25. The full report is
 `docs/code-harness/CODE_HARNESS_PHASE0.md`. The code of the experiment is in `experiments/repl-phase0/`.
 
 | Check | Result |
