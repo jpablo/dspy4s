@@ -34,8 +34,8 @@ document exists in the code of dspy4s yet.
 - Section 8 describes the runtime. A session is an actor, its log is an event journal, and each guest API call
   in a cell is an event. The store of 4.2 survives a restart, and a replay of the journal can also rebuild the
   REPL definitions. The first runtime uses direct style, and distribution comes later.
-- [CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md) says which parts of Kyo the harness can reuse: the session host, a journal
-  backend, and an early MCP server.
+- [CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md) says which parts of Kyo the harness can reuse. Choice 7 of
+  [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md) takes a plain host, so the first version has no Kyo host.
 - The Phase 0 experiment (section 11) recommends a REPL in the same JVM, with five guards. Two of the guards
   start a new REPL. The store keeps the saved values across that change, and replay also keeps the definitions.
 - deepseek-harness, Codex and tacit confirm the main choices (section 9). tacit reports that agents that write
@@ -1081,8 +1081,9 @@ only after three turns with the same blocker.
 The costs:
 
 - There is more new code than in an RLM configuration (5.1).
-- Each guest API call costs two commits, and the caller waits for each commit. On SQLite, a check measured about
-  140 µs for each commit with no full flush of the disk cache, and 5 to 9 ms with `PRAGMA fullfsync` ([CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md), section 2). Choice 17 of
+- Each guest API call costs two commits, and the caller waits for each commit. On SQLite, a check on the plain host
+  measured about 60 µs for each commit with no full flush of the disk cache, and about 4 ms with `PRAGMA fullfsync`
+  ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), section 12). Choice 17 of
   [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md) uses the full flush only for some commits.
 - The journal stores the result of each guest API call, so a large `read` or `exec` result costs storage (8.4).
 - The builder of the derived data runs in the background, so it adds concurrency.
@@ -1834,7 +1835,8 @@ So a Pekko interpreter of the decider alone is a small adapter. The log reads, t
 fit in the same way ([CODE_HARNESS_RUNTIME.md](CODE_HARNESS_RUNTIME.md), 5.5).
 
 [CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md) analyzes which parts of Kyo can serve as this runtime, and it tests a small
-session host on `kyo-actor`.
+session host on `kyo-actor`. Choice 7 of [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md) takes a plain host for the
+first version.
 
 ### 8.6 Distribution
 
@@ -1876,6 +1878,8 @@ Open questions:
    The other guard limits a REPL to about 300 cells.
 2. Does the session host use `kyo-actor`, and does the journal use `kyo-sql-sqlite`
    ([CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md), section 7)? This needs JDK 25, and it changes decision 1 for the host.
+   Closed by choice 7 of [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md): no. The first host is a plain thread and a
+   mailbox, the journal is on `sqlite-jdbc`, and decision 1 stays.
 
 ## 9. Findings from deepseek-harness, Codex and tacit
 

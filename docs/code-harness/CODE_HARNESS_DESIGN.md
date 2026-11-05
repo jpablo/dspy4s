@@ -39,7 +39,7 @@ configuration. So the design has one kernel.
 | tacit | Results that show that capability-safe Scala works for agents, a timed-out cell that keeps the earlier state, an early MCP server | A validator as a boundary |
 | dspy4s `RLM` | Inputs as REPL values, `llmQuery`, recursion that returns a typed value | The Python interpreter |
 | dspy4s | `Predict`, `History`, `Module`, the optimizers | `AgentLoop.run` for this loop (`next` holds the limit) |
-| Kyo | `kyo-actor` for the session host, `kyo-sql-sqlite` for the journal, `kyo-mcp` for the MCP server, the claim token as a fence | `kyo-flow` for the turn, `kyo-ai` for `Predict`, `kyo-compat` for pluggable programs |
+| Kyo | The claim token as a fence. `kyo-mcp` for the MCP server is open (choice 10). | `kyo-actor` for the first session host and `kyo-sql-sqlite` for the journal (choice 7), `kyo-flow` for the turn, `kyo-ai` for `Predict`, `kyo-compat` for pluggable programs |
 
 The analysis of each project is in [CODE_HARNESS.md](CODE_HARNESS.md) (sections 2 and 9),
 [CODE_HARNESS_LOOPS.md](CODE_HARNESS_LOOPS.md), [CODE_HARNESS_RUNTIME.md](CODE_HARNESS_RUNTIME.md),
@@ -54,6 +54,8 @@ These words settle section 4 of [CODE_HARNESS_CONCEPTS.md](CODE_HARNESS_CONCEPTS
 | Session | A durable conversation: an id and a journal | The live objects |
 | Activation | The live part of a session in one process: the REPL, the threads, the mailbox | |
 | Journal | The append-only list of the entries of a session | `History`, the transcript, the trace |
+| Writer | The one thread of a session that takes messages from its mailbox and commits to its journal | The worker, which runs the turn |
+| Feed | The view of one client: the committed entries of a session, in a bounded queue | The journal |
 | Entry | One fact in a journal | An event for clients, which is a published event |
 | Commit | One atomic write of entries to a journal | A git commit, which is always "git commit" |
 | Catalog | The derived list of the sessions, with one row for each session | The journal |
@@ -358,7 +360,7 @@ trait Journal:
 ```
 
 A test gives `TurnEffects` as a script. The harness gives a `Predict` leaf and a REPL. A journal can be a value in
-memory or an actor with SQLite behind it, and `drive` stays the same.
+memory or a writer with SQLite behind it, and `drive` stays the same.
 
 An example journal: a user asks a question, the model runs one cell with one guest API call, and then it answers.
 
@@ -986,7 +988,7 @@ final case class Harness[I: Data, O: Data](
 
 `forward` makes a journal in memory and a REPL in a workspace fork. It sends the input with its values (5.1), runs
 `drive`, and reads the last `TurnEnded`. `Submitted` gives the output through `Data[O]`. `Replied` and `Exhausted` run
-the `finisher` leaf. This path needs no actor and no thread other than the cell thread.
+the `finisher` leaf. This path needs no writer and no thread other than the cell thread.
 
 | Leaf | Where | What it decides |
 |---|---|---|
@@ -1016,7 +1018,7 @@ A runtime enters in two places. The middle stays the same in each option, becaus
 and a cell needs a thread.
 
 ```text
-Session host: mailbox, worker start and stop, event broadcast   <- pluggable; first version on kyo-actor
+Session host: mailbox, writer, worker start and stop, feeds     <- pluggable; first version on a plain thread
 Kernel: evolve, next, decide, repair                            pure, one implementation
 Worker, cell, REPL: drive on plain threads                      one implementation
 Guest API handlers: LM, files, shell, network                   <- pluggable; each handler can use Kyo inside
@@ -1029,31 +1031,44 @@ trait SessionHost:
 trait SessionRef:
   def send(command: Command): Either[DspyError, Unit]   // into the mailbox; it does not wait for the commit
   def state: SessionState                               // the committed state
-  def published: Subscription[Logged]                   // only committed entries
+  def subscribe(capacity: Int): Feed                    // only committed entries
+
+trait Feed:
+  def poll(): Option[Either[Behind, Logged]]            // `Behind`: this client lost entries (10.2)
 ```
 
-Each of the kernel functions, `drive`, `Journal` and `SessionHost` is free of Kyo types. So a ZIO or Pekko host stays
-possible, and an API change in Kyo stays in the adapters.
+Each of the kernel functions, `drive`, `Journal` and `SessionHost` is free of the types of a runtime. So a Kyo, ZIO or
+Pekko host stays possible.
 
 ### 10.2 The first host
 
-- **`kyo-actor`.** One actor for each session is the one writer of its journal. A worker commit is an `ask` across the
-  bridge (`KyoApp.Unsafe.runAndBlock`). Each reply needs `Abort.run[Closed](...)`, because an interrupted `ask` closes
-  its reply subject.
-- **`kyo-sql-sqlite` for the journal.** One file for each session, at `<root>/sessions/<id>.db`, and the actor of the
-  session is its one writer. One row for each entry, with a primary key on the session and `seq`. The primary key
-  rejects a stale writer of that file. The `session` column stays in each file, so a copy of the rows moves a session
-  to another file or to a server database. A JSONL file stays possible behind `Journal`.
+- **A thread and a queue.** One virtual thread for each session takes messages from a bounded mailbox, and it is the
+  one writer of its journal. A worker commit puts a message with a `CompletableFuture` and waits for it. An interrupt
+  of a cell thread reaches only its own wait, so the commit stands.
+- **`sqlite-jdbc` for the journal.** One file for each session, at `<root>/sessions/<id>.db`. The writer holds one
+  connection for the full activation, and no pool replaces it. One row for each entry, with a primary key on the
+  session and `seq`. The primary key rejects a stale writer of that file. The `session` column stays in each file, so
+  a copy of the rows moves a session to another file or to a server database. A JSONL file stays possible behind
+  `Journal`.
 - **A catalog for `list` and search.** `<root>/catalog.db` has one row for each session: the id, the owner, the parent
   of a fork, the status and the last `seq`. This row is the deterministic part of a `SessionCard`, so it is a `Fold`
-  of the journal. The actor writes the row after a turn ends or when the status changes. After a crash a row can lag,
-  so the host lists the folder at its start and folds each journal that differs from its row. A removal of the catalog
-  file loses nothing.
+  of the journal. The writer updates the row after a turn ends or when the status changes. After a crash a row can
+  lag, so the host lists the folder at its start and folds each journal that differs from its row. A removal of the
+  catalog file loses nothing.
 - **The flush on SQLite.** Each file uses WAL, `synchronous=NORMAL` and `fullfsync=ON`. For a commit that `needsFlush`
   (4.1), the writer sets `synchronous=FULL` and then sets `NORMAL` again. `synchronous` belongs to a connection, so
-  the actor holds one connection. On macOS `fullfsync` uses `F_FULLFSYNC`. On other systems it has no effect, and
+  the writer holds one connection. On macOS `fullfsync` uses `F_FULLFSYNC`. On other systems it has no effect, and
   `FULL` uses a plain `fsync`.
-- **JDK 25.** Kyo RC7 needs it. dspy4s compiles and passes its tests on it.
+- **The end of a session.** The writer sets a flag and then fails each message in the mailbox. A caller checks the
+  flag after its put, so a message after the last drain also fails. So a call after the end gets an error, and it
+  does not wait for ever.
+- **A failed write.** It ends this session only. Each caller that waits gets the error, and the other sessions go on.
+- **Feeds.** The writer publishes an entry only after its commit, and it never waits for a client. If the queue of a
+  client is full, the writer empties it and marks the client as `Behind`. The client subscribes again, reads the
+  journal from its last `seq`, and skips each entry with a `seq` that it has. So it misses nothing.
+- **Timers.** A stop starts a timer for the grace period of 10.3. The timer only puts a message in the mailbox, so the
+  writer stays the one place that commits.
+- **The JDK.** The host needs no Kyo and no JDK 25. The checks of section 12 ran on JDK 21 and on JDK 25.
 
 One file for each session makes a session one item on disk. A person can remove or archive it as one file. A corrupt
 file, a stuck transaction or a large WAL stops only one session, and two terminals need no coordination. The graph of
@@ -1061,7 +1076,7 @@ a session can stay in its file.
 
 Throughput does not decide this, because an LM step takes seconds. The wait time does. The lock of SQLite has no fair
 order. In the check of section 12, a writer on one shared file waited for up to 2.7 s. A shared file would need one
-writer actor for all sessions, and that works only inside one process.
+writer for all sessions, and that works only inside one process.
 
 The costs: `list` needs the catalog, and a report needs the report pass of 8.6. The parent of a journal fork must stay
 until each fork has copied its prefix. 10,000 rollouts also make 10,000 files of at least 16 KB. The primary key holds
@@ -1072,16 +1087,16 @@ necessary.
 
 ### 10.3 The path of a hard stop
 
-1. `Abort` arrives as a message, and the actor commits `StopRequested`.
+1. `Abort` arrives as a message, and the writer commits `StopRequested`.
 2. The host sets the stop flag and interrupts the cell thread. The worker thread gets no interrupt, so its commits
    complete.
 3. The host stops the LM transport and the process groups of the running `exec` calls: TERM, a grace period, then
    KILL.
 4. The cell ends, and the worker commits the closing entries and `TurnEnded(Aborted)`.
 5. If the cell does not end after a grace period, the host marks the process as unclean (guard 3 of Phase 0). The
-   actor then commits the closing entries. A later commit from that worker gets a rejection.
+   writer then commits the closing entries. A later commit from that worker gets a rejection.
 
-A stop never cuts a commit, because the commit runs in the actor.
+A stop never cuts a commit, because the commit runs in the writer.
 
 **The stop of a job.** An `Abort` stops no job, because a job must be able to outlive a turn, for example `sbt ~test`.
 `StopJobs` stops jobs, and it also works with no open turn:
@@ -1095,7 +1110,7 @@ enum JobSelector derives Schema:
 final case class JobRecord(turn: Long, stopRequested: Boolean) derives Schema
 ```
 
-1. The actor commits `JobsStopRequested`, and `evolve` marks the jobs that the selector covers.
+1. The writer commits `JobsStopRequested`, and `evolve` marks the jobs that the selector covers.
 2. The host copies the marks to its job table. It stops the process groups of these jobs: TERM, a grace period, then
    KILL.
 3. A `spawn` in flight finds the mark in the job table. It does not start its process, and it returns an error.
@@ -1133,7 +1148,7 @@ copy has no fence, because each host then has its own file. So the first host mu
 The files stay on a local disk, because WAL needs one host.
 
 The third meaning needs one store that all hosts can reach: a server database behind `Journal`, with the same table.
-The primary key of the journal is the fence there. The Kyo repository has `kyo-sql-postgres`, but no check has run it.
+The primary key of the journal is the fence there. JDBC also reaches a server database, but no check has run one.
 
 ### 10.5 The modules
 
@@ -1144,8 +1159,8 @@ The primary key of the journal is the fence there. The Kyo repository has `kyo-s
 | `harness-repl` | `ScalaRepl`, the guards of Phase 0 | `harness-guest`, `scala3-repl` |
 | `harness-sandbox` | Seatbelt, bubblewrap, the profiles | `harness-kernel` |
 | `harness` | `Harness`, `drive`, the handlers, the leaves | The modules above, dspy4s `programs` |
-| `harness-host-kyo` | The session host, the SQLite journal, the catalog, the report pass, the MCP server | `harness`, Kyo |
-| `harness-cli` | The terminal client | `harness-host-kyo` |
+| `harness-host` | The session host, the SQLite journal, the catalog, the report pass, the MCP server | `harness`, `sqlite-jdbc` |
+| `harness-cli` | The terminal client | `harness-host` |
 
 ## 11. The kinds of state, and the questions that test them
 
@@ -1179,13 +1194,13 @@ The answers to the scenarios of [CODE_HARNESS_CONCEPTS.md](CODE_HARNESS_CONCEPTS
 
 ## 12. What ran
 
-The checks used Scala `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` and JDK 25.0.5. The code is in `tmp/design-check/` and
-`tmp/kyo-check/`, and it is not committed.
+The checks used Scala `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` and JDK 25.0.5, and the plain host also ran on JDK
+21.0.11. The code is in `tmp/design-check/`, `tmp/kyo-check/` and `tmp/plain-host/`, and it is not committed.
 
 | Check | Result |
 |---|---|
 | The kernel under random schedules, with no threads | 200,000 runs with 318,283 crashes, 223,402 stops, 70,885 late messages, 684,647 grants, 55,191 calls under a `Once` grant, 65,382 jobs and 19,289 `spawn` calls that a stop refused. The calls go through `guardCheck`: 50,606 gave a question, 11,733 grants answered a question, and 189,989 grants were repeats from a client. Each crash read the journal through the JSON codec of `Logged`: 7,785,588 entries, with no change. No run broke a checked law of 4.7. A second phase of 50,000 runs had 132,952 power losses, which cut the journal at the last flush, and no run broke a law. The 485,904 values of inputs stayed a fold of the journal. The law One journal did not run. For the law Report, only `reports` ran: 618,665 reports match the turns that owe one. |
-| The check of that check | Thirty mutants. Fifteen for the kernel: keep the waiting inputs after a stop (78,443 runs fail), accept an effect of any cell (8,584), keep a late outcome (17,704), remove a `Once` grant at `EffectStarted` (45,405), keep a `Once` grant after its call (21,636), keep a `Turn` grant after its turn (117,250), keep a grant after `Ended` (48,318), let an `Abort` stop jobs (50,090), keep the jobs after `Ended` (11,205), let `OfLastTurn` reach other turns (15,957), take the list of jobs only from the live table (9,548), no flush at all (43,719 runs of the second phase fail), a flush at the outcome in place of the intent (205), no flush for `Input` (32,374), no flush for `Activated` (13,946). Nine for approvals: no question in `pending` (33,116), keep a question after a new turn (17,465), no check of a repeated `Grant` (98,346), no `Input` after an answer (14,913), reports only for the owner (136,829), a question in a session with no person (33,430), a grant above a deny rule (14,216), the first rule wins (39,446), and a goal check while a question waits. Only the fixed flows find the last one: 6 turns in place of 1. Six for the values: a wrong field in a preamble (17 problems), a preamble with no givens (2), a host that reads with `Schema` (1), no values in the state (138,589 runs), values in the store (138,589), and a fork with no values (138,589). |
+| The check of that check | Thirty-six mutants. Fifteen for the kernel: keep the waiting inputs after a stop (78,443 runs fail), accept an effect of any cell (8,584), keep a late outcome (17,704), remove a `Once` grant at `EffectStarted` (45,405), keep a `Once` grant after its call (21,636), keep a `Turn` grant after its turn (117,250), keep a grant after `Ended` (48,318), let an `Abort` stop jobs (50,090), keep the jobs after `Ended` (11,205), let `OfLastTurn` reach other turns (15,957), take the list of jobs only from the live table (9,548), no flush at all (43,719 runs of the second phase fail), a flush at the outcome in place of the intent (205), no flush for `Input` (32,374), no flush for `Activated` (13,946). Nine for approvals: no question in `pending` (33,116), keep a question after a new turn (17,465), no check of a repeated `Grant` (98,346), no `Input` after an answer (14,913), reports only for the owner (136,829), a question in a session with no person (33,430), a grant above a deny rule (14,216), the first rule wins (39,446), and a goal check while a question waits. Only the fixed flows find the last one: 6 turns in place of 1. Six for the values: a wrong field in a preamble (17 problems), a preamble with no givens (2), a host that reads with `Schema` (1), no values in the state (138,589 runs), values in the store (138,589), and a fork with no values (138,589). Six for the plain host: no drain at the end, no answer after a failed write, no timer, a writer that waits for a client, a silent drop, and a publish before the commit. Each one fails a fixed flow of the host. |
 | `drive` with scripts | A chat answer, `submit`, the step limit of both kinds, a failed cell, a failed LM call, a stop during a cell, and a crash during a cell give the expected journals. |
 | The fixed flows of an approval | A session from `start` asks, the person approves, and the owner gets two reports, the last with the result. A repeat of the `Grant` commits nothing, also after the call. A typed message gives no report. A session with a goal uses one turn while it waits. A child and a rollout get a plain error. `Verdict` is a semilattice, `verdict` is a homomorphism from `Guard`, and a grant never widens a deny rule. |
 | A denied call in a real REPL with safe mode, with a stub of the handler | With no `catch`, the cell stops, and a later cell does not see its `val`. With a `catch` of `NeedsApproval` or `Exception`, or with `scala.util.Try`, the cell continues and keeps its values. Safe mode rejects `NeedsApproval(...)` in a cell. |
@@ -1204,8 +1219,12 @@ The checks used Scala `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` and JDK 25.0.5. 
 | Batch calls and job calls in the same REPL | `llmQueryBatched`, `rlmBatched`, `waitJob` and `spawn(..., report = true)` compile, and a batch has no hang with a definition of its cell. Their handlers are stubs. |
 | The second try, with the parser of the compiler | After a failed second part, a later cell cannot use the class, as a term or as a type, and it can define the name again. A class that needs a `val` of its cell compiles only with no split, so the host does not split each cell. |
 | A session host on `kyo-actor` with threads | 2,000 sessions with a stop at a random time: no violation ([CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md), 4.1). |
-| A commit through an actor to SQLite | About 140 µs from a plain thread and back, with no full flush of the disk cache. |
-| The two file layouts of 10.2, with Python's SQLite 3.49.1 and not the Kyo driver | 64 writers: 5,300 commits per second and a longest wait of 45 ms with one file for each session, and 3,500 and 2.7 s with one shared file. Section 2 of [CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md) has all the numbers. |
+| A commit through `kyo-actor` to SQLite | About 140 µs from a plain thread and back, with no full flush of the disk cache. |
+| A plain host against a host on `kyo-actor` and `kyo-sql-sqlite`, each with one SQLite file for each session, on JDK 25 | Both: 2,000 sessions with a stop at a random time and the disk equal to the live state, and SIGKILL in 20 rounds with no lost answer and no corrupt file. A normal commit: 49 µs against 355 µs. A commit with a flush: 4.2 ms against 5.1 ms. 2,000 open sessions: heap +15 MB against +35 MB. The two hosts have 80 and 75 lines, with no feeds and no timer ([CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md), section 9). |
+| The pool of the Kyo driver | It replaces an idle connection, by default after 10 minutes, and `fullfsync` goes from 1 to 0 with no error. With an idle time of 2 s, a commit with a flush went from 7.5 ms to 2.0 ms. |
+| The plain host of 10.2 on JDK 21 and on JDK 25 | 2,000 sessions one after the other and 256 at the same time: no problem, and the disk equals the live state. SIGKILL in 20 rounds: 35,736 and 61,326 commits with an answer, none lost, and no corrupt file. A normal commit: 59 µs and 66 µs. A commit with a flush: 4.0 ms and 4.4 ms. With the feeds, the timer and the rules for the end, the host has about 145 lines. |
+| The plain host with fixed flows | A call after the close gets an error. A failed write gives the error to the caller, and another session goes on. A cell that ignores a stop ends at the timer, and later commits from its worker get a rejection. A client that reads too slowly does not stop the writer, and it gets 20,005 entries once and in order. A client saw 200 of 200 entries only after their commit. |
+| The two file layouts of 10.2, with Python's SQLite 3.49.1 and not `sqlite-jdbc` | 64 writers: 5,300 commits per second and a longest wait of 45 ms with one file for each session, and 3,500 and 2.7 s with one shared file. Section 2 of [CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md) has all the numbers. |
 | `PRAGMA fullfsync` in the same check | One writer: 5 to 9 ms for each commit, against 75 µs without it. |
 | A flush for only some commits, with the same SQLite and one writer | A commit that flushes: a median of 4.4 ms. A normal commit: a median of 48 µs, and 266 µs right after a flush. A cell of 100 `write` calls spends 0.54 s in commits, and a cell of 100 `read` calls spends 0.03 s. |
 | SIGKILL of a writer with normal commits, with the same SQLite | 50 rounds with 29,016 commits that got an answer: none lost, and no corrupt file. |
@@ -1230,7 +1249,7 @@ each recursive type had its given. A cell took a median of 265 ms and at most 81
 These checks found errors in the earlier design. They are fixed here:
 
 - A stop before the first step started a new turn.
-- An interrupted `ask` ended the session actor.
+- On Kyo, an interrupted `ask` ended the session actor.
 - `store[A: Schema]` cannot compile in safe mode.
 - `DynamicValue` in an entry changed values at a commit, and a grant with `Exact` did not match after a restart.
 - A NaN or a record as a map key threw at the encode. So a value of a model could stop a commit.
@@ -1242,6 +1261,8 @@ These checks found errors in the earlier design. They are fixed here:
   approved turn. The rules had no verdict and no default.
 - A reading of 5.1 found more errors. The host read the value of `submit` with `Schema`, which cannot read the form of
   `Data`. A child could not know the type that its parent wants. The design had no route for a typed input.
+- A reading of 10.2 found that the pool of the Kyo driver can drop the flush settings of choice 17 with no error. The
+  design had also chosen Kyo with no plain host to compare.
 
 What did not run:
 
@@ -1251,14 +1272,15 @@ What did not run:
 - The OS sandbox.
 - A real power loss. The kernel check only cuts the journal at the last flush, and the SQLite check only measures the
   time. That a flush reaches the disk and covers the earlier commits comes from the SQLite documentation.
-- The flush on the Kyo driver and on Linux, and a `tell` across two journals with a power loss.
+- The flush on Linux, and a `tell` across two journals with a power loss.
 - A process kill of the real host during a commit.
 - `load` after a real restart, in a new REPL. The check has one REPL and text from the same process.
 - `rlm`, `start`, `observe` and `zoom`. The check has a stub of `rlm`, so its cells only compile.
 - `now()` through `recorded`. The check calls the clock directly.
 - A real `waitJob`, a real batch, a message at the end of a job, and the clock rule of a cell.
 - The kernel with several open calls in one cell, because the test of `parallel` stopped at the REPL.
-- The Kyo driver with one file for each session, and its connection pools.
+- The plain host with a real REPL, a real LM and a real client. Its cells in the checks are plain threads.
+- The idle time of 10 minutes of the Kyo pool. The check used 2 s, and the 10 minutes comes from the Kyo source.
 - The catalog, `missing` and the report pass.
 - A real job: `spawn`, `stopJob`, the job table, the process groups and the wrapper. The kernel check has the job
   table as a small value, with no process.
@@ -1285,6 +1307,7 @@ What did not run:
 | Agent teams, shared boards | The controller and `tell` cover them. |
 | A merge of graphs across sessions | The first version has one graph for each session. |
 | Pekko and Cluster Sharding | The session host contract keeps the option (RUNTIME 5.5). |
+| Kyo for the first session host | The plain host has the same safety and about the same code, with no pool, no bridge and no release candidate (12). The contracts keep Kyo possible. |
 | A cell that waits for a person | A wait of two days holds a thread, and a restart loses it. The cost of the other way is in 5.5. |
 | `parallel` in the first version | The hang and the lost updates of section 12. Batch calls cover the main need. |
 | Code that outlives its cell | A cell commits only if it completes. A job or `start` covers this need. |
@@ -1297,7 +1320,7 @@ What did not run:
 ## 14. The choices
 
 The decisions of [CODE_HARNESS.md](CODE_HARNESS.md), 7.10 and 8.7 stay, except decision 1 of 8.7, as item 7 says.
-These choices are new in this document. Only choices 1, 2, 3, 4, 5, 6, 13, 14, 15, 16, 17 and 18 are confirmed:
+These choices are new in this document. Only choices 1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 17 and 18 are confirmed:
 
 | # | Choice | Answers |
 |---|---|---|
@@ -1307,10 +1330,10 @@ These choices are new in this document. Only choices 1, 2, 3, 4, 5, 6, 13, 14, 1
 | 4 | Confirmed on 2026-11-04. Long work is a job. There is no yield protocol. A job has `waitJob` and an optional message at its end, and the clock of a cell stops during a guest API call (6). | Question 2 of 9.4 |
 | 5 | Confirmed on 2026-11-04. A cell never waits for a person. A rule says `Allow`, `Ask` or `Deny`. A call with `Ask` fails with `NeedsApproval`, and the journal holds the question. A `Grant` with a request id answers it and starts a turn (5.5). A child and a rollout cannot ask. A goal waits for the answer (8.5), and the turn after a grant has a report (8.6). | |
 | 6 | Confirmed on 2026-11-05. `Data` is the type of a value that a later cell, another session or the host reads back with a type. Only `Data` reads its form. `Data` has `shape`, and the preamble of a session holds its types and `submit`. An `Input` holds the values of a program call. A child with no `submit` makes `rlm` fail (5.1). | |
-| 7 | The session host is on `kyo-actor`, and the journal is on `kyo-sql-sqlite`, behind contracts. The turn stays on plain threads. | Question 2 of 8.7, decision 1 of 8.7 for the host |
-| 8 | dspy4s moves to JDK 25. | |
+| 7 | Confirmed on 2026-11-05. The session host is one plain thread and one mailbox for each session, and the journal is on `sqlite-jdbc`, behind contracts. The turn stays on plain threads. Decision 1 of 8.7 stays, and a Kyo host stays possible (10.2). | Question 2 of 8.7 |
+| 8 | dspy4s moves to JDK 25. Choice 7 no longer needs this. | |
 | 9 | Replay is not in the first version. | Question 1 of 8.7 |
-| 10 | The early MCP server uses `kyo-mcp`, and it comes after the guest API. | Question 4 of 9.4 |
+| 10 | The early MCP server uses `kyo-mcp`, and it comes after the guest API. After choice 7, this alone would bring in Kyo and JDK 25. | Question 4 of 9.4 |
 | 11 | A derivation sees only masked `Classified` values. | Question 5 of 9.4 |
 | 12 | The words of section 3. | Section 4 of the concept inventory |
 | 13 | Confirmed on 2026-11-03. One commit writes to one journal (4.1). The journal has one SQLite file for each session, with a catalog that a fold can rebuild (10.2). The report pass sends again a report that a crash cut (8.6). | Open question 1 below |
@@ -1348,7 +1371,7 @@ Each phase ends with something that runs.
 | 4. One task | `Harness`, `drive`, the window strategy, `OptimizableStructure`, `ProgramRunner`. | A harness for one task that the optimizers accept. |
 | 5. RLM | `llmQuery`, `llmQueryBatched`, `rlm` and `rlmBatched` behind `Children^`, a child from a `shape`, the shared budget, the depth limit. | RLM in the harness. |
 | 6. Optimization | A metric from tests, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
-| 7. The session host | `harness-host-kyo`: the actor, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `guarded`, and the client side of `Grant`. `harness-cli`. | A coding agent for daily use, one session at a time. |
+| 7. The session host | `harness-host`: the writer, feeds, timers, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `guarded`, and the client side of `Grant`. `harness-cli`. | A coding agent for daily use, one session at a time. |
 | 8. Memory | The memory tree and its metric. | Long sessions that lose no detail. |
 | 9. The controller | `Sessions`, the report pass with a crash test, the ledger, the graph, probes, release plans. | One controller above all sessions. |
 | Later | Replay, the reviewer, jobs across a restart, `parallel` if batch calls are not enough, a container backend, LSP as a guest API, the early MCP server if phase 2 needs it, prompt-cache marks. | |
