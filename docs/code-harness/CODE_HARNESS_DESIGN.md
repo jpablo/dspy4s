@@ -77,7 +77,7 @@ Phase 0 "guards".
 | Preamble | The text that a new REPL compiles before its first cell: the types, `submit` and the input fields of a session | A prompt |
 | Pending call | A rule in `pending`: a call that waits for the answer of a person (5.5) | A plain question in the text of the model |
 | Grant | The answer of a person to a pending call, or a permission in advance: a guard rule and a lifetime | A change of mode |
-| Report | The message that a session sends to the session that owns it, after a turn | The value of `rlm` |
+| Report | The message that a session sends to the session that owns it, after a turn, while it owes one (8.6) | The value of `rlm` |
 | Steer | A message that enters between two steps (`Send` in a turn) | |
 | Abort | The hard stop of a turn | `Thread.interrupt`, which is the only meaning of "interrupt" |
 | Fork | Say which one: a journal fork, a workspace fork or a session fork | |
@@ -397,7 +397,7 @@ TurnEnded(Aborted)
 | Stop | After `StopRequested`, `next` starts no new work, and `decide` accepts no new intent. |
 | One journal | One commit writes to one journal. |
 | Input | Two `Send` commands with one request id give one `Input`. |
-| Report | After the report pass of 8.6, each `TurnEnded` that needs a report has exactly one `Input` in the journal of an open owner. |
+| Report | After the report pass of 8.6, each `TurnEnded` or `Ended` that needs a report has exactly one `Input` in the journal of an open owner. |
 | Rest | With no open turn, no input waits. |
 | Grant | A `Once` grant covers one call. A `Turn` grant ends at the next `TurnEnded`. No grant stays after `Ended`, and a journal fork starts with no grants. A repeat of a `Grant` commits nothing. |
 | Pending call | A pending call has no active grant that covers it. `TurnStarted` and `Ended` empty `pending`, and a journal fork starts with no pending calls. A session with no person never gets a pending call. |
@@ -744,9 +744,9 @@ knows how much they trust that call.
 
 **The answer.** A `Grant` that answers a pending call commits `Granted`, an `Input` and, with no open turn,
 `TurnStarted` in one commit. So the client sends one command. The harness writes the text of the `Input`, and
-`meta.source` is `Source.Harness`, so an owner gets a report of that turn (8.6). A repeat with the same request id
-commits nothing, so one OK gives one grant. To refuse, a person sends a plain message. A new turn empties `pending`,
-and the model asks again if it still needs the call.
+`meta.source` is `Source.Harness`. While the work is open, the owner gets a report of that turn (8.6). A repeat with
+the same request id commits nothing, so one OK gives one grant. To refuse, a person sends a plain message. A new turn
+empties `pending`, and the model asks again if it still needs the call.
 
 **A session with no person.** `hasPerson` is true for an owner that is the user or a session. It is false for a cell
 and an optimizer. So in a child and a rollout, `Ask` gives a plain error, and `pending` stays empty. The model of a
@@ -1010,8 +1010,8 @@ that the `Input` is in the journal of the receiver.
 A report is a pure function of the journal of the session. So a second send has the same request id and the same text:
 
 ```scala
-// One `Send` for each `TurnEnded` of a turn that saw an `Input` from the owner or from the harness.
-// A stop that clears an `Input` counts as a step that saw it.
+// An `Input` of the owner opens a debt at the first step or stop that sees it. One `Send` for each `TurnEnded` and
+// for `Ended` while the debt is open. `Submitted`, `Exhausted`, `Aborted` and `Ended` close the debt.
 // The request id holds the session and the `seq` of that entry.
 def reports(session: SessionId, journal: Vector[Logged]): Vector[Command.Send]
 
@@ -1019,11 +1019,18 @@ def missing(session: SessionId, journal: Vector[Logged], owner: SessionState): V
   reports(session, journal).filterNot(send => owner.requests(send.request))
 ```
 
-A turn that a message of the harness started has a report: the message at the end of a job, a goal message and the
-message after a grant. So an owner gets the result of work that a person approved. A person can also type into a
-session that has an owner. That turn has no report, and the ledger of 8.3 shows the work (open question 8 of section
-14). A child of `rlm` and a rollout have no report. The owner of a child is a cell, which gets the value through the
-effect. The owner of a rollout is an optimizer, which reads the journal.
+A message of the owner opens a debt. While a session owes its owner a report, each turn ends with a report, whatever
+started the turn. That covers a message of the owner, a message that a person types, the message at the end of a job,
+a goal message and the message after a grant. The debt closes when the work ends: a turn that ends in `Submitted`,
+`Exhausted` or `Aborted`, or the end of the session. A turn that ends in `Replied` can hold a question, so it keeps
+the debt open. So a person can answer a question of the session by typing, and the owner still gets the result. After
+the work ends, a typed chat turn gives no report until the owner sends a new message.
+
+While the work is open, each turn of the session starts a turn of its owner, so the owner pays one LM call for each.
+The policy instructions tell a session with an owner to end the work with `submit` and its result. A model that only
+replies keeps the debt open, and it keeps reporting. A child of `rlm` and a rollout have no report. The owner of a
+child is a cell, which gets the value through the effect. The owner of a rollout is an optimizer, which reads the
+journal.
 
 **The report pass.** The host runs `missing`, in the order of `seq`, for each session that has a session as its owner.
 It does this at its own start, and again when an owner opens. A session with an open turn first gets `Activate`, so
@@ -1263,10 +1270,10 @@ and the start probe also ran on JDK 21.0.11. The code is in `tmp/design-check/`,
 
 | Check | Result |
 |---|---|
-| The kernel under random schedules, with no threads | 200,000 runs with 318,283 crashes, 223,402 stops, 70,885 late messages, 684,647 grants, 55,191 calls under a `Once` grant, 65,382 jobs and 19,289 `spawn` calls that a stop refused. The calls go through `guardCheck`: 50,606 gave a pending call, 11,733 grants answered a pending call, and 189,989 grants were repeats from a client. Each crash read the journal through the JSON codec of `Logged`: 7,785,588 entries, with no change. No run broke a checked law of 4.7. A second phase of 50,000 runs had 132,952 power losses, which cut the journal at the last flush, and no run broke a law. The 485,904 values of inputs stayed a fold of the journal. The law One journal did not run. For the law Report, only `reports` ran: 618,665 reports match the turns that owe one. |
-| The check of that check | Thirty-six mutants. Fifteen for the kernel: keep the waiting inputs after a stop (78,443 runs fail), accept an effect of any cell (8,584), keep a late outcome (17,704), remove a `Once` grant at `EffectStarted` (45,405), keep a `Once` grant after its call (21,636), keep a `Turn` grant after its turn (117,250), keep a grant after `Ended` (48,318), let an `Abort` stop jobs (50,090), keep the jobs after `Ended` (11,205), let `OfLastTurn` reach other turns (15,957), take the list of jobs only from the live table (9,548), no flush at all (43,719 runs of the second phase fail), a flush at the outcome in place of the intent (205), no flush for `Input` (32,374), no flush for `Activated` (13,946). Nine for approvals: nothing in `pending` (33,116), keep a pending call after a new turn (17,465), no check of a repeated `Grant` (98,346), no `Input` after an answer (14,913), reports only for the owner (136,829), a pending call in a session with no person (33,430), a grant above a deny rule (14,216), the first rule wins (39,446), and a goal check while a pending call waits. Only the fixed flows find the last one: 6 turns in place of 1. Six for the values: a wrong field in a preamble (17 problems), a preamble with no givens (2), a host that reads with `Schema` (1), no values in the state (138,589 runs), values in the store (138,589), and a fork with no values (138,589). Six for the plain session host: no drain at the end, no answer after a failed write, no timer, a writer that waits for a client, a silent drop, and a publish before the commit. Each one fails a fixed flow of the host. |
+| The kernel under random schedules, with no threads | 200,000 runs with 318,283 crashes, 223,402 stops, 70,885 late messages, 684,647 grants, 55,191 calls under a `Once` grant, 65,382 jobs and 19,289 `spawn` calls that a stop refused. The calls go through `guardCheck`: 50,606 gave a pending call, 11,733 grants answered a pending call, and 189,989 grants were repeats from a client. Each crash read the journal through the JSON codec of `Logged`: 7,785,588 entries, with no change. No run broke a checked law of 4.7. A second phase of 50,000 runs had 132,952 power losses, which cut the journal at the last flush, and no run broke a law. The 485,904 values of inputs stayed a fold of the journal. The law One journal did not run. For the law Report, only `reports` ran: 448,426 reports match the turns of an open debt. |
+| The check of that check | Thirty-eight mutants. Fifteen for the kernel: keep the waiting inputs after a stop (78,443 runs fail), accept an effect of any cell (8,584), keep a late outcome (17,704), remove a `Once` grant at `EffectStarted` (45,405), keep a `Once` grant after its call (21,636), keep a `Turn` grant after its turn (117,250), keep a grant after `Ended` (48,318), let an `Abort` stop jobs (50,090), keep the jobs after `Ended` (11,205), let `OfLastTurn` reach other turns (15,957), take the list of jobs only from the live table (9,548), no flush at all (43,719 runs of the second phase fail), a flush at the outcome in place of the intent (205), no flush for `Input` (32,374), no flush for `Activated` (13,946). Eleven for approvals: nothing in `pending` (33,116), keep a pending call after a new turn (17,465), no check of a repeated `Grant` (98,346), no `Input` after an answer (14,913), the old rule of reports (140,087), a debt that never closes (105,531), a debt that closes on a reply (46,407), a pending call in a session with no person (33,430), a grant above a deny rule (14,216), the first rule wins (39,446), and a goal check while a pending call waits. Only the fixed flows find the last one: 6 turns in place of 1. Six for the values: a wrong field in a preamble (17 problems), a preamble with no givens (2), a host that reads with `Schema` (1), no values in the state (138,589 runs), values in the store (138,589), and a fork with no values (138,589). Six for the plain session host: no drain at the end, no answer after a failed write, no timer, a writer that waits for a client, a silent drop, and a publish before the commit. Each one fails a fixed flow of the host. |
 | `drive` with scripts | A chat answer, `submit`, the step limit of both kinds, a failed cell, a failed LM call, a stop during a cell, and a crash during a cell give the expected journals. |
-| The fixed flows of an approval | A session from `start` asks, the person approves, and the owner gets two reports, the last with the result. A repeat of the `Grant` commits nothing, also after the call. A typed message gives no report. A session with a goal uses one turn while it waits. A child and a rollout get a plain error. `Verdict` is a semilattice, `verdict` is a homomorphism from `Guard`, and a grant never widens a deny rule. |
+| The fixed flows of an approval | A session from `start` asks, the person approves, and the owner gets two reports, the last with the result. A repeat of the `Grant` commits nothing, also after the call. A typed message after the result gives no report. A session asks a plain question, the person answers by typing, and the owner gets the result. A new message of the owner opens a new debt, and the end of a session that owes gives a report. A session with a goal uses one turn while it waits. A child and a rollout get a plain error. `Verdict` is a semilattice, `verdict` is a homomorphism from `Guard`, and a grant never widens a deny rule. |
 | A denied call in a real REPL with safe mode, with a stub of the handler | With no `catch`, the cell stops, and a later cell does not see its `val`. With a `catch` of `NeedsApproval` or `Exception`, or with `scala.util.Try`, the cell continues and keeps its values. Safe mode rejects `NeedsApproval(...)` in a cell. |
 | `Mode` | The semilattice laws hold over 81 modes. A meet with `Mode.closed` never gives `Sessions^`, and it keeps `Children^`. |
 | Modes as givens in a real REPL, with capture checking and safe mode | Read-only mode: `read` compiles, and `write`, `exec`, `spawn`, `stopJob` and `tell` do not. Controller: `tell` compiles, and `write`, `exec` and `stopJob` do not. Local: all compile. Read-only also rejects `rlm` and `start`. Controller: `rlm` and `start` compile. Closed: `rlm`, `write` and `exec` compile, and `start` and `tell` do not. `rlmBatched` follows `rlm`, `waitJob` needs `Shell^`, and `llmQueryBatched` compiles in all four modes. |
@@ -1333,6 +1340,7 @@ These checks found errors in the earlier design. They are fixed here:
   approved turn. The rules had no verdict and no default.
 - A reading of 5.1 found more errors. The host read the value of `submit` with `Schema`, which cannot read the form of
   `Data`. A child could not know the type that its parent wants. The design had no route for typed input fields.
+- A reading of open question 8 found that the owner never got the result of a turn that a person started by typing.
 - A reading of choice 11 found that a command got the full environment of the harness, with its API keys. Choice 11
   also covered a type that the first version does not have.
 - A reading of choice 10 found that the plan put the early MCP server under "Later". It also found that `kyo-mcp`
@@ -1353,6 +1361,7 @@ What did not run:
 - The flush on Linux, and a `tell` across two journals with a power loss.
 - A process kill of the real host during a commit.
 - A real model that reads the note of lost names.
+- Real models that end delegated work with `submit`, and a real controller that gets the reports.
 - A real `exec` handler with the allowlist, the mask in the real writer, and a key that a model builds again from
   parts.
 - A real agent that uses the early MCP server, its tool for the API reference, and the server with the kernel and a
@@ -1443,8 +1452,8 @@ Open questions:
    first divergence ([CODE_HARNESS.md](CODE_HARNESS.md), 8.4).
 7. What must change before `parallel` can come? A task must be able to use a `val` of its own cell. A shared `var`
    needs a rule, and the `Once` rule of 5.5 must change.
-8. How does an owner get the result when a person answers a plain question by typing? That turn has no report (8.6),
-   so the owner can wait for a result that it never gets. Choice 5 fixes this only for an answer through `Grant`.
+8. Closed: a message of the owner opens a debt, and each turn reports until the work ends (8.6). So a typed answer
+   also reaches the owner.
 9. Closed: `submit` records its value and then throws a `ControlThrowable` (5.1). The host keeps the first value, also
    if the cell catches the signal.
 
