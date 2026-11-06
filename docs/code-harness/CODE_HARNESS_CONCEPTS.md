@@ -185,7 +185,7 @@ a concept with "Replay" in this table is lost, and the model gets a note of the 
 | Git state | The branch, the head commit and the changes | World | World |
 | Workspace fork | A copy of the scope for one rollout (F6) | World | World |
 | Process | An OS process that a cell started | World | World, if it still runs |
-| Process environment | The variables and the working directory of a command | Data | Config |
+| Process environment | The variables and the working directory of a command. A command gets only an allowlist of variables (5.6 of the design). | Data | Config |
 | Device | A computer that runs tools for a session (uniichat) | World | World |
 | External service | A remote system that a command or a call changes | World | World |
 | Secret | A value that the model must not see, for example `Classified` (atc, tacit) | World | World |
