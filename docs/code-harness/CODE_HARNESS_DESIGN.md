@@ -407,6 +407,7 @@ TurnEnded(Aborted)
 | Store | The store holds only the writes of cells that completed. |
 | Names | The note after a restart lists the names of the cells that completed, and no name of a failed cell. |
 | Secret | No known secret value is in a committed entry, and a second mask changes nothing. |
+| Submit | A cell that called `submit` ends its turn with the first value, and the host refuses each later call of that cell. |
 | Data | `decode(encode(v)) == Right(v)` for each value with a `Data`. An `encode` never throws. |
 | Text | `parse(print(encode(v))) == encode(v)`. So a commit changes no value. |
 | Form | Only `Data` reads the form of `Data`. The host reads the value of `submit` with `Data[O]`. |
@@ -580,6 +581,16 @@ version. A typed value in `inputs` can come later by the same route.
 **A child that gives no value.** `rlm[A]` gets its value only from `submit`. The `finisher` leaf makes an `O` and not
 an `A`, so it cannot help. A child that ends with `Replied` or `Exhausted` makes the call fail, and the error holds
 the last text of the child. `rlmBatched` fails if one child fails, and the error names the task.
+
+**How `submit` ends a cell.** `submit` has the type `Nothing` (F3). It records its value with the host, and then it
+throws a `ControlThrowable`. A `catch` of `Exception`, `scala.util.Try` and `finally` do not stop the signal, and safe
+mode rejects `NonFatal`. A `catch` of `Throwable` stops it, and the compiler warns. So the rule is in the host:
+
+- A cell that called `submit` ends its turn with the first value, whatever the cell does after the call.
+- After `submit`, the host refuses each later guest API call of that cell, and a second `submit`.
+- The store writes before `submit` commit, as for a cell that completes.
+- The host removes the line of the signal from the output of the cell.
+- A cell that ends by `submit` defines no name, because the signal leaves the cell.
 
 **`now()` gives the time.** Safe mode rejects `System.currentTimeMillis` and `System.nanoTime`, and models write them.
 `now()` is a guest API call like the others, so `recorded` stores its value. It closes nothing: safe mode allows
@@ -848,9 +859,10 @@ REPL compiles the preamble (5.1), the store comes back, and the model gets a not
 **The note of lost names.** After a crash the old REPL is gone, so the note comes from a fold of the journal. For each
 cell that completed, the parser of the compiler finds the top-level names: `val`, `lazy val`, `def`, `class`, `trait`,
 `object`, `enum`, `type`, the names in a pattern, extension methods and imports. A later cell that defines a name
-again moves the name to that cell. A cell that failed defines nothing, as in the REPL. The note lists each name with
-its cell, and the model can read that cell with `zoom` and run it again. The parser needs no state of the old REPL, so
-the note is the same after a crash, a reopen and a change of mode.
+again moves the name to that cell. A cell that failed defines nothing, as in the REPL, and so does a cell that ended
+by `submit` (5.1). The note lists each name with its cell, and the model can read that cell with `zoom` and run it
+again. The parser needs no state of the old REPL, so the note is the same after a crash, a reopen and a change of
+mode.
 
 **One restart for each cause.** A crash, a reopen, a change of mode, an unclean host (protection 3 of Phase 0) and the
 cell limit (protection 5, about 300 cells) all start a new REPL in the same way: the preamble, the store and the note.
@@ -1262,6 +1274,7 @@ and the start probe also ran on JDK 21.0.11. The code is in `tmp/design-check/`,
 | The JSON codec of `DynamicValue` | 19 of 30 kinds of value change or throw. `Long(5)` comes back as `Int(5)`, `Double(2.5)` as a `BigDecimal`, a `Variant` and a `Map` as a `Record`. NaN, the infinities and a record as a map key throw at the encode. A `GuardRule` with `Exact` matches its call before the codec, and it does not match after the codec. |
 | The lost names from the journal, with the parser only | 51 cells: 21 that cover patterns, givens, extension methods, imports, enums, types, a name that a later cell defines again, a compile error and a failure at run time, and 30 from a model. The parser read the 44 cells that completed in 9 ms. It found each name that the old REPL completes and a new REPL does not, apart from the names that the REPL makes: `res0`, the wrapper objects and the names of anonymous givens. It also found two types that the completion of the REPL does not list. The names of the 7 failed cells were absent from the old REPL too. |
 | The environment of a command and the mask of secrets, with fake values | With all variables, `env` showed 3 of 3 secret variables, and with the allowlist of 5.6 it showed 0. A normal command ran, and a secret name that a session adds did not go through. The mask hid a key that a command printed from a file, and a key in JSON. On 100,000 random texts, no known value stayed, and a second mask changed nothing. A key cut across two lines and a key in base64 stayed. |
+| `submit` in a real REPL, on JDK 21 | 12 cases. `submit` records its value and throws a `ControlThrowable`. A `catch` of `Exception`, `Try` and `finally` let the signal through, and safe mode rejects `NonFatal`. After a `catch` of `Throwable`, a `store` and a second `submit` got a refusal, and the first value stayed. A `store` before `submit` happened, and a `val` of that cell was gone in the next cell. |
 | The early MCP server on the MCP Java SDK 2.1.0, with a real REPL, on JDK 21 | 35 calls of `run_cell` with prints, definitions, a compile error, an exception, and a library that prints to stdout during a cell and 50 ms after it. With stdout as the wire and no rule: 6 calls worked, and after the late print each later call timed out. With the rule of section 6: 35 of 35 worked, with a median of 14 ms for each call. |
 | A model value with the name of a given of the preamble | `val files`, `val state`, `val shell`, `val llm`, `val peers` and `val children` did not hide the capability from a later cell. |
 | `Data` with `decode`, in a real REPL | Enums, sealed traits, recursion, mutual recursion, generic types, tuples, named tuples and maps come back equal through the journal text. The compiler rejects capabilities, functions, `Any`, plain classes, iterators, lazy lists and mutable buffers. |
@@ -1360,7 +1373,8 @@ What did not run:
   handler behind it.
 - What real models do after `NeedsApproval`. No test shows that a model ends its turn and asks.
 - A denied call in a real child of `rlm`.
-- How `submit` ends a cell. The checks have `submit` as a normal call, and F3 says `Nothing` (open question 9).
+- A model that catches `Throwable` on purpose, `submit` in a real child of `rlm`, and `submit` in a real cell thread
+  with the stop flag.
 - A model that reads a preamble, a real child with an LM, and a child that ends with no value.
 - The values of a real `Send`. In the REPL checks they come from a system property.
 - The full `SessionConfig` of 8.1. The kernel check has only `kind`, `steps`, `guard` and `owner`.
@@ -1431,8 +1445,8 @@ Open questions:
    needs a rule, and the `Once` rule of 5.5 must change.
 8. How does an owner get the result when a person answers a plain question by typing? That turn has no report (8.6),
    so the owner can wait for a result that it never gets. Choice 5 fixes this only for an answer through `Grant`.
-9. How does `submit` end a cell? F3 says `Nothing`, so a throw is the plain way. A cell with a `catch` of `Throwable`
-   can stop that throw, and a test must show what the host does then.
+9. Closed: `submit` records its value and then throws a `ControlThrowable` (5.1). The host keeps the first value, also
+   if the cell catches the signal.
 
 ## 15. The plan
 
@@ -1441,7 +1455,7 @@ Each phase ends with something that runs.
 | Phase | Work | Result |
 |---|---|---|
 | 1. Kernel | `harness-kernel`, with `pending`, `inputs`, `Guard` and `guardCheck`, the laws as ScalaCheck properties and the mutants of section 12. No REPL and no LM. | The laws of 4.7 run in CI. |
-| 2. Guest API and REPL | `harness-guest`, `harness-repl`, the modes, the protections of Phase 0, the laws of `Data` as properties, `shape` and the preamble, the note of lost names, the second try of a cell, the catch around `ReplDriver.run`, the clock of a cell, the error hints, negative tests for modes, and `harness-mcp`. | Model code runs against the guest API in each mode, and another agent can run cells through MCP. |
+| 2. Guest API and REPL | `harness-guest`, `harness-repl`, the modes, the protections of Phase 0, the laws of `Data` as properties, `shape` and the preamble, the note of lost names, the end of a cell by `submit`, the second try of a cell, the catch around `ReplDriver.run`, the clock of a cell, the error hints, negative tests for modes, and `harness-mcp`. | Model code runs against the guest API in each mode, and another agent can run cells through MCP. |
 | 3. Sandbox | `harness-sandbox`: Seatbelt and bubblewrap, profiles from modes, the allowlist of environment variables, and escape tests. | `exec` runs only in a sandbox. |
 | 4. One task | `Harness`, `drive`, the window strategy, `OptimizableStructure`, `ProgramRunner`, the mask of secrets. | A harness for one task that the optimizers accept. |
 | 5. RLM | `llmQuery`, `llmQueryBatched`, `rlm` and `rlmBatched` behind `Children^`, a child from a `shape`, the shared budget, the depth limit. | RLM in the harness. |
