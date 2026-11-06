@@ -173,6 +173,9 @@ harness must do:
 | Clock and random | The time and the random numbers that a cell sees. Safe mode does not close them | World | Stored, if a replay needs them |
 | Language versions | The compiler version and the guest API version | Data | Stored |
 
+The first version has no replay (choice 9 of [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md)). So after a restart,
+a concept with "Replay" in this table is lost, and the model gets a note of the lost names.
+
 ### 3.4 The world
 
 | Concept | What it is | Kind | After a restart |

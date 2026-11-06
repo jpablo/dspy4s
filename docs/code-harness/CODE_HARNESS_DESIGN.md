@@ -200,8 +200,8 @@ def evolve(s: SessionState, logged: Logged): SessionState   // total and pure
 prefix continues to the same state: the journal is a free monoid, and the fold is a homomorphism from it to the
 functions on the state.
 
-Each other view of a journal is also a fold, for example the ledger, the usage totals and the deterministic part of a
-`SessionCard`. Folds compose, so several views need one pass:
+Each other view of a journal is also a fold, for example the note of lost names (6), the ledger, the usage totals and
+the deterministic part of a `SessionCard`. Folds compose, so several views need one pass:
 
 ```scala
 final case class Fold[-E, S, +A](initial: S, step: (S, E) => S, done: S => A):
@@ -400,6 +400,7 @@ TurnEnded(Aborted)
 | Job | An `Abort` changes no job. A stop covers only the jobs with an intent before it. After `Abort` and then `StopJobs(OfLastTurn)`, no job of that turn starts or runs. `Ended` stops all jobs, and a journal fork starts with no jobs. |
 | Repair | `repair` closes each open part, and `repair(state after repair)` is empty. |
 | Store | The store holds only the writes of cells that completed. |
+| Names | The note after a restart lists the names of the cells that completed, and no name of a failed cell. |
 | Data | `decode(encode(v)) == Right(v)` for each value with a `Data`. An `encode` never throws. |
 | Text | `parse(print(encode(v))) == encode(v)`. So a commit changes no value. |
 | Form | Only `Data` reads the form of `Data`. The host reads the value of `submit` with `Data[O]`. |
@@ -576,8 +577,8 @@ the last text of the child. `rlmBatched` fails if one child fails, and the error
 
 **`now()` gives the time.** Safe mode rejects `System.currentTimeMillis` and `System.nanoTime`, and models write them.
 `now()` is a guest API call like the others, so `recorded` stores its value. It closes nothing: safe mode allows
-`java.time.Instant.now()`, `scala.util.Random` and `Math.random()`, so a cell is not deterministic by its type (open
-question 6).
+`java.time.Instant.now()`, `scala.util.Random` and `Math.random()`, so a cell is not deterministic by its type. Choice
+9 leaves this for a later replay.
 
 ### 5.2 Modes
 
@@ -818,8 +819,21 @@ also sends a message when the job ends: a `Send` with `Source.Harness` and a req
 gives one `Input`, and the message can start a turn. The default is no message. A job that a stop ended sends no
 message. A cell has a timeout, and no second cell runs at the same time.
 
-**Replay comes later.** Replay of cells ([CODE_HARNESS.md](CODE_HARNESS.md), 8.4) can rebuild the definitions. It is
-possible because the journal already holds each typed result and the versions. The first version does not need it.
+**Replay comes later.** Replay of cells ([CODE_HARNESS.md](CODE_HARNESS.md), 8.4) can rebuild the definitions, because
+the journal already holds each typed result and the versions. The first version has no replay. After a restart, a new
+REPL compiles the preamble (5.1), the store comes back, and the model gets a note of the names that it lost.
+
+**The note of lost names.** After a crash the old REPL is gone, so the note comes from a fold of the journal. For each
+cell that completed, the parser of the compiler finds the top-level names: `val`, `lazy val`, `def`, `class`,
+`trait`, `object`, `enum`, `type`, the names in a pattern, extension methods and imports. A later cell that defines a
+name again moves the name to that cell. A cell that failed defines nothing, as in the REPL. The note lists each name
+with its cell, and the model can read that cell with `zoom` and run it again. The parser needs no state of the old
+REPL, so the note is the same after a crash, a reopen and a change of mode.
+
+**One restart for each cause.** A crash, a reopen, a change of mode, an unclean host (guard 3 of Phase 0) and the cell
+limit (guard 5, about 300 cells) all start a new REPL in the same way: the preamble, the store and the note. Replay
+would not suit the cell limit in any version. The limit exists because the memory of a REPL grows with its cells, and
+a replay of 300 cells makes the same 300 cells again.
 
 ## 7. The context
 
@@ -1210,6 +1224,8 @@ it is not committed.
 | Modes as givens in a real REPL, with capture checking and safe mode | Read-only mode: `read` compiles, and `write`, `exec`, `spawn`, `stopJob` and `tell` do not. Controller: `tell` compiles, and `write`, `exec` and `stopJob` do not. Local: all compile. Read-only also rejects `rlm` and `start`. Controller: `rlm` and `start` compile. Closed: `rlm`, `write` and `exec` compile, and `start` and `tell` do not. `rlmBatched` follows `rlm`, `waitJob` needs `Shell^`, and `llmQueryBatched` compiles in all four modes. |
 | Safe mode in the same REPL | It rejects `asInstanceOf`, the name of the host, `caps.unsafe`, `@assumeSafe`, `Thread`, `Future`, `CompletableFuture`, `Executors`, `System.exit`, `System.currentTimeMillis`, `System.nanoTime`, `System.getenv`, `sys.env`, `java.io.File`, `java.nio.file.Files`, `scala.io.Source`, `Runtime`, `Predef.println`, `java.util.Random`, `UUID.randomUUID` and the `Schema` of zio-blocks. It allows `java.time.Instant.now()`, `java.time.Clock`, `scala.util.Random`, `Math.random()` and `Object.hashCode`. |
 | The JSON codec of `DynamicValue` | 19 of 30 kinds of value change or throw. `Long(5)` comes back as `Int(5)`, `Double(2.5)` as a `BigDecimal`, a `Variant` and a `Map` as a `Record`. NaN, the infinities and a record as a map key throw at the encode. A `GuardRule` with `Exact` matches its call before the codec, and it does not match after the codec. |
+| The lost names from the journal, with the parser only | 51 cells: 21 that cover patterns, givens, extension methods, imports, enums, types, a name that a later cell defines again, a compile error and a failure at run time, and 30 from a model. The parser read the 44 cells that completed in 9 ms. It found each name that the old REPL completes and a new REPL does not, apart from the names that the REPL makes: `res0`, the wrapper objects and the names of anonymous givens. It also found two types that the completion of the REPL does not list. The names of the 7 failed cells were absent from the old REPL too. |
+| A model value with the name of a given of the preamble | `val files`, `val state`, `val shell`, `val llm`, `val peers` and `val children` did not hide the capability from a later cell. |
 | `Data` with `decode`, in a real REPL | Enums, sealed traits, recursion, mutual recursion, generic types, tuples, named tuples and maps come back equal through the journal text. The compiler rejects capabilities, functions, `Any`, plain classes, iterators, lazy lists and mutable buffers. |
 | The laws of `Data` on random values | 300,000 values, with 0 failures. The first run found that the reader rounds a number to 34 digits. |
 | The forms of `Data` and `Schema` | Of 13 kinds of value, 7 differ, and each reader fails on the text of the other. A plain record, an enum case with fields, a `Map` with string keys, a `Set`, an `Instant` and a tuple have one form. |
@@ -1266,6 +1282,8 @@ These checks found errors in the earlier design. They are fixed here:
   approved turn. The rules had no verdict and no default.
 - A reading of 5.1 found more errors. The host read the value of `submit` with `Schema`, which cannot read the form of
   `Data`. A child could not know the type that its parent wants. The design had no route for a typed input.
+- A reading of choice 9 found two more errors. The note of lost names had no source after a crash. Guards 3 and 5 of
+  Phase 0 still used replay.
 - A reading of 10.2 found that the pool of the Kyo driver can drop the flush settings of choice 17 with no error. The
   design had also chosen Kyo with no plain host to compare.
 
@@ -1279,6 +1297,9 @@ What did not run:
   time. That a flush reaches the disk and covers the earlier commits comes from the SQLite documentation.
 - The flush on Linux, and a `tell` across two journals with a power loss.
 - A process kill of the real host during a commit.
+- A real model that reads the note of lost names.
+- `zoom` on the journal of its own session.
+- The length of a note for a long session.
 - `load` after a real restart, in a new REPL. The check has one REPL and text from the same process.
 - `rlm`, `start`, `observe` and `zoom`. The check has a stub of `rlm`, so its cells only compile.
 - `now()` through `recorded`. The check calls the clock directly.
@@ -1305,7 +1326,7 @@ What did not run:
 |---|---|
 | `spawn` for subagents | `rlm` and `start` cover both uses. |
 | The yield protocol | Jobs cover long work. |
-| Replay in the first version | The store is enough for a restart. The journal keeps the option. |
+| Replay in the first version | The store, the preamble and the note are enough for a restart, and replay does not suit the cell limit (6). The journal keeps the option. |
 | Fresh cells | A persistent REPL lets the model build on its values. The store covers what must survive. |
 | Effects as values for guest code | Models write direct-style code with fewer errors, and handlers give record, replay and guard. |
 | `A < S` or `F[_]` as the program type of the harness | A cell needs a thread in each case. The question for `Predict` stays open (RUNTIME 5.4). |
@@ -1326,7 +1347,7 @@ What did not run:
 ## 14. The choices
 
 The decisions of [CODE_HARNESS.md](CODE_HARNESS.md), 7.10 and 8.7 stay, except decision 1 of 8.7, as item 7 says.
-These choices are new in this document. Only choices 1 to 8 and 13 to 18 are confirmed:
+These choices are new in this document. Only choices 1 to 9 and 13 to 18 are confirmed:
 
 | # | Choice | Answers |
 |---|---|---|
@@ -1338,7 +1359,7 @@ These choices are new in this document. Only choices 1 to 8 and 13 to 18 are con
 | 6 | Confirmed on 2026-11-05. `Data` is the type of a value that a later cell, another session or the host reads back with a type. Only `Data` reads its form. `Data` has `shape`, and the preamble of a session holds its types and `submit`. An `Input` holds the values of a program call. A child with no `submit` makes `rlm` fail (5.1). | |
 | 7 | Confirmed on 2026-11-05. The session host is one plain thread and one mailbox for each session, and the journal is on `sqlite-jdbc`, behind contracts. The turn stays on plain threads. Decision 1 of 8.7 stays, and a Kyo host stays possible (10.2). | Question 2 of 8.7 |
 | 8 | Confirmed on 2026-11-05. dspy4s stays on JDK 21 in the first version. The CLI of phase 7 can run on JDK 25 with an AOT cache, and that decision comes with the CLI (12). | |
-| 9 | Replay is not in the first version. | Question 1 of 8.7 |
+| 9 | Confirmed on 2026-11-05. Replay is not in the first version. After each restart, a new REPL gets the preamble and the store, and the model gets a note of the lost names, which the parser finds in the journal. The cell limit and an unclean host restart in the same way (6). | Question 1 of 8.7, open question 6 |
 | 10 | The early MCP server uses `kyo-mcp`, and it comes after the guest API. After choice 7, this alone would bring in Kyo and JDK 25. | Question 4 of 9.4 |
 | 11 | A derivation sees only masked `Classified` values. | Question 5 of 9.4 |
 | 12 | The words of section 3. | Section 4 of the concept inventory |
@@ -1356,8 +1377,8 @@ Open questions:
 3. Closed by choice 15: an `Abort` does not stop jobs, and `StopJobs` does.
 4. Closed by choice 16: `Mirror` is enough, with `Json` in the entries.
 5. Closed by choice 17: a commit does a full flush only where a power loss can do harm.
-6. Which check closes the clock and random numbers for a later replay? Safe mode allows `java.time.Instant.now()`,
-   `scala.util.Random`, `Math.random()` and `Object.hashCode`, so a cell is not deterministic by its type.
+6. Closed by choice 9: the first version needs no check of the clock and random numbers. A later replay stops at the
+   first divergence ([CODE_HARNESS.md](CODE_HARNESS.md), 8.4).
 7. What must change before `parallel` can come? A task must be able to use a `val` of its own cell. A shared `var`
    needs a rule, and the `Once` rule of 5.5 must change.
 8. How does an owner get the result when a person answers a plain question by typing? That turn has no report (8.6),
@@ -1372,7 +1393,7 @@ Each phase ends with something that runs.
 | Phase | Work | Result |
 |---|---|---|
 | 1. Kernel | `harness-kernel`, with `pending`, `inputs`, `Guard` and `guardCheck`, the laws as ScalaCheck properties and the mutants of section 12. No REPL and no LM. | The laws of 4.7 run in CI. |
-| 2. Guest API and REPL | `harness-guest`, `harness-repl`, the modes, the guards of Phase 0, the laws of `Data` as properties, `shape` and the preamble, the second try of a cell, the catch around `ReplDriver.run`, the clock of a cell, the error hints, and negative tests for modes. | Model code runs against the guest API in each mode. |
+| 2. Guest API and REPL | `harness-guest`, `harness-repl`, the modes, the guards of Phase 0, the laws of `Data` as properties, `shape` and the preamble, the note of lost names, the second try of a cell, the catch around `ReplDriver.run`, the clock of a cell, the error hints, and negative tests for modes. | Model code runs against the guest API in each mode. |
 | 3. Sandbox | `harness-sandbox`: Seatbelt and bubblewrap, profiles from modes, and escape tests. | `exec` runs only in a sandbox. |
 | 4. One task | `Harness`, `drive`, the window strategy, `OptimizableStructure`, `ProgramRunner`. | A harness for one task that the optimizers accept. |
 | 5. RLM | `llmQuery`, `llmQueryBatched`, `rlm` and `rlmBatched` behind `Children^`, a child from a `shape`, the shared budget, the depth limit. | RLM in the harness. |
