@@ -1980,7 +1980,8 @@ Questions 1 and 3 have a decision (8.7). The other questions are open:
 4. Does the harness expose the REPL and the guest API as an MCP server early, before its own loop exists (9.3)? Yes,
    in phase 2, on the MCP Java SDK ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), choice 10).
 5. Do the derivations see only masked `Classified` values, with an optional trusted LM for the classified parts
-   (9.3)?
+   (9.3)? Closed by choice 11 of [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md): the first version has no
+   `Classified`, and a secret never enters a cell (5.6 of that document).
 
 ## 10. Optimization
 

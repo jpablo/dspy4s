@@ -401,6 +401,7 @@ TurnEnded(Aborted)
 | Repair | `repair` closes each open part, and `repair(state after repair)` is empty. |
 | Store | The store holds only the writes of cells that completed. |
 | Names | The note after a restart lists the names of the cells that completed, and no name of a failed cell. |
+| Secret | No known secret value is in a committed entry, and a second mask changes nothing. |
 | Data | `decode(encode(v)) == Right(v)` for each value with a `Data`. An `encode` never throws. |
 | Text | `parse(print(encode(v))) == encode(v)`. So a commit changes no value. |
 | Form | Only `Data` reads the form of `Data`. The host reads the value of `submit` with `Data[O]`. |
@@ -762,12 +763,28 @@ wait in the handler can come later with no kernel change, because `Granted` can 
 
 ### 5.6 Secrets and taint
 
-- A `Classified` value never enters a journal in clear text, and a derivation sees only masked values. `Classified` is
-  a plain class, so it has no `Data` (5.1), and the compiler keeps it out of `store`, `submit` and the `values` of an
-  `Input`.
+**A secret never enters a cell.** So a secret never enters the journal, a derivation or a prompt. Four rules hold:
+
+- A handler adds a secret to a request (`secretHeaders`), and a cell never sees the value.
+- Each mode keeps the secret paths unreadable (5.4), for example `~/.ssh`, `~/.aws` and `.env`.
+- A command from `exec` or `spawn` gets only an allowlist of environment variables: `PATH`, `HOME`, `SHELL`, `TMPDIR`,
+  `TMP`, `TEMP`, `LANG`, `LC_ALL`, `LC_CTYPE`, `LOGNAME`, `USER`, `TERM`, and the names in `SessionConfig.env`. A name
+  that contains `KEY`, `SECRET`, `TOKEN`, `PASSWORD`, `PASSWD`, `CREDENTIAL` or `AUTH` never goes through, also if the
+  session adds it. The harness process holds the keys of the LM provider, and Java and Codex pass all variables by
+  default.
+- The writer masks each known secret value in each string of an entry before the commit, as `«secret:NAME»`. The known
+  values are the values behind `secretHeaders` and the values of the secret-like variables of the harness process. A
+  longer value goes first, so a value inside another value is not cut. This rule is a second guard: it does not find a
+  value that a command cuts across two lines or encodes.
+
 - `Meta.taint` marks each entry from external content. The model does not see this mark. The reviewer and the graph
   read it.
-- Real secrets stay out of cells. A handler adds them to a request (`secretHeaders`).
+
+**`Classified` comes later.** atc and tacit have a type `Classified[A]`: code can send its value to an allowed place,
+but it cannot print or read the value. The first version has no such type, because no call gives a classified value. A
+later `Classified` must be a plain class with no `Data`, so the compiler keeps it out of `store`, `submit` and the
+`values` of an `Input`. Two points are open for it. A trusted LM for the classified parts needs the clear value, and
+the journal does not hold it. A function that `Classified.map` runs can leak a bit through an exception or its time.
 
 ## 6. The REPL
 
@@ -897,7 +914,8 @@ final case class SessionConfig(
     guard   : Guard,             // the rules of 5.5
     preamble: String,            // the types, `submit` and the inputs of this session (5.1)
     model   : ModelChoice,
-    goal    : Option[String]
+    goal    : Option[String],
+    env     : Set[String]        // more names of variables for a command (5.6)
 )
 ```
 
@@ -1238,6 +1256,7 @@ it is not committed.
 | Safe mode in the same REPL | It rejects `asInstanceOf`, the name of the host, `caps.unsafe`, `@assumeSafe`, `Thread`, `Future`, `CompletableFuture`, `Executors`, `System.exit`, `System.currentTimeMillis`, `System.nanoTime`, `System.getenv`, `sys.env`, `java.io.File`, `java.nio.file.Files`, `scala.io.Source`, `Runtime`, `Predef.println`, `java.util.Random`, `UUID.randomUUID` and the `Schema` of zio-blocks. It allows `java.time.Instant.now()`, `java.time.Clock`, `scala.util.Random`, `Math.random()` and `Object.hashCode`. |
 | The JSON codec of `DynamicValue` | 19 of 30 kinds of value change or throw. `Long(5)` comes back as `Int(5)`, `Double(2.5)` as a `BigDecimal`, a `Variant` and a `Map` as a `Record`. NaN, the infinities and a record as a map key throw at the encode. A `GuardRule` with `Exact` matches its call before the codec, and it does not match after the codec. |
 | The lost names from the journal, with the parser only | 51 cells: 21 that cover patterns, givens, extension methods, imports, enums, types, a name that a later cell defines again, a compile error and a failure at run time, and 30 from a model. The parser read the 44 cells that completed in 9 ms. It found each name that the old REPL completes and a new REPL does not, apart from the names that the REPL makes: `res0`, the wrapper objects and the names of anonymous givens. It also found two types that the completion of the REPL does not list. The names of the 7 failed cells were absent from the old REPL too. |
+| The environment of a command and the mask of secrets, with fake values | With all variables, `env` showed 3 of 3 secret variables, and with the allowlist of 5.6 it showed 0. A normal command ran, and a secret name that a session adds did not go through. The mask hid a key that a command printed from a file, and a key in JSON. On 100,000 random texts, no known value stayed, and a second mask changed nothing. A key cut across two lines and a key in base64 stayed. |
 | The early MCP server on the MCP Java SDK 2.1.0, with a real REPL, on JDK 21 | 35 calls of `run_cell` with prints, definitions, a compile error, an exception, and a library that prints to stdout during a cell and 50 ms after it. With stdout as the wire and no rule: 6 calls worked, and after the late print each later call timed out. With the rule of section 6: 35 of 35 worked, with a median of 14 ms for each call. |
 | A model value with the name of a given of the preamble | `val files`, `val state`, `val shell`, `val llm`, `val peers` and `val children` did not hide the capability from a later cell. |
 | `Data` with `decode`, in a real REPL | Enums, sealed traits, recursion, mutual recursion, generic types, tuples, named tuples and maps come back equal through the journal text. The compiler rejects capabilities, functions, `Any`, plain classes, iterators, lazy lists and mutable buffers. |
@@ -1296,6 +1315,8 @@ These checks found errors in the earlier design. They are fixed here:
   approved turn. The rules had no verdict and no default.
 - A reading of 5.1 found more errors. The host read the value of `submit` with `Schema`, which cannot read the form of
   `Data`. A child could not know the type that its parent wants. The design had no route for a typed input.
+- A reading of choice 11 found that a command got the full environment of the harness, with its API keys. Choice 11
+  also covered a type that the first version does not have.
 - A reading of choice 10 found that the plan put the early MCP server under "Later". It also found that `kyo-mcp`
   would bring in Kyo and JDK 25.
 - A reading of choice 9 found two more errors. The note of lost names had no source after a crash. Guards 3 and 5 of
@@ -1314,6 +1335,8 @@ What did not run:
 - The flush on Linux, and a `tell` across two journals with a power loss.
 - A process kill of the real host during a commit.
 - A real model that reads the note of lost names.
+- A real `exec` handler with the allowlist, the mask in the real writer, and a key that a model builds again from
+  parts.
 - A real agent that uses the early MCP server, its tool for the API reference, and the server with the kernel and a
   journal.
 - `zoom` on the journal of its own session.
@@ -1351,6 +1374,7 @@ What did not run:
 | Agent teams, shared boards | The controller and `tell` cover them. |
 | A merge of graphs across sessions | The first version has one graph for each session. |
 | Pekko and Cluster Sharding | The session host contract keeps the option (RUNTIME 5.5). |
+| `Classified` in the first version | No call gives a classified value, and the rules of 5.6 keep secrets out of cells. |
 | `kyo-mcp` for the early MCP server | It needs Kyo and JDK 25 (choices 7 and 8). The MCP Java SDK is already in dspy4s, and it runs on JDK 21 (12). |
 | A move to JDK 25 in the first version | It gives only a faster start of a new process, and the CLI comes in phase 7 (12). |
 | Kyo for the first session host | The plain host has the same safety and about the same code, with no pool, no bridge and no release candidate (12). The contracts keep Kyo possible. |
@@ -1366,7 +1390,7 @@ What did not run:
 ## 14. The choices
 
 The decisions of [CODE_HARNESS.md](CODE_HARNESS.md), 7.10 and 8.7 stay, except decision 1 of 8.7, as item 7 says.
-These choices are new in this document. Only choices 1 to 10 and 13 to 18 are confirmed:
+These choices are new in this document. Only choices 1 to 11 and 13 to 18 are confirmed:
 
 | # | Choice | Answers |
 |---|---|---|
@@ -1380,7 +1404,7 @@ These choices are new in this document. Only choices 1 to 10 and 13 to 18 are co
 | 8 | Confirmed on 2026-11-05. dspy4s stays on JDK 21 in the first version. The CLI of phase 7 can run on JDK 25 with an AOT cache, and that decision comes with the CLI (12). | |
 | 9 | Confirmed on 2026-11-05. Replay is not in the first version. After each restart, a new REPL gets the preamble and the store, and the model gets a note of the lost names, which the parser finds in the journal. The cell limit and an unclean host restart in the same way (6). | Question 1 of 8.7, open question 6 |
 | 10 | Confirmed on 2026-11-05. The early MCP server uses the MCP Java SDK, and it comes in phase 2 as `harness-mcp`. Only the transport writes to stdout. Until the sandbox of phase 3, the server starts only the read-only mode (6). | Question 4 of 9.4 |
-| 11 | A derivation sees only masked `Classified` values. | Question 5 of 9.4 |
+| 11 | Confirmed on 2026-11-05. A secret never enters a cell: `secretHeaders`, unreadable secret paths, an allowlist of environment variables for a command, and a mask of the known values at each commit (5.6). `Classified` comes later. | Question 5 of 9.4 |
 | 12 | The words of section 3. | Section 4 of the concept inventory |
 | 13 | Confirmed on 2026-11-03. One commit writes to one journal (4.1). The journal has one SQLite file for each session, with a catalog that a fold can rebuild (10.2). The report pass sends again a report that a crash cut (8.6). | Open question 1 below |
 | 14 | Confirmed on 2026-11-03. Each `Grant` holds a lifetime: `Once` (the default), `Turn` or `Session`. `GuardRule` is data with a pure `matches`. A journal fork has no grants (5.5). | Open question 2 below |
@@ -1413,8 +1437,8 @@ Each phase ends with something that runs.
 |---|---|---|
 | 1. Kernel | `harness-kernel`, with `pending`, `inputs`, `Guard` and `guardCheck`, the laws as ScalaCheck properties and the mutants of section 12. No REPL and no LM. | The laws of 4.7 run in CI. |
 | 2. Guest API and REPL | `harness-guest`, `harness-repl`, the modes, the guards of Phase 0, the laws of `Data` as properties, `shape` and the preamble, the note of lost names, the second try of a cell, the catch around `ReplDriver.run`, the clock of a cell, the error hints, negative tests for modes, and `harness-mcp`. | Model code runs against the guest API in each mode, and another agent can run cells through MCP. |
-| 3. Sandbox | `harness-sandbox`: Seatbelt and bubblewrap, profiles from modes, and escape tests. | `exec` runs only in a sandbox. |
-| 4. One task | `Harness`, `drive`, the window strategy, `OptimizableStructure`, `ProgramRunner`. | A harness for one task that the optimizers accept. |
+| 3. Sandbox | `harness-sandbox`: Seatbelt and bubblewrap, profiles from modes, the allowlist of environment variables, and escape tests. | `exec` runs only in a sandbox. |
+| 4. One task | `Harness`, `drive`, the window strategy, `OptimizableStructure`, `ProgramRunner`, the mask of secrets. | A harness for one task that the optimizers accept. |
 | 5. RLM | `llmQuery`, `llmQueryBatched`, `rlm` and `rlmBatched` behind `Children^`, a child from a `shape`, the shared budget, the depth limit. | RLM in the harness. |
 | 6. Optimization | A metric from tests, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
 | 7. The session host | `harness-host`: the writer, feeds, timers, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `guarded`, and the client side of `Grant`. `harness-cli`, its JDK and an AOT cache (choice 8). | A coding agent for daily use, one session at a time. |
