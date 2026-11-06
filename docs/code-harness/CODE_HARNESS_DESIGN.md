@@ -771,7 +771,7 @@ wait in the handler can come later with no kernel change, because `Granted` can 
 - `guarded` reads the state after the commit of `EffectStarted`, so a `Once` grant must stay until the outcome. A
   crash still uses up the grant, because `closing` commits `EffectDone(Unknown)`. The call then needs a new approval.
 - The calls of one cell run one at a time, so the next call sees the removal. A later version with parallel guest
-  calls must change this rule.
+  calls must change this rule (condition 3 of section 6).
 - A `Once` grant that no call uses stays until `Ended`.
 - `Exact` compares `Json` values, so a grant matches its call before and after a restart.
 - A grant belongs to one session. A child or a session from `start` does not get it, and `forked` drops all grants of
@@ -868,6 +868,22 @@ mode.
 cell limit (protection 5, about 300 cells) all start a new REPL in the same way: the preamble, the store and the note.
 Replay would not suit the cell limit in any version. The limit exists because the memory of a REPL grows with its
 cells, and a replay of 300 cells makes the same 300 cells again.
+
+**The conditions for a later `parallel`.** The first version has no `parallel` (choice 18). A later version needs five
+things:
+
+1. A task has the type `A ->{caps.any.rd} B`, as the `map` of `Classified` in atc, so it can capture only read-only
+   views. The compiler then rejects a write, `exec`, `store`, an LM call and a shared `var` in a task. The guest API
+   gives read-only views such as `Files^{files.rd}`, because a task cannot read through the givens of the preamble.
+2. Before a cell runs, the host refuses a task that uses a top-level definition of its own cell. Such a task waits for
+   the class initializer of the cell, so the cell hangs. A definition of an earlier cell or of a block is safe. The
+   parser finds these names, as for the note of lost names.
+3. One call claims a `Once` grant at `EffectStarted`. A second call that matches it while it is claimed gets
+   `NeedsApproval`, and the grant goes away at `EffectDone` (5.5).
+4. The kernel simulation covers several open calls in one cell, with stops, crashes and repairs.
+5. The clock of a cell stops while at least one call is open.
+
+An LM call is not read-only, so batch calls stay the way to call an LM many times.
 
 **The early MCP server.** In phase 2, a small module `harness-mcp` offers the REPL and the guest API to another agent,
 for example Claude Code, before the harness has its own loop. So real models can try the guest API, `NeedsApproval`,
@@ -1281,6 +1297,7 @@ and the start probe also ran on JDK 21.0.11. The code is in `tmp/design-check/`,
 | The JSON codec of `DynamicValue` | 19 of 30 kinds of value change or throw. `Long(5)` comes back as `Int(5)`, `Double(2.5)` as a `BigDecimal`, a `Variant` and a `Map` as a `Record`. NaN, the infinities and a record as a map key throw at the encode. A `GuardRule` with `Exact` matches its call before the codec, and it does not match after the codec. |
 | The lost names from the journal, with the parser only | 51 cells: 21 that cover patterns, givens, extension methods, imports, enums, types, a name that a later cell defines again, a compile error and a failure at run time, and 30 from a model. The parser read the 44 cells that completed in 9 ms. It found each name that the old REPL completes and a new REPL does not, apart from the names that the REPL makes: `res0`, the wrapper objects and the names of anonymous givens. It also found two types that the completion of the REPL does not list. The names of the 7 failed cells were absent from the old REPL too. |
 | The environment of a command and the mask of secrets, with fake values | With all variables, `env` showed 3 of 3 secret variables, and with the allowlist of 5.6 it showed 0. A normal command ran, and a secret name that a session adds did not go through. The mask hid a key that a command printed from a file, and a key in JSON. On 100,000 random texts, no known value stayed, and a second mask changed nothing. A key cut across two lines and a key in base64 stayed. |
+| A read-only task type, `A ->{caps.any.rd} B`, in a real REPL on JDK 21 | Pure work and a local `var` in one task compile and run. A write, `exec`, `store`, an LM call and a shared `var` are rejected. A plain `read` is rejected, because the task captures the object of the preamble. A `read` through a view `Files^{files.rd}`, in a block or in an earlier cell, runs with no hang, and a write through that view is rejected. |
 | `submit` in a real REPL, on JDK 21 | 12 cases. `submit` records its value and throws a `ControlThrowable`. A `catch` of `Exception`, `Try` and `finally` let the signal through, and safe mode rejects `NonFatal`. After a `catch` of `Throwable`, a `store` and a second `submit` got a refusal, and the first value stayed. A `store` before `submit` happened, and a `val` of that cell was gone in the next cell. |
 | The early MCP server on the MCP Java SDK 2.1.0, with a real REPL, on JDK 21 | 35 calls of `run_cell` with prints, definitions, a compile error, an exception, and a library that prints to stdout during a cell and 50 ms after it. With stdout as the wire and no rule: 6 calls worked, and after the late print each later call timed out. With the rule of section 6: 35 of 35 worked, with a median of 14 ms for each call. |
 | A model value with the name of a given of the preamble | `val files`, `val state`, `val shell`, `val llm`, `val peers` and `val children` did not hide the capability from a later cell. |
@@ -1372,7 +1389,8 @@ What did not run:
 - `rlm`, `start`, `observe` and `zoom`. The check has a stub of `rlm`, so its cells only compile.
 - `now()` through `recorded`. The check calls the clock directly.
 - A real `waitJob`, a real batch, a message at the end of a job, and the clock rule of a cell.
-- The kernel with several open calls in one cell, because the test of `parallel` stopped at the REPL.
+- The conditions 2 to 5 for a later `parallel` (6): the check of the host, the claim of a `Once` grant, several
+  open calls in the kernel simulation, and the clock.
 - The plain session host with a real REPL, a real LM and a real client. Its cells in the checks are plain threads.
 - The idle time of 10 minutes of the Kyo pool. The check used 2 s, and the 10 minutes comes from the Kyo source.
 - The catalog, `missing` and the report pass.
@@ -1407,7 +1425,7 @@ What did not run:
 | A move to JDK 25 in the first version | It gives only a faster start of a new process, and the CLI comes in phase 7 (12). |
 | Kyo for the first session host | The plain session host has the same safety and about the same code, with no pool, no bridge and no release candidate (12). The contracts keep Kyo possible. |
 | A cell that waits for a person | A wait of two days holds a thread, and a restart loses it. The cost of the other way is in 5.5. |
-| `parallel` in the first version | The hang and the lost updates of section 12. Batch calls cover the main need. |
+| `parallel` in the first version | The hang and the lost updates of section 12. Batch calls cover the main need. Section 6 lists the conditions for a later version. |
 | Code that outlives its cell | A cell commits only if it completes. A job or `start` covers this need. |
 | `Data` as a wrapper around `Schema` | The macro crashes the compiler in a capture-checked cell (12). |
 | `Data` that writes the form of `Schema` | `Schema` throws on NaN and on a record as a map key, so a value from a model could stop a commit (12). |
@@ -1450,8 +1468,7 @@ Open questions:
 5. Closed by choice 17: a commit does a full flush only where a power loss can do harm.
 6. Closed by choice 9: the first version needs no check of the clock and random numbers. A later replay stops at the
    first divergence ([CODE_HARNESS.md](CODE_HARNESS.md), 8.4).
-7. What must change before `parallel` can come? A task must be able to use a `val` of its own cell. A shared `var`
-   needs a rule, and the `Once` rule of 5.5 must change.
+7. Closed: section 6 lists five conditions for a later `parallel`. The first version has none (choice 18).
 8. Closed: a message of the owner opens a debt, and each turn reports until the work ends (8.6). So a typed answer
    also reaches the owner.
 9. Closed: `submit` records its value and then throws a `ControlThrowable` (5.1). The host keeps the first value, also
@@ -1472,7 +1489,7 @@ Each phase ends with something that runs.
 | 7. The session host | `harness-host`: the writer, feeds, timers, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `guarded`, and the client side of `Grant`. `harness-cli`, its JDK and an AOT cache (choice 8). | A coding agent for daily use, one session at a time. |
 | 8. Memory | The memory tree and its metric. | Long sessions that lose no detail. |
 | 9. The controller | `Sessions`, the report pass with a crash test, the ledger, the graph, probes, release plans. | One controller above all sessions. |
-| Later | Replay, the reviewer, jobs across a restart, `parallel` if batch calls are not enough, a container backend, LSP as a guest API, prompt-cache marks. | |
+| Later | Replay, the reviewer, jobs across a restart, `parallel` if batch calls are not enough, with the conditions of section 6, a container backend, LSP as a guest API, prompt-cache marks. | |
 
 Phase 6 comes before the session host on purpose. The optimizers are what makes this harness different from the
 others, so the design must meet them early.
