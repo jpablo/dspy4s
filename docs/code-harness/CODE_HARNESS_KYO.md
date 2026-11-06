@@ -3,7 +3,8 @@
 Status: analysis, 2026-11-01. This document says which parts of Kyo the dspy4s harness can reuse. It adds to
 [CODE_HARNESS_RUNTIME.md](CODE_HARNESS_RUNTIME.md) and to section 8 of [CODE_HARNESS.md](CODE_HARNESS.md). Choice 7
 of [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), on 2026-11-05, did not take the recommendation of section 7. The
-first session host is plain, and section 9 says why. Choice 8 keeps dspy4s on JDK 21.
+first session host is plain, and section 9 says why. Choice 8 keeps dspy4s on JDK 21, and choice 10
+takes the MCP Java SDK for the early MCP server.
 
 ## Summary
 
@@ -104,7 +105,7 @@ little. The longest wait differs by ten times or more, because the lock of SQLit
 |---|---|---|---|
 | Session host: mailbox, one writer, timers, broadcast | `kyo-core`, `kyo-actor` | Possible, not in the first version (9) | A stop must stay a message, and each reply needs a guard (4.1) |
 | Journal backend | `kyo-sql-sqlite` | Possible, not in the first version (9) | A native library through FFI, one writer for each database file, and a pool that drops the settings of an idle connection (4.2, 9) |
-| Early MCP server (question 4 of 9.4) | `kyo-mcp` | Open (choice 10) | No server ran in the checks (4.3) |
+| Early MCP server (question 4 of 9.4) | `kyo-mcp` | Not used: choice 10 takes the MCP Java SDK | No server ran in the checks (4.3) |
 | Container sandbox (F8) | `kyo-pod` | Later | It needs Docker or Podman, one `exec` cannot be stopped, and it has no host list (4.5) |
 | Browser guest API | `kyo-browser` | Later | It starts Chrome with `--no-sandbox` (4.7) |
 | LSP guest API | `kyo-lsp` | Later | It sends no workspace root, and it cannot start a server process (4.7) |
@@ -238,7 +239,8 @@ A JSONL file also stays possible behind the same contract, as in pi and deepseek
 - `stdioWith` diverts only the Kyo `Console` (`kyo-jsonrpc/shared/src/main/scala/kyo/JsonRpcTransport.scala:108`). A
   guest `System.out` can corrupt the wire *(inference)*.
 
-It covers the early MCP server on stdio. dspy4s already has `McpTools` on the Java SDK, so the client side adds
+Choice 10 of [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md) takes the MCP Java SDK, which runs on JDK 21. It covers
+the early MCP server on stdio. dspy4s already has `McpTools` on the Java SDK, so the client side adds
 little.
 
 ### 4.4 `kyo-system`

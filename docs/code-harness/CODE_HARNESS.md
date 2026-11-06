@@ -1977,7 +1977,8 @@ Questions 1 and 3 have a decision (8.7). The other questions are open:
    ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), choice 4).
 3. Does the journal store the typed value of each result, which replay needs, or only the rendered text (9.2)? It
    stores both (8.3).
-4. Does the harness expose the REPL and the guest API as an MCP server early, before its own loop exists (9.3)?
+4. Does the harness expose the REPL and the guest API as an MCP server early, before its own loop exists (9.3)? Yes,
+   in phase 2, on the MCP Java SDK ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), choice 10).
 5. Do the derivations see only masked `Classified` values, with an optional trusted LM for the classified parts
    (9.3)?
 

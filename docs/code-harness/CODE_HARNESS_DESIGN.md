@@ -39,7 +39,7 @@ configuration. So the design has one kernel.
 | tacit | Results that show that capability-safe Scala works for agents, a timed-out cell that keeps the earlier state, an early MCP server | A validator as a boundary |
 | dspy4s `RLM` | Inputs as REPL values, `llmQuery`, recursion that returns a typed value | The Python interpreter |
 | dspy4s | `Predict`, `History`, `Module`, the optimizers | `AgentLoop.run` for this loop (`next` holds the limit) |
-| Kyo | The claim token as a fence. `kyo-mcp` for the MCP server is open (choice 10). | `kyo-actor` for the first session host and `kyo-sql-sqlite` for the journal (choice 7), `kyo-flow` for the turn, `kyo-ai` for `Predict`, `kyo-compat` for pluggable programs |
+| Kyo | The claim token as a fence | `kyo-actor` for the first session host and `kyo-sql-sqlite` for the journal (choice 7), `kyo-mcp` for the MCP server (choice 10), `kyo-flow` for the turn, `kyo-ai` for `Predict`, `kyo-compat` for pluggable programs |
 
 The analysis of each project is in [CODE_HARNESS.md](CODE_HARNESS.md) (sections 2 and 9),
 [CODE_HARNESS_LOOPS.md](CODE_HARNESS_LOOPS.md), [CODE_HARNESS_RUNTIME.md](CODE_HARNESS_RUNTIME.md),
@@ -824,16 +824,28 @@ the journal already holds each typed result and the versions. The first version 
 REPL compiles the preamble (5.1), the store comes back, and the model gets a note of the names that it lost.
 
 **The note of lost names.** After a crash the old REPL is gone, so the note comes from a fold of the journal. For each
-cell that completed, the parser of the compiler finds the top-level names: `val`, `lazy val`, `def`, `class`,
-`trait`, `object`, `enum`, `type`, the names in a pattern, extension methods and imports. A later cell that defines a
-name again moves the name to that cell. A cell that failed defines nothing, as in the REPL. The note lists each name
-with its cell, and the model can read that cell with `zoom` and run it again. The parser needs no state of the old
-REPL, so the note is the same after a crash, a reopen and a change of mode.
+cell that completed, the parser of the compiler finds the top-level names: `val`, `lazy val`, `def`, `class`, `trait`,
+`object`, `enum`, `type`, the names in a pattern, extension methods and imports. A later cell that defines a name
+again moves the name to that cell. A cell that failed defines nothing, as in the REPL. The note lists each name with
+its cell, and the model can read that cell with `zoom` and run it again. The parser needs no state of the old REPL, so
+the note is the same after a crash, a reopen and a change of mode.
 
 **One restart for each cause.** A crash, a reopen, a change of mode, an unclean host (guard 3 of Phase 0) and the cell
 limit (guard 5, about 300 cells) all start a new REPL in the same way: the preamble, the store and the note. Replay
 would not suit the cell limit in any version. The limit exists because the memory of a REPL grows with its cells, and
 a replay of 300 cells makes the same 300 cells again.
+
+**The early MCP server.** In phase 2, a small module `harness-mcp` offers the REPL and the guest API to another agent,
+for example Claude Code, before the harness has its own loop. So real models can try the guest API, `NeedsApproval`,
+the preamble and the note of lost names before phase 4. The server uses the MCP Java SDK, which dspy4s already has in
+its `mcp` module, and it runs on JDK 21. It has two tools: `run_cell(code)` gives the output of one cell, and a second
+tool gives the API reference. Two rules hold:
+
+- Only the transport writes to the stdout of the process, because stdout carries the protocol. At its start the server
+  sends `System.out` to stderr, and a cell writes to its own buffer. In the check of section 12, one late print of a
+  library broke each later call of a server with no such rule.
+- Until the sandbox of phase 3 exists, the server starts only the read-only mode of 5.2, with no `Shell^` and no
+  `Network^`. The other agent has its own shell, so the server only tests the guest API.
 
 ## 7. The context
 
@@ -1172,9 +1184,10 @@ The primary key of the journal is the fence there. JDBC also reaches a server da
 | `harness-guest` | The guest API traits, `Data`. The source text is the API reference. | zio-blocks only |
 | `harness-kernel` | `Entry`, `SessionState`, `evolve`, `next`, `decide`, `repair`, `reports`, `Fold`, `Mode`, `ContextStrategy`, the memory tree | zio-blocks only |
 | `harness-repl` | `ScalaRepl`, the guards of Phase 0 | `harness-guest`, `scala3-repl` |
+| `harness-mcp` | The early MCP server of section 6 | `harness-repl`, the MCP Java SDK |
 | `harness-sandbox` | Seatbelt, bubblewrap, the profiles | `harness-kernel` |
 | `harness` | `Harness`, `drive`, the handlers, the leaves | The modules above, dspy4s `programs` |
-| `harness-host` | The session host, the SQLite journal, the catalog, the report pass, the MCP server | `harness`, `sqlite-jdbc` |
+| `harness-host` | The session host, the SQLite journal, the catalog, the report pass | `harness`, `sqlite-jdbc` |
 | `harness-cli` | The terminal client | `harness-host` |
 
 ## 11. The kinds of state, and the questions that test them
@@ -1225,6 +1238,7 @@ it is not committed.
 | Safe mode in the same REPL | It rejects `asInstanceOf`, the name of the host, `caps.unsafe`, `@assumeSafe`, `Thread`, `Future`, `CompletableFuture`, `Executors`, `System.exit`, `System.currentTimeMillis`, `System.nanoTime`, `System.getenv`, `sys.env`, `java.io.File`, `java.nio.file.Files`, `scala.io.Source`, `Runtime`, `Predef.println`, `java.util.Random`, `UUID.randomUUID` and the `Schema` of zio-blocks. It allows `java.time.Instant.now()`, `java.time.Clock`, `scala.util.Random`, `Math.random()` and `Object.hashCode`. |
 | The JSON codec of `DynamicValue` | 19 of 30 kinds of value change or throw. `Long(5)` comes back as `Int(5)`, `Double(2.5)` as a `BigDecimal`, a `Variant` and a `Map` as a `Record`. NaN, the infinities and a record as a map key throw at the encode. A `GuardRule` with `Exact` matches its call before the codec, and it does not match after the codec. |
 | The lost names from the journal, with the parser only | 51 cells: 21 that cover patterns, givens, extension methods, imports, enums, types, a name that a later cell defines again, a compile error and a failure at run time, and 30 from a model. The parser read the 44 cells that completed in 9 ms. It found each name that the old REPL completes and a new REPL does not, apart from the names that the REPL makes: `res0`, the wrapper objects and the names of anonymous givens. It also found two types that the completion of the REPL does not list. The names of the 7 failed cells were absent from the old REPL too. |
+| The early MCP server on the MCP Java SDK 2.1.0, with a real REPL, on JDK 21 | 35 calls of `run_cell` with prints, definitions, a compile error, an exception, and a library that prints to stdout during a cell and 50 ms after it. With stdout as the wire and no rule: 6 calls worked, and after the late print each later call timed out. With the rule of section 6: 35 of 35 worked, with a median of 14 ms for each call. |
 | A model value with the name of a given of the preamble | `val files`, `val state`, `val shell`, `val llm`, `val peers` and `val children` did not hide the capability from a later cell. |
 | `Data` with `decode`, in a real REPL | Enums, sealed traits, recursion, mutual recursion, generic types, tuples, named tuples and maps come back equal through the journal text. The compiler rejects capabilities, functions, `Any`, plain classes, iterators, lazy lists and mutable buffers. |
 | The laws of `Data` on random values | 300,000 values, with 0 failures. The first run found that the reader rounds a number to 34 digits. |
@@ -1282,6 +1296,8 @@ These checks found errors in the earlier design. They are fixed here:
   approved turn. The rules had no verdict and no default.
 - A reading of 5.1 found more errors. The host read the value of `submit` with `Schema`, which cannot read the form of
   `Data`. A child could not know the type that its parent wants. The design had no route for a typed input.
+- A reading of choice 10 found that the plan put the early MCP server under "Later". It also found that `kyo-mcp`
+  would bring in Kyo and JDK 25.
 - A reading of choice 9 found two more errors. The note of lost names had no source after a crash. Guards 3 and 5 of
   Phase 0 still used replay.
 - A reading of 10.2 found that the pool of the Kyo driver can drop the flush settings of choice 17 with no error. The
@@ -1298,6 +1314,8 @@ What did not run:
 - The flush on Linux, and a `tell` across two journals with a power loss.
 - A process kill of the real host during a commit.
 - A real model that reads the note of lost names.
+- A real agent that uses the early MCP server, its tool for the API reference, and the server with the kernel and a
+  journal.
 - `zoom` on the journal of its own session.
 - The length of a note for a long session.
 - `load` after a real restart, in a new REPL. The check has one REPL and text from the same process.
@@ -1333,6 +1351,7 @@ What did not run:
 | Agent teams, shared boards | The controller and `tell` cover them. |
 | A merge of graphs across sessions | The first version has one graph for each session. |
 | Pekko and Cluster Sharding | The session host contract keeps the option (RUNTIME 5.5). |
+| `kyo-mcp` for the early MCP server | It needs Kyo and JDK 25 (choices 7 and 8). The MCP Java SDK is already in dspy4s, and it runs on JDK 21 (12). |
 | A move to JDK 25 in the first version | It gives only a faster start of a new process, and the CLI comes in phase 7 (12). |
 | Kyo for the first session host | The plain host has the same safety and about the same code, with no pool, no bridge and no release candidate (12). The contracts keep Kyo possible. |
 | A cell that waits for a person | A wait of two days holds a thread, and a restart loses it. The cost of the other way is in 5.5. |
@@ -1347,7 +1366,7 @@ What did not run:
 ## 14. The choices
 
 The decisions of [CODE_HARNESS.md](CODE_HARNESS.md), 7.10 and 8.7 stay, except decision 1 of 8.7, as item 7 says.
-These choices are new in this document. Only choices 1 to 9 and 13 to 18 are confirmed:
+These choices are new in this document. Only choices 1 to 10 and 13 to 18 are confirmed:
 
 | # | Choice | Answers |
 |---|---|---|
@@ -1360,7 +1379,7 @@ These choices are new in this document. Only choices 1 to 9 and 13 to 18 are con
 | 7 | Confirmed on 2026-11-05. The session host is one plain thread and one mailbox for each session, and the journal is on `sqlite-jdbc`, behind contracts. The turn stays on plain threads. Decision 1 of 8.7 stays, and a Kyo host stays possible (10.2). | Question 2 of 8.7 |
 | 8 | Confirmed on 2026-11-05. dspy4s stays on JDK 21 in the first version. The CLI of phase 7 can run on JDK 25 with an AOT cache, and that decision comes with the CLI (12). | |
 | 9 | Confirmed on 2026-11-05. Replay is not in the first version. After each restart, a new REPL gets the preamble and the store, and the model gets a note of the lost names, which the parser finds in the journal. The cell limit and an unclean host restart in the same way (6). | Question 1 of 8.7, open question 6 |
-| 10 | The early MCP server uses `kyo-mcp`, and it comes after the guest API. After choice 7, this alone would bring in Kyo and JDK 25. | Question 4 of 9.4 |
+| 10 | Confirmed on 2026-11-05. The early MCP server uses the MCP Java SDK, and it comes in phase 2 as `harness-mcp`. Only the transport writes to stdout. Until the sandbox of phase 3, the server starts only the read-only mode (6). | Question 4 of 9.4 |
 | 11 | A derivation sees only masked `Classified` values. | Question 5 of 9.4 |
 | 12 | The words of section 3. | Section 4 of the concept inventory |
 | 13 | Confirmed on 2026-11-03. One commit writes to one journal (4.1). The journal has one SQLite file for each session, with a catalog that a fold can rebuild (10.2). The report pass sends again a report that a crash cut (8.6). | Open question 1 below |
@@ -1393,7 +1412,7 @@ Each phase ends with something that runs.
 | Phase | Work | Result |
 |---|---|---|
 | 1. Kernel | `harness-kernel`, with `pending`, `inputs`, `Guard` and `guardCheck`, the laws as ScalaCheck properties and the mutants of section 12. No REPL and no LM. | The laws of 4.7 run in CI. |
-| 2. Guest API and REPL | `harness-guest`, `harness-repl`, the modes, the guards of Phase 0, the laws of `Data` as properties, `shape` and the preamble, the note of lost names, the second try of a cell, the catch around `ReplDriver.run`, the clock of a cell, the error hints, and negative tests for modes. | Model code runs against the guest API in each mode. |
+| 2. Guest API and REPL | `harness-guest`, `harness-repl`, the modes, the guards of Phase 0, the laws of `Data` as properties, `shape` and the preamble, the note of lost names, the second try of a cell, the catch around `ReplDriver.run`, the clock of a cell, the error hints, negative tests for modes, and `harness-mcp`. | Model code runs against the guest API in each mode, and another agent can run cells through MCP. |
 | 3. Sandbox | `harness-sandbox`: Seatbelt and bubblewrap, profiles from modes, and escape tests. | `exec` runs only in a sandbox. |
 | 4. One task | `Harness`, `drive`, the window strategy, `OptimizableStructure`, `ProgramRunner`. | A harness for one task that the optimizers accept. |
 | 5. RLM | `llmQuery`, `llmQueryBatched`, `rlm` and `rlmBatched` behind `Children^`, a child from a `shape`, the shared budget, the depth limit. | RLM in the harness. |
@@ -1401,7 +1420,7 @@ Each phase ends with something that runs.
 | 7. The session host | `harness-host`: the writer, feeds, timers, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `guarded`, and the client side of `Grant`. `harness-cli`, its JDK and an AOT cache (choice 8). | A coding agent for daily use, one session at a time. |
 | 8. Memory | The memory tree and its metric. | Long sessions that lose no detail. |
 | 9. The controller | `Sessions`, the report pass with a crash test, the ledger, the graph, probes, release plans. | One controller above all sessions. |
-| Later | Replay, the reviewer, jobs across a restart, `parallel` if batch calls are not enough, a container backend, LSP as a guest API, the early MCP server if phase 2 needs it, prompt-cache marks. | |
+| Later | Replay, the reviewer, jobs across a restart, `parallel` if batch calls are not enough, a container backend, LSP as a guest API, prompt-cache marks. | |
 
 Phase 6 comes before the session host on purpose. The optimizers are what makes this harness different from the
 others, so the design must meet them early.
