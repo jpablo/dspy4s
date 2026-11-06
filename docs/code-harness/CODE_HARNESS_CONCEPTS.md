@@ -225,7 +225,7 @@ a concept with "Replay" in this table is lost, and the model gets a note of the 
 | Interrupt | A request to stop the current work (`Abort`, 4.2) | Record | Stored, as `StopRequested` |
 | Cancel handle | The object that stops running work | Live | Lost |
 | Request id | The key that finds a repeated input | Data | Stored |
-| Approval | A question to a person about one action, with its answer | Control and Record | The question is Stored, as `EffectResult.NeedsApproval` and `pending`. A waiting cell thread would be Lost, so no thread waits. |
+| Approval | A pending call, which waits for the answer of a person, with that answer | Control and Record | The pending call is Stored, as `EffectResult.NeedsApproval` and `pending`. A waiting cell thread would be Lost, so no thread waits. |
 | Grant | The answer to an approval: a guard rule and a lifetime | Record | Stored |
 | Sleep | A wait for a time (`pi-durable`: stored; Codex: a `sleep` tool) | Control | Stored in `pi-durable` |
 | Client | A terminal or a page that shows a session | Live | Lost |

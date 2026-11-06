@@ -1569,14 +1569,14 @@ enum Outcome:
   case Abandoned(reason: String)
   case Replaced(by: SessionRef)
 
-enum ReleaseStep:
+enum ReleaseItem:
   case RemoveWorktree(path: Path)
   case DeleteBranch(name: String)
   case KeepRef(name: String, commit: Sha)  // makes a later delete reversible
   case ArchiveDirectory(path: Path, to: Path)
   case Keep(resource: String, reason: String)
 
-def releasePlan(scope: ScopeState, outcome: Outcome): Vector[ReleaseStep]  // pure
+def releasePlan(scope: ScopeState, outcome: Outcome): Vector[ReleaseItem]  // pure
 ```
 
 A handler runs the plan, and the ledger records each step. A dry run shows the plan with no effect. Tests can
