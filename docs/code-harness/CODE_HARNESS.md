@@ -1803,6 +1803,10 @@ change:
 
 The later change is then only to add the replay of cells.
 
+Choice 9 of [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md) keeps replay for later. The design has steps 2 and 3.
+Step 1 waits for replay, because safe mode allows `java.time.Instant.now()` and `scala.util.Random`. A replay then
+stops at the first divergence.
+
 ### 8.5 The decider and the runtime
 
 The algebra of a session is a pure decider. A runtime is an interpreter of it:
@@ -1876,6 +1880,8 @@ Open questions:
    with a small amount of code (one handler that records and one that replays). Two guards of the REPL in the same
    JVM start a new REPL, and replay keeps the definitions across that change. One guard restarts an unclean host.
    The other guard limits a REPL to about 300 cells.
+   Closed by choice 9 of [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md): replay is a later feature. Both guards
+   start a new REPL as after a crash, and the model gets a note of the lost names.
 2. Does the session host use `kyo-actor`, and does the journal use `kyo-sql-sqlite`
    ([CODE_HARNESS_KYO.md](CODE_HARNESS_KYO.md), section 7)? This needs JDK 25, and it changes decision 1 for the host.
    Closed by choice 7 of [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md): no. The first host is a plain thread and a
@@ -2063,13 +2069,15 @@ The recommendation is a REPL in the same JVM, behind the `ScalaRepl` contract (F
 2. Bind an `ExecutionContext` for each REPL in the preamble. Reject `ExecutionContext.global`, `new Thread`,
    `System.exit` and `Runtime` in guest code, with safe mode or a validator, as atc does.
 3. When a worker thread does not end after a stop, mark the host process as unclean. Restart the host at the
-   next safe point, for example after a batch of rollouts, and rebuild each REPL with replay.
+   next safe point, for example after a batch of rollouts, and start each REPL as after a crash.
 4. Monitor the heap. Above a limit, close the REPL whose cell thread allocated the most memory. The experiment
    did not test this guard.
-5. Limit a REPL to about 300 cells. Then start a new REPL and replay the cells into it.
+5. Limit a REPL to about 300 cells. Then start a new REPL as after a crash.
 
-Guards 3 and 5 use replay (8.4) to rebuild the definitions. With no replay, the new REPL has only the store of 4.2,
-and the model gets a note. A forked JVM stays the fallback: use it if unclean restarts occur often, or if the harness
+Guards 3 and 5 do not use replay, because the first version has none (choice 9 of
+[CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md)). The new REPL has the preamble and the store of 4.2, and the model
+gets a note of the lost names. A replay would not suit guard 5, because it makes the same cells again, with the same
+memory. A forked JVM stays the fallback: use it if unclean restarts occur often, or if the harness
 must run code from a source that it does not trust.
 
 The experiment did not test a journal on disk, the order of `parallel` results in a replay, capture checking in
