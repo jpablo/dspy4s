@@ -52,15 +52,15 @@ h3 { font: 600 19px/1.2 var(--display); margin: 0; }
 .scroll { overflow-x: auto; min-width: 0; }
 code { font-family: var(--mono); font-size: .9em; }
 /* Stickies */
-.sticky { display: inline-flex; flex-direction: column; justify-content: center; gap: 2px; width: 132px; min-height: 92px; padding: 9px 10px; color: var(--st-ink); font: 13px/1.3 var(--body); border-radius: 2px; box-shadow: 0 1px 0 rgba(0,0,0,.14); flex: none; }
+.sticky { display: inline-flex; flex-direction: column; justify-content: center; gap: 2px; width: 140px; min-height: 92px; padding: 9px 10px; color: var(--st-ink); font: 13px/1.3 var(--body); border-radius: 2px; box-shadow: 0 1px 0 rgba(0,0,0,.14); flex: none; }
 .sticky b { font: 500 12.5px/1.25 var(--mono); overflow-wrap: anywhere; }
 .sticky small { font-size: 12px; line-height: 1.3; opacity: .82; }
 .sticky.k-event { background: var(--st-event); }
 .sticky.k-command { background: var(--st-command); }
 .sticky.k-policy { background: var(--st-policy); }
 .sticky.k-read { background: var(--st-read); }
-.sticky.k-actor { background: var(--st-actor); width: 96px; min-height: 64px; }
-.sticky.k-aggregate { background: var(--st-aggregate); width: 150px; min-height: 104px; }
+.sticky.k-actor { background: var(--st-actor); width: 112px; min-height: 64px; }
+.sticky.k-aggregate { background: var(--st-aggregate); width: 140px; min-height: 104px; }
 .sticky.k-external { background: var(--st-external); }
 .sticky.k-hot { background: var(--st-hot); transform: rotate(-2deg); }
 .key { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
@@ -70,7 +70,13 @@ code { font-family: var(--mono); font-size: .9em; }
 .key .item b { display: block; font: 500 13px var(--mono); }
 .board { display: grid; gap: 22px; }
 .lane h3 { margin-bottom: 8px; }
-.lane .strip { display: flex; align-items: center; gap: 0; padding: 10px 4px 14px; overflow-x: auto; }
+.snake { display: grid; align-items: center; justify-content: start; padding: 8px 0 6px; }
+.snake .sticky { justify-self: start; }
+.cell-arrow, .cell-down { text-align: center; color: var(--muted); font: 15px var(--mono); }
+.ret { position: relative; align-self: stretch; margin: 54px 0 54px 12px; border: 2px solid var(--muted); border-right: none; border-radius: 7px 0 0 7px; }
+.ret::after { content: ""; position: absolute; right: -1px; top: -7px; border: 6px solid transparent; border-left: 8px solid var(--muted); border-right: none; }
+.ret-tail { align-self: center; margin-left: 12px; border-top: 2px solid var(--muted); }
+.loopnote { margin: 2px 0 0; font-size: 13.5px; color: var(--muted); }
 .arrow { flex: none; width: 22px; text-align: center; color: var(--muted); font: 14px var(--mono); }
 .levels { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
 .levels span.lv { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
@@ -260,7 +266,8 @@ footer { border-top: 1px solid var(--line); margin-top: 48px; padding-top: 18px;
       n("event", "Acted", "text and code"), n("policy", "When code arrives", "the REPL runs the cell"),
       n("policy", "Each guest API call", "passes the guard"), n("event", "EffectStarted"), n("external", "Workspace and OS", "the call runs"),
       n("event", "EffectDone"), n("event", "Observed"), n("policy", "When a cell ends", "the worker asks next"),
-      n("event", "Acted", "text, no code"), n("event", "TurnEnded", "Replied"), n("read", "Feeds", "the client shows the answer"), n("actor", "Person")]],
+      n("event", "Acted", "text, no code"), n("event", "TurnEnded", "Replied"), n("read", "Feeds", "the client shows the answer"), n("actor", "Person")],
+      "The person reads the answer and sends the next message, so the flow returns to its start."],
     ["A stop, and a crash", [
       n("actor", "Person"), n("command", "Abort", "Stop"), n("event", "StopRequested"),
       n("policy", "When a stop commits", "flag, interrupt, TERM then KILL"), n("event", "EffectDone", "Unknown"), n("event", "Observed", "Failed"),
@@ -291,20 +298,57 @@ footer { border-top: 1px solid var(--line); margin-top: 48px; padding-top: 18px;
       n("actor", "Optimizer"), n("command", "forward", "the input fields"), n("aggregate", "Session in memory", "a closed mode"),
       n("event", "Input", "with the values"), n("policy", "Preamble", "types, submit, input fields"), n("event", "Acted", "a cell"),
       n("event", "Observed", "Submitted"), n("event", "TurnEnded", "Submitted"), n("policy", "Data[O]", "reads the value"),
-      n("read", "Trace", "the leaves and their calls"), n("policy", "Metric", "runs the tests in the fork"), n("actor", "Optimizer", "a new candidate"),
-      n("hot", "An optimizer run", "not run")]]
+      n("read", "Trace", "the leaves and their calls"), n("policy", "Metric", "runs the tests in the fork"),
+      n("hot", "An optimizer run", "not run"), n("actor", "Optimizer")],
+      "The optimizer makes a new candidate and runs it, so the flow returns to its start."]
   ];
+  /* Each row is a snake. The count of notes on a line follows the width. A row that ends with its first actor returns to it
+     by an arrow on the left, so it has an even count of lines. */
+  const STW = 140, AW = 26, GUT = 36, ROWH = 110, DOWNH = 30;
   const lanes = document.getElementById("lanes");
-  LANES.forEach(function (lane) {
+  function sticky(s) { const st = el("div", "sticky k-" + s[0]); st.appendChild(el("b", null, s[1])); if (s[2]) st.appendChild(el("small", null, s[2])); return st; }
+  function place(node, col, row, colEnd) { node.style.gridColumn = colEnd ? col + " / " + colEnd : String(col); node.style.gridRow = String(row); return node; }
+  const built = LANES.map(function (lane) {
     const box = el("div", "lane"); box.appendChild(el("h3", null, lane[0]));
-    const strip = el("div", "strip");
-    lane[1].forEach(function (s, i) {
-      if (i > 0) strip.appendChild(el("span", "arrow", "→"));
-      const st = el("div", "sticky k-" + s[0]); st.appendChild(el("b", null, s[1])); if (s[2]) st.appendChild(el("small", null, s[2]));
-      strip.appendChild(st);
-    });
-    box.appendChild(strip); lanes.appendChild(box);
+    const grid = el("div", "snake"); box.appendChild(grid);
+    let items = lane[1];
+    const last = items[items.length - 1];
+    const loop = !!lane[2] && items[0][0] === "actor" && last[0] === "actor" && items[0][1] === last[1];
+    if (loop) { items = items.slice(0, -1); box.appendChild(el("p", "loopnote", "↺ " + lane[2])); }
+    lanes.appendChild(box);
+    return { box: box, grid: grid, items: items, loop: loop, key: "" };
   });
+  function layout(b) {
+    const width = b.box.clientWidth || 900;
+    const kMax = Math.max(1, Math.floor((width - (b.loop ? GUT : 0) + AW) / (STW + AW)));
+    const n = b.items.length;
+    let L = Math.ceil(n / kMax);
+    if (b.loop) { if (L < 2) L = 2; if (L % 2 === 1) L += 1; }
+    const sizes = []; for (let i = 0; i < L; i++) sizes.push(Math.floor(n / L) + (i < n % L ? 1 : 0));
+    const k = sizes[0];
+    const key = k + "x" + L; if (b.key === key) return; b.key = key;
+    const base = b.loop ? 2 : 1;
+    const colOf = function (p) { return base + 2 * p; };
+    const g = b.grid; g.textContent = "";
+    g.style.gridTemplateColumns = (b.loop ? GUT + "px " : "") + Array.from({ length: k }, function (_, j) { return (j > 0 ? AW + "px " : "") + STW + "px"; }).join(" ");
+    g.style.gridTemplateRows = Array.from({ length: L }, function (_, i) { return (i > 0 ? DOWNH + "px " : "") + ROWH + "px"; }).join(" ");
+    let idx = 0, pos = 0, dir = 1;
+    for (let i = 0; i < L; i++) {
+      const row = 2 * i + 1;
+      for (let j = 0; j < sizes[i]; j++) {
+        if (j > 0) { pos += dir; g.appendChild(place(el("span", "cell-arrow", dir > 0 ? "→" : "←"), colOf(Math.min(pos, pos - dir)) + 1, row)); }
+        g.appendChild(place(sticky(b.items[idx++]), colOf(pos), row));
+      }
+      if (i < L - 1) { g.appendChild(place(el("span", "cell-down", "↓"), colOf(pos), row + 1)); dir = -dir; }
+    }
+    if (b.loop) {
+      const lastRow = 2 * (L - 1) + 1;
+      const ret = el("span", "ret"); ret.style.gridColumn = "1"; ret.style.gridRow = "1 / " + (lastRow + 1); g.appendChild(ret);
+      if (pos > 0) g.appendChild(place(el("span", "ret-tail"), 1, lastRow, colOf(pos)));
+    }
+  }
+  built.forEach(layout);
+  if (window.ResizeObserver) new ResizeObserver(function () { built.forEach(layout); }).observe(lanes);
 
   /* The parts of the harness, for the catalog and the table. */
   const PARTS = {
