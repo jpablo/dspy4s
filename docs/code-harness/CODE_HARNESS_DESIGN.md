@@ -3,7 +3,8 @@
 Status: design, 2026-11-01. This document is the current design of the dspy4s harness. It takes the place of section 4
 of [CODE_HARNESS.md](CODE_HARNESS.md), which keeps the analysis and the history. Nothing here exists in the code of
 dspy4s yet. The sketches of the kernel and of the guest API compile and ran in checks (section 12). Section 14 lists
-the choices that are new in this document.
+the choices that are new in this document. [CODE_HARNESS_ATLAS.html](CODE_HARNESS_ATLAS.html) has six diagrams of this
+design. Open it in a browser.
 
 ## Summary
 

@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Open this file in a browser. It shows six diagrams of CODE_HARNESS_DESIGN.md. The design document is the
+     authority: where a diagram and the design differ, follow the design. -->
+<title>Code harness atlas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500&display=swap">
+<style>
+/* Layout: a single reading column of six numbered plates, in the order of the design; each plate is caption, figure, source. */
+:root {
+  --bg: #f2f5f4; --surface: #ffffff; --ink: #13211e; --muted: #566a66; --line: #c6d3d0;
+  --accent: #0d6a5b; --accent-tint: #dbeee9;
+  --intent: #a8610f; --intent-tint: #f6e7d2;
+  --person: #5548ad; --person-tint: #e5e2f6;
+  --stop: #b0412d; --stop-tint: #f5ddd7;
+  --gray-tint: #e6ecea;
+  --display: "IBM Plex Sans Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0d1413; --surface: #151f1d; --ink: #e1ebe8; --muted: #94a8a3; --line: #2a3a37;
+  --accent: #5bc3ad; --accent-tint: #163a33; --intent: #e5a351; --intent-tint: #392914;
+  --person: #a69bef; --person-tint: #26224a; --stop: #ed8973; --stop-tint: #3c1e18; --gray-tint: #1d2927;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0d1413; --surface: #151f1d; --ink: #e1ebe8; --muted: #94a8a3; --line: #2a3a37;
+  --accent: #5bc3ad; --accent-tint: #163a33; --intent: #e5a351; --intent-tint: #392914;
+  --person: #a69bef; --person-tint: #26224a; --stop: #ed8973; --stop-tint: #3c1e18; --gray-tint: #1d2927;
+  color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 var(--body); }
+.wrap { max-width: 1020px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 40px 72px; }
+.eyebrow { font: 500 12px/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0; }
+h1 { font: 600 clamp(34px, 6vw, 52px)/1.05 var(--display); letter-spacing: -.01em; margin: 10px 0 14px; text-wrap: balance; }
+.lede { max-width: 64ch; color: var(--muted); margin: 0; }
+.index { display: flex; flex-wrap: wrap; gap: 8px; margin: 26px 0 8px; padding: 0; list-style: none; }
+.index a { display: inline-flex; gap: 8px; align-items: baseline; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); text-decoration: none; font-size: 14px; background: var(--surface); }
+.index a:hover { border-color: var(--accent); }
+.index a:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.index b { font: 500 12px var(--mono); color: var(--muted); }
+.plate { border-top: 1px solid var(--line); padding-block: 44px 8px; display: grid; gap: 14px; }
+.plate-head { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; align-items: baseline; }
+.plate-no { font: 600 13px var(--mono); color: var(--accent); letter-spacing: .04em; text-transform: uppercase; grid-row: span 2; padding-top: 6px; }
+h2 { font: 600 28px/1.15 var(--display); margin: 0; text-wrap: balance; }
+.ref { font: 12.5px var(--mono); color: var(--muted); margin: 0; }
+.caption { max-width: 68ch; margin: 0; }
+.figure { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; overflow-x: auto; min-width: 0; }
+.figure svg { display: block; width: 100%; height: auto; min-width: 760px; }
+code, .mono { font-family: var(--mono); font-size: .9em; }
+/* SVG classes */
+.s-box { fill: var(--surface); stroke: var(--line); }
+.s-panel { fill: var(--gray-tint); stroke: var(--line); }
+.s-core { fill: var(--accent-tint); stroke: var(--accent); }
+.s-ext { fill: var(--surface); stroke: var(--muted); stroke-dasharray: 5 4; }
+.s-person { fill: var(--person-tint); stroke: var(--person); }
+.s-intent { fill: var(--intent-tint); stroke: var(--intent); }
+.s-frame { fill: none; stroke: var(--muted); }
+.t-title { font: 600 15px var(--display); fill: var(--ink); }
+.t-big { font: 600 17px var(--display); fill: var(--ink); }
+.t-sub { font: 12.5px var(--body); fill: var(--muted); }
+.t-mono { font: 12px var(--mono); fill: var(--ink); }
+.t-lbl { font: 12px var(--body); fill: var(--muted); paint-order: stroke; stroke: var(--surface); stroke-width: 5px; stroke-linejoin: round; }
+.t-lblink { font: 12px var(--body); fill: var(--ink); paint-order: stroke; stroke: var(--surface); stroke-width: 5px; stroke-linejoin: round; }
+.wire { stroke: var(--muted); stroke-width: 1.3; fill: none; }
+.wire-dash { stroke-dasharray: 5 4; }
+.wire-accent { stroke: var(--accent); }
+.wire-person { stroke: var(--person); }
+.wire-intent { stroke: var(--intent); }
+.lifeline { stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 4 4; }
+/* Unit table */
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; }
+th, td { text-align: left; vertical-align: top; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+th { font: 500 12px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+td:first-child { font-weight: 500; white-space: nowrap; }
+.table-wrap { overflow-x: auto; min-width: 0; }
+.keeps { margin: 12px 0 0; font-size: 14.5px; color: var(--muted); max-width: 70ch; }
+/* Tape */
+.seg { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.btn { font: 13.5px var(--body); padding: 6px 11px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+.btn:hover:not(:disabled) { border-color: var(--accent); }
+.btn:disabled { opacity: .38; cursor: not-allowed; }
+.seg .btn[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.tape { display: flex; flex-wrap: wrap; gap: 7px; align-items: flex-start; margin-top: 14px; }
+.grp { display: inline-flex; flex-wrap: wrap; gap: 7px; align-items: flex-start; padding: 22px 8px 8px; border: 1px dashed var(--muted); border-radius: 9px; position: relative; }
+.grp-label { position: absolute; top: 4px; left: 9px; font: 11.5px var(--mono); color: var(--muted); }
+.tile { font: 12.5px/1.2 var(--mono); padding: 6px 9px; border-radius: 6px; border: 1px solid var(--line); position: relative; white-space: nowrap; color: var(--ink); }
+.tile.life { background: var(--gray-tint); }
+.tile.msg { background: var(--person-tint); border-color: var(--person); }
+.tile.intent { background: var(--intent-tint); border-color: var(--intent); }
+.tile.outcome { background: var(--accent-tint); border-color: var(--accent); }
+.tile.both { background: linear-gradient(90deg, var(--accent-tint) 50%, var(--intent-tint) 50%); border-color: var(--muted); }
+.tile.stop { background: var(--stop-tint); border-color: var(--stop); }
+.tile.repair { background: repeating-linear-gradient(135deg, var(--stop-tint) 0 6px, var(--surface) 6px 12px); border: 1px dashed var(--stop); }
+.tile.flush::after { content: ""; position: absolute; top: -5px; right: -5px; width: 10px; height: 10px; border-radius: 50%; background: var(--ink); border: 2px solid var(--surface); }
+.tile.fresh { box-shadow: 0 0 0 2px var(--accent); }
+.mark { font: 500 12.5px var(--mono); color: var(--stop); align-self: center; padding: 0 4px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 14px; margin-top: 16px; font-size: 13px; color: var(--muted); }
+.legend span { display: inline-flex; gap: 6px; align-items: center; }
+.legend .tile { padding: 2px 8px; font-size: 11.5px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink); display: inline-block; }
+.tape-note { margin: 14px 0 0; font-size: 14.5px; max-width: 70ch; }
+/* Stepper */
+.stepper { display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 22px; }
+@media (max-width: 760px) { .stepper { grid-template-columns: 1fr; } }
+.controls { display: grid; gap: 14px; align-content: start; }
+.controls h3 { font: 500 12px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .05em; margin: 0 0 6px; }
+.controls .seg { gap: 6px; }
+.states { display: flex; flex-wrap: wrap; gap: 6px; }
+.state { font: 12.5px var(--mono); padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--muted); }
+.state.on { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.readout { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 14px 0 4px; font-size: 14px; align-items: baseline; }
+.readout dt { color: var(--muted); font: 500 12px var(--mono); text-transform: uppercase; letter-spacing: .05em; }
+.readout dd { margin: 0; font-family: var(--mono); font-size: 14px; }
+.flag { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--stop-tint); color: var(--stop); border: 1px solid var(--stop); }
+.said { margin: 10px 0 0; font-size: 14px; color: var(--muted); min-height: 1.6em; }
+/* Evidence */
+.summary { display: flex; height: 14px; border-radius: 7px; overflow: hidden; border: 1px solid var(--line); margin: 6px 0 14px; }
+.summary span { display: block; height: 100%; }
+.chip { display: inline-block; font: 500 11.5px/1.5 var(--mono); padding: 1px 8px; border-radius: 999px; white-space: nowrap; border: 1px solid; }
+.k-repl { background: var(--accent); border-color: var(--accent); color: var(--surface); }
+.k-random { background: var(--accent-tint); border-color: var(--accent); color: var(--accent); }
+.k-program { background: var(--person-tint); border-color: var(--person); color: var(--person); }
+.k-measured { background: var(--intent-tint); border-color: var(--intent); color: var(--intent); }
+.k-none { background: var(--stop-tint); border-color: var(--stop); color: var(--stop); }
+.bar-repl { background: var(--accent); } .bar-random { background: var(--accent-tint); } .bar-program { background: var(--person); }
+.bar-measured { background: var(--intent); } .bar-none { background: var(--stop); }
+.ev td:nth-child(2) { white-space: nowrap; }
+.ev td:last-child { color: var(--muted); font-size: 14px; }
+.ev tr.group td { font: 600 15px var(--display); color: var(--ink); background: var(--gray-tint); padding-block: 7px; }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.filters .btn b { font-weight: 500; color: var(--muted); margin-left: 4px; }
+.filters .btn[aria-pressed="true"] b { color: var(--bg); }
+footer { border-top: 1px solid var(--line); margin-top: 48px; padding-top: 18px; color: var(--muted); font-size: 13.5px; max-width: 76ch; }
+@media (prefers-reduced-motion: no-preference) { .tile.fresh { transition: box-shadow .3s; } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <p class="eyebrow">dspy4s · branch code-harness · 2026-11-06</p>
+  <h1>Code harness atlas</h1>
+  <p class="lede">Six plates for reading <code>docs/code-harness/CODE_HARNESS_DESIGN.md</code>, in the order of the design. Read them from the system map down to the evidence. Where a plate and the design differ, follow the design.</p>
+  <ul class="index">
+    <li><a href="#map"><b>1</b>The system map</a></li>
+    <li><a href="#units"><b>2</b>The units</a></li>
+    <li><a href="#tape"><b>3</b>The journal tape</a></li>
+    <li><a href="#stepper"><b>4</b>The next stepper</a></li>
+    <li><a href="#approval"><b>5</b>An approval</a></li>
+    <li><a href="#evidence"><b>6</b>The evidence</a></li>
+  </ul>
+
+  <section class="plate" id="map">
+    <div class="plate-head"><span class="plate-no">Plate 1</span><h2>The system map</h2><p class="ref">Design §1, §4, §10.1, §10.2</p></div>
+    <p class="caption">The harness is one JVM process. Clients and other agents send commands in. The session host gives each session one mailbox and one writer. The writer asks the pure kernel what may commit, writes the journal file, and publishes the entries to the clients. The worker runs one turn: the REPL runs the cells, and the handlers make the guest API calls through the guard and the OS sandbox. Background readers read the journal, but they never write to it.</p>
+    <div class="figure">
+      <svg viewBox="0 0 940 550" role="img" aria-labelledby="map-t map-d">
+        <title id="map-t">The parts of the code harness</title>
+        <desc id="map-d">Clients and an MCP agent outside the process. Inside: the session host with mailbox, writer, feeds and timers; the pure kernel; the worker with the REPL and the guest API handlers; background readers. Outside right: journal files, the OS sandbox, the LM provider.</desc>
+        <defs><marker id="ah1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+        <rect x="200" y="16" width="520" height="514" rx="14" class="s-frame" stroke-width="1"/>
+        <text x="216" y="40" class="t-big">Harness process, JDK 21</text>
+
+        <rect x="216" y="64" width="236" height="150" rx="10" class="s-core" stroke-width="1"/>
+        <text x="232" y="88" class="t-title">Session host</text>
+        <rect x="232" y="100" width="204" height="26" rx="5" class="s-box"/><text x="242" y="117" class="t-sub">Mailbox: commands in order</text>
+        <rect x="232" y="132" width="204" height="26" rx="5" class="s-box"/><text x="242" y="149" class="t-sub">Writer: one thread</text>
+        <rect x="232" y="164" width="204" height="26" rx="5" class="s-box"/><text x="242" y="181" class="t-sub">Feeds and timers</text>
+
+        <rect x="468" y="64" width="236" height="150" rx="10" class="s-core" stroke-width="1"/>
+        <text x="484" y="88" class="t-title">Kernel, pure functions</text>
+        <text x="484" y="114" class="t-mono">decide</text><text x="544" y="114" class="t-sub">may this commit?</text>
+        <text x="484" y="140" class="t-mono">evolve</text><text x="544" y="140" class="t-sub">the new state</text>
+        <text x="484" y="166" class="t-mono">next</text><text x="544" y="166" class="t-sub">what comes next</text>
+        <text x="484" y="192" class="t-mono">repair</text><text x="544" y="192" class="t-sub">close after a crash</text>
+
+        <rect x="216" y="232" width="488" height="140" rx="10" class="s-panel"/>
+        <text x="232" y="256" class="t-title">Worker: <tspan class="t-mono">drive</tspan> runs one turn</text>
+        <rect x="232" y="270" width="220" height="86" rx="8" class="s-box"/>
+        <text x="248" y="294" class="t-title">REPL</text>
+        <text x="248" y="314" class="t-sub">cells and the preamble</text>
+        <text x="248" y="332" class="t-sub">capture checking, safe mode</text>
+        <rect x="468" y="270" width="220" height="86" rx="8" class="s-box"/>
+        <text x="484" y="294" class="t-title">Guest API handlers</text>
+        <text x="484" y="314" class="t-sub">files, shell, LM, store</text>
+        <text x="484" y="332" class="t-sub">guard: Allow, Ask, Deny</text>
+
+        <rect x="216" y="390" width="488" height="124" rx="10" class="s-panel"/>
+        <text x="232" y="414" class="t-title">Background readers</text>
+        <rect x="232" y="428" width="144" height="70" rx="8" class="s-box"/><text x="244" y="454" class="t-title">Context strategy</text><text x="244" y="474" class="t-sub">window, memory tree</text>
+        <rect x="388" y="428" width="144" height="70" rx="8" class="s-box"/><text x="400" y="454" class="t-title">Derivations</text><text x="400" y="474" class="t-sub">summaries, graph</text>
+        <rect x="544" y="428" width="144" height="70" rx="8" class="s-box"/><text x="556" y="454" class="t-title">Controller</text><text x="556" y="474" class="t-sub">ledger, probes</text>
+
+        <rect x="20" y="80" width="150" height="72" rx="10" class="s-person"/>
+        <text x="36" y="106" class="t-title">Clients</text><text x="36" y="126" class="t-sub">terminal, other UIs</text>
+        <rect x="20" y="280" width="150" height="72" rx="10" class="s-person"/>
+        <text x="36" y="306" class="t-title">Another agent</text><text x="36" y="326" class="t-sub">MCP, from phase 2</text>
+
+        <rect x="760" y="64" width="160" height="96" rx="10" class="s-ext"/>
+        <text x="776" y="88" class="t-title">Journal files</text><text x="776" y="108" class="t-sub">one SQLite file</text><text x="776" y="124" class="t-sub">for each session</text><text x="776" y="144" class="t-mono">catalog.db</text>
+        <rect x="760" y="232" width="160" height="60" rx="10" class="s-ext"/>
+        <text x="776" y="256" class="t-title">OS sandbox</text><text x="776" y="276" class="t-sub">commands and jobs</text>
+        <rect x="760" y="310" width="160" height="60" rx="10" class="s-ext"/>
+        <text x="776" y="334" class="t-title">LM provider</text><text x="776" y="354" class="t-sub">the Predict leaves</text>
+
+        <line x1="170" y1="106" x2="228" y2="113" class="wire wire-person" marker-end="url(#ah1)"/>
+        <text x="174" y="96" class="t-lbl">commands</text>
+        <line x1="230" y1="177" x2="174" y2="142" class="wire wire-person" marker-end="url(#ah1)"/>
+        <text x="174" y="190" class="t-lbl">entries</text>
+        <path d="M334 64 V54 H744 V100 H756" class="wire wire-accent" marker-end="url(#ah1)"/>
+        <line x1="452" y1="140" x2="465" y2="140" class="wire" marker-end="url(#ah1)"/>
+        <line x1="334" y1="232" x2="334" y2="217" class="wire wire-accent" marker-end="url(#ah1)"/>
+        <text x="344" y="227" class="t-lbl" style="font-size:11px">commits through the mailbox</text>
+        <line x1="586" y1="232" x2="586" y2="217" class="wire" marker-end="url(#ah1)"/>
+        <text x="596" y="227" class="t-lbl" style="font-size:11px">asks next</text>
+        <line x1="688" y1="300" x2="756" y2="268" class="wire wire-intent" marker-end="url(#ah1)"/>
+        <line x1="688" y1="330" x2="756" y2="340" class="wire wire-intent" marker-end="url(#ah1)"/>
+        <path d="M920 112 H932 V470 H708" class="wire wire-dash" marker-end="url(#ah1)"/>
+        <text x="846" y="462" class="t-lbl">reads only</text>
+        <line x1="170" y1="316" x2="228" y2="316" class="wire wire-person" marker-end="url(#ah1)"/>
+        <text x="174" y="306" class="t-lbl" style="font-family:var(--mono)">run_cell</text>
+      </svg>
+    </div>
+  </section>
+
+  <section class="plate" id="units">
+    <div class="plate-head"><span class="plate-no">Plate 2</span><h2>The units, one inside the other</h2><p class="ref">Design §3, §4.1, §6</p></div>
+    <p class="caption">Each unit sits inside the one above it. A session lives for good in its journal file. An activation is the part of a session that lives in one process, so the REPL definitions end with it. Turns, steps, cells and guest API calls are spans of entries in the journal.</p>
+    <div class="figure">
+      <svg viewBox="0 0 940 430" role="img" aria-labelledby="units-t units-d">
+        <title id="units-t">Session, activation, turn, step, cell and guest API call</title>
+        <desc id="units-d">Nested boxes: a session holds activations, an activation holds turns, a turn holds steps, a step holds at most one cell, and a cell holds guest API calls that run one at a time.</desc>
+        <rect x="20" y="16" width="900" height="400" rx="16" class="s-panel"/>
+        <text x="40" y="42" class="t-big">Session</text><text x="40" y="61" class="t-sub">an id and a journal, for good</text>
+        <rect x="40" y="76" width="860" height="330" rx="14" class="s-box"/>
+        <text x="60" y="102" class="t-big">Activation</text><text x="60" y="121" class="t-sub">the live part in one process: one REPL, the threads, the mailbox</text>
+        <rect x="60" y="136" width="820" height="260" rx="12" class="s-core"/>
+        <text x="80" y="162" class="t-big">Turn</text><text x="80" y="181" class="t-sub"><tspan class="t-mono">TurnStarted</tspan> to <tspan class="t-mono">TurnEnded</tspan>; a report while the session owes one</text>
+        <rect x="80" y="196" width="780" height="190" rx="10" class="s-box"/>
+        <text x="100" y="222" class="t-big">Step</text><text x="100" y="241" class="t-sub">one LM call and what it starts</text>
+        <rect x="100" y="256" width="740" height="120" rx="10" class="s-intent"/>
+        <text x="120" y="282" class="t-big">Cell</text><text x="120" y="301" class="t-sub">code that the REPL runs</text>
+        <text x="120" y="320" class="t-sub">store writes count only if it completes</text>
+        <rect x="460" y="270" width="170" height="60" rx="8" class="s-box"/>
+        <text x="474" y="294" class="t-title">Guest API call</text><text x="474" y="314" class="t-sub">intent, then outcome</text>
+        <rect x="650" y="270" width="170" height="60" rx="8" class="s-box"/>
+        <text x="664" y="294" class="t-title">The next call</text><text x="664" y="314" class="t-sub">one at a time</text>
+      </svg>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Unit</th><th>Its entries</th><th>Where it lives</th><th>After a restart</th></tr></thead>
+        <tbody>
+          <tr><td>Session</td><td>all of them</td><td><code>&lt;root&gt;/sessions/&lt;id&gt;.db</code></td><td>Stays. It can reopen, also on another machine.</td></tr>
+          <tr><td>Activation</td><td><code>Activated</code></td><td>Process memory: the REPL, the threads, the mailbox</td><td>Ends. A new <code>Activated</code> starts the next one.</td></tr>
+          <tr><td>Turn</td><td><code>TurnStarted</code> … <code>TurnEnded</code></td><td>The journal</td><td>A turn that a crash cut ends as <code>TurnEnded(Crashed)</code>.</td></tr>
+          <tr><td>Step</td><td><code>StepStarted</code>, <code>Acted</code></td><td>The journal</td><td>The repair closes it.</td></tr>
+          <tr><td>Cell</td><td><code>Acted.code</code>, <code>Observed</code></td><td>The journal, and its definitions in the REPL</td><td>Its store writes stay only if it completed. Its definitions are gone.</td></tr>
+          <tr><td>Guest API call</td><td><code>EffectStarted</code>, <code>EffectDone</code></td><td>The journal</td><td>An open call gets <code>EffectDone(Unknown)</code>.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="keeps">A restart keeps the journal, the store and the preamble. It loses the definitions in the REPL, so the model gets a note that lists the lost names and the cell of each.</p>
+  </section>
+
+  <section class="plate" id="tape">
+    <div class="plate-head"><span class="plate-no">Plate 3</span><h2>The journal tape</h2><p class="ref">Design §4.1, §4.4, §4.6, choice 17</p></div>
+    <p class="caption">A journal is a list of facts. Read it from left to right. Each intent is committed before its effect starts, and each outcome after the effect ends. A dot marks a commit with a full flush: each input, each activation, and the intent of a call that can change the world. Pick a case to see how a stop and a crash change the journal.</p>
+    <div class="figure">
+      <div class="seg" role="group" aria-label="Pick a case">
+        <button class="btn" type="button" id="tape-normal" aria-pressed="true">A normal turn</button>
+        <button class="btn" type="button" id="tape-stop" aria-pressed="false">A stop during a call</button>
+        <button class="btn" type="button" id="tape-crash" aria-pressed="false">A crash during a call</button>
+      </div>
+      <div class="tape" id="tape-view" aria-live="polite"></div>
+      <p class="tape-note" id="tape-note"></p>
+      <div class="legend">
+        <span><i class="tile life">lifecycle</i></span>
+        <span><i class="tile msg">message</i></span>
+        <span><i class="tile intent">intent</i></span>
+        <span><i class="tile outcome">outcome</i></span>
+        <span><i class="tile both">outcome and intent</i></span>
+        <span><i class="tile stop">stop</i></span>
+        <span><i class="tile repair">added by repair</i></span>
+        <span><i class="dot"></i>full flush</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="plate" id="stepper">
+    <div class="plate-head"><span class="plate-no">Plate 4</span><h2>The next stepper</h2><p class="ref">Design §4.2, §4.3, §4.4, §4.6</p></div>
+    <p class="caption"><code>next</code> reads the state and says what comes next. Use the buttons to send events. Each event commits entries, and the state is the fold of those entries. A button is off when the current state does not accept that event. This chat session has a limit of 3 steps.</p>
+    <div class="figure">
+      <div class="stepper">
+        <div class="controls">
+          <div><h3>A person</h3><div class="seg">
+            <button class="btn" type="button" id="ev-send">Send a message</button>
+            <button class="btn" type="button" id="ev-stop">Press Stop</button></div></div>
+          <div><h3>The worker</h3><div class="seg">
+            <button class="btn" type="button" id="ev-call">Call the LM</button>
+            <button class="btn" type="button" id="ev-end">End the turn</button>
+            <button class="btn" type="button" id="ev-close">Close the stopped turn</button></div></div>
+          <div><h3>The LM</h3><div class="seg">
+            <button class="btn" type="button" id="ev-code">Write a cell</button>
+            <button class="btn" type="button" id="ev-text">Reply with text</button></div></div>
+          <div><h3>The cell</h3><div class="seg">
+            <button class="btn" type="button" id="ev-start">Start a guest API call</button>
+            <button class="btn" type="button" id="ev-done">The call returns</button>
+            <button class="btn" type="button" id="ev-observed">The cell ends</button>
+            <button class="btn" type="button" id="ev-submit">The cell calls submit</button></div></div>
+          <div><h3>The world</h3><div class="seg">
+            <button class="btn" type="button" id="ev-crash">Crash and restart</button>
+            <button class="btn" type="button" id="ev-reset">Start again</button></div></div>
+        </div>
+        <div>
+          <div class="states" id="states"></div>
+          <dl class="readout">
+            <dt>Position</dt><dd id="pos"></dd>
+            <dt>next says</dt><dd id="nexts"></dd>
+          </dl>
+          <p class="said" id="said"></p>
+          <div class="tape" id="log"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="plate" id="approval">
+    <div class="plate-head"><span class="plate-no">Plate 5</span><h2>An approval, from start to end</h2><p class="ref">Design §5.5, §8.6, choices 5 and 14</p></div>
+    <p class="caption">A cell never waits for a person. The call fails at once with <code>NeedsApproval</code>, the journal keeps the pending call, and the turn ends with a question. The person's <code>Grant</code> answers it in one commit, and a new turn makes the call again. The owner gets a report of each turn while the work is open.</p>
+    <div class="figure">
+      <svg viewBox="0 0 940 690" role="img" aria-labelledby="ap-t ap-d">
+        <title id="ap-t">The sequence of an approval</title>
+        <desc id="ap-d">Five lanes: person and client, writer and journal, worker and cell, guard, owner. Fourteen messages from the first guard check to the last report.</desc>
+        <defs><marker id="ah2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+        <rect x="15" y="16" width="150" height="44" rx="8" class="s-person"/><text x="90" y="43" text-anchor="middle" class="t-title">Person and client</text>
+        <rect x="205" y="16" width="150" height="44" rx="8" class="s-core"/><text x="280" y="43" text-anchor="middle" class="t-title">Writer and journal</text>
+        <rect x="395" y="16" width="150" height="44" rx="8" class="s-panel"/><text x="470" y="43" text-anchor="middle" class="t-title">Worker and cell</text>
+        <rect x="575" y="16" width="150" height="44" rx="8" class="s-intent"/><text x="650" y="43" text-anchor="middle" class="t-title">Guard</text>
+        <rect x="765" y="16" width="150" height="44" rx="8" class="s-person"/><text x="840" y="43" text-anchor="middle" class="t-title">Owner session</text>
+        <line x1="90" y1="60" x2="90" y2="670" class="lifeline"/>
+        <line x1="280" y1="60" x2="280" y2="670" class="lifeline"/>
+        <line x1="470" y1="60" x2="470" y2="670" class="lifeline"/>
+        <line x1="650" y1="60" x2="650" y2="670" class="lifeline"/>
+        <line x1="840" y1="60" x2="840" y2="670" class="lifeline"/>
+
+        <line x1="470" y1="96" x2="646" y2="96" class="wire wire-intent" marker-end="url(#ah2)"/>
+        <text x="482" y="88" class="t-lblink">1. guardCheck: exec("git push")</text>
+        <line x1="650" y1="136" x2="474" y2="136" class="wire wire-intent" marker-end="url(#ah2)"/>
+        <text x="482" y="128" class="t-lblink">2. Ask, and no grant covers it</text>
+        <line x1="470" y1="176" x2="284" y2="176" class="wire wire-accent" marker-end="url(#ah2)"/>
+        <text x="292" y="168" class="t-lblink">3. EffectDone(NeedsApproval)</text>
+        <text x="292" y="196" class="t-lbl">pending now holds the rule</text>
+        <line x1="470" y1="236" x2="284" y2="236" class="wire wire-accent" marker-end="url(#ah2)"/>
+        <text x="292" y="228" class="t-lblink">4. The model asks: TurnEnded(Replied)</text>
+        <line x1="280" y1="276" x2="836" y2="276" class="wire wire-person" marker-end="url(#ah2)"/>
+        <text x="292" y="268" class="t-lblink">5. Report: the session asks a question, and the debt stays open</text>
+        <line x1="280" y1="316" x2="94" y2="316" class="wire wire-person" marker-end="url(#ah2)"/>
+        <text x="102" y="308" class="t-lblink">6. The feed shows the pending call</text>
+        <line x1="90" y1="356" x2="276" y2="356" class="wire wire-person" marker-end="url(#ah2)"/>
+        <text x="102" y="348" class="t-lblink">7. Grant(request, rule, Once)</text>
+        <text x="292" y="392" class="t-lblink">8. One commit: Granted, an Input from the harness, TurnStarted</text>
+        <line x1="280" y1="436" x2="466" y2="436" class="wire wire-accent" marker-end="url(#ah2)"/>
+        <text x="292" y="428" class="t-lblink">9. A new turn starts</text>
+        <line x1="470" y1="476" x2="646" y2="476" class="wire wire-intent" marker-end="url(#ah2)"/>
+        <text x="482" y="468" class="t-lblink">10. guardCheck again</text>
+        <line x1="650" y1="516" x2="474" y2="516" class="wire wire-intent" marker-end="url(#ah2)"/>
+        <text x="482" y="508" class="t-lblink">11. Run: the grant covers the call</text>
+        <line x1="470" y1="556" x2="284" y2="556" class="wire wire-accent" marker-end="url(#ah2)"/>
+        <text x="292" y="548" class="t-lblink">12. EffectStarted, the call, EffectDone</text>
+        <text x="292" y="576" class="t-lbl">the Once grant goes away</text>
+        <line x1="470" y1="616" x2="284" y2="616" class="wire wire-accent" marker-end="url(#ah2)"/>
+        <text x="292" y="608" class="t-lblink">13. submit, then TurnEnded(Submitted)</text>
+        <line x1="280" y1="656" x2="836" y2="656" class="wire wire-person" marker-end="url(#ah2)"/>
+        <text x="292" y="648" class="t-lblink">14. Report: the result, and the debt closes</text>
+      </svg>
+    </div>
+  </section>
+
+  <section class="plate" id="evidence">
+    <div class="plate-head"><span class="plate-no">Plate 6</span><h2>The evidence behind each claim</h2><p class="ref">Design §12</p></div>
+    <p class="caption">Each row is a claim of the design and what backs it today. All checks ran as test programs outside the repository build. The rows marked "not run" show where development must look first.</p>
+    <div class="figure">
+      <div class="filters" role="group" aria-label="Filter by kind of evidence" id="filters"></div>
+      <div class="summary" id="summary" aria-hidden="true"></div>
+      <div class="table-wrap">
+        <table class="ev"><thead><tr><th>Claim</th><th>Evidence</th><th>Result</th></tr></thead><tbody id="ev-body"></tbody></table>
+      </div>
+    </div>
+  </section>
+
+  <footer>Source: <code>docs/code-harness/CODE_HARNESS_DESIGN.md</code> on the branch <code>code-harness</code>, at commit <code>56da1332</code>. The plates are drawn by hand from the text, so they show the main paths and leave details out. The checks of plate 6 are test programs in an untracked <code>tmp/</code> folder; the harness itself has no code yet.</footer>
+</div>
+
+<script>
+(function () {
+  function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+  function tile(kind, text, flush) { return { t: "tile", k: kind, s: text, f: !!flush }; }
+  function grp(label, items) { return { t: "grp", label: label, items: items }; }
+  function render(items, into) {
+    items.forEach(function (it) {
+      if (it.t === "tile") { const n = el("span", "tile " + it.k + (it.f ? " flush" : ""), it.s); into.appendChild(n); }
+      else if (it.t === "mark") { into.appendChild(el("span", "mark", it.s)); }
+      else { const g = el("span", "grp"); g.appendChild(el("span", "grp-label", it.label)); render(it.items, g); into.appendChild(g); }
+    });
+  }
+
+  /* Plate 3: three journals. */
+  const tapes = {
+    normal: {
+      note: "A person asks a question. The model runs one cell with one call, then it answers in text. ScopeRecorded holds the git head at the end of the turn.",
+      items: [tile("life", "Activated", true), tile("msg", "Input", true), grp("turn", [tile("life", "TurnStarted"),
+        grp("step 0", [tile("intent", "StepStarted(0)"), tile("both", "Acted(code)"),
+          grp("cell", [tile("intent", "EffectStarted(exec)", true), tile("outcome", "EffectDone"), tile("outcome", "Observed")])]),
+        grp("step 1", [tile("intent", "StepStarted(1)"), tile("outcome", "Acted(no code)")]),
+        tile("life", "TurnEnded(Replied)")]), tile("life", "ScopeRecorded")]
+    },
+    stop: {
+      note: "The person presses Stop while the call runs. StopRequested commits at once, so no new intent can commit. The open call ends as Unknown, the cell fails, and the turn ends as Aborted. A stop never cuts a commit.",
+      items: [tile("life", "Activated", true), tile("msg", "Input", true), grp("turn", [tile("life", "TurnStarted"),
+        grp("step 0", [tile("intent", "StepStarted(0)"), tile("both", "Acted(code)"),
+          grp("cell", [tile("intent", "EffectStarted(exec)", true), tile("stop", "StopRequested"), tile("outcome", "EffectDone(Unknown)"), tile("outcome", "Observed(Failed)")])]),
+        tile("life", "TurnEnded(Aborted)")])]
+    },
+    crash: {
+      note: "The process dies during the call. At the next start, repair is a pure function of the journal: it closes each open part, and then Activated commits. Because the intent of the call was flushed, the journal shows that the call may have run.",
+      items: [tile("life", "Activated", true), tile("msg", "Input", true), grp("turn", [tile("life", "TurnStarted"),
+        grp("step 0", [tile("intent", "StepStarted(0)"), tile("both", "Acted(code)"),
+          grp("cell", [tile("intent", "EffectStarted(exec)", true), { t: "mark", s: "the process crashes" }, tile("repair", "EffectDone(Unknown)"), tile("repair", "Observed(Failed)")])]),
+        tile("repair", "TurnEnded(Crashed)")]), tile("life", "Activated", true)]
+    }
+  };
+  const tapeView = document.getElementById("tape-view");
+  const tapeNote = document.getElementById("tape-note");
+  function showTape(name) {
+    tapeView.textContent = ""; render(tapes[name].items, tapeView); tapeNote.textContent = tapes[name].note;
+    ["normal", "stop", "crash"].forEach(function (n) { document.getElementById("tape-" + n).setAttribute("aria-pressed", String(n === name)); });
+  }
+  ["normal", "stop", "crash"].forEach(function (n) { document.getElementById("tape-" + n).addEventListener("click", function () { showTape(n); }); });
+  showTape("normal");
+
+  /* Plate 4: a small model of next, evolve and repair for one chat session. */
+  const LIMIT = 3;
+  const POSITIONS = ["NoTurn", "BeforeStep", "InPolicy", "InCell", "Answered", "Finished"];
+  let s;
+  function reset() {
+    s = { pos: "BeforeStep", step: 0, stopping: false, open: false, log: [] };
+    commit([tile("life", "Activated", true), tile("msg", "Input", true), tile("life", "TurnStarted")], "A person sent a message, so a turn started.");
+  }
+  function inTurn() { return s.pos !== "NoTurn"; }
+  function nextSays() {
+    if (s.pos === "NoTurn") return "Wait";
+    if (s.stopping) return "End(Aborted)";
+    switch (s.pos) {
+      case "BeforeStep": return s.step < LIMIT ? "CallPolicy(" + s.step + ")" : "CallPolicy(" + s.step + ", mustAnswer = true)";
+      case "InPolicy": return "Wait, while the LM call runs";
+      case "InCell": return s.open ? "Wait, while a call runs" : "RunCell";
+      case "Answered": return "End(Replied)";
+      case "Finished": return "End(Submitted)";
+    }
+    return "Wait";
+  }
+  function commit(entries, said) {
+    s.log.forEach(function (e) { e.fresh = false; });
+    entries.forEach(function (e) { e.fresh = true; s.log.push(e); });
+    if (said) document.getElementById("said").textContent = said;
+    draw();
+  }
+  const ev = {
+    send: function () {
+      if (!inTurn()) { s.pos = "BeforeStep"; s.step = 0; commit([tile("msg", "Input", true), tile("life", "TurnStarted")], "With no open turn, a message starts a turn."); }
+      else commit([tile("msg", "Input", true)], "During a turn, the message waits. The policy sees it at the next step.");
+    },
+    stop: function () { s.stopping = true; commit([tile("stop", "StopRequested")], "The stop flag and an interrupt reach the cell. No new intent can commit now."); },
+    call: function () { s.pos = "InPolicy"; commit([tile("intent", "StepStarted(" + s.step + ")")], "The intent of the LM call commits before the call."); },
+    code: function () { s.pos = "InCell"; commit([tile("both", "Acted(code)")], "The LM answer is also the intent of the cell."); },
+    text: function () { s.pos = "Answered"; commit([tile("outcome", "Acted(no code)")], "A reply with no cell ends a chat turn."); },
+    start: function () { s.open = true; commit([tile("intent", "EffectStarted(exec)", true)], "The guard ran, and the intent of the call commits with a full flush."); },
+    done: function () { s.open = false; commit([tile("outcome", "EffectDone")], "The outcome of the call commits after it."); },
+    observed: function () { s.pos = "BeforeStep"; s.step += 1; commit([tile("outcome", "Observed")], "The cell completed, so its store writes count."); },
+    submit: function () { s.pos = "Finished"; commit([tile("outcome", "Observed(Submitted)")], "submit records its value, so this turn ends with it."); },
+    end: function () {
+      const out = s.pos === "Answered" ? "Replied" : "Submitted";
+      s.pos = "NoTurn"; s.step = 0;
+      commit([tile("life", "TurnEnded(" + out + ")")], "The turn ends. The session waits for the next message.");
+    },
+    close: function () {
+      const add = [];
+      if (s.open) add.push(tile("outcome", "EffectDone(Unknown)"));
+      if (s.pos === "InCell") add.push(tile("outcome", "Observed(Failed)"));
+      add.push(tile("life", "TurnEnded(Aborted)"));
+      s.pos = "NoTurn"; s.step = 0; s.stopping = false; s.open = false;
+      commit(add, "The worker closes each open part, and the turn ends as Aborted.");
+    },
+    crash: function () {
+      const add = [];
+      if (inTurn()) {
+        if (s.open) add.push(tile("repair", "EffectDone(Unknown)"));
+        if (s.pos === "InCell") add.push(tile("repair", "Observed(Failed)"));
+        add.push(tile("repair", "TurnEnded(Crashed)"));
+      }
+      add.push(tile("life", "Activated", true));
+      s.pos = "NoTurn"; s.step = 0; s.stopping = false; s.open = false;
+      commit(add, inTurn() ? "" : "The process restarted. repair closed the open parts, and a new activation began with a new, empty REPL.");
+    },
+    reset: function () { reset(); }
+  };
+  const allowed = {
+    send: function () { return true; },
+    stop: function () { return inTurn() && !s.stopping; },
+    call: function () { return s.pos === "BeforeStep" && !s.stopping; },
+    code: function () { return s.pos === "InPolicy" && !s.stopping && s.step < LIMIT; },
+    text: function () { return s.pos === "InPolicy" && !s.stopping; },
+    start: function () { return s.pos === "InCell" && !s.open && !s.stopping; },
+    done: function () { return s.open && !s.stopping; },
+    observed: function () { return s.pos === "InCell" && !s.open && !s.stopping; },
+    submit: function () { return s.pos === "InCell" && !s.open && !s.stopping; },
+    end: function () { return (s.pos === "Answered" || s.pos === "Finished") && !s.stopping; },
+    close: function () { return s.stopping; },
+    crash: function () { return true; },
+    reset: function () { return true; }
+  };
+  Object.keys(ev).forEach(function (k) {
+    document.getElementById("ev-" + k).addEventListener("click", function () {
+      if (!allowed[k]()) return;
+      if (k === "crash") {
+        const wasInTurn = inTurn();
+        ev.crash();
+        document.getElementById("said").textContent = wasInTurn
+          ? "The process died in the turn. At the restart, repair closed the open parts, then a new activation began with an empty REPL."
+          : "The process restarted. A new activation began with an empty REPL.";
+        return;
+      }
+      ev[k]();
+    });
+  });
+  function draw() {
+    const states = document.getElementById("states");
+    states.textContent = "";
+    POSITIONS.forEach(function (p) { const n = el("span", "state" + (p === s.pos ? " on" : ""), p); states.appendChild(n); });
+    const pos = document.getElementById("pos");
+    pos.textContent = s.pos + (s.pos === "BeforeStep" || s.pos === "InPolicy" || s.pos === "InCell" ? "  (step " + s.step + " of " + LIMIT + ")" : "");
+    if (s.stopping) pos.appendChild(el("span", "flag", "stopping"));
+    if (s.open) pos.appendChild(el("span", "flag", "a call is open"));
+    document.getElementById("nexts").textContent = nextSays();
+    const log = document.getElementById("log");
+    log.textContent = "";
+    s.log.forEach(function (e) { const n = el("span", "tile " + e.k + (e.f ? " flush" : "") + (e.fresh ? " fresh" : ""), e.s); log.appendChild(n); });
+    Object.keys(allowed).forEach(function (k) { document.getElementById("ev-" + k).disabled = !allowed[k](); });
+  }
+  reset();
+
+  /* Plate 6: the evidence. */
+  const KINDS = {
+    repl: ["Real REPL", "k-repl", "bar-repl"],
+    random: ["Random tests", "k-random", "bar-random"],
+    program: ["Test program", "k-program", "bar-program"],
+    measured: ["Measured", "k-measured", "bar-measured"],
+    none: ["Not run", "k-none", "bar-none"]
+  };
+  const rows = [
+    ["The kernel", null, null],
+    ["The laws of the kernel: stops, grants, jobs, input values, reports", "random", "200,000 random runs with crashes, stops and late messages, and 0 problems. Each of 38 mutants makes a check fail."],
+    ["A power loss cuts the journal at the last flush", "random", "50,000 runs with 132,952 power losses, and 0 problems."],
+    ["drive with scripted effects", "program", "A chat answer, submit, both step limits, a failed cell, a failed LM call, a stop and a crash give the expected journals."],
+    ["A real power loss on a disk", "none", "The flush cost is measured, but no machine lost power."],
+    ["The law One journal: one commit writes to one journal", "none", "Not checked."],
+    ["The guest API and the REPL", null, null],
+    ["Modes as givens, with capture checking and safe mode", "repl", "Read-only mode rejects write, exec, spawn and tell. Each mode compiles what it allows."],
+    ["The laws of Data", "random", "300,000 random values, and 0 failures."],
+    ["Cells that models wrote against the guest API", "repl", "None of 128 cells had a Data error. With the current reference: Sonnet 29 of 30, Haiku 30 of 30."],
+    ["Only Data reads the form of Data", "repl", "7 of 13 kinds of value have another form in Schema, and each reader fails on the other's text."],
+    ["A child defines the parent's type from its shape", "repl", "Two REPLs: 13 of 15 kinds of value went both ways. 2 give a plain error."],
+    ["The note of lost names comes from the journal", "repl", "The parser found each name of 44 completed cells in 9 ms."],
+    ["submit ends a cell, also after a catch of Throwable", "repl", "12 cases. The host keeps the first value and refuses each later call."],
+    ["A call that needs a person fails at once", "repl", "With a stub handler: a cell with no catch stops; a catch keeps its values."],
+    ["Read-only tasks for a later parallel", "repl", "Writes, exec, store, LM calls and a shared var are rejected. Reads work through a read-only view."],
+    ["Real models after NeedsApproval, with a preamble, with the note", "none", "No model saw these yet."],
+    ["rlm, start, observe and zoom with real children", "none", "rlm is a stub in the checks."],
+    ["The host and the runtime", null, null],
+    ["The plain session host", "program", "2,000 sessions one after another and 256 at once, on JDK 21 and 25. SIGKILL in 20 rounds lost no answered commit. 6 mutants found."],
+    ["The cost of a full flush on SQLite, on macOS", "measured", "A commit with a flush takes about 4 ms. A normal commit takes about 50 µs."],
+    ["Kyo against the plain host", "measured", "Same safety and about the same code. The Kyo pool dropped fullfsync after an idle time."],
+    ["The Phase 0 REPL experiment on JDK 21 and JDK 25", "repl", "43 checks pass, and the same 3 known problems fail on both."],
+    ["The start time with an AOT cache on JDK 25", "measured", "From 2.51 s to 1.69 s up to the end of the first cell."],
+    ["The early MCP server on the MCP Java SDK", "program", "35 of 35 calls worked with the stdout rule, and 6 of 35 without it."],
+    ["The environment allowlist and the mask of secrets", "program", "With fake keys: no secret name reaches a command, and 100,000 random texts keep no known value."],
+    ["A hard stop through the LM transport and the process groups", "none", "Not built yet."],
+    ["The OS sandbox: Seatbelt and bubblewrap", "none", "Not built yet."],
+    ["Real jobs: spawn, process groups and the wrapper", "none", "The job table exists only in the kernel check."],
+    ["The catalog, missing and the report pass", "none", "Not built yet."],
+    ["The kernel with a real REPL and a real LM", "none", "Each part ran alone, never all together."],
+    ["An optimizer run, such as GEPA, on the harness", "none", "Not run."]
+  ];
+  let filter = "all";
+  const counts = {};
+  rows.forEach(function (r) { if (r[1]) counts[r[1]] = (counts[r[1]] || 0) + 1; });
+  const total = rows.filter(function (r) { return r[1]; }).length;
+  const filters = document.getElementById("filters");
+  function makeFilter(key, label, count) {
+    const b = el("button", "btn"); b.type = "button"; b.id = "filter-" + key;
+    b.appendChild(document.createTextNode(label)); const c = el("b", null, String(count)); b.appendChild(c);
+    b.setAttribute("aria-pressed", String(key === filter));
+    b.addEventListener("click", function () { filter = key; drawEvidence(); });
+    filters.appendChild(b);
+  }
+  makeFilter("all", "All", total);
+  Object.keys(KINDS).forEach(function (k) { makeFilter(k, KINDS[k][0], counts[k] || 0); });
+  const summary = document.getElementById("summary");
+  Object.keys(KINDS).forEach(function (k) { const span = el("span", KINDS[k][2]); span.style.width = ((counts[k] || 0) / total * 100) + "%"; summary.appendChild(span); });
+  function drawEvidence() {
+    const body = document.getElementById("ev-body");
+    body.textContent = "";
+    let group = null;
+    rows.forEach(function (r) {
+      if (!r[1]) { group = r[0]; return; }
+      if (filter !== "all" && r[1] !== filter) return;
+      if (group) { const tr = el("tr", "group"); const td = el("td", null, group); td.colSpan = 3; tr.appendChild(td); body.appendChild(tr); group = null; }
+      const tr = el("tr");
+      tr.appendChild(el("td", null, r[0]));
+      const k = el("td"); k.appendChild(el("span", "chip " + KINDS[r[1]][1], KINDS[r[1]][0])); tr.appendChild(k);
+      tr.appendChild(el("td", null, r[2]));
+      body.appendChild(tr);
+    });
+    Array.prototype.forEach.call(filters.children, function (b) { b.setAttribute("aria-pressed", String(b.id === "filter-" + filter)); });
+  }
+  drawEvidence();
+})();
+</script>
+</body>
+</html>
