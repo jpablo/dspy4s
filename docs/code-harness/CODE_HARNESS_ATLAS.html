@@ -85,9 +85,12 @@ td:first-child { font-weight: 500; white-space: nowrap; }
 .btn:hover:not(:disabled) { border-color: var(--accent); }
 .btn:disabled { opacity: .38; cursor: not-allowed; }
 .seg .btn[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
-.tape { display: flex; flex-wrap: wrap; gap: 7px; align-items: flex-start; margin-top: 14px; }
-.grp { display: inline-flex; flex-wrap: wrap; gap: 7px; align-items: flex-start; padding: 22px 8px 8px; border: 1px dashed var(--muted); border-radius: 9px; position: relative; }
-.grp-label { position: absolute; top: 4px; left: 9px; font: 11.5px var(--mono); color: var(--muted); }
+.tape { display: flex; flex-direction: column; margin-top: 14px; }
+.row { display: flex; align-items: center; min-height: 32px; }
+.seq { flex: none; width: 2.4em; padding-right: 10px; text-align: right; font: 11.5px var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.indent { flex: none; align-self: stretch; width: calc(var(--d, 0) * 24px); background-image: repeating-linear-gradient(to right, var(--line) 0 1px, transparent 1px 24px); background-position: 7px 0; }
+.row.label { min-height: 24px; }
+.lbl { font: 11.5px var(--mono); color: var(--muted); letter-spacing: .03em; }
 .tile { font: 12.5px/1.2 var(--mono); padding: 6px 9px; border-radius: 6px; border: 1px solid var(--line); position: relative; white-space: nowrap; color: var(--ink); }
 .tile.life { background: var(--gray-tint); }
 .tile.msg { background: var(--person-tint); border-color: var(--person); }
@@ -269,7 +272,7 @@ footer { border-top: 1px solid var(--line); margin-top: 48px; padding-top: 18px;
 
   <section class="plate" id="tape">
     <div class="plate-head"><span class="plate-no">Plate 3</span><h2>The journal tape</h2><p class="ref">Design §4.1, §4.4, §4.6, choice 17</p></div>
-    <p class="caption">A journal is a list of facts. Read it from left to right. Each intent is committed before its effect starts, and each outcome after the effect ends. A dot marks a commit with a full flush: each input, each activation, and the intent of a call that can change the world. Pick a case to see how a stop and a crash change the journal.</p>
+    <p class="caption">A journal is a list of facts. Read it from top to bottom: the number is the <code>seq</code> of each entry, and the indentation shows the turn, the step and the cell that it belongs to. Each intent is committed before its effect starts, and each outcome after the effect ends. A dot marks a commit with a full flush: each input, each activation, and the intent of a call that can change the world. Pick a case to see how a stop and a crash change the journal.</p>
     <div class="figure">
       <div class="seg" role="group" aria-label="Pick a case">
         <button class="btn" type="button" id="tape-normal" aria-pressed="true">A normal turn</button>
@@ -400,12 +403,37 @@ footer { border-top: 1px solid var(--line); margin-top: 48px; padding-top: 18px;
 (function () {
   function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
   function tile(kind, text, flush) { return { t: "tile", k: kind, s: text, f: !!flush }; }
-  function grp(label, items) { return { t: "grp", label: label, items: items }; }
-  function render(items, into) {
-    items.forEach(function (it) {
-      if (it.t === "tile") { const n = el("span", "tile " + it.k + (it.f ? " flush" : ""), it.s); into.appendChild(n); }
-      else if (it.t === "mark") { into.appendChild(el("span", "mark", it.s)); }
-      else { const g = el("span", "grp"); g.appendChild(el("span", "grp-label", it.label)); render(it.items, g); into.appendChild(g); }
+  function mark(text) { return { t: "mark", s: text }; }
+  /* A journal is a flat list. The outline shows its turns, steps and cells by indentation, and each entry keeps its seq. */
+  function outline(entries) {
+    const rows = [];
+    let turn = false, step = false, cell = false, seq = 0;
+    function depth() { return cell ? 3 : step ? 2 : turn ? 1 : 0; }
+    entries.forEach(function (e) {
+      const n = e.s;
+      if (e.t === "mark") { rows.push({ t: "mark", s: n, d: depth() }); return; }
+      if (n.indexOf("Activated") === 0) { turn = false; step = false; cell = false; }
+      if (n.indexOf("TurnStarted") === 0) { rows.push({ t: "label", s: "turn", d: 0 }); turn = true; step = false; cell = false; }
+      if (n.indexOf("StepStarted") === 0) { cell = false; rows.push({ t: "label", s: "step " + n.replace(/\D/g, ""), d: 1 }); step = true; }
+      const d = n.indexOf("TurnEnded") === 0 ? 1 : depth();
+      rows.push({ t: "tile", e: e, d: d, seq: seq++ });
+      if (n.indexOf("Acted(code)") === 0) { rows.push({ t: "label", s: "cell", d: 2 }); cell = true; }
+      if (n.indexOf("Observed") === 0) { cell = false; }
+      if (n.indexOf("TurnEnded") === 0) { turn = false; step = false; cell = false; }
+    });
+    return rows;
+  }
+  function renderOutline(entries, into) {
+    into.textContent = "";
+    outline(entries).forEach(function (r) {
+      const row = el("div", "row" + (r.t === "label" ? " label" : ""));
+      row.style.setProperty("--d", String(r.d));
+      row.appendChild(el("span", "seq", r.t === "tile" ? String(r.seq) : ""));
+      row.appendChild(el("span", "indent"));
+      if (r.t === "tile") row.appendChild(el("span", "tile " + r.e.k + (r.e.f ? " flush" : "") + (r.e.fresh ? " fresh" : ""), r.e.s));
+      else if (r.t === "label") row.appendChild(el("span", "lbl", r.s));
+      else row.appendChild(el("span", "mark", r.s));
+      into.appendChild(row);
     });
   }
 
@@ -413,31 +441,31 @@ footer { border-top: 1px solid var(--line); margin-top: 48px; padding-top: 18px;
   const tapes = {
     normal: {
       note: "A person asks a question. The model runs one cell with one call, then it answers in text. ScopeRecorded holds the git head at the end of the turn.",
-      items: [tile("life", "Activated", true), tile("msg", "Input", true), grp("turn", [tile("life", "TurnStarted"),
-        grp("step 0", [tile("intent", "StepStarted(0)"), tile("both", "Acted(code)"),
-          grp("cell", [tile("intent", "EffectStarted(exec)", true), tile("outcome", "EffectDone"), tile("outcome", "Observed")])]),
-        grp("step 1", [tile("intent", "StepStarted(1)"), tile("outcome", "Acted(no code)")]),
-        tile("life", "TurnEnded(Replied)")]), tile("life", "ScopeRecorded")]
+      items: [tile("life", "Activated", true), tile("msg", "Input", true), tile("life", "TurnStarted"),
+        tile("intent", "StepStarted(0)"), tile("both", "Acted(code)"),
+        tile("intent", "EffectStarted(exec)", true), tile("outcome", "EffectDone"), tile("outcome", "Observed"),
+        tile("intent", "StepStarted(1)"), tile("outcome", "Acted(no code)"),
+        tile("life", "TurnEnded(Replied)"), tile("life", "ScopeRecorded")]
     },
     stop: {
       note: "The person presses Stop while the call runs. StopRequested commits at once, so no new intent can commit. The open call ends as Unknown, the cell fails, and the turn ends as Aborted. A stop never cuts a commit.",
-      items: [tile("life", "Activated", true), tile("msg", "Input", true), grp("turn", [tile("life", "TurnStarted"),
-        grp("step 0", [tile("intent", "StepStarted(0)"), tile("both", "Acted(code)"),
-          grp("cell", [tile("intent", "EffectStarted(exec)", true), tile("stop", "StopRequested"), tile("outcome", "EffectDone(Unknown)"), tile("outcome", "Observed(Failed)")])]),
-        tile("life", "TurnEnded(Aborted)")])]
+      items: [tile("life", "Activated", true), tile("msg", "Input", true), tile("life", "TurnStarted"),
+        tile("intent", "StepStarted(0)"), tile("both", "Acted(code)"),
+        tile("intent", "EffectStarted(exec)", true), tile("stop", "StopRequested"), tile("outcome", "EffectDone(Unknown)"), tile("outcome", "Observed(Failed)"),
+        tile("life", "TurnEnded(Aborted)")]
     },
     crash: {
       note: "The process dies during the call. At the next start, repair is a pure function of the journal: it closes each open part, and then Activated commits. Because the intent of the call was flushed, the journal shows that the call may have run.",
-      items: [tile("life", "Activated", true), tile("msg", "Input", true), grp("turn", [tile("life", "TurnStarted"),
-        grp("step 0", [tile("intent", "StepStarted(0)"), tile("both", "Acted(code)"),
-          grp("cell", [tile("intent", "EffectStarted(exec)", true), { t: "mark", s: "the process crashes" }, tile("repair", "EffectDone(Unknown)"), tile("repair", "Observed(Failed)")])]),
-        tile("repair", "TurnEnded(Crashed)")]), tile("life", "Activated", true)]
+      items: [tile("life", "Activated", true), tile("msg", "Input", true), tile("life", "TurnStarted"),
+        tile("intent", "StepStarted(0)"), tile("both", "Acted(code)"),
+        tile("intent", "EffectStarted(exec)", true), mark("the process crashes here"), tile("repair", "EffectDone(Unknown)"), tile("repair", "Observed(Failed)"),
+        tile("repair", "TurnEnded(Crashed)"), tile("life", "Activated", true)]
     }
   };
   const tapeView = document.getElementById("tape-view");
   const tapeNote = document.getElementById("tape-note");
   function showTape(name) {
-    tapeView.textContent = ""; render(tapes[name].items, tapeView); tapeNote.textContent = tapes[name].note;
+    renderOutline(tapes[name].items, tapeView); tapeNote.textContent = tapes[name].note;
     ["normal", "stop", "crash"].forEach(function (n) { document.getElementById("tape-" + n).setAttribute("aria-pressed", String(n === name)); });
   }
   ["normal", "stop", "crash"].forEach(function (n) { document.getElementById("tape-" + n).addEventListener("click", function () { showTape(n); }); });
@@ -547,9 +575,7 @@ footer { border-top: 1px solid var(--line); margin-top: 48px; padding-top: 18px;
     if (s.stopping) pos.appendChild(el("span", "flag", "stopping"));
     if (s.open) pos.appendChild(el("span", "flag", "a call is open"));
     document.getElementById("nexts").textContent = nextSays();
-    const log = document.getElementById("log");
-    log.textContent = "";
-    s.log.forEach(function (e) { const n = el("span", "tile " + e.k + (e.f ? " flush" : "") + (e.fresh ? " fresh" : ""), e.s); log.appendChild(n); });
+    renderOutline(s.log, document.getElementById("log"));
     Object.keys(allowed).forEach(function (k) { document.getElementById("ev-" + k).disabled = !allowed[k](); });
   }
   reset();
