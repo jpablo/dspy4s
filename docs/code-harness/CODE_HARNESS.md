@@ -38,6 +38,8 @@ document exists in the code of dspy4s yet.
   [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md) takes a plain host, so the first version has no Kyo host.
 - [CODE_HARNESS_ATLAS.html](CODE_HARNESS_ATLAS.html) has six diagrams of the design in
   [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md). Open it in a browser.
+- [CODE_HARNESS_EVENTS.html](CODE_HARNESS_EVENTS.html) has the events of that design: an Event Storming board, a
+  catalog, and sequence diagrams. Open it in a browser.
 - The Phase 0 experiment (section 11) recommends a REPL in the same JVM, with five guards. Two of the guards
   start a new REPL. The store keeps the saved values across that change, and replay also keeps the definitions.
 - deepseek-harness, Codex and tacit confirm the main choices (section 9). tacit reports that agents that write
