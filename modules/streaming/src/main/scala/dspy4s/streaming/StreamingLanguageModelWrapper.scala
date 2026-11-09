@@ -22,6 +22,7 @@ import dspy4s.streaming.contracts.StreamEvent
 import dspy4s.streaming.contracts.StreamListener
 import dspy4s.streaming.contracts.TokenEvent
 
+import scala.annotation.nowarn
 import scala.util.control.NonFatal
 
 /** Wraps a [[StreamingLanguageModel]] for one model call. The wrapper gives the streamed text to the [[StreamingQueue]]
@@ -207,6 +208,9 @@ final class StreamingLanguageModelWrapper private[streaming] (
             recover(LmChunk.failure(ManagedLanguageModel.unexpected(error, request)))
 
       /** The value of `step`. An exception closes the stream of the delegate, and then goes up to the caller. */
+      // The catch takes each Throwable, also a fatal one, and throws it again with no change. So the stream closes on
+      // each failure, and no failure is lost. Warning E235 is off here for that reason.
+      @nowarn("id=E235")
       private def releasedOnThrow[A](step: => A): A =
         try step
         catch

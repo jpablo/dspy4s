@@ -1,0 +1,635 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- Open this file in a browser. It shows the events, their catalog and their sequences of CODE_HARNESS_DESIGN.md. The design document is the
+     authority: where this page and the design differ, follow the design. -->
+<title>Code harness events</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column that goes from the workshop board down to sequences; boards and diagrams scroll sideways in their own frames. */
+:root {
+  --bg: #eef1f4; --surface: #ffffff; --ink: #151a22; --muted: #5a6473; --line: #ccd3dc; --soft: #e3e8ee;
+  --accent: #2d5f9a;
+  --ln-command: #2c74b3; --ln-event: #c2671c; --ln-policy: #7556bd; --ln-read: #3a8634; --ln-external: #b4447a; --ln-plain: #6b7584;
+  --st-ink: #1c1a16;
+  --st-event: #f6a865; --st-command: #91c6ee; --st-policy: #cab7ec; --st-read: #abdca3; --st-actor: #fbe88e; --st-aggregate: #f8d45c; --st-external: #f3abc8; --st-hot: #f06f8e;
+  --display: "IBM Plex Sans Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
+  --body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #11141a; --surface: #1a1f27; --ink: #e3e8ef; --muted: #98a3b3; --line: #2c3440; --soft: #222833; --accent: #8ab4ea;
+  --ln-command: #7fbbef; --ln-event: #f0a45e; --ln-policy: #b8a1f1; --ln-read: #8fd385; --ln-external: #ef9cc1; --ln-plain: #9aa5b5;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #11141a; --surface: #1a1f27; --ink: #e3e8ef; --muted: #98a3b3; --line: #2c3440; --soft: #222833; --accent: #8ab4ea;
+  --ln-command: #7fbbef; --ln-event: #f0a45e; --ln-policy: #b8a1f1; --ln-read: #8fd385; --ln-external: #ef9cc1; --ln-plain: #9aa5b5;
+  color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.6 var(--body); }
+.wrap { max-width: 1060px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 40px 72px; }
+.eyebrow { font: 500 12px/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin: 0; }
+h1 { font: 600 clamp(34px, 6vw, 52px)/1.05 var(--display); letter-spacing: -.01em; margin: 10px 0 14px; text-wrap: balance; }
+.lede { max-width: 66ch; color: var(--muted); margin: 0; }
+.index { display: flex; flex-wrap: wrap; gap: 8px; margin: 24px 0 6px; padding: 0; list-style: none; }
+.index a { display: inline-flex; gap: 8px; align-items: baseline; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; color: var(--ink); text-decoration: none; font-size: 14px; background: var(--surface); }
+.index a:hover { border-color: var(--accent); }
+.index b { font: 500 12px var(--mono); color: var(--muted); }
+a:focus-visible, .btn:focus-visible, input:focus-visible, select:focus-visible, td.cellbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+section.part { border-top: 1px solid var(--line); padding-block: 44px 8px; display: grid; gap: 14px; }
+section.part > *, .board > *, .scen > *, .lane { min-width: 0; }
+.head { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; align-items: baseline; }
+.no { font: 600 13px var(--mono); color: var(--accent); letter-spacing: .04em; text-transform: uppercase; grid-row: span 2; padding-top: 6px; }
+h2 { font: 600 28px/1.15 var(--display); margin: 0; text-wrap: balance; }
+h3 { font: 600 19px/1.2 var(--display); margin: 0; }
+.ref { font: 12.5px var(--mono); color: var(--muted); margin: 0; }
+.caption { max-width: 70ch; margin: 0; }
+.frame { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; min-width: 0; }
+.scroll { overflow-x: auto; min-width: 0; }
+code { font-family: var(--mono); font-size: .9em; }
+/* Stickies */
+.sticky { display: inline-flex; flex-direction: column; justify-content: center; gap: 2px; width: 140px; min-height: 92px; padding: 9px 10px; color: var(--st-ink); font: 13px/1.3 var(--body); border-radius: 2px; box-shadow: 0 1px 0 rgba(0,0,0,.14); flex: none; }
+.sticky b { font: 500 12.5px/1.25 var(--mono); overflow-wrap: anywhere; }
+.sticky small { font-size: 12px; line-height: 1.3; opacity: .82; }
+.sticky.k-event { background: var(--st-event); }
+.sticky.k-command { background: var(--st-command); }
+.sticky.k-policy { background: var(--st-policy); }
+.sticky.k-read { background: var(--st-read); }
+.sticky.k-actor { background: var(--st-actor); width: 112px; min-height: 64px; }
+.sticky.k-aggregate { background: var(--st-aggregate); width: 140px; min-height: 104px; }
+.sticky.k-external { background: var(--st-external); }
+.sticky.k-hot { background: var(--st-hot); transform: rotate(-2deg); }
+.key { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.key .item { display: grid; grid-template-columns: 58px 1fr; gap: 10px; align-items: start; font-size: 14px; }
+.key .chipnote { width: 58px; height: 42px; border-radius: 2px; box-shadow: 0 1px 0 rgba(0,0,0,.14); }
+.key .item p { margin: 0; }
+.key .item b { display: block; font: 500 13px var(--mono); }
+.board { display: grid; gap: 22px; }
+.lane h3 { margin-bottom: 8px; }
+.snake { display: grid; align-items: center; justify-content: start; padding: 8px 0 6px; }
+.snake .sticky { justify-self: start; }
+.cell-arrow, .cell-down { text-align: center; color: var(--muted); font: 15px var(--mono); }
+.ret { position: relative; align-self: stretch; margin: 54px 0 54px 12px; border: 2px solid var(--muted); border-right: none; border-radius: 7px 0 0 7px; }
+.ret::after { content: ""; position: absolute; right: -1px; top: -7px; border: 6px solid transparent; border-left: 8px solid var(--muted); border-right: none; }
+.ret-tail { align-self: center; margin-left: 12px; border-top: 2px solid var(--muted); }
+.loopnote { margin: 2px 0 0; font-size: 13.5px; color: var(--muted); }
+.arrow { flex: none; width: 22px; text-align: center; color: var(--muted); font: 14px var(--mono); }
+.levels { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
+.levels span.lv { padding: 4px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
+/* SVG */
+.s-box { fill: var(--surface); stroke: var(--line); }
+.s-soft { fill: var(--soft); stroke: var(--line); }
+.t-title { font: 600 15px var(--display); fill: var(--ink); }
+.t-sub { font: 12.5px var(--body); fill: var(--muted); }
+.t-lbl { font: 12px var(--body); fill: var(--ink); paint-order: stroke; stroke: var(--surface); stroke-width: 5px; stroke-linejoin: round; }
+.t-note { font: 12px var(--mono); fill: var(--ink); }
+.wire { stroke-width: 1.5; fill: none; }
+.lifeline { stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 4 4; }
+svg.seq, svg.flow { display: block; height: auto; }
+/* Tables */
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th, td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--line); }
+th { font: 500 12px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .05em; position: sticky; top: 0; background: var(--surface); }
+.cat td:first-child { font: 500 13px var(--mono); }
+.cat td.who { white-space: nowrap; font-size: 13px; }
+.pill { display: inline-block; font: 500 11.5px/1.5 var(--mono); padding: 1px 8px; border-radius: 999px; white-space: nowrap; color: var(--st-ink); }
+.lv-stimulus { background: var(--st-actor); } .lv-command { background: var(--st-command); } .lv-entry { background: var(--st-event); }
+.lv-effect { background: var(--st-external); } .lv-output { background: var(--st-read); } .lv-signal { background: var(--st-policy); }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.btn { font: 13.5px var(--body); padding: 6px 11px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
+.btn:hover { border-color: var(--accent); }
+.btn[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+input[type="search"], select { font: 14px var(--body); padding: 6px 10px; border-radius: 7px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+input[type="search"] { min-width: 0; flex: 1 1 180px; }
+.count { font: 12.5px var(--mono); color: var(--muted); }
+.matrix { border-collapse: separate; border-spacing: 3px; font-size: 12.5px; width: auto; }
+.matrix th { position: static; text-transform: none; letter-spacing: 0; font: 500 12px var(--body); color: var(--muted); padding: 4px 6px; border: none; }
+.matrix th.col { writing-mode: vertical-rl; transform: rotate(180deg); height: 150px; vertical-align: bottom; white-space: nowrap; }
+.matrix td { border: none; width: 38px; height: 34px; text-align: center; vertical-align: middle; padding: 0; border-radius: 5px; font: 500 13px var(--mono); }
+.matrix td.empty { background: var(--soft); opacity: .55; }
+.matrix td.cellbtn { background: var(--st-command); color: var(--st-ink); cursor: pointer; }
+.matrix td.cellbtn.picked { box-shadow: 0 0 0 2px var(--ink); }
+.picklist { margin: 12px 0 0; font-size: 14px; min-height: 2em; }
+.picklist ul { margin: 6px 0 0; padding-left: 20px; }
+.scen { display: grid; gap: 10px; }
+.scen + .scen { margin-top: 26px; }
+.grouphead { margin-top: 10px; font: 600 22px var(--display); }
+.subnote { font-size: 14px; color: var(--muted); max-width: 72ch; margin: 0; }
+.flowlists { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 18px; font-size: 14.5px; }
+.flowlists ul { margin: 6px 0 0; padding-left: 20px; }
+footer { border-top: 1px solid var(--line); margin-top: 48px; padding-top: 18px; color: var(--muted); font-size: 13.5px; max-width: 78ch; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <p class="eyebrow">dspy4s · branch code-harness · 2026-11-08</p>
+  <h1>Code harness events</h1>
+  <p class="lede">What reaches the harness, who makes each event, who handles it, and what it changes. The page goes from a workshop board down to sequence diagrams, in five parts. Where this page and <code>docs/code-harness/CODE_HARNESS_DESIGN.md</code> differ, follow the design.</p>
+  <ul class="index">
+    <li><a href="#board"><b>1</b>The board</a></li>
+    <li><a href="#flow"><b>2</b>Information in one step</a></li>
+    <li><a href="#matrix"><b>3</b>Who sends what to whom</a></li>
+    <li><a href="#catalog"><b>4</b>The catalog</a></li>
+    <li><a href="#scenarios"><b>5</b>Sequences</a></li>
+  </ul>
+
+  <section class="part" id="board">
+    <div class="head"><span class="no">Part 1</span><h2>The board, in Event Storming notation</h2><p class="ref">Design §4, §5.5, §8.6, §10.3</p></div>
+    <p class="caption">This is the level of a workshop. Each row is one process, read from left to right. An actor or a policy gives a command, the session (the aggregate) accepts it, and one or more events become facts in the journal. A policy reacts to an event and gives the next command. Read models are what people and the LM see. The pink notes are hot spots: parts that no check has run yet.</p>
+    <div class="frame">
+      <div class="key" id="key"></div>
+      <p class="subnote" style="margin-top:14px">An event can exist at several levels. Something happens outside, it becomes a command, the writer commits it as journal entries, and the entries go out to clients, to the owner and to the world:</p>
+      <div class="levels" style="margin-top:8px">
+        <span class="lv"><span class="pill lv-stimulus">stimulus</span> outside</span><span class="arrow">→</span>
+        <span class="lv"><span class="pill lv-command">command</span> mailbox</span><span class="arrow">→</span>
+        <span class="lv"><span class="pill lv-entry">journal entry</span> a fact</span><span class="arrow">→</span>
+        <span class="lv"><span class="pill lv-output">output</span> feeds, reports</span>
+        <span class="lv"><span class="pill lv-effect">effect</span> a call to the world</span>
+        <span class="lv"><span class="pill lv-signal">signal</span> a timer or a rule</span>
+      </div>
+    </div>
+    <div class="frame board" id="lanes"></div>
+  </section>
+
+  <section class="part" id="flow">
+    <div class="head"><span class="no">Part 2</span><h2>The flow of information in one step</h2><p class="ref">Design §4.6, §5.1, §5.6, §7</p></div>
+    <p class="caption">A turn is a loop, and a message from outside starts it. The writer commits the message as <code>Input</code> and <code>TurnStarted</code>. Then the worker asks <code>next</code>, which reads the state of the journal. While <code>next</code> says <code>CallPolicy</code>, a step runs: the context strategy makes the policy input, the LM replies, a cell runs, and each result goes back into the journal through the writer. The loop ends when a reply has no code, or when <code>next</code> says <code>End</code>. Nothing that the journal does not hold can reach the next LM call.</p>
+    <div class="frame scroll">
+      <svg class="flow" viewBox="0 0 1110 440" style="min-width:860px;width:100%" role="img" aria-labelledby="fl-t fl-d">
+        <title id="fl-t">The loop of a turn: its start, its steps and its exits</title>
+        <desc id="fl-d">A message becomes Input and TurnStarted in the journal. next reads the state. CallPolicy starts a step: the context strategy, the policy leaf, Acted. Code goes to the REPL cell, the guard, a handler and the world, and the result goes back into the journal. A reply with no code, and End from next, lead to TurnEnded.</desc>
+        <defs><marker id="fa" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
+        <rect x="20" y="50" width="150" height="64" rx="32" class="s-box" style="stroke:var(--ln-command)"/><text x="95" y="76" text-anchor="middle" class="t-title">A message</text><text x="95" y="96" text-anchor="middle" class="t-sub">person, owner, harness</text>
+        <rect x="250" y="50" width="150" height="64" rx="8" class="s-box" style="stroke:var(--ln-event)"/><text x="266" y="76" class="t-title">Journal</text><text x="266" y="96" class="t-sub">every entry, for good</text>
+        <polygon points="480,82 555,38 630,82 555,126" class="s-box" style="stroke:var(--ln-policy)"/><text x="555" y="78" text-anchor="middle" class="t-title">next</text><text x="555" y="96" text-anchor="middle" class="t-sub">reads the state</text>
+        <rect x="710" y="50" width="150" height="64" rx="8" class="s-box"/><text x="726" y="76" class="t-title">Context strategy</text><text x="726" y="96" class="t-sub">makes the input</text>
+        <rect x="940" y="50" width="150" height="64" rx="8" class="s-box" style="stroke:var(--ln-external)"/><text x="956" y="76" class="t-title">Policy leaf</text><text x="956" y="96" class="t-sub">one LM call</text>
+        <rect x="940" y="200" width="150" height="64" rx="8" class="s-box" style="stroke:var(--ln-event)"/><text x="956" y="226" class="t-title">Acted</text><text x="956" y="246" class="t-sub">text, maybe code</text>
+        <rect x="480" y="200" width="150" height="64" rx="32" class="s-box" style="stroke:var(--ln-event)"/><text x="555" y="226" text-anchor="middle" class="t-title">TurnEnded</text><text x="555" y="246" text-anchor="middle" class="t-sub">wait for a message</text>
+        <rect x="940" y="350" width="150" height="64" rx="8" class="s-box"/><text x="956" y="376" class="t-title">REPL cell</text><text x="956" y="396" class="t-sub">runs the code</text>
+        <rect x="710" y="350" width="150" height="64" rx="8" class="s-box" style="stroke:var(--ln-policy)"/><text x="726" y="376" class="t-title">Guard</text><text x="726" y="396" class="t-sub">Allow, Ask, Deny</text>
+        <rect x="480" y="350" width="150" height="64" rx="8" class="s-box"/><text x="496" y="376" class="t-title">Handler</text><text x="496" y="396" class="t-sub">files, shell, LM</text>
+        <rect x="250" y="350" width="150" height="64" rx="8" class="s-box" style="stroke:var(--ln-external)"/><text x="266" y="376" class="t-title">The world</text><text x="266" y="396" class="t-sub">workspace, OS, LM</text>
+        <line x1="170" y1="82" x2="247" y2="82" class="wire" style="stroke:var(--ln-command)" marker-end="url(#fa)"/><text x="178" y="58" class="t-lbl">Input,</text><text x="178" y="73" class="t-lbl">TurnStarted</text>
+        <line x1="400" y1="82" x2="477" y2="82" class="wire" style="stroke:var(--ln-plain)" marker-end="url(#fa)"/><text x="408" y="73" class="t-lbl">the state</text>
+        <line x1="630" y1="82" x2="707" y2="82" class="wire" style="stroke:var(--ln-policy)" marker-end="url(#fa)"/><text x="636" y="58" class="t-lbl">CallPolicy:</text><text x="636" y="73" class="t-lbl">StepStarted</text>
+        <line x1="860" y1="82" x2="937" y2="82" class="wire" style="stroke:var(--ln-plain)" marker-end="url(#fa)"/><text x="866" y="73" class="t-lbl">PolicyInput</text>
+        <line x1="1015" y1="114" x2="1015" y2="197" class="wire" style="stroke:var(--ln-external)" marker-end="url(#fa)"/><text x="1023" y="160" class="t-lbl">a reply</text>
+        <line x1="1015" y1="264" x2="1015" y2="347" class="wire" style="stroke:var(--ln-plain)" marker-end="url(#fa)"/><text x="1023" y="310" class="t-lbl">code</text>
+        <line x1="940" y1="232" x2="633" y2="232" class="wire" style="stroke:var(--ln-event)" marker-end="url(#fa)"/><text x="660" y="224" class="t-lbl">no code: the turn ends as Replied</text>
+        <line x1="555" y1="126" x2="555" y2="197" class="wire" style="stroke:var(--ln-event)" marker-end="url(#fa)"/><text x="563" y="152" class="t-lbl">End: after submit,</text><text x="563" y="167" class="t-lbl">at the step limit,</text><text x="563" y="182" class="t-lbl">or after a stop</text>
+        <line x1="940" y1="382" x2="863" y2="382" class="wire" style="stroke:var(--ln-plain)" marker-end="url(#fa)"/><text x="868" y="374" class="t-lbl">op, args</text>
+        <line x1="710" y1="382" x2="633" y2="382" class="wire" style="stroke:var(--ln-policy)" marker-end="url(#fa)"/><text x="640" y="374" class="t-lbl">Run</text>
+        <line x1="480" y1="382" x2="403" y2="382" class="wire" style="stroke:var(--ln-plain)" marker-end="url(#fa)"/><text x="410" y="374" class="t-lbl">the call</text>
+        <line x1="325" y1="350" x2="325" y2="117" class="wire" style="stroke:var(--ln-event)" marker-end="url(#fa)"/>
+        <text x="317" y="210" text-anchor="end" class="t-lbl">the result:</text><text x="317" y="226" text-anchor="end" class="t-lbl">EffectDone, Observed,</text><text x="317" y="242" text-anchor="end" class="t-lbl">through the writer</text>
+        <text x="20" y="160" class="t-sub">start</text><text x="20" y="176" class="t-sub">here</text>
+      </svg>
+    </div>
+    <div class="flowlists">
+      <div><h3>What crosses each arrow</h3><ul>
+        <li><b>Input, TurnStarted:</b> the message, committed with a full flush. With no open turn, it starts one.</li>
+        <li><b>the state:</b> the fold of the journal. <code>next</code> reads it before each step.</li>
+        <li><b>CallPolicy, StepStarted:</b> the intent of the LM call commits before the call.</li>
+        <li><b>PolicyInput:</b> the task, the API reference with the preamble, the status, the last observation and the history that the strategy keeps.</li>
+        <li><b>a reply:</b> text, and maybe the code of one cell.</li>
+        <li><b>op, args:</b> the name of the call and its arguments as <code>Json</code>. The intent commits before the call.</li>
+        <li><b>the result:</b> a value as <code>Json</code> with its rendered text, an error, <code>NeedsApproval</code> or <code>Unknown</code>.</li>
+        <li><b>End:</b> <code>TurnEnded</code> with <code>Replied</code>, <code>Submitted</code>, <code>Exhausted</code> or <code>Aborted</code>. A chat turn at the step limit first gets one last LM call that must answer in text.</li>
+      </ul></div>
+      <div><h3>What never crosses</h3><ul>
+        <li><b>A secret.</b> A handler adds it to a request, and the writer masks each known value before a commit.</li>
+        <li><b>A live REPL value.</b> Only a <code>Data</code> value leaves a cell, through <code>store</code>, <code>submit</code> or <code>rlm</code>.</li>
+        <li><b>A call that the guard refuses.</b> It gets an error, or <code>NeedsApproval</code>, and the world sees nothing.</li>
+        <li><b>A change by a derivation.</b> Summaries and the graph read the journal, but they never write to it.</li>
+      </ul></div>
+    </div>
+  </section>
+
+  <section class="part" id="matrix">
+    <div class="head"><span class="no">Part 3</span><h2>Who sends what to whom</h2><p class="ref">Built from the catalog of part 4</p></div>
+    <p class="caption">Each row is a part that makes events, and each column is a part that receives them. A number is the count of kinds of event on that path. Select a number to list them.</p>
+    <div class="frame">
+      <div class="scroll"><table class="matrix" id="mx"></table></div>
+      <div class="picklist" id="pick" aria-live="polite">Select a number to see the events on that path.</div>
+    </div>
+  </section>
+
+  <section class="part" id="catalog">
+    <div class="head"><span class="no">Part 4</span><h2>The catalog of events</h2><p class="ref">Design §4.1, §4.5, §5.1, §8.2, §8.6, §10.3</p></div>
+    <p class="caption">Every event of the design at every level, with the part that makes it, the parts that receive it, and what happens then. Filter by level or by part, or search for a name.</p>
+    <div class="frame">
+      <div class="tools">
+        <div class="tools" id="levels" role="group" aria-label="Filter by level" style="margin:0"></div>
+        <label class="count" for="part">Part</label>
+        <select id="part"></select>
+        <input type="search" id="q" placeholder="Search, for example Grant" aria-label="Search the catalog">
+        <span class="count" id="shown"></span>
+      </div>
+      <div class="scroll"><table class="cat"><thead><tr><th>Event</th><th>Level</th><th>Made by</th><th>Received by</th><th>What happens</th></tr></thead><tbody id="cat-body"></tbody></table></div>
+    </div>
+  </section>
+
+  <section class="part" id="scenarios">
+    <div class="head"><span class="no">Part 5</span><h2>Sequences of concrete scenarios</h2><p class="ref">Design §4 to §10</p></div>
+    <p class="caption">Each diagram follows one scenario through the parts. Time goes down. The color of an arrow gives the level of its event: blue for a command, orange for journal entries, pink for a call to the world, lilac for a signal or a rule, and green for an output to a reader.</p>
+    <div id="seqs"></div>
+  </section>
+
+  <footer>Source: <code>docs/code-harness/CODE_HARNESS_DESIGN.md</code> on the branch <code>code-harness</code>, at commit <code>749caa18</code>. The harness has no code yet, so each event here is a design. The diagrams show the main paths and leave details out. The companion page is the Code harness atlas.</footer>
+</div>
+
+<script>
+(function () {
+  function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; }
+  const SVGNS = "http://www.w3.org/2000/svg";
+  function sv(tag, attrs, text) { const n = document.createElementNS(SVGNS, tag); Object.keys(attrs || {}).forEach(function (k) { n.setAttribute(k, attrs[k]); }); if (text != null) n.textContent = text; return n; }
+
+  /* Part 1: the key and the board. */
+  const KINDS = [
+    ["actor", "Actor", "A person, an owner session or an optimizer."],
+    ["command", "Command", "Send, Abort, StopJobs, Grant, Activate, Commit, Close, or a guest API call."],
+    ["aggregate", "Aggregate", "The session. Its writer runs decide, so it keeps the rules."],
+    ["event", "Domain event", "An Entry: one fact in the journal."],
+    ["policy", "Policy", "A rule that reacts to an event: next, the guard, repair, the report debt, a timer."],
+    ["read", "Read model", "A fold of the journal: the state, the store, the feeds, the catalog, the ledger."],
+    ["external", "External system", "The LM provider, the OS and its sandbox, the workspace, git."],
+    ["hot", "Hot spot", "A part of the design that no check has run yet."]
+  ];
+  const key = document.getElementById("key");
+  KINDS.forEach(function (k) {
+    const item = el("div", "item");
+    const chip = el("span", "chipnote"); chip.style.background = "var(--st-" + k[0] + ")";
+    const p = el("p"); p.appendChild(el("b", null, k[1])); p.appendChild(document.createTextNode(k[2]));
+    item.appendChild(chip); item.appendChild(p); key.appendChild(item);
+  });
+  function n(k, title, sub) { return [k, title, sub || ""]; }
+  const LANES = [
+    ["A chat turn with a cell", [
+      n("actor", "Person"), n("command", "Send", "a message"), n("aggregate", "Session", "its writer runs decide"),
+      n("event", "Input"), n("event", "TurnStarted"), n("policy", "When a turn starts", "the worker asks next"),
+      n("command", "Commit", "the intent of an LM call"), n("event", "StepStarted"), n("external", "LM provider", "the policy leaf"),
+      n("event", "Acted", "text and code"), n("policy", "When code arrives", "the REPL runs the cell"),
+      n("policy", "Each guest API call", "passes the guard"), n("event", "EffectStarted"), n("external", "Workspace and OS", "the call runs"),
+      n("event", "EffectDone"), n("event", "Observed"), n("policy", "When a cell ends", "the worker asks next"),
+      n("event", "Acted", "text, no code"), n("event", "TurnEnded", "Replied"), n("read", "Feeds", "the client shows the answer"), n("actor", "Person")],
+      "The person reads the answer and sends the next message, so the flow returns to its start."],
+    ["A stop, and a crash", [
+      n("actor", "Person"), n("command", "Abort", "Stop"), n("event", "StopRequested"),
+      n("policy", "When a stop commits", "flag, interrupt, TERM then KILL"), n("event", "EffectDone", "Unknown"), n("event", "Observed", "Failed"),
+      n("event", "TurnEnded", "Aborted"), n("policy", "When a cell ignores a stop", "the grace timer closes the turn"),
+      n("hot", "Hard stop path", "LM transport and process groups not run"),
+      n("external", "OS", "starts the host again"), n("command", "Activate"), n("policy", "repair", "closes each open part"),
+      n("event", "TurnEnded", "Crashed"), n("event", "Activated"), n("policy", "Report pass", "sends lost reports"), n("hot", "Real power loss", "not run")]],
+    ["An approval", [
+      n("command", "exec", "git push, from a cell"), n("policy", "Guard", "Ask, and no grant"), n("event", "EffectDone", "NeedsApproval"),
+      n("read", "Pending calls", "a fold of the journal"), n("event", "TurnEnded", "Replied, it asks"), n("actor", "Person"),
+      n("command", "Grant", "request, rule, Once"), n("event", "Granted"), n("event", "Input", "from the harness"), n("event", "TurnStarted"),
+      n("policy", "Guard", "Run: a grant covers it"), n("event", "EffectDone", "the push ran"), n("policy", "A Once grant", "goes away at its call"),
+      n("hot", "Real models", "after NeedsApproval, not run")]],
+    ["Delegation and reports", [
+      n("actor", "Owner session"), n("command", "start", "a goal, from a cell"), n("aggregate", "New session"),
+      n("event", "Activated", "with its task"), n("policy", "A message of the owner", "opens a report debt"),
+      n("event", "TurnEnded", "Replied, a question"), n("policy", "While it owes", "each turn reports"), n("command", "Send", "the report"),
+      n("aggregate", "Owner session"), n("event", "Input", "from a child"), n("actor", "Person", "answers by typing"),
+      n("event", "TurnEnded", "Submitted"), n("policy", "submit", "closes the debt"), n("read", "Ledger, graph", "what the controller sees"),
+      n("hot", "A real controller", "with reports, not run")]],
+    ["Jobs, timers and a restart", [
+      n("command", "spawn", "report = true"), n("event", "EffectStarted", "spawn"), n("read", "Job list", "a fold of the journal"),
+      n("external", "OS", "the job process runs"), n("policy", "When a job ends", "send a message"), n("command", "Send", "from the harness"),
+      n("event", "Input"), n("event", "TurnStarted"), n("command", "StopJobs", "Stop all"), n("event", "JobsStopRequested"),
+      n("policy", "Stop the marked", "process groups"), n("event", "Activated", "after a restart"),
+      n("policy", "A new REPL", "compiles the preamble"), n("read", "Lost names", "a note from the journal"), n("hot", "Real jobs", "not run")]],
+    ["A program call and a rollout", [
+      n("actor", "Optimizer"), n("command", "forward", "the input fields"), n("aggregate", "Session in memory", "a closed mode"),
+      n("event", "Input", "with the values"), n("policy", "Preamble", "types, submit, input fields"), n("event", "Acted", "a cell"),
+      n("event", "Observed", "Submitted"), n("event", "TurnEnded", "Submitted"), n("policy", "Data[O]", "reads the value"),
+      n("read", "Trace", "the leaves and their calls"), n("policy", "Metric", "runs the tests in the fork"),
+      n("hot", "An optimizer run", "not run"), n("actor", "Optimizer")],
+      "The optimizer makes a new candidate and runs it, so the flow returns to its start."]
+  ];
+  /* Each row is a snake. The count of notes on a line follows the width. A row that ends with its first actor returns to it
+     by an arrow on the left, so it has an even count of lines. */
+  const STW = 140, AW = 26, GUT = 36, ROWH = 110, DOWNH = 30;
+  const lanes = document.getElementById("lanes");
+  function sticky(s) { const st = el("div", "sticky k-" + s[0]); st.appendChild(el("b", null, s[1])); if (s[2]) st.appendChild(el("small", null, s[2])); return st; }
+  function place(node, col, row, colEnd) { node.style.gridColumn = colEnd ? col + " / " + colEnd : String(col); node.style.gridRow = String(row); return node; }
+  const built = LANES.map(function (lane) {
+    const box = el("div", "lane"); box.appendChild(el("h3", null, lane[0]));
+    const grid = el("div", "snake"); box.appendChild(grid);
+    let items = lane[1];
+    const last = items[items.length - 1];
+    const loop = !!lane[2] && items[0][0] === "actor" && last[0] === "actor" && items[0][1] === last[1];
+    if (loop) { items = items.slice(0, -1); box.appendChild(el("p", "loopnote", "↺ " + lane[2])); }
+    lanes.appendChild(box);
+    return { box: box, grid: grid, items: items, loop: loop, key: "" };
+  });
+  function layout(b) {
+    const width = b.box.clientWidth || 900;
+    const kMax = Math.max(1, Math.floor((width - (b.loop ? GUT : 0) + AW) / (STW + AW)));
+    const n = b.items.length;
+    let L = Math.ceil(n / kMax);
+    if (b.loop) { if (L < 2) L = 2; if (L % 2 === 1) L += 1; }
+    const sizes = []; for (let i = 0; i < L; i++) sizes.push(Math.floor(n / L) + (i < n % L ? 1 : 0));
+    const k = sizes[0];
+    const key = k + "x" + L; if (b.key === key) return; b.key = key;
+    const base = b.loop ? 2 : 1;
+    const colOf = function (p) { return base + 2 * p; };
+    const g = b.grid; g.textContent = "";
+    g.style.gridTemplateColumns = (b.loop ? GUT + "px " : "") + Array.from({ length: k }, function (_, j) { return (j > 0 ? AW + "px " : "") + STW + "px"; }).join(" ");
+    g.style.gridTemplateRows = Array.from({ length: L }, function (_, i) { return (i > 0 ? DOWNH + "px " : "") + ROWH + "px"; }).join(" ");
+    let idx = 0, pos = 0, dir = 1;
+    for (let i = 0; i < L; i++) {
+      const row = 2 * i + 1;
+      for (let j = 0; j < sizes[i]; j++) {
+        if (j > 0) { pos += dir; g.appendChild(place(el("span", "cell-arrow", dir > 0 ? "→" : "←"), colOf(Math.min(pos, pos - dir)) + 1, row)); }
+        g.appendChild(place(sticky(b.items[idx++]), colOf(pos), row));
+      }
+      if (i < L - 1) { g.appendChild(place(el("span", "cell-down", "↓"), colOf(pos), row + 1)); dir = -dir; }
+    }
+    if (b.loop) {
+      const lastRow = 2 * (L - 1) + 1;
+      const ret = el("span", "ret"); ret.style.gridColumn = "1"; ret.style.gridRow = "1 / " + (lastRow + 1); g.appendChild(ret);
+      if (pos > 0) g.appendChild(place(el("span", "ret-tail"), 1, lastRow, colOf(pos)));
+    }
+  }
+  built.forEach(layout);
+  if (window.ResizeObserver) new ResizeObserver(function () { built.forEach(layout); }).observe(lanes);
+
+  /* The parts of the harness, for the catalog and the table. */
+  const PARTS = {
+    person: "Person and client", owner: "Owner session", optimizer: "Optimizer", agent: "MCP agent", os: "OS and workspace",
+    host: "Writer", worker: "Worker", cell: "Cell and REPL", handlers: "Guard and handlers", lm: "LM provider",
+    timers: "Timers and job wrapper", readers: "Readers and clients", child: "Child session"
+  };
+  const LEVELS = { stimulus: "stimulus", command: "command", entry: "journal entry", effect: "effect", output: "output", signal: "signal" };
+  /* name, level, made by, received by, what happens */
+  const CAT = [
+    ["A person types a message", "stimulus", ["person"], ["host"], "It becomes Send from the user. A message with a known request id commits nothing."],
+    ["A person presses Stop", "stimulus", ["person"], ["host"], "It becomes Abort. Jobs keep running."],
+    ["A person presses Stop all", "stimulus", ["person"], ["host"], "It becomes Abort, then StopJobs(OfLastTurn)."],
+    ["A person answers a pending call", "stimulus", ["person"], ["host"], "It becomes Grant(request, rule, lifetime). To refuse, the person types a plain message."],
+    ["A person opens or closes a session", "stimulus", ["person"], ["host"], "It becomes Activate or Close."],
+    ["The host process starts", "stimulus", ["os"], ["host"], "Activate for each session with repair, a check of the catalog, and the report pass."],
+    ["A job process ends", "stimulus", ["os"], ["timers"], "The wrapper tells the job table. With report = true, the harness sends a message to the session."],
+    ["An optimizer runs a program", "stimulus", ["optimizer"], ["worker"], "forward makes a journal in memory and a REPL in a workspace fork, then runs drive. No mailbox."],
+    ["Another agent runs a cell", "stimulus", ["agent"], ["cell"], "harness-mcp runs the cell in a read-only REPL and gives the output back. From phase 2."],
+    ["Activate(versions, config)", "command", ["host"], ["host"], "repair(s), then Activated. If an input waits, also TurnStarted."],
+    ["Send(request, text, values)", "command", ["person", "owner", "child", "timers", "handlers"], ["host"], "A known request id commits nothing. An ended session rejects it. With no turn: Input and TurnStarted. In a turn: Input, which waits for the next step."],
+    ["Commit(entries)", "command", ["worker", "handlers"], ["host"], "The entries, if each is valid at its position. A late outcome of a closed call adds nothing. After StopRequested, no new intent commits."],
+    ["Abort(reason)", "command", ["person"], ["host"], "In a turn: StopRequested, which also clears the inputs that wait. It changes no job."],
+    ["StopJobs(which, reason)", "command", ["person", "handlers"], ["host"], "JobsStopRequested, also with no open turn. The host stops the process groups of the marked jobs."],
+    ["Grant(request, rule, lifetime)", "command", ["person"], ["host"], "A known request id commits nothing. If it answers a pending call: Granted, an Input from the harness and, with no turn, TurnStarted. Otherwise only Granted."],
+    ["Close(outcome, reason)", "command", ["person", "owner"], ["host"], "Ended, only with no open turn."],
+    ["Activated", "entry", ["host"], ["readers"], "A new activation with its configuration and versions. The catalog row and the state follow it. Full flush."],
+    ["Input", "entry", ["host"], ["worker", "readers"], "The policy sees it at the next step. A message of the owner opens a report debt. Its values go to the input fields. Full flush."],
+    ["TurnStarted", "entry", ["host"], ["worker"], "The worker starts drive. The pending calls empty."],
+    ["StepStarted", "entry", ["worker"], ["host"], "The intent of an LM call. The call starts after the commit."],
+    ["Acted", "entry", ["worker"], ["cell", "readers"], "The LM outcome, and the intent of the cell. With no code, the turn ends as Replied."],
+    ["EffectStarted", "entry", ["handlers"], ["host"], "The intent of a guest API call, after the guard. Full flush for a call that can change the world. A spawn adds a job."],
+    ["EffectDone", "entry", ["handlers", "worker"], ["host", "cell"], "Value, Error, NeedsApproval or Unknown. NeedsApproval adds a pending call. A Once grant goes away."],
+    ["Observed", "entry", ["worker"], ["host", "readers"], "The outcome of the cell. The store takes its writes if it completed. Submitted ends the turn."],
+    ["StopRequested", "entry", ["host"], ["worker", "cell"], "No new intent can commit. next says End(Aborted)."],
+    ["JobsStopRequested", "entry", ["host"], ["timers"], "Marks the jobs that the selector covers. A spawn in flight does not start its process."],
+    ["Granted", "entry", ["host"], ["handlers"], "The grant joins the state, and guardCheck reads it."],
+    ["ScopeRecorded", "entry", ["worker"], ["readers"], "The git head of the scope at the end of each turn."],
+    ["TurnEnded", "entry", ["worker", "host"], ["owner", "readers"], "A report if the session owes one. The goal check runs. An input that waits starts the next turn."],
+    ["Ended", "entry", ["host"], ["owner", "timers"], "Stops all jobs, and gives a report if the session owes one. A reopen gives a new Activated."],
+    ["A policy call", "effect", ["worker"], ["lm"], "The policy leaf gets the PolicyInput. StepStarted commits before the call."],
+    ["A reply of the LM", "effect", ["lm"], ["worker"], "The worker commits it as Acted: text, and maybe the code of one cell. A failed call ends the turn as Failed."],
+    ["read, write, edit", "effect", ["cell"], ["handlers"], "The files handler, inside the paths of the mode. The intent of write and edit gets a full flush."],
+    ["exec, spawn", "effect", ["cell"], ["handlers"], "The shell handler starts a process in the OS sandbox, with the allowlist of environment variables. spawn starts a job."],
+    ["waitJob, jobOutput, stopJob", "effect", ["cell"], ["handlers"], "The job table answers. stopJob is StopJobs(One(job))."],
+    ["httpGet", "effect", ["cell"], ["handlers"], "Only in a mode with Network^, through the proxy and its host list."],
+    ["llmQuery, llmQueryBatched", "effect", ["cell"], ["handlers", "lm"], "The subQuery leaf calls the LM. A batch is one call, and the host runs its prompts at the same time."],
+    ["rlm, rlmBatched", "effect", ["cell"], ["handlers", "child"], "A child session with its own journal and a preamble from Data[A].shape. A child with no submit makes the call fail."],
+    ["start, tell", "effect", ["cell"], ["handlers", "owner"], "start makes a session with Activated and its task. tell sends Send to a session and waits for its commit."],
+    ["observe, zoom, list", "effect", ["cell"], ["handlers"], "They read other sessions and change nothing in them."],
+    ["store, load, keys", "effect", ["cell"], ["handlers"], "store writes commit with the Observed of a cell that completes."],
+    ["submit", "signal", ["cell"], ["handlers", "worker"], "It records the first value, then throws a ControlThrowable. The host refuses each later call of that cell."],
+    ["NeedsApproval", "signal", ["handlers"], ["worker", "person"], "The guard says Ask and no grant covers the call. The call fails at once, and the model ends its turn and asks."],
+    ["A feed entry", "output", ["host"], ["readers", "person"], "After each commit, the writer publishes each entry. It never waits for a client."],
+    ["Behind", "output", ["host"], ["readers", "person"], "A client that read too slowly reads the journal again from its last seq."],
+    ["A report", "output", ["host"], ["owner"], "After a TurnEnded or Ended while the session owes one. The owner gets an Input, and a turn starts. The report pass sends it again after a crash."],
+    ["The grace timer ends", "signal", ["timers"], ["host"], "If the cell did not end after a stop, the writer commits the closing entries and TurnEnded(Aborted). Later commits of that worker get a rejection."],
+    ["The cell clock runs out", "signal", ["timers"], ["cell", "worker"], "The stop flag ends the cell as TimedOut. The clock stops during a guest API call."],
+    ["The goal is not met", "signal", ["worker"], ["host"], "After a turn, the goal leaf says false, and the harness sends a message. Not while a call is pending."],
+    ["next", "signal", ["worker"], ["worker"], "It says Wait, CallPolicy, RunCell or End from the state."],
+    ["repair", "signal", ["host"], ["host"], "At Activate it closes each open part: EffectDone(Unknown), Observed(Failed), TurnEnded(Crashed)."],
+    ["The report pass", "signal", ["host"], ["owner"], "At the start of the host, and when an owner opens, it sends each missing report."]
+  ];
+
+  /* Part 3: the table of paths. */
+  const order = ["person", "owner", "optimizer", "agent", "os", "host", "worker", "cell", "handlers", "lm", "timers", "readers", "child"];
+  const paths = {};
+  CAT.forEach(function (r, i) { r[2].forEach(function (m) { r[3].forEach(function (t) { const k = m + ">" + t; (paths[k] = paths[k] || []).push(i); }); }); });
+  const mx = document.getElementById("mx");
+  const head = el("tr"); head.appendChild(el("th", null, "from ↓  to →"));
+  order.forEach(function (p) { head.appendChild(el("th", "col", PARTS[p])); });
+  mx.appendChild(head);
+  let picked = null;
+  order.forEach(function (from) {
+    const tr = el("tr"); tr.appendChild(el("th", null, PARTS[from]));
+    order.forEach(function (to) {
+      const list = paths[from + ">" + to];
+      const td = el("td", list ? "cellbtn" : "empty", list ? String(list.length) : "");
+      if (list) {
+        td.tabIndex = 0; td.setAttribute("role", "button"); td.setAttribute("aria-label", PARTS[from] + " to " + PARTS[to] + ": " + list.length + " kinds of event");
+        const pick = function () {
+          if (picked) picked.classList.remove("picked"); td.classList.add("picked"); picked = td;
+          const box = document.getElementById("pick"); box.textContent = "";
+          box.appendChild(el("b", null, PARTS[from] + " → " + PARTS[to]));
+          const ul = el("ul"); list.forEach(function (i) { const li = el("li"); li.appendChild(el("code", null, CAT[i][0])); li.appendChild(document.createTextNode(" (" + LEVELS[CAT[i][1]] + "): " + CAT[i][4])); ul.appendChild(li); });
+          box.appendChild(ul);
+        };
+        td.addEventListener("click", pick);
+        td.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+      }
+      tr.appendChild(td);
+    });
+    mx.appendChild(tr);
+  });
+
+  /* Part 4: the catalog. */
+  let level = "all";
+  const levelsBox = document.getElementById("levels");
+  function levelButton(k, label) {
+    const b = el("button", "btn", label); b.type = "button"; b.id = "lv-" + k; b.setAttribute("aria-pressed", String(k === level));
+    b.addEventListener("click", function () { level = k; drawCatalog(); }); levelsBox.appendChild(b);
+  }
+  levelButton("all", "All");
+  Object.keys(LEVELS).forEach(function (k) { levelButton(k, LEVELS[k]); });
+  const partSel = document.getElementById("part");
+  const any = el("option", null, "Any part"); any.value = "any"; partSel.appendChild(any);
+  order.forEach(function (p) { const o = el("option", null, PARTS[p]); o.value = p; partSel.appendChild(o); });
+  partSel.addEventListener("change", drawCatalog);
+  const q = document.getElementById("q");
+  q.addEventListener("input", drawCatalog);
+  function drawCatalog() {
+    const body = document.getElementById("cat-body"); body.textContent = "";
+    const part = partSel.value; const text = q.value.trim().toLowerCase(); let count = 0;
+    CAT.forEach(function (r) {
+      if (level !== "all" && r[1] !== level) return;
+      if (part !== "any" && r[2].indexOf(part) < 0 && r[3].indexOf(part) < 0) return;
+      if (text && (r[0] + " " + r[4]).toLowerCase().indexOf(text) < 0) return;
+      count++;
+      const tr = el("tr");
+      tr.appendChild(el("td", null, r[0]));
+      const lv = el("td"); lv.appendChild(el("span", "pill lv-" + r[1], LEVELS[r[1]])); tr.appendChild(lv);
+      tr.appendChild(el("td", "who", r[2].map(function (p) { return PARTS[p]; }).join(", ")));
+      tr.appendChild(el("td", "who", r[3].map(function (p) { return PARTS[p]; }).join(", ")));
+      tr.appendChild(el("td", null, r[4]));
+      body.appendChild(tr);
+    });
+    document.getElementById("shown").textContent = count + " of " + CAT.length;
+    Array.prototype.forEach.call(levelsBox.children, function (b) { b.setAttribute("aria-pressed", String(b.id === "lv-" + level)); });
+  }
+  drawCatalog();
+
+  /* Part 5: sequence diagrams from data. */
+  const COLOR = { command: "var(--ln-command)", entry: "var(--ln-event)", effect: "var(--ln-external)", signal: "var(--ln-policy)", output: "var(--ln-read)", plain: "var(--ln-plain)" };
+  let markers = 0;
+  function sequence(spec) {
+    const W = 980, M = 80, n = spec.lanes.length;
+    const gap = (W - 2 * M) / (n - 1);
+    const x = {}; spec.lanes.forEach(function (l, i) { x[l[0]] = M + i * gap; });
+    const svg = sv("svg", { "class": "seq", viewBox: "0 0 " + W + " 100", role: "img" });
+    svg.style.minWidth = "820px"; svg.style.width = "100%";
+    svg.appendChild(sv("title", {}, spec.title));
+    const id = "sq" + (markers++);
+    const defs = sv("defs"); const mk = sv("marker", { id: id, viewBox: "0 0 10 10", refX: "8", refY: "5", markerWidth: "7", markerHeight: "7", orient: "auto-start-reverse" });
+    mk.appendChild(sv("path", { d: "M2 1L8 5L2 9", fill: "none", stroke: "context-stroke", "stroke-width": "1.6", "stroke-linecap": "round", "stroke-linejoin": "round" }));
+    defs.appendChild(mk); svg.appendChild(defs);
+    const boxW = Math.min(160, gap - 14);
+    const lines = sv("g"); svg.appendChild(lines);
+    spec.lanes.forEach(function (l) {
+      svg.appendChild(sv("rect", { x: x[l[0]] - boxW / 2, y: 14, width: boxW, height: 46, rx: 8, "class": "s-soft" }));
+      const parts = l[1].split("\n");
+      parts.forEach(function (p, i) { svg.appendChild(sv("text", { x: x[l[0]], y: parts.length === 1 ? 42 : 33 + i * 17, "text-anchor": "middle", "class": "t-title", style: "font-size:14px" }, p)); });
+    });
+    let y = 70;
+    spec.steps.forEach(function (s) {
+      if (s.note) {
+        y += 34;
+        const w = Math.min(s.text.length * 6.8 + 20, 520);
+        let nx = x[s.note] + 8; if (nx + w > W - 6) nx = x[s.note] - 8 - w;
+        svg.appendChild(sv("rect", { x: nx, y: y - 17, width: w, height: 26, rx: 5, fill: "var(--surface)", stroke: COLOR[s.k || "plain"], "stroke-dasharray": s.k ? "" : "4 3" }));
+        svg.appendChild(sv("text", { x: nx + 10, y: y + 1, "class": "t-note" }, s.text));
+        return;
+      }
+      if (s.span) {
+        y += 36;
+        const a = x[s.span[0]] - 60, b = x[s.span[1]] + 60;
+        svg.appendChild(sv("rect", { x: Math.max(6, a), y: y - 18, width: Math.min(W - 12, b) - Math.max(6, a), height: 28, rx: 6, fill: "var(--soft)", stroke: "var(--line)" }));
+        svg.appendChild(sv("text", { x: (Math.max(6, a) + Math.min(W - 6, b)) / 2, y: y + 1, "text-anchor": "middle", "class": "t-lbl", style: "stroke:var(--soft)" }, s.text));
+        return;
+      }
+      y += 40;
+      const x1 = x[s.f], x2 = x[s.t], dir = x2 > x1 ? 1 : -1;
+      svg.appendChild(sv("line", { x1: x1, y1: y, x2: x2 - dir * 4, y2: y, "class": "wire", stroke: COLOR[s.k], "marker-end": "url(#" + id + ")", style: "stroke:" + COLOR[s.k] }));
+      svg.appendChild(sv("text", { x: Math.min(x1, x2) + 10, y: y - 8, "class": "t-lbl" }, s.text));
+    });
+    const end = y + 26;
+    spec.lanes.forEach(function (l) { lines.appendChild(sv("line", { x1: x[l[0]], y1: 60, x2: x[l[0]], y2: end, "class": "lifeline" })); });
+    svg.setAttribute("viewBox", "0 0 " + W + " " + (end + 14));
+    return svg;
+  }
+  function m(f, t, k, text) { return { f: f, t: t, k: k, text: text }; }
+  function note(lane, k, text) { return { note: lane, k: k, text: text }; }
+  function span(a, b, text) { return { span: [a, b], text: text }; }
+  const GROUPS = [
+    ["Turn, stop and crash", [
+      { title: "A chat turn with a cell", text: "A person asks why the build fails. The model reads a file in one cell, then answers in text. Each intent commits before its effect.",
+        lanes: [["P", "Person\nand client"], ["H", "Writer"], ["W", "Worker"], ["L", "LM provider"], ["C", "Cell\nand REPL"], ["G", "Guard and\nhandlers"], ["X", "Workspace"]],
+        steps: [m("P", "H", "command", "Send(request, \"why does the build fail?\")"), note("H", "entry", "commits Input, TurnStarted (flush)"), m("H", "P", "output", "feed entries"),
+          m("H", "W", "signal", "start drive"), m("W", "H", "command", "Commit(StepStarted(0))"), m("W", "L", "effect", "policy call: PolicyInput"), m("L", "W", "effect", "a reply with code"),
+          m("W", "H", "command", "Commit(Acted(code))"), m("W", "C", "plain", "run the cell"), m("C", "G", "effect", "read(\"build.sbt\")"), note("G", "signal", "guard: Allow"),
+          m("G", "H", "command", "Commit(EffectStarted(read))"), m("G", "X", "effect", "read the file"), m("G", "H", "command", "Commit(EffectDone(Value))"), m("G", "C", "plain", "the text of the file"),
+          m("C", "W", "plain", "the cell ends"), m("W", "H", "command", "Commit(Observed(Ok))"), m("W", "L", "effect", "policy call"), m("L", "W", "effect", "a reply with no code"),
+          m("W", "H", "command", "Commit(Acted, TurnEnded(Replied), ScopeRecorded)"), m("H", "P", "output", "feed: the answer")] },
+      { title: "A hard stop", text: "The person presses Stop during a long command. The stop is a message, so it never cuts a commit. Jobs keep running.",
+        lanes: [["P", "Person\nand client"], ["H", "Writer"], ["W", "Worker"], ["C", "Cell\nand REPL"], ["G", "Guard and\nhandlers"], ["X", "OS sandbox"]],
+        steps: [m("C", "G", "effect", "exec(\"sbt test\")"), m("G", "H", "command", "Commit(EffectStarted(exec)), flush"), m("G", "X", "effect", "start the process group"),
+          m("P", "H", "command", "Abort(\"stop\")"), note("H", "entry", "commits StopRequested"), m("H", "C", "signal", "stop flag and interrupt"), m("H", "X", "signal", "TERM, a grace period, then KILL"),
+          m("X", "G", "effect", "the process ends"), m("C", "W", "plain", "the cell ends"), m("W", "H", "command", "Commit(EffectDone(Unknown), Observed(Failed))"),
+          m("W", "H", "command", "Commit(TurnEnded(Aborted))"), m("H", "P", "output", "feed: the turn is aborted")] },
+      { title: "A crash during a call, and the repair", text: "The process dies after the intent of a write. At the next start, repair closes each open part from the journal alone.",
+        lanes: [["O", "OS"], ["H", "Writer"], ["W", "Worker"], ["G", "Guard and\nhandlers"], ["OW", "Owner\nsession"]],
+        steps: [m("G", "H", "command", "Commit(EffectStarted(write)), flush"), span("O", "OW", "the process crashes: the write may or may not have run"),
+          m("O", "H", "command", "start the host: Activate"), note("H", "signal", "repair: EffectDone(Unknown), Observed(Failed), TurnEnded(Crashed)"),
+          note("H", "entry", "commits Activated (flush)"), m("H", "OW", "output", "the report pass: TurnEnded(Crashed), if it owes one"),
+          m("H", "W", "signal", "a new REPL, the preamble, the note of lost names")] }
+    ]],
+    ["Approval and delegation", [
+      { title: "An approval", text: "A cell never waits for a person. The pending call is in the journal, and a Grant answers it in one commit.",
+        lanes: [["P", "Person\nand client"], ["H", "Writer"], ["W", "Worker\nand cell"], ["G", "Guard"], ["O", "Owner\nsession"]],
+        steps: [m("W", "G", "effect", "guardCheck: exec(\"git push\")"), m("G", "W", "signal", "Ask, and no grant covers it"), m("W", "H", "command", "Commit(EffectDone(NeedsApproval))"),
+          note("H", "entry", "pending holds the rule"), m("W", "H", "command", "the model asks: TurnEnded(Replied)"), m("H", "O", "output", "report: the session asks"),
+          m("H", "P", "output", "feed: a pending call"), m("P", "H", "command", "Grant(request, rule, Once)"), note("H", "entry", "one commit: Granted, Input, TurnStarted"),
+          m("H", "W", "signal", "a new turn"), m("W", "G", "effect", "guardCheck again"), m("G", "W", "signal", "Run"), m("W", "H", "command", "EffectStarted, the call, EffectDone"),
+          note("H", "entry", "the Once grant goes away"), m("W", "H", "command", "submit, TurnEnded(Submitted)"), m("H", "O", "output", "report: the result, the debt closes")] },
+      { title: "start, and the report debt", text: "An owner starts a session with a goal. Each turn reports while the work is open, also the turn that a person starts by typing.",
+        lanes: [["O", "Owner\nsession"], ["N", "New session:\nwriter"], ["NW", "New session:\nworker"], ["P", "Person\nand client"]],
+        steps: [m("O", "N", "command", "start(goal): Activated and the task, in one commit"), note("N", "signal", "a message of the owner opens a debt"),
+          m("N", "NW", "signal", "a turn"), m("NW", "N", "command", "TurnEnded(Replied): \"A or B?\""), m("N", "O", "output", "report 1: a question"),
+          note("O", "plain", "a turn of the owner: it waits"), m("P", "N", "command", "Send: \"use B\" (typed)"), m("N", "NW", "signal", "a turn"),
+          m("NW", "N", "command", "TurnEnded(Submitted)"), m("N", "O", "output", "report 2: the result, the debt closes"),
+          m("P", "N", "command", "Send: \"thanks\""), note("N", "plain", "no report: the debt is closed")] },
+      { title: "tell between sessions", text: "A message between two sessions is two commits in two journals. A second send with the same request id commits nothing.",
+        lanes: [["C", "Cell of A"], ["G", "Handler of A"], ["HA", "Writer of A"], ["HB", "Writer of B"], ["WB", "Worker of B"]],
+        steps: [m("C", "G", "effect", "tell(\"B\", \"the tests pass\")"), m("G", "HA", "command", "Commit(EffectStarted(tell))"), m("G", "HB", "command", "Send(request, text) from a child"),
+          note("HB", "entry", "Input, and TurnStarted if idle"), m("HB", "G", "plain", "committed"), m("G", "HA", "command", "Commit(EffectDone(Value))"), m("HB", "WB", "signal", "a turn starts in B"),
+          span("C", "WB", "a crash between the commits gives Unknown in A; nothing sends again by itself")] }
+    ]],
+    ["Jobs, timers and a restart", [
+      { title: "A job with a message at its end", text: "A long build runs as a job, so the cell ends at once. The job sends a message when it ends, and the message can start a turn.",
+        lanes: [["C", "Cell\nand REPL"], ["G", "Shell handler,\njob table"], ["H", "Writer"], ["J", "Job process\nand wrapper"]],
+        steps: [m("C", "G", "effect", "spawn(\"sbt test\", report = true)"), m("G", "H", "command", "Commit(EffectStarted(spawn)), flush"), m("G", "J", "effect", "start under the wrapper"),
+          m("G", "H", "command", "Commit(EffectDone(JobId))"), note("H", "plain", "the cell and the turn end"), m("J", "G", "signal", "the process exits with 0"),
+          m("G", "H", "command", "Send from the harness, request id from the JobId"), note("H", "entry", "Input, TurnStarted"), span("C", "J", "a repeat of the message gives one Input; a job that a stop ended sends no message")] },
+      { title: "The grace timer of a stop", text: "A cell ignores the stop, for example a loop in library code. The timer only puts a message in the mailbox, so the writer stays the one place that commits.",
+        lanes: [["P", "Person\nand client"], ["H", "Writer"], ["T", "Timer"], ["W", "Worker"], ["C", "Cell\nand REPL"]],
+        steps: [m("P", "H", "command", "Abort"), note("H", "entry", "commits StopRequested"), m("H", "C", "signal", "stop flag and interrupt"), m("H", "T", "signal", "start the grace timer"),
+          note("C", "plain", "the cell does not end"), m("T", "H", "signal", "GraceEnded"), note("H", "entry", "closing entries, TurnEnded(Aborted)"), note("H", "plain", "the process is unclean (protection 3)"),
+          m("C", "W", "plain", "much later, the cell returns"), m("W", "H", "command", "Commit(...)"), m("H", "W", "plain", "a rejection")] },
+      { title: "A restart, and the note of lost names", text: "After a restart the REPL is new. The preamble and the store come back, and the parser finds the lost names in the journal.",
+        lanes: [["H", "Writer"], ["W", "Worker"], ["R", "New REPL"], ["L", "LM provider"]],
+        steps: [note("H", "entry", "Activated"), m("H", "W", "signal", "an input waits: a turn"), m("W", "R", "plain", "compile the preamble"),
+          note("W", "signal", "fold of the journal: build (cell 1), testsOf (cell 3)"), m("W", "L", "effect", "policy call with the note of lost names"),
+          m("L", "W", "effect", "a cell that defines again what it needs"), m("W", "R", "plain", "run the cell")] }
+    ]],
+    ["Program call and rollout", [
+      { title: "A program call through forward", text: "A program call has a typed input and output. Only Data reads the form of Data, so the host reads the value of submit with Data[O].",
+        lanes: [["Q", "Caller"], ["F", "forward\nand worker"], ["J", "Journal\nin memory"], ["R", "REPL in a\nworkspace fork"], ["L", "LM provider"]],
+        steps: [m("Q", "F", "command", "forward(In)"), m("F", "J", "entry", "Input with the input fields, as Data[I]"), m("F", "R", "plain", "preamble: types, submit, a val for each field"),
+          m("F", "L", "effect", "policy call"), m("L", "F", "effect", "a cell"), m("F", "R", "plain", "run: submit(summary, files)"), m("R", "F", "signal", "the value, then the signal"),
+          m("F", "J", "entry", "Observed(Submitted), TurnEnded(Submitted)"), m("F", "Q", "output", "Data[O] reads the value: Out"),
+          span("Q", "L", "Replied or Exhausted: the finisher leaf makes the output instead")] },
+      { title: "An optimizer rollout", text: "A rollout is a session in a closed mode, owned by the optimizer. It has no reports, and a call that needs a person gets a plain error.",
+        lanes: [["O", "Optimizer"], ["F", "forward"], ["K", "Workspace\nfork"], ["M", "Metric"]],
+        steps: [m("O", "F", "command", "run the candidate on a task"), note("F", "signal", "mode: base.meet(Mode.closed); owner: Optimizer"),
+          m("F", "K", "effect", "cells write in the fork"), note("F", "signal", "Ask gives Refused: no person can answer"), m("F", "O", "output", "the output and the trace"),
+          m("O", "M", "command", "score the rollout"), m("M", "K", "effect", "run the tests in the fork"), m("M", "O", "output", "a score and text feedback"),
+          note("O", "plain", "GEPA proposes new instructions")] }
+    ]]
+  ];
+  const seqs = document.getElementById("seqs");
+  GROUPS.forEach(function (g) {
+    seqs.appendChild(el("div", "grouphead", g[0]));
+    g[1].forEach(function (s) {
+      const box = el("div", "scen");
+      box.appendChild(el("h3", null, s.title));
+      box.appendChild(el("p", "subnote", s.text));
+      const frame = el("div", "frame scroll"); frame.appendChild(sequence(s)); box.appendChild(frame);
+      seqs.appendChild(box);
+    });
+  });
+})();
+</script>
+</body>
+</html>

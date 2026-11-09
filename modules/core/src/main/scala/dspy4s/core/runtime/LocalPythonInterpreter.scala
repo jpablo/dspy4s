@@ -38,6 +38,7 @@ import java.util.concurrent.TimeoutException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.locks.ReentrantLock
+import scala.annotation.nowarn
 import scala.annotation.tailrec
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.duration.FiniteDuration
@@ -334,7 +335,10 @@ final class LocalPythonInterpreter(
       captured: ContextPropagation.Captured
   ): CompletableFuture[ToolOutcome] =
     val outcome = new CompletableFuture[ToolOutcome]()
-    val _       = InterpreterSupport.startDaemon("dspy4s-local-python-tool") {
+    // The catch takes each Throwable, also a fatal one: the waiting `execute` must wake, or the session hangs. A
+    // fatal error ends the session, and `execute` throws it again (see the class doc). So warning E235 is off here.
+    @nowarn("id=E235")
+    def body(): Unit =
       try
         val delta = captured.run {
           RuntimeEnvironment.isolatedAttempt(RuntimeEnvironment.current) {
@@ -348,7 +352,7 @@ final class LocalPythonInterpreter(
           // Upstream 453823209: wake `execute`, because the worker cannot reply while this tool has no answer.
           worker.post(Inbound.Fatal(error))
           val _ = outcome.complete(ToolOutcome.Fatal(error))
-    }
+    val _ = InterpreterSupport.startDaemon("dspy4s-local-python-tool")(body())
     outcome
 
   /** The `tool_result` or `tool_error` reply to one tool request (upstream `_handle_tool`). Each call is a `ToolCall`

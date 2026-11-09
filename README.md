@@ -70,7 +70,8 @@ dspy4s is split into focused modules so you can depend only on what you need.
 
 ## Requirements
 
-- Scala 3 (the build pins `3.8.4`)
+- Scala 3 (the build pins the nightly `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` from the Scala nightly
+  repository)
 - JDK 21 (the repo pins `openjdk-21.0.1` in `.tool-versions`)
 - sbt 1.x
 - An `OPENAI_API_KEY` for examples that make live LM calls
@@ -111,7 +112,7 @@ It is published at <https://jpablo.github.io/dspy4s/>.
   and run it end to end.
 - [Signatures](site/docs/programs/signatures.md): the full set of ways
   to declare inputs and outputs (inline, traits, enums, custom types).
-- [Architecture](docs/ARCHITECTURE.md): the design choices, module graph, and
+- [Architecture](docs/architecture/ARCHITECTURE.md): the design choices, module graph, and
   the static and runtime-defined stacks.
 
 To preview the docs locally:

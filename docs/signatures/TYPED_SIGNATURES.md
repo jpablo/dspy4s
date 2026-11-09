@@ -8,7 +8,7 @@
 > `Predict[I, O]`. For the current API see:
 >
 > - [TYPED_SIGNATURES_GUIDE.md](TYPED_SIGNATURES_GUIDE.md) — day-to-day usage
-> - [ARCHITECTURE.md](ARCHITECTURE.md) — how the domain/record split fits the broader stack
+> - [ARCHITECTURE.md](../architecture/ARCHITECTURE.md) — how the domain/record split fits the broader stack
 >
 > The body of this document is preserved as a record of the design
 > thinking; treat its code snippets as illustrative of intent, not as

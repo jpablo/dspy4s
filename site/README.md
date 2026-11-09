@@ -2,7 +2,7 @@
 
 A [MkDocs Material](https://squidfunk.github.io/mkdocs-material/) site whose code
 snippets are **extracted from the compiled `modules/examples` sources**, so every
-sample is guaranteed to compile. See [`docs/SITE_PLAN.md`](../docs/SITE_PLAN.md)
+sample is guaranteed to compile. See [`site/PLAN.md`](PLAN.md)
 for the design.
 
 ## Prerequisites

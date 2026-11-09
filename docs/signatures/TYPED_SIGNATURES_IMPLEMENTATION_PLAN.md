@@ -6,7 +6,7 @@
 > wrapper, dropped the `Typed*` prefix throughout, and narrowed the
 > mutation API. For the current shape see
 > [TYPED_SIGNATURES_GUIDE.md](TYPED_SIGNATURES_GUIDE.md) and
-> [ARCHITECTURE.md](ARCHITECTURE.md). Treat the plan below as a record of
+> [ARCHITECTURE.md](../architecture/ARCHITECTURE.md). Treat the plan below as a record of
 > the implementation thinking, not as the current API contract.
 
 ## Recommendation
@@ -810,7 +810,7 @@ Add examples:
 Update docs:
 
 - Add a user-facing signatures guide.
-- Link from `docs/TYPED_SIGNATURES.md`.
+- Link from `docs/signatures/TYPED_SIGNATURES.md`.
 - Document supported field types and deferred types.
 - Document the relationship between `Signature` and `Signature`.
 - Document how to access the raw `Prediction` when users need completions,
@@ -843,7 +843,7 @@ The `examples` module now depends on `signatures` (added to `build.sbt`).
 All four files compile against the actual API and reference the
 production types only.
 
-User-facing guide: [`docs/TYPED_SIGNATURES_GUIDE.md`](TYPED_SIGNATURES_GUIDE.md).
+User-facing guide: [`docs/signatures/TYPED_SIGNATURES_GUIDE.md`](TYPED_SIGNATURES_GUIDE.md).
 Covers:
   - 5-line quick-start with the trait-spec API.
   - All five authoring surfaces (string DSL, trait spec, function/method,
