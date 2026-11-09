@@ -1,0 +1,150 @@
+# The mutants of the sandbox. Each mutant breaks one rule of 5.4 or 5.6 of docs/code-harness/CODE_HARNESS_DESIGN.md.
+#
+# `python3 scripts/mutants/mutants.py modules/harness-sandbox/src/test/mutants.toml` applies each mutant alone, runs the
+# laws of the module, and restores the code. At least one law must fail for each mutant. The mutants of Seatbelt need
+# macOS: on another host the escape tests skip, and these mutants survive.
+
+module = "harness-sandbox"
+project = "harnessSandbox"
+sources = "modules/harness-sandbox/src/main/scala/dspy4s/harness/sandbox"
+
+# ── The profile ──
+
+[[mutant]]
+name = "Mutant: a mode with no Files^ starts a child process"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "val run = mode.shell == Access.Full && mode.files == Access.Full"
+new = "val run = mode.shell == Access.Full"
+
+[[mutant]]
+name = "Mutant: the network needs no Network^"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "net = if run && mode.network == Access.Full then Net.Proxy(hosts) else Net.Closed"
+new = "net = if run then Net.Proxy(hosts) else Net.Closed"
+
+[[mutant]]
+name = "Mutant: .git is writable"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "readOnly = Vector(scope.resolve(\".git\"))"
+new = "readOnly = Vector.empty"
+
+[[mutant]]
+name = "Mutant: the journals are readable"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "hidden = layout.secrets :+ layout.journals"
+new = "hidden = layout.secrets"
+
+[[mutant]]
+name = "Mutant: *.d also matches d"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "name.endsWith(p.drop(1)) && name.length > p.length - 1"
+new = "name.endsWith(p.drop(2))"
+
+[[mutant]]
+name = "Mutant: the profile of a command hides no secret file"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "profile.hide(secretFiles(profile, layout.secretNames))"
+new = "profile"
+
+[[mutant]]
+name = "Mutant: a secret name matches only the same name"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "n == name || n.startsWith(name + \".\")"
+new = "n == name"
+
+[[mutant]]
+name = "Mutant: the walk enters .git"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "if profile.readOnly.exists(dir.startsWith) || profile.isHidden(dir) then"
+new = "if profile.isHidden(dir) then"
+
+[[mutant]]
+name = "Mutant: the walk does not hide the target of a symbolic link"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "found.result().flatMap(path => Vector(path, Layout.real(path))).distinct"
+new = "found.result()"
+
+# ── The environment ──
+
+[[mutant]]
+name = "Mutant: the session can add a secret name"
+[[mutant.edit]]
+file = "Environment.scala"
+old = "(allowed.contains(name) || extra.contains(name)) && !isSecret(name)"
+new = "allowed.contains(name) || extra.contains(name)"
+
+# ── Seatbelt ──
+
+[[mutant]]
+name = "Mutant: Seatbelt allows by default"
+[[mutant.edit]]
+file = "Seatbelt.scala"
+old = "    \"(deny default)\",\n"
+new = "    \"(allow default)\",\n"
+
+[[mutant]]
+name = "Mutant: Seatbelt does not hide the secrets and the journals"
+[[mutant.edit]]
+file = "Seatbelt.scala"
+old = "profile.hidden.map(p => s\"(deny file-read* file-write* ${subpath(p)})\") ++"
+new = "Vector.empty[String] ++"
+
+[[mutant]]
+name = "Mutant: Seatbelt gets a quote in a path as it is"
+[[mutant.edit]]
+file = "Seatbelt.scala"
+old = "case '\"'  => \"\\\\\\\"\""
+new = "case '\"'  => \"\\\"\""
+
+[[mutant]]
+name = "Mutant: Seatbelt opens the whole network"
+[[mutant.edit]]
+file = "Seatbelt.scala"
+old = "s\"\"\"(allow network-outbound (remote ip \"localhost:$port\"))\"\"\""
+new = "s\"(allow network-outbound) ; $port\""
+
+[[mutant]]
+name = "Mutant: Seatbelt keeps .git writable"
+[[mutant.edit]]
+file = "Seatbelt.scala"
+old = "profile.readOnly.map(p => s\"(deny file-write* ${subpath(p)})\") ++"
+new = "Vector.empty[String] ++"
+
+# ── The handler ──
+
+[[mutant]]
+name = "Mutant: exec runs the command with no backend"
+[[mutant.edit]]
+file = "SandboxedShell.scala"
+old = "val sandbox = backend.getOrElse(throw SandboxError("
+new = "val sandbox = backend.orElse(Some(Seatbelt)).getOrElse(throw SandboxError("
+
+[[mutant]]
+name = "Mutant: exec passes all the variables of the harness process"
+[[mutant.edit]]
+file = "SandboxedShell.scala"
+old = "Environment.forChild(parentEnv, config.env) ++ temp ++ proxyVars"
+new = "parentEnv ++ temp ++ proxyVars"
+
+[[mutant]]
+name = "Mutant: the time limit stops only the command"
+[[mutant.edit]]
+file = "SandboxedShell.scala"
+old = "SandboxedShell.stop(seen :+ process.toHandle)"
+new = "SandboxedShell.stop(Vector(process.toHandle))"
+
+[[mutant]]
+name = "Mutant: exec takes the profile of the mode for each command"
+[[mutant.edit]]
+file = "SandboxedShell.scala"
+old = "val now     = Profiles.forCommand(config.mode, root, layout, hosts)"
+new = "val now     = profile"

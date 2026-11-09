@@ -1545,7 +1545,7 @@ name = "McpServer"
 ops = ["runCell", "serve"]
 ref = "6"
 uses = ["scala-repl", "bindings"]
-text = "Two tools: run_cell(code) and api_reference. Only the transport writes to stdout. Until the sandbox exists, the server gives files: Files on a workspace and state: Store^ in memory, with no shell, network, LM or sessions."
+text = "Two tools: run_cell(code) and api_reference. Only the transport writes to stdout. The server gives files: Files on a workspace and state: Store^ in memory, with no shell, network, LM or sessions. exec takes Files^, and the server has no handler that writes files."
 
 [[group]]
 id = "mcp-laws"
@@ -1563,3 +1563,350 @@ name = "MCP:"
 ref = "6"
 uses = ["mcp-server"]
 text = "A cell reads the workspace and nothing outside it, cannot write, keeps values in the store, and another agent runs cells over stdio with only the protocol on stdout."
+
+# ── Phase 3: the profile of a child process (5.4). It is pure, so the laws need no OS. ──────────────────────────────
+
+[[group]]
+id = "profile"
+phase = "p3"
+module = "harness-sandbox"
+file = "Profile.scala"
+title = "What a child process can do: the profile, and the profile of a mode"
+
+[[node]]
+id = "layout"
+group = "profile"
+kind = "data"
+name = "Layout"
+ref = "5.4"
+uses = []
+text = "The places of the host that a profile names, apart from the scope: the private temporary directory, the folder of the journals, the secret paths (~/.ssh, ~/.aws and more) and the names of secret files (.env)."
+
+[[node]]
+id = "host-list"
+group = "profile"
+kind = "data"
+name = "HostList"
+ops = ["allows"]
+ref = "5.4"
+spec = true
+uses = []
+text = "The hosts that the proxy lets through. A proposal: the design names the host list of the guarded handler and gives no type. A pattern *.d matches each subdomain of d."
+
+[[node]]
+id = "net"
+group = "profile"
+kind = "data"
+name = "Net"
+ref = "5.4"
+uses = ["host-list"]
+text = "The network of a child process: closed, or only the proxy of the session, which applies the host list."
+
+[[node]]
+id = "profile"
+group = "profile"
+kind = "data"
+name = "Profile"
+ops = ["canRead", "canWrite", "canConnect", "hide"]
+ref = "5.4"
+spec = true
+uses = ["net"]
+proof_uses = ["host-list"]
+text = "What a child process can do, as observations: canRun, canRead(path), canWrite(path) and canConnect(host). A backend turns a profile into the rules of the OS. hide(paths) gives a profile that allows less: nothing under the paths."
+
+[[node]]
+id = "profile-for-mode"
+group = "profile"
+kind = "function"
+name = "forMode"
+ref = "5.4"
+spec = true
+uses = ["mode", "layout", "profile"]
+text = "The profile of the table of 5.4: no child process without Shell^ and Files^; writes only under the scope and the private temporary directory, with .git read-only; the proxy only with Network^; in each mode, the secrets and the journals are not readable, and the other paths are read-only."
+
+[[node]]
+id = "profile-for-command"
+group = "profile"
+kind = "function"
+name = "forCommand"
+ref = "5.4"
+spec = true
+uses = ["mode", "layout", "host-list", "profile"]
+proof_uses = ["profile-for-mode", "profile"]
+text = "The profile of one command: the profile of the mode, which also hides each file with a secret name that exists in a writable root when the command starts, and the target of each one that is a symbolic link. The walk skips .git. A command can make a new file with a secret name, and the next command cannot read it."
+
+# ── Phase 3: the environment of a child process (5.6) ───────────────────────────────────────────────────────────
+
+[[group]]
+id = "environment"
+phase = "p3"
+module = "harness-sandbox"
+file = "Environment.scala"
+title = "The allowlist of environment variables"
+
+[[node]]
+id = "child-env"
+group = "environment"
+kind = "function"
+name = "forChild"
+ref = "5.6"
+spec = true
+uses = []
+text = "The variables of a command: the names of the allowlist of 5.6 and the names of SessionConfig.env, with the values of the harness process. A name that contains KEY, SECRET, TOKEN, PASSWORD, PASSWD, CREDENTIAL or AUTH never goes through."
+
+# ── Phase 3: the backends (5.4, CODE_HARNESS.md F8). Seatbelt and bubblewrap do not share a file, so they can run at the
+# same time. ──────────────────────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "backend"
+phase = "p3"
+module = "harness-sandbox"
+file = "Backend.scala"
+title = "An OS sandbox that runs a command under a profile"
+
+[[node]]
+id = "backend"
+group = "backend"
+kind = "data"
+name = "Backend"
+ref = "5.4"
+uses = ["profile"]
+text = "An OS sandbox: it gives the command line that runs a command under a profile, and it says if it works on this host. It works when a shell runs under that command line, with a profile like the profile of a session."
+
+[[group]]
+id = "seatbelt"
+phase = "p3"
+module = "harness-sandbox"
+file = "Seatbelt.scala"
+title = "The backend for macOS: sandbox-exec and a profile in SBPL"
+
+[[node]]
+id = "seatbelt"
+group = "seatbelt"
+kind = "data"
+name = "Seatbelt"
+ops = ["policy", "wrap"]
+ref = "5.4"
+spec = true
+uses = ["backend", "profile"]
+text = "The SBPL text of a profile for /usr/bin/sandbox-exec. It denies by default, as Codex does: a child can start processes, read files, and look only at the processes of its own sandbox. It has no access to launchd and the other services of the system."
+
+[[group]]
+id = "bubblewrap"
+phase = "p3"
+module = "harness-sandbox"
+file = "Bubblewrap.scala"
+title = "The backend for Linux: bwrap and its arguments"
+
+[[node]]
+id = "bubblewrap"
+group = "bubblewrap"
+kind = "data"
+name = "Bubblewrap"
+ops = ["flags", "wrap"]
+ref = "5.4"
+spec = true
+uses = ["backend", "profile"]
+text = "The bwrap arguments of a profile: the root read-only, the scope and the temporary directory writable, .git read-only, an empty folder or file over each secret, and new namespaces for the pids and the network. A proposal: on Linux the network stays closed also with Network^, because the proxy needs a bridge into the namespace. That is less authority, so the law holds."
+
+[[group]]
+id = "backends"
+phase = "p3"
+module = "harness-sandbox"
+file = "Backends.scala"
+title = "The choice of a backend on this host"
+
+[[node]]
+id = "backend-detect"
+group = "backends"
+kind = "function"
+name = "detect"
+ref = "5.4"
+uses = ["backend"]
+proof_uses = ["seatbelt", "bubblewrap"]
+text = "The first backend that works on this host: Seatbelt on macOS, bubblewrap on Linux, or none."
+
+# ── Phase 3: the proxy of the network (5.4) ─────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "proxy"
+phase = "p3"
+module = "harness-sandbox"
+file = "HostProxy.scala"
+title = "The proxy that applies the host list"
+
+[[node]]
+id = "host-proxy"
+group = "proxy"
+kind = "data"
+name = "HostProxy"
+ops = ["port", "close"]
+ref = "5.4"
+spec = true
+uses = ["host-list"]
+proof_uses = ["host-list"]
+text = "An HTTP proxy on the loopback address, for plain requests and CONNECT. It lets a request through only when its host is on the list. A Seatbelt profile lets a child reach only this port."
+
+# ── Phase 3: the handler of Shell (5.3) ─────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "sandboxed-shell"
+phase = "p3"
+module = "harness-sandbox"
+file = "SandboxedShell.scala"
+title = "Shell.sandboxed: exec in an OS sandbox"
+
+[[node]]
+id = "sandboxed-shell"
+group = "sandboxed-shell"
+kind = "data"
+name = "SandboxedShell"
+ops = ["exec", "close"]
+ref = "5.3"
+spec = true
+uses = ["shell", "files", "session-config", "layout", "host-list", "backend"]
+proof_uses = ["profile-for-mode", "profile-for-command", "child-env", "host-proxy"]
+text = "Shell.sandboxed(root, profile) of 5.3. exec runs the command in the backend, under the profile of the mode of the session, with the allowlist of variables and a time limit. With no backend, or in a mode with no child process, exec fails and the command does not run. spawn and the job table come with phase 7."
+
+# ── Phase 3: the laws ───────────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "profile-laws"
+phase = "p3"
+module = "harness-sandbox"
+file = "ProfileLaws.scala"
+where = "tests"
+title = "The laws of the profile, as properties"
+
+[[node]]
+id = "law-profile-monotone"
+group = "profile-laws"
+kind = "law"
+name = "Monotone:"
+ref = "5.4"
+uses = ["profile-for-mode"]
+text = "If m1 <= m2, the profile of m2 allows each run, read, write and host that the profile of m1 allows. A profile that hides more paths allows less, and nothing under them."
+
+[[node]]
+id = "law-profile-authority"
+group = "profile-laws"
+kind = "law"
+name = "Authority:"
+ref = "5.4"
+uses = ["profile-for-mode", "profile-for-command"]
+text = "The profile of a mode allows a child process only with Shell^ and Files^, a write only under the scope or the private temporary directory and never in .git, a host only with Network^ and on the list, and in no mode a read or a write of a secret or of the journals. The profile of a command also hides each file with a secret name that exists in a writable root, apart from .git."
+
+[[node]]
+id = "law-host-list"
+group = "profile-laws"
+kind = "law"
+name = "Hosts:"
+ref = "5.4"
+uses = ["host-list"]
+text = "A host is allowed when a pattern names it, with no case. *.d matches each subdomain of d and not d. An empty list allows no host."
+
+[[group]]
+id = "environment-laws"
+phase = "p3"
+module = "harness-sandbox"
+file = "EnvironmentLaws.scala"
+where = "tests"
+title = "The laws of the allowlist of variables"
+
+[[node]]
+id = "law-env"
+group = "environment-laws"
+kind = "law"
+name = "Environment:"
+ref = "5.6"
+uses = ["child-env"]
+text = "A command gets only the names of the allowlist and of the session that the harness process has, with their values, and never a name with a secret word. More names of the session never remove a name, and a second filter changes nothing."
+
+[[group]]
+id = "seatbelt-laws"
+phase = "p3"
+module = "harness-sandbox"
+file = "SeatbeltLaws.scala"
+where = "tests"
+title = "The escape tests on macOS"
+
+[[node]]
+id = "law-seatbelt"
+group = "seatbelt-laws"
+kind = "law"
+name = "Seatbelt:"
+ref = "5.4"
+uses = ["seatbelt", "profile-for-mode"]
+text = "On macOS, for the profile of each mode of 5.2, a real child process can do what the probes of the profile allow and nothing more: writes in the scope, in the temporary directory, outside and in .git; reads of a secret, a .env file, a secret file with a quote in its name and the journals; a new file with a secret name; a hard link to a secret and to a .env file; a move of a .env file; a child of the child; the network, directly and through the proxy; the processes outside the sandbox and launchd. When the backend works, a command runs under the profile of each mode with a child process."
+
+[[group]]
+id = "bubblewrap-laws"
+phase = "p3"
+module = "harness-sandbox"
+file = "BubblewrapLaws.scala"
+where = "tests"
+title = "The escape tests on Linux"
+
+[[node]]
+id = "law-bubblewrap"
+group = "bubblewrap-laws"
+kind = "law"
+name = "Bubblewrap:"
+ref = "5.4"
+uses = ["bubblewrap", "profile-for-mode"]
+text = "On Linux with bwrap, the probes of Seatbelt give what the profile allows, apart from the network of Network^, which stays closed. The tests skip on a host with no working bwrap. scripts/sandbox-linux/run.sh runs them in a podman container, and the blueprint reads its report."
+
+[[group]]
+id = "proxy-laws"
+phase = "p3"
+module = "harness-sandbox"
+file = "ProxyLaws.scala"
+where = "tests"
+title = "The laws of the proxy"
+
+[[node]]
+id = "law-proxy"
+group = "proxy-laws"
+kind = "law"
+name = "Proxy:"
+ref = "5.4"
+uses = ["host-proxy"]
+text = "A plain request and a CONNECT for a host on the list reach the host. A request for another host gets 403, and the proxy opens no connection for it."
+
+[[group]]
+id = "shell-laws"
+phase = "p3"
+module = "harness-sandbox"
+file = "SandboxedShellLaws.scala"
+where = "tests"
+title = "exec runs only in a sandbox"
+
+[[node]]
+id = "law-exec"
+group = "shell-laws"
+kind = "law"
+name = "Exec:"
+ref = "5.3"
+uses = ["sandboxed-shell"]
+proof_uses = ["backend-detect"]
+text = "With no backend, or in a mode with no child process, exec fails and the command does not run. Else the command runs in the sandbox of the mode: it sees only the variables of the allowlist, it cannot write outside the scope, also from its own child, and the time limit stops it and its children. A zombie counts as stopped, so the handler does not wait for it. A file with a secret name that a command makes is hidden from the next command."
+
+# ── Phase 3: the mutants of the sandbox ─────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "sandbox-mutants"
+phase = "p3"
+module = "harness-sandbox"
+file = "mutants.toml"
+where = "tests"
+title = "The mutants of the sandbox"
+
+[[node]]
+id = "sandbox-mutants"
+group = "sandbox-mutants"
+kind = "check"
+name = "Mutant:"
+ref = "5.4"
+uses = ["law-profile-monotone", "law-profile-authority", "law-host-list", "law-env", "law-seatbelt", "law-proxy",
+        "law-exec"]
+text = "Each mutant breaks one rule of the profile, the allowlist, Seatbelt or the handler of Shell, and at least one law must fail. scripts/mutants/mutants.py runs the list. The mutants of Seatbelt need macOS."

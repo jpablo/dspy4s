@@ -65,7 +65,8 @@ lazy val root = (project in file("."))
     harnessGuest,
     harnessKernel,
     harnessRepl,
-    harnessMcp
+    harnessMcp,
+    harnessSandbox
   )
   .settings(commonSettings)
   .settings(
@@ -247,9 +248,8 @@ lazy val examples = (project in file("modules/examples"))
     Test / javaOptions += "-Dfile.encoding=UTF-8"
   )
 
-// The code harness (docs/code-harness/CODE_HARNESS_DESIGN.md, 10.5). The two modules hold phase 1, the kernel, and the
-// modes of phase 2, with the laws of each as tests. docs/code-harness/CODE_HARNESS_BLUEPRINT.html shows the state of
-// each part of the plan.
+// The code harness (docs/code-harness/CODE_HARNESS_DESIGN.md, 10.5). The modules hold the phases of section 15, with the
+// laws of each as tests. docs/code-harness/CODE_HARNESS_BLUEPRINT.html shows the state of each part of the plan.
 
 // The guest API: what model code calls, and the modes that limit it (5.1, 5.2).
 lazy val harnessGuest = (project in file("modules/harness-guest"))
@@ -317,6 +317,23 @@ lazy val harnessMcp = (project in file("modules/harness-mcp"))
     // The end-to-end test starts the server in a child JVM with the class path of the tests.
     Test / fork := true,
     Test / javaOptions += "-Dfile.encoding=UTF-8"
+  )
+
+// The sandbox (5.4, 5.6): the profile of a child process from the mode, Seatbelt and bubblewrap, the proxy of the host
+// list, the allowlist of variables, and the handler of Shell. exec runs only in a sandbox.
+lazy val harnessSandbox = (project in file("modules/harness-sandbox"))
+  .dependsOn(harnessKernel)
+  .settings(commonSettings)
+  .settings(name := "dspy4s-harness-sandbox")
+  .settings(
+    libraryDependencies ++= Seq(
+      "org.scalameta" %% "munit"            % munitVersion           % Test,
+      "org.scalameta" %% "munit-scalacheck" % munitScalacheckVersion % Test
+    ),
+    // The escape tests look for a variable of the test JVM from a child process. The value is not a real secret.
+    Test / fork              := true,
+    Test / envVars           := Map("DSPY4S_FAKE_SECRET_TOKEN" -> "fake-value-for-the-escape-tests"),
+    Test / parallelExecution := false
   )
 
 // JMH stays outside the root aggregate. Normal compile and test runs do not pay for benchmark generation.

@@ -692,6 +692,43 @@ the only ways to read another session.
 
 Seatbelt on macOS and bubblewrap on Linux come first. `kyo-pod` is a possible later backend for rollouts.
 
+**The first version (phase 3).** `Profile.forMode(mode, scope, layout, hosts)` gives the profile. Four observations
+are its meaning: `canRun`, `canRead(path)`, `canWrite(path)` and `canConnect(host)`. The laws and the escape tests
+compare each backend with these observations.
+
+- The layout names the private temporary directory, the folder of the journals, the secret paths and the names of the
+  secret files. The secret paths are `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.netrc`,
+  `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, `~/.password-store`, `~/.config/gcloud`, `~/.config/gh` and
+  `~/Library/Keychains`. Under the scope and the temporary directory, a file or folder with the name `.env` or
+  `.env.*` that exists when a command starts is secret. A proposal: the design names only `~/.ssh`, `~/.aws` and
+  `.env`.
+- The host list is a set of host names. A name `*.d` matches each subdomain of `d`. A proposal: the design gives the
+  host list no type.
+- Seatbelt denies by default, as in Codex. A child can start programs, read files, and look only at the processes of
+  its own sandbox. It cannot reach launchd and the other services of the system, so it cannot start a process outside
+  the sandbox. `sh`, `git`, `python3` and `java` run with these rules.
+- bubblewrap keeps the network closed in each mode, also with `Network^`, because the proxy needs a bridge into the
+  network namespace, as in Codex. Less network is less authority, so the law holds.
+- A secret name protects the files that exist when a command starts. Before each command, `Profiles.forCommand`
+  walks the writable roots, apart from `.git`, and hides each file with a secret name and the target of each one that
+  is a symbolic link. The command cannot read, write, link or move these files, and both backends deny them by path.
+  A command can make a new file with a secret name. That file holds only data of the command, and the next command
+  cannot read it. A mount of bubblewrap cannot hide a name, so a rule for the names would hold only on macOS. The walk
+  takes time in a large scope.
+- Seatbelt escapes a quote, a backslash, a newline and a return in a path, so a file name cannot stop the next
+  commands.
+- A backend works when `/bin/sh -c true` runs under its own command line. A probe with other arguments can pass in a
+  container where each command fails, for example where bwrap can mount `/dev` but not `/proc`.
+- In a container, the JVM can be PID 1 with no init. Then an orphan of a command stays a zombie after it ends, and
+  `ProcessHandle.isAlive` is true for it. The handler counts a zombie as stopped, so the time limit does not wait for
+  it. A zombie uses no memory, but only an init reaps it, so run the harness with an init in a container.
+- `scripts/sandbox-linux/run.sh` runs the laws on Linux in a podman container, as a normal user.
+- The proxy listens on the loopback address, for plain HTTP and for `CONNECT`. A host that is not on the list gets 403,
+  and the proxy opens no connection for it. The proxy resolves the names, so a child needs no DNS.
+- A proposal: `exec` gives the standard output and the standard error as one text. A last line tells about a cut of
+  the output, the end of the time limit, and an exit code that is not 0. The time limit stops the command and each
+  child that the handler saw.
+
 ### 5.5 Approvals: a cell never waits for a person
 
 Each rule of a session says `Allow`, `Ask` or `Deny` for the calls that it matches. The strongest verdict wins, and a
@@ -1263,7 +1300,7 @@ key of the journal is the fence there. JDBC also reaches a server database, but 
 | `harness-kernel` | `Entry`, `SessionState`, `evolve`, `next`, `decide`, `repair`, `reports`, `Fold`, `ContextStrategy`, the memory tree | `harness-guest`, zio-blocks |
 | `harness-repl` | `ScalaRepl`, the protections of Phase 0, the note of lost names | `harness-guest`, `harness-kernel`, `scala3-repl` |
 | `harness-mcp` | The early MCP server of section 6 | `harness-repl`, the MCP Java SDK |
-| `harness-sandbox` | Seatbelt, bubblewrap, the profiles | `harness-kernel` |
+| `harness-sandbox` | The profiles, Seatbelt, bubblewrap, the proxy of the host list, the allowlist of variables, and the handler of `Shell` | `harness-kernel` |
 | `harness` | `Harness`, `drive`, the handlers, the leaves | The modules above, dspy4s `programs` |
 | `harness-host` | The session host, the SQLite journal, the catalog, the report pass | `harness`, `sqlite-jdbc` |
 | `harness-cli` | The terminal client | `harness-host` |
@@ -1345,6 +1382,7 @@ and the start probe also ran on JDK 21.0.11. The code is in `tmp/design-check/`,
 | The Phase 0 experiment on JDK 21.0.11 and on JDK 25.0.5 | The same 43 checks pass on both, and the same 3 known problems fail. The first REPL in a JVM: 1,048 ms and 1,026 ms. The heap after 600 cells: 349 MiB and 348 MiB. |
 | A new JVM up to the end of the first harness cell, with the preamble of 5.2 | JDK 21: 2.51 s. JDK 25: 2.51 s. JDK 25 with an AOT cache from one training run: 1.69 s, and the cache file has 64 MB. Each number is a median of 5 runs. |
 | `sqlite-jdbc` on JDK 25 | It prints a warning about native access, and the warning names the flag `--enable-native-access=ALL-UNNAMED`. JDK 21 prints no warning. |
+| The laws of `harness-sandbox` on Linux, with `scripts/sandbox-linux/run.sh`: Ubuntu 24.04, bwrap and JDK 21 on arm64, in a privileged podman container, as a normal user | 43 tests: 37 pass, and 6 of Seatbelt skip. Each probe of 5.4 gives what the profile allows. The first run found three errors, fixed here. A command made a new file `.env.new`, because a mount of bubblewrap cannot hide a name, so 5.4 now protects the secret files that exist when a command starts. The probe of bubblewrap passed in a container where each command failed. The time limit waited 2 s for a zombie when the JVM was PID 1. |
 
 The cells that models wrote. A cell counts if it compiled, so the table does not say that the cell does its task. The
 last column has this `Data` and the second try of section 6:
@@ -1392,7 +1430,8 @@ What did not run:
 - The kernel with a real REPL and a real LM.
 - The AOT cache with a real CLI, on Linux, and after a change of the class path.
 - A hard stop that reaches the LM transport and a process group.
-- The OS sandbox.
+- bubblewrap on a Linux host that is not a container, for example Ubuntu 24.04, which limits user namespaces with
+  AppArmor. The run of the table used a privileged podman container.
 - A real power loss. The kernel check only cuts the journal at the last flush, and the SQLite check only measures the
   time. That a flush reaches the disk and covers the earlier commits comes from the SQLite documentation.
 - The flush on Linux, and a `tell` across two journals with a power loss.

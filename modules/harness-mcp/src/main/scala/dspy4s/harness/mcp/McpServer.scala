@@ -27,8 +27,8 @@ final class McpServer(root: Path):
 
 object McpServer:
 
-  /** The read-only mode of 5.2, with no LM and no sessions, because the server has neither. Until the sandbox of phase
-    * 3 exists, the server gives no `Shell^` and no `Network^`.
+  /** The read-only mode of 5.2, with no LM and no sessions, because the server has neither. `exec` takes `Files^`, and
+    * the server has no handler that writes files, so it gives no `Shell^` and no `Network^`.
     */
   val mode: Mode = Mode(
     files = Access.Read,

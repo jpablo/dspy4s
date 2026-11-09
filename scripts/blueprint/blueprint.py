@@ -12,7 +12,8 @@ Each node has two states, as in a Lean blueprint:
 - The statement (the border): a type or function is stated when its declaration is in the code. A law is stated when
   a test with its name is in the code. A node is ready when each node that it uses is stated.
 - The proof (the fill): a type is done when it and its methods have bodies, a function when it has a body that is not
-  `???`, and a law when its tests pass in the last test report. A node is ready when it is stated and each node that
+  `???`, and a law when its tests pass in the test reports: a report passes each test, and no report fails one. A
+  skip is no run, so a skip on macOS and a pass on Linux is a pass. A node is ready when it is stated and each node that
   its proof needs is complete. A node is complete when it and each node that its proof needs, and so on, are done.
 
 As in a Lean blueprint, the statement and the proof have different uses. `uses` holds what the statement needs: the
@@ -257,13 +258,22 @@ def read_code(module: str) -> Code:
             return {}
         return {str(f.relative_to(ROOT)): f.read_text() for f in sorted((base / rel).rglob(pattern))}
 
-    results: dict[str, bool] = {}
+    # A test passes when a report has it with no failure and no report has it with a failure. A skip counts as no run,
+    # so a test that skips on macOS and passes in the Linux report of scripts/sandbox-linux/run.sh passes.
+    passed: set[str] = set()
+    failed: set[str] = set()
+    seen: set[str] = set()
     if (reports := base / "target/test-reports").is_dir():
         for report in sorted(reports.glob("*.xml")):
             for case in ET.parse(report).getroot().iter("testcase"):
-                bad = any(child.tag in ("failure", "error", "skipped") for child in case)
+                tags = {child.tag for child in case}
                 name = case.get("name", "")
-                results[name] = results.get(name, True) and not bad
+                seen.add(name)
+                if tags & {"failure", "error"}:
+                    failed.add(name)
+                elif "skipped" not in tags:
+                    passed.add(name)
+    results = {name: name in passed and name not in failed for name in seen}
     # A check can have its statement in a list of the tests, for example the mutants of the kernel in mutants.toml.
     return Code(texts("src/main/scala"), texts("src/test/scala") | texts("src/test", "*.toml"), results)
 
