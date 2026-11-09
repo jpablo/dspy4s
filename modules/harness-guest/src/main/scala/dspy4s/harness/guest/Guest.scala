@@ -47,6 +47,16 @@ import caps.assumeSafe
   update def rlm[A: Data](task: String, inputs: Map[String, String]): A
   update def rlmBatched[A: Data](tasks: Vector[String]): Vector[A]
 
+/** What a cell gets from the host with no capability (5.1): the clock and the input values of the session. The
+  * preamble of each mode binds it as a given, so a cell cannot make one. `now` is a guest API call, so the journal
+  * records its value. An input is not an effect, because the journal already holds the value.
+  */
+@assumeSafe trait Turn:
+  def now(): Long
+
+  /** The `Json` of the input field `name`, or `None` for an unknown name. */
+  def input(name: String): Option[zio.blocks.schema.json.Json]
+
 /** A command that runs after its cell ends (6). The id is plain data that holds the `EffectId` of its `spawn`, so it
   * stays valid in a later cell, and the store can hold it.
   */
@@ -76,12 +86,15 @@ final case class NeedsApproval(op: String, argument: String)
   def println(value: Any): Unit = scala.Console.println(value)
 
   /** Milliseconds since the epoch. A guest API call, so the journal records its value (5.1). */
-  def now(): Long = ???
+  def now()(using t: Turn): Long = t.now()
 
   /** The value of an input field of this session (5.1). It needs no capability, because it reads only what the
-    * session got, and it is not an effect, because the journal already holds the value.
+    * session got. A value that does not fit the type throws a `DataError` with its path, and the cell fails.
     */
-  def input[A](name: String)(using d: Data[A]): A = ???
+  def input[A](name: String)(using t: Turn, d: Data[A]): A =
+    t.input(name) match
+      case Some(value) => d.decode(value, name).fold(error => throw error, identity)
+      case None        => throw IllegalArgumentException(s"this session has no input with the name $name")
 
   def read(path: String)(using f: Files): String                                  = f.read(path)
   def write(path: String, content: String)(using f: Files^): Unit                 = f.write(path, content)

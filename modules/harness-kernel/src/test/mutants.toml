@@ -1,0 +1,220 @@
+# The mutants of section 12 of docs/code-harness/CODE_HARNESS_DESIGN.md. Each mutant breaks one rule of the kernel.
+#
+# `python3 scripts/mutants/mutants.py modules/harness-kernel/src/test/mutants.toml` applies each mutant alone, runs the
+# laws of the module, and restores the code. At least one law must fail for each mutant. The script writes the results
+# to the test reports of the module, where the blueprint reads them.
+#
+# Each edit replaces `old`, which must occur exactly once in the file, with `new`. Two mutants of section 12 are not
+# here, because they need the host: "take the list of jobs only from the live table" (phase 7), and "the old rule of
+# reports", which section 12 kept only as a mutant of the sketch.
+
+module = "harness-kernel"
+project = "harnessKernel"
+sources = "modules/harness-kernel/src/main/scala/dspy4s/harness/kernel"
+
+# ── The kernel ──
+
+[[mutant]]
+name = "Mutant: a stop keeps the inputs that wait"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "case Entry.StopRequested(_)                 => base.copy(stopping = true, waiting = 0)"
+new = "case Entry.StopRequested(_)                 => base.copy(stopping = true)"
+
+[[mutant]]
+name = "Mutant: an effect of any cell can start"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "case Position.InCell(_, cell, _) => id.cell == cell"
+new = "case Position.InCell(_, cell, _) => id.cell >= 0 || cell < 0"
+
+[[mutant]]
+name = "Mutant: a late outcome of a closed effect commits"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "        case Entry.EffectDone(id, _) => s.open.contains(id)"
+new = "        case Entry.EffectDone(id, _) => id.n >= 0 || s.open.contains(id)"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "\n    case Entry.EffectDone(id, _) => s.open.contains(id)"
+new = "\n    case Entry.EffectDone(id, _) => id.n >= 0 || s.open.contains(id)"
+
+[[mutant]]
+name = "Mutant: a Once grant goes at EffectStarted"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "base.copy(open = s.open + (id -> OpenCall(op, args)), jobs = jobs)"
+new = "base.copy(open = s.open + (id -> OpenCall(op, args)), jobs = jobs, grants = s.grants.filterNot(usedUp(op, args)))"
+
+[[mutant]]
+name = "Mutant: a Once grant stays after its call"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "s.open.get(id).fold(s.grants)(call => s.grants.filterNot(usedUp(call.op, call.args)))"
+new = "s.open.get(id).fold(s.grants)(_ => s.grants)"
+
+[[mutant]]
+name = "Mutant: a Turn grant stays after its turn"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "grants = s.grants.filterNot(_.lifetime == GrantLifetime.Turn)"
+new = "grants = s.grants"
+
+[[mutant]]
+name = "Mutant: a grant stays after Ended"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "base.copy(closed = true, grants = Set.empty, pending = Set.empty, jobs = stopJobs(s, JobSelector.All))"
+new = "base.copy(closed = true, pending = Set.empty, jobs = stopJobs(s, JobSelector.All))"
+
+[[mutant]]
+name = "Mutant: an Abort stops jobs"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "case Entry.StopRequested(_)                 => base.copy(stopping = true, waiting = 0)"
+new = "case Entry.StopRequested(_)                 => base.copy(stopping = true, waiting = 0, jobs = stopJobs(s, JobSelector.OfLastTurn))"
+
+[[mutant]]
+name = "Mutant: the jobs stay after Ended"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "base.copy(closed = true, grants = Set.empty, pending = Set.empty, jobs = stopJobs(s, JobSelector.All))"
+new = "base.copy(closed = true, grants = Set.empty, pending = Set.empty, jobs = s.jobs)"
+
+[[mutant]]
+name = "Mutant: OfLastTurn reaches other turns"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "case JobSelector.OfLastTurn  => job.turn == s.lastTurn"
+new = "case JobSelector.OfLastTurn  => job.turn <= s.lastTurn"
+
+[[mutant]]
+name = "Mutant: no flush at all"
+[[mutant.edit]]
+file = "Entry.scala"
+old = "    case Entry.EffectStarted(_, op, _)                => !readOnlyOps(op)"
+new = "    case Entry.EffectStarted(_, op, _)                => op.isEmpty && !readOnlyOps(op)"
+[[mutant.edit]]
+file = "Entry.scala"
+old = "    case Entry.Input(_, _, _) | Entry.Activated(_, _) => true"
+new = "    case Entry.Input(_, _, _) | Entry.Activated(_, _) => false"
+
+[[mutant]]
+name = "Mutant: the flush is at the outcome, not at the intent"
+[[mutant.edit]]
+file = "Entry.scala"
+old = "    case Entry.EffectStarted(_, op, _)                => !readOnlyOps(op)"
+new = """    case Entry.EffectStarted(_, op, _)                => op.isEmpty && !readOnlyOps(op)
+    case Entry.EffectDone(_, _)                       => true"""
+
+[[mutant]]
+name = "Mutant: an Input needs no flush"
+[[mutant.edit]]
+file = "Entry.scala"
+old = "    case Entry.Input(_, _, _) | Entry.Activated(_, _) => true"
+new = """    case Entry.Input(_, _, _)                         => false
+    case Entry.Activated(_, _)                        => true"""
+
+[[mutant]]
+name = "Mutant: an Activated needs no flush"
+[[mutant.edit]]
+file = "Entry.scala"
+old = "    case Entry.Input(_, _, _) | Entry.Activated(_, _) => true"
+new = """    case Entry.Input(_, _, _)                         => true
+    case Entry.Activated(_, _)                        => false"""
+
+# ── The approvals ──
+
+[[mutant]]
+name = "Mutant: nothing goes to pending"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "case EffectResult.NeedsApproval(rule) if !s.grants.exists(_.rule.covers(rule)) => s.pending + rule"
+new = "case EffectResult.NeedsApproval(rule) if !s.grants.exists(_.rule.covers(rule)) => s.pending"
+
+[[mutant]]
+name = "Mutant: a pending call stays after a new turn"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "base.copy(position = Position.BeforeStep(0), lastTurn = logged.seq, pending = Set.empty)"
+new = "base.copy(position = Position.BeforeStep(0), lastTurn = logged.seq)"
+
+[[mutant]]
+name = "Mutant: a repeated Grant commits again"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "case Command.Grant(request, _, _) if s.requests(request) => Right(Vector.empty)"
+new = "case Command.Grant(request, _, _) if s.requests(request) && request.value.isEmpty => Right(Vector.empty)"
+
+[[mutant]]
+name = "Mutant: an answer to a pending call gives no Input"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "if !s.pending.exists(rule.covers) then Right(Vector(granted))"
+new = "if s.pending.isEmpty || s.pending.nonEmpty then Right(Vector(granted))"
+
+[[mutant]]
+name = "Mutant: a report debt never closes"
+[[mutant.edit]]
+file = "Reports.scala"
+old = "case TurnOutcome.Submitted(_) | TurnOutcome.Exhausted | TurnOutcome.Aborted => true"
+new = "case TurnOutcome.Submitted(_) | TurnOutcome.Exhausted | TurnOutcome.Aborted => false"
+
+[[mutant]]
+name = "Mutant: a report debt closes on a reply"
+[[mutant.edit]]
+file = "Reports.scala"
+old = "case TurnOutcome.Submitted(_) | TurnOutcome.Exhausted | TurnOutcome.Aborted => true"
+new = "case TurnOutcome.Submitted(_) | TurnOutcome.Exhausted | TurnOutcome.Aborted | TurnOutcome.Replied(_) => true"
+
+[[mutant]]
+name = "Mutant: a pending call in a session with no person"
+[[mutant.edit]]
+file = "Approvals.scala"
+old = "case Verdict.Ask if s.config.owner.hasPerson =>"
+new = "case Verdict.Ask if s.config.owner.hasPerson || s.waiting >= 0 =>"
+
+[[mutant]]
+name = "Mutant: a grant beats a deny rule"
+[[mutant.edit]]
+file = "Approvals.scala"
+old = 'case Verdict.Deny                            => GuardResult.Refused("a rule denies this call")'
+new = """case Verdict.Deny if granted                => GuardResult.Run
+    case Verdict.Deny                            => GuardResult.Refused("a rule denies this call")"""
+
+[[mutant]]
+name = "Mutant: the first rule wins"
+[[mutant.edit]]
+file = "Guard.scala"
+old = "if rule.rule.matches(op, args) then found.join(rule.verdict) else found"
+new = "if rule.rule.matches(op, args) && found == Verdict.Allow then rule.verdict else found"
+
+[[mutant]]
+name = "Mutant: a goal check while a pending call waits"
+[[mutant.edit]]
+file = "Approvals.scala"
+old = "!s.closed && s.position == Position.NoTurn && s.waiting == 0 && s.pending.isEmpty"
+new = "!s.closed && s.position == Position.NoTurn && s.waiting == 0"
+
+# ── The values of the inputs ──
+
+[[mutant]]
+name = "Mutant: the state loses the values of an input"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "inputs = s.inputs ++ values)"
+new = "inputs = s.inputs ++ values.empty)"
+
+[[mutant]]
+name = "Mutant: the values of an input go to the store"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "inputs = s.inputs ++ values)"
+new = "inputs = s.inputs ++ values, store = s.store ++ values)"
+
+[[mutant]]
+name = "Mutant: a fork loses the values of the inputs"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "state(prefix).copy(grants = Set.empty, pending = Set.empty, jobs = Map.empty)"
+new = "state(prefix).copy(grants = Set.empty, pending = Set.empty, jobs = Map.empty, inputs = Map.empty)"

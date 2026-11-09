@@ -1,5 +1,8 @@
 package dspy4s.harness.repl
 
+import dspy4s.harness.kernel.{CellOutcome, Entry, Logged, Meta, Source, Taint}
+import zio.blocks.schema.json.Json
+
 /** The top-level names of a cell and the error hints of section 6. */
 class ReplLaws extends munit.FunSuite:
 
@@ -31,6 +34,41 @@ class ReplLaws extends munit.FunSuite:
 
   test("Top-level names: a cell that does not parse defines nothing") {
     assertEquals(topLevelNames("val broken = ("), Vector.empty)
+  }
+
+  /** A journal of four cells. The `Acted` entries have the `seq` 1, 4, 7 and 10. */
+  private def cellsJournal(cells: (String, CellOutcome)*): Vector[Logged] =
+    val meta    = Meta(0L, Source.Policy, Taint.Trusted, required = true)
+    val entries = cells.toVector.flatMap { (code, outcome) =>
+      Vector(Entry.StepStarted(0), Entry.Acted("", "", Some(code)), Entry.Observed("", outcome, Map.empty))
+    }
+    entries.zipWithIndex.map((entry, i) => Logged(i.toLong, meta, entry))
+
+  test("Names: the note lists the names of the cells that completed, with their cells") {
+    val journal = cellsJournal(
+      "val x = 1\ndef f(n: Int) = n"    -> CellOutcome.Ok,
+      "val y: Int = \"no\""             -> CellOutcome.CompileError(Vector("type mismatch")),
+      "val z = 3"                       -> CellOutcome.Submitted(Json.Number(3)),
+      "case class P(a: Int)\nval x = 2" -> CellOutcome.Ok
+    )
+    assertEquals(lostNames(journal), Vector("f" -> 1L, "P" -> 10L, "x" -> 10L))
+  }
+
+  test("Names: a failed cell and a cell that ended by submit define no name") {
+    val journal = cellsJournal(
+      "val a = 1" -> CellOutcome.Failed("boom"),
+      "val b = 2" -> CellOutcome.TimedOut(1000L),
+      "val c = 3" -> CellOutcome.Submitted(Json.Number(3))
+    )
+    assertEquals(lostNames(journal), Vector.empty)
+  }
+
+  test("Names: a cell with no outcome, which a crash cut, defines no name") {
+    val meta    = Meta(0L, Source.Policy, Taint.Trusted, required = true)
+    val journal = Vector(Entry.StepStarted(0), Entry.Acted("", "", Some("val d = 4"))).zipWithIndex.map((e, i) =>
+      Logged(i.toLong, meta, e)
+    )
+    assertEquals(lostNames(journal), Vector.empty)
   }
 
   test("Hints: a recursive type with no given") {

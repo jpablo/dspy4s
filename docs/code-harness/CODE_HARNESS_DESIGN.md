@@ -458,10 +458,14 @@ definition that a cell can use has `@assumeSafe`, because safe mode rejects the 
   def exec(command: String)(using s: Shell^, f: Files^): String = s.exec(command)
   def load[A: Data](key: String)(using s: Store): Option[A] = s.load[A](key)
   def store[A: Data](key: String, value: A)(using s: Store^): Unit = s.store(key, value)
-  def now(): Long                                              // milliseconds since the epoch
-  def input[A: Data](name: String): A                          // the value of an input field of this session
+  def now()(using t: Turn): Long                               // milliseconds since the epoch
+  def input[A: Data](name: String)(using t: Turn): A           // the value of an input field of this session
   // and the other functions
 ```
+
+`now()` and `input` take the given `Turn`, which the preamble of each mode binds. `Turn` is not a capability, so each
+mode has it, and a cell cannot make one. The host gives the clock through it as a recorded guest API call, and the
+input values from `SessionState.inputs`.
 
 The sketch shows the shape. The full API also has `edit`, `httpGet`, `llmQuery`, `llmQueryBatched`, `rlm`, `start`,
 `observe` and `zoom`. `submit` comes from the preamble of the session. The source text of these traits, with a
@@ -499,8 +503,10 @@ enum DataShape:                                    // a record and a union are l
 ```
 
 A case class or an enum needs no other code. A cell can write `case class Point(x: Int, y: String)`, and then
-`store("p", Point(1, "a"))`. A recursive type needs one more line, because the inline given does not end on it: `case
-class Dir(name: String, kids: Vector[Dir])`, and then `given Data[Dir] = Data.derived`.
+`store("p", Point(1, "a"))`. A recursive type, for example `case class Dir(name: String, kids: Vector[Dir])`, and two
+types that hold each other need no other code either, because `derived` takes the `Data` of each field as a by-name
+given. The sketch of section 12 needed one more line for them, `given Data[Dir] = Data.derived`, and the line still
+works.
 
 | Value | Its `Json` form |
 |---|---|
@@ -568,6 +574,8 @@ val doc: String = input[String]("doc")
 
 - `SessionConfig.preamble` holds the text (8.1), and the journal holds no `DataShape`. A new REPL after a crash or a
   reopen compiles the same text. The text holds no value, so it holds no secret.
+- A new REPL compiles the givens of its mode before safe mode starts, and then the preamble of the session in safe
+  mode. So a cell can use the types, `submit` and the inputs, and it cannot name the host.
 - The API reference in the prompt also shows the preamble, so the model sees the types and `submit`.
 - A program makes its preamble from `Data[O].shape` and `Data[I].shape` when it is built. A child gets its preamble
   from `Data[A].shape` when `rlm` is called. A session with no output type has `submit(value: String)`.
@@ -1249,7 +1257,7 @@ key of the journal is the fence there. JDBC also reaches a server database, but 
 |---|---|---|
 | `harness-guest` | The guest API traits, `Data`, `Access` and `Mode`. The source text is the API reference. | zio-blocks only |
 | `harness-kernel` | `Entry`, `SessionState`, `evolve`, `next`, `decide`, `repair`, `reports`, `Fold`, `ContextStrategy`, the memory tree | `harness-guest`, zio-blocks |
-| `harness-repl` | `ScalaRepl`, the protections of Phase 0 | `harness-guest`, `scala3-repl` |
+| `harness-repl` | `ScalaRepl`, the protections of Phase 0, the note of lost names | `harness-guest`, `harness-kernel`, `scala3-repl` |
 | `harness-mcp` | The early MCP server of section 6 | `harness-repl`, the MCP Java SDK |
 | `harness-sandbox` | Seatbelt, bubblewrap, the profiles | `harness-kernel` |
 | `harness` | `Harness`, `drive`, the handlers, the leaves | The modules above, dspy4s `programs` |
@@ -1504,4 +1512,5 @@ others, so the design must meet them early.
 
 The order of the table is an order of priority. The blueprint shows the phases that can run at the same time: phases
 1 and 2 first, phase 3 after phase 1, phase 4 after phases 2 and 3, phases 5 to 8 after phase 4, and phase 9 after
-phases 7 and 8. Phases 1 and 2 share only `Access` and `Mode`, so these two types come first.
+phases 7 and 8. In phase 1, the kernel uses `Access` and `Mode` of phase 2, so these two types come first. In phase
+2, the REPL uses the journal types of the kernel, so the REPL waits for the journal.

@@ -73,9 +73,10 @@ class ApprovalLaws extends ScalaCheckSuite:
   }
 
   property("Pending call: TurnStarted and Ended empty pending") {
-    forAll(states) { s =>
-      assert(commit(s, Vector(Entry.TurnStarted)).pending.isEmpty)
-      assert(commit(s, Vector(Entry.Ended(SessionOutcome.Parked, "done"))).pending.isEmpty)
+    forAll(schedules) { run =>
+      for s <- everyState(run) do
+        assert(commit(s, Vector(Entry.TurnStarted)).pending.isEmpty)
+        assert(commit(s, Vector(Entry.Ended(SessionOutcome.Parked, "done"))).pending.isEmpty)
     }
   }
 
@@ -97,6 +98,16 @@ class ApprovalLaws extends ScalaCheckSuite:
   }
 
   // ── Guard ──
+
+  test("Guard: the strongest verdict of the rules that match wins, in each order of the rules") {
+    val allow = VerdictRule(GuardRule("exec", ArgMatch.AnyArgs), Verdict.Allow)
+    val ask   = VerdictRule(GuardRule("exec", ArgMatch.Prefix("command", "git")), Verdict.Ask)
+    val deny  = VerdictRule(GuardRule("exec", ArgMatch.Exact(args)), Verdict.Deny)
+    for rules <- Vector(allow, ask, deny).permutations do
+      assertEquals(Guard(rules).verdict("exec", args), Verdict.Deny, rules.toString)
+    for rules <- Vector(allow, ask).permutations do
+      assertEquals(Guard(rules).verdict("exec", args), Verdict.Ask, rules.toString)
+  }
 
   property("Guard: verdict is a homomorphism from Guard to Verdict") {
     forAll(guards, guards, calls) { (a, b, call) =>

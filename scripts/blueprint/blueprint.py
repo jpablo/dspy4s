@@ -252,10 +252,10 @@ def closure(edges: dict[str, list[str]]) -> dict[str, set[str]]:
 
 def read_code(module: str) -> Code:
     base = ROOT / "modules" / module
-    def texts(rel: str) -> dict[str, str]:
+    def texts(rel: str, pattern: str = "*.scala") -> dict[str, str]:
         if not (base / rel).is_dir():
             return {}
-        return {str(f.relative_to(ROOT)): f.read_text() for f in sorted((base / rel).rglob("*.scala"))}
+        return {str(f.relative_to(ROOT)): f.read_text() for f in sorted((base / rel).rglob(pattern))}
 
     results: dict[str, bool] = {}
     if (reports := base / "target/test-reports").is_dir():
@@ -264,7 +264,8 @@ def read_code(module: str) -> Code:
                 bad = any(child.tag in ("failure", "error", "skipped") for child in case)
                 name = case.get("name", "")
                 results[name] = results.get(name, True) and not bad
-    return Code(texts("src/main/scala"), texts("src/test/scala"), results)
+    # A check can have its statement in a list of the tests, for example the mutants of the kernel in mutants.toml.
+    return Code(texts("src/main/scala"), texts("src/test/scala") | texts("src/test", "*.toml"), results)
 
 
 def type_pattern(name: str) -> re.Pattern[str]:
@@ -556,8 +557,9 @@ def named(code: str, by_name: dict[str, Node]) -> set[str]:
             continue
         line_start = text.rfind("\n", 0, m.start()) + 1
         line_end = text.find("\n", m.end())
-        rest = text[m.end() : line_end if line_end >= 0 else len(text)]
-        if text[line_start : m.start()].strip() == "case" and "=>" not in rest:
+        line = text[line_start : line_end if line_end >= 0 else len(text)]
+        head = line.split("(")[0]  # the names before the fields, for example `case Once, Turn, Session`
+        if line.lstrip().startswith("case ") and "=>" not in line and m.start() - line_start < len(head):
             continue  # the declaration of an enum case, not a use
         if n.kind == "function":
             after = text[m.end():].lstrip()[:1]
@@ -568,7 +570,7 @@ def named(code: str, by_name: dict[str, Node]) -> set[str]:
     return out
 
 
-COMMON_METHODS = {"apply", "map", "flatMap", "zip", "filter", "fold", "foldLeft", "get", "contains", "of"}
+COMMON_METHODS = {"apply", "map", "flatMap", "zip", "filter", "fold", "foldLeft", "get", "contains", "of", "join"}
 
 
 def called(code: str, owners: dict[str, Node]) -> dict[str, str]:

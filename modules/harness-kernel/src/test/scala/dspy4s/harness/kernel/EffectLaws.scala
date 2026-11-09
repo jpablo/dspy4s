@@ -83,10 +83,11 @@ class EffectLaws extends ScalaCheckSuite:
   }
 
   property("Job: an Abort changes no job") {
-    forAll(states) { s =>
-      decide(Command.Abort("stop"), s) match
-        case Right(entries) => assertEquals(commit(s, entries).jobs, s.jobs)
-        case Left(_)        => ()
+    forAll(schedules) { run =>
+      for s <- everyState(run) do
+        decide(Command.Abort("stop"), s) match
+          case Right(entries) => assertEquals(commit(s, entries).jobs, s.jobs)
+          case Left(_)        => ()
     }
   }
 
@@ -109,6 +110,39 @@ class EffectLaws extends ScalaCheckSuite:
     assertEquals(stopped.jobs.get(job).map(_.stopRequested), Some(true))
     val later = Entry.EffectStarted(EffectId(cell, 1), "spawn", args)
     assertEquals(decide(Command.Commit(Vector(later)), stopped), Left(Rejection.OutOfOrder(later)))
+  }
+
+  test("Job: StopJobs(OfLastTurn) leaves the jobs of an earlier turn") {
+    val earlier = EffectId(cell, 0)
+    val later   = EffectId(12, 0)
+    val s       = state(
+      journal(
+        (cellEntries() ++ Vector(
+          Entry.EffectStarted(earlier, "spawn", args),
+          Entry.EffectDone(earlier, EffectResult.Value(args, "job")),
+          Entry.Observed("", CellOutcome.Ok, Map.empty),
+          Entry.TurnEnded(TurnOutcome.Replied("started")),
+          Entry.Input(RequestId("r2"), "more", Map.empty),
+          Entry.TurnStarted,
+          Entry.StepStarted(0),
+          Entry.Acted("", "", Some("spawn()")),
+          Entry.EffectStarted(later, "spawn", args),
+          Entry.JobsStopRequested(JobSelector.OfLastTurn, "stop")
+        ))*
+      )
+    )
+    assertEquals(s.jobs.get(earlier).map(_.stopRequested), Some(false))
+    assertEquals(s.jobs.get(later).map(_.stopRequested), Some(true))
+  }
+
+  property("Job: StopJobs(OfLastTurn) marks only the jobs of the last turn") {
+    forAll(schedules) { run =>
+      for s <- everyState(run) do
+        val stopped = commit(s, Vector(Entry.JobsStopRequested(JobSelector.OfLastTurn, "stop")))
+        for (id, job) <- stopped.jobs do
+          val expected = s.jobs.get(id).exists(_.stopRequested) || job.turn == s.lastTurn
+          assertEquals(job.stopRequested, expected, s"the job $id of the turn ${job.turn}, the last turn ${s.lastTurn}")
+    }
   }
 
   property("Job: Ended stops all jobs") {

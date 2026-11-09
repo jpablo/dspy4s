@@ -275,9 +275,10 @@ lazy val harnessKernel = (project in file("modules/harness-kernel"))
     )
   )
 
-// The REPL (6): ReplDriver with capture checking and safe mode. Only this module depends on the compiler.
+// The REPL (6): ReplDriver with capture checking and safe mode. Only this module depends on the compiler. It uses the
+// kernel: a cell gives a CellOutcome, and the note of lost names folds over the journal.
 lazy val harnessRepl = (project in file("modules/harness-repl"))
-  .dependsOn(harnessGuest)
+  .dependsOn(harnessGuest, harnessKernel)
   .settings(commonSettings)
   .settings(name := "dspy4s-harness-repl")
   .settings(

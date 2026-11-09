@@ -993,7 +993,7 @@ text = "After the report pass of 8.6, each TurnEnded or Ended that needs a repor
 id = "mutants"
 phase = "p1"
 module = "harness-kernel"
-file = "Mutants.scala"
+file = "mutants.toml"
 where = "tests"
 title = "The mutants of section 12"
 
@@ -1003,9 +1003,10 @@ group = "mutants"
 kind = "check"
 name = "Mutant:"
 ref = "12"
-blocked = "Choose how the mutants run: stryker4s, or hand-written versions of single rules in the tests."
-uses = ["law-stop", "law-effect", "law-grant", "law-pending", "law-job", "law-flush", "law-report", "law-inputs"]
-text = "Each mutant of section 12 breaks one rule, and at least one property must fail."
+uses = ["law-fold", "law-homomorphism", "law-store", "law-inputs", "law-codec", "law-decide-table", "law-input",
+        "law-log", "law-language", "law-rest", "law-next-rules", "law-stop", "law-effect", "law-repair", "law-flush",
+        "law-job", "law-grant", "law-pending", "law-guard", "law-report"]
+text = "Each mutant of section 12 breaks one rule, and at least one law must fail. scripts/mutants/mutants.py runs the list in mutants.toml and writes a test report."
 
 # ── Phase 2: the modes (5.2). Phase 1 uses them too. ────────────────────────────────────────────────────────────────
 
@@ -1291,6 +1292,16 @@ spec = true
 uses = ["cap", "data"]
 
 [[node]]
+id = "turn"
+group = "guest-api"
+kind = "data"
+name = "Turn"
+ref = "5.1"
+spec = true
+uses = []
+text = "What a cell gets from the host with no capability: the clock, as a recorded guest API call, and the input values of the session. The preamble of each mode binds it as a given (decision of 2026-11-09)."
+
+[[node]]
 id = "api"
 group = "guest-api"
 kind = "data"
@@ -1298,11 +1309,10 @@ name = "api"
 ops = ["now", "input"]
 ref = "5.1"
 spec = true
-uses = ["files", "shell", "llm", "store", "sessions", "children", "data", "job-id", "job-status"]
-blocked = "Choose how a cell reaches the host for now() and input(name): a given of the preamble, or a value that the host binds. The design says what they do, not how."
+uses = ["files", "shell", "llm", "store", "sessions", "children", "data", "job-id", "job-status", "turn"]
 text = "The functions that a cell calls. Each one takes its capability as a given, so the mode limits what compiles."
 
-# ── Phase 2: the REPL (6). The statements need a choice of the result of a cell: harness-repl does not see the kernel. ─
+# ── Phase 2: the REPL (6). harness-repl uses the kernel: a cell gives a CellOutcome (decision of 2026-11-09). ──────
 
 [[group]]
 id = "repl"
@@ -1312,6 +1322,16 @@ file = "ScalaRepl.scala"
 title = "One REPL for each activation"
 
 [[node]]
+id = "bindings"
+group = "repl"
+kind = "data"
+name = "Bindings"
+ref = "5.2"
+spec = true
+uses = ["turn", "files", "shell", "llm", "store", "sessions", "children"]
+text = "What a host gives a REPL: the Turn, and a handler for each capability. The mode says which of them the preamble binds, and how."
+
+[[node]]
 id = "scala-repl"
 group = "repl"
 kind = "data"
@@ -1319,8 +1339,8 @@ name = "ScalaRepl"
 ops = ["run"]
 ref = "6"
 spec = true
-uses = ["mode", "api"]
-blocked = "Choose the type of the result of a cell. harness-repl does not depend on harness-kernel, so it cannot give a CellOutcome, and the host must map its result to one."
+uses = ["mode", "bindings", "cell-outcome"]
+proof_uses = ["api", "error-hints"]
 text = "ReplDriver in the same JVM with capture checking and safe mode, the givens of the mode, one cell at a time on its own thread, the stop flag, the protections of Phase 0, the second try in two parts, the catch around ReplDriver.run, and the clock of a cell."
 
 [[group]]
@@ -1338,6 +1358,17 @@ name = "topLevelNames"
 ref = "6"
 uses = []
 text = "The names that a cell defines, from the parser of the compiler. The note of lost names folds them over the cells that completed, so it needs no state of the old REPL."
+
+[[node]]
+id = "lost-names"
+group = "names"
+kind = "function"
+name = "lostNames"
+ref = "6"
+spec = true
+uses = ["logged"]
+proof_uses = ["top-level-names"]
+text = "The note of lost names: each name of a completed cell, with its cell. A later cell that defines a name again moves the name, and a failed cell or a cell that ended by submit defines nothing."
 
 [[group]]
 id = "hints"
@@ -1379,39 +1410,8 @@ kind = "law"
 name = "Names:"
 ref = "4.7"
 spec = true
-uses = ["top-level-names", "logged"]
-blocked = "Choose the module of the note of lost names. It folds topLevelNames over the cells of the journal, so it needs harness-repl and the Logged of harness-kernel, and harness-repl does not depend on the kernel. Either harness-repl depends on the kernel, or the note moves to harness in phase 4."
+uses = ["lost-names"]
 text = "The note after a restart lists the names of the cells that completed, and no name of a failed cell."
-
-[[node]]
-id = "law-submit"
-group = "repl-laws"
-kind = "law"
-name = "Submit:"
-ref = "4.7"
-spec = true
-uses = ["scala-repl", "api"]
-text = "A cell that called submit ends its turn with the first value, and the host refuses each later call of that cell."
-
-[[node]]
-id = "law-shape"
-group = "repl-laws"
-kind = "law"
-name = "Shape:"
-ref = "4.7"
-spec = true
-uses = ["scala-repl", "preamble", "data"]
-text = "A type that a preamble defines from shape reads each value of the first type, and it writes the same Json."
-
-[[node]]
-id = "law-mode-givens"
-group = "repl-laws"
-kind = "law"
-name = "Mode givens:"
-ref = "5.2"
-spec = true
-uses = ["scala-repl", "mode"]
-text = "The negative tests of the modes: in each mode, the calls that the mode does not give do not compile."
 
 [[node]]
 id = "law-hints"
@@ -1421,6 +1421,44 @@ name = "Hints:"
 ref = "6"
 uses = ["error-hints"]
 text = "Each error of the table of section 6 gets its hint."
+
+[[group]]
+id = "scala-repl-laws"
+phase = "p2"
+module = "harness-repl"
+file = "ScalaReplLaws.scala"
+where = "tests"
+title = "The laws of ScalaRepl, in a real REPL"
+
+[[node]]
+id = "law-submit"
+group = "scala-repl-laws"
+kind = "law"
+name = "Submit:"
+ref = "4.7"
+spec = true
+uses = ["scala-repl", "api"]
+text = "A cell that called submit ends its turn with the first value, and the host refuses each later call of that cell. The tests cover the first value and the names. The refusal of later calls is not in ScalaRepl yet."
+
+[[node]]
+id = "law-shape"
+group = "scala-repl-laws"
+kind = "law"
+name = "Shape:"
+ref = "4.7"
+spec = true
+uses = ["scala-repl", "preamble", "data"]
+text = "A type that a preamble defines from shape reads each value of the first type, and it writes the same Json."
+
+[[node]]
+id = "law-mode-givens"
+group = "scala-repl-laws"
+kind = "law"
+name = "Mode givens:"
+ref = "5.2"
+spec = true
+uses = ["scala-repl", "mode"]
+text = "The negative tests of the modes: in each mode, the calls that the mode does not give do not compile."
 
 # ── Phase 2: the early MCP server (6) ───────────────────────────────────────────────────────────────────────────
 
