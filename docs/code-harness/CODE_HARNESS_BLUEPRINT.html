@@ -1,0 +1,1524 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Made by scripts/blueprint/blueprint.py from docs/code-harness/blueprint.toml. Do not edit by hand. -->
+<title>Code harness blueprint</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: a drafting sheet. The graph is the drawing, the legend is the title block, the side panel is the parts list. */
+:root {
+  --paper: #eef1f4; --sheet: #ffffff; --grid: #e6eaef; --ink: #18202b; --muted: #556072; --rule: #d3d9e1;
+  --line: #8b96a6; --chip: #f4f6f9;
+  --st-waiting: #b2bbc7; --st-ready: #2462c8; --st-stated: #2e8b46; --st-upstream: #155c33; --st-blocked: #d06d0a;
+  --pf-none: #ffffff; --pf-ready: #d9e6fb; --pf-done: #c8eacd; --pf-complete: #2b7a40; --on-complete: #ffffff;
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", "Helvetica Neue", sans-serif;
+  --font-body: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --paper: #0d1217; --sheet: #141b23; --grid: #1a222c; --ink: #e1e6ed; --muted: #97a2b2; --rule: #29323e;
+    --line: #64728a; --chip: #1b232d;
+    --st-waiting: #4c5868; --st-ready: #6c9ef2; --st-stated: #5bbd72; --st-upstream: #3f9e5b; --st-blocked: #f09a4a;
+    --pf-none: #141b23; --pf-ready: #1b2f4f; --pf-done: #1d4227; --pf-complete: #3e9a55; --on-complete: #08130c;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --paper: #0d1217; --sheet: #141b23; --grid: #1a222c; --ink: #e1e6ed; --muted: #97a2b2; --rule: #29323e;
+  --line: #64728a; --chip: #1b232d;
+  --st-waiting: #4c5868; --st-ready: #6c9ef2; --st-stated: #5bbd72; --st-upstream: #3f9e5b; --st-blocked: #f09a4a;
+  --pf-none: #141b23; --pf-ready: #1b2f4f; --pf-done: #1d4227; --pf-complete: #3e9a55; --on-complete: #08130c;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.5 var(--font-body); }
+code, .mono { font-family: var(--font-mono); font-size: 0.9em; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--st-ready); outline-offset: 2px; }
+
+.sheet { max-width: 1440px; margin: 0 auto; padding-block: 28px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  display: grid; gap: 20px; }
+
+.top { display: grid; gap: 6px; max-width: 72ch; }
+.eyebrow { margin: 0; font: 600 12px/1.2 var(--font-display); letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+h1 { margin: 0; font: 600 clamp(1.7rem, 3.2vw, 2.4rem)/1.1 var(--font-display); letter-spacing: -0.01em; text-wrap: balance; }
+.lede { margin: 0; color: var(--ink); }
+.made { margin: 0; color: var(--muted); font-size: 13px; }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--rule); }
+.tabs button { border: 1px solid transparent; border-bottom: none; background: none; padding: 8px 14px; cursor: pointer;
+  font: 600 14px/1.2 var(--font-display); letter-spacing: 0.02em; color: var(--muted); border-radius: 4px 4px 0 0; }
+.tabs button[aria-selected="true"] { color: var(--ink); background: var(--sheet); border-color: var(--rule); margin-bottom: -1px; }
+
+.summary { display: flex; flex-wrap: wrap; gap: 10px 28px; align-items: baseline; }
+.meter { display: grid; gap: 4px; min-width: 11rem; }
+.meter .label { font: 600 12px/1.2 var(--font-display); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.meter .value { font: 500 15px/1.2 var(--font-body); font-variant-numeric: tabular-nums; }
+.meter .bar { height: 4px; background: var(--grid); border-radius: 2px; overflow: hidden; }
+.meter .bar span { display: block; height: 100%; background: var(--st-stated); }
+
+.work { display: grid; grid-template-columns: minmax(0, 1fr) 21rem; gap: 16px; align-items: start; }
+@media (max-width: 900px) { .work { grid-template-columns: minmax(0, 1fr); } }
+
+.drawing { min-width: 0; background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; }
+.titleblock { display: flex; flex-wrap: wrap; gap: 8px 22px; padding: 10px 12px; border-bottom: 1px solid var(--rule); font-size: 13px; }
+.titleblock .group { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.titleblock .group b { font: 600 11px/1.2 var(--font-display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-right: 2px; }
+.key { display: inline-flex; gap: 5px; align-items: center; white-space: nowrap; }
+.key svg { display: block; flex: none; }
+.toolbar { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--rule); }
+.toolbar button { border: 1px solid var(--rule); background: var(--chip); border-radius: 4px; padding: 3px 10px; cursor: pointer; font-size: 13px; }
+.toolbar button:hover { border-color: var(--line); }
+.toolbar .hint { color: var(--muted); font-size: 13px; margin-left: 6px; }
+
+.view-graph { overflow: auto; max-height: 78vh; padding: 12px;
+  background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px; }
+.view-graph svg { display: block; height: auto; margin: 0 auto; }
+.view-graph svg text { font-family: Helvetica, Arial, sans-serif; fill: var(--ink); }
+.view-graph g.graph > polygon { fill: transparent; stroke: none; }
+.view-graph .node { cursor: pointer; }
+.view-graph .node:focus { outline: none; }
+.view-graph .node polygon, .view-graph .node ellipse, .view-graph .node path { fill: var(--pf-none); stroke: var(--st-waiting); stroke-width: 1.6px; }
+.view-graph .node.st-ready :is(polygon, ellipse, path) { stroke: var(--st-ready); }
+.view-graph .node.st-stated :is(polygon, ellipse, path) { stroke: var(--st-stated); }
+.view-graph .node.st-upstream :is(polygon, ellipse, path) { stroke: var(--st-upstream); }
+.view-graph .node.st-blocked :is(polygon, ellipse, path) { stroke: var(--st-blocked); }
+.view-graph .node.pf-ready :is(polygon, ellipse, path) { fill: var(--pf-ready); }
+.view-graph .node.pf-done :is(polygon, ellipse, path) { fill: var(--pf-done); }
+.view-graph .node.pf-complete :is(polygon, ellipse, path) { fill: var(--pf-complete); }
+.view-graph .node.pf-complete text { fill: var(--on-complete); }
+.view-graph .node.sel :is(polygon, ellipse, path) { stroke-width: 3.4px; }
+.view-graph .node:focus-visible :is(polygon, ellipse, path) { stroke-width: 3.4px; stroke-dasharray: 4 2; }
+.view-graph .edge path { stroke: var(--line); fill: none; }
+.view-graph .edge polygon { fill: var(--line); stroke: var(--line); }
+.view-graph.focus .node, .view-graph.focus .edge { opacity: 0.22; }
+.view-graph.focus .on { opacity: 1; }
+.view-graph.focus .edge.on path { stroke: var(--ink); stroke-width: 1.6px; }
+.view-graph.focus .edge.on polygon { fill: var(--ink); stroke: var(--ink); }
+@media (prefers-reduced-motion: no-preference) { .view-graph .node, .view-graph .edge { transition: opacity 120ms ease; } }
+
+.panel { min-width: 0; background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 14px 16px;
+  display: grid; gap: 12px; position: sticky; top: calc(env(safe-area-inset-top, 0px) + 12px); }
+@media (max-width: 900px) { .panel { position: static; } }
+.panel h2 { margin: 0; font: 600 20px/1.2 var(--font-display); overflow-wrap: anywhere; }
+.panel .kind { margin: 0; font: 600 12px/1.2 var(--font-display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.panel p { margin: 0; }
+.panel .empty { color: var(--muted); }
+.rows { display: grid; gap: 8px; }
+.row { display: grid; gap: 3px; }
+.row .what { font: 600 11px/1.2 var(--font-display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.row .why { color: var(--muted); font-size: 13.5px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; }
+.chip i { width: 14px; height: 14px; border-radius: 3px; border: 2px solid var(--st-waiting); background: var(--pf-none); flex: none; }
+.links { display: flex; flex-wrap: wrap; gap: 4px; }
+.links button { border: 1px solid var(--rule); background: var(--chip); border-radius: 3px; padding: 1px 7px; cursor: pointer; font: 13px/1.5 var(--font-mono); }
+.links button:hover { border-color: var(--line); }
+.open-view { justify-self: start; border: 1px solid var(--st-ready); color: var(--st-ready); background: none; border-radius: 4px; padding: 4px 12px; cursor: pointer; font-weight: 600; }
+
+.next { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 16px; }
+.next section { min-width: 0; display: grid; gap: 6px; align-content: start; }
+.next h3 { margin: 0; font: 600 14px/1.2 var(--font-display); letter-spacing: 0.06em; text-transform: uppercase; display: flex; gap: 8px; align-items: center; }
+.next h3 .n { font: 500 13px var(--font-body); color: var(--muted); letter-spacing: 0; text-transform: none; }
+.next p { margin: 0; color: var(--muted); font-size: 13.5px; }
+
+details.all { background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; }
+details.all summary { cursor: pointer; padding: 10px 14px; font: 600 14px/1.2 var(--font-display); letter-spacing: 0.04em; }
+.table-wrap { overflow-x: auto; border-top: 1px solid var(--rule); }
+table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+th, td { text-align: left; padding: 6px 12px; border-bottom: 1px solid var(--rule); vertical-align: top; }
+th { font: 600 11px/1.2 var(--font-display); letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+td.name button { border: none; background: none; padding: 0; cursor: pointer; font: 500 13.5px var(--font-mono); text-align: left; color: var(--ink); text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
+td .chip { font-weight: 400; white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="sheet">
+  <header class="top">
+    <p class="eyebrow">dspy4s · code harness</p>
+    <h1>Code harness blueprint</h1>
+    <p class="lede">The plan of the design as a graph. An arrow goes from a node to each node that uses it. The border
+      of a node shows its statement, and the fill shows its proof: the code of a type or a function, or the passing
+      tests of a law.</p>
+    <p class="made" id="made"></p>
+  </header>
+
+  <nav class="tabs" role="tablist" id="tabs" aria-label="Views"></nav>
+  <section class="summary" id="summary" aria-label="Progress"></section>
+
+  <div class="work">
+    <div class="drawing">
+      <div class="titleblock" aria-label="Legend">
+        <div class="group"><b>Border</b>
+          <span class="key"><svg width="22" height="14"><rect x="1" y="1" width="20" height="12" rx="2" fill="var(--pf-none)" stroke="var(--st-waiting)" stroke-width="2"/></svg>Waiting</span>
+          <span class="key"><svg width="22" height="14"><rect x="1" y="1" width="20" height="12" rx="2" fill="var(--pf-none)" stroke="var(--st-ready)" stroke-width="2"/></svg>Ready to state</span>
+          <span class="key"><svg width="22" height="14"><rect x="1" y="1" width="20" height="12" rx="2" fill="var(--pf-none)" stroke="var(--st-stated)" stroke-width="2"/></svg>Stated</span>
+          <span class="key"><svg width="22" height="14"><rect x="1" y="1" width="20" height="12" rx="2" fill="var(--pf-none)" stroke="var(--st-upstream)" stroke-width="2" stroke-dasharray="3 2"/></svg>From a library</span>
+          <span class="key"><svg width="22" height="14"><rect x="1" y="1" width="20" height="12" rx="2" fill="var(--pf-none)" stroke="var(--st-blocked)" stroke-width="2"/></svg>Blocked</span>
+        </div>
+        <div class="group"><b>Fill</b>
+          <span class="key"><svg width="22" height="14"><rect x="1" y="1" width="20" height="12" rx="2" fill="var(--pf-ready)" stroke="var(--line)" stroke-width="1"/></svg>Ready to prove</span>
+          <span class="key"><svg width="22" height="14"><rect x="1" y="1" width="20" height="12" rx="2" fill="var(--pf-done)" stroke="var(--line)" stroke-width="1"/></svg>Done</span>
+          <span class="key"><svg width="22" height="14"><rect x="1" y="1" width="20" height="12" rx="2" fill="var(--pf-complete)" stroke="var(--line)" stroke-width="1"/></svg>Complete, with all under it</span>
+        </div>
+        <div class="group"><b>Shape</b>
+          <span class="key"><svg width="22" height="14"><rect x="1" y="1" width="20" height="12" fill="none" stroke="var(--line)" stroke-width="1.4"/></svg>Type</span>
+          <span class="key"><svg width="22" height="14"><rect x="1" y="1" width="20" height="12" rx="5" fill="none" stroke="var(--line)" stroke-width="1.4"/></svg>Function</span>
+          <span class="key"><svg width="22" height="14"><ellipse cx="11" cy="7" rx="10" ry="6" fill="none" stroke="var(--line)" stroke-width="1.4"/></svg>Law</span>
+          <span class="key"><svg width="22" height="14"><polygon points="5,1 17,1 21,7 17,13 5,13 1,7" fill="none" stroke="var(--line)" stroke-width="1.4"/></svg>Check</span>
+          <span class="key"><svg width="22" height="14"><rect x="1" y="1" width="20" height="12" fill="none" stroke="var(--line)" stroke-width="1.2"/><rect x="3.5" y="3.5" width="15" height="7" fill="none" stroke="var(--line)" stroke-width="1.2"/></svg>Spec: a person reviews it</span>
+        </div>
+      </div>
+      <div class="toolbar">
+        <button type="button" data-zoom="fit">Fit</button>
+        <button type="button" data-zoom="out" aria-label="Zoom out">−</button>
+        <button type="button" data-zoom="in" aria-label="Zoom in">+</button>
+        <span class="hint">Select a node to see its state, what it uses and what uses it.</span>
+      </div>
+      <div class="view-graph" id="graph-plan" data-view="plan"><svg role="img" data-width="792"
+ viewBox="0.00 0.00 594.00 372.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(10.8 360.8)">
+<title>plan</title>
+<g id="n&#45;p1" class="node kind&#45;phase st&#45;ready pf&#45;none">
+<title>p1</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M347.92,-350C347.92,-350 256,-350 256,-350 250,-350 244,-344 244,-338 244,-338 244,-317.6 244,-317.6 244,-311.6 250,-305.6 256,-305.6 256,-305.6 347.92,-305.6 347.92,-305.6 353.92,-305.6 359.92,-311.6 359.92,-317.6 359.92,-317.6 359.92,-338 359.92,-338 359.92,-344 353.92,-350 347.92,-350"/>
+<text xml:space="preserve" text-anchor="start" x="275.33" y="-332.4" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="12.00">1 · Kernel</text>
+<text xml:space="preserve" text-anchor="start" x="271.21" y="-323.25" font-family="Helvetica,sans-Serif" font-size="9.00">harness&#45;kernel</text>
+<text xml:space="preserve" text-anchor="start" x="256.96" y="-314.25" font-family="Helvetica,sans-Serif" font-size="9.00">0 of 66 stated · 0 done</text>
+</g>
+<g id="n&#45;p3" class="node kind&#45;phase st&#45;waiting pf&#45;none">
+<title>p3</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M306.92,-273.6C306.92,-273.6 215,-273.6 215,-273.6 209,-273.6 203,-267.6 203,-261.6 203,-261.6 203,-241.2 203,-241.2 203,-235.2 209,-229.2 215,-229.2 215,-229.2 306.92,-229.2 306.92,-229.2 312.92,-229.2 318.92,-235.2 318.92,-241.2 318.92,-241.2 318.92,-261.6 318.92,-261.6 318.92,-267.6 312.92,-273.6 306.92,-273.6"/>
+<text xml:space="preserve" text-anchor="start" x="227.21" y="-256" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="12.00">3 · Sandbox</text>
+<text xml:space="preserve" text-anchor="start" x="225.33" y="-246.85" font-family="Helvetica,sans-Serif" font-size="9.00">harness&#45;sandbox</text>
+<text xml:space="preserve" text-anchor="start" x="215.96" y="-237.85" font-family="Helvetica,sans-Serif" font-size="9.00">not in the blueprint yet</text>
+</g>
+<g id="e&#45;p1&#45;&#45;p3" class="edge">
+<title>p1&#45;&gt;p3</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M289.88,-304.88C285.54,-297.01 280.6,-288.03 276.04,-279.76"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="277.95,-279.24 273.61,-275.36 274.58,-281.1 277.95,-279.24"/>
+</g>
+<g id="n&#45;p4" class="node kind&#45;phase st&#45;waiting pf&#45;none">
+<title>p4</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M379.92,-197.2C379.92,-197.2 288,-197.2 288,-197.2 282,-197.2 276,-191.2 276,-185.2 276,-185.2 276,-164.8 276,-164.8 276,-158.8 282,-152.8 288,-152.8 288,-152.8 379.92,-152.8 379.92,-152.8 385.92,-152.8 391.92,-158.8 391.92,-164.8 391.92,-164.8 391.92,-185.2 391.92,-185.2 391.92,-191.2 385.92,-197.2 379.92,-197.2"/>
+<text xml:space="preserve" text-anchor="start" x="300.96" y="-179.6" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="12.00">4 · One task</text>
+<text xml:space="preserve" text-anchor="start" x="317.46" y="-170.45" font-family="Helvetica,sans-Serif" font-size="9.00">harness</text>
+<text xml:space="preserve" text-anchor="start" x="288.96" y="-161.45" font-family="Helvetica,sans-Serif" font-size="9.00">not in the blueprint yet</text>
+</g>
+<g id="e&#45;p1&#45;&#45;p4" class="edge">
+<title>p1&#45;&gt;p4</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M314.44,-304.97C319.2,-295.6 324.15,-284.36 326.96,-273.6 332.91,-250.81 334.47,-224.08 334.65,-204.36"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="336.57,-204.56 334.66,-199.05 332.72,-204.55 336.57,-204.56"/>
+</g>
+<g id="n&#45;p2" class="node kind&#45;phase st&#45;ready pf&#45;none">
+<title>p2</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M560.17,-273.6C560.17,-273.6 385.75,-273.6 385.75,-273.6 379.75,-273.6 373.75,-267.6 373.75,-261.6 373.75,-261.6 373.75,-241.2 373.75,-241.2 373.75,-235.2 379.75,-229.2 385.75,-229.2 385.75,-229.2 560.17,-229.2 560.17,-229.2 566.17,-229.2 572.17,-235.2 572.17,-241.2 572.17,-241.2 572.17,-261.6 572.17,-261.6 572.17,-267.6 566.17,-273.6 560.17,-273.6"/>
+<text xml:space="preserve" text-anchor="start" x="406.58" y="-256" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="12.00">2 · Guest API and REPL</text>
+<text xml:space="preserve" text-anchor="start" x="386.71" y="-246.85" font-family="Helvetica,sans-Serif" font-size="9.00">harness&#45;guest, harness&#45;repl, harness&#45;mcp</text>
+<text xml:space="preserve" text-anchor="start" x="427.96" y="-237.85" font-family="Helvetica,sans-Serif" font-size="9.00">not in the blueprint yet</text>
+</g>
+<g id="e&#45;p2&#45;&#45;p4" class="edge">
+<title>p2&#45;&gt;p4</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M432.01,-228.48C415.89,-219.85 397.29,-209.9 380.65,-200.99"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="381.58,-199.3 375.82,-198.41 379.76,-202.7 381.58,-199.3"/>
+</g>
+<g id="n&#45;p8" class="node kind&#45;phase st&#45;waiting pf&#45;none">
+<title>p8</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M523.92,-120.8C523.92,-120.8 432,-120.8 432,-120.8 426,-120.8 420,-114.8 420,-108.8 420,-108.8 420,-88.4 420,-88.4 420,-82.4 426,-76.4 432,-76.4 432,-76.4 523.92,-76.4 523.92,-76.4 529.92,-76.4 535.92,-82.4 535.92,-88.4 535.92,-88.4 535.92,-108.8 535.92,-108.8 535.92,-114.8 529.92,-120.8 523.92,-120.8"/>
+<text xml:space="preserve" text-anchor="start" x="447.21" y="-103.2" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="12.00">8 · Memory</text>
+<text xml:space="preserve" text-anchor="start" x="434.08" y="-94.05" font-family="Helvetica,sans-Serif" font-size="9.00">in the modules above</text>
+<text xml:space="preserve" text-anchor="start" x="432.96" y="-85.05" font-family="Helvetica,sans-Serif" font-size="9.00">not in the blueprint yet</text>
+</g>
+<g id="e&#45;p2&#45;&#45;p8" class="edge">
+<title>p2&#45;&gt;p8</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M473.69,-228.47C474.56,-202 476.04,-157.42 477.01,-128.25"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="478.93,-128.48 477.19,-122.92 475.08,-128.35 478.93,-128.48"/>
+</g>
+<g id="e&#45;p3&#45;&#45;p4" class="edge">
+<title>p3&#45;&gt;p4</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M282.47,-228.48C290.49,-220.31 299.68,-210.94 308.05,-202.41"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="309.17,-204.01 311.65,-198.74 306.43,-201.31 309.17,-204.01"/>
+</g>
+<g id="n&#45;p5" class="node kind&#45;phase st&#45;waiting pf&#45;none">
+<title>p5</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M103.92,-120.8C103.92,-120.8 12,-120.8 12,-120.8 6,-120.8 0,-114.8 0,-108.8 0,-108.8 0,-88.4 0,-88.4 0,-82.4 6,-76.4 12,-76.4 12,-76.4 103.92,-76.4 103.92,-76.4 109.92,-76.4 115.92,-82.4 115.92,-88.4 115.92,-88.4 115.92,-108.8 115.92,-108.8 115.92,-114.8 109.92,-120.8 103.92,-120.8"/>
+<text xml:space="preserve" text-anchor="start" x="36.96" y="-103.2" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="12.00">5 · RLM</text>
+<text xml:space="preserve" text-anchor="start" x="14.08" y="-94.05" font-family="Helvetica,sans-Serif" font-size="9.00">in the modules above</text>
+<text xml:space="preserve" text-anchor="start" x="12.96" y="-85.05" font-family="Helvetica,sans-Serif" font-size="9.00">not in the blueprint yet</text>
+</g>
+<g id="e&#45;p4&#45;&#45;p5" class="edge">
+<title>p4&#45;&gt;p5</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M275.31,-160.19C233.05,-149.98 174.75,-135.38 123.96,-120.8 123.66,-120.71 123.35,-120.63 123.05,-120.54"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="123.69,-118.72 117.87,-119.02 122.6,-122.41 123.69,-118.72"/>
+</g>
+<g id="n&#45;p6" class="node kind&#45;phase st&#45;waiting pf&#45;none">
+<title>p6</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M235.92,-120.8C235.92,-120.8 144,-120.8 144,-120.8 138,-120.8 132,-114.8 132,-108.8 132,-108.8 132,-88.4 132,-88.4 132,-82.4 138,-76.4 144,-76.4 144,-76.4 235.92,-76.4 235.92,-76.4 241.92,-76.4 247.92,-82.4 247.92,-88.4 247.92,-88.4 247.92,-108.8 247.92,-108.8 247.92,-114.8 241.92,-120.8 235.92,-120.8"/>
+<text xml:space="preserve" text-anchor="start" x="146.46" y="-103.2" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="12.00">6 · Optimization</text>
+<text xml:space="preserve" text-anchor="start" x="146.08" y="-94.05" font-family="Helvetica,sans-Serif" font-size="9.00">in the modules above</text>
+<text xml:space="preserve" text-anchor="start" x="144.96" y="-85.05" font-family="Helvetica,sans-Serif" font-size="9.00">not in the blueprint yet</text>
+</g>
+<g id="e&#45;p4&#45;&#45;p6" class="edge">
+<title>p4&#45;&gt;p6</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M291.53,-152.08C274.69,-143.38 255.23,-133.32 237.88,-124.36"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="239.06,-122.8 233.29,-121.99 237.3,-126.22 239.06,-122.8"/>
+</g>
+<g id="n&#45;p7" class="node kind&#45;phase st&#45;waiting pf&#45;none">
+<title>p7</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M391.92,-120.8C391.92,-120.8 276,-120.8 276,-120.8 270,-120.8 264,-114.8 264,-108.8 264,-108.8 264,-88.4 264,-88.4 264,-82.4 270,-76.4 276,-76.4 276,-76.4 391.92,-76.4 391.92,-76.4 397.92,-76.4 403.92,-82.4 403.92,-88.4 403.92,-88.4 403.92,-108.8 403.92,-108.8 403.92,-114.8 397.92,-120.8 391.92,-120.8"/>
+<text xml:space="preserve" text-anchor="start" x="276.96" y="-103.2" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="12.00">7 · The session host</text>
+<text xml:space="preserve" text-anchor="start" x="282.58" y="-94.05" font-family="Helvetica,sans-Serif" font-size="9.00">harness&#45;host, harness&#45;cli</text>
+<text xml:space="preserve" text-anchor="start" x="288.96" y="-85.05" font-family="Helvetica,sans-Serif" font-size="9.00">not in the blueprint yet</text>
+</g>
+<g id="e&#45;p4&#45;&#45;p7" class="edge">
+<title>p4&#45;&gt;p7</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M333.96,-152.08C333.96,-144.51 333.96,-135.92 333.96,-127.92"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="335.89,-128.23 333.96,-122.73 332.04,-128.23 335.89,-128.23"/>
+</g>
+<g id="e&#45;p4&#45;&#45;p8" class="edge">
+<title>p4&#45;&gt;p8</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M376.39,-152.08C393.23,-143.38 412.69,-133.32 430.04,-124.36"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="430.62,-126.22 434.63,-121.99 428.86,-122.8 430.62,-126.22"/>
+</g>
+<g id="n&#45;p9" class="node kind&#45;phase st&#45;waiting pf&#45;none">
+<title>p9</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M454.54,-44.4C454.54,-44.4 357.38,-44.4 357.38,-44.4 351.38,-44.4 345.38,-38.4 345.38,-32.4 345.38,-32.4 345.38,-12 345.38,-12 345.38,-6 351.38,0 357.38,0 357.38,0 454.54,0 454.54,0 460.54,0 466.54,-6 466.54,-12 466.54,-12 466.54,-32.4 466.54,-32.4 466.54,-38.4 460.54,-44.4 454.54,-44.4"/>
+<text xml:space="preserve" text-anchor="start" x="358.33" y="-26.8" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="12.00">9 · The controller</text>
+<text xml:space="preserve" text-anchor="start" x="362.08" y="-17.65" font-family="Helvetica,sans-Serif" font-size="9.00">in the modules above</text>
+<text xml:space="preserve" text-anchor="start" x="360.96" y="-8.65" font-family="Helvetica,sans-Serif" font-size="9.00">not in the blueprint yet</text>
+</g>
+<g id="e&#45;p7&#45;&#45;p9" class="edge">
+<title>p7&#45;&gt;p9</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M355.17,-75.68C363.08,-67.51 372.15,-58.14 380.41,-49.61"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="381.51,-51.23 383.95,-45.94 378.74,-48.56 381.51,-51.23"/>
+</g>
+<g id="e&#45;p8&#45;&#45;p9" class="edge">
+<title>p8&#45;&gt;p9</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M456.75,-75.68C448.84,-67.51 439.77,-58.14 431.51,-49.61"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="433.18,-48.56 427.97,-45.94 430.41,-51.23 433.18,-48.56"/>
+</g>
+</g>
+</svg>
+</div>
+<div class="view-graph" id="graph-phase-1" data-view="phase-1" hidden><svg role="img" data-width="1761"
+ viewBox="0.00 0.00 1321.00 962.00" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<g id="graph0" class="graph" transform="scale(1 1) rotate(0) translate(10.8 950.8)">
+<title>phase</title>
+<g id="n&#45;json" class="node kind&#45;upstream st&#45;upstream pf&#45;complete">
+<title>json</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" stroke-dasharray="5,2" points="849.78,-940 795.78,-940 795.78,-904 849.78,-904 849.78,-940"/>
+<text xml:space="preserve" text-anchor="start" x="810.03" y="-922.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Json</text>
+<text xml:space="preserve" text-anchor="start" x="814.91" y="-913.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.1</text>
+</g>
+<g id="n&#45;cell&#45;outcome" class="node kind&#45;data st&#45;ready pf&#45;none spec">
+<title>cell&#45;outcome</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="330.73,-792 248.83,-792 248.83,-756 330.73,-756 330.73,-792"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="334.73,-796 244.83,-796 244.83,-752 334.73,-752 334.73,-796"/>
+<text xml:space="preserve" text-anchor="start" x="256.03" y="-774.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">CellOutcome</text>
+<text xml:space="preserve" text-anchor="start" x="270.28" y="-765.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.1 · spec</text>
+</g>
+<g id="e&#45;json&#45;&#45;cell&#45;outcome" class="edge">
+<title>json&#45;&gt;cell&#45;outcome</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M795.39,-920.52C734.93,-918.75 586.09,-910.5 468.78,-872 416.66,-854.9 361.95,-822.88 326.94,-800.32"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="328.3,-798.91 322.64,-797.53 326.2,-802.13 328.3,-798.91"/>
+</g>
+<g id="n&#45;turn&#45;outcome" class="node kind&#45;data st&#45;ready pf&#45;none spec">
+<title>turn&#45;outcome</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="500.23,-564 415.33,-564 415.33,-528 500.23,-528 500.23,-564"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="504.23,-568 411.33,-568 411.33,-524 504.23,-524 504.23,-568"/>
+<text xml:space="preserve" text-anchor="start" x="422.53" y="-546.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">TurnOutcome</text>
+<text xml:space="preserve" text-anchor="start" x="438.28" y="-537.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.1 · spec</text>
+</g>
+<g id="e&#45;json&#45;&#45;turn&#45;outcome" class="edge">
+<title>json&#45;&gt;turn&#45;outcome</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M795.16,-921.65C713.98,-921.98 481.78,-911.04 481.78,-775 481.78,-775 481.78,-775 481.78,-697 481.78,-654.09 472.09,-605.14 465.02,-575.15"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="466.94,-574.91 463.79,-570.01 463.2,-575.81 466.94,-574.91"/>
+</g>
+<g id="n&#45;arg&#45;match" class="node kind&#45;data st&#45;ready pf&#45;none spec">
+<title>arg&#45;match</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="855.48,-868 790.08,-868 790.08,-832 855.48,-832 855.48,-868"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="859.48,-872 786.08,-872 786.08,-828 859.48,-828 859.48,-872"/>
+<text xml:space="preserve" text-anchor="start" x="797.28" y="-850.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">ArgMatch</text>
+<text xml:space="preserve" text-anchor="start" x="803.28" y="-841.9" font-family="Helvetica,sans-Serif" font-size="8.00">§5.5 · spec</text>
+</g>
+<g id="e&#45;json&#45;&#45;arg&#45;match" class="edge">
+<title>json&#45;&gt;arg&#45;match</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M822.78,-903.34C822.78,-896.06 822.78,-887.44 822.78,-879.32"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="824.71,-879.53 822.78,-874.03 820.86,-879.53 824.71,-879.53"/>
+</g>
+<g id="n&#45;open&#45;call" class="node kind&#45;data st&#45;ready pf&#45;none">
+<title>open&#45;call</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="973.98,-868 911.58,-868 911.58,-832 973.98,-832 973.98,-868"/>
+<text xml:space="preserve" text-anchor="start" x="918.78" y="-850.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">OpenCall</text>
+<text xml:space="preserve" text-anchor="start" x="934.91" y="-841.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.2</text>
+</g>
+<g id="e&#45;json&#45;&#45;open&#45;call" class="edge">
+<title>json&#45;&gt;open&#45;call</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M850.31,-904.94C867.12,-895.14 888.79,-882.5 906.92,-871.92"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="907.47,-873.83 911.25,-869.39 905.53,-870.5 907.47,-873.83"/>
+</g>
+<g id="n&#45;position" class="node kind&#45;data st&#45;ready pf&#45;none">
+<title>position</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="1065.73,-868 1007.83,-868 1007.83,-832 1065.73,-832 1065.73,-868"/>
+<text xml:space="preserve" text-anchor="start" x="1015.03" y="-850.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Position</text>
+<text xml:space="preserve" text-anchor="start" x="1028.91" y="-841.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.2</text>
+</g>
+<g id="e&#45;json&#45;&#45;position" class="edge">
+<title>json&#45;&gt;position</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M850.45,-906.94C852.91,-905.88 855.37,-904.89 857.78,-904 911.2,-884.36 927.55,-889.29 981.78,-872 988.06,-870 994.67,-867.67 1001.04,-865.31"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="1001.57,-867.17 1006.04,-863.43 1000.21,-863.57 1001.57,-867.17"/>
+</g>
+<g id="n&#45;schema" class="node kind&#45;upstream st&#45;upstream pf&#45;complete">
+<title>schema</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" stroke-dasharray="5,2" points="402.98,-488 346.58,-488 346.58,-452 402.98,-452 402.98,-488"/>
+<text xml:space="preserve" text-anchor="start" x="353.78" y="-470.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Schema</text>
+<text xml:space="preserve" text-anchor="start" x="366.91" y="-461.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.1</text>
+</g>
+<g id="n&#45;logged" class="node kind&#45;data st&#45;waiting pf&#45;none spec">
+<title>logged</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="406.86,-412 352.71,-412 352.71,-376 406.86,-376 406.86,-412"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="410.86,-416 348.71,-416 348.71,-372 410.86,-372 410.86,-416"/>
+<text xml:space="preserve" text-anchor="start" x="359.91" y="-394.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Logged</text>
+<text xml:space="preserve" text-anchor="start" x="360.28" y="-385.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.1 · spec</text>
+</g>
+<g id="e&#45;schema&#45;&#45;logged" class="edge">
+<title>schema&#45;&gt;logged</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M375.97,-451.46C376.53,-443.07 377.23,-432.81 377.87,-423.35"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="379.78,-423.62 378.23,-418 375.94,-423.36 379.78,-423.62"/>
+</g>
+<g id="n&#45;session&#45;id" class="node kind&#45;data st&#45;ready pf&#45;none spec">
+<title>session&#45;id</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="317.86,-716 251.71,-716 251.71,-680 317.86,-680 317.86,-716"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="321.86,-720 247.71,-720 247.71,-676 321.86,-676 321.86,-720"/>
+<text xml:space="preserve" text-anchor="start" x="258.91" y="-698.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">SessionId</text>
+<text xml:space="preserve" text-anchor="start" x="265.28" y="-689.9" font-family="Helvetica,sans-Serif" font-size="8.00">§8.6 · spec</text>
+</g>
+<g id="n&#45;source" class="node kind&#45;data st&#45;waiting pf&#45;none spec">
+<title>source</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="137.78,-640 83.78,-640 83.78,-604 137.78,-604 137.78,-640"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="141.78,-644 79.78,-644 79.78,-600 141.78,-600 141.78,-644"/>
+<text xml:space="preserve" text-anchor="start" x="92.03" y="-622.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Source</text>
+<text xml:space="preserve" text-anchor="start" x="91.28" y="-613.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.1 · spec</text>
+</g>
+<g id="e&#45;session&#45;id&#45;&#45;source" class="edge">
+<title>session&#45;id&#45;&gt;source</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M247.03,-680.94C217.82,-668.52 177.57,-651.4 148.4,-639"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="149.42,-637.34 143.6,-636.96 147.91,-640.88 149.42,-637.34"/>
+</g>
+<g id="n&#45;session&#45;outcome" class="node kind&#45;data st&#45;waiting pf&#45;none spec">
+<title>session&#45;outcome</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="336.61,-640 232.96,-640 232.96,-604 336.61,-604 336.61,-640"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="340.61,-644 228.96,-644 228.96,-600 340.61,-600 340.61,-644"/>
+<text xml:space="preserve" text-anchor="start" x="240.16" y="-622.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">SessionOutcome</text>
+<text xml:space="preserve" text-anchor="start" x="265.28" y="-613.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.1 · spec</text>
+</g>
+<g id="e&#45;session&#45;id&#45;&#45;session&#45;outcome" class="edge">
+<title>session&#45;id&#45;&gt;session&#45;outcome</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M284.78,-675.6C284.78,-667.99 284.78,-659.31 284.78,-651.23"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="286.71,-651.47 284.78,-645.97 282.86,-651.47 286.71,-651.47"/>
+</g>
+<g id="n&#45;owner" class="node kind&#45;data st&#45;waiting pf&#45;none spec">
+<title>owner</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="611.78,-640 557.78,-640 557.78,-604 611.78,-604 611.78,-640"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="615.78,-644 553.78,-644 553.78,-600 615.78,-600 615.78,-644"/>
+<text xml:space="preserve" text-anchor="start" x="567.91" y="-622.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Owner</text>
+<text xml:space="preserve" text-anchor="start" x="565.28" y="-613.9" font-family="Helvetica,sans-Serif" font-size="8.00">§8.1 · spec</text>
+</g>
+<g id="e&#45;session&#45;id&#45;&#45;owner" class="edge">
+<title>session&#45;id&#45;&gt;owner</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M322.47,-687.7C380.05,-673.5 489.3,-646.55 546.96,-632.33"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="547.19,-634.26 552.07,-631.07 546.27,-630.52 547.19,-634.26"/>
+</g>
+<g id="n&#45;request&#45;id" class="node kind&#45;data st&#45;ready pf&#45;none spec">
+<title>request&#45;id</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="659.61,-564 591.96,-564 591.96,-528 659.61,-528 659.61,-564"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="663.61,-568 587.96,-568 587.96,-524 663.61,-524 663.61,-568"/>
+<text xml:space="preserve" text-anchor="start" x="599.16" y="-546.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">RequestId</text>
+<text xml:space="preserve" text-anchor="start" x="606.28" y="-537.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.5 · spec</text>
+</g>
+<g id="n&#45;entry" class="node kind&#45;data st&#45;waiting pf&#45;none spec">
+<title>entry</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="476.78,-488 422.78,-488 422.78,-452 476.78,-452 476.78,-488"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="480.78,-492 418.78,-492 418.78,-448 480.78,-448 480.78,-492"/>
+<text xml:space="preserve" text-anchor="start" x="435.53" y="-470.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Entry</text>
+<text xml:space="preserve" text-anchor="start" x="430.28" y="-461.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.1 · spec</text>
+</g>
+<g id="e&#45;request&#45;id&#45;&#45;entry" class="edge">
+<title>request&#45;id&#45;&gt;entry</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M587.16,-528.76C557.59,-516.33 517.02,-499.27 487.64,-486.92"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="488.63,-485.24 482.81,-484.89 487.13,-488.79 488.63,-485.24"/>
+</g>
+<g id="n&#45;session&#45;state" class="node kind&#45;data st&#45;waiting pf&#45;none">
+<title>session&#45;state</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="805.48,-488 722.08,-488 722.08,-452 805.48,-452 805.48,-488"/>
+<text xml:space="preserve" text-anchor="start" x="729.28" y="-470.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">SessionState</text>
+<text xml:space="preserve" text-anchor="start" x="755.91" y="-461.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.2</text>
+</g>
+<g id="e&#45;request&#45;id&#45;&#45;session&#45;state" class="edge">
+<title>request&#45;id&#45;&gt;session&#45;state</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M664.22,-524.39C683.16,-514.23 705.94,-502.02 724.93,-491.83"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="725.56,-493.68 729.5,-489.38 723.74,-490.29 725.56,-493.68"/>
+</g>
+<g id="n&#45;versions" class="node kind&#45;data st&#45;ready pf&#45;none spec">
+<title>versions</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="255.86,-564 195.71,-564 195.71,-528 255.86,-528 255.86,-564"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="259.86,-568 191.71,-568 191.71,-524 259.86,-524 259.86,-568"/>
+<text xml:space="preserve" text-anchor="start" x="202.91" y="-546.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Versions</text>
+<text xml:space="preserve" text-anchor="start" x="206.28" y="-537.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.1 · spec</text>
+</g>
+<g id="e&#45;versions&#45;&#45;entry" class="edge">
+<title>versions&#45;&gt;entry</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M260.65,-528.2C264.36,-526.68 268.12,-525.24 271.78,-524 331.81,-503.62 351.45,-514.34 410.78,-492 411.24,-491.83 411.7,-491.65 412.16,-491.47"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="412.62,-493.37 416.93,-489.44 411.11,-489.82 412.62,-493.37"/>
+</g>
+<g id="n&#45;meta" class="node kind&#45;data st&#45;waiting pf&#45;none spec">
+<title>meta</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="137.78,-564 83.78,-564 83.78,-528 137.78,-528 137.78,-564"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="141.78,-568 79.78,-568 79.78,-524 141.78,-524 141.78,-568"/>
+<text xml:space="preserve" text-anchor="start" x="98.41" y="-546.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Meta</text>
+<text xml:space="preserve" text-anchor="start" x="91.28" y="-537.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.1 · spec</text>
+</g>
+<g id="e&#45;source&#45;&#45;meta" class="edge">
+<title>source&#45;&gt;meta</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M110.78,-599.6C110.78,-591.99 110.78,-583.31 110.78,-575.23"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="112.71,-575.47 110.78,-569.97 108.86,-575.47 112.71,-575.47"/>
+</g>
+<g id="n&#45;taint" class="node kind&#45;data st&#45;ready pf&#45;none spec">
+<title>taint</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="59.78,-640 5.78,-640 5.78,-604 59.78,-604 59.78,-640"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="63.78,-644 1.78,-644 1.78,-600 63.78,-600 63.78,-644"/>
+<text xml:space="preserve" text-anchor="start" x="20.03" y="-622.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Taint</text>
+<text xml:space="preserve" text-anchor="start" x="13.28" y="-613.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.1 · spec</text>
+</g>
+<g id="e&#45;taint&#45;&#45;meta" class="edge">
+<title>taint&#45;&gt;meta</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M55.34,-599.6C64,-591.38 73.98,-581.92 83.06,-573.3"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="84.35,-574.73 87.01,-569.55 81.7,-571.94 84.35,-574.73"/>
+</g>
+<g id="e&#45;meta&#45;&#45;logged" class="edge">
+<title>meta&#45;&gt;logged</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M142.43,-527.35C192.31,-499.54 289.01,-445.62 342.29,-415.91"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="343.2,-417.6 347.06,-413.24 341.32,-414.24 343.2,-417.6"/>
+</g>
+<g id="n&#45;effect&#45;id" class="node kind&#45;data st&#45;ready pf&#45;none spec">
+<title>effect&#45;id</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="428.23,-640 373.33,-640 373.33,-604 428.23,-604 428.23,-640"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="432.23,-644 369.33,-644 369.33,-600 432.23,-600 432.23,-644"/>
+<text xml:space="preserve" text-anchor="start" x="380.53" y="-622.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">EffectId</text>
+<text xml:space="preserve" text-anchor="start" x="381.28" y="-613.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.1 · spec</text>
+</g>
+<g id="n&#45;job&#45;selector" class="node kind&#45;data st&#45;waiting pf&#45;none spec">
+<title>job&#45;selector</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="391.48,-564 314.08,-564 314.08,-528 391.48,-528 391.48,-564"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="395.48,-568 310.08,-568 310.08,-524 395.48,-524 395.48,-568"/>
+<text xml:space="preserve" text-anchor="start" x="321.28" y="-546.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">JobSelector</text>
+<text xml:space="preserve" text-anchor="start" x="331.03" y="-537.9" font-family="Helvetica,sans-Serif" font-size="8.00">§10.3 · spec</text>
+</g>
+<g id="e&#45;effect&#45;id&#45;&#45;job&#45;selector" class="edge">
+<title>effect&#45;id&#45;&gt;job&#45;selector</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M386.9,-599.6C381.77,-591.69 375.88,-582.62 370.46,-574.26"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="372.15,-573.32 367.54,-569.75 368.92,-575.42 372.15,-573.32"/>
+</g>
+<g id="e&#45;effect&#45;id&#45;&#45;session&#45;state" class="edge">
+<title>effect&#45;id&#45;&gt;session&#45;state</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M432.84,-616.03C500.14,-605.42 651.56,-580.48 671.78,-568 692.81,-555.02 689.04,-542.18 705.78,-524 715.71,-513.22 727.51,-502.16 737.88,-492.94"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="738.96,-494.56 741.81,-489.48 736.41,-491.67 738.96,-494.56"/>
+</g>
+<g id="n&#45;effect&#45;result" class="node kind&#45;data st&#45;waiting pf&#45;none spec">
+<title>effect&#45;result</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="846.23,-716 767.33,-716 767.33,-680 846.23,-680 846.23,-716"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="850.23,-720 763.33,-720 763.33,-676 850.23,-676 850.23,-720"/>
+<text xml:space="preserve" text-anchor="start" x="774.53" y="-698.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">EffectResult</text>
+<text xml:space="preserve" text-anchor="start" x="787.28" y="-689.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.1 · spec</text>
+</g>
+<g id="e&#45;effect&#45;result&#45;&#45;entry" class="edge">
+<title>effect&#45;result&#45;&gt;entry</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M762.65,-684.55C751.33,-681.56 739.15,-678.5 727.78,-676 647.58,-658.32 606.74,-699.04 545.78,-644 504.64,-606.85 541.68,-570.67 511.78,-524 505.14,-513.64 495.87,-504.2 486.51,-496.26"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="487.84,-494.87 482.37,-492.87 485.4,-497.84 487.84,-494.87"/>
+</g>
+<g id="e&#45;cell&#45;outcome&#45;&#45;entry" class="edge">
+<title>cell&#45;outcome&#45;&gt;entry</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M266.53,-751.26C219.54,-704.77 122.76,-594.22 183.78,-524 217.19,-485.55 362.38,-507.88 410.78,-492 411.25,-491.85 411.71,-491.69 412.18,-491.53"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="412.58,-493.44 417,-489.64 411.17,-489.85 412.58,-493.44"/>
+</g>
+<g id="e&#45;turn&#45;outcome&#45;&#45;entry" class="edge">
+<title>turn&#45;outcome&#45;&gt;entry</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M455.47,-523.6C454.64,-515.99 453.71,-507.31 452.83,-499.23"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="454.77,-499.23 452.26,-493.97 450.94,-499.64 454.77,-499.23"/>
+</g>
+<g id="n&#45;next&#45;step" class="node kind&#45;data st&#45;waiting pf&#45;none">
+<title>next&#45;step</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="631.78,-488 577.78,-488 577.78,-452 631.78,-452 631.78,-488"/>
+<text xml:space="preserve" text-anchor="start" x="592.78" y="-470.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Next</text>
+<text xml:space="preserve" text-anchor="start" x="596.91" y="-461.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.3</text>
+</g>
+<g id="e&#45;turn&#45;outcome&#45;&#45;next&#45;step" class="edge">
+<title>turn&#45;outcome&#45;&gt;next&#45;step</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M500.69,-523.4C523.22,-512.06 550.4,-498.37 571.34,-487.83"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="572.09,-489.61 576.13,-485.42 570.35,-486.18 572.09,-489.61"/>
+</g>
+<g id="e&#45;session&#45;outcome&#45;&#45;entry" class="edge">
+<title>session&#45;outcome&#45;&gt;entry</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M282.49,-599.32C281.44,-577.6 283.44,-544.52 301.78,-524 335.43,-486.36 364.08,-511.18 410.78,-492 411.23,-491.81 411.69,-491.62 412.15,-491.43"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="412.65,-493.31 416.88,-489.3 411.07,-489.8 412.65,-493.31"/>
+</g>
+<g id="e&#45;job&#45;selector&#45;&#45;entry" class="edge">
+<title>job&#45;selector&#45;&gt;entry</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M381.1,-523.4C392.06,-515.04 404.69,-505.4 416.11,-496.69"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="416.97,-498.45 420.18,-493.58 414.64,-495.39 416.97,-498.45"/>
+</g>
+<g id="e&#45;entry&#45;&#45;logged" class="edge">
+<title>entry&#45;&gt;logged</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M429.53,-447.6C421.77,-439.38 412.81,-429.92 404.66,-421.3"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="406.34,-420.27 401.16,-417.6 403.54,-422.92 406.34,-420.27"/>
+</g>
+<g id="n&#45;needs&#45;flush" class="node kind&#45;function st&#45;waiting pf&#45;none">
+<title>needs&#45;flush</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M1008.36,-260C1008.36,-260 957.21,-260 957.21,-260 951.21,-260 945.21,-254 945.21,-248 945.21,-248 945.21,-236 945.21,-236 945.21,-230 951.21,-224 957.21,-224 957.21,-224 1008.36,-224 1008.36,-224 1014.36,-224 1020.36,-230 1020.36,-236 1020.36,-236 1020.36,-248 1020.36,-248 1020.36,-254 1014.36,-260 1008.36,-260"/>
+<text xml:space="preserve" text-anchor="start" x="952.41" y="-242.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">needsFlush</text>
+<text xml:space="preserve" text-anchor="start" x="974.91" y="-233.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.1</text>
+</g>
+<g id="e&#45;entry&#45;&#45;needs&#45;flush" class="edge">
+<title>entry&#45;&gt;needs&#45;flush</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M446.79,-447.4C445.05,-425.1 446.36,-390.96 466.78,-372 519.48,-323.08 719.7,-359.97 788.78,-340 848.7,-322.68 912.3,-287.17 949.73,-264.25"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="950.68,-265.93 954.35,-261.4 948.66,-262.65 950.68,-265.93"/>
+</g>
+<g id="n&#45;closing" class="node kind&#45;function st&#45;waiting pf&#45;none">
+<title>closing</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M516.78,-412C516.78,-412 486.78,-412 486.78,-412 480.78,-412 474.78,-406 474.78,-400 474.78,-400 474.78,-388 474.78,-388 474.78,-382 480.78,-376 486.78,-376 486.78,-376 516.78,-376 516.78,-376 522.78,-376 528.78,-382 528.78,-388 528.78,-388 528.78,-400 528.78,-400 528.78,-406 522.78,-412 516.78,-412"/>
+<text xml:space="preserve" text-anchor="start" x="482.66" y="-394.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">closing</text>
+<text xml:space="preserve" text-anchor="start" x="493.91" y="-385.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.4</text>
+</g>
+<g id="e&#45;entry&#45;&#45;closing" class="edge">
+<title>entry&#45;&gt;closing</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M464.82,-447.6C471.34,-438.32 478.99,-427.44 485.62,-417.99"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="487.03,-419.34 488.62,-413.73 483.88,-417.12 487.03,-419.34"/>
+</g>
+<g id="n&#45;command" class="node kind&#45;data st&#45;waiting pf&#45;none spec">
+<title>command</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="319.98,-412 251.58,-412 251.58,-376 319.98,-376 319.98,-412"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="323.98,-416 247.58,-416 247.58,-372 323.98,-372 323.98,-416"/>
+<text xml:space="preserve" text-anchor="start" x="258.78" y="-394.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Command</text>
+<text xml:space="preserve" text-anchor="start" x="266.28" y="-385.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.5 · spec</text>
+</g>
+<g id="e&#45;entry&#45;&#45;command" class="edge">
+<title>entry&#45;&gt;command</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M418.41,-451.78C415.84,-450.47 413.28,-449.2 410.78,-448 384.74,-435.5 354.98,-422.82 331.04,-413"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="331.85,-411.25 326.03,-410.95 330.39,-414.82 331.85,-411.25"/>
+</g>
+<g id="n&#45;rejection" class="node kind&#45;data st&#45;waiting pf&#45;none spec">
+<title>rejection</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="227.73,-412 163.83,-412 163.83,-376 227.73,-376 227.73,-412"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="231.73,-416 159.83,-416 159.83,-372 231.73,-372 231.73,-416"/>
+<text xml:space="preserve" text-anchor="start" x="171.03" y="-394.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Rejection</text>
+<text xml:space="preserve" text-anchor="start" x="176.28" y="-385.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.5 · spec</text>
+</g>
+<g id="e&#45;entry&#45;&#45;rejection" class="edge">
+<title>entry&#45;&gt;rejection</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M418.22,-450.98C415.74,-449.88 413.25,-448.87 410.78,-448 337.87,-422.25 313.29,-439.97 239.78,-416 239.48,-415.9 239.18,-415.8 238.87,-415.7"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="239.57,-413.91 233.74,-413.83 238.25,-417.52 239.57,-413.91"/>
+</g>
+<g id="n&#45;evolve" class="node kind&#45;function st&#45;waiting pf&#45;none">
+<title>evolve</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M768.78,-336C768.78,-336 738.78,-336 738.78,-336 732.78,-336 726.78,-330 726.78,-324 726.78,-324 726.78,-312 726.78,-312 726.78,-306 732.78,-300 738.78,-300 738.78,-300 768.78,-300 768.78,-300 774.78,-300 780.78,-306 780.78,-312 780.78,-312 780.78,-324 780.78,-324 780.78,-330 774.78,-336 768.78,-336"/>
+<text xml:space="preserve" text-anchor="start" x="736.91" y="-318.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">evolve</text>
+<text xml:space="preserve" text-anchor="start" x="745.91" y="-309.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.2</text>
+</g>
+<g id="e&#45;logged&#45;&#45;evolve" class="edge">
+<title>logged&#45;&gt;evolve</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M411.64,-379.83C419.73,-376.89 428.48,-374.04 436.78,-372 544.71,-345.51 576.13,-363.37 684.78,-340 696.34,-337.51 708.77,-334 719.84,-330.56"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="720.23,-332.46 724.89,-328.96 719.07,-328.79 720.23,-332.46"/>
+</g>
+<g id="n&#45;reports" class="node kind&#45;function st&#45;waiting pf&#45;none">
+<title>reports</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M296.78,-336C296.78,-336 266.78,-336 266.78,-336 260.78,-336 254.78,-330 254.78,-324 254.78,-324 254.78,-312 254.78,-312 254.78,-306 260.78,-300 266.78,-300 266.78,-300 296.78,-300 296.78,-300 302.78,-300 308.78,-306 308.78,-312 308.78,-312 308.78,-324 308.78,-324 308.78,-330 302.78,-336 296.78,-336"/>
+<text xml:space="preserve" text-anchor="start" x="262.66" y="-318.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">reports</text>
+<text xml:space="preserve" text-anchor="start" x="273.91" y="-309.9" font-family="Helvetica,sans-Serif" font-size="8.00">§8.6</text>
+</g>
+<g id="e&#45;logged&#45;&#45;reports" class="edge">
+<title>logged&#45;&gt;reports</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M351.17,-371.4C338.42,-361.77 323.42,-350.44 310.64,-340.79"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="311.94,-339.36 306.39,-337.59 309.62,-342.44 311.94,-339.36"/>
+</g>
+<g id="n&#45;law&#45;codec" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;codec</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="389.78" cy="-318" rx="61.06" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="389.78" cy="-318" rx="65.06" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="352.66" y="-318.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Journal codec</text>
+<text xml:space="preserve" text-anchor="start" x="370.28" y="-309.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.1 · spec</text>
+</g>
+<g id="e&#45;logged&#45;&#45;law&#45;codec" class="edge">
+<title>logged&#45;&gt;law&#45;codec</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M382.67,-371.6C383.7,-363.99 384.87,-355.31 385.97,-347.23"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="387.85,-347.67 386.68,-341.96 384.03,-347.15 387.85,-347.67"/>
+</g>
+<g id="n&#45;schedules" class="node kind&#45;function st&#45;waiting pf&#45;none">
+<title>schedules</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M853.61,-184C853.61,-184 809.96,-184 809.96,-184 803.96,-184 797.96,-178 797.96,-172 797.96,-172 797.96,-160 797.96,-160 797.96,-154 803.96,-148 809.96,-148 809.96,-148 853.61,-148 853.61,-148 859.61,-148 865.61,-154 865.61,-160 865.61,-160 865.61,-172 865.61,-172 865.61,-178 859.61,-184 853.61,-184"/>
+<text xml:space="preserve" text-anchor="start" x="805.16" y="-166.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">schedules</text>
+<text xml:space="preserve" text-anchor="start" x="813.41" y="-157.9" font-family="Helvetica,sans-Serif" font-size="8.00">§12 · tests</text>
+</g>
+<g id="e&#45;needs&#45;flush&#45;&#45;schedules" class="edge">
+<title>needs&#45;flush&#45;&gt;schedules</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M946.61,-223.28C924.27,-212.32 895.54,-198.25 872.41,-186.91"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="873.37,-185.24 867.58,-184.54 871.67,-188.69 873.37,-185.24"/>
+</g>
+<g id="n&#45;guard&#45;rule" class="node kind&#45;data st&#45;waiting pf&#45;none spec">
+<title>guard&#45;rule</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="858.11,-792 787.46,-792 787.46,-756 858.11,-756 858.11,-792"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="862.11,-796 783.46,-796 783.46,-752 862.11,-752 862.11,-796"/>
+<text xml:space="preserve" text-anchor="start" x="794.66" y="-774.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">GuardRule</text>
+<text xml:space="preserve" text-anchor="start" x="803.28" y="-765.9" font-family="Helvetica,sans-Serif" font-size="8.00">§5.5 · spec</text>
+</g>
+<g id="e&#45;arg&#45;match&#45;&#45;guard&#45;rule" class="edge">
+<title>arg&#45;match&#45;&gt;guard&#45;rule</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M822.78,-827.6C822.78,-819.99 822.78,-811.31 822.78,-803.23"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="824.71,-803.47 822.78,-797.97 820.86,-803.47 824.71,-803.47"/>
+</g>
+<g id="e&#45;guard&#45;rule&#45;&#45;effect&#45;result" class="edge">
+<title>guard&#45;rule&#45;&gt;effect&#45;result</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M818.15,-751.6C816.51,-743.99 814.63,-735.31 812.88,-727.23"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="814.79,-726.91 811.74,-721.94 811.02,-727.73 814.79,-726.91"/>
+</g>
+<g id="n&#45;verdict&#45;rule" class="node kind&#45;data st&#45;waiting pf&#45;none spec">
+<title>verdict&#45;rule</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="715.36,-716 640.21,-716 640.21,-680 715.36,-680 715.36,-716"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="719.36,-720 636.21,-720 636.21,-676 719.36,-676 719.36,-720"/>
+<text xml:space="preserve" text-anchor="start" x="647.41" y="-698.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">VerdictRule</text>
+<text xml:space="preserve" text-anchor="start" x="658.28" y="-689.9" font-family="Helvetica,sans-Serif" font-size="8.00">§5.5 · spec</text>
+</g>
+<g id="e&#45;guard&#45;rule&#45;&#45;verdict&#45;rule" class="edge">
+<title>guard&#45;rule&#45;&gt;verdict&#45;rule</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M782.78,-752.58C765.07,-743.55 744.12,-732.85 725.6,-723.4"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="726.92,-721.92 721.15,-721.13 725.17,-725.35 726.92,-721.92"/>
+</g>
+<g id="n&#45;active&#45;grant" class="node kind&#45;data st&#45;waiting pf&#45;none">
+<title>active&#45;grant</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="906.11,-564 829.46,-564 829.46,-528 906.11,-528 906.11,-564"/>
+<text xml:space="preserve" text-anchor="start" x="836.66" y="-546.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">ActiveGrant</text>
+<text xml:space="preserve" text-anchor="start" x="859.91" y="-537.9" font-family="Helvetica,sans-Serif" font-size="8.00">§5.5</text>
+</g>
+<g id="e&#45;guard&#45;rule&#45;&#45;active&#45;grant" class="edge">
+<title>guard&#45;rule&#45;&gt;active&#45;grant</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M840.59,-751.42C859.33,-727.09 887.53,-685.5 897.78,-644 902.47,-625.02 902.76,-618.91 897.78,-600 895.04,-589.6 889.74,-579.1 884.35,-570.21"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="886.11,-569.4 881.55,-565.78 882.86,-571.46 886.11,-569.4"/>
+</g>
+<g id="n&#45;guard&#45;result" class="node kind&#45;data st&#45;waiting pf&#45;none">
+<title>guard&#45;result</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="993.98,-716 913.58,-716 913.58,-680 993.98,-680 993.98,-716"/>
+<text xml:space="preserve" text-anchor="start" x="920.78" y="-698.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">GuardResult</text>
+<text xml:space="preserve" text-anchor="start" x="945.91" y="-689.9" font-family="Helvetica,sans-Serif" font-size="8.00">§5.5</text>
+</g>
+<g id="e&#45;guard&#45;rule&#45;&#45;guard&#45;result" class="edge">
+<title>guard&#45;rule&#45;&gt;guard&#45;result</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M861.02,-751.4C878.53,-741.51 899.2,-729.83 916.57,-720.02"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="917.3,-721.82 921.15,-717.44 915.41,-718.46 917.3,-721.82"/>
+</g>
+<g id="n&#45;verdict" class="node kind&#45;data st&#45;ready pf&#45;none spec">
+<title>verdict</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="704.78,-792 650.78,-792 650.78,-756 704.78,-756 704.78,-792"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="708.78,-796 646.78,-796 646.78,-752 708.78,-752 708.78,-796"/>
+<text xml:space="preserve" text-anchor="start" x="659.41" y="-774.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Verdict</text>
+<text xml:space="preserve" text-anchor="start" x="658.28" y="-765.9" font-family="Helvetica,sans-Serif" font-size="8.00">§5.5 · spec</text>
+</g>
+<g id="e&#45;verdict&#45;&#45;verdict&#45;rule" class="edge">
+<title>verdict&#45;&gt;verdict&#45;rule</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M677.78,-751.6C677.78,-743.99 677.78,-735.31 677.78,-727.23"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="679.71,-727.47 677.78,-721.97 675.86,-727.47 679.71,-727.47"/>
+</g>
+<g id="n&#45;guard" class="node kind&#45;data st&#45;waiting pf&#45;none spec">
+<title>guard</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="689.78,-640 635.78,-640 635.78,-604 689.78,-604 689.78,-640"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="693.78,-644 631.78,-644 631.78,-600 693.78,-600 693.78,-644"/>
+<text xml:space="preserve" text-anchor="start" x="646.66" y="-622.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Guard</text>
+<text xml:space="preserve" text-anchor="start" x="643.28" y="-613.9" font-family="Helvetica,sans-Serif" font-size="8.00">§5.5 · spec</text>
+</g>
+<g id="e&#45;verdict&#45;rule&#45;&#45;guard" class="edge">
+<title>verdict&#45;rule&#45;&gt;guard</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M673.44,-675.6C671.9,-667.99 670.14,-659.31 668.5,-651.23"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="670.41,-650.96 667.43,-645.95 666.64,-651.72 670.41,-650.96"/>
+</g>
+<g id="n&#45;session&#45;config" class="node kind&#45;data st&#45;waiting pf&#45;none spec">
+<title>session&#45;config</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="809.61,-564 717.96,-564 717.96,-528 809.61,-528 809.61,-564"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="813.61,-568 713.96,-568 713.96,-524 813.61,-524 813.61,-568"/>
+<text xml:space="preserve" text-anchor="start" x="725.16" y="-546.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">SessionConfig</text>
+<text xml:space="preserve" text-anchor="start" x="744.28" y="-537.9" font-family="Helvetica,sans-Serif" font-size="8.00">§8.1 · spec</text>
+</g>
+<g id="e&#45;guard&#45;&#45;session&#45;config" class="edge">
+<title>guard&#45;&gt;session&#45;config</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M692.27,-599.4C703.68,-591.04 716.83,-581.4 728.72,-572.69"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="729.69,-574.37 732.99,-569.56 727.41,-571.26 729.69,-574.37"/>
+</g>
+<g id="n&#45;grant&#45;lifetime" class="node kind&#45;data st&#45;ready pf&#45;none spec">
+<title>grant&#45;lifetime</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="799.61,-640 713.96,-640 713.96,-604 799.61,-604 799.61,-640"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="803.61,-644 709.96,-644 709.96,-600 803.61,-600 803.61,-644"/>
+<text xml:space="preserve" text-anchor="start" x="721.16" y="-622.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">GrantLifetime</text>
+<text xml:space="preserve" text-anchor="start" x="737.28" y="-613.9" font-family="Helvetica,sans-Serif" font-size="8.00">§5.5 · spec</text>
+</g>
+<g id="e&#45;grant&#45;lifetime&#45;&#45;entry" class="edge">
+<title>grant&#45;lifetime&#45;&gt;entry</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M709.19,-602.47C706.7,-601.61 704.21,-600.78 701.78,-600 648.41,-582.87 627.35,-597.66 579.78,-568 557.85,-554.33 561.7,-540.46 541.78,-524 525.18,-510.29 504.58,-498.05 487.08,-488.81"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="488.25,-487.25 482.49,-486.42 486.48,-490.66 488.25,-487.25"/>
+</g>
+<g id="e&#45;grant&#45;lifetime&#45;&#45;active&#45;grant" class="edge">
+<title>grant&#45;lifetime&#45;&gt;active&#45;grant</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M789.19,-599.4C803.76,-589.68 820.92,-578.24 835.48,-568.53"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="836.49,-570.17 840,-565.52 834.36,-566.97 836.49,-570.17"/>
+</g>
+<g id="e&#45;owner&#45;&#45;session&#45;config" class="edge">
+<title>owner&#45;&gt;session&#45;config</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M616.53,-603.46C618.97,-602.25 621.4,-601.09 623.78,-600 650.59,-587.77 681.12,-575.98 706.81,-566.63"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="707.43,-568.45 711.95,-564.77 706.12,-564.83 707.43,-568.45"/>
+</g>
+<g id="n&#45;turn&#45;kind" class="node kind&#45;data st&#45;ready pf&#45;none spec">
+<title>turn&#45;kind</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="885.98,-640 823.58,-640 823.58,-604 885.98,-604 885.98,-640"/>
+<polygon fill="none" stroke="black" stroke-width="1.6" points="889.98,-644 819.58,-644 819.58,-600 889.98,-600 889.98,-644"/>
+<text xml:space="preserve" text-anchor="start" x="830.78" y="-622.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">TurnKind</text>
+<text xml:space="preserve" text-anchor="start" x="835.28" y="-613.9" font-family="Helvetica,sans-Serif" font-size="8.00">§8.1 · spec</text>
+</g>
+<g id="e&#45;turn&#45;kind&#45;&#45;session&#45;config" class="edge">
+<title>turn&#45;kind&#45;&gt;session&#45;config</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M828.46,-599.6C818.17,-591.23 806.29,-581.57 795.53,-572.82"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="796.9,-571.45 791.41,-569.47 794.47,-574.44 796.9,-571.45"/>
+</g>
+<g id="e&#45;session&#45;config&#45;&#45;entry" class="edge">
+<title>session&#45;config&#45;&gt;entry</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M713.33,-533.11C650.53,-518.31 544.65,-493.36 488.1,-480.03"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="488.58,-478.17 482.78,-478.78 487.69,-481.91 488.58,-478.17"/>
+</g>
+<g id="e&#45;session&#45;config&#45;&#45;session&#45;state" class="edge">
+<title>session&#45;config&#45;&gt;session&#45;state</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M763.78,-523.6C763.78,-514.75 763.78,-504.45 763.78,-495.32"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="765.71,-495.48 763.78,-489.98 761.86,-495.48 765.71,-495.48"/>
+</g>
+<g id="e&#45;active&#45;grant&#45;&#45;session&#45;state" class="edge">
+<title>active&#45;grant&#45;&gt;session&#45;state</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M842.87,-527.28C828.21,-516.84 809.55,-503.57 794.05,-492.53"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="795.2,-490.99 789.6,-489.37 792.96,-494.13 795.2,-490.99"/>
+</g>
+<g id="e&#45;open&#45;call&#45;&#45;session&#45;state" class="edge">
+<title>open&#45;call&#45;&gt;session&#45;state</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M958.53,-831.53C980.79,-804.95 1018.78,-751.84 1018.78,-699 1018.78,-699 1018.78,-699 1018.78,-621 1018.78,-577.23 1032.02,-555.65 1001.78,-524 976.25,-497.27 874.79,-482.35 812.88,-475.56"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="813.31,-473.67 807.63,-474.99 812.9,-477.5 813.31,-473.67"/>
+</g>
+<g id="n&#45;job&#45;record" class="node kind&#45;data st&#45;ready pf&#45;none">
+<title>job&#45;record</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="993.86,-564 921.71,-564 921.71,-528 993.86,-528 993.86,-564"/>
+<text xml:space="preserve" text-anchor="start" x="928.91" y="-546.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">JobRecord</text>
+<text xml:space="preserve" text-anchor="start" x="947.66" y="-537.9" font-family="Helvetica,sans-Serif" font-size="8.00">§10.3</text>
+</g>
+<g id="e&#45;job&#45;record&#45;&#45;session&#45;state" class="edge">
+<title>job&#45;record&#45;&gt;session&#45;state</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M921.42,-527.28C918.85,-526.14 916.28,-525.04 913.78,-524 880.43,-510.19 842.03,-496.67 812.43,-486.74"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="813.38,-485.02 807.55,-485.11 812.16,-488.67 813.38,-485.02"/>
+</g>
+<g id="e&#45;position&#45;&#45;session&#45;state" class="edge">
+<title>position&#45;&gt;session&#45;state</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M1039.87,-831.51C1044.52,-803.6 1052.78,-747.19 1052.78,-699 1052.78,-699 1052.78,-699 1052.78,-621 1052.78,-576.13 1057.76,-554.42 1024.78,-524 994.47,-496.04 879.68,-481.31 812.86,-474.95"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="813.16,-473.05 807.51,-474.45 812.8,-476.88 813.16,-473.05"/>
+</g>
+<g id="e&#45;session&#45;state&#45;&#45;evolve" class="edge">
+<title>session&#45;state&#45;&gt;evolve</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M762.59,-451.2C760.81,-424.37 757.41,-373.46 755.4,-343.25"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="757.34,-343.49 755.06,-338.13 753.5,-343.75 757.34,-343.49"/>
+</g>
+<g id="n&#45;next" class="node kind&#45;function st&#45;waiting pf&#45;none">
+<title>next</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M678.78,-412C678.78,-412 648.78,-412 648.78,-412 642.78,-412 636.78,-406 636.78,-400 636.78,-400 636.78,-388 636.78,-388 636.78,-382 642.78,-376 648.78,-376 648.78,-376 678.78,-376 678.78,-376 684.78,-376 690.78,-382 690.78,-388 690.78,-388 690.78,-400 690.78,-400 690.78,-406 684.78,-412 678.78,-412"/>
+<text xml:space="preserve" text-anchor="start" x="652.53" y="-394.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">next</text>
+<text xml:space="preserve" text-anchor="start" x="655.91" y="-385.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.3</text>
+</g>
+<g id="e&#45;session&#45;state&#45;&#45;next" class="edge">
+<title>session&#45;state&#45;&gt;next</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M739.83,-451.28C725.73,-440.84 707.79,-427.57 692.88,-416.53"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="694.2,-415.11 688.63,-413.39 691.91,-418.21 694.2,-415.11"/>
+</g>
+<g id="e&#45;session&#45;state&#45;&#45;closing" class="edge">
+<title>session&#45;state&#45;&gt;closing</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M721.29,-462.31C675.69,-454.34 601.59,-439.14 540.78,-416 539.03,-415.33 537.26,-414.6 535.49,-413.83"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="536.52,-412.19 530.72,-411.62 534.9,-415.68 536.52,-412.19"/>
+</g>
+<g id="n&#45;guard&#45;check" class="node kind&#45;function st&#45;waiting pf&#45;none">
+<title>guard&#45;check</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M1136.86,-412C1136.86,-412 1082.71,-412 1082.71,-412 1076.71,-412 1070.71,-406 1070.71,-400 1070.71,-400 1070.71,-388 1070.71,-388 1070.71,-382 1076.71,-376 1082.71,-376 1082.71,-376 1136.86,-376 1136.86,-376 1142.86,-376 1148.86,-382 1148.86,-388 1148.86,-388 1148.86,-400 1148.86,-400 1148.86,-406 1142.86,-412 1136.86,-412"/>
+<text xml:space="preserve" text-anchor="start" x="1077.91" y="-394.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">guardCheck</text>
+<text xml:space="preserve" text-anchor="start" x="1101.91" y="-385.9" font-family="Helvetica,sans-Serif" font-size="8.00">§5.5</text>
+</g>
+<g id="e&#45;session&#45;state&#45;&#45;guard&#45;check" class="edge">
+<title>session&#45;state&#45;&gt;guard&#45;check</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M806.21,-459.93C871.5,-445.96 996.12,-419.31 1063.6,-404.88"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="1063.65,-406.84 1068.62,-403.8 1062.84,-403.07 1063.65,-406.84"/>
+</g>
+<g id="n&#45;goal&#45;check&#45;due" class="node kind&#45;function st&#45;waiting pf&#45;none">
+<title>goal&#45;check&#45;due</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M1001.23,-336C1001.23,-336 934.33,-336 934.33,-336 928.33,-336 922.33,-330 922.33,-324 922.33,-324 922.33,-312 922.33,-312 922.33,-306 928.33,-300 934.33,-300 934.33,-300 1001.23,-300 1001.23,-300 1007.23,-300 1013.23,-306 1013.23,-312 1013.23,-312 1013.23,-324 1013.23,-324 1013.23,-330 1007.23,-336 1001.23,-336"/>
+<text xml:space="preserve" text-anchor="start" x="929.53" y="-318.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">goalCheckDue</text>
+<text xml:space="preserve" text-anchor="start" x="959.91" y="-309.9" font-family="Helvetica,sans-Serif" font-size="8.00">§5.5</text>
+</g>
+<g id="e&#45;session&#45;state&#45;&#45;goal&#45;check&#45;due" class="edge">
+<title>session&#45;state&#45;&gt;goal&#45;check&#45;due</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M787.98,-451.2C825.56,-423.58 897.81,-370.45 938.35,-340.64"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="939.22,-342.39 942.51,-337.58 936.94,-339.29 939.22,-342.39"/>
+</g>
+<g id="n&#45;missing" class="node kind&#45;function st&#45;waiting pf&#45;none">
+<title>missing</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M384.61,-260C384.61,-260 352.96,-260 352.96,-260 346.96,-260 340.96,-254 340.96,-248 340.96,-248 340.96,-236 340.96,-236 340.96,-230 346.96,-224 352.96,-224 352.96,-224 384.61,-224 384.61,-224 390.61,-224 396.61,-230 396.61,-236 396.61,-236 396.61,-248 396.61,-248 396.61,-254 390.61,-260 384.61,-260"/>
+<text xml:space="preserve" text-anchor="start" x="348.16" y="-242.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">missing</text>
+<text xml:space="preserve" text-anchor="start" x="360.91" y="-233.9" font-family="Helvetica,sans-Serif" font-size="8.00">§8.6</text>
+</g>
+<g id="e&#45;session&#45;state&#45;&#45;missing" class="edge">
+<title>session&#45;state&#45;&gt;missing</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M721.45,-458.47C693.35,-450.08 656.65,-436.33 628.78,-416 593.57,-390.31 593.89,-374.14 566.78,-340 551.41,-320.65 553,-310.21 532.78,-296 531.41,-295.03 451.28,-269.35 403.55,-254.1"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="404.17,-252.27 398.34,-252.43 402.99,-255.94 404.17,-252.27"/>
+</g>
+<g id="n&#45;fold" class="node kind&#45;data st&#45;ready pf&#45;none">
+<title>fold</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="919.78,-940 865.78,-940 865.78,-904 919.78,-904 919.78,-940"/>
+<text xml:space="preserve" text-anchor="start" x="881.16" y="-922.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Fold</text>
+<text xml:space="preserve" text-anchor="start" x="884.91" y="-913.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.2</text>
+</g>
+<g id="n&#45;forked" class="node kind&#45;function st&#45;waiting pf&#45;none">
+<title>forked</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M1042.78,-184C1042.78,-184 1012.78,-184 1012.78,-184 1006.78,-184 1000.78,-178 1000.78,-172 1000.78,-172 1000.78,-160 1000.78,-160 1000.78,-154 1006.78,-148 1012.78,-148 1012.78,-148 1042.78,-148 1042.78,-148 1048.78,-148 1054.78,-154 1054.78,-160 1054.78,-160 1054.78,-172 1054.78,-172 1054.78,-178 1048.78,-184 1042.78,-184"/>
+<text xml:space="preserve" text-anchor="start" x="1010.91" y="-166.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">forked</text>
+<text xml:space="preserve" text-anchor="start" x="1019.91" y="-157.9" font-family="Helvetica,sans-Serif" font-size="8.00">§5.5</text>
+</g>
+<g id="e&#45;evolve&#45;&#45;forked" class="edge">
+<title>evolve&#45;&gt;forked</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M781.26,-313.69C847.74,-305.42 1012.99,-283.12 1028.78,-264 1045.4,-243.87 1041.53,-212.57 1035.89,-191"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="1037.81,-190.72 1034.47,-185.95 1034.11,-191.76 1037.81,-190.72"/>
+</g>
+<g id="e&#45;evolve&#45;&#45;schedules" class="edge">
+<title>evolve&#45;&gt;schedules</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M781.56,-301.13C785.27,-299.28 789.08,-297.51 792.78,-296 839.9,-276.71 872.22,-304.72 902.78,-264 914.52,-248.36 911.55,-237.48 902.78,-220 896.02,-206.53 884.04,-195.6 871.81,-187.25"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="873,-185.72 867.34,-184.34 870.9,-188.95 873,-185.72"/>
+</g>
+<g id="n&#45;law&#45;fold" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;fold</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="595.78" cy="-242" rx="36.78" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="595.78" cy="-242" rx="40.78" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="584.16" y="-242.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Fold</text>
+<text xml:space="preserve" text-anchor="start" x="576.28" y="-233.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.7 · spec</text>
+</g>
+<g id="e&#45;evolve&#45;&#45;law&#45;fold" class="edge">
+<title>evolve&#45;&gt;law&#45;fold</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M726.22,-301.83C722.4,-299.82 718.51,-297.83 714.78,-296 699.76,-288.62 662.35,-272.07 633.44,-259.41"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="634.47,-257.76 628.66,-257.32 632.93,-261.28 634.47,-257.76"/>
+</g>
+<g id="n&#45;law&#45;homomorphism" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;homomorphism</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="724.78" cy="-242" rx="68.29" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="724.78" cy="-242" rx="72.29" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="682.41" y="-242.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Homomorphism</text>
+<text xml:space="preserve" text-anchor="start" x="705.28" y="-233.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.7 · spec</text>
+</g>
+<g id="e&#45;evolve&#45;&#45;law&#45;homomorphism" class="edge">
+<title>evolve&#45;&gt;law&#45;homomorphism</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M746.91,-299.46C743.56,-290.91 739.44,-280.41 735.68,-270.8"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="737.56,-270.33 733.76,-265.91 733.97,-271.73 737.56,-270.33"/>
+</g>
+<g id="n&#45;law&#45;repair" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;repair</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="497.78" cy="-242" rx="36.78" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="497.78" cy="-242" rx="40.78" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="480.53" y="-242.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Repair</text>
+<text xml:space="preserve" text-anchor="start" x="478.28" y="-233.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.7 · spec</text>
+</g>
+<g id="e&#45;evolve&#45;&#45;law&#45;repair" class="edge">
+<title>evolve&#45;&gt;law&#45;repair</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M726.13,-300.8C722.4,-299 718.55,-297.34 714.78,-296 643.15,-270.57 619.47,-286.21 546.78,-264 542.77,-262.78 538.65,-261.33 534.58,-259.77"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="535.33,-258 529.51,-257.76 533.91,-261.58 535.33,-258"/>
+</g>
+<g id="n&#45;law&#45;store" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;store</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="853.78" cy="-242" rx="36.78" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="853.78" cy="-242" rx="40.78" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="839.53" y="-242.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Store</text>
+<text xml:space="preserve" text-anchor="start" x="834.28" y="-233.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.7 · spec</text>
+</g>
+<g id="e&#45;evolve&#45;&#45;law&#45;store" class="edge">
+<title>evolve&#45;&gt;law&#45;store</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M777.73,-299.28C791.83,-288.84 809.77,-275.57 824.68,-264.53"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="825.65,-266.21 828.93,-261.39 823.36,-263.11 825.65,-266.21"/>
+</g>
+<g id="e&#45;next&#45;step&#45;&#45;next" class="edge">
+<title>next&#45;step&#45;&gt;next</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M618.76,-451.46C626.79,-441.4 636.95,-428.65 645.59,-417.81"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="646.92,-419.23 648.85,-413.73 643.91,-416.83 646.92,-419.23"/>
+</g>
+<g id="e&#45;next&#45;&#45;schedules" class="edge">
+<title>next&#45;&gt;schedules</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M675.6,-375.36C688.28,-354.02 704.16,-318.19 684.78,-296 615.14,-216.28 518.42,-343.72 448.78,-264 435.92,-249.27 435.94,-234.75 448.78,-220 492.77,-169.5 700.9,-165.53 790.54,-166.23"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="790.42,-168.15 795.94,-166.28 790.46,-164.3 790.42,-168.15"/>
+</g>
+<g id="n&#45;law&#45;next&#45;rules" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;next&#45;rules</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="625.78" cy="-318" rx="46.6" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="625.78" cy="-318" rx="50.6" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="599.16" y="-318.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Next rules</text>
+<text xml:space="preserve" text-anchor="start" x="606.28" y="-309.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.3 · spec</text>
+</g>
+<g id="e&#45;next&#45;&#45;law&#45;next&#45;rules" class="edge">
+<title>next&#45;&gt;law&#45;next&#45;rules</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M654.78,-375.46C650.27,-366.69 644.71,-355.86 639.67,-346.05"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="641.46,-345.33 637.24,-341.31 638.04,-347.08 641.46,-345.33"/>
+</g>
+<g id="n&#45;repair" class="node kind&#45;function st&#45;waiting pf&#45;none">
+<title>repair</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M512.78,-336C512.78,-336 482.78,-336 482.78,-336 476.78,-336 470.78,-330 470.78,-324 470.78,-324 470.78,-312 470.78,-312 470.78,-306 476.78,-300 482.78,-300 482.78,-300 512.78,-300 512.78,-300 518.78,-300 524.78,-306 524.78,-312 524.78,-312 524.78,-324 524.78,-324 524.78,-330 518.78,-336 512.78,-336"/>
+<text xml:space="preserve" text-anchor="start" x="482.41" y="-318.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">repair</text>
+<text xml:space="preserve" text-anchor="start" x="489.91" y="-309.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.4</text>
+</g>
+<g id="e&#45;closing&#45;&#45;repair" class="edge">
+<title>closing&#45;&gt;repair</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M500.83,-375.46C500.31,-365.86 499.66,-353.8 499.09,-343.3"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="501.03,-343.42 498.81,-338.03 497.18,-343.62 501.03,-343.42"/>
+</g>
+<g id="n&#45;decide" class="node kind&#45;function st&#45;waiting pf&#45;none">
+<title>decide</title>
+<path fill="white" stroke="black" stroke-width="1.6" d="M244.78,-260C244.78,-260 214.78,-260 214.78,-260 208.78,-260 202.78,-254 202.78,-248 202.78,-248 202.78,-236 202.78,-236 202.78,-230 208.78,-224 214.78,-224 214.78,-224 244.78,-224 244.78,-224 250.78,-224 256.78,-230 256.78,-236 256.78,-236 256.78,-248 256.78,-248 256.78,-254 250.78,-260 244.78,-260"/>
+<text xml:space="preserve" text-anchor="start" x="212.53" y="-242.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">decide</text>
+<text xml:space="preserve" text-anchor="start" x="221.91" y="-233.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.5</text>
+</g>
+<g id="e&#45;repair&#45;&#45;decide" class="edge">
+<title>repair&#45;&gt;decide</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M470.3,-299.43C467.81,-298.17 465.28,-297 462.78,-296 444.43,-288.63 324.18,-262.84 263.99,-250.16"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="264.42,-248.28 258.64,-249.03 263.63,-252.05 264.42,-248.28"/>
+</g>
+<g id="e&#45;repair&#45;&#45;law&#45;repair" class="edge">
+<title>repair&#45;&gt;law&#45;repair</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M497.78,-299.46C497.78,-291.07 497.78,-280.81 497.78,-271.35"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="499.71,-271.51 497.78,-266.01 495.86,-271.51 499.71,-271.51"/>
+</g>
+<g id="e&#45;command&#45;&#45;decide" class="edge">
+<title>command&#45;&gt;decide</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M266.21,-371.2C259.04,-362.14 251.54,-351.13 246.78,-340 236.74,-316.51 232.63,-287.41 230.95,-267.24"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="232.87,-267.2 230.55,-261.86 229.04,-267.49 232.87,-267.2"/>
+</g>
+<g id="e&#45;command&#45;&#45;reports" class="edge">
+<title>command&#45;&gt;reports</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M284.62,-371.6C284.15,-362.75 283.59,-352.45 283.1,-343.32"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="285.03,-343.36 282.81,-337.98 281.18,-343.57 285.03,-343.36"/>
+</g>
+<g id="e&#45;rejection&#45;&#45;decide" class="edge">
+<title>rejection&#45;&gt;decide</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M200.28,-371.39C204.43,-351.71 210.81,-321.85 216.78,-296 218.95,-286.58 221.46,-276.26 223.69,-267.24"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="225.54,-267.76 225,-261.96 221.8,-266.83 225.54,-267.76"/>
+</g>
+<g id="e&#45;decide&#45;&#45;schedules" class="edge">
+<title>decide&#45;&gt;schedules</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M257.19,-234.67C277.87,-230.07 306.99,-223.99 332.78,-220 501.9,-193.84 705.28,-176.62 790.77,-170.02"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="790.76,-171.96 796.09,-169.62 790.46,-168.12 790.76,-171.96"/>
+</g>
+<g id="n&#45;law&#45;input" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;input</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="40.78" cy="-166" rx="36.78" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="40.78" cy="-166" rx="40.78" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="27.28" y="-166.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Input</text>
+<text xml:space="preserve" text-anchor="start" x="21.28" y="-157.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.7 · spec</text>
+</g>
+<g id="e&#45;decide&#45;&#45;law&#45;input" class="edge">
+<title>decide&#45;&gt;law&#45;input</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M202.02,-230.89C173.67,-220.47 128.46,-203.6 89.78,-188 86.15,-186.54 82.38,-184.98 78.62,-183.41"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="79.4,-181.65 73.58,-181.29 77.9,-185.2 79.4,-181.65"/>
+</g>
+<g id="n&#45;law&#45;log" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;log</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="138.78" cy="-166" rx="36.78" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="138.78" cy="-166" rx="40.78" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="128.66" y="-166.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Log</text>
+<text xml:space="preserve" text-anchor="start" x="119.28" y="-157.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.7 · spec</text>
+</g>
+<g id="e&#45;decide&#45;&#45;law&#45;log" class="edge">
+<title>decide&#45;&gt;law&#45;log</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M208.22,-223.46C195.69,-213.28 179.78,-200.34 166.35,-189.42"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="167.68,-188.02 162.2,-186.04 165.25,-191.01 167.68,-188.02"/>
+</g>
+<g id="n&#45;law&#45;decide&#45;table" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;decide&#45;table</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="253.78" cy="-166" rx="54.34" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="253.78" cy="-166" rx="58.34" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="221.53" y="-166.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Decide table</text>
+<text xml:space="preserve" text-anchor="start" x="234.28" y="-157.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.5 · spec</text>
+</g>
+<g id="e&#45;decide&#45;&#45;law&#45;decide&#45;table" class="edge">
+<title>decide&#45;&gt;law&#45;decide&#45;table</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M235.47,-223.46C238.24,-214.92 241.64,-204.44 244.75,-194.84"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="246.56,-195.49 246.43,-189.67 242.9,-194.3 246.56,-195.49"/>
+</g>
+<g id="n&#45;law&#45;grant" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;grant</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="1027.78" cy="-90" rx="36.78" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="1027.78" cy="-90" rx="40.78" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="1013.16" y="-90.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Grant</text>
+<text xml:space="preserve" text-anchor="start" x="1008.28" y="-81.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.7 · spec</text>
+</g>
+<g id="e&#45;forked&#45;&#45;law&#45;grant" class="edge">
+<title>forked&#45;&gt;law&#45;grant</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M1027.78,-147.46C1027.78,-139.07 1027.78,-128.81 1027.78,-119.35"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="1029.71,-119.51 1027.78,-114.01 1025.86,-119.51 1029.71,-119.51"/>
+</g>
+<g id="n&#45;law&#45;pending" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;pending</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="1240.78" cy="-90" rx="54.34" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="1240.78" cy="-90" rx="58.34" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="1208.53" y="-90.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Pending call</text>
+<text xml:space="preserve" text-anchor="start" x="1221.28" y="-81.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.7 · spec</text>
+</g>
+<g id="e&#45;forked&#45;&#45;law&#45;pending" class="edge">
+<title>forked&#45;&gt;law&#45;pending</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M1055.56,-149.15C1059.28,-147.3 1063.08,-145.52 1066.78,-144 1113.07,-124.92 1126.93,-126.7 1174.78,-112 1179.9,-110.43 1185.24,-108.76 1190.57,-107.09"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="1190.83,-109.03 1195.5,-105.54 1189.67,-105.36 1190.83,-109.03"/>
+</g>
+<g id="n&#45;law&#45;job" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;job</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="929.78" cy="-90" rx="36.78" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="929.78" cy="-90" rx="40.78" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="920.03" y="-90.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Job</text>
+<text xml:space="preserve" text-anchor="start" x="910.28" y="-81.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.7 · spec</text>
+</g>
+<g id="e&#45;forked&#45;&#45;law&#45;job" class="edge">
+<title>forked&#45;&gt;law&#45;job</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M1004.56,-147.46C990.74,-137.03 973.11,-123.72 958.44,-112.64"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="959.81,-111.27 954.27,-109.49 957.49,-114.34 959.81,-111.27"/>
+</g>
+<g id="n&#45;law&#45;inputs" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;inputs</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="1125.78" cy="-90" rx="36.78" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="1125.78" cy="-90" rx="40.78" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="1109.28" y="-90.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Inputs</text>
+<text xml:space="preserve" text-anchor="start" x="1106.28" y="-81.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.7 · spec</text>
+</g>
+<g id="e&#45;forked&#45;&#45;law&#45;inputs" class="edge">
+<title>forked&#45;&gt;law&#45;inputs</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M1051.01,-147.46C1064.82,-137.03 1082.45,-123.72 1097.12,-112.64"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="1098.07,-114.34 1101.3,-109.49 1095.75,-111.27 1098.07,-114.34"/>
+</g>
+<g id="e&#45;guard&#45;result&#45;&#45;guard&#45;check" class="edge">
+<title>guard&#45;result&#45;&gt;guard&#45;check</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M962.84,-679.46C989.44,-627.96 1067.34,-477.15 1097.58,-418.61"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="1099.26,-419.57 1100.07,-413.8 1095.83,-417.8 1099.26,-419.57"/>
+</g>
+<g id="e&#45;guard&#45;check&#45;&#45;schedules" class="edge">
+<title>guard&#45;check&#45;&gt;schedules</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M1106.62,-375.29C1099.39,-340.18 1078.33,-261.56 1028.78,-220 984.35,-182.74 916.16,-171.46 872.78,-168.17"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="873.02,-166.26 867.4,-167.8 872.76,-170.1 873.02,-166.26"/>
+</g>
+<g id="n&#45;law&#45;guard" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;guard</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="1179.78" cy="-318" rx="36.78" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="1179.78" cy="-318" rx="40.78" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="1163.66" y="-318.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Guard</text>
+<text xml:space="preserve" text-anchor="start" x="1160.28" y="-309.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.7 · spec</text>
+</g>
+<g id="e&#45;guard&#45;check&#45;&#45;law&#45;guard" class="edge">
+<title>guard&#45;check&#45;&gt;law&#45;guard</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M1126.37,-375.46C1135.56,-365.75 1147.11,-353.54 1157.11,-342.96"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="1158.27,-344.54 1160.65,-339.22 1155.48,-341.89 1158.27,-344.54"/>
+</g>
+<g id="e&#45;goal&#45;check&#45;due&#45;&#45;law&#45;pending" class="edge">
+<title>goal&#45;check&#45;due&#45;&gt;law&#45;pending</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M996.62,-299.33C1012.15,-289.46 1031.43,-276.63 1047.78,-264 1111.16,-215.02 1179.71,-150.51 1215.6,-115.75"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="1216.65,-117.41 1219.26,-112.2 1213.97,-114.65 1216.65,-117.41"/>
+</g>
+<g id="e&#45;reports&#45;&#45;missing" class="edge">
+<title>reports&#45;&gt;missing</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M302.4,-299.46C314.55,-289.12 330.04,-275.95 343,-264.93"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="344.03,-266.58 346.97,-261.55 341.54,-263.65 344.03,-266.58"/>
+</g>
+<g id="n&#45;law&#45;report" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;report</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="368.78" cy="-166" rx="36.78" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="368.78" cy="-166" rx="40.78" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="350.78" y="-166.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Report</text>
+<text xml:space="preserve" text-anchor="start" x="349.28" y="-157.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.7 · spec</text>
+</g>
+<g id="e&#45;missing&#45;&#45;law&#45;report" class="edge">
+<title>missing&#45;&gt;law&#45;report</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M368.78,-223.46C368.78,-215.07 368.78,-204.81 368.78,-195.35"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="370.71,-195.51 368.78,-190.01 366.86,-195.51 370.71,-195.51"/>
+</g>
+<g id="n&#45;law&#45;language" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;language</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="529.78" cy="-90" rx="45.56" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="529.78" cy="-90" rx="49.56" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="503.91" y="-90.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Language</text>
+<text xml:space="preserve" text-anchor="start" x="510.28" y="-81.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.7 · spec</text>
+</g>
+<g id="e&#45;schedules&#45;&#45;law&#45;language" class="edge">
+<title>schedules&#45;&gt;law&#45;language</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M797.32,-159.12C749.55,-150.61 660.74,-133.51 586.78,-112 582.26,-110.68 577.57,-109.19 572.93,-107.61"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="573.74,-105.86 567.92,-105.88 572.48,-109.5 573.74,-105.86"/>
+</g>
+<g id="n&#45;law&#45;effect" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;effect</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="733.78" cy="-90" rx="36.78" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="733.78" cy="-90" rx="40.78" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="718.41" y="-90.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Effect</text>
+<text xml:space="preserve" text-anchor="start" x="714.28" y="-81.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.7 · spec</text>
+</g>
+<g id="e&#45;schedules&#45;&#45;law&#45;effect" class="edge">
+<title>schedules&#45;&gt;law&#45;effect</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M808.56,-147.46C794.74,-137.03 777.11,-123.72 762.44,-112.64"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="763.81,-111.27 758.27,-109.49 761.49,-114.34 763.81,-111.27"/>
+</g>
+<g id="n&#45;law&#45;stop" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;stop</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="831.78" cy="-90" rx="36.78" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="831.78" cy="-90" rx="40.78" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="819.41" y="-90.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Stop</text>
+<text xml:space="preserve" text-anchor="start" x="812.28" y="-81.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.7 · spec</text>
+</g>
+<g id="e&#45;schedules&#45;&#45;law&#45;stop" class="edge">
+<title>schedules&#45;&gt;law&#45;stop</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M831.78,-147.46C831.78,-139.07 831.78,-128.81 831.78,-119.35"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="833.71,-119.51 831.78,-114.01 829.86,-119.51 833.71,-119.51"/>
+</g>
+<g id="n&#45;law&#45;rest" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;rest</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="635.78" cy="-90" rx="36.78" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="635.78" cy="-90" rx="40.78" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="623.78" y="-90.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Rest</text>
+<text xml:space="preserve" text-anchor="start" x="616.28" y="-81.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.7 · spec</text>
+</g>
+<g id="e&#45;schedules&#45;&#45;law&#45;rest" class="edge">
+<title>schedules&#45;&gt;law&#45;rest</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M797.41,-153.25C767.48,-142.87 723.02,-127.07 684.78,-112 681.14,-110.56 677.37,-109.03 673.6,-107.47"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="674.37,-105.71 668.55,-105.36 672.88,-109.26 674.37,-105.71"/>
+</g>
+<g id="n&#45;law&#45;flush" class="node kind&#45;law st&#45;waiting pf&#45;none spec">
+<title>law&#45;flush</title>
+<ellipse fill="white" stroke="black" stroke-width="1.6" cx="423.78" cy="-90" rx="36.78" ry="18"/>
+<ellipse fill="none" stroke="black" stroke-width="1.6" cx="423.78" cy="-90" rx="40.78" ry="22"/>
+<text xml:space="preserve" text-anchor="start" x="409.16" y="-90.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Flush</text>
+<text xml:space="preserve" text-anchor="start" x="404.28" y="-81.9" font-family="Helvetica,sans-Serif" font-size="8.00">§4.7 · spec</text>
+</g>
+<g id="e&#45;schedules&#45;&#45;law&#45;flush" class="edge">
+<title>schedules&#45;&gt;law&#45;flush</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M797.39,-162.99C732.58,-158.53 588.37,-145.44 471.78,-112 467.88,-110.88 463.88,-109.51 459.93,-108.02"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="460.89,-106.33 455.07,-106.09 459.47,-109.91 460.89,-106.33"/>
+</g>
+<g id="e&#45;schedules&#45;&#45;law&#45;grant" class="edge">
+<title>schedules&#45;&gt;law&#45;grant</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M866.15,-153.25C896.08,-142.87 940.54,-127.07 978.78,-112 982.42,-110.56 986.2,-109.03 989.96,-107.47"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="990.68,-109.26 995.01,-105.36 989.19,-105.71 990.68,-109.26"/>
+</g>
+<g id="e&#45;schedules&#45;&#45;law&#45;pending" class="edge">
+<title>schedules&#45;&gt;law&#45;pending</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M866.26,-160.36C941.09,-150.19 1116.34,-125.73 1174.78,-112 1180.25,-110.72 1185.92,-109.2 1191.54,-107.58"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="1192.06,-109.44 1196.79,-106.03 1190.96,-105.74 1192.06,-109.44"/>
+</g>
+<g id="e&#45;schedules&#45;&#45;law&#45;job" class="edge">
+<title>schedules&#45;&gt;law&#45;job</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M855.01,-147.46C868.82,-137.03 886.45,-123.72 901.12,-112.64"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="902.07,-114.34 905.3,-109.49 899.75,-111.27 902.07,-114.34"/>
+</g>
+<g id="n&#45;mutants" class="node kind&#45;check st&#45;blocked pf&#45;none">
+<title>mutants</title>
+<polygon fill="white" stroke="black" stroke-width="1.6" points="920.87,-18 900.82,-36 860.74,-36 840.7,-18 860.74,0 900.82,0 920.87,-18"/>
+<text xml:space="preserve" text-anchor="start" x="862.78" y="-18.05" font-family="Helvetica,sans-Serif" font-weight="bold" font-size="11.00">Mutant</text>
+<text xml:space="preserve" text-anchor="start" x="874.03" y="-9.9" font-family="Helvetica,sans-Serif" font-size="8.00">§12</text>
+</g>
+<g id="e&#45;law&#45;effect&#45;&#45;mutants" class="edge">
+<title>law&#45;effect&#45;&gt;mutants</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M764.24,-74.5C788.89,-62.76 823.52,-46.27 848.62,-34.31"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="849.42,-36.07 853.55,-31.97 847.76,-32.59 849.42,-36.07"/>
+</g>
+<g id="e&#45;law&#45;stop&#45;&#45;mutants" class="edge">
+<title>law&#45;stop&#45;&gt;mutants</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M845.95,-68.75C851.85,-60.33 858.73,-50.5 864.8,-41.82"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="866.11,-43.31 867.69,-37.7 862.96,-41.11 866.11,-43.31"/>
+</g>
+<g id="e&#45;law&#45;flush&#45;&#45;mutants" class="edge">
+<title>law&#45;flush&#45;&gt;mutants</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M453.76,-74.29C459.63,-71.87 465.81,-69.62 471.78,-68 600.38,-32.99 758.51,-22.98 835.02,-20.13"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="834.93,-22.06 840.35,-19.94 834.79,-18.21 834.93,-22.06"/>
+</g>
+<g id="e&#45;law&#45;grant&#45;&#45;mutants" class="edge">
+<title>law&#45;grant&#45;&gt;mutants</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M997.32,-74.5C972.67,-62.76 938.04,-46.27 912.94,-34.31"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="913.8,-32.59 908.01,-31.97 912.15,-36.07 913.8,-32.59"/>
+</g>
+<g id="e&#45;law&#45;pending&#45;&#45;mutants" class="edge">
+<title>law&#45;pending&#45;&gt;mutants</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M1198.07,-74.43C1190.37,-72.09 1182.38,-69.83 1174.78,-68 1086.08,-46.61 980.09,-31.44 922.71,-24.07"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="923,-22.17 917.31,-23.38 922.52,-25.99 923,-22.17"/>
+</g>
+<g id="e&#45;law&#45;job&#45;&#45;mutants" class="edge">
+<title>law&#45;job&#45;&gt;mutants</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M915.61,-68.75C909.71,-60.33 902.83,-50.5 896.76,-41.82"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="898.6,-41.11 893.87,-37.7 895.45,-43.31 898.6,-41.11"/>
+</g>
+<g id="e&#45;law&#45;inputs&#45;&#45;mutants" class="edge">
+<title>law&#45;inputs&#45;&gt;mutants</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M1094.97,-74.91C1089,-72.43 1082.75,-70.01 1076.78,-68 1023.52,-50.06 960.15,-35.38 920.19,-26.91"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="920.6,-25.03 914.83,-25.78 919.81,-28.8 920.6,-25.03"/>
+</g>
+<g id="e&#45;law&#45;report&#45;&#45;mutants" class="edge">
+<title>law&#45;report&#45;&gt;mutants</title>
+<path fill="none" stroke="gray" stroke-width="0.9" d="M363.02,-143.73C358.47,-121.7 355.67,-87.78 374.78,-68 406.45,-35.21 716.66,-23.43 835.12,-20.11"/>
+<polygon fill="gray" stroke="gray" stroke-width="0.9" points="835.16,-22.03 840.61,-19.95 835.06,-18.18 835.16,-22.03"/>
+</g>
+</g>
+</svg>
+</div>
+    </div>
+    <aside class="panel" id="panel" aria-live="polite">
+      <p class="kind">The parts list</p>
+      <p class="empty">Select a node in the graph or in a list below.</p>
+    </aside>
+  </div>
+
+  <div class="next" id="next"></div>
+
+  <details class="all" id="all">
+    <summary id="all-summary">All nodes</summary>
+    <div class="table-wrap"><table id="all-table"></table></div>
+  </details>
+</div>
+
+<script type="application/json" id="bp-data">{"title": "Code harness blueprint", "commit": "52a03fb6", "date": "2026-11-08", "views": [{"id": "plan", "tab": "The plan"}, {"id": "phase-1", "tab": "Phase 1: Kernel", "phase": "p1"}], "phases": {"n-p1": {"title": "Phase 1: Kernel", "kind": "phase", "modules": ["harness-kernel"], "result": "The laws of 4.7 run in CI.", "uses": [], "users": ["n-p3", "n-p4"], "view": "phase-1", "total": 66, "stated": 0, "done": 0, "spec": 45, "reviewed": 0, "statement": "ready", "proof": "none", "why": "It uses no other phase, so the work can start."}, "n-p2": {"title": "Phase 2: Guest API and REPL", "kind": "phase", "modules": ["harness-guest", "harness-repl", "harness-mcp"], "result": "Model code runs against the guest API in each mode, and another agent can run cells through MCP.", "uses": [], "users": ["n-p4", "n-p8"], "view": null, "total": 0, "stated": 0, "done": 0, "spec": 0, "reviewed": 0, "statement": "ready", "proof": "none", "why": "It uses no other phase, so the work can start. The phase has no nodes in the blueprint yet."}, "n-p3": {"title": "Phase 3: Sandbox", "kind": "phase", "modules": ["harness-sandbox"], "result": "exec runs only in a sandbox.", "uses": ["n-p1"], "users": ["n-p4"], "view": null, "total": 0, "stated": 0, "done": 0, "spec": 0, "reviewed": 0, "statement": "waiting", "proof": "none", "why": "These phases are not complete yet: phase 1."}, "n-p4": {"title": "Phase 4: One task", "kind": "phase", "modules": ["harness"], "result": "A harness for one task that the optimizers accept.", "uses": ["n-p1", "n-p2", "n-p3"], "users": ["n-p5", "n-p6", "n-p7", "n-p8"], "view": null, "total": 0, "stated": 0, "done": 0, "spec": 0, "reviewed": 0, "statement": "waiting", "proof": "none", "why": "These phases are not complete yet: phase 1, phase 2, phase 3."}, "n-p5": {"title": "Phase 5: RLM", "kind": "phase", "modules": [], "result": "RLM in the harness.", "uses": ["n-p4"], "users": [], "view": null, "total": 0, "stated": 0, "done": 0, "spec": 0, "reviewed": 0, "statement": "waiting", "proof": "none", "why": "These phases are not complete yet: phase 4."}, "n-p6": {"title": "Phase 6: Optimization", "kind": "phase", "modules": [], "result": "A first measured improvement, or a reason for its absence.", "uses": ["n-p4"], "users": [], "view": null, "total": 0, "stated": 0, "done": 0, "spec": 0, "reviewed": 0, "statement": "waiting", "proof": "none", "why": "These phases are not complete yet: phase 4."}, "n-p7": {"title": "Phase 7: The session host", "kind": "phase", "modules": ["harness-host", "harness-cli"], "result": "A coding agent for daily use, one session at a time.", "uses": ["n-p4"], "users": ["n-p9"], "view": null, "total": 0, "stated": 0, "done": 0, "spec": 0, "reviewed": 0, "statement": "waiting", "proof": "none", "why": "These phases are not complete yet: phase 4."}, "n-p8": {"title": "Phase 8: Memory", "kind": "phase", "modules": [], "result": "Long sessions that lose no detail.", "uses": ["n-p2", "n-p4"], "users": ["n-p9"], "view": null, "total": 0, "stated": 0, "done": 0, "spec": 0, "reviewed": 0, "statement": "waiting", "proof": "none", "why": "These phases are not complete yet: phase 2, phase 4."}, "n-p9": {"title": "Phase 9: The controller", "kind": "phase", "modules": [], "result": "One controller above all sessions.", "uses": ["n-p7", "n-p8"], "users": [], "view": null, "total": 0, "stated": 0, "done": 0, "spec": 0, "reviewed": 0, "statement": "waiting", "proof": "none", "why": "These phases are not complete yet: phase 7, phase 8."}}, "nodes": {"n-json": {"title": "Json", "kind": "upstream", "phase": "p1", "ref": "4.1", "text": "The JSON value of zio-blocks. Each value in an entry is a Json, with only the six JSON cases.", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "upstream", "proof": "complete", "whyStatement": "It comes from a library.", "whyProof": "It comes from a library.", "uses": [], "users": ["n-effect-result", "n-cell-outcome", "n-turn-outcome", "n-entry", "n-arg-match", "n-guard-rule", "n-guard", "n-open-call", "n-position", "n-session-state", "n-command", "n-guard-check"]}, "n-schema": {"title": "Schema", "kind": "upstream", "phase": "p1", "ref": "4.1", "text": "The codec of zio-blocks. Each type of the journal derives one.", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "upstream", "proof": "complete", "whyStatement": "It comes from a library.", "whyProof": "It comes from a library.", "uses": [], "users": ["n-logged"]}, "n-session-id": {"title": "SessionId", "kind": "data", "phase": "p1", "ref": "8.6", "text": "", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "ready", "proof": "none", "whyStatement": "It uses no other node.", "whyProof": "The statement comes first.", "uses": [], "users": ["n-source", "n-session-outcome", "n-owner", "n-reports"]}, "n-request-id": {"title": "RequestId", "kind": "data", "phase": "p1", "ref": "4.5", "text": "The id of a Send or a Grant. A repeat with a known id commits nothing.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "ready", "proof": "none", "whyStatement": "It uses no other node.", "whyProof": "The statement comes first.", "uses": [], "users": ["n-entry", "n-session-state", "n-command"]}, "n-versions": {"title": "Versions", "kind": "data", "phase": "p1", "ref": "4.1", "text": "", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "ready", "proof": "none", "whyStatement": "It uses no other node.", "whyProof": "The statement comes first.", "uses": [], "users": ["n-entry", "n-command"]}, "n-source": {"title": "Source", "kind": "data", "phase": "p1", "ref": "4.1", "text": "The sender of an entry: User, Controller, Harness, Policy or a child session.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: SessionId.", "whyProof": "The statement comes first.", "uses": ["n-session-id"], "users": ["n-meta", "n-reports"]}, "n-taint": {"title": "Taint", "kind": "data", "phase": "p1", "ref": "4.1", "text": "", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "ready", "proof": "none", "whyStatement": "It uses no other node.", "whyProof": "The statement comes first.", "uses": [], "users": ["n-meta"]}, "n-meta": {"title": "Meta", "kind": "data", "phase": "p1", "ref": "4.1", "text": "The data that the model never sees.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: Source, Taint.", "whyProof": "The statement comes first.", "uses": ["n-source", "n-taint"], "users": ["n-logged"]}, "n-effect-id": {"title": "EffectId", "kind": "data", "phase": "p1", "ref": "4.1", "text": "The id of a guest API call: the seq of its Acted entry, and a count.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "ready", "proof": "none", "whyStatement": "It uses no other node.", "whyProof": "The statement comes first.", "uses": [], "users": ["n-job-selector", "n-entry", "n-session-state"]}, "n-effect-result": {"title": "EffectResult", "kind": "data", "phase": "p1", "ref": "4.1", "text": "Value, Error, NeedsApproval or Unknown.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: GuardRule.", "whyProof": "The statement comes first.", "uses": ["n-json", "n-guard-rule"], "users": ["n-entry"]}, "n-cell-outcome": {"title": "CellOutcome", "kind": "data", "phase": "p1", "ref": "4.1", "text": "", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "ready", "proof": "none", "whyStatement": "Each node that it uses is stated.", "whyProof": "The statement comes first.", "uses": ["n-json"], "users": ["n-entry"]}, "n-turn-outcome": {"title": "TurnOutcome", "kind": "data", "phase": "p1", "ref": "4.1", "text": "Replied, Submitted, Exhausted, Aborted, Crashed or Failed.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "ready", "proof": "none", "whyStatement": "Each node that it uses is stated.", "whyProof": "The statement comes first.", "uses": ["n-json"], "users": ["n-entry", "n-next-step"]}, "n-session-outcome": {"title": "SessionOutcome", "kind": "data", "phase": "p1", "ref": "4.1", "text": "", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: SessionId.", "whyProof": "The statement comes first.", "uses": ["n-session-id"], "users": ["n-entry", "n-command"]}, "n-job-selector": {"title": "JobSelector", "kind": "data", "phase": "p1", "ref": "10.3", "text": "", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: EffectId.", "whyProof": "The statement comes first.", "uses": ["n-effect-id"], "users": ["n-entry", "n-command"]}, "n-entry": {"title": "Entry", "kind": "data", "phase": "p1", "ref": "4.1", "text": "The 14 kinds of entry. The entries of one turn form the small language of 4.1.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: Versions, SessionConfig, RequestId, EffectId, EffectResult, CellOutcome, JobSelector, GuardRule, GrantLifetime, TurnOutcome, SessionOutcome.", "whyProof": "The statement comes first.", "uses": ["n-versions", "n-session-config", "n-request-id", "n-json", "n-effect-id", "n-effect-result", "n-cell-outcome", "n-job-selector", "n-guard-rule", "n-grant-lifetime", "n-turn-outcome", "n-session-outcome"], "users": ["n-logged", "n-needs-flush", "n-closing", "n-command", "n-rejection", "n-decide"]}, "n-logged": {"title": "Logged", "kind": "data", "phase": "p1", "ref": "4.1", "text": "An entry with its seq and its meta: one line of the journal.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: Meta, Entry.", "whyProof": "The statement comes first.", "uses": ["n-meta", "n-entry", "n-schema"], "users": ["n-evolve", "n-forked", "n-reports", "n-schedules", "n-law-codec"]}, "n-needs-flush": {"title": "needsFlush", "kind": "function", "phase": "p1", "ref": "4.1", "text": "An entry that needs a flush before commit returns: Input, Activated, and an EffectStarted that is not read-only.", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: Entry.", "whyProof": "The statement comes first.", "uses": ["n-entry"], "users": ["n-schedules", "n-law-flush"]}, "n-arg-match": {"title": "ArgMatch", "kind": "data", "phase": "p1", "ref": "5.5", "text": "", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "ready", "proof": "none", "whyStatement": "Each node that it uses is stated.", "whyProof": "The statement comes first.", "uses": ["n-json"], "users": ["n-guard-rule"]}, "n-guard-rule": {"title": "GuardRule", "kind": "data", "phase": "p1", "ref": "5.5", "text": "", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": ["matches", "covers"], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: ArgMatch.", "whyProof": "The statement comes first.", "uses": ["n-arg-match", "n-json"], "users": ["n-effect-result", "n-entry", "n-verdict-rule", "n-active-grant", "n-session-state", "n-command", "n-guard-result"]}, "n-verdict": {"title": "Verdict", "kind": "data", "phase": "p1", "ref": "5.5", "text": "Allow, Ask or Deny. join gives the stronger verdict.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": ["join"], "statement": "ready", "proof": "none", "whyStatement": "It uses no other node.", "whyProof": "The statement comes first.", "uses": [], "users": ["n-verdict-rule"]}, "n-verdict-rule": {"title": "VerdictRule", "kind": "data", "phase": "p1", "ref": "5.5", "text": "", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: GuardRule, Verdict.", "whyProof": "The statement comes first.", "uses": ["n-guard-rule", "n-verdict"], "users": ["n-guard"]}, "n-guard": {"title": "Guard", "kind": "data", "phase": "p1", "ref": "5.5", "text": "and is a monoid, and allowAll is its identity.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": ["verdict", "and"], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: VerdictRule.", "whyProof": "The statement comes first.", "uses": ["n-verdict-rule", "n-json"], "users": ["n-session-config", "n-guard-check", "n-law-guard"]}, "n-grant-lifetime": {"title": "GrantLifetime", "kind": "data", "phase": "p1", "ref": "5.5", "text": "Once, Turn or Session.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "ready", "proof": "none", "whyStatement": "It uses no other node.", "whyProof": "The statement comes first.", "uses": [], "users": ["n-entry", "n-active-grant", "n-command"]}, "n-owner": {"title": "Owner", "kind": "data", "phase": "p1", "ref": "8.1", "text": "", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": ["hasPerson"], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: SessionId.", "whyProof": "The statement comes first.", "uses": ["n-session-id"], "users": ["n-session-config"]}, "n-turn-kind": {"title": "TurnKind", "kind": "data", "phase": "p1", "ref": "8.1", "text": "", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "ready", "proof": "none", "whyStatement": "It uses no other node.", "whyProof": "The statement comes first.", "uses": [], "users": ["n-session-config"]}, "n-session-config": {"title": "SessionConfig", "kind": "data", "phase": "p1", "ref": "8.1", "text": "The kernel check has only kind, steps, guard and owner. Section 8.1 has more fields, for example preamble and env.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: TurnKind, Guard, Owner.", "whyProof": "The statement comes first.", "uses": ["n-turn-kind", "n-guard", "n-owner"], "users": ["n-entry", "n-session-state", "n-command"]}, "n-active-grant": {"title": "ActiveGrant", "kind": "data", "phase": "p1", "ref": "5.5", "text": "", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: GuardRule, GrantLifetime.", "whyProof": "The statement comes first.", "uses": ["n-guard-rule", "n-grant-lifetime"], "users": ["n-session-state"]}, "n-open-call": {"title": "OpenCall", "kind": "data", "phase": "p1", "ref": "4.2", "text": "", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "ready", "proof": "none", "whyStatement": "Each node that it uses is stated.", "whyProof": "The statement comes first.", "uses": ["n-json"], "users": ["n-session-state"]}, "n-job-record": {"title": "JobRecord", "kind": "data", "phase": "p1", "ref": "10.3", "text": "", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "ready", "proof": "none", "whyStatement": "It uses no other node.", "whyProof": "The statement comes first.", "uses": [], "users": ["n-session-state"]}, "n-position": {"title": "Position", "kind": "data", "phase": "p1", "ref": "4.2", "text": "", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "ready", "proof": "none", "whyStatement": "Each node that it uses is stated.", "whyProof": "The statement comes first.", "uses": ["n-json"], "users": ["n-session-state"]}, "n-session-state": {"title": "SessionState", "kind": "data", "phase": "p1", "ref": "4.2", "text": "", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": ["of"], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: SessionConfig, Position, EffectId, OpenCall, RequestId, ActiveGrant, GuardRule, JobRecord.", "whyProof": "The statement comes first.", "uses": ["n-session-config", "n-position", "n-effect-id", "n-open-call", "n-json", "n-request-id", "n-active-grant", "n-guard-rule", "n-job-record"], "users": ["n-evolve", "n-next", "n-closing", "n-decide", "n-forked", "n-guard-check", "n-goal-check-due", "n-missing", "n-law-fold", "n-law-homomorphism"]}, "n-fold": {"title": "Fold", "kind": "data", "phase": "p1", "ref": "4.2", "text": "A view of a journal as a fold. Folds compose, so several views need one pass.", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": ["apply", "map", "zip"], "statement": "ready", "proof": "none", "whyStatement": "It uses no other node.", "whyProof": "The statement comes first.", "uses": [], "users": []}, "n-evolve": {"title": "evolve", "kind": "function", "phase": "p1", "ref": "4.2", "text": "The only place where state changes. Total and pure.", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: SessionState, Logged.", "whyProof": "The statement comes first.", "uses": ["n-session-state", "n-logged"], "users": ["n-forked", "n-schedules", "n-law-fold", "n-law-homomorphism", "n-law-rest", "n-law-grant", "n-law-pending", "n-law-job", "n-law-repair", "n-law-store", "n-law-inputs"]}, "n-next-step": {"title": "Next", "kind": "data", "phase": "p1", "ref": "4.3", "text": "Wait, CallPolicy, RunCell or End.", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: TurnOutcome.", "whyProof": "The statement comes first.", "uses": ["n-turn-outcome"], "users": ["n-next"]}, "n-next": {"title": "next", "kind": "function", "phase": "p1", "ref": "4.3", "text": "", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: SessionState, Next.", "whyProof": "The statement comes first.", "uses": ["n-session-state", "n-next-step"], "users": ["n-schedules", "n-law-stop", "n-law-next-rules"]}, "n-closing": {"title": "closing", "kind": "function", "phase": "p1", "ref": "4.4", "text": "", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: SessionState, Entry.", "whyProof": "The statement comes first.", "uses": ["n-session-state", "n-entry"], "users": ["n-repair"]}, "n-repair": {"title": "repair", "kind": "function", "phase": "p1", "ref": "4.4", "text": "A stop and a crash close a turn with the same entries.", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: closing.", "whyProof": "The statement comes first.", "uses": ["n-closing"], "users": ["n-decide", "n-schedules", "n-law-effect", "n-law-repair"]}, "n-command": {"title": "Command", "kind": "data", "phase": "p1", "ref": "4.5", "text": "", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: Versions, SessionConfig, RequestId, Entry, JobSelector, GuardRule, GrantLifetime, SessionOutcome.", "whyProof": "The statement comes first.", "uses": ["n-versions", "n-session-config", "n-request-id", "n-json", "n-entry", "n-job-selector", "n-guard-rule", "n-grant-lifetime", "n-session-outcome"], "users": ["n-decide", "n-reports", "n-schedules"]}, "n-rejection": {"title": "Rejection", "kind": "data", "phase": "p1", "ref": "4.5", "text": "", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: Entry.", "whyProof": "The statement comes first.", "uses": ["n-entry"], "users": ["n-decide"]}, "n-decide": {"title": "decide", "kind": "function", "phase": "p1", "ref": "4.5", "text": "Says which entries a command can commit. It keeps each journal inside the language of 4.1.", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: Command, SessionState, Rejection, Entry, repair.", "whyProof": "The statement comes first.", "uses": ["n-command", "n-session-state", "n-rejection", "n-entry", "n-repair"], "users": ["n-schedules", "n-law-language", "n-law-effect", "n-law-stop", "n-law-input", "n-law-rest", "n-law-grant", "n-law-job", "n-law-log", "n-law-decide-table"]}, "n-forked": {"title": "forked", "kind": "function", "phase": "p1", "ref": "5.5", "text": "A fork of a journal prefix starts with no grants, no pending calls and no jobs.", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: SessionState, Logged, evolve.", "whyProof": "The statement comes first.", "uses": ["n-session-state", "n-logged", "n-evolve"], "users": ["n-law-grant", "n-law-pending", "n-law-job", "n-law-inputs"]}, "n-guard-result": {"title": "GuardResult", "kind": "data", "phase": "p1", "ref": "5.5", "text": "", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: GuardRule.", "whyProof": "The statement comes first.", "uses": ["n-guard-rule"], "users": ["n-guard-check"]}, "n-guard-check": {"title": "guardCheck", "kind": "function", "phase": "p1", "ref": "5.5", "text": "", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: SessionState, Guard, GuardResult.", "whyProof": "The statement comes first.", "uses": ["n-session-state", "n-guard", "n-guard-result", "n-json"], "users": ["n-schedules", "n-law-grant", "n-law-pending", "n-law-guard"]}, "n-goal-check-due": {"title": "goalCheckDue", "kind": "function", "phase": "p1", "ref": "5.5", "text": "The goal check runs after a turn, except while a question waits for a person.", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: SessionState.", "whyProof": "The statement comes first.", "uses": ["n-session-state"], "users": ["n-law-pending"]}, "n-reports": {"title": "reports", "kind": "function", "phase": "p1", "ref": "8.6", "text": "A report is a pure function of the journal of the session.", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: SessionId, Source, Logged, Command.", "whyProof": "The statement comes first.", "uses": ["n-session-id", "n-source", "n-logged", "n-command"], "users": ["n-missing", "n-law-report"]}, "n-missing": {"title": "missing", "kind": "function", "phase": "p1", "ref": "8.6", "text": "", "spec": false, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: reports, SessionState.", "whyProof": "The statement comes first.", "uses": ["n-reports", "n-session-state"], "users": ["n-law-report"]}, "n-schedules": {"title": "schedules", "kind": "function", "phase": "p1", "ref": "12", "text": "The generator of random schedules for the properties: crashes, stops, late messages, grants, jobs and power losses.", "spec": false, "reviewed": null, "blocked": null, "where": "tests", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: Command, decide, evolve, next, repair, guardCheck, Logged, needsFlush.", "whyProof": "The statement comes first.", "uses": ["n-command", "n-decide", "n-evolve", "n-next", "n-repair", "n-guard-check", "n-logged", "n-needs-flush"], "users": ["n-law-language", "n-law-effect", "n-law-stop", "n-law-rest", "n-law-flush", "n-law-grant", "n-law-pending", "n-law-job"]}, "n-mutants": {"title": "Mutant", "kind": "check", "phase": "p1", "ref": "12", "text": "Each mutant of section 12 breaks one rule, and at least one property must fail.", "spec": false, "reviewed": null, "blocked": "Choose how the mutants run: stryker4s, or hand-written versions of single rules in the tests.", "where": "main", "ops": [], "statement": "blocked", "proof": "none", "whyStatement": "Blocked: Choose how the mutants run: stryker4s, or hand-written versions of single rules in the tests.", "whyProof": "The statement comes first.", "uses": ["n-law-stop", "n-law-effect", "n-law-grant", "n-law-pending", "n-law-job", "n-law-flush", "n-law-report", "n-law-inputs"], "users": []}, "n-law-fold": {"title": "Fold", "kind": "law", "phase": "p1", "ref": "4.7", "text": "SessionState is the fold of the journal.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: SessionState, evolve.", "whyProof": "The statement comes first.", "uses": ["n-session-state", "n-evolve"], "users": []}, "n-law-homomorphism": {"title": "Homomorphism", "kind": "law", "phase": "p1", "ref": "4.7", "text": "state(a ++ b) is the fold of b from state(a).", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: SessionState, evolve.", "whyProof": "The statement comes first.", "uses": ["n-session-state", "n-evolve"], "users": []}, "n-law-language": {"title": "Language", "kind": "law", "phase": "p1", "ref": "4.7", "text": "Each journal is a word of the language of 4.1.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: decide, schedules.", "whyProof": "The statement comes first.", "uses": ["n-decide", "n-schedules"], "users": []}, "n-law-effect": {"title": "Effect", "kind": "law", "phase": "p1", "ref": "4.7", "text": "An intent commits before its effect, and the outcome commits after the effect. Each intent has exactly one outcome after a repair.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: decide, repair, schedules.", "whyProof": "The statement comes first.", "uses": ["n-decide", "n-repair", "n-schedules"], "users": ["n-mutants"]}, "n-law-stop": {"title": "Stop", "kind": "law", "phase": "p1", "ref": "4.7", "text": "After StopRequested, next starts no new work, and decide accepts no new intent.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: next, decide, schedules.", "whyProof": "The statement comes first.", "uses": ["n-next", "n-decide", "n-schedules"], "users": ["n-mutants"]}, "n-law-input": {"title": "Input", "kind": "law", "phase": "p1", "ref": "4.7", "text": "Two Send commands with one request id give one Input.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: decide.", "whyProof": "The statement comes first.", "uses": ["n-decide"], "users": []}, "n-law-rest": {"title": "Rest", "kind": "law", "phase": "p1", "ref": "4.7", "text": "With no open turn, no input waits.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: decide, evolve, schedules.", "whyProof": "The statement comes first.", "uses": ["n-decide", "n-evolve", "n-schedules"], "users": []}, "n-law-flush": {"title": "Flush", "kind": "law", "phase": "p1", "ref": "4.7", "text": "After a power loss, the journal is a prefix that ends at the last flush. Each effect that changed the world has its intent in it, and so does each Input for which a sender got an answer. Phase 1 cuts the journal at the last flush; a real power loss is not in phase 1.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: needsFlush, schedules.", "whyProof": "The statement comes first.", "uses": ["n-needs-flush", "n-schedules"], "users": ["n-mutants"]}, "n-law-grant": {"title": "Grant", "kind": "law", "phase": "p1", "ref": "4.7", "text": "A Once grant covers one call. A Turn grant ends at the next TurnEnded. No grant stays after Ended, and a journal fork starts with no grants. A repeat of a Grant commits nothing.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: evolve, decide, forked, guardCheck, schedules.", "whyProof": "The statement comes first.", "uses": ["n-evolve", "n-decide", "n-forked", "n-guard-check", "n-schedules"], "users": ["n-mutants"]}, "n-law-pending": {"title": "Pending call", "kind": "law", "phase": "p1", "ref": "4.7", "text": "A pending call has no active grant that covers it. TurnStarted and Ended empty pending, and a journal fork starts with no pending calls. A session with no person never gets a pending call.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: guardCheck, evolve, forked, goalCheckDue, schedules.", "whyProof": "The statement comes first.", "uses": ["n-guard-check", "n-evolve", "n-forked", "n-goal-check-due", "n-schedules"], "users": ["n-mutants"]}, "n-law-guard": {"title": "Guard", "kind": "law", "phase": "p1", "ref": "4.7", "text": "verdict is a homomorphism from Guard to Verdict. A grant changes only Ask, and more grants never make a result stronger.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: Guard, guardCheck.", "whyProof": "The statement comes first.", "uses": ["n-guard", "n-guard-check"], "users": []}, "n-law-job": {"title": "Job", "kind": "law", "phase": "p1", "ref": "4.7", "text": "An Abort changes no job. A stop covers only the jobs with an intent before it. After Abort and then StopJobs(OfLastTurn), no job of that turn starts or runs. Ended stops all jobs, and a journal fork starts with no jobs. Phase 1 has the job table as a small value, with no process.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: decide, evolve, forked, schedules.", "whyProof": "The statement comes first.", "uses": ["n-decide", "n-evolve", "n-forked", "n-schedules"], "users": ["n-mutants"]}, "n-law-repair": {"title": "Repair", "kind": "law", "phase": "p1", "ref": "4.7", "text": "repair closes each open part, and repair(state after repair) is empty.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: repair, evolve.", "whyProof": "The statement comes first.", "uses": ["n-repair", "n-evolve"], "users": []}, "n-law-store": {"title": "Store", "kind": "law", "phase": "p1", "ref": "4.7", "text": "The store holds only the writes of cells that completed.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: evolve.", "whyProof": "The statement comes first.", "uses": ["n-evolve"], "users": []}, "n-law-inputs": {"title": "Inputs", "kind": "law", "phase": "p1", "ref": "4.7", "text": "inputs is the fold of the values of the Input entries. A repeat adds nothing, a fork keeps them, and the store does not hold them.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: evolve, forked.", "whyProof": "The statement comes first.", "uses": ["n-evolve", "n-forked"], "users": ["n-mutants"]}, "n-law-log": {"title": "Log", "kind": "law", "phase": "p1", "ref": "4.7", "text": "No part of the harness changes or removes an entry.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: decide.", "whyProof": "The statement comes first.", "uses": ["n-decide"], "users": []}, "n-law-report": {"title": "Report", "kind": "law", "phase": "p1", "ref": "4.7", "text": "After the report pass of 8.6, each TurnEnded or Ended that needs a report has exactly one Input in the journal of an open owner. Phase 1 checks only reports and missing; the report pass of a real host comes later.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: reports, missing.", "whyProof": "The statement comes first.", "uses": ["n-reports", "n-missing"], "users": ["n-mutants"]}, "n-law-codec": {"title": "Journal codec", "kind": "law", "phase": "p1", "ref": "4.1", "text": "A journal read through the codec of Logged gives the same entries.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: Logged.", "whyProof": "The statement comes first.", "uses": ["n-logged"], "users": []}, "n-law-decide-table": {"title": "Decide table", "kind": "law", "phase": "p1", "ref": "4.5", "text": "Each row of the table of decide in 4.5 holds, for example: a Send to a session that has ended commits nothing and gets SessionClosed.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: decide.", "whyProof": "The statement comes first.", "uses": ["n-decide"], "users": []}, "n-law-next-rules": {"title": "Next rules", "kind": "law", "phase": "p1", "ref": "4.3", "text": "The rules of next in 4.3: the step limit of both kinds of turn, a stop, an answer, and a submit.", "spec": true, "reviewed": null, "blocked": null, "where": "main", "ops": [], "statement": "waiting", "proof": "none", "whyStatement": "These nodes are not stated yet: next.", "whyProof": "The statement comes first.", "uses": ["n-next"], "users": []}}}</script>
+<script>
+(function () {
+  "use strict";
+  const data = JSON.parse(document.getElementById("bp-data").textContent);
+  const KIND = { upstream: "Library type", data: "Type", function: "Function", law: "Law", check: "Check", phase: "Phase" };
+  const STATEMENT = { waiting: "Waiting", ready: "Ready to state", stated: "Stated", upstream: "From a library", blocked: "Blocked" };
+  const PROOF = { none: "Not started", ready: "Ready to prove", done: "Done", complete: "Complete" };
+  const BORDER = { waiting: "--st-waiting", ready: "--st-ready", stated: "--st-stated", upstream: "--st-upstream", blocked: "--st-blocked" };
+  const FILL = { none: "--pf-none", ready: "--pf-ready", done: "--pf-done", complete: "--pf-complete" };
+  const views = data.views;
+  let current = null;
+  let selected = null;
+
+  const el = (tag, attrs, ...kids) => {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v);
+    }
+    for (const kid of kids.flat()) if (kid != null) e.append(kid);
+    return e;
+  };
+  const info = (id) => data.nodes[id] || data.phases[id];
+  const chip = (statement, proof, text) => {
+    const box = el("i");
+    if (statement) box.style.borderColor = `var(${BORDER[statement]})`;
+    if (proof) box.style.background = `var(${FILL[proof]})`;
+    if (statement === "upstream") box.style.borderStyle = "dashed";
+    return el("span", { class: "chip" }, box, text);
+  };
+
+  document.getElementById("made").textContent = data.commit
+    ? `Made from blueprint.toml and the build results at commit ${data.commit} (${data.date}).`
+    : "Made from blueprint.toml and the build results.";
+
+  // ── Views ──
+  const tabs = document.getElementById("tabs");
+  for (const v of views) {
+    tabs.append(el("button", { type: "button", role: "tab", id: `tab-${v.id}`, "aria-controls": `graph-${v.id}`,
+      onclick: () => go(v.id) }, v.tab));
+  }
+  const graphs = {};
+  document.querySelectorAll(".view-graph").forEach((g) => {
+    const svg = g.querySelector("svg");
+    graphs[g.dataset.view] = { box: g, svg, natural: Number(svg.dataset.width) || 800, scale: null };
+    g.querySelectorAll("g.node").forEach((n) => {
+      const d = info(n.id);
+      if (!d) return;
+      n.setAttribute("tabindex", "0");
+      n.setAttribute("role", "button");
+      n.setAttribute("aria-label", `${d.title}: ${STATEMENT[d.statement]}, ${PROOF[d.proof]}`);
+      n.addEventListener("click", () => select(n.id));
+      n.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(n.id); } });
+    });
+  });
+
+  // "Fit" is pure CSS (the width of the box, up to the natural width), so it needs no measure at load time.
+  function zoom(how) {
+    const g = graphs[current];
+    if (!g) return;
+    const s = g.svg;
+    if (how === "start") how = current === "plan" ? "fit" : "natural";
+    g.scale = how;
+    if (how === "fit") { s.style.width = "100%"; s.style.maxWidth = `${g.natural}px`; return; }
+    if (how === "natural") { s.style.maxWidth = "none"; s.style.width = `${g.natural}px`; return; }
+    const now = s.getBoundingClientRect().width || g.natural;
+    s.style.maxWidth = "none";
+    s.style.width = `${Math.round(how === "in" ? now * 1.25 : Math.max(200, now / 1.25))}px`;
+  }
+  document.querySelectorAll("[data-zoom]").forEach((b) => b.addEventListener("click", () => zoom(b.dataset.zoom)));
+
+  function show(id) {
+    if (!graphs[id]) id = "plan";
+    current = id;
+    for (const v of views) {
+      const on = v.id === id;
+      document.getElementById(`tab-${v.id}`).setAttribute("aria-selected", String(on));
+      graphs[v.id].box.hidden = !on;
+    }
+    if (graphs[id].scale === null) zoom("start");
+    summary();
+    nextWork();
+    table();
+    if (selected && document.querySelector(`#graph-${id} #${CSS.escape(selected)}`)) highlight(selected); else clearHighlight();
+  }
+  // Show the view at once, then put its name in the address, so that a link opens the same view.
+  function go(id) {
+    if (id !== current) show(id);
+    try { if (location.hash.slice(1) !== id) location.hash = id; } catch (e) { /* the address can be read-only */ }
+  }
+  window.addEventListener("hashchange", () => { const id = location.hash.slice(1); if (graphs[id] && id !== current) show(id); });
+
+  const viewNodes = () => {
+    const v = views.find((x) => x.id === current);
+    if (!v.phase) return Object.keys(data.phases);
+    return Object.keys(data.nodes).filter((k) => data.nodes[k].phase === v.phase);
+  };
+
+  // ── Summary and lists ──
+  function meter(label, part, whole, color) {
+    const bar = el("span");
+    bar.style.width = whole ? `${(100 * part) / whole}%` : "0";
+    bar.style.background = `var(${color})`;
+    return el("div", { class: "meter" }, el("span", { class: "label" }, label),
+      el("span", { class: "value" }, `${part} of ${whole}`), el("div", { class: "bar" }, bar));
+  }
+  function summary() {
+    const box = document.getElementById("summary");
+    box.replaceChildren();
+    const v = views.find((x) => x.id === current);
+    const phases = v.phase ? [v.phase] : Object.keys(data.phases).map((k) => k.slice(2));
+    for (const p of phases) {
+      const s = data.phases[`n-${p}`];
+      if (!s.total) continue;
+      const prefix = v.phase ? "" : `${s.title}: `;
+      box.append(meter(`${prefix}Stated`, s.stated, s.total, "--st-stated"), meter(`${prefix}Done`, s.done, s.total, "--pf-complete"),
+        meter(`${prefix}Spec reviewed`, s.reviewed, s.spec, "--st-ready"));
+    }
+    if (!v.phase) {
+      const ready = Object.values(data.phases).filter((p) => p.statement === "ready").map((p) => p.title);
+      box.append(el("div", { class: "meter" }, el("span", { class: "label" }, "Phases that can start"),
+        el("span", { class: "value" }, ready.length ? ready.join(", ") : "None")));
+    }
+  }
+  function list(title, ids, note) {
+    const links = el("div", { class: "links" }, ids.map((id) => el("button", { type: "button", onclick: () => select(id) }, info(id).title)));
+    return el("section", {}, el("h3", {}, title, el("span", { class: "n" }, String(ids.length))),
+      el("p", {}, note), ids.length ? links : el("p", {}, "None."));
+  }
+  function nextWork() {
+    const ids = viewNodes();
+    const box = document.getElementById("next");
+    box.replaceChildren(
+      list("Ready to state", ids.filter((k) => info(k).statement === "ready"),
+        "Each node that it uses is stated, so its declaration or its test can be written now."),
+      list("Ready to prove", ids.filter((k) => info(k).proof === "ready"),
+        "It is stated, and each node that it uses is done, so its body can be written now."),
+      list("Blocked", ids.filter((k) => info(k).statement === "blocked"), "The design must change before the work can start."));
+  }
+  function table() {
+    const ids = viewNodes();
+    document.getElementById("all-summary").textContent = `All ${ids.length} nodes of this view`;
+    const head = el("tr", {}, ["Node", "Kind", "Section", "Statement", "Proof", "Spec"].map((h) => el("th", { scope: "col" }, h)));
+    const rows = ids.map((id) => {
+      const d = info(id);
+      return el("tr", {},
+        el("td", { class: "name" }, el("button", { type: "button", onclick: () => select(id) }, d.title)),
+        el("td", {}, KIND[d.kind]), el("td", {}, d.ref ? `§${d.ref}` : ""),
+        el("td", {}, chip(d.statement, null, STATEMENT[d.statement])), el("td", {}, chip(null, d.proof, PROOF[d.proof])),
+        el("td", {}, d.spec ? (d.reviewed ? `Reviewed ${d.reviewed}` : "Needs review") : ""));
+    });
+    document.getElementById("all-table").replaceChildren(el("thead", {}, head), el("tbody", {}, rows));
+  }
+
+  // ── Selection ──
+  function clearHighlight() {
+    for (const g of Object.values(graphs)) {
+      g.box.classList.remove("focus");
+      g.box.querySelectorAll(".on, .sel").forEach((x) => x.classList.remove("on", "sel"));
+    }
+  }
+  function highlight(id) {
+    clearHighlight();
+    const g = graphs[current];
+    const node = g.box.querySelector(`#${CSS.escape(id)}`);
+    if (!node) return;
+    const d = info(id);
+    g.box.classList.add("focus");
+    node.classList.add("on", "sel");
+    const name = id.slice(2);
+    for (const other of [...d.uses, ...d.users]) {
+      const n = g.box.querySelector(`#${CSS.escape(other)}`);
+      if (n) n.classList.add("on");
+    }
+    g.box.querySelectorAll("g.edge").forEach((e) => {
+      const [from, to] = e.id.slice(2).split("--");
+      if (from === name || to === name) e.classList.add("on");
+    });
+  }
+  function select(id) {
+    const d = info(id);
+    if (!d) return;
+    selected = id;
+    const inView = document.querySelector(`#graph-${current} #${CSS.escape(id)}`);
+    if (!inView) {
+      const target = d.kind === "phase" ? "plan" : (views.find((v) => v.phase === d.phase) || {}).id;
+      if (target && target !== current) go(target);
+    }
+    panel(id, d);
+    highlight(id);
+    const n = document.querySelector(`#graph-${current} #${CSS.escape(id)}`);
+    if (n && n.scrollIntoView) n.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }
+  function panel(id, d) {
+    const box = document.getElementById("panel");
+    const links = (ids) => ids.length
+      ? el("div", { class: "links" }, ids.map((x) => el("button", { type: "button", onclick: () => select(x) }, info(x).title)))
+      : el("p", { class: "why" }, "None.");
+    const parts = [el("p", { class: "kind" }, d.kind === "phase" ? KIND.phase : `${KIND[d.kind]}${d.ref ? ` · §${d.ref}` : ""}`),
+      el("h2", {}, d.title)];
+    if (d.kind === "phase") {
+      parts.push(el("p", {}, d.result));
+      parts.push(el("div", { class: "rows" },
+        el("div", { class: "row" }, el("span", { class: "what" }, "Modules"), el("span", {}, d.modules.length ? d.modules.join(", ") : "No new module")),
+        el("div", { class: "row" }, el("span", { class: "what" }, "State"), chip(d.statement, d.proof, `${STATEMENT[d.statement]}, ${PROOF[d.proof].toLowerCase()}`), el("span", { class: "why" }, d.why)),
+        el("div", { class: "row" }, el("span", { class: "what" }, "Nodes"), el("span", {}, d.total ? `${d.stated} of ${d.total} stated, ${d.done} done, ${d.reviewed} of ${d.spec} spec nodes reviewed` : "The phase has no nodes in the blueprint yet.")),
+        el("div", { class: "row" }, el("span", { class: "what" }, "Uses"), links(d.uses)),
+        el("div", { class: "row" }, el("span", { class: "what" }, "Used by"), links(d.users))));
+      if (d.view) parts.push(el("button", { type: "button", class: "open-view", onclick: () => go(d.view) }, `Open ${d.title.split(":")[0]}`));
+    } else {
+      if (d.text) parts.push(el("p", {}, d.text));
+      const rows = [
+        el("div", { class: "row" }, el("span", { class: "what" }, "Statement"), chip(d.statement, null, STATEMENT[d.statement]), el("span", { class: "why" }, d.whyStatement)),
+        el("div", { class: "row" }, el("span", { class: "what" }, "Proof"), chip(null, d.proof, PROOF[d.proof]), el("span", { class: "why" }, d.whyProof)),
+      ];
+      if (d.spec) rows.push(el("div", { class: "row" }, el("span", { class: "what" }, "Spec"),
+        el("span", {}, d.reviewed ? `A person reviewed it on ${d.reviewed}.` : "It crosses a boundary, so a person must review it. Nobody has reviewed it yet.")));
+      if (d.ops && d.ops.length) rows.push(el("div", { class: "row" }, el("span", { class: "what" }, "Methods with a body"), el("span", { class: "mono" }, d.ops.join(", "))));
+      if (d.where === "tests") rows.push(el("div", { class: "row" }, el("span", { class: "what" }, "Place"), el("span", {}, "Test code")));
+      rows.push(el("div", { class: "row" }, el("span", { class: "what" }, "Uses"), links(d.uses)));
+      rows.push(el("div", { class: "row" }, el("span", { class: "what" }, "Used by"), links(d.users)));
+      parts.push(el("div", { class: "rows" }, rows));
+    }
+    box.replaceChildren(...parts);
+  }
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && selected) { selected = null; clearHighlight();
+      document.getElementById("panel").replaceChildren(el("p", { class: "kind" }, "The parts list"), el("p", { class: "empty" }, "Select a node in the graph or in a list below.")); }
+  });
+
+  show(location.hash.slice(1));
+})();
+</script>
+</body>
+</html>

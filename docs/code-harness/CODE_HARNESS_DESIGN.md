@@ -5,7 +5,9 @@ of [CODE_HARNESS.md](CODE_HARNESS.md), which keeps the analysis and the history.
 dspy4s yet. The sketches of the kernel and of the guest API compile and ran in checks (section 12). Section 14 lists
 the choices that are new in this document. [CODE_HARNESS_ATLAS.html](CODE_HARNESS_ATLAS.html) has six diagrams of this
 design, and [CODE_HARNESS_EVENTS.html](CODE_HARNESS_EVENTS.html) has its events, their catalog and their sequences.
-Open them in a browser.
+Open them in a browser. [CODE_HARNESS_BLUEPRINT.html](CODE_HARNESS_BLUEPRINT.html) shows the plan of section 15 as a
+graph, with the state of each node. `scripts/blueprint/blueprint.py` makes it from
+[blueprint.toml](blueprint.toml) and the build results.
 
 ## Summary
 
