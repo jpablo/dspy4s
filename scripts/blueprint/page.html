@@ -120,6 +120,8 @@ h1 { margin: 0; font: 600 clamp(1.7rem, 3.2vw, 2.4rem)/1.1 var(--font-display); 
 .open-view { justify-self: start; border: 1px solid var(--st-ready); color: var(--st-ready); background: none; border-radius: 4px; padding: 4px 12px; cursor: pointer; font-weight: 600; }
 
 .panel ul.notes { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13.5px; }
+.panel .rows, .panel .row { min-width: 0; }
+.panel .mono, .panel .links button { overflow-wrap: anywhere; }
 
 .parallel { min-width: 0; background: var(--sheet); border: 1px solid var(--rule); border-radius: 4px; padding: 14px 16px; display: grid; gap: 12px; }
 .parallel .head { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between; }
@@ -164,7 +166,7 @@ td .chip { font-weight: 400; white-space: nowrap; }
     <h1>Code harness blueprint</h1>
     <p class="lede">The plan of the design as a graph. An arrow goes from a node to each node that uses it. The border
       of a node shows its statement, and the fill shows its proof: the code of a type or a function, or the passing
-      tests of a law.</p>
+      tests of a law. A dashed arrow goes to a proof that runs the code of a node.</p>
     <p class="made" id="made"></p>
   </header>
 
@@ -195,8 +197,9 @@ td .chip { font-weight: 400; white-space: nowrap; }
           <span class="key"><svg width="22" height="14"><rect x="1" y="1" width="20" height="12" fill="none" stroke="var(--line)" stroke-width="1.2"/><rect x="3.5" y="3.5" width="15" height="7" fill="none" stroke="var(--line)" stroke-width="1.2"/></svg>Spec: a person reviews it</span>
         </div>
         <div class="group"><b>Arrow</b>
-          <span class="key"><svg width="26" height="14"><line x1="1" y1="7" x2="20" y2="7" stroke="var(--line)" stroke-width="1.4"/><polygon points="19,3.5 25,7 19,10.5" fill="var(--line)"/></svg>Used by</span>
-          <span class="key"><svg width="26" height="14"><line x1="1" y1="7" x2="20" y2="7" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="3 2"/><polygon points="19,3.5 25,7 19,10.5" fill="var(--line)"/></svg>Some nodes used by</span>
+          <span class="key"><svg width="26" height="14"><line x1="1" y1="7" x2="20" y2="7" stroke="var(--line)" stroke-width="1.4"/><polygon points="19,3.5 25,7 19,10.5" fill="var(--line)"/></svg>Its statement is used by</span>
+          <span class="key"><svg width="26" height="14"><line x1="1" y1="7" x2="20" y2="7" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="4 2.5"/><polygon points="19,3.5 25,7 19,10.5" fill="var(--line)"/></svg>Its proof is used by</span>
+          <span class="key"><svg width="26" height="14"><line x1="1" y1="7" x2="20" y2="7" stroke="var(--line)" stroke-width="1.4" stroke-dasharray="1 2.5"/><polygon points="19,3.5 25,7 19,10.5" fill="var(--line)"/></svg>Some nodes used by (the plan)</span>
         </div>
       </div>
       <div class="toolbar">
@@ -562,7 +565,7 @@ td .chip { font-weight: 400; white-space: nowrap; }
     g.box.classList.add("focus");
     node.classList.add("on", "sel");
     const name = id.slice(2);
-    for (const other of [...d.uses, ...d.users]) {
+    for (const other of [...d.uses, ...(d.proofUses || []), ...d.users]) {
       const n = g.box.querySelector(`#${CSS.escape(other)}`);
       if (n) n.classList.add("on");
     }
@@ -628,6 +631,7 @@ td .chip { font-weight: 400; white-space: nowrap; }
       if (d.ops && d.ops.length) rows.push(row("Methods with a body", el("span", { class: "mono" }, d.ops.join(", "))));
       if (d.where === "tests") rows.push(row("Place", el("span", {}, "Test code")));
       rows.push(row("Uses", links(d.uses)));
+      if (d.proofUses && d.proofUses.length) rows.push(row("Its proof also uses", links(d.proofUses)));
       rows.push(row("Used by", links(d.users)));
       parts.push(el("div", { class: "rows" }, rows));
     }

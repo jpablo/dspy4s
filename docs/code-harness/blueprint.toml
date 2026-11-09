@@ -33,7 +33,12 @@
 #   spec     true when the node crosses a boundary (the journal, a command, a law): a person must review it
 #   reviewed the date of that review
 #   blocked  a reason when the design must change before the work can start
-#   uses     the nodes that this node needs. The check compares them with the names in the code.
+#   uses     the nodes that the statement needs: the types of the fields and of the signature. The check compares
+#            them with the names in the code.
+#   proof_uses
+#            more nodes that the proof needs, for example a function or a method that a body calls. As in a Lean
+#            blueprint, the page draws these arrows dashed. A proof also needs the functions in `uses`, and the
+#            proof of a law or a check needs each node in `uses` that has a proof.
 #   text     the statement of a law (from section 4.7), or a short note
 
 [meta]
@@ -237,6 +242,7 @@ ops = ["verdict", "and"]
 ref = "5.5"
 spec = true
 uses = ["verdict-rule", "json"]
+proof_uses = ["guard-rule", "verdict"]
 text = "and is a monoid, and allowAll is its identity."
 
 [[node]]
@@ -478,6 +484,7 @@ id = "session-state"
 group = "state"
 kind = "data"
 name = "SessionState"
+ops = ["initial"]
 ref = "4.2"
 uses = ["session-config", "position", "effect-id", "open-call", "json", "request-id", "active-grant", "guard-rule",
         "job-record"]
@@ -489,6 +496,7 @@ kind = "function"
 name = "evolve"
 ref = "4.2"
 uses = ["session-state", "logged"]
+proof_uses = ["guard-rule"]
 text = "The only place where state changes. Total and pure."
 
 [[node]]
@@ -498,7 +506,8 @@ kind = "function"
 name = "state"
 ref = "4.2"
 uses = ["session-state", "logged", "evolve"]
-text = "The state after a journal: journal.foldLeft(initial)(evolve)."
+proof_uses = ["session-state"]
+text = "The state after a journal: journal.foldLeft(SessionState.initial)(evolve). SessionState.of in the first draft of the design, but a method of SessionState that uses evolve makes a cycle in the plan."
 
 [[node]]
 id = "forked"
@@ -623,8 +632,29 @@ group = "decide"
 kind = "function"
 name = "decide"
 ref = "4.5"
-uses = ["command", "session-state", "rejection", "entry", "repair"]
+uses = ["command", "session-state", "rejection", "entry", "repair", "approved-text"]
+proof_uses = ["evolve", "guard-rule"]
 text = "Says which entries a command can commit. It keeps each journal inside the language of 4.1."
+
+[[node]]
+id = "approved-text"
+group = "decide"
+kind = "function"
+name = "approvedText"
+ref = "5.5"
+spec = true
+uses = ["guard-rule"]
+text = "The text of the Input after a grant that answers a pending call. The harness writes it, and the model reads it."
+
+[[node]]
+id = "source-of"
+group = "decide"
+kind = "function"
+name = "sourceOf"
+ref = "5.5"
+spec = true
+uses = ["command", "source", "entry"]
+text = "The sender of an entry that a command commits. The Input after a grant comes from the harness, so its turn gives a report (8.6)."
 
 # ── Phase 1: the approvals (5.5) ────────────────────────────────────────────────────────────────────────────────────
 
@@ -650,6 +680,7 @@ kind = "function"
 name = "guardCheck"
 ref = "5.5"
 uses = ["session-state", "guard", "guard-result", "json"]
+proof_uses = ["guard", "guard-rule", "owner"]
 
 [[node]]
 id = "goal-check-due"
@@ -702,7 +733,7 @@ group = "schedules"
 kind = "function"
 name = "schedules"
 ref = "12"
-uses = ["command", "decide", "evolve", "next", "repair", "guard-check", "logged", "needs-flush"]
+uses = ["command", "decide", "evolve", "next", "repair", "guard-check", "logged", "needs-flush", "source-of"]
 text = "The generator of random schedules for the properties: crashes, stops, late messages, grants, jobs and power losses."
 
 # ── Phase 1: the laws of 4.7 that the kernel alone can show ─────────────────────────────────────────────────────────
@@ -722,7 +753,7 @@ kind = "law"
 name = "Fold:"
 ref = "4.7"
 spec = true
-uses = ["state"]
+uses = ["state", "schedules"]
 text = "SessionState is the fold of the journal."
 
 [[node]]
@@ -732,7 +763,7 @@ kind = "law"
 name = "Homomorphism:"
 ref = "4.7"
 spec = true
-uses = ["state"]
+uses = ["state", "schedules"]
 text = "state(a ++ b) is the fold of b from state(a)."
 
 [[node]]
@@ -742,7 +773,7 @@ kind = "law"
 name = "Store:"
 ref = "4.7"
 spec = true
-uses = ["evolve"]
+uses = ["state", "repair", "schedules"]
 text = "The store holds only the writes of cells that completed."
 
 [[node]]
@@ -752,7 +783,7 @@ kind = "law"
 name = "Inputs:"
 ref = "4.7"
 spec = true
-uses = ["evolve", "forked"]
+uses = ["state", "decide", "forked", "schedules"]
 text = "inputs is the fold of the values of the Input entries. A repeat adds nothing, a fork keeps them, and the store does not hold them."
 
 [[node]]
@@ -762,7 +793,7 @@ kind = "law"
 name = "Journal codec:"
 ref = "4.1"
 spec = true
-uses = ["logged"]
+uses = ["logged", "schedules"]
 text = "A journal read through the codec of Logged gives the same entries."
 
 [[group]]
@@ -780,7 +811,7 @@ kind = "law"
 name = "Decide table:"
 ref = "4.5"
 spec = true
-uses = ["decide"]
+uses = ["decide", "state"]
 text = "Each row of the table of decide in 4.5 holds, for example: a Send to a session that has ended commits nothing and gets SessionClosed."
 
 [[node]]
@@ -790,7 +821,7 @@ kind = "law"
 name = "Input:"
 ref = "4.7"
 spec = true
-uses = ["decide"]
+uses = ["decide", "schedules"]
 text = "Two Send commands with one request id give one Input."
 
 [[node]]
@@ -800,7 +831,7 @@ kind = "law"
 name = "Log:"
 ref = "4.7"
 spec = true
-uses = ["decide"]
+uses = ["schedules"]
 text = "No part of the harness changes or removes an entry."
 
 [[node]]
@@ -810,7 +841,7 @@ kind = "law"
 name = "Language:"
 ref = "4.7"
 spec = true
-uses = ["decide", "schedules"]
+uses = ["schedules", "state"]
 text = "Each journal is a word of the language of 4.1."
 
 [[node]]
@@ -820,7 +851,7 @@ kind = "law"
 name = "Rest:"
 ref = "4.7"
 spec = true
-uses = ["decide", "evolve", "schedules"]
+uses = ["schedules"]
 text = "With no open turn, no input waits."
 
 [[group]]
@@ -838,7 +869,7 @@ kind = "law"
 name = "Next rules:"
 ref = "4.3"
 spec = true
-uses = ["next"]
+uses = ["next", "state"]
 text = "The rules of next in 4.3: the step limit of both kinds of turn, a stop, an answer, and a submit."
 
 [[node]]
@@ -866,7 +897,7 @@ kind = "law"
 name = "Effect:"
 ref = "4.7"
 spec = true
-uses = ["decide", "repair", "schedules"]
+uses = ["repair", "state", "schedules"]
 text = "An intent commits before its effect, and the outcome commits after the effect. Each intent has exactly one outcome after a repair."
 
 [[node]]
@@ -876,7 +907,7 @@ kind = "law"
 name = "Repair:"
 ref = "4.7"
 spec = true
-uses = ["repair", "evolve"]
+uses = ["repair", "schedules"]
 text = "repair closes each open part, and repair(state after repair) is empty."
 
 [[node]]
@@ -896,7 +927,7 @@ kind = "law"
 name = "Job:"
 ref = "4.7"
 spec = true
-uses = ["decide", "evolve", "forked", "schedules"]
+uses = ["decide", "state", "forked", "schedules"]
 text = "An Abort changes no job. A stop covers only the jobs with an intent before it. After Abort and then StopJobs(OfLastTurn), no job of that turn starts or runs. Ended stops all jobs, and a journal fork starts with no jobs. Phase 1 has the job table as a small value, with no process."
 
 [[group]]
@@ -914,7 +945,7 @@ kind = "law"
 name = "Grant:"
 ref = "4.7"
 spec = true
-uses = ["evolve", "decide", "forked", "guard-check", "schedules"]
+uses = ["guard-check", "decide", "state", "forked", "schedules"]
 text = "A Once grant covers one call. A Turn grant ends at the next TurnEnded. No grant stays after Ended, and a journal fork starts with no grants. A repeat of a Grant commits nothing."
 
 [[node]]
@@ -924,7 +955,7 @@ kind = "law"
 name = "Pending call:"
 ref = "4.7"
 spec = true
-uses = ["guard-check", "evolve", "forked", "goal-check-due", "schedules"]
+uses = ["guard-check", "state", "forked", "goal-check-due", "schedules", "guard-rule", "owner"]
 text = "A pending call has no active grant that covers it. TurnStarted and Ended empty pending, and a journal fork starts with no pending calls. A session with no person never gets a pending call."
 
 [[node]]
@@ -934,7 +965,7 @@ kind = "law"
 name = "Guard:"
 ref = "4.7"
 spec = true
-uses = ["guard", "guard-check"]
+uses = ["guard", "guard-check", "schedules", "verdict"]
 text = "verdict is a homomorphism from Guard to Verdict. A grant changes only Ask, and more grants never make a result stronger."
 
 [[group]]
@@ -952,7 +983,7 @@ kind = "law"
 name = "Report:"
 ref = "4.7"
 spec = true
-uses = ["reports", "missing"]
+uses = ["reports", "missing", "state", "schedules"]
 text = "After the report pass of 8.6, each TurnEnded or Ended that needs a report has exactly one Input in the journal of an open owner. Phase 1 checks only reports and missing; the report pass of a real host comes later."
 
 # ── Phase 1: the mutants ────────────────────────────────────────────────────────────────────────────────────────────
@@ -989,6 +1020,7 @@ id = "access"
 group = "modes"
 kind = "data"
 name = "Access"
+ops = ["<=", "meet"]
 ref = "5.2"
 spec = true
 uses = []
@@ -1003,6 +1035,7 @@ ops = ["<=", "meet"]
 ref = "5.2"
 spec = true
 uses = ["access"]
+proof_uses = ["access"]
 text = "A product of seven chains None < Read < Full, so a bounded meet-semilattice. The REPL makes the givens of the preamble from a mode, and SessionConfig holds two modes."
 
 [[group]]
@@ -1022,3 +1055,13 @@ ref = "5.2"
 spec = true
 uses = ["mode"]
 text = "meet is associative, commutative and idempotent, and Mode.full is its identity. a <= b exactly when a.meet(b) == a."
+[[node]]
+id = "law-closed"
+group = "mode-laws"
+kind = "law"
+name = "Closed mode:"
+ref = "5.2"
+spec = true
+uses = ["mode"]
+text = "A child and a rollout have the mode base.meet(Mode.closed): sessions is at most Read, and children does not change."
+

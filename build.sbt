@@ -61,7 +61,9 @@ lazy val root = (project in file("."))
     gepa,
     streaming,
     mcp,
-    examples
+    examples,
+    harnessGuest,
+    harnessKernel
   )
   .settings(commonSettings)
   .settings(
@@ -241,6 +243,35 @@ lazy val examples = (project in file("modules/examples"))
     // The MCP tests start the servers of the examples in a child JVM with the class path of the tests.
     Test / fork := true,
     Test / javaOptions += "-Dfile.encoding=UTF-8"
+  )
+
+// The code harness (docs/code-harness/CODE_HARNESS_DESIGN.md, 10.5). The two modules hold the typed skeleton of
+// phases 1 and 2: the types and the signatures, with `???` in place of each body, and the laws as tests. So the laws
+// fail until the bodies exist. docs/code-harness/CODE_HARNESS_BLUEPRINT.html shows the state of each part.
+
+// The guest API: what model code calls, and the modes that limit it (5.1, 5.2).
+lazy val harnessGuest = (project in file("modules/harness-guest"))
+  .settings(commonSettings)
+  .settings(name := "dspy4s-harness-guest")
+  .settings(
+    libraryDependencies ++= Seq(
+      "dev.zio"       %% "zio-blocks-schema" % zioBlocksVersion,
+      "org.scalameta" %% "munit"             % munitVersion           % Test,
+      "org.scalameta" %% "munit-scalacheck"  % munitScalacheckVersion % Test
+    )
+  )
+
+// The kernel: the journal, the state as a fold of the journal, and the pure functions that decide each step (4).
+lazy val harnessKernel = (project in file("modules/harness-kernel"))
+  .dependsOn(harnessGuest)
+  .settings(commonSettings)
+  .settings(name := "dspy4s-harness-kernel")
+  .settings(
+    libraryDependencies ++= Seq(
+      "dev.zio"       %% "zio-blocks-schema" % zioBlocksVersion,
+      "org.scalameta" %% "munit"             % munitVersion           % Test,
+      "org.scalameta" %% "munit-scalacheck"  % munitScalacheckVersion % Test
+    )
   )
 
 // JMH stays outside the root aggregate. Normal compile and test runs do not pay for benchmark generation.

@@ -205,9 +205,10 @@ final case class SessionState(
 def evolve(s: SessionState, logged: Logged): SessionState   // total and pure
 ```
 
-`evolve` is the only place where state changes. `SessionState` is `journal.foldLeft(initial)(evolve)`, so a fold of a
-prefix continues to the same state: the journal is a free monoid, and the fold is a homomorphism from it to the
-functions on the state.
+`evolve` is the only place where state changes. `state(journal)` is `journal.foldLeft(SessionState.initial)(evolve)`,
+so a fold of a prefix continues to the same state: the journal is a free monoid, and the fold is a homomorphism from
+it to the functions on the state. `state` is a function and not a method of `SessionState`, because the type
+`SessionState` comes before `evolve`, and `evolve` comes before the fold.
 
 Each other view of a journal is also a fold, for example the note of lost names (6), the ledger, the usage totals and
 the deterministic part of a `SessionCard`. Folds compose, so several views need one pass:
@@ -732,7 +733,7 @@ def guardCheck(s: SessionState, op: String, args: Json): GuardResult =
     case Verdict.Ask                             => GuardResult.Refused("no person can answer in this session")
 
 def forked(prefix: Vector[Logged]): SessionState =
-  SessionState.of(prefix).copy(grants = Set.empty, pending = Set.empty, jobs = Map.empty)
+  state(prefix).copy(grants = Set.empty, pending = Set.empty, jobs = Map.empty)
 
 // Three examples. `args` gives the `Json` of the arguments of the call.
 Grant(request, GuardRule("exec", ArgMatch.Exact(args("git push origin main"))), GrantLifetime.Once)

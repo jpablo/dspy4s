@@ -13,17 +13,24 @@ Each node has two states, as in a Lean blueprint:
   a test with its name is in the code. A node is ready when each node that it uses is stated.
 - The proof (the fill): a type is done when it and its methods have bodies, a function when it has a body that is not
   `???`, and a law when its tests pass in the last test report. A node is ready when it is stated and each node that
-  it uses is done. A node is complete when it and all the nodes under it are done.
+  its proof needs is complete. A node is complete when it and each node that its proof needs, and so on, are done.
+
+As in a Lean blueprint, the statement and the proof have different uses. `uses` holds what the statement needs: the
+types in the fields and the signature. The proof needs the code that it runs: the functions in `uses`, and the nodes
+in `proof_uses`, for example a type whose method a body calls. A test runs what it uses, so the proof of a law or a
+check also needs each node in `uses` that has a proof. A type with no methods has no proof, so it is done when it is
+stated.
 
 The waves show the work that can run at the same time. A node that is not stated has a statement wave: 1 when each
 node that it uses is stated, and else 1 more than the highest statement wave of those nodes. The proof wave is the
-same for the proofs. The nodes of one wave do not use each other, so one writer for each group can work on them at
-the same time. The highest wave is the length of the longest chain.
+same for the proofs, over what each proof needs. The nodes of one wave do not use each other, so one writer for each
+group can work on them at the same time. The highest wave is the length of the longest chain.
 
-The check of the code compares the uses of each type and function with the names in its code. It reads names, not
-types, so it gives warnings and not errors:
-- The code names a node that the node does not use, directly or through other nodes. The plan then shows parallel
-  work that is not parallel.
+The check of the code compares the uses of each type and function with its code. It reads names, not types, so it
+gives warnings and not errors:
+- The code names a node, or calls a method of a node, that the node does not use, directly or through other nodes.
+  The plan then shows parallel work that is not parallel. A method counts when its name follows a dot, apart from
+  names that collections also have, for example `map`.
 - A done node uses a node that its code does not name, and no other path gives that use. The plan then shows an
   order that the code does not need.
 - The code of a node is not in the file of its group.
@@ -78,6 +85,7 @@ class Node:
     group: str | None = None
     text: str = ""
     ops: list[str] = field(default_factory=list)
+    proof_uses: list[str] = field(default_factory=list)
     spec: bool = False
     reviewed: str | None = None
     blocked: str | None = None
@@ -166,12 +174,12 @@ def check(phases: list[Phase], groups: list[Group], nodes: list[Node]) -> None:
             problems.append(f"node {n.id} has the unknown group {n.group}")
         elif n.kind in ("law", "check") and by_group[n.group].where != "tests":
             problems.append(f"the {n.kind} {n.id} must be in a group of test code")
-        problems += [f"node {n.id} uses the unknown node {u}" for u in n.uses if u not in node_ids]
+        problems += [f"node {n.id} uses the unknown node {u}" for u in n.uses + n.proof_uses if u not in node_ids]
         if n.kind in ("law", "check") and not n.name.endswith(":"):
             problems.append(f"the name of the {n.kind} {n.id} must end with a colon, for example \"Fold:\"")
     if not problems:
         graphs = {
-            "uses of the nodes": {n.id: n.uses for n in nodes},
+            "uses of the nodes": {n.id: n.uses + n.proof_uses for n in nodes},
             "uses of the phases": {p.id: p.uses for p in phases},
             "groups (move a node to another group)": group_uses(groups, nodes),
         }
@@ -196,13 +204,29 @@ def find_cycle(start: str, uses: dict[str, list[str]]) -> list[str] | None:
     return visit(start)
 
 
+def has_proof(n: Node) -> bool:
+    """True for a node with code to prove: a function, a law, a check, or a type with methods."""
+    return n.kind in ("function", "law", "check") or (n.kind == "data" and bool(n.ops))
+
+
+def proof_needs(n: Node, by_id: dict[str, Node]) -> list[str]:
+    """The nodes whose code the proof of `n` runs: the functions in `uses`, the nodes in `proof_uses`, and, for a law
+    or a check, each node in `uses` that has a proof, because a test runs what it uses. A type in a signature or a
+    field is part of the statement only."""
+    if not has_proof(n):
+        return []
+    test = n.kind in ("law", "check")
+    stated = [u for u in n.uses if has_proof(by_id[u]) and (test or by_id[u].kind == "function")]
+    return stated + [u for u in n.proof_uses if u not in stated]
+
+
 def group_uses(groups: list[Group], nodes: list[Node]) -> dict[str, list[str]]:
     """For each group, the other groups whose nodes its nodes use."""
     group_of = {n.id: n.group for n in nodes}
     out: dict[str, list[str]] = {g.id: [] for g in groups}
     for n in nodes:
         if n.group in out:
-            for u in n.uses:
+            for u in n.uses + n.proof_uses:
                 g = group_of.get(u)
                 if g and g != n.group and g not in out[n.group]:
                     out[n.group].append(g)
@@ -269,8 +293,10 @@ def has_body(text: str, start: int) -> bool:
     return False
 
 
-def find_def(text: str, name: str) -> list[int]:
-    return [m.start() for m in re.finditer(rf"\bdef\s+{re.escape(name)}(?=[\s(\[:=])", text)]
+def find_def(text: str, name: str, vals: bool = False) -> list[int]:
+    """The places of each `def name`, and of each `val name` when `vals` is true: a method of a type can be a value."""
+    keyword = r"(?:def|val)" if vals else "def"
+    return [m.start() for m in re.finditer(rf"\b{keyword}\s+{re.escape(name)}(?=[\s(\[:=])", text)]
 
 
 def block_end(text: str, body: int, indent: int) -> int:
@@ -306,7 +332,7 @@ def scan(node: Node, code: Code | None) -> None:
         node.stated, node.file = bool(hits), (hits[0] if hits else None)
         node.code = "\n".join(b for t in code.main.values() if (b := block_of(t, node.name)))
         node.done = node.stated and all(
-            any(has_body(node.code, p) for p in find_def(node.code, op)) for op in node.ops)
+            any(has_body(node.code, p) for p in find_def(node.code, op, vals=True)) for op in node.ops)
     elif node.kind == "function":
         found = [(f, t, p) for f, t in code.files(node.where).items() for p in find_def(t, node.name)]
         node.stated, node.file = bool(found), (found[0][0] if found else None)
@@ -348,27 +374,32 @@ def derive(nodes: list[Node]) -> None:
             n.statement = "waiting"
             n.why_statement = f"These nodes are not stated yet: {names(unstated, by_id)}."
 
-        not_done = [d.id for d in deps if d.proof not in ("done", "complete")]
+        needs = [by_id[u] for u in proof_needs(n, by_id)]
+        not_complete = [d.id for d in needs if d.proof != "complete"]
         if n.kind == "upstream":
             n.proof, n.why_proof = "complete", "It comes from a library."
         elif n.done:
-            all_complete = all(d.proof == "complete" for d in deps)
-            n.proof = "complete" if all_complete else "done"
-            what = {"data": "The type and its methods have bodies.", "function": "The function has a body."}
-            under = (" It and all the nodes under it are done." if all_complete
-                     else " Some nodes under it are not complete.")
-            n.why_proof = what.get(n.kind, "Its tests pass.") + under
-        elif n.stated and not not_done:
-            n.proof, n.why_proof = "ready", "Each node that it uses is done, so the work can start."
+            n.proof = "done" if not_complete else "complete"
+            what = {
+                "data": "The type and its methods have bodies." if n.ops else "The type has no methods to prove.",
+                "function": "The function has a body.",
+            }.get(n.kind, "Its tests pass.")
+            under = (f" These nodes that its proof needs are not complete: {names(not_complete, by_id)}."
+                     if not_complete else " Each node that its proof needs is complete." if needs else "")
+            n.why_proof = what + under
+        elif n.stated and not not_complete:
+            n.proof = "ready"
+            n.why_proof = ("Each node that its proof needs is complete, so the work can start." if needs
+                           else "Its proof needs no other node, so the work can start.")
         else:
             n.proof = "none"
             n.why_proof = (
                 "The statement comes first." if not n.stated
-                else f"These nodes are not done yet: {names(not_done, by_id)}."
+                else f"These nodes that its proof needs are not complete yet: {names(not_complete, by_id)}."
             )
 
         n.swave = 0 if n.stated or n.kind == "upstream" else 1 + max((d.swave for d in deps), default=0)
-        n.pwave = 0 if n.done or n.kind == "upstream" else 1 + max((d.pwave for d in deps), default=0)
+        n.pwave = 0 if n.done or n.kind == "upstream" else 1 + max((d.pwave for d in needs), default=0)
 
 
 def topological(nodes: list[Node]) -> list[Node]:
@@ -379,7 +410,7 @@ def topological(nodes: list[Node]) -> list[Node]:
         if n.id in seen:
             return
         seen.add(n.id)
-        for u in n.uses:
+        for u in n.uses + n.proof_uses:
             visit(by_id[u])
         out.append(n)
     for n in nodes:
@@ -450,7 +481,7 @@ def partial_uses(phases: list[Phase], nodes: list[Node]) -> dict[tuple[str, str]
     by_id = {n.id: n for n in nodes}
     out: dict[tuple[str, str], list[str]] = {}
     for n in nodes:
-        for u in n.uses:
+        for u in n.uses + n.proof_uses:
             d = by_id[u]
             if n.phase and d.phase and d.phase != n.phase and d.phase not in full[n.phase]:
                 ids = out.setdefault((d.phase, n.phase), [])
@@ -464,7 +495,7 @@ def outside(phase: Phase, phases: list[Phase], nodes: list[Node]) -> list[str]:
     nodes under it in a phase that `phase` does not use."""
     full = closure({p.id: p.uses for p in phases})[phase.id]
     by_id = {n.id: n for n in nodes}
-    queue = [u for n in nodes if n.phase == phase.id for u in n.uses if by_id[u].phase != phase.id]
+    queue = [u for n in nodes if n.phase == phase.id for u in n.uses + n.proof_uses if by_id[u].phase != phase.id]
     direct = set(queue)
     out: list[str] = []
     while queue:
@@ -476,7 +507,7 @@ def outside(phase: Phase, phases: list[Phase], nodes: list[Node]) -> list[str]:
         if u in direct or partial:
             out.append(u)
         if partial:
-            queue += x.uses
+            queue += x.uses + x.proof_uses
     return out
 
 
@@ -508,24 +539,53 @@ def named(code: str, by_name: dict[str, Node]) -> set[str]:
     return out
 
 
+COMMON_METHODS = {"apply", "map", "flatMap", "zip", "filter", "fold", "foldLeft", "get", "contains", "of"}
+
+
+def called(code: str, owners: dict[str, Node]) -> dict[str, str]:
+    """The nodes whose methods the code calls, as id -> the first method. A method counts after a dot."""
+    out: dict[str, str] = {}
+    for m in re.finditer(r"\.\s*([A-Za-z_][\w$]*|[<>=!]+)", strip(code)):
+        if (n := owners.get(m.group(1))) is not None:
+            out.setdefault(n.id, m.group(1))
+    return out
+
+
 def check_code(nodes: list[Node], groups: list[Group]) -> None:
     by_id = {n.id: n for n in nodes}
+    # A library type is complete, so a use of it never changes the order of the work. The check ignores it.
     by_name: dict[str, Node] = {}
     for n in nodes:
-        if n.kind in ("upstream", "data", "function"):
+        if n.kind in ("data", "function"):
             by_name.setdefault(n.name, n)
-    below = closure({n.id: n.uses for n in nodes})
+    # A method name that two types share, or that collections also have, tells nothing.
+    count: dict[str, int] = {}
+    for n in nodes:
+        for op in n.ops:
+            count[op] = count.get(op, 0) + 1
+    owners = {op: n for n in nodes for op in n.ops if count[op] == 1 and op not in COMMON_METHODS}
+    # A type in the code must be under the node. A call runs code, so its node must be under the proof of the node.
+    below = closure({n.id: n.uses + n.proof_uses for n in nodes})
+    proof_below = closure({n.id: proof_needs(n, by_id) for n in nodes})
     only = set(reduced({n.id: n.uses for n in nodes}))
     group_of = {g.id: g for g in groups}
     for n in nodes:
         if n.kind in ("data", "function") and n.stated:
             uses = named(n.code, by_name) - {n.id}
-            for d in sorted(uses - below[n.id]):
-                n.notes.append(f"The code names {by_id[d].title}, but {n.title} does not use it. "
-                               f"Add {d} to its uses, or the plan shows parallel work that is not parallel.")
+            for d in sorted(uses):
+                if by_id[d].kind == "function" and d not in proof_below[n.id]:
+                    n.notes.append(f"The code calls {by_id[d].title}, but the proof of {n.title} does not use it. "
+                                   f"Add {d} to its proof_uses, or the proof waves are wrong.")
+                elif by_id[d].kind != "function" and d not in below[n.id]:
+                    n.notes.append(f"The code names {by_id[d].title}, but {n.title} does not use it. "
+                                   f"Add {d} to its uses, or the plan shows parallel work that is not parallel.")
+            for d, op in sorted(called(n.code, owners).items()):
+                if d != n.id and d not in proof_below[n.id]:
+                    n.notes.append(f"The code calls {op} of {by_id[d].title}, but the proof of {n.title} does not "
+                                   f"use it. Add {d} to its proof_uses, or the proof waves are wrong.")
             if n.done:
                 for d in n.uses:
-                    if (n.id, d) in only and d not in uses:
+                    if (n.id, d) in only and d not in uses and by_id[d].kind != "upstream":
                         n.notes.append(f"{n.title} uses {by_id[d].title}, but its code does not name it. "
                                        f"Remove the use if {n.title} does not need it.")
         if n.file and n.group and Path(n.file).name != group_of[n.group].file:
@@ -602,6 +662,11 @@ def node_svg(own: list[Node], others: list[Node], numbers: dict[str, int]) -> st
         lines.append(f'  "{n.id}" [id="n-{n.id}", class="{classes}", label={label}, {SHAPES[n.kind]}{extra}];')
     for user, dep in reduced({n.id: [u for u in n.uses if u in ids] for n in own + others}):
         lines.append(f'  "{dep}" -> "{user}" [id="e-{dep}--{user}"];')
+    # The extra uses of a proof, dashed as in a Lean blueprint. They do not change the layout.
+    for n in own + others:
+        for dep in n.proof_uses:
+            if dep in ids:
+                lines.append(f'  "{dep}" -> "{n.id}" [id="e-{dep}--{n.id}", class="proof", style=dashed];')
     lines.append("}")
     return run_dot(lines)
 
@@ -623,7 +688,7 @@ def plan_svg(phases: list[Phase], states: dict[str, PhaseState], partials: dict[
             lines.append(f'  "{u}" -> "{p.id}" [id="e-{u}--{p.id}"];')
     for (a, b), ids in partials.items():
         label = esc(", ".join(by_id[i].title for i in ids))
-        lines.append(f'  "{a}" -> "{b}" [id="e-{a}--{b}", class="partial", style=dashed, constraint=false,'
+        lines.append(f'  "{a}" -> "{b}" [id="e-{a}--{b}", class="partial", style=dotted, constraint=false,'
                      f' label=<<FONT POINT-SIZE="9">{label}</FONT>>];')
     waves: dict[int, list[str]] = {}
     for p in phases:
@@ -658,7 +723,7 @@ class Plan:
 def page_data(plan: Plan) -> dict:
     users: dict[str, list[str]] = {n.id: [] for n in plan.nodes}
     for n in plan.nodes:
-        for u in n.uses:
+        for u in n.uses + n.proof_uses:
             users[u].append(n.id)
     numbers = {p.id: p.number for p in plan.phases}
     shown = [p for p in plan.phases if any(n.phase == p.id for n in plan.nodes)]
@@ -697,7 +762,8 @@ def page_data(plan: Plan) -> dict:
                 "blocked": n.blocked, "where": n.where, "ops": n.ops, "file": n.file,
                 "statement": n.statement, "proof": n.proof, "whyStatement": n.why_statement, "whyProof": n.why_proof,
                 "swave": n.swave, "pwave": n.pwave, "notes": n.notes,
-                "uses": [f"n-{u}" for u in n.uses], "users": [f"n-{u}" for u in users[n.id]],
+                "uses": [f"n-{u}" for u in n.uses], "proofUses": [f"n-{u}" for u in n.proof_uses],
+                "users": [f"n-{u}" for u in users[n.id]],
             }
             for n in plan.nodes
         },
