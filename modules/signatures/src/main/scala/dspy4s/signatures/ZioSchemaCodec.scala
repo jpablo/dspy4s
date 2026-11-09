@@ -15,7 +15,8 @@ import dspy4s.core.contracts.Reflects
 import dspy4s.core.contracts.Reflects.{caseNames, withoutDeferred}
 import zio.blocks.chunk.{Chunk, ChunkMap, NonEmptyChunk}
 import zio.blocks.docs.Doc
-import zio.blocks.schema.binding.{Binding, BindingType, HasBinding}
+import zio.blocks.maybe.Maybe
+import zio.blocks.schema.binding.{Binding, BindingType, ConstantConstructor, ConstantDeconstructor, HasBinding}
 import zio.blocks.schema.derive.{Deriver, InstanceOverride}
 import zio.blocks.schema.json.{
   Json,
@@ -747,10 +748,37 @@ private[signatures] object ZioSchemaCodec:
 
   /** Decode `dv` as an `A`. [[normalize]] first coerces `dv` to the reflect of `schema`, then `Schema.fromDynamicValue`
     * decodes it. An error of zio-blocks becomes a `ValidationError` with the message of that error, which has the path
-    * of the value.
+    * of the value. The decode uses the schema of [[withAbsentMaybes]]. This function makes that schema for each value,
+    * and a shape makes it one time ([[derivedFromZioSchema]]).
     */
   def decodeValue[A](dv: DynamicValue)(using schema: Schema[A]): Either[DspyError, A] =
+    decodeWith(withAbsentMaybes(schema), dv)
+
+  /** Decode `dv` as an `A` with `schema`, a schema of [[withAbsentMaybes]] (see [[decodeValue]]). */
+  private def decodeWith[A](schema: Schema[A], dv: DynamicValue): Either[DspyError, A] =
     schema.fromDynamicValue(normalize(dv, schema.reflect)).left.map(err => ValidationError(DspyError.messageOf(err)))
+
+  /** `schema` with the binding of [[AbsentMaybes]] in the `Absent` case of each `Maybe`. The transform of a deferred
+    * reflect is lazy: it goes into a deferred reflect only when a decode reads it, thus it stops for a recursive type.
+    */
+  private def withAbsentMaybes[A](schema: Schema[A]): Schema[A] =
+    Schema(schema.reflect.transform(DynamicOptic.root, AbsentMaybes).force)
+
+  /** The repair of a defect of zio-blocks 0.0.54 to 0.0.56. Since 0.0.54, `Maybe.absent` is the `Absent` object. But
+    * the binding of the `Absent` case of each `Maybe` reflect (`Binding.Record.absent`) still builds a null, as it did
+    * when `Maybe` was `A | Null`. A null is a present `Maybe`, thus `isEmpty` is false. This transformer replaces that
+    * binding with a binding that builds `Maybe.absent`. Remove it when `Binding.Record.absent` builds `Maybe.absent`.
+    * `MaybeAbsentSuite` shows the defect.
+    */
+  private object AbsentMaybes extends ReflectTransformer.OnlyMetadata[Binding, Binding]:
+    private val absentCase: Binding[BindingType.Record, Maybe[Nothing]] =
+      Binding.Record[Maybe[Nothing]](new ConstantConstructor(Maybe.absent), new ConstantDeconstructor)
+
+    override def transformMetadata[K, A](f: Binding[K, A]): Lazy[Binding[K, A]] =
+      // The identity test shows that `f` is the binding of the `Absent` case of a `Maybe`, thus `A` is a `Maybe` type.
+      // The transformer does not know that type, so a cast is necessary. `absentCase` is a binding of each `Maybe` type.
+      // zio-blocks makes the same cast: `Schema.maybe` casts the `Maybe` reflect, with this case, from `AnyRef`.
+      Lazy(if f eq Binding.Record.absent then absentCase.asInstanceOf[Binding[K, A]] else f)
 
   /** The names that the decode reads for each field of the record behind `reflect`, by the wire name of the field
     * ([[Reflects.fieldNames]]).
@@ -764,7 +792,8 @@ private[signatures] object ZioSchemaCodec:
 
   /** Make a `Shape[A]` from a zio-blocks `Schema[A]`. The encode gives each field in the wire form
     * ([[Reflects.wireRecord]]). The root stays a record, also for a tuple, because its fields are the fields of a
-    * signature. The decode first checks that the record has each required field, and then uses [[decodeValue]].
+    * signature. The decode first checks that the record has each required field, and then decodes as [[decodeValue]]
+    * does, with a schema of [[withAbsentMaybes]] that the shape makes at the first decode.
     */
   def derivedFromZioSchema[A](using schema: Schema[A]): RoundTripShape[A] =
     val rootReflect   = schema.reflect
@@ -773,6 +802,8 @@ private[signatures] object ZioSchemaCodec:
 
     new RoundTripShape[A]:
       override val fieldSpecs: Vector[FieldSpec] = specs
+
+      private lazy val decodeSchema: Schema[A] = withAbsentMaybes(schema)
 
       // A tuple at the top is the record of the output fields. On the wire it is a JSON object, not the array of its schema.
       override lazy val jsonSchema: Option[DynamicValue.Record] =
@@ -789,4 +820,4 @@ private[signatures] object ZioSchemaCodec:
 
       // `normalize` gives `None` to each absent optional field, at each level.
       override def decode(raw: DynamicValue.Record): Either[DspyError, A] =
-        requireFields(raw).flatMap(_ => decodeValue[A](raw))
+        requireFields(raw).flatMap(_ => decodeWith(decodeSchema, raw))
