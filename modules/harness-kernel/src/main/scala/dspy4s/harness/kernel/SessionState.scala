@@ -1,6 +1,6 @@
 package dspy4s.harness.kernel
 
-import dspy4s.harness.guest.{Access, Mode}
+import dspy4s.harness.guest.{Access, Mode, Scope, StrategyName}
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.Json
 

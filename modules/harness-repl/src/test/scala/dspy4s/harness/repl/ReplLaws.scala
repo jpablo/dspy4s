@@ -80,6 +80,11 @@ class ReplLaws extends munit.FunSuite:
     assert(hint(error).exists(_.contains("the capability files")), hint(error).toString)
   }
 
+  test("Hints: a top-level var") {
+    val error = "Mutable variable n is defined in a class that does not extend `Stateful` or `Mutable`."
+    assert(hint(error).exists(_.contains("locally")))
+  }
+
   test("Hints: a Vector in a pair") {
     val error = "Found: (x$1: (String, Vector[String]{val prefix1: String}))"
     assert(hint(error).exists(_.contains("groupMapReduce")))

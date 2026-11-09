@@ -1,6 +1,6 @@
 package dspy4s.harness.kernel
 
-import dspy4s.harness.guest.Mode
+import dspy4s.harness.guest.{Mode, Scope, StrategyName}
 import org.scalacheck.Gen
 import zio.blocks.schema.json.Json
 

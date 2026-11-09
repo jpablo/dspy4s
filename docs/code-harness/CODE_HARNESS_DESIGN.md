@@ -468,7 +468,9 @@ mode has it, and a cell cannot make one. The host gives the clock through it as 
 input values from `SessionState.inputs`.
 
 The sketch shows the shape. The full API also has `edit`, `httpGet`, `llmQuery`, `llmQueryBatched`, `rlm`, `start`,
-`observe` and `zoom`. `submit` comes from the preamble of the session. The source text of these traits, with a
+`observe` and `zoom`. `submit` comes from the preamble of the session. This section gives no signature for `edit` and
+`httpGet`, so the code of `harness-guest` proposes `edit(path, oldText, newText)` on `Files^` and a `Network` trait
+with `get(url)` behind `httpGet`, for the review. `Sessions` has the signatures of 8.2. The source text of these traits, with a
 notation header, is the API reference in the prompt. A search function and the reference on demand can come later, for
 a large API.
 
@@ -844,7 +846,8 @@ the journal does not hold it. A function that `Classified.map` runs can leak a b
 
 | The error | The cause | The hint |
 |---|---|---|
-| "Maximal number of successive inlines (32) exceeded" | A recursive type with no given | `given Data[T] = Data.derived` |
+| "Maximal number of successive inlines (32) exceeded" | A type that the inline derivation of `Data` cannot end on | `given Data[T] = Data.derived` |
+| "Mutable variable n is defined in a class that does not extend `Stateful`" | A top-level `var`, which capture checking refuses in a cell | A `val`, or the `var` in a block |
 | "is not included in the allowed capture set" after the second try | A capability in a place that must be pure | The name of the capability |
 | "Found: (x$1: (String, Vector[String]{val prefix1: ..." | A `Vector` in a pair, for example `groupBy(f).map { case (k, v) => ... }` | `.view.mapValues`, `groupMapReduce` or `.toList` |
 | "Found: ((Array[(String)?]^{any.rd}))?^{x1.rd}" | `case Array(x, y)` inside `collect` | `.toList`, and then `case List(x, y)` |
@@ -911,7 +914,8 @@ tool gives the API reference. Two rules hold:
   sends `System.out` to stderr, and a cell writes to its own buffer. In the check of section 12, one late print of a
   library broke each later call of a server with no such rule.
 - Until the sandbox of phase 3 exists, the server starts only the read-only mode of 5.2, with no `Shell^` and no
-  `Network^`. The other agent has its own shell, so the server only tests the guest API.
+  `Network^`. The other agent has its own shell, so the server only tests the guest API. The first server also has no
+  LM and no other sessions, so it gives `files: Files` on the workspace and `state: Store^` in memory.
 
 ## 7. The context
 
@@ -1255,7 +1259,7 @@ key of the journal is the fence there. JDBC also reaches a server database, but 
 
 | Module | Contents | Depends on |
 |---|---|---|
-| `harness-guest` | The guest API traits, `Data`, `Access` and `Mode`. The source text is the API reference. | zio-blocks only |
+| `harness-guest` | The guest API traits, `Data`, `Access`, `Mode`, `Scope`, `StrategyName`, `SessionRef` and `SessionCard`. The source text is the API reference. | zio-blocks only |
 | `harness-kernel` | `Entry`, `SessionState`, `evolve`, `next`, `decide`, `repair`, `reports`, `Fold`, `ContextStrategy`, the memory tree | `harness-guest`, zio-blocks |
 | `harness-repl` | `ScalaRepl`, the protections of Phase 0, the note of lost names | `harness-guest`, `harness-kernel`, `scala3-repl` |
 | `harness-mcp` | The early MCP server of section 6 | `harness-repl`, the MCP Java SDK |

@@ -13,6 +13,13 @@ import caps.assumeSafe
   def read(path: String): String
   update def write(path: String, content: String): Unit
 
+  /** Replaces the one place of `oldText` in the file with `newText`. A file where `oldText` occurs no time, or more
+    * than one time, is an error, and the file does not change.
+    *
+    * A proposal for the review: section 5.1 names `edit` and gives no signature.
+    */
+  update def edit(path: String, oldText: String, newText: String): Unit
+
 /** Commands in the workspace. A session has this capability, or it has none. */
 @assumeSafe trait Shell extends caps.ExclusiveCapability:
   def exec(command: String)(using Files^): String
@@ -30,17 +37,39 @@ import caps.assumeSafe
   def query(prompt: String): String
   def queryBatched(prompts: Vector[String]): Vector[String]
 
+/** The network (5.2, 5.4). Only a mode with `Network^` gives it, and the proxy of the sandbox applies the host list.
+  *
+  * A proposal for the review: section 5.1 names `httpGet` and gives no signature or trait.
+  */
+@assumeSafe trait Network extends caps.ExclusiveCapability:
+  /** The body of the answer to a GET request, as text. */
+  def get(url: String): String
+
 /** The session state that survives a restart (6). The bare `Store` can only load, and `Store^` can also store. */
 @assumeSafe trait Store extends Cap:
   def keys: Vector[String]
   def load[A: Data](key: String): Option[A]
   update def store[A: Data](key: String, value: A): Unit
 
-/** Other sessions. The bare `Sessions` can only look, and `Sessions^` can also start work and send messages (5.2). */
+/** Other sessions (8.2). The bare `Sessions` can only look, and `Sessions^` can also start work and send messages
+  * (5.2). The folder of the journals is closed to `Files`, so `zoom` and `observe` are the only ways to read another
+  * session (5.4).
+  */
 @assumeSafe trait Sessions extends Cap:
-  def list(): Vector[String]
-  update def tell(session: String, message: String): Unit
-  update def start(goal: String): String
+  /** The cards of the sessions. The catalog gives the deterministic part (10.2). */
+  def list(): Vector[SessionCard]
+
+  /** A `Send` to that session. It returns after the receiver commits (8.6). */
+  update def tell(session: SessionRef, message: String): Unit
+
+  /** Starts a session in the background. Its report comes back as an `Input` that starts a turn (8.6). */
+  update def start(goal: String, scope: Scope, strategy: StrategyName): SessionRef
+
+  /** A read-only `rlm` with the journal of that session as an input. It changes nothing in that session. */
+  def observe(session: SessionRef, question: String)(using Llm^): String
+
+  /** A part of the journal of a session. `ref` names the part, for example a cell. The form of `ref` is open. */
+  def zoom(session: SessionRef, ref: String): String
 
 /** A child inside the cell (5.1). A closed session has this capability, and it has only the bare `Sessions`. */
 @assumeSafe trait Children extends Cap:
@@ -78,9 +107,8 @@ import caps.assumeSafe
 final case class NeedsApproval(op: String, argument: String)
     extends RuntimeException(s"$op($argument) needs an approval. End the turn and ask the person.")
 
-/** The functions that a cell calls (5.1). Each one takes its capability as a given, so the mode limits what compiles.
-  *
-  * Not here yet, because the design gives no signature: `edit`, `httpGet` and a `Network` trait, `observe` and `zoom`.
+/** The functions that a cell calls (5.1, 8.2). Each one takes its capability as a given, so the mode limits what
+  * compiles.
   */
 @assumeSafe object api:
   def println(value: Any): Unit = scala.Console.println(value)
@@ -98,6 +126,8 @@ final case class NeedsApproval(op: String, argument: String)
 
   def read(path: String)(using f: Files): String                                  = f.read(path)
   def write(path: String, content: String)(using f: Files^): Unit                 = f.write(path, content)
+  def edit(path: String, oldText: String, newText: String)(using f: Files^): Unit = f.edit(path, oldText, newText)
+  def httpGet(url: String)(using n: Network^): String                              = n.get(url)
   def exec(command: String)(using s: Shell^, f: Files^): String                    = s.exec(command)
   def spawn(command: String, report: Boolean = false)(using s: Shell^, f: Files^): JobId = s.spawn(command, report)
   def jobOutput(job: JobId)(using s: Shell^): String                               = s.jobOutput(job)
@@ -108,9 +138,13 @@ final case class NeedsApproval(op: String, argument: String)
   def keys()(using s: Store): Vector[String]                                       = s.keys
   def load[A: Data](key: String)(using s: Store): Option[A]                        = s.load[A](key)
   def store[A: Data](key: String, value: A)(using s: Store^): Unit                 = s.store(key, value)
-  def sessions()(using s: Sessions): Vector[String]                                = s.list()
-  def tell(session: String, message: String)(using s: Sessions^): Unit             = s.tell(session, message)
-  def start(goal: String)(using s: Sessions^): String                              = s.start(goal)
+  def sessions()(using s: Sessions): Vector[SessionCard]                           = s.list()
+  def tell(session: SessionRef, message: String)(using s: Sessions^): Unit         = s.tell(session, message)
+  def observe(session: SessionRef, question: String)(using s: Sessions, l: Llm^): String = s.observe(session, question)
+  def zoom(session: SessionRef, ref: String)(using s: Sessions): String            = s.zoom(session, ref)
+
+  def start(goal: String, scope: Scope, strategy: StrategyName)(using s: Sessions^): SessionRef =
+    s.start(goal, scope, strategy)
 
   def rlm[A: Data](task: String, inputs: Map[String, String] = Map.empty)(using c: Children^): A =
     c.rlm[A](task, inputs)

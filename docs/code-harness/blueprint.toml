@@ -62,7 +62,6 @@ title = "Guest API and REPL"
 modules = ["harness-guest", "harness-repl", "harness-mcp"]
 uses = []
 result = "Model code runs against the guest API in each mode, and another agent can run cells through MCP."
-partial = true
 
 [[phase]]
 id = "p3"
@@ -285,7 +284,7 @@ uses = []
 
 [[node]]
 id = "strategy-name"
-group = "config"
+group = "session-types"
 kind = "data"
 name = "StrategyName"
 ref = "7"
@@ -295,13 +294,13 @@ text = "The name of a strategy of section 7: Window, Prefix summary or Memory tr
 
 [[node]]
 id = "scope"
-group = "config"
+group = "session-types"
 kind = "data"
 name = "Scope"
 ref = "8.1"
 spec = true
 uses = []
-text = "Where a session works: the home of the user, a directory, a worktree, a scratch directory or a fork of a workspace. The table of 8.1 names these cases, but the design gives no type."
+text = "Where a session works: the home of the user, a directory, a worktree, a scratch directory or a fork of a workspace. A proposal: the table of 8.1 names these cases, and CODE_HARNESS.md 7.1 has another proposal. The guest API (start) and the kernel (SessionConfig) both use it, so it is in harness-guest."
 
 [[node]]
 id = "model-choice"
@@ -1068,6 +1067,35 @@ uses = ["mode"]
 text = "A child and a rollout have the mode base.meet(Mode.closed): sessions is at most Read, and children does not change."
 
 
+# ── Phase 2: the types of the sessions (8.1, 8.2). The kernel and the guest API both use them. ────────────────────
+
+[[group]]
+id = "session-types"
+phase = "p2"
+module = "harness-guest"
+file = "SessionTypes.scala"
+title = "The types of the sessions that the guest API and the kernel share"
+
+[[node]]
+id = "session-ref"
+group = "session-types"
+kind = "data"
+name = "SessionRef"
+ref = "8.2"
+spec = true
+uses = []
+text = "A reference to another session, for tell, observe and zoom. It is plain data, so the store can hold it."
+
+[[node]]
+id = "session-card"
+group = "session-types"
+kind = "data"
+name = "SessionCard"
+ref = "10.2"
+spec = true
+uses = ["session-ref"]
+text = "What list shows about a session. A proposal: the deterministic part of 10.2 and the goal. The parts that an LM writes come with the controller."
+
 # ── Phase 2: Data, the codec of the values that leave a cell (5.1) ──────────────────────────────────────────────────
 
 [[group]]
@@ -1244,6 +1272,7 @@ name = "Files"
 ref = "5.1"
 spec = true
 uses = ["cap"]
+text = "read, write, and edit(path, oldText, newText). The edit signature is a proposal: section 5.1 names edit and gives no signature."
 
 [[node]]
 id = "shell"
@@ -1253,6 +1282,16 @@ name = "Shell"
 ref = "5.1"
 spec = true
 uses = ["files", "job-id", "job-status"]
+
+[[node]]
+id = "network"
+group = "guest-api"
+kind = "data"
+name = "Network"
+ref = "5.1"
+spec = true
+uses = []
+text = "The network behind httpGet. Only a mode with Network^ gives it, and the proxy of the sandbox applies the host list. A proposal: section 5.1 names httpGet and gives no signature."
 
 [[node]]
 id = "llm"
@@ -1280,7 +1319,8 @@ kind = "data"
 name = "Sessions"
 ref = "5.1"
 spec = true
-uses = ["cap"]
+uses = ["cap", "session-card", "session-ref", "scope", "strategy-name", "llm"]
+text = "list, tell, start, observe and zoom, as section 8.2 gives them. The host of phases 7 and 9 gives the handlers."
 
 [[node]]
 id = "children"
@@ -1309,7 +1349,8 @@ name = "api"
 ops = ["now", "input"]
 ref = "5.1"
 spec = true
-uses = ["files", "shell", "llm", "store", "sessions", "children", "data", "job-id", "job-status", "turn"]
+uses = ["files", "shell", "network", "llm", "store", "sessions", "children", "data", "job-id", "job-status", "turn",
+        "session-ref", "session-card", "scope", "strategy-name"]
 text = "The functions that a cell calls. Each one takes its capability as a given, so the mode limits what compiles."
 
 # ── Phase 2: the REPL (6). harness-repl uses the kernel: a cell gives a CellOutcome (decision of 2026-11-09). ──────
@@ -1328,7 +1369,7 @@ kind = "data"
 name = "Bindings"
 ref = "5.2"
 spec = true
-uses = ["turn", "files", "shell", "llm", "store", "sessions", "children"]
+uses = ["turn", "files", "shell", "network", "llm", "store", "sessions", "children"]
 text = "What a host gives a REPL: the Turn, and a handler for each capability. The mode says which of them the preamble binds, and how."
 
 [[node]]
@@ -1341,7 +1382,7 @@ ref = "6"
 spec = true
 uses = ["mode", "bindings", "cell-outcome"]
 proof_uses = ["api", "error-hints"]
-text = "ReplDriver in the same JVM with capture checking and safe mode, the givens of the mode, one cell at a time on its own thread, the stop flag, the protections of Phase 0, the second try in two parts, the catch around ReplDriver.run, and the clock of a cell."
+text = "ReplDriver in the same JVM with capture checking and safe mode, the givens of the mode, one cell at a time on its own thread, the five protections of Phase 0 (output, safe mode, the unclean flag, the heap guard, the cell limit), the second try in two parts, the catch around ReplDriver.run, the clock of a cell, and the gate that refuses the calls of a cell after submit."
 
 [[group]]
 id = "names"
@@ -1438,7 +1479,7 @@ name = "Submit:"
 ref = "4.7"
 spec = true
 uses = ["scala-repl", "api"]
-text = "A cell that called submit ends its turn with the first value, and the host refuses each later call of that cell. The tests cover the first value and the names. The refusal of later calls is not in ScalaRepl yet."
+text = "A cell that called submit ends its turn with the first value, and the host refuses each later call of that cell and a second submit. The cell defines no name."
 
 [[node]]
 id = "law-shape"
@@ -1460,6 +1501,33 @@ spec = true
 uses = ["scala-repl", "mode"]
 text = "The negative tests of the modes: in each mode, the calls that the mode does not give do not compile."
 
+[[node]]
+id = "law-clock"
+group = "scala-repl-laws"
+kind = "law"
+name = "Cell clock:"
+ref = "6"
+uses = ["scala-repl"]
+text = "The timeout stops a loop in guest code, and the clock stops during a guest API call."
+
+[[node]]
+id = "law-second-try"
+group = "scala-repl-laws"
+kind = "law"
+name = "Second try:"
+ref = "6"
+uses = ["scala-repl"]
+text = "A cell that the capture checker rejects for the capture set of the enclosing object compiles in two parts: the type definitions, then the rest."
+
+[[node]]
+id = "law-heap"
+group = "scala-repl-laws"
+kind = "law"
+name = "Heap guard:"
+ref = "6"
+uses = ["scala-repl"]
+text = "Under heap pressure, the guard stops the running cell that allocated the most, and its REPL closes (protection 4 of Phase 0)."
+
 # ── Phase 2: the early MCP server (6) ───────────────────────────────────────────────────────────────────────────
 
 [[group]]
@@ -1474,7 +1542,24 @@ id = "mcp-server"
 group = "mcp"
 kind = "data"
 name = "McpServer"
-ops = ["run"]
+ops = ["runCell", "serve"]
 ref = "6"
-uses = ["scala-repl"]
-text = "Two tools: run_cell(code) and the API reference. Only the transport writes to stdout, and the server starts only the read-only mode until the sandbox exists."
+uses = ["scala-repl", "bindings"]
+text = "Two tools: run_cell(code) and api_reference. Only the transport writes to stdout. Until the sandbox exists, the server gives files: Files on a workspace and state: Store^ in memory, with no shell, network, LM or sessions."
+
+[[group]]
+id = "mcp-laws"
+phase = "p2"
+module = "harness-mcp"
+file = "McpLaws.scala"
+where = "tests"
+title = "The laws of the MCP server, in this JVM and over stdio"
+
+[[node]]
+id = "law-mcp"
+group = "mcp-laws"
+kind = "law"
+name = "MCP:"
+ref = "6"
+uses = ["mcp-server"]
+text = "A cell reads the workspace and nothing outside it, cannot write, keeps values in the store, and another agent runs cells over stdio with only the protocol on stdout."

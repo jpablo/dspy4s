@@ -1,6 +1,9 @@
 package dspy4s.harness.repl
 
+import dotty.tools.dotc.ast.untpd
+import dotty.tools.dotc.core.Contexts.Context
 import dotty.tools.dotc.reporting.Diagnostic
+import dotty.tools.dotc.util.SourceFile
 import dotty.tools.repl.{HarnessDriver, Newline, ParseResult, Parsed, State, SyntaxErrors}
 import dspy4s.harness.guest.*
 import dspy4s.harness.kernel.CellOutcome
@@ -23,6 +26,7 @@ final case class Bindings(
     turn    : Turn,
     files   : Option[Files]    = None,
     shell   : Option[Shell]    = None,
+    network : Option[Network]  = None,
     llm     : Option[Llm]      = None,
     store   : Option[Store]    = None,
     sessions: Option[Sessions] = None,
@@ -33,39 +37,53 @@ final case class Bindings(
 final case class CellRun(output: String, outcome: CellOutcome)
 
 /** One REPL for each activation (6), in the same JVM, with capture checking and safe mode. The protections of Phase 0
-  * hold: one cell at a time on its own thread with `Console.withOut`, the stop flag at the timeout, a catch around the
-  * run, and an invalid wrapper for a cell that does not complete, so a later cell sees only the definitions from before
-  * it.
+  * hold:
+  *   - one cell at a time on its own thread with `Console.withOut`, and `System.out` routed to the cell
+  *   - the stop flag at the timeout, and a catch around the run
+  *   - an invalid wrapper for a cell that does not complete, so a later cell sees only the definitions from before it
+  *   - the unclean flag for a thread that does not stop, the heap guard, and the cell limit
   *
-  * Not in this version: the second try in two parts, the refusal of the calls of a cell after its `submit`, and a clock
-  * that stops during a guest API call.
+  * Each guest API call goes through a gate: the clock of the cell stops during a call, and after `submit` the gate
+  * refuses each later call of the cell. A cell that the capture checker rejects for the capture set of the enclosing
+  * object gets a second try in two parts: the type definitions first, then the rest.
   *
   * @param preamble
   *   the preamble of the session (5.1): its types, `submit` and its inputs
   * @param cellTimeout
-  *   the time of one cell, with its compile
+  *   the time of the guest code of one cell, with its compile and with no guest API call
   * @param cellLimit
   *   the number of cells after which the REPL is full, and the host starts a new one (protection 5 of Phase 0)
+  * @param secondTry
+  *   false only for a check of the second try
   */
 final class ScalaRepl(
     mode       : Mode,
     bindings   : Bindings,
     preamble   : String         = "",
     cellTimeout: FiniteDuration = 30.seconds,
-    cellLimit  : Int            = 300
+    cellLimit  : Int            = 300,
+    secondTry  : Boolean        = true
 ) extends AutoCloseable:
   import ScalaRepl.*
 
-  private val key                              = s"repl-${UUID.randomUUID()}"
-  private val capture                          = BoundedOutput(4 * 1024 * 1024)
-  private val out                              = PrintStream(capture, true, UTF_8)
-  private val driver                           = HarnessDriver(compilerArgs, out, SandboxLoader())
-  private var state: State                     = driver.initialState
-  private var cells                            = 0
-  @volatile private var worker: Thread | Null  = null
-  @volatile private var uncleanThread: Boolean = false
+  private val absent = absentHandlers(mode, bindings)
+  require(absent.isEmpty, s"the mode gives ${absent.mkString(", ")}, and the bindings have no handler for it")
 
-  HostBindings.register(key, bindings)
+  private val key                                = s"repl-${UUID.randomUUID()}"
+  private val capture                            = BoundedOutput(4 * 1024 * 1024)
+  private val out                                = PrintStream(capture, true, UTF_8)
+  private val driver                             = HarnessDriver(compilerArgs, out, SandboxLoader())
+  private val gate                               = CallGate(() => HostBindings.submitted(key).isDefined)
+  private var state: State                       = driver.initialState
+  private var cells                              = 0
+  @volatile private var worker: Thread | Null    = null
+  @volatile private var cellStart: Long          = 0L
+  @volatile private var uncleanThread: Boolean   = false
+  @volatile private var memoryStop: Boolean      = false
+  @volatile private var closedForMemory: Boolean = false
+
+  HostBindings.register(key, gated(bindings, gate))
+  HeapGuard.watch(this)
   // The givens read the bindings before safe mode starts. The preamble of the session comes after, in safe mode, so a
   // cell can use its types, `submit` and its inputs.
   for chunk <- givensFor(mode, key) :+ "import language.experimental.safe" :+ preamble if chunk.trim.nonEmpty do
@@ -85,6 +103,9 @@ final class ScalaRepl(
     */
   def unclean: Boolean = uncleanThread
 
+  /** True when the heap guard stopped a cell of this REPL (protection 4 of Phase 0). The host starts a new REPL. */
+  def outOfMemory: Boolean = closedForMemory
+
   /** True after `cellLimit` cells. The memory of a REPL grows with the square of its cells, so the host starts a new
     * REPL with the preamble, the store and the note of lost names.
     */
@@ -95,10 +116,46 @@ final class ScalaRepl(
     val t = worker
     if t != null then t.interrupt()
     HostBindings.remove(key)
+    HeapGuard.unwatch(this)
+
+  /** The bytes that the running cell allocated, for the heap guard. */
+  private[repl] def allocatedInCell: Option[Long] =
+    val t = worker
+    if t == null then None else HeapGuard.allocated(t).map(_ - cellStart)
+
+  /** Stops the running cell for the heap guard, and closes the REPL. */
+  private[repl] def stopForMemory(): Unit =
+    val t = worker
+    if t != null then
+      memoryStop = true
+      closedForMemory = true
+      driver.setStopFlag(true)
+      t.interrupt()
 
   private def execute(code: String): CellRun =
+    val whole = executeOnce(code)
+    whole.outcome match
+      case CellOutcome.CompileError(lines) if secondTry && isCaptureOfObject(lines.mkString(" ")) =>
+        split(code).fold(whole)(inTwoParts)
+      case _ => whole
+
+  /** The second try (6): the type definitions first, then the rest. A failed second part also hides the first. */
+  private def inTwoParts(types: String, rest: String): CellRun =
+    val before = state
+    val first  = executeOnce(types)
+    if first.outcome != CellOutcome.Ok then
+      state = before.copy(objectIndex = state.objectIndex)
+      first
+    else
+      val typesIndex = state.objectIndex
+      val second     = executeOnce(rest)
+      if second.outcome != CellOutcome.Ok then invalidate(typesIndex)
+      CellRun(Vector(first.output, second.output).filter(_.nonEmpty).mkString("\n"), second.outcome)
+
+  private def executeOnce(code: String): CellRun =
     capture.reset()
     HostBindings.clearSubmit(key)
+    gate.reset()
     ParseResult(code.stripTrailing() + "\n")(using state) match
       case parsed: Parsed             => dispatch(parsed)
       case SyntaxErrors(_, errors, _) => compileError(errors.map(describe).toVector)
@@ -121,11 +178,17 @@ final class ScalaRepl(
       )
     val thread = Thread(null, body, key, 64L << 20)
     thread.setDaemon(true)
+    memoryStop = false
+    cellStart = HeapGuard.allocated(thread).getOrElse(0L)
     worker = thread
     thread.start()
+    val started = System.nanoTime()
+    // The clock of the cell counts only the guest code: the gate takes out the time of the guest API calls.
+    def guestNanos = System.nanoTime() - started - gate.callNanos
     try
-      thread.join(cellTimeout.toMillis)
-      if thread.isAlive then timedOut(thread, before)
+      while thread.isAlive && guestNanos < cellTimeout.toNanos && !memoryStop do thread.join(10)
+      if memoryStop then stoppedForMemory(thread, before)
+      else if thread.isAlive then timedOut(thread, before)
       else
         result.get() match
           case Left(t) =>
@@ -146,13 +209,22 @@ final class ScalaRepl(
           case null => CellRun(capture.text, CellOutcome.Failed("the cell gave no result"))
     finally worker = null
 
-  private def timedOut(thread: Thread, before: State): CellRun =
+  private def stop(thread: Thread, before: State): String =
     driver.setStopFlag(true)
     thread.interrupt()
     thread.join(5000)
     if thread.isAlive then uncleanThread = true
     invalidate(state.objectIndex.max(before.objectIndex + 1))
-    CellRun(withoutStopTrace(capture.text), CellOutcome.TimedOut(cellTimeout.toMillis))
+    withoutStopTrace(capture.text)
+
+  private def timedOut(thread: Thread, before: State): CellRun =
+    CellRun(stop(thread, before), CellOutcome.TimedOut(cellTimeout.toMillis))
+
+  private def stoppedForMemory(thread: Thread, before: State): CellRun =
+    CellRun(
+      stop(thread, before),
+      CellOutcome.Failed("the heap was full, so the host stopped the cell and closes the REPL")
+    )
 
   /** Hides the wrapper of a cell that did not complete, as atc does. The earlier definitions stay. */
   private def invalidate(index: Int): Unit =
@@ -164,6 +236,27 @@ final class ScalaRepl(
   private def compileError(diagnostics: Vector[String]): CellRun =
     val text = diagnostics.mkString("\n")
     CellRun(text, CellOutcome.CompileError(diagnostics ++ hint(text).map(h => s"Hint: $h")))
+
+  /** The type definitions and the rest of a cell, with the imports in both parts, or `None` when a part is empty. */
+  private def split(code: String): Option[(String, String)] =
+    given Context = state.context
+    ParseResult(SourceFile.virtual("cell", code))(using state) match
+      case parsed: Parsed =>
+        val trees   = parsed.trees
+        val imports = trees.collect { case i: untpd.Import => i }
+        val types   = trees.filter {
+          case _: untpd.TypeDef | _: untpd.ModuleDef => true
+          case _                                     => false
+        }
+        val rest = trees.filter {
+          case _: untpd.TypeDef | _: untpd.ModuleDef | _: untpd.Import => false
+          case _                                                       => true
+        }
+        def text(part: List[untpd.Tree]): String = (imports ++ part).map(t =>
+          code.substring(t.sourcePos.start, t.sourcePos.end)
+        ).mkString("\n")
+        if types.isEmpty || rest.isEmpty then None else Some((text(types), text(rest)))
+      case _ => None
 
 object ScalaRepl:
 
@@ -212,11 +305,29 @@ object ScalaRepl:
     ) ++ Vector(
       bind("files", "Files", "files", mode.files, read = true),
       bind("shell", "Shell", "shell", mode.shell, read = false),
+      bind("net", "Network", "network", mode.network, read = false),
       bind("llm", "Llm", "llm", mode.llm, read = false),
       bind("state", "Store", "store", mode.store, read = true),
       bind("peers", "Sessions", "sessions", mode.sessions, read = true),
       bind("children", "Children", "children", mode.children, read = false)
     ).flatten
+
+  /** The capabilities that the mode gives and that the bindings do not have. */
+  private def absentHandlers(mode: Mode, b: Bindings): Vector[String] =
+    def needs(access: Access, read: Boolean): Boolean = access == Access.Full || (read && access == Access.Read)
+    Vector(
+      ("files", needs(mode.files, read = true), b.files.isDefined),
+      ("shell", needs(mode.shell, read = false), b.shell.isDefined),
+      ("network", needs(mode.network, read = false), b.network.isDefined),
+      ("llm", needs(mode.llm, read = false), b.llm.isDefined),
+      ("store", needs(mode.store, read = true), b.store.isDefined),
+      ("sessions", needs(mode.sessions, read = true), b.sessions.isDefined),
+      ("children", needs(mode.children, read = false), b.children.isDefined)
+    ).collect { case (name, needed, present) if needed && !present => name }
+
+  /** The error of the capture checker that the second try answers (6). Its text spans two lines of the diagnostic. */
+  private def isCaptureOfObject(text: String): Boolean =
+    text.contains("is not included in the allowed capture set") && text.contains("of the enclosing object")
 
   private def describe(d: Diagnostic): String =
     val pos = d.pos
@@ -251,9 +362,10 @@ object HostBindings:
     bindings.remove(key): Unit
     submits.remove(key): Unit
 
-  /** Records the first value of a cell, and ends the cell. */
+  /** Records the first value of a cell, and ends the cell. A second `submit` of the cell is an error (5.1). */
   def submit(key: String, value: Json): Nothing =
-    submits.putIfAbsent(key, value): Unit
+    if submits.putIfAbsent(key, value) != null then
+      throw IllegalStateException("submit: this cell has called submit, so it can make no more calls")
     throw SubmitSignal()
 
   def submitted(key: String): Option[Json] = Option(submits.get(key))

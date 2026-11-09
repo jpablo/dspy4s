@@ -1,6 +1,6 @@
 package dspy4s.harness.kernel
 
-import dspy4s.harness.guest.Mode
+import dspy4s.harness.guest.{Mode, Scope, StrategyName}
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.Json
 
@@ -20,32 +20,6 @@ enum Owner derives Schema, CanEqual:
 /** A chat turn gives one last step to answer. A program call ends, and the caller runs the finisher (4.3). */
 enum TurnKind derives Schema, CanEqual:
   case Chat, Program
-
-/** The strategies of the context (7). */
-enum StrategyName derives Schema, CanEqual:
-  case Window, PrefixSummary, MemoryTree
-
-/** Where a session works (8.1).
-  *
-  * A proposal for the review: the table of 8.1 names these cases, but the design gives no type. A path is a text, so
-  * the configuration has the same JSON on each host.
-  */
-enum Scope derives Schema, CanEqual:
-
-  /** The home of the user: the scope of the controller. */
-  case Home(path: String)
-
-  case Directory(path: String)
-
-  case Worktree(path: String, branch: String)
-
-  /** A new directory that only this session uses. */
-  case Scratch(path: String)
-
-  /** A copy at `path` of the workspace at `from`: the scope of a rollout, or of a child that does not share the scope
-    * of its parent.
-    */
-  case Fork(path: String, from: String)
 
 /** The model of a session (8.1).
   *

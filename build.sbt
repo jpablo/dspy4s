@@ -64,7 +64,8 @@ lazy val root = (project in file("."))
     examples,
     harnessGuest,
     harnessKernel,
-    harnessRepl
+    harnessRepl,
+    harnessMcp
   )
   .settings(commonSettings)
   .settings(
@@ -255,6 +256,16 @@ lazy val harnessGuest = (project in file("modules/harness-guest"))
   .settings(commonSettings)
   .settings(name := "dspy4s-harness-guest")
   .settings(
+    // The API reference (5.1) is the source text of the guest API. The MCP server gives it to another agent.
+    Compile / resourceGenerators += Def.task {
+      val sources = (Compile / scalaSource).value / "dspy4s" / "harness" / "guest"
+      val target  = (Compile / resourceManaged).value / "dspy4s" / "harness" / "guest"
+      Seq("Guest.scala", "SessionTypes.scala").map { name =>
+        val copy = target / s"$name.txt"
+        IO.copyFile(sources / name, copy)
+        copy
+      }
+    }.taskValue,
     libraryDependencies ++= Seq(
       "dev.zio"       %% "zio-blocks-schema" % zioBlocksVersion,
       "org.scalameta" %% "munit"             % munitVersion           % Test,
@@ -287,7 +298,25 @@ lazy val harnessRepl = (project in file("modules/harness-repl"))
       "org.scalameta"  %% "munit"       % munitVersion % Test
     ),
     // The checks of section 12 used the REPL of this nightly with no scaladoc, and the REPL does not need it.
-    excludeDependencies += ExclusionRule("org.scala-lang", "scaladoc_3")
+    excludeDependencies += ExclusionRule("org.scala-lang", "scaladoc_3"),
+    // The heap guard is one for the JVM, so its test must not stop the cells of another suite.
+    Test / parallelExecution := false
+  )
+
+// The early MCP server (6): the REPL and the guest API for another agent, before the harness has its own loop.
+lazy val harnessMcp = (project in file("modules/harness-mcp"))
+  .dependsOn(harnessRepl)
+  .settings(commonSettings)
+  .settings(name := "dspy4s-harness-mcp")
+  .settings(
+    libraryDependencies ++= Seq(
+      "io.modelcontextprotocol.sdk" % "mcp"   % mcpSdkVersion,
+      "org.scalameta"              %% "munit" % munitVersion % Test
+    ),
+    excludeDependencies += ExclusionRule("org.scala-lang", "scaladoc_3"),
+    // The end-to-end test starts the server in a child JVM with the class path of the tests.
+    Test / fork := true,
+    Test / javaOptions += "-Dfile.encoding=UTF-8"
   )
 
 // JMH stays outside the root aggregate. Normal compile and test runs do not pay for benchmark generation.
