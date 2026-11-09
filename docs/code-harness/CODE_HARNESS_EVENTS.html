@@ -158,38 +158,49 @@ footer { border-top: 1px solid var(--line); margin-top: 48px; padding-top: 18px;
 
   <section class="part" id="flow">
     <div class="head"><span class="no">Part 2</span><h2>The flow of information in one step</h2><p class="ref">Design §4.6, §5.1, §5.6, §7</p></div>
-    <p class="caption">One step is a loop. The context strategy reads the journal and makes the policy input. The LM writes a cell, the cell calls the guest API, and each result goes back into the journal through the writer. The next step starts from the journal again, so nothing that the journal does not hold can reach the next LM call.</p>
+    <p class="caption">A turn is a loop, and a message from outside starts it. The writer commits the message as <code>Input</code> and <code>TurnStarted</code>. Then the worker asks <code>next</code>, which reads the state of the journal. While <code>next</code> says <code>CallPolicy</code>, a step runs: the context strategy makes the policy input, the LM replies, a cell runs, and each result goes back into the journal through the writer. The loop ends when a reply has no code, or when <code>next</code> says <code>End</code>. Nothing that the journal does not hold can reach the next LM call.</p>
     <div class="frame scroll">
-      <svg class="flow" viewBox="0 0 1000 330" style="min-width:820px;width:100%" role="img" aria-labelledby="fl-t fl-d">
-        <title id="fl-t">The information loop of one step</title>
-        <desc id="fl-d">Journal to context strategy to policy leaf to Acted; Acted down to the REPL cell; the cell to the guard, the guard to a handler, the handler to the world; the result back up to the journal.</desc>
+      <svg class="flow" viewBox="0 0 1110 440" style="min-width:860px;width:100%" role="img" aria-labelledby="fl-t fl-d">
+        <title id="fl-t">The loop of a turn: its start, its steps and its exits</title>
+        <desc id="fl-d">A message becomes Input and TurnStarted in the journal. next reads the state. CallPolicy starts a step: the context strategy, the policy leaf, Acted. Code goes to the REPL cell, the guard, a handler and the world, and the result goes back into the journal. A reply with no code, and End from next, lead to TurnEnded.</desc>
         <defs><marker id="fa" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M2 1L8 5L2 9" fill="none" stroke="context-stroke" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></marker></defs>
-        <rect x="20" y="40" width="170" height="64" rx="8" class="s-box" style="stroke:var(--ln-event)"/><text x="36" y="66" class="t-title">Journal</text><text x="36" y="86" class="t-sub">every entry, for good</text>
-        <rect x="283" y="40" width="170" height="64" rx="8" class="s-box"/><text x="299" y="66" class="t-title">Context strategy</text><text x="299" y="86" class="t-sub">a fold of the journal</text>
-        <rect x="546" y="40" width="170" height="64" rx="8" class="s-box" style="stroke:var(--ln-external)"/><text x="562" y="66" class="t-title">Policy leaf</text><text x="562" y="86" class="t-sub">one LM call</text>
-        <rect x="809" y="40" width="170" height="64" rx="8" class="s-box" style="stroke:var(--ln-event)"/><text x="825" y="66" class="t-title">Acted</text><text x="825" y="86" class="t-sub">text, and maybe code</text>
-        <rect x="809" y="226" width="170" height="64" rx="8" class="s-box"/><text x="825" y="252" class="t-title">REPL cell</text><text x="825" y="272" class="t-sub">runs the code</text>
-        <rect x="546" y="226" width="170" height="64" rx="8" class="s-box" style="stroke:var(--ln-policy)"/><text x="562" y="252" class="t-title">Guard</text><text x="562" y="272" class="t-sub">Allow, Ask, Deny</text>
-        <rect x="283" y="226" width="170" height="64" rx="8" class="s-box"/><text x="299" y="252" class="t-title">Handler</text><text x="299" y="272" class="t-sub">files, shell, LM, sessions</text>
-        <rect x="20" y="226" width="170" height="64" rx="8" class="s-box" style="stroke:var(--ln-external)"/><text x="36" y="252" class="t-title">The world</text><text x="36" y="272" class="t-sub">workspace, OS, LM, sessions</text>
-        <line x1="190" y1="72" x2="280" y2="72" class="wire" style="stroke:var(--ln-plain)" marker-end="url(#fa)"/><text x="200" y="62" class="t-lbl">entries</text>
-        <line x1="453" y1="72" x2="543" y2="72" class="wire" style="stroke:var(--ln-plain)" marker-end="url(#fa)"/><text x="461" y="62" class="t-lbl">PolicyInput</text>
-        <line x1="716" y1="72" x2="806" y2="72" class="wire" style="stroke:var(--ln-plain)" marker-end="url(#fa)"/><text x="726" y="62" class="t-lbl">a reply</text>
-        <line x1="894" y1="104" x2="894" y2="223" class="wire" style="stroke:var(--ln-plain)" marker-end="url(#fa)"/><text x="902" y="168" class="t-lbl">code</text>
-        <line x1="809" y1="258" x2="719" y2="258" class="wire" style="stroke:var(--ln-plain)" marker-end="url(#fa)"/><text x="726" y="248" class="t-lbl">op, args</text>
-        <line x1="546" y1="258" x2="456" y2="258" class="wire" style="stroke:var(--ln-plain)" marker-end="url(#fa)"/><text x="463" y="248" class="t-lbl">Run</text>
-        <line x1="283" y1="258" x2="193" y2="258" class="wire" style="stroke:var(--ln-plain)" marker-end="url(#fa)"/><text x="200" y="248" class="t-lbl">the call</text>
-        <line x1="105" y1="226" x2="105" y2="107" class="wire" style="stroke:var(--ln-event)" marker-end="url(#fa)"/>
-        <text x="116" y="160" class="t-lbl">the result: EffectDone</text><text x="116" y="176" class="t-lbl">and Observed, through</text><text x="116" y="192" class="t-lbl">the writer</text>
+        <rect x="20" y="50" width="150" height="64" rx="32" class="s-box" style="stroke:var(--ln-command)"/><text x="95" y="76" text-anchor="middle" class="t-title">A message</text><text x="95" y="96" text-anchor="middle" class="t-sub">person, owner, harness</text>
+        <rect x="250" y="50" width="150" height="64" rx="8" class="s-box" style="stroke:var(--ln-event)"/><text x="266" y="76" class="t-title">Journal</text><text x="266" y="96" class="t-sub">every entry, for good</text>
+        <polygon points="480,82 555,38 630,82 555,126" class="s-box" style="stroke:var(--ln-policy)"/><text x="555" y="78" text-anchor="middle" class="t-title">next</text><text x="555" y="96" text-anchor="middle" class="t-sub">reads the state</text>
+        <rect x="710" y="50" width="150" height="64" rx="8" class="s-box"/><text x="726" y="76" class="t-title">Context strategy</text><text x="726" y="96" class="t-sub">makes the input</text>
+        <rect x="940" y="50" width="150" height="64" rx="8" class="s-box" style="stroke:var(--ln-external)"/><text x="956" y="76" class="t-title">Policy leaf</text><text x="956" y="96" class="t-sub">one LM call</text>
+        <rect x="940" y="200" width="150" height="64" rx="8" class="s-box" style="stroke:var(--ln-event)"/><text x="956" y="226" class="t-title">Acted</text><text x="956" y="246" class="t-sub">text, maybe code</text>
+        <rect x="480" y="200" width="150" height="64" rx="32" class="s-box" style="stroke:var(--ln-event)"/><text x="555" y="226" text-anchor="middle" class="t-title">TurnEnded</text><text x="555" y="246" text-anchor="middle" class="t-sub">wait for a message</text>
+        <rect x="940" y="350" width="150" height="64" rx="8" class="s-box"/><text x="956" y="376" class="t-title">REPL cell</text><text x="956" y="396" class="t-sub">runs the code</text>
+        <rect x="710" y="350" width="150" height="64" rx="8" class="s-box" style="stroke:var(--ln-policy)"/><text x="726" y="376" class="t-title">Guard</text><text x="726" y="396" class="t-sub">Allow, Ask, Deny</text>
+        <rect x="480" y="350" width="150" height="64" rx="8" class="s-box"/><text x="496" y="376" class="t-title">Handler</text><text x="496" y="396" class="t-sub">files, shell, LM</text>
+        <rect x="250" y="350" width="150" height="64" rx="8" class="s-box" style="stroke:var(--ln-external)"/><text x="266" y="376" class="t-title">The world</text><text x="266" y="396" class="t-sub">workspace, OS, LM</text>
+        <line x1="170" y1="82" x2="247" y2="82" class="wire" style="stroke:var(--ln-command)" marker-end="url(#fa)"/><text x="178" y="58" class="t-lbl">Input,</text><text x="178" y="73" class="t-lbl">TurnStarted</text>
+        <line x1="400" y1="82" x2="477" y2="82" class="wire" style="stroke:var(--ln-plain)" marker-end="url(#fa)"/><text x="408" y="73" class="t-lbl">the state</text>
+        <line x1="630" y1="82" x2="707" y2="82" class="wire" style="stroke:var(--ln-policy)" marker-end="url(#fa)"/><text x="636" y="58" class="t-lbl">CallPolicy:</text><text x="636" y="73" class="t-lbl">StepStarted</text>
+        <line x1="860" y1="82" x2="937" y2="82" class="wire" style="stroke:var(--ln-plain)" marker-end="url(#fa)"/><text x="866" y="73" class="t-lbl">PolicyInput</text>
+        <line x1="1015" y1="114" x2="1015" y2="197" class="wire" style="stroke:var(--ln-external)" marker-end="url(#fa)"/><text x="1023" y="160" class="t-lbl">a reply</text>
+        <line x1="1015" y1="264" x2="1015" y2="347" class="wire" style="stroke:var(--ln-plain)" marker-end="url(#fa)"/><text x="1023" y="310" class="t-lbl">code</text>
+        <line x1="940" y1="232" x2="633" y2="232" class="wire" style="stroke:var(--ln-event)" marker-end="url(#fa)"/><text x="660" y="224" class="t-lbl">no code: the turn ends as Replied</text>
+        <line x1="555" y1="126" x2="555" y2="197" class="wire" style="stroke:var(--ln-event)" marker-end="url(#fa)"/><text x="563" y="152" class="t-lbl">End: after submit,</text><text x="563" y="167" class="t-lbl">at the step limit,</text><text x="563" y="182" class="t-lbl">or after a stop</text>
+        <line x1="940" y1="382" x2="863" y2="382" class="wire" style="stroke:var(--ln-plain)" marker-end="url(#fa)"/><text x="868" y="374" class="t-lbl">op, args</text>
+        <line x1="710" y1="382" x2="633" y2="382" class="wire" style="stroke:var(--ln-policy)" marker-end="url(#fa)"/><text x="640" y="374" class="t-lbl">Run</text>
+        <line x1="480" y1="382" x2="403" y2="382" class="wire" style="stroke:var(--ln-plain)" marker-end="url(#fa)"/><text x="410" y="374" class="t-lbl">the call</text>
+        <line x1="325" y1="350" x2="325" y2="117" class="wire" style="stroke:var(--ln-event)" marker-end="url(#fa)"/>
+        <text x="317" y="210" text-anchor="end" class="t-lbl">the result:</text><text x="317" y="226" text-anchor="end" class="t-lbl">EffectDone, Observed,</text><text x="317" y="242" text-anchor="end" class="t-lbl">through the writer</text>
+        <text x="20" y="160" class="t-sub">start</text><text x="20" y="176" class="t-sub">here</text>
       </svg>
     </div>
     <div class="flowlists">
       <div><h3>What crosses each arrow</h3><ul>
-        <li><b>entries:</b> each fact of the session, in the order of <code>seq</code>.</li>
+        <li><b>Input, TurnStarted:</b> the message, committed with a full flush. With no open turn, it starts one.</li>
+        <li><b>the state:</b> the fold of the journal. <code>next</code> reads it before each step.</li>
+        <li><b>CallPolicy, StepStarted:</b> the intent of the LM call commits before the call.</li>
         <li><b>PolicyInput:</b> the task, the API reference with the preamble, the status, the last observation and the history that the strategy keeps.</li>
         <li><b>a reply:</b> text, and maybe the code of one cell.</li>
         <li><b>op, args:</b> the name of the call and its arguments as <code>Json</code>. The intent commits before the call.</li>
         <li><b>the result:</b> a value as <code>Json</code> with its rendered text, an error, <code>NeedsApproval</code> or <code>Unknown</code>.</li>
+        <li><b>End:</b> <code>TurnEnded</code> with <code>Replied</code>, <code>Submitted</code>, <code>Exhausted</code> or <code>Aborted</code>. A chat turn at the step limit first gets one last LM call that must answer in text.</li>
       </ul></div>
       <div><h3>What never crosses</h3><ul>
         <li><b>A secret.</b> A handler adds it to a request, and the writer masks each known value before a commit.</li>
