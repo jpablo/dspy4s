@@ -4,26 +4,43 @@
 # CODE_HARNESS_BLUEPRINT.html. The script finds the state of each node; this file holds no state, except the date of
 # a review of a spec node.
 #
+# A phase:
+#   id, number, title and result come from section 15.
+#   modules  the sbt modules that the phase makes. The script reads modules/<module>/src and the test reports in
+#            modules/<module>/target/test-reports.
+#   uses     the phases whose results this phase needs. A node can also use a node of another phase. The plan then
+#            shows a dashed arrow, because the phase needs only some nodes of the other phase.
+#   partial  true when the blueprint has only some nodes of the phase
+#
+# A group is a work package: the nodes in one file. Two groups have no file in common, so two writers can work on
+# two groups at the same time.
+#   id       a unique name, used in the `group` of a node
+#   phase    the phase that makes the group
+#   module   the module of the file, one of the modules of the phase
+#   file     the name of the file, for example "Entry.scala". The check warns when the code of a node is in another
+#            file.
+#   where    "tests" for test code
+#   title    a short description
+#
 # A node:
 #   id       a unique name, used in `uses`
-#   phase    the phase that builds it
+#   group    the group of the node. The node has the phase of its group. An upstream node has no group.
 #   kind     "upstream" (a type of a library), "data" (a type), "function", "law" or "check"
 #   name     what the scan looks for: the Scala name of a type or function, or, for a law or check, the start of
 #            the test names, for example "Fold:" for test("Fold: ...")
 #   ops      for a type with methods: the methods that need a body
-#   where    "tests" when the code is test code (the schedule generator)
 #   ref      the section of CODE_HARNESS_DESIGN.md
 #   spec     true when the node crosses a boundary (the journal, a command, a law): a person must review it
 #   reviewed the date of that review
 #   blocked  a reason when the design must change before the work can start
-#   uses     the nodes that this node needs
+#   uses     the nodes that this node needs. The check compares them with the names in the code.
 #   text     the statement of a law (from section 4.7), or a short note
 
 [meta]
 title = "Code harness blueprint"
 design = "CODE_HARNESS_DESIGN.md"
 
-# ── Phases (section 15). `uses` comes from the module table of 10.5 and from what each phase needs. ──────────────
+# ── Phases (section 15). `uses` comes from the module table of 10.5 and from what each phase needs. ─────────────────
 
 [[phase]]
 id = "p1"
@@ -32,9 +49,6 @@ title = "Kernel"
 modules = ["harness-kernel"]
 uses = []
 result = "The laws of 4.7 run in CI."
-sources = "modules/harness-kernel/src/main/scala"
-tests = "modules/harness-kernel/src/test/scala"
-reports = "modules/harness-kernel/target/test-reports"
 
 [[phase]]
 id = "p2"
@@ -43,6 +57,7 @@ title = "Guest API and REPL"
 modules = ["harness-guest", "harness-repl", "harness-mcp"]
 uses = []
 result = "Model code runs against the guest API in each mode, and another agent can run cells through MCP."
+partial = true
 
 [[phase]]
 id = "p3"
@@ -100,11 +115,10 @@ modules = []
 uses = ["p7", "p8"]
 result = "One controller above all sessions."
 
-# ── Phase 1: library types ────────────────────────────────────────────────────────────────────────────────────
+# ── Types of libraries. They have no group, and each phase can use them. ────────────────────────────────────────────
 
 [[node]]
 id = "json"
-phase = "p1"
 kind = "upstream"
 name = "Json"
 ref = "4.1"
@@ -113,18 +127,24 @@ text = "The JSON value of zio-blocks. Each value in an entry is a Json, with onl
 
 [[node]]
 id = "schema"
-phase = "p1"
 kind = "upstream"
 name = "Schema"
 ref = "4.1"
 uses = []
 text = "The codec of zio-blocks. Each type of the journal derives one."
 
-# ── Phase 1: the journal (4.1) ────────────────────────────────────────────────────────────────────────────────
+# ── Phase 1: the ids (4.1) ──────────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "ids"
+phase = "p1"
+module = "harness-kernel"
+file = "Ids.scala"
+title = "The ids of sessions, requests and effects, and the versions"
 
 [[node]]
 id = "session-id"
-phase = "p1"
+group = "ids"
 kind = "data"
 name = "SessionId"
 ref = "8.6"
@@ -133,7 +153,7 @@ uses = []
 
 [[node]]
 id = "request-id"
-phase = "p1"
+group = "ids"
 kind = "data"
 name = "RequestId"
 ref = "4.5"
@@ -142,46 +162,8 @@ uses = []
 text = "The id of a Send or a Grant. A repeat with a known id commits nothing."
 
 [[node]]
-id = "versions"
-phase = "p1"
-kind = "data"
-name = "Versions"
-ref = "4.1"
-spec = true
-uses = []
-
-[[node]]
-id = "source"
-phase = "p1"
-kind = "data"
-name = "Source"
-ref = "4.1"
-spec = true
-uses = ["session-id"]
-text = "The sender of an entry: User, Controller, Harness, Policy or a child session."
-
-[[node]]
-id = "taint"
-phase = "p1"
-kind = "data"
-name = "Taint"
-ref = "4.1"
-spec = true
-uses = []
-
-[[node]]
-id = "meta"
-phase = "p1"
-kind = "data"
-name = "Meta"
-ref = "4.1"
-spec = true
-uses = ["source", "taint"]
-text = "The data that the model never sees."
-
-[[node]]
 id = "effect-id"
-phase = "p1"
+group = "ids"
 kind = "data"
 name = "EffectId"
 ref = "4.1"
@@ -190,87 +172,26 @@ uses = []
 text = "The id of a guest API call: the seq of its Acted entry, and a count."
 
 [[node]]
-id = "effect-result"
-phase = "p1"
+id = "versions"
+group = "ids"
 kind = "data"
-name = "EffectResult"
+name = "Versions"
 ref = "4.1"
 spec = true
-uses = ["json", "guard-rule"]
-text = "Value, Error, NeedsApproval or Unknown."
+uses = []
 
-[[node]]
-id = "cell-outcome"
+# ── Phase 1: the guard (5.5) ────────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "guard"
 phase = "p1"
-kind = "data"
-name = "CellOutcome"
-ref = "4.1"
-spec = true
-uses = ["json"]
-
-[[node]]
-id = "turn-outcome"
-phase = "p1"
-kind = "data"
-name = "TurnOutcome"
-ref = "4.1"
-spec = true
-uses = ["json"]
-text = "Replied, Submitted, Exhausted, Aborted, Crashed or Failed."
-
-[[node]]
-id = "session-outcome"
-phase = "p1"
-kind = "data"
-name = "SessionOutcome"
-ref = "4.1"
-spec = true
-uses = ["session-id"]
-
-[[node]]
-id = "job-selector"
-phase = "p1"
-kind = "data"
-name = "JobSelector"
-ref = "10.3"
-spec = true
-uses = ["effect-id"]
-
-[[node]]
-id = "entry"
-phase = "p1"
-kind = "data"
-name = "Entry"
-ref = "4.1"
-spec = true
-uses = ["versions", "session-config", "request-id", "json", "effect-id", "effect-result", "cell-outcome",
-        "job-selector", "guard-rule", "grant-lifetime", "turn-outcome", "session-outcome"]
-text = "The 14 kinds of entry. The entries of one turn form the small language of 4.1."
-
-[[node]]
-id = "logged"
-phase = "p1"
-kind = "data"
-name = "Logged"
-ref = "4.1"
-spec = true
-uses = ["meta", "entry", "schema"]
-text = "An entry with its seq and its meta: one line of the journal."
-
-[[node]]
-id = "needs-flush"
-phase = "p1"
-kind = "function"
-name = "needsFlush"
-ref = "4.1"
-uses = ["entry"]
-text = "An entry that needs a flush before commit returns: Input, Activated, and an EffectStarted that is not read-only."
-
-# ── Phase 1: the guard and the config (5.5, 8.1) ─────────────────────────────────────────────────────────────
+module = "harness-kernel"
+file = "Guard.scala"
+title = "The rules of the guard and their verdicts"
 
 [[node]]
 id = "arg-match"
-phase = "p1"
+group = "guard"
 kind = "data"
 name = "ArgMatch"
 ref = "5.5"
@@ -279,7 +200,7 @@ uses = ["json"]
 
 [[node]]
 id = "guard-rule"
-phase = "p1"
+group = "guard"
 kind = "data"
 name = "GuardRule"
 ops = ["matches", "covers"]
@@ -289,7 +210,7 @@ uses = ["arg-match", "json"]
 
 [[node]]
 id = "verdict"
-phase = "p1"
+group = "guard"
 kind = "data"
 name = "Verdict"
 ops = ["join"]
@@ -300,7 +221,7 @@ text = "Allow, Ask or Deny. join gives the stronger verdict."
 
 [[node]]
 id = "verdict-rule"
-phase = "p1"
+group = "guard"
 kind = "data"
 name = "VerdictRule"
 ref = "5.5"
@@ -309,7 +230,7 @@ uses = ["guard-rule", "verdict"]
 
 [[node]]
 id = "guard"
-phase = "p1"
+group = "guard"
 kind = "data"
 name = "Guard"
 ops = ["verdict", "and"]
@@ -320,7 +241,7 @@ text = "and is a monoid, and allowAll is its identity."
 
 [[node]]
 id = "grant-lifetime"
-phase = "p1"
+group = "guard"
 kind = "data"
 name = "GrantLifetime"
 ref = "5.5"
@@ -328,9 +249,18 @@ spec = true
 uses = []
 text = "Once, Turn or Session."
 
+# ── Phase 1: the configuration (8.1) ────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "config"
+phase = "p1"
+module = "harness-kernel"
+file = "SessionConfig.scala"
+title = "The configuration of a session"
+
 [[node]]
 id = "owner"
-phase = "p1"
+group = "config"
 kind = "data"
 name = "Owner"
 ops = ["hasPerson"]
@@ -340,7 +270,7 @@ uses = ["session-id"]
 
 [[node]]
 id = "turn-kind"
-phase = "p1"
+group = "config"
 kind = "data"
 name = "TurnKind"
 ref = "8.1"
@@ -348,20 +278,172 @@ spec = true
 uses = []
 
 [[node]]
+id = "strategy-name"
+group = "config"
+kind = "data"
+name = "StrategyName"
+ref = "7"
+spec = true
+uses = []
+text = "The name of a strategy of section 7: Window, Prefix summary or Memory tree."
+
+[[node]]
+id = "scope"
+group = "config"
+kind = "data"
+name = "Scope"
+ref = "8.1"
+spec = true
+uses = []
+text = "Where a session works: the home of the user, a directory, a worktree, a scratch directory or a fork of a workspace. The table of 8.1 names these cases, but the design gives no type."
+
+[[node]]
+id = "model-choice"
+group = "config"
+kind = "data"
+name = "ModelChoice"
+ref = "8.1"
+spec = true
+uses = []
+text = "The model of a session. The design gives no type yet."
+
+[[node]]
 id = "session-config"
-phase = "p1"
+group = "config"
 kind = "data"
 name = "SessionConfig"
 ref = "8.1"
 spec = true
-uses = ["turn-kind", "guard", "owner"]
-text = "The kernel check has only kind, steps, guard and owner. Section 8.1 has more fields, for example preamble and env."
+uses = ["turn-kind", "mode", "strategy-name", "scope", "owner", "guard", "model-choice"]
+text = "One type for the four kinds of session: the controller, a work session, a child and a rollout. Activated holds it, so it holds no secret (5.6)."
 
-# ── Phase 1: the state, the next work and the commands (4.2 to 4.5) ───────────────────────────────────────────
+# ── Phase 1: the journal (4.1) ──────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "journal"
+phase = "p1"
+module = "harness-kernel"
+file = "Entry.scala"
+title = "The entries of the journal and their meta"
+
+[[node]]
+id = "source"
+group = "journal"
+kind = "data"
+name = "Source"
+ref = "4.1"
+spec = true
+uses = ["session-id"]
+text = "The sender of an entry: User, Controller, Harness, Policy or a child session."
+
+[[node]]
+id = "taint"
+group = "journal"
+kind = "data"
+name = "Taint"
+ref = "4.1"
+spec = true
+uses = []
+
+[[node]]
+id = "meta"
+group = "journal"
+kind = "data"
+name = "Meta"
+ref = "4.1"
+spec = true
+uses = ["source", "taint"]
+text = "The data that the model never sees."
+
+[[node]]
+id = "effect-result"
+group = "journal"
+kind = "data"
+name = "EffectResult"
+ref = "4.1"
+spec = true
+uses = ["json", "guard-rule"]
+text = "Value, Error, NeedsApproval or Unknown."
+
+[[node]]
+id = "cell-outcome"
+group = "journal"
+kind = "data"
+name = "CellOutcome"
+ref = "4.1"
+spec = true
+uses = ["json"]
+
+[[node]]
+id = "turn-outcome"
+group = "journal"
+kind = "data"
+name = "TurnOutcome"
+ref = "4.1"
+spec = true
+uses = ["json"]
+text = "Replied, Submitted, Exhausted, Aborted, Crashed or Failed."
+
+[[node]]
+id = "session-outcome"
+group = "journal"
+kind = "data"
+name = "SessionOutcome"
+ref = "4.1"
+spec = true
+uses = ["session-id"]
+
+[[node]]
+id = "job-selector"
+group = "journal"
+kind = "data"
+name = "JobSelector"
+ref = "10.3"
+spec = true
+uses = ["effect-id"]
+
+[[node]]
+id = "entry"
+group = "journal"
+kind = "data"
+name = "Entry"
+ref = "4.1"
+spec = true
+uses = ["versions", "session-config", "request-id", "json", "effect-id", "effect-result", "cell-outcome",
+        "job-selector", "guard-rule", "grant-lifetime", "turn-outcome", "session-outcome"]
+text = "The 14 kinds of entry. The entries of one turn form the small language of 4.1."
+
+[[node]]
+id = "logged"
+group = "journal"
+kind = "data"
+name = "Logged"
+ref = "4.1"
+spec = true
+uses = ["meta", "entry", "schema"]
+text = "An entry with its seq and its meta: one line of the journal."
+
+[[node]]
+id = "needs-flush"
+group = "journal"
+kind = "function"
+name = "needsFlush"
+ref = "4.1"
+uses = ["entry"]
+text = "An entry that needs a flush before commit returns: Input, Activated, and an EffectStarted that is not read-only."
+
+# ── Phase 1: the state (4.2) ────────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "state"
+phase = "p1"
+module = "harness-kernel"
+file = "SessionState.scala"
+title = "The state and the fold of the journal"
 
 [[node]]
 id = "active-grant"
-phase = "p1"
+group = "state"
 kind = "data"
 name = "ActiveGrant"
 ref = "5.5"
@@ -369,7 +451,7 @@ uses = ["guard-rule", "grant-lifetime"]
 
 [[node]]
 id = "open-call"
-phase = "p1"
+group = "state"
 kind = "data"
 name = "OpenCall"
 ref = "4.2"
@@ -377,7 +459,7 @@ uses = ["json"]
 
 [[node]]
 id = "job-record"
-phase = "p1"
+group = "state"
 kind = "data"
 name = "JobRecord"
 ref = "10.3"
@@ -385,7 +467,7 @@ uses = []
 
 [[node]]
 id = "position"
-phase = "p1"
+group = "state"
 kind = "data"
 name = "Position"
 ref = "4.2"
@@ -393,27 +475,16 @@ uses = ["json"]
 
 [[node]]
 id = "session-state"
-phase = "p1"
+group = "state"
 kind = "data"
 name = "SessionState"
-ops = ["of"]
 ref = "4.2"
 uses = ["session-config", "position", "effect-id", "open-call", "json", "request-id", "active-grant", "guard-rule",
         "job-record"]
 
 [[node]]
-id = "fold"
-phase = "p1"
-kind = "data"
-name = "Fold"
-ops = ["apply", "map", "zip"]
-ref = "4.2"
-uses = []
-text = "A view of a journal as a fold. Folds compose, so several views need one pass."
-
-[[node]]
 id = "evolve"
-phase = "p1"
+group = "state"
 kind = "function"
 name = "evolve"
 ref = "4.2"
@@ -421,8 +492,54 @@ uses = ["session-state", "logged"]
 text = "The only place where state changes. Total and pure."
 
 [[node]]
-id = "next-step"
+id = "state"
+group = "state"
+kind = "function"
+name = "state"
+ref = "4.2"
+uses = ["session-state", "logged", "evolve"]
+text = "The state after a journal: journal.foldLeft(initial)(evolve)."
+
+[[node]]
+id = "forked"
+group = "state"
+kind = "function"
+name = "forked"
+ref = "5.5"
+uses = ["state"]
+text = "A fork of a journal prefix starts with no grants, no pending calls and no jobs."
+
+# ── Phase 1: the folds (4.2) ────────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "fold"
 phase = "p1"
+module = "harness-kernel"
+file = "Fold.scala"
+title = "The views of a journal that compose"
+
+[[node]]
+id = "fold"
+group = "fold"
+kind = "data"
+name = "Fold"
+ops = ["apply", "map", "zip"]
+ref = "4.2"
+uses = []
+text = "A view of a journal as a fold. Folds compose, so several views need one pass."
+
+# ── Phase 1: the next piece of work (4.3) ───────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "next"
+phase = "p1"
+module = "harness-kernel"
+file = "Next.scala"
+title = "The next piece of work"
+
+[[node]]
+id = "next-step"
+group = "next"
 kind = "data"
 name = "Next"
 ref = "4.3"
@@ -431,15 +548,24 @@ text = "Wait, CallPolicy, RunCell or End."
 
 [[node]]
 id = "next"
-phase = "p1"
+group = "next"
 kind = "function"
 name = "next"
 ref = "4.3"
 uses = ["session-state", "next-step"]
 
+# ── Phase 1: the repair (4.4) ───────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "repair"
+phase = "p1"
+module = "harness-kernel"
+file = "Repair.scala"
+title = "The entries that close a turn"
+
 [[node]]
 id = "closing"
-phase = "p1"
+group = "repair"
 kind = "function"
 name = "closing"
 ref = "4.4"
@@ -447,16 +573,25 @@ uses = ["session-state", "entry"]
 
 [[node]]
 id = "repair"
-phase = "p1"
+group = "repair"
 kind = "function"
 name = "repair"
 ref = "4.4"
 uses = ["closing"]
 text = "A stop and a crash close a turn with the same entries."
 
+# ── Phase 1: the commands (4.5) ─────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "commands"
+phase = "p1"
+module = "harness-kernel"
+file = "Command.scala"
+title = "The commands and their rejections"
+
 [[node]]
 id = "command"
-phase = "p1"
+group = "commands"
 kind = "data"
 name = "Command"
 ref = "4.5"
@@ -466,34 +601,43 @@ uses = ["versions", "session-config", "request-id", "json", "entry", "job-select
 
 [[node]]
 id = "rejection"
-phase = "p1"
+group = "commands"
 kind = "data"
 name = "Rejection"
 ref = "4.5"
 spec = true
 uses = ["entry"]
 
-[[node]]
+# ── Phase 1: decide (4.5) ───────────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
 id = "decide"
 phase = "p1"
+module = "harness-kernel"
+file = "Decide.scala"
+title = "The entries that a command commits"
+
+[[node]]
+id = "decide"
+group = "decide"
 kind = "function"
 name = "decide"
 ref = "4.5"
 uses = ["command", "session-state", "rejection", "entry", "repair"]
 text = "Says which entries a command can commit. It keeps each journal inside the language of 4.1."
 
-[[node]]
-id = "forked"
+# ── Phase 1: the approvals (5.5) ────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "approvals"
 phase = "p1"
-kind = "function"
-name = "forked"
-ref = "5.5"
-uses = ["session-state", "logged", "evolve"]
-text = "A fork of a journal prefix starts with no grants, no pending calls and no jobs."
+module = "harness-kernel"
+file = "Approvals.scala"
+title = "The check of a call and the goal check"
 
 [[node]]
 id = "guard-result"
-phase = "p1"
+group = "approvals"
 kind = "data"
 name = "GuardResult"
 ref = "5.5"
@@ -501,7 +645,7 @@ uses = ["guard-rule"]
 
 [[node]]
 id = "guard-check"
-phase = "p1"
+group = "approvals"
 kind = "function"
 name = "guardCheck"
 ref = "5.5"
@@ -509,16 +653,25 @@ uses = ["session-state", "guard", "guard-result", "json"]
 
 [[node]]
 id = "goal-check-due"
-phase = "p1"
+group = "approvals"
 kind = "function"
 name = "goalCheckDue"
 ref = "5.5"
 uses = ["session-state"]
 text = "The goal check runs after a turn, except while a question waits for a person."
 
-[[node]]
+# ── Phase 1: the reports (8.6) ──────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
 id = "reports"
 phase = "p1"
+module = "harness-kernel"
+file = "Reports.scala"
+title = "The reports between sessions"
+
+[[node]]
+id = "reports"
+group = "reports"
 kind = "function"
 name = "reports"
 ref = "8.6"
@@ -527,169 +680,64 @@ text = "A report is a pure function of the journal of the session."
 
 [[node]]
 id = "missing"
-phase = "p1"
+group = "reports"
 kind = "function"
 name = "missing"
 ref = "8.6"
 uses = ["reports", "session-state"]
 
-# ── Phase 1: the checks ───────────────────────────────────────────────────────────────────────────────────────
+# ── Phase 1: the test code (12) ─────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "schedules"
+phase = "p1"
+module = "harness-kernel"
+file = "Schedules.scala"
+where = "tests"
+title = "The generator of random schedules"
 
 [[node]]
 id = "schedules"
-phase = "p1"
+group = "schedules"
 kind = "function"
 name = "schedules"
-where = "tests"
 ref = "12"
 uses = ["command", "decide", "evolve", "next", "repair", "guard-check", "logged", "needs-flush"]
 text = "The generator of random schedules for the properties: crashes, stops, late messages, grants, jobs and power losses."
 
-[[node]]
-id = "mutants"
-phase = "p1"
-kind = "check"
-name = "Mutant:"
-ref = "12"
-uses = ["law-stop", "law-effect", "law-grant", "law-pending", "law-job", "law-flush", "law-report", "law-inputs"]
-blocked = "Choose how the mutants run: stryker4s, or hand-written versions of single rules in the tests."
-text = "Each mutant of section 12 breaks one rule, and at least one property must fail."
+# ── Phase 1: the laws of 4.7 that the kernel alone can show ─────────────────────────────────────────────────────────
 
-# ── Phase 1: the laws of 4.7 that the kernel alone can show ──────────────────────────────────────────────────
+[[group]]
+id = "state-laws"
+phase = "p1"
+module = "harness-kernel"
+file = "StateLaws.scala"
+where = "tests"
+title = "The laws of the state and of the codec"
 
 [[node]]
 id = "law-fold"
-phase = "p1"
+group = "state-laws"
 kind = "law"
 name = "Fold:"
 ref = "4.7"
 spec = true
-uses = ["session-state", "evolve"]
+uses = ["state"]
 text = "SessionState is the fold of the journal."
 
 [[node]]
 id = "law-homomorphism"
-phase = "p1"
+group = "state-laws"
 kind = "law"
 name = "Homomorphism:"
 ref = "4.7"
 spec = true
-uses = ["session-state", "evolve"]
+uses = ["state"]
 text = "state(a ++ b) is the fold of b from state(a)."
 
 [[node]]
-id = "law-language"
-phase = "p1"
-kind = "law"
-name = "Language:"
-ref = "4.7"
-spec = true
-uses = ["decide", "schedules"]
-text = "Each journal is a word of the language of 4.1."
-
-[[node]]
-id = "law-effect"
-phase = "p1"
-kind = "law"
-name = "Effect:"
-ref = "4.7"
-spec = true
-uses = ["decide", "repair", "schedules"]
-text = "An intent commits before its effect, and the outcome commits after the effect. Each intent has exactly one outcome after a repair."
-
-[[node]]
-id = "law-stop"
-phase = "p1"
-kind = "law"
-name = "Stop:"
-ref = "4.7"
-spec = true
-uses = ["next", "decide", "schedules"]
-text = "After StopRequested, next starts no new work, and decide accepts no new intent."
-
-[[node]]
-id = "law-input"
-phase = "p1"
-kind = "law"
-name = "Input:"
-ref = "4.7"
-spec = true
-uses = ["decide"]
-text = "Two Send commands with one request id give one Input."
-
-[[node]]
-id = "law-rest"
-phase = "p1"
-kind = "law"
-name = "Rest:"
-ref = "4.7"
-spec = true
-uses = ["decide", "evolve", "schedules"]
-text = "With no open turn, no input waits."
-
-[[node]]
-id = "law-flush"
-phase = "p1"
-kind = "law"
-name = "Flush:"
-ref = "4.7"
-spec = true
-uses = ["needs-flush", "schedules"]
-text = "After a power loss, the journal is a prefix that ends at the last flush. Each effect that changed the world has its intent in it, and so does each Input for which a sender got an answer. Phase 1 cuts the journal at the last flush; a real power loss is not in phase 1."
-
-[[node]]
-id = "law-grant"
-phase = "p1"
-kind = "law"
-name = "Grant:"
-ref = "4.7"
-spec = true
-uses = ["evolve", "decide", "forked", "guard-check", "schedules"]
-text = "A Once grant covers one call. A Turn grant ends at the next TurnEnded. No grant stays after Ended, and a journal fork starts with no grants. A repeat of a Grant commits nothing."
-
-[[node]]
-id = "law-pending"
-phase = "p1"
-kind = "law"
-name = "Pending call:"
-ref = "4.7"
-spec = true
-uses = ["guard-check", "evolve", "forked", "goal-check-due", "schedules"]
-text = "A pending call has no active grant that covers it. TurnStarted and Ended empty pending, and a journal fork starts with no pending calls. A session with no person never gets a pending call."
-
-[[node]]
-id = "law-guard"
-phase = "p1"
-kind = "law"
-name = "Guard:"
-ref = "4.7"
-spec = true
-uses = ["guard", "guard-check"]
-text = "verdict is a homomorphism from Guard to Verdict. A grant changes only Ask, and more grants never make a result stronger."
-
-[[node]]
-id = "law-job"
-phase = "p1"
-kind = "law"
-name = "Job:"
-ref = "4.7"
-spec = true
-uses = ["decide", "evolve", "forked", "schedules"]
-text = "An Abort changes no job. A stop covers only the jobs with an intent before it. After Abort and then StopJobs(OfLastTurn), no job of that turn starts or runs. Ended stops all jobs, and a journal fork starts with no jobs. Phase 1 has the job table as a small value, with no process."
-
-[[node]]
-id = "law-repair"
-phase = "p1"
-kind = "law"
-name = "Repair:"
-ref = "4.7"
-spec = true
-uses = ["repair", "evolve"]
-text = "repair closes each open part, and repair(state after repair) is empty."
-
-[[node]]
 id = "law-store"
-phase = "p1"
+group = "state-laws"
 kind = "law"
 name = "Store:"
 ref = "4.7"
@@ -699,7 +747,7 @@ text = "The store holds only the writes of cells that completed."
 
 [[node]]
 id = "law-inputs"
-phase = "p1"
+group = "state-laws"
 kind = "law"
 name = "Inputs:"
 ref = "4.7"
@@ -708,28 +756,8 @@ uses = ["evolve", "forked"]
 text = "inputs is the fold of the values of the Input entries. A repeat adds nothing, a fork keeps them, and the store does not hold them."
 
 [[node]]
-id = "law-log"
-phase = "p1"
-kind = "law"
-name = "Log:"
-ref = "4.7"
-spec = true
-uses = ["decide"]
-text = "No part of the harness changes or removes an entry."
-
-[[node]]
-id = "law-report"
-phase = "p1"
-kind = "law"
-name = "Report:"
-ref = "4.7"
-spec = true
-uses = ["reports", "missing"]
-text = "After the report pass of 8.6, each TurnEnded or Ended that needs a report has exactly one Input in the journal of an open owner. Phase 1 checks only reports and missing; the report pass of a real host comes later."
-
-[[node]]
 id = "law-codec"
-phase = "p1"
+group = "state-laws"
 kind = "law"
 name = "Journal codec:"
 ref = "4.1"
@@ -737,9 +765,17 @@ spec = true
 uses = ["logged"]
 text = "A journal read through the codec of Logged gives the same entries."
 
+[[group]]
+id = "decide-laws"
+phase = "p1"
+module = "harness-kernel"
+file = "DecideLaws.scala"
+where = "tests"
+title = "The laws of decide"
+
 [[node]]
 id = "law-decide-table"
-phase = "p1"
+group = "decide-laws"
 kind = "law"
 name = "Decide table:"
 ref = "4.5"
@@ -748,11 +784,241 @@ uses = ["decide"]
 text = "Each row of the table of decide in 4.5 holds, for example: a Send to a session that has ended commits nothing and gets SessionClosed."
 
 [[node]]
-id = "law-next-rules"
+id = "law-input"
+group = "decide-laws"
+kind = "law"
+name = "Input:"
+ref = "4.7"
+spec = true
+uses = ["decide"]
+text = "Two Send commands with one request id give one Input."
+
+[[node]]
+id = "law-log"
+group = "decide-laws"
+kind = "law"
+name = "Log:"
+ref = "4.7"
+spec = true
+uses = ["decide"]
+text = "No part of the harness changes or removes an entry."
+
+[[node]]
+id = "law-language"
+group = "decide-laws"
+kind = "law"
+name = "Language:"
+ref = "4.7"
+spec = true
+uses = ["decide", "schedules"]
+text = "Each journal is a word of the language of 4.1."
+
+[[node]]
+id = "law-rest"
+group = "decide-laws"
+kind = "law"
+name = "Rest:"
+ref = "4.7"
+spec = true
+uses = ["decide", "evolve", "schedules"]
+text = "With no open turn, no input waits."
+
+[[group]]
+id = "next-laws"
 phase = "p1"
+module = "harness-kernel"
+file = "NextLaws.scala"
+where = "tests"
+title = "The laws of next"
+
+[[node]]
+id = "law-next-rules"
+group = "next-laws"
 kind = "law"
 name = "Next rules:"
 ref = "4.3"
 spec = true
 uses = ["next"]
 text = "The rules of next in 4.3: the step limit of both kinds of turn, a stop, an answer, and a submit."
+
+[[node]]
+id = "law-stop"
+group = "next-laws"
+kind = "law"
+name = "Stop:"
+ref = "4.7"
+spec = true
+uses = ["next", "decide", "schedules"]
+text = "After StopRequested, next starts no new work, and decide accepts no new intent."
+
+[[group]]
+id = "effect-laws"
+phase = "p1"
+module = "harness-kernel"
+file = "EffectLaws.scala"
+where = "tests"
+title = "The laws of effects, repairs and jobs"
+
+[[node]]
+id = "law-effect"
+group = "effect-laws"
+kind = "law"
+name = "Effect:"
+ref = "4.7"
+spec = true
+uses = ["decide", "repair", "schedules"]
+text = "An intent commits before its effect, and the outcome commits after the effect. Each intent has exactly one outcome after a repair."
+
+[[node]]
+id = "law-repair"
+group = "effect-laws"
+kind = "law"
+name = "Repair:"
+ref = "4.7"
+spec = true
+uses = ["repair", "evolve"]
+text = "repair closes each open part, and repair(state after repair) is empty."
+
+[[node]]
+id = "law-flush"
+group = "effect-laws"
+kind = "law"
+name = "Flush:"
+ref = "4.7"
+spec = true
+uses = ["needs-flush", "schedules"]
+text = "After a power loss, the journal is a prefix that ends at the last flush. Each effect that changed the world has its intent in it, and so does each Input for which a sender got an answer. Phase 1 cuts the journal at the last flush; a real power loss is not in phase 1."
+
+[[node]]
+id = "law-job"
+group = "effect-laws"
+kind = "law"
+name = "Job:"
+ref = "4.7"
+spec = true
+uses = ["decide", "evolve", "forked", "schedules"]
+text = "An Abort changes no job. A stop covers only the jobs with an intent before it. After Abort and then StopJobs(OfLastTurn), no job of that turn starts or runs. Ended stops all jobs, and a journal fork starts with no jobs. Phase 1 has the job table as a small value, with no process."
+
+[[group]]
+id = "approval-laws"
+phase = "p1"
+module = "harness-kernel"
+file = "ApprovalLaws.scala"
+where = "tests"
+title = "The laws of grants and pending calls"
+
+[[node]]
+id = "law-grant"
+group = "approval-laws"
+kind = "law"
+name = "Grant:"
+ref = "4.7"
+spec = true
+uses = ["evolve", "decide", "forked", "guard-check", "schedules"]
+text = "A Once grant covers one call. A Turn grant ends at the next TurnEnded. No grant stays after Ended, and a journal fork starts with no grants. A repeat of a Grant commits nothing."
+
+[[node]]
+id = "law-pending"
+group = "approval-laws"
+kind = "law"
+name = "Pending call:"
+ref = "4.7"
+spec = true
+uses = ["guard-check", "evolve", "forked", "goal-check-due", "schedules"]
+text = "A pending call has no active grant that covers it. TurnStarted and Ended empty pending, and a journal fork starts with no pending calls. A session with no person never gets a pending call."
+
+[[node]]
+id = "law-guard"
+group = "approval-laws"
+kind = "law"
+name = "Guard:"
+ref = "4.7"
+spec = true
+uses = ["guard", "guard-check"]
+text = "verdict is a homomorphism from Guard to Verdict. A grant changes only Ask, and more grants never make a result stronger."
+
+[[group]]
+id = "report-laws"
+phase = "p1"
+module = "harness-kernel"
+file = "ReportLaws.scala"
+where = "tests"
+title = "The law of reports"
+
+[[node]]
+id = "law-report"
+group = "report-laws"
+kind = "law"
+name = "Report:"
+ref = "4.7"
+spec = true
+uses = ["reports", "missing"]
+text = "After the report pass of 8.6, each TurnEnded or Ended that needs a report has exactly one Input in the journal of an open owner. Phase 1 checks only reports and missing; the report pass of a real host comes later."
+
+# ── Phase 1: the mutants ────────────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "mutants"
+phase = "p1"
+module = "harness-kernel"
+file = "Mutants.scala"
+where = "tests"
+title = "The mutants of section 12"
+
+[[node]]
+id = "mutants"
+group = "mutants"
+kind = "check"
+name = "Mutant:"
+ref = "12"
+blocked = "Choose how the mutants run: stryker4s, or hand-written versions of single rules in the tests."
+uses = ["law-stop", "law-effect", "law-grant", "law-pending", "law-job", "law-flush", "law-report", "law-inputs"]
+text = "Each mutant of section 12 breaks one rule, and at least one property must fail."
+
+# ── Phase 2: the modes (5.2). Phase 1 uses them too. ────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "modes"
+phase = "p2"
+module = "harness-guest"
+file = "Mode.scala"
+title = "The modes and their order"
+
+[[node]]
+id = "access"
+group = "modes"
+kind = "data"
+name = "Access"
+ref = "5.2"
+spec = true
+uses = []
+text = "None, Read or Full."
+
+[[node]]
+id = "mode"
+group = "modes"
+kind = "data"
+name = "Mode"
+ops = ["<=", "meet"]
+ref = "5.2"
+spec = true
+uses = ["access"]
+text = "A product of seven chains None < Read < Full, so a bounded meet-semilattice. The REPL makes the givens of the preamble from a mode, and SessionConfig holds two modes."
+
+[[group]]
+id = "mode-laws"
+phase = "p2"
+module = "harness-guest"
+file = "ModeLaws.scala"
+where = "tests"
+title = "The laws of the modes"
+
+[[node]]
+id = "law-mode"
+group = "mode-laws"
+kind = "law"
+name = "Mode lattice:"
+ref = "5.2"
+spec = true
+uses = ["mode"]
+text = "meet is associative, commutative and idempotent, and Mode.full is its identity. a <= b exactly when a.meet(b) == a."

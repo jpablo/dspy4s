@@ -6,8 +6,8 @@ dspy4s yet. The sketches of the kernel and of the guest API compile and ran in c
 the choices that are new in this document. [CODE_HARNESS_ATLAS.html](CODE_HARNESS_ATLAS.html) has six diagrams of this
 design, and [CODE_HARNESS_EVENTS.html](CODE_HARNESS_EVENTS.html) has its events, their catalog and their sequences.
 Open them in a browser. [CODE_HARNESS_BLUEPRINT.html](CODE_HARNESS_BLUEPRINT.html) shows the plan of section 15 as a
-graph, with the state of each node. `scripts/blueprint/blueprint.py` makes it from
-[blueprint.toml](blueprint.toml) and the build results.
+graph, with the state of each node and the work that can run at the same time. `scripts/blueprint/blueprint.py` makes
+it from [blueprint.toml](blueprint.toml) and the build results.
 
 ## Summary
 
@@ -614,6 +614,9 @@ final case class Mode(files: Access, shell: Access, network: Access, llm: Access
   def <=(that: Mode): Boolean
   def meet(that: Mode): Mode
 ```
+
+`Access` and `Mode` are in `harness-guest` (10.5). A mode says which capabilities of the guest API a session gets, so
+the REPL uses it for the preamble. `SessionConfig` (8.1) holds two modes, so the kernel uses it too.
 
 | Mode | Givens in the preamble |
 |---|---|
@@ -1243,8 +1246,8 @@ key of the journal is the fence there. JDBC also reaches a server database, but 
 
 | Module | Contents | Depends on |
 |---|---|---|
-| `harness-guest` | The guest API traits, `Data`. The source text is the API reference. | zio-blocks only |
-| `harness-kernel` | `Entry`, `SessionState`, `evolve`, `next`, `decide`, `repair`, `reports`, `Fold`, `Mode`, `ContextStrategy`, the memory tree | zio-blocks only |
+| `harness-guest` | The guest API traits, `Data`, `Access` and `Mode`. The source text is the API reference. | zio-blocks only |
+| `harness-kernel` | `Entry`, `SessionState`, `evolve`, `next`, `decide`, `repair`, `reports`, `Fold`, `ContextStrategy`, the memory tree | `harness-guest`, zio-blocks |
 | `harness-repl` | `ScalaRepl`, the protections of Phase 0 | `harness-guest`, `scala3-repl` |
 | `harness-mcp` | The early MCP server of section 6 | `harness-repl`, the MCP Java SDK |
 | `harness-sandbox` | Seatbelt, bubblewrap, the profiles | `harness-kernel` |
@@ -1497,3 +1500,7 @@ Each phase ends with something that runs.
 
 Phase 6 comes before the session host on purpose. The optimizers are what makes this harness different from the
 others, so the design must meet them early.
+
+The order of the table is an order of priority. The blueprint shows the phases that can run at the same time: phases
+1 and 2 first, phase 3 after phase 1, phase 4 after phases 2 and 3, phases 5 to 8 after phase 4, and phase 9 after
+phases 7 and 8. Phases 1 and 2 share only `Access` and `Mode`, so these two types come first.

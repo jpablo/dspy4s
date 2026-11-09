@@ -1,11 +1,12 @@
 """Makes the blueprint page of the code harness: the plan as a graph, with the state of each node.
 
 Usage:
-    python3 scripts/blueprint/blueprint.py [--artifact PATH]
+    python3 scripts/blueprint/blueprint.py [--artifact PATH] [--strict]
 
-The script reads docs/code-harness/blueprint.toml, the Scala sources and the test reports of each phase, and writes
-docs/code-harness/CODE_HARNESS_BLUEPRINT.html. It needs Graphviz (`dot`) and Python 3.12. With --artifact, it also
-writes the page in the form that the artifact host takes, with no doctype, html, head or body.
+The script reads docs/code-harness/blueprint.toml, and the Scala sources and the test reports of the modules of each
+group. It writes docs/code-harness/CODE_HARNESS_BLUEPRINT.html. It needs Graphviz (`dot`) and Python 3.12. With
+--artifact, it also writes the page in the form that the artifact host takes, with no doctype, html, head or body.
+With --strict, it stops with an error when the check of the code finds a problem.
 
 Each node has two states, as in a Lean blueprint:
 - The statement (the border): a type or function is stated when its declaration is in the code. A law is stated when
@@ -13,6 +14,19 @@ Each node has two states, as in a Lean blueprint:
 - The proof (the fill): a type is done when it and its methods have bodies, a function when it has a body that is not
   `???`, and a law when its tests pass in the last test report. A node is ready when it is stated and each node that
   it uses is done. A node is complete when it and all the nodes under it are done.
+
+The waves show the work that can run at the same time. A node that is not stated has a statement wave: 1 when each
+node that it uses is stated, and else 1 more than the highest statement wave of those nodes. The proof wave is the
+same for the proofs. The nodes of one wave do not use each other, so one writer for each group can work on them at
+the same time. The highest wave is the length of the longest chain.
+
+The check of the code compares the uses of each type and function with the names in its code. It reads names, not
+types, so it gives warnings and not errors:
+- The code names a node that the node does not use, directly or through other nodes. The plan then shows parallel
+  work that is not parallel.
+- A done node uses a node that its code does not name, and no other path gives that use. The plan then shows an
+  order that the code does not need.
+- The code of a node is not in the file of its group.
 """
 
 import argparse
@@ -30,6 +44,7 @@ SOURCE = ROOT / "docs/code-harness/blueprint.toml"
 TEMPLATE = Path(__file__).with_name("page.html")
 OUTPUT = ROOT / "docs/code-harness/CODE_HARNESS_BLUEPRINT.html"
 KINDS = {"upstream", "data", "function", "law", "check"}
+PLACES = {"main", "tests"}
 
 
 @dataclass
@@ -40,32 +55,47 @@ class Phase:
     modules: list[str]
     uses: list[str]
     result: str
-    sources: str | None = None
-    tests: str | None = None
-    reports: str | None = None
+    partial: bool = False
+
+
+@dataclass
+class Group:
+    id: str
+    phase: str
+    module: str
+    file: str
+    title: str
+    where: str = "main"
 
 
 @dataclass
 class Node:
     id: str
-    phase: str
     kind: str
     name: str
     ref: str
     uses: list[str]
+    group: str | None = None
     text: str = ""
     ops: list[str] = field(default_factory=list)
-    where: str = "main"
     spec: bool = False
     reviewed: str | None = None
     blocked: str | None = None
-    # Found by the scan:
-    stated: bool = False
-    done: bool = False
-    statement: str = ""
-    proof: str = ""
-    why_statement: str = ""
-    why_proof: str = ""
+    # From the group:
+    phase: str | None = field(default=None, init=False)
+    where: str = field(default="main", init=False)
+    # Found by the scan, the states and the checks:
+    stated: bool = field(default=False, init=False)
+    done: bool = field(default=False, init=False)
+    file: str | None = field(default=None, init=False)
+    code: str = field(default="", init=False)
+    statement: str = field(default="", init=False)
+    proof: str = field(default="", init=False)
+    why_statement: str = field(default="", init=False)
+    why_proof: str = field(default="", init=False)
+    swave: int = field(default=0, init=False)
+    pwave: int = field(default=0, init=False)
+    notes: list[str] = field(default_factory=list, init=False)
 
     @property
     def title(self) -> str:
@@ -74,46 +104,80 @@ class Node:
 
 @dataclass
 class Code:
-    main: str
-    tests: str
+    main: dict[str, str]
+    tests: dict[str, str]
     results: dict[str, bool]
+
+    def files(self, where: str) -> dict[str, str]:
+        return self.tests if where == "tests" else self.main
 
 
 # ── The source file ──────────────────────────────────────────────────────────────────────────────────────────────
 
 
-def load(path: Path) -> tuple[dict, list[Phase], list[Node]]:
+def load(path: Path) -> tuple[dict, list[Phase], list[Group], list[Node]]:
     data = tomllib.loads(path.read_text())
-    phases = [Phase(**p) for p in data["phase"]]
-    nodes = [Node(**n) for n in data["node"]]
-    check(phases, nodes)
-    return data["meta"], phases, nodes
+    try:
+        phases = [Phase(**p) for p in data["phase"]]
+        groups = [Group(**g) for g in data.get("group", [])]
+        nodes = [Node(**n) for n in data["node"]]
+    except TypeError as e:
+        raise SystemExit(f"blueprint.toml has an unknown field, or a field is missing: {e}") from None
+    check(phases, groups, nodes)
+    by_group = {g.id: g for g in groups}
+    for n in nodes:
+        if n.group:
+            n.phase, n.where = by_group[n.group].phase, by_group[n.group].where
+    return data["meta"], phases, groups, nodes
 
 
-def check(phases: list[Phase], nodes: list[Node]) -> None:
+def check(phases: list[Phase], groups: list[Group], nodes: list[Node]) -> None:
     """Stops with a clear message when the source file has a mistake."""
     problems: list[str] = []
-    phase_ids = [p.id for p in phases]
+    by_phase = {p.id: p for p in phases}
+    by_group = {g.id: g for g in groups}
     node_ids = [n.id for n in nodes]
-    for kind, ids in (("phase", phase_ids), ("node", node_ids)):
+    for kind, ids in (("phase", [p.id for p in phases]), ("group", [g.id for g in groups]), ("node", node_ids)):
         twice = sorted({i for i in ids if ids.count(i) > 1})
         if twice:
             problems.append(f"each {kind} id must be unique: {', '.join(twice)}")
     for p in phases:
-        problems += [f"phase {p.id} uses the unknown phase {u}" for u in p.uses if u not in phase_ids]
+        problems += [f"phase {p.id} uses the unknown phase {u}" for u in p.uses if u not in by_phase]
+    files: dict[tuple[str, str, str], str] = {}
+    for g in groups:
+        if g.phase not in by_phase:
+            problems.append(f"group {g.id} has the unknown phase {g.phase}")
+        elif g.module not in by_phase[g.phase].modules:
+            problems.append(f"group {g.id} has the module {g.module}, which is not a module of phase {g.phase}")
+        if g.where not in PLACES:
+            problems.append(f"group {g.id} has the unknown place {g.where}; use \"main\" or \"tests\"")
+        if (key := (g.module, g.where, g.file)) in files:
+            problems.append(f"the groups {files[key]} and {g.id} have the same file {g.file}")
+        files[key] = g.id
     for n in nodes:
         if n.kind not in KINDS:
             problems.append(f"node {n.id} has the unknown kind {n.kind}")
-        if n.phase not in phase_ids:
-            problems.append(f"node {n.id} has the unknown phase {n.phase}")
+        if n.kind == "upstream":
+            if n.group:
+                problems.append(f"the upstream node {n.id} must have no group")
+        elif n.group is None:
+            problems.append(f"node {n.id} needs a group")
+        elif n.group not in by_group:
+            problems.append(f"node {n.id} has the unknown group {n.group}")
+        elif n.kind in ("law", "check") and by_group[n.group].where != "tests":
+            problems.append(f"the {n.kind} {n.id} must be in a group of test code")
         problems += [f"node {n.id} uses the unknown node {u}" for u in n.uses if u not in node_ids]
         if n.kind in ("law", "check") and not n.name.endswith(":"):
             problems.append(f"the name of the {n.kind} {n.id} must end with a colon, for example \"Fold:\"")
-    by_id = {n.id: n for n in nodes}
-    for start in nodes:
-        if cycle := find_cycle(start.id, {k: v.uses for k, v in by_id.items()}):
-            problems.append("the uses make a cycle: " + " -> ".join(cycle))
-            break
+    if not problems:
+        graphs = {
+            "uses of the nodes": {n.id: n.uses for n in nodes},
+            "uses of the phases": {p.id: p.uses for p in phases},
+            "groups (move a node to another group)": group_uses(groups, nodes),
+        }
+        for what, edges in graphs.items():
+            if cycle := next(filter(None, (find_cycle(k, edges) for k in edges)), None):
+                problems.append(f"the {what} make a cycle: " + " -> ".join(cycle))
     if problems:
         raise SystemExit("blueprint.toml has problems:\n- " + "\n- ".join(problems))
 
@@ -132,27 +196,55 @@ def find_cycle(start: str, uses: dict[str, list[str]]) -> list[str] | None:
     return visit(start)
 
 
+def group_uses(groups: list[Group], nodes: list[Node]) -> dict[str, list[str]]:
+    """For each group, the other groups whose nodes its nodes use."""
+    group_of = {n.id: n.group for n in nodes}
+    out: dict[str, list[str]] = {g.id: [] for g in groups}
+    for n in nodes:
+        if n.group in out:
+            for u in n.uses:
+                g = group_of.get(u)
+                if g and g != n.group and g not in out[n.group]:
+                    out[n.group].append(g)
+    return out
+
+
+def closure(edges: dict[str, list[str]]) -> dict[str, set[str]]:
+    """For each key, all the keys under it."""
+    memo: dict[str, set[str]] = {}
+    def below(x: str) -> set[str]:
+        if x not in memo:
+            memo[x] = set()
+            for u in edges.get(x, []):
+                memo[x] |= {u} | below(u)
+        return memo[x]
+    for x in edges:
+        below(x)
+    return memo
+
+
 # ── The scan of the code and the test reports ────────────────────────────────────────────────────────────────────
 
 
-def read_code(phase: Phase) -> Code:
-    def text(rel: str | None) -> str:
-        if rel is None or not (ROOT / rel).is_dir():
-            return ""
-        return "\n".join(f.read_text() for f in sorted((ROOT / rel).rglob("*.scala")))
+def read_code(module: str) -> Code:
+    base = ROOT / "modules" / module
+    def texts(rel: str) -> dict[str, str]:
+        if not (base / rel).is_dir():
+            return {}
+        return {str(f.relative_to(ROOT)): f.read_text() for f in sorted((base / rel).rglob("*.scala"))}
 
     results: dict[str, bool] = {}
-    if phase.reports and (ROOT / phase.reports).is_dir():
-        for report in sorted((ROOT / phase.reports).glob("*.xml")):
+    if (reports := base / "target/test-reports").is_dir():
+        for report in sorted(reports.glob("*.xml")):
             for case in ET.parse(report).getroot().iter("testcase"):
                 bad = any(child.tag in ("failure", "error", "skipped") for child in case)
                 name = case.get("name", "")
                 results[name] = results.get(name, True) and not bad
-    return Code(text(phase.sources), text(phase.tests), results)
+    return Code(texts("src/main/scala"), texts("src/test/scala"), results)
 
 
-def declared_type(text: str, name: str) -> re.Match[str] | None:
-    return re.search(rf"^([ \t]*)(?:[a-z ]*\s)?(?:enum|class|trait|object|type)\s+{re.escape(name)}\b", text, re.M)
+def type_pattern(name: str) -> re.Pattern[str]:
+    return re.compile(rf"^([ \t]*)(?:[a-z ]*\s)?(?:enum|class|trait|object|type)\s+{re.escape(name)}(?![\w$])", re.M)
 
 
 def has_body(text: str, start: int) -> bool:
@@ -178,43 +270,56 @@ def has_body(text: str, start: int) -> bool:
 
 
 def find_def(text: str, name: str) -> list[int]:
-    return [m.start() for m in re.finditer(rf"\bdef\s+{re.escape(name)}\b", text)]
+    return [m.start() for m in re.finditer(rf"\bdef\s+{re.escape(name)}(?=[\s(\[:=])", text)]
+
+
+def block_end(text: str, body: int, indent: int) -> int:
+    """The end of a block whose body starts at `body`: the next line with code at `indent` or less."""
+    for line in re.finditer(r"^( *)([^\s)\]}])", text[body:], re.M):  # a closing bracket does not end it
+        if len(line.group(1)) <= indent:
+            return body + line.start()
+    return len(text)
 
 
 def block_of(text: str, name: str) -> str:
     """The text of each declaration of the type `name` and of its companion object."""
     parts = []
-    for m in re.finditer(rf"^([ \t]*)(?:[a-z ]*\s)?(?:enum|class|trait|object)\s+{re.escape(name)}\b", text, re.M):
-        indent = len(m.group(1))
+    for m in type_pattern(name).finditer(text):
         body = text.find("\n", m.end()) + 1 or len(text)  # the block ends on a later line, not on this one
-        end = len(text)
-        for line in re.finditer(r"^( *)([^\s)\]}])", text[body:], re.M):  # a closing bracket does not end it
-            if len(line.group(1)) <= indent:
-                end = body + line.start()
-                break
-        parts.append(text[m.start():end])
+        parts.append(text[m.start() : block_end(text, body, len(m.group(1)))])
     return "\n".join(parts)
 
 
-def scan(node: Node, code: Code) -> None:
-    if node.kind == "upstream":
-        node.stated = node.done = True
+def def_block(text: str, start: int) -> str:
+    """The text of the definition that starts at `start`."""
+    line_start = text.rfind("\n", 0, start) + 1
+    indent = len(text[line_start:start]) - len(text[line_start:start].lstrip())
+    body = text.find("\n", start) + 1 or len(text)
+    return text[start : block_end(text, body, indent)]
+
+
+def scan(node: Node, code: Code | None) -> None:
+    if node.kind == "upstream" or code is None:
+        node.stated = node.done = node.kind == "upstream"
     elif node.kind == "data":
-        node.stated = declared_type(code.main, node.name) is not None
-        block = block_of(code.main, node.name)
-        node.done = node.stated and all(any(has_body(block, p) for p in find_def(block, op)) for op in node.ops)
+        hits = [f for f, t in code.main.items() if type_pattern(node.name).search(t)]
+        node.stated, node.file = bool(hits), (hits[0] if hits else None)
+        node.code = "\n".join(b for t in code.main.values() if (b := block_of(t, node.name)))
+        node.done = node.stated and all(
+            any(has_body(node.code, p) for p in find_def(node.code, op)) for op in node.ops)
     elif node.kind == "function":
-        text = code.tests if node.where == "tests" else code.main
-        starts = find_def(text, node.name)
-        node.stated = bool(starts)
-        node.done = any(has_body(text, p) for p in starts)
+        found = [(f, t, p) for f, t in code.files(node.where).items() for p in find_def(t, node.name)]
+        node.stated, node.file = bool(found), (found[0][0] if found else None)
+        node.code = "\n".join(def_block(t, p) for _, t, p in found)
+        node.done = any(has_body(t, p) for _, t, p in found)
     else:  # a law or a check: the tests are the statement
-        node.stated = f'"{node.name}' in code.tests
+        hits = [f for f, t in code.tests.items() if f'"{node.name}' in t]
+        node.stated, node.file = bool(hits), (hits[0] if hits else None)
         runs = [ok for name, ok in code.results.items() if name.startswith(node.name)]
         node.done = node.stated and bool(runs) and all(runs)
 
 
-# ── The states ───────────────────────────────────────────────────────────────────────────────────────────────────
+# ── The states and the waves ─────────────────────────────────────────────────────────────────────────────────────
 
 
 def names(ids: list[str], by_id: dict[str, Node]) -> str:
@@ -223,8 +328,7 @@ def names(ids: list[str], by_id: dict[str, Node]) -> str:
 
 def derive(nodes: list[Node]) -> None:
     by_id = {n.id: n for n in nodes}
-    order = topological(nodes)
-    for n in order:
+    for n in topological(nodes):
         deps = [by_id[u] for u in n.uses]
         unstated = [d.id for d in deps if d.statement not in ("stated", "upstream")]
         if n.kind == "upstream":
@@ -263,6 +367,9 @@ def derive(nodes: list[Node]) -> None:
                 else f"These nodes are not done yet: {names(not_done, by_id)}."
             )
 
+        n.swave = 0 if n.stated or n.kind == "upstream" else 1 + max((d.swave for d in deps), default=0)
+        n.pwave = 0 if n.done or n.kind == "upstream" else 1 + max((d.pwave for d in deps), default=0)
+
 
 def topological(nodes: list[Node]) -> list[Node]:
     by_id = {n.id: n for n in nodes}
@@ -290,6 +397,7 @@ class PhaseState:
     statement: str = "waiting"
     proof: str = "none"
     why: str = ""
+    wave: int = 0
 
 
 def derive_phases(phases: list[Phase], nodes: list[Node]) -> dict[str, PhaseState]:
@@ -304,7 +412,7 @@ def derive_phases(phases: list[Phase], nodes: list[Node]) -> dict[str, PhaseStat
         visit(p)
     states: dict[str, PhaseState] = {}
     for p in order:
-        own = [n for n in nodes if n.phase == p.id and n.kind != "upstream"]
+        own = [n for n in nodes if n.phase == p.id]
         s = PhaseState(
             total=len(own),
             stated=sum(n.stated for n in own),
@@ -313,10 +421,10 @@ def derive_phases(phases: list[Phase], nodes: list[Node]) -> dict[str, PhaseStat
             reviewed=sum(bool(n.reviewed) for n in own if n.spec),
         )
         deps_complete = all(states[u].proof == "complete" for u in p.uses)
-        if own and s.done == s.total:
+        if own and s.done == s.total and not p.partial:
             s.statement, s.proof = "stated", "complete" if deps_complete else "done"
             s.why = "Each node of the phase is done."
-        elif own and s.stated == s.total:
+        elif own and s.stated == s.total and not p.partial:
             s.statement, s.proof = "stated", "ready" if deps_complete else "none"
             s.why = "Each node of the phase is stated."
         elif deps_complete:
@@ -325,12 +433,104 @@ def derive_phases(phases: list[Phase], nodes: list[Node]) -> dict[str, PhaseStat
                      else "It uses no other phase, so the work can start.")
             if not own:
                 s.why += " The phase has no nodes in the blueprint yet."
+            elif p.partial:
+                s.why += " The blueprint has only some nodes of the phase."
         else:
             s.statement = "waiting"
             s.why = "These phases are not complete yet: " + ", ".join(
                 f"phase {by_id[u].number}" for u in p.uses if states[u].proof != "complete") + "."
+        s.wave = 0 if s.proof == "complete" else 1 + max((states[u].wave for u in p.uses), default=0)
         states[p.id] = s
     return states
+
+
+def partial_uses(phases: list[Phase], nodes: list[Node]) -> dict[tuple[str, str], list[str]]:
+    """The nodes that a phase uses from a phase that it does not use: (from, to) -> the node ids."""
+    full = closure({p.id: p.uses for p in phases})
+    by_id = {n.id: n for n in nodes}
+    out: dict[tuple[str, str], list[str]] = {}
+    for n in nodes:
+        for u in n.uses:
+            d = by_id[u]
+            if n.phase and d.phase and d.phase != n.phase and d.phase not in full[n.phase]:
+                ids = out.setdefault((d.phase, n.phase), [])
+                if d.id not in ids:
+                    ids.append(d.id)
+    return out
+
+
+def outside(phase: Phase, phases: list[Phase], nodes: list[Node]) -> list[str]:
+    """The nodes of other phases that the graph of `phase` shows: each node that a node of the phase uses, and the
+    nodes under it in a phase that `phase` does not use."""
+    full = closure({p.id: p.uses for p in phases})[phase.id]
+    by_id = {n.id: n for n in nodes}
+    queue = [u for n in nodes if n.phase == phase.id for u in n.uses if by_id[u].phase != phase.id]
+    direct = set(queue)
+    out: list[str] = []
+    while queue:
+        u = queue.pop(0)
+        if u in out:
+            continue
+        x = by_id[u]
+        partial = x.phase is not None and x.phase not in full and x.phase != phase.id
+        if u in direct or partial:
+            out.append(u)
+        if partial:
+            queue += x.uses
+    return out
+
+
+# ── The check of the code ────────────────────────────────────────────────────────────────────────────────────────
+
+
+def strip(code: str) -> str:
+    """The code with no comments and no string literals."""
+    code = re.sub(r'"""[\s\S]*?"""', '""', code)
+    code = re.sub(r'"(?:\\.|[^"\\\n])*"', '""', code)
+    code = re.sub(r"/\*[\s\S]*?\*/", " ", code)
+    return re.sub(r"//[^\n]*", " ", code)
+
+
+def named(code: str, by_name: dict[str, Node]) -> set[str]:
+    """The ids of the nodes that the code names. A function counts only in a call, or as an argument."""
+    text = strip(code)
+    out: set[str] = set()
+    for m in re.finditer(r"(?<![\w$])[A-Za-z_][\w$]*", text):
+        n = by_name.get(m.group())
+        if n is None:
+            continue
+        if n.kind == "function":
+            after = text[m.end():].lstrip()[:1]
+            before = text[:m.start()].rstrip()[-1:]
+            if not (after in ("(", "[") or (before in ("(", ",") and after in (")", ","))):
+                continue
+        out.add(n.id)
+    return out
+
+
+def check_code(nodes: list[Node], groups: list[Group]) -> None:
+    by_id = {n.id: n for n in nodes}
+    by_name: dict[str, Node] = {}
+    for n in nodes:
+        if n.kind in ("upstream", "data", "function"):
+            by_name.setdefault(n.name, n)
+    below = closure({n.id: n.uses for n in nodes})
+    only = set(reduced({n.id: n.uses for n in nodes}))
+    group_of = {g.id: g for g in groups}
+    for n in nodes:
+        if n.kind in ("data", "function") and n.stated:
+            uses = named(n.code, by_name) - {n.id}
+            for d in sorted(uses - below[n.id]):
+                n.notes.append(f"The code names {by_id[d].title}, but {n.title} does not use it. "
+                               f"Add {d} to its uses, or the plan shows parallel work that is not parallel.")
+            if n.done:
+                for d in n.uses:
+                    if (n.id, d) in only and d not in uses:
+                        n.notes.append(f"{n.title} uses {by_id[d].title}, but its code does not name it. "
+                                       f"Remove the use if {n.title} does not need it.")
+        if n.file and n.group and Path(n.file).name != group_of[n.group].file:
+            n.notes.append(f"The code is in {Path(n.file).name}, but the group {n.group} has the file "
+                           f"{group_of[n.group].file}. Move the code, or change the group.")
 
 
 # ── The drawing ──────────────────────────────────────────────────────────────────────────────────────────────────
@@ -385,29 +585,35 @@ def header(name: str) -> list[str]:
     ]
 
 
-def node_svg(nodes: list[Node]) -> str:
+def node_svg(own: list[Node], others: list[Node], numbers: dict[str, int]) -> str:
     lines = header("phase")
-    for n in nodes:
+    ids = {n.id for n in own + others}
+    outer = {n.id for n in others if n.kind != "upstream"}
+    for n in own + others:
+        ext = n.id in outer
         mark = " · spec ✓" if n.spec and n.reviewed else " · spec" if n.spec else ""
-        sub = f"§{n.ref}{mark}" + (" · tests" if n.where == "tests" else "")
+        sub = (f"phase {numbers[n.phase]} · " if ext and n.phase else "") + f"§{n.ref}{mark}"
+        sub += " · tests" if n.where == "tests" and n.kind == "function" else ""
         label = (f'<<FONT POINT-SIZE="11"><B>{esc(n.title)}</B></FONT><BR/>'
                  f'<FONT POINT-SIZE="8">{esc(sub)}</FONT>>')
         classes = f"kind-{n.kind} st-{n.statement} pf-{n.proof}" + (" spec" if n.spec else "")
+        classes += " ext" if ext else ""
         extra = ", peripheries=2" if n.spec else ""
         lines.append(f'  "{n.id}" [id="n-{n.id}", class="{classes}", label={label}, {SHAPES[n.kind]}{extra}];')
-    ids = {n.id for n in nodes}
-    for user, dep in reduced({n.id: [u for u in n.uses if u in ids] for n in nodes}):
+    for user, dep in reduced({n.id: [u for u in n.uses if u in ids] for n in own + others}):
         lines.append(f'  "{dep}" -> "{user}" [id="e-{dep}--{user}"];')
     lines.append("}")
     return run_dot(lines)
 
 
-def plan_svg(phases: list[Phase], states: dict[str, PhaseState]) -> str:
+def plan_svg(phases: list[Phase], states: dict[str, PhaseState], partials: dict[tuple[str, str], list[str]],
+             by_id: dict[str, Node]) -> str:
     lines = header("plan")
     for p in phases:
         s = states[p.id]
         modules = ", ".join(p.modules) if p.modules else "in the modules above"
         count = f"{s.stated} of {s.total} stated · {s.done} done" if s.total else "not in the blueprint yet"
+        count += " · more to come" if s.total and p.partial else ""
         label = (f'<<FONT POINT-SIZE="12"><B>{p.number} · {esc(p.title)}</B></FONT><BR/>'
                  f'<FONT POINT-SIZE="9">{esc(modules)}</FONT><BR/><FONT POINT-SIZE="9">{esc(count)}</FONT>>')
         classes = f"kind-phase st-{s.statement} pf-{s.proof}"
@@ -415,6 +621,14 @@ def plan_svg(phases: list[Phase], states: dict[str, PhaseState]) -> str:
     for p in phases:
         for u in p.uses:
             lines.append(f'  "{u}" -> "{p.id}" [id="e-{u}--{p.id}"];')
+    for (a, b), ids in partials.items():
+        label = esc(", ".join(by_id[i].title for i in ids))
+        lines.append(f'  "{a}" -> "{b}" [id="e-{a}--{b}", class="partial", style=dashed, constraint=false,'
+                     f' label=<<FONT POINT-SIZE="9">{label}</FONT>>];')
+    waves: dict[int, list[str]] = {}
+    for p in phases:
+        waves.setdefault(states[p.id].wave, []).append(f'"{p.id}"')
+    lines += [f"  {{ rank=same; {'; '.join(ids)} }}" for ids in waves.values() if len(ids) > 1]
     lines.append("}")
     return run_dot(lines)
 
@@ -430,50 +644,79 @@ def git(*args: str) -> str:
         return ""
 
 
-def page_data(meta: dict, phases: list[Phase], nodes: list[Node], states: dict[str, PhaseState]) -> dict:
-    users: dict[str, list[str]] = {n.id: [] for n in nodes}
-    for n in nodes:
+@dataclass
+class Plan:
+    meta: dict
+    phases: list[Phase]
+    groups: list[Group]
+    nodes: list[Node]
+    states: dict[str, PhaseState]
+    partials: dict[tuple[str, str], list[str]]
+    others: dict[str, list[str]]
+
+
+def page_data(plan: Plan) -> dict:
+    users: dict[str, list[str]] = {n.id: [] for n in plan.nodes}
+    for n in plan.nodes:
         for u in n.uses:
             users[u].append(n.id)
-    by_phase = {p.id: [n for n in nodes if n.phase == p.id] for p in phases}
+    numbers = {p.id: p.number for p in plan.phases}
+    shown = [p for p in plan.phases if any(n.phase == p.id for n in plan.nodes)]
+    between = group_uses(plan.groups, plan.nodes)
     return {
-        "title": meta["title"],
+        "title": plan.meta["title"],
         "commit": git("rev-parse", "--short", "HEAD"),
         "date": git("log", "-1", "--format=%cs"),
         "views": [{"id": "plan", "tab": "The plan"}] + [
-            {"id": f"phase-{p.number}", "tab": f"Phase {p.number}: {p.title}", "phase": p.id}
-            for p in phases if by_phase[p.id]
+            {"id": f"phase-{p.number}", "tab": f"Phase {p.number}: {p.title}", "phase": p.id,
+             "outside": [f"n-{u}" for u in plan.others[p.id]]}
+            for p in shown
         ],
         "phases": {
             f"n-{p.id}": {
-                "title": f"Phase {p.number}: {p.title}", "kind": "phase", "modules": p.modules,
-                "result": p.result, "uses": [f"n-{u}" for u in p.uses],
-                "users": [f"n-{q.id}" for q in phases if p.id in q.uses],
-                "view": f"phase-{p.number}" if by_phase[p.id] else None, **vars(states[p.id]),
+                "title": f"Phase {p.number}: {p.title}", "number": p.number, "kind": "phase", "modules": p.modules,
+                "result": p.result, "partial": p.partial, "uses": [f"n-{u}" for u in p.uses],
+                "users": [f"n-{q.id}" for q in plan.phases if p.id in q.uses],
+                "view": f"phase-{p.number}" if p in shown else None, **vars(plan.states[p.id]),
             }
-            for p in phases
+            for p in plan.phases
+        },
+        "partials": [
+            {"from": f"n-{a}", "to": f"n-{b}", "nodes": [f"n-{i}" for i in ids]}
+            for (a, b), ids in plan.partials.items()
+        ],
+        "groups": {
+            g.id: {"title": g.title, "file": g.file, "module": g.module, "where": g.where, "phase": g.phase,
+                   "uses": between[g.id]}
+            for g in plan.groups
         },
         "nodes": {
             f"n-{n.id}": {
-                "title": n.title, "kind": n.kind, "phase": n.phase, "ref": n.ref, "text": n.text,
-                "spec": n.spec, "reviewed": n.reviewed, "blocked": n.blocked, "where": n.where, "ops": n.ops,
+                "title": n.title, "kind": n.kind, "phase": n.phase, "phaseNumber": numbers.get(n.phase or ""),
+                "group": n.group, "ref": n.ref, "text": n.text, "spec": n.spec, "reviewed": n.reviewed,
+                "blocked": n.blocked, "where": n.where, "ops": n.ops, "file": n.file,
                 "statement": n.statement, "proof": n.proof, "whyStatement": n.why_statement, "whyProof": n.why_proof,
+                "swave": n.swave, "pwave": n.pwave, "notes": n.notes,
                 "uses": [f"n-{u}" for u in n.uses], "users": [f"n-{u}" for u in users[n.id]],
             }
-            for n in nodes
+            for n in plan.nodes
         },
     }
 
 
-def render(meta: dict, phases: list[Phase], nodes: list[Node], states: dict[str, PhaseState]) -> str:
+def render(plan: Plan) -> str:
     page = TEMPLATE.read_text()
-    views = [f'<div class="view-graph" id="graph-plan" data-view="plan">{plan_svg(phases, states)}</div>']
-    for p in phases:
-        own = [n for n in nodes if n.phase == p.id]
+    by_id = {n.id: n for n in plan.nodes}
+    numbers = {p.id: p.number for p in plan.phases}
+    svg = plan_svg(plan.phases, plan.states, plan.partials, by_id)
+    views = [f'<div class="view-graph" id="graph-plan" data-view="plan">{svg}</div>']
+    for p in plan.phases:
+        own = [n for n in plan.nodes if n.phase == p.id]
         if own:
+            others = [by_id[u] for u in plan.others[p.id]]
             views.append(f'<div class="view-graph" id="graph-phase-{p.number}" data-view="phase-{p.number}" hidden>'
-                         f"{node_svg(own)}</div>")
-    data = json.dumps(page_data(meta, phases, nodes, states), ensure_ascii=False, indent=None).replace("</", "<\\/")
+                         f"{node_svg(own, others, numbers)}</div>")
+    data = json.dumps(page_data(plan), ensure_ascii=False, indent=None).replace("</", "<\\/")
     return page.replace("<!--@GRAPHS-->", "\n".join(views)).replace("/*@DATA*/{}", data)
 
 
@@ -490,26 +733,38 @@ def as_document(page: str) -> str:
             f"{head.strip()}\n</head>\n<body>\n{body.strip()}\n</body>\n</html>\n")
 
 
+def build() -> Plan:
+    meta, phases, groups, nodes = load(SOURCE)
+    module_of = {g.id: g.module for g in groups}
+    codes = {m: read_code(m) for m in sorted(set(module_of.values()))}
+    for n in nodes:
+        scan(n, codes[module_of[n.group]] if n.group else None)
+    derive(nodes)
+    check_code(nodes, groups)
+    return Plan(meta, phases, groups, nodes, derive_phases(phases, nodes), partial_uses(phases, nodes),
+                {p.id: outside(p, phases, nodes) for p in phases})
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--artifact", type=Path, help="also write the page in the form of the artifact host")
+    parser.add_argument("--strict", action="store_true", help="stop with an error when the check of the code warns")
     args = parser.parse_args()
-    meta, phases, nodes = load(SOURCE)
-    for p in phases:
-        code = read_code(p)
-        for n in nodes:
-            if n.phase == p.id:
-                scan(n, code)
-    derive(nodes)
-    states = derive_phases(phases, nodes)
-    page = render(meta, phases, nodes, states)
+    plan = build()
+    page = render(plan)
     OUTPUT.write_text(as_document(page))
     if args.artifact:
         args.artifact.write_text(page.replace("<!--@HEAD-END-->", ""))
     counts: dict[str, int] = {}
-    for n in nodes:
+    for n in plan.nodes:
         counts[n.statement] = counts.get(n.statement, 0) + 1
-    print(f"wrote {OUTPUT.relative_to(ROOT)}: {len(nodes)} nodes, statements {counts}")
+    notes = [(n, note) for n in plan.nodes for note in n.notes]
+    print(f"wrote {OUTPUT.relative_to(ROOT)}: {len(plan.nodes)} nodes in {len(plan.groups)} groups, "
+          f"statements {counts}, {len(notes)} warnings from the check of the code")
+    for n, note in notes:
+        print(f"- {n.id}: {note}")
+    if args.strict and notes:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
