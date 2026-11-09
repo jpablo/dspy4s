@@ -63,7 +63,8 @@ lazy val root = (project in file("."))
     mcp,
     examples,
     harnessGuest,
-    harnessKernel
+    harnessKernel,
+    harnessRepl
   )
   .settings(commonSettings)
   .settings(
@@ -272,6 +273,20 @@ lazy val harnessKernel = (project in file("modules/harness-kernel"))
       "org.scalameta" %% "munit"             % munitVersion           % Test,
       "org.scalameta" %% "munit-scalacheck"  % munitScalacheckVersion % Test
     )
+  )
+
+// The REPL (6): ReplDriver with capture checking and safe mode. Only this module depends on the compiler.
+lazy val harnessRepl = (project in file("modules/harness-repl"))
+  .dependsOn(harnessGuest)
+  .settings(commonSettings)
+  .settings(name := "dspy4s-harness-repl")
+  .settings(
+    libraryDependencies ++= Seq(
+      "org.scala-lang" %% "scala3-repl" % scalaVersion.value,
+      "org.scalameta"  %% "munit"       % munitVersion % Test
+    ),
+    // The checks of section 12 used the REPL of this nightly with no scaladoc, and the REPL does not need it.
+    excludeDependencies += ExclusionRule("org.scala-lang", "scaladoc_3")
   )
 
 // JMH stays outside the root aggregate. Normal compile and test runs do not pay for benchmark generation.

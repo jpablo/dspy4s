@@ -1066,3 +1066,377 @@ spec = true
 uses = ["mode"]
 text = "A child and a rollout have the mode base.meet(Mode.closed): sessions is at most Read, and children does not change."
 
+
+# ── Phase 2: Data, the codec of the values that leave a cell (5.1) ──────────────────────────────────────────────────
+
+[[group]]
+id = "data"
+phase = "p2"
+module = "harness-guest"
+file = "Data.scala"
+title = "The codec of the values that leave a cell"
+
+[[node]]
+id = "data-error"
+group = "data"
+kind = "data"
+name = "DataError"
+ref = "5.1"
+spec = true
+uses = []
+text = "A value that does not fit the type: the path, what the type expects, and what the value has. A cell sees its message."
+
+[[node]]
+id = "data-shape"
+group = "data"
+kind = "data"
+name = "DataShape"
+ref = "5.1"
+spec = true
+uses = []
+text = "What a value looks like, for the preamble of a new REPL. A record and a union are lazy, because a type can hold itself."
+
+[[node]]
+id = "data"
+group = "data"
+kind = "data"
+name = "Data"
+ops = ["derived"]
+ref = "5.1"
+spec = true
+uses = ["json", "data-error", "data-shape"]
+text = "The type class of a value that a later cell, another session or the host reads back with a type. The table of 5.1 gives the JSON form of each kind of value, and the companion has the givens and derived."
+
+# ── Phase 2: the preamble (5.1) ─────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "preamble"
+phase = "p2"
+module = "harness-guest"
+file = "Preamble.scala"
+title = "The source text of a new REPL, from a shape"
+
+[[node]]
+id = "type-text"
+group = "preamble"
+kind = "function"
+name = "typeText"
+ref = "5.1"
+uses = ["data-shape"]
+text = "The Scala text of the type of a shape."
+
+[[node]]
+id = "preamble"
+group = "preamble"
+kind = "function"
+name = "preamble"
+ref = "5.1"
+spec = true
+uses = ["data-shape"]
+proof_uses = ["type-text"]
+text = "The preamble of a new REPL: the types, one given for each type, submit, and one val for each input. It holds no value, so it holds no secret. Two types with one name and two forms, a sealed trait inside a sealed trait, and an input with the name of a guest API function have no preamble."
+
+# ── Phase 2: the laws of Data ────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "data-laws"
+phase = "p2"
+module = "harness-guest"
+file = "DataLaws.scala"
+where = "tests"
+title = "The laws of Data"
+
+[[node]]
+id = "law-data"
+group = "data-laws"
+kind = "law"
+name = "Data:"
+ref = "4.7"
+spec = true
+uses = ["data"]
+text = "decode(encode(v)) == Right(v) for each value with a Data. An encode never throws."
+
+[[node]]
+id = "law-text"
+group = "data-laws"
+kind = "law"
+name = "Text:"
+ref = "4.7"
+spec = true
+uses = ["data"]
+text = "parse(print(encode(v))) == encode(v). So a commit changes no value."
+
+[[node]]
+id = "law-form"
+group = "data-laws"
+kind = "law"
+name = "Form:"
+ref = "4.7"
+spec = true
+uses = ["data", "schema"]
+text = "Only Data reads the form of Data. For the values of the table of 5.1, Data and Schema write different JSON, and each reader fails on the text of the other."
+
+[[node]]
+id = "law-preamble"
+group = "data-laws"
+kind = "law"
+name = "Preamble:"
+ref = "5.1"
+spec = true
+uses = ["preamble", "data"]
+text = "The text of a preamble for the shapes of 5.1, and its three refusals. The law Shape, which compiles the text in a REPL, is in phase 2 too."
+
+# ── Phase 2: the guest API (5.1). The traits use capture checking, and safe code can call them. ──────────────────────
+
+[[group]]
+id = "guest-api"
+phase = "p2"
+module = "harness-guest"
+file = "Guest.scala"
+title = "The guest API: one trait for each effect, and the functions that a cell calls"
+
+[[node]]
+id = "cap"
+group = "guest-api"
+kind = "data"
+name = "Cap"
+ref = "5.1"
+spec = true
+uses = []
+text = "A capability with a read-only view: the bare type reads, and T^ also writes."
+
+[[node]]
+id = "job-id"
+group = "guest-api"
+kind = "data"
+name = "JobId"
+ref = "6"
+spec = true
+uses = ["data"]
+text = "The id of a job: the EffectId of its spawn. It is plain data, so it stays valid in a later cell and the store can hold it."
+
+[[node]]
+id = "job-status"
+group = "guest-api"
+kind = "data"
+name = "JobStatus"
+ref = "6"
+spec = true
+uses = ["data"]
+text = "Running, Exited, Stopped or Lost."
+
+[[node]]
+id = "needs-approval"
+group = "guest-api"
+kind = "data"
+name = "NeedsApproval"
+ref = "5.5"
+spec = true
+uses = []
+text = "The error of a call that waits for a person. Safe mode rejects its constructor in a cell."
+
+[[node]]
+id = "files"
+group = "guest-api"
+kind = "data"
+name = "Files"
+ref = "5.1"
+spec = true
+uses = ["cap"]
+
+[[node]]
+id = "shell"
+group = "guest-api"
+kind = "data"
+name = "Shell"
+ref = "5.1"
+spec = true
+uses = ["files", "job-id", "job-status"]
+
+[[node]]
+id = "llm"
+group = "guest-api"
+kind = "data"
+name = "Llm"
+ref = "5.1"
+spec = true
+uses = []
+text = "An LM call from a cell. A batch is one call, and the host runs its prompts at the same time."
+
+[[node]]
+id = "store"
+group = "guest-api"
+kind = "data"
+name = "Store"
+ref = "5.1"
+spec = true
+uses = ["cap", "data"]
+
+[[node]]
+id = "sessions"
+group = "guest-api"
+kind = "data"
+name = "Sessions"
+ref = "5.1"
+spec = true
+uses = ["cap"]
+
+[[node]]
+id = "children"
+group = "guest-api"
+kind = "data"
+name = "Children"
+ref = "5.1"
+spec = true
+uses = ["cap", "data"]
+
+[[node]]
+id = "api"
+group = "guest-api"
+kind = "data"
+name = "api"
+ops = ["now", "input"]
+ref = "5.1"
+spec = true
+uses = ["files", "shell", "llm", "store", "sessions", "children", "data", "job-id", "job-status"]
+blocked = "Choose how a cell reaches the host for now() and input(name): a given of the preamble, or a value that the host binds. The design says what they do, not how."
+text = "The functions that a cell calls. Each one takes its capability as a given, so the mode limits what compiles."
+
+# ── Phase 2: the REPL (6). The statements need a choice of the result of a cell: harness-repl does not see the kernel. ─
+
+[[group]]
+id = "repl"
+phase = "p2"
+module = "harness-repl"
+file = "ScalaRepl.scala"
+title = "One REPL for each activation"
+
+[[node]]
+id = "scala-repl"
+group = "repl"
+kind = "data"
+name = "ScalaRepl"
+ops = ["run"]
+ref = "6"
+spec = true
+uses = ["mode", "api"]
+blocked = "Choose the type of the result of a cell. harness-repl does not depend on harness-kernel, so it cannot give a CellOutcome, and the host must map its result to one."
+text = "ReplDriver in the same JVM with capture checking and safe mode, the givens of the mode, one cell at a time on its own thread, the stop flag, the protections of Phase 0, the second try in two parts, the catch around ReplDriver.run, and the clock of a cell."
+
+[[group]]
+id = "names"
+phase = "p2"
+module = "harness-repl"
+file = "Names.scala"
+title = "The top-level names of a cell, for the note of lost names"
+
+[[node]]
+id = "top-level-names"
+group = "names"
+kind = "function"
+name = "topLevelNames"
+ref = "6"
+uses = []
+text = "The names that a cell defines, from the parser of the compiler. The note of lost names folds them over the cells that completed, so it needs no state of the old REPL."
+
+[[group]]
+id = "hints"
+phase = "p2"
+module = "harness-repl"
+file = "Hints.scala"
+title = "The hints for the compile errors that models cannot read"
+
+[[node]]
+id = "error-hints"
+group = "hints"
+kind = "function"
+name = "hint"
+ref = "6"
+uses = []
+text = "The hint for an error of the table of section 6, or none."
+
+[[group]]
+id = "repl-laws"
+phase = "p2"
+module = "harness-repl"
+file = "ReplLaws.scala"
+where = "tests"
+title = "The laws of the REPL"
+
+[[node]]
+id = "law-top-level-names"
+group = "repl-laws"
+kind = "law"
+name = "Top-level names:"
+ref = "6"
+uses = ["top-level-names"]
+text = "The names of a cell: val, def, class, object, enum, type, the names in a pattern, givens with a name, extension methods and imports. An expression, an anonymous given and a cell that does not parse define none."
+
+[[node]]
+id = "law-names"
+group = "repl-laws"
+kind = "law"
+name = "Names:"
+ref = "4.7"
+spec = true
+uses = ["top-level-names", "logged"]
+blocked = "Choose the module of the note of lost names. It folds topLevelNames over the cells of the journal, so it needs harness-repl and the Logged of harness-kernel, and harness-repl does not depend on the kernel. Either harness-repl depends on the kernel, or the note moves to harness in phase 4."
+text = "The note after a restart lists the names of the cells that completed, and no name of a failed cell."
+
+[[node]]
+id = "law-submit"
+group = "repl-laws"
+kind = "law"
+name = "Submit:"
+ref = "4.7"
+spec = true
+uses = ["scala-repl", "api"]
+text = "A cell that called submit ends its turn with the first value, and the host refuses each later call of that cell."
+
+[[node]]
+id = "law-shape"
+group = "repl-laws"
+kind = "law"
+name = "Shape:"
+ref = "4.7"
+spec = true
+uses = ["scala-repl", "preamble", "data"]
+text = "A type that a preamble defines from shape reads each value of the first type, and it writes the same Json."
+
+[[node]]
+id = "law-mode-givens"
+group = "repl-laws"
+kind = "law"
+name = "Mode givens:"
+ref = "5.2"
+spec = true
+uses = ["scala-repl", "mode"]
+text = "The negative tests of the modes: in each mode, the calls that the mode does not give do not compile."
+
+[[node]]
+id = "law-hints"
+group = "repl-laws"
+kind = "law"
+name = "Hints:"
+ref = "6"
+uses = ["error-hints"]
+text = "Each error of the table of section 6 gets its hint."
+
+# ── Phase 2: the early MCP server (6) ───────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "mcp"
+phase = "p2"
+module = "harness-mcp"
+file = "McpServer.scala"
+title = "The REPL and the guest API for another agent"
+
+[[node]]
+id = "mcp-server"
+group = "mcp"
+kind = "data"
+name = "McpServer"
+ops = ["run"]
+ref = "6"
+uses = ["scala-repl"]
+text = "Two tools: run_cell(code) and the API reference. Only the transport writes to stdout, and the server starts only the read-only mode until the sandbox exists."

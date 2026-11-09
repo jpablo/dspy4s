@@ -1,0 +1,105 @@
+package dspy4s.harness.guest
+
+// A cell runs with capture checking, and the modes are capabilities: the bare type reads, and `T^` also writes (5.1).
+import language.experimental.captureChecking
+
+import caps.assumeSafe
+
+/** A capability with a read-only view. The bare type can only read, and `T^` can also change something. */
+@assumeSafe trait Cap extends caps.Stateful, caps.ExclusiveCapability
+
+/** The files of the workspace. The bare `Files` can only read, and `Files^` can also write. */
+@assumeSafe trait Files extends Cap:
+  def read(path: String): String
+  update def write(path: String, content: String): Unit
+
+/** Commands in the workspace. A session has this capability, or it has none. */
+@assumeSafe trait Shell extends caps.ExclusiveCapability:
+  def exec(command: String)(using Files^): String
+
+  /** Starts a job (6). With `report`, the end of the job sends a message to the session. */
+  def spawn(command: String, report: Boolean = false)(using Files^): JobId
+  def jobOutput(job: JobId): String
+
+  /** Blocks until the job ends or the time is up. */
+  def waitJob(job: JobId, maxSeconds: Int): JobStatus
+  def stopJob(job: JobId): Unit
+
+/** An LM call from a cell. A batch is one call, and the host runs its prompts at the same time (6). */
+@assumeSafe trait Llm extends caps.ExclusiveCapability:
+  def query(prompt: String): String
+  def queryBatched(prompts: Vector[String]): Vector[String]
+
+/** The session state that survives a restart (6). The bare `Store` can only load, and `Store^` can also store. */
+@assumeSafe trait Store extends Cap:
+  def keys: Vector[String]
+  def load[A: Data](key: String): Option[A]
+  update def store[A: Data](key: String, value: A): Unit
+
+/** Other sessions. The bare `Sessions` can only look, and `Sessions^` can also start work and send messages (5.2). */
+@assumeSafe trait Sessions extends Cap:
+  def list(): Vector[String]
+  update def tell(session: String, message: String): Unit
+  update def start(goal: String): String
+
+/** A child inside the cell (5.1). A closed session has this capability, and it has only the bare `Sessions`. */
+@assumeSafe trait Children extends Cap:
+  update def rlm[A: Data](task: String, inputs: Map[String, String]): A
+  update def rlmBatched[A: Data](tasks: Vector[String]): Vector[A]
+
+/** A command that runs after its cell ends (6). The id is plain data that holds the `EffectId` of its `spawn`, so it
+  * stays valid in a later cell, and the store can hold it.
+  */
+@assumeSafe final case class JobId(cell: Long, n: Int) derives Data
+@assumeSafe object JobId
+
+/** What `waitJob` gives (6). */
+@assumeSafe enum JobStatus derives Data:
+  case Running
+  case Exited(code: Int)
+  case Stopped
+  case Lost
+
+@assumeSafe object JobStatus
+
+/** A guard needs a person for this call (5.5). The handler throws it before the call runs. Safe mode rejects its
+  * constructor, so a cell cannot make one.
+  */
+final case class NeedsApproval(op: String, argument: String)
+    extends RuntimeException(s"$op($argument) needs an approval. End the turn and ask the person.")
+
+/** The functions that a cell calls (5.1). Each one takes its capability as a given, so the mode limits what compiles.
+  *
+  * Not here yet, because the design gives no signature: `edit`, `httpGet` and a `Network` trait, `observe` and `zoom`.
+  */
+@assumeSafe object api:
+  def println(value: Any): Unit = scala.Console.println(value)
+
+  /** Milliseconds since the epoch. A guest API call, so the journal records its value (5.1). */
+  def now(): Long = ???
+
+  /** The value of an input field of this session (5.1). It needs no capability, because it reads only what the
+    * session got, and it is not an effect, because the journal already holds the value.
+    */
+  def input[A](name: String)(using d: Data[A]): A = ???
+
+  def read(path: String)(using f: Files): String                                  = f.read(path)
+  def write(path: String, content: String)(using f: Files^): Unit                 = f.write(path, content)
+  def exec(command: String)(using s: Shell^, f: Files^): String                    = s.exec(command)
+  def spawn(command: String, report: Boolean = false)(using s: Shell^, f: Files^): JobId = s.spawn(command, report)
+  def jobOutput(job: JobId)(using s: Shell^): String                               = s.jobOutput(job)
+  def waitJob(job: JobId, maxSeconds: Int)(using s: Shell^): JobStatus             = s.waitJob(job, maxSeconds)
+  def stopJob(job: JobId)(using s: Shell^): Unit                                   = s.stopJob(job)
+  def llmQuery(prompt: String)(using l: Llm^): String                              = l.query(prompt)
+  def llmQueryBatched(prompts: Vector[String])(using l: Llm^): Vector[String]      = l.queryBatched(prompts)
+  def keys()(using s: Store): Vector[String]                                       = s.keys
+  def load[A: Data](key: String)(using s: Store): Option[A]                        = s.load[A](key)
+  def store[A: Data](key: String, value: A)(using s: Store^): Unit                 = s.store(key, value)
+  def sessions()(using s: Sessions): Vector[String]                                = s.list()
+  def tell(session: String, message: String)(using s: Sessions^): Unit             = s.tell(session, message)
+  def start(goal: String)(using s: Sessions^): String                              = s.start(goal)
+
+  def rlm[A: Data](task: String, inputs: Map[String, String] = Map.empty)(using c: Children^): A =
+    c.rlm[A](task, inputs)
+
+  def rlmBatched[A: Data](tasks: Vector[String])(using c: Children^): Vector[A] = c.rlmBatched[A](tasks)

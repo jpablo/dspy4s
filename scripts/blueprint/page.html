@@ -393,7 +393,8 @@ td .chip { font-weight: 400; white-space: nowrap; }
         "Each node that it uses is stated, so its declaration or its test can be written now."),
       list("Ready to prove", ids.filter((k) => info(k).proof === "ready"),
         "It is stated, and each node that it uses is done, so its body can be written now."),
-      list("Blocked", ids.filter((k) => info(k).statement === "blocked"), "The design must change before the work can start."),
+      list("Blocked", ids.filter((k) => info(k).blocked && !["done", "complete"].includes(info(k).proof)),
+        "The design must change before the work can start: the statement, or the proof of a stated node."),
     ];
     if (view().phase) parts.push(list("Code checks", ids.filter((k) => (info(k).notes || []).length),
       "The uses of the node do not agree with the names in its code. Select the node to see the warning."));

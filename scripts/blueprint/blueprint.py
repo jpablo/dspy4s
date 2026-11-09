@@ -268,7 +268,10 @@ def read_code(module: str) -> Code:
 
 
 def type_pattern(name: str) -> re.Pattern[str]:
-    return re.compile(rf"^([ \t]*)(?:[a-z ]*\s)?(?:enum|class|trait|object|type)\s+{re.escape(name)}(?![\w$])", re.M)
+    """A declaration of the type `name`, with its annotations and modifiers, for example `@assumeSafe final class`."""
+    annotations = r"(?:@[\w.]+(?:\([^)\n]*\))?\s+)*"
+    return re.compile(
+        rf"^([ \t]*){annotations}(?:[a-z ]*\s)?(?:enum|class|trait|object|type)\s+{re.escape(name)}(?![\w$])", re.M)
 
 
 def has_body(text: str, start: int) -> bool:
@@ -405,6 +408,8 @@ def derive(nodes: list[Node]) -> None:
             under = (f" These nodes that its proof needs are not complete: {names(not_complete, by_id)}."
                      if not_complete else " Each node that its proof needs is complete." if needs else "")
             n.why_proof = what + under
+        elif n.stated and n.blocked:
+            n.proof, n.why_proof = "none", f"Blocked: {n.blocked}"
         elif n.stated and not not_complete:
             n.proof = "ready"
             n.why_proof = ("Each node that its proof needs is complete, so the work can start." if needs
@@ -541,13 +546,19 @@ def strip(code: str) -> str:
 
 
 def named(code: str, by_name: dict[str, Node]) -> set[str]:
-    """The ids of the nodes that the code names. A function counts only in a call, or as an argument."""
+    """The ids of the nodes that the code names. A function counts only in a call, or as an argument. A name after a
+    dot is a member, for example the case `EffectResult.NeedsApproval`, so it does not count."""
     text = strip(code)
     out: set[str] = set()
-    for m in re.finditer(r"(?<![\w$])[A-Za-z_][\w$]*", text):
+    for m in re.finditer(r"(?<![\w$.])[A-Za-z_][\w$]*", text):
         n = by_name.get(m.group())
         if n is None:
             continue
+        line_start = text.rfind("\n", 0, m.start()) + 1
+        line_end = text.find("\n", m.end())
+        rest = text[m.end() : line_end if line_end >= 0 else len(text)]
+        if text[line_start : m.start()].strip() == "case" and "=>" not in rest:
+            continue  # the declaration of an enum case, not a use
         if n.kind == "function":
             after = text[m.end():].lstrip()[:1]
             before = text[:m.start()].rstrip()[-1:]
