@@ -1,6 +1,9 @@
 ThisBuild / organization := "io.github.jpablo"
 ThisBuild / version      := "0.1.0-SNAPSHOT"
-ThisBuild / scalaVersion := "3.8.4"
+// A Scala 3 nightly, the same as atc: capture checking and safe mode need it. Nightlies come from their own
+// repository.
+ThisBuild / scalaVersion := "3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY"
+ThisBuild / resolvers += "Scala nightlies" at "https://repo.scala-lang.org/artifactory/maven-nightlies/"
 
 addCommandAlias("fmt", ";scalafmtAll;scalafmtSbt")
 addCommandAlias("fmtCheck", ";scalafmtCheckAll;scalafmtSbtCheck")
@@ -13,8 +16,8 @@ addCommandAlias(
 addCommandAlias("mutationOptics", ";project programs;stryker")
 
 lazy val munitVersion           = "1.3.4"
-lazy val munitScalacheckVersion = "1.3.0" // own line; munit-scalacheck has no 1.3.1 (patch-compatible with munit 1.3.1)
-lazy val zioBlocksVersion       = "0.0.41"
+lazy val munitScalacheckVersion = "1.3.0"  // own line; munit-scalacheck has no 1.3.1 (patch-compatible with munit 1.3.1)
+lazy val zioBlocksVersion       = "0.0.56" // 0.0.41 fails on Scala 3.10: its TypeId macro gives a TypeId[Any]
 lazy val ujsonVersion           = "4.4.3"
 lazy val dotenvVersion          = "3.2.0"
 lazy val scalaXmlVersion        = "2.4.0"

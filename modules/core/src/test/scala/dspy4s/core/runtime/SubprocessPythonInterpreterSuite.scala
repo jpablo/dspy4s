@@ -8,6 +8,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.TimeUnit
+import scala.annotation.nowarn
 
 /** Tests for [[SubprocessPythonInterpreter]]. Auto-skipped (`assume(...)`) when `python3` isn't installed, so
   * `sbt test` passes on systems without Python.
@@ -145,14 +146,17 @@ class SubprocessPythonInterpreterSuite extends FunSuite:
     val pidFile = Files.createTempFile("dspy4s-python", ".pid")
     val interp  = new SubprocessPythonInterpreter(timeoutMillis = 60000L)
     val outcome = new CompletableFuture[Either[Throwable, (Boolean, Boolean)]]()
-    val caller  = new Thread(() =>
+    // The catch takes each Throwable, also an InterruptedException: the test reads each failure of the caller from
+    // `outcome`. So warning E235 is off here.
+    @nowarn("id=E235")
+    def call(): Unit =
       val run =
         try
           val result = interp.execute(s"import os, time; open('$pidFile', 'w').write(str(os.getpid())); time.sleep(30)")
           Right((result.isLeft, Thread.currentThread().isInterrupted))
         catch case error: Throwable => Left(error)
       val _ = outcome.complete(run)
-    )
+    val caller = new Thread(() => call())
     caller.setDaemon(true)
     try
       caller.start()

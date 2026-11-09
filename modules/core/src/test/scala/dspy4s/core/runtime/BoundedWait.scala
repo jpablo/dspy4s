@@ -4,6 +4,7 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.TimeoutException
+import scala.annotation.nowarn
 
 /** Test helpers for code that can block. A test that uses them fails, and does not block the suite, when the code under
   * test hangs.
@@ -15,15 +16,15 @@ object BoundedWait:
     */
   def within[A](seconds: Long)(body: => A): Option[A] =
     val result = new CompletableFuture[A]()
-    val thread = new Thread(
-      () =>
-        try
-          val _ = result.complete(body)
-        catch
-          case error: Throwable => val _ = result.completeExceptionally(error)
-      ,
-      "dspy4s-bounded-wait"
-    )
+    // The catch takes each Throwable, also a fatal one: the caller gets each failure of `body`, and does not wait for
+    // the time limit. So warning E235 is off here.
+    @nowarn("id=E235")
+    def run(): Unit =
+      try
+        val _ = result.complete(body)
+      catch
+        case error: Throwable => val _ = result.completeExceptionally(error)
+    val thread = new Thread(() => run(), "dspy4s-bounded-wait")
     thread.setDaemon(true)
     thread.start()
     try Some(result.get(seconds, TimeUnit.SECONDS))
