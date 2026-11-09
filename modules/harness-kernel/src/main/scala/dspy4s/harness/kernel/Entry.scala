@@ -132,4 +132,8 @@ val readOnlyOps: Set[String] = Set(
 /** True for an entry that reaches the disk before `commit` returns (4.1): an `Input`, because a sender has an answer,
   * an `Activated`, because a parent has a child, and an `EffectStarted` of an operation that is not read-only.
   */
-def needsFlush(entry: Entry): Boolean = ???
+def needsFlush(entry: Entry): Boolean =
+  entry match
+    case Entry.EffectStarted(_, op, _)                => !readOnlyOps(op)
+    case Entry.Input(_, _, _) | Entry.Activated(_, _) => true
+    case _                                            => false

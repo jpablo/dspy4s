@@ -734,6 +734,7 @@ kind = "function"
 name = "schedules"
 ref = "12"
 uses = ["command", "decide", "evolve", "next", "repair", "guard-check", "logged", "needs-flush", "source-of"]
+proof_uses = ["state"]
 text = "The generator of random schedules for the properties: crashes, stops, late messages, grants, jobs and power losses."
 
 # ── Phase 1: the laws of 4.7 that the kernel alone can show ─────────────────────────────────────────────────────────

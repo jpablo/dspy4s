@@ -294,7 +294,7 @@ def has_body(text: str, start: int) -> bool:
 
 
 def find_def(text: str, name: str, vals: bool = False) -> list[int]:
-    """The places of each `def name`, and of each `val name` when `vals` is true: a method of a type can be a value."""
+    """The places of each `def name`, and of each `val name` when `vals` is true. A method of a type can be a val."""
     keyword = r"(?:def|val)" if vals else "def"
     return [m.start() for m in re.finditer(rf"\b{keyword}\s+{re.escape(name)}(?=[\s(\[:=])", text)]
 
@@ -324,7 +324,25 @@ def def_block(text: str, start: int) -> str:
     return text[start : block_end(text, body, indent)]
 
 
-def scan(node: Node, code: Code | None) -> None:
+def with_helpers(text: str, code: str, skip: set[str]) -> str:
+    """`code` with the helpers in the same file that it calls, and theirs: the defs, classes and objects whose name is
+    not the name of a node. So the check of a function also reads its private helpers."""
+    seen: set[str] = set()
+    parts, todo = [code], [code]
+    while todo:
+        for m in re.finditer(r"(?<![\w$.])([A-Za-z_][\w$]*)\s*[(\[]", strip(todo.pop())):
+            name = m.group(1)
+            if name in seen or name in skip:
+                continue
+            seen.add(name)
+            blocks = [def_block(text, p) for p in find_def(text, name)]
+            blocks += [block] if (block := block_of(text, name)) else []
+            parts += blocks
+            todo += blocks
+    return "\n".join(parts)
+
+
+def scan(node: Node, code: Code | None, names: set[str]) -> None:
     if node.kind == "upstream" or code is None:
         node.stated = node.done = node.kind == "upstream"
     elif node.kind == "data":
@@ -336,7 +354,7 @@ def scan(node: Node, code: Code | None) -> None:
     elif node.kind == "function":
         found = [(f, t, p) for f, t in code.files(node.where).items() for p in find_def(t, node.name)]
         node.stated, node.file = bool(found), (found[0][0] if found else None)
-        node.code = "\n".join(def_block(t, p) for _, t, p in found)
+        node.code = "\n".join(with_helpers(t, def_block(t, p), names) for _, t, p in found)
         node.done = any(has_body(t, p) for _, t, p in found)
     else:  # a law or a check: the tests are the statement
         hits = [f for f, t in code.tests.items() if f'"{node.name}' in t]
@@ -543,10 +561,14 @@ COMMON_METHODS = {"apply", "map", "flatMap", "zip", "filter", "fold", "foldLeft"
 
 
 def called(code: str, owners: dict[str, Node]) -> dict[str, str]:
-    """The nodes whose methods the code calls, as id -> the first method. A method counts after a dot."""
+    """The nodes whose methods the code calls, as id -> the first method. A method counts after a dot, apart from a
+    name that the code itself declares as a field, a parameter or a member, for example the `initial` of `Fold`."""
+    text = strip(code)
+    own = set(re.findall(r"\b([A-Za-z_][\w$]*)\s*:(?!:)", text))
+    own |= set(re.findall(r"\b(?:def|val|var)\s+([A-Za-z_][\w$]*)", text))
     out: dict[str, str] = {}
-    for m in re.finditer(r"\.\s*([A-Za-z_][\w$]*|[<>=!]+)", strip(code)):
-        if (n := owners.get(m.group(1))) is not None:
+    for m in re.finditer(r"\.\s*([A-Za-z_][\w$]*|[<>=!]+)", text):
+        if m.group(1) not in own and (n := owners.get(m.group(1))) is not None:
             out.setdefault(n.id, m.group(1))
     return out
 
@@ -803,8 +825,9 @@ def build() -> Plan:
     meta, phases, groups, nodes = load(SOURCE)
     module_of = {g.id: g.module for g in groups}
     codes = {m: read_code(m) for m in sorted(set(module_of.values()))}
+    names = {n.name for n in nodes}
     for n in nodes:
-        scan(n, codes[module_of[n.group]] if n.group else None)
+        scan(n, codes[module_of[n.group]] if n.group else None, names)
     derive(nodes)
     check_code(nodes, groups)
     return Plan(meta, phases, groups, nodes, derive_phases(phases, nodes), partial_uses(phases, nodes),

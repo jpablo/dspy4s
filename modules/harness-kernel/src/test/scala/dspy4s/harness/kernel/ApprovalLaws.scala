@@ -66,8 +66,9 @@ class ApprovalLaws extends ScalaCheckSuite:
   // ── Pending call ──
 
   property("Pending call: a pending call has no active grant that covers it") {
-    forAll(states) { s =>
-      for call <- s.pending do assert(!s.grants.exists(_.rule.covers(call)), s"a grant covers the pending call $call")
+    forAll(schedules) { run =>
+      for s <- everyState(run); call <- s.pending do
+        assert(!s.grants.exists(_.rule.covers(call)), s"a grant covers the pending call $call")
     }
   }
 
@@ -92,7 +93,7 @@ class ApprovalLaws extends ScalaCheckSuite:
   }
 
   property("Pending call: the goal check waits while a pending call waits") {
-    forAll(states)(s => if s.pending.nonEmpty then assert(!goalCheckDue(s)))
+    forAll(schedules)(run => for s <- everyState(run) if s.pending.nonEmpty do assert(!goalCheckDue(s)))
   }
 
   // ── Guard ──

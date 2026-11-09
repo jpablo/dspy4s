@@ -6,10 +6,10 @@ import zio.blocks.schema.Schema
 enum Access derives Schema, CanEqual:
   case None, Read, Full
 
-  def <=(that: Access): Boolean = ???
+  def <=(that: Access): Boolean = ordinal <= that.ordinal
 
   /** The lower level of the two. */
-  def meet(that: Access): Access = ???
+  def meet(that: Access): Access = if this <= that then this else that
 
 /** The capabilities of a session (5.2). A mode is a product of seven chains, so the modes form a bounded
   * meet-semilattice with `Mode.full` at the top. The REPL makes the givens of the preamble from a mode, and
@@ -26,10 +26,21 @@ final case class Mode(
 ) derives Schema, CanEqual:
 
   /** True when each capability of this mode is at most the capability of `that`. */
-  def <=(that: Mode): Boolean = ???
+  def <=(that: Mode): Boolean =
+    files <= that.files && shell <= that.shell && network <= that.network && llm <= that.llm &&
+      sessions <= that.sessions && children <= that.children && store <= that.store
 
   /** The mode with the lower level of each capability. */
-  def meet(that: Mode): Mode = ???
+  def meet(that: Mode): Mode =
+    Mode(
+      files.meet(that.files),
+      shell.meet(that.shell),
+      network.meet(that.network),
+      llm.meet(that.llm),
+      sessions.meet(that.sessions),
+      children.meet(that.children),
+      store.meet(that.store)
+    )
 
 /** The modes of the table of 5.2. */
 object Mode:

@@ -4,9 +4,15 @@ package dspy4s.harness.kernel
   * of their ids, and an `Observed` with a failure for an open cell. A stop and a crash close a turn with the same
   * entries.
   */
-def closing(s: SessionState): Vector[Entry] = ???
+def closing(s: SessionState): Vector[Entry] =
+  val effects = s.open.keys.toVector.sortBy(id => (id.cell, id.n)).map(Entry.EffectDone(_, EffectResult.Unknown))
+  s.position match
+    case Position.InCell(_, _, _) => effects :+
+        Entry.Observed("", CellOutcome.Failed("the cell did not complete"), Map.empty)
+    case _ => effects
 
 /** The entries after a crash (4.4): `closing` and `TurnEnded(Crashed)`, or nothing with no open turn. The old entries
   * never change, and nothing runs an effect with an unknown outcome again automatically.
   */
-def repair(s: SessionState): Vector[Entry] = ???
+def repair(s: SessionState): Vector[Entry] =
+  if s.position == Position.NoTurn then Vector.empty else closing(s) :+ Entry.TurnEnded(TurnOutcome.Crashed)

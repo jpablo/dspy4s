@@ -12,7 +12,10 @@ enum Owner derives Schema, CanEqual:
   case Session(id: SessionId)
 
   /** True for the user and for a session. */
-  def hasPerson: Boolean = ???
+  def hasPerson: Boolean =
+    this match
+      case User | Session(_) => true
+      case Optimizer | Cell  => false
 
 /** A chat turn gives one last step to answer. A program call ends, and the caller runs the finisher (4.3). */
 enum TurnKind derives Schema, CanEqual:

@@ -245,9 +245,9 @@ lazy val examples = (project in file("modules/examples"))
     Test / javaOptions += "-Dfile.encoding=UTF-8"
   )
 
-// The code harness (docs/code-harness/CODE_HARNESS_DESIGN.md, 10.5). The two modules hold the typed skeleton of
-// phases 1 and 2: the types and the signatures, with `???` in place of each body, and the laws as tests. So the laws
-// fail until the bodies exist. docs/code-harness/CODE_HARNESS_BLUEPRINT.html shows the state of each part.
+// The code harness (docs/code-harness/CODE_HARNESS_DESIGN.md, 10.5). The two modules hold phase 1, the kernel, and the
+// modes of phase 2, with the laws of each as tests. docs/code-harness/CODE_HARNESS_BLUEPRINT.html shows the state of
+// each part of the plan.
 
 // The guest API: what model code calls, and the modes that limit it (5.1, 5.2).
 lazy val harnessGuest = (project in file("modules/harness-guest"))
