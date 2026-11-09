@@ -288,7 +288,7 @@ Notably **not** auto-coerced:
 - A number with a fraction, such as `3.5` or `"3.5"` → `Int` (rejected; no silent truncation)
 - A text that only Java reads as a number, such as `"3d"` or `"0x1p3"` → a number (rejected)
 
-[PORT_DIFFERENCES.md](port/PORT_DIFFERENCES.md) (section 17) compares this rule with upstream.
+[PORT_DIFFERENCES.md](../port/PORT_DIFFERENCES.md) (section 17) compares this rule with upstream.
 
 Supported for structured fields:
 

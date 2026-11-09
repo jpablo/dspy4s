@@ -891,7 +891,7 @@ def step(derived: Derived, i: Int)(using RuntimeContext)
 def runCell(code: String, derived: Derived)(using RuntimeContext)
     : Either[DspyError, AgentLoop.Step[Derived, TurnOutcome]] =
   for
-    result <- interpreter.execute(Cell(code))                       // each guest API call commits its own entries
+    result <- interpreter.run(Cell(code))                           // each guest API call commits its own entries
     cell    = result.observation
     _      <- journal.commit(Entry.Observed(cell.output, cell.outcome, cell.writes))
   yield cell.outcome match
