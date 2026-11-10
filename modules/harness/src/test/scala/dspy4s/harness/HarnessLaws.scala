@@ -327,7 +327,9 @@ class HarnessLaws extends FunSuite:
   }
 
   test("Harness: the REPL has only the givens of the task mode") {
-    val model = ScriptLm(policy("ask", Some("""llmQuery("hi")""")), policy("give up", Some("""submit("x")""")))
+    // Since phase 5 the task mode gives `Llm^` (8.1), so `llmQuery` compiles. The task mode still gives no `Network^`.
+    val fetch = """httpGet("http://fake.test/page")"""
+    val model = ScriptLm(policy("fetch", Some(fetch)), policy("give up", Some("""submit("x")""")))
     call(model) { (_, result, journal) =>
       assertEquals(result, Right(Answer("x")))
       assert(

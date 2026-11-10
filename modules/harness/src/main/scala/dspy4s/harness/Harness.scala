@@ -2,7 +2,7 @@ package dspy4s.harness
 
 import dspy4s.core.contracts.{ConfigurationError, DspyError, ParseError, RuntimeContext, RuntimeError}
 import dspy4s.core.data.RawPrediction
-import dspy4s.harness.guest.{Data, DataShape, Scope, preamble}
+import dspy4s.harness.guest.{Access, Data, DataShape, Mode, Scope, preamble}
 import dspy4s.harness.kernel.*
 import dspy4s.harness.repl.{Bindings, ScalaRepl}
 import dspy4s.harness.sandbox.{Layout, Profiles, SandboxedShell}
@@ -31,13 +31,21 @@ import scala.util.control.NonFatal
   * the end of the call, the current REPL is closed, `env.journals` gets the journal, and the copy and the private
   * folders are gone.
   *
-  * A proposal for the review: phase 4 has only the leaves `policy` and `finisher`, the leaves that run in a program
-  * call. `subQuery` comes with `llmQuery` in phase 5, and `goal` with the goals of sessions in phase 7.
+  * Since phase 5, a cell has `Llm^` and `Children^` (8.1). The `subQuery` leaf answers `llmQuery`, and `rlm` runs a
+  * child turn inside the cell. A child has the same path as the top session of the call (`session`): its own journal, a
+  * new REPL, the same `policy` leaf, the window strategy, and the same copy of the workspace with the same files and
+  * shell (8.1: "The scope of the parent"). Only `submit` gives the value of a child (5.1). The policy calls of the
+  * whole tree and the queries take from one `Budget` of `limits.modelCalls` calls, and a REPL at the depth
+  * `limits.depth` has no `Children^` (8.2).
+  *
+  * A proposal for the review: the harness has the leaves `policy`, `finisher` and `subQuery`, the leaves that run in a
+  * program call. `goal` comes with the goals of sessions in phase 7.
   */
 final case class Harness[I, O](
     signature: Signature[I, O],
     policy   : Predict[PolicyInput, PolicyStep],
     finisher : Predict[FinishInput, O],
+    subQuery : Predict[SubQuery, SubAnswer],
     strategy : ContextStrategy,
     env      : HarnessEnv,
     limits   : HarnessLimits
@@ -49,28 +57,28 @@ final case class Harness[I, O](
 
   protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     val journal = MemoryJournal(() => System.currentTimeMillis(), env.secrets)
-    val result  =
-      try
-        Harness.inFolder(Harness.forkWorkspace(env.workspace)) { fork =>
-          Harness.inFolder(JFiles.createTempDirectory("dspy4s-journals-")) { journals =>
-            val layout = Layout.forSession(env.home, journals)
-            Harness.inFolder(layout.temp)(_ => run(call.input, fork, layout, journal))
-          }
+    // `Module.apply` installs the context of the call, so a query and a child on another thread get it (9).
+    val host   = HostThreads.ofThisThread()
+    val result = Harness.repaired(journal) {
+      Harness.inFolder(Harness.forkWorkspace(env.workspace)) { fork =>
+        Harness.inFolder(JFiles.createTempDirectory("dspy4s-journals-")) { journals =>
+          val layout = Layout.forSession(env.home, journals)
+          Harness.inFolder(layout.temp)(_ => run(call.input, fork, layout, journal, host))
         }
-      catch
-        case NonFatal(e) =>
-          // The journal of one call has no next `Activate`, so the harness repairs an open turn here (4.4). The stop
-          // comes first: it holds the reason, and an input that no step saw then starts no new turn.
-          val reason = s"the call stopped: $e"
-          if journal.state.position != Position.NoTurn then
-            journal.run(Command.Abort(reason), Source.Harness): Unit
-            journal.commit(repair(journal.state)*): Unit
-          Left(RuntimeError("harness", reason))
+      }
+    }
     env.journals(journal.log)
     result
 
+  /** The mode of a session at `depth` (5.2, 8.2): the mode of the environment at the top, and `base.meet(Mode.closed)`
+    * for a child (5.2, the closed law). A REPL at the depth limit has no `Children^`, so `rlm` does not compile there.
+    */
+  private[harness] def modeAt(depth: Int): Mode =
+    val base = if depth == 0 then env.mode else env.mode.meet(Mode.closed)
+    if depth < limits.depth then base else base.copy(children = Access.None)
+
   /** The work of one call in the copy `fork`. */
-  private def run(input: I, fork: Path, layout: Layout, journal: MemoryJournal)(using
+  private def run(input: I, fork: Path, layout: Layout, journal: MemoryJournal, host: HostThreads)(using
       RuntimeContext
   ): Either[DspyError, Prediction[O]] =
     val fields = inputData.encode(input) match
@@ -82,47 +90,73 @@ final case class Harness[I, O](
     for
       _       <- Either.cond(fields.nonEmpty || inputShapes.isEmpty, (), ConfigurationError("the input is not a record"))
       text    <- preamble(outputData.shape, inputShapes).left.map(e => ConfigurationError(s"no preamble: $e"))
-      outcome <- turn(fields, text, fork, layout, journal)
+      outcome <- top(fields, text, fork, layout, journal, host)
       output  <- result(outcome, fields, journal)
     yield output
 
-  /** Starts the session, sends the input, and drives the turn. Gives the outcome of the turn. */
-  private def turn(fields: Vector[(String, Json)], text: String, fork: Path, layout: Layout, journal: MemoryJournal)(
-      using RuntimeContext
-  ): Either[DspyError, TurnOutcome] =
-    val config = SessionConfig(
-      kind = TurnKind.Program,
-      steps = limits.steps,
-      mode = env.mode,
-      ceiling = env.mode,
-      strategy = strategy.name,
-      scope = Scope.Fork(fork.toString, env.workspace.fold("")(_.toString)),
-      owner = Owner.Optimizer,
-      guard = Guard.allowAll,
-      preamble = text,
-      model = ModelChoice(Harness.modelName, Map.empty),
-      goal = None,
-      env = Set.empty
-    )
-    val task = Harness.task(signature, fields, Some(text))
+  /** The top session of a call: the files and the shell of the copy, which each child shares (8.1), the budget of the
+    * tree, and the turn. The shell closes at the end of the call.
+    */
+  private def top(
+      fields : Vector[(String, Json)],
+      text   : String,
+      fork   : Path,
+      layout : Layout,
+      journal: MemoryJournal,
+      host   : HostThreads
+  )(using RuntimeContext): Either[DspyError, TurnOutcome] =
+    val config  = sessionConfig(0, text, Scope.Fork(fork.toString, env.workspace.fold("")(_.toString)))
+    val profile = Profiles.forMode(env.mode, Layout.real(fork), layout, env.hosts)
+    val shell   = SandboxedShell(config, layout, env.hosts, env.backend, limits.execTimeout)
+    val files   = LocalFiles(fork, profile, layout.secretNames)
+    val tree    = Harness.CallTree(Budget(limits.modelCalls), host, fork, files, shell, config.scope)
+    try session(config, Harness.task(Harness.instructions(signature), fields, Some(text)), fields, 0, journal, tree)
+    finally shell.close()
+
+  /** One session of a call (8.1): the top session at the depth 0, or a child of `rlm`. Both have this path. It starts
+    * the session, sends the task, and drives the turn with the handlers of the mode of `config` and with the files and
+    * the shell of `tree`. Gives the outcome of the turn. The REPL of the last cell closes at the end, also after an
+    * exception.
+    */
+  private def session(
+      config : SessionConfig,
+      task   : String,
+      fields : Vector[(String, Json)],
+      depth  : Int,
+      journal: MemoryJournal,
+      tree   : Harness.CallTree
+  )(using RuntimeContext): Either[DspyError, TurnOutcome] =
     for
       _ <- journal.run(Command.Activate(Harness.versions, config), Source.Harness).left.map(rejected)
       _ <- journal.run(Command.Send(RequestId("task"), task, fields.toMap), Source.User).left.map(rejected)
     yield
       val recorder = Recorder(journal)
       val store    = SnapshotStore()
-      val profile  = Profiles.forMode(env.mode, Layout.real(fork), layout, env.hosts)
-      val shell    = SandboxedShell(config, layout, env.hosts, env.backend, limits.execTimeout)
+      val llm      = LeafLlm(subQuery, tree.budget, tree.host, limits.batch)
+      val children = ChildTurns(childStart(depth + 1, tree), tree.host, limits.batch)
       val bindings = Bindings(
         turn = JournalTurn(journal, () => System.currentTimeMillis()),
-        files = Some(LocalFiles(fork, profile, layout.secretNames)),
-        shell = Some(shell),
-        store = Some(store)
+        files = Some(tree.files),
+        shell = Some(tree.shell),
+        llm = Option.when(config.mode.llm == Access.Full)(llm),
+        store = Some(store),
+        children = Option.when(config.mode.children == Access.Full)(children)
       )
-      val handlers = recorded(bindings, recorder, Some(fork))
-      val newRepl  = () => ScalaRepl(env.mode, handlers, text, limits.cellTimeout, limits.cellLimit)
-      val effects  =
-        HarnessEffects(task, Harness.apiReference, policy, strategy, journal, newRepl, recorder, store, limits)
+      val handlers = recorded(bindings, recorder, Some(tree.fork))
+      val newRepl  = () => ScalaRepl(config.mode, handlers, config.preamble, limits.cellTimeout, limits.cellLimit)
+      val effects  = HarnessEffects(
+        task,
+        Harness.apiReference,
+        policy,
+        strategyAt(depth),
+        journal,
+        newRepl,
+        recorder,
+        store,
+        limits,
+        tree.budget,
+        tree.host
+      )
       try
         drive(journal, effects): Unit
         journal.log.reverseIterator.collectFirst { case Logged(_, _, Entry.TurnEnded(outcome)) => outcome }
@@ -130,23 +164,82 @@ final case class Harness[I, O](
       finally
         // This closes the REPL of the last cell, also after a restart (6).
         effects.close()
-        shell.close()
+
+  /** The start of a child at `depth` in the tree of a call. */
+  private def childStart(depth: Int, tree: Harness.CallTree): ChildStart =
+    new ChildStart:
+      def child[A: Data](task: String, inputs: Map[String, String])(using RuntimeContext): A =
+        runChild[A](task, inputs, depth, tree)
+
+  /** A child of `rlm` at `depth` (5.1, 8.1). It has its own journal with the secrets of the call, and `env.journals`
+    * gets the journal at its end. Its preamble comes from `Data[A].shape`, with one input of the type `String` for each
+    * key of `inputs`, and the `Input` entry holds the values. The task of the policy has the task text, the input
+    * fields and the preamble, as the task of the top session. Only `submit` gives the value (5.1). A child that ends
+    * with `Replied` or `Exhausted` throws, and the message has the last text of the child. `Failed`, `Aborted`,
+    * `Crashed` and a type with no preamble also throw, so the cell of the parent fails.
+    *
+    * A proposal for the review: the inputs are in the order of their names. The task of a child has the source `User`,
+    * as the task of the top session, because the kernel has no source for a cell.
+    */
+  private def runChild[A](task: String, inputs: Map[String, String], depth: Int, tree: Harness.CallTree)(using
+      data   : Data[A],
+      context: RuntimeContext
+  ): A =
+    val fields = inputs.toVector.sortBy(_._1).map((name, value) => name -> Json.String(value))
+    val shapes = fields.map((name, _) => name -> summon[Data[String]].shape)
+    val text   = preamble(data.shape, shapes).fold(
+      e => throw IllegalArgumentException(s"rlm: the type of the child has no preamble: $e"),
+      identity
+    )
+    val journal = MemoryJournal(() => System.currentTimeMillis(), env.secrets)
+    val config  = sessionConfig(depth, text, tree.scope)
+    val outcome =
+      try
+        Harness.repaired(journal)(session(config, Harness.task(task, fields, Some(text)), fields, depth, journal, tree))
+      finally env.journals(journal.log)
+    outcome.flatMap(Harness.submitted(_, journal.log, data)) match
+      case Right(Some(value)) => value
+      case Right(None)        => throw IllegalStateException(
+          s"rlm: the child ended with no submit, so it gave no value. Its last text: ${Harness.lastText(journal.log)}"
+        )
+      case Left(error) => throw IllegalStateException(s"rlm: the child failed: ${error.message}")
+
+  /** The configuration of a session at `depth` (8.1): a program turn with the mode of `modeAt`, the owner `Optimizer`
+    * at the top and `Cell` for a child, and the preamble `text`.
+    */
+  private def sessionConfig(depth: Int, text: String, scope: Scope)(using RuntimeContext): SessionConfig =
+    val mode = modeAt(depth)
+    SessionConfig(
+      kind = TurnKind.Program,
+      steps = limits.steps,
+      mode = mode,
+      ceiling = mode,
+      strategy = strategyAt(depth).name,
+      scope = scope,
+      owner = if depth == 0 then Owner.Optimizer else Owner.Cell,
+      guard = Guard.allowAll,
+      preamble = text,
+      model = ModelChoice(Harness.modelName, Map.empty),
+      goal = None,
+      env = Set.empty
+    )
+
+  /** The strategy of the top session, and the window for a child (8.1). */
+  private def strategyAt(depth: Int): ContextStrategy = if depth == 0 then strategy else Window
 
   /** The output of the call from the outcome of its turn. */
   private def result(outcome: TurnOutcome, fields: Vector[(String, Json)], journal: MemoryJournal)(using
       RuntimeContext
   ): Either[DspyError, Prediction[O]] =
-    outcome match
-      case TurnOutcome.Submitted(value) => outputData.decode(value, "submit") match
-          case Right(output) => Right(Prediction(output, RawPrediction(signature.outputShape.encode(output))))
-          case Left(error)   => Left(ParseError("harness", s"submit gave a value that does not fit: ${error.getMessage}"))
-      case TurnOutcome.Replied(_) | TurnOutcome.Exhausted =>
-        finisher(FinishInput(Harness.task(signature, fields), Harness.transcript(journal.log, limits.budget)))
-      case TurnOutcome.Failed(error) => Left(RuntimeError("harness", s"the turn failed: $error"))
-      case TurnOutcome.Aborted       =>
-        val reason = journal.log.reverseIterator.collectFirst { case Logged(_, _, Entry.StopRequested(r)) => r }
-        Left(RuntimeError("harness", reason.fold("the turn stopped")(r => s"the turn stopped: $r")))
-      case TurnOutcome.Crashed => Left(RuntimeError("harness", "the turn did not end"))
+    Harness.submitted(outcome, journal.log, outputData).flatMap {
+      case Some(output) => Right(Prediction(output, RawPrediction(signature.outputShape.encode(output))))
+      case None         =>
+        val finish = FinishInput(
+          Harness.task(Harness.instructions(signature), fields),
+          Harness.transcript(journal.log, limits.budget)
+        )
+        finisher(finish)
+    }
 
   private def rejected(rejection: Rejection): DspyError = RuntimeError("harness", s"the journal refused: $rejection")
 
@@ -163,18 +256,34 @@ object Harness extends HarnessGivens:
   /** The first instructions of the finisher leaf. */
   val finisherInstructions: String = "Give the output of the task from the steps of the work."
 
+  /** The first instructions of the subQuery leaf, which answers `llmQuery` (9). An optimizer can change them. */
+  val subQueryInstructions: String = "Answer the question of the code. Give a short answer."
+
   /** The name of the model of the runtime, for the configuration of the session. */
   private def modelName(using context: RuntimeContext): String =
     context.lm.collect { case model: LanguageModel => model.id }.getOrElse("none")
 
   /** The versions of a journal of a call (4.1). */
-  val versions: Versions = Versions(s"scala-${dotty.tools.dotc.config.Properties.versionNumberString}", "phase-4")
+  val versions: Versions = Versions(s"scala-${dotty.tools.dotc.config.Properties.versionNumberString}", "phase-5")
 
   /** The longest text of one input value in the task. */
   private val InputLimit = 2_000
 
-  /** A harness for `signature` with the first leaves: a policy with `policyInstructions`, and a finisher that gives the
-    * output fields of `signature`. The two leaves have the names `policy` and `finisher`, and the window strategy.
+  /** What the sessions of one call share (8.1, 8.2): the budget of model calls, the host threads, and the copy of the
+    * workspace with its files, its shell and its scope. A child works in the scope of its parent.
+    */
+  private[harness] final case class CallTree(
+      budget: Budget,
+      host  : HostThreads,
+      fork  : Path,
+      files : LocalFiles,
+      shell : SandboxedShell,
+      scope : Scope
+  )
+
+  /** A harness for `signature` with the first leaves: a policy with `policyInstructions`, a finisher that gives the
+    * output fields of `signature`, and a subQuery leaf with `subQueryInstructions`. The three leaves have the names
+    * `policy`, `finisher` and `subQuery`, and the window strategy.
     */
   def forTask[I: Data, O: Data](
       signature: Signature[I, O],
@@ -184,10 +293,12 @@ object Harness extends HarnessGivens:
     val policy   = Signature.derived[PolicyInput, PolicyStep]("policy", policyInstructions)
     val finisher =
       Signature.fromShapes("finisher", finisherInstructions, Shape.derived[FinishInput], signature.outputShape)
+    val subQuery = Signature.derived[SubQuery, SubAnswer]("subQuery", subQueryInstructions)
     Harness(
       signature,
       Predict(policy, name = Some("policy")),
       Predict(finisher, name = Some("finisher")),
+      Predict(subQuery, name = Some("subQuery")),
       Window,
       env,
       limits
@@ -232,18 +343,60 @@ object Harness extends HarnessGivens:
     )
   }.mkString("// The guest API. A cell is Scala 3 with capture checking and safe mode.\n\n", "\n\n", "")
 
-  /** The task of a call: the instructions of the signature, and the input fields with their values. The preamble has a
-    * val for each input field, so a cell reads the whole value.
+  /** The instructions of a signature: the head of the task of a call. */
+  private[harness] def instructions(signature: Signature[?, ?]): String =
+    signature.layout.instructions.filter(_.trim.nonEmpty).getOrElse("Do the task.")
+
+  /** The task of a session: the head, the instructions of the signature or the task of a child, and the input fields
+    * with their values. The preamble has a val for each input field, so a cell reads the whole value.
     *
     * The task of the policy also shows the source of `preamble`, so the model sees the types of `submit` and of the
     * input vals (5.1). The task of the finisher has no preamble, because the finisher writes no code.
     */
-  private[harness] def task(signature: Signature[?, ?], fields: Vector[(String, Json)], preamble: Option[String] = None)
-      : String =
-    val inputs = fields.map((name, value) => s"- $name: ${Window.cut(value.print, InputLimit)}").mkString("\n")
-    val head   = signature.layout.instructions.filter(_.trim.nonEmpty).getOrElse("Do the task.")
+  private[harness] def task(head: String, fields: Vector[(String, Json)], preamble: Option[String] = None): String =
+    val inputs =
+      if fields.isEmpty then "The task has no input fields."
+      else
+        "The input fields, each also a val of the preamble:\n" +
+          fields.map((name, value) => s"- $name: ${Window.cut(value.print, InputLimit)}").mkString("\n")
     val source = preamble.fold("")(p => s"\n\nThe preamble of the REPL defines these names:\n```scala\n${p.trim}\n```")
-    s"$head\n\nThe input fields, each also a val of the preamble:\n$inputs$source\n\nGive the result with submit."
+    s"$head\n\n$inputs$source\n\nGive the result with submit."
+
+  /** The value of a turn (5.1, 9). `Submitted` gives its value through `data`. `Replied` and `Exhausted` give no value,
+    * and the caller chooses: the top session runs the finisher, and a child fails. `Failed`, `Aborted` and `Crashed`
+    * give a `DspyError`, and the error of `Aborted` gives the reason of the stop.
+    */
+  private[harness] def submitted[A](outcome: TurnOutcome, log: Vector[Logged], data: Data[A])
+      : Either[DspyError, Option[A]] =
+    outcome match
+      case TurnOutcome.Submitted(value) => data.decode(value, "submit") match
+          case Right(output) => Right(Some(output))
+          case Left(error)   => Left(ParseError("harness", s"submit gave a value that does not fit: ${error.getMessage}"))
+      case TurnOutcome.Replied(_) | TurnOutcome.Exhausted => Right(None)
+      case TurnOutcome.Failed(error)                      => Left(RuntimeError("harness", s"the turn failed: $error"))
+      case TurnOutcome.Aborted                            =>
+        val reason = log.reverseIterator.collectFirst { case Logged(_, _, Entry.StopRequested(r)) => r }
+        Left(RuntimeError("harness", reason.fold("the turn stopped")(r => s"the turn stopped: $r")))
+      case TurnOutcome.Crashed => Left(RuntimeError("harness", "the turn did not end"))
+
+  /** The text of the last step of a turn, cut to `InputLimit` characters, for the error of a child with no value. */
+  private[harness] def lastText(log: Vector[Logged]): String =
+    log.reverseIterator.collectFirst { case Logged(_, _, Entry.Acted(_, text, _)) => Window.cut(text, InputLimit) }
+      .getOrElse("none")
+
+  /** Runs `body`. After an exception, it closes the open turn of `journal` with a stop and the entries of a repair
+    * (4.4), and gives a `DspyError`. The journal of one call has no next `Activate`, so the harness repairs the turn
+    * here. The stop comes first: it holds the reason, and an input that no step saw then starts no new turn.
+    */
+  private[harness] def repaired[A](journal: Journal)(body: => Either[DspyError, A]): Either[DspyError, A] =
+    try body
+    catch
+      case NonFatal(e) =>
+        val reason = s"the call stopped: $e"
+        if journal.state.position != Position.NoTurn then
+          journal.run(Command.Abort(reason), Source.Harness): Unit
+          journal.commit(repair(journal.state)*): Unit
+        Left(RuntimeError("harness", reason))
 
   /** The steps of a call as text for the finisher, cut to `budget` characters. */
   private[harness] def transcript(log: Vector[Logged], budget: Int): String =

@@ -1313,6 +1313,41 @@ open model of 27B parameters that sends its reasoning apart from its text:
   characters to 100 to 400, and a call took 1 to 2 s in place of 20 to 60 s. One task needed two more steps, because
   of a compile error.
 
+**The first version (phase 5).** Phase 5 adds `Llm^` and `Children^` to a harness call. These choices were made on
+2026-11-10, while the user was away, with the permission to make the proofs with no spec review first:
+
+- The task mode gives `Llm^` and `Children^`, as 8.1 gives a rollout. `recorded` records `llmQuery`,
+  `llmQueryBatched`, `rlm` and `rlmBatched`, with their arguments and their values through `Data`.
+- A third leaf, `subQuery: Predict[SubQuery, SubAnswer]`, answers `llmQuery`. The names are not `Query` and `Answer`,
+  because the tests have a type `Answer`. The structure of a harness has three leaves: `policy`, `finisher` and
+  `subQuery`.
+- `llmQueryBatched` runs at most `HarnessLimits.batch` queries at the same time on host threads, and it keeps the order
+  of the prompts. A cell cannot start threads, but the host can.
+- `rlm[A]` runs a child turn inside the cell. The child has its own journal, which `env.journals` gets, a new REPL with
+  a preamble from `Data[A].shape` and one `String` input for each key of `inputs`, the same `policy` leaf, the window
+  strategy and the same copy of the workspace. Only `submit` gives its value (5.1). `rlmBatched` runs at most
+  `HarnessLimits.batch` children at the same time, and it keeps the order of the tasks.
+- The budget `HarnessLimits.modelCalls` counts each policy call of the whole tree and each query of one program call.
+  The finisher does not count. A policy call with a spent budget ends the turn `Failed`, and a query with a spent
+  budget fails its cell.
+- The depth limit `HarnessLimits.depth` is 2. The top call has depth 0. A REPL at depth d has `Children^` only when d is
+  below the limit, so at the limit `rlm` does not compile.
+
+The proofs of phase 5 added these points, also for the review:
+
+- `HostThreads` runs each query and each child with the context of the program call, and it keeps their trace. The
+  harness adds that trace to the trace of the call after each cell, so an optimizer sees `subQuery` and the policy of
+  a child. It works like `ContextPropagation.futureExecuted`.
+- After one failure, an item of a batch that did not start does not run, and an item that runs is not stopped. The
+  error gives the first failure in the order of the items.
+- A child has the mode `env.mode.meet(Mode.closed)`, `Owner.Cell`, and its task has the source `User`, because the
+  kernel has no source for a cell. The inputs of `rlm` go in the order of their names.
+- The structure is two nested pairs. The inner pair has no name, so the names of `policy` and `finisher` stay.
+- `ChildTurns` gets a `ChildStart` from the harness and does not name `Harness`, so the plan has no cycle. A child and
+  the top call share one path in `Harness.scala`.
+- `HarnessEnv.journals` can run on several threads at the same time, because the children of `rlmBatched` end on
+  several threads.
+
 ## 10. The runtime
 
 ### 10.1 The layers
@@ -1551,6 +1586,7 @@ and the start probe also ran on JDK 21.0.11. The code is in `tmp/design-check/`,
 | The raw vLLM trace of a live call, and the Array chains of a cell | The trace showed that a cell refused `split(...)` then `take(5).foreach(...)`, so the model added the numbers by eye. Probes in the REPL, in a bare `ReplDriver` and in a plain compile found a defect of the compiler in a REPL with capture checking and safe mode, with the triggers of 6. Each REPL of the harness had it from its start: through the start cell `val host`, and through the top-level `given Data[T] = Data.derived` of the preamble. The fixes: no `val host`, a preamble with companion objects and an object for `submit` and the vals, a restart after the error that shows the defect, the hint of an explicit type, and one text of a cell for the MCP server and the harness, so the model sees the hints. The same trace showed no defect of dspy4s: the reminder of the format in each history turn, the `None` of a missing field, the note "valid Python str" of a `Reasoning` field and the absent `temperature` all follow upstream DSPy. A live run after the fixes: 5 of 5 right, 1 to 2 calls and 1 to 6 s a task, no restart, and the CSV task added the amounts with Vector code. The REPL has 41 laws with one expected failure (the defect), the harness 79 laws and 34 mutants, and each mutant is killed. |
 | A task set of 30 live tasks, `HarnessTasks`, with a metric, in one workspace with a folder for each task, so one harness and an optimizer can run each task | The tasks read, parse and sum files (CSV, JSON, a log, 5000 rows), use the shell and Python, write and edit files, use the store across cells, and need dates, a regex and a median. The test code computes each expected answer from the same generated data. `TaskSetLaws` checks the metric with no model, and it found that the metric took the quotes off before the period at the end. The baseline with the private endpoint and native reasoning declared: 30 of 30 right, 1 to 6 model calls and 0 to 14 s a task, and no restart. A first run of the first 20 tasks gave 19 of 20: the model gave the 32nd Fibonacci number for the 30th. |
 | A first GEPA run on the task set (`HarnessGepaRun`): the 15 tasks with an even index train and the 15 others validate, the reflection model is the model of the endpoint, and the metric gives 1.0 for a correct answer in one step, 0.1 less for each more step down to 0.5, and 0 for a wrong answer | GEPA gives a metric an empty trace for a validation run, as upstream gives `trace=None`, so the metric reads the steps from the journal of each call. The run made 120 metric calls in 15 iterations and 4 candidates in about 17 minutes. The validation score went from 0.820 to 0.900 with an instruction to finish in one cell. Two more evaluations of the seed and of the best candidate on all 30 tasks did not confirm it: the seed was right 58 of 60 times with a mean score of 0.834 and 140 steps, and the best 52 of 60 times with 0.822 and 104 steps. So the best candidate takes 26 % fewer steps, but it skips a look at the data and gives more wrong answers, and the gain on the validation set was mostly chance. The reasons: the seed already solves nearly each task, the step penalty rewards a skip of the inspection, and one score of each of 15 validation tasks cannot tell candidates apart. A next run needs harder tasks, several scores of each validation task, and a smaller weight for the steps. The best instruction also says that safe mode refuses `ChronoUnit.DAYS`; this note of the model is not checked. |
+| Phase 5: `llmQuery`, `llmQueryBatched`, `rlm` and `rlmBatched` in the harness, with the leaf `subQuery`, the shared budget and the depth limit | `RlmLaws` has 14 laws: the answer of the leaf and its effect, the trace of a query, the order of a batch with at most 4 calls at the same time, the index or the task in the error of a batch, one budget for the whole tree, a typed value of a child for a record too, a child that replies with no code, the depth limit, a property of the mode at each depth, and the shared copy of the workspace. The structure has three leaves. The harness has 99 laws and 50 mutants, and each mutant is killed. A live run with the private endpoint: a task that asks for `llmQuery` got `merci` with one query, and a task that asks for `rlm` got 541 from a child, with 7 model calls in 12 s. |
 | The laws of `harness` (phase 4), with scripts of `TurnEffects`, a real REPL, the sandbox of the host, and a scripted model through the chat adapter | 60 tests pass: `drive` with the scripts of this table, the journal in memory, the mask, the handlers, the window, a harness that submits, a reply and the step limit that run the finisher, a call in a copy of the workspace, `exec` in the sandbox, and the leaves for the optimizers. 18 mutants, each one killed. The runner of the optimizers puts the output in `RawPrediction.values`. A first run found that the chat adapter reads the text `null` in the field `code` as code. |
 
 The cells that models wrote. A cell counts if it compiled, so the table does not say that the cell does its task. The

@@ -8,7 +8,8 @@ import dspy4s.programs.strategies.Predict
 /** The effects of a turn of a harness (CODE_HARNESS_DESIGN.md, 4.6 and 9).
   *
   *   - `callPolicy` updates the derived data of `strategy`, projects the log of `journal` into the budget of `limits`,
-  *     and calls `policy` with the task and the API reference. The status says when a step is the last one, and the
+  *     spends one call of `budget`, and calls `policy` with the task and the API reference. A spent budget fails the
+  *     call with a plain error, so the turn ends `Failed` (8.2). The status says when a step is the last one, and the
   *     code of a step that must answer does not run. A code that is empty, `null` or `None` is no code, because the
   *     chat adapter keeps the text of an empty field (9). The trace of the call goes to the `RuntimeContext`, so an
   *     optimizer sees it.
@@ -18,7 +19,8 @@ import dspy4s.programs.strategies.Predict
   *     failure, a timeout or a submit. It has at most `limits.maxObservation` characters, with a note of the rest. The
   *     hints of a compile error are at the end of the text, so each hint that the cut removed comes after the cut text.
   *     When the thread of the cell still runs, or the heap guard closed the REPL (6), `runCell` closes `recorder` and
-  *     stops the turn (9).
+  *     stops the turn (9). After the cell, `host` joins the trace of the queries and the children of the cell into the
+  *     trace of this thread.
   *   - When the turn goes on, and the compiler cannot go on after the error of the cell (`ScalaRepl.needsRestart`) or
   *     the REPL is full (`ScalaRepl.full`), `runCell` closes the REPL and starts a new one from `newRepl`, with the
   *     same mode, bindings, preamble and limits (6). The store, the files and the journal stay. After the output, the
@@ -37,7 +39,9 @@ final class HarnessEffects(
     newRepl  : () => ScalaRepl,
     recorder : Recorder,
     store    : SnapshotStore,
-    limits   : HarnessLimits
+    limits   : HarnessLimits,
+    budget   : Budget,
+    host     : HostThreads
 )(using RuntimeContext)
     extends TurnEffects:
 
@@ -50,7 +54,7 @@ final class HarnessEffects(
       derived = data
       val view  = strategy.project(log, data, limits.budget)
       val input = PolicyInput(task, reference, view.status, view.observation, view.history)
-      policy(input).left.map(_.message).map { step =>
+      budget.spend().flatMap(_ => policy(input).left.map(_.message)).map { step =>
         val code = step.output.code.filterNot(c => HarnessEffects.NoCode.contains(c.strip))
         // The code of the last step of a chat does not run (4.3).
         PolicyReply(step.output.reasoning, step.output.text, if mustAnswer then None else code)
@@ -60,7 +64,8 @@ final class HarnessEffects(
   def runCell(cell: Long, code: String): CellResult =
     recorder.startCell(cell)
     store.begin(journal.state.store)
-    val run  = repl.run(code)
+    val run = repl.run(code)
+    host.join()
     val stop = HarnessEffects.unsafe(repl)
     stop.foreach { reason =>
       // A thread of the cell can still run. After the close, its calls get no id and reach no handler.

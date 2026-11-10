@@ -1,6 +1,6 @@
 package dspy4s.harness
 
-import dspy4s.harness.guest.{Data, Files, JobId, JobStatus, Shell, Store, Turn}
+import dspy4s.harness.guest.{Children, Data, Files, JobId, JobStatus, Llm, Shell, Store, Turn}
 import dspy4s.harness.kernel.{EffectId, EffectResult, Entry}
 import dspy4s.harness.repl.Bindings
 import dspy4s.harness.sandbox.{Layout, Profile}
@@ -208,14 +208,14 @@ final class JournalTurn(journal: Journal, clock: () => Long) extends Turn:
   * reads the journal, so it is not an effect. With `root`, the path of a file call is absolute and normal in the
   * arguments, as a path rule of a guard needs (5.5).
   *
-  * The handlers of the mode of phase 4 have a record: files, shell, store and the turn. A binding of another capability
-  * is an error until its phase.
+  * The handlers of the task mode have a record: files, shell, store, the turn, and since phase 5 the LM (`llmQuery`,
+  * `llmQueryBatched`) and the children (`rlm`, `rlmBatched`). The value of each call goes into the journal through its
+  * `Data`. A child has its own journal, so the journal of the parent has one effect for each `rlm`. A binding of the
+  * network or of the sessions is an error until its phase.
   */
 def recorded(bindings: Bindings, recorder: Recorder, root: Option[Path] = None): Bindings =
-  val others =
-    Vector(bindings.network.isDefined, bindings.llm.isDefined, bindings.sessions.isDefined, bindings.children.isDefined)
-  if others.contains(true) then
-    throw IllegalArgumentException("recorded has a record only for files, shell, store and turn")
+  if bindings.network.isDefined || bindings.sessions.isDefined then
+    throw IllegalArgumentException("recorded has a record only for files, shell, store, llm, children and turn")
   val base                               = root.map(Layout.real)
   def path(text : String): String        = base.fold(text)(_.resolve(text).normalize.toString)
   def args(pairs: (String, Json)*): Json = Json.Object(Chunk.from(pairs))
@@ -264,5 +264,26 @@ def recorded(bindings: Bindings, recorder: Recorder, root: Option[Path] = None):
             "store",
             args("key" -> text(key), "value" -> summon[Data[A]].encode(value))
           )(inner.store(key, value))
+    },
+    llm = bindings.llm.map { inner =>
+      new Llm:
+        def query(prompt: String): String =
+          recorder.call("llmQuery", args("prompt" -> text(prompt)))(inner.query(prompt))
+        def queryBatched(prompts: Vector[String]): Vector[String] =
+          recorder.call("llmQueryBatched", args("prompts" -> summon[Data[Vector[String]]].encode(prompts)))(
+            inner.queryBatched(prompts)
+          )
+    },
+    children = bindings.children.map { inner =>
+      new Children:
+        def rlm[A: Data](task: String, inputs: Map[String, String]): A =
+          recorder.call(
+            "rlm",
+            args("task" -> text(task), "inputs" -> summon[Data[Map[String, String]]].encode(inputs))
+          )(inner.rlm[A](task, inputs))
+        def rlmBatched[A: Data](tasks: Vector[String]): Vector[A] =
+          recorder.call("rlmBatched", args("tasks" -> summon[Data[Vector[String]]].encode(tasks)))(
+            inner.rlmBatched[A](tasks)
+          )
     }
   )

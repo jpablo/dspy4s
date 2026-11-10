@@ -1,5 +1,5 @@
-# The mutants of the harness of phase 4. Each mutant breaks one rule of 4.6, 5.3, 5.6, 7 or 9 of
-# docs/code-harness/CODE_HARNESS_DESIGN.md.
+# The mutants of the harness of phases 4 and 5. Each mutant breaks one rule of 4.6, 5.1, 5.2, 5.3, 5.6, 6, 7, 8.2 or 9
+# of docs/code-harness/CODE_HARNESS_DESIGN.md.
 #
 # `python3 scripts/mutants/mutants.py modules/harness/src/test/mutants.toml` applies each mutant alone, runs the laws
 # of the module, and restores the code. At least one law must fail for each mutant.
@@ -177,8 +177,8 @@ new = "case _                                         => store.writes"
 name = "Mutant: the call works in the workspace and not in a copy"
 [[mutant.edit]]
 file = "Harness.scala"
-old = "run(call.input, fork, layout, journal)"
-new = "run(call.input, env.workspace.getOrElse(fork), layout, journal)"
+old = "run(call.input, fork, layout, journal, host)"
+new = "run(call.input, env.workspace.getOrElse(fork), layout, journal, host)"
 
 [[mutant]]
 name = "Mutant: a failed copy leaves its part"
@@ -268,8 +268,8 @@ new = "PolicyReply(\"\","
 name = "Mutant: the task of the policy has no preamble"
 [[mutant.edit]]
 file = "Harness.scala"
-old = "Harness.task(signature, fields, Some(text))"
-new = "Harness.task(signature, fields)"
+old = "Harness.task(Harness.instructions(signature), fields, Some(text))"
+new = "Harness.task(Harness.instructions(signature), fields)"
 
 [[mutant]]
 name = "Mutant: the two leaves have one name"
@@ -284,3 +284,99 @@ name = "Mutant: the runner gives no output values"
 file = "HarnessGivens.scala"
 old = ".map(_.raw)"
 new = ".map(_ => RawPrediction(DynamicValue.Record.empty))"
+
+# ── Phase 5: RLM in the harness (5.1, 5.2, 6, 8.1, 8.2, 9) ──
+
+[[mutant]]
+name = "Mutant: the task mode gives no Llm^"
+[[mutant.edit]]
+file = "HarnessConfig.scala"
+old = "Mode(Access.Full, Access.Full, Access.None, Access.Full, Access.None, Access.Full, Access.Full)"
+new = "Mode(Access.Full, Access.Full, Access.None, Access.None, Access.None, Access.Full, Access.Full)"
+
+[[mutant]]
+name = "Mutant: recorded does not record rlm"
+[[mutant.edit]]
+file = "Handlers.scala"
+old = """          recorder.call(
+            "rlm",
+            args("task" -> text(task), "inputs" -> summon[Data[Map[String, String]]].encode(inputs))
+          )(inner.rlm[A](task, inputs))"""
+new = "          inner.rlm[A](task, inputs)"
+
+[[mutant]]
+name = "Mutant: the subQuery leaf has the name of the finisher"
+[[mutant.edit]]
+file = "HarnessGivens.scala"
+old = "Some(\"subQuery\"),"
+new = "Some(\"finisher\"),"
+
+[[mutant]]
+name = "Mutant: a replace of the subQuery leaf changes the limits"
+[[mutant.edit]]
+file = "HarnessGivens.scala"
+old = "harness.copy(subQuery = subQuery)("
+new = "harness.copy(subQuery = subQuery, limits = harness.limits.copy(batch = 1))("
+
+[[mutant]]
+name = "Mutant: a batch runs each item at the same time"
+[[mutant.edit]]
+file = "Budget.scala"
+old = "Executors.newFixedThreadPool(width.max(1).min(items.size), threads)"
+new = "Executors.newFixedThreadPool(items.size.max(width).max(1), threads)"
+
+[[mutant]]
+name = "Mutant: a batch gives the values in the reverse order"
+[[mutant.edit]]
+file = "Budget.scala"
+old = ".toLeft(results.collect { case Some(Right(value)) => value })"
+new = ".toLeft(results.collect { case Some(Right(value)) => value }.reverse)"
+
+[[mutant]]
+name = "Mutant: rlmBatched names the first task in its error"
+[[mutant.edit]]
+file = "ChildTurns.scala"
+old = "\\\"${tasks(i)}\\\", failed"
+new = "\\\"${tasks(0)}\\\", failed"
+
+[[mutant]]
+name = "Mutant: env.journals does not get the journal of a child"
+[[mutant.edit]]
+file = "Harness.scala"
+old = "finally env.journals(journal.log)"
+new = "finally journal.log.size: Unit"
+
+[[mutant]]
+name = "Mutant: a query spends no call of the budget"
+[[mutant.edit]]
+file = "SubQueries.scala"
+old = "budget.spend().left.foreach(error => throw IllegalStateException(s\"llmQuery: $error\"))"
+new = "budget.spent: Unit"
+
+[[mutant]]
+name = "Mutant: a policy call spends no call of the budget"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "budget.spend().flatMap(_ => policy(input).left.map(_.message))"
+new = "Right(budget.spent).flatMap(_ => policy(input).left.map(_.message))"
+
+[[mutant]]
+name = "Mutant: each child has a budget of its own"
+[[mutant.edit]]
+file = "Harness.scala"
+old = "ChildTurns(childStart(depth + 1, tree), tree.host, limits.batch)"
+new = "ChildTurns(childStart(depth + 1, tree.copy(budget = Budget(limits.modelCalls))), tree.host, limits.batch)"
+
+[[mutant]]
+name = "Mutant: a REPL at the depth limit has Children^"
+[[mutant.edit]]
+file = "Harness.scala"
+old = "if depth < limits.depth then base"
+new = "if depth <= limits.depth then base"
+
+[[mutant]]
+name = "Mutant: the trace of the queries of a cell joins before the cell"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "    val run = repl.run(code)\n    host.join()\n"
+new = "    host.join()\n    val run = repl.run(code)\n"

@@ -281,6 +281,16 @@ object HarnessTasks:
       "big-csv",
       s"t27/big.csv has 5000 rows with the columns id, group and value. What is the sum of the values of the rows of the group B? $only",
       bigRows.collect { case (_, "B", value) => value.toLong }.sum.toString
+    ),
+    HarnessTask(
+      "llm",
+      s"Use llmQuery to ask a model for the French word for thank you, and give that word in lower case. $only",
+      "merci"
+    ),
+    HarnessTask(
+      "rlm",
+      s"Use rlm to give a child the task to compute the 100th prime number as an Int, and give the value of the child. $only",
+      nthPrime(100).toString
     )
   )
 

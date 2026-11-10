@@ -83,7 +83,7 @@ result = "A harness for one task that the optimizers accept."
 id = "p5"
 number = 5
 title = "RLM"
-modules = []
+modules = ["harness"]
 uses = ["p4"]
 result = "RLM in the harness."
 
@@ -2224,8 +2224,8 @@ kind = "function"
 name = "recorded"
 ref = "5.3"
 uses = ["bindings", "recorder", "layout"]
-proof_uses = ["files", "shell", "store", "turn", "recorder"]
-text = "recorded(h) for each handler of a Bindings value: each call of the guest API goes through the recorder. input reads the journal, so it is not an effect."
+proof_uses = ["files", "shell", "store", "turn", "recorder", "llm", "children"]
+text = "recorded(h) for each handler of a Bindings value: each call of the guest API goes through the recorder. input reads the journal, so it is not an effect. Since phase 5 it also records llmQuery, llmQueryBatched, rlm and rlmBatched, with their values through Data. It refuses a binding of the network and of the sessions."
 
 # ── Phase 4: the context (7) ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -2338,9 +2338,10 @@ name = "HarnessEffects"
 ops = ["callPolicy", "runCell"]
 ref = "4.6"
 uses = ["turn-effects", "predict", "policy-input", "policy-step", "context-strategy", "journal-trait", "scala-repl",
-        "recorder", "snapshot-store", "harness-limits", "runtime-context", "session-state"]
-proof_uses = ["cell-result", "policy-reply", "window", "recorder", "snapshot-store", "lost-names"]
-text = "callPolicy projects the log with the strategy and calls the policy leaf, so the trace reaches the RuntimeContext. runCell starts the calls of the cell, takes the snapshot of the store, and runs the code in the REPL. After the error of the compiler defect, it starts a new REPL and adds the note of the lost names."
+        "recorder", "snapshot-store", "harness-limits", "runtime-context", "session-state", "budget", "host-threads"]
+proof_uses = ["cell-result", "policy-reply", "window", "recorder", "snapshot-store", "lost-names", "budget",
+              "host-threads"]
+text = "callPolicy projects the log with the strategy, spends one call of the budget, and calls the policy leaf, so the trace reaches the RuntimeContext. A spent budget fails the call, and the turn ends Failed. runCell starts the calls of the cell, takes the snapshot of the store, runs the code in the REPL, and joins the trace of the host threads. After the error of the compiler defect, it starts a new REPL and adds the note of the lost names."
 
 [[group]]
 id = "harness"
@@ -2356,7 +2357,7 @@ kind = "data"
 name = "HarnessEnv"
 ref = "9"
 uses = ["host-list", "backend", "secrets", "mode", "logged"]
-text = "What a harness needs that an optimizer must not change: the workspace, the home folder, the hosts, the backend, the secrets and the mode. journals gets the journal of each call, because the owner of a rollout is an optimizer, which reads the journal (8.6)."
+text = "What a harness needs that an optimizer must not change: the workspace, the home folder, the hosts, the backend, the secrets and the mode. The task mode gives Files^, Shell^, Llm^, Children^ and Store^, as 8.1 gives a rollout. journals gets the journal of each call and of each child, because the owner of a rollout is an optimizer, which reads the journal (8.6)."
 
 [[node]]
 id = "harness-limits"
@@ -2365,7 +2366,7 @@ kind = "data"
 name = "HarnessLimits"
 ref = "9"
 uses = []
-text = "The limits of a call: the steps, the budget of a projection, the time of a cell and of a command, and the size of an observation."
+text = "The limits of a call: the steps, the budget of a projection, the time of a cell and of a command, the size of an observation, the cell limit, and since phase 5 the model calls of the tree (60), the depth limit of rlm (2) and the width of a batch (4)."
 
 [[node]]
 id = "finish-input"
@@ -2385,10 +2386,11 @@ ops = ["forward", "forTask", "forkWorkspace"]
 ref = "9"
 spec = true
 uses = ["dspy-module", "signature", "predict", "policy-input", "policy-step", "finish-input", "context-strategy",
-        "harness-env", "harness-limits", "data", "runtime-context", "dspy-error"]
+        "harness-env", "harness-limits", "data", "runtime-context", "dspy-error", "sub-query", "sub-answer", "mode"]
 proof_uses = ["drive", "memory-journal", "harness-effects", "recorded", "local-files", "snapshot-store", "journal-turn",
-              "sandboxed-shell", "profile-for-mode", "layout", "preamble", "scala-repl", "window"]
-text = "A harness for one task, as a dspy4s Module. forward copies the workspace, starts a journal in memory and a REPL with the handlers of the mode, sends the input fields, runs drive and reads the last TurnEnded: Submitted gives the output through Data, Replied and Exhausted run the finisher. A proposal: phase 4 has only the leaves policy and finisher, and the mode Files^, Shell^ and Store^."
+              "sandboxed-shell", "profile-for-mode", "layout", "preamble", "scala-repl", "window", "budget",
+              "host-threads", "leaf-llm", "child-turns", "child-start"]
+text = "A harness for one task, as a dspy4s Module. forward copies the workspace, starts a journal in memory and a REPL with the handlers of the mode, sends the input fields, runs drive and reads the last TurnEnded: Submitted gives the output through Data, Replied and Exhausted run the finisher. Since phase 5 a child of rlm has the same session path: its own journal, a new REPL with a preamble from Data[A].shape, the same policy leaf, the window strategy and the same copy, files and shell. Only submit gives the value of a child. modeAt gives Children^ only below the depth limit. A proposal: the leaves are policy, finisher and subQuery."
 
 [[group]]
 id = "harness-givens"
@@ -2405,7 +2407,7 @@ name = "structure"
 ref = "9"
 spec = true
 uses = ["harness", "optimizable-structure"]
-text = "The leaves policy and finisher, in this order and with distinct names. A replace changes only these leaves."
+text = "The leaves policy, finisher and subQuery, in this order and with distinct names. A replace changes only these leaves. A proposal: two nested pairs, and the inner pair has no name of its own."
 
 [[node]]
 id = "harness-runner"
@@ -2571,7 +2573,7 @@ kind = "law"
 name = "Structure:"
 ref = "9"
 uses = ["harness-structure", "harness"]
-text = "The leaves are the policy and the finisher, with distinct keys. A replace with the parameters that read gives changes no parameter, a replace changes only the instructions of the leaves, and the arity agrees with the leaves."
+text = "The leaves are the policy, the finisher and the subQuery, with distinct keys, and the subQuery leaf has its first instructions. A replace with the parameters that read gives changes no parameter, a replace changes only the instructions of the three leaves, and the arity agrees with the leaves."
 
 [[node]]
 id = "law-optimizers"
@@ -2597,5 +2599,150 @@ kind = "check"
 name = "Mutant:"
 ref = "4.7"
 uses = ["law-drive", "law-journal", "law-secret", "law-recorded", "law-local-files", "law-snapshot-store", "law-window",
-        "law-harness", "law-structure"]
-text = "Each mutant breaks one rule of drive, the journal, the mask, the handlers, the window or the harness, and at least one law must fail. scripts/mutants/mutants.py runs the list, with a time limit for each mutant."
+        "law-harness", "law-structure", "law-llm", "law-budget", "law-rlm"]
+text = "Each mutant breaks one rule of drive, the journal, the mask, the handlers, the window, the harness or, since phase 5, the mode, the subQuery leaf, the handlers of Llm^ and Children^, the budget, the depth limit and the width of a batch, and at least one law must fail. scripts/mutants/mutants.py runs the list, with a time limit for each mutant."
+
+# ── Phase 5: the budget, the host threads and the batches (8.2, 6, 9) ──────────────────────────────────────────────
+
+[[group]]
+id = "budget"
+phase = "p5"
+module = "harness"
+file = "Budget.scala"
+title = "The shared budget, the host threads and the batches of a call"
+
+[[node]]
+id = "budget"
+group = "budget"
+kind = "data"
+name = "Budget"
+ops = ["spend"]
+ref = "8.2"
+spec = true
+uses = []
+text = "The model calls of one program call, for the whole tree: each policy call of the call and of each child, and each query. The finisher does not count. spend is one atomic step, because a batch runs on several threads. A proposal: the limit is 60."
+
+[[node]]
+id = "host-threads"
+group = "budget"
+kind = "data"
+name = "HostThreads"
+ops = ["run", "join"]
+ref = "9"
+uses = ["runtime-context"]
+text = "The work of a program call on another thread: a query on the thread of its cell, a child on the thread of the cell of its parent, and a batch on host threads. run gives the body the context of the call and keeps its trace. A proposal: join adds the kept trace to the trace of the call after each cell, so an optimizer sees each call of a leaf."
+
+[[node]]
+id = "in-batch"
+group = "budget"
+kind = "function"
+name = "inBatch"
+ref = "6"
+uses = []
+text = "Runs a task for each item, at most width items at the same time, each on a host thread, and keeps the order of the items: all the values, or the first failure with the index of its item. After a failure, an item that did not start does not run."
+
+# ── Phase 5: the subQuery leaf and the handler of Llm^ (5.1, 9) ───────────────────────────────────────────────────
+
+[[group]]
+id = "sub-queries"
+phase = "p5"
+module = "harness"
+file = "SubQueries.scala"
+title = "The subQuery leaf types and the handler of Llm^"
+
+[[node]]
+id = "sub-query"
+group = "sub-queries"
+kind = "data"
+name = "SubQuery"
+ref = "9"
+uses = ["schema"]
+text = "The input of the subQuery leaf: the prompt of an llmQuery. A proposal: the names are not Query and Answer, because the tests have a type Answer."
+
+[[node]]
+id = "sub-answer"
+group = "sub-queries"
+kind = "data"
+name = "SubAnswer"
+ref = "9"
+uses = ["schema"]
+text = "The output of the subQuery leaf: the answer to the prompt."
+
+[[node]]
+id = "leaf-llm"
+group = "sub-queries"
+kind = "data"
+name = "LeafLlm"
+ops = ["query", "queryBatched"]
+ref = "5.1"
+spec = true
+uses = ["llm", "predict", "sub-query", "sub-answer", "budget", "host-threads"]
+proof_uses = ["in-batch", "budget", "host-threads"]
+text = "The handler of Llm^. query spends one call of the budget and runs the subQuery leaf on the host threads. A spent budget and a failed model call throw, so the cell fails. queryBatched runs at most HarnessLimits.batch queries at the same time, keeps the order of the prompts, and throws with the index of the prompt that failed."
+
+# ── Phase 5: the handler of Children^ (5.1, 8.1, 8.2) ─────────────────────────────────────────────────────────────
+
+[[group]]
+id = "children-handler"
+phase = "p5"
+module = "harness"
+file = "ChildTurns.scala"
+title = "The start of a child and the handler of Children^"
+
+[[node]]
+id = "child-start"
+group = "children-handler"
+kind = "data"
+name = "ChildStart"
+ref = "8.1"
+uses = ["data", "runtime-context"]
+text = "The start of a child of a program call: the harness gives it to the handler of Children^. child runs the turn of a child and gives the value of its submit, and it throws when the child gives no value (5.1)."
+
+[[node]]
+id = "child-turns"
+group = "children-handler"
+kind = "data"
+name = "ChildTurns"
+ops = ["rlm", "rlmBatched"]
+ref = "8.2"
+spec = true
+uses = ["children", "child-start", "host-threads", "data"]
+proof_uses = ["in-batch", "host-threads"]
+text = "The handler of Children^. rlm runs a child turn inside the cell, with the context of the program call. rlmBatched runs at most HarnessLimits.batch children at the same time, each with no inputs, keeps the order of the tasks, and throws with the task of the child that failed."
+
+# ── Phase 5: the laws ─────────────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "rlm-laws"
+phase = "p5"
+module = "harness"
+file = "RlmLaws.scala"
+where = "tests"
+title = "The laws of RLM in the harness, with scripted models and real REPLs"
+
+[[node]]
+id = "law-llm"
+group = "rlm-laws"
+kind = "law"
+name = "LLM:"
+ref = "5.1"
+uses = ["harness", "leaf-llm", "recorded"]
+text = "llmQuery gives the answer of the subQuery leaf, and the journal of the parent has one llmQuery effect. The trace of a query reaches the trace of the program call. llmQueryBatched keeps the order of the prompts with a model whose reply depends on the request, runs at most HarnessLimits.batch queries at the same time, and fails with the index of the prompt that failed."
+
+[[node]]
+id = "law-budget"
+group = "rlm-laws"
+kind = "law"
+name = "Budget:"
+ref = "8.2"
+uses = ["harness", "budget", "harness-effects", "leaf-llm"]
+text = "The policy calls of the parent and of a child and the queries share one budget. A query with a spent budget fails its cell, and a policy call with a spent budget ends the turn Failed."
+
+[[node]]
+id = "law-rlm"
+group = "rlm-laws"
+kind = "law"
+name = "RLM:"
+ref = "8.2"
+uses = ["harness", "child-turns", "recorded"]
+text = "rlm gives the typed value of the submit of a child, also for a record, the inputs are String vals of the child, the child has its own journal, which env.journals gets, and the parent journal has one rlm effect. A child that replies with no code makes rlm fail in the cell of the parent, with the text of the child. A child below the depth limit can call rlm, and a child at the limit cannot compile it. A child works in the copy of the parent. rlmBatched keeps the order of the tasks, runs at most HarnessLimits.batch children at the same time, and fails with the task of the child that failed."

@@ -26,9 +26,13 @@ class StructureLaws extends FunSuite:
   private def structure: OptimizableStructure[Harness[Question, Answer]] =
     summon[OptimizableStructure[Harness[Question, Answer]]]
 
-  test("Structure: the leaves are the policy and the finisher, with distinct keys") {
-    assertEquals(structure.inspectNamed(harness).map(_._1), Vector("policy", "finisher"))
-    assertEquals(structure.inspect(harness).map(_.metadata).distinct.size, 2)
+  test("Structure: the leaves are the policy, the finisher and the subQuery, with distinct keys") {
+    assertEquals(structure.inspectNamed(harness).map(_._1), Vector("policy", "finisher", "subQuery"))
+    assertEquals(structure.inspect(harness).map(_.metadata).distinct.size, 3)
+  }
+
+  test("Structure: the subQuery leaf has the first instructions of the code questions") {
+    assertEquals(structure.read(harness).map(_.instructions).lastOption.flatten, Some(Harness.subQueryInstructions))
   }
 
   test("Structure: a replace with the parameters that read gives changes no parameter") {
@@ -36,9 +40,10 @@ class StructureLaws extends FunSuite:
   }
 
   test("Structure: a replace changes the instructions of each leaf, and nothing else") {
-    val changed = structure.read(harness).zip(Vector("P", "F")).map((p, text) => p.copy(instructions = Some(text)))
+    val changed = structure.read(harness).zip(Vector("P", "F", "S")).map((p, text) => p.copy(instructions = Some(text)))
     val updated = structure.replace(harness, changed)
-    assertEquals(structure.read(updated).map(_.instructions), Vector(Some("P"), Some("F")))
+    assertEquals(structure.read(updated).map(_.instructions), Vector(Some("P"), Some("F"), Some("S")))
+    assertEquals(updated.subQuery.signature.layout.instructions, Some("S"))
     assertEquals(updated.limits, harness.limits)
     assertEquals(updated.strategy.name, harness.strategy.name)
   }
@@ -46,13 +51,13 @@ class StructureLaws extends FunSuite:
   test("Structure: the arity agrees with the leaves") {
     val law = structure.arityAgreement(harness)
     assertEquals(law.lhs, law.rhs)
-    assertEquals(structure.arity(harness), 2)
+    assertEquals(structure.arity(harness), 3)
   }
 
   test("Optimizers: a harness has what each optimizer needs") {
     def leaves[P: {OptimizableStructure, ProgramRunner}](program: P): Option[Int] =
       Option(summon[ProgramRunner[P]]).map(_ => summon[OptimizableStructure[P]].arity(program))
-    assertEquals(leaves(harness), Some(2))
+    assertEquals(leaves(harness), Some(3))
   }
 
   test("Optimizers: the runner reads a record of the inputs, and gives the output in RawPrediction.values") {

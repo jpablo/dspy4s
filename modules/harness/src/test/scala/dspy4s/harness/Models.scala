@@ -7,6 +7,8 @@ import dspy4s.lm.contracts.{LanguageModel, LmMode, LmOutput, LmRequest, LmRespon
 import dspy4s.signatures.Signature
 import zio.blocks.schema.Schema
 
+import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.atomic.AtomicInteger
 import scala.collection.mutable.ArrayBuffer
 
 /** The input of the task of the tests. */
@@ -41,6 +43,26 @@ final class ThinkingLm(thought: String, replies: String*) extends LanguageModel:
       .lift(requests.size - 1)
       .toRight(RuntimeError("thinking", "the script has no more replies"))
       .map(text => LmResponse(outputs = Vector(LmOutput(text = text, reasoning = thought))))
+
+/** A model whose reply is a function of the text of its request, not of the order of the calls. So calls at the same
+  * time get the right replies (6). `pause` gives the milliseconds that a call waits before its reply, and `most` counts
+  * the most calls that ran at the same time. A `Left` reply is a failed call.
+  */
+final class RequestLm(reply: String => Either[String, String], pause: String => Long = _ => 0L) extends LanguageModel:
+  override val id: String                        = "request"
+  override val mode: LmMode                      = LmMode.Chat
+  val requests: ConcurrentLinkedQueue[LmRequest] = ConcurrentLinkedQueue()
+  val most: AtomicInteger                        = AtomicInteger(0)
+  private val running                            = AtomicInteger(0)
+
+  override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
+    requests.add(request): Unit
+    most.accumulateAndGet(running.incrementAndGet(), math.max): Unit
+    try
+      val text = request.messages.flatMap(_.text).mkString("\n")
+      Thread.sleep(pause(text))
+      reply(text).left.map(RuntimeError("request", _)).map(t => LmResponse(outputs = Vector(LmOutput(text = t))))
+    finally running.decrementAndGet(): Unit
 
 /** The helpers of the tests that call a model. */
 object Models:
