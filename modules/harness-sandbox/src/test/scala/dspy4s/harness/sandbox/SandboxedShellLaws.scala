@@ -133,7 +133,7 @@ class SandboxedShellLaws extends FunSuite:
     assume(Seatbelt.works(), "only Seatbelt lets a child reach the proxy")
     withPlace { place =>
       val server = TestServer()
-      val sh     = shell(place, Mode.full, Some(Seatbelt), HostList(Set("localhost")))
+      val sh     = shell(place, Mode.full, Some(Seatbelt), HostList(Set("localhost:*")))
       try
         assertEquals(sh.exec(s"curl -s -m 5 http://localhost:${server.port}/"), "FAKE-SERVER")
         assert(sh.exec(s"curl -s -m 5 http://127.0.0.1:${server.port}/").contains("not on the host list"))

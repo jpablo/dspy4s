@@ -8,6 +8,11 @@ import java.nio.file.{Files as JFiles, Path}
   * namespace hides the other processes, also the harness process and its variables in `/proc`. The network namespace is
   * always new, so a command has no network, also in a mode with `Network^`. The proxy needs a bridge into the
   * namespace, as in Codex, and that comes later. Less network is less authority, so the law of 5.4 holds.
+  *
+  * A seccomp filter keeps each command away from the UNIX sockets of the host (`Seccomp`). bwrap loads it from the file
+  * descriptor 3, and a shell opens that descriptor and then becomes bwrap with the same process id. So
+  * `--die-with-parent` and the stop of `SandboxedShell` still reach bwrap. `works()` runs a command with `wrap`, so on
+  * a host where the filter does not load, bubblewrap does not work.
   */
 object Bubblewrap extends Backend:
   val name = "bubblewrap"
@@ -17,10 +22,17 @@ object Bubblewrap extends Backend:
 
   def works(): Boolean = Host.os.contains("linux") && program.isDefined && Host.probe(this)
 
+  /** The command line. The filter must be outside each writable root of `profile`, else a command could change the
+    * filter of a later command. So `wrap` refuses a scope that holds the temporary folder of the JVM.
+    */
   def wrap(profile: Profile, cwd: Path, argv: Vector[String], proxyPort: Option[Int]): Vector[String] =
     require(profile.canRun, "the profile allows no child process")
-    val bwrap = program.getOrElse(throw IllegalStateException("bwrap is not on this host"))
-    (bwrap +: flags(profile, cwd)) ++ ("--" +: argv)
+    val bwrap  = program.getOrElse(throw IllegalStateException("bwrap is not on this host"))
+    val filter = Seccomp.file().getOrElse(throw IllegalStateException("no seccomp filter for this host"))
+    if profile.writable.exists(filter.startsWith) then
+      throw IllegalStateException(s"a writable root of the profile holds the seccomp filter $filter")
+    val open = Vector("/bin/sh", "-c", "exec 3<\"$1\"; shift; exec \"$@\"", "sh", filter.toString)
+    open ++ (Vector(bwrap, "--seccomp", "3") ++ flags(profile, cwd)) ++ ("--" +: argv)
 
   /** The arguments of `bwrap` for `profile`. A later mount covers an earlier one, so the secrets come last. Only a path
     * that exists can have a mount, so a new file with a secret name has none (5.4).

@@ -249,6 +249,19 @@ class DataLaws extends ScalaCheckSuite:
     )
   }
 
+  test("Preamble: the name of an input goes into the text of its input call with escapes") {
+    // A quote or a backslash in a name would end the string, and the preamble would not compile.
+    val text = preamble(summon[Data[String]].shape, Vector("a\"b\\c" -> summon[Data[String]].shape))
+    assert(text.exists(_.contains("input[String](\"a\\\"b\\\\c\")")), text.toString)
+  }
+
+  test("Preamble: an input name that no Scala name can hold has no preamble") {
+    // A backquoted name cannot hold a backquote or a new line, and a name cannot be empty.
+    Vector("", "a`b", "a\nb").foreach { name =>
+      assert(preamble(summon[Data[String]].shape, Vector(name -> summon[Data[String]].shape)).isLeft, name)
+    }
+  }
+
   test("Preamble: two types with one name and two forms have no preamble") {
     val first  = DataShape.Record("P", () => Vector("x" -> DataShape.Plain("Int")))
     val second = DataShape.Record("P", () => Vector("y" -> DataShape.Plain("String")))

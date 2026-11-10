@@ -46,7 +46,11 @@ def decide(command: Command, s: SessionState): Either[Rejection, Vector[Entry]] 
       else if s.position != Position.NoTurn then Left(Rejection.TurnOpen)
       else Right(Vector(Entry.Ended(outcome, reason)))
 
-/** True when `entry` of a `Commit` is valid at this place of the language of 4.1. */
+/** True when `entry` of a `Commit` is valid at this place of the language of 4.1. An `EffectStarted` needs an `n` above
+  * the `n` of each call that its cell started, open or closed. A second intent with the id of an open effect would
+  * replace the first, and the first would get no outcome of its own. A replay answers each call by its id, so one id
+  * must name one call of the cell.
+  */
 private def allowed(s: SessionState, entry: Entry): Boolean =
   entry match
     case Entry.ScopeRecorded(_, _)                      => !s.closed
@@ -56,7 +60,7 @@ private def allowed(s: SessionState, entry: Entry): Boolean =
       (s.position match
         case Position.InPolicy(_) => true
         case _                    => false)
-    case Entry.EffectStarted(id, _, _) => !s.stopping &&
+    case Entry.EffectStarted(id, _, _) => !s.stopping && id.n > s.lastCall &&
       (s.position match
         case Position.InCell(_, cell, _) => id.cell == cell
         case _                           => false)

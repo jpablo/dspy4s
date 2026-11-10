@@ -698,23 +698,36 @@ compare each backend with these observations.
 
 - The layout names the private temporary directory, the folder of the journals, the secret paths and the names of the
   secret files. The secret paths are `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.netrc`,
-  `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, `~/.password-store`, `~/.config/gcloud`, `~/.config/gh` and
-  `~/Library/Keychains`. Under the scope and the temporary directory, a file or folder with the name `.env` or
+  `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, `~/.password-store`, `~/.config/gcloud`, `~/.config/gh`,
+  `~/Library/Keychains`, and the credential files of common tools: `~/.config/git/credentials`, `~/.config/op`,
+  `~/.codex/auth.json`, `~/.claude/.credentials.json`, `~/.m2/settings.xml`, `~/.gradle/gradle.properties`,
+  `~/.sbt/.credentials`, `~/.ivy2/.credentials`, `~/.cargo/credentials`, `~/.cargo/credentials.toml`,
+  `~/.local/share/keyrings`, `~/.pgpass`, `~/.vault-token` and `~/.terraform.d/credentials.tfrc.json`. Under the scope and the temporary directory, a file or folder with the name `.env` or
   `.env.*` that exists when a command starts is secret. A proposal: the design names only `~/.ssh`, `~/.aws` and
   `.env`.
-- The host list is a set of host names. A name `*.d` matches each subdomain of `d`. A proposal: the design gives the
-  host list no type.
+- The host list is a set of patterns: `name`, `name:port` or `name:*`. A name `*.d` matches each subdomain of `d`. A
+  pattern with no port allows only the ports 80 and 443. A proposal: the design gives the host list no type.
 - Seatbelt denies by default, as in Codex. A child can start programs, read files, and look only at the processes of
   its own sandbox. It cannot reach launchd and the other services of the system, so it cannot start a process outside
   the sandbox. `sh`, `git`, `python3` and `java` run with these rules.
 - bubblewrap keeps the network closed in each mode, also with `Network^`, because the proxy needs a bridge into the
   network namespace, as in Codex. Less network is less authority, so the law holds.
-- A secret name protects the files that exist when a command starts. Before each command, `Profiles.forCommand`
-  walks the writable roots, apart from `.git`, and hides each file with a secret name and the target of each one that
-  is a symbolic link. The command cannot read, write, link or move these files, and both backends deny them by path.
-  A command can make a new file with a secret name. That file holds only data of the command, and the next command
-  cannot read it. A mount of bubblewrap cannot hide a name, so a rule for the names would hold only on macOS. The walk
-  takes time in a large scope.
+- A read-only mount does not stop a connection to a UNIX socket of the host, and a network namespace covers only the
+  abstract sockets. Through the D-Bus bus of the user, a command can start a process outside the sandbox, and
+  docker.sock gives root. So bubblewrap loads a seccomp filter: `socket` for `AF_UNIX` gets `EPERM`, and so do
+  `socketpair` for a datagram pair, `io_uring_setup`, and each call of another ABI. A stream pair from `socketpair`
+  stays allowed. The filter exists for aarch64 and x86_64, and on another host bubblewrap does not work. Seatbelt
+  denies these connections by default.
+- A secret name protects the files that exist when a command starts. Before each command, the shell finds the
+  files of the writable roots with a secret name, apart from `.git`, and it hides each one and the target of each one
+  that is a symbolic link. It also hides a folder that it cannot read. The command cannot read, write, link or move
+  these files, and both backends deny them by path. A command can make a new file with a secret name. That file holds
+  only data of the command, and the next command cannot read it. A mount of bubblewrap cannot hide a name, so a rule
+  for the names would hold only on macOS.
+- `SecretIndex` keeps the listing of each folder, so a command lists again only the folders that changed. It lists a
+  folder again when its change time, its last-modified time or its file key differs, and when the folder changed less
+  than 2 seconds before the listing, because a file time on Linux can be coarse. A command can set the last-modified
+  time back, but not the change time.
 - Seatbelt escapes a quote, a backslash, a newline and a return in a path, so a file name cannot stop the next
   commands.
 - A backend works when `/bin/sh -c true` runs under its own command line. A probe with other arguments can pass in a
@@ -723,8 +736,14 @@ compare each backend with these observations.
   `ProcessHandle.isAlive` is true for it. The handler counts a zombie as stopped, so the time limit does not wait for
   it. A zombie uses no memory, but only an init reaps it, so run the harness with an init in a container.
 - `scripts/sandbox-linux/run.sh` runs the laws on Linux in a podman container, as a normal user.
-- The proxy listens on the loopback address, for plain HTTP and for `CONNECT`. A host that is not on the list gets 403,
-  and the proxy opens no connection for it. The proxy resolves the names, so a child needs no DNS.
+- The proxy listens on the loopback address, for plain HTTP and for `CONNECT`. A host or a port that is not on the
+  list gets 403, and the proxy opens no connection for it. The proxy resolves the names, so a child needs no DNS. It
+  sends the `Host` header of the URL that it checked, and it refuses a folded header. It serves at most 64
+  connections at a time, and a connection above the limit gets 503. A side that is silent for the idle time ends the
+  connection.
+- Two limits stay. A tunnel of `CONNECT` can carry another host in its TLS name or in its inner `Host` header, as
+  with any proxy that does not open TLS. A second request in one plain connection keeps its own `Host` header, but the
+  proxy asks the host to close after the first answer.
 - A proposal: `exec` gives the standard output and the standard error as one text. A last line tells about a cut of
   the output, the end of the time limit, and an exit code that is not 0. The time limit stops the command and each
   child that the handler saw.
@@ -794,6 +813,19 @@ Grant(request, GuardRule("exec", ArgMatch.Prefix("command", "git push")), GrantL
 | `Turn` | A loop of calls | The next `TurnEnded` |
 | `Session` | Work that the person trusts | `Ended` |
 
+**The normal form of `Prefix`.** A raw `startsWith` lets a cell dodge a rule with `//etc`, `/./etc` or two spaces, so
+`Prefix` compares a normal form:
+
+- A rule text that starts with `/` is a path rule. Both sides lose their empty parts and their `.` parts, and a `..`
+  removes the part before it. The value matches when its parts start with the parts of the rule, so `/etc` matches
+  `/etc/hosts` and not `/etcetera`. A relative path never matches, so a handler gives absolute normal paths.
+- Another rule text is a text rule. Each run of whitespace becomes one space on both sides. The value matches when it
+  starts with the rule text and its next character cannot go on with a word: it is not a letter, a digit, `-`, `_` or
+  `.`. So `git push` matches `git push;rm x` and `git push origin`, and not `git pushx`.
+
+`decide` also refuses an `EffectStarted` whose id is not above each id that its cell started, open or closed, so one
+id names one call. `SessionState.lastCall` holds the largest one.
+
 `Ended` removes all grants, so a reopened session asks again. The lifetime is in the grant, because only the person
 knows how much they trust that call.
 
@@ -841,8 +873,8 @@ wait in the handler can come later with no kernel change, because `Granted` can 
 - A command from `exec` or `spawn` gets only an allowlist of environment variables: `PATH`, `HOME`, `SHELL`, `TMPDIR`,
   `TMP`, `TEMP`, `LANG`, `LC_ALL`, `LC_CTYPE`, `LOGNAME`, `USER`, `TERM`, and the names in `SessionConfig.env`. A name
   that contains `KEY`, `SECRET`, `TOKEN`, `PASSWORD`, `PASSWD`, `CREDENTIAL` or `AUTH` never goes through, also if the
-  session adds it. The harness process holds the keys of the LM provider, and Java and Codex pass all variables by
-  default.
+  session adds it. `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` and `GIT_AUTHOR_DATE` are not secret, because `AUTH` is in
+  `AUTHOR`. The harness process holds the keys of the LM provider, and Java and Codex pass all variables by default.
 - The writer masks each known secret value in each string of an entry before the commit, as `«secret:NAME»`. The known
   values are the values behind `secretHeaders` and the values of the secret-like variables of the harness process. A
   longer value goes first, so a value inside another value is not cut. This rule is a second guard: it does not find a
@@ -953,6 +985,8 @@ tool gives the API reference. Two rules hold:
 - Until the sandbox of phase 3 exists, the server starts only the read-only mode of 5.2, with no `Shell^` and no
   `Network^`. The other agent has its own shell, so the server only tests the guest API. The first server also has no
   LM and no other sessions, so it gives `files: Files` on the workspace and `state: Store^` in memory.
+- `files` cannot read a file with a secret name or a secret path of the home folder (5.4), as for a command. The
+  check takes the path as the cell writes it and its real path, so a link with a secret name is closed too.
 
 ## 7. The context
 
@@ -1334,7 +1368,7 @@ key of the journal is the fence there. JDBC also reaches a server database, but 
 | `harness-guest` | The guest API traits, `Data`, `Access`, `Mode`, `Scope`, `StrategyName`, `SessionRef` and `SessionCard`. The source text is the API reference. | zio-blocks only |
 | `harness-kernel` | `Entry`, `SessionState`, `evolve`, `next`, `decide`, `repair`, `reports`, `Fold` | `harness-guest`, zio-blocks |
 | `harness-repl` | `ScalaRepl`, the protections of Phase 0, the note of lost names | `harness-guest`, `harness-kernel`, `scala3-repl` |
-| `harness-mcp` | The early MCP server of section 6 | `harness-repl`, the MCP Java SDK |
+| `harness-mcp` | The early MCP server of section 6 | `harness-repl`, `harness-sandbox` for the secret paths and names, the MCP Java SDK |
 | `harness-sandbox` | The profiles, Seatbelt, bubblewrap, the proxy of the host list, the allowlist of variables, and the handler of `Shell` | `harness-kernel` |
 | `harness` | `Harness`, `drive`, the journal in memory, the mask of secrets, the handlers, the context strategies and the memory tree, the leaves. A strategy needs `RuntimeContext`, `DspyError` and `History` of dspy4s, so it is not in the kernel. | The modules above, dspy4s `programs` and `adapters` |
 | `harness-host` | The session host, the SQLite journal, the catalog, the report pass | `harness`, `sqlite-jdbc` |
@@ -1417,7 +1451,8 @@ and the start probe also ran on JDK 21.0.11. The code is in `tmp/design-check/`,
 | The Phase 0 experiment on JDK 21.0.11 and on JDK 25.0.5 | The same 43 checks pass on both, and the same 3 known problems fail. The first REPL in a JVM: 1,048 ms and 1,026 ms. The heap after 600 cells: 349 MiB and 348 MiB. |
 | A new JVM up to the end of the first harness cell, with the preamble of 5.2 | JDK 21: 2.51 s. JDK 25: 2.51 s. JDK 25 with an AOT cache from one training run: 1.69 s, and the cache file has 64 MB. Each number is a median of 5 runs. |
 | `sqlite-jdbc` on JDK 25 | It prints a warning about native access, and the warning names the flag `--enable-native-access=ALL-UNNAMED`. JDK 21 prints no warning. |
-| The laws of `harness-sandbox` on Linux, with `scripts/sandbox-linux/run.sh`: Ubuntu 24.04, bwrap and JDK 21 on arm64, in a privileged podman container, as a normal user | 43 tests: 37 pass, and 6 of Seatbelt skip. Each probe of 5.4 gives what the profile allows. The first run found three errors, fixed here. A command made a new file `.env.new`, because a mount of bubblewrap cannot hide a name, so 5.4 now protects the secret files that exist when a command starts. The probe of bubblewrap passed in a container where each command failed. The time limit waited 2 s for a zombie when the JVM was PID 1. |
+| The laws of `harness-sandbox` on Linux, with `scripts/sandbox-linux/run.sh`: Ubuntu 24.04, bwrap and JDK 21 on arm64, in a privileged podman container, as a normal user | 63 tests: 57 pass, and 6 of Seatbelt skip. Each probe of 5.4 gives what the profile allows. The first run found three errors, fixed here. A command made a new file `.env.new`, because a mount of bubblewrap cannot hide a name, so 5.4 now protects the secret files that exist when a command starts. The probe of bubblewrap passed in a container where each command failed. The time limit waited 2 s for a zombie when the JVM was PID 1. |
+| A code review of phases 1 to 3 at the high level, and the fixes | 10 findings, each fixed with a test that failed first. The worst: bwrap let a command reach the UNIX sockets of the host, so the D-Bus bus or docker.sock could start a process outside the sandbox. A probe reproduced it on Linux, and a seccomp filter fixed it. The others: the MCP files read `.env`, the proxy kept the `Host` header of the client and allowed each port with no limit of connections, the secret paths missed common credential files, `Prefix` compared raw text, `decide` took an effect id two times, `AUTH` matched `AUTHOR`, each command walked the whole scope, and the preamble did not escape a name. A review of the fixes found 6 more cases, fixed too. The sandbox has 36 mutants, the kernel 27, and each one is killed. |
 
 The cells that models wrote. A cell counts if it compiled, so the table does not say that the cell does its task. The
 last column has this `Data` and the second try of section 6:

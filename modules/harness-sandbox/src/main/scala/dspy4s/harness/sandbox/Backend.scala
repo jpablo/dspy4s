@@ -30,18 +30,23 @@ private[sandbox] object Host:
 
   /** True when `/bin/sh -c true` runs under `backend`, with the command line that `exec` uses. A probe with other
     * arguments can pass on a host where each command fails, for example where a container does not let bwrap mount
-    * `/proc`. The profile has a child process and one writable root, the temporary folder of the JVM.
+    * `/proc`. The profile has a child process and one writable root, a new folder in the temporary folder of the JVM,
+    * as the private temporary directory of a session is. The seccomp filter of bubblewrap is outside that folder.
     */
   def probe(backend: Backend): Boolean =
-    val temp    = Layout.real(Path.of(System.getProperty("java.io.tmpdir")))
-    val profile = Profile(
-      canRun = true,
-      writable = Vector(temp),
-      readOnly = Vector.empty,
-      hidden = Vector.empty,
-      net = Net.Closed
-    )
-    Try(backend.wrap(profile, temp, Vector("/bin/sh", "-c", "true"), None)).toOption.exists(runs)
+    Try(JFiles.createTempDirectory("dspy4s-probe-")).toOption.exists { folder =>
+      try
+        val temp    = Layout.real(folder)
+        val profile = Profile(
+          canRun = true,
+          writable = Vector(temp),
+          readOnly = Vector.empty,
+          hidden = Vector.empty,
+          net = Net.Closed
+        )
+        Try(backend.wrap(profile, temp, Vector("/bin/sh", "-c", "true"), None)).toOption.exists(runs)
+      finally Try(JFiles.deleteIfExists(folder)): Unit
+    }
 
   /** True when the process runs. `ProcessHandle.isAlive` is also true for a zombie, a process that ended and that its
     * parent did not reap. A JVM that is PID 1 in a container with no init does not reap its orphans, so they stay

@@ -43,8 +43,8 @@ new = "\n    case Entry.EffectDone(id, _) => id.n >= 0 || s.open.contains(id)"
 name = "Mutant: a Once grant goes at EffectStarted"
 [[mutant.edit]]
 file = "SessionState.scala"
-old = "base.copy(open = s.open + (id -> OpenCall(op, args)), jobs = jobs)"
-new = "base.copy(open = s.open + (id -> OpenCall(op, args)), jobs = jobs, grants = s.grants.filterNot(usedUp(op, args)))"
+old = "lastCall = s.lastCall.max(id.n), jobs = jobs)"
+new = "lastCall = s.lastCall.max(id.n), jobs = jobs, grants = s.grants.filterNot(usedUp(op, args)))"
 
 [[mutant]]
 name = "Mutant: a Once grant stays after its call"

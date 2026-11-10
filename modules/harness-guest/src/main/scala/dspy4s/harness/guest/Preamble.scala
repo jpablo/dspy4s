@@ -16,17 +16,21 @@ def typeText(shape: DataShape): String =
   * value comes from `input`, so the text holds no value and no secret. A record gives `submit` one parameter for each
   * field, and another type gives `submit(value: T)`.
   *
-  * Three things have no preamble: two types with one name and two forms, a union case that is not a record, and an
-  * input with the name of a guest API function.
+  * Four things have no preamble: two types with one name and two forms, a union case that is not a record, an input
+  * with the name of a guest API function, and an input name that no Scala name can hold. A name cannot be empty, and a
+  * name in backquotes cannot hold a backquote or a line break.
   */
 def preamble(root: DataShape, inputs: Vector[(String, DataShape)] = Vector.empty): Either[String, String] =
-  val hidden = inputs.collectFirst { case (n, _) if apiNames(n) => n }
-  hidden match
-    case Some(n) => Left(s"the input $n has the name of a guest API function")
-    case None    => definitions(DataShape.Applied("Tuple", root +: inputs.map(_._2))).map { found =>
+  val problem = inputs.collectFirst {
+    case (n, _) if apiNames(n)                                     => s"the input $n has the name of a guest API function"
+    case (n, _) if n.isEmpty || n.exists(c => "`\n\r".contains(c)) => s"the input ${literal(n)} has no Scala name"
+  }
+  problem match
+    case Some(error) => Left(error)
+    case None        => definitions(DataShape.Applied("Tuple", root +: inputs.map(_._2))).map { found =>
         val types  = found.map(_._2).mkString("\n")
         val givens = found.map((n, _) => s"given Data[${scalaName(n)}] = Data.derived").mkString("\n")
-        val vals   = inputs.map((n, s) => s"val ${scalaName(n)}: ${typeText(s)} = input[${typeText(s)}](\"$n\")")
+        val vals   = inputs.map((n, s) => s"val ${scalaName(n)}: ${typeText(s)} = input[${typeText(s)}](${literal(n)})")
         val submit = root match
           case DataShape.Record(n, fields) =>
             val all = fields()
@@ -111,10 +115,29 @@ private val apiNames = Set(
   "input"
 )
 
-/** A name as Scala source: in backquotes when it is a reserved word or not a plain name. */
+/** A name as Scala source: in backquotes when it is a reserved word or not a plain name. The compiler reads the escapes
+  * of a string in backquotes too, so the text in backquotes has the escapes of `literal`.
+  */
 private def scalaName(text: String): String =
   val plain = text.nonEmpty && text.head.isLetter && text.forall(c => c.isLetterOrDigit || c == '_')
-  if plain && !reserved(text) then text else s"`$text`"
+  if plain && !reserved(text) then text else s"`${escaped(text)}`"
+
+/** The Scala string literal of a text, in quotes. */
+private def literal(text: String): String = s"\"${escaped(text)}\""
+
+/** The characters of a text as Scala source in quotes or backquotes. A backslash, a quote and each control character
+  * get an escape.
+  */
+private def escaped(text: String): String =
+  text.flatMap {
+    case '\\'             => "\\\\"
+    case '"'              => "\\\""
+    case '\n'             => "\\n"
+    case '\r'             => "\\r"
+    case '\t'             => "\\t"
+    case c if c.isControl => f"\\u${c.toInt}%04x"
+    case c                => c.toString
+  }
 
 private def params(fields: Vector[(String, DataShape)]): String =
   fields.map((n, s) => s"${scalaName(n)}: ${typeText(s)}").mkString(", ")

@@ -52,6 +52,27 @@ class DecideLaws extends ScalaCheckSuite:
     assertEquals(decide(Command.Commit(Vector(Entry.StepStarted(0))), inTurn), Right(Vector(Entry.StepStarted(0))))
   }
 
+  test("Decide table: a Commit of an EffectStarted with the id of an open effect is refused") {
+    // A second intent with one id would replace the first, and the first would get no outcome of its own.
+    val started = Entry.EffectStarted(EffectId(cell, 0), "read", args)
+    val open    = commit(inCell, Vector(started))
+    assertEquals(decide(Command.Commit(Vector(started)), open), Left(Rejection.OutOfOrder(started)))
+    val other = Entry.EffectStarted(EffectId(cell, 0), "write", args)
+    assertEquals(decide(Command.Commit(Vector(other)), open), Left(Rejection.OutOfOrder(other)))
+    val next = Entry.EffectStarted(EffectId(cell, 1), "write", args)
+    assertEquals(decide(Command.Commit(Vector(next)), open), Right(Vector(next)))
+  }
+
+  test("Decide table: an EffectStarted needs an id above each id that its cell started, also a closed one") {
+    // A replay answers each call by its id, so one id must name one call of the cell.
+    def started(n: Int) = Entry.EffectStarted(EffectId(cell, n), "read", args)
+    val closed          = commit(inCell, Vector(started(0), Entry.EffectDone(EffectId(cell, 0), EffectResult.Unknown)))
+    assertEquals(decide(Command.Commit(Vector(started(0))), closed), Left(Rejection.OutOfOrder(started(0))))
+    assertEquals(decide(Command.Commit(Vector(started(2))), closed), Right(Vector(started(2))))
+    val later = commit(closed, Vector(started(2)))
+    assertEquals(decide(Command.Commit(Vector(started(1))), later), Left(Rejection.OutOfOrder(started(1))))
+  }
+
   test("Decide table: an Abort in a turn commits StopRequested, which clears the inputs that wait") {
     val entries = decide(Command.Abort("stop"), inTurn)
     assertEquals(entries, Right(Vector(Entry.StopRequested("stop"))))

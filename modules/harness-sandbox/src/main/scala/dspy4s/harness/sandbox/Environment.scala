@@ -14,9 +14,15 @@ object Environment:
   /** A name that contains one of these words, with no case, never goes through, also when the session adds it. */
   val secretWords: Vector[String] = Vector("KEY", "SECRET", "TOKEN", "PASSWORD", "PASSWD", "CREDENTIAL", "AUTH")
 
+  /** The names that contain a secret word but do not hold a secret: AUTHOR contains AUTH. Each name must be the same,
+    * with the same case. They go through as other names do, when they are on the allowlist or in `SessionConfig.env`.
+    * Each other name with a secret word stays out, for example HTTP_AUTHORIZATION.
+    */
+  val notSecret: Set[String] = Set("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE")
+
   def isSecret(name: String): Boolean =
     val upper = name.toUpperCase(Locale.ROOT)
-    secretWords.exists(upper.contains)
+    !notSecret.contains(name) && secretWords.exists(upper.contains)
 
   /** The variables of a command: the names of the allowlist and the names `extra` of `SessionConfig.env`, with the
     * values of `parent`, apart from each secret name.

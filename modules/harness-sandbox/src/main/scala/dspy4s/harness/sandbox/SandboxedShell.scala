@@ -38,8 +38,13 @@ final class SandboxedShell(
   /** The scope of the session, as a real path. Each command starts in it. */
   val root: Path = Layout.real(Paths.get(SandboxedShell.pathOf(config.scope)))
 
-  /** The profile of the mode. Each command also gets the secret files that exist when it starts (`forCommand`). */
+  /** The profile of the mode. Each command also gets the secret files that exist when it starts. */
   val profile: Profile = Profiles.forMode(config.mode, root, layout, hosts)
+
+  /** The secret files of the writable roots. The shell keeps one index for its life, so a command lists again only the
+    * folders that changed (`SecretIndex`).
+    */
+  private val index = SecretIndex(layout.secretNames)
 
   private var proxy: Option[HostProxy] = None
 
@@ -53,7 +58,7 @@ final class SandboxedShell(
     val port = profile.net match
       case Net.Proxy(_) => Some(proxyPort())
       case Net.Closed   => None
-    val now     = Profiles.forCommand(config.mode, root, layout, hosts)
+    val now     = profile.hide(index.find(profile))
     val builder = ProcessBuilder(sandbox.wrap(now, root, Vector("/bin/sh", "-c", command), port)*)
       .directory(root.toFile)
       .redirectErrorStream(true)

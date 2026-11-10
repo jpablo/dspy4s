@@ -33,6 +33,7 @@ final case class SessionState(
     closed  : Boolean,
     waiting : Int,                     // inputs that no step has seen, since the last stop
     open    : Map[EffectId, OpenCall], // effects with an intent and no outcome
+    lastCall: Int,                     // the largest `n` of an `EffectStarted` in the open cell, or -1
     store   : Map[String, Json],
     inputs  : Map[String, Json],       // the values of the input fields, apart from the store (5.1)
     requests: Set[RequestId],
@@ -71,6 +72,7 @@ object SessionState:
       closed = true,
       0,
       Map.empty,
+      -1,
       Map.empty,
       Map.empty,
       Set.empty,
@@ -95,12 +97,13 @@ def evolve(s: SessionState, logged: Logged): SessionState =
       val step = s.position match
         case Position.InPolicy(i) => i
         case _                    => 0
+      // Each cell counts its own calls, so `lastCall` starts again.
       code match
-        case Some(source) => base.copy(position = Position.InCell(step, logged.seq, source))
-        case None         => base.copy(position = Position.Answered(text))
+        case Some(source) => base.copy(position = Position.InCell(step, logged.seq, source), lastCall = -1)
+        case None         => base.copy(position = Position.Answered(text), lastCall = -1)
     case Entry.EffectStarted(id, op, args) =>
       val jobs = if op == spawnOp then s.jobs + (id -> JobRecord(s.lastTurn, stopRequested = false)) else s.jobs
-      base.copy(open = s.open + (id -> OpenCall(op, args)), jobs = jobs)
+      base.copy(open = s.open + (id -> OpenCall(op, args)), lastCall = s.lastCall.max(id.n), jobs = jobs)
     case Entry.EffectDone(id, result) =>
       // `guarded` reads the grants after the commit of `EffectStarted`, so a `Once` grant stays until the outcome.
       val grants  = s.open.get(id).fold(s.grants)(call => s.grants.filterNot(usedUp(call.op, call.args)))

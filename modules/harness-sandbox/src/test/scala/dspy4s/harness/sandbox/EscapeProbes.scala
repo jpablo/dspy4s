@@ -21,7 +21,7 @@ abstract class EscapeProbes(backend: Backend, law: String, proxies: Boolean) ext
   /** The value of a variable of the test JVM (build.sbt). A child must not see it. */
   private val fakeSecret = "fake-value-for-the-escape-tests"
 
-  private val listed = HostList(Set("localhost"))
+  private val listed = HostList(Set("localhost:*"))
 
   /** What a real child did, and what the profile allows. */
   private final case class Probe(name: String, observed: Boolean, allowed: Boolean)
@@ -32,6 +32,7 @@ abstract class EscapeProbes(backend: Backend, law: String, proxies: Boolean) ext
   private def probes(mode: Mode, sandboxed: Boolean): Vector[Probe] =
     val place  = Place()
     val server = TestServer()
+    val unix   = UnixServer()
     val proxy  = HostProxy.start(listed)
     try
       // The profile of one command: the profile of the mode, with the secret files that exist when the command starts,
@@ -131,10 +132,17 @@ abstract class EscapeProbes(backend: Backend, law: String, proxies: Boolean) ext
           sh(s"ps eww -p $pid 2>&1; cat /proc/$pid/environ 2>&1").contains(fakeSecret),
           !sandboxed
         ),
-        Probe("launchd", sh("launchctl list 2>&1").contains("com.apple"), !sandboxed && Host.os.contains("mac"))
+        Probe("launchd", sh("launchctl list 2>&1").contains("com.apple"), !sandboxed && Host.os.contains("mac")),
+        // A UNIX socket of the host, as the D-Bus bus or docker.sock, can start a process outside the sandbox.
+        Probe(
+          "a UNIX socket of the host",
+          sh(s"curl -s -m 3 --unix-socket '${unix.path}' http://x/ 2>&1").contains("FAKE-UNIX"),
+          !sandboxed
+        )
       )
     finally
       proxy.close()
+      unix.close()
       server.close()
       place.close()
 

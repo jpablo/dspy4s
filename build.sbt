@@ -304,9 +304,10 @@ lazy val harnessRepl = (project in file("modules/harness-repl"))
     Test / parallelExecution := false
   )
 
-// The early MCP server (6): the REPL and the guest API for another agent, before the harness has its own loop.
+// The early MCP server (6): the REPL and the guest API for another agent, before the harness has its own loop. It takes
+// the secret paths and names of the sandbox (5.6), so a cell cannot read them.
 lazy val harnessMcp = (project in file("modules/harness-mcp"))
-  .dependsOn(harnessRepl)
+  .dependsOn(harnessRepl, harnessSandbox)
   .settings(commonSettings)
   .settings(name := "dspy4s-harness-mcp")
   .settings(

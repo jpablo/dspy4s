@@ -59,3 +59,18 @@ class EnvironmentLaws extends ScalaCheckSuite:
       Map("PATH" -> "/usr/bin", "PROJECT_NAME" -> "dspy4s")
     )
   }
+
+  test("Environment: the names of the git author go through when the session adds them, and AUTH names do not") {
+    // GIT_AUTHOR_NAME holds AUTH in AUTHOR, and it is not a secret.
+    val parent = Map(
+      "GIT_AUTHOR_NAME"    -> "Fake Name",
+      "GIT_AUTHOR_EMAIL"   -> "fake@example.com",
+      "GIT_AUTHOR_DATE"    -> "2026-01-01T00:00:00Z",
+      "FAKE_AUTH_TOKEN"    -> "fake-1",
+      "HTTP_AUTHORIZATION" -> "fake-2"
+    )
+    assertEquals(
+      Environment.forChild(parent, parent.keySet).keySet,
+      Set("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_AUTHOR_DATE")
+    )
+  }

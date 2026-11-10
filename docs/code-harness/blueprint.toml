@@ -275,6 +275,7 @@ ops = ["matches", "covers"]
 ref = "5.5"
 spec = true
 uses = ["arg-match", "json"]
+text = "A rule for the calls of one operation. Prefix compares a normal form: a path rule matches at the end of a part after a lexical normal form, and a text rule matches when the next character cannot go on with a word."
 
 [[node]]
 id = "verdict"
@@ -1608,7 +1609,7 @@ kind = "data"
 name = "McpServer"
 ops = ["runCell", "serve"]
 ref = "6"
-uses = ["scala-repl", "bindings"]
+uses = ["scala-repl", "bindings", "layout"]
 text = "Two tools: run_cell(code) and api_reference. Only the transport writes to stdout. The server gives files: Files on a workspace and state: Store^ in memory, with no shell, network, LM or sessions. exec takes Files^, and the server has no handler that writes files."
 
 [[group]]
@@ -1626,7 +1627,7 @@ kind = "law"
 name = "MCP:"
 ref = "6"
 uses = ["mcp-server"]
-text = "A cell reads the workspace and nothing outside it, cannot write, keeps values in the store, and another agent runs cells over stdio with only the protocol on stdout."
+text = "A cell reads the workspace and nothing outside it, cannot read a file with a secret name or a secret path of the home folder, cannot write, keeps values in the store, and another agent runs cells over stdio with only the protocol on stdout."
 
 # ── Phase 3: the profile of a child process (5.4). It is pure, so the laws need no OS. ──────────────────────────────
 
@@ -1655,7 +1656,7 @@ ops = ["allows"]
 ref = "5.4"
 spec = true
 uses = []
-text = "The hosts that the proxy lets through. A proposal: the design names the host list of the guarded handler and gives no type. A pattern *.d matches each subdomain of d."
+text = "The hosts and the ports that the proxy lets through: name, name:port or name:*, and *.d for each subdomain of d. A pattern with no port allows only the ports 80 and 443. A proposal: the design names the host list of the guarded handler and gives no type."
 
 [[node]]
 id = "net"
@@ -1696,8 +1697,19 @@ name = "forCommand"
 ref = "5.4"
 spec = true
 uses = ["mode", "layout", "host-list", "profile"]
-proof_uses = ["profile-for-mode", "profile"]
+proof_uses = ["profile-for-mode", "profile", "secret-index"]
 text = "The profile of one command: the profile of the mode, which also hides each file with a secret name that exists in a writable root when the command starts, and the target of each one that is a symbolic link. The walk skips .git. A command can make a new file with a secret name, and the next command cannot read it."
+
+[[node]]
+id = "secret-index"
+group = "profile"
+kind = "data"
+name = "SecretIndex"
+ops = ["find", "listings"]
+ref = "5.4"
+spec = true
+uses = ["profile", "layout"]
+text = "The secret files of the writable roots, with a cache of the listing of each folder. It lists a folder again when its change time, last-modified time or file key differs, or when it changed in the last 2 seconds, because a file time on Linux can be coarse. A folder that it cannot read is hidden as a whole."
 
 # ── Phase 3: the environment of a child process (5.6) ───────────────────────────────────────────────────────────
 
@@ -1771,7 +1783,26 @@ ops = ["flags", "wrap"]
 ref = "5.4"
 spec = true
 uses = ["backend", "profile"]
+proof_uses = ["seccomp"]
 text = "The bwrap arguments of a profile: the root read-only, the scope and the temporary directory writable, .git read-only, an empty folder or file over each secret, and new namespaces for the pids and the network. A proposal: on Linux the network stays closed also with Network^, because the proxy needs a bridge into the namespace. That is less authority, so the law holds."
+
+[[group]]
+id = "seccomp"
+phase = "p3"
+module = "harness-sandbox"
+file = "Seccomp.scala"
+title = "The seccomp filter of bubblewrap"
+
+[[node]]
+id = "seccomp"
+group = "seccomp"
+kind = "data"
+name = "Seccomp"
+ops = ["program", "file"]
+ref = "5.4"
+spec = true
+uses = ["layout"]
+text = "A classic BPF program for aarch64 and x86_64: socket for AF_UNIX, socketpair for a datagram pair, io_uring_setup and each call of another ABI get EPERM. A read-only mount does not stop a connection to a UNIX socket of the host, so with no filter a command reaches the D-Bus bus or docker.sock. bwrap loads it from a file that no command can write."
 
 [[group]]
 id = "backends"
@@ -1809,7 +1840,7 @@ ref = "5.4"
 spec = true
 uses = ["host-list"]
 proof_uses = ["host-list"]
-text = "An HTTP proxy on the loopback address, for plain requests and CONNECT. It lets a request through only when its host is on the list. A Seatbelt profile lets a child reach only this port."
+text = "An HTTP proxy on the loopback address, for plain requests and CONNECT. It lets a request through only when the list allows its host at its port, and it sends the Host header of the URL that it checked. It serves at most a limit of connections, with 503 above it, and a side that is silent for the idle time ends the connection. A Seatbelt profile lets a child reach only this port."
 
 # ── Phase 3: the handler of Shell (5.3) ─────────────────────────────────────────────────────────────────────────
 
@@ -1861,6 +1892,15 @@ uses = ["profile-for-mode", "profile-for-command"]
 text = "The profile of a mode allows a child process only with Shell^ and Files^, a write only under the scope or the private temporary directory and never in .git, a host only with Network^ and on the list, and in no mode a read or a write of a secret or of the journals. The profile of a command also hides each file with a secret name that exists in a writable root, apart from .git."
 
 [[node]]
+id = "law-secret-index"
+group = "profile-laws"
+kind = "law"
+name = "Index:"
+ref = "5.4"
+uses = ["secret-index", "profile-for-mode"]
+text = "After each change of the files, the index gives the secret files of a new walk. A folder that changed in the last two seconds is listed again, also with the same time, and a folder that the index cannot read is hidden as a whole."
+
+[[node]]
 id = "law-host-list"
 group = "profile-laws"
 kind = "law"
@@ -1884,7 +1924,7 @@ kind = "law"
 name = "Environment:"
 ref = "5.6"
 uses = ["child-env"]
-text = "A command gets only the names of the allowlist and of the session that the harness process has, with their values, and never a name with a secret word. More names of the session never remove a name, and a second filter changes nothing."
+text = "A command gets only the names of the allowlist and of the session that the harness process has, with their values, and never a name with a secret word. GIT_AUTHOR_NAME, GIT_AUTHOR_EMAIL and GIT_AUTHOR_DATE are not secret. More names of the session never remove a name, and a second filter changes nothing."
 
 [[group]]
 id = "seatbelt-laws"
@@ -1901,7 +1941,7 @@ kind = "law"
 name = "Seatbelt:"
 ref = "5.4"
 uses = ["seatbelt", "profile-for-mode"]
-text = "On macOS, for the profile of each mode of 5.2, a real child process can do what the probes of the profile allow and nothing more: writes in the scope, in the temporary directory, outside and in .git; reads of a secret, a .env file, a secret file with a quote in its name and the journals; a new file with a secret name; a hard link to a secret and to a .env file; a move of a .env file; a child of the child; the network, directly and through the proxy; the processes outside the sandbox and launchd. When the backend works, a command runs under the profile of each mode with a child process."
+text = "On macOS, for the profile of each mode of 5.2, a real child process can do what the probes of the profile allow and nothing more: writes in the scope, in the temporary directory, outside and in .git; reads of a secret, a .env file, a secret file with a quote in its name and the journals; a new file with a secret name; a hard link to a secret and to a .env file; a move of a .env file; a UNIX socket of the host; a child of the child; the network, directly and through the proxy; the processes outside the sandbox and launchd. When the backend works, a command runs under the profile of each mode with a child process."
 
 [[group]]
 id = "bubblewrap-laws"
@@ -1921,6 +1961,23 @@ uses = ["bubblewrap", "profile-for-mode"]
 text = "On Linux with bwrap, the probes of Seatbelt give what the profile allows, apart from the network of Network^, which stays closed. The tests skip on a host with no working bwrap. scripts/sandbox-linux/run.sh runs them in a podman container, and the blueprint reads its report."
 
 [[group]]
+id = "seccomp-laws"
+phase = "p3"
+module = "harness-sandbox"
+file = "SeccompLaws.scala"
+where = "tests"
+title = "The laws of the seccomp filter, on a model of classic BPF"
+
+[[node]]
+id = "law-seccomp"
+group = "seccomp-laws"
+kind = "law"
+name = "Seccomp:"
+ref = "5.4"
+uses = ["seccomp"]
+text = "On a model of classic BPF: socket for AF_UNIX, socketpair for SOCK_DGRAM and io_uring_setup get EPERM, the other calls are allowed, each call of another ABI gets EPERM, and another arch has no program. The escape tests run the real filter on Linux."
+
+[[group]]
 id = "proxy-laws"
 phase = "p3"
 module = "harness-sandbox"
@@ -1935,7 +1992,7 @@ kind = "law"
 name = "Proxy:"
 ref = "5.4"
 uses = ["host-proxy"]
-text = "A plain request and a CONNECT for a host on the list reach the host. A request for another host gets 403, and the proxy opens no connection for it."
+text = "A plain request and a CONNECT for a host on the list reach the host. A request for another host or port gets 403, and the proxy opens no connection for it. The Host header comes from the URL. A connection above the limit gets 503, a silent host ends at the idle time, and a download goes on while the client is silent."
 
 [[group]]
 id = "shell-laws"
@@ -1972,8 +2029,8 @@ kind = "check"
 name = "Mutant:"
 ref = "5.4"
 uses = ["law-profile-monotone", "law-profile-authority", "law-host-list", "law-env", "law-seatbelt", "law-proxy",
-        "law-exec"]
-text = "Each mutant breaks one rule of the profile, the allowlist, Seatbelt or the handler of Shell, and at least one law must fail. scripts/mutants/mutants.py runs the list. The mutants of Seatbelt need macOS."
+        "law-exec", "law-secret-index", "law-seccomp"]
+text = "Each mutant breaks one rule of the profile, the index, the allowlist, the proxy, the filter, Seatbelt or the handler of Shell, and at least one law must fail. scripts/mutants/mutants.py runs the list. The mutants of Seatbelt need macOS."
 
 # ── Phase 4: the worker (4.6) ─────────────────────────────────────────────────────────────────────────────────────
 

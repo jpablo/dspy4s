@@ -3,6 +3,7 @@ package dspy4s.harness.mcp
 import dspy4s.harness.guest.*
 import dspy4s.harness.kernel.CellOutcome
 import dspy4s.harness.repl.{Bindings, CellRun, ScalaRepl}
+import dspy4s.harness.sandbox.Layout
 import io.modelcontextprotocol.json.{McpJsonDefaults, McpJsonMapper, TypeRef}
 import io.modelcontextprotocol.server.McpServer as SdkServer
 import io.modelcontextprotocol.server.transport.StdioServerTransportProvider
@@ -15,10 +16,15 @@ import java.nio.file.{Path, Paths}
 /** The early MCP server (6): the REPL and the guest API for another agent, for example Claude Code, before the harness
   * has its own loop. It has two tools: `run_cell(code)` gives the output of one cell, and `api_reference` gives the
   * source text of the guest API. One REPL serves all calls, so a later cell sees the definitions of an earlier one.
+  *
+  * A cell cannot read the secret paths of the home folder `home` or a file with a secret name (5.6). For each secret
+  * path that is a symbolic link, the server closes the link and its target, as `Layout.forSession` does.
   */
-final class McpServer(root: Path):
-  private val repl =
-    ScalaRepl(McpServer.mode, Bindings(SystemTurn, files = Some(DirectoryFiles(root)), store = Some(MemoryStore())))
+final class McpServer(root: Path, home: Path = Paths.get(System.getProperty("user.home"))):
+  private val files =
+    val hidden = Layout.secretsUnder(Layout.real(home)).flatMap(p => Vector(p, Layout.real(p)).distinct)
+    DirectoryFiles(root, hidden, Layout.secretNames)
+  private val repl = ScalaRepl(McpServer.mode, Bindings(SystemTurn, files = Some(files), store = Some(MemoryStore())))
 
   /** Runs one cell, and gives its text and true when the cell did not complete. One cell runs at a time. */
   def runCell(code: String): (String, Boolean) = synchronized(McpServer.render(repl.run(code)))

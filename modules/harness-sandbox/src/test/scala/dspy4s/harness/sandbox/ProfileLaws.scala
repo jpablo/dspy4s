@@ -5,7 +5,12 @@ import munit.ScalaCheckSuite
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
 
+import java.nio.file.attribute.{FileTime, PosixFilePermissions}
 import java.nio.file.{Files as JFiles, Path}
+import java.time.Instant
+import scala.concurrent.duration.Duration
+import scala.jdk.CollectionConverters.*
+import scala.util.Using
 
 /** The laws of the profile (5.4). The profile is pure, so the paths need not exist. */
 class ProfileLaws extends ScalaCheckSuite:
@@ -45,6 +50,42 @@ class ProfileLaws extends ScalaCheckSuite:
 
   private val patterns: Gen[Set[String]] =
     Gen.containerOf[Set, String](Gen.oneOf("example.com", "*.example.com", "other.net", "*.net", "EXAMPLE.org"))
+
+  /** A change of the files of a scope, from a seed: a new file, a deletion, a move, or a new folder with a secret name.
+    * The names hold secret names and others, at three depths.
+    */
+  private val changes: Gen[Path => Unit] =
+    val folders                         = Vector("", "d1", "d1/d2", "d3")
+    val names                           = Vector(".env", ".env.local", "a.txt", ".envrc", "my.env")
+    def files(root: Path): Vector[Path] =
+      Using.resource(JFiles.walk(root))(_.iterator.asScala.filter(JFiles.isRegularFile(_)).toVector.sorted)
+    for
+      kind   <- Gen.choose(0, 3)
+      folder <- Gen.oneOf(folders)
+      name   <- Gen.oneOf(names)
+      pick   <- Gen.choose(0, 100)
+    yield (root: Path) =>
+      // A change that cannot apply does nothing: a file where a folder is, or a folder where a file is.
+      val dir = JFiles.createDirectories(root.resolve(folder))
+      kind match
+        case 0 => if !JFiles.isDirectory(dir.resolve(name)) then JFiles.writeString(dir.resolve(name), "x"): Unit
+        case 1 => files(root).lift(pick % (files(root).size max 1)).foreach(JFiles.delete)
+        case 2 => files(root).lift(pick % (files(root).size max 1)).foreach { from =>
+            val to = dir.resolve(name)
+            if !JFiles.exists(to) then JFiles.move(from, to): Unit
+          }
+        case _ => if !JFiles.isRegularFile(dir.resolve(".env")) then
+            JFiles.writeString(JFiles.createDirectories(dir.resolve(".env/inner")).resolve("k"), "x"): Unit
+
+  /** Gives each folder that changed in the last minute an old time of its own, as after a wait. A folder that did not
+    * change keeps its time, so the index can keep its listing.
+    */
+  private def age(root: Path, step: Int): Unit =
+    val now = Instant.now()
+    Using.resource(JFiles.walk(root))(_.iterator.asScala.filter(JFiles.isDirectory(_)).toVector).foreach { dir =>
+      if JFiles.getLastModifiedTime(dir).toInstant.isAfter(now.minusSeconds(60)) then
+        JFiles.setLastModifiedTime(dir, FileTime.from(now.minusSeconds(3600 - step.toLong))): Unit
+    }
 
   private def profile(mode: Mode): Profile = Profiles.forMode(mode, scope, layout, hosts)
 
@@ -174,6 +215,146 @@ class ProfileLaws extends ScalaCheckSuite:
         Profiles.forMode(Mode.readOnly, s, place.layout, HostList.empty).hidden
       )
     finally place.close()
+  }
+
+  test("Authority: the secret paths cover the credential files of common tools") {
+    val home  = Path.of("/w/home")
+    val found = Layout.secretsUnder(home)
+    Vector(
+      ".codex/auth.json",
+      ".claude/.credentials.json",
+      ".m2/settings.xml",
+      ".gradle/gradle.properties",
+      ".sbt/.credentials",
+      ".ivy2/.credentials",
+      ".cargo/credentials",
+      ".cargo/credentials.toml",
+      ".local/share/keyrings/login.keyring",
+      ".config/op/config",
+      ".config/git/credentials",
+      ".pgpass",
+      ".vault-token",
+      ".terraform.d/credentials.tfrc.json"
+    ).foreach(name => assert(found.exists(home.resolve(name).startsWith), name))
+  }
+
+  property("Index: after each change of the files, the index gives the secret files of a new walk") {
+    forAll(Gen.listOfN(12, changes)) { steps =>
+      val place = Place()
+      try
+        val profile = Profiles.forMode(Mode.local, place.scope, place.layout, HostList.empty)
+        val names   = place.layout.secretNames
+        val index   = SecretIndex(names)
+        steps.zipWithIndex.foreach { (change, i) =>
+          change(place.scope)
+          age(place.scope, i)
+          assertEquals(index.find(profile).toSet, Profiles.secretFiles(profile, names).toSet, s"step $i")
+        }
+      finally place.close()
+    }
+  }
+
+  test("Index: a folder that changed in the last two seconds is listed again, also with the same time") {
+    // A file time on Linux can be coarse, so two changes in one tick can give one time, as git knows.
+    val place = Place()
+    try
+      val profile = Profiles.forMode(Mode.local, place.scope, place.layout, HostList.empty)
+      val index   = SecretIndex(place.layout.secretNames)
+      val dir     = JFiles.createDirectories(place.scope.resolve("d"))
+      val time    = JFiles.getLastModifiedTime(dir)
+      assert(!index.find(profile).contains(dir.resolve(".env")))
+      JFiles.writeString(dir.resolve(".env"), "FAKE"): Unit
+      JFiles.setLastModifiedTime(dir, time): Unit
+      assert(index.find(profile).contains(dir.resolve(".env")))
+    finally place.close()
+  }
+
+  property("Index: with no settle time, the index keeps the folders, and it gives the secret files of a new walk") {
+    // With the default settle time, each folder of a new place changed less than two seconds before, so the index
+    // lists each one again. With none, the index keeps each folder that did not change.
+    forAll(Gen.listOfN(12, changes)) { steps =>
+      val place = Place()
+      try
+        val profile = Profiles.forMode(Mode.local, place.scope, place.layout, HostList.empty)
+        val names   = place.layout.secretNames
+        val index   = SecretIndex(names, settle = Duration.Zero)
+        steps.zipWithIndex.foreach { (change, i) =>
+          change(place.scope)
+          age(place.scope, i)
+          assertEquals(index.find(profile).toSet, Profiles.secretFiles(profile, names).toSet, s"step $i")
+        }
+      finally place.close()
+    }
+  }
+
+  test("Index: a folder that did not change is listed once, and a folder that changed in the last two seconds again") {
+    val place = Place()
+    try
+      val profile = Profiles.forMode(Mode.local, place.scope, place.layout, HostList.empty)
+      JFiles.createDirectories(place.scope.resolve("d/e")): Unit
+      val kept = SecretIndex(place.layout.secretNames, settle = Duration.Zero)
+      kept.find(profile): Unit
+      val first = kept.listings
+      kept.find(profile): Unit
+      assertEquals(kept.listings, first)
+      val recent = SecretIndex(place.layout.secretNames)
+      recent.find(profile): Unit
+      recent.find(profile): Unit
+      assertEquals(recent.listings, 2 * first)
+    finally place.close()
+  }
+
+  test("Index: a folder whose last-modified time a command sets back is listed again") {
+    // The change time shows the change: a command cannot set it.
+    val place = Place()
+    try
+      val profile = Profiles.forMode(Mode.local, place.scope, place.layout, HostList.empty)
+      val index   = SecretIndex(place.layout.secretNames, settle = Duration.Zero)
+      val dir     = JFiles.createDirectories(place.scope.resolve("d"))
+      val time    = JFiles.getLastModifiedTime(dir)
+      assert(!index.find(profile).contains(dir.resolve(".env")))
+      JFiles.writeString(dir.resolve(".env"), "FAKE"): Unit
+      JFiles.setLastModifiedTime(dir, time): Unit
+      assert(index.find(profile).contains(dir.resolve(".env")))
+    finally place.close()
+  }
+
+  test("Index: a folder with a secret name is hidden, also when the index cannot read it") {
+    val place = Place()
+    try
+      val profile = Profiles.forMode(Mode.local, place.scope, place.layout, HostList.empty)
+      val closed  = JFiles.createDirectories(place.scope.resolve("a/.env.closed"))
+      JFiles.writeString(closed.resolve("k"), "FAKE"): Unit
+      JFiles.setPosixFilePermissions(closed, PosixFilePermissions.fromString("---------")): Unit
+      try assert(Profiles.secretFiles(profile, place.layout.secretNames).contains(closed))
+      finally JFiles.setPosixFilePermissions(closed, PosixFilePermissions.fromString("rwx------")): Unit
+    finally place.close()
+  }
+
+  test("Index: a folder that the index cannot read is hidden as a whole") {
+    // The command can chmod its own folder, and then it could read a secret file that the walk did not see.
+    val place  = Place()
+    val locked = JFiles.createDirectories(place.scope.resolve("locked"))
+    try
+      JFiles.writeString(locked.resolve(".env"), "FAKE"): Unit
+      JFiles.setPosixFilePermissions(locked, java.util.Set.of()): Unit
+      val profile = Profiles.forMode(Mode.local, place.scope, place.layout, HostList.empty)
+      assert(SecretIndex(place.layout.secretNames).find(profile).contains(locked))
+      assert(!SecretIndex(place.layout.secretNames).find(profile).contains(place.scope))
+    finally
+      JFiles.setPosixFilePermissions(locked, java.nio.file.attribute.PosixFilePermissions.fromString("rwx------")): Unit
+      place.close()
+  }
+
+  test("Hosts: a pattern with no port allows only the ports 80 and 443, and host:port or host:* allows more") {
+    assert(HostList(Set("example.com")).allows("example.com", 443))
+    assert(HostList(Set("example.com")).allows("example.com", 80))
+    assert(!HostList(Set("example.com")).allows("example.com", 22))
+    assert(HostList(Set("example.com:8080")).allows("example.com", 8080))
+    assert(!HostList(Set("example.com:8080")).allows("example.com", 443))
+    assert(HostList(Set("example.com:*")).allows("example.com", 22))
+    assert(HostList(Set("*.example.com:*")).allows("a.example.com", 5432))
+    assert(!HostList(Set("*.example.com:*")).allows("example.com", 443))
   }
 
   test("Hosts: a pattern names the same host, with no case and no last dot") {

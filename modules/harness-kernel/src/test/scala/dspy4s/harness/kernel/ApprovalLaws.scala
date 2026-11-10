@@ -3,6 +3,7 @@ package dspy4s.harness.kernel
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
+import zio.blocks.schema.json.Json
 
 import Fixtures.*
 import Schedules.*
@@ -107,6 +108,36 @@ class ApprovalLaws extends ScalaCheckSuite:
       assertEquals(Guard(rules).verdict("exec", args), Verdict.Deny, rules.toString)
     for rules <- Vector(allow, ask).permutations do
       assertEquals(Guard(rules).verdict("exec", args), Verdict.Ask, rules.toString)
+  }
+
+  test("Guard: a Prefix rule matches the normal form of a path or a text, at the end of a part") {
+    // A raw startsWith lets a cell dodge a Deny rule with //etc, /./etc or two spaces.
+    def call(field: String, value: String): Json = Json.Object((field, Json.String(value)))
+    val etc                                      = GuardRule("read", ArgMatch.Prefix("path", "/etc"))
+    Vector("/etc", "/etc/hosts", "//etc/hosts", "/./etc/hosts", "/tmp/../etc/hosts", "/etc/")
+      .foreach(path => assert(etc.matches("read", call("path", path)), path))
+    Vector("/etcetera/x", "/tmp/etc", "/", "etc/hosts")
+      .foreach(path => assert(!etc.matches("read", call("path", path)), path))
+    val push = GuardRule("exec", ArgMatch.Prefix("command", "git push"))
+    Vector("git push", "git push origin main", "  git push", "git  push", "git\tpush x")
+      .foreach(command => assert(push.matches("exec", call("command", command)), command))
+    Vector("git pull", "git pushx", "echo git push")
+      .foreach(command => assert(!push.matches("exec", call("command", command)), command))
+  }
+
+  test("Guard: a text rule ends at each character that cannot go on with a word") {
+    // A shell joins commands with ; & | and a URL goes on with / ? : #, so these end the word of the rule.
+    def call(field: String, value: String): Json = Json.Object((field, Json.String(value)))
+    val push                                     = GuardRule("exec", ArgMatch.Prefix("command", "git push"))
+    Vector("git push;x", "git push&&x", "git push|x", "git push>out", "git push(x)", "git push\nx")
+      .foreach(command => assert(push.matches("exec", call("command", command)), command))
+    Vector("git push-x", "git push_x", "git push.x", "git push2")
+      .foreach(command => assert(!push.matches("exec", call("command", command)), command))
+    val site = GuardRule("httpGet", ArgMatch.Prefix("url", "https://evil.example"))
+    Vector("https://evil.example", "https://evil.example/x", "https://evil.example?q=1", "https://evil.example:443/")
+      .foreach(url => assert(site.matches("httpGet", call("url", url)), url))
+    Vector("https://evil.example.other.net/", "https://evil.examples/")
+      .foreach(url => assert(!site.matches("httpGet", call("url", url)), url))
   }
 
   property("Guard: verdict is a homomorphism from Guard to Verdict") {

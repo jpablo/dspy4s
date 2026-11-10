@@ -3,43 +3,51 @@ package dspy4s.harness.sandbox
 import dspy4s.harness.guest.{Mode, Scope, StrategyName}
 import dspy4s.harness.kernel.{Guard, ModelChoice, Owner, SessionConfig, TurnKind}
 
-import java.io.IOException
-import java.net.{InetAddress, ServerSocket, Socket}
+import java.io.{ByteArrayOutputStream, IOException}
+import java.net.{InetAddress, ServerSocket, Socket, StandardProtocolFamily, UnixDomainSocketAddress}
+import java.nio.ByteBuffer
+import java.nio.channels.ServerSocketChannel
 import java.nio.charset.StandardCharsets.{ISO_8859_1, UTF_8}
 import java.nio.file.{Files, Path}
 import java.util.Comparator
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 
-/** A plain HTTP server on the loopback address for the tests. It counts its connections, and it answers each request
-  * with the body `FAKE-SERVER`.
+/** A plain HTTP server on the loopback address for the tests. It counts its connections, keeps the head of the last
+  * request, and answers each request with the body `FAKE-SERVER`.
   */
 final class TestServer extends AutoCloseable:
   private val server      = ServerSocket(0, 50, InetAddress.getLoopbackAddress)
   private val connections = AtomicInteger(0)
 
+  @volatile private var head = ""
+
   val port: Int = server.getLocalPort
 
   def count: Int = connections.get
+
+  /** The head of the last request, with no empty line at its end. */
+  def lastHead: String = head
 
   def close(): Unit = server.close()
 
   private def answer(client: Socket): Unit =
     try
       // The head of the request ends with an empty line.
-      val in    = client.getInputStream
-      var tail  = 0
-      var bytes = 0
-      var open  = true
-      while open && tail != 0x0d0a0d0a && bytes < 65536 do
+      val in   = client.getInputStream
+      val seen = ByteArrayOutputStream()
+      var tail = 0
+      var open = true
+      while open && tail != 0x0d0a0d0a && seen.size < 65536 do
         val b = in.read()
         if b < 0 then open = false
         else
           tail = (tail << 8) | b
-          bytes += 1
-      val body = "FAKE-SERVER".getBytes(UTF_8)
-      val head = s"HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n"
-      client.getOutputStream.write(head.getBytes(ISO_8859_1) ++ body)
+          seen.write(b)
+      head = seen.toString(ISO_8859_1).stripSuffix("\r\n\r\n")
+      val body   = "FAKE-SERVER".getBytes(UTF_8)
+      val status = s"HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n"
+      client.getOutputStream.write(status.getBytes(ISO_8859_1) ++ body)
     catch case _: IOException => ()
     finally client.close()
 
@@ -55,6 +63,37 @@ final class TestServer extends AutoCloseable:
   )
   acceptor.setDaemon(true)
   acceptor.start()
+
+/** A server on a UNIX socket of the host, as the D-Bus bus or docker.sock are. It answers each connection with an HTTP
+  * answer with the body `FAKE-UNIX`. The socket is in a short folder under /tmp, because a socket path has a limit of
+  * about 100 bytes.
+  */
+final class UnixServer extends AutoCloseable:
+  private val folder = Files.createTempDirectory(Path.of("/tmp"), "dspy4s-u")
+  val path: Path     = folder.resolve("s")
+  private val server = ServerSocketChannel.open(StandardProtocolFamily.UNIX)
+  server.bind(UnixDomainSocketAddress.of(path)): Unit
+
+  private val acceptor = Thread(
+    () =>
+      try
+        while server.isOpen do
+          val client = server.accept()
+          try
+            val body = "FAKE-UNIX"
+            val text = s"HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body"
+            client.write(ByteBuffer.wrap(text.getBytes(ISO_8859_1))): Unit
+          finally client.close()
+      catch case _: IOException => (),
+    "test-unix-server"
+  )
+  acceptor.setDaemon(true)
+  acceptor.start()
+
+  def close(): Unit =
+    server.close()
+    Files.deleteIfExists(path): Unit
+    Files.deleteIfExists(folder): Unit
 
 /** The places of one test, under a new real temporary folder: a scope with `.git` and two `.env` files, a folder
   * outside the scope, a fake secret, a journal and the private temporary directory. Each file holds a fake value.

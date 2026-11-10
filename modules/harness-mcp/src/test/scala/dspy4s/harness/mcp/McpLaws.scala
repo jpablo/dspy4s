@@ -44,6 +44,30 @@ class McpLaws extends munit.FunSuite:
     }
   }
 
+  test("MCP: a cell cannot read a file with a secret name, or a secret path of the home folder") {
+    // Sections 5.4 and 5.6: each mode keeps .env and the secret paths unreadable.
+    val root = workspace()
+    JFiles.writeString(root.resolve(".env"), "FAKE-ENV-VALUE", UTF_8): Unit
+    JFiles.createDirectories(root.resolve("app/.ssh")): Unit
+    JFiles.writeString(root.resolve("app/.env.local"), "FAKE-LOCAL-VALUE", UTF_8): Unit
+    JFiles.createDirectories(root.resolve(".ssh")): Unit
+    JFiles.writeString(root.resolve(".ssh/id_fake"), "FAKE-KEY-VALUE", UTF_8): Unit
+    // The workspace is the home folder here, so its .ssh is a secret path.
+    val server = McpServer(root, home = root)
+    try
+      for (path, value) <- Vector(
+                             ".env"           -> "FAKE-ENV-VALUE",
+                             "app/.env.local" -> "FAKE-LOCAL-VALUE",
+                             ".ssh/id_fake"   -> "FAKE-KEY-VALUE"
+                           )
+      do
+        val (text, failed) = server.runCell(s"""println(read("$path"))""")
+        assert(failed, text)
+        assert(!text.contains(value), text)
+      assertEquals(server.runCell("""println(read("notes.txt").length)""")._2, false)
+    finally server.close()
+  }
+
   test("MCP: the workspace is read-only for a cell, and the server gives no shell") {
     withServer { server =>
       for cell <- Vector("""write("notes.txt", "x")""", """edit("notes.txt", "one", "1")""", """println(exec("ls"))""")
