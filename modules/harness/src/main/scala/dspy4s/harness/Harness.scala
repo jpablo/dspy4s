@@ -57,6 +57,7 @@ final case class Harness[I, O](
   protected val lifecycle: ModuleLifecycle[I] = ModuleLifecycle.typed(signature.inputShape)
 
   protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
+    val id      = Harness.newId()
     val journal = MemoryJournal(() => System.currentTimeMillis(), env.secrets)
     // `Module.apply` installs the context of the call, so a query and a child on another thread get it (9).
     val host = HostThreads.ofThisThread()
@@ -69,7 +70,7 @@ final case class Harness[I, O](
           }
         }
       }
-    finally env.journals(journal.log)
+    finally env.journals(id, journal.log)
 
   /** The mode of a session at `depth` (5.2, 8.2): the mode of the environment at the top, and `base.meet(Mode.closed)`
     * for a child (5.2, the closed law). A REPL at the depth limit has no `Children^`, so `rlm` does not compile there.
@@ -198,12 +199,13 @@ final case class Harness[I, O](
       e => throw IllegalArgumentException(s"rlm: the type of the child has no preamble: $e"),
       identity
     )
+    val id      = Harness.newId()
     val journal = MemoryJournal(() => System.currentTimeMillis(), env.secrets)
     val config  = sessionConfig(depth, text, tree.scope)
     val outcome =
       try
         Harness.repaired(journal)(session(config, Harness.task(task, fields, Some(text)), fields, depth, journal, tree))
-      finally env.journals(journal.log)
+      finally env.journals(id, journal.log)
     outcome.flatMap(Harness.submitted(_, journal.log, data)) match
       case Right(Some(value)) => value
       case Right(None)        => throw IllegalStateException(
@@ -274,6 +276,9 @@ object Harness extends HarnessGivens:
 
   /** The versions of a journal of a call (4.1). */
   val versions: Versions = Versions(s"scala-${dotty.tools.dotc.config.Properties.versionNumberString}", "phase-5")
+
+  /** A new id for a session of a call: each session of a call has its own id (phase 7). */
+  private[harness] def newId(): SessionId = SessionId(java.util.UUID.randomUUID().toString)
 
   /** The longest text of one input value in the task. */
   private val InputLimit = 2_000

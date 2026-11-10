@@ -43,7 +43,7 @@ class RlmLaws extends ScalaCheckSuite:
         HostList.empty,
         Backends.detect(),
         Secrets.none,
-        journals = log => journals.add(log): Unit
+        journals = (_, log) => journals.add(log): Unit
       )
       val result = withModel(model)(Harness.forTask(signature, env, limits)(Question("What is 6 times 7?")))
       check(place, result.map(_.output), journals.asScala.toVector)

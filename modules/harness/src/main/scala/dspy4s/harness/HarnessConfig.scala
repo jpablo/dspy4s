@@ -1,7 +1,7 @@
 package dspy4s.harness
 
 import dspy4s.harness.guest.{Access, Mode}
-import dspy4s.harness.kernel.Logged
+import dspy4s.harness.kernel.{Logged, SessionId}
 import dspy4s.harness.sandbox.{Backend, HostList}
 import zio.blocks.schema.Schema
 
@@ -15,9 +15,11 @@ import scala.concurrent.duration.*
   * @param home
   *   the home folder, for the secret paths of the layout (5.4)
   * @param journals
-  *   gets the journal of each call at its end. The owner of a rollout is an optimizer, which reads the journal (8.6).
-  *   It also gets the journal of each child of `rlm` at the end of the child, before the journal of its parent (8.2).
-  *   The children of `rlmBatched` end on several threads, so this function can run on several threads at the same time.
+  *   gets the id and the journal of each call at its end. The owner of a rollout is an optimizer, which reads the
+  *   journal (8.6). It also gets the id and the journal of each child of `rlm` at the end of the child, before the
+  *   journal of its parent (8.2). Each session of a call has its own id, and the task of a child holds the id of its
+  *   parent in `Source.Parent` (phase 7). The children of `rlmBatched` end on several threads, so this function can run
+  *   on several threads at the same time.
   */
 final case class HarnessEnv(
     workspace: Option[Path],
@@ -25,8 +27,8 @@ final case class HarnessEnv(
     hosts    : HostList,
     backend  : Option[Backend],
     secrets  : Secrets,
-    mode     : Mode                   = HarnessEnv.taskMode,
-    journals : Vector[Logged] => Unit = _ => ()
+    mode     : Mode                                = HarnessEnv.taskMode,
+    journals : (SessionId, Vector[Logged]) => Unit = (_, _) => ()
 )
 
 object HarnessEnv:

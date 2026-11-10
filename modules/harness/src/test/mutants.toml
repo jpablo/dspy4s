@@ -350,7 +350,7 @@ new = "(task, _) => rlm[A](task, Map.empty)"
 name = "Mutant: env.journals does not get the journal of a child"
 [[mutant.edit]]
 file = "Harness.scala"
-old = "      finally env.journals(journal.log)"
+old = "      finally env.journals(id, journal.log)"
 new = "      finally journal.log.size: Unit"
 
 [[mutant]]
@@ -412,8 +412,8 @@ old = "    try Harness.repaired(journal) {"
 new = "    val result = Harness.repaired(journal) {"
 [[mutant.edit]]
 file = "Harness.scala"
-old = "\n    finally env.journals(journal.log)\n"
-new = "\n    env.journals(journal.log)\n    result\n"
+old = "\n    finally env.journals(id, journal.log)\n"
+new = "\n    env.journals(id, journal.log)\n    result\n"
 
 [[mutant]]
 name = "Mutant: the end of a call leaves the budget of its tree open"

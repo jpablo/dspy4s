@@ -99,7 +99,7 @@ result = "A first measured improvement, or a reason for its absence."
 id = "p7"
 number = 7
 title = "The session host"
-modules = ["harness-host", "harness-cli"]
+modules = ["harness-host", "harness-cli", "harness"]
 uses = ["p4"]
 result = "A coding agent for daily use, one session at a time."
 
@@ -403,8 +403,8 @@ kind = "data"
 name = "Source"
 ref = "4.1"
 spec = true
-uses = ["session-id"]
-text = "The sender of an entry: User, Controller, Harness, Policy or a child session."
+uses = ["session-id", "effect-id"]
+text = "The sender of an entry: User, Controller, Harness, Policy, a child session, or since phase 7 the cell of a parent: Parent(session, effect) is the source of the task of an rlm child, and links its journal to the rlm call of the parent."
 
 [[node]]
 id = "taint"
@@ -2356,8 +2356,8 @@ group = "harness-config"
 kind = "data"
 name = "HarnessEnv"
 ref = "9"
-uses = ["host-list", "backend", "secrets", "mode", "logged"]
-text = "What a harness needs that an optimizer must not change: the workspace, the home folder, the hosts, the backend, the secrets and the mode. The task mode gives Files^, Shell^, Llm^, Children^ and Store^, as 8.1 gives a rollout. journals gets the journal of each call and of each child, because the owner of a rollout is an optimizer, which reads the journal (8.6)."
+uses = ["host-list", "backend", "secrets", "mode", "logged", "session-id"]
+text = "What a harness needs that an optimizer must not change: the workspace, the home folder, the hosts, the backend, the secrets and the mode. The task mode gives Files^, Shell^, Llm^, Children^ and Store^, as 8.1 gives a rollout. journals gets the id and the journal of each call and of each child, because the owner of a rollout is an optimizer, which reads the journal (8.6). Each session of a call has its own id since phase 7."
 
 [[node]]
 id = "harness-limits"
@@ -2386,7 +2386,8 @@ ops = ["forward", "forTask", "forkWorkspace"]
 ref = "9"
 spec = true
 uses = ["dspy-module", "signature", "predict", "policy-input", "policy-step", "finish-input", "context-strategy",
-        "harness-env", "harness-limits", "data", "runtime-context", "dspy-error", "sub-query", "sub-answer", "mode"]
+        "harness-env", "harness-limits", "data", "runtime-context", "dspy-error", "sub-query", "sub-answer", "mode",
+        "session-id"]
 proof_uses = ["drive", "memory-journal", "harness-effects", "recorded", "local-files", "snapshot-store", "journal-turn",
               "sandboxed-shell", "profile-for-mode", "layout", "preamble", "scala-repl", "window", "budget",
               "host-threads", "leaf-llm", "child-turns", "child-start"]
@@ -2746,3 +2747,680 @@ name = "RLM:"
 ref = "8.2"
 uses = ["harness", "child-turns", "recorded"]
 text = "rlm gives the typed value of the submit of a child, also for a record, the inputs are String vals of the child, the child has its own journal, which env.journals gets, and the parent journal has one rlm effect. A child that replies with no code makes rlm fail in the cell of the parent, with the text of the child. A child below the depth limit can call rlm, and a child at the limit cannot compile it. A child works in the copy of the parent. rlmBatched keeps the order of the tasks, gives each child its own inputs, runs at most HarnessLimits.batch children at the same time, and fails with the task of the child that failed."
+
+# ── Phase 7: the session host. The proofs go in the order of the parts: the host and its journal, the approvals, the
+# CLI, then the jobs and the hard stop (decision of 2026-11-10). ─────────────────────────────────────────────────────
+
+[[group]]
+id = "guarded"
+phase = "p7"
+module = "harness"
+file = "Guarded.scala"
+title = "The handler guarded: the check of each call after its intent"
+
+[[node]]
+id = "guard-stop"
+group = "guarded"
+kind = "data"
+name = "GuardStop"
+ref = "5.5"
+uses = ["effect-result"]
+text = "Why guarded stops a call: the result for its EffectDone, and the exception that the cell gets."
+
+[[node]]
+id = "guarded"
+group = "guarded"
+kind = "function"
+name = "guarded"
+ref = "5.5"
+spec = true
+uses = ["session-state", "json", "guard-stop"]
+proof_uses = ["guard-check", "needs-approval"]
+text = "The check of a call after the commit of its EffectStarted. Run gives Right. NeedsPerson gives EffectResult.NeedsApproval(rule) and a NeedsApproval error, so evolve adds the rule to pending, and a catch in the cell cannot hide it. Refused gives EffectResult.Error and an error with the reason. A proposal: the recorder calls guarded for each call of each session, and a program call has Guard.allowAll."
+
+[[group]]
+id = "host-types"
+phase = "p7"
+module = "harness-host"
+file = "HostTypes.scala"
+title = "The errors, the tickets and the limits of a host"
+
+[[node]]
+id = "host-error"
+group = "host-types"
+kind = "data"
+name = "HostError"
+ref = "10.2"
+spec = true
+uses = ["rejection"]
+text = "Why the host did not commit a command: a rejection of decide, a failed write that ended the session, the end of the session, a fenced worker, or a file that did not open."
+
+[[node]]
+id = "worker-ticket"
+group = "host-types"
+kind = "data"
+name = "WorkerTicket"
+ref = "10.3"
+uses = []
+text = "The id of one run of a worker. After a hard stop, the writer fences the ticket of a worker whose cell did not end."
+
+[[node]]
+id = "host-limits"
+group = "host-types"
+kind = "data"
+name = "HostLimits"
+ref = "10.2"
+uses = []
+text = "The size of a mailbox and the grace period of a hard stop. A proposal: 256 messages and 5 seconds."
+
+[[group]]
+id = "session-file"
+phase = "p7"
+module = "harness-host"
+file = "SessionFile.scala"
+title = "The SQLite file of one session"
+
+[[node]]
+id = "session-file"
+group = "session-file"
+kind = "data"
+name = "SessionFile"
+ops = ["append", "readFrom", "setting", "close", "open", "pathOf"]
+ref = "10.2"
+spec = true
+uses = ["logged", "session-id"]
+text = "<root>/sessions/<id>.db: one row for each entry, with a primary key on the session and seq, which rejects a stale writer. WAL, synchronous=NORMAL and fullfsync=ON, and synchronous=FULL for a commit that needs a flush. One connection for the life of the file."
+
+[[group]]
+id = "feeds"
+phase = "p7"
+module = "harness-host"
+file = "Feeds.scala"
+title = "The feeds of a session: only committed entries, and Behind for a slow client"
+
+[[node]]
+id = "behind"
+group = "feeds"
+kind = "data"
+name = "Behind"
+ref = "10.2"
+uses = []
+text = "A client lost entries, because its queue was full. It reads the journal after its last seq, so it misses nothing."
+
+[[node]]
+id = "feed"
+group = "feeds"
+kind = "data"
+name = "Feed"
+ref = "10.1"
+uses = ["behind", "logged"]
+text = "The committed entries of one session for one client."
+
+[[node]]
+id = "feeds"
+group = "feeds"
+kind = "data"
+name = "Feeds"
+ops = ["subscribe", "publish", "close"]
+ref = "10.2"
+spec = true
+uses = ["feed", "logged"]
+text = "Only the writer publishes, after a commit. It never waits for a client: a full queue is emptied, and the next poll gives Behind."
+
+[[group]]
+id = "timers"
+phase = "p7"
+module = "harness-host"
+file = "Timers.scala"
+title = "The timers of a host"
+
+[[node]]
+id = "cancel"
+group = "timers"
+kind = "data"
+name = "Cancel"
+ref = "10.2"
+uses = []
+text = "Cancels a timer. A late or a second cancel does nothing."
+
+[[node]]
+id = "timers"
+group = "timers"
+kind = "data"
+name = "Timers"
+ops = ["after", "close"]
+ref = "10.2"
+uses = ["cancel"]
+text = "A timer only puts a message in a mailbox, so the writer stays the one place that commits."
+
+[[group]]
+id = "writer"
+phase = "p7"
+module = "harness-host"
+file = "Writer.scala"
+title = "The one writer of a session, and the journal of a worker"
+
+[[node]]
+id = "writer"
+group = "writer"
+kind = "data"
+name = "Writer"
+ops = ["run", "post", "fence", "state", "log", "ended", "close"]
+ref = "10.2"
+spec = true
+uses = ["session-file", "logged", "secrets", "feeds", "session-state", "command", "source", "worker-ticket", "host-error"]
+proof_uses = ["decide", "evolve", "source-of", "needs-flush"]
+text = "One virtual thread takes the messages of a bounded mailbox and commits them in one transaction each, with the mask of secrets. It publishes to the feeds after the commit. An interrupt of a waiting thread does not cut its commit. A failed write ends only this session, and after the end each message fails at once."
+
+[[node]]
+id = "writer-journal"
+group = "writer"
+kind = "data"
+name = "WriterJournal"
+ops = ["state", "log", "run"]
+ref = "10.2"
+uses = ["journal-trait", "writer", "worker-ticket", "command", "source", "rejection", "session-state", "logged"]
+text = "The journal of one run of a worker: each commit goes through the mailbox with the ticket of the run. A proposal: a write error or a fence throws, so drive stops and the turn stays open, as after a crash."
+
+[[group]]
+id = "catalog"
+phase = "p7"
+module = "harness-host"
+file = "Catalog.scala"
+title = "The catalog of a host: one row for each session, a fold of its journal"
+
+[[node]]
+id = "session-status"
+group = "catalog"
+kind = "data"
+name = "SessionStatus"
+ref = "10.2"
+uses = ["session-outcome", "schema"]
+text = "Idle, InTurn, Stopping or Ended."
+
+[[node]]
+id = "catalog-row"
+group = "catalog"
+kind = "data"
+name = "CatalogRow"
+ref = "10.2"
+uses = ["session-id", "owner", "session-status", "schema"]
+text = "The deterministic part of a SessionCard: the id, the owner, the parent of a fork, the status and the last seq. A proposal: phase 7 makes no fork, so the parent is None."
+
+[[node]]
+id = "catalog-row-fold"
+group = "catalog"
+kind = "function"
+name = "catalogRow"
+ref = "10.2"
+spec = true
+uses = ["session-id", "fold", "logged", "catalog-row"]
+text = "The row of a session as a fold of its journal, so a lost row comes back from the journal."
+
+[[node]]
+id = "catalog"
+group = "catalog"
+kind = "data"
+name = "Catalog"
+ops = ["put", "row", "rows", "close", "open", "rebuild"]
+ref = "10.2"
+uses = ["catalog-row", "session-id"]
+proof_uses = ["catalog-row-fold", "session-file"]
+text = "<root>/catalog.db. The writer updates a row after a turn ends or when the status changes. rebuild at the start folds each journal whose row lags, so a crash or a removal of the file loses nothing."
+
+[[group]]
+id = "host"
+phase = "p7"
+module = "harness-host"
+file = "SessionHost.scala"
+title = "The session host, the handle of a client, and the runtime of the turns"
+
+[[node]]
+id = "session-host"
+group = "host"
+kind = "data"
+name = "SessionHost"
+ref = "10.1"
+spec = true
+uses = ["session-id", "session-config", "host-error", "session-handle"]
+text = "open(id, config) opens a new session or a session with a journal. It is free of the types of a runtime."
+
+[[node]]
+id = "session-handle"
+group = "host"
+kind = "data"
+name = "SessionHandle"
+ref = "10.1"
+spec = true
+uses = ["session-id", "command", "host-error", "session-state", "feed", "logged"]
+text = "An open session for a client: send into the mailbox with no wait for the commit, the committed state, a feed, and the entries after a seq. A proposal: the name of 10.1 is SessionRef, and the guest API already has a data type SessionRef."
+
+[[node]]
+id = "activation"
+group = "host"
+kind = "data"
+name = "Activation"
+ref = "11"
+uses = ["turn-effects"]
+text = "The live part of one activation: the effects of a turn, the stop of steps 2 and 3 of 10.3, and the flag of a cell that did not end."
+
+[[node]]
+id = "session-runtime"
+group = "host"
+kind = "data"
+name = "SessionRuntime"
+ref = "10.1"
+uses = ["session-id", "session-config", "journal-trait", "job-table", "activation"]
+text = "What the host needs to run the turns of a session: it makes the activation."
+
+[[node]]
+id = "local-host"
+group = "host"
+kind = "data"
+name = "LocalHost"
+ops = ["open", "list", "close", "start"]
+ref = "10.2"
+spec = true
+uses = ["session-host", "session-runtime", "secrets", "host-limits", "catalog", "timers", "session-handle", "catalog-row",
+        "host-error", "session-config", "session-id"]
+proof_uses = ["writer", "writer-journal", "session-file", "feeds", "drive", "next", "job-table", "catalog-row-fold"]
+text = "One writer and one file for each session. open of an id with a file repairs an open turn. After each commit with work and no worker, a worker runs drive with a new ticket. After StopRequested, Activation.stop, and a timer for the grace period: a worker that still runs is fenced, and the writer commits the closing entries and TurnEnded(Aborted). The catalog gets the row after a turn ends."
+
+[[group]]
+id = "jobs"
+phase = "p7"
+module = "harness-host"
+file = "Jobs.scala"
+title = "The jobs of a session: the table, the handler and the wrapper"
+
+[[node]]
+id = "job-table"
+group = "jobs"
+kind = "data"
+name = "JobTable"
+ops = ["sync", "start", "output", "await", "status", "close"]
+ref = "10.3"
+spec = true
+uses = ["effect-id", "session-state", "job-status"]
+text = "The live part of the jobs: the process groups, the output and the marks. sync copies the marks and stops a marked job with TERM, a grace period and KILL. A marked job does not start. A job of the state with no row is Lost."
+
+[[node]]
+id = "job-shell"
+group = "jobs"
+kind = "data"
+name = "JobShell"
+ops = ["exec", "spawn", "jobOutput", "waitJob", "stopJob"]
+ref = "10.3"
+uses = ["shell", "sandboxed-shell", "job-table", "journal-trait", "files", "job-id", "job-status"]
+proof_uses = ["job-wrapper", "command"]
+text = "The handler of Shell^ in the host. spawn gives the JobId of its own EffectStarted, a report sends a message with Source.Harness at the end of the job, and stopJob is StopJobs(One(job)). A proposal: the sandbox gets a launch of a command with no wait."
+
+[[node]]
+id = "job-wrapper"
+group = "jobs"
+kind = "data"
+name = "JobWrapper"
+ops = ["command"]
+ref = "10.3"
+uses = []
+text = "The command that runs a job in its own process group and stops that group when its standard input closes. The host holds the pipe, so a crash of the host stops the job."
+
+[[group]]
+id = "work-runtime"
+phase = "p7"
+module = "harness-host"
+file = "WorkRuntime.scala"
+title = "The runtime of a work session: chat turns with the parts of a harness"
+
+[[node]]
+id = "work-env"
+group = "work-runtime"
+kind = "data"
+name = "WorkEnv"
+ref = "8.1"
+uses = ["host-list", "backend", "secrets"]
+text = "The home folder, the host list, the backend of the sandbox and the secrets of a work session."
+
+[[node]]
+id = "work-runtime"
+group = "work-runtime"
+kind = "data"
+name = "WorkRuntime"
+ops = ["activate", "defaultGuard", "config", "forWork"]
+ref = "8.1"
+spec = true
+uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context",
+        "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard"]
+proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell",
+              "leaf-llm", "child-turns", "budget", "local-files", "snapshot-store", "journal-turn", "preamble"]
+text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of the mode through recorded and guarded, and JobShell. The first rules of 5.5: git push gets Ask in a mode with Network^. A proposal: each turn gets a new budget of model calls."
+
+[[group]]
+id = "cli-args"
+phase = "p7"
+module = "harness-cli"
+file = "CliArgs.scala"
+title = "The arguments of the CLI"
+
+[[node]]
+id = "cli-mode"
+group = "cli-args"
+kind = "data"
+name = "CliMode"
+ref = "5.2"
+uses = []
+text = "Local, with no network, or Full."
+
+[[node]]
+id = "cli-args"
+group = "cli-args"
+kind = "data"
+name = "CliArgs"
+ops = ["parse"]
+ref = "15"
+uses = ["cli-mode", "session-id"]
+text = "The folder, the root of the host, the session to open again and the mode. A proposal: [--root DIR] [--session ID] [--full] [FOLDER], with the root <home>/.dspy4s/harness."
+
+[[group]]
+id = "entry-text"
+phase = "p7"
+module = "harness-cli"
+file = "EntryText.scala"
+title = "The text of an entry for the terminal"
+
+[[node]]
+id = "entry-text"
+group = "entry-text"
+kind = "function"
+name = "entryText"
+ref = "10.1"
+uses = ["logged"]
+text = "The text of a step and its code, the output of a cell, a pending call with the commands that answer it, the outcome of a turn and the stops. The other entries give none."
+
+[[group]]
+id = "lines"
+phase = "p7"
+module = "harness-cli"
+file = "Lines.scala"
+title = "The lines of the person and their commands: the client side of Grant"
+
+[[node]]
+id = "line"
+group = "lines"
+kind = "data"
+name = "Line"
+ref = "10.3"
+uses = ["grant-lifetime"]
+text = "A message, /stop, /stopall, /allow once|turn|session, /close, /quit, or an unknown command."
+
+[[node]]
+id = "parse-line"
+group = "lines"
+kind = "function"
+name = "parseLine"
+ref = "10.3"
+uses = ["line"]
+text = "The line of a text. A text that does not start with / is a message."
+
+[[node]]
+id = "commands-for"
+group = "lines"
+kind = "function"
+name = "commandsFor"
+ref = "5.5"
+spec = true
+uses = ["line", "session-state", "request-id", "command"]
+text = "Stop gives Abort, and Stop all gives Abort and StopJobs(OfLastTurn) (10.3). Allow gives one Grant for each pending call with the lifetime of the line, and an error with no pending call (5.5). A message gives one Send."
+
+[[group]]
+id = "cli"
+phase = "p7"
+module = "harness-cli"
+file = "Cli.scala"
+title = "The terminal client"
+
+[[node]]
+id = "cli"
+group = "cli"
+kind = "data"
+name = "Cli"
+ops = ["main", "loop"]
+ref = "15"
+uses = ["session-handle"]
+proof_uses = ["cli-args", "local-host", "work-runtime", "work-env", "entry-text", "parse-line", "commands-for"]
+text = "main makes the model from the environment, starts a LocalHost with a WorkRuntime, and opens the session. loop prints the feed and sends the commands of the lines. After Behind it reads the journal, so it shows each entry once. A proposal: JDK 21, and an AOT cache only if the start is too slow."
+
+# ── Phase 7: the laws ─────────────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "guarded-laws"
+phase = "p7"
+module = "harness"
+file = "GuardedLaws.scala"
+where = "tests"
+title = "The laws of guarded"
+
+[[node]]
+id = "law-guarded"
+group = "guarded-laws"
+kind = "law"
+name = "Guarded:"
+ref = "5.5"
+uses = ["guarded", "recorder"]
+text = "Allow runs, and Deny stops with an error. Ask with no grant stops with NeedsApproval of the Exact rule, and Ask with a grant runs. With no person, Ask gives a plain error. The recorder calls guarded after the commit of EffectStarted: a Deny call does not run, and an Ask call puts its rule in pending."
+
+[[group]]
+id = "chat-window-laws"
+phase = "p7"
+module = "harness"
+file = "ChatWindowLaws.scala"
+where = "tests"
+title = "The laws of the window for a chat"
+
+[[node]]
+id = "law-chat-window"
+group = "chat-window-laws"
+kind = "law"
+name = "Chat window:"
+ref = "7"
+spec = true
+uses = ["window"]
+text = "A step sees each earlier turn as its message and its reply, oldest first, and the message of the open turn. With a small budget, the oldest turns go first. One open turn has no earlier turn."
+
+[[group]]
+id = "link-laws"
+phase = "p7"
+module = "harness"
+file = "LinkLaws.scala"
+where = "tests"
+title = "The laws of the link from a child to its parent"
+
+[[node]]
+id = "law-link"
+group = "link-laws"
+kind = "law"
+name = "Link:"
+ref = "8.2"
+spec = true
+uses = ["harness", "harness-env", "source"]
+text = "The task of an rlm child has the source Parent with the id of the parent session and the id of its rlm effect. env.journals gets a different id for each session of a call."
+
+[[group]]
+id = "session-file-laws"
+phase = "p7"
+module = "harness-host"
+file = "SessionFileLaws.scala"
+where = "tests"
+title = "The laws of the file of a session"
+
+[[node]]
+id = "law-file"
+group = "session-file-laws"
+kind = "law"
+name = "File:"
+ref = "10.2"
+uses = ["session-file"]
+text = "The rows come back in the order of seq, also after a new open. A commit with a seq that the file has adds nothing. WAL and synchronous NORMAL stay after a flush. A copy of the file holds the same journal only for its session."
+
+[[group]]
+id = "writer-laws"
+phase = "p7"
+module = "harness-host"
+file = "WriterLaws.scala"
+where = "tests"
+title = "The laws of the writer and of the timers"
+
+[[node]]
+id = "law-writer"
+group = "writer-laws"
+kind = "law"
+name = "Writer:"
+ref = "10.2"
+uses = ["writer", "writer-journal"]
+text = "The commits of several threads have no gap in seq, and the state is the fold of the file. run returns after the rows are in the file. An interrupt does not cut a commit. After close, each command fails at once. A failed write ends only its session. A fenced ticket gets Fenced. The file holds no known secret."
+
+[[node]]
+id = "law-timer"
+group = "writer-laws"
+kind = "law"
+name = "Timer:"
+ref = "10.2"
+uses = ["timers", "writer"]
+text = "A timer runs once after its delay, a cancel stops it, and a timer commits only through the writer."
+
+[[group]]
+id = "feed-laws"
+phase = "p7"
+module = "harness-host"
+file = "FeedLaws.scala"
+where = "tests"
+title = "The laws of the feeds"
+
+[[node]]
+id = "law-feed"
+group = "feed-laws"
+kind = "law"
+name = "Feed:"
+ref = "10.2"
+uses = ["feeds", "writer"]
+text = "A client gets the entries after its subscribe in the order of seq, and before run returns. A full queue gives Behind, and publish does not wait. A client that reads the journal on Behind misses no entry and gets none twice."
+
+[[group]]
+id = "catalog-laws"
+phase = "p7"
+module = "harness-host"
+file = "CatalogLaws.scala"
+where = "tests"
+title = "The laws of the catalog"
+
+[[node]]
+id = "law-catalog"
+group = "catalog-laws"
+kind = "law"
+name = "Catalog:"
+ref = "10.2"
+uses = ["catalog", "catalog-row-fold", "session-file"]
+text = "The row is a fold of the journal. A new open reads the same rows. rebuild folds each journal whose row lags, gives the same rows after a removal of the file, and removes a row with no file."
+
+[[group]]
+id = "host-laws"
+phase = "p7"
+module = "harness-host"
+file = "HostLaws.scala"
+where = "tests"
+title = "The laws of the host and of a hard stop, with scripted effects"
+
+[[node]]
+id = "law-host"
+group = "host-laws"
+kind = "law"
+name = "Host:"
+ref = "10.2"
+uses = ["local-host"]
+text = "open makes the file and commits Activated, and a second open gives the same handle. A message starts a turn that a worker runs. An open after a crash repairs the turn and runs nothing. A new host opens the session with a new activation, and the store comes back. The end of one session does not stop another. list gives the rows."
+
+[[node]]
+id = "law-hard-stop"
+group = "host-laws"
+kind = "law"
+name = "Hard stop:"
+ref = "10.3"
+uses = ["local-host"]
+text = "Abort commits StopRequested, stops the activation, and the turn ends Aborted. A cell that does not end in the grace period: the worker is fenced, the writer commits the closing entries and TurnEnded(Aborted), the late commit is refused, and the next turn gets a new activation."
+
+[[group]]
+id = "job-laws"
+phase = "p7"
+module = "harness-host"
+file = "JobLaws.scala"
+where = "tests"
+title = "The laws of the job table and of the wrapper, with real processes"
+
+[[node]]
+id = "law-jobs"
+group = "job-laws"
+kind = "law"
+name = "Jobs:"
+ref = "10.3"
+uses = ["job-table", "job-wrapper"]
+text = "A job outlives its call, with its output and its exit code. A stop mark stops a job, with KILL after the grace period. A marked job does not start. A job with no row is Lost. A report gets the status at the end. close stops each job. The wrapper stops its process group when its pipe closes."
+
+[[group]]
+id = "work-laws"
+phase = "p7"
+module = "harness-host"
+file = "WorkLaws.scala"
+where = "tests"
+title = "The laws of a work session, with a real REPL, the sandbox and a scripted model"
+
+[[node]]
+id = "law-work"
+group = "work-laws"
+kind = "law"
+name = "Work:"
+ref = "8.1"
+uses = ["work-runtime", "local-host"]
+text = "config and defaultGuard. A cell runs in the scope, and a val stays for the next turn. An Ask call does not run, pending holds its rule, and a Grant lets the new turn run it. A catch does not hide a pending call. A job outlives its turn and Abort, and StopJobs(OfLastTurn) stops it. A report starts a turn. stopJob commits JobsStopRequested(One). A stop ends a long exec."
+
+[[group]]
+id = "crash-laws"
+phase = "p7"
+module = "harness-host"
+file = "CrashLaws.scala"
+where = "tests"
+title = "The laws of a crash of the host, with a host in a child JVM"
+
+[[node]]
+id = "law-crash"
+group = "crash-laws"
+kind = "law"
+name = "Crash:"
+ref = "10.3"
+uses = ["local-host", "work-runtime", "catalog-row-fold"]
+text = "After a SIGKILL of the host during a cell, no job process stays, the next start gives the catalog rows of the journals, and the open gives TurnEnded(Crashed)."
+
+[[group]]
+id = "cli-laws"
+phase = "p7"
+module = "harness-cli"
+file = "CliLaws.scala"
+where = "tests"
+title = "The laws of the CLI, and the check of its start time"
+
+[[node]]
+id = "law-cli"
+group = "cli-laws"
+kind = "law"
+name = "CLI:"
+ref = "10.3"
+uses = ["cli-args", "parse-line", "commands-for", "entry-text"]
+text = "parse gives the defaults and an error with the usage. parseLine reads the commands. Stop and Stop all give their commands, Allow gives one Grant for each pending call, a message gives one Send, and Quit gives none. entryText shows a step, a cell output and a pending call."
+
+[[node]]
+id = "check-cli-start"
+group = "cli-laws"
+kind = "check"
+name = "CLI start:"
+ref = "15"
+uses = ["cli"]
+text = "The time from the start of a JVM to the end at /quit, in a child JVM. Choice 8: an AOT cache on JDK 25 comes only if this time is too long."

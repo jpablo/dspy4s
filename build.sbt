@@ -67,7 +67,9 @@ lazy val root = (project in file("."))
     harnessRepl,
     harnessMcp,
     harnessSandbox,
-    harness
+    harness,
+    harnessHost,
+    harnessCli
   )
   .settings(commonSettings)
   .settings(
@@ -355,6 +357,39 @@ lazy val harness = (project in file("modules/harness"))
     // A test of a harness runs a REPL and a sandbox, and the heap guard of the REPL is one for the JVM.
     Test / fork              := true,
     Test / parallelExecution := false
+  )
+
+// The session host (10.1 to 10.3): one writer for each session, a SQLite file for each journal, the feeds, the timers,
+// the catalog, the path of a hard stop and the jobs. A work session runs its turns with the parts of `harness`.
+lazy val harnessHost = (project in file("modules/harness-host"))
+  // The tests of the host use the scripted effects, gates and models of the tests of `harness`.
+  .dependsOn(harness % "compile->compile;test->test")
+  .settings(commonSettings)
+  .settings(name := "dspy4s-harness-host")
+  .settings(
+    libraryDependencies ++= Seq(
+      "org.xerial"     % "sqlite-jdbc"      % "3.53.4.0",
+      "org.scalameta" %% "munit"            % munitVersion           % Test,
+      "org.scalameta" %% "munit-scalacheck" % munitScalacheckVersion % Test
+    ),
+    excludeDependencies += ExclusionRule("org.scala-lang", "scaladoc_3"),
+    // A host runs REPLs and a sandbox, and the crash tests start a host in a child JVM with the class path of the tests.
+    Test / fork              := true,
+    Test / parallelExecution := false
+  )
+
+// The terminal client of a work session (phase 7). It runs on JDK 21, as the other modules (choice 8).
+lazy val harnessCli = (project in file("modules/harness-cli"))
+  .dependsOn(harnessHost % "compile->compile;test->test")
+  .settings(commonSettings)
+  .settings(name := "dspy4s-harness-cli")
+  .settings(
+    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test,
+    excludeDependencies += ExclusionRule("org.scala-lang", "scaladoc_3"),
+    Compile / run / fork         := true,
+    Compile / run / connectInput := true,
+    // The check of the start time starts the client in a child JVM with the class path of the tests.
+    Test / fork := true
   )
 
 // JMH stays outside the root aggregate. Normal compile and test runs do not pay for benchmark generation.
