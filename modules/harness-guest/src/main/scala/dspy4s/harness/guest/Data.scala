@@ -118,7 +118,7 @@ enum DataShape:
   /** The `Data` of a case class or an enum, from the names and the element types of its `Mirror`. */
   inline def derived[A](using m: Mirror.Of[A]): Data[A] =
     val name   = constValue[m.MirroredLabel]
-    val labels = constValueTuple[m.MirroredElemLabels].toList.map(_.toString)
+    val labels = labelsOf(constValueTuple[m.MirroredElemLabels])
     inline m match
       case p: Mirror.ProductOf[A] =>
         RecordData[A, p.MirroredElemTypes](name, labels, p, summonInline[Fields[p.MirroredElemTypes]])

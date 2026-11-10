@@ -11,6 +11,12 @@ import scala.deriving.Mirror
 object DataDerivation:
   import DataSupport.*
 
+  /** The names of the fields or of the cases. `derived` calls this function and not `Tuple.toList`: the result type of
+    * `toList` is a match type, and capture checking cannot reduce it for the tuple of labels in a file with capture
+    * checking.
+    */
+  def labelsOf(names: Tuple): List[String] = names.productIterator.map(_.toString).toList
+
   /** The fields of a record, typed by the tuple of their types. The instance for `H *: T` applies the `Data` of `H` to
     * the value of `H`, so no field value is cast. The `Data` of a field is lazy, because a type can hold itself.
     */
