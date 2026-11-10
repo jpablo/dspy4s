@@ -102,7 +102,7 @@ final case class Harness[I, O](
       goal = None,
       env = Set.empty
     )
-    val task = Harness.task(signature, fields)
+    val task = Harness.task(signature, fields, Some(text))
     for
       _ <- journal.run(Command.Activate(Harness.versions, config), Source.Harness).left.map(rejected)
       _ <- journal.run(Command.Send(RequestId("task"), task, fields.toMap), Source.User).left.map(rejected)
@@ -230,11 +230,16 @@ object Harness extends HarnessGivens:
 
   /** The task of a call: the instructions of the signature, and the input fields with their values. The preamble has a
     * val for each input field, so a cell reads the whole value.
+    *
+    * The task of the policy also shows the source of `preamble`, so the model sees the types of `submit` and of the
+    * input vals (5.1). The task of the finisher has no preamble, because the finisher writes no code.
     */
-  private[harness] def task(signature: Signature[?, ?], fields: Vector[(String, Json)]): String =
+  private[harness] def task(signature: Signature[?, ?], fields: Vector[(String, Json)], preamble: Option[String] = None)
+      : String =
     val inputs = fields.map((name, value) => s"- $name: ${Window.cut(value.print, InputLimit)}").mkString("\n")
     val head   = signature.layout.instructions.filter(_.trim.nonEmpty).getOrElse("Do the task.")
-    s"$head\n\nThe input fields, each also a val of the preamble:\n$inputs\n\nGive the result with submit."
+    val source = preamble.fold("")(p => s"\n\nThe preamble of the REPL defines these names:\n```scala\n${p.trim}\n```")
+    s"$head\n\nThe input fields, each also a val of the preamble:\n$inputs$source\n\nGive the result with submit."
 
   /** The steps of a call as text for the finisher, cut to `budget` characters. */
   private[harness] def transcript(log: Vector[Logged], budget: Int): String =

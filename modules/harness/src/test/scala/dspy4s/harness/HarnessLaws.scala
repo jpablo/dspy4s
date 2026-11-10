@@ -5,6 +5,7 @@ import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.harness.kernel.*
 import dspy4s.harness.repl.HeapGuard
 import dspy4s.harness.sandbox.{Backends, HostList}
+import dspy4s.lm.contracts.LanguageModel
 import munit.FunSuite
 
 import java.nio.file.{Files, LinkOption, Path}
@@ -24,7 +25,7 @@ class HarnessLaws extends FunSuite:
 
   /** Runs a harness for the task of the tests in a new place, and gives the result and the journal of the call. */
   private def call(
-      model   : ScriptLm,
+      model   : LanguageModel,
       question: String  = "What is 6 times 7?",
       steps   : Int     = 3,
       secrets : Secrets = Secrets.none
@@ -76,8 +77,7 @@ class HarnessLaws extends FunSuite:
   test("Harness: a code field with the text null or None is no code, so the reply runs the finisher") {
     Vector("null", "None").foreach { empty =>
       RuntimeEnvironment.resetForTests()
-      val model =
-        ScriptLm(s"[[ ## text ## ]]\nIt is 42.\n\n[[ ## code ## ]]\n$empty\n\n[[ ## completed ## ]]", answer("42"))
+      val model = ScriptLm(policy("It is 42.", Some(empty)), answer("42"))
       call(model) { (_, result, journal) =>
         assertEquals(result, Right(Answer("42")), empty)
         assertEquals(ended(journal), Vector(TurnOutcome.Replied("It is 42.")), empty)
@@ -144,6 +144,37 @@ class HarnessLaws extends FunSuite:
       assertEquals(Files.readString(fork.resolve("a.txt")), "FAKE-A")
       assert(!Files.exists(fork.resolve("pipe"), LinkOption.NOFOLLOW_LINKS))
     finally place.close()
+  }
+
+  test("Harness: the task of the policy shows the preamble, so the model sees the type of submit") {
+    val model = ScriptLm(policy("compute", Some("submit(\"42\")")))
+    call(model) { (_, result, _) =>
+      assertEquals(result, Right(Answer("42")))
+      val prompt = model.requests.headOption.toVector.flatMap(_.messages).flatMap(_.text).mkString("\n")
+      assert(prompt.contains("def submit(answer: String)"), prompt.take(3_000))
+      assert(prompt.contains("val question: String"), prompt.take(3_000))
+    }
+  }
+
+  private def reasoning(journal: Vector[Logged]): Vector[String] =
+    journal.collect { case Logged(_, _, Entry.Acted(thought, _, _)) => thought }
+
+  test("Harness: a model with native reasoning gets no reasoning field, and its reasoning goes into the Acted") {
+    val model = ThinkingLm("a native fake thought", thinking("compute", Some("submit(\"42\")")))
+    call(model) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("42")))
+      assertEquals(reasoning(journal), Vector("a native fake thought"))
+      val prompt = model.requests.headOption.toVector.flatMap(_.messages).flatMap(_.text).mkString("\n")
+      assert(!prompt.contains("[[ ## reasoning ## ]]"), prompt.take(3_000))
+    }
+  }
+
+  test("Harness: a model with no native reasoning writes the reasoning field, and it goes into the Acted") {
+    val model = ScriptLm(policy("compute", Some("submit(\"42\")"), reasoning = "a written fake thought"))
+    call(model) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("42")))
+      assertEquals(reasoning(journal), Vector("a written fake thought"))
+    }
   }
 
   test("Harness: the step limit runs the finisher") {

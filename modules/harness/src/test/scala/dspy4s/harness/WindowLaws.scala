@@ -1,6 +1,6 @@
 package dspy4s.harness
 
-import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.{DynamicValues, RuntimeContext}
 import dspy4s.harness.kernel.{state as foldOf, *}
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
@@ -79,6 +79,14 @@ class WindowLaws extends ScalaCheckSuite:
       val p = Window.project(logOf(1L, entries*), (), budget)
       assertEquals(stepsIn(p), Vector(0), s"budget $budget")
       assert(p.size <= budget, s"${p.size} > $budget")
+    }
+  }
+
+  test("Window: each message of the history has an empty reasoning, so the adapter shows no None for it") {
+    val p = Window.project(logOf(1L, steps(Vector("a", "b"))*), (), 10_000)
+    assertEquals(p.history.messages.size, 2)
+    p.history.messages.foreach { m =>
+      assertEquals(DynamicValues.recordGet(m, "reasoning"), Some(DynamicValues.string("")), m.toString)
     }
   }
 

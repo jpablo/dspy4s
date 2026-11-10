@@ -18,8 +18,8 @@ import scala.annotation.tailrec
   *   - the observation: the output of the last cell of the open turn, cut to half of the budget;
   *   - the history: one message for each earlier step with an `Acted`. A message holds the input field `observation`,
   *     the output before that step, and the output fields `text` and `code` of the step. Each of the three is cut to an
-  *     eighth of the budget, so the last step fits when the status is short (9). The newest messages that fit the rest
-  *     of the budget stay, oldest first.
+  *     eighth of the budget, so the last step fits when the status is short (9). The output field `reasoning` is empty.
+  *     The newest messages that fit the rest of the budget stay, oldest first.
   */
 object Window extends ContextStrategy:
   type D = Unit
@@ -64,9 +64,12 @@ object Window extends ContextStrategy:
         case _ => steps
     }
 
-  /** The message of `step`, with each field cut to `max` characters. */
+  /** The message of `step`, with each field cut to `max` characters. The window keeps no thought, so `reasoning` is
+    * empty. With no such key, the adapter shows the text `None` for the field, and a model can copy it (9).
+    */
   private def message(observation: String, step: Step, max: Int): DynamicValue.Record =
-    val fields = Vector("observation" -> observation, "text" -> step.text) ++ step.code.map("code" -> _)
+    val fields = Vector("observation" -> observation, "reasoning" -> "", "text" -> step.text) ++
+      step.code.map("code" -> _)
     DynamicValues.record(fields.map((key, value) => key -> DynamicValues.string(cut(value, max)))*)
 
   /** The newest messages whose characters fit `room`, in their order. */

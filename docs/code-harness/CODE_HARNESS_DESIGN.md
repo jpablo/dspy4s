@@ -1256,6 +1256,21 @@ A code review of phase 4 on 2026-11-09 added these rules:
   an input that no step saw.
 - Only the status says that a step is the last one, and the code of that step does not run.
 
+The first live run of phase 4 on 2026-11-09 added these rules. It used a private OpenAI-compatible endpoint with an
+open model of 27B parameters that sends its reasoning apart from its text:
+
+- The task of the policy shows the source of the preamble. Before, the model knew `submit` only from the
+  instructions, so it wrote `submit(13)` for `submit(answer: String)` and lost a step to a compile error.
+- `PolicyStep` has the output field `reasoning` with the type `Reasoning`, as `ChainOfThought` has. For a model that
+  declares native reasoning, the prompt has no such field, and the adapter fills it from the reply. A model with no
+  native reasoning writes the field. So `Acted.reasoning` holds either one. Before, it was always empty.
+- Each message of the history has an empty `reasoning`, because the window keeps no thought. With no such key, the
+  adapter shows the text `None` for the field, as DSPy does, and a model can copy it.
+- The port declares no capability for a server that is not OpenAI. With `LmCapabilities(reasoning = true)`, dspy4s
+  sends its default effort `low`, and this server obeyed it: the reasoning of a step fell from 9,000 to 27,000
+  characters to 100 to 400, and a call took 1 to 2 s in place of 20 to 60 s. One task needed two more steps, because
+  of a compile error.
+
 ## 10. The runtime
 
 ### 10.1 The layers
@@ -1490,6 +1505,7 @@ and the start probe also ran on JDK 21.0.11. The code is in `tmp/design-check/`,
 | The laws of `harness-sandbox` on Linux, with `scripts/sandbox-linux/run.sh`: Ubuntu 24.04, bwrap and JDK 21 on arm64, in a privileged podman container, as a normal user | 63 tests: 57 pass, and 6 of Seatbelt skip. Each probe of 5.4 gives what the profile allows. The first run found three errors, fixed here. A command made a new file `.env.new`, because a mount of bubblewrap cannot hide a name, so 5.4 now protects the secret files that exist when a command starts. The probe of bubblewrap passed in a container where each command failed. The time limit waited 2 s for a zombie when the JVM was PID 1. |
 | A code review of phases 1 to 3 at the high level, and the fixes | 10 findings, each fixed with a test that failed first. The worst: bwrap let a command reach the UNIX sockets of the host, so the D-Bus bus or docker.sock could start a process outside the sandbox. A probe reproduced it on Linux, and a seccomp filter fixed it. The others: the MCP files read `.env`, the proxy kept the `Host` header of the client and allowed each port with no limit of connections, the secret paths missed common credential files, `Prefix` compared raw text, `decide` took an effect id two times, `AUTH` matched `AUTHOR`, each command walked the whole scope, and the preamble did not escape a name. A review of the fixes found 6 more cases, fixed too. The sandbox has 36 mutants, the kernel 27, and each one is killed. |
 | A code review of phase 4 at the high level, and the fixes | 10 findings. 9 are fixed, each with a test that failed first, and 1 needed no change. The worst: `Files.local` wrote through a symbolic link to a place that does not exist, so a command could make the JVM write outside the root and outside the sandbox. The others: a cell thread that did not stop, or a REPL that the heap guard closed, ran on into the next cells; two calls of one cell could get a false refusal; a code field `null` ran as a cell; a copy that failed threw out of `forward` and left its part; a long text or code dropped the whole history; and three cleanups. The full copy of the workspace needed no change, because `Files.copy` on JDK 21 clones each file. A review of the fixes found 2 more cases, fixed too: a read through a link at the last part, and an exception that left the turn of the journal open. The harness has 70 laws and 29 mutants, and each mutant is killed. |
+| A first live run of `Harness` with a real model: `HarnessLiveRun`, five small tasks, Seatbelt on macOS, a private OpenAI-compatible endpoint with an open model of 27B parameters | Run 1: 5 of 5 answers right, with 1 to 3 model calls a task and 5 to 84 s a task, nearly all in the first call, with 9,000 to 27,000 characters of reasoning. The model used `read`, `exec` and `write` well. It found two gaps: the model did not see the preamble, so it wrote `submit(13)`, and `Acted.reasoning` was empty. Run 2, after the fixes and with native reasoning declared: 5 of 5 right, 1 to 4 calls and 1 to 6 s a task. The shell task now ended with `submit` and needed no finisher. A run with a reasoning field in the prompt found that the history showed `None` for that field, fixed too. The suite runs only with `HARNESS_LIVE=true`. The harness has 74 laws and 32 mutants, and each mutant is killed. |
 | The laws of `harness` (phase 4), with scripts of `TurnEffects`, a real REPL, the sandbox of the host, and a scripted model through the chat adapter | 60 tests pass: `drive` with the scripts of this table, the journal in memory, the mask, the handlers, the window, a harness that submits, a reply and the step limit that run the finisher, a call in a copy of the workspace, `exec` in the sandbox, and the leaves for the optimizers. 18 mutants, each one killed. The runner of the optimizers puts the output in `RawPrediction.values`. A first run found that the chat adapter reads the text `null` in the field `code` as code. |
 
 The cells that models wrote. A cell counts if it compiled, so the table does not say that the cell does its task. The

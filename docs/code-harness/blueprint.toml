@@ -2492,7 +2492,7 @@ kind = "law"
 name = "Window:"
 ref = "7"
 uses = ["window"]
-text = "project depends only on the entries and the derived data, fits the budget, keeps the last observation and the newest steps, oldest first, keeps the last step also with a long text and code, and cuts a long value with a note. update gives no derived data."
+text = "project depends only on the entries and the derived data, fits the budget, keeps the last observation and the newest steps, oldest first, keeps the last step also with a long text and code, gives each message an empty reasoning, and cuts a long value with a note. update gives no derived data."
 
 [[node]]
 id = "law-status"
@@ -2518,7 +2518,7 @@ kind = "law"
 name = "Harness:"
 ref = "9"
 uses = ["harness"]
-text = "A policy that submits gives the output through Data, and in RawPrediction.values. A reply with no code and the step limit run the finisher. The call works in a copy of the workspace, exec runs in the sandbox, and a failed model call gives a DspyError. The store keeps only the writes of a cell that completed. A code of null or None is no code. After the heap guard closes the REPL, the turn stops. A workspace that cannot be copied gives a DspyError and leaves no copy, and the copy leaves out a named pipe. The journal of a call is one turn, and it holds no known secret. The REPL has only the givens of the task mode."
+text = "A policy that submits gives the output through Data, and in RawPrediction.values. A reply with no code and the step limit run the finisher. The call works in a copy of the workspace, exec runs in the sandbox, and a failed model call gives a DspyError. The store keeps only the writes of a cell that completed. A code of null or None is no code. The task of the policy shows the preamble, and the reasoning of a reply, native or written, goes into the Acted. After the heap guard closes the REPL, the turn stops. A workspace that cannot be copied gives a DspyError and leaves no copy, and the copy leaves out a named pipe. The journal of a call is one turn, and it holds no known secret. The REPL has only the givens of the task mode."
 
 [[group]]
 id = "structure-laws"

@@ -1,6 +1,6 @@
 package dspy4s.harness
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, History, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, DynamicValues, History, Reasoning, RuntimeContext}
 import dspy4s.harness.guest.StrategyName
 import dspy4s.harness.kernel.{Logged, Position, SessionState}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
@@ -11,8 +11,13 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 final case class PolicyInput(task: String, apiReference: String, status: String, observation: String, history: History)
     derives Schema
 
-/** The output of the policy leaf (9): a text, and the code of a cell, if any. A step with no code answers. */
-final case class PolicyStep(text: String, code: Option[String]) derives Schema
+/** The output of the policy leaf (9): the thought, a text, and the code of a cell, if any. A step with no code answers.
+  *
+  * `reasoning` has the type `Reasoning`, so a model with native reasoning gets no such field in its prompt, and the
+  * adapter fills it from the reasoning of the reply. A model with no native reasoning writes the field.
+  * `Acted.reasoning` holds either one.
+  */
+final case class PolicyStep(reasoning: Reasoning, text: String, code: Option[String]) derives Schema
 
 /** What a strategy gives for one step (7): the status section, the last observation, and the earlier steps.
   *

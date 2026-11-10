@@ -41,7 +41,7 @@ final class HarnessEffects(
       policy(input).left.map(_.message).map { step =>
         val code = step.output.code.filterNot(c => HarnessEffects.NoCode.contains(c.strip))
         // The code of the last step of a chat does not run (4.3).
-        PolicyReply("", step.output.text, if mustAnswer then None else code)
+        PolicyReply(step.output.reasoning, step.output.text, if mustAnswer then None else code)
       }
     }
 

@@ -157,6 +157,13 @@ file = "Window.scala"
 old = "DynamicValues.string(cut(value, max))"
 new = "DynamicValues.string(if key == \"observation\" then cut(value, max) else value)"
 
+[[mutant]]
+name = "Mutant: the history has no empty reasoning"
+[[mutant.edit]]
+file = "Window.scala"
+old = "\"observation\" -> observation, \"reasoning\" -> \"\", \"text\""
+new = "\"observation\" -> observation, \"text\""
+
 # ── The harness ──
 
 [[mutant]]
@@ -214,6 +221,20 @@ name = "Mutant: a code of null runs"
 file = "HarnessEffects.scala"
 old = "Set(\"\", \"null\", \"None\")"
 new = "Set(\"\")"
+
+[[mutant]]
+name = "Mutant: the reasoning of a step is lost"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "PolicyReply(step.output.reasoning,"
+new = "PolicyReply(\"\","
+
+[[mutant]]
+name = "Mutant: the task of the policy has no preamble"
+[[mutant.edit]]
+file = "Harness.scala"
+old = "Harness.task(signature, fields, Some(text))"
+new = "Harness.task(signature, fields)"
 
 [[mutant]]
 name = "Mutant: the two leaves have one name"
