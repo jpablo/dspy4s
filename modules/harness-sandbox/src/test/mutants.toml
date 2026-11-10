@@ -273,5 +273,5 @@ new = "SandboxedShell.stop(Vector(process.toHandle))"
 name = "Mutant: exec takes the profile of the mode for each command"
 [[mutant.edit]]
 file = "SandboxedShell.scala"
-old = "val now     = profile.hide(index.find(profile))"
-new = "val now     = profile.hide(index.find(profile).take(0))"
+old = "val now       = profile.hide(index.find(profile))"
+new = "val now       = profile.hide(index.find(profile).take(0))"

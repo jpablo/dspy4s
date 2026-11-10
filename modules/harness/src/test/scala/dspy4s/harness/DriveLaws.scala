@@ -34,6 +34,22 @@ class DriveLaws extends ScalaCheckSuite:
   /** What happens in a cell: nothing, an effect with its outcome, an effect that stays open, or a stop. */
   private val actions: Gen[Int] = Gen.frequency(6 -> 0, 2 -> 1, 1 -> 2, 1 -> 3)
 
+  test("Drive: a policy call that fails during a stop ends the turn Aborted, not Failed") {
+    val j = journal()
+    open(j, config(kind = TurnKind.Chat))
+    // The stop comes while the policy call runs, and the call then fails, as a call that the stop cut.
+    val stopped = new TurnEffects:
+      def callPolicy(mustAnswer: Boolean): Either[String, PolicyReply] =
+        j.run(Command.Abort("FAKE-STOP"), Source.User): Unit
+        Left("FAKE-CUT")
+      def runCell(cell: Long, code: String): CellResult = done
+    drive(j, stopped): Unit
+    assertEquals(
+      turn(j),
+      Vector(Entry.StepStarted(0), Entry.StopRequested("FAKE-STOP"), Entry.TurnEnded(TurnOutcome.Aborted))
+    )
+  }
+
   test("Drive: a chat answer ends the turn with Replied") {
     val j = journal()
     open(j, config(kind = TurnKind.Chat))

@@ -14,8 +14,15 @@ sources = "modules/harness/src/main/scala/dspy4s/harness"
 name = "Mutant: a failed LM call does not end the turn"
 [[mutant.edit]]
 file = "Worker.scala"
-old = "case Left(error) => journal.commit(Entry.TurnEnded(TurnOutcome.Failed(error))): Unit"
-new = "case Left(error) => Option(TurnOutcome.Failed(error)): Unit"
+old = "if !journal.state.stopping then journal.commit(Entry.TurnEnded(TurnOutcome.Failed(error))): Unit"
+new = "if !journal.state.stopping then Option(TurnOutcome.Failed(error)): Unit"
+
+[[mutant]]
+name = "Mutant: a policy call that a stop cut ends the turn Failed"
+[[mutant.edit]]
+file = "Worker.scala"
+old = "if !journal.state.stopping then journal.commit(Entry.TurnEnded(TurnOutcome.Failed(error))): Unit"
+new = "if journal.state.nextSeq >= 0 then journal.commit(Entry.TurnEnded(TurnOutcome.Failed(error))): Unit"
 
 [[mutant]]
 name = "Mutant: a stop leaves the effects of a cell open"
@@ -364,8 +371,8 @@ new = "budget().spent: Unit"
 name = "Mutant: a policy call spends no call of the budget"
 [[mutant.edit]]
 file = "HarnessEffects.scala"
-old = "budget().spend().flatMap(_ => policy(input).left.map(_.message))"
-new = "Right(budget().spent).flatMap(_ => policy(input).left.map(_.message))"
+old = "budget().spend().flatMap(_ => runner.run(() => policy(input).left.map(_.message)))"
+new = "Right(budget().spent).flatMap(_ => runner.run(() => policy(input).left.map(_.message)))"
 
 [[mutant]]
 name = "Mutant: each child has a budget of its own"

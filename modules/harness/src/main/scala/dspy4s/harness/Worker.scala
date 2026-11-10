@@ -43,7 +43,8 @@ trait Journal:
   * what comes, and the journal holds each result.
   *
   *   - `CallPolicy`: `StepStarted`, then the `Acted` of the reply from the policy. The policy runs only when the
-  *     journal accepts the `StepStarted`. A failed call ends the turn with `TurnEnded(Failed)`.
+  *     journal accepts the `StepStarted`. A failed call ends the turn with `TurnEnded(Failed)`, apart from a call that
+  *     fails during a stop: then `next` ends the turn `Aborted`.
   *   - `RunCell`: the cell, then `EffectDone(Unknown)` for each effect that a stop left open, and `Observed`.
   *   - `End`: the entries of `closing`, and `TurnEnded`.
   *
@@ -66,7 +67,9 @@ def drive(journal: Journal, effects: TurnEffects): SessionState =
               Command.Commit(Vector(Entry.Acted(reply.reasoning, reply.text, reply.code))),
               Source.Policy
             ): Unit
-          case Left(error) => journal.commit(Entry.TurnEnded(TurnOutcome.Failed(error))): Unit
+          // A call that a stop cut fails, and the stop ends the turn `Aborted` in the next round (10.3).
+          case Left(error) =>
+            if !journal.state.stopping then journal.commit(Entry.TurnEnded(TurnOutcome.Failed(error))): Unit
       }
       drive(journal, effects)
     case Next.RunCell(cell, code) =>

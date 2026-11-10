@@ -3,7 +3,7 @@ package dspy4s.harness.repl
 import dspy4s.harness.guest.*
 import dspy4s.harness.kernel.CellOutcome
 
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
 import scala.concurrent.duration.*
 
 /** The laws of `ScalaRepl.stopCell` (CODE_HARNESS_DESIGN.md, 10.3, phase 7): the stop of one cell keeps the REPL. */
@@ -33,6 +33,26 @@ class StopCellLaws extends munit.FunSuite:
         case CellOutcome.Failed(_) => ()
         case other                 => fail(s"not a failure: $other")
       assert(!r.unclean)
+      assertEquals(r.run("println(kept)").output, "7")
+    finally r.close()
+  }
+
+  test("Stop cell: a cell that starts while the turn stops ends with a failure, and the next turn runs cells") {
+    // The stop came before the cell, so `stopCell` saw no cell. The REPL reads the stop of the turn itself.
+    val stopping = AtomicBoolean(false)
+    val r        = ScalaRepl(readFiles, Bindings(FakeTurn(), files = Some(FakeFiles())), "", 60.seconds, stops = stopping.get)
+    try
+      assertEquals(r.run("val kept = 7").outcome, CellOutcome.Ok)
+      stopping.set(true)
+      val result = AtomicReference[CellRun]()
+      val cell   = Thread.ofPlatform().start(() => result.set(r.run("locally { var n = 0L; while true do n += 1 }")))
+      cell.join(20_000)
+      assert(!cell.isAlive, "the cell did not end, so the stop of the turn did not reach it")
+      result.get.outcome match
+        case CellOutcome.Failed(_) => ()
+        case other                 => fail(s"not a failure: $other")
+      assert(!r.unclean)
+      stopping.set(false)
       assertEquals(r.run("println(kept)").output, "7")
     finally r.close()
   }

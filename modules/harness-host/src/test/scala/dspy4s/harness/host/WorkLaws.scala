@@ -247,6 +247,35 @@ class WorkLaws extends munit.FunSuite:
     }
   }
 
+  test("Work: a stop during a long policy call ends the call, the turn ends Aborted in time, and the REPL stays") {
+    // The calls of the model: 1 and 2 define x, 3 is the slow call of the stopped turn, 4 and 5 use x.
+    val calls = java.util.concurrent.atomic.AtomicInteger(0)
+    val model = dspy4s.harness.RequestLm(
+      _ =>
+        Right(calls.get match
+          case 1 => policy("define", Some("val x = 41"))
+          case 2 => policy("defined", None)
+          case 4 => policy("use", Some("println(x + 1)"))
+          case _ => policy("FAKE-USED", None)),
+      _ => if calls.incrementAndGet() == 3 then 30_000L else 0L
+    )
+    work(model) { (_, handle) =>
+      assertEquals(handle.send(message("m1")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+      assertEquals(handle.send(message("m2", "FAKE-SLOW")), Right(()))
+      assert(eventually(30)(calls.get == 3), entries(handle).toString)
+      val start = System.nanoTime()
+      assertEquals(handle.send(Command.Abort("FAKE-STOP")), Right(()))
+      assert(eventually(20)(outcomes(handle).size == 2), entries(handle).toString)
+      // Before the grace period of 5 s, so no fence: the activation and its REPL stay.
+      assert((System.nanoTime() - start) / 1_000_000L < 4_000L, "the stop waited for the policy call")
+      assertEquals(outcomes(handle).last, TurnOutcome.Aborted)
+      assertEquals(handle.send(message("m3")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 3), entries(handle).toString)
+      assert(outputs(handle).exists(_.contains("42")), outputs(handle).toString)
+    }
+  }
+
   test("Work: a stop during a long exec ends the command and its process, and the turn ends Aborted") {
     sandboxed()
     val model = ScriptLm(policy("wait", Some("""exec("sleep 319")""")), policy("never", None))

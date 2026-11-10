@@ -177,6 +177,8 @@ class HostLaws extends munit.FunSuite:
       withHost(root, scripted(answer("hi"))) { host =>
         val handle = opened(host, id(1))
         assertEquals(handle.send(message("m1")), Right(()))
+        // The row follows each commit, so the law waits for the end of the turn first.
+        assert(eventually()(outcomes(handle).nonEmpty))
         assert(eventually()(host.list.exists(r => r.session == id(1) && r.lastSeq == handle.state.nextSeq - 1)))
         assertEquals(host.list.map(_.status), Vector(SessionStatus.Idle))
       }

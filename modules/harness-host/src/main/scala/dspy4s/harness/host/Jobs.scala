@@ -2,13 +2,12 @@ package dspy4s.harness.host
 
 import dspy4s.harness.Journal
 import dspy4s.harness.guest.{Files, JobId, JobStatus, Shell}
-import dspy4s.harness.kernel.{EffectId, SessionState}
+import dspy4s.harness.kernel.{Command, EffectId, JobSelector, SessionState, Source}
 import dspy4s.harness.sandbox.SandboxedShell
 
 import java.io.InputStream
 import java.nio.charset.StandardCharsets.UTF_8
 import java.util.concurrent.{ConcurrentHashMap, CountDownLatch, ExecutorService, Executors, ThreadFactory, TimeUnit}
-import scala.annotation.nowarn
 import scala.concurrent.duration.FiniteDuration
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
@@ -22,9 +21,10 @@ import scala.util.Try
   * runs on a thread of the table, so `sync` returns at once. When a job with `report` ends, the table calls `report`
   * with its id and status, and the host posts the message to the writer of the session.
   *
-  * A stop closes the standard input of the job: the wrapper then stops the process group with TERM, the grace period
-  * and KILL. When the job still runs after the grace period and one more second, the table sends TERM and then KILL to
-  * the process and each descendant that it sees, for a process with no wrapper.
+  * A stop closes the standard input of the job: the wrapper then stops the group and the tree of the command with TERM,
+  * a grace period and KILL, and it ends after the stop (`ProcessWrapper`). When the job still runs after the grace
+  * period of the table and one more second, the table sends TERM and then KILL to the process and each descendant that
+  * it sees, for a process with no wrapper.
   */
 final class JobTable(grace: FiniteDuration, report: (EffectId, JobStatus) => Unit) extends AutoCloseable:
   import JobTable.*
@@ -192,15 +192,34 @@ object JobTable:
   *     turn, or it starts a turn when no turn is open.
   *   - `stopJob(job)` runs `StopJobs(One(job))` (10.3).
   */
-@nowarn("msg=unused") // the skeleton: the proof of the jobs uses the parameters
 final class JobShell(inner: SandboxedShell, table: JobTable, journal: Journal) extends Shell:
 
   def exec(command: String)(using Files): String = inner.exec(command)
 
-  def spawn(command: String, report: Boolean)(using Files): JobId = ???
+  def spawn(command: String, report: Boolean)(using Files): JobId =
+    val id = journal.state.open.collectFirst { case (effect, call) if call.op == "spawn" => effect }
+      .getOrElse(throw IllegalStateException("spawn: the journal has no open spawn call"))
+    table.start(id, () => inner.launch(command), report) match
+      case Right(())   => JobId(id.cell, id.n)
+      case Left(error) => throw IllegalStateException(s"spawn: $error")
 
-  def jobOutput(job: JobId): String = ???
+  def jobOutput(job: JobId): String =
+    val id = known(job, "jobOutput")
+    // A job of the journal with no row lost its output with its host (10.3).
+    table.output(id).getOrElse("")
 
-  def waitJob(job: JobId, maxSeconds: Int): JobStatus = ???
+  def waitJob(job: JobId, maxSeconds: Int): JobStatus =
+    val id = known(job, "waitJob")
+    table.await(id, maxSeconds).getOrElse(table.status(id, journal.state))
 
-  def stopJob(job: JobId): Unit = ???
+  def stopJob(job: JobId): Unit =
+    val id = known(job, "stopJob")
+    journal.run(Command.StopJobs(JobSelector.One(id), "the cell stopped the job"), Source.Policy).left.foreach {
+      rejection => throw IllegalStateException(s"stopJob: the session refused the stop ($rejection)")
+    }
+
+  /** The effect of `job`, when the journal knows the job. */
+  private def known(job: JobId, op: String): EffectId =
+    val id = EffectId(job.cell, job.n)
+    if journal.state.jobs.contains(id) then id
+    else throw IllegalArgumentException(s"$op: this session has no job $job")

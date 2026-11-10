@@ -750,9 +750,12 @@ def plan_svg(phases: list[Phase], states: dict[str, PhaseState], partials: dict[
         label = esc(", ".join(by_id[i].title for i in ids))
         lines.append(f'  "{a}" -> "{b}" [id="e-{a}--{b}", class="partial", style=dotted, constraint=false,'
                      f' label=<<FONT POINT-SIZE="9">{label}</FONT>>];')
+    # Each wave of the open work is one row. The complete phases have wave 0, and they can use each other, so they get
+    # no row: a row would make flat edges between them, and dot fails on a flat edge with a label.
     waves: dict[int, list[str]] = {}
     for p in phases:
-        waves.setdefault(states[p.id].wave, []).append(f'"{p.id}"')
+        if states[p.id].wave > 0:
+            waves.setdefault(states[p.id].wave, []).append(f'"{p.id}"')
     lines += [f"  {{ rank=same; {'; '.join(ids)} }}" for ids in waves.values() if len(ids) > 1]
     lines.append("}")
     return run_dot(lines)

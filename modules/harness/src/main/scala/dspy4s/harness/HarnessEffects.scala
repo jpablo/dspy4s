@@ -12,7 +12,8 @@ import dspy4s.programs.strategies.Predict
   *     session), and calls `policy` with the task and the API reference. A spent budget fails the call with a plain
   *     error, so the turn ends `Failed` (8.2). The status says when a step is the last one, and the code of a step that
   *     must answer does not run. A code that is empty, `null` or `None` is no code, because the chat adapter keeps the
-  *     text of an empty field (9). The trace of the call goes to the `RuntimeContext`, so an optimizer sees it.
+  *     text of an empty field (9). The trace of the call goes to the `RuntimeContext`, so an optimizer sees it. The
+  *     call of `policy` runs through `runner`, so a work session can cut it (10.3).
   *   - `runCell` starts the calls of the cell in `recorder`, takes the snapshot of the store, and runs the code in the
   *     current REPL. The writes of the store go into the result only when the cell completes. The output in the journal
   *     is `CellRun.text`, the text that the MCP server also shows (6): the hints of a compile error, and a note of a
@@ -43,7 +44,8 @@ final class HarnessEffects(
     store    : SnapshotStore,
     limits   : HarnessLimits,
     budget   : () => Budget,
-    host     : Option[HostThreads]
+    host     : Option[HostThreads],
+    runner   : PolicyRunner = PolicyRunner.Direct
 )(using RuntimeContext)
     extends TurnEffects:
 
@@ -56,7 +58,7 @@ final class HarnessEffects(
       derived = data
       val view  = strategy.project(log, data, limits.budget)
       val input = PolicyInput(task, reference, view.status, view.observation, view.history)
-      budget().spend().flatMap(_ => policy(input).left.map(_.message)).map { step =>
+      budget().spend().flatMap(_ => runner.run(() => policy(input).left.map(_.message))).map { step =>
         val code = step.output.code.filterNot(c => HarnessEffects.NoCode.contains(c.strip))
         // The code of the last step of a chat does not run (4.3).
         PolicyReply(step.output.reasoning, step.output.text, if mustAnswer then None else code)

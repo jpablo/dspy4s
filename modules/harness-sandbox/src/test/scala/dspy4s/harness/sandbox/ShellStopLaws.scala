@@ -62,10 +62,15 @@ class ShellStopLaws extends munit.FunSuite:
     val place = Place()
     try
       val sh     = shell(place)
-      val thread = Thread.ofPlatform().start(() => Try(sh.exec("sleep 342")): Unit)
+      val ended  = AtomicReference[Option[Throwable]](None)
+      val thread = Thread.ofPlatform().start { () =>
+        try sh.exec("sleep 342"): Unit
+        catch case e: InterruptedException => ended.set(Some(e))
+      }
       assert(eventually(running("sleep 342").nonEmpty), "the command did not start")
       thread.interrupt()
       thread.join(15_000)
       assert(eventually(running("sleep 342").isEmpty), "a process of the exec stays after the interrupt")
+      assert(ended.get.nonEmpty, "the exec did not give the interrupt back to its thread")
     finally place.close()
   }

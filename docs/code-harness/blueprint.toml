@@ -1994,7 +1994,7 @@ kind = "law"
 name = "Bubblewrap:"
 ref = "5.4"
 uses = ["bubblewrap", "profile-for-mode"]
-text = "On Linux with bwrap, the probes of Seatbelt give what the profile allows, apart from the network of Network^, which stays closed. The tests skip on a host with no working bwrap. scripts/sandbox-linux/run.sh runs them in a podman container, and the blueprint reads its report."
+text = "On Linux with bwrap, the probes of Seatbelt give what the profile allows, apart from the network of Network^, which stays closed. The tests skip on a host with no working bwrap. scripts/sandbox-linux/run.sh runs them in a podman container, and the blueprint reads its report. A stop of the wrapper at each point of the start of bwrap leaves no process of the command."
 
 [[group]]
 id = "seccomp-laws"
@@ -2338,10 +2338,11 @@ name = "HarnessEffects"
 ops = ["callPolicy", "runCell"]
 ref = "4.6"
 uses = ["turn-effects", "predict", "policy-input", "policy-step", "context-strategy", "journal-trait", "scala-repl",
-        "recorder", "snapshot-store", "harness-limits", "runtime-context", "session-state", "budget", "host-threads"]
+        "recorder", "snapshot-store", "harness-limits", "runtime-context", "session-state", "budget", "host-threads",
+        "policy-runner"]
 proof_uses = ["cell-result", "policy-reply", "window", "recorder", "snapshot-store", "lost-names", "budget",
               "host-threads"]
-text = "callPolicy projects the log with the strategy, spends one call of the budget, and calls the policy leaf, so the trace reaches the RuntimeContext. A spent budget fails the call, and the turn ends Failed. runCell starts the calls of the cell, takes the snapshot of the store, runs the code in the REPL, and joins the trace of the host threads. After the error of the compiler defect, it starts a new REPL and adds the note of the lost names."
+text = "callPolicy projects the log with the strategy, spends one call of the budget, and calls the policy leaf through the PolicyRunner, so the trace reaches the RuntimeContext. A spent budget fails the call, and the turn ends Failed. runCell starts the calls of the cell, takes the snapshot of the store, runs the code in the REPL, and joins the trace of the host threads. After the error of the compiler defect, it starts a new REPL and adds the note of the lost names."
 
 [[group]]
 id = "harness"
@@ -2436,7 +2437,7 @@ kind = "law"
 name = "Drive:"
 ref = "4.6"
 uses = ["drive", "memory-journal"]
-text = "With scripts of TurnEffects: a chat answer, submit, the step limit of both kinds, a failed cell, a failed LM call, a stop during a cell and a crash during a cell give the journals of section 12. For each script, the turn ends, and it is a word of the language of 4.1."
+text = "With scripts of TurnEffects: a chat answer, submit, the step limit of both kinds, a failed cell, a failed LM call, a stop during a cell and a crash during a cell give the journals of section 12. A policy call that fails during a stop ends the turn Aborted, not Failed. For each script, the turn ends, and it is a word of the language of 4.1."
 
 [[group]]
 id = "journal-laws"
@@ -3011,7 +3012,7 @@ kind = "data"
 name = "Activation"
 ref = "11"
 uses = ["turn-effects"]
-text = "The live part of one activation: the effects of a turn, the stop of steps 2 and 3 of 10.3 through ScalaRepl.stopCell and SandboxedShell.stopAll, and the flag of a cell that did not end."
+text = "The live part of one activation: the effects of a turn, the stop of steps 2 and 3 of 10.3 through the PolicyRunner of the session, ScalaRepl.stopCell and SandboxedShell.stopAll, and the flag of a cell that did not end."
 
 [[node]]
 id = "session-runtime"
@@ -3062,7 +3063,7 @@ name = "JobShell"
 ops = ["exec", "spawn", "jobOutput", "waitJob", "stopJob"]
 ref = "10.3"
 uses = ["shell", "sandboxed-shell", "job-table", "journal-trait", "files", "job-id", "job-status"]
-proof_uses = ["process-wrapper", "command"]
+proof_uses = ["process-wrapper", "command", "job-table"]
 text = "The handler of Shell^ in the host. exec goes to the sandbox, and spawn starts a job with SandboxedShell.launch and gives the JobId of its own EffectStarted. stopJob is StopJobs(One(job)), and the end of a job with report reaches the host through the table."
 
 [[group]]
@@ -3372,7 +3373,7 @@ kind = "law"
 name = "Work:"
 ref = "8.1"
 uses = ["work-runtime", "local-host"]
-text = "config and workMode, with no Sessions^ and no Children^, and defaultGuard. A cell runs in the scope, a val stays for the next turn, and rlm does not compile. Each turn gets a new budget. An Ask call does not run, pending holds its rule, and a Grant lets the new turn run it. A catch does not hide it. Under the sandbox a job runs on after its cell, Abort during a cell stops no job, and StopJobs(OfLastTurn) stops it. A report starts a turn. stopJob stops the job. A stop ends a long exec and its process."
+text = "config and workMode, with no Sessions^ and no Children^, and defaultGuard. A cell runs in the scope, a val stays for the next turn, and rlm does not compile. Each turn gets a new budget. An Ask call does not run, pending holds its rule, and a Grant lets the new turn run it. A catch does not hide it. Under the sandbox a job runs on after its cell, Abort during a cell stops no job, and StopJobs(OfLastTurn) stops it. A report starts a turn. stopJob stops the job. A stop ends a long exec and its process. A stop during a long policy call ends the call, the turn ends Aborted before the grace period, and the REPL stays."
 
 [[group]]
 id = "crash-laws"
@@ -3418,6 +3419,23 @@ uses = ["cli"]
 text = "The time from the start of a JVM to the end at /quit, in a child JVM. Choice 8: an AOT cache on JDK 25 comes only if this time is too long."
 
 [[group]]
+id = "policy-runner"
+phase = "p7"
+module = "harness"
+file = "PolicyRunner.scala"
+title = "How the effects of a harness run the LM call of the policy"
+
+[[node]]
+id = "policy-runner"
+group = "policy-runner"
+kind = "data"
+name = "PolicyRunner"
+ops = ["run"]
+ref = "10.3"
+uses = []
+text = "A program call runs the LM call of the policy on the thread of callPolicy. A work session runs it on a thread of its own, so a hard stop cuts a long call and the turn ends Aborted. The update of the derived data stays on the thread of callPolicy."
+
+[[group]]
 id = "process-wrapper"
 phase = "p7"
 module = "harness-sandbox"
@@ -3433,7 +3451,7 @@ ops = ["command"]
 ref = "10.3"
 spec = true
 uses = []
-text = "The command that runs a command in its own process group with an empty standard input, and stops that group when the standard input of the wrapper closes: TERM, a grace period, then KILL. The host holds the pipe, so a crash of the host stops the command."
+text = "The command that runs a command in its own process group with an empty standard input. When the standard input of the wrapper closes, the wrapper stops the group, so no process of it starts a new process, reads the tree of the command from ps, and gives TERM to the group and the tree, then KILL after the grace period. The tree holds the sandbox of bwrap, which is in another session. The wrapper ends after the stop. The host holds the pipe, so a crash of the host stops the command."
 
 [[group]]
 id = "wrapper-laws"
@@ -3450,7 +3468,7 @@ kind = "law"
 name = "Wrapper:"
 ref = "10.3"
 uses = ["process-wrapper"]
-text = "The wrapper gives the exit code of its command, and the command gets an empty standard input. When the pipe closes, the wrapper stops the process group, with KILL after the grace period for a command that ignores TERM."
+text = "The wrapper gives the exit code of its command, and the command gets an empty standard input. When the pipe closes, the wrapper stops the process group, with KILL after the grace period for a command that ignores TERM. A process that ignores TERM gets KILL also when the first process of the group ended on TERM, and the stop reaches a process of the command in another session."
 
 [[group]]
 id = "shell-stop-laws"
@@ -3467,7 +3485,7 @@ kind = "law"
 name = "Shell stop:"
 ref = "10.3"
 uses = ["sandboxed-shell"]
-text = "stopAll ends an exec that runs, its process tree stops, and the exec gives a note of the stop. An interrupt of the thread of an exec stops its process tree."
+text = "stopAll ends an exec that runs, its process tree stops, and the exec gives a note of the stop. An interrupt of the thread of an exec stops its process tree, and the exec gives the interrupt back to its thread."
 
 [[group]]
 id = "stop-cell-laws"
@@ -3484,4 +3502,4 @@ kind = "law"
 name = "Stop cell:"
 ref = "10.3"
 uses = ["scala-repl"]
-text = "stopCell ends the running cell with a failure, and the REPL keeps the definitions of the earlier cells. With no running cell it does nothing."
+text = "stopCell ends the running cell with a failure, and the REPL keeps the definitions of the earlier cells. With no running cell it does nothing. A cell that starts while the turn stops also ends with a failure, and the next turn runs cells."

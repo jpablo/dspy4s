@@ -11,6 +11,7 @@ import dspy4s.programs.strategies.Predict
 import dspy4s.signatures.Signature
 
 import java.nio.file.{Files as JFiles, Path}
+import java.util.concurrent.{CancellationException, ExecutionException, Executors, Future}
 import scala.util.Try
 
 /** What a work session needs from the machine (CODE_HARNESS_DESIGN.md, 8.1): the home folder for the secret paths
@@ -61,6 +62,7 @@ final class WorkRuntime(
         val recorder = Recorder(journal, () => turns.closed, env.secrets.maskJson)
         val store    = SnapshotStore()
         val host     = HostThreads.ofThisThread()
+        val calls    = StoppablePolicy(context, () => journal.state.stopping)
         val bindings = Bindings(
           turn = JournalTurn(journal, () => System.currentTimeMillis()),
           files = Option.when(config.mode.files != Access.None)(LocalFiles(scope, profile, made.secretNames)),
@@ -69,9 +71,17 @@ final class WorkRuntime(
           store = Option.when(config.mode.store != Access.None)(store)
         )
         val handlers = recorded(bindings, recorder, Some(scope))
-        val newRepl  = () => ScalaRepl(config.mode, handlers, config.preamble, limits.cellTimeout, limits.cellLimit)
-        val task     = Harness.task(s"${WorkRuntime.instructions}\n\nThe folder of the session: $scope.", Vector.empty)
-        val effects  = HarnessEffects(
+        val newRepl  = () =>
+          ScalaRepl(
+            config.mode,
+            handlers,
+            config.preamble,
+            limits.cellTimeout,
+            limits.cellLimit,
+            stops = () => journal.state.stopping
+          )
+        val task    = Harness.task(s"${WorkRuntime.instructions}\n\nThe folder of the session: $scope.", Vector.empty)
+        val effects = HarnessEffects(
           task,
           Harness.apiReference,
           policy,
@@ -82,9 +92,10 @@ final class WorkRuntime(
           store,
           limits,
           () => turns.current,
-          Some(host)
+          Some(host),
+          calls
         )(using context)
-        val activation = WorkActivation(effects, commands, turns, made, context)
+        val activation = WorkActivation(effects, commands, calls, turns, made, context)
         started = true
         activation
       finally
@@ -98,6 +109,7 @@ final class WorkRuntime(
 private final class WorkActivation(
     inner  : HarnessEffects,
     shell  : SandboxedShell,
+    calls  : StoppablePolicy,
     turns  : TurnBudget,
     layout : Layout,
     context: RuntimeContext
@@ -109,7 +121,9 @@ private final class WorkActivation(
     def runCell(cell: Long, code: String): CellResult =
       RuntimeEnvironment.withContext(context)(inner.runCell(cell, code))
 
+  /** Steps 2 and 3 of a hard stop: the LM call of the policy, the cell and the commands stop. It returns at once. */
   def stop(): Unit =
+    calls.stop()
     Try(inner.stopCell()): Unit
     Try(shell.stopAll()): Unit
 
@@ -117,9 +131,40 @@ private final class WorkActivation(
 
   def close(): Unit =
     turns.close()
+    calls.close()
     Try(inner.close()): Unit
     Try(shell.close()): Unit
     WorkRuntime.remove(layout.temp)
+
+/** The runner of the LM calls of the policy of a work session (10.3): each call runs on a thread of its own, so that
+  * `stop` cuts it with no interrupt of the worker. A call that ignores the interrupt ends later on its thread, and the
+  * next call does not wait for it. A cut call gives an error, and the stop ends the turn `Aborted` (`drive`).
+  */
+private final class StoppablePolicy(context: RuntimeContext, stopping: () => Boolean) extends PolicyRunner:
+  private val calls = Executors.newCachedThreadPool { body =>
+    val thread = Thread(body, "harness-policy-call")
+    thread.setDaemon(true)
+    thread
+  }
+  @volatile private var running: Option[Future[?]] = None
+
+  def run[A](call: () => Either[String, A]): Either[String, A] =
+    val future = calls.submit(() => RuntimeEnvironment.withContext(context)(call()))
+    running = Some(future)
+    // A stop between the `StepStarted` and the line above saw no call, so the call reads the stop itself.
+    if stopping() then future.cancel(true): Unit
+    try future.get()
+    catch
+      case _: CancellationException => Left("the policy call stopped, because the turn stops")
+      case e: ExecutionException    => throw Option(e.getCause).getOrElse(e)
+    finally running = None
+
+  /** Cuts the call that runs. It returns at once. */
+  def stop(): Unit = running.foreach(_.cancel(true): Unit)
+
+  def close(): Unit =
+    stop()
+    calls.shutdownNow(): Unit
 
 /** The budget of the current turn of a work session (8.2): a new `Budget` of `limit` calls at each new `TurnStarted`.
   * The last budget closes at the end of the activation, so a late call fails.

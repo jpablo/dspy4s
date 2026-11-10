@@ -63,9 +63,9 @@ trait Activation extends AutoCloseable:
   /** The effects of a turn (4.6). */
   def effects: TurnEffects
 
-  /** Steps 2 and 3 of the path of a hard stop (10.3): `ScalaRepl.stopCell` and `SandboxedShell.stopAll`. It returns at
-    * once. The worker thread gets no interrupt, so its commits complete. The stop of the LM transport, so that a long
-    * policy call ends before the grace period, comes with part B of phase 7.
+  /** Steps 2 and 3 of the path of a hard stop (10.3): the stop of the policy call, `ScalaRepl.stopCell` and
+    * `SandboxedShell.stopAll`. It returns at once. The worker thread gets no interrupt, so its commits complete. A long
+    * policy call so ends before the grace period, and the activation and its REPL stay.
     */
   def stop(): Unit
 
