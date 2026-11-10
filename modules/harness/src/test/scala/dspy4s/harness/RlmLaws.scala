@@ -322,7 +322,7 @@ class RlmLaws extends ScalaCheckSuite:
   test(
     "RLM: rlmBatched gives the values in the order of the tasks, with at most HarnessLimits.batch children at once"
   ) {
-    val tasks = (1 to 5).map(n => s"\"FAKE-TASK-$n\"").mkString(", ")
+    val tasks = (1 to 5).map(n => s"(\"FAKE-TASK-$n\", Map.empty)").mkString(", ")
     val code  = s"""submit(rlmBatched[String](Vector($tasks)).mkString(","))"""
     // The first child waits the longest, so the children end in another order than the tasks.
     val model = RequestLm(
@@ -338,8 +338,26 @@ class RlmLaws extends ScalaCheckSuite:
     }
   }
 
+  test("RLM: each child of rlmBatched gets its own inputs as String vals, as a child of rlm") {
+    val code =
+      """submit(rlmBatched[String](Vector(1, 2).map(n => (s"FAKE-TASK-$n", Map("part" -> s"p$n")))).mkString(","))"""
+    val model = RequestLm(request =>
+      Right(childTask(request).fold(policy("delegate", Some(code)))(_ =>
+        policy("give", Some("submit(part.toUpperCase)"))
+      ))
+    )
+    call(model) { (_, result, journals) =>
+      assertEquals(result, Right(Answer("P1,P2")), journals.mkString("\n"))
+      assertEquals(
+        kids(journals).flatMap(inputs).toSet,
+        Set[Map[String, Json]](Map("part" -> Json.String("p1")), Map("part" -> Json.String("p2")))
+      )
+    }
+  }
+
   test("RLM: rlmBatched fails when one child fails, with that task in the error") {
-    val code  = """println(rlmBatched[String](Vector("FAKE-TASK-1", "FAKE-TASK-2", "FAKE-TASK-3")).mkString(","))"""
+    val code =
+      """println(rlmBatched[String](Vector("FAKE-TASK-1", "FAKE-TASK-2", "FAKE-TASK-3").map(t => (t, Map.empty))).mkString(","))"""
     val model = RequestLm { request =>
       childTask(request) match
         case Some(2)                                  => Right(policy("FAKE-NO-VALUE", None))
@@ -531,7 +549,8 @@ class RlmLaws extends ScalaCheckSuite:
   }
 
   test("Budget: with a spent budget, rlmBatched starts no child, so no child journal reaches env.journals") {
-    val code  = """println(rlmBatched[String](Vector("FAKE-TASK-1", "FAKE-TASK-2", "FAKE-TASK-3")).mkString(","))"""
+    val code =
+      """println(rlmBatched[String](Vector("FAKE-TASK-1", "FAKE-TASK-2", "FAKE-TASK-3").map(t => (t, Map.empty))).mkString(","))"""
     val model = RequestLm(request =>
       Right(childTask(request).fold(policy("delegate", Some(code)))(n => policy("give", Some(s"""submit("v$n")"""))))
     )

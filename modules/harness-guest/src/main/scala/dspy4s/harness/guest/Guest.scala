@@ -74,7 +74,7 @@ import caps.assumeSafe
 /** A child inside the cell (5.1). A closed session has this capability, and it has only the bare `Sessions`. */
 @assumeSafe trait Children extends Cap:
   update def rlm[A: Data](task: String, inputs: Map[String, String]): A
-  update def rlmBatched[A: Data](tasks: Vector[String]): Vector[A]
+  update def rlmBatched[A: Data](tasks: Vector[(String, Map[String, String])]): Vector[A]
 
 /** What a cell gets from the host with no capability (5.1): the clock and the input values of the session. The
   * preamble of each mode binds it as a given, so a cell cannot make one. `now` is a guest API call, so the journal
@@ -146,7 +146,15 @@ final case class NeedsApproval(op: String, argument: String)
   def start(goal: String, scope: Scope, strategy: StrategyName)(using s: Sessions^): SessionRef =
     s.start(goal, scope, strategy)
 
+  /** Runs a child with `task`, and gives the value of its `submit`. Each input is a `String` val of the child. The
+    * prompt of the child shows only the start of an input, so give a long text as an input, not in the task.
+    */
   def rlm[A: Data](task: String, inputs: Map[String, String] = Map.empty)(using c: Children^): A =
     c.rlm[A](task, inputs)
 
-  def rlmBatched[A: Data](tasks: Vector[String])(using c: Children^): Vector[A] = c.rlmBatched[A](tasks)
+  /** Runs one child for each task and its inputs, some at the same time, and gives the values in the order of the
+    * tasks. The children share the files of this session, so give each child its own file to write. Example:
+    * `rlmBatched[Int](parts.map(part => ("Count the errors in text.", Map("text" -> part))))`.
+    */
+  def rlmBatched[A: Data](tasks: Vector[(String, Map[String, String])])(using c: Children^): Vector[A] =
+    c.rlmBatched[A](tasks)

@@ -263,8 +263,10 @@ object Harness extends HarnessGivens:
   /** The first instructions of the finisher leaf. */
   val finisherInstructions: String = "Give the output of the task from the steps of the work."
 
-  /** The first instructions of the subQuery leaf, which answers `llmQuery` (9). An optimizer can change them. */
-  val subQueryInstructions: String = "Answer the question of the code. Give a short answer."
+  /** The first instructions of the subQuery leaf, which answers `llmQuery` (9). They set no length, because the prompt
+    * of the cell can ask for a list or a long extract. An optimizer can change them.
+    */
+  val subQueryInstructions: String = "Answer the prompt of the code."
 
   /** The name of the model of the runtime, for the configuration of the session. */
   private def modelName(using context: RuntimeContext): String =

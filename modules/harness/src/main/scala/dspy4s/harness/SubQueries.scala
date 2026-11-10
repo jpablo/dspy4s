@@ -6,8 +6,8 @@ import zio.blocks.schema.Schema
 
 /** The input of the `subQuery` leaf (CODE_HARNESS_DESIGN.md, 9): the prompt of an `llmQuery` of a cell.
   *
-  * A proposal for the review: section 9 names the types `Query` and `Answer`. The tests already have a type `Answer`,
-  * so the names are `SubQuery` and `SubAnswer`.
+  * Section 9 names the types `Query` and `Answer`. The review of phase 5 kept the names `SubQuery` and `SubAnswer`,
+  * because the signature of a user often has its own type `Answer`, and a wildcard import would clash with it.
   */
 final case class SubQuery(prompt: String) derives Schema
 

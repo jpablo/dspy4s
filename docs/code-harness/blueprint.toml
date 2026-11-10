@@ -2708,7 +2708,7 @@ ref = "8.2"
 spec = true
 uses = ["children", "child-start", "host-threads", "data"]
 proof_uses = ["in-batch", "host-threads"]
-text = "The handler of Children^. rlm runs a child turn inside the cell, with the context of the program call. rlmBatched runs at most HarnessLimits.batch children at the same time, each with no inputs, keeps the order of the tasks, and throws with the task of the child that failed."
+text = "The handler of Children^. rlm runs a child turn inside the cell, with the context of the program call. rlmBatched runs at most HarnessLimits.batch children at the same time, each with its task and its inputs as rlm gets them, keeps the order of the tasks, and throws with the task of the child that failed."
 
 # ── Phase 5: the laws ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -2745,4 +2745,4 @@ kind = "law"
 name = "RLM:"
 ref = "8.2"
 uses = ["harness", "child-turns", "recorded"]
-text = "rlm gives the typed value of the submit of a child, also for a record, the inputs are String vals of the child, the child has its own journal, which env.journals gets, and the parent journal has one rlm effect. A child that replies with no code makes rlm fail in the cell of the parent, with the text of the child. A child below the depth limit can call rlm, and a child at the limit cannot compile it. A child works in the copy of the parent. rlmBatched keeps the order of the tasks, runs at most HarnessLimits.batch children at the same time, and fails with the task of the child that failed."
+text = "rlm gives the typed value of the submit of a child, also for a record, the inputs are String vals of the child, the child has its own journal, which env.journals gets, and the parent journal has one rlm effect. A child that replies with no code makes rlm fail in the cell of the parent, with the text of the child. A child below the depth limit can call rlm, and a child at the limit cannot compile it. A child works in the copy of the parent. rlmBatched keeps the order of the tasks, gives each child its own inputs, runs at most HarnessLimits.batch children at the same time, and fails with the task of the child that failed."

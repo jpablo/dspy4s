@@ -86,8 +86,9 @@ private final class GatedSessions(inner: Sessions, gate: CallGate) extends Sessi
   def zoom(session: SessionRef, ref: String): String = gate("zoom")(inner.zoom(session, ref))
 
 private final class GatedChildren(inner: Children, gate: CallGate) extends Children:
-  def rlm[A: Data](task        : String, inputs: Map[String, String]): A = gate("rlm")(inner.rlm[A](task, inputs))
-  def rlmBatched[A: Data](tasks: Vector[String]): Vector[A]              = gate("rlmBatched")(inner.rlmBatched[A](tasks))
+  def rlm[A: Data](task: String, inputs: Map[String, String]): A                   = gate("rlm")(inner.rlm[A](task, inputs))
+  def rlmBatched[A: Data](tasks: Vector[(String, Map[String, String])]): Vector[A] =
+    gate("rlmBatched")(inner.rlmBatched[A](tasks))
 
 /** Protection 4 of Phase 0: above a limit of the heap, the guard stops the running cell that allocated the most memory,
   * and its REPL closes, so the host starts a new one as after a crash. The other REPLs of the JVM go on.

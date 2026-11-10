@@ -336,8 +336,15 @@ new = ".toLeft(results.collect { case Some(Right(value)) => value }.reverse)"
 name = "Mutant: rlmBatched names the first task in its error"
 [[mutant.edit]]
 file = "ChildTurns.scala"
-old = "\\\"${tasks(i)}\\\", failed"
-new = "\\\"${tasks(0)}\\\", failed"
+old = "\\\"${tasks(i)._1}\\\", failed"
+new = "\\\"${tasks(0)._1}\\\", failed"
+
+[[mutant]]
+name = "Mutant: rlmBatched gives a child no inputs"
+[[mutant.edit]]
+file = "ChildTurns.scala"
+old = "(task, inputs) => rlm[A](task, inputs)"
+new = "(task, _) => rlm[A](task, Map.empty)"
 
 [[mutant]]
 name = "Mutant: env.journals does not get the journal of a child"

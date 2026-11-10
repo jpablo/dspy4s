@@ -284,8 +284,11 @@ def recorded(bindings: Bindings, recorder: Recorder, root: Option[Path] = None):
             "rlm",
             args("task" -> text(task), "inputs" -> summon[Data[Map[String, String]]].encode(inputs))
           )(inner.rlm[A](task, inputs))
-        def rlmBatched[A: Data](tasks: Vector[String]): Vector[A] =
-          recorder.call("rlmBatched", args("tasks" -> summon[Data[Vector[String]]].encode(tasks)))(
+        def rlmBatched[A: Data](tasks: Vector[(String, Map[String, String])]): Vector[A] =
+          recorder.call(
+            "rlmBatched",
+            args("tasks" -> summon[Data[Vector[(String, Map[String, String])]]].encode(tasks))
+          )(
             inner.rlmBatched[A](tasks)
           )
     }

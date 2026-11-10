@@ -435,7 +435,8 @@ definition that a cell can use has `@assumeSafe`, because safe mode rejects the 
   update def write(path: String, content: String): Unit
 
 @assumeSafe trait Shell extends caps.ExclusiveCapability:
-  def exec(command: String)(using Files^): String  def spawn(command: String, report: Boolean = false)(using Files^): JobId
+  def exec(command: String)(using Files^): String
+  def spawn(command: String, report: Boolean = false)(using Files^): JobId
   def jobOutput(job: JobId): String
   def waitJob(job: JobId, maxSeconds: Int): JobStatus
   def stopJob(job: JobId): Unit
@@ -446,10 +447,12 @@ definition that a cell can use has `@assumeSafe`, because safe mode rejects the 
   update def store[A: Data](key: String, value: A): Unit
 
 @assumeSafe trait Sessions extends Cap:
-  def list(): Vector[String]  update def tell(session: String, message: String): Unit
+  def list(): Vector[String]
+  update def tell(session: String, message: String): Unit
 
-@assumeSafe trait Children extends Cap:  update def rlm[A: Data](task: String, inputs: Map[String, String]): A
-  update def rlmBatched[A: Data](tasks: Vector[String]): Vector[A]
+@assumeSafe trait Children extends Cap:
+  update def rlm[A: Data](task: String, inputs: Map[String, String]): A
+  update def rlmBatched[A: Data](tasks: Vector[(String, Map[String, String])]): Vector[A]
 
 @assumeSafe object api:
   def println(value: Any): Unit = scala.Console.println(value)
@@ -1106,7 +1109,7 @@ configuration. Neither one cut any work.
 | Function | Needs | Meaning |
 |---|---|---|
 | `rlm[A: Data](task, inputs): A` | `Children^` | Runs a child inside the cell and gives its value. It is one effect of the parent, and the child has its own journal. A child that ends with no `submit` makes the call fail (5.1). |
-| `rlmBatched[A: Data](tasks): Vector[A]` | `Children^` | Runs several children at the same time inside the cell. It is one effect of the parent, and each child has its own journal. |
+| `rlmBatched[A: Data](tasks): Vector[A]` | `Children^` | Runs several children at the same time inside the cell. Each task has its inputs, as the inputs of `rlm`. It is one effect of the parent, and each child has its own journal. |
 | `start(goal, scope, strategy): SessionRef` | `Sessions^` | Starts a session in the background. Its report comes back as an `Input` with `Source.Child`, and this starts a turn (8.6). |
 | `tell(session, message)` | `Sessions^` | `Send` to that session, with `Source.Controller` or `Source.Child`. It returns after the receiver commits (8.6). |
 | `observe(session, question): String` | `Sessions`, `Llm^` | A read-only `rlm` with the journal of that session as an input. It changes nothing in that session. |
@@ -1364,6 +1367,22 @@ A code review of phase 5 on 2026-11-10 added these rules:
   timestamps, so the entries of the tree come in the order of the steps.
 - A child checks the budget before it makes its journal and its REPL, so a spent budget starts no child.
 
+**The review of the choices (2026-11-10).** The user reviewed the choices of phase 5 after the work. The choices above
+stay, with these changes and notes:
+
+- `rlmBatched` takes a task and its inputs for each child: `rlmBatched[A: Data](tasks: Vector[(String, Map[String,
+  String])])`. With only a task text, the usual RLM pattern, one child for each part of a long text, put each part into
+  the task. The task goes in full into each policy prompt of the child. An input goes into the prompt only as a
+  preview of 2,000 characters, and the child reads all of it in a `val`.
+- The instructions of `subQuery` are "Answer the prompt of the code." They set no length, because a cell can ask for a
+  list or a long extract.
+- The names `SubQuery` and `SubAnswer` stay, because the signature of a user often has its own type `Answer`, and a
+  wildcard import would clash with it.
+- The children of a batch share the copy of the workspace, as 8.1 says. The API reference tells the model to give each
+  child its own file to write.
+- The task of a child keeps the source `User` until phase 7. Phase 7 brings session ids, and with them a source for a
+  parent cell and a link from the journal of a child to the journal of its parent.
+
 ## 10. The runtime
 
 ### 10.1 The layers
@@ -1604,6 +1623,7 @@ and the start probe also ran on JDK 21.0.11. The code is in `tmp/design-check/`,
 | A first GEPA run on the task set (`HarnessGepaRun`): the 15 tasks with an even index train and the 15 others validate, the reflection model is the model of the endpoint, and the metric gives 1.0 for a correct answer in one step, 0.1 less for each more step down to 0.5, and 0 for a wrong answer | GEPA gives a metric an empty trace for a validation run, as upstream gives `trace=None`, so the metric reads the steps from the journal of each call. The run made 120 metric calls in 15 iterations and 4 candidates in about 17 minutes. The validation score went from 0.820 to 0.900 with an instruction to finish in one cell. Two more evaluations of the seed and of the best candidate on all 30 tasks did not confirm it: the seed was right 58 of 60 times with a mean score of 0.834 and 140 steps, and the best 52 of 60 times with 0.822 and 104 steps. So the best candidate takes 26 % fewer steps, but it skips a look at the data and gives more wrong answers, and the gain on the validation set was mostly chance. The reasons: the seed already solves nearly each task, the step penalty rewards a skip of the inspection, and one score of each of 15 validation tasks cannot tell candidates apart. A next run needs harder tasks, several scores of each validation task, and a smaller weight for the steps. The best instruction also says that safe mode refuses `ChronoUnit.DAYS`; this note of the model is not checked. |
 | Phase 5: `llmQuery`, `llmQueryBatched`, `rlm` and `rlmBatched` in the harness, with the leaf `subQuery`, the shared budget and the depth limit | `RlmLaws` has 14 laws: the answer of the leaf and its effect, the trace of a query, the order of a batch with at most 4 calls at the same time, the index or the task in the error of a batch, one budget for the whole tree, a typed value of a child for a record too, a child that replies with no code, the depth limit, a property of the mode at each depth, and the shared copy of the workspace. The structure has three leaves. The harness has 99 laws and 50 mutants, and each mutant is killed. A live run with the private endpoint: a task that asks for `llmQuery` got `merci` with one query, and a task that asks for `rlm` got 541 from a child, with 7 model calls in 12 s. |
 | A code review of phase 5 and of the other work of 2026-11-10, by a subagent that read the code and not the conclusions, and the fixes | 6 findings, each fixed with a law that failed first. The worst: one parser state for all threads, so two restarts at the same time threw `RecursionOverflow` (3074 of 16000 calls on 8 threads), and later calls in the same JVM failed too. The others: an interrupt skipped the repair and lost the journal, a child went on after its call ended and wrote into the deleted copy of the workspace, the trace of two children came out of order, a restart came after the last step, and a child started before the check of its budget. The harness has 112 laws and 62 mutants, and each mutant is killed. After these fixes, the baseline of the 32 tasks gave 31 of 32 right answers with 77 model calls in 120 s and no restart. The model used `llmQuery` and `rlm` only in the two tasks that ask for them, and the one miss was again the 32nd Fibonacci number for the 30th. |
+| The review of the phase 5 choices with the user, and the changes | The other choices stay. `rlmBatched` takes a task and its inputs for each child, and a new law shows that each child gets its own inputs. The instructions of `subQuery` set no length. The task of a child keeps the source `User` until phase 7. The harness has 113 laws and 63 mutants. The new mutant and the 9 other mutants of the batch, the budget and the children are killed. The code of the other 53 mutants did not change. |
 | The laws of `harness` (phase 4), with scripts of `TurnEffects`, a real REPL, the sandbox of the host, and a scripted model through the chat adapter | 60 tests pass: `drive` with the scripts of this table, the journal in memory, the mask, the handlers, the window, a harness that submits, a reply and the step limit that run the finisher, a call in a copy of the workspace, `exec` in the sandbox, and the leaves for the optimizers. 18 mutants, each one killed. The runner of the optimizers puts the output in `RawPrediction.values`. A first run found that the chat adapter reads the text `null` in the field `code` as code. |
 
 The cells that models wrote. A cell counts if it compiled, so the table does not say that the cell does its task. The
@@ -1767,7 +1787,7 @@ Each phase ends with something that runs.
 | 4. One task | `Harness`, `drive`, the window strategy, `OptimizableStructure`, `ProgramRunner`, the mask of secrets. | A harness for one task that the optimizers accept. |
 | 5. RLM | `llmQuery`, `llmQueryBatched`, `rlm` and `rlmBatched` behind `Children^`, a child from a `shape`, the shared budget, the depth limit. | RLM in the harness. |
 | 6. Optimization | A metric from tests, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
-| 7. The session host | `harness-host`: the writer, feeds, timers, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `guarded`, and the client side of `Grant`. `harness-cli`, its JDK and an AOT cache (choice 8). | A coding agent for daily use, one session at a time. |
+| 7. The session host | `harness-host`: the writer, feeds, timers, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `guarded`, and the client side of `Grant`. A source for the task of an `rlm` child and a link from its journal to the journal of its parent (9). `harness-cli`, its JDK and an AOT cache (choice 8). | A coding agent for daily use, one session at a time. |
 | 8. Memory | The memory tree and its metric. | Long sessions that lose no detail. |
 | 9. The controller | `Sessions`, the report pass with a crash test, the ledger, the graph, probes, release plans. | One controller above all sessions. |
 | Later | Replay, the reviewer, jobs across a restart, `parallel` if batch calls are not enough, with the conditions of section 6, a container backend, LSP as a guest API, prompt-cache marks. | |
