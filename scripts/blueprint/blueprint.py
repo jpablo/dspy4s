@@ -580,7 +580,9 @@ def named(code: str, by_name: dict[str, Node]) -> set[str]:
     return out
 
 
-COMMON_METHODS = {"apply", "map", "flatMap", "zip", "filter", "fold", "foldLeft", "get", "contains", "of", "join"}
+# Names that collections, the session state or the guest API also have, so a call of one tells nothing.
+COMMON_METHODS = {"apply", "map", "flatMap", "zip", "filter", "fold", "foldLeft", "get", "contains", "of", "join",
+                  "size", "keys", "store", "read", "write"}
 
 
 def called(code: str, owners: dict[str, Node]) -> dict[str, str]:

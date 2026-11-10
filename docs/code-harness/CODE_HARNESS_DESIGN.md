@@ -987,6 +987,8 @@ final case class PolicyStep(text: String, code: Option[String])
   ([CODE_HARNESS.md](CODE_HARNESS.md), 6.2).
 - **Derived data has a journal of its own.** An LM makes it, so a new derivation costs money and gives a different
   result.
+- **The first version.** Phase 4 has the window strategy. The end of section 9 has its proposals: `project` gives a
+  `Projection`, the derived data is a type member, and the budget counts characters.
 
 ## 8. Sessions
 
@@ -1151,6 +1153,39 @@ and `Exhausted` run the `finisher` leaf. This path needs no writer and no thread
   rollout task and a metric.
 - **Tests with no model.** A script of `TurnEffects`, and later recorded model streams.
 
+**The first version (phase 4).** The module `harness` holds the worker of 4.6, a journal in memory, the mask of 5.6,
+the handlers of a call (5.3), the window strategy (7) and `Harness`. These choices were made on 2026-11-09:
+
+- A call of phase 4 has the mode `Files^`, `Shell^` and `Store^`, and nothing else (`HarnessEnv.taskMode`). The mode
+  of a rollout in 8.1 gives `Llm^`, `Children^` and the bare `Sessions`, and their handlers come later. Phase 5 adds
+  `Llm^` and `Children^`.
+- `Harness` has only the leaves `policy` and `finisher`, the leaves that run in a program call. So an optimizer sees
+  only leaves that run. `subQuery` comes with `llmQuery` in phase 5, and `goal` with the goals of sessions in phase 7.
+- `forward` copies the workspace to a new private temporary folder. `Files.local` and `Shell.sandboxed` work on the
+  copy, so both see the same files, and the copy is deleted at the end of the call.
+
+And these are proposals for the review:
+
+- `Journal.run` takes the sender, which gives the source of each entry through `sourceOf`, so the `Acted` of a step
+  comes from the policy. `Journal.log` gives the entries to a strategy.
+- The journal in memory is the writer of one call. It masks each entry before the commit, as the writer of 5.6 does.
+- `Secrets.known` keeps no value shorter than 8 characters, because its mask would change common text, and no value
+  that is a part of a mask, because a second mask would change the first one.
+- The recorder is `recorded(h)` of 5.3: each guest API call commits `EffectStarted` and `EffectDone`, also `read`,
+  `load` and `now`. `input` reads the journal, so it is not an effect. `guarded` stays in phase 7.
+- `Files.local` applies the profile of 5.4 itself: a write only under a writable root and not in `.git`, and no read
+  or write of a hidden path or of a secret file that exists.
+- A strategy gives a `Projection`: the status, the last observation and the history. The harness adds the task and
+  the API reference, which do not come from the journal. The derived data is a type member of `ContextStrategy`, so
+  `Harness` has no third type parameter, and `guestApi` waits for the memory tree.
+- The window holds the steps of the open turn, oldest first. The last observation is always in it, cut to half of the
+  budget. The budget counts characters, so the projection needs no tokenizer. The status renders in full at each step.
+- `HarnessEnv.journals` gets the journal of each call, because the owner of a rollout is an optimizer, which reads the
+  journal (8.6).
+- `OptimizableStructure` and `ProgramRunner` of a harness are givens of its companion, which each optimizer of dspy4s
+  needs: `P: {OptimizableStructure, ProgramRunner}`. The runner puts the encoded output in `RawPrediction.values`,
+  where a metric reads it.
+
 ## 10. The runtime
 
 ### 10.1 The layers
@@ -1297,11 +1332,11 @@ key of the journal is the fence there. JDBC also reaches a server database, but 
 | Module | Contents | Depends on |
 |---|---|---|
 | `harness-guest` | The guest API traits, `Data`, `Access`, `Mode`, `Scope`, `StrategyName`, `SessionRef` and `SessionCard`. The source text is the API reference. | zio-blocks only |
-| `harness-kernel` | `Entry`, `SessionState`, `evolve`, `next`, `decide`, `repair`, `reports`, `Fold`, `ContextStrategy`, the memory tree | `harness-guest`, zio-blocks |
+| `harness-kernel` | `Entry`, `SessionState`, `evolve`, `next`, `decide`, `repair`, `reports`, `Fold` | `harness-guest`, zio-blocks |
 | `harness-repl` | `ScalaRepl`, the protections of Phase 0, the note of lost names | `harness-guest`, `harness-kernel`, `scala3-repl` |
 | `harness-mcp` | The early MCP server of section 6 | `harness-repl`, the MCP Java SDK |
 | `harness-sandbox` | The profiles, Seatbelt, bubblewrap, the proxy of the host list, the allowlist of variables, and the handler of `Shell` | `harness-kernel` |
-| `harness` | `Harness`, `drive`, the handlers, the leaves | The modules above, dspy4s `programs` |
+| `harness` | `Harness`, `drive`, the journal in memory, the mask of secrets, the handlers, the context strategies and the memory tree, the leaves. A strategy needs `RuntimeContext`, `DspyError` and `History` of dspy4s, so it is not in the kernel. | The modules above, dspy4s `programs` and `adapters` |
 | `harness-host` | The session host, the SQLite journal, the catalog, the report pass | `harness`, `sqlite-jdbc` |
 | `harness-cli` | The terminal client | `harness-host` |
 

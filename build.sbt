@@ -66,7 +66,8 @@ lazy val root = (project in file("."))
     harnessKernel,
     harnessRepl,
     harnessMcp,
-    harnessSandbox
+    harnessSandbox,
+    harness
   )
   .settings(commonSettings)
   .settings(
@@ -333,6 +334,23 @@ lazy val harnessSandbox = (project in file("modules/harness-sandbox"))
     // The escape tests look for a variable of the test JVM from a child process. The value is not a real secret.
     Test / fork              := true,
     Test / envVars           := Map("DSPY4S_FAKE_SECRET_TOKEN" -> "fake-value-for-the-escape-tests"),
+    Test / parallelExecution := false
+  )
+
+// One task (9, 4.6): Harness, drive, the window strategy, the handlers of a call and the mask of secrets. A Harness is
+// a dspy4s Module, so the optimizers take it. The tests use GEPA to check that an optimizer takes a harness.
+lazy val harness = (project in file("modules/harness"))
+  .dependsOn(harnessRepl, harnessSandbox, programs, adapters, gepa % "test->compile")
+  .settings(commonSettings)
+  .settings(name := "dspy4s-harness")
+  .settings(
+    libraryDependencies ++= Seq(
+      "org.scalameta" %% "munit"            % munitVersion           % Test,
+      "org.scalameta" %% "munit-scalacheck" % munitScalacheckVersion % Test
+    ),
+    excludeDependencies += ExclusionRule("org.scala-lang", "scaladoc_3"),
+    // A test of a harness runs a REPL and a sandbox, and the heap guard of the REPL is one for the JVM.
+    Test / fork              := true,
     Test / parallelExecution := false
   )
 

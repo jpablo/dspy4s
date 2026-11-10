@@ -137,6 +137,70 @@ ref = "4.1"
 uses = []
 text = "The codec of zio-blocks. Each type of the journal derives one."
 
+[[node]]
+id = "dspy-module"
+kind = "upstream"
+name = "Module"
+ref = "9"
+uses = []
+text = "A program of dspy4s: forward(call)(using RuntimeContext) gives Either[DspyError, Prediction[O]]. A harness is one, so the optimizers take it."
+
+[[node]]
+id = "predict"
+kind = "upstream"
+name = "Predict"
+ref = "9"
+uses = []
+text = "A leaf of dspy4s: one LM call with a signature. An optimizer changes its instructions and its demos. Each leaf of a program needs a distinct name, because the traces carry it."
+
+[[node]]
+id = "signature"
+kind = "upstream"
+name = "Signature"
+ref = "9"
+uses = []
+text = "The typed signature of dspy4s: the input and output fields, with a Shape for each side."
+
+[[node]]
+id = "optimizable-structure"
+kind = "upstream"
+name = "OptimizableStructure"
+ref = "9"
+uses = []
+text = "The leaves of a program for an optimizer: inspectNamed and replace, with the law arityAgreement."
+
+[[node]]
+id = "program-runner"
+kind = "upstream"
+name = "ProgramRunner"
+ref = "9"
+uses = []
+text = "How an optimizer runs a program: a record of the inputs gives a RawPrediction. Each optimizer takes P: {OptimizableStructure, ProgramRunner}."
+
+[[node]]
+id = "runtime-context"
+kind = "upstream"
+name = "RuntimeContext"
+ref = "9"
+uses = []
+text = "What a dspy4s program gets at a call: the LM, the adapter, the callbacks and the trace."
+
+[[node]]
+id = "dspy-error"
+kind = "upstream"
+name = "DspyError"
+ref = "9"
+uses = []
+text = "The error type of dspy4s."
+
+[[node]]
+id = "history"
+kind = "upstream"
+name = "History"
+ref = "7"
+uses = []
+text = "The earlier calls of a conversation, as an input field of a signature."
+
 # ── Phase 1: the ids (4.1) ──────────────────────────────────────────────────────────────────────────────────────────
 
 [[group]]
@@ -1910,3 +1974,534 @@ ref = "5.4"
 uses = ["law-profile-monotone", "law-profile-authority", "law-host-list", "law-env", "law-seatbelt", "law-proxy",
         "law-exec"]
 text = "Each mutant breaks one rule of the profile, the allowlist, Seatbelt or the handler of Shell, and at least one law must fail. scripts/mutants/mutants.py runs the list. The mutants of Seatbelt need macOS."
+
+# ── Phase 4: the worker (4.6) ─────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "worker"
+phase = "p4"
+module = "harness"
+file = "Worker.scala"
+title = "The worker: TurnEffects, Journal and drive"
+
+[[node]]
+id = "policy-reply"
+group = "worker"
+kind = "data"
+name = "PolicyReply"
+ref = "4.6"
+uses = []
+text = "The reply of the policy for one step: the thought, the text, and the code of a cell, if any."
+
+[[node]]
+id = "cell-result"
+group = "worker"
+kind = "data"
+name = "CellResult"
+ref = "4.6"
+uses = ["cell-outcome", "json"]
+text = "The result of one cell: its output, its outcome, and the store writes of a cell that completed."
+
+[[node]]
+id = "turn-effects"
+group = "worker"
+kind = "data"
+name = "TurnEffects"
+ref = "4.6"
+uses = ["session-state", "policy-reply", "cell-result"]
+text = "The effects of a turn: callPolicy and runCell. A test gives a script, and a harness gives its policy leaf and a REPL."
+
+[[node]]
+id = "journal-trait"
+group = "worker"
+kind = "data"
+name = "Journal"
+ops = ["commit"]
+ref = "4.6"
+spec = true
+uses = ["session-state", "logged", "command", "rejection", "source", "entry"]
+text = "A journal: the committed entries and their fold. run commits the entries that decide gives for a command. A proposal: run also takes the sender, which gives the source of each entry, and the journal gives its log to a strategy."
+
+[[node]]
+id = "drive"
+group = "worker"
+kind = "function"
+name = "drive"
+ref = "4.6"
+spec = true
+uses = ["journal-trait", "turn-effects", "session-state"]
+proof_uses = ["next", "closing"]
+text = "Runs the open turn to its end, and gives the state at Next.Wait. The worker holds no decision: next says what comes, and the journal holds each result. An exception of the effects leaves the turn open, as after a crash."
+
+# ── Phase 4: the journal in memory and the mask of secrets (9, 5.6) ───────────────────────────────────────────────
+
+[[group]]
+id = "memory-journal"
+phase = "p4"
+module = "harness"
+file = "MemoryJournal.scala"
+title = "The journal in memory of one call"
+
+[[node]]
+id = "memory-journal"
+group = "memory-journal"
+kind = "data"
+name = "MemoryJournal"
+ops = ["state", "log", "run"]
+ref = "9"
+spec = true
+uses = ["journal-trait", "secrets"]
+proof_uses = ["decide", "evolve", "source-of"]
+text = "A journal in memory: the writer of one call. Each entry gets the next seq, the time of the clock, its source and the mask of the secrets. A refused command adds nothing. run holds a lock, because a cell thread and a stop can call it at the same time."
+
+[[group]]
+id = "secrets"
+phase = "p4"
+module = "harness"
+file = "Secrets.scala"
+title = "The known secret values and their mask"
+
+[[node]]
+id = "secrets"
+group = "secrets"
+kind = "data"
+name = "Secrets"
+ops = ["maskText", "mask", "known"]
+ref = "5.6"
+spec = true
+uses = ["entry"]
+text = "The known secret values, by name: the values of the secret-like variables of the harness process and the values behind secretHeaders. mask replaces each one in each string of an entry with «secret:NAME», a longer value first. A proposal: a value shorter than 8 characters, or a part of a mask, is not a known value."
+
+# ── Phase 4: the handlers of a call (5.3) ─────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "handlers"
+phase = "p4"
+module = "harness"
+file = "Handlers.scala"
+title = "recorded, Files.local, Store.snapshot and the Turn of a session"
+
+[[node]]
+id = "recorder"
+group = "handlers"
+kind = "data"
+name = "Recorder"
+ops = ["startCell", "call"]
+ref = "5.3"
+spec = true
+uses = ["journal-trait", "data", "json"]
+proof_uses = ["effect-id", "effect-result"]
+text = "recorded(h) of 5.3: EffectStarted before each call and EffectDone after it, with the value as Json and as text. A call that the journal refuses, for example after a stop, does not run."
+
+[[node]]
+id = "local-files"
+group = "handlers"
+kind = "data"
+name = "LocalFiles"
+ops = ["read", "write", "edit"]
+ref = "5.3"
+uses = ["files", "profile"]
+text = "Files.local(root) of 5.3: the real files under the root, with the rules of the profile. A hidden path, and a file with a secret name that exists, can be neither read nor written. A path outside the root is an error, also through a symbolic link."
+
+[[node]]
+id = "snapshot-store"
+group = "handlers"
+kind = "data"
+name = "SnapshotStore"
+ops = ["begin", "writes", "keys", "load", "store"]
+ref = "5.3"
+uses = ["store", "data", "json"]
+text = "Store.snapshot(state) of 5.3: the store at the start of a cell, and a buffer of its writes. CellResult.writes holds the buffer, so the store changes only when the cell completes."
+
+[[node]]
+id = "journal-turn"
+group = "handlers"
+kind = "data"
+name = "JournalTurn"
+ops = ["now", "input"]
+ref = "5.1"
+uses = ["turn", "journal-trait", "json"]
+text = "The Turn of a session: the time of the clock, and the values of the input fields from SessionState.inputs."
+
+[[node]]
+id = "recorded"
+group = "handlers"
+kind = "function"
+name = "recorded"
+ref = "5.3"
+uses = ["bindings", "recorder"]
+proof_uses = ["files", "shell", "store", "turn"]
+text = "recorded(h) for each handler of a Bindings value: each call of the guest API goes through the recorder. input reads the journal, so it is not an effect."
+
+# ── Phase 4: the context (7) ──────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "context"
+phase = "p4"
+module = "harness"
+file = "Context.scala"
+title = "The policy input, the projection, the strategies and the status"
+
+[[node]]
+id = "policy-input"
+group = "context"
+kind = "data"
+name = "PolicyInput"
+ref = "7"
+spec = true
+uses = ["history", "schema"]
+text = "The input of the policy leaf: the task, the API reference, the status, the last observation and the history. The API reference is an input field, so an optimizer cannot change it."
+
+[[node]]
+id = "policy-step"
+group = "context"
+kind = "data"
+name = "PolicyStep"
+ref = "9"
+spec = true
+uses = ["schema"]
+text = "The output of the policy leaf: a text, and the code of a cell, if any."
+
+[[node]]
+id = "projection"
+group = "context"
+kind = "data"
+name = "Projection"
+ops = ["size"]
+ref = "7"
+spec = true
+uses = ["history"]
+text = "What a strategy gives for one step: the status, the last observation and the earlier steps. size counts the characters of a budget. A proposal: the harness adds the task and the API reference, which do not come from the journal."
+
+[[node]]
+id = "derivation"
+group = "context"
+kind = "data"
+name = "Derivation"
+ref = "7"
+uses = ["logged", "runtime-context", "dspy-error"]
+text = "The data that a strategy derives from the journal. It never changes the journal. An update can call Predict leaves."
+
+[[node]]
+id = "context-strategy"
+group = "context"
+kind = "data"
+name = "ContextStrategy"
+ref = "7"
+spec = true
+uses = ["derivation", "strategy-name", "projection"]
+text = "A strategy: derived data and a pure projection into a budget. A proposal: the derived data is a type member, guestApi waits for the memory tree, and the strategies are in harness, because they need the types of dspy4s."
+
+[[node]]
+id = "status"
+group = "context"
+kind = "data"
+name = "Status"
+ops = ["render", "of"]
+ref = "7"
+uses = ["session-state"]
+text = "The status section: the step, the step limit and the keys of the store. A proposal: it renders in full at each step. The jobs come with phase 7."
+
+[[group]]
+id = "window"
+phase = "p4"
+module = "harness"
+file = "Window.scala"
+title = "The window strategy"
+
+[[node]]
+id = "window"
+group = "window"
+kind = "data"
+name = "Window"
+ops = ["update", "project", "cut"]
+ref = "7"
+uses = ["context-strategy"]
+proof_uses = ["status", "projection", "state"]
+text = "No derived data, and the last steps of the open turn that fit the budget, oldest first. The last observation is always in it, cut to half of the budget, with a note of the rest. A proposal: the budget counts characters."
+
+# ── Phase 4: the harness (9) ──────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "harness-config"
+phase = "p4"
+module = "harness"
+file = "HarnessConfig.scala"
+title = "The environment, the limits and the finisher input of a harness"
+
+[[group]]
+id = "harness-effects"
+phase = "p4"
+module = "harness"
+file = "HarnessEffects.scala"
+title = "The effects of a turn of a harness"
+
+[[node]]
+id = "harness-effects"
+group = "harness-effects"
+kind = "data"
+name = "HarnessEffects"
+ops = ["callPolicy", "runCell"]
+ref = "4.6"
+uses = ["turn-effects", "predict", "policy-input", "policy-step", "context-strategy", "journal-trait", "scala-repl",
+        "recorder", "snapshot-store", "harness-limits", "runtime-context", "session-state"]
+proof_uses = ["cell-result", "policy-reply"]
+text = "callPolicy projects the log with the strategy and calls the policy leaf, so the trace reaches the RuntimeContext. runCell starts the calls of the cell, takes the snapshot of the store, and runs the code in the REPL."
+
+[[group]]
+id = "harness"
+phase = "p4"
+module = "harness"
+file = "Harness.scala"
+title = "Harness, its environment and its limits"
+
+[[node]]
+id = "harness-env"
+group = "harness-config"
+kind = "data"
+name = "HarnessEnv"
+ref = "9"
+uses = ["host-list", "backend", "secrets", "mode", "logged"]
+text = "What a harness needs that an optimizer must not change: the workspace, the home folder, the hosts, the backend, the secrets and the mode. journals gets the journal of each call, because the owner of a rollout is an optimizer, which reads the journal (8.6)."
+
+[[node]]
+id = "harness-limits"
+group = "harness-config"
+kind = "data"
+name = "HarnessLimits"
+ref = "9"
+uses = []
+text = "The limits of a call: the steps, the budget of a projection, the time of a cell and of a command, and the size of an observation."
+
+[[node]]
+id = "finish-input"
+group = "harness-config"
+kind = "data"
+name = "FinishInput"
+ref = "9"
+uses = ["schema"]
+text = "The input of the finisher leaf: the task, and the steps of the call as text."
+
+[[node]]
+id = "harness"
+group = "harness"
+kind = "data"
+name = "Harness"
+ops = ["forward", "forTask", "forkWorkspace"]
+ref = "9"
+spec = true
+uses = ["dspy-module", "signature", "predict", "policy-input", "policy-step", "finish-input", "context-strategy",
+        "harness-env", "harness-limits", "data", "runtime-context", "dspy-error"]
+proof_uses = ["drive", "memory-journal", "harness-effects", "recorded", "local-files", "snapshot-store", "journal-turn",
+              "sandboxed-shell", "profile-for-mode", "layout", "preamble", "scala-repl", "window"]
+text = "A harness for one task, as a dspy4s Module. forward copies the workspace, starts a journal in memory and a REPL with the handlers of the mode, sends the input fields, runs drive and reads the last TurnEnded: Submitted gives the output through Data, Replied and Exhausted run the finisher. A proposal: phase 4 has only the leaves policy and finisher, and the mode Files^, Shell^ and Store^."
+
+[[group]]
+id = "harness-givens"
+phase = "p4"
+module = "harness"
+file = "HarnessGivens.scala"
+title = "What the optimizers need: OptimizableStructure and ProgramRunner"
+
+[[node]]
+id = "harness-structure"
+group = "harness-givens"
+kind = "function"
+name = "structure"
+ref = "9"
+spec = true
+uses = ["harness", "optimizable-structure"]
+text = "The leaves policy and finisher, in this order and with distinct names. A replace changes only these leaves."
+
+[[node]]
+id = "harness-runner"
+group = "harness-givens"
+kind = "function"
+name = "runner"
+ref = "9"
+uses = ["harness", "program-runner"]
+text = "Reads the record of the inputs through the signature, runs the harness, and puts the encoded output in RawPrediction.values, where a metric reads it."
+
+# ── Phase 4: the laws ─────────────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "drive-laws"
+phase = "p4"
+module = "harness"
+file = "DriveLaws.scala"
+where = "tests"
+title = "The laws of drive, with scripts"
+
+[[node]]
+id = "law-drive"
+group = "drive-laws"
+kind = "law"
+name = "Drive:"
+ref = "4.6"
+uses = ["drive", "memory-journal"]
+text = "With scripts of TurnEffects: a chat answer, submit, the step limit of both kinds, a failed cell, a failed LM call, a stop during a cell and a crash during a cell give the journals of section 12. For each script, the turn ends, and it is a word of the language of 4.1."
+
+[[group]]
+id = "journal-laws"
+phase = "p4"
+module = "harness"
+file = "JournalLaws.scala"
+where = "tests"
+title = "The laws of the journal in memory"
+
+[[node]]
+id = "law-journal"
+group = "journal-laws"
+kind = "law"
+name = "Journal:"
+ref = "4.7"
+uses = ["memory-journal"]
+text = "The state is the fold of the log. run commits the entries of decide with the next seq, and a refused command adds nothing. Each entry has the time of the clock and the source of its command, and the mask hides each known secret before the commit. Commands from several threads each commit once."
+
+[[group]]
+id = "secret-laws"
+phase = "p4"
+module = "harness"
+file = "SecretLaws.scala"
+where = "tests"
+title = "The law Secret"
+
+[[node]]
+id = "law-secret"
+group = "secret-laws"
+kind = "law"
+name = "Secret:"
+ref = "4.7"
+uses = ["secrets"]
+text = "No known secret value is in a masked text or entry, and a second mask changes nothing. A longer value goes first. known takes only the secret-like variables and the headers."
+
+[[group]]
+id = "handler-laws"
+phase = "p4"
+module = "harness"
+file = "HandlerLaws.scala"
+where = "tests"
+title = "The laws of the handlers of a call"
+
+[[node]]
+id = "law-recorded"
+group = "handler-laws"
+kind = "law"
+name = "Recorded:"
+ref = "4.7"
+uses = ["recorded", "recorder", "local-files", "snapshot-store", "journal-turn", "memory-journal"]
+text = "The law Effect for real handlers: a call commits its intent before it runs and its outcome after, the calls of a cell get the ids 0, 1 and 2, a call after a stop does not run, and each guest API call of the bindings goes through the recorder."
+
+[[node]]
+id = "law-local-files"
+group = "handler-laws"
+kind = "law"
+name = "Files:"
+ref = "5.4"
+uses = ["local-files"]
+text = "Files.local reads and writes only under the root, also through a symbolic link, keeps .git read-only, and hides the secret files that exist. edit replaces the one place of a text."
+
+[[node]]
+id = "law-snapshot-store"
+group = "handler-laws"
+kind = "law"
+name = "Store:"
+ref = "4.7"
+uses = ["snapshot-store"]
+text = "The law Store for the handler: load reads the snapshot and the writes of the cell, the writes are only in the buffer, and a value comes back with the type of the cell that loads it."
+
+[[node]]
+id = "law-journal-turn"
+group = "handler-laws"
+kind = "law"
+name = "Turn:"
+ref = "5.1"
+uses = ["journal-turn", "memory-journal"]
+text = "input reads the values of the Input entries, and now reads the clock."
+
+[[group]]
+id = "window-laws"
+phase = "p4"
+module = "harness"
+file = "WindowLaws.scala"
+where = "tests"
+title = "The laws of the window strategy and of the status"
+
+[[node]]
+id = "law-window"
+group = "window-laws"
+kind = "law"
+name = "Window:"
+ref = "7"
+uses = ["window"]
+text = "project depends only on the entries and the derived data, fits the budget, keeps the last observation and the newest steps, oldest first, and cuts a long observation with a note. update gives no derived data."
+
+[[node]]
+id = "law-status"
+group = "window-laws"
+kind = "law"
+name = "Status:"
+ref = "7"
+uses = ["status"]
+text = "The status gives the step, the step limit and the keys of the store."
+
+[[group]]
+id = "harness-laws"
+phase = "p4"
+module = "harness"
+file = "HarnessLaws.scala"
+where = "tests"
+title = "The laws of a harness, with a scripted model and a real REPL"
+
+[[node]]
+id = "law-harness"
+group = "harness-laws"
+kind = "law"
+name = "Harness:"
+ref = "9"
+uses = ["harness"]
+text = "A policy that submits gives the output through Data, and in RawPrediction.values. A reply with no code and the step limit run the finisher. The call works in a copy of the workspace, exec runs in the sandbox, and a failed model call gives a DspyError. The journal of a call is one turn, and it holds no known secret. The REPL has only the givens of the task mode."
+
+[[group]]
+id = "structure-laws"
+phase = "p4"
+module = "harness"
+file = "StructureLaws.scala"
+where = "tests"
+title = "The laws of the structure, and what the optimizers need"
+
+[[node]]
+id = "law-structure"
+group = "structure-laws"
+kind = "law"
+name = "Structure:"
+ref = "9"
+uses = ["harness-structure", "harness"]
+text = "The leaves are the policy and the finisher, with distinct keys. A replace with the parameters that read gives changes no parameter, a replace changes only the instructions of the leaves, and the arity agrees with the leaves."
+
+[[node]]
+id = "law-optimizers"
+group = "structure-laws"
+kind = "law"
+name = "Optimizers:"
+ref = "9"
+uses = ["harness-structure", "harness-runner", "harness"]
+text = "A harness has what each optimizer needs, P: {OptimizableStructure, ProgramRunner}, and the runner reads a record of the inputs and gives the output in RawPrediction.values."
+
+[[group]]
+id = "harness-mutants"
+phase = "p4"
+module = "harness"
+file = "mutants.toml"
+where = "tests"
+title = "The mutants of the harness"
+
+[[node]]
+id = "harness-mutants"
+group = "harness-mutants"
+kind = "check"
+name = "Mutant:"
+ref = "4.7"
+uses = ["law-drive", "law-journal", "law-secret", "law-recorded", "law-local-files", "law-snapshot-store", "law-window",
+        "law-harness", "law-structure"]
+text = "Each mutant breaks one rule of drive, the journal, the mask, the handlers, the window or the harness, and at least one law must fail. They come with the proofs."
