@@ -410,10 +410,15 @@ object ScalaRepl:
 
   private def firstLine(text: String): String = text.linesIterator.find(_.trim.nonEmpty).getOrElse("an exception")
 
-  /** Removes the trace that the REPL prints when the stop flag ends a cell. */
+  /** Removes the trace that the REPL prints when a stop ends a cell: the trace of the stop flag, and the trace of an
+    * `InterruptedException`, because the stop also interrupts the cell thread, for example in a guest call. The model
+    * reads the output in the next turn, and the outcome of the cell already gives the reason of the stop.
+    */
   private def withoutStopTrace(output: String): String =
     val lines = output.linesIterator.toVector
-    val start = lines.lastIndexWhere(l => l.startsWith("java.lang.ThreadDeath") || l.contains("StopRepl"))
+    val start = lines.lastIndexWhere(l =>
+      l.startsWith("java.lang.ThreadDeath") || l.contains("StopRepl") || l.startsWith("java.lang.InterruptedException")
+    )
     if start < 0 then output else lines.take(start).mkString("\n").stripTrailing()
 
   /** Removes the line of the signal of `submit`, and its trace (5.1). */

@@ -3502,4 +3502,4 @@ kind = "law"
 name = "Stop cell:"
 ref = "10.3"
 uses = ["scala-repl"]
-text = "stopCell ends the running cell with a failure, and the REPL keeps the definitions of the earlier cells. With no running cell it does nothing. A cell that starts while the turn stops also ends with a failure, and the next turn runs cells."
+text = "stopCell ends the running cell with a failure, and the REPL keeps the definitions of the earlier cells. With no running cell it does nothing. A cell that starts while the turn stops also ends with a failure, and the next turn runs cells. A guest call that the stop interrupts leaves no stack trace in the output."

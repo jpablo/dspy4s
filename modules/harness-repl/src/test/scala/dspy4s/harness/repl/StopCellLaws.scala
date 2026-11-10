@@ -4,6 +4,7 @@ import dspy4s.harness.guest.*
 import dspy4s.harness.kernel.CellOutcome
 
 import java.util.concurrent.atomic.{AtomicBoolean, AtomicReference}
+import java.util.concurrent.{CountDownLatch, TimeUnit}
 import scala.concurrent.duration.*
 
 /** The laws of `ScalaRepl.stopCell` (CODE_HARNESS_DESIGN.md, 10.3, phase 7): the stop of one cell keeps the REPL. */
@@ -54,6 +55,31 @@ class StopCellLaws extends munit.FunSuite:
       assert(!r.unclean)
       stopping.set(false)
       assertEquals(r.run("println(kept)").output, "7")
+    finally r.close()
+  }
+
+  test("Stop cell: a guest call that the stop interrupts leaves no stack trace in the output of the cell") {
+    // The model reads the output in the next turn, and the trace of the interrupt of the host tells it nothing.
+    val entered = CountDownLatch(1)
+    val slow    = new Files:
+      def read(path: String): String =
+        entered.countDown()
+        Thread.sleep(60_000)
+        ""
+      def write(path: String, content: String): Unit                  = ()
+      def edit(path : String, oldText: String, newText: String): Unit = ()
+    val r = ScalaRepl(readFiles, Bindings(FakeTurn(), files = Some(slow)), "", 60.seconds)
+    try
+      val result = AtomicReference[CellRun]()
+      val cell   = Thread.ofPlatform().start(() => result.set(r.run("""println("before"); read("a.txt")""")))
+      assert(entered.await(60, TimeUnit.SECONDS), "the cell did not reach the guest call")
+      r.stopCell()
+      cell.join(20_000)
+      assert(!cell.isAlive, "the cell did not end after stopCell")
+      val output = result.get.output
+      assert(output.contains("before"), output)
+      assert(!output.contains("InterruptedException"), output)
+      assert(!output.linesIterator.exists(_.trim.startsWith("at ")), output)
     finally r.close()
   }
 
