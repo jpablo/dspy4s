@@ -8,6 +8,11 @@ enum Source derives Schema, CanEqual:
   case User, Controller, Harness, Policy
   case Child(session: SessionId)
 
+  /** The cell of a parent session: the sender of the task of an `rlm` child (8.2). `effect` is the `rlm` or
+    * `rlmBatched` call in the journal of `session`, so the journal of a child links to the call of its parent.
+    */
+  case Parent(session: SessionId, effect: EffectId)
+
 /** `External` marks a value that came from outside the session, for example a web page (5.6). */
 enum Taint derives Schema, CanEqual:
   case Trusted, External

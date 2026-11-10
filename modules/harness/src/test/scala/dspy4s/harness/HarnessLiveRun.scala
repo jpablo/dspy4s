@@ -40,7 +40,7 @@ class HarnessLiveRun extends FunSuite:
         HostList.empty,
         Backends.detect(),
         Secrets.known(sys.env, Map.empty),
-        journals = journal = _
+        journals = (_, log) => journal = log
       )
       val start    = System.nanoTime()
       val result   = withModel(lm)(Harness.forTask(signature, env, HarnessLimits(steps = 8))(Question(task.question)))

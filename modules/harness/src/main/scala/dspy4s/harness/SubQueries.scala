@@ -16,17 +16,19 @@ final case class SubAnswer(answer: String) derives Schema
 
 /** The handler of `Llm^` (5.1, 6, 9): the `subQuery` leaf answers each query of a cell.
   *
-  *   - `query` spends one call of `budget`, and runs the leaf through `host`, so the call has the context of the
-  *     program call and its trace reaches the trace of the call. A spent budget and a failed model call throw an
-  *     exception with a plain message, so the cell fails.
+  *   - `query` spends one call of the budget that `budget` gives: the budget of the program call, or of the turn of a
+  *     work session (phase 7). It and runs the leaf through `host`, so the call has the context of the program call and
+  *     its trace reaches the trace of the call. A spent budget and a failed model call throw an exception with a plain
+  *     message, so the cell fails.
   *   - `queryBatched` runs at most `width` queries at the same time on host threads, and keeps the order of the
   *     prompts. Each prompt spends one call of the budget. When one query fails, it throws, and the message has the
   *     index of that prompt. A cell cannot start a thread, but the host can (6).
   */
-final class LeafLlm(leaf: Predict[SubQuery, SubAnswer], budget: Budget, host: HostThreads, width: Int) extends Llm:
+final class LeafLlm(leaf: Predict[SubQuery, SubAnswer], budget: () => Budget, host: HostThreads, width: Int)
+    extends Llm:
 
   def query(prompt: String): String =
-    budget.spend().left.foreach(error => throw IllegalStateException(s"llmQuery: $error"))
+    budget().spend().left.foreach(error => throw IllegalStateException(s"llmQuery: $error"))
     host.run(leaf(SubQuery(prompt))) match
       case Right(prediction) => prediction.output.answer
       case Left(error)       => throw IllegalStateException(s"llmQuery: the model call failed: ${error.message}")

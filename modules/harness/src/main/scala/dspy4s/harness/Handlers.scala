@@ -16,7 +16,7 @@ import java.nio.file.{Files as JFiles, LinkOption, Path, StandardOpenOption}
   * After `close`, no call runs (9). When `ended` is true, no call runs either: the program call of the session ended,
   * so a child that outlives its parent cannot write or exec (9).
   */
-final class Recorder(journal: Journal, ended: () => Boolean = () => false):
+final class Recorder(journal: Journal, ended: () => Boolean = () => false, mask: Json => Json = identity):
   private var cell   = -1L
   private var calls  = 0
   private var closed = false
@@ -35,8 +35,9 @@ final class Recorder(journal: Journal, ended: () => Boolean = () => false):
     */
   def close(): Unit = synchronized { closed = true }
 
-  /** One call: the intent, the call, and the outcome. A call that throws gets `EffectResult.Error`, and the exception
-    * goes on to the cell.
+  /** One call: the intent, the check of `guarded` (5.5), the call, and the outcome. A call that throws gets
+    * `EffectResult.Error`, and the exception goes on to the cell. A call that `guarded` stops does not run: its
+    * `EffectDone` holds the result of the guard, and the cell gets the error of the guard.
     *
     * The lock of the recorder holds the choice of the id and the commit of the intent, so the journal gets the intents
     * of a cell in the order of their ids (4.5). The call itself and its outcome are outside the lock. The lock order is
@@ -52,8 +53,18 @@ final class Recorder(journal: Journal, ended: () => Boolean = () => false):
       calls += 1
       (fresh, journal.commit(Entry.EffectStarted(fresh, op, args)))
     }
-    intent.left.foreach { rejection =>
-      throw IllegalStateException(s"$op: the session refused the call, because it stops or the cell ended ($rejection)")
+    val after = intent.fold(
+      rejection =>
+        throw IllegalStateException(
+          s"$op: the session refused the call, because it stops or the cell ended ($rejection)"
+        ),
+      identity
+    )
+    // `guarded` reads the state after the intent, so a `Once` grant stays until the outcome of its call (5.5). It
+    // compares the arguments with the mask, because the journal holds the pending rule and the grant with the mask.
+    guarded(after, op, mask(args)).left.foreach { stop =>
+      journal.commit(Entry.EffectDone(id, stop.result)): Unit
+      throw stop.error
     }
     val value =
       try run

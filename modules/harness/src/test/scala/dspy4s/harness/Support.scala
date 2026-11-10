@@ -184,7 +184,7 @@ final class Background(model: LanguageModel, limits: HarnessLimits):
       HostList.empty,
       Backends.detect(),
       Secrets.none,
-      journals = log => journals.add(log): Unit
+      journals = (_, log) => journals.add(log): Unit
     )
     val harness = Harness.forTask(Models.signature, env, limits)
     try result = Some(Models.withModel(model)(harness(Question("6 times 7?"))).map(_.output))

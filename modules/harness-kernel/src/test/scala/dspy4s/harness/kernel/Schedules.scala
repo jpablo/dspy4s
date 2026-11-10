@@ -183,7 +183,7 @@ object Schedules:
       val _ = run(command, sender)
 
   /** The live part of a host: the processes of the jobs, and the marks of the jobs that must not start (10.3). */
-  private final class JobTable:
+  private final class JobTableModel:
     var running = Set.empty[EffectId]
     var marked  = Set.empty[EffectId]
 
@@ -207,7 +207,7 @@ object Schedules:
     )
     var host = Host(Vector.empty, 0, Vector.empty)
     host.send(Command.Activate(versions, config))
-    var table         = JobTable()
+    var table         = JobTableModel()
     var request       = 0
     var grantRequest  = 0
     var lastGrant     = Option.empty[Command.Grant]
@@ -227,7 +227,7 @@ object Schedules:
       late = Vector.empty
       pendingStarts = Vector.empty
       host.send(Command.Activate(versions, config))
-      table = JobTable()
+      table = JobTableModel()
       table.applyStops(host.live)
 
     def startJob(id: EffectId): Unit =

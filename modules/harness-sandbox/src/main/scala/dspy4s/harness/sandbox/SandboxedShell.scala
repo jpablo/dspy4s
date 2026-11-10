@@ -3,10 +3,10 @@ package dspy4s.harness.sandbox
 import dspy4s.harness.guest.{Files, JobId, JobStatus, Scope, Shell}
 import dspy4s.harness.kernel.SessionConfig
 
-import java.io.{ByteArrayOutputStream, File, InputStream}
+import java.io.{ByteArrayOutputStream, InputStream}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.{Path, Paths}
-import java.util.concurrent.{CompletableFuture, TimeUnit}
+import java.util.concurrent.{CompletableFuture, ConcurrentHashMap, TimeUnit}
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
@@ -48,7 +48,16 @@ final class SandboxedShell(
 
   private var proxy: Option[HostProxy] = None
 
-  def exec(command: String)(using Files): String =
+  /** The processes of the `exec` calls that run, and the ones that `stopAll` stopped. */
+  private val running = ConcurrentHashMap.newKeySet[Process]()
+  private val stopped = ConcurrentHashMap.newKeySet[Process]()
+
+  def exec(command: String)(using Files): String = run(start(command))
+
+  /** The process of `command` under the profile of the mode, in the backend, in the folder of the scope, and under
+    * `ProcessWrapper`. Its standard input is the pipe of the wrapper, and the command itself gets an empty one.
+    */
+  private def start(command: String): Process =
     if !profile.canRun then
       throw SandboxError("The mode of this session gives no child process, so exec did not run the command.")
     val sandbox = backend.getOrElse(throw SandboxError(
@@ -58,20 +67,38 @@ final class SandboxedShell(
     val port = profile.net match
       case Net.Proxy(_) => Some(proxyPort())
       case Net.Closed   => None
-    val now     = profile.hide(index.find(profile))
-    val builder = ProcessBuilder(sandbox.wrap(now, root, Vector("/bin/sh", "-c", command), port)*)
-      .directory(root.toFile)
-      .redirectErrorStream(true)
-      .redirectInput(ProcessBuilder.Redirect.from(File("/dev/null")))
-    val env = builder.environment()
+    val now       = profile.hide(index.find(profile))
+    val sandboxed = sandbox.wrap(now, root, Vector("/bin/sh", "-c", command), port)
+    val wrapped   = ProcessWrapper.command(ProcessWrapper.quoted(sandboxed), (SandboxedShell.GraceMillis / 1000).toInt)
+    val builder   = ProcessBuilder(wrapped*).directory(root.toFile).redirectErrorStream(true)
+    val env       = builder.environment()
     env.clear()
     childEnv(port).foreach((name, value) => env.put(name, value): Unit)
-    run(builder.start())
+    builder.start()
 
   def spawn(command: String, report   : Boolean)(using Files): JobId = later("spawn")
   def jobOutput(job: JobId): String                                  = later("jobOutput")
   def waitJob(job  : JobId, maxSeconds: Int): JobStatus              = later("waitJob")
   def stopJob(job  : JobId): Unit                                    = later("stopJob")
+
+  /** Starts `command` as `exec` does, under the profile of the mode and in the folder of the scope, and gives the
+    * process with no wait (phase 7, for the jobs of 10.3). The command runs under `ProcessWrapper`: its own standard
+    * input is empty, and the standard input of the process is the pipe of the wrapper, which the caller holds.
+    */
+  def launch(command: String): Process = start(command)
+
+  /** Step 3 of the hard stop (10.3, phase 7): it closes the pipe of the wrapper of each `exec` that runs, and returns
+    * at once. Each wrapper then stops the group and the tree of its command with TERM, a grace period and KILL
+    * (`ProcessWrapper`), and the `exec` calls give their output with a note of the stop.
+    *
+    * Since phase 7, `exec` runs under `ProcessWrapper` as a job does, so a crash of the host also stops it. An
+    * interrupt of the thread of an `exec` stops its process tree before the interrupt goes on.
+    */
+  def stopAll(): Unit =
+    running.forEach { process =>
+      stopped.add(process): Unit
+      Try(process.getOutputStream.close()): Unit
+    }
 
   /** Stops the proxy. */
   def close(): Unit =
@@ -96,24 +123,37 @@ final class SandboxedShell(
       started.port
     }
 
-  /** Waits for the command, with the time limit. A child that the command leaves behind stops at the end. */
+  /** Waits for the command, with the time limit. A child that the command leaves behind stops at the end. After an
+    * interrupt of the thread, the process tree stops first, and then the interrupt goes on.
+    */
   private def run(process: Process): String =
+    running.add(process): Unit
     val output   = collect(process.getInputStream)
     val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(timeoutSeconds.toLong)
     var seen     = Vector.empty[ProcessHandle]
     var ended    = false
-    while !ended && System.nanoTime() < deadline do
-      // A child can leave its parent, so the handler keeps each process that it sees.
-      seen = (seen.filter(Host.running) ++ process.descendants().iterator.asScala).distinct
-      ended = process.waitFor(SandboxedShell.PollMillis, TimeUnit.MILLISECONDS)
-    seen = (seen ++ process.descendants().iterator.asScala).distinct
-    SandboxedShell.stop(seen :+ process.toHandle)
+    try
+      while !ended && System.nanoTime() < deadline do
+        // A child can leave its parent, so the handler keeps each process that it sees.
+        seen = (seen.filter(Host.running) ++ process.descendants().iterator.asScala).distinct
+        ended = process.waitFor(SandboxedShell.PollMillis, TimeUnit.MILLISECONDS)
+    finally
+      seen = (seen ++ process.descendants().iterator.asScala).distinct
+      // The end of the pipe makes the wrapper stop the command, and the wrapper ends after its stop. A signal from the
+      // handler before that end can stop the watcher of the wrapper, so the handler stops only what is left after it.
+      Try(process.getOutputStream.close()): Unit
+      // The stop of the wrapper takes at most the grace period and one second more.
+      val again = SandboxedShell.awaitEnd(process, SandboxedShell.GraceMillis + 2_000L)
+      running.remove(process): Unit
+      SandboxedShell.stop(seen :+ process.toHandle)
+      if again then Thread.currentThread().interrupt()
     // A child that holds the output open and that the handler did not see can block the reader.
     val (kept, cut) = Try(output.get(SandboxedShell.GraceMillis, TimeUnit.MILLISECONDS)).getOrElse {
       Try(process.getInputStream.close()): Unit
       output.join()
     }
     val notes = Vector(
+      Option.when(stopped.remove(process))("[the command stopped, because the turn stops]"),
       Option.when(cut > 0)(s"[$cut more bytes of output were cut]"),
       Option.when(!ended)(s"[the command stopped after $timeoutSeconds s]"),
       Option.when(ended && process.exitValue() != 0)(s"[exit code ${process.exitValue()}]")
@@ -146,11 +186,11 @@ final class SandboxedShell(
     result
 
   private def later(op: String): Nothing =
-    throw UnsupportedOperationException(s"$op: the jobs come with the session host (phase 7)")
+    throw UnsupportedOperationException(s"$op: a program call has no jobs. A work session of the host has them (10.3)")
 
 object SandboxedShell:
-  private val PollMillis  = 50L
-  private val GraceMillis = 2_000L
+  private val PollMillis           = 50L
+  private[sandbox] val GraceMillis = 2_000L
 
   /** The folder of a scope. */
   def pathOf(scope: Scope): String =
@@ -160,6 +200,15 @@ object SandboxedShell:
       case Scope.Worktree(path, _) => path
       case Scope.Scratch(path)     => path
       case Scope.Fork(path, _)     => path
+
+  /** Waits at most `millis` for the end of `process`. True when an interrupt came during the wait: the wait then ends,
+    * and the caller sets the interrupt again after its stop.
+    */
+  private def awaitEnd(process: Process, millis: Long): Boolean =
+    try
+      process.waitFor(millis, TimeUnit.MILLISECONDS): Unit
+      false
+    catch case _: InterruptedException => true
 
   /** TERM to each process that runs, a grace period, then KILL. A zombie does not run, so the grace period does not
     * wait for it.

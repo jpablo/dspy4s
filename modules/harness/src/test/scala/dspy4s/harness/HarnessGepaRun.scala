@@ -102,7 +102,7 @@ class HarnessGepaRun extends FunSuite:
         HostList.empty,
         Backends.detect(),
         Secrets.known(sys.env, Map.empty),
-        journals = keep
+        journals = (_, log) => keep(log)
       )
       val harness  = Harness.forTask(signature, env, HarnessLimits(steps = 8))
       val examples = HarnessTasks.examples.zipWithIndex
@@ -171,7 +171,7 @@ class HarnessGepaRun extends FunSuite:
         HostList.empty,
         Backends.detect(),
         Secrets.known(sys.env, Map.empty),
-        journals = keep
+        journals = (_, log) => keep(log)
       )
       val program =
         Candidate.applyTo(Harness.forTask(signature, env, HarnessLimits(steps = 8)), state.candidates(index))

@@ -1534,8 +1534,134 @@ key of the journal is the fence there. JDBC also reaches a server database, but 
 | `harness-mcp` | The early MCP server of section 6 | `harness-repl`, `harness-sandbox` for the secret paths and names, the MCP Java SDK |
 | `harness-sandbox` | The profiles, Seatbelt, bubblewrap, the proxy of the host list, the allowlist of variables, and the handler of `Shell` | `harness-kernel` |
 | `harness` | `Harness`, `drive`, the journal in memory, the mask of secrets, the handlers, the context strategies and the memory tree, the leaves. A strategy needs `RuntimeContext`, `DspyError` and `History` of dspy4s, so it is not in the kernel. | The modules above, dspy4s `programs` and `adapters` |
-| `harness-host` | The session host, the SQLite journal, the catalog, the report pass | `harness`, `sqlite-jdbc` |
+| `harness-host` | The session host, the SQLite journal, the feeds, the timers, the catalog, the jobs, and the runtime of a work session. The report pass comes with phase 9. | `harness`, `sqlite-jdbc` |
 | `harness-cli` | The terminal client | `harness-host` |
+
+### 10.6 The first version (phase 7)
+
+Phase 7 makes a coding agent for daily use, one session at a time. The plan is a typed skeleton: each type is
+complete, each new function and method has a `???` body, and the laws are tests that fail until the bodies exist.
+These choices were made with the user on 2026-11-10:
+
+- The phase has four parts: (A) the host and its journal, with chat sessions, (B) jobs and the hard stop, (C)
+  approvals, and (D) the CLI. The skeleton and the laws cover all four. The proofs go in the order A, C, D, then B,
+  so a usable CLI comes before the jobs.
+- The window strategy gives a chat step the earlier turns of the session: each message and its last reply, the
+  newest that fit the budget, and the message of the open turn. Phase 8 brings the memory tree for long sessions.
+- `Source.Parent(session, effect)` is the source of the task of an `rlm` child. It links the journal of the child to
+  the `rlm` call in the journal of its parent. Each session of a program call has its own id, and `env.journals`
+  gets the id with the journal.
+- The CLI runs on JDK 21. Its start time is a check, and an AOT cache on JDK 25 comes only if the start is too
+  slow (choice 8).
+- A work session has `WorkRuntime.workMode`: local mode with no `Sessions^` and no `Children^`. `Sessions^` comes
+  with phase 9, and the network of a work session comes with a recorded handler of `Network^`. So the CLI has no
+  flag for the mode, and a work session has no `rlm`. `rlm` stays in program calls, with the link of
+  `Source.Parent`.
+- An `exec` runs under the same wrapper as a job (`ProcessWrapper`), so a crash of the host stops it on each system.
+  The time limit of an `exec` is a loop in the JVM, so after a crash nothing else stops it.
+- Each chat turn gets a new budget of `HarnessLimits.modelCalls` model calls. `HarnessEffects` and `LeafLlm` take a
+  function that gives the budget of the current turn, and a program call gives its one budget.
+
+The parts of the plan:
+
+| Part | Types and functions | Laws |
+|---|---|---|
+| A. The host | `SessionFile`, `Writer`, `WriterJournal`, `Feeds`, `Timers`, `Catalog`, `Rebuilt`, `catalogRow`, `SessionHost`, `SessionHandle`, `SessionRuntime`, `Activation`, `LocalHost`, `WorkRuntime` | `File:`, `Writer:`, `Timer:`, `Feed:`, `Catalog:`, `Host:`, `Work:`, `Chat window:`, `Link:` |
+| B. Jobs and the hard stop | `JobTable`, `JobShell`, `ProcessWrapper`, `SandboxedShell.launch`, `SandboxedShell.stopAll`, `ScalaRepl.stopCell`, `Writer.expire`, the fence of `WorkerTicket` | `Jobs:`, `Wrapper:`, `Shell stop:`, `Stop cell:`, `Hard stop:`, `Crash:`, and the job laws of `Work:` |
+| C. Approvals | `guarded`, `GuardStop`, and the client side of `Grant` in `commandsFor` | `Guarded:`, and the approval laws of `Work:` and `CLI:` |
+| D. The CLI | `CliArgs`, `Line`, `parseLine`, `commandsFor`, `entryText`, `Cli` | `CLI:`, `CLI start:` |
+
+These points are proposals for the review:
+
+- The host trait of 10.1 is `SessionHandle`, because the guest API already has the data type `SessionRef`. It also
+  has `run`, which waits for the commit, so a client can show a refusal.
+- A session id is a random UUID. The root of the CLI is `<home>/.dspy4s/harness`, and its command line is
+  `[--root DIR] [--session ID] [FOLDER]`.
+- `HostError` holds a rejection, a failed write, the end of a session, a fenced activation and an open that failed.
+  `WriterJournal` gives a rejection as a `Rejection`, and it throws for the other errors, so `drive` stops and the
+  turn stays open, as after a crash.
+- The grace period of a hard stop is 5 seconds, and a mailbox holds 256 messages.
+- The recorder calls `guarded` for each call of each session. A program call has `Guard.allowAll`, so it does not
+  change.
+- A work session reuses `HarnessEffects`. The REPL lives as long as the activation, so a value of a turn stays for
+  the next turns.
+- The job table belongs to the open session in the host, not to the activation, so a new activation keeps the jobs.
+  `spawn` finds its `JobId` from its own open effect in the journal. `stopJob` is `StopJobs(One(job))`, and the table
+  gives the end of a job with `report` to the host, which posts the message to the writer.
+- `CatalogRow.parent` is the parent of a journal fork. Phase 7 makes no fork, so it is `None`.
+- The `test->test` dependency of `harness-host` and `harness-cli` on `harness` lets their tests use the scripted
+  effects and models of the tests of `harness`.
+
+**The review of the plan (2026-11-10).** A subagent that read the skeleton and the laws, and not the conclusions of
+the plan, found 15 gaps. The four choices above about the mode, `rlm`, `exec` and the budget came from it. These
+rules of the plan came from it too:
+
+- A ticket belongs to one activation, and `activate` gets the `WriterJournal` with that ticket. So the fence after a
+  hard stop also reaches the commits of the effects and of the recorder of a stuck activation.
+- The grace timer calls `Writer.expire` with the turn of the stop. The writer checks and closes that turn on its own
+  thread, so the timer never touches a later turn that the same worker runs.
+- The hard stop has its own operations: `ScalaRepl.stopCell` stops one cell and keeps the REPL, and
+  `SandboxedShell.stopAll` stops the running `exec` calls. An interrupt of the thread of an `exec` stops its process
+  tree first.
+- The job table starts each process on one launcher thread for its life. On Linux, `--die-with-parent` stops a
+  process when the thread that started it ends, and a cell thread ends with its cell. `sync` returns at once.
+- `LocalHost` holds an exclusive lock on `<root>/sessions/<id>.lock`, so a second host gets `OpenFailed` for an open
+  session. The catalog has a busy timeout, and a failed write of the catalog never ends a session.
+- `rebuild` gives a result for each file, so one bad file does not stop the start of the host. The file has a column
+  `required`, so a reader skips a row that it cannot decode when the row is not required (4.1). The writer gives the
+  next entry the `seq` after the largest `seq` of the file.
+- `open` takes `Option[SessionConfig]`: `None` keeps the configuration of the journal, and a mode above the ceiling of
+  the session gives `OpenFailed`.
+- A feed has an end, so a client ends after `Close` or a failed write.
+- The laws of a stop now send the stop while a turn is open, check that the processes end, and use a latch in place
+  of a sleep. The report of a job waits for a file that the test makes, so its order is fixed.
+
+**The review of the proofs of parts A, C and D (2026-11-10).** A second subagent read the bodies of the host, of the
+approvals and of the CLI, and found 12 defects, most of them with a probe. Each fix has a law that failed first. The
+rules that came from it:
+
+- A session has one end, `shutdown`, for each path: `Ended`, a failed write, and the close of the host. It runs once,
+  and it closes the activation, stops the jobs, ends the writer and frees the lock. After it, a commit starts no
+  worker. A failed write calls a hook of the writer, so the session ends, and a reopen in the same host works at once.
+  `LocalHost.open` waits for an ending session with no lock of the host held.
+- A failure of the turn machinery ends the turn and waits for the next command: the harness sends `Abort`, so the
+  waiting messages count as seen, and then commits the end of the turn. A failed activation and an exception of the
+  effects never start the same turn again by themselves. After a fatal error, no worker starts again.
+- The ticket of an activation exists before the activation, so a stop while a REPL starts gets its grace timer.
+- `JobTable.close` waits for each stop, also for a stop that `sync` started, and a second close does nothing. The report
+  of a job waits for the end of its output.
+- The recorder compares the arguments of a call with the mask, as the journal holds the pending rule and the grant. The
+  first rules of 5.5 cover `spawn` too.
+- A message after the last step of a turn belongs to the next turn in the window, as in the kernel.
+- The CLI uses `Secrets.known`, so a short placeholder key is not a known value. It ignores an empty line, removes the
+  control characters of each text, reads the state before its feed, and gives the exit code 1 after a failed write.
+- The guest API label of the journals is `phase-7`.
+
+**Part B: the jobs and the hard stop (2026-11-10).** Each rule has a law that failed first.
+
+- `exec` and each job run under `ProcessWrapper`, a bash script that holds a pipe to the host. The end of the pipe is
+  the one signal of a stop: the host closes it, or the host crashes. Then the wrapper stops the process group of the
+  command with STOP, reads the tree of the command from `ps`, and gives TERM to the group and the tree, then CONT. It
+  waits until no process of them runs, at most the grace period and one second more, and gives KILL. The wrapper ends
+  after the stop, so the end of the wrapper is the end of the stop.
+- The tree is necessary on Linux. bwrap puts the sandbox in a new session (`--new-session`, against TIOCSTI), so the
+  group does not hold it. A stop during the start of bwrap killed the first bwrap before `--die-with-parent` of the
+  second one worked, and the sandbox and its command stayed. In the container, a stop 5 ms after the start left the
+  processes in 2 of 4 runs. The STOP comes first, so no new process starts between the read of the tree and the TERM.
+- The wait does not count a zombie. A JVM that is PID 1 with no init does not reap its orphans.
+- The host sends no signal to a wrapper that runs, because a TERM to the watcher of the wrapper stops the stop.
+  `stopAll` and the job table only close the pipe. After the end of the wrapper, the host stops each process that it
+  saw and that still runs.
+- A stop cuts a long policy call. The LM call runs on a thread of its own through `PolicyRunner`, and the stop of the
+  activation cancels it. The update of the derived data of the strategy stays on the worker thread. A call that a stop
+  cut fails, and `drive` then commits no `TurnEnded(Failed)`: the next round ends the turn `Aborted`. A stop that comes
+  before the call starts is in the journal, so the call reads it and stops too.
+- `ScalaRepl` reads the stop of the turn (`stops`) while it waits for a cell, and the reset of the stop flag moved from
+  the cell thread to `dispatch`. So a stop just before the start of a cell also ends the cell, and the REPL stays.
+- The laws of `harness-host` also run on Linux: `MODULE=harness-host scripts/sandbox-linux/run.sh`. That run found the
+  start race of bwrap, and a law of `list` that read the row before the end of the turn.
+- The blueprint gives the complete phases no row of their own, because they can use each other. A row made flat edges
+  between them, and dot failed on a flat edge with a label when phase 7 became complete.
 
 ## 11. The kinds of state, and the questions that test them
 
@@ -1615,6 +1741,8 @@ and the start probe also ran on JDK 21.0.11. The code is in `tmp/design-check/`,
 | A new JVM up to the end of the first harness cell, with the preamble of 5.2 | JDK 21: 2.51 s. JDK 25: 2.51 s. JDK 25 with an AOT cache from one training run: 1.69 s, and the cache file has 64 MB. Each number is a median of 5 runs. |
 | `sqlite-jdbc` on JDK 25 | It prints a warning about native access, and the warning names the flag `--enable-native-access=ALL-UNNAMED`. JDK 21 prints no warning. |
 | The laws of `harness-sandbox` on Linux, with `scripts/sandbox-linux/run.sh`: Ubuntu 24.04, bwrap and JDK 21 on arm64, in a privileged podman container, as a normal user | 63 tests: 57 pass, and 6 of Seatbelt skip. Each probe of 5.4 gives what the profile allows. The first run found three errors, fixed here. A command made a new file `.env.new`, because a mount of bubblewrap cannot hide a name, so 5.4 now protects the secret files that exist when a command starts. The probe of bubblewrap passed in a container where each command failed. The time limit waited 2 s for a zombie when the JVM was PID 1. |
+| The laws of `harness-sandbox` and `harness-host` on Linux after part B of phase 7, in the same container | `harness-sandbox`: 72 tests, 66 pass, and 6 of Seatbelt skip. `harness-host`: 78 tests, and 78 pass. The first run of the host laws found that a stop during the start of bwrap left the sandbox and its command, because `--new-session` puts the sandbox out of the process group. The fix in the wrapper (10.6) passed a stop at 0 to 1000 ms after the start, with no process left. |
+| A live chat through the CLI of phase 7: JDK 21, Seatbelt on macOS, the private endpoint with the open model of 27B parameters, and a script that sends one message at a time | Five turns in 64 s, and the first model call took most of the first 44 s. `exec` listed the 3 files of the folder. A cell defined `val x = 41` and started the job `sleep 301` with `spawn`, and `waitJob` gave `Running`. `stopJob` and `waitJob` gave `Stopped`, with no process left. `/stop` during `exec("sleep 302")` ended the turn `Aborted` 0.2 s later, with no process left. The next turn computed `x + 1 = 42`, so the REPL stayed. `/quit` gave the exit code 0, and the journal has 53 entries. The run found one problem, fixed with a law that failed first: the output of the stopped cell showed the stack trace of the `InterruptedException` of the stop to the model. |
 | A code review of phases 1 to 3 at the high level, and the fixes | 10 findings, each fixed with a test that failed first. The worst: bwrap let a command reach the UNIX sockets of the host, so the D-Bus bus or docker.sock could start a process outside the sandbox. A probe reproduced it on Linux, and a seccomp filter fixed it. The others: the MCP files read `.env`, the proxy kept the `Host` header of the client and allowed each port with no limit of connections, the secret paths missed common credential files, `Prefix` compared raw text, `decide` took an effect id two times, `AUTH` matched `AUTHOR`, each command walked the whole scope, and the preamble did not escape a name. A review of the fixes found 6 more cases, fixed too. The sandbox has 36 mutants, the kernel 27, and each one is killed. |
 | A code review of phase 4 at the high level, and the fixes | 10 findings. 9 are fixed, each with a test that failed first, and 1 needed no change. The worst: `Files.local` wrote through a symbolic link to a place that does not exist, so a command could make the JVM write outside the root and outside the sandbox. The others: a cell thread that did not stop, or a REPL that the heap guard closed, ran on into the next cells; two calls of one cell could get a false refusal; a code field `null` ran as a cell; a copy that failed threw out of `forward` and left its part; a long text or code dropped the whole history; and three cleanups. The full copy of the workspace needed no change, because `Files.copy` on JDK 21 clones each file. A review of the fixes found 2 more cases, fixed too: a read through a link at the last part, and an exception that left the turn of the journal open. The harness has 70 laws and 29 mutants, and each mutant is killed. |
 | A first live run of `Harness` with a real model: `HarnessLiveRun`, five small tasks, Seatbelt on macOS, a private OpenAI-compatible endpoint with an open model of 27B parameters | Run 1: 5 of 5 answers right, with 1 to 3 model calls a task and 5 to 84 s a task, nearly all in the first call, with 9,000 to 27,000 characters of reasoning. The model used `read`, `exec` and `write` well. It found two gaps: the model did not see the preamble, so it wrote `submit(13)`, and `Acted.reasoning` was empty. Run 2, after the fixes and with native reasoning declared: 5 of 5 right, 1 to 4 calls and 1 to 6 s a task. The shell task now ended with `submit` and needed no finisher. A run with a reasoning field in the prompt found that the history showed `None` for that field, fixed too. The suite runs only with `HARNESS_LIVE=true`. The harness has 74 laws and 32 mutants, and each mutant is killed. |
@@ -1696,7 +1824,7 @@ What did not run:
 - The idle time of 10 minutes of the Kyo pool. The check used 2 s, and the 10 minutes comes from the Kyo source.
 - The catalog, `missing` and the report pass.
 - A real job: `spawn`, `stopJob`, the job table, the process groups and the wrapper. The kernel check has the job
-  table as a small value, with no process.
+  table as a small value, with no process. The laws of phase 7 check them now.
 - `guarded` as a real handler, and a client that sends `Grant`. The kernel check has only `guardCheck`, with no
   handler behind it.
 - What real models do after `NeedsApproval`. No test shows that a model ends its turn and asks.
@@ -1787,7 +1915,7 @@ Each phase ends with something that runs.
 | 4. One task | `Harness`, `drive`, the window strategy, `OptimizableStructure`, `ProgramRunner`, the mask of secrets. | A harness for one task that the optimizers accept. |
 | 5. RLM | `llmQuery`, `llmQueryBatched`, `rlm` and `rlmBatched` behind `Children^`, a child from a `shape`, the shared budget, the depth limit. | RLM in the harness. |
 | 6. Optimization | A metric from tests, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
-| 7. The session host | `harness-host`: the writer, feeds, timers, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `guarded`, and the client side of `Grant`. A source for the task of an `rlm` child and a link from its journal to the journal of its parent (9). `harness-cli`, its JDK and an AOT cache (choice 8). | A coding agent for daily use, one session at a time. |
+| 7. The session host | `harness-host`: the writer, feeds, timers, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `guarded`, and the client side of `Grant`. A source for the task of an `rlm` child and a link from its journal to the journal of its parent (9). The window with the earlier turns of a chat. The wrapper of each `exec` and each job (10.6). `harness-cli`, its JDK and an AOT cache (choice 8). | A coding agent for daily use, one session at a time. |
 | 8. Memory | The memory tree and its metric. | Long sessions that lose no detail. |
 | 9. The controller | `Sessions`, the report pass with a crash test, the ledger, the graph, probes, release plans. | One controller above all sessions. |
 | Later | Replay, the reviewer, jobs across a restart, `parallel` if batch calls are not enough, with the conditions of section 6, a container backend, LSP as a guest API, prompt-cache marks. | |

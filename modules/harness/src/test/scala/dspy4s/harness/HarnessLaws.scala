@@ -36,8 +36,14 @@ class HarnessLaws extends FunSuite:
     val place   = Place()
     var journal = Vector.empty[Logged]
     try
-      val env =
-        HarnessEnv(Some(place.root), place.home, HostList.empty, Backends.detect(), secrets, journals = journal = _)
+      val env = HarnessEnv(
+        Some(place.root),
+        place.home,
+        HostList.empty,
+        Backends.detect(),
+        secrets,
+        journals = (_, log) => journal = log
+      )
       val harness = Harness.forTask(
         signature,
         env,
@@ -370,7 +376,7 @@ class HarnessLaws extends FunSuite:
         HostList.empty,
         Backends.detect(),
         Secrets.none,
-        journals = journal = _
+        journals = (_, log) => journal = log
       )
       val model = RequestLm(_ => throw StackOverflowError("a fake fatal error"))
       // `intercept` does not catch a fatal error, so the test catches it.

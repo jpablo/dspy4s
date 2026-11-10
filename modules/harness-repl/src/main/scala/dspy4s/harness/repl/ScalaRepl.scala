@@ -77,6 +77,9 @@ final case class CellRun(output: String, outcome: CellOutcome):
   *   the number of cells after which the REPL is full, and the host starts a new one (protection 5 of Phase 0)
   * @param secondTry
   *   false only for a check of the second try
+  * @param stops
+  *   true while the turn of the cell stops (10.3). The wait of `run` reads it, so a stop just before the start of a
+  *   cell, which `stopCell` does not see, also ends the cell. A REPL with no host gives false.
   */
 final class ScalaRepl(
     mode       : Mode,
@@ -84,7 +87,8 @@ final class ScalaRepl(
     preamble   : String         = "",
     cellTimeout: FiniteDuration = 30.seconds,
     cellLimit  : Int            = 300,
-    secondTry  : Boolean        = true
+    secondTry  : Boolean        = true,
+    stops      : () => Boolean  = () => false
 ) extends AutoCloseable:
   import ScalaRepl.*
 
@@ -102,6 +106,7 @@ final class ScalaRepl(
   @volatile private var cellStart: Long          = 0L
   @volatile private var uncleanThread: Boolean   = false
   @volatile private var memoryStop: Boolean      = false
+  @volatile private var hostStop: Boolean        = false
   @volatile private var closedForMemory: Boolean = false
   private var confused: Boolean                  = false
 
@@ -144,6 +149,21 @@ final class ScalaRepl(
     * of an earlier cell, so the same error is a real error, and a new REPL would give it again.
     */
   def needsRestart: Boolean = confused
+
+  /** Steps 2 and 4 of the hard stop (CODE_HARNESS_DESIGN.md, 10.3, phase 7): it interrupts the thread of the running
+    * cell, and returns at once. The cell ends with a failure, and the REPL and the definitions of the earlier cells
+    * stay. A cell thread that does not end in the wait of `run` makes the REPL `unclean`. With no running cell, it does
+    * nothing. The thread that waits in `run` gets no interrupt, so the commits of the worker complete.
+    *
+    * A proposal for the review: `close` also interrupts the cell, but it removes the bindings, so a stop must not use
+    * it.
+    */
+  def stopCell(): Unit =
+    val t = worker
+    if t != null then
+      hostStop = true
+      driver.setStopFlag(true)
+      t.interrupt()
 
   def close(): Unit =
     driver.setStopFlag(true)
@@ -204,7 +224,6 @@ final class ScalaRepl(
         try
           Console.withOut(out):
             Console.withErr(out):
-              driver.setStopFlag(false)
               driver.resetEvaluationThrew()
               Right(driver.runParsed(parsed)(using before))
         // The thread of a cell gives each failure to the host: a compiler crash, and the stop of the stop flag.
@@ -213,6 +232,10 @@ final class ScalaRepl(
     val thread = Thread(null, body, key, 64L << 20)
     thread.setDaemon(true)
     memoryStop = false
+    hostStop = false
+    // The flag belongs to the loader, not to the thread. A reset here, and not on the thread of the cell, keeps a stop
+    // that comes before the cell thread runs.
+    driver.setStopFlag(false)
     cellStart = HeapGuard.allocated(thread).getOrElse(0L)
     worker = thread
     thread.start()
@@ -220,7 +243,9 @@ final class ScalaRepl(
     // The clock of the cell counts only the guest code: the gate takes out the time of the guest API calls.
     def guestNanos = System.nanoTime() - started - gate.callNanos
     try
-      try while thread.isAlive && guestNanos < cellTimeout.toNanos && !memoryStop do thread.join(10)
+      try
+        while thread.isAlive && guestNanos < cellTimeout.toNanos && !memoryStop && !hostStop && !stops() do
+          thread.join(10)
       catch
         case interrupt: InterruptedException =>
           // The caller of `run` stops, for example at the end of a program call (9). The stop flag does not reach host
@@ -228,6 +253,8 @@ final class ScalaRepl(
           stop(thread, before): Unit
           throw interrupt
       if memoryStop then stoppedForMemory(thread, before)
+      else if hostStop || stops() then
+        CellRun(stop(thread, before), CellOutcome.Failed("the host stopped the cell, because the turn stops"))
       else if thread.isAlive then timedOut(thread, before)
       else
         result.get() match
@@ -383,10 +410,15 @@ object ScalaRepl:
 
   private def firstLine(text: String): String = text.linesIterator.find(_.trim.nonEmpty).getOrElse("an exception")
 
-  /** Removes the trace that the REPL prints when the stop flag ends a cell. */
+  /** Removes the trace that the REPL prints when a stop ends a cell: the trace of the stop flag, and the trace of an
+    * `InterruptedException`, because the stop also interrupts the cell thread, for example in a guest call. The model
+    * reads the output in the next turn, and the outcome of the cell already gives the reason of the stop.
+    */
   private def withoutStopTrace(output: String): String =
     val lines = output.linesIterator.toVector
-    val start = lines.lastIndexWhere(l => l.startsWith("java.lang.ThreadDeath") || l.contains("StopRepl"))
+    val start = lines.lastIndexWhere(l =>
+      l.startsWith("java.lang.ThreadDeath") || l.contains("StopRepl") || l.startsWith("java.lang.InterruptedException")
+    )
     if start < 0 then output else lines.take(start).mkString("\n").stripTrailing()
 
   /** Removes the line of the signal of `submit`, and its trace (5.1). */

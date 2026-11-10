@@ -14,8 +14,15 @@ sources = "modules/harness/src/main/scala/dspy4s/harness"
 name = "Mutant: a failed LM call does not end the turn"
 [[mutant.edit]]
 file = "Worker.scala"
-old = "case Left(error) => journal.commit(Entry.TurnEnded(TurnOutcome.Failed(error))): Unit"
-new = "case Left(error) => Option(TurnOutcome.Failed(error)): Unit"
+old = "if !journal.state.stopping then journal.commit(Entry.TurnEnded(TurnOutcome.Failed(error))): Unit"
+new = "if !journal.state.stopping then Option(TurnOutcome.Failed(error)): Unit"
+
+[[mutant]]
+name = "Mutant: a policy call that a stop cut ends the turn Failed"
+[[mutant.edit]]
+file = "Worker.scala"
+old = "if !journal.state.stopping then journal.commit(Entry.TurnEnded(TurnOutcome.Failed(error))): Unit"
+new = "if journal.state.nextSeq >= 0 then journal.commit(Entry.TurnEnded(TurnOutcome.Failed(error))): Unit"
 
 [[mutant]]
 name = "Mutant: a stop leaves the effects of a cell open"
@@ -60,8 +67,8 @@ new = "value.length >= 0 &&"
 name = "Mutant: a call runs when the journal refuses its intent"
 [[mutant.edit]]
 file = "Handlers.scala"
-old = "throw IllegalStateException(s\"$op: the session refused the call, because it stops or the cell ended ($rejection)\")"
-new = "val _ = rejection"
+old = "rejection =>\n        throw IllegalStateException(\n          s\"$op: the session refused the call, because it stops or the cell ended ($rejection)\"\n        ),"
+new = "_ => journal.state,"
 
 [[mutant]]
 name = "Mutant: the calls of a cell share one id"
@@ -117,8 +124,8 @@ old = "(fresh, journal.commit(Entry.EffectStarted(fresh, op, args)))"
 new = "fresh"
 [[mutant.edit]]
 file = "Handlers.scala"
-old = "intent.left.foreach { rejection =>"
-new = "journal.commit(Entry.EffectStarted(id, op, args)).left.foreach { rejection =>"
+old = "val after = intent.fold("
+new = "val after = journal.commit(Entry.EffectStarted(id, op, args)).fold("
 
 [[mutant]]
 name = "Mutant: Files.local follows a link to a place that does not exist"
@@ -177,8 +184,8 @@ new = "case _                                         => store.writes"
 name = "Mutant: the call works in the workspace and not in a copy"
 [[mutant.edit]]
 file = "Harness.scala"
-old = "run(call.input, fork, layout, journal, host)"
-new = "run(call.input, env.workspace.getOrElse(fork), layout, journal, host)"
+old = "run(call.input, fork, layout, journal, host, id)"
+new = "run(call.input, env.workspace.getOrElse(fork), layout, journal, host, id)"
 
 [[mutant]]
 name = "Mutant: a failed copy leaves its part"
@@ -350,29 +357,29 @@ new = "(task, _) => rlm[A](task, Map.empty)"
 name = "Mutant: env.journals does not get the journal of a child"
 [[mutant.edit]]
 file = "Harness.scala"
-old = "      finally env.journals(journal.log)"
+old = "      finally env.journals(id, journal.log)"
 new = "      finally journal.log.size: Unit"
 
 [[mutant]]
 name = "Mutant: a query spends no call of the budget"
 [[mutant.edit]]
 file = "SubQueries.scala"
-old = "budget.spend().left.foreach(error => throw IllegalStateException(s\"llmQuery: $error\"))"
-new = "budget.spent: Unit"
+old = "budget().spend().left.foreach(error => throw IllegalStateException(s\"llmQuery: $error\"))"
+new = "budget().spent: Unit"
 
 [[mutant]]
 name = "Mutant: a policy call spends no call of the budget"
 [[mutant.edit]]
 file = "HarnessEffects.scala"
-old = "budget.spend().flatMap(_ => policy(input).left.map(_.message))"
-new = "Right(budget.spent).flatMap(_ => policy(input).left.map(_.message))"
+old = "budget().spend().flatMap(_ => runner.run(() => policy(input).left.map(_.message)))"
+new = "Right(budget().spent).flatMap(_ => runner.run(() => policy(input).left.map(_.message)))"
 
 [[mutant]]
 name = "Mutant: each child has a budget of its own"
 [[mutant.edit]]
 file = "Harness.scala"
-old = "ChildTurns(childStart(depth + 1, tree), tree.host, limits.batch)"
-new = "ChildTurns(childStart(depth + 1, tree.copy(budget = Budget(limits.modelCalls))), tree.host, limits.batch)"
+old = "ChildTurns(childStart(depth + 1, tree, id, journal), tree.host, limits.batch)"
+new = "ChildTurns(childStart(depth + 1, tree.copy(budget = Budget(limits.modelCalls)), id, journal), tree.host, limits.batch)"
 
 [[mutant]]
 name = "Mutant: a REPL at the depth limit has Children^"
@@ -412,8 +419,8 @@ old = "    try Harness.repaired(journal) {"
 new = "    val result = Harness.repaired(journal) {"
 [[mutant.edit]]
 file = "Harness.scala"
-old = "\n    finally env.journals(journal.log)\n"
-new = "\n    env.journals(journal.log)\n    result\n"
+old = "\n    finally env.journals(id, journal.log)\n"
+new = "\n    env.journals(id, journal.log)\n    result\n"
 
 [[mutant]]
 name = "Mutant: the end of a call leaves the budget of its tree open"

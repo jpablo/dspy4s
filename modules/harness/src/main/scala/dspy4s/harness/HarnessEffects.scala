@@ -8,11 +8,12 @@ import dspy4s.programs.strategies.Predict
 /** The effects of a turn of a harness (CODE_HARNESS_DESIGN.md, 4.6 and 9).
   *
   *   - `callPolicy` updates the derived data of `strategy`, projects the log of `journal` into the budget of `limits`,
-  *     spends one call of `budget`, and calls `policy` with the task and the API reference. A spent budget fails the
-  *     call with a plain error, so the turn ends `Failed` (8.2). The status says when a step is the last one, and the
-  *     code of a step that must answer does not run. A code that is empty, `null` or `None` is no code, because the
-  *     chat adapter keeps the text of an empty field (9). The trace of the call goes to the `RuntimeContext`, so an
-  *     optimizer sees it.
+  *     spends one call of the budget that `budget` gives (the budget of the program call, or of the turn of a work
+  *     session), and calls `policy` with the task and the API reference. A spent budget fails the call with a plain
+  *     error, so the turn ends `Failed` (8.2). The status says when a step is the last one, and the code of a step that
+  *     must answer does not run. A code that is empty, `null` or `None` is no code, because the chat adapter keeps the
+  *     text of an empty field (9). The trace of the call goes to the `RuntimeContext`, so an optimizer sees it. The
+  *     call of `policy` runs through `runner`, so a work session can cut it (10.3).
   *   - `runCell` starts the calls of the cell in `recorder`, takes the snapshot of the store, and runs the code in the
   *     current REPL. The writes of the store go into the result only when the cell completes. The output in the journal
   *     is `CellRun.text`, the text that the MCP server also shows (6): the hints of a compile error, and a note of a
@@ -42,8 +43,9 @@ final class HarnessEffects(
     recorder : Recorder,
     store    : SnapshotStore,
     limits   : HarnessLimits,
-    budget   : Budget,
-    host     : Option[HostThreads]
+    budget   : () => Budget,
+    host     : Option[HostThreads],
+    runner   : PolicyRunner = PolicyRunner.Direct
 )(using RuntimeContext)
     extends TurnEffects:
 
@@ -56,7 +58,7 @@ final class HarnessEffects(
       derived = data
       val view  = strategy.project(log, data, limits.budget)
       val input = PolicyInput(task, reference, view.status, view.observation, view.history)
-      budget.spend().flatMap(_ => policy(input).left.map(_.message)).map { step =>
+      budget().spend().flatMap(_ => runner.run(() => policy(input).left.map(_.message))).map { step =>
         val code = step.output.code.filterNot(c => HarnessEffects.NoCode.contains(c.strip))
         // The code of the last step of a chat does not run (4.3).
         PolicyReply(step.output.reasoning, step.output.text, if mustAnswer then None else code)
@@ -85,6 +87,12 @@ final class HarnessEffects(
 
   /** Closes the current REPL. */
   def close(): Unit = repl.close()
+
+  /** Stops the running cell of the current REPL, and keeps the REPL (10.3, phase 7: the hard stop of a session). */
+  def stopCell(): Unit = repl.stopCell()
+
+  /** True when a cell thread of the current REPL did not stop (protection 3 of Phase 0). */
+  def unclean: Boolean = repl.unclean
 
   /** Closes the current REPL, starts a new one, and gives the note of the lost names (6). The journal does not have the
     * `Observed` of this cell yet. So the note takes the names of the earlier cells from the log, and the names of this
