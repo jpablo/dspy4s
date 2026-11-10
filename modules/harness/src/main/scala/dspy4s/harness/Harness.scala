@@ -24,7 +24,9 @@ import scala.util.control.NonFatal
   * `forward` copies the workspace, starts a journal in memory and a REPL with the handlers of the mode, and sends an
   * `Input` with the values of the input fields (5.1). Then it runs `drive` and reads the last `TurnEnded`. `Submitted`
   * gives the output through `Data[O]`. `Replied` and `Exhausted` run the `finisher` leaf. `Failed`, `Aborted` and
-  * `Crashed` give a `DspyError`. This path needs no writer and no thread other than the cell thread. At the end of the
+  * `Crashed` give a `DspyError`, and the error of `Aborted` gives the reason of the stop. A copy or a private folder
+  * that fails also gives a `DspyError`. An exception closes an open turn with a stop, the entries of a repair and
+  * `TurnEnded(Crashed)` (4.4). This path needs no writer and no thread other than the cell thread. At the end of the
   * call, `env.journals` gets the journal, and the copy and the private folders are gone.
   *
   * A proposal for the review: phase 4 has only the leaves `policy` and `finisher`, the leaves that run in a program
@@ -44,17 +46,26 @@ final case class Harness[I, O](
   protected val lifecycle: ModuleLifecycle[I] = ModuleLifecycle.typed(signature.inputShape)
 
   protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
-    val fork     = Harness.forkWorkspace(env.workspace)
-    val journals = JFiles.createTempDirectory("dspy4s-journals-")
-    val layout   = Layout.forSession(env.home, journals)
-    val journal  = MemoryJournal(() => System.currentTimeMillis(), env.secrets)
-    try
-      val result =
-        try run(call.input, fork, layout, journal)
-        catch case NonFatal(e) => Left(RuntimeError("harness", s"the call stopped: $e"))
-      env.journals(journal.log)
-      result
-    finally Vector(fork, journals, layout.temp).foreach(Harness.delete)
+    val journal = MemoryJournal(() => System.currentTimeMillis(), env.secrets)
+    val result  =
+      try
+        Harness.inFolder(Harness.forkWorkspace(env.workspace)) { fork =>
+          Harness.inFolder(JFiles.createTempDirectory("dspy4s-journals-")) { journals =>
+            val layout = Layout.forSession(env.home, journals)
+            Harness.inFolder(layout.temp)(_ => run(call.input, fork, layout, journal))
+          }
+        }
+      catch
+        case NonFatal(e) =>
+          // The journal of one call has no next `Activate`, so the harness repairs an open turn here (4.4). The stop
+          // comes first: it holds the reason, and an input that no step saw then starts no new turn.
+          val reason = s"the call stopped: $e"
+          if journal.state.position != Position.NoTurn then
+            journal.run(Command.Abort(reason), Source.Harness): Unit
+            journal.commit(repair(journal.state)*): Unit
+          Left(RuntimeError("harness", reason))
+    env.journals(journal.log)
+    result
 
   /** The work of one call in the copy `fork`. */
   private def run(input: I, fork: Path, layout: Layout, journal: MemoryJournal)(using
@@ -129,8 +140,10 @@ final case class Harness[I, O](
       case TurnOutcome.Replied(_) | TurnOutcome.Exhausted =>
         finisher(FinishInput(Harness.task(signature, fields), Harness.transcript(journal.log, limits.budget)))
       case TurnOutcome.Failed(error) => Left(RuntimeError("harness", s"the turn failed: $error"))
-      case TurnOutcome.Aborted       => Left(RuntimeError("harness", "the turn stopped"))
-      case TurnOutcome.Crashed       => Left(RuntimeError("harness", "the turn did not end"))
+      case TurnOutcome.Aborted       =>
+        val reason = journal.log.reverseIterator.collectFirst { case Logged(_, _, Entry.StopRequested(r)) => r }
+        Left(RuntimeError("harness", reason.fold("the turn stopped")(r => s"the turn stopped: $r")))
+      case TurnOutcome.Crashed => Left(RuntimeError("harness", "the turn did not end"))
 
   private def rejected(rejection: Rejection): DspyError = RuntimeError("harness", s"the journal refused: $rejection")
 
@@ -140,7 +153,8 @@ object Harness extends HarnessGivens:
   val policyInstructions: String =
     "Solve the task with Scala 3 code in a REPL. At each step, give a short text and the code of one cell. The cell " +
       "runs, and the next step sees its output. Use the functions of the API reference. Keep a value for a later cell " +
-      "in a val or in the store. When you have the result, call submit with it. A step with no code ends the work."
+      "in a val or in the store. When you have the result, call submit with it. A step with no code ends the work. " +
+      "In that step, leave out the code field."
 
   /** The first instructions of the finisher leaf. */
   val finisherInstructions: String = "Give the output of the task from the steps of the work."
@@ -175,27 +189,35 @@ object Harness extends HarnessGivens:
       limits
     )
 
-  /** A copy of `workspace` in a new private temporary folder, or an empty folder for `None`. The copy keeps the
-    * symbolic links as links. The caller deletes the folder.
+  /** A copy of `workspace` in a new private folder under `parent`, or an empty folder for `None` (9). The copy keeps
+    * the symbolic links as links. It leaves out each file that is not a regular file, a folder or a link, such as a
+    * named pipe, a socket or a device, because the open of a named pipe can wait with no limit. On an exception, the
+    * part of the copy is deleted, and the exception goes on. The caller deletes the folder.
     */
-  def forkWorkspace(workspace: Option[Path]): Path =
-    val fork = Layout.real(JFiles.createTempDirectory("dspy4s-fork-"))
-    workspace.foreach { source =>
-      val from = Layout.real(source)
-      JFiles.walkFileTree(
-        from,
-        new SimpleFileVisitor[Path]:
-          override def preVisitDirectory(dir: Path, attributes: BasicFileAttributes): FileVisitResult =
-            JFiles.createDirectories(fork.resolve(from.relativize(dir).toString)): Unit
-            FileVisitResult.CONTINUE
-          override def visitFile(file: Path, attributes: BasicFileAttributes): FileVisitResult =
-            val target = fork.resolve(from.relativize(file).toString)
-            if attributes.isSymbolicLink then JFiles.createSymbolicLink(target, JFiles.readSymbolicLink(file)): Unit
-            else JFiles.copy(file, target, StandardCopyOption.COPY_ATTRIBUTES): Unit
-            FileVisitResult.CONTINUE
-      ): Unit
-    }
-    fork
+  def forkWorkspace(workspace: Option[Path], parent: Path = Path.of(System.getProperty("java.io.tmpdir"))): Path =
+    val created = JFiles.createTempDirectory(parent, "dspy4s-fork-")
+    try
+      val fork = Layout.real(created)
+      workspace.foreach { source =>
+        val from = Layout.real(source)
+        JFiles.walkFileTree(
+          from,
+          new SimpleFileVisitor[Path]:
+            override def preVisitDirectory(dir: Path, attributes: BasicFileAttributes): FileVisitResult =
+              JFiles.createDirectories(fork.resolve(from.relativize(dir).toString)): Unit
+              FileVisitResult.CONTINUE
+            override def visitFile(file: Path, attributes: BasicFileAttributes): FileVisitResult =
+              val target = fork.resolve(from.relativize(file).toString)
+              if attributes.isSymbolicLink then JFiles.createSymbolicLink(target, JFiles.readSymbolicLink(file)): Unit
+              else if !attributes.isOther then JFiles.copy(file, target, StandardCopyOption.COPY_ATTRIBUTES): Unit
+              FileVisitResult.CONTINUE
+        ): Unit
+      }
+      fork
+    catch
+      case e: Exception =>
+        delete(created)
+        throw e
 
   /** The API reference (5.1): the source text of the guest API. */
   lazy val apiReference: String = Vector("Guest.scala", "SessionTypes.scala").map { name =>
@@ -221,6 +243,11 @@ object Harness extends HarnessGivens:
       case Entry.Observed(output, outcome, _) => s"Output (${outcome.toString.takeWhile(_ != '(')}):\n$output"
     }
     Window.cut(steps.mkString("\n\n"), budget)
+
+  /** Gives the result of `body` for `folder`, and deletes the folder after it. */
+  private def inFolder[A](folder: Path)(body: Path => A): A =
+    try body(folder)
+    finally delete(folder)
 
   /** Deletes a folder and each file in it, and gives nothing when a part is gone. */
   private def delete(folder: Path): Unit =

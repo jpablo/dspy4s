@@ -8,8 +8,8 @@ import zio.blocks.schema.DynamicValue
 import scala.annotation.tailrec
 
 /** The window strategy (CODE_HARNESS_DESIGN.md, 7): no derived data, and the last steps of the open turn that fit the
-  * budget, oldest first. The last step is always in it, and a long observation is cut with no LM call (cheap steps
-  * first), with a note that says how to read the rest. A child and a rollout use it.
+  * budget, oldest first. The last step is always in it, and a long observation, text or code is cut with no LM call
+  * (cheap steps first), with a note of the rest. A child and a rollout use it.
   *
   * A proposal for the review: the budget counts characters, not tokens, so the projection needs no tokenizer.
   *
@@ -17,8 +17,9 @@ import scala.annotation.tailrec
   *   - the status of the state after the journal;
   *   - the observation: the output of the last cell of the open turn, cut to half of the budget;
   *   - the history: one message for each earlier step with an `Acted`. A message holds the input field `observation`,
-  *     the output before that step, cut to an eighth of the budget, and the output fields `text` and `code` of the
-  *     step. The newest messages that fit the rest of the budget stay, oldest first.
+  *     the output before that step, and the output fields `text` and `code` of the step. Each of the three is cut to an
+  *     eighth of the budget, so the last step fits when the status is short (9). The newest messages that fit the rest
+  *     of the budget stay, oldest first.
   */
 object Window extends ContextStrategy:
   type D = Unit
@@ -36,7 +37,7 @@ object Window extends ContextStrategy:
     val observation = outputs.lastOption.fold("")(cut(_, budget / 2))
     // The observation before step k is the output of step k - 1.
     val before   = "" +: steps.map(_.output.getOrElse(""))
-    val messages = steps.zipWithIndex.map((step, k) => message(cut(before(k), budget / 8), step))
+    val messages = steps.zipWithIndex.map((step, k) => message(before(k), step, budget / 8))
     Projection(status, observation, History(newest(messages, budget - status.length - observation.length)))
 
   /** The first `max` characters of `text`, and a note with the number of characters that the cut removed. A text of
@@ -63,9 +64,10 @@ object Window extends ContextStrategy:
         case _ => steps
     }
 
-  private def message(observation: String, step: Step): DynamicValue.Record =
+  /** The message of `step`, with each field cut to `max` characters. */
+  private def message(observation: String, step: Step, max: Int): DynamicValue.Record =
     val fields = Vector("observation" -> observation, "text" -> step.text) ++ step.code.map("code" -> _)
-    DynamicValues.record(fields.map((key, value) => key -> DynamicValues.string(value))*)
+    DynamicValues.record(fields.map((key, value) => key -> DynamicValues.string(cut(value, max)))*)
 
   /** The newest messages whose characters fit `room`, in their order. */
   private def newest(messages: Vector[DynamicValue.Record], room: Int): Vector[DynamicValue.Record] =

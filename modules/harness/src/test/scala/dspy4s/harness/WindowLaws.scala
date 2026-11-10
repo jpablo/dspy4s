@@ -4,7 +4,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.harness.kernel.{state as foldOf, *}
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
-import org.scalacheck.Prop.forAll
+import org.scalacheck.Prop.forAllNoShrink
 import zio.blocks.schema.json.Json
 
 import Support.*
@@ -38,7 +38,7 @@ class WindowLaws extends ScalaCheckSuite:
   }
 
   property("Window: the projection fits the budget") {
-    forAll(Gen.listOf(Gen.choose(0, 5_000).map("x" * _)), Gen.choose(4_000, 20_000)) { (outputs, budget) =>
+    forAllNoShrink(Gen.listOf(Gen.choose(0, 5_000).map("x" * _)), Gen.choose(4_000, 20_000)) { (outputs, budget) =>
       val p = Window.project(logOf(1L, steps(outputs.toVector)*), (), budget)
       assert(p.size <= budget, s"${p.size} > $budget")
     }
@@ -63,6 +63,23 @@ class WindowLaws extends ScalaCheckSuite:
     val kept = stepsIn(p)
     assert(kept.nonEmpty && kept.size < 10, kept.toString)
     assertEquals(kept, (10 - kept.size until 10).toVector)
+  }
+
+  test("Window: the last step stays in the history, also with a long text and a long code") {
+    val entries = Vector(
+      Entry.Activated(versions, config(steps = 50)),
+      Entry.Input(RequestId("task"), "the task", Map.empty),
+      Entry.TurnStarted,
+      Entry.StepStarted(0),
+      Entry.Acted("", "text-0 " + "t" * 30_000, Some("c" * 30_000)),
+      Entry.Observed("out", CellOutcome.Ok, Map.empty),
+      Entry.StepStarted(1)
+    )
+    Vector(4_000, 40_000).foreach { budget =>
+      val p = Window.project(logOf(1L, entries*), (), budget)
+      assertEquals(stepsIn(p), Vector(0), s"budget $budget")
+      assert(p.size <= budget, s"${p.size} > $budget")
+    }
   }
 
   test("Window: before the first cell, the observation is empty and the history has no step") {

@@ -8,6 +8,9 @@ import munit.FunSuite
 import zio.blocks.schema.json.Json
 
 import java.nio.file.Files as JFiles
+import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.{CountDownLatch, TimeUnit}
+import scala.util.{Failure, Success, Try}
 
 import Support.*
 
@@ -77,6 +80,58 @@ class HandlerLaws extends FunSuite:
     assertEquals(effects(j), Vector.empty)
   }
 
+  test("Recorded: after close, a call does not run, and it commits no intent") {
+    val j        = journal()
+    val cell     = inCell(j)
+    val recorder = Recorder(j)
+    recorder.startCell(cell)
+    recorder.close()
+    var ran = false
+    intercept[RuntimeException](recorder.call("write", Json.String("a.txt")) { ran = true }): Unit
+    assert(!ran)
+    assertEquals(effects(j), Vector.empty)
+  }
+
+  /** A journal that holds the commit of the intent with the id 0 until the intent with the id 1 is in the log, or until
+    * 500 ms pass.
+    */
+  private final class SecondFirst(inner: MemoryJournal) extends Journal:
+    val firstWaits: CountDownLatch                                             = CountDownLatch(1)
+    val secondDone: CountDownLatch                                             = CountDownLatch(1)
+    def state: SessionState                                                    = inner.state
+    def log: Vector[Logged]                                                    = inner.log
+    def run(command: Command, sender: Source): Either[Rejection, SessionState] =
+      val n = command match
+        case Command.Commit(Vector(Entry.EffectStarted(id, _, _))) => id.n
+        case _                                                     => -1
+      if n == 0 then
+        firstWaits.countDown()
+        secondDone.await(500, TimeUnit.MILLISECONDS): Unit
+      val result = inner.run(command, sender)
+      if n == 1 then secondDone.countDown()
+      result
+
+  test("Recorded: two calls of a cell on two threads both run, also when the second one could commit first") {
+    val inner    = journal()
+    val cell     = inCell(inner)
+    val j        = SecondFirst(inner)
+    val recorder = Recorder(j)
+    recorder.startCell(cell)
+    def start(op: String): (Thread, AtomicReference[Try[String]]) =
+      val result = AtomicReference[Try[String]](Failure(IllegalStateException("the call did not end")))
+      val thread = Thread(() => result.set(Try(recorder.call(op, Json.Null)(op))))
+      thread.start()
+      (thread, result)
+    val (first, firstResult) = start("first")
+    assert(j.firstWaits.await(5, TimeUnit.SECONDS), "the first call did not come to its commit")
+    val (second, secondResult) = start("second")
+    first.join(5_000)
+    second.join(5_000)
+    assertEquals(firstResult.get, Success("first"))
+    assertEquals(secondResult.get, Success("second"))
+    assertEquals(effects(inner).collect { case Entry.EffectStarted(id, _, _) => id.n }, Vector(0, 1))
+  }
+
   test("Recorded: a call that throws gets an Error outcome, and the exception goes on to the cell") {
     val j        = journal()
     val cell     = inCell(j)
@@ -142,6 +197,32 @@ class HandlerLaws extends FunSuite:
       intercept[RuntimeException](f.read("link")): Unit
       intercept[RuntimeException](f.write("link", "changed")): Unit
       intercept[RuntimeException](f.read(place.secrets.resolve("id_fake").toString)): Unit
+      assertEquals(JFiles.readString(place.outside.resolve("o.txt")), "FAKE-OUTSIDE")
+    }
+  }
+
+  test("Files: a link to a place that does not exist cannot be read or written, and nothing appears outside") {
+    withPlace { place =>
+      val f      = files(place)
+      val file   = place.outside.resolve("new.txt")
+      val folder = place.outside.resolve("new-folder")
+      JFiles.createSymbolicLink(place.root.resolve("to-file"), file): Unit
+      JFiles.createSymbolicLink(place.root.resolve("to-folder"), folder): Unit
+      intercept[RuntimeException](f.write("to-file", "changed")): Unit
+      intercept[RuntimeException](f.write("to-folder/x.txt", "changed")): Unit
+      intercept[RuntimeException](f.read("to-file")): Unit
+      assert(!JFiles.exists(file), "a write went out of the root")
+      assert(!JFiles.exists(folder), "a write went out of the root")
+    }
+  }
+
+  test("Files: a file with a second hard link cannot be read or written, because the link can come from outside") {
+    withPlace { place =>
+      val f = files(place)
+      JFiles.createLink(place.root.resolve("hard.txt"), place.outside.resolve("o.txt")): Unit
+      intercept[RuntimeException](f.write("hard.txt", "changed")): Unit
+      intercept[RuntimeException](f.edit("hard.txt", "FAKE", "x")): Unit
+      intercept[RuntimeException](f.read("hard.txt")): Unit
       assertEquals(JFiles.readString(place.outside.resolve("o.txt")), "FAKE-OUTSIDE")
     }
   }

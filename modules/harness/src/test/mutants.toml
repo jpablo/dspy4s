@@ -98,6 +98,42 @@ file = "Handlers.scala"
 old = "recorder.call(\"now\", Json.Null)(turn.now())"
 new = "turn.now()"
 
+[[mutant]]
+name = "Mutant: a call runs after close"
+[[mutant.edit]]
+file = "Handlers.scala"
+old = "if closed then"
+new = "if closed && false then"
+
+[[mutant]]
+name = "Mutant: the id and the intent of a call are not atomic"
+[[mutant.edit]]
+file = "Handlers.scala"
+old = "val (id, intent) = synchronized {"
+new = "val id = synchronized {"
+[[mutant.edit]]
+file = "Handlers.scala"
+old = "(fresh, journal.commit(Entry.EffectStarted(fresh, op, args)))"
+new = "fresh"
+[[mutant.edit]]
+file = "Handlers.scala"
+old = "intent.left.foreach { rejection =>"
+new = "journal.commit(Entry.EffectStarted(id, op, args)).left.foreach { rejection =>"
+
+[[mutant]]
+name = "Mutant: Files.local follows a link to a place that does not exist"
+[[mutant.edit]]
+file = "Handlers.scala"
+old = "else if JFiles.exists(path, LinkOption.NOFOLLOW_LINKS) then None"
+new = "else if false then None"
+
+[[mutant]]
+name = "Mutant: Files.local accepts a file with a second hard link"
+[[mutant.edit]]
+file = "Handlers.scala"
+old = "LocalFiles.links(target) > 1"
+new = "LocalFiles.links(target) > 2"
+
 # ── The window ──
 
 [[mutant]]
@@ -114,6 +150,13 @@ file = "Window.scala"
 old = "outputs.lastOption.fold(\"\")(cut(_, budget / 2))"
 new = "outputs.lastOption.getOrElse(\"\")"
 
+[[mutant]]
+name = "Mutant: the window does not cut the text and the code"
+[[mutant.edit]]
+file = "Window.scala"
+old = "DynamicValues.string(cut(value, max))"
+new = "DynamicValues.string(if key == \"observation\" then cut(value, max) else value)"
+
 # ── The harness ──
 
 [[mutant]]
@@ -127,8 +170,50 @@ new = "case _                                         => store.writes"
 name = "Mutant: the call works in the workspace and not in a copy"
 [[mutant.edit]]
 file = "Harness.scala"
-old = "val fork     = Harness.forkWorkspace(env.workspace)"
-new = "val fork     = env.workspace.getOrElse(Harness.forkWorkspace(None))"
+old = "run(call.input, fork, layout, journal)"
+new = "run(call.input, env.workspace.getOrElse(fork), layout, journal)"
+
+[[mutant]]
+name = "Mutant: a failed copy leaves its part"
+[[mutant.edit]]
+file = "Harness.scala"
+old = "        delete(created)\n        throw e"
+new = "        throw e"
+
+[[mutant]]
+name = "Mutant: the copy opens a named pipe"
+[[mutant.edit]]
+file = "Harness.scala"
+old = "else if !attributes.isOther then JFiles.copy("
+new = "else JFiles.copy("
+
+[[mutant]]
+name = "Mutant: an exception leaves the turn open"
+[[mutant.edit]]
+file = "Harness.scala"
+old = "if journal.state.position != Position.NoTurn then"
+new = "if false then"
+
+[[mutant]]
+name = "Mutant: a stop gives no reason"
+[[mutant.edit]]
+file = "Harness.scala"
+old = "(r => s\"the turn stopped: $r\")"
+new = "(_ => \"the turn stopped\")"
+
+[[mutant]]
+name = "Mutant: the harness goes on after the REPL closes"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "HarnessEffects.unsafe(repl).foreach { reason =>"
+new = "HarnessEffects.unsafe(repl).filter(_ => false).foreach { reason =>"
+
+[[mutant]]
+name = "Mutant: a code of null runs"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "Set(\"\", \"null\", \"None\")"
+new = "Set(\"\")"
 
 [[mutant]]
 name = "Mutant: the two leaves have one name"

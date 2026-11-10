@@ -3,10 +3,14 @@ package dspy4s.harness
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.harness.kernel.*
+import dspy4s.harness.repl.HeapGuard
 import dspy4s.harness.sandbox.{Backends, HostList}
 import munit.FunSuite
 
-import java.nio.file.{Files, Path}
+import java.nio.file.{Files, LinkOption, Path}
+import scala.concurrent.duration.*
+import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.util.Try
 
 import Models.*
 
@@ -67,6 +71,79 @@ class HarnessLaws extends FunSuite:
       assertEquals(ended(journal), Vector(TurnOutcome.Replied("It is 42.")))
       assertEquals(model.requests.size, 2)
     }
+  }
+
+  test("Harness: a code field with the text null or None is no code, so the reply runs the finisher") {
+    Vector("null", "None").foreach { empty =>
+      RuntimeEnvironment.resetForTests()
+      val model =
+        ScriptLm(s"[[ ## text ## ]]\nIt is 42.\n\n[[ ## code ## ]]\n$empty\n\n[[ ## completed ## ]]", answer("42"))
+      call(model) { (_, result, journal) =>
+        assertEquals(result, Right(Answer("42")), empty)
+        assertEquals(ended(journal), Vector(TurnOutcome.Replied("It is 42.")), empty)
+      }
+    }
+  }
+
+  test("Harness: after the heap guard closes the REPL, the turn stops and calls the policy no more") {
+    val before = HeapGuard.pressure
+    val spin   = "locally { var n = 0L; while true do n += 1 }"
+    val model  = ScriptLm(policy("spin", Some(spin)), policy("again", Some("submit(\"x\")")), answer("x"))
+    try
+      // The pressure starts after the first policy call, so the guard stops the cell and not the preamble.
+      HeapGuard.pressure = () => model.requests.nonEmpty
+      call(model) { (_, result, journal) =>
+        assert(result.isLeft, result.toString)
+        assert(result.left.exists(_.message.contains("heap guard")), result.toString)
+        assertEquals(model.requests.size, 1)
+        assertEquals(ended(journal), Vector(TurnOutcome.Aborted), journal.mkString("\n"))
+      }
+    finally HeapGuard.pressure = before
+  }
+
+  test("Harness: when the REPL cannot start, the call gives a DspyError, and the journal ends the turn as Crashed") {
+    val before = HeapGuard.pressure
+    try
+      // Under pressure from the start, the guard stops the preamble, so the REPL does not start.
+      HeapGuard.pressure = () => true
+      call(ScriptLm(policy("done", Some("submit(\"x\")")))) { (_, result, journal) =>
+        assert(result.isLeft, result.toString)
+        assertEquals(ended(journal), Vector(TurnOutcome.Crashed), journal.mkString("\n"))
+        assert(Support.isTurn(journal.map(_.entry).dropWhile(_ != Entry.TurnStarted).drop(1)), journal.mkString("\n"))
+      }
+    finally HeapGuard.pressure = before
+  }
+
+  private def count(folder: Path): Long =
+    val paths = Files.list(folder)
+    try paths.count()
+    finally paths.close()
+
+  test("Harness: a workspace that cannot be copied gives a DspyError, and no part of the copy stays") {
+    val place  = Place()
+    val closed = place.root.resolve("closed.txt")
+    try
+      Files.writeString(closed, "FAKE-CLOSED"): Unit
+      Files.setPosixFilePermissions(closed, java.util.Set.of()): Unit
+      assume(!Files.isReadable(closed), "the test runs as a user that reads each file")
+      intercept[java.io.IOException](Harness.forkWorkspace(Some(place.root), place.temp)): Unit
+      assertEquals(count(place.temp), 0L)
+      val env    = HarnessEnv(Some(place.root), place.home, HostList.empty, Backends.detect(), Secrets.none)
+      val result = withModel(ScriptLm())(Harness.forTask(signature, env)(Question("q")))
+      assert(result.isLeft, result.toString)
+    finally place.close()
+  }
+
+  test("Harness: the copy of the workspace leaves out a named pipe, so the copy does not wait for a writer") {
+    val place = Place()
+    try
+      val pipe = place.root.resolve("pipe")
+      assume(Try(ProcessBuilder("mkfifo", pipe.toString).start().waitFor()).toOption.contains(0), "no mkfifo here")
+      val copy = Future(Harness.forkWorkspace(Some(place.root), place.temp))(using ExecutionContext.global)
+      val fork = Await.result(copy, 10.seconds)
+      assertEquals(Files.readString(fork.resolve("a.txt")), "FAKE-A")
+      assert(!Files.exists(fork.resolve("pipe"), LinkOption.NOFOLLOW_LINKS))
+    finally place.close()
   }
 
   test("Harness: the step limit runs the finisher") {

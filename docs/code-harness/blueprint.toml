@@ -2065,7 +2065,7 @@ group = "worker"
 kind = "data"
 name = "TurnEffects"
 ref = "4.6"
-uses = ["session-state", "policy-reply", "cell-result"]
+uses = ["policy-reply", "cell-result"]
 text = "The effects of a turn: callPolicy and runCell. A test gives a script, and a harness gives its policy leaf and a REPL."
 
 [[node]]
@@ -2448,7 +2448,7 @@ kind = "law"
 name = "Recorded:"
 ref = "4.7"
 uses = ["recorded", "recorder", "local-files", "snapshot-store", "journal-turn", "memory-journal"]
-text = "The law Effect for real handlers: a call commits its intent before it runs and its outcome after, the calls of a cell get the ids 0, 1 and 2, a call after a stop does not run, and each guest API call of the bindings goes through the recorder."
+text = "The law Effect for real handlers: a call commits its intent before it runs and its outcome after, the calls of a cell get the ids 0, 1 and 2, a call after a stop or after close does not run, two calls of a cell on two threads both run, and each guest API call of the bindings goes through the recorder."
 
 [[node]]
 id = "law-local-files"
@@ -2457,7 +2457,7 @@ kind = "law"
 name = "Files:"
 ref = "5.4"
 uses = ["local-files"]
-text = "Files.local reads and writes only under the root, also through a symbolic link, keeps .git read-only, and hides the secret files that exist. edit replaces the one place of a text."
+text = "Files.local reads and writes only under the root, also through a symbolic link, keeps .git read-only, and hides the secret files that exist. It refuses a link to a place that does not exist and a file with a second hard link. edit replaces the one place of a text."
 
 [[node]]
 id = "law-snapshot-store"
@@ -2492,7 +2492,7 @@ kind = "law"
 name = "Window:"
 ref = "7"
 uses = ["window"]
-text = "project depends only on the entries and the derived data, fits the budget, keeps the last observation and the newest steps, oldest first, and cuts a long observation with a note. update gives no derived data."
+text = "project depends only on the entries and the derived data, fits the budget, keeps the last observation and the newest steps, oldest first, keeps the last step also with a long text and code, and cuts a long value with a note. update gives no derived data."
 
 [[node]]
 id = "law-status"
@@ -2518,7 +2518,7 @@ kind = "law"
 name = "Harness:"
 ref = "9"
 uses = ["harness"]
-text = "A policy that submits gives the output through Data, and in RawPrediction.values. A reply with no code and the step limit run the finisher. The call works in a copy of the workspace, exec runs in the sandbox, and a failed model call gives a DspyError. The store keeps only the writes of a cell that completed. The journal of a call is one turn, and it holds no known secret. The REPL has only the givens of the task mode."
+text = "A policy that submits gives the output through Data, and in RawPrediction.values. A reply with no code and the step limit run the finisher. The call works in a copy of the workspace, exec runs in the sandbox, and a failed model call gives a DspyError. The store keeps only the writes of a cell that completed. A code of null or None is no code. After the heap guard closes the REPL, the turn stops. A workspace that cannot be copied gives a DspyError and leaves no copy, and the copy leaves out a named pipe. The journal of a call is one turn, and it holds no known secret. The REPL has only the givens of the task mode."
 
 [[group]]
 id = "structure-laws"

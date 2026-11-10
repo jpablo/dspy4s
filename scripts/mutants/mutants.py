@@ -1,7 +1,7 @@
 """Runs the named mutants of a module: each one breaks one rule, and at least one law must fail.
 
 Usage:
-    python3 scripts/mutants/mutants.py modules/harness-kernel/src/test/mutants.toml [--only TEXT] [--timeout SECONDS]
+    python3 scripts/mutants/mutants.py modules/harness-kernel/src/test/mutants.toml [--only TEXT ...] [--timeout SECONDS]
 
 The file lists the mutants (see modules/harness-kernel/src/test/mutants.toml). For each mutant, the script applies its
 edits, runs `sbt <project>/test`, and restores the code, also after an error or an interrupt. A mutant is killed
@@ -11,8 +11,9 @@ the tests, and the mutant is killed. After a SIGKILL of the script itself, a mut
 shows it, because the old text of that mutant is gone.
 
 The script writes the results as a JUnit report, modules/<module>/target/test-reports/TEST-mutants.xml, with one test
-case for each mutant. The blueprint reads that report like the other test reports. The exit code is 1 when a mutant
-survives or does not compile. It needs Python 3.12 and sbt.
+case for each mutant. With `--only`, the report keeps the earlier results of the other mutants, so a long list can run
+in parts. The blueprint reads that report like the other test reports. The exit code is 1 when a mutant survives or
+does not compile. It needs Python 3.12 and sbt.
 """
 
 import argparse
@@ -99,17 +100,26 @@ def run_one(project: str, sources: Path, mutant: dict, timeout: float) -> Result
     return Result(mutant["name"], "killed", f"{failed} tests fail: " + "; ".join(t for _, t in laws[:3]), seconds)
 
 
-def write_report(module: str, results: list[Result]) -> Path:
-    suite = ET.Element("testsuite", name=f"{module}.mutants", tests=str(len(results)),
-                       failures=str(sum(r.status == "survived" for r in results)),
-                       errors=str(sum(r.status == "error" for r in results)))
+def write_report(module: str, results: list[Result], names: list[str], merge: bool) -> Path:
+    """Writes the report of `results`. With `merge`, the report also keeps each earlier result of a mutant that did
+    not run now, so runs with `--only` give one report of the whole list. `names` is the whole list, in its order, and
+    a result of a name that is not in it is gone."""
+    path = ROOT / "modules" / module / "target/test-reports/TEST-mutants.xml"
+    cases: dict[str, ET.Element] = {}
+    if merge and path.exists():
+        cases = {c.get("name", ""): c for c in ET.parse(path).getroot().iter("testcase") if c.get("name") in names}
     for r in results:
-        case = ET.SubElement(suite, "testcase", classname=f"{module}.mutants", name=r.name, time=f"{r.seconds:.1f}")
+        case = ET.Element("testcase", classname=f"{module}.mutants", name=r.name, time=f"{r.seconds:.1f}")
         if r.status == "survived":
             ET.SubElement(case, "failure", message=r.detail)
         elif r.status == "error":
             ET.SubElement(case, "error", message=r.detail)
-    path = ROOT / "modules" / module / "target/test-reports/TEST-mutants.xml"
+        cases[r.name] = case
+    ordered = [cases[n] for n in names if n in cases]
+    suite = ET.Element("testsuite", name=f"{module}.mutants", tests=str(len(ordered)),
+                       failures=str(sum(c.find("failure") is not None for c in ordered)),
+                       errors=str(sum(c.find("error") is not None for c in ordered)))
+    suite.extend(ordered)
     path.parent.mkdir(parents=True, exist_ok=True)
     ET.ElementTree(suite).write(path, encoding="utf-8", xml_declaration=True)
     return path
@@ -118,13 +128,14 @@ def write_report(module: str, results: list[Result]) -> Path:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("mutants", type=Path, help="the TOML file with the mutants")
-    parser.add_argument("--only", help="run only the mutants whose name holds this text")
+    parser.add_argument("--only", action="append",
+                        help="run only the mutants whose name holds this text; give it more than once for more texts")
     parser.add_argument("--check", action="store_true", help="only check that each edit applies, with no sbt run")
     parser.add_argument("--timeout", type=float, default=300.0, help="the seconds of the tests of one mutant")
     args = parser.parse_args()
     data = tomllib.loads((ROOT / args.mutants).read_text())
     module, project, sources = data["module"], data["project"], ROOT / data["sources"]
-    mutants = [m for m in data["mutant"] if not args.only or args.only in m["name"]]
+    mutants = [m for m in data["mutant"] if not args.only or any(t in m["name"] for t in args.only)]
     if args.check:
         problems = []
         for m in mutants:
@@ -149,7 +160,7 @@ def main() -> None:
     after, late = run_tests(project, args.timeout)
     if late or not re.search(r"Passed: Total \d+, Failed 0, Errors 0", after):
         raise SystemExit(f"the laws of {module} fail after the restore of the code: look at the files of {sources}")
-    path = write_report(module, results)
+    path = write_report(module, results, [m["name"] for m in data["mutant"]], merge=args.only is not None)
     killed = sum(r.status == "killed" for r in results)
     print(f"{killed} of {len(results)} mutants killed. The report is {path.relative_to(ROOT)}.")
     if killed != len(results):

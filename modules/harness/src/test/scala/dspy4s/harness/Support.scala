@@ -92,7 +92,7 @@ object Support:
     val mustAnswer: ArrayBuffer[Boolean] = ArrayBuffer.empty
     val ran: ArrayBuffer[(Long, String)] = ArrayBuffer.empty
 
-    def callPolicy(state: SessionState, last: Boolean): Either[String, PolicyReply] =
+    def callPolicy(last: Boolean): Either[String, PolicyReply] =
       mustAnswer += last: Unit
       replies.lift(mustAnswer.size - 1).getOrElse(Left("the script has no more replies"))
 

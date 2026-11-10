@@ -16,10 +16,14 @@ final case class PolicyReply(reasoning: String, text: String, code: Option[Strin
   */
 final case class CellResult(output: String, outcome: CellOutcome, writes: Map[String, Json]) derives CanEqual
 
-/** The effects of a turn (4.6). A test gives a script, and a harness gives its policy leaf and a REPL. */
+/** The effects of a turn (4.6). A test gives a script, and a harness gives its policy leaf and a REPL.
+  *
+  * A proposal for the review: the design gives `callPolicy` the state after `StepStarted`. The policy of a harness
+  * reads the log of the journal, so `callPolicy` takes only `mustAnswer`.
+  */
 trait TurnEffects:
-  def callPolicy(state: SessionState, mustAnswer: Boolean): Either[String, PolicyReply]
-  def runCell(cell    : Long, code              : String): CellResult
+  def callPolicy(mustAnswer: Boolean): Either[String, PolicyReply]
+  def runCell(cell         : Long, code: String): CellResult
 
 /** A journal (4.6): the committed entries and their fold. `run` commits the entries that `decide` gives for a command.
   *
@@ -38,8 +42,8 @@ trait Journal:
 /** Runs the open turn to its end (4.6), and gives the state at `Next.Wait`. The worker holds no decision: `next` says
   * what comes, and the journal holds each result.
   *
-  *   - `CallPolicy`: `StepStarted`, then the `Acted` of the reply from the policy. A failed call ends the turn with
-  *     `TurnEnded(Failed)`.
+  *   - `CallPolicy`: `StepStarted`, then the `Acted` of the reply from the policy. The policy runs only when the
+  *     journal accepts the `StepStarted`. A failed call ends the turn with `TurnEnded(Failed)`.
   *   - `RunCell`: the cell, then `EffectDone(Unknown)` for each effect that a stop left open, and `Observed`.
   *   - `End`: the entries of `closing`, and `TurnEnded`.
   *
@@ -56,8 +60,8 @@ def drive(journal: Journal, effects: TurnEffects): SessionState =
   next(current) match
     case Next.Wait                         => current
     case Next.CallPolicy(step, mustAnswer) =>
-      journal.commit(Entry.StepStarted(step)).foreach { started =>
-        effects.callPolicy(started, mustAnswer) match
+      journal.commit(Entry.StepStarted(step)).foreach { _ =>
+        effects.callPolicy(mustAnswer) match
           case Right(reply) => journal.run(
               Command.Commit(Vector(Entry.Acted(reply.reasoning, reply.text, reply.code))),
               Source.Policy
