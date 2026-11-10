@@ -34,13 +34,16 @@ object HarnessEnv:
     */
   val taskMode: Mode = Mode(Access.Full, Access.Full, Access.None, Access.None, Access.None, Access.None, Access.Full)
 
-/** The limits of a call, which an optimizer must not change (9). `budget` counts the characters of a projection. */
+/** The limits of a call, which an optimizer must not change (9). `budget` counts the characters of a projection. After
+  * `cellLimit` cells, the REPL is full, and the harness starts a new REPL (6).
+  */
 final case class HarnessLimits(
     steps         : Int            = 10,
     budget        : Int            = 40_000,
     cellTimeout   : FiniteDuration = 30.seconds,
     execTimeout   : Int            = 600,
-    maxObservation: Int            = 4_000
+    maxObservation: Int            = 4_000,
+    cellLimit     : Int            = 300
 ) derives CanEqual
 
 /** The input of the finisher leaf (9): the task, and the steps of the call as text. */

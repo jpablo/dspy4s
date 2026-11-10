@@ -1594,6 +1594,15 @@ uses = ["scala-repl"]
 text = "Under heap pressure, the guard stops the running cell that allocated the most, and its REPL closes (protection 4 of Phase 0)."
 
 [[node]]
+id = "law-echo"
+group = "scala-repl-laws"
+kind = "law"
+name = "Echo:"
+ref = "6"
+uses = ["scala-repl"]
+text = "The echo of a long val is cut to a few hundred characters, and println keeps its whole text."
+
+[[node]]
 id = "law-arrays"
 group = "scala-repl-laws"
 kind = "law"
@@ -2545,7 +2554,7 @@ kind = "law"
 name = "Harness:"
 ref = "9"
 uses = ["harness"]
-text = "A policy that submits gives the output through Data, and in RawPrediction.values. A reply with no code and the step limit run the finisher. The call works in a copy of the workspace, exec runs in the sandbox, and a failed model call gives a DspyError. The store keeps only the writes of a cell that completed. A code of null or None is no code. The task of the policy shows the preamble, and the reasoning of a reply, native or written, goes into the Acted. After the heap guard closes the REPL, the turn stops. The policy sees the hint of a compile error and the note of a timeout. After a cell that confuses the compiler, a new REPL runs the next cells, and the policy learns the lost names; another compile error starts no new REPL. A workspace that cannot be copied gives a DspyError and leaves no copy, and the copy leaves out a named pipe. The journal of a call is one turn, and it holds no known secret. The REPL has only the givens of the task mode."
+text = "A policy that submits gives the output through Data, and in RawPrediction.values. A reply with no code and the step limit run the finisher. The call works in a copy of the workspace, exec runs in the sandbox, and a failed model call gives a DspyError. The store keeps only the writes of a cell that completed. A code of null or None is no code. The task of the policy shows the preamble, and the reasoning of a reply, native or written, goes into the Acted. After the heap guard closes the REPL, the turn stops. The policy sees the hint of a compile error and the note of a timeout. After a cell that confuses the compiler, a new REPL runs the next cells, and the policy learns the lost names; another compile error starts no new REPL. A full REPL leads to a new REPL, and the hint of a compile error stays in the observation after the cut. A workspace that cannot be copied gives a DspyError and leaves no copy, and the copy leaves out a named pipe. The journal of a call is one turn, and it holds no known secret. The REPL has only the givens of the task mode."
 
 [[group]]
 id = "structure-laws"

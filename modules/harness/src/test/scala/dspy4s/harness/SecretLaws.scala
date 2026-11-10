@@ -3,7 +3,7 @@ package dspy4s.harness
 import dspy4s.harness.kernel.*
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
-import org.scalacheck.Prop.forAll
+import org.scalacheck.Prop.forAllNoShrink
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.json.Json
 
@@ -31,14 +31,14 @@ class SecretLaws extends ScalaCheckSuite:
   private val maskedTexts: Gen[(Secrets, String)] = secrets.flatMap(s => texts(s).map((s, _)))
 
   property("Secret: no known value stays in a masked text") {
-    forAll(maskedTexts) { (known, text) =>
+    forAllNoShrink(maskedTexts) { (known, text) =>
       val masked = known.maskText(text)
       known.values.values.foreach(value => assert(!masked.contains(value), s"$value stays in $masked"))
     }
   }
 
   property("Secret: a second mask changes nothing") {
-    forAll(maskedTexts) { (known, text) =>
+    forAllNoShrink(maskedTexts) { (known, text) =>
       val once = known.maskText(text)
       assertEquals(known.maskText(once), once)
     }

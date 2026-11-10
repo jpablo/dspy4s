@@ -120,7 +120,7 @@ final case class Harness[I, O](
         store = Some(store)
       )
       val handlers = recorded(bindings, recorder, Some(fork))
-      val newRepl  = () => ScalaRepl(env.mode, handlers, text, limits.cellTimeout)
+      val newRepl  = () => ScalaRepl(env.mode, handlers, text, limits.cellTimeout, limits.cellLimit)
       val effects  =
         HarnessEffects(task, Harness.apiReference, policy, strategy, journal, newRepl, recorder, store, limits)
       try

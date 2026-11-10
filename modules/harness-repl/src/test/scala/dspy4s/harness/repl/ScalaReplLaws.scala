@@ -310,6 +310,18 @@ class ScalaReplLaws extends munit.FunSuite:
     finally r.close()
   }
 
+  // The REPL shows the value of each val that a cell defines. A long value then fills the observation a second time.
+  test("Echo: a long val gets a short echo, and println shows its whole text") {
+    val r = repl()
+    try
+      val kept = r.run("val big = \"x\" * 5000")
+      assertEquals(kept.outcome, CellOutcome.Ok, kept.toString)
+      assert(kept.output.length < 1_000, s"${kept.output.length} characters of echo")
+      val printed = r.run("println(\"y\" * 5000)")
+      assertEquals(printed.output.count(_ == 'y'), 5_000)
+    finally r.close()
+  }
+
   test("Cell clock: the timeout stops a loop in guest code, and a later cell runs") {
     val r = repl(cellTimeout = 1.second)
     try

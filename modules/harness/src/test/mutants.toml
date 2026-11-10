@@ -219,8 +219,22 @@ new = "val stop = HarnessEffects.unsafe(repl).filter(_ => false)"
 name = "Mutant: a REPL that confuses the compiler runs the next cell"
 [[mutant.edit]]
 file = "HarnessEffects.scala"
-old = "if stop.isEmpty && repl.needsRestart then"
-new = "if stop.isEmpty && false then"
+old = "if repl.needsRestart then Some("
+new = "if false then Some("
+
+[[mutant]]
+name = "Mutant: a full REPL runs the next cell"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "else if repl.full then Some("
+new = "else if false then Some("
+
+[[mutant]]
+name = "Mutant: the note of a full REPL does not have the names of the last cell"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "if run.outcome == CellOutcome.Ok then topLevelNames"
+new = "if false then topLevelNames"
 
 [[mutant]]
 name = "Mutant: a code of null runs"
@@ -233,8 +247,15 @@ new = "Set(\"\")"
 name = "Mutant: the policy sees only the output of a cell"
 [[mutant.edit]]
 file = "HarnessEffects.scala"
-old = "Window.cut(run.text, limits.maxObservation)"
-new = "Window.cut(run.output, limits.maxObservation)"
+old = "Window.cut(run.text, max)"
+new = "Window.cut(run.output, max)"
+
+[[mutant]]
+name = "Mutant: the cut removes the hint of a compile error"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = ".filterNot(shown.contains)"
+new = ".filter(_ => false)"
 
 [[mutant]]
 name = "Mutant: the reasoning of a step is lost"

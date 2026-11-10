@@ -2,7 +2,7 @@ package dspy4s.harness
 
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.harness.kernel.{CellOutcome, Command, Source}
-import dspy4s.harness.repl.{ScalaRepl, lostNames}
+import dspy4s.harness.repl.{CellRun, ScalaRepl, lostNames, topLevelNames}
 import dspy4s.programs.strategies.Predict
 
 /** The effects of a turn of a harness (CODE_HARNESS_DESIGN.md, 4.6 and 9).
@@ -15,13 +15,15 @@ import dspy4s.programs.strategies.Predict
   *   - `runCell` starts the calls of the cell in `recorder`, takes the snapshot of the store, and runs the code in the
   *     current REPL. The writes of the store go into the result only when the cell completes. The output in the journal
   *     is `CellRun.text`, the text that the MCP server also shows (6): the hints of a compile error, and a note of a
-  *     failure, a timeout or a submit. It has at most `limits.maxObservation` characters, with a note of the rest. When
-  *     the thread of the cell still runs, the heap guard closed the REPL, or the REPL is full (6), `runCell` closes
-  *     `recorder` and stops the turn (9).
-  *   - When the turn goes on and the compiler cannot go on after the error of the cell (`ScalaRepl.needsRestart`),
-  *     `runCell` closes the REPL and starts a new one from `newRepl`, with the same mode, bindings, preamble and cell
-  *     time limit (6). The store, the files and the journal stay. After the output, the observation has a note with the
-  *     names of earlier cells that the new REPL does not have, from `lostNames`. Each restart starts a new REPL.
+  *     failure, a timeout or a submit. It has at most `limits.maxObservation` characters, with a note of the rest. The
+  *     hints of a compile error are at the end of the text, so each hint that the cut removed comes after the cut text.
+  *     When the thread of the cell still runs, or the heap guard closed the REPL (6), `runCell` closes `recorder` and
+  *     stops the turn (9).
+  *   - When the turn goes on, and the compiler cannot go on after the error of the cell (`ScalaRepl.needsRestart`) or
+  *     the REPL is full (`ScalaRepl.full`), `runCell` closes the REPL and starts a new one from `newRepl`, with the
+  *     same mode, bindings, preamble and limits (6). The store, the files and the journal stay. After the output, the
+  *     observation has a note with the reason and with the names of the cells that the new REPL does not have, from
+  *     `lostNames`. Each restart starts a new REPL.
   *
   * The effects own the current REPL: the first one starts with the effects, and `close` closes the current one. When a
   * new REPL cannot start, its exception goes on to the caller.
@@ -69,40 +71,66 @@ final class HarnessEffects(
       case CellOutcome.Ok | CellOutcome.Submitted(_) => store.writes
       case _                                         => Map.empty
     // A turn that stops runs no more cells, so it needs no new REPL.
-    val note = if stop.isEmpty && repl.needsRestart then Some(restart()) else None
-    CellResult(Window.cut(run.text, limits.maxObservation) + note.fold("")("\n" + _), run.outcome, writes)
+    val note = if stop.isEmpty then HarnessEffects.restartReason(repl).map(restart(code, run, _)) else None
+    CellResult((HarnessEffects.observation(run, limits.maxObservation) ++ note).mkString("\n"), run.outcome, writes)
 
   /** Closes the current REPL. */
   def close(): Unit = repl.close()
 
-  /** Closes the REPL that the compiler cannot use, starts a new one, and gives the note of the lost names (6). The
-    * failed cell defines nothing, and the journal does not have its `Observed` yet, so the note comes from the log.
+  /** Closes the current REPL, starts a new one, and gives the note of the lost names (6). The journal does not have the
+    * `Observed` of this cell yet. So the note takes the names of the earlier cells from the log, and the names of this
+    * cell from its code when it completed. A failed cell defines nothing.
     */
-  private def restart(): String =
+  private def restart(code: String, run: CellRun, reason: String): String =
     repl.close()
     repl = newRepl()
-    HarnessEffects.restartNote(lostNames(journal.log).map(_._1).distinct)
+    val defined = if run.outcome == CellOutcome.Ok then topLevelNames(code).distinct else Vector.empty
+    val earlier = lostNames(journal.log).map(_._1).distinct.filterNot(defined.contains)
+    HarnessEffects.restartNote(reason, earlier ++ defined, run.outcome)
 
 object HarnessEffects:
 
   /** The texts of a code field that hold no code. The chat adapter keeps the text `null`, as DSPy does (9). */
   private val NoCode: Set[String] = Set("", "null", "None")
 
-  /** The note after a new REPL (6), with the names of earlier cells that the new REPL does not have. A cell that did
-    * not compile never ran, so it repeats no side effect, and the note tells the policy that it can run the cell again.
+  /** The text of a cell, cut to `max` characters (6). The hints of a compile error are at the end of the text, so each
+    * hint that the cut removed comes after the cut text.
     */
-  private def restartNote(names: Vector[String]): String =
-    val head = "The harness started a new REPL, because the compiler could not go on after this error."
+  private def observation(run: CellRun, max: Int): Vector[String] =
+    val shown = Window.cut(run.text, max)
+    val hints = run.outcome match
+      case CellOutcome.CompileError(lines) => lines.filter(_.startsWith("Hint:")).filterNot(shown.contains)
+      case _                               => Vector.empty
+    shown +: hints
+
+  /** The reason for a new REPL after a cell (6), or none. The compiler reason comes first, because its note tells the
+    * policy that it can run the failed cell again.
+    */
+  private def restartReason(repl: ScalaRepl): Option[String] =
+    if repl.needsRestart then Some("the compiler could not go on after this error")
+    else if repl.full then Some("the REPL ran its limit of cells")
+    else None
+
+  /** The note after a new REPL (6), with its reason and the names of the cells that the new REPL does not have. A cell
+    * that did not compile never ran, so it repeats no side effect, and the note tells the policy that it can run the
+    * cell again. A cell that ran can have side effects, so the note does not tell the policy to run it again.
+    */
+  private def restartNote(reason: String, names: Vector[String], outcome: CellOutcome): String =
+    val head = s"The harness started a new REPL, because $reason."
     val lost =
       if names.isEmpty then "No names of earlier cells were lost."
       else s"These names of earlier cells are gone: ${names.mkString(", ")}. Define them again if you need them."
-    s"$head $lost Then you can run the failed cell again."
+    val again = outcome match
+      case CellOutcome.CompileError(_) => " Then you can run the failed cell again."
+      case _                           => ""
+    s"$head $lost$again"
 
-  /** The reason to stop the turn after a cell, when the REPL cannot run the next cell safely (6). */
+  /** The reason to stop the turn after a cell, when the REPL cannot run the next cell safely (6). A full REPL does not
+    * stop the turn: the harness starts a new REPL for it (`restartReason`).
+    */
   private def unsafe(repl: ScalaRepl): Option[String] =
     val reasons = Vector(
       repl.unclean     -> "the thread of a cell did not stop after its timeout",
-      repl.outOfMemory -> "the heap guard stopped a cell and closed the REPL",
-      repl.full        -> "the REPL ran its limit of cells"
+      repl.outOfMemory -> "the heap guard stopped a cell and closed the REPL"
     ).collect { case (true, reason) => reason }
     Option.when(reasons.nonEmpty)(reasons.mkString("; ") + ", so the harness stopped the turn")

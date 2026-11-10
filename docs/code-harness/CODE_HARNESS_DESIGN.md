@@ -993,6 +993,8 @@ say to prefer a `Vector` or a `List` to an Array and to convert the result of `s
 Vector chain still works. The test "Known compiler defect" is an expected failure: when it passes, a fix of the
 compiler came, and the restart can go.
 
+**A full REPL, and the echo.** After the cell limit (`HarnessLimits.cellLimit`, 300 cells), the harness starts a new REPL as for the defect of the compiler, and the note gives that reason. Its names include the names of the last cell when that cell completed. The note says that the model can run the cell again only after a compile error, because a cell that completed can have side effects. The REPL shows the value of each `val` that a cell defines. That echo is cut to 400 characters with a note, so a long value does not fill the observation a second time. `println` and the guest API keep their whole output, and the harness cuts the whole observation. A hint of a compile error that the cut removed comes after the cut text.
+
 **The text of a cell.** `CellRun.text` is the text that an agent sees: the output; for a compile error, its lines and
 hints; for a failure, a timeout or a submit, the output and a note. The MCP server and the harness both show it, so the
 model of the harness sees the hints and learns that a cell stopped at its time limit.
@@ -1282,9 +1284,9 @@ A code review of phase 4 on 2026-11-09 added these rules:
   more than one hard link. It opens a file for a read or a write with no link at the last part. A command in the
   sandbox can make these links, and the JVM is not in the sandbox. One limit stays: a job can swap a folder for a link
   between the check and the open.
-- After a cell whose thread still runs, or after the heap guard closed the REPL, or when the REPL is full, the
-  recorder refuses each later call, and the harness stops the turn. The error of the call gives the reason. The
-  thread of the cell can still run in the JVM, but it cannot reach a handler.
+- After a cell whose thread still runs, or after the heap guard closed the REPL, the recorder refuses each later
+  call, and the harness stops the turn. The error of the call gives the reason. The thread of the cell can still run
+  in the JVM, but it cannot reach a handler. A full REPL starts a new REPL instead (6).
 - The recorder chooses the id of a call and commits its intent under one lock. So two calls of one cell on two
   threads cannot get a false refusal. Today only a thread that did not stop can make a second call, and in phase 5
   `llmQueryBatched` can too.

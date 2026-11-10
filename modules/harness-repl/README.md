@@ -52,7 +52,7 @@ finally repl.close()
 | `SubmitSignal` | The signal of `submit`. It is a `ControlThrowable`, so `NonFatal` and `Try` do not catch it. |
 | `topLevelNames` / `lostNames` | The top-level names of a cell, from the parser only, and the note of lost names. |
 | `hint` | A hint after a compile error that is hard for a model to read, for example a top-level `var`, a top-level `val` that needs an explicit type, a capability in a place that must be pure, or a derivation of `Data` that goes too deep. |
-| `HarnessDriver` / `FlagRendering` | The `ReplDriver` of the harness. `FlagRendering` records whether an evaluation threw. |
+| `HarnessDriver` / `FlagRendering` | The `ReplDriver` of the harness. `FlagRendering` records whether an evaluation threw, and it cuts the echo of a value to 400 characters, with a note. |
 
 ## Design notes
 
