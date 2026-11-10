@@ -104,6 +104,41 @@ class JobLaws extends munit.FunSuite:
     finally jobs.close()
   }
 
+  /** A launch of `command` with no wrapper, so a stop needs the TERM and KILL of the table. */
+  private def bare(command: String): () => Process =
+    () => ProcessBuilder("/bin/sh", "-c", command).redirectErrorStream(true).start()
+
+  test("Jobs: close after the stop of sync stops a job that ignores TERM, also with no wrapper") {
+    val jobs = table()
+    assertEquals(jobs.start(job, bare("trap '' TERM; sleep 333"), report = false), Right(()))
+    assert(eventually()(running("sleep 333").nonEmpty))
+    jobs.sync(withJob(job, marked = true))
+    jobs.close()
+    assert(eventually(15)(running("sleep 333").isEmpty), "a process of the job stays after close")
+    assertEquals(jobs.status(job, withJob(job, marked = true)), JobStatus.Stopped)
+  }
+
+  test("Jobs: the report of a job sees its whole output") {
+    val outputs = java.util.concurrent.ConcurrentHashMap[EffectId, String]()
+    val ref     = java.util.concurrent.atomic.AtomicReference[JobTable]()
+    val jobs    = JobTable(1.second, (id, _) => outputs.put(id, ref.get.output(id).getOrElse("")): Unit)
+    ref.set(jobs)
+    try
+      // The race of the report and the reader is short, so the law runs many jobs with a long output.
+      val ids = (0 until 40).map(n => EffectId(4L, n))
+      ids.foreach(id => assertEquals(jobs.start(id, bare("seq 1 100000"), report = true), Right(())))
+      assert(eventually(60)(outputs.size == ids.size), s"${outputs.size} reports")
+      val cut = ids.filterNot(id => outputs.get(id).trim.endsWith("100000"))
+      assert(cut.isEmpty, s"${cut.size} of ${ids.size} reports lost the end of the output")
+    finally jobs.close()
+  }
+
+  test("Jobs: a second close does nothing") {
+    val jobs = table()
+    jobs.close()
+    jobs.close()
+  }
+
   test("Jobs: close stops each job that runs") {
     val jobs = table()
     assertEquals(jobs.start(job, launch("sleep 30"), report = false), Right(()))

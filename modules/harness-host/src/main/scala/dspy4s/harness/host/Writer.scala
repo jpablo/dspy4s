@@ -22,8 +22,8 @@ import scala.util.Try
   *     `after` must return at once, because the writer waits for it.
   *   - A thread that waits for its future and gets an interrupt waits again, because the commit stands. Then it sets
   *     its interrupt flag again. So an interrupt of a cell thread reaches only its own wait (10.2).
-  *   - A failed write ends this session only: the writer ends, the feeds end, and each caller that waits gets
-  *     `HostError.WriteFailed`.
+  *   - A failed write ends this session only: the writer ends, the feeds end, `failed` gets the error once, and each
+  *     caller that waits gets `HostError.WriteFailed`.
   *   - The end of a session (`close`) sets a flag, and then fails each message in the mailbox with `HostError.Ended`. A
   *     caller checks the flag after its put, so a message after the last drain also fails, and no call waits for ever.
   *
@@ -36,7 +36,8 @@ final class Writer(
     secrets : Secrets,
     feeds   : Feeds,
     capacity: Int,
-    after   : SessionState => Unit
+    after   : SessionState => Unit,
+    failed  : String => Unit = _ => ()
 ) extends AutoCloseable:
   import Writer.*
 
@@ -66,6 +67,9 @@ final class Writer(
 
   /** Refuses each later command of the activation `ticket` (10.3, step 5). */
   def fence(ticket: WorkerTicket): Unit = fenced.add(ticket): Unit
+
+  /** Closes the file, so the next write fails. Only the laws of a failed write use it. */
+  private[host] def breakFileForLaws(): Unit = file.close()
 
   /** True after `fence(ticket)`, so the host knows that the activation of `ticket` is not safe. */
   private[host] def isFenced(ticket: WorkerTicket): Boolean = fenced.contains(ticket)
@@ -151,6 +155,8 @@ final class Writer(
               failure = Some(error)
               stopped = true
               feeds.close()
+              // The host ends the session on this hook: its activation, its jobs and its lock (10.2).
+              Try(failed(error)): Unit
               Left(HostError.WriteFailed(error))
             case Right(()) =>
               next += rows.size

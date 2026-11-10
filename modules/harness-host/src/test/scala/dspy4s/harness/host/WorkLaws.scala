@@ -75,6 +75,7 @@ class WorkLaws extends munit.FunSuite:
   test("Work: defaultGuard asks for git push only in a mode with Network^") {
     assertEquals(WorkRuntime.defaultGuard(Mode.full).verdict("exec", command("git push origin main")), Verdict.Ask)
     assertEquals(WorkRuntime.defaultGuard(Mode.full).verdict("exec", command("git status")), Verdict.Allow)
+    assertEquals(WorkRuntime.defaultGuard(Mode.full).verdict("spawn", command("git push origin main")), Verdict.Ask)
     assertEquals(WorkRuntime.defaultGuard(Mode.local), Guard.allowAll)
   }
 

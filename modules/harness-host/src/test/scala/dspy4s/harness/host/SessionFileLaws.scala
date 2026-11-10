@@ -51,6 +51,18 @@ class SessionFileLaws extends munit.FunSuite:
     }
   }
 
+  test("File: a commit with a flush runs with synchronous FULL, and a commit with no flush with NORMAL") {
+    withRoot { root =>
+      val file = open(SessionFile.pathOf(root, id(1)))
+      try
+        assertEquals(file.append(inputs(1), flush = true), Right(()))
+        assertEquals(file.lastSynchronous, "2")
+        assertEquals(file.append(inputs(2).drop(1), flush = false), Right(()))
+        assertEquals(file.lastSynchronous, "1")
+      finally file.close()
+    }
+  }
+
   test("File: the file uses WAL and synchronous NORMAL, also after a commit with a flush") {
     withRoot { root =>
       val file = open(SessionFile.pathOf(root, id(1)))

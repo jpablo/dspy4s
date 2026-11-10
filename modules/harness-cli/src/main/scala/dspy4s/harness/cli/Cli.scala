@@ -45,7 +45,7 @@ object Cli:
   private def session(cli: CliArgs, home: Path): Int =
     val name    = sys.env.getOrElse("DSPY_MODEL", "none")
     val model   = modelOf(name)
-    val secrets = Secrets(sys.env.get("OPENAI_API_KEY").map("OPENAI_API_KEY" -> _).toMap)
+    val secrets = secretsOf(sys.env)
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(model), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
       val env              = WorkEnv(home, HostList.empty, Backends.detect(), secrets, cli.root)
@@ -64,10 +64,14 @@ object Cli:
                 1
               case Right(handle) =>
                 println(s"The session ${id.value} is open. Type a message, or one of $commandList.")
-                loop(handle, BufferedReader(InputStreamReader(System.in, UTF_8)), System.out)
-                0
+                if loop(handle, BufferedReader(InputStreamReader(System.in, UTF_8)), System.out) then 0 else 1
           finally host.close()
     }
+
+  /** The mask of the client: each secret-like variable of the environment (5.6), with the rules of `Secrets.known`. A
+    * short value, as the placeholder key `unused`, is not a known value, so the mask never changes a word of a cell.
+    */
+  private[cli] def secretsOf(env: Map[String, String]): Secrets = Secrets.known(env, Map.empty)
 
   /** The model of the environment, or a model whose calls fail with the reason. */
   private def modelOf(name: String): LanguageModel =
@@ -85,18 +89,23 @@ object Cli:
     *     sees a refusal, for example `Close` during a turn.
     *   - An error of `commandsFor` and a refused command print one line, and the loop goes on.
     *   - After `Behind`, the client reads the journal after its last `seq`, so it shows each entry once.
-    *   - It ends at `/quit`, at the end of `in`, or when the feed ends, for example after `Close` or a failed write.
+    *   - It ends at `/quit`, at the end of `in`, or when the feed ends, for example after `Close` or a failed write. It
+    *     gives false only when the feed ended and the session did not close, as after a failed write.
     */
-  def loop(handle: SessionHandle, in: BufferedReader, out: PrintStream): Unit =
+  def loop(handle: SessionHandle, in: BufferedReader, out: PrintStream): Boolean =
+    // The state before the feed, so an entry that commits between the two reads is in the feed or in the read after
+    // it, and `Shown` shows it once (10.2: a client misses nothing).
+    val start                     = handle.state.nextSeq - 1
     val feed                      = handle.subscribe(1024)
     val done                      = CountDownLatch(1)
-    val shown                     = Shown(handle.state.nextSeq - 1)
+    val shown                     = Shown(start)
     def print(text: String): Unit = out.synchronized(out.println(text))
     // An entry of the feed, or the entries of the journal after the last one shown after `Behind`.
     def take(item: Either[Behind, Logged]): Unit =
       item match
         case Right(logged) => shown.next(logged).flatMap(entryText).foreach(print)
         case Left(_)       => handle.read(shown.last).foreach(l => shown.next(l).flatMap(entryText).foreach(print))
+    handle.read(start).foreach(l => take(Right(l)))
     val printer = Thread.ofPlatform().daemon(true).name("harness-cli-printer").start { () =>
       while done.getCount > 0 && !feed.ended do feed.poll(200).foreach(take)
       done.countDown()
@@ -124,7 +133,10 @@ object Cli:
     done.await()
     printer.join(1_000)
     Iterator.continually(feed.poll()).takeWhile(_.isDefined).flatten.foreach(take)
+    val failed = feed.ended && !handle.state.closed
     feed.close()
+    if failed then print("The session stopped: its host can write no more. The journal keeps each committed entry.")
+    !failed
 
 /** The last `seq` that a client showed, so it shows each entry once. */
 private final class Shown(start: Long):

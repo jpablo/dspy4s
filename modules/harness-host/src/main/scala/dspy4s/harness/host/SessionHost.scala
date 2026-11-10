@@ -63,8 +63,9 @@ trait Activation extends AutoCloseable:
   /** The effects of a turn (4.6). */
   def effects: TurnEffects
 
-  /** Steps 2 and 3 of the path of a hard stop (10.3): `ScalaRepl.stopCell`, the stop of the LM transport, and
-    * `SandboxedShell.stopAll`. It returns at once. The worker thread gets no interrupt, so its commits complete.
+  /** Steps 2 and 3 of the path of a hard stop (10.3): `ScalaRepl.stopCell` and `SandboxedShell.stopAll`. It returns at
+    * once. The worker thread gets no interrupt, so its commits complete. The stop of the LM transport, so that a long
+    * policy call ends before the grace period, comes with part B of phase 7.
     */
   def stop(): Unit
 
@@ -112,11 +113,13 @@ final class LocalHost private (
   private val sessions = scala.collection.mutable.Map.empty[SessionId, OpenSession]
 
   def open(id: SessionId, config: Option[SessionConfig]): Either[HostError, SessionHandle] =
+    // A session that ends frees its lock in its shutdown. The wait for it holds no lock of the host, so the opens of
+    // other sessions go on.
+    synchronized(sessions.get(id)).filterNot(_.live).foreach(_.awaitEnd())
     synchronized {
       sessions.get(id) match
         case Some(session) if session.live => Right(session)
-        case other                         =>
-          other.foreach(_.awaitEnd())
+        case _                             =>
           OpenSession.start(id, config, OpenSession.Place(root, runtime, secrets, limits, clock, catalog, timers)).map {
             session =>
               sessions.update(id, session)
@@ -126,6 +129,9 @@ final class LocalHost private (
 
   /** The rows of the catalog. */
   def list: Vector[CatalogRow] = catalog.rows
+
+  /** The open session `id`. Only the laws use it. */
+  private[host] def sessionOf(id: SessionId): Option[OpenSession] = synchronized(sessions.get(id))
 
   /** The files of `sessions` that are not journals, from the rebuild at the start (10.2). */
   def failed: Vector[(Path, String)] = rebuilt.failed
@@ -187,6 +193,7 @@ private final class OpenSession private (
   private var worker: Option[Long]                           = None
   private var workers                                        = 0L
   private var tickets                                        = 0L
+  private var pendingTicket: Option[WorkerTicket]            = None
   private var stopTurn                                       = -1L
   private var row                                            = catalogRow(id)(start)
   private var putOnce                                        = false
@@ -208,33 +215,63 @@ private final class OpenSession private (
 
   def read(after: Long): Vector[Logged] = writer.log.filter(_.seq > after)
 
+  /** Makes the next write of the session fail. Only the laws of a failed write use it. */
+  private[host] def breakWritesForLaws(): Unit = writer.breakFileForLaws()
+
   /** Waits at most 30 seconds for the end of a session that is ending. */
   def awaitEnd(): Unit = finished.await(30, TimeUnit.SECONDS): Unit
 
-  /** The end of the session by the host: the writer, the activation, the jobs and the lock. */
-  def close(): Unit =
-    guard.synchronized { endedFlag = true }
-    writer.close()
-    release()
+  /** The end of the session by the host (`LocalHost.close`, the end of a client). */
+  def close(): Unit = shutdown()
+
+  /** The end of this open session, from each path: `Ended`, a failed write, or the close of the host. It runs once, and
+    * it does all the work of the end: the activation and its REPL close, the jobs stop, the writer ends, the lock goes,
+    * and a reopen in this host can go on. After it, a commit starts no worker.
+    */
+  private def shutdown(): Unit =
+    val last = guard.synchronized {
+      if endedFlag then None
+      else
+        endedFlag = true
+        val live = activation.map(_._2)
+        activation = None
+        Some(live)
+    }
+    last.foreach { live =>
+      live.foreach(a => Try(a.close()): Unit)
+      Try(jobs.close()): Unit
+      writer.close()
+      Try(lock.release()): Unit
+      Try(channel.close()): Unit
+      finished.countDown()
+    }
+
+  /** After a failed write, on the thread of the writer (10.2: "A failed write ends this session only"). */
+  private def onFailure(error: String): Unit =
+    val _ = error
+    shutdown()
 
   /** Commits the `Activate` of this open. */
   private def activate(config: SessionConfig): Either[HostError, Unit] =
     writer.run(Command.Activate(Harness.versions, config), Source.Harness).map(_ => ())
 
-  /** After each commit, on the thread of the writer. It must return at once. */
+  /** After each commit, on the thread of the writer. It must return at once. After the end, it does nothing. */
   private def onCommit(s: SessionState): Unit =
-    guard.synchronized {
-      Try(jobs.sync(s)): Unit
-      if s.stopping && s.position != Position.NoTurn && s.lastTurn != stopTurn then
-        stopTurn = s.lastTurn
-        activation.foreach { (ticket, live) =>
-          Try(live.stop()): Unit
-          place.timers.after(place.limits.grace)(() => writer.expire(s.lastTurn, ticket)): Unit
-        }
-      putRow()
-      if s.closed then end()
-      else if next(s) != Next.Wait then ensureWorker()
+    val ended = guard.synchronized {
+      if !endedFlag then
+        Try(jobs.sync(s)): Unit
+        if s.stopping && s.position != Position.NoTurn && s.lastTurn != stopTurn then
+          stopTurn = s.lastTurn
+          activation.foreach((_, live) => Try(live.stop()): Unit)
+          // The ticket exists before its activation, so a stop while a REPL starts also gets its timer.
+          activation.map(_._1).orElse(pendingTicket).foreach { ticket =>
+            place.timers.after(place.limits.grace)(() => writer.expire(s.lastTurn, ticket)): Unit
+          }
+        putRow()
+        if !s.closed && next(s) != Next.Wait then ensureWorker()
+      s.closed
     }
+    if ended then shutdown()
 
   /** Starts a worker when the work needs one. Holds `guard`. A worker that runs takes the new work in its next round,
     * unless its activation is not safe: then the next work gets a new worker and a new activation, and the old worker
@@ -255,42 +292,71 @@ private final class OpenSession private (
   /** One worker: a new activation when the last one is not safe, then `drive`. At the end, it starts the next worker
     * when work came during its last round.
     */
+  /** The rule of a failure of the turn machinery: the turn ends, its waiting messages count as seen, and the session
+    * waits for the next command. So a failure that occurs again never starts the same turn again by itself. The `Abort`
+    * of the harness commits `StopRequested`, which sets `waiting` to 0, so the end of the turn starts no new turn
+    * (4.2). `decide` takes a `StopRequested` only through `Abort`, so the end is two commits.
+    */
   private def runWorker(n: Long, fresh: Boolean): Unit =
+    var clean = false
     try
       val (ticket, live) = if fresh then newActivation() else guard.synchronized(activation.get)
-      try drive(WriterJournal(writer, ticket), live.effects): Unit
+      try
+        drive(WriterJournal(writer, ticket), live.effects): Unit
+        clean = true
       catch
-        case NonFatal(_) if !writer.isFenced(ticket) && !writer.ended =>
+        case NonFatal(e) if !writer.isFenced(ticket) && !writer.ended =>
           // The turn stays open after an exception of the effects. The repair closes it as after a crash (4.4).
           guard.synchronized { activation = activation.filterNot(_._1 == ticket) }
           Try(live.close()): Unit
+          writer.run(Command.Abort(s"the turn failed: $e"), Source.Harness): Unit
           writer.run(Command.Commit(repair(writer.state)), Source.Harness): Unit
-        case NonFatal(_) => ()
+          clean = true
+        case NonFatal(_) => clean = true
     catch
       case NonFatal(e) =>
         // No activation: the open turn ends with the failure, so the session does not wait for ever.
+        val reason = s"the activation failed: $e"
+        writer.run(Command.Abort(reason), Source.Harness): Unit
         writer.run(
-          Command.Commit(closing(writer.state) :+ Entry.TurnEnded(TurnOutcome.Failed(s"the activation failed: $e"))),
+          Command.Commit(closing(writer.state) :+ Entry.TurnEnded(TurnOutcome.Failed(reason))),
           Source.Harness
         ): Unit
+        clean = true
     finally
       guard.synchronized {
         if worker.contains(n) then
           worker = None
-          if live && next(writer.state) != Next.Wait then ensureWorker()
+          // After a fatal error, no worker starts again: the next command of a client tries again.
+          if clean && live && next(writer.state) != Next.Wait then ensureWorker()
       }
 
   /** A new activation with a new ticket. The last activation closes. */
   private def newActivation(): (WorkerTicket, Activation) =
     val (ticket, old) = guard.synchronized {
       tickets += 1
+      val made = WorkerTicket(tickets)
+      pendingTicket = Some(made)
       val old = activation.map(_._2)
-      (WorkerTicket(tickets), old)
+      activation = None
+      (made, old)
     }
     old.foreach(o => Try(o.close()): Unit)
-    val made = place.runtime.activate(id, writer.state.config, WriterJournal(writer, ticket), jobs)
-    guard.synchronized { activation = Some((ticket, made)) }
-    (ticket, made)
+    var started = false
+    try
+      val made  = place.runtime.activate(id, writer.state.config, WriterJournal(writer, ticket), jobs)
+      val taken = guard.synchronized {
+        pendingTicket = None
+        // A shutdown while the REPL started: this activation closes at once.
+        if endedFlag then false
+        else
+          activation = Some((ticket, made))
+          true
+      }
+      started = true
+      if !taken then Try(made.close()): Unit
+      (ticket, made)
+    finally if !started then guard.synchronized { pendingTicket = None }
 
   /** Puts the row of the session into the catalog when its status changes, and at the first commit of this open. */
   private def putRow(): Unit =
@@ -302,15 +368,6 @@ private final class OpenSession private (
       place.catalog.put(next): Unit
     row = next
 
-  /** The end after `Ended`, on the thread of the writer. */
-  private def end(): Unit =
-    endedFlag = true
-    activation.foreach((_, live) => Try(live.close()): Unit)
-    activation = None
-    Try(jobs.close()): Unit
-    writer.close()
-    release()
-
   /** The message of a job with `report` at its end (10.3). The writer of the session gets it, so it also reaches a
     * later activation.
     */
@@ -318,12 +375,6 @@ private final class OpenSession private (
     val output = jobs.output(job).fold("")(text => text.takeRight(ReportOutput))
     val text   = s"The job ${job.cell}.${job.n} ended with the status $status. The end of its output:\n$output"
     writer.post(Command.Send(RequestId(s"job:${job.cell}:${job.n}"), text, Map.empty), Source.Harness): Unit
-
-  private def release(): Unit =
-    Try(jobs.close()): Unit
-    Try(lock.release()): Unit
-    Try(channel.close()): Unit
-    finished.countDown()
 
 private object OpenSession:
 
@@ -376,12 +427,23 @@ private object OpenSession:
       lock   : FileLock
   ): OpenSession =
     val committed = AtomicReference[SessionState => Unit](_ => ())
+    val failing   = AtomicReference[String => Unit](_ => ())
     val reported  = AtomicReference[(EffectId, JobStatus) => Unit]((_, _) => ())
     val feeds     = Feeds()
-    val writer    = Writer(file, start, place.clock, place.secrets, feeds, place.limits.mailbox, s => committed.get()(s))
-    val jobs      = JobTable(place.limits.grace, (job, status) => reported.get()(job, status))
-    val session   = OpenSession(id, place, writer, feeds, jobs, start, channel, lock)
+    val writer    = Writer(
+      file,
+      start,
+      place.clock,
+      place.secrets,
+      feeds,
+      place.limits.mailbox,
+      s => committed.get()(s),
+      e => failing.get()(e)
+    )
+    val jobs    = JobTable(place.limits.grace, (job, status) => reported.get()(job, status))
+    val session = OpenSession(id, place, writer, feeds, jobs, start, channel, lock)
     committed.set(s => session.onCommit(s))
+    failing.set(e => session.onFailure(e))
     reported.set((job, status) => session.reportJob(job, status))
     session
 

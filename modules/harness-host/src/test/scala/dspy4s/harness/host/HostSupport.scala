@@ -73,6 +73,7 @@ object HostSupport:
   final class ScriptRuntime(effects: Journal => TurnEffects, onStop: () => Unit = () => ()) extends SessionRuntime:
     val activations: AtomicInteger = AtomicInteger(0)
     val stops: AtomicInteger       = AtomicInteger(0)
+    val closes: AtomicInteger      = AtomicInteger(0)
 
     def activate(session: SessionId, config: SessionConfig, journal: Journal, jobs: JobTable): Activation =
       activations.incrementAndGet(): Unit
@@ -83,4 +84,4 @@ object HostSupport:
           stops.incrementAndGet(): Unit
           onStop()
         def unclean: Boolean = false
-        def close(): Unit    = ()
+        def close(): Unit    = closes.incrementAndGet(): Unit

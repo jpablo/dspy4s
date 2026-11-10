@@ -29,10 +29,11 @@ import scala.util.Try
 final class JobTable(grace: FiniteDuration, report: (EffectId, JobStatus) => Unit) extends AutoCloseable:
   import JobTable.*
 
-  private val rows     = ConcurrentHashMap[EffectId, Row]()
-  private val marks    = ConcurrentHashMap.newKeySet[EffectId]()
-  private val launcher = Executors.newSingleThreadExecutor(threads("harness-job-launcher"))
-  private val helpers  = Executors.newCachedThreadPool(threads("harness-job"))
+  private val rows             = ConcurrentHashMap[EffectId, Row]()
+  @volatile private var closed = false
+  private val marks            = ConcurrentHashMap.newKeySet[EffectId]()
+  private val launcher         = Executors.newSingleThreadExecutor(threads("harness-job-launcher"))
+  private val helpers          = Executors.newCachedThreadPool(threads("harness-job"))
 
   /** Copies the stop marks of `state` to the table, and starts the stop of each marked job that runs: TERM, the grace
     * period, then KILL (10.3, step 2). It returns at once.
@@ -60,6 +61,9 @@ final class JobTable(grace: FiniteDuration, report: (EffectId, JobStatus) => Uni
             submit(helpers)(read(row, process.getInputStream))
             submit(helpers) {
               process.waitFor(): Unit
+              // The report waits for the end of the output, so it sees the whole output. A descendant that holds the
+              // pipe open makes it wait at most `ReaderWait`.
+              row.drained.await(ReaderWait.toMillis, TimeUnit.MILLISECONDS): Unit
               row.ended.countDown()
               if report then Try(this.report(id, statusOf(row))): Unit
             }
@@ -86,22 +90,36 @@ final class JobTable(grace: FiniteDuration, report: (EffectId, JobStatus) => Uni
       if state.jobs.get(id).exists(_.stopRequested) then JobStatus.Stopped else JobStatus.Lost
     }
 
-  /** Stops each job that runs: TERM, the grace period, then KILL. It waits for the stops. */
+  /** Stops each job that runs: TERM, the grace period, then KILL. It waits for the stops, also for a job whose stop
+    * `sync` started already, and then the threads of the table end. A second call does nothing.
+    */
   def close(): Unit =
-    val running = rows.values().asScala.toVector.filter(_.process.isAlive)
-    val stops   = running.map(row => helpers.submit((() => stop(row)): Runnable))
-    stops.foreach(stop => Try(stop.get()): Unit)
-    launcher.shutdownNow(): Unit
-    helpers.shutdownNow(): Unit
+    val first = synchronized {
+      val was = closed
+      closed = true
+      !was
+    }
+    if first then
+      val running = rows.values().asScala.toVector.filter(_.process.isAlive)
+      running.foreach(_.markStopped(): Unit)
+      val stops = running.map(row => helpers.submit((() => escalate(row)): Runnable))
+      stops.foreach(stop => Try(stop.get()): Unit)
+      launcher.shutdown()
+      helpers.shutdown()
+      Try(helpers.awaitTermination(ReaderWait.toMillis, TimeUnit.MILLISECONDS)): Unit
 
   private def statusOf(row: Row): JobStatus =
     if row.process.isAlive then JobStatus.Running
     else if row.stopped then JobStatus.Stopped
     else JobStatus.Exited(row.process.exitValue())
 
-  /** The stop of one job: the end of the pipe of its wrapper, then TERM and KILL for a process with no wrapper. */
-  private def stop(row: Row): Unit =
-    if row.markStopped() then
+  /** The stop of one job, once: the end of the pipe of its wrapper, then TERM and KILL for a process with no wrapper.
+    */
+  private def stop(row: Row): Unit = if row.markStopped() then escalate(row)
+
+  /** The steps of a stop. Two stops of one job at the same time do no harm. */
+  private def escalate(row: Row): Unit =
+    if row.process.isAlive then
       Try(row.process.getOutputStream.close()): Unit
       if !row.ended.await(grace.toMillis + 1_000L, TimeUnit.MILLISECONDS) then
         val seen = row.process.descendants().iterator().asScala.toVector :+ row.process.toHandle
@@ -112,20 +130,26 @@ final class JobTable(grace: FiniteDuration, report: (EffectId, JobStatus) => Uni
 
   /** Keeps the output of a job, at most `MaxOutput` characters: the oldest characters go first. */
   private def read(row: Row, in: InputStream): Unit =
-    val buffer = new Array[Byte](8192)
-    var n      = in.read(buffer)
-    while n >= 0 do
-      row.append(String(buffer, 0, n, UTF_8))
-      n = in.read(buffer)
+    try
+      val buffer = new Array[Byte](8192)
+      var n      = in.read(buffer)
+      while n >= 0 do
+        row.append(String(buffer, 0, n, UTF_8))
+        n = in.read(buffer)
+    finally row.drained.countDown()
 
 object JobTable:
 
   /** The most characters of the output of a job that the table keeps. */
   private val MaxOutput = 200_000
 
+  /** The longest wait for the end of the output of a job that ended, and for the threads of a table that closes. */
+  private val ReaderWait = scala.concurrent.duration.FiniteDuration(2, TimeUnit.SECONDS)
+
   /** The row of one job: its process, its output, and its stop. */
   private final class Row(val process: Process):
     val ended: CountDownLatch      = CountDownLatch(1)
+    val drained: CountDownLatch    = CountDownLatch(1)
     private val output             = StringBuilder()
     @volatile private var stopFlag = false
 

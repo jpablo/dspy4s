@@ -100,7 +100,7 @@ class CliLaws extends munit.FunSuite:
     val out    = ByteArrayOutputStream()
     val lines  = "hello\n/close\n"
     val loop   = Thread.ofPlatform().start { () =>
-      Cli.loop(handle, BufferedReader(StringReader(lines)), PrintStream(out, true, UTF_8))
+      Cli.loop(handle, BufferedReader(StringReader(lines)), PrintStream(out, true, UTF_8)): Unit
     }
     loop.join(10_000)
     assert(!loop.isAlive, "the loop did not end at the end of its input")
@@ -116,7 +116,7 @@ class CliLaws extends munit.FunSuite:
 
   test("CLI: loop ends with no error when the feed ends, also with no end of its input") {
     val handle = FakeHandle(endAfterFirst = true)
-    val ended  = java.util.concurrent.atomic.AtomicReference[scala.util.Try[Unit]]()
+    val ended  = java.util.concurrent.atomic.AtomicReference[scala.util.Try[Boolean]]()
     // An input that never ends: only the end of the feed can end the loop.
     val input = java.io.PipedReader(java.io.PipedWriter())
     val loop  = Thread.ofPlatform().start { () =>
@@ -128,7 +128,39 @@ class CliLaws extends munit.FunSuite:
     }
     loop.join(10_000)
     assert(!loop.isAlive, "the loop did not end at the end of the feed")
-    assert(Option(ended.get).exists(_.isSuccess), String.valueOf(ended.get))
+    assertEquals(Option(ended.get).flatMap(_.toOption), Some(true), String.valueOf(ended.get))
+  }
+
+  test("CLI: loop gives false when the feed ends and the session did not close, as after a failed write") {
+    val handle = FakeHandle(endAfterFirst = true, closed = false)
+    val input  = java.io.PipedReader(java.io.PipedWriter())
+    val result = Cli.loop(handle, BufferedReader(input), PrintStream(ByteArrayOutputStream(), true, UTF_8))
+    assertEquals(result, false)
+  }
+
+  test("CLI: an empty line gives no command") {
+    Vector("", "   ", "\t").foreach { text =>
+      assertEquals(commandsFor(parseLine(text), SessionState.initial, request), Right(Vector.empty), text)
+    }
+  }
+
+  test("CLI: entryText removes the control characters of a cell output and of a text, apart from new lines") {
+    val log = Support.logOf(
+      1000L,
+      Entry.Observed("FAKE\u001b[31mRED\u0007\nNEXT", CellOutcome.Ok, Map.empty),
+      Entry.Acted("", "FAKE\u001b]0;TITLE\u0007TEXT", None)
+    )
+    log.foreach { logged =>
+      val text = entryText(logged).getOrElse(fail("no text"))
+      assert(!text.exists(c => c.isControl && c != '\n'), text.map(c => f"${c.toInt}%04x").mkString(" "))
+    }
+    assert(entryText(log(0)).exists(_.contains("NEXT")))
+  }
+
+  test("CLI: the mask of the CLI skips a short key, and covers each secret-like variable of the environment") {
+    val secrets = Cli.secretsOf(Map("OPENAI_API_KEY" -> "unused", "FAKE_API_TOKEN" -> "fake-token-value-0123456789"))
+    assertEquals(secrets.maskText("val unused = 1"), "val unused = 1")
+    assert(!secrets.maskText("the token fake-token-value-0123456789").contains("fake-token-value"))
   }
 
   test("CLI start: the time from the start of a JVM to the first prompt, and the end at /quit") {
@@ -159,7 +191,7 @@ class CliLaws extends munit.FunSuite:
 /** A session for the laws of `Cli.loop`: `send` keeps the commands, `run` refuses each command with `TurnOpen`, and the
   * feed gives one `Acted` with the text `FAKE-REPLY`. With `endAfterFirst`, the feed ends after that entry.
   */
-private final class FakeHandle(endAfterFirst: Boolean = false) extends SessionHandle:
+private final class FakeHandle(endAfterFirst: Boolean = false, closed: Boolean = true) extends SessionHandle:
   val sent: ConcurrentLinkedQueue[Command] = ConcurrentLinkedQueue()
   val ran: ConcurrentLinkedQueue[Command]  = ConcurrentLinkedQueue()
   private val reply                        = Support.logOf(1000L, Entry.Acted("", "FAKE-REPLY", None)).head
@@ -171,7 +203,7 @@ private final class FakeHandle(endAfterFirst: Boolean = false) extends SessionHa
   def run(command: Command): Either[HostError, SessionState] =
     ran.add(command): Unit
     Left(HostError.Rejected(Rejection.TurnOpen))
-  def state: SessionState               = SessionState.initial
+  def state: SessionState               = SessionState.initial.copy(closed = closed)
   def read(after: Long): Vector[Logged] = Vector(reply).filter(_.seq > after)
   def subscribe(capacity: Int): Feed    =
     new Feed:

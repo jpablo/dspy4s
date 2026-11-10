@@ -118,7 +118,8 @@ object Window extends ContextStrategy:
           val reply = outcome match
             case TurnOutcome.Replied(text) => text
             case other                     => Vector(s"The turn ended: $other.", w.last).filter(_.nonEmpty).mkString(" ")
-          Walk(w.turns :+ ChatTurn(w.heard, reply), Vector.empty, w.pending, Vector.empty, "")
+          // A message after the last step of the turn waits for the next turn, as in the kernel (4.2).
+          Walk(w.turns :+ ChatTurn(w.heard.dropRight(w.pending.size), reply), Vector.empty, w.pending, w.pending, "")
         case _ => w
     }
     // The messages after the last step belong to the next step, as the first messages of a turn belong to its first step.

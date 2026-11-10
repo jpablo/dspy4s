@@ -37,6 +37,7 @@ final class SessionFile private (connection: Connection, val path: Path, val ses
         // `synchronous` cannot change inside a transaction, so it changes before the transaction and after it.
         if flush then pragma("synchronous = FULL")
         try
+          lastSync = setting("synchronous")
           connection.setAutoCommit(false)
           try
             Using.resource(connection.prepareStatement(SessionFile.Insert)) { insert =>
@@ -91,6 +92,11 @@ final class SessionFile private (connection: Connection, val path: Path, val ses
         if rows.wasNull() then -1L else seq
       }
     }
+
+  /** The value of `synchronous` in the transaction of the last commit: "2" for FULL and "1" for NORMAL. */
+  private[host] def lastSynchronous: String = lastSync
+
+  @volatile private var lastSync = ""
 
   /** The value of the setting `name` of the connection, for example `journal_mode` or `synchronous`. */
   def setting(name: String): String =

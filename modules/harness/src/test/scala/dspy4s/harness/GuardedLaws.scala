@@ -73,3 +73,22 @@ class GuardedLaws extends munit.FunSuite:
     intercept[NeedsApproval](recorder.call("exec", push)("out")): Unit
     assertEquals(journal.state.pending, Set(GuardRule("exec", ArgMatch.Exact(push))))
   }
+
+  test("Guarded: a grant of a call whose arguments hold a known secret lets the next call with those arguments run") {
+    val secret  = "fake-secret-value-0123456789"
+    val secrets = Secrets(Map("FAKE_KEY" -> secret))
+    val call    = Json.Object(Chunk(("command", Json.String(s"deploy --token $secret"))))
+    val journal = Support.journal(secrets)
+    val anyExec = Guard(Vector(VerdictRule(GuardRule("exec", ArgMatch.AnyArgs), Verdict.Ask)))
+    Support.open(journal, Support.config().copy(guard = anyExec, owner = Owner.User))
+    journal.commit(Entry.StepStarted(0)): Unit
+    journal.run(Command.Commit(Vector(Entry.Acted("", "", Some("code")))), Source.Policy): Unit
+    val recorder = Recorder(journal, mask = secrets.maskJson)
+    recorder.startCell(journal.log.last.seq)
+    intercept[NeedsApproval](recorder.call("exec", call)("out")): Unit
+    // The pending rule holds the arguments with the mask, as the journal holds them, and the grant holds that rule.
+    val pending = journal.state.pending.headOption.getOrElse(fail("no pending call"))
+    assert(!pending.toString.contains(secret), pending.toString)
+    assert(journal.run(Command.Grant(RequestId("g1"), pending, GrantLifetime.Once), Source.User).isRight)
+    assertEquals(recorder.call("exec", call)("out"), "out")
+  }

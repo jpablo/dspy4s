@@ -52,6 +52,9 @@ final case class Secrets(values: Map[String, String]) derives CanEqual:
         case Entry.Ended(outcome, reason)             => Entry.Ended(session(outcome), maskText(reason))
         case Entry.TurnStarted | Entry.StepStarted(_) => entry
 
+  /** `value` with each known value masked, also in its keys. */
+  def maskJson(value: Json): Json = json(value)
+
   private def json(value: Json): Json =
     value match
       case Json.String(text)  => Json.String(maskText(text))

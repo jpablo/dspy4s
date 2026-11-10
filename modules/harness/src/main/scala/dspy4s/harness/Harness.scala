@@ -141,7 +141,7 @@ final case class Harness[I, O](
       _ <- journal.run(Command.Activate(Harness.versions, config), Source.Harness).left.map(rejected)
       _ <- journal.run(Command.Send(RequestId("task"), task, fields.toMap), source).left.map(rejected)
     yield
-      val recorder = Recorder(journal, () => tree.budget.closed)
+      val recorder = Recorder(journal, () => tree.budget.closed, env.secrets.maskJson)
       val store    = SnapshotStore()
       val llm      = LeafLlm(subQuery, () => tree.budget, tree.host, limits.batch)
       val children = ChildTurns(childStart(depth + 1, tree, id, journal), tree.host, limits.batch)
@@ -290,7 +290,7 @@ object Harness extends HarnessGivens:
     context.lm.collect { case model: LanguageModel => model.id }.getOrElse("none")
 
   /** The versions of a journal of a call (4.1). */
-  val versions: Versions = Versions(s"scala-${dotty.tools.dotc.config.Properties.versionNumberString}", "phase-5")
+  val versions: Versions = Versions(s"scala-${dotty.tools.dotc.config.Properties.versionNumberString}", "phase-7")
 
   /** The id of the open `rlm` or `rlmBatched` call of a parent (8.2, phase 7). The calls of one cell run one at a time,
     * so the cell of the parent has only that one open while its child runs.

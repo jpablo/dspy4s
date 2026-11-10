@@ -16,7 +16,7 @@ import java.nio.file.{Files as JFiles, LinkOption, Path, StandardOpenOption}
   * After `close`, no call runs (9). When `ended` is true, no call runs either: the program call of the session ended,
   * so a child that outlives its parent cannot write or exec (9).
   */
-final class Recorder(journal: Journal, ended: () => Boolean = () => false):
+final class Recorder(journal: Journal, ended: () => Boolean = () => false, mask: Json => Json = identity):
   private var cell   = -1L
   private var calls  = 0
   private var closed = false
@@ -60,8 +60,9 @@ final class Recorder(journal: Journal, ended: () => Boolean = () => false):
         ),
       identity
     )
-    // `guarded` reads the state after the intent, so a `Once` grant stays until the outcome of its call (5.5).
-    guarded(after, op, args).left.foreach { stop =>
+    // `guarded` reads the state after the intent, so a `Once` grant stays until the outcome of its call (5.5). It
+    // compares the arguments with the mask, because the journal holds the pending rule and the grant with the mask.
+    guarded(after, op, mask(args)).left.foreach { stop =>
       journal.commit(Entry.EffectDone(id, stop.result)): Unit
       throw stop.error
     }

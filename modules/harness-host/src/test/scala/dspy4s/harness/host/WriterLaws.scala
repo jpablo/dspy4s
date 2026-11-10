@@ -178,12 +178,53 @@ class WriterLaws extends munit.FunSuite:
           w.run(Command.Commit(Vector(Entry.StepStarted(1))), Source.Harness, Some(one)),
           Left(HostError.Fenced)
         )
-        // A later turn with another ticket: the expire of the first turn does nothing to it.
+        // A later turn that stops too: the expire of the first turn does nothing to it, and its own expire closes it.
         assert(w.run(message("m2"), Source.User).isRight)
+        val second = w.state.lastTurn
+        assert(w.run(Command.Commit(Vector(Entry.StepStarted(0))), Source.Harness, Some(two)).isRight)
+        assert(w.run(Command.Abort("FAKE-SECOND-STOP"), Source.User).isRight)
         w.expire(first, two)
         assert(w.run(message("m3"), Source.User).isRight)
-        assert(w.state.position != Position.NoTurn)
-        assert(w.run(Command.Commit(Vector(Entry.StepStarted(0))), Source.Harness, Some(two)).isRight)
+        assertEquals(
+          w.log.count(_.entry == Entry.TurnEnded(TurnOutcome.Aborted)),
+          1,
+          "the expire of the first turn closed the second turn"
+        )
+        w.expire(second, two)
+        // The waiting message m3 then starts the next turn, so the law counts the turns that ended Aborted.
+        assert(
+          eventually()(w.log.count(_.entry == Entry.TurnEnded(TurnOutcome.Aborted)) == 2),
+          w.log.map(_.entry).mkString("\n")
+        )
+      finally w.close()
+    }
+  }
+
+  test("Writer: a commit with an entry that needs a flush runs with synchronous FULL, and another commit with NORMAL") {
+    withRoot { root =>
+      val (w, file) = writer(root)
+      try
+        assert(w.run(activate, Source.Harness).isRight)
+        assert(w.run(message("m1"), Source.User).isRight)
+        // An Input needs a flush (4.1), and a StepStarted does not.
+        assertEquals(file.lastSynchronous, "2")
+        assert(w.run(Command.Commit(Vector(Entry.StepStarted(0))), Source.Harness).isRight)
+        assertEquals(file.lastSynchronous, "1")
+      finally w.close()
+    }
+  }
+
+  test("Writer: a failed write calls the failure hook with the error, once") {
+    withRoot { root =>
+      val file   = SessionFile.open(SessionFile.pathOf(root, id(1)), id(1)).fold(e => fail(e), identity)
+      val errors = java.util.concurrent.ConcurrentLinkedQueue[String]()
+      val w      = Writer(file, Vector.empty, () => 1000L, Secrets.none, Feeds(), 64, _ => (), e => errors.add(e): Unit)
+      try
+        assert(w.run(activate, Source.Harness).isRight)
+        file.close()
+        assert(w.run(message("m1"), Source.User).isLeft)
+        assert(w.run(message("m2"), Source.User).isLeft)
+        assertEquals(errors.size, 1)
       finally w.close()
     }
   }

@@ -226,6 +226,57 @@ class HostLaws extends munit.FunSuite:
     }
   }
 
+  test("Host: an activation that fails ends its turn Failed once, and the next message tries again") {
+    withRoot { root =>
+      val runtime = ScriptRuntime(_ => throw IllegalStateException("FAKE-NO-REPL"))
+      withHost(root, runtime) { host =>
+        val handle = opened(host, id(1))
+        assertEquals(handle.send(message("m1")), Right(()))
+        assert(eventually()(outcomes(handle).nonEmpty), entries(handle).toString)
+        Thread.sleep(500)
+        assertEquals(runtime.activations.get, 1, "the failed activation started again")
+        outcomes(handle) match
+          case Vector(TurnOutcome.Failed(reason)) => assert(reason.contains("FAKE-NO-REPL"), reason)
+          case other                              => fail(s"not one Failed turn: $other")
+        assertEquals(handle.state.position, Position.NoTurn)
+        assertEquals(handle.send(message("m2")), Right(()))
+        assert(eventually()(outcomes(handle).size == 2), entries(handle).toString)
+        assertEquals(runtime.activations.get, 2)
+      }
+    }
+  }
+
+  test("Host: after a failed write the session ends, its lock goes, and an open in the same host works at once") {
+    withRoot { root =>
+      val runtime = scripted(answer("hi"))
+      withHost(root, runtime) { host =>
+        val first = opened(host, id(1))
+        host.sessionOf(id(1)).foreach(_.breakWritesForLaws())
+        assert(first.send(message("m1")).isRight)
+        assert(eventually()(first.send(message("m2")).isLeft), "the session takes commands after a failed write")
+        val start = System.nanoTime()
+        val again = host.open(id(1), None)
+        assert((System.nanoTime() - start) / 1_000_000L < 5_000L, "the open waited for the failed session")
+        assert(again.isRight, again.toString)
+      }
+    }
+  }
+
+  test("Host: close of the host closes each activation, and a later commit starts no worker") {
+    withRoot { root =>
+      val runtime = scripted(answer("hi"))
+      val host    = LocalHost.start(root, runtime, dspy4s.harness.Secrets.none).fold(e => fail(e.toString), identity)
+      val handle  = opened(host, id(1))
+      assertEquals(handle.send(message("m1")), Right(()))
+      assert(eventually()(outcomes(handle).nonEmpty))
+      host.close()
+      assertEquals(runtime.closes.get, runtime.activations.get)
+      assertEquals(handle.send(message("m2")), Left(HostError.Ended))
+      Thread.sleep(300)
+      assertEquals(runtime.activations.get, 1)
+    }
+  }
+
   // ── The hard stop (10.3) ──
 
   test("Hard stop: Abort commits StopRequested, stops the activation, and the turn ends Aborted after the cell ends") {
@@ -283,6 +334,25 @@ class HostLaws extends munit.FunSuite:
         second.countDown()
         assert(eventually()(outcomes(handle) == Vector(TurnOutcome.Aborted, TurnOutcome.Replied("FAKE-NEXT"))))
         assert(!lastTurn(handle).contains(Entry.StopRequested("FAKE-LATE")), lastTurn(handle).toString)
+      }
+    }
+  }
+
+  test("Hard stop: a stop while the activation starts gets its grace timer, and the turn ends Aborted in time") {
+    withRoot { root =>
+      // The activation takes 3 seconds, as a REPL that is slow to start.
+      val runtime = ScriptRuntime { _ =>
+        Thread.sleep(3_000)
+        Support.Script(Vector(answer("never")))
+      }
+      withHost(root, runtime, HostLimits(grace = 300.millis)) { host =>
+        val handle = opened(host, id(1))
+        assertEquals(handle.send(message("m1")), Right(()))
+        assert(eventually()(runtime.activations.get == 1))
+        val start = System.nanoTime()
+        assertEquals(handle.send(Command.Abort("FAKE-STOP")), Right(()))
+        assert(eventually()(outcomes(handle) == Vector(TurnOutcome.Aborted)), entries(handle).toString)
+        assert((System.nanoTime() - start) / 1_000_000L < 2_000L, "the turn waited for the activation")
       }
     }
   }

@@ -47,19 +47,24 @@ final class WorkRuntime(
 
   def activate(session: SessionId, config: SessionConfig, journal: Journal, jobs: JobTable): Activation =
     RuntimeEnvironment.withContext(context) {
-      val scope   = Layout.real(Path.of(SandboxedShell.pathOf(config.scope)))
-      val layout  = Layout.forSession(env.home, env.journals)
-      val profile = Profiles.forMode(config.mode, scope, layout, env.hosts)
-      val shell   = SandboxedShell(config, layout, env.hosts, env.backend, limits.execTimeout)
+      var layout  = Option.empty[Layout]
+      var shell   = Option.empty[SandboxedShell]
+      var started = false
       try
+        val scope = Layout.real(Path.of(SandboxedShell.pathOf(config.scope)))
+        val made  = Layout.forSession(env.home, env.journals)
+        layout = Some(made)
+        val profile  = Profiles.forMode(config.mode, scope, made, env.hosts)
+        val commands = SandboxedShell(config, made, env.hosts, env.backend, limits.execTimeout)
+        shell = Some(commands)
         val turns    = TurnBudget(journal, limits.modelCalls)
-        val recorder = Recorder(journal, () => turns.closed)
+        val recorder = Recorder(journal, () => turns.closed, env.secrets.maskJson)
         val store    = SnapshotStore()
         val host     = HostThreads.ofThisThread()
         val bindings = Bindings(
           turn = JournalTurn(journal, () => System.currentTimeMillis()),
-          files = Option.when(config.mode.files != Access.None)(LocalFiles(scope, profile, layout.secretNames)),
-          shell = Option.when(config.mode.shell == Access.Full)(JobShell(shell, jobs, journal)),
+          files = Option.when(config.mode.files != Access.None)(LocalFiles(scope, profile, made.secretNames)),
+          shell = Option.when(config.mode.shell == Access.Full)(JobShell(commands, jobs, journal)),
           llm = Option.when(config.mode.llm == Access.Full)(LeafLlm(subQuery, () => turns.current, host, limits.batch)),
           store = Option.when(config.mode.store != Access.None)(store)
         )
@@ -79,12 +84,14 @@ final class WorkRuntime(
           () => turns.current,
           Some(host)
         )(using context)
-        WorkActivation(effects, shell, turns, layout, context)
-      catch
-        case e: Exception =>
-          Try(shell.close()): Unit
-          WorkRuntime.remove(layout.temp)
-          throw e
+        val activation = WorkActivation(effects, commands, turns, made, context)
+        started = true
+        activation
+      finally
+        // Each throwable of a start leaves no shell proxy and no temporary folder.
+        if !started then
+          shell.foreach(s => Try(s.close()): Unit)
+          layout.foreach(l => WorkRuntime.remove(l.temp))
     }
 
 /** The live part of one activation of a work session. Each call of the effects runs in the context of the runtime. */
@@ -156,12 +163,16 @@ object WorkRuntime:
       "of the API reference. Keep a value for a later cell or turn in a val or in the store. A step with no code " +
       "ends the turn, and its text is the reply to the person. If a call needs an approval, end the turn and ask."
 
-  /** The first rules of 5.5: in a mode with `Network^`, `exec` with the prefix `git push` gets `Ask`. In another mode
-    * the sandbox already stops a push, so the guard has no rule.
+  /** The first rules of 5.5: in a mode with `Network^`, `exec` and `spawn` with the prefix `git push` get `Ask`. In
+    * another mode the sandbox already stops a push, so the guard has no rule.
     */
   def defaultGuard(mode: Mode): Guard =
     if mode.network != Access.Full then Guard.allowAll
-    else Guard(Vector(VerdictRule(GuardRule("exec", ArgMatch.Prefix("command", "git push")), Verdict.Ask)))
+    else
+      // `spawn` runs a command as `exec` does, so it gets the same rule.
+      Guard(Vector("exec", "spawn").map(op =>
+        VerdictRule(GuardRule(op, ArgMatch.Prefix("command", "git push")), Verdict.Ask)
+      ))
 
   /** The configuration of a work session in the folder `scope` (8.1): a chat turn with `limits.steps` steps, the owner
     * `User`, `workMode` as the mode and the ceiling, the window strategy, `defaultGuard(workMode)`, the preamble of a

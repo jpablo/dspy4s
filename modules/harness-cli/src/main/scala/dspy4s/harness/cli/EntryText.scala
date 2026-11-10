@@ -16,7 +16,20 @@ private val OutputLines = 40
   *   - An `Input` from a source that is not `User`, for example the message at the end of a job: its text.
   *   - The other entries give none.
   */
-def entryText(logged: Logged): Option[String] =
+def entryText(logged: Logged): Option[String] = rawText(logged).map(printable)
+
+/** `text` with no control character apart from a new line: a tab becomes two spaces, and the others go. So the output
+  * of a cell or the text of a model cannot send terminal escape sequences to the terminal of the person.
+  */
+private def printable(text: String): String =
+  text.flatMap {
+    case '\n'                           => "\n"
+    case '\t'                           => "  "
+    case c if Character.isISOControl(c) => ""
+    case c                              => c.toString
+  }
+
+private def rawText(logged: Logged): Option[String] =
   logged.entry match
     case Entry.Acted(_, text, code) =>
       Some((Vector(text).filter(_.nonEmpty) ++ code.map(c => s"```scala\n$c\n```")).mkString("\n"))

@@ -52,3 +52,23 @@ class ChatWindowLaws extends munit.FunSuite:
     val text = shown(Window.project(chat(0), (), 40_000))
     assert(!text.contains("reply <"), text)
   }
+
+  test("Chat window: a message after the last step of a turn belongs to the next turn, not to the turn that ended") {
+    val log = Support.logOf(
+      1000L,
+      Entry.Activated(Support.versions, Support.config(TurnKind.Chat)),
+      Entry.Input(RequestId("m1"), "FIRST-QUESTION", Map.empty),
+      Entry.TurnStarted,
+      Entry.StepStarted(0),
+      // The person types again while the model writes its first reply.
+      Entry.Input(RequestId("m2"), "SECOND-QUESTION", Map.empty),
+      Entry.Acted("", "FIRST-REPLY", None),
+      Entry.TurnEnded(TurnOutcome.Replied("FIRST-REPLY")),
+      Entry.TurnStarted,
+      Entry.StepStarted(0)
+    )
+    val p     = Window.project(log, (), 40_000)
+    val first = p.history.messages.map(_.toString).find(_.contains("FIRST-REPLY")).getOrElse(fail("no first turn"))
+    assert(!first.contains("SECOND-QUESTION"), first)
+    assert(p.observation.contains("SECOND-QUESTION"), p.observation)
+  }

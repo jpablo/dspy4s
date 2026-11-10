@@ -1616,6 +1616,29 @@ rules of the plan came from it too:
 - The laws of a stop now send the stop while a turn is open, check that the processes end, and use a latch in place
   of a sleep. The report of a job waits for a file that the test makes, so its order is fixed.
 
+**The review of the proofs of parts A, C and D (2026-11-10).** A second subagent read the bodies of the host, of the
+approvals and of the CLI, and found 12 defects, most of them with a probe. Each fix has a law that failed first. The
+rules that came from it:
+
+- A session has one end, `shutdown`, for each path: `Ended`, a failed write, and the close of the host. It runs once,
+  and it closes the activation, stops the jobs, ends the writer and frees the lock. After it, a commit starts no
+  worker. A failed write calls a hook of the writer, so the session ends, and a reopen in the same host works at once.
+  `LocalHost.open` waits for an ending session with no lock of the host held.
+- A failure of the turn machinery ends the turn and waits for the next command: the harness sends `Abort`, so the
+  waiting messages count as seen, and then commits the end of the turn. A failed activation and an exception of the
+  effects never start the same turn again by themselves. After a fatal error, no worker starts again.
+- The ticket of an activation exists before the activation, so a stop while a REPL starts gets its grace timer.
+- `JobTable.close` waits for each stop, also for a stop that `sync` started, and a second close does nothing. The report
+  of a job waits for the end of its output.
+- The recorder compares the arguments of a call with the mask, as the journal holds the pending rule and the grant. The
+  first rules of 5.5 cover `spawn` too.
+- A message after the last step of a turn belongs to the next turn in the window, as in the kernel.
+- The CLI uses `Secrets.known`, so a short placeholder key is not a known value. It ignores an empty line, removes the
+  control characters of each text, reads the state before its feed, and gives the exit code 1 after a failed write.
+- The guest API label of the journals is `phase-7`.
+
+The stop of the LM transport, so that a long policy call ends before the grace period, comes with part B.
+
 ## 11. The kinds of state, and the questions that test them
 
 [CODE_HARNESS_CONCEPTS.md](CODE_HARNESS_CONCEPTS.md) lists eight kinds of state. Each kind has one model:
