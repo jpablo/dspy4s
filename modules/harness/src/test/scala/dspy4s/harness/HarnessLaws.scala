@@ -1,0 +1,410 @@
+package dspy4s.harness
+
+import dspy4s.core.contracts.DynamicValues
+import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.harness.kernel.*
+import dspy4s.harness.repl.HeapGuard
+import dspy4s.harness.sandbox.{Backends, HostList}
+import dspy4s.lm.contracts.LanguageModel
+import munit.FunSuite
+
+import java.nio.file.{Files, LinkOption, Path}
+import scala.concurrent.duration.*
+import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.util.Try
+
+import Models.*
+
+/** The laws of a harness for one task (CODE_HARNESS_DESIGN.md, 9), with a scripted model, a real REPL and the sandbox
+  * of the host. The journal of each call goes to the test through `HarnessEnv.journals`.
+  */
+class HarnessLaws extends FunSuite:
+
+  override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
+  override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
+
+  /** Runs a harness for the task of the tests in a new place, and gives the result and the journal of the call. */
+  private def call(
+      model         : LanguageModel,
+      question      : String         = "What is 6 times 7?",
+      steps         : Int            = 3,
+      cellTime      : FiniteDuration = 30.seconds,
+      maxObservation: Int            = 4_000,
+      cellLimit     : Int            = 300,
+      secrets       : Secrets        = Secrets.none
+  )(check: (Place, Either[dspy4s.core.contracts.DspyError, Answer], Vector[Logged]) => Unit): Unit =
+    val place   = Place()
+    var journal = Vector.empty[Logged]
+    try
+      val env =
+        HarnessEnv(Some(place.root), place.home, HostList.empty, Backends.detect(), secrets, journals = journal = _)
+      val harness = Harness.forTask(
+        signature,
+        env,
+        HarnessLimits(steps = steps, cellTimeout = cellTime, maxObservation = maxObservation, cellLimit = cellLimit)
+      )
+      val result = withModel(model)(harness(Question(question))).map(_.output)
+      check(place, result, journal)
+    finally place.close()
+
+  private def ended(journal: Vector[Logged]): Vector[TurnOutcome] =
+    journal.collect { case Logged(_, _, Entry.TurnEnded(outcome)) => outcome }
+
+  test("Harness: a policy that submits gives the output through Data, and the journal is one turn") {
+    val model = ScriptLm(policy("compute", Some("submit((6 * 7).toString)")))
+    call(model) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("42")))
+      assertEquals(ended(journal).size, 1)
+      assert(Support.isTurn(journal.map(_.entry).dropWhile(_ != Entry.TurnStarted).drop(1)), journal.mkString("\n"))
+    }
+  }
+
+  test("Harness: the output is in RawPrediction.values, where a metric reads it") {
+    val model = ScriptLm(policy("compute", Some("submit(\"42\")")))
+    val place = Place()
+    try
+      val env    = HarnessEnv(Some(place.root), place.home, HostList.empty, Backends.detect(), Secrets.none)
+      val result = withModel(model)(Harness.forTask(signature, env)(Question("q")))
+      assertEquals(
+        result.map(p => DynamicValues.recordGet(p.raw.values, "answer")),
+        Right(Some(DynamicValues.string("42")))
+      )
+    finally place.close()
+  }
+
+  test("Harness: a reply with no code runs the finisher") {
+    val model = ScriptLm(policy("It is 42.", None), answer("42"))
+    call(model) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("42")))
+      assertEquals(ended(journal), Vector(TurnOutcome.Replied("It is 42.")))
+      assertEquals(model.requests.size, 2)
+    }
+  }
+
+  test("Harness: a code field with the text null or None is no code, so the reply runs the finisher") {
+    Vector("null", "None").foreach { empty =>
+      RuntimeEnvironment.resetForTests()
+      val model = ScriptLm(policy("It is 42.", Some(empty)), answer("42"))
+      call(model) { (_, result, journal) =>
+        assertEquals(result, Right(Answer("42")), empty)
+        assertEquals(ended(journal), Vector(TurnOutcome.Replied("It is 42.")), empty)
+      }
+    }
+  }
+
+  test("Harness: after the heap guard closes the REPL, the turn stops and calls the policy no more") {
+    val before = HeapGuard.pressure
+    val spin   = "locally { var n = 0L; while true do n += 1 }"
+    val model  = ScriptLm(policy("spin", Some(spin)), policy("again", Some("submit(\"x\")")), answer("x"))
+    try
+      // The pressure starts after the first policy call, so the guard stops the cell and not the preamble.
+      HeapGuard.pressure = () => model.requests.nonEmpty
+      call(model) { (_, result, journal) =>
+        assert(result.isLeft, result.toString)
+        assert(result.left.exists(_.message.contains("heap guard")), result.toString)
+        assertEquals(model.requests.size, 1)
+        assertEquals(ended(journal), Vector(TurnOutcome.Aborted), journal.mkString("\n"))
+      }
+    finally HeapGuard.pressure = before
+  }
+
+  test("Harness: when the REPL cannot start, the call gives a DspyError, and the journal ends the turn as Crashed") {
+    val before = HeapGuard.pressure
+    try
+      // Under pressure from the start, the guard stops the preamble, so the REPL does not start.
+      HeapGuard.pressure = () => true
+      call(ScriptLm(policy("done", Some("submit(\"x\")")))) { (_, result, journal) =>
+        assert(result.isLeft, result.toString)
+        assertEquals(ended(journal), Vector(TurnOutcome.Crashed), journal.mkString("\n"))
+        assert(Support.isTurn(journal.map(_.entry).dropWhile(_ != Entry.TurnStarted).drop(1)), journal.mkString("\n"))
+      }
+    finally HeapGuard.pressure = before
+  }
+
+  private def count(folder: Path): Long =
+    val paths = Files.list(folder)
+    try paths.count()
+    finally paths.close()
+
+  test("Harness: a workspace that cannot be copied gives a DspyError, and no part of the copy stays") {
+    val place  = Place()
+    val closed = place.root.resolve("closed.txt")
+    try
+      Files.writeString(closed, "FAKE-CLOSED"): Unit
+      Files.setPosixFilePermissions(closed, java.util.Set.of()): Unit
+      assume(!Files.isReadable(closed), "the test runs as a user that reads each file")
+      intercept[java.io.IOException](Harness.forkWorkspace(Some(place.root), place.temp)): Unit
+      assertEquals(count(place.temp), 0L)
+      val env    = HarnessEnv(Some(place.root), place.home, HostList.empty, Backends.detect(), Secrets.none)
+      val result = withModel(ScriptLm())(Harness.forTask(signature, env)(Question("q")))
+      assert(result.isLeft, result.toString)
+    finally place.close()
+  }
+
+  test("Harness: the copy of the workspace leaves out a named pipe, so the copy does not wait for a writer") {
+    val place = Place()
+    try
+      val pipe = place.root.resolve("pipe")
+      assume(Try(ProcessBuilder("mkfifo", pipe.toString).start().waitFor()).toOption.contains(0), "no mkfifo here")
+      val copy = Future(Harness.forkWorkspace(Some(place.root), place.temp))(using ExecutionContext.global)
+      val fork = Await.result(copy, 10.seconds)
+      assertEquals(Files.readString(fork.resolve("a.txt")), "FAKE-A")
+      assert(!Files.exists(fork.resolve("pipe"), LinkOption.NOFOLLOW_LINKS))
+    finally place.close()
+  }
+
+  test("Harness: the task of the policy shows the preamble, so the model sees the type of submit") {
+    val model = ScriptLm(policy("compute", Some("submit(\"42\")")))
+    call(model) { (_, result, _) =>
+      assertEquals(result, Right(Answer("42")))
+      val prompt = model.requests.headOption.toVector.flatMap(_.messages).flatMap(_.text).mkString("\n")
+      assert(prompt.contains("def submit(answer: String)"), prompt.take(3_000))
+      assert(prompt.contains("val question: String"), prompt.take(3_000))
+    }
+  }
+
+  private def reasoning(journal: Vector[Logged]): Vector[String] =
+    journal.collect { case Logged(_, _, Entry.Acted(thought, _, _)) => thought }
+
+  test("Harness: a model with native reasoning gets no reasoning field, and its reasoning goes into the Acted") {
+    val model = ThinkingLm("a native fake thought", thinking("compute", Some("submit(\"42\")")))
+    call(model) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("42")))
+      assertEquals(reasoning(journal), Vector("a native fake thought"))
+      val prompt = model.requests.headOption.toVector.flatMap(_.messages).flatMap(_.text).mkString("\n")
+      assert(!prompt.contains("[[ ## reasoning ## ]]"), prompt.take(3_000))
+    }
+  }
+
+  test("Harness: a model with no native reasoning writes the reasoning field, and it goes into the Acted") {
+    val model = ScriptLm(policy("compute", Some("submit(\"42\")"), reasoning = "a written fake thought"))
+    call(model) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("42")))
+      assertEquals(reasoning(journal), Vector("a written fake thought"))
+    }
+  }
+
+  /** The text of the user messages of the request `k` of `model`, where the observation of a step is. */
+  private def prompt(model: ScriptLm, k: Int): String =
+    model.requests.lift(k).toVector.flatMap(_.messages).flatMap(_.text).mkString("\n")
+
+  test("Harness: the policy sees the hint of a compile error") {
+    val model = ScriptLm(policy("keep", Some("val xs = Array(1, 2, 3)")), policy("done", Some("submit(\"x\")")))
+    call(model) { (_, result, _) =>
+      assertEquals(result, Right(Answer("x")))
+      assert(prompt(model, 1).contains("Hint:"), prompt(model, 1).take(3_000))
+    }
+  }
+
+  test("Harness: the policy sees that a cell stopped at its time limit") {
+    val spin  = "locally { var n = 0L; while true do n += 1 }"
+    val model = ScriptLm(policy("spin", Some(spin)), policy("done", Some("submit(\"x\")")))
+    call(model, cellTime = 1.second) { (_, result, _) =>
+      assertEquals(result, Right(Answer("x")))
+      assert(prompt(model, 1).contains("stopped after"), prompt(model, 1).take(3_000))
+    }
+  }
+
+  test(
+    "Harness: after a cell that confuses the compiler, a new REPL runs the next cells, and the policy learns the lost names"
+  ) {
+    val model = ScriptLm(
+      policy("keep", Some("store(\"k\", 5)\nval kept = 41")),
+      policy("array", Some("val xs = Array(1, 2, 3)")),
+      policy("sum", Some("submit((load[Int](\"k\").getOrElse(0) + Array(4, 5).map(_ + 1).sum).toString)"))
+    )
+    call(model) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("16")), journal.mkString("\n"))
+      val after = prompt(model, 2)
+      assert(after.contains("started a new REPL"), after.take(3_000))
+      assert(after.contains("gone: kept"), after.take(3_000))
+    }
+  }
+
+  test(
+    "Harness: a cell that breaks later Array chains with no error of its own leads to a new REPL at the next chain"
+  ) {
+    val model = ScriptLm(
+      policy("define", Some("case class I(x: Int)\ndef f(i: I): Int = i.x")),
+      policy("chain", Some("println(Array(4, 5).map(_ + 1).sum)")),
+      policy("again", Some("submit(Array(4, 5).map(_ + 1).sum.toString)"))
+    )
+    call(model) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("11")), journal.mkString("\n"))
+      assert(prompt(model, 2).contains("started a new REPL"), prompt(model, 2).take(3_000))
+    }
+  }
+
+  test("Harness: the hint of a compile error stays in the observation, also after the cut") {
+    val model = ScriptLm(policy("keep", Some("val xs = Array(1, 2, 3)")), policy("done", Some("submit(\"x\")")))
+    call(model, maxObservation = 200) { (_, result, _) =>
+      assertEquals(result, Right(Answer("x")))
+      assert(prompt(model, 1).contains("Hint:"), prompt(model, 1).take(3_000))
+    }
+  }
+
+  test("Harness: a full REPL leads to a new REPL, and the policy learns the lost names") {
+    val model = ScriptLm(
+      policy("a", Some("val a = 1")),
+      policy("b", Some("val b = 2")),
+      policy("done", Some("submit(\"x\")"))
+    )
+    call(model, cellLimit = 2) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("x")), journal.mkString("\n"))
+      assert(prompt(model, 2).contains("started a new REPL"), prompt(model, 2).take(3_000))
+      assert(prompt(model, 2).contains("gone: a, b"), prompt(model, 2).take(3_000))
+    }
+  }
+
+  private def observed(journal: Vector[Logged]): Vector[String] =
+    journal.collect { case Logged(_, _, Entry.Observed(output, _, _)) => output }
+
+  // No cell comes after the cell of the last step (4.3), so a new REPL is for nothing, and its note goes to the finisher.
+  test("Harness: the cell of the last step starts no new REPL, so the finisher sees no note of a new REPL") {
+    val model = ScriptLm(policy("keep", Some("val xs = Array(1, 2, 3)")), answer("x"))
+    call(model, steps = 1) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("x")))
+      assertEquals(ended(journal), Vector(TurnOutcome.Exhausted))
+      assert(observed(journal).nonEmpty, journal.mkString("\n"))
+      assert(!observed(journal).exists(_.contains("started a new REPL")), observed(journal).mkString("\n"))
+      assert(!prompt(model, 1).contains("started a new REPL"), prompt(model, 1).take(3_000))
+    }
+  }
+
+  // A cell that ended by `submit` ends the turn (5.1), so no cell comes after it.
+  test("Harness: a cell that ended by submit starts no new REPL, also when the REPL is full") {
+    val model = ScriptLm(policy("done", Some("submit(\"x\")")))
+    call(model, cellLimit = 1) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("x")))
+      assert(observed(journal).nonEmpty, journal.mkString("\n"))
+      assert(!observed(journal).exists(_.contains("started a new REPL")), observed(journal).mkString("\n"))
+    }
+  }
+
+  test("Harness: a compile error of another kind starts no new REPL, and the names stay") {
+    val model = ScriptLm(
+      policy("keep", Some("val kept = 41")),
+      policy("typo", Some("println(noSuchName)")),
+      policy("use", Some("submit(kept.toString)"))
+    )
+    call(model) { (_, result, _) =>
+      assertEquals(result, Right(Answer("41")))
+      assert(!prompt(model, 2).contains("started a new REPL"), prompt(model, 2).take(3_000))
+    }
+  }
+
+  test("Harness: the step limit runs the finisher") {
+    val model = ScriptLm(policy("start", Some("val x = 1")), answer("1"))
+    call(model, steps = 1) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("1")))
+      assertEquals(ended(journal), Vector(TurnOutcome.Exhausted))
+    }
+  }
+
+  test("Harness: the call works in a copy of the workspace, and the workspace stays the same") {
+    val code  = """write("a.txt", "after"); write("b.txt", "new"); submit(read("a.txt"))"""
+    val model = ScriptLm(policy("change", Some(code)))
+    call(model) { (place, result, _) =>
+      assertEquals(result, Right(Answer("after")))
+      assertEquals(Files.readString(place.root.resolve("a.txt")), "FAKE-A")
+      assert(!Files.exists(place.root.resolve("b.txt")))
+    }
+  }
+
+  test("Harness: exec runs in the sandbox, in the copy, and the copy is gone after the call") {
+    assume(Backends.detect().isDefined, "no OS sandbox works on this host")
+    val model = ScriptLm(policy("where", Some("""submit(exec("pwd").trim)""")))
+    call(model) { (place, result, _) =>
+      result match
+        case Right(Answer(folder)) =>
+          assert(!folder.startsWith(place.root.toString), folder)
+          assert(!Files.exists(Path.of(folder)), folder)
+        case other => fail(s"the call gave $other")
+    }
+  }
+
+  test("Harness: the store keeps only the writes of a cell that completed") {
+    val failing = """store("k", 1); throw IllegalStateException("fake failure")"""
+    val reading = """submit(load[Int]("k").fold("none")(_.toString))"""
+    val model   = ScriptLm(policy("store", Some(failing)), policy("read", Some(reading)))
+    call(model) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("none")), journal.mkString("\n"))
+    }
+  }
+
+  test("Harness: a failed model call gives a DspyError") {
+    call(ScriptLm()) { (_, result, journal) =>
+      assert(result.isLeft, result.toString)
+      assert(ended(journal).exists {
+        case TurnOutcome.Failed(_) => true
+        case _                     => false
+      })
+    }
+  }
+
+  // The parallel executor interrupts the thread of a call at its timeout or at `maxErrors` (9).
+  test("Harness: an interrupt of a program call gives its journal to env.journals, with a closed turn") {
+    val gate  = Gate()
+    val model = RequestLm(_ => Right(policy("compute", Some("submit(\"42\")"))), _ => gate.pass())
+    Background.run(model, HarnessLimits(steps = 3), gate) { call =>
+      assert(gate.awaitReached(), "the policy call did not start")
+      call.thread.interrupt()
+      assert(call.awaitEnd(), "the call did not end")
+      call.all match
+        case Vector(journal) =>
+          assertEquals(ended(journal), Vector(TurnOutcome.Crashed), journal.mkString("\n"))
+          assert(Support.isTurn(journal.map(_.entry).dropWhile(_ != Entry.TurnStarted).drop(1)), journal.mkString("\n"))
+        case other => fail(s"env.journals got ${other.size} journals")
+      assert(call.result.exists(_.isLeft), s"result ${call.result}, exception ${call.thrown}")
+      assert(call.flagged, "the call did not set the interrupt flag of its thread again")
+    }
+  }
+
+  test("Harness: after a fatal error of a call, env.journals still gets the journal") {
+    val place   = Place()
+    var journal = Vector.empty[Logged]
+    try
+      val env = HarnessEnv(
+        Some(place.root),
+        place.home,
+        HostList.empty,
+        Backends.detect(),
+        Secrets.none,
+        journals = journal = _
+      )
+      val model = RequestLm(_ => throw StackOverflowError("a fake fatal error"))
+      // `intercept` does not catch a fatal error, so the test catches it.
+      val fatal =
+        try
+          withModel(model)(Harness.forTask(signature, env)(Question("q"))): Unit
+          false
+        catch case _: StackOverflowError => true
+      assert(fatal, "the fatal error did not go on to the caller")
+      assert(journal.nonEmpty, "env.journals got no journal")
+    finally place.close()
+  }
+
+  test("Harness: the journal of a call holds no known secret") {
+    val secret = "fake-secret-9876"
+    val model  = ScriptLm(policy("done", Some(s"""submit("$secret")""")))
+    call(model, question = s"Repeat $secret", secrets = Secrets(Map("FAKE_KEY" -> secret))) { (_, _, journal) =>
+      assert(journal.nonEmpty)
+      assert(!journal.toString.contains(secret), journal.mkString("\n"))
+    }
+  }
+
+  test("Harness: the REPL has only the givens of the task mode") {
+    // Since phase 5 the task mode gives `Llm^` (8.1), so `llmQuery` compiles. The task mode still gives no `Network^`.
+    val fetch = """httpGet("http://fake.test/page")"""
+    val model = ScriptLm(policy("fetch", Some(fetch)), policy("give up", Some("""submit("x")""")))
+    call(model) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("x")))
+      assert(
+        journal.exists {
+          case Logged(_, _, Entry.Observed(_, CellOutcome.CompileError(_), _)) => true
+          case _                                                               => false
+        },
+        journal.mkString("\n")
+      )
+    }
+  }

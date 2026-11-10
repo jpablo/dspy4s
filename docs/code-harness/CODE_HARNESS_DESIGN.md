@@ -5,7 +5,9 @@ of [CODE_HARNESS.md](CODE_HARNESS.md), which keeps the analysis and the history.
 dspy4s yet. The sketches of the kernel and of the guest API compile and ran in checks (section 12). Section 14 lists
 the choices that are new in this document. [CODE_HARNESS_ATLAS.html](CODE_HARNESS_ATLAS.html) has six diagrams of this
 design, and [CODE_HARNESS_EVENTS.html](CODE_HARNESS_EVENTS.html) has its events, their catalog and their sequences.
-Open them in a browser.
+Open them in a browser. [CODE_HARNESS_BLUEPRINT.html](CODE_HARNESS_BLUEPRINT.html) shows the plan of section 15 as a
+graph, with the state of each node and the work that can run at the same time. `scripts/blueprint/blueprint.py` makes
+it from [blueprint.toml](blueprint.toml) and the build results.
 
 ## Summary
 
@@ -203,9 +205,10 @@ final case class SessionState(
 def evolve(s: SessionState, logged: Logged): SessionState   // total and pure
 ```
 
-`evolve` is the only place where state changes. `SessionState` is `journal.foldLeft(initial)(evolve)`, so a fold of a
-prefix continues to the same state: the journal is a free monoid, and the fold is a homomorphism from it to the
-functions on the state.
+`evolve` is the only place where state changes. `state(journal)` is `journal.foldLeft(SessionState.initial)(evolve)`,
+so a fold of a prefix continues to the same state: the journal is a free monoid, and the fold is a homomorphism from
+it to the functions on the state. `state` is a function and not a method of `SessionState`, because the type
+`SessionState` comes before `evolve`, and `evolve` comes before the fold.
 
 Each other view of a journal is also a fold, for example the note of lost names (6), the ledger, the usage totals and
 the deterministic part of a `SessionCard`. Folds compose, so several views need one pass:
@@ -432,7 +435,8 @@ definition that a cell can use has `@assumeSafe`, because safe mode rejects the 
   update def write(path: String, content: String): Unit
 
 @assumeSafe trait Shell extends caps.ExclusiveCapability:
-  def exec(command: String)(using Files^): String  def spawn(command: String, report: Boolean = false)(using Files^): JobId
+  def exec(command: String)(using Files^): String
+  def spawn(command: String, report: Boolean = false)(using Files^): JobId
   def jobOutput(job: JobId): String
   def waitJob(job: JobId, maxSeconds: Int): JobStatus
   def stopJob(job: JobId): Unit
@@ -443,10 +447,12 @@ definition that a cell can use has `@assumeSafe`, because safe mode rejects the 
   update def store[A: Data](key: String, value: A): Unit
 
 @assumeSafe trait Sessions extends Cap:
-  def list(): Vector[String]  update def tell(session: String, message: String): Unit
+  def list(): Vector[String]
+  update def tell(session: String, message: String): Unit
 
-@assumeSafe trait Children extends Cap:  update def rlm[A: Data](task: String, inputs: Map[String, String]): A
-  update def rlmBatched[A: Data](tasks: Vector[String]): Vector[A]
+@assumeSafe trait Children extends Cap:
+  update def rlm[A: Data](task: String, inputs: Map[String, String]): A
+  update def rlmBatched[A: Data](tasks: Vector[(String, Map[String, String])]): Vector[A]
 
 @assumeSafe object api:
   def println(value: Any): Unit = scala.Console.println(value)
@@ -455,13 +461,19 @@ definition that a cell can use has `@assumeSafe`, because safe mode rejects the 
   def exec(command: String)(using s: Shell^, f: Files^): String = s.exec(command)
   def load[A: Data](key: String)(using s: Store): Option[A] = s.load[A](key)
   def store[A: Data](key: String, value: A)(using s: Store^): Unit = s.store(key, value)
-  def now(): Long                                              // milliseconds since the epoch
-  def input[A: Data](name: String): A                          // the value of an input field of this session
+  def now()(using t: Turn): Long                               // milliseconds since the epoch
+  def input[A: Data](name: String)(using t: Turn): A           // the value of an input field of this session
   // and the other functions
 ```
 
+`now()` and `input` take the given `Turn`, which the preamble of each mode binds. `Turn` is not a capability, so each
+mode has it, and a cell cannot make one. The host gives the clock through it as a recorded guest API call, and the
+input values from `SessionState.inputs`.
+
 The sketch shows the shape. The full API also has `edit`, `httpGet`, `llmQuery`, `llmQueryBatched`, `rlm`, `start`,
-`observe` and `zoom`. `submit` comes from the preamble of the session. The source text of these traits, with a
+`observe` and `zoom`. `submit` comes from the preamble of the session. This section gives no signature for `edit` and
+`httpGet`, so the code of `harness-guest` proposes `edit(path, oldText, newText)` on `Files^` and a `Network` trait
+with `get(url)` behind `httpGet`, for the review. `Sessions` has the signatures of 8.2. The source text of these traits, with a
 notation header, is the API reference in the prompt. A search function and the reference on demand can come later, for
 a large API.
 
@@ -496,8 +508,10 @@ enum DataShape:                                    // a record and a union are l
 ```
 
 A case class or an enum needs no other code. A cell can write `case class Point(x: Int, y: String)`, and then
-`store("p", Point(1, "a"))`. A recursive type needs one more line, because the inline given does not end on it: `case
-class Dir(name: String, kids: Vector[Dir])`, and then `given Data[Dir] = Data.derived`.
+`store("p", Point(1, "a"))`. A recursive type, for example `case class Dir(name: String, kids: Vector[Dir])`, and two
+types that hold each other need no other code either, because `derived` takes the `Data` of each field as a by-name
+given. The sketch of section 12 needed one more line for them, `given Data[Dir] = Data.derived`, and the line still
+works.
 
 | Value | Its `Json` form |
 |---|---|
@@ -556,23 +570,35 @@ the REPL of a child has none of the types of its parent:
 case class Point(x: Int, note: Option[String])
 val p = rlm[Point]("find the point", Map("doc" -> text))
 
-// the preamble of the child: the types, one given for each type, `submit`, and one `val` for each input
+// the preamble of the child: the types, a companion with one given for each type, and an object with `submit` and
+// one `val` for each input
 case class Point(x: Int, note: Option[String])
-given Data[Point] = Data.derived
-def submit(x: Int, note: Option[String]): Nothing = ...
-val doc: String = input[String]("doc")
+object Point:
+  given _root_.dspy4s.harness.guest.Data[Point] = _root_.dspy4s.harness.guest.Data.derived
+object Preamble:
+  def submit(x: Int, note: Option[String]): Nothing = ...
+  val doc: String = input[String]("doc")
+import Preamble.*
 ```
+
+- The givens are in the companion objects, and `submit` and the vals are in an object, because of a defect of the
+  compiler (6): in safe mode, a top-level given of `Data.derived`, or a top-level `def` or `val` whose type has a
+  collection or a type of the same chunk, breaks each later Array chain. The full name of `Data` stays right when a
+  case of the type has the name `Data`. A val of `Preamble` reads its input when a cell first uses the object.
 
 - `SessionConfig.preamble` holds the text (8.1), and the journal holds no `DataShape`. A new REPL after a crash or a
   reopen compiles the same text. The text holds no value, so it holds no secret.
+- A new REPL compiles the givens of its mode before safe mode starts, and then the preamble of the session in safe
+  mode. So a cell can use the types, `submit` and the inputs, and it cannot name the host.
 - The API reference in the prompt also shows the preamble, so the model sees the types and `submit`.
 - A program makes its preamble from `Data[O].shape` and `Data[I].shape` when it is built. A child gets its preamble
   from `Data[A].shape` when `rlm` is called. A session with no output type has `submit(value: String)`.
 - A record gives `submit` one parameter for each field (F3). Another type gives `submit(value: T)`.
 - The JSON of a value does not hold the name of a type. So the preamble can write `Box[Int]` as a class with an `Int`
   field, and a sealed trait as an enum, with the same form.
-- Three things have no preamble: two types with one name and two forms, a sealed trait inside a sealed trait, and an
-  input with the name of a guest API function. A program fails at its build, and `rlm` fails with a plain error.
+- Five things have no preamble: two types with one name and two forms, a sealed trait inside a sealed trait, an input
+  with the name of a guest API function, and a type or an input with the name `Preamble`. A program fails at its
+  build, and `rlm` fails with a plain error.
 
 **The values of the input fields.** The input fields of a program call and the `inputs` of `rlm` are in the `values`
 of the `Input` entry. `SessionState.inputs` is their fold, apart from the store, so a `store` cannot change an input.
@@ -612,6 +638,9 @@ final case class Mode(files: Access, shell: Access, network: Access, llm: Access
   def <=(that: Mode): Boolean
   def meet(that: Mode): Mode
 ```
+
+`Access` and `Mode` are in `harness-guest` (10.5). A mode says which capabilities of the guest API a session gets, so
+the REPL uses it for the preamble. `SessionConfig` (8.1) holds two modes, so the kernel uses it too.
 
 | Mode | Givens in the preamble |
 |---|---|
@@ -676,6 +705,62 @@ the only ways to read another session.
 
 Seatbelt on macOS and bubblewrap on Linux come first. `kyo-pod` is a possible later backend for rollouts.
 
+**The first version (phase 3).** `Profile.forMode(mode, scope, layout, hosts)` gives the profile. Four observations
+are its meaning: `canRun`, `canRead(path)`, `canWrite(path)` and `canConnect(host)`. The laws and the escape tests
+compare each backend with these observations.
+
+- The layout names the private temporary directory, the folder of the journals, the secret paths and the names of the
+  secret files. The secret paths are `~/.ssh`, `~/.aws`, `~/.azure`, `~/.gnupg`, `~/.kube`, `~/.docker`, `~/.netrc`,
+  `~/.npmrc`, `~/.pypirc`, `~/.git-credentials`, `~/.password-store`, `~/.config/gcloud`, `~/.config/gh`,
+  `~/Library/Keychains`, and the credential files of common tools: `~/.config/git/credentials`, `~/.config/op`,
+  `~/.codex/auth.json`, `~/.claude/.credentials.json`, `~/.m2/settings.xml`, `~/.gradle/gradle.properties`,
+  `~/.sbt/.credentials`, `~/.ivy2/.credentials`, `~/.cargo/credentials`, `~/.cargo/credentials.toml`,
+  `~/.local/share/keyrings`, `~/.pgpass`, `~/.vault-token` and `~/.terraform.d/credentials.tfrc.json`. Under the scope and the temporary directory, a file or folder with the name `.env` or
+  `.env.*` that exists when a command starts is secret. A proposal: the design names only `~/.ssh`, `~/.aws` and
+  `.env`.
+- The host list is a set of patterns: `name`, `name:port` or `name:*`. A name `*.d` matches each subdomain of `d`. A
+  pattern with no port allows only the ports 80 and 443. A proposal: the design gives the host list no type.
+- Seatbelt denies by default, as in Codex. A child can start programs, read files, and look only at the processes of
+  its own sandbox. It cannot reach launchd and the other services of the system, so it cannot start a process outside
+  the sandbox. `sh`, `git`, `python3` and `java` run with these rules.
+- bubblewrap keeps the network closed in each mode, also with `Network^`, because the proxy needs a bridge into the
+  network namespace, as in Codex. Less network is less authority, so the law holds.
+- A read-only mount does not stop a connection to a UNIX socket of the host, and a network namespace covers only the
+  abstract sockets. Through the D-Bus bus of the user, a command can start a process outside the sandbox, and
+  docker.sock gives root. So bubblewrap loads a seccomp filter: `socket` for `AF_UNIX` gets `EPERM`, and so do
+  `socketpair` for a datagram pair, `io_uring_setup`, and each call of another ABI. A stream pair from `socketpair`
+  stays allowed. The filter exists for aarch64 and x86_64, and on another host bubblewrap does not work. Seatbelt
+  denies these connections by default.
+- A secret name protects the files that exist when a command starts. Before each command, the shell finds the
+  files of the writable roots with a secret name, apart from `.git`, and it hides each one and the target of each one
+  that is a symbolic link. It also hides a folder that it cannot read. The command cannot read, write, link or move
+  these files, and both backends deny them by path. A command can make a new file with a secret name. That file holds
+  only data of the command, and the next command cannot read it. A mount of bubblewrap cannot hide a name, so a rule
+  for the names would hold only on macOS.
+- `SecretIndex` keeps the listing of each folder, so a command lists again only the folders that changed. It lists a
+  folder again when its change time, its last-modified time or its file key differs, and when the folder changed less
+  than 2 seconds before the listing, because a file time on Linux can be coarse. A command can set the last-modified
+  time back, but not the change time.
+- Seatbelt escapes a quote, a backslash, a newline and a return in a path, so a file name cannot stop the next
+  commands.
+- A backend works when `/bin/sh -c true` runs under its own command line. A probe with other arguments can pass in a
+  container where each command fails, for example where bwrap can mount `/dev` but not `/proc`.
+- In a container, the JVM can be PID 1 with no init. Then an orphan of a command stays a zombie after it ends, and
+  `ProcessHandle.isAlive` is true for it. The handler counts a zombie as stopped, so the time limit does not wait for
+  it. A zombie uses no memory, but only an init reaps it, so run the harness with an init in a container.
+- `scripts/sandbox-linux/run.sh` runs the laws on Linux in a podman container, as a normal user.
+- The proxy listens on the loopback address, for plain HTTP and for `CONNECT`. A host or a port that is not on the
+  list gets 403, and the proxy opens no connection for it. The proxy resolves the names, so a child needs no DNS. It
+  sends the `Host` header of the URL that it checked, and it refuses a folded header. It serves at most 64
+  connections at a time, and a connection above the limit gets 503. A side that is silent for the idle time ends the
+  connection.
+- Two limits stay. A tunnel of `CONNECT` can carry another host in its TLS name or in its inner `Host` header, as
+  with any proxy that does not open TLS. A second request in one plain connection keeps its own `Host` header, but the
+  proxy asks the host to close after the first answer.
+- A proposal: `exec` gives the standard output and the standard error as one text. A last line tells about a cut of
+  the output, the end of the time limit, and an exit code that is not 0. The time limit stops the command and each
+  child that the handler saw.
+
 ### 5.5 Approvals: a cell never waits for a person
 
 Each rule of a session says `Allow`, `Ask` or `Deny` for the calls that it matches. The strongest verdict wins, and a
@@ -727,7 +812,7 @@ def guardCheck(s: SessionState, op: String, args: Json): GuardResult =
     case Verdict.Ask                             => GuardResult.Refused("no person can answer in this session")
 
 def forked(prefix: Vector[Logged]): SessionState =
-  SessionState.of(prefix).copy(grants = Set.empty, pending = Set.empty, jobs = Map.empty)
+  state(prefix).copy(grants = Set.empty, pending = Set.empty, jobs = Map.empty)
 
 // Three examples. `args` gives the `Json` of the arguments of the call.
 Grant(request, GuardRule("exec", ArgMatch.Exact(args("git push origin main"))), GrantLifetime.Once)
@@ -740,6 +825,19 @@ Grant(request, GuardRule("exec", ArgMatch.Prefix("command", "git push")), GrantL
 | `Once`, the default | One call | The `EffectDone` of the first call that the rule matches |
 | `Turn` | A loop of calls | The next `TurnEnded` |
 | `Session` | Work that the person trusts | `Ended` |
+
+**The normal form of `Prefix`.** A raw `startsWith` lets a cell dodge a rule with `//etc`, `/./etc` or two spaces, so
+`Prefix` compares a normal form:
+
+- A rule text that starts with `/` is a path rule. Both sides lose their empty parts and their `.` parts, and a `..`
+  removes the part before it. The value matches when its parts start with the parts of the rule, so `/etc` matches
+  `/etc/hosts` and not `/etcetera`. A relative path never matches, so a handler gives absolute normal paths.
+- Another rule text is a text rule. Each run of whitespace becomes one space on both sides. The value matches when it
+  starts with the rule text and its next character cannot go on with a word: it is not a letter, a digit, `-`, `_` or
+  `.`. So `git push` matches `git push;rm x` and `git push origin`, and not `git pushx`.
+
+`decide` also refuses an `EffectStarted` whose id is not above each id that its cell started, open or closed, so one
+id names one call. `SessionState.lastCall` holds the largest one.
 
 `Ended` removes all grants, so a reopened session asks again. The lifetime is in the grant, because only the person
 knows how much they trust that call.
@@ -788,8 +886,8 @@ wait in the handler can come later with no kernel change, because `Granted` can 
 - A command from `exec` or `spawn` gets only an allowlist of environment variables: `PATH`, `HOME`, `SHELL`, `TMPDIR`,
   `TMP`, `TEMP`, `LANG`, `LC_ALL`, `LC_CTYPE`, `LOGNAME`, `USER`, `TERM`, and the names in `SessionConfig.env`. A name
   that contains `KEY`, `SECRET`, `TOKEN`, `PASSWORD`, `PASSWD`, `CREDENTIAL` or `AUTH` never goes through, also if the
-  session adds it. The harness process holds the keys of the LM provider, and Java and Codex pass all variables by
-  default.
+  session adds it. `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` and `GIT_AUTHOR_DATE` are not secret, because `AUTH` is in
+  `AUTHOR`. The harness process holds the keys of the LM provider, and Java and Codex pass all variables by default.
 - The writer masks each known secret value in each string of an entry before the commit, as `«secret:NAME»`. The known
   values are the values behind `secretHeaders` and the values of the secret-like variables of the harness process. A
   longer value goes first, so a value inside another value is not cut. This rule is a second guard: it does not find a
@@ -830,7 +928,8 @@ the journal does not hold it. A function that `Classified.map` runs can leak a b
 
 | The error | The cause | The hint |
 |---|---|---|
-| "Maximal number of successive inlines (32) exceeded" | A recursive type with no given | `given Data[T] = Data.derived` |
+| "Maximal number of successive inlines (32) exceeded" | A type that the inline derivation of `Data` cannot end on | `given Data[T] = Data.derived` |
+| "Mutable variable n is defined in a class that does not extend `Stateful`" | A top-level `var`, which capture checking refuses in a cell | A `val`, or the `var` in a block |
 | "is not included in the allowed capture set" after the second try | A capability in a place that must be pure | The name of the capability |
 | "Found: (x$1: (String, Vector[String]{val prefix1: ..." | A `Vector` in a pair, for example `groupBy(f).map { case (k, v) => ... }` | `.view.mapValues`, `groupMapReduce` or `.toList` |
 | "Found: ((Array[(String)?]^{any.rd}))?^{x1.rd}" | `case Array(x, y)` inside `collect` | `.toList`, and then `case List(x, y)` |
@@ -871,6 +970,40 @@ cell limit (protection 5, about 300 cells) all start a new REPL in the same way:
 Replay would not suit the cell limit in any version. The limit exists because the memory of a REPL grows with its
 cells, and a replay of 300 cells makes the same 300 cells again.
 
+**A defect of the compiler, and its restart.** The compiler of the 3.10 nightly has a defect in a REPL with capture
+checking and safe mode. After some top-level definitions, each later Array chain fails, for example
+`Array(4, 5).map(_ + 1).sum` with `Found: Array[Int]^{any.rd}`, `Required: Array[Int]`. A plain compile with the same
+options compiles the same code. A bare REPL with only capture checking and safe mode has the defect after a
+top-level `val v = Vector(1, 2)`. The definitions that cause it in the REPL of the harness, as far as the probes of
+2026-11-09 and 2026-11-10 found:
+
+- a top-level `def` or `val` whose type has a collection (`Vector`, `List`, `Seq`, `Map`, `Set`), also in a bare REPL;
+- a failed top-level `val` with no type, such as `val xs = Array(1, 2, 3)`, which safe mode refuses;
+- a top-level `def` whose signature names a type of the same cell;
+- a top-level given of `Data.derived`, and a top-level `val` that holds an object with capability fields.
+
+The last three did not cause it in a bare REPL, so they need an earlier cell of the harness too, such as a capability
+given. A draft of a report for the compiler is in `tmp/`, and it is not committed.
+
+The same definitions in an object, used through an import, cause nothing. So the start cells have no `val` of the
+bindings, and the preamble puts its givens in companion objects and `submit` and the vals in an object (5.1). A cell of
+the model can still cause the defect. So `ScalaRepl.needsRestart` becomes true after the error of a failed `val` with no
+type, and after the error of the defect itself in a cell after the first cell. In the first cell of a new REPL that
+error is a real error, and a restart would repeat. Then the harness starts a new REPL in the way of this section, and the
+observation of the cell ends with a note: the names of earlier cells that are gone, and that the model can run the cell
+again. A cell that did not compile never ran, so it repeats no side effect. The first instructions of the policy also
+say to prefer a `Vector` or a `List` to an Array and to convert the result of `split` at once. In the broken state a
+Vector chain still works. The test "Known compiler defect" is an expected failure: when it passes, a fix of the
+compiler came, and the restart can go.
+
+**A full REPL, and the echo.** After the cell limit (`HarnessLimits.cellLimit`, 300 cells), the harness starts a new REPL as for the defect of the compiler, and the note gives that reason. Its names include the names of the last cell when that cell completed. The note says that the model can run the cell again only after a compile error, because a cell that completed can have side effects. The REPL shows the value of each `val` that a cell defines. That echo is cut to 400 characters with a note, so a long value does not fill the observation a second time. `println` and the guest API keep their whole output, and the harness cuts the whole observation. A hint of a compile error that the cut removed comes after the cut text.
+
+**When no restart comes.** No new REPL starts after a cell that ended by `submit`, or after the cell of the last step, because no cell can come after it. The parser of the note of lost names runs under one lock, because one parser state of the compiler is not safe for threads: two restarts at the same time made it throw.
+
+**The text of a cell.** `CellRun.text` is the text that an agent sees: the output; for a compile error, its lines and
+hints; for a failure, a timeout or a submit, the output and a note. The MCP server and the harness both show it, so the
+model of the harness sees the hints and learns that a cell stopped at its time limit.
+
 **The conditions for a later `parallel`.** The first version has no `parallel` (choice 18). A later version needs five
 things:
 
@@ -897,7 +1030,10 @@ tool gives the API reference. Two rules hold:
   sends `System.out` to stderr, and a cell writes to its own buffer. In the check of section 12, one late print of a
   library broke each later call of a server with no such rule.
 - Until the sandbox of phase 3 exists, the server starts only the read-only mode of 5.2, with no `Shell^` and no
-  `Network^`. The other agent has its own shell, so the server only tests the guest API.
+  `Network^`. The other agent has its own shell, so the server only tests the guest API. The first server also has no
+  LM and no other sessions, so it gives `files: Files` on the workspace and `state: Store^` in memory.
+- `files` cannot read a file with a secret name or a secret path of the home folder (5.4), as for a command. The
+  check takes the path as the cell writes it and its real path, so a link with a secret name is closed too.
 
 ## 7. The context
 
@@ -932,6 +1068,8 @@ final case class PolicyStep(text: String, code: Option[String])
   ([CODE_HARNESS.md](CODE_HARNESS.md), 6.2).
 - **Derived data has a journal of its own.** An LM makes it, so a new derivation costs money and gives a different
   result.
+- **The first version.** Phase 4 has the window strategy. The end of section 9 has its proposals: `project` gives a
+  `Projection`, the derived data is a type member, and the budget counts characters.
 
 ## 8. Sessions
 
@@ -971,7 +1109,7 @@ configuration. Neither one cut any work.
 | Function | Needs | Meaning |
 |---|---|---|
 | `rlm[A: Data](task, inputs): A` | `Children^` | Runs a child inside the cell and gives its value. It is one effect of the parent, and the child has its own journal. A child that ends with no `submit` makes the call fail (5.1). |
-| `rlmBatched[A: Data](tasks): Vector[A]` | `Children^` | Runs several children at the same time inside the cell. It is one effect of the parent, and each child has its own journal. |
+| `rlmBatched[A: Data](tasks): Vector[A]` | `Children^` | Runs several children at the same time inside the cell. Each task has its inputs, as the inputs of `rlm`. It is one effect of the parent, and each child has its own journal. |
 | `start(goal, scope, strategy): SessionRef` | `Sessions^` | Starts a session in the background. Its report comes back as an `Input` with `Source.Child`, and this starts a turn (8.6). |
 | `tell(session, message)` | `Sessions^` | `Send` to that session, with `Source.Controller` or `Source.Child`. It returns after the receiver commits (8.6). |
 | `observe(session, question): String` | `Sessions`, `Llm^` | A read-only `rlm` with the journal of that session as an input. It changes nothing in that session. |
@@ -1095,6 +1233,155 @@ and `Exhausted` run the `finisher` leaf. This path needs no writer and no thread
 - **Rollout tasks.** The first source is the history of this repository: a commit that makes a test pass gives a
   rollout task and a metric.
 - **Tests with no model.** A script of `TurnEffects`, and later recorded model streams.
+
+**The first version (phase 4).** The module `harness` holds the worker of 4.6, a journal in memory, the mask of 5.6,
+the handlers of a call (5.3), the window strategy (7) and `Harness`. These choices were made on 2026-11-09:
+
+- A call of phase 4 has the mode `Files^`, `Shell^` and `Store^`, and nothing else (`HarnessEnv.taskMode`). The mode
+  of a rollout in 8.1 gives `Llm^`, `Children^` and the bare `Sessions`, and their handlers come later. Phase 5 adds
+  `Llm^` and `Children^`.
+- `Harness` has only the leaves `policy` and `finisher`, the leaves that run in a program call. So an optimizer sees
+  only leaves that run. `subQuery` comes with `llmQuery` in phase 5, and `goal` with the goals of sessions in phase 7.
+- `forward` copies the workspace to a new private temporary folder. `Files.local` and `Shell.sandboxed` work on the
+  copy, so both see the same files, and the copy is deleted at the end of the call.
+
+And these are proposals for the review:
+
+- `Journal.run` takes the sender, which gives the source of each entry through `sourceOf`, so the `Acted` of a step
+  comes from the policy. `Journal.log` gives the entries to a strategy.
+- The journal in memory is the writer of one call. It masks each entry before the commit, as the writer of 5.6 does.
+- `Secrets.known` keeps no value shorter than 8 characters, because its mask would change common text, and no value
+  that is a part of a mask, because a second mask would change the first one.
+- The recorder is `recorded(h)` of 5.3: each guest API call commits `EffectStarted` and `EffectDone`, also `read`,
+  `load` and `now`. `input` reads the journal, so it is not an effect. `guarded` stays in phase 7.
+- `Files.local` applies the profile of 5.4 itself: a write only under a writable root and not in `.git`, and no read
+  or write of a hidden path or of a secret file that exists.
+- A strategy gives a `Projection`: the status, the last observation and the history. The harness adds the task and
+  the API reference, which do not come from the journal. The derived data is a type member of `ContextStrategy`, so
+  `Harness` has no third type parameter, and `guestApi` waits for the memory tree.
+- The window holds the steps of the open turn, oldest first. The last observation is always in it, cut to half of the
+  budget. The budget counts characters, so the projection needs no tokenizer. The status renders in full at each step.
+- `HarnessEnv.journals` gets the journal of each call, because the owner of a rollout is an optimizer, which reads the
+  journal (8.6).
+- `OptimizableStructure` and `ProgramRunner` of a harness are givens of its companion, which each optimizer of dspy4s
+  needs: `P: {OptimizableStructure, ProgramRunner}`. The runner puts the encoded output in `RawPrediction.values`,
+  where a metric reads it.
+
+The proofs of phase 4 added these points, also for the review:
+
+- The window gives the output of the last cell as the observation, cut to half of the budget. An earlier step is a
+  message of the history with the input field `observation`, the output before that step cut to an eighth of the
+  budget, and the output fields `text` and `code`, each also cut to an eighth of the budget. The newest messages that
+  fit the rest of the budget stay, so the last step stays when the status is short.
+- `recorded` takes the root of the copy, so the path of a file call in the journal is absolute and normal. A path
+  rule of a guard needs that (5.5).
+- The journal keeps at most `HarnessLimits.maxObservation` characters of the output of a cell.
+- The task of a call holds the instructions of the signature and the value of each input field. The preamble also
+  has a `val` for each input field, so a cell reads the whole value.
+- `Harness` keeps `Data[I]` and `Data[O]` as values, because a replace of its leaves needs `copy`.
+- The chat adapter keeps the text `null` of an optional string field, as DSPy does. So the harness reads a code of
+  `null` or `None` as no code, and the first instructions of the policy tell the model to leave out the field `code`
+  in a step with no code.
+
+A code review of phase 4 on 2026-11-09 added these rules:
+
+- `Files.local` refuses a path with a part that is a symbolic link to a place that does not exist, and a file with
+  more than one hard link. It opens a file for a read or a write with no link at the last part. A command in the
+  sandbox can make these links, and the JVM is not in the sandbox. One limit stays: a job can swap a folder for a link
+  between the check and the open.
+- After a cell whose thread still runs, or after the heap guard closed the REPL, the recorder refuses each later
+  call, and the harness stops the turn. The error of the call gives the reason. The thread of the cell can still run
+  in the JVM, but it cannot reach a handler. A full REPL starts a new REPL instead (6).
+- The recorder chooses the id of a call and commits its intent under one lock. So two calls of one cell on two
+  threads cannot get a false refusal. Today only a thread that did not stop can make a second call, and in phase 5
+  `llmQueryBatched` can too.
+- `forward` gives a `DspyError` when the copy of the workspace fails, and it deletes the part of the copy. The copy
+  leaves out a named pipe, a socket and a device, because the open of a named pipe can wait with no limit. On JDK 21,
+  `Files.copy` clones a file on APFS and on a Linux file system with reflinks, so the copy costs mostly the walk.
+- An exception during a call stops the turn with its reason and closes it with `TurnEnded(Crashed)`, as a repair does
+  (4.4). So the journal of a call is always one turn. The stop comes first, because the kernel starts a new turn for
+  an input that no step saw.
+- Only the status says that a step is the last one, and the code of that step does not run.
+
+The first live run of phase 4 on 2026-11-09 added these rules. It used a private OpenAI-compatible endpoint with an
+open model of 27B parameters that sends its reasoning apart from its text:
+
+- The task of the policy shows the source of the preamble. Before, the model knew `submit` only from the
+  instructions, so it wrote `submit(13)` for `submit(answer: String)` and lost a step to a compile error.
+- `PolicyStep` has the output field `reasoning` with the type `Reasoning`, as `ChainOfThought` has. For a model that
+  declares native reasoning, the prompt has no such field, and the adapter fills it from the reply. A model with no
+  native reasoning writes the field. So `Acted.reasoning` holds either one. Before, it was always empty.
+- Each message of the history has an empty `reasoning`, because the window keeps no thought. With no such key, the
+  adapter shows the text `None` for the field, as DSPy does, and a model can copy it.
+- The port declares no capability for a server that is not OpenAI. With `LmCapabilities(reasoning = true)`, dspy4s
+  sends its default effort `low`, and this server obeyed it: the reasoning of a step fell from 9,000 to 27,000
+  characters to 100 to 400, and a call took 1 to 2 s in place of 20 to 60 s. One task needed two more steps, because
+  of a compile error.
+
+**The first version (phase 5).** Phase 5 adds `Llm^` and `Children^` to a harness call. These choices were made on
+2026-11-10, while the user was away, with the permission to make the proofs with no spec review first:
+
+- The task mode gives `Llm^` and `Children^`, as 8.1 gives a rollout. `recorded` records `llmQuery`,
+  `llmQueryBatched`, `rlm` and `rlmBatched`, with their arguments and their values through `Data`.
+- A third leaf, `subQuery: Predict[SubQuery, SubAnswer]`, answers `llmQuery`. The names are not `Query` and `Answer`,
+  because the tests have a type `Answer`. The structure of a harness has three leaves: `policy`, `finisher` and
+  `subQuery`.
+- `llmQueryBatched` runs at most `HarnessLimits.batch` queries at the same time on host threads, and it keeps the order
+  of the prompts. A cell cannot start threads, but the host can.
+- `rlm[A]` runs a child turn inside the cell. The child has its own journal, which `env.journals` gets, a new REPL with
+  a preamble from `Data[A].shape` and one `String` input for each key of `inputs`, the same `policy` leaf, the window
+  strategy and the same copy of the workspace. Only `submit` gives its value (5.1). `rlmBatched` runs at most
+  `HarnessLimits.batch` children at the same time, and it keeps the order of the tasks.
+- The budget `HarnessLimits.modelCalls` counts each policy call of the whole tree and each query of one program call.
+  The finisher does not count. A policy call with a spent budget ends the turn `Failed`, and a query with a spent
+  budget fails its cell.
+- The depth limit `HarnessLimits.depth` is 2. The top call has depth 0. A REPL at depth d has `Children^` only when d is
+  below the limit, so at the limit `rlm` does not compile.
+
+The proofs of phase 5 added these points, also for the review:
+
+- `HostThreads` runs each query and each child with the context of the program call, and it keeps their trace. The
+  harness adds that trace to the trace of the call after each cell, so an optimizer sees `subQuery` and the policy of
+  a child. It works like `ContextPropagation.futureExecuted`.
+- After one failure, an item of a batch that did not start does not run, and an item that runs is not stopped. The
+  error gives the first failure in the order of the items.
+- A child has the mode `env.mode.meet(Mode.closed)`, `Owner.Cell`, and its task has the source `User`, because the
+  kernel has no source for a cell. The inputs of `rlm` go in the order of their names.
+- The structure is two nested pairs. The inner pair has no name, so the names of `policy` and `finisher` stay.
+- `ChildTurns` gets a `ChildStart` from the harness and does not name `Harness`, so the plan has no cycle. A child and
+  the top call share one path in `Harness.scala`.
+- `HarnessEnv.journals` can run on several threads at the same time, because the children of `rlmBatched` end on
+  several threads.
+
+A code review of phase 5 on 2026-11-10 added these rules:
+
+- A program call has one cancel for its whole tree, in its budget. The end of the top call closes it. After that, each
+  spend fails, and the recorder of each session of the tree refuses each guest API call, so a child that outlives its
+  parent cannot spend, write or exec.
+- An interrupt of a program call repairs its open turn, sets the interrupt flag again, and gives an error.
+  `env.journals` gets each journal in a `finally`, so an interrupted call and an interrupted child give a journal with
+  a closed turn. `ScalaRepl` stops its cell when its own wait is interrupted.
+- A batch that ends early, by an interrupt or by an `Error` of an item, interrupts its items and waits at most 3 s for
+  them. That is shorter than the 5 s that the REPL waits for a cell to stop.
+- Only the top session joins the trace of the host threads, and the join sorts the trace and the history by their
+  timestamps, so the entries of the tree come in the order of the steps.
+- A child checks the budget before it makes its journal and its REPL, so a spent budget starts no child.
+
+**The review of the choices (2026-11-10).** The user reviewed the choices of phase 5 after the work. The choices above
+stay, with these changes and notes:
+
+- `rlmBatched` takes a task and its inputs for each child: `rlmBatched[A: Data](tasks: Vector[(String, Map[String,
+  String])])`. With only a task text, the usual RLM pattern, one child for each part of a long text, put each part into
+  the task. The task goes in full into each policy prompt of the child. An input goes into the prompt only as a
+  preview of 2,000 characters, and the child reads all of it in a `val`.
+- The instructions of `subQuery` are "Answer the prompt of the code." They set no length, because a cell can ask for a
+  list or a long extract.
+- The names `SubQuery` and `SubAnswer` stay, because the signature of a user often has its own type `Answer`, and a
+  wildcard import would clash with it.
+- The children of a batch share the copy of the workspace, as 8.1 says. The API reference tells the model to give each
+  child its own file to write.
+- The task of a child keeps the source `User` until phase 7. Phase 7 brings session ids, and with them a source for a
+  parent cell and a link from the journal of a child to the journal of its parent.
 
 ## 10. The runtime
 
@@ -1241,12 +1528,12 @@ key of the journal is the fence there. JDBC also reaches a server database, but 
 
 | Module | Contents | Depends on |
 |---|---|---|
-| `harness-guest` | The guest API traits, `Data`. The source text is the API reference. | zio-blocks only |
-| `harness-kernel` | `Entry`, `SessionState`, `evolve`, `next`, `decide`, `repair`, `reports`, `Fold`, `Mode`, `ContextStrategy`, the memory tree | zio-blocks only |
-| `harness-repl` | `ScalaRepl`, the protections of Phase 0 | `harness-guest`, `scala3-repl` |
-| `harness-mcp` | The early MCP server of section 6 | `harness-repl`, the MCP Java SDK |
-| `harness-sandbox` | Seatbelt, bubblewrap, the profiles | `harness-kernel` |
-| `harness` | `Harness`, `drive`, the handlers, the leaves | The modules above, dspy4s `programs` |
+| `harness-guest` | The guest API traits, `Data`, `Access`, `Mode`, `Scope`, `StrategyName`, `SessionRef` and `SessionCard`. The source text is the API reference. | zio-blocks only |
+| `harness-kernel` | `Entry`, `SessionState`, `evolve`, `next`, `decide`, `repair`, `reports`, `Fold` | `harness-guest`, zio-blocks |
+| `harness-repl` | `ScalaRepl`, the protections of Phase 0, the note of lost names | `harness-guest`, `harness-kernel`, `scala3-repl` |
+| `harness-mcp` | The early MCP server of section 6 | `harness-repl`, `harness-sandbox` for the secret paths and names, the MCP Java SDK |
+| `harness-sandbox` | The profiles, Seatbelt, bubblewrap, the proxy of the host list, the allowlist of variables, and the handler of `Shell` | `harness-kernel` |
+| `harness` | `Harness`, `drive`, the journal in memory, the mask of secrets, the handlers, the context strategies and the memory tree, the leaves. A strategy needs `RuntimeContext`, `DspyError` and `History` of dspy4s, so it is not in the kernel. | The modules above, dspy4s `programs` and `adapters` |
 | `harness-host` | The session host, the SQLite journal, the catalog, the report pass | `harness`, `sqlite-jdbc` |
 | `harness-cli` | The terminal client | `harness-host` |
 
@@ -1327,6 +1614,17 @@ and the start probe also ran on JDK 21.0.11. The code is in `tmp/design-check/`,
 | The Phase 0 experiment on JDK 21.0.11 and on JDK 25.0.5 | The same 43 checks pass on both, and the same 3 known problems fail. The first REPL in a JVM: 1,048 ms and 1,026 ms. The heap after 600 cells: 349 MiB and 348 MiB. |
 | A new JVM up to the end of the first harness cell, with the preamble of 5.2 | JDK 21: 2.51 s. JDK 25: 2.51 s. JDK 25 with an AOT cache from one training run: 1.69 s, and the cache file has 64 MB. Each number is a median of 5 runs. |
 | `sqlite-jdbc` on JDK 25 | It prints a warning about native access, and the warning names the flag `--enable-native-access=ALL-UNNAMED`. JDK 21 prints no warning. |
+| The laws of `harness-sandbox` on Linux, with `scripts/sandbox-linux/run.sh`: Ubuntu 24.04, bwrap and JDK 21 on arm64, in a privileged podman container, as a normal user | 63 tests: 57 pass, and 6 of Seatbelt skip. Each probe of 5.4 gives what the profile allows. The first run found three errors, fixed here. A command made a new file `.env.new`, because a mount of bubblewrap cannot hide a name, so 5.4 now protects the secret files that exist when a command starts. The probe of bubblewrap passed in a container where each command failed. The time limit waited 2 s for a zombie when the JVM was PID 1. |
+| A code review of phases 1 to 3 at the high level, and the fixes | 10 findings, each fixed with a test that failed first. The worst: bwrap let a command reach the UNIX sockets of the host, so the D-Bus bus or docker.sock could start a process outside the sandbox. A probe reproduced it on Linux, and a seccomp filter fixed it. The others: the MCP files read `.env`, the proxy kept the `Host` header of the client and allowed each port with no limit of connections, the secret paths missed common credential files, `Prefix` compared raw text, `decide` took an effect id two times, `AUTH` matched `AUTHOR`, each command walked the whole scope, and the preamble did not escape a name. A review of the fixes found 6 more cases, fixed too. The sandbox has 36 mutants, the kernel 27, and each one is killed. |
+| A code review of phase 4 at the high level, and the fixes | 10 findings. 9 are fixed, each with a test that failed first, and 1 needed no change. The worst: `Files.local` wrote through a symbolic link to a place that does not exist, so a command could make the JVM write outside the root and outside the sandbox. The others: a cell thread that did not stop, or a REPL that the heap guard closed, ran on into the next cells; two calls of one cell could get a false refusal; a code field `null` ran as a cell; a copy that failed threw out of `forward` and left its part; a long text or code dropped the whole history; and three cleanups. The full copy of the workspace needed no change, because `Files.copy` on JDK 21 clones each file. A review of the fixes found 2 more cases, fixed too: a read through a link at the last part, and an exception that left the turn of the journal open. The harness has 70 laws and 29 mutants, and each mutant is killed. |
+| A first live run of `Harness` with a real model: `HarnessLiveRun`, five small tasks, Seatbelt on macOS, a private OpenAI-compatible endpoint with an open model of 27B parameters | Run 1: 5 of 5 answers right, with 1 to 3 model calls a task and 5 to 84 s a task, nearly all in the first call, with 9,000 to 27,000 characters of reasoning. The model used `read`, `exec` and `write` well. It found two gaps: the model did not see the preamble, so it wrote `submit(13)`, and `Acted.reasoning` was empty. Run 2, after the fixes and with native reasoning declared: 5 of 5 right, 1 to 4 calls and 1 to 6 s a task. The shell task now ended with `submit` and needed no finisher. A run with a reasoning field in the prompt found that the history showed `None` for that field, fixed too. The suite runs only with `HARNESS_LIVE=true`. The harness has 74 laws and 32 mutants, and each mutant is killed. |
+| The raw vLLM trace of a live call, and the Array chains of a cell | The trace showed that a cell refused `split(...)` then `take(5).foreach(...)`, so the model added the numbers by eye. Probes in the REPL, in a bare `ReplDriver` and in a plain compile found a defect of the compiler in a REPL with capture checking and safe mode, with the triggers of 6. Each REPL of the harness had it from its start: through the start cell `val host`, and through the top-level `given Data[T] = Data.derived` of the preamble. The fixes: no `val host`, a preamble with companion objects and an object for `submit` and the vals, a restart after the error that shows the defect, the hint of an explicit type, and one text of a cell for the MCP server and the harness, so the model sees the hints. The same trace showed no defect of dspy4s: the reminder of the format in each history turn, the `None` of a missing field, the note "valid Python str" of a `Reasoning` field and the absent `temperature` all follow upstream DSPy. A live run after the fixes: 5 of 5 right, 1 to 2 calls and 1 to 6 s a task, no restart, and the CSV task added the amounts with Vector code. The REPL has 41 laws with one expected failure (the defect), the harness 79 laws and 34 mutants, and each mutant is killed. |
+| A task set of 30 live tasks, `HarnessTasks`, with a metric, in one workspace with a folder for each task, so one harness and an optimizer can run each task | The tasks read, parse and sum files (CSV, JSON, a log, 5000 rows), use the shell and Python, write and edit files, use the store across cells, and need dates, a regex and a median. The test code computes each expected answer from the same generated data. `TaskSetLaws` checks the metric with no model, and it found that the metric took the quotes off before the period at the end. The baseline with the private endpoint and native reasoning declared: 30 of 30 right, 1 to 6 model calls and 0 to 14 s a task, and no restart. A first run of the first 20 tasks gave 19 of 20: the model gave the 32nd Fibonacci number for the 30th. |
+| A first GEPA run on the task set (`HarnessGepaRun`): the 15 tasks with an even index train and the 15 others validate, the reflection model is the model of the endpoint, and the metric gives 1.0 for a correct answer in one step, 0.1 less for each more step down to 0.5, and 0 for a wrong answer | GEPA gives a metric an empty trace for a validation run, as upstream gives `trace=None`, so the metric reads the steps from the journal of each call. The run made 120 metric calls in 15 iterations and 4 candidates in about 17 minutes. The validation score went from 0.820 to 0.900 with an instruction to finish in one cell. Two more evaluations of the seed and of the best candidate on all 30 tasks did not confirm it: the seed was right 58 of 60 times with a mean score of 0.834 and 140 steps, and the best 52 of 60 times with 0.822 and 104 steps. So the best candidate takes 26 % fewer steps, but it skips a look at the data and gives more wrong answers, and the gain on the validation set was mostly chance. The reasons: the seed already solves nearly each task, the step penalty rewards a skip of the inspection, and one score of each of 15 validation tasks cannot tell candidates apart. A next run needs harder tasks, several scores of each validation task, and a smaller weight for the steps. The best instruction also says that safe mode refuses `ChronoUnit.DAYS`; this note of the model is not checked. |
+| Phase 5: `llmQuery`, `llmQueryBatched`, `rlm` and `rlmBatched` in the harness, with the leaf `subQuery`, the shared budget and the depth limit | `RlmLaws` has 14 laws: the answer of the leaf and its effect, the trace of a query, the order of a batch with at most 4 calls at the same time, the index or the task in the error of a batch, one budget for the whole tree, a typed value of a child for a record too, a child that replies with no code, the depth limit, a property of the mode at each depth, and the shared copy of the workspace. The structure has three leaves. The harness has 99 laws and 50 mutants, and each mutant is killed. A live run with the private endpoint: a task that asks for `llmQuery` got `merci` with one query, and a task that asks for `rlm` got 541 from a child, with 7 model calls in 12 s. |
+| A code review of phase 5 and of the other work of 2026-11-10, by a subagent that read the code and not the conclusions, and the fixes | 6 findings, each fixed with a law that failed first. The worst: one parser state for all threads, so two restarts at the same time threw `RecursionOverflow` (3074 of 16000 calls on 8 threads), and later calls in the same JVM failed too. The others: an interrupt skipped the repair and lost the journal, a child went on after its call ended and wrote into the deleted copy of the workspace, the trace of two children came out of order, a restart came after the last step, and a child started before the check of its budget. The harness has 112 laws and 62 mutants, and each mutant is killed. After these fixes, the baseline of the 32 tasks gave 31 of 32 right answers with 77 model calls in 120 s and no restart. The model used `llmQuery` and `rlm` only in the two tasks that ask for them, and the one miss was again the 32nd Fibonacci number for the 30th. |
+| The review of the phase 5 choices with the user, and the changes | The other choices stay. `rlmBatched` takes a task and its inputs for each child, and a new law shows that each child gets its own inputs. The instructions of `subQuery` set no length. The task of a child keeps the source `User` until phase 7. The harness has 113 laws and 63 mutants. The new mutant and the 9 other mutants of the batch, the budget and the children are killed. The code of the other 53 mutants did not change. |
+| The laws of `harness` (phase 4), with scripts of `TurnEffects`, a real REPL, the sandbox of the host, and a scripted model through the chat adapter | 60 tests pass: `drive` with the scripts of this table, the journal in memory, the mask, the handlers, the window, a harness that submits, a reply and the step limit that run the finisher, a call in a copy of the workspace, `exec` in the sandbox, and the leaves for the optimizers. 18 mutants, each one killed. The runner of the optimizers puts the output in `RawPrediction.values`. A first run found that the chat adapter reads the text `null` in the field `code` as code. |
 
 The cells that models wrote. A cell counts if it compiled, so the table does not say that the cell does its task. The
 last column has this `Data` and the second try of section 6:
@@ -1374,7 +1672,8 @@ What did not run:
 - The kernel with a real REPL and a real LM.
 - The AOT cache with a real CLI, on Linux, and after a change of the class path.
 - A hard stop that reaches the LM transport and a process group.
-- The OS sandbox.
+- bubblewrap on a Linux host that is not a container, for example Ubuntu 24.04, which limits user namespaces with
+  AppArmor. The run of the table used a privileged podman container.
 - A real power loss. The kernel check only cuts the journal at the last flush, and the SQLite check only measures the
   time. That a flush reaches the disk and covers the earlier commits comes from the SQLite documentation.
 - The flush on Linux, and a `tell` across two journals with a power loss.
@@ -1488,10 +1787,15 @@ Each phase ends with something that runs.
 | 4. One task | `Harness`, `drive`, the window strategy, `OptimizableStructure`, `ProgramRunner`, the mask of secrets. | A harness for one task that the optimizers accept. |
 | 5. RLM | `llmQuery`, `llmQueryBatched`, `rlm` and `rlmBatched` behind `Children^`, a child from a `shape`, the shared budget, the depth limit. | RLM in the harness. |
 | 6. Optimization | A metric from tests, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
-| 7. The session host | `harness-host`: the writer, feeds, timers, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `guarded`, and the client side of `Grant`. `harness-cli`, its JDK and an AOT cache (choice 8). | A coding agent for daily use, one session at a time. |
+| 7. The session host | `harness-host`: the writer, feeds, timers, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `guarded`, and the client side of `Grant`. A source for the task of an `rlm` child and a link from its journal to the journal of its parent (9). `harness-cli`, its JDK and an AOT cache (choice 8). | A coding agent for daily use, one session at a time. |
 | 8. Memory | The memory tree and its metric. | Long sessions that lose no detail. |
 | 9. The controller | `Sessions`, the report pass with a crash test, the ledger, the graph, probes, release plans. | One controller above all sessions. |
 | Later | Replay, the reviewer, jobs across a restart, `parallel` if batch calls are not enough, with the conditions of section 6, a container backend, LSP as a guest API, prompt-cache marks. | |
 
 Phase 6 comes before the session host on purpose. The optimizers are what makes this harness different from the
 others, so the design must meet them early.
+
+The order of the table is an order of priority. The blueprint shows the phases that can run at the same time: phases
+1 and 2 first, phase 3 after phase 1, phase 4 after phases 2 and 3, phases 5 to 8 after phase 4, and phase 9 after
+phases 7 and 8. In phase 1, the kernel uses `Access` and `Mode` of phase 2, so these two types come first. In phase
+2, the REPL uses the journal types of the kernel, so the REPL waits for the journal.

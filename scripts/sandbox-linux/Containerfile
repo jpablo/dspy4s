@@ -1,0 +1,6 @@
+# The image of scripts/sandbox-linux/run.sh: a JRE 21, bwrap, and the programs of the escape probes.
+FROM docker.io/library/ubuntu:24.04
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openjdk-21-jre-headless bubblewrap curl procps ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+USER ubuntu

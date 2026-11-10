@@ -61,7 +61,13 @@ lazy val root = (project in file("."))
     gepa,
     streaming,
     mcp,
-    examples
+    examples,
+    harnessGuest,
+    harnessKernel,
+    harnessRepl,
+    harnessMcp,
+    harnessSandbox,
+    harness
   )
   .settings(commonSettings)
   .settings(
@@ -241,6 +247,114 @@ lazy val examples = (project in file("modules/examples"))
     // The MCP tests start the servers of the examples in a child JVM with the class path of the tests.
     Test / fork := true,
     Test / javaOptions += "-Dfile.encoding=UTF-8"
+  )
+
+// The code harness (docs/code-harness/CODE_HARNESS_DESIGN.md, 10.5). The modules hold the phases of section 15, with the
+// laws of each as tests. docs/code-harness/CODE_HARNESS_BLUEPRINT.html shows the state of each part of the plan.
+
+// The guest API: what model code calls, and the modes that limit it (5.1, 5.2).
+lazy val harnessGuest = (project in file("modules/harness-guest"))
+  .settings(commonSettings)
+  .settings(name := "dspy4s-harness-guest")
+  .settings(
+    // The API reference (5.1) is the source text of the guest API. The MCP server gives it to another agent.
+    Compile / resourceGenerators += Def.task {
+      val sources = (Compile / scalaSource).value / "dspy4s" / "harness" / "guest"
+      val target  = (Compile / resourceManaged).value / "dspy4s" / "harness" / "guest"
+      Seq("Guest.scala", "SessionTypes.scala").map { name =>
+        val copy = target / s"$name.txt"
+        IO.copyFile(sources / name, copy)
+        copy
+      }
+    }.taskValue,
+    libraryDependencies ++= Seq(
+      "dev.zio"       %% "zio-blocks-schema" % zioBlocksVersion,
+      "org.scalameta" %% "munit"             % munitVersion           % Test,
+      "org.scalameta" %% "munit-scalacheck"  % munitScalacheckVersion % Test
+    )
+  )
+
+// The kernel: the journal, the state as a fold of the journal, and the pure functions that decide each step (4).
+lazy val harnessKernel = (project in file("modules/harness-kernel"))
+  .dependsOn(harnessGuest)
+  .settings(commonSettings)
+  .settings(name := "dspy4s-harness-kernel")
+  .settings(
+    libraryDependencies ++= Seq(
+      "dev.zio"       %% "zio-blocks-schema" % zioBlocksVersion,
+      "org.scalameta" %% "munit"             % munitVersion           % Test,
+      "org.scalameta" %% "munit-scalacheck"  % munitScalacheckVersion % Test
+    )
+  )
+
+// The REPL (6): ReplDriver with capture checking and safe mode. Only this module depends on the compiler. It uses the
+// kernel: a cell gives a CellOutcome, and the note of lost names folds over the journal.
+lazy val harnessRepl = (project in file("modules/harness-repl"))
+  .dependsOn(harnessGuest, harnessKernel)
+  .settings(commonSettings)
+  .settings(name := "dspy4s-harness-repl")
+  .settings(
+    libraryDependencies ++= Seq(
+      "org.scala-lang" %% "scala3-repl" % scalaVersion.value,
+      "org.scalameta"  %% "munit"       % munitVersion % Test
+    ),
+    // The checks of section 12 used the REPL of this nightly with no scaladoc, and the REPL does not need it.
+    excludeDependencies += ExclusionRule("org.scala-lang", "scaladoc_3"),
+    // The heap guard is one for the JVM, so its test must not stop the cells of another suite. The tests also fork:
+    // in the JVM of sbt, the suites of other modules fill the heap, and the guard then stops a cell of these laws.
+    Test / fork              := true,
+    Test / parallelExecution := false
+  )
+
+// The early MCP server (6): the REPL and the guest API for another agent, before the harness has its own loop. It takes
+// the secret paths and names of the sandbox (5.6), so a cell cannot read them.
+lazy val harnessMcp = (project in file("modules/harness-mcp"))
+  .dependsOn(harnessRepl, harnessSandbox)
+  .settings(commonSettings)
+  .settings(name := "dspy4s-harness-mcp")
+  .settings(
+    libraryDependencies ++= Seq(
+      "io.modelcontextprotocol.sdk" % "mcp"   % mcpSdkVersion,
+      "org.scalameta"              %% "munit" % munitVersion % Test
+    ),
+    excludeDependencies += ExclusionRule("org.scala-lang", "scaladoc_3"),
+    // The end-to-end test starts the server in a child JVM with the class path of the tests.
+    Test / fork := true,
+    Test / javaOptions += "-Dfile.encoding=UTF-8"
+  )
+
+// The sandbox (5.4, 5.6): the profile of a child process from the mode, Seatbelt and bubblewrap, the proxy of the host
+// list, the allowlist of variables, and the handler of Shell. exec runs only in a sandbox.
+lazy val harnessSandbox = (project in file("modules/harness-sandbox"))
+  .dependsOn(harnessKernel)
+  .settings(commonSettings)
+  .settings(name := "dspy4s-harness-sandbox")
+  .settings(
+    libraryDependencies ++= Seq(
+      "org.scalameta" %% "munit"            % munitVersion           % Test,
+      "org.scalameta" %% "munit-scalacheck" % munitScalacheckVersion % Test
+    ),
+    // The escape tests look for a variable of the test JVM from a child process. The value is not a real secret.
+    Test / fork              := true,
+    Test / envVars           := Map("DSPY4S_FAKE_SECRET_TOKEN" -> "fake-value-for-the-escape-tests"),
+    Test / parallelExecution := false
+  )
+
+// One task (9, 4.6): Harness, drive, the window strategy, the handlers of a call and the mask of secrets. A Harness is
+// a dspy4s Module, so the optimizers take it. The tests use GEPA to check that an optimizer takes a harness.
+lazy val harness = (project in file("modules/harness"))
+  .dependsOn(harnessRepl, harnessSandbox, programs, adapters, gepa % "test->compile")
+  .settings(commonSettings)
+  .settings(name := "dspy4s-harness")
+  .settings(
+    libraryDependencies ++= Seq(
+      "org.scalameta" %% "munit"            % munitVersion           % Test,
+      "org.scalameta" %% "munit-scalacheck" % munitScalacheckVersion % Test
+    ),
+    excludeDependencies += ExclusionRule("org.scala-lang", "scaladoc_3"),
+    // A test of a harness runs a REPL and a sandbox, and the heap guard of the REPL is one for the JVM.
+    Test / fork              := true,
+    Test / parallelExecution := false
   )
 
 // JMH stays outside the root aggregate. Normal compile and test runs do not pay for benchmark generation.
