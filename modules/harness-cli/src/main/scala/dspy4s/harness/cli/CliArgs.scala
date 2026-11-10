@@ -4,31 +4,24 @@ import dspy4s.harness.kernel.SessionId
 
 import java.nio.file.Path
 
-/** The mode of a work session from the CLI (CODE_HARNESS_DESIGN.md, 5.2): `Local` has no network, and `Full` has the
-  * network through the host list.
-  */
-enum CliMode derives CanEqual:
-  case Local, Full
-
-/** The arguments of the CLI.
+/** The arguments of the CLI (CODE_HARNESS_DESIGN.md, 15, phase 7).
   *
   * @param scope
-  *   the folder of the work session
+  *   the folder of a new work session
   * @param root
   *   the root of the host, with the folder `sessions` and the catalog (10.2)
   * @param session
-  *   the session to open again, or none for a new session
-  * @param mode
-  *   the mode of a new session
+  *   the session to open again, or none for a new session. A session that opens again keeps its own configuration and
+  *   scope, so the folder does not apply to it.
   */
-final case class CliArgs(scope: Path, root: Path, session: Option[SessionId], mode: CliMode) derives CanEqual
+final case class CliArgs(scope: Path, root: Path, session: Option[SessionId]) derives CanEqual
 
 object CliArgs:
 
-  /** The arguments from the command line: `[--root DIR] [--session ID] [--full] [FOLDER]`. The folder is `cwd` by
-    * default, the root is `<home>/.dspy4s/harness`, and the mode is `Local`. An unknown flag or a missing value gives
-    * an error with the usage.
+  /** The arguments from the command line: `[--root DIR] [--session ID] [FOLDER]`. The folder is `cwd` by default, and
+    * the root is `<home>/.dspy4s/harness`. An unknown flag or a missing value gives an error with the usage.
     *
-    * A proposal for the review: the design gives no command line.
+    * A proposal for the review: the design gives no command line. A work session of phase 7 has the mode
+    * `WorkRuntime.workMode`, so the CLI has no flag for the mode.
     */
   def parse(args: Vector[String], home: Path, cwd: Path): Either[String, CliArgs] = ???

@@ -73,6 +73,20 @@ final class SandboxedShell(
   def waitJob(job  : JobId, maxSeconds: Int): JobStatus              = later("waitJob")
   def stopJob(job  : JobId): Unit                                    = later("stopJob")
 
+  /** Starts `command` as `exec` does, under the profile of the mode and in the folder of the scope, and gives the
+    * process with no wait (phase 7, for the jobs of 10.3). The command runs under `ProcessWrapper`: its own standard
+    * input is empty, and the standard input of the process is the pipe of the wrapper, which the caller holds.
+    */
+  def launch(command: String)(using Files): Process = ???
+
+  /** Step 3 of the hard stop (10.3, phase 7): it stops the process tree of each `exec` that runs, with TERM, a grace
+    * period, then KILL, and returns at once. The `exec` calls then give their output with a note of the stop.
+    *
+    * Since phase 7, `exec` runs under `ProcessWrapper` as a job does, so a crash of the host also stops it. An
+    * interrupt of the thread of an `exec` stops its process tree before the interrupt goes on.
+    */
+  def stopAll(): Unit = ???
+
   /** Stops the proxy. */
   def close(): Unit =
     synchronized {

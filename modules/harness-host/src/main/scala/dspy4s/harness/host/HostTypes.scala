@@ -16,14 +16,17 @@ enum HostError derives CanEqual:
   /** The session ended, so its writer takes no message. */
   case Ended
 
-  /** The writer fenced this run of a worker after a hard stop (10.3, step 5). */
+  /** The writer fenced this activation after a hard stop (10.3, step 5). */
   case Fenced
 
-  /** The host could not open the file or the folder of a session. */
+  /** The host could not open the session: its file or folder, a file that is not a journal, a session that another host
+    * has open, a new session with no configuration, or a mode above the ceiling of the session.
+    */
   case OpenFailed(message: String)
 
-/** The id of one run of a worker (10.3). After a hard stop, the writer fences the ticket of a worker whose cell did not
-  * end, so a late commit of that worker gets `HostError.Fenced`.
+/** The id of one activation (10.3). Each commit of the activation goes through its ticket: the commits of the worker,
+  * of the effects and of the recorder. After a hard stop whose cell does not end, the writer fences the ticket, so each
+  * late commit of that activation gets `HostError.Fenced`.
   */
 final case class WorkerTicket(n: Long) derives CanEqual
 

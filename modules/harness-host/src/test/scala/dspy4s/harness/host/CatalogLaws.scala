@@ -49,7 +49,9 @@ class CatalogLaws extends munit.FunSuite:
     }
   }
 
-  test("Catalog: rebuild folds each journal whose row lags, so a crash before the update of a row loses nothing") {
+  test(
+    "Catalog: rebuild folds each journal whose row differs: a row that lags after a crash, or is ahead after a power loss"
+  ) {
     withRoot { root =>
       val one = Support.logOf(1000L, activated, Entry.Input(RequestId("r1"), "x", Map.empty), Entry.TurnStarted)
       val two = Support.logOf(1000L, activated)
@@ -58,7 +60,9 @@ class CatalogLaws extends munit.FunSuite:
       val c = catalog(root)
       try
         assertEquals(c.put(CatalogRow(id(1), Owner.User, None, SessionStatus.Idle, 0L)), Right(()))
-        val rows = Catalog.rebuild(c, root.resolve("sessions")).fold(e => fail(e), identity)
+        // A row ahead of its journal, as after a power loss.
+        assertEquals(c.put(CatalogRow(id(2), Owner.User, None, SessionStatus.InTurn, 9L)), Right(()))
+        val rows = Catalog.rebuild(c, root.resolve("sessions")).fold(e => fail(e), identity).rows
         assertEquals(rows, Vector(catalogRow(id(1))(one), catalogRow(id(2))(two)))
         assertEquals(c.rows, rows)
       finally c.close()
@@ -84,8 +88,22 @@ class CatalogLaws extends munit.FunSuite:
       val c = catalog(root)
       try
         assertEquals(c.put(CatalogRow(id(9), Owner.User, None, SessionStatus.Idle, 0L)), Right(()))
-        assertEquals(Catalog.rebuild(c, root.resolve("sessions")), Right(Vector.empty))
+        assertEquals(Catalog.rebuild(c, root.resolve("sessions")), Right(Rebuilt(Vector.empty, Vector.empty)))
         assertEquals(c.row(id(9)), None)
+      finally c.close()
+    }
+  }
+
+  test("Catalog: a file that is not a journal goes into failed, and the rows of the other journals come back") {
+    withRoot { root =>
+      write(root, id(1), Support.logOf(1000L, activated))
+      val bad = root.resolve("sessions").resolve("fake-session-9.db")
+      Files.writeString(bad, "FAKE-NOT-SQLITE"): Unit
+      val c = catalog(root)
+      try
+        val rebuilt = Catalog.rebuild(c, root.resolve("sessions")).fold(e => fail(e), identity)
+        assertEquals(rebuilt.rows.map(_.session), Vector(id(1)))
+        assertEquals(rebuilt.failed.map(_._1), Vector(bad))
       finally c.close()
     }
   }

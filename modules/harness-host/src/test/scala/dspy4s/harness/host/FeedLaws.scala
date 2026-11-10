@@ -73,9 +73,13 @@ class FeedLaws extends munit.FunSuite:
     }
   }
 
-  test("Feed: after the close of the feeds, poll gives none") {
+  test("Feed: after the close of the feeds, a client gets the entries of its queue, then none, and ended is true") {
     val feeds = Feeds()
     val feed  = feeds.subscribe(4)
+    feeds.publish(inputs(0, 1))
+    assert(!feed.ended)
     feeds.close()
+    assertEquals(drain(feed), inputs(0, 1).map(Right(_)))
     assertEquals(feed.poll(), None)
+    assert(feed.ended)
   }

@@ -99,7 +99,7 @@ result = "A first measured improvement, or a reason for its absence."
 id = "p7"
 number = 7
 title = "The session host"
-modules = ["harness-host", "harness-cli", "harness"]
+modules = ["harness-host", "harness-cli", "harness", "harness-sandbox", "harness-repl"]
 uses = ["p4"]
 result = "A coding agent for daily use, one session at a time."
 
@@ -1442,7 +1442,7 @@ id = "scala-repl"
 group = "repl"
 kind = "data"
 name = "ScalaRepl"
-ops = ["run"]
+ops = ["run", "stopCell"]
 ref = "6"
 spec = true
 uses = ["mode", "bindings", "cell-outcome"]
@@ -1892,11 +1892,11 @@ id = "sandboxed-shell"
 group = "sandboxed-shell"
 kind = "data"
 name = "SandboxedShell"
-ops = ["exec", "close"]
+ops = ["exec", "close", "launch", "stopAll"]
 ref = "5.3"
 spec = true
 uses = ["shell", "files", "session-config", "layout", "host-list", "backend"]
-proof_uses = ["profile-for-mode", "profile-for-command", "child-env", "host-proxy"]
+proof_uses = ["profile-for-mode", "profile-for-command", "child-env", "host-proxy", "process-wrapper"]
 text = "Shell.sandboxed(root, profile) of 5.3. exec runs the command in the backend, under the profile of the mode of the session, with the allowlist of variables and a time limit. With no backend, or in a mode with no child process, exec fails and the command does not run. spawn and the job table come with phase 7."
 
 # ── Phase 3: the laws ───────────────────────────────────────────────────────────────────────────────────────────
@@ -2802,7 +2802,7 @@ kind = "data"
 name = "WorkerTicket"
 ref = "10.3"
 uses = []
-text = "The id of one run of a worker. After a hard stop, the writer fences the ticket of a worker whose cell did not end."
+text = "The id of one activation. Each commit of the activation goes through its ticket, and after a hard stop whose cell does not end, the writer fences the ticket."
 
 [[node]]
 id = "host-limits"
@@ -2825,11 +2825,11 @@ id = "session-file"
 group = "session-file"
 kind = "data"
 name = "SessionFile"
-ops = ["append", "readFrom", "setting", "close", "open", "pathOf"]
+ops = ["append", "readFrom", "lastSeq", "setting", "close", "open", "pathOf"]
 ref = "10.2"
 spec = true
 uses = ["logged", "session-id"]
-text = "<root>/sessions/<id>.db: one row for each entry, with a primary key on the session and seq, which rejects a stale writer. WAL, synchronous=NORMAL and fullfsync=ON, and synchronous=FULL for a commit that needs a flush. One connection for the life of the file."
+text = "<root>/sessions/<id>.db: one row for each entry, with a primary key on the session and seq, which rejects a stale writer, and a column required, so a reader skips a row that it cannot decode when the row is not required. WAL, synchronous=NORMAL and fullfsync=ON, and synchronous=FULL for a commit that needs a flush. One connection for the life of the file."
 
 [[group]]
 id = "feeds"
@@ -2854,7 +2854,7 @@ kind = "data"
 name = "Feed"
 ref = "10.1"
 uses = ["behind", "logged"]
-text = "The committed entries of one session for one client."
+text = "The committed entries of one session for one client, and the end of the feed after Close or a failed write."
 
 [[node]]
 id = "feeds"
@@ -2905,12 +2905,12 @@ id = "writer"
 group = "writer"
 kind = "data"
 name = "Writer"
-ops = ["run", "post", "fence", "state", "log", "ended", "close"]
+ops = ["run", "post", "fence", "expire", "state", "log", "ended", "close"]
 ref = "10.2"
 spec = true
 uses = ["session-file", "logged", "secrets", "feeds", "session-state", "command", "source", "worker-ticket", "host-error"]
 proof_uses = ["decide", "evolve", "source-of", "needs-flush"]
-text = "One virtual thread takes the messages of a bounded mailbox and commits them in one transaction each, with the mask of secrets. It publishes to the feeds after the commit. An interrupt of a waiting thread does not cut its commit. A failed write ends only this session, and after the end each message fails at once."
+text = "One virtual thread takes the messages of a bounded mailbox and commits them in one transaction each, with the mask of secrets and the seq after the largest seq of the file. It publishes to the feeds after the commit. An interrupt of a waiting thread does not cut its commit. A failed write ends only this session. expire closes the turn of a stop after the grace period, and does nothing to a later turn."
 
 [[node]]
 id = "writer-journal"
@@ -2920,7 +2920,7 @@ name = "WriterJournal"
 ops = ["state", "log", "run"]
 ref = "10.2"
 uses = ["journal-trait", "writer", "worker-ticket", "command", "source", "rejection", "session-state", "logged"]
-text = "The journal of one run of a worker: each commit goes through the mailbox with the ticket of the run. A proposal: a write error or a fence throws, so drive stops and the turn stays open, as after a crash."
+text = "The journal of one activation: each commit of its worker, effects and recorder goes through the mailbox with the ticket of the activation. A proposal: a write error or a fence throws, so drive stops and the turn stays open, as after a crash."
 
 [[group]]
 id = "catalog"
@@ -2958,15 +2958,24 @@ uses = ["session-id", "fold", "logged", "catalog-row"]
 text = "The row of a session as a fold of its journal, so a lost row comes back from the journal."
 
 [[node]]
+id = "rebuilt"
+group = "catalog"
+kind = "data"
+name = "Rebuilt"
+ref = "10.2"
+uses = ["catalog-row"]
+text = "The rows after a rebuild, and each file that is not a journal, with the reason."
+
+[[node]]
 id = "catalog"
 group = "catalog"
 kind = "data"
 name = "Catalog"
 ops = ["put", "row", "rows", "close", "open", "rebuild"]
 ref = "10.2"
-uses = ["catalog-row", "session-id"]
+uses = ["catalog-row", "session-id", "rebuilt"]
 proof_uses = ["catalog-row-fold", "session-file"]
-text = "<root>/catalog.db. The writer updates a row after a turn ends or when the status changes. rebuild at the start folds each journal whose row lags, so a crash or a removal of the file loses nothing."
+text = "<root>/catalog.db. The writer updates a row after a turn ends or when the status changes. rebuild folds each journal whose row differs, and gives a result for each file, so a crash, a power loss, a removal of the file or a bad file loses nothing. A busy timeout, and a failed write never ends a session."
 
 [[group]]
 id = "host"
@@ -2983,7 +2992,7 @@ name = "SessionHost"
 ref = "10.1"
 spec = true
 uses = ["session-id", "session-config", "host-error", "session-handle"]
-text = "open(id, config) opens a new session or a session with a journal. It is free of the types of a runtime."
+text = "open(id, config) opens a new session with Some(config), or a session with a journal: None keeps its configuration. It is free of the types of a runtime."
 
 [[node]]
 id = "session-handle"
@@ -2993,7 +3002,7 @@ name = "SessionHandle"
 ref = "10.1"
 spec = true
 uses = ["session-id", "command", "host-error", "session-state", "feed", "logged"]
-text = "An open session for a client: send into the mailbox with no wait for the commit, the committed state, a feed, and the entries after a seq. A proposal: the name of 10.1 is SessionRef, and the guest API already has a data type SessionRef."
+text = "An open session for a client: send with no wait for the commit, run that waits and gives a refusal, the committed state, a feed, and the entries after a seq. A proposal: the name of 10.1 is SessionRef, and the guest API already has a data type SessionRef."
 
 [[node]]
 id = "activation"
@@ -3002,7 +3011,7 @@ kind = "data"
 name = "Activation"
 ref = "11"
 uses = ["turn-effects"]
-text = "The live part of one activation: the effects of a turn, the stop of steps 2 and 3 of 10.3, and the flag of a cell that did not end."
+text = "The live part of one activation: the effects of a turn, the stop of steps 2 and 3 of 10.3 through ScalaRepl.stopCell and SandboxedShell.stopAll, and the flag of a cell that did not end."
 
 [[node]]
 id = "session-runtime"
@@ -3018,13 +3027,13 @@ id = "local-host"
 group = "host"
 kind = "data"
 name = "LocalHost"
-ops = ["open", "list", "close", "start"]
+ops = ["open", "list", "failed", "close", "start"]
 ref = "10.2"
 spec = true
 uses = ["session-host", "session-runtime", "secrets", "host-limits", "catalog", "timers", "session-handle", "catalog-row",
         "host-error", "session-config", "session-id"]
-proof_uses = ["writer", "writer-journal", "session-file", "feeds", "drive", "next", "job-table", "catalog-row-fold"]
-text = "One writer and one file for each session. open of an id with a file repairs an open turn. After each commit with work and no worker, a worker runs drive with a new ticket. After StopRequested, Activation.stop, and a timer for the grace period: a worker that still runs is fenced, and the writer commits the closing entries and TurnEnded(Aborted). The catalog gets the row after a turn ends."
+proof_uses = ["writer", "writer-journal", "session-file", "feeds", "drive", "next", "job-table", "catalog-row-fold", "rebuilt"]
+text = "One writer and one file for each session, with an exclusive lock for a second host. open repairs an open turn, keeps the configuration of the journal with None, and refuses a mode above the ceiling. Each activation gets a new ticket and its WriterJournal. After StopRequested, Activation.stop, and a timer calls Writer.expire with the turn of the stop. The catalog gets the row after a turn ends."
 
 [[group]]
 id = "jobs"
@@ -3042,7 +3051,7 @@ ops = ["sync", "start", "output", "await", "status", "close"]
 ref = "10.3"
 spec = true
 uses = ["effect-id", "session-state", "job-status"]
-text = "The live part of the jobs: the process groups, the output and the marks. sync copies the marks and stops a marked job with TERM, a grace period and KILL. A marked job does not start. A job of the state with no row is Lost."
+text = "The live part of the jobs: the process groups, the output and the marks. It belongs to the open session, not to the activation. One launcher thread starts each process, because on Linux --die-with-parent follows the thread. sync copies the marks and returns at once, and a marked job does not start. A job of the state with no row is Lost. The end of a job with report goes to the report function of the host."
 
 [[node]]
 id = "job-shell"
@@ -3052,18 +3061,8 @@ name = "JobShell"
 ops = ["exec", "spawn", "jobOutput", "waitJob", "stopJob"]
 ref = "10.3"
 uses = ["shell", "sandboxed-shell", "job-table", "journal-trait", "files", "job-id", "job-status"]
-proof_uses = ["job-wrapper", "command"]
-text = "The handler of Shell^ in the host. spawn gives the JobId of its own EffectStarted, a report sends a message with Source.Harness at the end of the job, and stopJob is StopJobs(One(job)). A proposal: the sandbox gets a launch of a command with no wait."
-
-[[node]]
-id = "job-wrapper"
-group = "jobs"
-kind = "data"
-name = "JobWrapper"
-ops = ["command"]
-ref = "10.3"
-uses = []
-text = "The command that runs a job in its own process group and stops that group when its standard input closes. The host holds the pipe, so a crash of the host stops the job."
+proof_uses = ["process-wrapper", "command"]
+text = "The handler of Shell^ in the host. exec goes to the sandbox, and spawn starts a job with SandboxedShell.launch and gives the JobId of its own EffectStarted. stopJob is StopJobs(One(job)), and the end of a job with report reaches the host through the table."
 
 [[group]]
 id = "work-runtime"
@@ -3090,10 +3089,10 @@ ops = ["activate", "defaultGuard", "config", "forWork"]
 ref = "8.1"
 spec = true
 uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context",
-        "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard"]
+        "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access"]
 proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell",
-              "leaf-llm", "child-turns", "budget", "local-files", "snapshot-store", "journal-turn", "preamble"]
-text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of the mode through recorded and guarded, and JobShell. The first rules of 5.5: git push gets Ask in a mode with Network^. A proposal: each turn gets a new budget of model calls."
+              "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble"]
+text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of workMode through recorded and guarded, and JobShell. workMode is local mode with no Sessions^ and no Children^, so a work session has no rlm. Each turn gets a new budget of model calls. The first rules of 5.5: git push gets Ask in a mode with Network^."
 
 [[group]]
 id = "cli-args"
@@ -3103,23 +3102,14 @@ file = "CliArgs.scala"
 title = "The arguments of the CLI"
 
 [[node]]
-id = "cli-mode"
-group = "cli-args"
-kind = "data"
-name = "CliMode"
-ref = "5.2"
-uses = []
-text = "Local, with no network, or Full."
-
-[[node]]
 id = "cli-args"
 group = "cli-args"
 kind = "data"
 name = "CliArgs"
 ops = ["parse"]
 ref = "15"
-uses = ["cli-mode", "session-id"]
-text = "The folder, the root of the host, the session to open again and the mode. A proposal: [--root DIR] [--session ID] [--full] [FOLDER], with the root <home>/.dspy4s/harness."
+uses = ["session-id"]
+text = "The folder of a new session, the root of the host, and the session to open again, which keeps its own configuration. A proposal: [--root DIR] [--session ID] [FOLDER], with the root <home>/.dspy4s/harness."
 
 [[group]]
 id = "entry-text"
@@ -3188,7 +3178,7 @@ ops = ["main", "loop"]
 ref = "15"
 uses = ["session-handle"]
 proof_uses = ["cli-args", "local-host", "work-runtime", "work-env", "entry-text", "parse-line", "commands-for"]
-text = "main makes the model from the environment, starts a LocalHost with a WorkRuntime, and opens the session. loop prints the feed and sends the commands of the lines. After Behind it reads the journal, so it shows each entry once. A proposal: JDK 21, and an AOT cache only if the start is too slow."
+text = "main makes the model from the environment, starts a LocalHost with a WorkRuntime, and opens the session. loop prints the feed, sends a message, /stop and /stopall, and runs /close and /allow so the person sees a refusal. After Behind it reads the journal, so it shows each entry once, and it ends when the feed ends. A proposal: JDK 21, and an AOT cache only if the start is too slow."
 
 # ── Phase 7: the laws ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -3260,7 +3250,7 @@ kind = "law"
 name = "File:"
 ref = "10.2"
 uses = ["session-file"]
-text = "The rows come back in the order of seq, also after a new open. A commit with a seq that the file has adds nothing. WAL and synchronous NORMAL stay after a flush. A copy of the file holds the same journal only for its session."
+text = "The rows come back in the order of seq, also after a new open. A commit with a seq that the file has adds nothing. WAL and synchronous NORMAL stay after a flush. A copy holds the same journal only for its session. A row that does not decode is skipped when it is not required, and lastSeq counts it. A file that is not a journal gives an error."
 
 [[group]]
 id = "writer-laws"
@@ -3277,7 +3267,7 @@ kind = "law"
 name = "Writer:"
 ref = "10.2"
 uses = ["writer", "writer-journal"]
-text = "The commits of several threads have no gap in seq, and the state is the fold of the file. run returns after the rows are in the file. An interrupt does not cut a commit. After close, each command fails at once. A failed write ends only its session. A fenced ticket gets Fenced. The file holds no known secret."
+text = "The commits of several threads have no gap in seq, and the state is the fold of the file. run returns after the rows are in the file. An interrupt does not cut a commit. After close, each command fails at once. A failed write ends only its session. A fenced ticket gets Fenced. expire closes a stopped turn and does nothing to a later one. The file holds no known secret."
 
 [[node]]
 id = "law-timer"
@@ -3303,7 +3293,7 @@ kind = "law"
 name = "Feed:"
 ref = "10.2"
 uses = ["feeds", "writer"]
-text = "A client gets the entries after its subscribe in the order of seq, and before run returns. A full queue gives Behind, and publish does not wait. A client that reads the journal on Behind misses no entry and gets none twice."
+text = "A client gets the entries after its subscribe in the order of seq, and before run returns. A full queue gives Behind, and publish does not wait. A client that reads the journal on Behind misses no entry and gets none twice. After the end, the queue drains and ended is true."
 
 [[group]]
 id = "catalog-laws"
@@ -3320,7 +3310,7 @@ kind = "law"
 name = "Catalog:"
 ref = "10.2"
 uses = ["catalog", "catalog-row-fold", "session-file"]
-text = "The row is a fold of the journal. A new open reads the same rows. rebuild folds each journal whose row lags, gives the same rows after a removal of the file, and removes a row with no file."
+text = "The row is a fold of the journal. A new open reads the same rows. rebuild folds each journal whose row lags or is ahead, gives the same rows after a removal of the file, removes a row with no file, and puts a bad file into failed."
 
 [[group]]
 id = "host-laws"
@@ -3337,7 +3327,7 @@ kind = "law"
 name = "Host:"
 ref = "10.2"
 uses = ["local-host"]
-text = "open makes the file and commits Activated, and a second open gives the same handle. A message starts a turn that a worker runs. An open after a crash repairs the turn and runs nothing. A new host opens the session with a new activation, and the store comes back. The end of one session does not stop another. list gives the rows."
+text = "open makes the file and commits Activated, and a second open gives the same handle. A new id with no configuration, a mode above the ceiling, a session of another host and a bad file give OpenFailed. A reopen keeps the configuration of the journal, also after Close. A message starts a turn that a worker runs. An open after a crash repairs the turn. The store comes back in a new host. run gives a refusal. list gives the rows."
 
 [[node]]
 id = "law-hard-stop"
@@ -3346,7 +3336,7 @@ kind = "law"
 name = "Hard stop:"
 ref = "10.3"
 uses = ["local-host"]
-text = "Abort commits StopRequested, stops the activation, and the turn ends Aborted. A cell that does not end in the grace period: the worker is fenced, the writer commits the closing entries and TurnEnded(Aborted), the late commit is refused, and the next turn gets a new activation."
+text = "Abort commits StopRequested, stops the activation, and the turn ends Aborted. A cell that does not end in the grace period: the activation is fenced, the writer closes the turn, a late commit of that activation does not reach the next turn, and the next turn gets a new activation. The grace timer of a stop does not touch a later turn."
 
 [[group]]
 id = "job-laws"
@@ -3362,8 +3352,8 @@ group = "job-laws"
 kind = "law"
 name = "Jobs:"
 ref = "10.3"
-uses = ["job-table", "job-wrapper"]
-text = "A job outlives its call, with its output and its exit code. A stop mark stops a job, with KILL after the grace period. A marked job does not start. A job with no row is Lost. A report gets the status at the end. close stops each job. The wrapper stops its process group when its pipe closes."
+uses = ["job-table", "process-wrapper"]
+text = "A job outlives its call, with its output and its exit code. A stop mark stops a job, with KILL after the grace period, and sync returns at once. A marked job does not start. A job with no row is Lost. The end of a job with report reaches the report of the table. close stops each job."
 
 [[group]]
 id = "work-laws"
@@ -3380,7 +3370,7 @@ kind = "law"
 name = "Work:"
 ref = "8.1"
 uses = ["work-runtime", "local-host"]
-text = "config and defaultGuard. A cell runs in the scope, and a val stays for the next turn. An Ask call does not run, pending holds its rule, and a Grant lets the new turn run it. A catch does not hide a pending call. A job outlives its turn and Abort, and StopJobs(OfLastTurn) stops it. A report starts a turn. stopJob commits JobsStopRequested(One). A stop ends a long exec."
+text = "config and workMode, with no Sessions^ and no Children^, and defaultGuard. A cell runs in the scope, a val stays for the next turn, and rlm does not compile. Each turn gets a new budget. An Ask call does not run, pending holds its rule, and a Grant lets the new turn run it. A catch does not hide it. Under the sandbox a job runs on after its cell, Abort during a cell stops no job, and StopJobs(OfLastTurn) stops it. A report starts a turn. stopJob stops the job. A stop ends a long exec and its process."
 
 [[group]]
 id = "crash-laws"
@@ -3397,7 +3387,7 @@ kind = "law"
 name = "Crash:"
 ref = "10.3"
 uses = ["local-host", "work-runtime", "catalog-row-fold"]
-text = "After a SIGKILL of the host during a cell, no job process stays, the next start gives the catalog rows of the journals, and the open gives TurnEnded(Crashed)."
+text = "After a SIGKILL of the host during a cell, no process of a job or of an exec stays, the next start gives the catalog rows of the journals, and the open gives TurnEnded(Crashed)."
 
 [[group]]
 id = "cli-laws"
@@ -3414,7 +3404,7 @@ kind = "law"
 name = "CLI:"
 ref = "10.3"
 uses = ["cli-args", "parse-line", "commands-for", "entry-text"]
-text = "parse gives the defaults and an error with the usage. parseLine reads the commands. Stop and Stop all give their commands, Allow gives one Grant for each pending call, a message gives one Send, and Quit gives none. entryText shows a step, a cell output and a pending call."
+text = "parse gives the defaults and an error with the usage. parseLine reads the commands. Stop and Stop all give their commands, Allow gives one Grant for each pending call, a message gives one Send, and Quit gives none. entryText shows a step, a cell output and a pending call. loop sends a message, shows a refusal of /close, and ends when the feed ends."
 
 [[node]]
 id = "check-cli-start"
@@ -3424,3 +3414,72 @@ name = "CLI start:"
 ref = "15"
 uses = ["cli"]
 text = "The time from the start of a JVM to the end at /quit, in a child JVM. Choice 8: an AOT cache on JDK 25 comes only if this time is too long."
+
+[[group]]
+id = "process-wrapper"
+phase = "p7"
+module = "harness-sandbox"
+file = "ProcessWrapper.scala"
+title = "The wrapper of each exec and each job, which a crash of the host stops"
+
+[[node]]
+id = "process-wrapper"
+group = "process-wrapper"
+kind = "data"
+name = "ProcessWrapper"
+ops = ["command"]
+ref = "10.3"
+spec = true
+uses = []
+text = "The command that runs a command in its own process group with an empty standard input, and stops that group when the standard input of the wrapper closes: TERM, a grace period, then KILL. The host holds the pipe, so a crash of the host stops the command."
+
+[[group]]
+id = "wrapper-laws"
+phase = "p7"
+module = "harness-sandbox"
+file = "WrapperLaws.scala"
+where = "tests"
+title = "The laws of the wrapper of a process"
+
+[[node]]
+id = "law-wrapper"
+group = "wrapper-laws"
+kind = "law"
+name = "Wrapper:"
+ref = "10.3"
+uses = ["process-wrapper"]
+text = "The wrapper gives the exit code of its command, and the command gets an empty standard input. When the pipe closes, the wrapper stops the process group, with KILL after the grace period for a command that ignores TERM."
+
+[[group]]
+id = "shell-stop-laws"
+phase = "p7"
+module = "harness-sandbox"
+file = "ShellStopLaws.scala"
+where = "tests"
+title = "The laws of the stop of an exec"
+
+[[node]]
+id = "law-shell-stop"
+group = "shell-stop-laws"
+kind = "law"
+name = "Shell stop:"
+ref = "10.3"
+uses = ["sandboxed-shell"]
+text = "stopAll ends an exec that runs, its process tree stops, and the exec gives a note of the stop. An interrupt of the thread of an exec stops its process tree."
+
+[[group]]
+id = "stop-cell-laws"
+phase = "p7"
+module = "harness-repl"
+file = "StopCellLaws.scala"
+where = "tests"
+title = "The laws of the stop of one cell"
+
+[[node]]
+id = "law-stop-cell"
+group = "stop-cell-laws"
+kind = "law"
+name = "Stop cell:"
+ref = "10.3"
+uses = ["scala-repl"]
+text = "stopCell ends the running cell with a failure, and the REPL keeps the definitions of the earlier cells. With no running cell it does nothing."

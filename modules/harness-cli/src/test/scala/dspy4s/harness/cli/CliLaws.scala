@@ -1,13 +1,16 @@
 package dspy4s.harness.cli
 
 import dspy4s.harness.Support
+import dspy4s.harness.host.{Behind, Feed, HostError, SessionHandle}
 import dspy4s.harness.kernel.*
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.json.Json
 
+import java.io.{BufferedReader, ByteArrayOutputStream, PrintStream, StringReader}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.{Files, Path}
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.{ConcurrentLinkedQueue, TimeUnit}
+import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
 
 /** The laws of the terminal client (CODE_HARNESS_DESIGN.md, 10.3, 5.5 and 15, phase 7). */
@@ -20,19 +23,16 @@ class CliLaws extends munit.FunSuite:
   private val pushRule = GuardRule("exec", ArgMatch.Exact(Json.Object(Chunk(("command", Json.String("git push"))))))
   private val pending  = SessionState.initial.copy(pending = Set(pushRule))
 
-  test("CLI: parse gives the folder, the root, the session and the mode, with the defaults") {
+  test("CLI: parse gives the folder, the root and the session, with the defaults") {
+    assertEquals(CliArgs.parse(Vector.empty, home, cwd), Right(CliArgs(cwd, home.resolve(".dspy4s/harness"), None)))
     assertEquals(
-      CliArgs.parse(Vector.empty, home, cwd),
-      Right(CliArgs(cwd, home.resolve(".dspy4s/harness"), None, CliMode.Local))
-    )
-    assertEquals(
-      CliArgs.parse(Vector("--root", "/fake/root", "--session", "fake-id", "--full", "/fake/other"), home, cwd),
-      Right(CliArgs(Path.of("/fake/other"), Path.of("/fake/root"), Some(SessionId("fake-id")), CliMode.Full))
+      CliArgs.parse(Vector("--root", "/fake/root", "--session", "fake-id", "/fake/other"), home, cwd),
+      Right(CliArgs(Path.of("/fake/other"), Path.of("/fake/root"), Some(SessionId("fake-id"))))
     )
   }
 
   test("CLI: parse gives an error with the usage for an unknown flag or a flag with no value") {
-    Vector(Vector("--fake"), Vector("--root"), Vector("--session")).foreach { args =>
+    Vector(Vector("--fake"), Vector("--full"), Vector("--root"), Vector("--session")).foreach { args =>
       assert(CliArgs.parse(args, home, cwd).left.exists(_.contains("--root")), args.toString)
     }
   }
@@ -95,6 +95,42 @@ class CliLaws extends munit.FunSuite:
     assert(entryText(log(3)).exists(t => t.contains("git push") && t.contains("/allow")))
   }
 
+  test("CLI: loop sends a message, runs /close and shows its refusal, and ends when the feed ends") {
+    val handle = FakeHandle()
+    val out    = ByteArrayOutputStream()
+    val lines  = "hello\n/close\n"
+    val loop   = Thread.ofPlatform().start { () =>
+      Cli.loop(handle, BufferedReader(StringReader(lines)), PrintStream(out, true, UTF_8))
+    }
+    loop.join(10_000)
+    assert(!loop.isAlive, "the loop did not end at the end of its input")
+    handle.sent.asScala.toVector match
+      case Vector(Command.Send(_, "hello", _)) => ()
+      case other                               => fail(s"sent: $other")
+    handle.ran.asScala.toVector match
+      case Vector(Command.Close(SessionOutcome.Parked, _)) => ()
+      case other                                           => fail(s"ran: $other")
+    assert(out.toString(UTF_8).contains("TurnOpen"), out.toString(UTF_8))
+    assert(out.toString(UTF_8).contains("FAKE-REPLY"), out.toString(UTF_8))
+  }
+
+  test("CLI: loop ends with no error when the feed ends, also with no end of its input") {
+    val handle = FakeHandle(endAfterFirst = true)
+    val ended  = java.util.concurrent.atomic.AtomicReference[scala.util.Try[Unit]]()
+    // An input that never ends: only the end of the feed can end the loop.
+    val input = java.io.PipedReader(java.io.PipedWriter())
+    val loop  = Thread.ofPlatform().start { () =>
+      ended.set(scala.util.Try(Cli.loop(
+        handle,
+        BufferedReader(input),
+        PrintStream(ByteArrayOutputStream(), true, UTF_8)
+      )))
+    }
+    loop.join(10_000)
+    assert(!loop.isAlive, "the loop did not end at the end of the feed")
+    assert(Option(ended.get).exists(_.isSuccess), String.valueOf(ended.get))
+  }
+
   test("CLI start: the time from the start of a JVM to the first prompt, and the end at /quit") {
     val root  = Files.createTempDirectory("dspy4s-cli-test-")
     val scope = Files.createDirectories(root.resolve("work"))
@@ -119,3 +155,28 @@ class CliLaws extends munit.FunSuite:
     assert(output.contains("session"), output)
     Support.remove(root)
   }
+
+/** A session for the laws of `Cli.loop`: `send` keeps the commands, `run` refuses each command with `TurnOpen`, and the
+  * feed gives one `Acted` with the text `FAKE-REPLY`. With `endAfterFirst`, the feed ends after that entry.
+  */
+private final class FakeHandle(endAfterFirst: Boolean = false) extends SessionHandle:
+  val sent: ConcurrentLinkedQueue[Command] = ConcurrentLinkedQueue()
+  val ran: ConcurrentLinkedQueue[Command]  = ConcurrentLinkedQueue()
+  private val reply                        = Support.logOf(1000L, Entry.Acted("", "FAKE-REPLY", None)).head
+
+  def id: SessionId                                   = SessionId("fake-session")
+  def send(command: Command): Either[HostError, Unit] =
+    sent.add(command): Unit
+    Right(())
+  def run(command: Command): Either[HostError, SessionState] =
+    ran.add(command): Unit
+    Left(HostError.Rejected(Rejection.TurnOpen))
+  def state: SessionState               = SessionState.initial
+  def read(after: Long): Vector[Logged] = Vector(reply).filter(_.seq > after)
+  def subscribe(capacity: Int): Feed    =
+    new Feed:
+      private val queue                                          = ConcurrentLinkedQueue[Either[Behind, Logged]](java.util.List.of(Right(reply)))
+      def poll(waitMillis: Long): Option[Either[Behind, Logged]] =
+        Option(queue.poll()).orElse { Thread.sleep(waitMillis.min(50)); None }
+      def ended: Boolean = endAfterFirst && queue.isEmpty
+      def close(): Unit  = ()

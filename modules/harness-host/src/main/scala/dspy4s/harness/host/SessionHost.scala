@@ -11,8 +11,10 @@ import scala.annotation.nowarn
   */
 trait SessionHost:
 
-  /** Opens the session `id` with `config`: a new session, or a session with a journal. */
-  def open(id: SessionId, config: SessionConfig): Either[HostError, SessionHandle]
+  /** Opens the session `id`. A new session needs `Some(config)`. For a session with a journal, `None` keeps the
+    * configuration of its last `Activated`, and `Some(config)` activates it with `config`.
+    */
+  def open(id: SessionId, config: Option[SessionConfig]): Either[HostError, SessionHandle]
 
 /** An open session for a client (10.1).
   *
@@ -24,6 +26,11 @@ trait SessionHandle:
 
   /** Puts `command` into the mailbox, with the source `User`. It does not wait for the commit. */
   def send(command: Command): Either[HostError, Unit]
+
+  /** Runs `command` with the source `User`, and waits for its commit. A client uses it when the person must see a
+    * refusal, for example `Close` during a turn or a `Grant` after the end.
+    */
+  def run(command: Command): Either[HostError, SessionState]
 
   /** The committed state. */
   def state: SessionState
@@ -38,8 +45,9 @@ trait SessionHandle:
 trait SessionRuntime:
 
   /** The live part of a new activation of `session` (11: Live): a new REPL, the handlers of the mode of `config` and
-    * the effects of a turn over `journal`. `jobs` is the job table of the session, which lives as long as the session
-    * is open in this host.
+    * the effects of a turn. `journal` is the journal of this activation, with its ticket: each commit of the effects
+    * and of the recorder goes through it, so a fence after a hard stop reaches them all. `jobs` is the job table of the
+    * session, which lives as long as the session is open in this host.
     */
   def activate(session: SessionId, config: SessionConfig, journal: Journal, jobs: JobTable): Activation
 
@@ -49,9 +57,8 @@ trait Activation extends AutoCloseable:
   /** The effects of a turn (4.6). */
   def effects: TurnEffects
 
-  /** Steps 2 and 3 of the path of a hard stop (10.3): it interrupts the cell thread, and stops the LM transport and the
-    * process groups of the running `exec` calls with TERM, a grace period, then KILL. It returns at once. The worker
-    * thread gets no interrupt, so its commits complete.
+  /** Steps 2 and 3 of the path of a hard stop (10.3): `ScalaRepl.stopCell`, the stop of the LM transport, and
+    * `SandboxedShell.stopAll`. It returns at once. The worker thread gets no interrupt, so its commits complete.
     */
   def stop(): Unit
 
@@ -67,14 +74,19 @@ trait Activation extends AutoCloseable:
   * and the path of a hard stop.
   *
   *   - `open` of a new id makes `<root>/sessions/<id>.db` and commits `Activate`. `open` of an id with a file reads its
-  *     journal, and `Activate` repairs an open turn with `TurnEnded(Crashed)` (4.4). A second `open` of an open session
-  *     gives the same handle.
-  *   - After each commit, when `next` gives work and no worker runs, the host starts a worker thread with a new ticket.
-  *     The worker runs `drive` with a `WriterJournal` and the effects of the activation.
-  *   - After `StopRequested`, the host calls `Activation.stop`, and a timer puts a message after `limits.grace`. When
-  *     the worker still runs at that message, the writer fences its ticket, and commits the closing entries and
-  *     `TurnEnded(Aborted)` (10.3, step 5). The next turn gets a new activation.
-  *   - After each commit, the host copies the marks of the jobs of the state to the job table (10.3).
+  *     journal, and `Activate` repairs an open turn with `TurnEnded(Crashed)` (4.4). An open after `Close` starts a new
+  *     writer, and `Activate` opens the session again. A second `open` of an open session gives the same handle.
+  *   - A mode above the ceiling of the last `Activated` gives `OpenFailed`, and so does a file that is not a journal.
+  *   - The host holds an exclusive lock on `<root>/sessions/<id>.lock` while the session is open. Another host gets
+  *     `OpenFailed` for that session, so two hosts never write one file. The lock goes with the process, so a crash
+  *     frees it.
+  *   - Each activation gets a new ticket and a `WriterJournal` with it. When `next` gives work and no worker runs, the
+  *     host starts a worker thread that runs `drive` with that journal and the effects of the activation.
+  *   - After `StopRequested`, the host calls `Activation.stop`, and a timer calls `Writer.expire` with the turn of the
+  *     stop and the ticket after `limits.grace` (10.3, step 5). When that turn still runs, the writer fences the ticket
+  *     and closes the turn, and the next turn gets a new activation.
+  *   - After each commit, the host copies the marks of the jobs of the state to the job table (10.3). The table of the
+  *     session posts the message of a job with `report` to the writer, so the message also reaches a later activation.
   *   - After a turn ends or the status changes, the host puts the row of the session into the catalog.
   */
 @nowarn("msg=unused") // the skeleton: the proof uses the parameters
@@ -89,12 +101,16 @@ final class LocalHost private (
 ) extends SessionHost,
       AutoCloseable:
 
-  def open(id: SessionId, config: SessionConfig): Either[HostError, SessionHandle] = ???
+  def open(id: SessionId, config: Option[SessionConfig]): Either[HostError, SessionHandle] = ???
 
   /** The rows of the catalog. */
   def list: Vector[CatalogRow] = ???
 
-  /** Ends the writer of each open session and closes its activation. The journals stay. */
+  /** The files of `sessions` that are not journals, from the rebuild at the start (10.2). */
+  def failed: Vector[(Path, String)] = ???
+
+  /** Ends the writer of each open session, closes its activation, stops its jobs and frees its lock. The journals stay.
+    */
   def close(): Unit = ???
 
 object LocalHost:

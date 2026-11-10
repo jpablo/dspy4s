@@ -5,6 +5,8 @@ import dspy4s.harness.kernel.*
 
 import java.nio.file.{Files, Path}
 import java.util.concurrent.atomic.AtomicInteger
+import scala.jdk.CollectionConverters.*
+import scala.jdk.OptionConverters.*
 
 /** The helpers of the tests of the host (CODE_HARNESS_DESIGN.md, 10). */
 object HostSupport:
@@ -32,8 +34,14 @@ object HostSupport:
     finally host.close()
 
   /** Opens `session` in `host`, or fails the test. */
-  def opened(host: LocalHost, session: SessionId, settings: SessionConfig = config()): SessionHandle =
+  def opened(host: LocalHost, session: SessionId, settings: Option[SessionConfig] = Some(config())): SessionHandle =
     host.open(session, settings).fold(e => throw AssertionError(e.toString), identity)
+
+  /** True when `handle` is in a cell. */
+  def inCell(handle: SessionHandle): Boolean =
+    handle.state.position match
+      case Position.InCell(_, _, _) => true
+      case _                        => false
 
   /** True when `condition` holds within `seconds`. */
   def eventually(seconds: Int = 10)(condition: => Boolean): Boolean =
@@ -44,6 +52,13 @@ object HostSupport:
       met = condition
     met
 
+  /** The processes of this machine whose command line holds `text`. A law gives each of its commands a unique text, for
+    * example `sleep 331`, so it finds only its own processes.
+    */
+  def running(text: String): Vector[ProcessHandle] =
+    ProcessHandle.allProcesses().iterator().asScala.filter(_.info().commandLine().toScala.exists(_.contains(text)))
+      .toVector
+
   /** The entries of a handle, without their meta. */
   def entries(handle: SessionHandle): Vector[Entry] = handle.read(-1).map(_.entry)
 
@@ -51,16 +66,17 @@ object HostSupport:
   def outcomes(handle: SessionHandle): Vector[TurnOutcome] =
     entries(handle).collect { case Entry.TurnEnded(outcome) => outcome }
 
-  /** A runtime whose activations run the effects of `effects`. `activations` counts the activations, `stops` counts the
-    * calls of `Activation.stop`, and each stop runs `onStop`.
+  /** A runtime whose activations run the effects that `effects` makes from the journal of the activation, so a script
+    * can commit through that journal. `activations` counts the activations, `stops` counts the calls of
+    * `Activation.stop`, and each stop runs `onStop`.
     */
-  final class ScriptRuntime(effects: () => TurnEffects, onStop: () => Unit = () => ()) extends SessionRuntime:
+  final class ScriptRuntime(effects: Journal => TurnEffects, onStop: () => Unit = () => ()) extends SessionRuntime:
     val activations: AtomicInteger = AtomicInteger(0)
     val stops: AtomicInteger       = AtomicInteger(0)
 
     def activate(session: SessionId, config: SessionConfig, journal: Journal, jobs: JobTable): Activation =
       activations.incrementAndGet(): Unit
-      val made = effects()
+      val made = effects(journal)
       new Activation:
         def effects: TurnEffects = made
         def stop(): Unit         =

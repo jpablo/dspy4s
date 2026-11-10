@@ -158,6 +158,36 @@ class WriterLaws extends munit.FunSuite:
     }
   }
 
+  test(
+    "Writer: expire of a stopped open turn fences its ticket and closes the turn, and expire of an ended turn does nothing"
+  ) {
+    withRoot { root =>
+      val (w, _) = writer(root)
+      try
+        val one = WorkerTicket(1)
+        val two = WorkerTicket(2)
+        assert(w.run(activate, Source.Harness).isRight)
+        assert(w.run(message("m1"), Source.User).isRight)
+        val first = w.state.lastTurn
+        assert(w.run(Command.Commit(Vector(Entry.StepStarted(0))), Source.Harness, Some(one)).isRight)
+        assert(w.run(Command.Abort("FAKE-STOP"), Source.User).isRight)
+        w.expire(first, one)
+        assert(eventually()(w.state.position == Position.NoTurn), w.log.toString)
+        assert(w.log.exists(_.entry == Entry.TurnEnded(TurnOutcome.Aborted)))
+        assertEquals(
+          w.run(Command.Commit(Vector(Entry.StepStarted(1))), Source.Harness, Some(one)),
+          Left(HostError.Fenced)
+        )
+        // A later turn with another ticket: the expire of the first turn does nothing to it.
+        assert(w.run(message("m2"), Source.User).isRight)
+        w.expire(first, two)
+        assert(w.run(message("m3"), Source.User).isRight)
+        assert(w.state.position != Position.NoTurn)
+        assert(w.run(Command.Commit(Vector(Entry.StepStarted(0))), Source.Harness, Some(two)).isRight)
+      finally w.close()
+    }
+  }
+
   test("Timer: a timer runs its put once after its delay, and a cancel before the delay stops it") {
     val timers = Timers()
     try
@@ -166,10 +196,11 @@ class WriterLaws extends munit.FunSuite:
       val _     = timers.after(200.millis)(() => ran.countDown())
       assert(ran.await(5, TimeUnit.SECONDS))
       assert(System.nanoTime() - start >= 200_000_000L)
-      val never  = CountDownLatch(1)
-      val cancel = timers.after(300.millis)(() => never.countDown())
+      val never = CountDownLatch(1)
+      // A pause of the host between `after` and `cancel` must not run the timer, so its delay is long.
+      val cancel = timers.after(1.second)(() => never.countDown())
       cancel.cancel()
-      assert(!never.await(600, TimeUnit.MILLISECONDS))
+      assert(!never.await(2, TimeUnit.SECONDS))
     finally timers.close()
   }
 

@@ -357,15 +357,15 @@ new = "      finally journal.log.size: Unit"
 name = "Mutant: a query spends no call of the budget"
 [[mutant.edit]]
 file = "SubQueries.scala"
-old = "budget.spend().left.foreach(error => throw IllegalStateException(s\"llmQuery: $error\"))"
-new = "budget.spent: Unit"
+old = "budget().spend().left.foreach(error => throw IllegalStateException(s\"llmQuery: $error\"))"
+new = "budget().spent: Unit"
 
 [[mutant]]
 name = "Mutant: a policy call spends no call of the budget"
 [[mutant.edit]]
 file = "HarnessEffects.scala"
-old = "budget.spend().flatMap(_ => policy(input).left.map(_.message))"
-new = "Right(budget.spent).flatMap(_ => policy(input).left.map(_.message))"
+old = "budget().spend().flatMap(_ => policy(input).left.map(_.message))"
+new = "Right(budget().spent).flatMap(_ => policy(input).left.map(_.message))"
 
 [[mutant]]
 name = "Mutant: each child has a budget of its own"

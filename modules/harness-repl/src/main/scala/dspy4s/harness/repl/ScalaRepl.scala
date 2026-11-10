@@ -145,6 +145,16 @@ final class ScalaRepl(
     */
   def needsRestart: Boolean = confused
 
+  /** Steps 2 and 4 of the hard stop (CODE_HARNESS_DESIGN.md, 10.3, phase 7): it interrupts the thread of the running
+    * cell, and returns at once. The cell ends with a failure, and the REPL and the definitions of the earlier cells
+    * stay. A cell thread that does not end in the wait of `run` makes the REPL `unclean`. With no running cell, it does
+    * nothing. The thread that waits in `run` gets no interrupt, so the commits of the worker complete.
+    *
+    * A proposal for the review: `close` also interrupts the cell, but it removes the bindings, so a stop must not use
+    * it.
+    */
+  def stopCell(): Unit = ???
+
   def close(): Unit =
     driver.setStopFlag(true)
     val t = worker

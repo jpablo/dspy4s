@@ -13,6 +13,11 @@ trait Feed extends AutoCloseable:
   /** The next entry, or `Behind` after a full queue, or none when no entry comes in `waitMillis` milliseconds. */
   def poll(waitMillis: Long = 0): Option[Either[Behind, Logged]]
 
+  /** True after the end of the feeds, when the queue is empty: the session ended or its writer failed, so no entry
+    * comes. A client then reads the state of the session, and it ends.
+    */
+  def ended: Boolean
+
   def close(): Unit
 
 /** The feeds of one session (10.2). Only the writer calls `publish`, and only after a commit, so a client never sees an

@@ -138,7 +138,7 @@ final case class Harness[I, O](
     yield
       val recorder = Recorder(journal, () => tree.budget.closed)
       val store    = SnapshotStore()
-      val llm      = LeafLlm(subQuery, tree.budget, tree.host, limits.batch)
+      val llm      = LeafLlm(subQuery, () => tree.budget, tree.host, limits.batch)
       val children = ChildTurns(childStart(depth + 1, tree), tree.host, limits.batch)
       val bindings = Bindings(
         turn = JournalTurn(journal, () => System.currentTimeMillis()),
@@ -160,7 +160,7 @@ final case class Harness[I, O](
         recorder,
         store,
         limits,
-        tree.budget,
+        () => tree.budget,
         Option.when(depth == 0)(tree.host)
       )
       try

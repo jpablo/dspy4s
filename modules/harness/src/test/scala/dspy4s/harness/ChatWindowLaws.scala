@@ -36,11 +36,16 @@ class ChatWindowLaws extends munit.FunSuite:
     assert(text.indexOf("question <1>") < text.indexOf("question <2>"), "the earlier turns are not oldest first")
   }
 
-  test("Chat window: with a small budget, the oldest turns go first, and the message of the open turn stays") {
-    val text = shown(Window.project(chat(40), (), 2_000))
+  test("Chat window: with a small budget, the oldest turns go first, the newest stay, and the projection fits") {
+    // 200 turns hold about 4,500 characters, so a budget of 2,000 keeps only some of them.
+    val budget = 2_000
+    val p      = Window.project(chat(200), (), budget)
+    val text   = shown(p)
+    assert(p.size <= budget, s"the projection has ${p.size} characters")
     assert(text.contains("open-question"), text)
-    assert(text.contains("question <40>"), text)
-    assert(!text.contains("question <1>"), text)
+    val kept = (1 to 200).filter(k => text.contains(s"question <$k>"))
+    assert(kept.nonEmpty && kept.size < 200, s"the window kept ${kept.size} turns")
+    assertEquals(kept, kept.min to 200, "the kept turns are not the newest ones")
   }
 
   test("Chat window: a projection of one open turn has no earlier turn") {

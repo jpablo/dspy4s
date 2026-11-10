@@ -38,9 +38,18 @@ final case class CatalogRow(
 /** The row of `session` as a fold of its journal (10.2). So a lost row comes back from the journal. */
 def catalogRow(session: SessionId): Fold[Logged, CatalogRow, CatalogRow] = ???
 
+/** The result of a rebuild of the catalog (10.2): the rows, and each file in `sessions` that is not a journal, with the
+  * reason. A bad file does not stop the start of the host, and its session does not open.
+  */
+final case class Rebuilt(rows: Vector[CatalogRow], failed: Vector[(Path, String)]) derives CanEqual
+
 /** The catalog of a host (10.2): `<root>/catalog.db`, one row for each session. The writer of a session updates its row
-  * after a turn ends or when the status changes. After a crash a row can lag, so `rebuild` runs at the start of the
-  * host. A removal of the file loses nothing.
+  * after a turn ends or when the status changes. After a crash a row can lag, or after a power loss it can be ahead of
+  * its journal, so `rebuild` runs at the start of the host. A removal of the file loses nothing.
+  *
+  * The writers of all sessions of a host share the catalog, so its methods hold a lock. Two hosts on one root can write
+  * the file at the same time, so the connection has a busy timeout. A failed write of the catalog never ends a session:
+  * the row then lags, and the next `rebuild` corrects it.
   */
 @nowarn("msg=unused") // the skeleton: the proof uses the parameters
 final class Catalog private (connection: Connection, val path: Path) extends AutoCloseable:
@@ -62,6 +71,7 @@ object Catalog:
   def open(path: Path): Either[String, Catalog] = ???
 
   /** The rows after a start of the host (10.2). It lists the files in `sessions`, folds each journal whose last `seq`
-    * differs from its row, and puts the new row. A row with no file goes away.
+    * differs from its row, and puts the new row. A row with no file goes away. A file that is not a journal goes into
+    * `failed`. Only an error of the catalog itself gives `Left`.
     */
-  def rebuild(catalog: Catalog, sessions: Path): Either[String, Vector[CatalogRow]] = ???
+  def rebuild(catalog: Catalog, sessions: Path): Either[String, Rebuilt] = ???
