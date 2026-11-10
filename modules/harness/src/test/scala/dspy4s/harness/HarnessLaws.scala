@@ -256,6 +256,31 @@ class HarnessLaws extends FunSuite:
     }
   }
 
+  private def observed(journal: Vector[Logged]): Vector[String] =
+    journal.collect { case Logged(_, _, Entry.Observed(output, _, _)) => output }
+
+  // No cell comes after the cell of the last step (4.3), so a new REPL is for nothing, and its note goes to the finisher.
+  test("Harness: the cell of the last step starts no new REPL, so the finisher sees no note of a new REPL") {
+    val model = ScriptLm(policy("keep", Some("val xs = Array(1, 2, 3)")), answer("x"))
+    call(model, steps = 1) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("x")))
+      assertEquals(ended(journal), Vector(TurnOutcome.Exhausted))
+      assert(observed(journal).nonEmpty, journal.mkString("\n"))
+      assert(!observed(journal).exists(_.contains("started a new REPL")), observed(journal).mkString("\n"))
+      assert(!prompt(model, 1).contains("started a new REPL"), prompt(model, 1).take(3_000))
+    }
+  }
+
+  // A cell that ended by `submit` ends the turn (5.1), so no cell comes after it.
+  test("Harness: a cell that ended by submit starts no new REPL, also when the REPL is full") {
+    val model = ScriptLm(policy("done", Some("submit(\"x\")")))
+    call(model, cellLimit = 1) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("x")))
+      assert(observed(journal).nonEmpty, journal.mkString("\n"))
+      assert(!observed(journal).exists(_.contains("started a new REPL")), observed(journal).mkString("\n"))
+    }
+  }
+
   test("Harness: a compile error of another kind starts no new REPL, and the names stay") {
     val model = ScriptLm(
       policy("keep", Some("val kept = 41")),
@@ -315,6 +340,48 @@ class HarnessLaws extends FunSuite:
         case _                     => false
       })
     }
+  }
+
+  // The parallel executor interrupts the thread of a call at its timeout or at `maxErrors` (9).
+  test("Harness: an interrupt of a program call gives its journal to env.journals, with a closed turn") {
+    val gate  = Gate()
+    val model = RequestLm(_ => Right(policy("compute", Some("submit(\"42\")"))), _ => gate.pass())
+    Background.run(model, HarnessLimits(steps = 3), gate) { call =>
+      assert(gate.awaitReached(), "the policy call did not start")
+      call.thread.interrupt()
+      assert(call.awaitEnd(), "the call did not end")
+      call.all match
+        case Vector(journal) =>
+          assertEquals(ended(journal), Vector(TurnOutcome.Crashed), journal.mkString("\n"))
+          assert(Support.isTurn(journal.map(_.entry).dropWhile(_ != Entry.TurnStarted).drop(1)), journal.mkString("\n"))
+        case other => fail(s"env.journals got ${other.size} journals")
+      assert(call.result.exists(_.isLeft), s"result ${call.result}, exception ${call.thrown}")
+      assert(call.flagged, "the call did not set the interrupt flag of its thread again")
+    }
+  }
+
+  test("Harness: after a fatal error of a call, env.journals still gets the journal") {
+    val place   = Place()
+    var journal = Vector.empty[Logged]
+    try
+      val env = HarnessEnv(
+        Some(place.root),
+        place.home,
+        HostList.empty,
+        Backends.detect(),
+        Secrets.none,
+        journals = journal = _
+      )
+      val model = RequestLm(_ => throw StackOverflowError("a fake fatal error"))
+      // `intercept` does not catch a fatal error, so the test catches it.
+      val fatal =
+        try
+          withModel(model)(Harness.forTask(signature, env)(Question("q"))): Unit
+          false
+        catch case _: StackOverflowError => true
+      assert(fatal, "the fatal error did not go on to the caller")
+      assert(journal.nonEmpty, "env.journals got no journal")
+    finally place.close()
   }
 
   test("Harness: the journal of a call holds no known secret") {

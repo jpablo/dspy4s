@@ -13,9 +13,10 @@ import java.nio.file.{Files as JFiles, LinkOption, Path, StandardOpenOption}
 /** The gate of the guest API calls of a cell: `recorded(h)` of CODE_HARNESS_DESIGN.md, 5.3. It commits `EffectStarted`
   * before each call and `EffectDone` after it, with the value as `Json` for a replay and as text for a reader (4.1). A
   * call that the journal refuses does not run, for example after a stop (4.7, Stop), and the cell gets an exception.
-  * After `close`, no call runs (9).
+  * After `close`, no call runs (9). When `ended` is true, no call runs either: the program call of the session ended,
+  * so a child that outlives its parent cannot write or exec (9).
   */
-final class Recorder(journal: Journal):
+final class Recorder(journal: Journal, ended: () => Boolean = () => false):
   private var cell   = -1L
   private var calls  = 0
   private var closed = false
@@ -45,6 +46,8 @@ final class Recorder(journal: Journal):
     val (id, intent) = synchronized {
       if closed then
         throw IllegalStateException(s"$op: the session refused the call, because the harness closed the calls")
+      if ended() then
+        throw IllegalStateException(s"$op: the session refused the call, because its program call ended")
       val fresh = EffectId(cell, calls)
       calls += 1
       (fresh, journal.commit(Entry.EffectStarted(fresh, op, args)))

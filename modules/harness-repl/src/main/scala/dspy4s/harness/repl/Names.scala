@@ -11,28 +11,30 @@ import java.io.{OutputStream, PrintStream}
 /** The top-level names that a cell defines (6), from the parser of the compiler only: `val`, `lazy val`, `def`,
   * `class`, `trait`, `object`, `enum`, `type`, the names in a pattern, extension methods and imports. The note of lost
   * names folds them over the cells that completed, so it needs no state of the old REPL. A cell that does not parse
-  * defines nothing.
+  * defines nothing. The parse runs under the lock of `NameParser`, so it is safe for threads.
   */
 def topLevelNames(code: String): Vector[String] =
-  given state: State = parserState
-  given Context      = state.context
-  ParseResult(SourceFile.virtual("cell", code)) match
-    case parsed: Parsed => parsed.trees.toVector.flatMap {
-        case d: untpd.ValDef if !d.name.isEmpty => Vector(d.name.toString)
-        case d: untpd.DefDef                    => Vector(d.name.toString)
-        case d: untpd.TypeDef                   => Vector(d.name.toString)
-        case d: untpd.ModuleDef                 => Vector(d.name.toString)
-        case untpd.PatDef(_, pats, _, _)        => pats.flatMap(patternNames).toVector
-        case untpd.ExtMethods(_, methods)       => methods.collect { case d: untpd.DefDef => d.name.toString }.toVector
-        case i: untpd.Import                    => i.selectors.filterNot(_.isWildcard).map(_.rename.toString).toVector
-        case _                                  => Vector.empty
-      }
-    case _ => Vector.empty
+  NameParser.parse {
+    given Context = summon[State].context
+    ParseResult(SourceFile.virtual("cell", code)) match
+      case parsed: Parsed => parsed.trees.toVector.flatMap {
+          case d: untpd.ValDef if !d.name.isEmpty => Vector(d.name.toString)
+          case d: untpd.DefDef                    => Vector(d.name.toString)
+          case d: untpd.TypeDef                   => Vector(d.name.toString)
+          case d: untpd.ModuleDef                 => Vector(d.name.toString)
+          case untpd.PatDef(_, pats, _, _)        => pats.flatMap(patternNames).toVector
+          case untpd.ExtMethods(_, methods)       => methods.collect { case d: untpd.DefDef => d.name.toString }.toVector
+          case i: untpd.Import                    => i.selectors.filterNot(_.isWildcard).map(_.rename.toString).toVector
+          case _                                  => Vector.empty
+        }
+      case _ => Vector.empty
+  }
 
 /** The note of lost names (6): each name that a completed cell defines, with the `seq` of the `Acted` entry of that
   * cell, in the order of the cells. A later cell that defines a name again moves the name to that cell. A failed cell
   * and a cell that ended by `submit` define nothing, as in the REPL. The note comes from the journal alone, so it is
-  * the same after a crash, a reopen and a change of mode.
+  * the same after a crash, a reopen and a change of mode. Each parse goes through `topLevelNames`, so it runs under the
+  * lock of `NameParser`.
   */
 def lostNames(journal: Vector[Logged]): Vector[(String, Long)] =
   // The open cell: the seq of its `Acted` entry and its code.
@@ -56,7 +58,17 @@ private def patternNames(tree: untpd.Tree)(using Context): List[String] =
         case _                                                                         => foldOver(found, tree)
   names(Nil, tree).reverse
 
-/** A REPL state for the parser. It compiles nothing, so its output goes nowhere. */
-private lazy val parserState: State =
-  val silent = PrintStream(OutputStream.nullOutputStream())
-  ReplDriver(Array("-usejavacp", "-color:never"), silent).initialState
+/** The parser of the names (6): one REPL state, which compiles nothing, so its output goes nowhere.
+  *
+  * The state is not safe for threads. For example, the tree accumulator of a pattern counts its depth in the state, and
+  * two parses at the same time lose a part of the count. After about 550 lost counts each later parse of a pattern
+  * throws `RecursionOverflow`, also on one thread. Two restarts can run at the same time: two children of one
+  * `rlmBatched`, or two program calls of a parallel evaluation (9). So `parse` holds a lock, and one parse runs at a
+  * time. A parse is short, so a lock is simpler than a state for each thread.
+  */
+private object NameParser:
+  private lazy val state: State =
+    val silent = PrintStream(OutputStream.nullOutputStream())
+    ReplDriver(Array("-usejavacp", "-color:never"), silent).initialState
+
+  def parse[A](body: State ?=> A): A = synchronized(body(using state))

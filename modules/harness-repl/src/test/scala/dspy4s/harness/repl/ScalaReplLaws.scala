@@ -4,7 +4,31 @@ import dspy4s.harness.guest.*
 import dspy4s.harness.kernel.CellOutcome
 import zio.blocks.schema.json.Json
 
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.{CountDownLatch, TimeUnit}
 import scala.concurrent.duration.*
+
+/** The files of a test whose read waits for `released`, at most 30 seconds. The read keeps its thread, `reached` counts
+  * down when the read starts, and `interrupted` is true when an interrupt ended the wait.
+  */
+final class BlockingFiles extends Files:
+  val reached: CountDownLatch          = CountDownLatch(1)
+  val released: CountDownLatch         = CountDownLatch(1)
+  @volatile var reader: Option[Thread] = None
+  @volatile var interrupted: Boolean   = false
+
+  def read(path: String): String =
+    reader = Some(Thread.currentThread())
+    reached.countDown()
+    try released.await(30, TimeUnit.SECONDS): Unit
+    catch
+      case e: InterruptedException =>
+        interrupted = true
+        throw e
+    s"the text of $path"
+
+  def write(path: String, content: String): Unit                  = ()
+  def edit(path : String, oldText: String, newText: String): Unit = ()
 
 /** The files of a test: each read gives a fixed text after `delayMillis`, and the writes go to a list. */
 final class FakeFiles(delayMillis: Long = 0L) extends Files:
@@ -339,6 +363,30 @@ class ScalaReplLaws extends munit.FunSuite:
       val slow = r.run("""println(read("a.txt").length)""")
       assertEquals((slow.outcome, slow.output), (CellOutcome.Ok, "17"), slow.toString)
     finally r.close()
+  }
+
+  // The parallel executor interrupts the thread of a program call, and that thread waits in `run` (9).
+  test(
+    "Cell clock: an interrupt of the thread that runs a cell stops the cell, so the cell does not outlive the caller"
+  ) {
+    val files = BlockingFiles()
+    val r     = ScalaRepl(readFiles, Bindings(FakeTurn(), files = Some(files)), cellTimeout = 30.seconds)
+    try
+      val thrown = AtomicBoolean(false)
+      val caller = Thread(() =>
+        try r.run("""println(read("a.txt"))"""): Unit
+        catch case _: InterruptedException => thrown.set(true)
+      )
+      caller.start()
+      assert(files.reached.await(30, TimeUnit.SECONDS), "the cell did not reach the read")
+      caller.interrupt()
+      caller.join(30_000)
+      assert(thrown.get, "the interrupt did not go on to the caller of run")
+      assert(files.reader.exists(!_.isAlive), "the thread of the cell still runs after the interrupt")
+      assert(files.interrupted, "the read did not get the interrupt")
+    finally
+      files.released.countDown()
+      r.close()
   }
 
   test("Second try: a cell that the capture checker rejects for the enclosing object compiles in two parts") {

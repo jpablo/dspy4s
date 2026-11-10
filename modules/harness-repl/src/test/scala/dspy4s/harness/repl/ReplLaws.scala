@@ -3,6 +3,9 @@ package dspy4s.harness.repl
 import dspy4s.harness.kernel.{CellOutcome, Entry, Logged, Meta, Source, Taint}
 import zio.blocks.schema.json.Json
 
+import java.util.concurrent.{Callable, ConcurrentHashMap, CountDownLatch, Executors, TimeUnit}
+import scala.util.Try
+
 /** The top-level names of a cell and the error hints of section 6. */
 class ReplLaws extends munit.FunSuite:
 
@@ -69,6 +72,39 @@ class ReplLaws extends munit.FunSuite:
       Logged(i.toLong, meta, e)
     )
     assertEquals(lostNames(journal), Vector.empty)
+  }
+
+  // Two restarts can run at the same time: two children of one `rlmBatched`, or two program calls of a parallel
+  // evaluation (6, 9). So the parse of the names must be safe for threads. A pattern goes through the tree accumulator
+  // of the compiler, which counts its depth in the state of the parser, so the cells are patterns and other cells.
+  test("Names: topLevelNames on 8 threads at the same time gives the result of one thread, also after the run") {
+    val nested   = "val (a, (b, (c, (d, (e, f))))) = (1, (2, (3, (4, (5, 6)))))"
+    val expected = (cells.map(_._1) :+ nested :+ nested :+ nested).map(cell => cell -> topLevelNames(cell))
+    val start    = CountDownLatch(1)
+    val failures = ConcurrentHashMap.newKeySet[String]()
+    val pool     = Executors.newFixedThreadPool(8)
+    try
+      val runs = Vector.fill(8) {
+        val job: Callable[Int] = () =>
+          start.await()
+          (0 until 2_000).count { i =>
+            val (cell, names) = expected(i % expected.size)
+            val found         = Try(topLevelNames(cell))
+            found.failed.foreach(e => failures.add(e.getClass.getName): Unit)
+            !found.toOption.contains(names)
+          }
+        pool.submit(job)
+      }
+      start.countDown()
+      val wrong = runs.map(_.get(120, TimeUnit.SECONDS)).sum
+      // The same cells again, one at a time on this thread, after the run.
+      val after = expected.count((cell, names) => !Try(topLevelNames(cell)).toOption.contains(names))
+      assertEquals(
+        (wrong, after),
+        (0, 0),
+        s"wrong results of 16000 calls on 8 threads, and of ${expected.size} calls after the run; failures: $failures"
+      )
+    finally pool.shutdownNow(): Unit
   }
 
   test("Hints: a recursive type with no given") {

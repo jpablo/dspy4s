@@ -26,10 +26,11 @@ import scala.util.control.NonFatal
   * gives the output through `Data[O]`. `Replied` and `Exhausted` run the `finisher` leaf. `Failed`, `Aborted` and
   * `Crashed` give a `DspyError`, and the error of `Aborted` gives the reason of the stop. A copy or a private folder
   * that fails also gives a `DspyError`. An exception closes an open turn with a stop, the entries of a repair and
-  * `TurnEnded(Crashed)` (4.4). This path needs no writer and no thread other than the cell thread. After a cell that
-  * confuses the compiler, the effects start a new REPL with the preamble, the store and the note of lost names (6). At
-  * the end of the call, the current REPL is closed, `env.journals` gets the journal, and the copy and the private
-  * folders are gone.
+  * `TurnEnded(Crashed)` (4.4). An interrupt of the thread of the call does the same, and the flag of the thread stays
+  * set (9). This path needs no writer and no thread other than the cell thread. After a cell that confuses the
+  * compiler, the effects start a new REPL with the preamble, the store and the note of lost names (6). At the end of
+  * the call, the current REPL is closed, the budget of the tree is closed, `env.journals` gets the journal on each
+  * path, and the copy and the private folders are gone.
   *
   * Since phase 5, a cell has `Llm^` and `Children^` (8.1). The `subQuery` leaf answers `llmQuery`, and `rlm` runs a
   * child turn inside the cell. A child has the same path as the top session of the call (`session`): its own journal, a
@@ -58,17 +59,17 @@ final case class Harness[I, O](
   protected def forward(call: ProgramCall[I])(using RuntimeContext): Either[DspyError, Prediction[O]] =
     val journal = MemoryJournal(() => System.currentTimeMillis(), env.secrets)
     // `Module.apply` installs the context of the call, so a query and a child on another thread get it (9).
-    val host   = HostThreads.ofThisThread()
-    val result = Harness.repaired(journal) {
-      Harness.inFolder(Harness.forkWorkspace(env.workspace)) { fork =>
-        Harness.inFolder(JFiles.createTempDirectory("dspy4s-journals-")) { journals =>
-          val layout = Layout.forSession(env.home, journals)
-          Harness.inFolder(layout.temp)(_ => run(call.input, fork, layout, journal, host))
+    val host = HostThreads.ofThisThread()
+    // `env.journals` gets the journal also after an error that `repaired` does not catch, for example a fatal error.
+    try Harness.repaired(journal) {
+        Harness.inFolder(Harness.forkWorkspace(env.workspace)) { fork =>
+          Harness.inFolder(JFiles.createTempDirectory("dspy4s-journals-")) { journals =>
+            val layout = Layout.forSession(env.home, journals)
+            Harness.inFolder(layout.temp)(_ => run(call.input, fork, layout, journal, host))
+          }
         }
       }
-    }
-    env.journals(journal.log)
-    result
+    finally env.journals(journal.log)
 
   /** The mode of a session at `depth` (5.2, 8.2): the mode of the environment at the top, and `base.meet(Mode.closed)`
     * for a child (5.2, the closed law). A REPL at the depth limit has no `Children^`, so `rlm` does not compile there.
@@ -95,7 +96,8 @@ final case class Harness[I, O](
     yield output
 
   /** The top session of a call: the files and the shell of the copy, which each child shares (8.1), the budget of the
-    * tree, and the turn. The shell closes at the end of the call.
+    * tree, and the turn. At the end of the call, the budget closes, so a child that outlives the call can make no more
+    * calls (9), and the shell closes.
     */
   private def top(
       fields : Vector[(String, Json)],
@@ -111,12 +113,15 @@ final case class Harness[I, O](
     val files   = LocalFiles(fork, profile, layout.secretNames)
     val tree    = Harness.CallTree(Budget(limits.modelCalls), host, fork, files, shell, config.scope)
     try session(config, Harness.task(Harness.instructions(signature), fields, Some(text)), fields, 0, journal, tree)
-    finally shell.close()
+    finally
+      tree.budget.close()
+      shell.close()
 
   /** One session of a call (8.1): the top session at the depth 0, or a child of `rlm`. Both have this path. It starts
     * the session, sends the task, and drives the turn with the handlers of the mode of `config` and with the files and
     * the shell of `tree`. Gives the outcome of the turn. The REPL of the last cell closes at the end, also after an
-    * exception.
+    * exception. The recorder refuses each call after the end of the program call (9), and only the top session joins
+    * the trace of the host threads.
     */
   private def session(
       config : SessionConfig,
@@ -130,7 +135,7 @@ final case class Harness[I, O](
       _ <- journal.run(Command.Activate(Harness.versions, config), Source.Harness).left.map(rejected)
       _ <- journal.run(Command.Send(RequestId("task"), task, fields.toMap), Source.User).left.map(rejected)
     yield
-      val recorder = Recorder(journal)
+      val recorder = Recorder(journal, () => tree.budget.closed)
       val store    = SnapshotStore()
       val llm      = LeafLlm(subQuery, tree.budget, tree.host, limits.batch)
       val children = ChildTurns(childStart(depth + 1, tree), tree.host, limits.batch)
@@ -155,7 +160,7 @@ final case class Harness[I, O](
         store,
         limits,
         tree.budget,
-        tree.host
+        Option.when(depth == 0)(tree.host)
       )
       try
         drive(journal, effects): Unit
@@ -171,9 +176,10 @@ final case class Harness[I, O](
       def child[A: Data](task: String, inputs: Map[String, String])(using RuntimeContext): A =
         runChild[A](task, inputs, depth, tree)
 
-  /** A child of `rlm` at `depth` (5.1, 8.1). It has its own journal with the secrets of the call, and `env.journals`
-    * gets the journal at its end. Its preamble comes from `Data[A].shape`, with one input of the type `String` for each
-    * key of `inputs`, and the `Input` entry holds the values. The task of the policy has the task text, the input
+  /** A child of `rlm` at `depth` (5.1, 8.1). A spent or closed budget throws first, so the child makes no journal and
+    * no REPL (8.2). It has its own journal with the secrets of the call, and `env.journals` gets the journal at its
+    * end, also after an interrupt. Its preamble comes from `Data[A].shape`, with one input of the type `String` for
+    * each key of `inputs`, and the `Input` entry holds the values. The task of the policy has the task text, the input
     * fields and the preamble, as the task of the top session. Only `submit` gives the value (5.1). A child that ends
     * with `Replied` or `Exhausted` throws, and the message has the last text of the child. `Failed`, `Aborted`,
     * `Crashed` and a type with no preamble also throw, so the cell of the parent fails.
@@ -185,6 +191,7 @@ final case class Harness[I, O](
       data   : Data[A],
       context: RuntimeContext
   ): A =
+    tree.budget.check().left.foreach(error => throw IllegalStateException(s"rlm: $error"))
     val fields = inputs.toVector.sortBy(_._1).map((name, value) => name -> Json.String(value))
     val shapes = fields.map((name, _) => name -> summon[Data[String]].shape)
     val text   = preamble(data.shape, shapes).fold(
@@ -387,16 +394,27 @@ object Harness extends HarnessGivens:
   /** Runs `body`. After an exception, it closes the open turn of `journal` with a stop and the entries of a repair
     * (4.4), and gives a `DspyError`. The journal of one call has no next `Activate`, so the harness repairs the turn
     * here. The stop comes first: it holds the reason, and an input that no step saw then starts no new turn.
+    *
+    * An `InterruptedException` gets the same repair, although `NonFatal` rejects it: the parallel executor interrupts
+    * the thread of a program call at a timeout or at `maxErrors` (9). After the repair, the interrupt flag of the
+    * thread is set again, so the caller sees the interrupt.
     */
   private[harness] def repaired[A](journal: Journal)(body: => Either[DspyError, A]): Either[DspyError, A] =
     try body
     catch
-      case NonFatal(e) =>
-        val reason = s"the call stopped: $e"
-        if journal.state.position != Position.NoTurn then
-          journal.run(Command.Abort(reason), Source.Harness): Unit
-          journal.commit(repair(journal.state)*): Unit
-        Left(RuntimeError("harness", reason))
+      case interrupt: InterruptedException =>
+        val error = stopped(journal, interrupt)
+        Thread.currentThread().interrupt()
+        error
+      case NonFatal(e) => stopped(journal, e)
+
+  /** Closes the open turn of `journal` after `e`, and gives the error of the call. */
+  private def stopped(journal: Journal, e: Throwable): Left[DspyError, Nothing] =
+    val reason = s"the call stopped: $e"
+    if journal.state.position != Position.NoTurn then
+      journal.run(Command.Abort(reason), Source.Harness): Unit
+      journal.commit(repair(journal.state)*): Unit
+    Left(RuntimeError("harness", reason))
 
   /** The steps of a call as text for the finisher, cut to `budget` characters. */
   private[harness] def transcript(log: Vector[Logged], budget: Int): String =

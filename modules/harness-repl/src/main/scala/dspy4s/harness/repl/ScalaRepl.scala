@@ -64,8 +64,10 @@ final case class CellRun(output: String, outcome: CellOutcome):
   * earlier cell of `run`.
   *
   * Each guest API call goes through a gate: the clock of the cell stops during a call, and after `submit` the gate
-  * refuses each later call of the cell. A cell that the capture checker rejects for the capture set of the enclosing
-  * object gets a second try in two parts: the type definitions first, then the rest.
+  * refuses each later call of the cell. An interrupt of the thread of `run` stops the cell with the stop flag and an
+  * interrupt of the cell thread, waits for the cell as at a timeout, and then goes on to the caller. A cell that the
+  * capture checker rejects for the capture set of the enclosing object gets a second try in two parts: the type
+  * definitions first, then the rest.
   *
   * @param preamble
   *   the preamble of the session (5.1): its types, `submit` and its inputs
@@ -218,7 +220,13 @@ final class ScalaRepl(
     // The clock of the cell counts only the guest code: the gate takes out the time of the guest API calls.
     def guestNanos = System.nanoTime() - started - gate.callNanos
     try
-      while thread.isAlive && guestNanos < cellTimeout.toNanos && !memoryStop do thread.join(10)
+      try while thread.isAlive && guestNanos < cellTimeout.toNanos && !memoryStop do thread.join(10)
+      catch
+        case interrupt: InterruptedException =>
+          // The caller of `run` stops, for example at the end of a program call (9). The stop flag does not reach host
+          // code, such as a child of `rlm`, so the cell also gets an interrupt, and it ends before the caller goes on.
+          stop(thread, before): Unit
+          throw interrupt
       if memoryStop then stoppedForMemory(thread, before)
       else if thread.isAlive then timedOut(thread, before)
       else

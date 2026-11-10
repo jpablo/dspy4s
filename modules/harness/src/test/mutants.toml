@@ -343,8 +343,8 @@ new = "\\\"${tasks(0)}\\\", failed"
 name = "Mutant: env.journals does not get the journal of a child"
 [[mutant.edit]]
 file = "Harness.scala"
-old = "finally env.journals(journal.log)"
-new = "finally journal.log.size: Unit"
+old = "      finally env.journals(journal.log)"
+new = "      finally journal.log.size: Unit"
 
 [[mutant]]
 name = "Mutant: a query spends no call of the budget"
@@ -378,5 +378,95 @@ new = "if depth <= limits.depth then base"
 name = "Mutant: the trace of the queries of a cell joins before the cell"
 [[mutant.edit]]
 file = "HarnessEffects.scala"
-old = "    val run = repl.run(code)\n    host.join()\n"
-new = "    host.join()\n    val run = repl.run(code)\n"
+old = "    val run = repl.run(code)\n    host.foreach(_.join())\n"
+new = "    host.foreach(_.join())\n    val run = repl.run(code)\n"
+
+# ── The fixes of the review of phase 5 (6, 8.2, 9) ──
+
+[[mutant]]
+name = "Mutant: an interrupt of a call leaves its turn open"
+[[mutant.edit]]
+file = "Harness.scala"
+old = "      case interrupt: InterruptedException =>\n        val error = stopped(journal, interrupt)\n        Thread.currentThread().interrupt()\n        error\n"
+new = ""
+
+[[mutant]]
+name = "Mutant: an interrupt of a call clears the interrupt flag of its thread"
+[[mutant.edit]]
+file = "Harness.scala"
+old = "        Thread.currentThread().interrupt()\n"
+new = ""
+
+[[mutant]]
+name = "Mutant: env.journals gets the journal of a call only after a result"
+[[mutant.edit]]
+file = "Harness.scala"
+old = "    try Harness.repaired(journal) {"
+new = "    val result = Harness.repaired(journal) {"
+[[mutant.edit]]
+file = "Harness.scala"
+old = "\n    finally env.journals(journal.log)\n"
+new = "\n    env.journals(journal.log)\n    result\n"
+
+[[mutant]]
+name = "Mutant: the end of a call leaves the budget of its tree open"
+[[mutant.edit]]
+file = "Harness.scala"
+old = "      tree.budget.close()\n"
+new = "      tree.budget.spent: Unit\n"
+
+[[mutant]]
+name = "Mutant: a closed budget still spends"
+[[mutant.edit]]
+file = "Budget.scala"
+old = "    if closed then Left(Budget.Closed)\n    else\n"
+new = "    if false then Left(Budget.Closed)\n    else\n"
+
+[[mutant]]
+name = "Mutant: the recorder runs a call after the end of its program call"
+[[mutant.edit]]
+file = "Handlers.scala"
+old = "      if ended() then\n"
+new = "      if ended() && false then\n"
+
+[[mutant]]
+name = "Mutant: a batch that ends early does not wait for its items"
+[[mutant.edit]]
+file = "Budget.scala"
+old = "pool.awaitTermination(BatchStop.toMillis, TimeUnit.MILLISECONDS)"
+new = "pool.awaitTermination(BatchStop.toMillis * 0, TimeUnit.MILLISECONDS)"
+
+[[mutant]]
+name = "Mutant: a batch that ends early waits for its items with no real limit"
+[[mutant.edit]]
+file = "Budget.scala"
+old = "pool.awaitTermination(BatchStop.toMillis, TimeUnit.MILLISECONDS)"
+new = "pool.awaitTermination(BatchStop.toMillis * 1000, TimeUnit.MILLISECONDS)"
+
+[[mutant]]
+name = "Mutant: the join of the host threads keeps the order of the ends"
+[[mutant.edit]]
+file = "Budget.scala"
+old = "RuntimeDelta(kept.trace.sortBy(_.timestamp), kept.history.sortBy(_.timestamp))"
+new = "RuntimeDelta(kept.trace, kept.history.sortBy(_.timestamp))"
+
+[[mutant]]
+name = "Mutant: a cell that ended by submit starts a new REPL"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "      case CellOutcome.Submitted(_) => true\n      case _                        => false"
+new = "      case CellOutcome.Submitted(_) => false\n      case _                        => false"
+
+[[mutant]]
+name = "Mutant: the cell of the last step starts a new REPL"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "step + 1 >= journal.state.config.steps"
+new = "step + 1 > journal.state.config.steps"
+
+[[mutant]]
+name = "Mutant: a child with a spent budget starts its journal and its REPL"
+[[mutant.edit]]
+file = "Harness.scala"
+old = "    tree.budget.check().left.foreach(error => throw IllegalStateException(s\"rlm: $error\"))\n"
+new = ""

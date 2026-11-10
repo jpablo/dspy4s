@@ -995,6 +995,8 @@ compiler came, and the restart can go.
 
 **A full REPL, and the echo.** After the cell limit (`HarnessLimits.cellLimit`, 300 cells), the harness starts a new REPL as for the defect of the compiler, and the note gives that reason. Its names include the names of the last cell when that cell completed. The note says that the model can run the cell again only after a compile error, because a cell that completed can have side effects. The REPL shows the value of each `val` that a cell defines. That echo is cut to 400 characters with a note, so a long value does not fill the observation a second time. `println` and the guest API keep their whole output, and the harness cuts the whole observation. A hint of a compile error that the cut removed comes after the cut text.
 
+**When no restart comes.** No new REPL starts after a cell that ended by `submit`, or after the cell of the last step, because no cell can come after it. The parser of the note of lost names runs under one lock, because one parser state of the compiler is not safe for threads: two restarts at the same time made it throw.
+
 **The text of a cell.** `CellRun.text` is the text that an agent sees: the output; for a compile error, its lines and
 hints; for a failure, a timeout or a submit, the output and a note. The MCP server and the harness both show it, so the
 model of the harness sees the hints and learns that a cell stopped at its time limit.
@@ -1348,6 +1350,20 @@ The proofs of phase 5 added these points, also for the review:
 - `HarnessEnv.journals` can run on several threads at the same time, because the children of `rlmBatched` end on
   several threads.
 
+A code review of phase 5 on 2026-11-10 added these rules:
+
+- A program call has one cancel for its whole tree, in its budget. The end of the top call closes it. After that, each
+  spend fails, and the recorder of each session of the tree refuses each guest API call, so a child that outlives its
+  parent cannot spend, write or exec.
+- An interrupt of a program call repairs its open turn, sets the interrupt flag again, and gives an error.
+  `env.journals` gets each journal in a `finally`, so an interrupted call and an interrupted child give a journal with
+  a closed turn. `ScalaRepl` stops its cell when its own wait is interrupted.
+- A batch that ends early, by an interrupt or by an `Error` of an item, interrupts its items and waits at most 3 s for
+  them. That is shorter than the 5 s that the REPL waits for a cell to stop.
+- Only the top session joins the trace of the host threads, and the join sorts the trace and the history by their
+  timestamps, so the entries of the tree come in the order of the steps.
+- A child checks the budget before it makes its journal and its REPL, so a spent budget starts no child.
+
 ## 10. The runtime
 
 ### 10.1 The layers
@@ -1587,6 +1603,7 @@ and the start probe also ran on JDK 21.0.11. The code is in `tmp/design-check/`,
 | A task set of 30 live tasks, `HarnessTasks`, with a metric, in one workspace with a folder for each task, so one harness and an optimizer can run each task | The tasks read, parse and sum files (CSV, JSON, a log, 5000 rows), use the shell and Python, write and edit files, use the store across cells, and need dates, a regex and a median. The test code computes each expected answer from the same generated data. `TaskSetLaws` checks the metric with no model, and it found that the metric took the quotes off before the period at the end. The baseline with the private endpoint and native reasoning declared: 30 of 30 right, 1 to 6 model calls and 0 to 14 s a task, and no restart. A first run of the first 20 tasks gave 19 of 20: the model gave the 32nd Fibonacci number for the 30th. |
 | A first GEPA run on the task set (`HarnessGepaRun`): the 15 tasks with an even index train and the 15 others validate, the reflection model is the model of the endpoint, and the metric gives 1.0 for a correct answer in one step, 0.1 less for each more step down to 0.5, and 0 for a wrong answer | GEPA gives a metric an empty trace for a validation run, as upstream gives `trace=None`, so the metric reads the steps from the journal of each call. The run made 120 metric calls in 15 iterations and 4 candidates in about 17 minutes. The validation score went from 0.820 to 0.900 with an instruction to finish in one cell. Two more evaluations of the seed and of the best candidate on all 30 tasks did not confirm it: the seed was right 58 of 60 times with a mean score of 0.834 and 140 steps, and the best 52 of 60 times with 0.822 and 104 steps. So the best candidate takes 26 % fewer steps, but it skips a look at the data and gives more wrong answers, and the gain on the validation set was mostly chance. The reasons: the seed already solves nearly each task, the step penalty rewards a skip of the inspection, and one score of each of 15 validation tasks cannot tell candidates apart. A next run needs harder tasks, several scores of each validation task, and a smaller weight for the steps. The best instruction also says that safe mode refuses `ChronoUnit.DAYS`; this note of the model is not checked. |
 | Phase 5: `llmQuery`, `llmQueryBatched`, `rlm` and `rlmBatched` in the harness, with the leaf `subQuery`, the shared budget and the depth limit | `RlmLaws` has 14 laws: the answer of the leaf and its effect, the trace of a query, the order of a batch with at most 4 calls at the same time, the index or the task in the error of a batch, one budget for the whole tree, a typed value of a child for a record too, a child that replies with no code, the depth limit, a property of the mode at each depth, and the shared copy of the workspace. The structure has three leaves. The harness has 99 laws and 50 mutants, and each mutant is killed. A live run with the private endpoint: a task that asks for `llmQuery` got `merci` with one query, and a task that asks for `rlm` got 541 from a child, with 7 model calls in 12 s. |
+| A code review of phase 5 and of the other work of 2026-11-10, by a subagent that read the code and not the conclusions, and the fixes | 6 findings, each fixed with a law that failed first. The worst: one parser state for all threads, so two restarts at the same time threw `RecursionOverflow` (3074 of 16000 calls on 8 threads), and later calls in the same JVM failed too. The others: an interrupt skipped the repair and lost the journal, a child went on after its call ended and wrote into the deleted copy of the workspace, the trace of two children came out of order, a restart came after the last step, and a child started before the check of its budget. The harness has 112 laws and 62 mutants, and each mutant is killed. |
 | The laws of `harness` (phase 4), with scripts of `TurnEffects`, a real REPL, the sandbox of the host, and a scripted model through the chat adapter | 60 tests pass: `drive` with the scripts of this table, the journal in memory, the mask, the handlers, the window, a harness that submits, a reply and the step limit that run the finisher, a call in a copy of the workspace, `exec` in the sandbox, and the leaves for the optimizers. 18 mutants, each one killed. The runner of the optimizers puts the output in `RawPrediction.values`. A first run found that the chat adapter reads the text `null` in the field `code` as code. |
 
 The cells that models wrote. A cell counts if it compiled, so the table does not say that the cell does its task. The

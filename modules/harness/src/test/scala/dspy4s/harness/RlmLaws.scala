@@ -1,6 +1,6 @@
 package dspy4s.harness
 
-import dspy4s.core.contracts.{DspyError, DynamicValues}
+import dspy4s.core.contracts.{DspyError, DynamicValues, TraceEntry}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.harness.guest.Access
 import dspy4s.harness.kernel.*
@@ -9,10 +9,13 @@ import dspy4s.lm.contracts.LanguageModel
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAllNoShrink
+import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.json.Json
 
 import java.nio.file.{Files, Path}
-import java.util.concurrent.ConcurrentLinkedQueue
+import java.time.Instant
+import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
+import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch, ExecutionException, TimeUnit}
 import scala.jdk.CollectionConverters.*
 
 import Models.*
@@ -89,6 +92,26 @@ class RlmLaws extends ScalaCheckSuite:
   private val ChildTask = raw"\[\[ ## task ## \]\]\s*FAKE-TASK-(\d+)".r
 
   private def childTask(request: String): Option[Int] = ChildTask.findFirstMatchIn(request).map(_.group(1).toInt)
+
+  /** The task `FAKE-ONE` or `FAKE-TWO` of a request of the policy of a child. */
+  private val Named = raw"\[\[ ## task ## \]\]\s*FAKE-(ONE|TWO)".r
+
+  /** True when a journal is one turn that ended (4.1). */
+  private def closed(log: Vector[Logged]): Boolean =
+    ended(log).nonEmpty && Support.isTurn(log.map(_.entry).dropWhile(_ != Entry.TurnStarted).drop(1))
+
+  /** A model for the laws of a child that outlives its call. The top session runs `rlm`. The first step of the child
+    * waits at `gate`, and then writes a file. Its second step submits.
+    */
+  private def orphanModel(gate: Gate): RequestLm =
+    RequestLm(
+      request =>
+        childTask(request) match
+          case Some(_) if request.contains("Step 2 of 3.") => Right(policy("late", Some("""submit("late")""")))
+          case Some(_)                                     => Right(policy("write", Some("write(\"orphan.txt\", \"FAKE-ORPHAN\")\nprintln(\"wrote\")")))
+          case None                                        => Right(policy("delegate", Some("""submit(rlm[String]("FAKE-TASK-1"))"""))),
+      request => if childTask(request).isDefined then gate.pass() else 0L
+    )
 
   // ── llmQuery and llmQueryBatched ──
 
@@ -327,5 +350,195 @@ class RlmLaws extends ScalaCheckSuite:
     call(model) { (_, result, journals) =>
       assertEquals(result, Right(Answer("none")), journals.mkString("\n"))
       assert(failedWith(top(journals), "\"FAKE-TASK-2\", failed"), cells(top(journals)).mkString("\n"))
+    }
+  }
+
+  // ── An interrupt, a child that outlives its call, and the trace of the tree (9) ──
+
+  test("RLM: an interrupt during a child gives the child journal to env.journals, with a closed turn") {
+    val gate  = Gate()
+    val model = RequestLm(
+      request =>
+        childTask(request) match
+          case Some(_)                                  => Right(policy("give", Some("""submit("v")""")))
+          case None if request.contains("Step 2 of 3.") => Right(policy("give up", Some("""submit("none")""")))
+          case None                                     => Right(policy("delegate", Some("""submit(rlm[String]("FAKE-TASK-1"))"""))),
+      request => if childTask(request).isDefined then gate.pass() else 0L
+    )
+    Background.run(model, HarnessLimits(steps = 3), gate) { call =>
+      assert(gate.awaitReached(), "the child made no model call")
+      gate.thread.foreach(_.interrupt())
+      assert(call.awaitEnd(), "the call did not end")
+      kids(call.all) match
+        case Vector(child) => assert(closed(child), child.mkString("\n"))
+        case other         => fail(s"env.journals got ${other.size} child journals")
+      assertEquals(call.result, Some(Right(Answer("none"))), call.all.mkString("\n"))
+    }
+  }
+
+  test(
+    "RLM: after an interrupt of a program call during a child, the child makes no write and no more model calls, and no journal reaches env.journals after the call returns"
+  ) {
+    val gate  = Gate()
+    val model = orphanModel(gate)
+    Background.run(model, HarnessLimits(steps = 3), gate) { call =>
+      assert(gate.awaitReached(), "the child made no model call")
+      call.thread.interrupt()
+      assert(call.awaitEnd(), "the call did not end")
+      gate.released.countDown()
+      assert(gate.awaitThread(), "the child still runs")
+      val all = call.all
+      assertEquals(all.size, call.atReturn, s"a journal reached env.journals after the call returned: ${all.size}")
+      assertEquals(model.requests.size, 2, "the child made a model call after the interrupt")
+      assert(!all.exists(ops(_).contains("write")), all.mkString("\n"))
+      assert(Support.forks(all).forall(!Files.exists(_)), s"the copy of the workspace is back: ${Support.forks(all)}")
+    }
+  }
+
+  test("RLM: a child that outlives its program call can make no model call and no guest API call") {
+    // The child ignores each interrupt in its model call, as host code that does not stop.
+    val gate  = Gate(interruptible = false)
+    val model = orphanModel(gate)
+    Background.run(model, HarnessLimits(steps = 3), gate) { call =>
+      assert(gate.awaitReached(), "the child made no model call")
+      call.thread.interrupt()
+      assert(call.awaitEnd(), "the call did not end")
+      gate.released.countDown()
+      assert(gate.awaitThread(), "the child still runs")
+      val all = call.all
+      assertEquals(model.requests.size, 2, "the child made a model call after the end of the program call")
+      assert(!all.exists(ops(_).contains("write")), all.mkString("\n"))
+      assert(Support.forks(all).forall(!Files.exists(_)), s"the copy of the workspace is back: ${Support.forks(all)}")
+    }
+  }
+
+  test(
+    "RLM: the trace of a cell with rlm(\"ONE\") then rlm(\"TWO\") has its policy entries in the order of the steps"
+  ) {
+    val code  = """submit(rlm[String]("FAKE-ONE") + rlm[String]("FAKE-TWO"))"""
+    val model = RequestLm { request =>
+      Named.findFirstMatchIn(request).map(_.group(1)) match
+        case Some("ONE")                                 => Right(policy("one", Some("""submit("one")""")))
+        case Some(_) if request.contains("Step 2 of 3.") => Right(policy("two again", Some("""submit("two")""")))
+        case Some(_)                                     => Right(policy("two", Some("""println("two")""")))
+        case None                                        => Right(policy("delegate", Some(code)))
+    }
+    val place = Place()
+    try
+      val env             = HarnessEnv(Some(place.root), place.home, HostList.empty, Backends.detect(), Secrets.none)
+      val (result, trace) = withModel(model) {
+        val result = Harness.forTask(signature, env, HarnessLimits(steps = 3))(Question("q"))
+        (result.map(_.output), RuntimeEnvironment.current.trace)
+      }
+      assertEquals(result, Right(Answer("onetwo")))
+      val steps = trace.filter(e => DynamicValues.recordGet(e.inputs, "status").isDefined)
+      val names = steps.map { e =>
+        val task = DynamicValues.recordGet(e.inputs, "task").fold("")(_.toString)
+        if task.contains("FAKE-ONE") then "one" else if task.contains("FAKE-TWO") then "two" else "top"
+      }
+      assertEquals(names, Vector("top", "one", "two", "two"), trace.mkString("\n"))
+      // Each entry stays an entry of the policy leaf, so an optimizer finds it.
+      assertEquals(steps.map(_.predictor).distinct.size, 1, steps.map(_.predictor).mkString("\n"))
+      assert(steps.forall(_.predictor.isDefined), steps.map(_.predictor).mkString("\n"))
+    finally place.close()
+  }
+
+  test("RLM: the join of the host threads gives the trace of the tree in the order of the timestamps") {
+    // The children of a batch end in another order than they start: here the first child ends last.
+    def entry(at: Long) =
+      TraceEntry("fake", DynamicValue.Record.empty, DynamicValue.Record.empty, timestamp = Instant.ofEpochMilli(at))
+    val host = HostThreads.ofThisThread()
+    host.run(RuntimeEnvironment.appendTrace(entry(2_000L)))
+    host.run {
+      RuntimeEnvironment.appendTrace(entry(1_000L))
+      RuntimeEnvironment.appendTrace(entry(3_000L))
+    }
+    host.join()
+    assertEquals(RuntimeEnvironment.current.trace.map(_.timestamp.toEpochMilli), Vector(1_000L, 2_000L, 3_000L))
+  }
+
+  /** An item of a batch that waits for `never`. After an interrupt it takes 200 ms to end, and then it counts its end.
+    */
+  private def slowToStop(running: CountDownLatch, never: CountDownLatch, ends: AtomicInteger): Unit =
+    running.countDown()
+    try never.await(30, TimeUnit.SECONDS): Unit
+    finally
+      Thread.sleep(200)
+      ends.incrementAndGet(): Unit
+
+  test("RLM: an interrupt of the thread of a batch interrupts its items, and the batch waits for them") {
+    val running = CountDownLatch(2)
+    val never   = CountDownLatch(1)
+    val ends    = AtomicInteger(0)
+    val atEnd   = AtomicInteger(-1)
+    val thrown  = AtomicReference[Option[Throwable]](None)
+    val batch   = Thread(() =>
+      try inBatch(Vector(1, 2), 2)(_ => slowToStop(running, never, ends)): Unit
+      catch case e: InterruptedException => thrown.set(Some(e))
+      atEnd.set(ends.get())
+    )
+    try
+      batch.start()
+      assert(running.await(30, TimeUnit.SECONDS), "the items did not start")
+      batch.interrupt()
+      batch.join(30_000)
+      assert(thrown.get.isDefined, "the interrupt did not go on")
+      assertEquals(atEnd.get(), 2, "the batch ended before its items")
+    finally never.countDown()
+  }
+
+  test("RLM: an Error of an item ends the batch, which interrupts the other items and waits for them") {
+    val running = CountDownLatch(2)
+    val never   = CountDownLatch(1)
+    val ends    = AtomicInteger(0)
+    try
+      intercept[ExecutionException] {
+        inBatch(Vector(0, 1, 2), 3) { i =>
+          if i == 0 then
+            running.await(30, TimeUnit.SECONDS): Unit
+            throw AssertionError("a fake error")
+          else slowToStop(running, never, ends)
+        }
+      }: Unit
+      assertEquals(ends.get(), 2, "the batch ended before its items")
+    finally never.countDown()
+  }
+
+  test("RLM: a batch waits at most a few seconds for an item that does not stop") {
+    val running  = CountDownLatch(1)
+    val released = CountDownLatch(1)
+    val batch    = Thread(() =>
+      try
+        inBatch(Vector(1), 1) { _ =>
+          running.countDown()
+          // The item ignores each interrupt, as host code that does not stop.
+          val end = System.nanoTime() + TimeUnit.SECONDS.toNanos(20)
+          while released.getCount > 0 && System.nanoTime() < end do
+            try released.await(50, TimeUnit.MILLISECONDS): Unit
+            catch case _: InterruptedException => ()
+        }: Unit
+      catch case _: InterruptedException => ()
+    )
+    try
+      batch.start()
+      assert(running.await(30, TimeUnit.SECONDS), "the item did not start")
+      val start = System.nanoTime()
+      batch.interrupt()
+      batch.join(30_000)
+      val seconds = (System.nanoTime() - start) / 1e9
+      assert(!batch.isAlive && seconds < 10, s"the batch waited $seconds s")
+    finally released.countDown()
+  }
+
+  test("Budget: with a spent budget, rlmBatched starts no child, so no child journal reaches env.journals") {
+    val code  = """println(rlmBatched[String](Vector("FAKE-TASK-1", "FAKE-TASK-2", "FAKE-TASK-3")).mkString(","))"""
+    val model = RequestLm(request =>
+      Right(childTask(request).fold(policy("delegate", Some(code)))(n => policy("give", Some(s"""submit("v$n")"""))))
+    )
+    call(model, HarnessLimits(steps = 3, modelCalls = 1)) { (_, result, journals) =>
+      assert(result.isLeft, result.toString)
+      assertEquals(kids(journals).size, 0, kids(journals).mkString("\n"))
+      assertEquals(model.requests.size, 1)
+      assert(failedWith(top(journals), "spent"), cells(top(journals)).mkString("\n"))
     }
   }

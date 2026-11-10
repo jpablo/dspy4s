@@ -1,13 +1,18 @@
 package dspy4s.harness
 
+import dspy4s.core.contracts.DspyError
 import dspy4s.harness.guest.{Mode, Scope, StrategyName}
 import dspy4s.harness.kernel.*
-import dspy4s.harness.sandbox.Layout
+import dspy4s.harness.sandbox.{Backends, HostList, Layout}
+import dspy4s.lm.contracts.LanguageModel
 import zio.blocks.schema.json.Json
 
 import java.nio.file.{Files, Path}
 import java.util.Comparator
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch, TimeUnit}
 import scala.collection.mutable.ArrayBuffer
+import scala.jdk.CollectionConverters.*
 
 /** The helpers of the tests of the harness. */
 object Support:
@@ -106,6 +111,105 @@ object Support:
     entries.toVector.zipWithIndex.map((entry, i) =>
       Logged(i.toLong, Meta(at, Source.Harness, Taint.Trusted, true), entry)
     )
+
+  /** The copies of the workspace that the journals name in their `Activated` entries. */
+  def forks(journals: Vector[Vector[Logged]]): Vector[Path] =
+    journals.flatten.collect { case Logged(_, _, Entry.Activated(_, config)) => config.scope }.collect {
+      case Scope.Fork(path, _) => Path.of(path)
+    }.distinct
+
+  /** Removes a folder and each file in it, when the folder exists. */
+  def remove(folder: Path): Unit =
+    if Files.exists(folder) then
+      val paths = Files.walk(folder)
+      try paths.sorted(Comparator.reverseOrder[Path]()).forEach(p => Files.deleteIfExists(p): Unit)
+      finally paths.close()
+
+/** A gate in a scripted model (9). The first call that reaches it keeps its thread, counts down `reached`, and waits
+  * for `released`, at most 30 seconds. A gate that is not `interruptible` ignores each interrupt in that wait, as host
+  * code that does not stop. Each later call goes through at once.
+  */
+final class Gate(interruptible: Boolean = true):
+  val released: CountDownLatch         = CountDownLatch(1)
+  @volatile var thread: Option[Thread] = None
+  private val reached                  = CountDownLatch(1)
+  private val entered                  = AtomicBoolean(false)
+
+  /** The pause of a call of `RequestLm`: the wait of the first call, and then no pause. */
+  def pass(): Long =
+    if entered.compareAndSet(false, true) then
+      thread = Some(Thread.currentThread())
+      reached.countDown()
+      if interruptible then released.await(30, TimeUnit.SECONDS): Unit
+      else
+        val end = System.nanoTime() + TimeUnit.SECONDS.toNanos(30)
+        while released.getCount > 0 && System.nanoTime() < end do
+          try released.await(50, TimeUnit.MILLISECONDS): Unit
+          catch case _: InterruptedException => ()
+    0L
+
+  /** Waits until a call reaches the gate, at most 30 seconds. */
+  def awaitReached(): Boolean = reached.await(30, TimeUnit.SECONDS)
+
+  /** Waits for the end of the thread that reached the gate, at most 30 seconds. */
+  def awaitThread(): Boolean =
+    thread.foreach(_.join(30_000))
+    thread.forall(!_.isAlive)
+
+/** A call of a harness for the task of the tests on its own thread, so a test can interrupt it (9). It keeps the result
+  * or the exception of the call, the interrupt flag of its thread after the call, and the number of journals that
+  * `env.journals` had when the call returned.
+  */
+final class Background(model: LanguageModel, limits: HarnessLimits):
+  val place: Place                                        = Place()
+  val journals: ConcurrentLinkedQueue[Vector[Logged]]     = ConcurrentLinkedQueue()
+  @volatile var result: Option[Either[DspyError, Answer]] = None
+  @volatile var thrown: Option[Exception]                 = None
+  @volatile var flagged: Boolean                          = false
+  @volatile var atReturn: Int                             = -1
+  lazy val thread: Thread                                 = Thread(() => call())
+
+  /** The journals that `env.journals` got, in the order of their ends. */
+  def all: Vector[Vector[Logged]] = journals.asScala.toVector
+
+  /** Waits for the end of the call, at most 60 seconds. */
+  def awaitEnd(): Boolean =
+    thread.join(60_000)
+    !thread.isAlive
+
+  private def call(): Unit =
+    val env = HarnessEnv(
+      Some(place.root),
+      place.home,
+      HostList.empty,
+      Backends.detect(),
+      Secrets.none,
+      journals = log => journals.add(log): Unit
+    )
+    val harness = Harness.forTask(Models.signature, env, limits)
+    try result = Some(Models.withModel(model)(harness(Question("6 times 7?"))).map(_.output))
+    catch case e: Exception => thrown = Some(e)
+    atReturn = journals.size
+    flagged = Thread.currentThread().isInterrupted
+
+object Background:
+
+  /** Starts a call on its own thread, and runs `check`. Then it opens each gate, waits for the end of the call, and
+    * removes the place and each copy of the workspace that a journal names, because a child that outlives its call can
+    * make the copy again.
+    */
+  def run(model: LanguageModel, limits: HarnessLimits, gates: Gate*)(check: Background => Unit): Unit =
+    val call = Background(model, limits)
+    try
+      call.thread.setDaemon(true)
+      call.thread.start()
+      check(call)
+    finally
+      gates.foreach(_.released.countDown())
+      call.awaitEnd(): Unit
+      gates.foreach(_.awaitThread(): Unit)
+      Support.forks(call.all).foreach(Support.remove)
+      call.place.close()
 
 /** The places of one test, under a new real temporary folder: a root with `.git/config`, `.env` and `a.txt`, a folder
   * outside the root, a secret folder of the home folder, the journals and a private temporary folder. Each file holds a

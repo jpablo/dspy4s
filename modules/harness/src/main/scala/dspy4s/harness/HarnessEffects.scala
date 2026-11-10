@@ -1,7 +1,7 @@
 package dspy4s.harness
 
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.harness.kernel.{CellOutcome, Command, Source}
+import dspy4s.harness.kernel.{CellOutcome, Command, Position, Source}
 import dspy4s.harness.repl.{CellRun, ScalaRepl, lostNames, topLevelNames}
 import dspy4s.programs.strategies.Predict
 
@@ -20,12 +20,14 @@ import dspy4s.programs.strategies.Predict
   *     hints of a compile error are at the end of the text, so each hint that the cut removed comes after the cut text.
   *     When the thread of the cell still runs, or the heap guard closed the REPL (6), `runCell` closes `recorder` and
   *     stops the turn (9). After the cell, `host` joins the trace of the queries and the children of the cell into the
-  *     trace of this thread.
-  *   - When the turn goes on, and the compiler cannot go on after the error of the cell (`ScalaRepl.needsRestart`) or
-  *     the REPL is full (`ScalaRepl.full`), `runCell` closes the REPL and starts a new one from `newRepl`, with the
-  *     same mode, bindings, preamble and limits (6). The store, the files and the journal stay. After the output, the
-  *     observation has a note with the reason and with the names of the cells that the new REPL does not have, from
-  *     `lostNames`. Each restart starts a new REPL.
+  *     trace of this thread. Only the top session has `host`. A child gives its trace to the queue and does not join,
+  *     so the top session gets the trace of the whole tree in the order of the timestamps (`HostThreads.join`).
+  *   - When another cell can come after this cell, and the compiler cannot go on after the error of the cell
+  *     (`ScalaRepl.needsRestart`) or the REPL is full (`ScalaRepl.full`), `runCell` closes the REPL and starts a new
+  *     one from `newRepl`, with the same mode, bindings, preamble and limits (6). The store, the files and the journal
+  *     stay. After the output, the observation has a note with the reason and with the names of the cells that the new
+  *     REPL does not have, from `lostNames`. Each restart starts a new REPL. No cell comes after a cell that ended by
+  *     `submit` (5.1), after the cell of the last step (4.3), or after a stop, so these cells start no new REPL.
   *
   * The effects own the current REPL: the first one starts with the effects, and `close` closes the current one. When a
   * new REPL cannot start, its exception goes on to the caller.
@@ -41,7 +43,7 @@ final class HarnessEffects(
     store    : SnapshotStore,
     limits   : HarnessLimits,
     budget   : Budget,
-    host     : HostThreads
+    host     : Option[HostThreads]
 )(using RuntimeContext)
     extends TurnEffects:
 
@@ -62,10 +64,11 @@ final class HarnessEffects(
     }
 
   def runCell(cell: Long, code: String): CellResult =
+    val last = HarnessEffects.lastStep(journal)
     recorder.startCell(cell)
     store.begin(journal.state.store)
     val run = repl.run(code)
-    host.join()
+    host.foreach(_.join())
     val stop = HarnessEffects.unsafe(repl)
     stop.foreach { reason =>
       // A thread of the cell can still run. After the close, its calls get no id and reach no handler.
@@ -75,8 +78,9 @@ final class HarnessEffects(
     val writes = run.outcome match
       case CellOutcome.Ok | CellOutcome.Submitted(_) => store.writes
       case _                                         => Map.empty
-    // A turn that stops runs no more cells, so it needs no new REPL.
-    val note = if stop.isEmpty then HarnessEffects.restartReason(repl).map(restart(code, run, _)) else None
+    // A turn that stops, a cell that submitted and the cell of the last step have no next cell, so no new REPL (6).
+    val next = stop.isEmpty && !last && !HarnessEffects.submitted(run.outcome)
+    val note = if next then HarnessEffects.restartReason(repl).map(restart(code, run, _)) else None
     CellResult((HarnessEffects.observation(run, limits.maxObservation) ++ note).mkString("\n"), run.outcome, writes)
 
   /** Closes the current REPL. */
@@ -107,6 +111,20 @@ object HarnessEffects:
       case CellOutcome.CompileError(lines) => lines.filter(_.startsWith("Hint:")).filterNot(shown.contains)
       case _                               => Vector.empty
     shown +: hints
+
+  /** True when the open cell of `journal` is in the last step that can run a cell (4.3). A program turn ends after the
+    * step `steps - 1`, and the step `steps` of a chat only answers, because its code does not run.
+    */
+  private def lastStep(journal: Journal): Boolean =
+    journal.state.position match
+      case Position.InCell(step, _, _) => step + 1 >= journal.state.config.steps
+      case _                           => false
+
+  /** True for a cell that ended by `submit`, which ends the turn (5.1). */
+  private def submitted(outcome: CellOutcome): Boolean =
+    outcome match
+      case CellOutcome.Submitted(_) => true
+      case _                        => false
 
   /** The reason for a new REPL after a cell (6), or none. The compiler reason comes first, because its note tells the
     * policy that it can run the failed cell again.
