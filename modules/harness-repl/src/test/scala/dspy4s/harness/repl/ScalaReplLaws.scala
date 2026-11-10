@@ -174,7 +174,8 @@ class ScalaReplLaws extends munit.FunSuite:
     val r = repl()
     try
       assertEquals(r.run("val xs = Vector(1, 2, 3)").outcome, CellOutcome.Ok)
-      assert(compileError(r.run("""val broken: Int = "x"""")))
+      val broken = r.run("""val broken: Int = "x"""")
+      assert(compileError(broken), s"${broken.outcome}: ${broken.output}")
       val sum = r.run("println(xs.sum)")
       assertEquals((sum.outcome, sum.output), (CellOutcome.Ok, "6"))
     finally r.close()

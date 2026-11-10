@@ -300,7 +300,9 @@ lazy val harnessRepl = (project in file("modules/harness-repl"))
     ),
     // The checks of section 12 used the REPL of this nightly with no scaladoc, and the REPL does not need it.
     excludeDependencies += ExclusionRule("org.scala-lang", "scaladoc_3"),
-    // The heap guard is one for the JVM, so its test must not stop the cells of another suite.
+    // The heap guard is one for the JVM, so its test must not stop the cells of another suite. The tests also fork:
+    // in the JVM of sbt, the suites of other modules fill the heap, and the guard then stops a cell of these laws.
+    Test / fork              := true,
     Test / parallelExecution := false
   )
 

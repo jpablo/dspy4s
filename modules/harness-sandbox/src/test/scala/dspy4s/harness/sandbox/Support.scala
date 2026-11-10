@@ -67,6 +67,10 @@ final class TestServer extends AutoCloseable:
 /** A server on a UNIX socket of the host, as the D-Bus bus or docker.sock are. It answers each connection with an HTTP
   * answer with the body `FAKE-UNIX`. The socket is in a short folder under /tmp, because a socket path has a limit of
   * about 100 bytes.
+  *
+  * The server reads the head of the request before it answers, as `TestServer` does. A server that answers and closes
+  * at once can close before the client sends its request. The send then fails with a broken pipe, and the client gets
+  * no answer. That made the control probe of bubblewrap fail on a slow host.
   */
 final class UnixServer extends AutoCloseable:
   private val folder = Files.createTempDirectory(Path.of("/tmp"), "dspy4s-u")
@@ -80,6 +84,12 @@ final class UnixServer extends AutoCloseable:
         while server.isOpen do
           val client = server.accept()
           try
+            // The head of the request ends with an empty line.
+            val seen   = ByteArrayOutputStream()
+            val buffer = ByteBuffer.allocate(1024)
+            while !seen.toString(ISO_8859_1).contains("\r\n\r\n") && seen.size < 65536 && client.read(buffer) >= 0 do
+              seen.write(buffer.array(), 0, buffer.position())
+              buffer.clear(): Unit
             val body = "FAKE-UNIX"
             val text = s"HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\nConnection: close\r\n\r\n$body"
             client.write(ByteBuffer.wrap(text.getBytes(ISO_8859_1))): Unit
