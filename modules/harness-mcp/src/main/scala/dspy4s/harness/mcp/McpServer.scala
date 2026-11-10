@@ -76,15 +76,14 @@ object McpServer:
       )
       .build()
 
-  /** The text of a cell for the other agent. A cell that did not complete is an error result. */
+  /** The text of a cell for the other agent: `CellRun.text`, which the harness also shows, or "(no output)" for a cell
+    * that completed and printed nothing. A cell that did not complete is an error result.
+    */
   def render(run: CellRun): (String, Boolean) =
-    def withOutput(note: String) = Vector(run.output, note).filter(_.nonEmpty).mkString("\n")
     run.outcome match
-      case CellOutcome.Ok                  => (if run.output.isEmpty then "(no output)" else run.output, false)
-      case CellOutcome.CompileError(lines) => (lines.mkString("\n"), true)
-      case CellOutcome.Failed(error)       => (withOutput(s"The cell failed: $error"), true)
-      case CellOutcome.TimedOut(millis)    => (withOutput(s"The cell stopped after $millis ms."), true)
-      case CellOutcome.Submitted(value)    => (withOutput(s"The cell submitted ${value.print}."), false)
+      case CellOutcome.Ok if run.output.isEmpty      => ("(no output)", false)
+      case CellOutcome.Ok | CellOutcome.Submitted(_) => (run.text, false)
+      case _                                         => (run.text, true)
 
   /** The API reference (5.1): a header with the notation, and the source text of the guest API. */
   lazy val reference: String =

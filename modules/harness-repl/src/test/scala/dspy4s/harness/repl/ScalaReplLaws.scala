@@ -165,6 +165,151 @@ class ScalaReplLaws extends munit.FunSuite:
     finally r.close()
   }
 
+  // A live run found that a chain of Array operations did not compile in a cell: the result of `take` or `map` had
+  // the type `Array[...]^{any.rd}`, and the next Array operation needs an Array with no capture set. A plain compile
+  // with the same options compiles the same code.
+  test("Arrays: a chain of Array operations compiles in a cell, at the top and in a def") {
+    val r = repl()
+    try
+      val chain = r.run("println(Array(1, 2, 3).map(_ + 1).sum)")
+      assertEquals((chain.outcome, chain.output.trim), (CellOutcome.Ok, "9"), chain.toString)
+      val lines = r.run("val lines = \"a\\nb\\nc\".split(\"\\n\")\nprintln(lines.take(2).toList)")
+      assertEquals(lines.outcome, CellOutcome.Ok, lines.toString)
+      assert(lines.output.contains("List(a, b)"), lines.output)
+      val total =
+        r.run("def total(text: String): Int = text.split(\",\").map(_.trim.toInt).sum\nprintln(total(\"1, 2, 3\"))")
+      assertEquals(total.outcome, CellOutcome.Ok, total.toString)
+      assert(total.output.contains("6"), total.output)
+    finally r.close()
+  }
+
+  // The cause was a top-level val that holds a value with capabilities. A cell of the model can make such a val too.
+  test("Arrays: a chain compiles after a cell that keeps an Array or a capability in a typed val") {
+    val r = repl(writeFiles)
+    try
+      val kept = r.run("val kept: Array[Int] = Array(1, 2, 3)")
+      assertEquals(kept.outcome, CellOutcome.Ok, kept.toString)
+      val handler = r.run("val handler: Files^ = summon[Files]")
+      assertEquals(handler.outcome, CellOutcome.Ok, handler.toString)
+      val chain = r.run("println(Array(4, 5).map(_ + 1).sum)")
+      assertEquals((chain.outcome, chain.output.trim), (CellOutcome.Ok, "11"), chain.toString)
+      val again = r.run("println(kept.map(_ * 2).sum)")
+      assertEquals((again.outcome, again.output.trim), (CellOutcome.Ok, "12"), again.toString)
+    finally r.close()
+  }
+
+  // A defect of the compiler of the 3.10 nightly, also in a bare REPL with no code of the harness: in safe mode, after a
+  // failed top-level val with no type, such as `val inferred = summon[Files]`, a later Array chain does not compile.
+  // The REPL hides the wrapper of the failed cell, so the compiler keeps the state. The harness starts a new REPL
+  // (`needsRestart`). This test is an expected failure: when it passes, a compiler fix came, and the restart can go.
+  test("Known compiler defect: after a failed val with no type, a later Array chain compiles".fail) {
+    val r = repl(writeFiles)
+    try
+      assert(compileError(r.run("val inferred = summon[Files]")), "the val needs an explicit type in safe mode")
+      val chain = r.run("println(Array(4, 5).map(_ + 1).sum)")
+      assertEquals((chain.outcome, chain.output.trim), (CellOutcome.Ok, "11"), chain.toString)
+    finally r.close()
+  }
+
+  test("Restart: a compile error that confuses the compiler sets needsRestart, and another compile error does not") {
+    val r = repl(writeFiles)
+    try
+      assert(compileError(r.run("println(noSuchName)")))
+      assert(!r.needsRestart, "a compile error of a name confuses nothing")
+      assert(compileError(r.run("val xs = Array(1, 2, 3)")))
+      assert(r.needsRestart, "a failed val with no type confuses the compiler")
+    finally r.close()
+  }
+
+  // A cell of the model can break the Array chains of later cells with no error of its own: a top-level def whose
+  // signature names a type of the same cell. The error of the next chain is the symptom, so it sets needsRestart.
+  test("Restart: the Array symptom after an earlier cell sets needsRestart") {
+    val r = repl()
+    try
+      val trigger = r.run("case class I(x: Int)\ndef f(i: I): Int = i.x")
+      assertEquals(trigger.outcome, CellOutcome.Ok, trigger.toString)
+      assert(!r.needsRestart, "the cell compiled, so nothing asks for a restart yet")
+      assert(compileError(r.run("println(Array(4, 5).map(_ + 1).sum)")), "the chain shows the symptom")
+      assert(r.needsRestart, "the symptom after an earlier cell asks for a new REPL")
+    finally r.close()
+  }
+
+  // An explicit empty capture set on a new Array gives the text of the symptom in each REPL, so it is a real error. A
+  // new REPL has no state of an earlier cell, so the same error in its first cell does not set needsRestart. The failed
+  // cell also breaks the later Array chains, and the next chain then sets needsRestart, as after each earlier cell.
+  test("Restart: the Array symptom in the first cell of a new REPL does not set needsRestart") {
+    val r = repl()
+    try
+      val run = r.run("locally { val pure: Array[Int]^{} = Array(1, 2); println(pure.sum) }")
+      assert(compileError(run) && showsArrayDefect(run.output), run.toString)
+      assert(!r.needsRestart, "the first cell has no earlier cell, so the error is a real error")
+    finally r.close()
+  }
+
+  // A preamble of each kind of type must leave a new REPL clean: a recursive type, and a record with a field of another
+  // type of the preamble. A top-level `def` that names a type of the same chunk breaks later Array chains, so `submit`
+  // is a member of an object.
+  test("Arrays: a chain compiles after a preamble with a recursive type and a nested record") {
+    Vector(summon[Data[ReplTree]].shape, summon[Data[ReplOuter]].shape).foreach { shape =>
+      val r = repl(preamble = preamble(shape).fold(e => fail(e), identity))
+      try
+        val chain = r.run("println(Array(1, 2, 3).map(_ + 1).sum)")
+        assertEquals((chain.outcome, chain.output.trim), (CellOutcome.Ok, "9"), s"$shape: $chain")
+      finally r.close()
+    }
+  }
+
+  // A top-level def or val whose type has a collection, such as `Vector[String]`, also breaks later Array chains. An
+  // input of a task is often a collection.
+  test("Arrays: a chain compiles after a preamble with an input val of a collection type") {
+    val r = repl(
+      preamble = pointPreamble(Vector("docs" -> summon[Data[Vector[String]]].shape)),
+      inputs = Map("docs" -> Json.Array(Json.String("a"), Json.String("b")))
+    )
+    try
+      val chain = r.run("println(Array(1, 2, 3).map(_ + 1).sum)")
+      assertEquals((chain.outcome, chain.output.trim), (CellOutcome.Ok, "9"), chain.toString)
+      val docs = r.run("println(docs.size)")
+      assertEquals((docs.outcome, docs.output.trim), (CellOutcome.Ok, "2"), docs.toString)
+    finally r.close()
+  }
+
+  test("Preamble: an enum with a case named Data compiles in a REPL") {
+    val r = repl(preamble = preamble(summon[Data[ReplMessage]].shape).fold(e => fail(e), identity))
+    try
+      val run = r.run("println(ReplMessage.Ack)")
+      assertEquals((run.outcome, run.output.trim), (CellOutcome.Ok, "Ack"), run.toString)
+    finally r.close()
+  }
+
+  // Each harness REPL has a preamble from a shape. A top-level given that `Data.derived` builds gave each Array result
+  // of a later cell a capture set, so the REPL of each harness call was broken before its first cell.
+  test("Arrays: a chain compiles in a REPL with a preamble from a shape and an input field") {
+    val r = repl(
+      preamble = pointPreamble(Vector("label" -> summon[Data[String]].shape)),
+      inputs = Map("label" -> Json.String("fake"))
+    )
+    try
+      val chain = r.run("println(Array(1, 2, 3).map(_ + 1).sum)")
+      assertEquals((chain.outcome, chain.output.trim), (CellOutcome.Ok, "9"), chain.toString)
+      val typed = r.run("println(ReplPoint(1, None).x + label.length)")
+      assertEquals((typed.outcome, typed.output.trim), (CellOutcome.Ok, "5"), typed.toString)
+    finally r.close()
+  }
+
+  test("Arrays: a top-level val of a new Array with no type gets the hint of an explicit type") {
+    val r = repl()
+    try
+      val run = r.run("val xs = Array(1, 2, 3)")
+      run.outcome match
+        case CellOutcome.CompileError(lines) =>
+          val hints = lines.filter(_.startsWith("Hint:"))
+          assert(hints.exists(_.contains("explicit type")), lines.mkString("\n"))
+          assert(!hints.exists(_.contains("case Array(x, y)")), lines.mkString("\n"))
+        case other => fail(s"the cell must not compile in safe mode: $other")
+    finally r.close()
+  }
+
   test("Cell clock: the timeout stops a loop in guest code, and a later cell runs") {
     val r = repl(cellTimeout = 1.second)
     try
@@ -244,3 +389,17 @@ class ScalaReplLaws extends munit.FunSuite:
 
 /** A record for the preamble tests. It is top-level, so the host and the REPL have the same shape. */
 final case class ReplPoint(x: Int, note: Option[String])
+
+/** A recursive type for the preamble tests. */
+final case class ReplTree(name: String, kids: Vector[ReplTree])
+
+object ReplTree:
+  given Data[ReplTree] = Data.derived
+
+/** A record with a field of another type of the preamble. */
+final case class ReplOuter(point: ReplPoint, label: String)
+
+/** An enum with a case that has the name of the type class `Data`. */
+enum ReplMessage:
+  case Data(n: Int)
+  case Ack

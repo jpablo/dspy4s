@@ -26,16 +26,17 @@ class HarnessLaws extends FunSuite:
   /** Runs a harness for the task of the tests in a new place, and gives the result and the journal of the call. */
   private def call(
       model   : LanguageModel,
-      question: String  = "What is 6 times 7?",
-      steps   : Int     = 3,
-      secrets : Secrets = Secrets.none
+      question: String         = "What is 6 times 7?",
+      steps   : Int            = 3,
+      cellTime: FiniteDuration = 30.seconds,
+      secrets : Secrets        = Secrets.none
   )(check: (Place, Either[dspy4s.core.contracts.DspyError, Answer], Vector[Logged]) => Unit): Unit =
     val place   = Place()
     var journal = Vector.empty[Logged]
     try
       val env =
         HarnessEnv(Some(place.root), place.home, HostList.empty, Backends.detect(), secrets, journals = journal = _)
-      val harness = Harness.forTask(signature, env, HarnessLimits(steps = steps))
+      val harness = Harness.forTask(signature, env, HarnessLimits(steps = steps, cellTimeout = cellTime))
       val result  = withModel(model)(harness(Question(question))).map(_.output)
       check(place, result, journal)
     finally place.close()
@@ -174,6 +175,69 @@ class HarnessLaws extends FunSuite:
     call(model) { (_, result, journal) =>
       assertEquals(result, Right(Answer("42")))
       assertEquals(reasoning(journal), Vector("a written fake thought"))
+    }
+  }
+
+  /** The text of the user messages of the request `k` of `model`, where the observation of a step is. */
+  private def prompt(model: ScriptLm, k: Int): String =
+    model.requests.lift(k).toVector.flatMap(_.messages).flatMap(_.text).mkString("\n")
+
+  test("Harness: the policy sees the hint of a compile error") {
+    val model = ScriptLm(policy("keep", Some("val xs = Array(1, 2, 3)")), policy("done", Some("submit(\"x\")")))
+    call(model) { (_, result, _) =>
+      assertEquals(result, Right(Answer("x")))
+      assert(prompt(model, 1).contains("Hint:"), prompt(model, 1).take(3_000))
+    }
+  }
+
+  test("Harness: the policy sees that a cell stopped at its time limit") {
+    val spin  = "locally { var n = 0L; while true do n += 1 }"
+    val model = ScriptLm(policy("spin", Some(spin)), policy("done", Some("submit(\"x\")")))
+    call(model, cellTime = 1.second) { (_, result, _) =>
+      assertEquals(result, Right(Answer("x")))
+      assert(prompt(model, 1).contains("stopped after"), prompt(model, 1).take(3_000))
+    }
+  }
+
+  test(
+    "Harness: after a cell that confuses the compiler, a new REPL runs the next cells, and the policy learns the lost names"
+  ) {
+    val model = ScriptLm(
+      policy("keep", Some("store(\"k\", 5)\nval kept = 41")),
+      policy("array", Some("val xs = Array(1, 2, 3)")),
+      policy("sum", Some("submit((load[Int](\"k\").getOrElse(0) + Array(4, 5).map(_ + 1).sum).toString)"))
+    )
+    call(model) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("16")), journal.mkString("\n"))
+      val after = prompt(model, 2)
+      assert(after.contains("started a new REPL"), after.take(3_000))
+      assert(after.contains("gone: kept"), after.take(3_000))
+    }
+  }
+
+  test(
+    "Harness: a cell that breaks later Array chains with no error of its own leads to a new REPL at the next chain"
+  ) {
+    val model = ScriptLm(
+      policy("define", Some("case class I(x: Int)\ndef f(i: I): Int = i.x")),
+      policy("chain", Some("println(Array(4, 5).map(_ + 1).sum)")),
+      policy("again", Some("submit(Array(4, 5).map(_ + 1).sum.toString)"))
+    )
+    call(model) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("11")), journal.mkString("\n"))
+      assert(prompt(model, 2).contains("started a new REPL"), prompt(model, 2).take(3_000))
+    }
+  }
+
+  test("Harness: a compile error of another kind starts no new REPL, and the names stay") {
+    val model = ScriptLm(
+      policy("keep", Some("val kept = 41")),
+      policy("typo", Some("println(noSuchName)")),
+      policy("use", Some("submit(kept.toString)"))
+    )
+    call(model) { (_, result, _) =>
+      assertEquals(result, Right(Answer("41")))
+      assert(!prompt(model, 2).contains("started a new REPL"), prompt(model, 2).take(3_000))
     }
   }
 

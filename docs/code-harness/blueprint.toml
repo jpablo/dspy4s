@@ -1593,6 +1593,33 @@ ref = "6"
 uses = ["scala-repl"]
 text = "Under heap pressure, the guard stops the running cell that allocated the most, and its REPL closes (protection 4 of Phase 0)."
 
+[[node]]
+id = "law-arrays"
+group = "scala-repl-laws"
+kind = "law"
+name = "Arrays:"
+ref = "6"
+uses = ["scala-repl", "preamble", "error-hints"]
+text = "A chain of Array operations compiles in a cell, at the top and in a def, after a typed val of an Array or of a capability, and after a preamble with a recursive type, a nested record or an input of a collection type. A val of a new Array with no type gets the hint of an explicit type."
+
+[[node]]
+id = "law-restart"
+group = "scala-repl-laws"
+kind = "law"
+name = "Restart:"
+ref = "6"
+uses = ["scala-repl", "error-hints"]
+text = "A failed val with no type, and the error of the compiler defect after an earlier cell, set needsRestart. Another compile error, and the same error in the first cell of a new REPL, do not."
+
+[[node]]
+id = "law-compiler-defect"
+group = "scala-repl-laws"
+kind = "law"
+name = "Known compiler defect:"
+ref = "6"
+uses = ["scala-repl"]
+text = "An expected failure: after a failed val with no type, the compiler of the 3.10 nightly refuses a later Array chain. When this test passes, a fix of the compiler came, and the restart can go."
+
 # ── Phase 2: the early MCP server (6) ───────────────────────────────────────────────────────────────────────────
 
 [[group]]
@@ -2303,8 +2330,8 @@ ops = ["callPolicy", "runCell"]
 ref = "4.6"
 uses = ["turn-effects", "predict", "policy-input", "policy-step", "context-strategy", "journal-trait", "scala-repl",
         "recorder", "snapshot-store", "harness-limits", "runtime-context", "session-state"]
-proof_uses = ["cell-result", "policy-reply", "window", "recorder", "snapshot-store"]
-text = "callPolicy projects the log with the strategy and calls the policy leaf, so the trace reaches the RuntimeContext. runCell starts the calls of the cell, takes the snapshot of the store, and runs the code in the REPL."
+proof_uses = ["cell-result", "policy-reply", "window", "recorder", "snapshot-store", "lost-names"]
+text = "callPolicy projects the log with the strategy and calls the policy leaf, so the trace reaches the RuntimeContext. runCell starts the calls of the cell, takes the snapshot of the store, and runs the code in the REPL. After the error of the compiler defect, it starts a new REPL and adds the note of the lost names."
 
 [[group]]
 id = "harness"
@@ -2518,7 +2545,7 @@ kind = "law"
 name = "Harness:"
 ref = "9"
 uses = ["harness"]
-text = "A policy that submits gives the output through Data, and in RawPrediction.values. A reply with no code and the step limit run the finisher. The call works in a copy of the workspace, exec runs in the sandbox, and a failed model call gives a DspyError. The store keeps only the writes of a cell that completed. A code of null or None is no code. The task of the policy shows the preamble, and the reasoning of a reply, native or written, goes into the Acted. After the heap guard closes the REPL, the turn stops. A workspace that cannot be copied gives a DspyError and leaves no copy, and the copy leaves out a named pipe. The journal of a call is one turn, and it holds no known secret. The REPL has only the givens of the task mode."
+text = "A policy that submits gives the output through Data, and in RawPrediction.values. A reply with no code and the step limit run the finisher. The call works in a copy of the workspace, exec runs in the sandbox, and a failed model call gives a DspyError. The store keeps only the writes of a cell that completed. A code of null or None is no code. The task of the policy shows the preamble, and the reasoning of a reply, native or written, goes into the Acted. After the heap guard closes the REPL, the turn stops. The policy sees the hint of a compile error and the note of a timeout. After a cell that confuses the compiler, a new REPL runs the next cells, and the policy learns the lost names; another compile error starts no new REPL. A workspace that cannot be copied gives a DspyError and leaves no copy, and the copy leaves out a named pipe. The journal of a call is one turn, and it holds no known secret. The REPL has only the givens of the task mode."
 
 [[group]]
 id = "structure-laws"

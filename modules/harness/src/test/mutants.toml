@@ -212,8 +212,15 @@ new = "(_ => \"the turn stopped\")"
 name = "Mutant: the harness goes on after the REPL closes"
 [[mutant.edit]]
 file = "HarnessEffects.scala"
-old = "HarnessEffects.unsafe(repl).foreach { reason =>"
-new = "HarnessEffects.unsafe(repl).filter(_ => false).foreach { reason =>"
+old = "val stop = HarnessEffects.unsafe(repl)"
+new = "val stop = HarnessEffects.unsafe(repl).filter(_ => false)"
+
+[[mutant]]
+name = "Mutant: a REPL that confuses the compiler runs the next cell"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "if stop.isEmpty && repl.needsRestart then"
+new = "if stop.isEmpty && false then"
 
 [[mutant]]
 name = "Mutant: a code of null runs"
@@ -221,6 +228,13 @@ name = "Mutant: a code of null runs"
 file = "HarnessEffects.scala"
 old = "Set(\"\", \"null\", \"None\")"
 new = "Set(\"\")"
+
+[[mutant]]
+name = "Mutant: the policy sees only the output of a cell"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "Window.cut(run.text, limits.maxObservation)"
+new = "Window.cut(run.output, limits.maxObservation)"
 
 [[mutant]]
 name = "Mutant: the reasoning of a step is lost"

@@ -67,10 +67,10 @@ submit(lines.size)
 
 | Type | Description |
 |------|-------------|
-| `Data[A]` | The type class of a value that leaves a cell: `encode`, `decode`, and `shape`. There are instances for the numbers, `String`, `Char`, `Boolean`, `Unit`, `Instant`, `Duration`, the collections, `Map`, the tuples, `Option`, and `Either`. A case class or an enum gets an instance with no `derives` clause. A recursive type needs one line: `given Data[T] = Data.derived`. |
+| `Data[A]` | The type class of a value that leaves a cell: `encode`, `decode`, and `shape`. There are instances for the numbers, `String`, `Char`, `Boolean`, `Unit`, `Instant`, `Duration`, the collections, `Map`, the tuples, `Option`, and `Either`. A case class or an enum gets an instance with no `derives` clause. A recursive type needs no other code either. A given of `Data.derived` goes in the companion object, because in a REPL a top-level one breaks later Array chains (section 6 of the design). |
 | `DataError` | A value that does not fit its type. The message gives the path, for example `at a.y: expected a field of P, found {x}`. |
 | `DataShape` | The form of a value: `Plain`, `Applied`, `Record`, or `Union`. A record and a union are lazy, because a type can hold itself. |
-| `preamble` | The first code of a new REPL, from the output shape and the input shapes: the types, a given for each type, `submit`, and a `val` for each input. |
+| `preamble` | The first code of a new REPL, from the output shape and the input shapes: the types, a companion object with a given for each type, and an object `Preamble` with `submit` and a `val` for each input, followed by `import Preamble.*`. |
 | `typeText` | The Scala text of the type of a shape. |
 
 ## Design notes
@@ -83,11 +83,12 @@ submit(lines.size)
   reads the value. For example, `Box[Int]` can be a class with an `Int` field, and a sealed trait can be an enum.
 - **Each value has a JSON form.** A map with text keys is an object, and another map is an array of pairs. A
   `Double` or a `Float` with no JSON number (NaN, the infinities, and -0.0) is a string. Thus an encode never throws.
-- **The preamble refuses four cases.** `preamble` gives an error for each of these cases:
+- **The preamble refuses five cases.** `preamble` gives an error for each of these cases:
   - two types with one name and two forms
   - a union case that is not a record
   - an input with the name of a guest API function
   - an input name that no Scala name can hold
+  - a type or an input with the name `Preamble`, the name of the object of `submit` and the inputs
 - **A message for a value with no `Data`.** The `implicitNotFound` text of `Data` lists the types that can leave a
   cell. It tells the model to use `.toVector` for an `Array` or a `Range`.
 

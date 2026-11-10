@@ -44,14 +44,14 @@ finally repl.close()
 
 | Type | Description |
 |------|-------------|
-| `ScalaRepl` | One REPL. `run(code)` gives a `CellRun`. `unclean`, `outOfMemory`, and `full` tell the host to start a new REPL. The parameters are the mode, the bindings, the preamble, the cell timeout (default 30 s), the cell limit (default 300), and `secondTry`. |
+| `ScalaRepl` | One REPL. `run(code)` gives a `CellRun`. `unclean`, `outOfMemory`, `full`, and `needsRestart` tell the host to start a new REPL. The parameters are the mode, the bindings, the preamble, the cell timeout (default 30 s), the cell limit (default 300), and `secondTry`. |
 | `Bindings` | The handlers behind the givens: the `Turn`, and an optional handler for each capability. A new `ScalaRepl` fails when the mode gives a capability that has no handler. |
-| `CellRun` | The output of a cell, at most 4 MiB, and its `CellOutcome`. |
+| `CellRun` | The output of a cell, at most 4 MiB, and its `CellOutcome`. `text` is the text of the cell for an agent: the output, the lines and hints of a compile error, or a note of a failure, a timeout or a submit. The MCP server and the harness both show it. |
 | `HeapGuard` | A daemon thread that checks the heap each 100 ms. When a heap pool is above 85% after its last collection, the guard stops the cell that runs and that allocated the most memory, and that REPL closes. The other REPLs of the JVM go on. |
 | `HostBindings` | The registry of the bindings of each REPL, by a key. The first code of a REPL takes its bindings from it, and `submit` records its value in it. |
 | `SubmitSignal` | The signal of `submit`. It is a `ControlThrowable`, so `NonFatal` and `Try` do not catch it. |
 | `topLevelNames` / `lostNames` | The top-level names of a cell, from the parser only, and the note of lost names. |
-| `hint` | A hint after a compile error that is hard for a model to read, for example a top-level `var`, a capability in a place that must be pure, or a derivation of `Data` that goes too deep. |
+| `hint` | A hint after a compile error that is hard for a model to read, for example a top-level `var`, a top-level `val` that needs an explicit type, a capability in a place that must be pure, or a derivation of `Data` that goes too deep. |
 | `HarnessDriver` / `FlagRendering` | The `ReplDriver` of the harness. `FlagRendering` records whether an evaluation threw. |
 
 ## Design notes
@@ -71,6 +71,10 @@ finally repl.close()
   of a cell holds the Scala library, the guest API, the JSON of zio-blocks, and the host bindings.
 - **A full REPL.** The memory of a REPL grows with the square of its cells. After the cell limit, `full` is true. The
   host then starts a new REPL with the preamble, the store, and the note of lost names.
+- **A defect of the compiler.** In safe mode, after some top-level definitions, for example a `val` of a `Vector`, the
+  compiler of the 3.10 nightly refuses each later Array chain (`Found: Array[Int]^{any.rd}`). After a failed `val`
+  with no type, and after that error in a cell after the first cell, `needsRestart` is true, and the harness starts a
+  new REPL. The start cells and the preamble keep their definitions in objects, so a new REPL starts clean.
 - **`HarnessDriver` is in the package of the REPL.** `Rendering` is `private[repl]`, so the driver is in
   `dotty.tools.repl`. Phase 0 tested this driver.
 

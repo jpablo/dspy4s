@@ -26,8 +26,10 @@ import scala.util.control.NonFatal
   * gives the output through `Data[O]`. `Replied` and `Exhausted` run the `finisher` leaf. `Failed`, `Aborted` and
   * `Crashed` give a `DspyError`, and the error of `Aborted` gives the reason of the stop. A copy or a private folder
   * that fails also gives a `DspyError`. An exception closes an open turn with a stop, the entries of a repair and
-  * `TurnEnded(Crashed)` (4.4). This path needs no writer and no thread other than the cell thread. At the end of the
-  * call, `env.journals` gets the journal, and the copy and the private folders are gone.
+  * `TurnEnded(Crashed)` (4.4). This path needs no writer and no thread other than the cell thread. After a cell that
+  * confuses the compiler, the effects start a new REPL with the preamble, the store and the note of lost names (6). At
+  * the end of the call, the current REPL is closed, `env.journals` gets the journal, and the copy and the private
+  * folders are gone.
   *
   * A proposal for the review: phase 4 has only the leaves `policy` and `finisher`, the leaves that run in a program
   * call. `subQuery` comes with `llmQuery` in phase 5, and `goal` with the goals of sessions in phase 7.
@@ -117,16 +119,17 @@ final case class Harness[I, O](
         shell = Some(shell),
         store = Some(store)
       )
-      val repl = ScalaRepl(env.mode, recorded(bindings, recorder, Some(fork)), text, limits.cellTimeout)
+      val handlers = recorded(bindings, recorder, Some(fork))
+      val newRepl  = () => ScalaRepl(env.mode, handlers, text, limits.cellTimeout)
+      val effects  =
+        HarnessEffects(task, Harness.apiReference, policy, strategy, journal, newRepl, recorder, store, limits)
       try
-        drive(
-          journal,
-          HarnessEffects(task, Harness.apiReference, policy, strategy, journal, repl, recorder, store, limits)
-        ): Unit
+        drive(journal, effects): Unit
         journal.log.reverseIterator.collectFirst { case Logged(_, _, Entry.TurnEnded(outcome)) => outcome }
           .getOrElse(TurnOutcome.Crashed)
       finally
-        repl.close()
+        // This closes the REPL of the last cell, also after a restart (6).
+        effects.close()
         shell.close()
 
   /** The output of the call from the outcome of its turn. */
@@ -153,8 +156,9 @@ object Harness extends HarnessGivens:
   val policyInstructions: String =
     "Solve the task with Scala 3 code in a REPL. At each step, give a short text and the code of one cell. The cell " +
       "runs, and the next step sees its output. Use the functions of the API reference. Keep a value for a later cell " +
-      "in a val or in the store. When you have the result, call submit with it. A step with no code ends the work. " +
-      "In that step, leave out the code field."
+      "in a val or in the store. Prefer a Vector or a List to an Array, and convert the result of split at once, " +
+      "for example text.split(\",\").toVector. When you have the result, call submit with it. A step with no code " +
+      "ends the work. In that step, leave out the code field."
 
   /** The first instructions of the finisher leaf. */
   val finisherInstructions: String = "Give the output of the task from the steps of the work."

@@ -209,9 +209,12 @@ class DataLaws extends ScalaCheckSuite:
       preamble(summon[Data[Point]].shape, Vector("doc" -> summon[Data[String]].shape)),
       Right(
         """case class Point(x: Int, note: Option[String])
-          |given Data[Point] = Data.derived
-          |def submit(x: Int, note: Option[String]): Nothing = submitValue(Point(x, note))
-          |val doc: String = input[String]("doc")""".stripMargin
+          |object Point:
+          |  given _root_.dspy4s.harness.guest.Data[Point] = _root_.dspy4s.harness.guest.Data.derived
+          |object Preamble:
+          |  def submit(x: Int, note: Option[String]): Nothing = submitValue(Point(x, note))
+          |  val doc: String = input[String]("doc")
+          |import Preamble.*""".stripMargin
       )
     )
   }
@@ -224,21 +227,31 @@ class DataLaws extends ScalaCheckSuite:
           |  case Circle(r: Double)
           |  case Box(w: Int, h: Int)
           |  case Empty
-          |given Data[Figure] = Data.derived
-          |def submit(value: Figure): Nothing = submitValue(value)""".stripMargin
+          |object Figure:
+          |  given _root_.dspy4s.harness.guest.Data[Figure] = _root_.dspy4s.harness.guest.Data.derived
+          |object Preamble:
+          |  def submit(value: Figure): Nothing = submitValue(value)
+          |import Preamble.*""".stripMargin
       )
     )
     assertEquals(
       preamble(summon[Data[Dir]].shape),
       Right(
         """case class Dir(name: String, kids: Vector[Dir])
-          |given Data[Dir] = Data.derived
-          |def submit(name: String, kids: Vector[Dir]): Nothing = submitValue(Dir(name, kids))""".stripMargin
+          |object Dir:
+          |  given _root_.dspy4s.harness.guest.Data[Dir] = _root_.dspy4s.harness.guest.Data.derived
+          |object Preamble:
+          |  def submit(name: String, kids: Vector[Dir]): Nothing = submitValue(Dir(name, kids))
+          |import Preamble.*""".stripMargin
       )
     )
     assertEquals(
       preamble(summon[Data[Vector[Int]]].shape),
-      Right("def submit(value: Vector[Int]): Nothing = submitValue(value)")
+      Right(
+        """object Preamble:
+          |  def submit(value: Vector[Int]): Nothing = submitValue(value)
+          |import Preamble.*""".stripMargin
+      )
     )
   }
 
@@ -246,6 +259,19 @@ class DataLaws extends ScalaCheckSuite:
     assertEquals(
       preamble(summon[Data[String]].shape, Vector("read" -> summon[Data[String]].shape)),
       Left("the input read has the name of a guest API function")
+    )
+  }
+
+  test("Preamble: a type or an input with the name of the preamble object has no preamble") {
+    assertEquals(
+      preamble(summon[Data[String]].shape, Vector("Preamble" -> summon[Data[String]].shape)),
+      Left("the input Preamble has the name of the preamble object")
+    )
+    val record = DataShape.Record("Preamble", () => Vector("x" -> DataShape.Plain("Int")))
+    assertEquals(preamble(record), Left("the type Preamble has the name of the preamble object"))
+    assertEquals(
+      preamble(summon[Data[String]].shape, Vector("p" -> record)),
+      Left("the type Preamble has the name of the preamble object")
     )
   }
 

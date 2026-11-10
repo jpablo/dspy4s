@@ -12,32 +12,59 @@ def typeText(shape: DataShape): String =
     case DataShape.Record(n, _)     => scalaName(n)
     case DataShape.Union(n, _)      => scalaName(n)
 
-/** The preamble of a new REPL (5.1): the types, one given for each type, `submit`, and one `val` for each input. A
-  * value comes from `input`, so the text holds no value and no secret. A record gives `submit` one parameter for each
-  * field, and another type gives `submit(value: T)`.
+/** The preamble of a new REPL (5.1): the types, a companion object with one given for each type, and the object
+  * `Preamble` with `submit` and one `val` for each input. An import of the members of `Preamble` comes after the
+  * object, so a cell calls `submit` and reads each input by its name. A value comes from `input`, so the text holds no
+  * value and no secret. A record gives `submit` one parameter for each field, and another type gives
+  * `submit(value: T)`.
   *
-  * Four things have no preamble: two types with one name and two forms, a union case that is not a record, an input
-  * with the name of a guest API function, and an input name that no Scala name can hold. A name cannot be empty, and a
-  * name in backquotes cannot hold a backquote or a line break.
+  * The given of a type is in the companion object of the type, not at the top level. A top-level given that
+  * `Data.derived` builds makes the compiler of the 3.10 nightly give each Array result of a later cell in safe mode a
+  * capture set. Then `Array(1, 2, 3).map(_ + 1).sum` does not compile. The given stays, because the inline derivation
+  * of `Data.auto` can stop on a deep type. The given has the full name of `Data`, so a case or a type with the name
+  * `Data` does not hide the type class.
+  *
+  * `submit` and the input vals are members of an object for the same reason. A top-level `def` or `val` whose type has
+  * a collection or a type of the same chunk has the same effect as a top-level given. Examples are
+  * `def submit(name: String, kids: Vector[Tree])` and `val docs: Vector[String]`. A member of an object, with an
+  * import, has no such effect. The JVM makes the object when a cell first uses one of its members, and then each val
+  * reads its input. So an input that does not fit its type fails that cell, not the start of the REPL.
+  *
+  * Five things have no preamble: two types with one name and two forms, a union case that is not a record, an input
+  * with the name of a guest API function, a type or an input with the name `Preamble`, and an input name that no Scala
+  * name can hold. A name cannot be empty, and a name in backquotes cannot hold a backquote or a line break.
   */
 def preamble(root: DataShape, inputs: Vector[(String, DataShape)] = Vector.empty): Either[String, String] =
   val problem = inputs.collectFirst {
     case (n, _) if apiNames(n)                                     => s"the input $n has the name of a guest API function"
+    case (n, _) if n == objectName                                 => s"the input $n has the name of the preamble object"
     case (n, _) if n.isEmpty || n.exists(c => "`\n\r".contains(c)) => s"the input ${literal(n)} has no Scala name"
   }
   problem match
     case Some(error) => Left(error)
-    case None        => definitions(DataShape.Applied("Tuple", root +: inputs.map(_._2))).map { found =>
-        val types  = found.map(_._2).mkString("\n")
-        val givens = found.map((n, _) => s"given Data[${scalaName(n)}] = Data.derived").mkString("\n")
-        val vals   = inputs.map((n, s) => s"val ${scalaName(n)}: ${typeText(s)} = input[${typeText(s)}](${literal(n)})")
-        val submit = root match
-          case DataShape.Record(n, fields) =>
-            val all = fields()
-            s"def submit(${params(all)}): Nothing = submitValue(${scalaName(n)}(${all.map((f, _) => scalaName(f)).mkString(", ")}))"
-          case other => s"def submit(value: ${typeText(other)}): Nothing = submitValue(value)"
-        Vector(types, givens, submit, vals.mkString("\n")).filter(_.nonEmpty).mkString("\n")
+    case None        => definitions(DataShape.Applied("Tuple", root +: inputs.map(_._2))).flatMap { found =>
+        if found.exists(_._1 == objectName) then Left(s"the type $objectName has the name of the preamble object")
+        else
+          val types   = found.map(_._2)
+          val objects =
+            found.map((n, _) => s"object ${scalaName(n)}:\n  given $dataName[${scalaName(n)}] = $dataName.derived")
+          val vals   = inputs.map((n, s) => s"val ${scalaName(n)}: ${typeText(s)} = input[${typeText(s)}](${literal(n)})")
+          val submit = root match
+            case DataShape.Record(n, fields) =>
+              val all = fields()
+              s"def submit(${params(all)}): Nothing = submitValue(${scalaName(n)}(${all.map((f, _) => scalaName(f)).mkString(", ")}))"
+            case other => s"def submit(value: ${typeText(other)}): Nothing = submitValue(value)"
+          val members = (submit +: vals).map(m => s"  $m")
+          Right((types ++ objects ++ (s"object $objectName:" +: members) :+ s"import $objectName.*").mkString("\n"))
       }
+
+/** The name of the object that holds `submit` and the input vals. A type or an input with this name would clash with
+  * the object, so it has no preamble.
+  */
+private val objectName = "Preamble"
+
+/** The full name of the type class `Data`. A case of a type with the name `Data` hides the short name. */
+private val dataName = "_root_.dspy4s.harness.guest.Data"
 
 private val fullNames = Map("Instant" -> "java.time.Instant", "Duration" -> "java.time.Duration")
 

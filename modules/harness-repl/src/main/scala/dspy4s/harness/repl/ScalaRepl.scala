@@ -34,14 +34,34 @@ final case class Bindings(
 )
 
 /** The result of one cell: the text that it printed, and its outcome. */
-final case class CellRun(output: String, outcome: CellOutcome)
+final case class CellRun(output: String, outcome: CellOutcome):
+
+  /** The text of the cell for an agent (6). The MCP server and the harness both show this text, so the two agents see
+    * the same cell in the same words:
+    *   - for a cell that completed, its output
+    *   - for a compile error, the lines of the error with their hints
+    *   - for a failure, a timeout or a submit, the output and a note of the outcome
+    */
+  def text: String =
+    def withOutput(note: String) = Vector(output, note).filter(_.nonEmpty).mkString("\n")
+    outcome match
+      case CellOutcome.Ok                  => output
+      case CellOutcome.CompileError(lines) => lines.mkString("\n")
+      case CellOutcome.Failed(error)       => withOutput(s"The cell failed: $error")
+      case CellOutcome.TimedOut(millis)    => withOutput(s"The cell stopped after $millis ms.")
+      case CellOutcome.Submitted(value)    => withOutput(s"The cell submitted ${value.print}.")
 
 /** One REPL for each activation (6), in the same JVM, with capture checking and safe mode. The protections of Phase 0
   * hold:
   *   - one cell at a time on its own thread with `Console.withOut`, and `System.out` routed to the cell
   *   - the stop flag at the timeout, and a catch around the run
-  *   - an invalid wrapper for a cell that does not complete, so a later cell sees only the definitions from before it
+  *   - an invalid wrapper for a cell that does not complete or does not compile, so a later cell sees only the
+  *     definitions from before it
   *   - the unclean flag for a thread that does not stop, the heap guard, and the cell limit
+  *
+  * After a compile error that confuses the compiler (`confusesCompiler`), `needsRestart` is true, and the host starts a
+  * new REPL. A compile error that shows the effect of the defect (`showsArrayDefect`) also sets it, but only after an
+  * earlier cell of `run`.
   *
   * Each guest API call goes through a gate: the clock of the cell stops during a call, and after `submit` the gate
   * refuses each later call of the cell. A cell that the capture checker rejects for the capture set of the enclosing
@@ -81,6 +101,7 @@ final class ScalaRepl(
   @volatile private var uncleanThread: Boolean   = false
   @volatile private var memoryStop: Boolean      = false
   @volatile private var closedForMemory: Boolean = false
+  private var confused: Boolean                  = false
 
   HostBindings.register(key, gated(bindings, gate))
   HeapGuard.watch(this)
@@ -110,6 +131,17 @@ final class ScalaRepl(
     * REPL with the preamble, the store and the note of lost names.
     */
   def full: Boolean = cells >= cellLimit
+
+  /** True after a cell with a compile error that confuses the compiler (`confusesCompiler`), and it stays true. Each
+    * later Array chain in this REPL fails to compile, so the host starts a new REPL with the preamble, the store and
+    * the note of lost names (6).
+    *
+    * A compile error that shows the effect of the defect (`showsArrayDefect`) also sets it, when an earlier cell of
+    * `run` ran in this REPL. The preamble and the givens are not cells of `run`. A cell can cause the defect with no
+    * error of its own, so the error of the next Array chain is the first sign. In the first cell, the REPL has no state
+    * of an earlier cell, so the same error is a real error, and a new REPL would give it again.
+    */
+  def needsRestart: Boolean = confused
 
   def close(): Unit =
     driver.setStopFlag(true)
@@ -201,6 +233,7 @@ final class ScalaRepl(
                 // A cell that ended by `submit` defines no name, because the signal leaves the cell (5.1).
                 invalidate(newState.objectIndex)
                 CellRun(withoutSignal(capture.text), CellOutcome.Submitted(value))
+              // The REPL hides the wrapper of a cell that does not compile (`afterFailedCompilation`).
               case None if parsed.reporter.hasErrors => compileError(capture.text.linesIterator.toVector)
               case None if driver.evaluationThrew    =>
                 invalidate(newState.objectIndex)
@@ -235,6 +268,8 @@ final class ScalaRepl(
 
   private def compileError(diagnostics: Vector[String]): CellRun =
     val text = diagnostics.mkString("\n")
+    // `run` counts the current cell too, so `cells > 1` means an earlier cell of `run`.
+    if confusesCompiler(text) || (cells > 1 && showsArrayDefect(text)) then confused = true
     CellRun(text, CellOutcome.CompileError(diagnostics ++ hint(text).map(h => s"Hint: $h")))
 
   /** The type definitions and the rest of a cell, with the imports in both parts, or `None` when a part is empty. */
@@ -285,21 +320,26 @@ object ScalaRepl:
       .mkString(File.pathSeparator)
 
   /** The preamble of a mode (5.2): one given for each capability that the mode gives, and the `Turn`. The bindings come
-    * from the registry with the key of this REPL, before safe mode starts, so a cell cannot name them.
+    * from the registry with the key of this REPL. Each given reads its handler inline from the registry, before safe
+    * mode starts, so a cell cannot name the bindings.
+    *
+    * The preamble has no top-level val of the `Bindings`. With such a val, the capture checker of the 3.10 nightly gave
+    * each Array result of a later cell in safe mode a capture set, so `xs.map(f).sum` did not compile.
     */
   def givensFor(mode: Mode, key: String): Vector[String] =
+    val bindings = s"""dspy4s.harness.repl.HostBindings.take("$key")"""
+
     def bind(name: String, tpe: String, field: String, access: Access, read: Boolean): Option[String] =
       access match
-        case Access.Full               => Some(s"@assumeSafe given $name: ($tpe^) = host.$field.get")
-        case Access.Read if read       => Some(s"@assumeSafe given $name: $tpe = host.$field.get")
+        case Access.Full               => Some(s"@assumeSafe given $name: ($tpe^) = $bindings.$field.get")
+        case Access.Read if read       => Some(s"@assumeSafe given $name: $tpe = $bindings.$field.get")
         case Access.Read | Access.None => None
     Vector(
       """import language.experimental.captureChecking
         |import caps.*
         |import dspy4s.harness.guest.*
         |import dspy4s.harness.guest.api.*""".stripMargin,
-      s"""val host = dspy4s.harness.repl.HostBindings.take("$key")""",
-      "@assumeSafe given turn: Turn = host.turn",
+      s"@assumeSafe given turn: Turn = $bindings.turn",
       s"""@assumeSafe def submitValue[A](value: A)(using d: Data[A]): Nothing =
          |  dspy4s.harness.repl.HostBindings.submit("$key", d.encode(value))""".stripMargin
     ) ++ Vector(

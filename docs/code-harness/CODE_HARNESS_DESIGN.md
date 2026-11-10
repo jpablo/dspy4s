@@ -567,12 +567,21 @@ the REPL of a child has none of the types of its parent:
 case class Point(x: Int, note: Option[String])
 val p = rlm[Point]("find the point", Map("doc" -> text))
 
-// the preamble of the child: the types, one given for each type, `submit`, and one `val` for each input
+// the preamble of the child: the types, a companion with one given for each type, and an object with `submit` and
+// one `val` for each input
 case class Point(x: Int, note: Option[String])
-given Data[Point] = Data.derived
-def submit(x: Int, note: Option[String]): Nothing = ...
-val doc: String = input[String]("doc")
+object Point:
+  given _root_.dspy4s.harness.guest.Data[Point] = _root_.dspy4s.harness.guest.Data.derived
+object Preamble:
+  def submit(x: Int, note: Option[String]): Nothing = ...
+  val doc: String = input[String]("doc")
+import Preamble.*
 ```
+
+- The givens are in the companion objects, and `submit` and the vals are in an object, because of a defect of the
+  compiler (6): in safe mode, a top-level given of `Data.derived`, or a top-level `def` or `val` whose type has a
+  collection or a type of the same chunk, breaks each later Array chain. The full name of `Data` stays right when a
+  case of the type has the name `Data`. A val of `Preamble` reads its input when a cell first uses the object.
 
 - `SessionConfig.preamble` holds the text (8.1), and the journal holds no `DataShape`. A new REPL after a crash or a
   reopen compiles the same text. The text holds no value, so it holds no secret.
@@ -584,8 +593,9 @@ val doc: String = input[String]("doc")
 - A record gives `submit` one parameter for each field (F3). Another type gives `submit(value: T)`.
 - The JSON of a value does not hold the name of a type. So the preamble can write `Box[Int]` as a class with an `Int`
   field, and a sealed trait as an enum, with the same form.
-- Three things have no preamble: two types with one name and two forms, a sealed trait inside a sealed trait, and an
-  input with the name of a guest API function. A program fails at its build, and `rlm` fails with a plain error.
+- Five things have no preamble: two types with one name and two forms, a sealed trait inside a sealed trait, an input
+  with the name of a guest API function, and a type or an input with the name `Preamble`. A program fails at its
+  build, and `rlm` fails with a plain error.
 
 **The values of the input fields.** The input fields of a program call and the `inputs` of `rlm` are in the `values`
 of the `Input` entry. `SessionState.inputs` is their fold, apart from the store, so a `store` cannot change an input.
@@ -956,6 +966,36 @@ mode.
 cell limit (protection 5, about 300 cells) all start a new REPL in the same way: the preamble, the store and the note.
 Replay would not suit the cell limit in any version. The limit exists because the memory of a REPL grows with its
 cells, and a replay of 300 cells makes the same 300 cells again.
+
+**A defect of the compiler, and its restart.** The compiler of the 3.10 nightly has a defect in a REPL with capture
+checking and safe mode. After some top-level definitions, each later Array chain fails, for example
+`Array(4, 5).map(_ + 1).sum` with `Found: Array[Int]^{any.rd}`, `Required: Array[Int]`. A plain compile with the same
+options compiles the same code. A bare REPL with only capture checking and safe mode has the defect after a
+top-level `val v = Vector(1, 2)`. The definitions that cause it in the REPL of the harness, as far as the probes of
+2026-11-09 and 2026-11-10 found:
+
+- a top-level `def` or `val` whose type has a collection (`Vector`, `List`, `Seq`, `Map`, `Set`), also in a bare REPL;
+- a failed top-level `val` with no type, such as `val xs = Array(1, 2, 3)`, which safe mode refuses;
+- a top-level `def` whose signature names a type of the same cell;
+- a top-level given of `Data.derived`, and a top-level `val` that holds an object with capability fields.
+
+The last three did not cause it in a bare REPL, so they need an earlier cell of the harness too, such as a capability
+given. A draft of a report for the compiler is in `tmp/`, and it is not committed.
+
+The same definitions in an object, used through an import, cause nothing. So the start cells have no `val` of the
+bindings, and the preamble puts its givens in companion objects and `submit` and the vals in an object (5.1). A cell of
+the model can still cause the defect. So `ScalaRepl.needsRestart` becomes true after the error of a failed `val` with no
+type, and after the error of the defect itself in a cell after the first cell. In the first cell of a new REPL that
+error is a real error, and a restart would repeat. Then the harness starts a new REPL in the way of this section, and the
+observation of the cell ends with a note: the names of earlier cells that are gone, and that the model can run the cell
+again. A cell that did not compile never ran, so it repeats no side effect. The first instructions of the policy also
+say to prefer a `Vector` or a `List` to an Array and to convert the result of `split` at once. In the broken state a
+Vector chain still works. The test "Known compiler defect" is an expected failure: when it passes, a fix of the
+compiler came, and the restart can go.
+
+**The text of a cell.** `CellRun.text` is the text that an agent sees: the output; for a compile error, its lines and
+hints; for a failure, a timeout or a submit, the output and a note. The MCP server and the harness both show it, so the
+model of the harness sees the hints and learns that a cell stopped at its time limit.
 
 **The conditions for a later `parallel`.** The first version has no `parallel` (choice 18). A later version needs five
 things:
@@ -1506,6 +1546,7 @@ and the start probe also ran on JDK 21.0.11. The code is in `tmp/design-check/`,
 | A code review of phases 1 to 3 at the high level, and the fixes | 10 findings, each fixed with a test that failed first. The worst: bwrap let a command reach the UNIX sockets of the host, so the D-Bus bus or docker.sock could start a process outside the sandbox. A probe reproduced it on Linux, and a seccomp filter fixed it. The others: the MCP files read `.env`, the proxy kept the `Host` header of the client and allowed each port with no limit of connections, the secret paths missed common credential files, `Prefix` compared raw text, `decide` took an effect id two times, `AUTH` matched `AUTHOR`, each command walked the whole scope, and the preamble did not escape a name. A review of the fixes found 6 more cases, fixed too. The sandbox has 36 mutants, the kernel 27, and each one is killed. |
 | A code review of phase 4 at the high level, and the fixes | 10 findings. 9 are fixed, each with a test that failed first, and 1 needed no change. The worst: `Files.local` wrote through a symbolic link to a place that does not exist, so a command could make the JVM write outside the root and outside the sandbox. The others: a cell thread that did not stop, or a REPL that the heap guard closed, ran on into the next cells; two calls of one cell could get a false refusal; a code field `null` ran as a cell; a copy that failed threw out of `forward` and left its part; a long text or code dropped the whole history; and three cleanups. The full copy of the workspace needed no change, because `Files.copy` on JDK 21 clones each file. A review of the fixes found 2 more cases, fixed too: a read through a link at the last part, and an exception that left the turn of the journal open. The harness has 70 laws and 29 mutants, and each mutant is killed. |
 | A first live run of `Harness` with a real model: `HarnessLiveRun`, five small tasks, Seatbelt on macOS, a private OpenAI-compatible endpoint with an open model of 27B parameters | Run 1: 5 of 5 answers right, with 1 to 3 model calls a task and 5 to 84 s a task, nearly all in the first call, with 9,000 to 27,000 characters of reasoning. The model used `read`, `exec` and `write` well. It found two gaps: the model did not see the preamble, so it wrote `submit(13)`, and `Acted.reasoning` was empty. Run 2, after the fixes and with native reasoning declared: 5 of 5 right, 1 to 4 calls and 1 to 6 s a task. The shell task now ended with `submit` and needed no finisher. A run with a reasoning field in the prompt found that the history showed `None` for that field, fixed too. The suite runs only with `HARNESS_LIVE=true`. The harness has 74 laws and 32 mutants, and each mutant is killed. |
+| The raw vLLM trace of a live call, and the Array chains of a cell | The trace showed that a cell refused `split(...)` then `take(5).foreach(...)`, so the model added the numbers by eye. Probes in the REPL, in a bare `ReplDriver` and in a plain compile found a defect of the compiler in a REPL with capture checking and safe mode, with the triggers of 6. Each REPL of the harness had it from its start: through the start cell `val host`, and through the top-level `given Data[T] = Data.derived` of the preamble. The fixes: no `val host`, a preamble with companion objects and an object for `submit` and the vals, a restart after the error that shows the defect, the hint of an explicit type, and one text of a cell for the MCP server and the harness, so the model sees the hints. The same trace showed no defect of dspy4s: the reminder of the format in each history turn, the `None` of a missing field, the note "valid Python str" of a `Reasoning` field and the absent `temperature` all follow upstream DSPy. A live run after the fixes: 5 of 5 right, 1 to 2 calls and 1 to 6 s a task, no restart, and the CSV task added the amounts with Vector code. The REPL has 41 laws with one expected failure (the defect), the harness 79 laws and 34 mutants, and each mutant is killed. |
 | The laws of `harness` (phase 4), with scripts of `TurnEffects`, a real REPL, the sandbox of the host, and a scripted model through the chat adapter | 60 tests pass: `drive` with the scripts of this table, the journal in memory, the mask, the handlers, the window, a harness that submits, a reply and the step limit that run the finisher, a call in a copy of the workspace, `exec` in the sandbox, and the leaves for the optimizers. 18 mutants, each one killed. The runner of the optimizers puts the output in `RawPrediction.values`. A first run found that the chat adapter reads the text `null` in the field `code` as code. |
 
 The cells that models wrote. A cell counts if it compiled, so the table does not say that the cell does its task. The

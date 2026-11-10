@@ -94,6 +94,46 @@ class ReplLaws extends munit.FunSuite:
     assert(hint("Found: ((Array[(String)?]^{any.rd}))?^{x1.rd}").exists(_.contains("case List(x, y)")))
   }
 
+  test("Hints: a top-level val that needs an explicit type, also for an Array") {
+    val error = """value xs needs an explicit type because the inferred type does not conform to
+                  |the type that is externally visible in other compilation units.
+                  | Inferred type          : Array[Int]^{any.rd}""".stripMargin
+    assert(hint(error).exists(_.contains("val xs: Array[Int]")), hint(error).toString)
+  }
+
+  // The texts come from the REPL: the error of an Array chain after a trigger, and the errors of `case Array(x, y)`.
+  test(
+    "Hints: the Array symptom of the compiler defect has an Array with a capture set, and an Array pattern is not the symptom"
+  ) {
+    assert(showsArrayDefect("  |Found:    Array[Int]^{any.rd}\n  |Required: Array[Int]"))
+    assert(showsArrayDefect("  |        Found:    Array[Int]^{xs.rd}\n  |        Required: Array[Int]"))
+    assert(
+      !showsArrayDefect("  |Found:    ((Array[(String)?]^{any.rd}))?^{x1.rd}\n  |Required: Array[(String)?]^{any².rd}")
+    )
+    assert(!showsArrayDefect("  |Found:    A1^{x5.rd}\n  |Required: Array[String]^{any.rd}"))
+    assert(!showsArrayDefect("  |Found:    Array[Int]\n  |Required: Array[String]"))
+  }
+
+  // The text comes from the REPL: the error of `println(Array(4, 5).map(_ + 1).sum)` after a cell with
+  // `case class I(x: Int)` and `def f(i: I): Int = i.x`. The cell has no Array pattern.
+  test("Hints: the Array symptom of the compiler defect gets no hint of an Array pattern") {
+    val error =
+      """-- [E007] Type Mismatch Error: -------------------------------------------------
+        |1 |println(Array(4, 5).map(_ + 1).sum)
+        |  |        ^^^^^^^^^^^
+        |  |Found:    Array[Int]^{any.rd}
+        |  |Required: Array[Int]
+        |  |
+        |  |Note that capability `any.rd` cannot flow into capture set {}.
+        |  |
+        |  |where:    any is a root capability classified as Unscoped created in value res0 when instantiating method apply's type (x: Int, xs: Seq[Int]): Array[Int]^{fresh}
+        |  |
+        |  | longer explanation available when compiling with `-explain`
+        |1 error found""".stripMargin
+    assert(showsArrayDefect(error), error)
+    assert(!hint(error).exists(_.contains("case Array(x, y)")), hint(error).toString)
+  }
+
   test("Hints: another error gets no hint") {
     assertEquals(hint("Not found: value foo"), None)
   }
