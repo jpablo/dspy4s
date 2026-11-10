@@ -1,7 +1,10 @@
 package dspy4s.harness
 
-import dspy4s.harness.kernel.{CellOutcome, Command, Entry, Logged, Rejection, SessionState, Source}
+import dspy4s.harness.kernel.{CellOutcome, Command, Entry, Logged, Next, Rejection, SessionState, Source, TurnOutcome}
+import dspy4s.harness.kernel.{closing, next}
 import zio.blocks.schema.json.Json
+
+import scala.annotation.tailrec
 
 /** The reply of the policy for one step (CODE_HARNESS_DESIGN.md, 4.6): the thought, the text, and the code of a cell,
   * if any.
@@ -42,5 +45,36 @@ trait Journal:
   *
   * An exception of `effects` goes on to the caller, and the turn stays open, as after a crash. The next `Activate`
   * repairs it (4.4).
+  *
+  * A stop can come between the read of the state and a commit, so the journal can refuse a `StepStarted` or an `Acted`.
+  * Then the next round reads the stop, and `next` ends the turn. The journal must accept the entries after a cell and
+  * at the end of a turn. When it refuses them, `drive` throws, because a new round would run the cell again.
   */
-def drive(journal: Journal, effects: TurnEffects): SessionState = ???
+@tailrec
+def drive(journal: Journal, effects: TurnEffects): SessionState =
+  val current = journal.state
+  next(current) match
+    case Next.Wait                         => current
+    case Next.CallPolicy(step, mustAnswer) =>
+      journal.commit(Entry.StepStarted(step)).foreach { started =>
+        effects.callPolicy(started, mustAnswer) match
+          case Right(reply) => journal.run(
+              Command.Commit(Vector(Entry.Acted(reply.reasoning, reply.text, reply.code))),
+              Source.Policy
+            ): Unit
+          case Left(error) => journal.commit(Entry.TurnEnded(TurnOutcome.Failed(error))): Unit
+      }
+      drive(journal, effects)
+    case Next.RunCell(cell, code) =>
+      val result = effects.runCell(cell, code)
+      // A stop can leave effects open. The outcome of the cell comes from the cell, not from `closing`.
+      val open = closing(journal.state).collect { case done: Entry.EffectDone => done }
+      accepted(journal.commit((open :+ Entry.Observed(result.output, result.outcome, result.writes))*), "the cell")
+      drive(journal, effects)
+    case Next.End(outcome) =>
+      accepted(journal.commit((closing(journal.state) :+ Entry.TurnEnded(outcome))*), "the end of the turn")
+      drive(journal, effects)
+
+/** Throws when the journal refused entries that the worker must commit. */
+private def accepted(result: Either[Rejection, SessionState], what: String): Unit =
+  result.left.foreach(rejection => throw IllegalStateException(s"the journal refused the entries of $what: $rejection"))

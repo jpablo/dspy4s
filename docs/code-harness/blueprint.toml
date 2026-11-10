@@ -2108,7 +2108,7 @@ ops = ["state", "log", "run"]
 ref = "9"
 spec = true
 uses = ["journal-trait", "secrets"]
-proof_uses = ["decide", "evolve", "source-of"]
+proof_uses = ["decide", "evolve", "source-of", "secrets"]
 text = "A journal in memory: the writer of one call. Each entry gets the next seq, the time of the clock, its source and the mask of the secrets. A refused command adds nothing. run holds a lock, because a cell thread and a stop can call it at the same time."
 
 [[group]]
@@ -2157,7 +2157,8 @@ kind = "data"
 name = "LocalFiles"
 ops = ["read", "write", "edit"]
 ref = "5.3"
-uses = ["files", "profile"]
+uses = ["files", "profile", "layout"]
+proof_uses = ["profile"]
 text = "Files.local(root) of 5.3: the real files under the root, with the rules of the profile. A hidden path, and a file with a secret name that exists, can be neither read nor written. A path outside the root is an error, also through a symbolic link."
 
 [[node]]
@@ -2186,8 +2187,8 @@ group = "handlers"
 kind = "function"
 name = "recorded"
 ref = "5.3"
-uses = ["bindings", "recorder"]
-proof_uses = ["files", "shell", "store", "turn"]
+uses = ["bindings", "recorder", "layout"]
+proof_uses = ["files", "shell", "store", "turn", "recorder"]
 text = "recorded(h) for each handler of a Bindings value: each call of the guest API goes through the recorder. input reads the journal, so it is not an effect."
 
 # ── Phase 4: the context (7) ──────────────────────────────────────────────────────────────────────────────────────
@@ -2302,7 +2303,7 @@ ops = ["callPolicy", "runCell"]
 ref = "4.6"
 uses = ["turn-effects", "predict", "policy-input", "policy-step", "context-strategy", "journal-trait", "scala-repl",
         "recorder", "snapshot-store", "harness-limits", "runtime-context", "session-state"]
-proof_uses = ["cell-result", "policy-reply"]
+proof_uses = ["cell-result", "policy-reply", "window", "recorder", "snapshot-store"]
 text = "callPolicy projects the log with the strategy and calls the policy leaf, so the trace reaches the RuntimeContext. runCell starts the calls of the cell, takes the snapshot of the store, and runs the code in the REPL."
 
 [[group]]
@@ -2517,7 +2518,7 @@ kind = "law"
 name = "Harness:"
 ref = "9"
 uses = ["harness"]
-text = "A policy that submits gives the output through Data, and in RawPrediction.values. A reply with no code and the step limit run the finisher. The call works in a copy of the workspace, exec runs in the sandbox, and a failed model call gives a DspyError. The journal of a call is one turn, and it holds no known secret. The REPL has only the givens of the task mode."
+text = "A policy that submits gives the output through Data, and in RawPrediction.values. A reply with no code and the step limit run the finisher. The call works in a copy of the workspace, exec runs in the sandbox, and a failed model call gives a DspyError. The store keeps only the writes of a cell that completed. The journal of a call is one turn, and it holds no known secret. The REPL has only the givens of the task mode."
 
 [[group]]
 id = "structure-laws"
@@ -2561,4 +2562,4 @@ name = "Mutant:"
 ref = "4.7"
 uses = ["law-drive", "law-journal", "law-secret", "law-recorded", "law-local-files", "law-snapshot-store", "law-window",
         "law-harness", "law-structure"]
-text = "Each mutant breaks one rule of drive, the journal, the mask, the handlers, the window or the harness, and at least one law must fail. They come with the proofs."
+text = "Each mutant breaks one rule of drive, the journal, the mask, the handlers, the window or the harness, and at least one law must fail. scripts/mutants/mutants.py runs the list, with a time limit for each mutant."

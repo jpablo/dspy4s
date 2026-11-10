@@ -3,7 +3,7 @@ package dspy4s.harness
 import dspy4s.harness.kernel.{state as foldOf, *}
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
-import org.scalacheck.Prop.forAll
+import org.scalacheck.Prop.forAllNoShrink
 import zio.blocks.schema.json.Json
 
 import java.util.concurrent.{CountDownLatch, Executors, TimeUnit}
@@ -26,8 +26,9 @@ class JournalLaws extends ScalaCheckSuite:
     Gen.const(Command.Close(SessionOutcome.Parked, "done"))
   )
 
+  // No shrink: a list of commands can have a large search for a smaller failure.
   property("Journal: the state is the fold of the log") {
-    forAll(Gen.listOf(Gen.zip(commands, sources))) { steps =>
+    forAllNoShrink(Gen.listOf(Gen.zip(commands, sources))) { steps =>
       val j = journal()
       steps.foreach((command, sender) => j.run(command, sender): Unit)
       assertEquals(j.state, foldOf(j.log))
@@ -35,7 +36,7 @@ class JournalLaws extends ScalaCheckSuite:
   }
 
   property("Journal: run commits the entries of decide with the next seq, and a refused command adds nothing") {
-    forAll(Gen.listOf(Gen.zip(commands, sources)), commands, sources) { (before, command, sender) =>
+    forAllNoShrink(Gen.listOf(Gen.zip(commands, sources)), commands, sources) { (before, command, sender) =>
       val j = journal()
       before.foreach((c, s) => j.run(c, s): Unit)
       val (state, log) = (j.state, j.log)

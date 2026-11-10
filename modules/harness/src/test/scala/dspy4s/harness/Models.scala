@@ -34,9 +34,12 @@ object Models:
   /** The signature of the task of the tests. */
   val signature: Signature[Question, Answer] = Signature.derived[Question, Answer]("qa", "Answer the question.")
 
-  /** A reply of the policy leaf in the format of the chat adapter. */
+  /** A reply of the policy leaf in the format of the chat adapter. A reply with no code has no code field: the chat
+    * adapter reads the text `null` in that field as the code `null`.
+    */
   def policy(text: String, code: Option[String]): String =
-    s"[[ ## text ## ]]\n$text\n\n[[ ## code ## ]]\n${code.getOrElse("null")}\n\n[[ ## completed ## ]]"
+    val field = code.fold("")(c => s"[[ ## code ## ]]\n$c\n\n")
+    s"[[ ## text ## ]]\n$text\n\n$field[[ ## completed ## ]]"
 
   /** A reply of the finisher leaf for `Answer`. */
   def answer(value: String): String = s"[[ ## answer ## ]]\n$value\n\n[[ ## completed ## ]]"

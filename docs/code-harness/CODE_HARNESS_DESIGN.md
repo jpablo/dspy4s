@@ -1220,6 +1220,20 @@ And these are proposals for the review:
   needs: `P: {OptimizableStructure, ProgramRunner}`. The runner puts the encoded output in `RawPrediction.values`,
   where a metric reads it.
 
+The proofs of phase 4 added these points, also for the review:
+
+- The window gives the output of the last cell as the observation, cut to half of the budget. An earlier step is a
+  message of the history with the input field `observation`, the output before that step cut to an eighth of the
+  budget, and the output fields `text` and `code`. The newest messages that fit the rest of the budget stay.
+- `recorded` takes the root of the copy, so the path of a file call in the journal is absolute and normal. A path
+  rule of a guard needs that (5.5).
+- The journal keeps at most `HarnessLimits.maxObservation` characters of the output of a cell.
+- The task of a call holds the instructions of the signature and the value of each input field. The preamble also
+  has a `val` for each input field, so a cell reads the whole value.
+- `Harness` keeps `Data[I]` and `Data[O]` as values, because a replace of its leaves needs `copy`.
+- A reply with no code must leave out the field `code`. The chat adapter reads the text `null` in that field as the
+  code `null`, and that cell uses a step. The first instructions of the policy do not say this yet.
+
 ## 10. The runtime
 
 ### 10.1 The layers
@@ -1453,6 +1467,7 @@ and the start probe also ran on JDK 21.0.11. The code is in `tmp/design-check/`,
 | `sqlite-jdbc` on JDK 25 | It prints a warning about native access, and the warning names the flag `--enable-native-access=ALL-UNNAMED`. JDK 21 prints no warning. |
 | The laws of `harness-sandbox` on Linux, with `scripts/sandbox-linux/run.sh`: Ubuntu 24.04, bwrap and JDK 21 on arm64, in a privileged podman container, as a normal user | 63 tests: 57 pass, and 6 of Seatbelt skip. Each probe of 5.4 gives what the profile allows. The first run found three errors, fixed here. A command made a new file `.env.new`, because a mount of bubblewrap cannot hide a name, so 5.4 now protects the secret files that exist when a command starts. The probe of bubblewrap passed in a container where each command failed. The time limit waited 2 s for a zombie when the JVM was PID 1. |
 | A code review of phases 1 to 3 at the high level, and the fixes | 10 findings, each fixed with a test that failed first. The worst: bwrap let a command reach the UNIX sockets of the host, so the D-Bus bus or docker.sock could start a process outside the sandbox. A probe reproduced it on Linux, and a seccomp filter fixed it. The others: the MCP files read `.env`, the proxy kept the `Host` header of the client and allowed each port with no limit of connections, the secret paths missed common credential files, `Prefix` compared raw text, `decide` took an effect id two times, `AUTH` matched `AUTHOR`, each command walked the whole scope, and the preamble did not escape a name. A review of the fixes found 6 more cases, fixed too. The sandbox has 36 mutants, the kernel 27, and each one is killed. |
+| The laws of `harness` (phase 4), with scripts of `TurnEffects`, a real REPL, the sandbox of the host, and a scripted model through the chat adapter | 60 tests pass: `drive` with the scripts of this table, the journal in memory, the mask, the handlers, the window, a harness that submits, a reply and the step limit that run the finisher, a call in a copy of the workspace, `exec` in the sandbox, and the leaves for the optimizers. 18 mutants, each one killed. The runner of the optimizers puts the output in `RawPrediction.values`. A first run found that the chat adapter reads the text `null` in the field `code` as code. |
 
 The cells that models wrote. A cell counts if it compiled, so the table does not say that the cell does its task. The
 last column has this `Data` and the second try of section 6:

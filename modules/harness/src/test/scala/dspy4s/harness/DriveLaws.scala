@@ -3,7 +3,7 @@ package dspy4s.harness
 import dspy4s.harness.kernel.*
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
-import org.scalacheck.Prop.forAll
+import org.scalacheck.Prop.forAllNoShrink
 import zio.blocks.schema.json.Json
 
 import Support.*
@@ -160,8 +160,9 @@ class DriveLaws extends ScalaCheckSuite:
     assertEquals(j.log, before)
   }
 
+  // No shrink: the inputs are five lists, and a search for a smaller failure fills the heap.
   property("Drive: each script ends the turn, and the turn is a word of the language of 4.1") {
-    forAll(
+    forAllNoShrink(
       Gen.oneOf(TurnKind.Chat, TurnKind.Program),
       Gen.choose(1, 4),
       Gen.listOfN(6, replies),

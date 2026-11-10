@@ -1,9 +1,9 @@
 package dspy4s.harness
 
-import dspy4s.core.contracts.{DspyError, History, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, DynamicValues, History, RuntimeContext}
 import dspy4s.harness.guest.StrategyName
-import dspy4s.harness.kernel.{Logged, SessionState}
-import zio.blocks.schema.Schema
+import dspy4s.harness.kernel.{Logged, Position, SessionState}
+import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
 /** The input of the policy leaf (CODE_HARNESS_DESIGN.md, 7 and 9). `task` holds the instructions and the input fields
   * of the call. `apiReference` is the API reference (5.1): an input field, so an optimizer cannot change it.
@@ -22,7 +22,17 @@ final case class PolicyStep(text: String, code: Option[String]) derives Schema
 final case class Projection(status: String, observation: String, history: History) derives CanEqual:
 
   /** The characters that a budget counts: the status, the observation, and each string in the history. */
-  def size: Int = ???
+  def size: Int = status.length + observation.length + history.messages.map(Projection.text).sum
+
+object Projection:
+
+  /** The characters of the strings in a value of a history message. */
+  def text(value: DynamicValue): Int =
+    value match
+      case DynamicValue.Primitive(PrimitiveValue.String(s)) => s.length
+      case record: DynamicValue.Record                      => DynamicValues.recordEntries(record).map((_, v) => text(v)).sum
+      case sequence: DynamicValue.Sequence                  => sequence.elements.map(text).sum
+      case _                                                => 0
 
 /** The data that a strategy derives from the journal (7). It never changes the journal. An update can call `Predict`
   * leaves, so it needs the runtime of dspy4s.
@@ -49,9 +59,20 @@ trait ContextStrategy extends Derivation:
   * the prompt-cache marks (Later), and the jobs come with phase 7.
   */
 final case class Status(step: Int, steps: Int, keys: Vector[String]) derives CanEqual:
-  def render: String = ???
+
+  /** For example `Step 3 of 5. The keys of the store: a, b.` The step after the limit is the last one, of a chat. */
+  def render: String =
+    val where = if step < steps then s"Step ${step + 1} of $steps." else "The last step: answer with no code."
+    val store = if keys.isEmpty then "none" else keys.mkString(", ")
+    s"$where The keys of the store: $store."
 
 object Status:
 
   /** The status after the last entry of the journal of `state`. */
-  def of(state: SessionState): Status = ???
+  def of(state: SessionState): Status =
+    val step = state.position match
+      case Position.BeforeStep(i)                                        => i
+      case Position.InPolicy(i)                                          => i
+      case Position.InCell(i, _, _)                                      => i
+      case Position.Answered(_) | Position.Finished(_) | Position.NoTurn => 0
+    Status(step, state.config.steps, state.store.keys.toVector.sorted)

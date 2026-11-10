@@ -1,0 +1,145 @@
+# The mutants of the harness of phase 4. Each mutant breaks one rule of 4.6, 5.3, 5.6, 7 or 9 of
+# docs/code-harness/CODE_HARNESS_DESIGN.md.
+#
+# `python3 scripts/mutants/mutants.py modules/harness/src/test/mutants.toml` applies each mutant alone, runs the laws
+# of the module, and restores the code. At least one law must fail for each mutant.
+
+module = "harness"
+project = "harness"
+sources = "modules/harness/src/main/scala/dspy4s/harness"
+
+# ── The worker and the journal ──
+
+[[mutant]]
+name = "Mutant: a failed LM call does not end the turn"
+[[mutant.edit]]
+file = "Worker.scala"
+old = "case Left(error) => journal.commit(Entry.TurnEnded(TurnOutcome.Failed(error))): Unit"
+new = "case Left(error) => Option(TurnOutcome.Failed(error)): Unit"
+
+[[mutant]]
+name = "Mutant: a stop leaves the effects of a cell open"
+[[mutant.edit]]
+file = "Worker.scala"
+old = "val open = closing(journal.state).collect { case done: Entry.EffectDone => done }"
+new = "val open = Vector.empty[Entry.EffectDone]"
+
+[[mutant]]
+name = "Mutant: the journal commits an entry with no mask"
+[[mutant.edit]]
+file = "MemoryJournal.scala"
+old = "secrets.mask(entry)"
+new = "secrets.copy(values = Map.empty).mask(entry)"
+
+# ── The mask ──
+
+[[mutant]]
+name = "Mutant: a shorter value goes first"
+[[mutant.edit]]
+file = "Secrets.scala"
+old = "sortBy((name, value) => (-value.length, name))"
+new = "sortBy((name, value) => (value.length, name))"
+
+[[mutant]]
+name = "Mutant: the mask does not reach a string in a Json"
+[[mutant.edit]]
+file = "Secrets.scala"
+old = "case Json.String(text)  => Json.String(maskText(text))"
+new = "case Json.String(text)  => Json.String(text)"
+
+[[mutant]]
+name = "Mutant: a short value is a known value"
+[[mutant.edit]]
+file = "Secrets.scala"
+old = "value.length >= minLength &&"
+new = "value.length >= 0 &&"
+
+# ── The handlers ──
+
+[[mutant]]
+name = "Mutant: a call runs when the journal refuses its intent"
+[[mutant.edit]]
+file = "Handlers.scala"
+old = "throw IllegalStateException(s\"$op: the session refused the call, because it stops or the cell ended ($rejection)\")"
+new = "val _ = rejection"
+
+[[mutant]]
+name = "Mutant: the calls of a cell share one id"
+[[mutant.edit]]
+file = "Handlers.scala"
+old = "calls += 1"
+new = "calls += 0"
+
+[[mutant]]
+name = "Mutant: Files.local reads a secret file"
+[[mutant.edit]]
+file = "Handlers.scala"
+old = "if !profile.canRead(target) || secret(path) then"
+new = "if !profile.canRead(target) then"
+
+[[mutant]]
+name = "Mutant: Files.local follows a link out of the root"
+[[mutant.edit]]
+file = "Handlers.scala"
+old = "if !target.startsWith(base) then throw"
+new = "if false then throw"
+
+[[mutant]]
+name = "Mutant: begin keeps the writes of the last cell"
+[[mutant.edit]]
+file = "Handlers.scala"
+old = "      base = snapshot\n      buffer = Map.empty"
+new = "      base = snapshot"
+
+[[mutant]]
+name = "Mutant: now is not an effect"
+[[mutant.edit]]
+file = "Handlers.scala"
+old = "recorder.call(\"now\", Json.Null)(turn.now())"
+new = "turn.now()"
+
+# ── The window ──
+
+[[mutant]]
+name = "Mutant: the window keeps the oldest steps"
+[[mutant.edit]]
+file = "Window.scala"
+old = "take(messages.reverse.toList, room, Nil)"
+new = "take(messages.toList, room, Nil).reverse"
+
+[[mutant]]
+name = "Mutant: the window does not cut the last observation"
+[[mutant.edit]]
+file = "Window.scala"
+old = "outputs.lastOption.fold(\"\")(cut(_, budget / 2))"
+new = "outputs.lastOption.getOrElse(\"\")"
+
+# ── The harness ──
+
+[[mutant]]
+name = "Mutant: a failed cell keeps its store writes"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "case _                                         => Map.empty"
+new = "case _                                         => store.writes"
+
+[[mutant]]
+name = "Mutant: the call works in the workspace and not in a copy"
+[[mutant.edit]]
+file = "Harness.scala"
+old = "val fork     = Harness.forkWorkspace(env.workspace)"
+new = "val fork     = env.workspace.getOrElse(Harness.forkWorkspace(None))"
+
+[[mutant]]
+name = "Mutant: the two leaves have one name"
+[[mutant.edit]]
+file = "HarnessGivens.scala"
+old = "Some(\"finisher\"),"
+new = "Some(\"policy\"),"
+
+[[mutant]]
+name = "Mutant: the runner gives no output values"
+[[mutant.edit]]
+file = "HarnessGivens.scala"
+old = ".map(_.raw)"
+new = ".map(_ => RawPrediction(DynamicValue.Record.empty))"

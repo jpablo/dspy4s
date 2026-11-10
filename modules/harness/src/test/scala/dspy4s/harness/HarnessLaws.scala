@@ -99,6 +99,15 @@ class HarnessLaws extends FunSuite:
     }
   }
 
+  test("Harness: the store keeps only the writes of a cell that completed") {
+    val failing = """store("k", 1); throw IllegalStateException("fake failure")"""
+    val reading = """submit(load[Int]("k").fold("none")(_.toString))"""
+    val model   = ScriptLm(policy("store", Some(failing)), policy("read", Some(reading)))
+    call(model) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("none")), journal.mkString("\n"))
+    }
+  }
+
   test("Harness: a failed model call gives a DspyError") {
     call(ScriptLm()) { (_, result, journal) =>
       assert(result.isLeft, result.toString)

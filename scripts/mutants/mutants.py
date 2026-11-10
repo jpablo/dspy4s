@@ -1,11 +1,14 @@
 """Runs the named mutants of a module: each one breaks one rule, and at least one law must fail.
 
 Usage:
-    python3 scripts/mutants/mutants.py modules/harness-kernel/src/test/mutants.toml [--only TEXT]
+    python3 scripts/mutants/mutants.py modules/harness-kernel/src/test/mutants.toml [--only TEXT] [--timeout SECONDS]
 
 The file lists the mutants (see modules/harness-kernel/src/test/mutants.toml). For each mutant, the script applies its
 edits, runs `sbt <project>/test`, and restores the code, also after an error or an interrupt. A mutant is killed
-when a law fails, and it survives when all laws pass. A mutant that does not compile is an error in the list.
+when a law fails, and it survives when all laws pass. A mutant that does not compile is an error in the list. The
+tests of one mutant have a time limit (300 s by default): past it, the script stops the whole sbt run, also the JVM of
+the tests, and the mutant is killed. After a SIGKILL of the script itself, a mutant can stay in the code, and `--check`
+shows it, because the old text of that mutant is gone.
 
 The script writes the results as a JUnit report, modules/<module>/target/test-reports/TEST-mutants.xml, with one test
 case for each mutant. The blueprint reads that report like the other test reports. The exit code is 1 when a mutant
@@ -14,6 +17,8 @@ survives or does not compile. It needs Python 3.12 and sbt.
 
 import argparse
 import re
+import os
+import signal
 import subprocess
 import time
 import tomllib
@@ -52,21 +57,37 @@ def restore(originals: dict[Path, str]) -> None:
         path.write_text(text)
 
 
-def run_tests(project: str) -> str:
-    done = subprocess.run(["sbt", "-batch", f"{project}/test"], cwd=ROOT, capture_output=True, text=True)
-    return done.stdout + done.stderr
+def run_tests(project: str, timeout: float | None = None) -> tuple[str, bool]:
+    """The output of the tests of `project`, and true when they ran past `timeout` seconds. The tests run in a process
+    group of their own. Past the time, and after an interrupt of this script, the whole group stops, also the JVM that
+    sbt forks for the tests, so no sbt run stays behind."""
+    process = subprocess.Popen(["sbt", "-batch", f"{project}/test"], cwd=ROOT, stdout=subprocess.PIPE,
+                               stderr=subprocess.STDOUT, text=True, start_new_session=True)
+    try:
+        output, _ = process.communicate(timeout=timeout)
+        return output, False
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        output, _ = process.communicate()
+        return output, True
+    except BaseException:
+        os.killpg(process.pid, signal.SIGKILL)
+        raise
 
 
-def run_one(project: str, sources: Path, mutant: dict) -> Result:
+def run_one(project: str, sources: Path, mutant: dict, timeout: float) -> Result:
     originals, problem = apply(sources, mutant)
     if problem:
         return Result(mutant["name"], "error", problem, 0.0)
     start = time.monotonic()
     try:
-        output = run_tests(project)
+        output, late = run_tests(project, timeout)
     finally:
         restore(originals)
     seconds = time.monotonic() - start
+    # A law that never ends does not pass, so a mutant past the time is killed, as in other mutation tools.
+    if late:
+        return Result(mutant["name"], "killed", f"the tests ran past the limit of {timeout:.0f} s", seconds)
     total = re.search(r"(Passed|Failed): Total (\d+), Failed (\d+), Errors (\d+)", output)
     if "Compilation failed" in output or total is None:
         errors = [line for line in output.splitlines() if "[error]" in line][:5]
@@ -99,6 +120,7 @@ def main() -> None:
     parser.add_argument("mutants", type=Path, help="the TOML file with the mutants")
     parser.add_argument("--only", help="run only the mutants whose name holds this text")
     parser.add_argument("--check", action="store_true", help="only check that each edit applies, with no sbt run")
+    parser.add_argument("--timeout", type=float, default=300.0, help="the seconds of the tests of one mutant")
     args = parser.parse_args()
     data = tomllib.loads((ROOT / args.mutants).read_text())
     module, project, sources = data["module"], data["project"], ROOT / data["sources"]
@@ -113,18 +135,19 @@ def main() -> None:
         print(f"{len(mutants) - len(problems)} of {len(mutants)} mutants apply.", *problems, sep="\n- ")
         raise SystemExit(1 if problems else 0)
     # A kill means something only when the laws pass on the code with no mutant.
-    baseline = run_tests(project)
-    if not re.search(r"Passed: Total \d+, Failed 0, Errors 0", baseline):
+    baseline, late = run_tests(project, args.timeout)
+    if late or not re.search(r"Passed: Total \d+, Failed 0, Errors 0", baseline):
         tail = "\n".join(baseline.splitlines()[-15:])
         raise SystemExit(f"the laws of {module} do not pass with no mutant, so no mutant can run. sbt said:\n{tail}")
     results = []
     for m in mutants:
-        result = run_one(project, sources, m)
+        result = run_one(project, sources, m, args.timeout)
         results.append(result)
         print(f"{result.status:8} {result.name} ({result.seconds:.0f} s): {result.detail}", flush=True)
     # The last run had a mutant, so its test reports are not the reports of the code. A run on the restored code
     # gives them again, and it shows that the restore worked.
-    if not re.search(r"Passed: Total \d+, Failed 0, Errors 0", run_tests(project)):
+    after, late = run_tests(project, args.timeout)
+    if late or not re.search(r"Passed: Total \d+, Failed 0, Errors 0", after):
         raise SystemExit(f"the laws of {module} fail after the restore of the code: look at the files of {sources}")
     path = write_report(module, results)
     killed = sum(r.status == "killed" for r in results)

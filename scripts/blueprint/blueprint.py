@@ -344,9 +344,11 @@ def with_helpers(text: str, code: str, skip: set[str]) -> str:
     seen: set[str] = set()
     parts, todo = [code], [code]
     while todo:
-        for m in re.finditer(r"(?<![\w$.])([A-Za-z_][\w$]*)\s*[(\[]", strip(todo.pop())):
+        body = strip(todo.pop())
+        for m in re.finditer(r"(?<![\w$.])([A-Za-z_][\w$]*)\s*[(\[]", body):
             name = m.group(1)
-            if name in seen or name in skip:
+            # A name after `def` declares a method, for example of an anonymous class, and calls nothing.
+            if name in seen or name in skip or body[: m.start()].rstrip().endswith("def"):
                 continue
             seen.add(name)
             blocks = [def_block(text, p) for p in find_def(text, name)]
@@ -610,7 +612,18 @@ def check_code(nodes: list[Node], groups: list[Group]) -> None:
     for n in nodes:
         for op in n.ops:
             count[op] = count.get(op, 0) + 1
-    owners = {op: n for n in nodes for op in n.ops if count[op] == 1 and op not in COMMON_METHODS}
+    # A name that the code of another node declares, as a def, a val or a parameter, also tells nothing: a call of
+    # `callPolicy` can go to the trait `TurnEffects`, and `writes` can be a field of `CellResult`.
+    declared: dict[str, set[str]] = {}
+    for n in nodes:
+        if n.kind in ("data", "function") and n.stated:
+            text = strip(n.code)
+            names = set(re.findall(r"\b(?:def|val|var)\s+([A-Za-z_][\w$]*)", text))
+            names |= set(re.findall(r"\b([A-Za-z_][\w$]*)\s*:(?!:)", text))
+            for name in names:
+                declared.setdefault(name, set()).add(n.id)
+    owners = {op: n for n in nodes for op in n.ops
+              if count[op] == 1 and op not in COMMON_METHODS and declared.get(op, {n.id}) <= {n.id}}
     # A type in the code must be under the node. A call runs code, so its node must be under the proof of the node.
     below = closure({n.id: n.uses + n.proof_uses for n in nodes})
     proof_below = closure({n.id: proof_needs(n, by_id) for n in nodes})
