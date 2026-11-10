@@ -2183,7 +2183,7 @@ ops = ["startCell", "call"]
 ref = "5.3"
 spec = true
 uses = ["journal-trait", "data", "json"]
-proof_uses = ["effect-id", "effect-result"]
+proof_uses = ["effect-id", "effect-result", "guarded"]
 text = "recorded(h) of 5.3: EffectStarted before each call and EffectDone after it, with the value as Json and as text. A call that the journal refuses, for example after a stop, does not run."
 
 [[node]]
@@ -2909,7 +2909,7 @@ ops = ["run", "post", "fence", "expire", "state", "log", "ended", "close"]
 ref = "10.2"
 spec = true
 uses = ["session-file", "logged", "secrets", "feeds", "session-state", "command", "source", "worker-ticket", "host-error"]
-proof_uses = ["decide", "evolve", "source-of", "needs-flush"]
+proof_uses = ["decide", "evolve", "source-of", "needs-flush", "secrets", "closing", "feeds", "session-file"]
 text = "One virtual thread takes the messages of a bounded mailbox and commits them in one transaction each, with the mask of secrets and the seq after the largest seq of the file. It publishes to the feeds after the commit. An interrupt of a waiting thread does not cut its commit. A failed write ends only this session. expire closes the turn of a stop after the grace period, and does nothing to a later turn."
 
 [[node]]
@@ -3032,7 +3032,8 @@ ref = "10.2"
 spec = true
 uses = ["session-host", "session-runtime", "secrets", "host-limits", "catalog", "timers", "session-handle", "catalog-row",
         "host-error", "session-config", "session-id"]
-proof_uses = ["writer", "writer-journal", "session-file", "feeds", "drive", "next", "job-table", "catalog-row-fold", "rebuilt"]
+proof_uses = ["writer", "writer-journal", "session-file", "feeds", "drive", "next", "job-table", "catalog-row-fold", "rebuilt",
+              "catalog"]
 text = "One writer and one file for each session, with an exclusive lock for a second host. open repairs an open turn, keeps the configuration of the journal with None, and refuses a mode above the ceiling. Each activation gets a new ticket and its WriterJournal. After StopRequested, Activation.stop, and a timer calls Writer.expire with the turn of the stop. The catalog gets the row after a turn ends."
 
 [[group]]
@@ -3089,7 +3090,8 @@ ops = ["activate", "defaultGuard", "config", "forWork"]
 ref = "8.1"
 spec = true
 uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context",
-        "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access"]
+        "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access",
+        "harness"]
 proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell",
               "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble"]
 text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of workMode through recorded and guarded, and JobShell. workMode is local mode with no Sessions^ and no Children^, so a work session has no rlm. Each turn gets a new budget of model calls. The first rules of 5.5: git push gets Ask in a mode with Network^."

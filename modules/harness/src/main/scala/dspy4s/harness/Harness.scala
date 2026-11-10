@@ -66,7 +66,7 @@ final case class Harness[I, O](
         Harness.inFolder(Harness.forkWorkspace(env.workspace)) { fork =>
           Harness.inFolder(JFiles.createTempDirectory("dspy4s-journals-")) { journals =>
             val layout = Layout.forSession(env.home, journals)
-            Harness.inFolder(layout.temp)(_ => run(call.input, fork, layout, journal, host))
+            Harness.inFolder(layout.temp)(_ => run(call.input, fork, layout, journal, host, id))
           }
         }
       }
@@ -80,7 +80,7 @@ final case class Harness[I, O](
     if depth < limits.depth then base else base.copy(children = Access.None)
 
   /** The work of one call in the copy `fork`. */
-  private def run(input: I, fork: Path, layout: Layout, journal: MemoryJournal, host: HostThreads)(using
+  private def run(input: I, fork: Path, layout: Layout, journal: MemoryJournal, host: HostThreads, id: SessionId)(using
       RuntimeContext
   ): Either[DspyError, Prediction[O]] =
     val fields = inputData.encode(input) match
@@ -92,7 +92,7 @@ final case class Harness[I, O](
     for
       _       <- Either.cond(fields.nonEmpty || inputShapes.isEmpty, (), ConfigurationError("the input is not a record"))
       text    <- preamble(outputData.shape, inputShapes).left.map(e => ConfigurationError(s"no preamble: $e"))
-      outcome <- top(fields, text, fork, layout, journal, host)
+      outcome <- top(fields, text, fork, layout, journal, host, id)
       output  <- result(outcome, fields, journal)
     yield output
 
@@ -106,14 +106,17 @@ final case class Harness[I, O](
       fork   : Path,
       layout : Layout,
       journal: MemoryJournal,
-      host   : HostThreads
+      host   : HostThreads,
+      id     : SessionId
   )(using RuntimeContext): Either[DspyError, TurnOutcome] =
     val config  = sessionConfig(0, text, Scope.Fork(fork.toString, env.workspace.fold("")(_.toString)))
     val profile = Profiles.forMode(env.mode, Layout.real(fork), layout, env.hosts)
     val shell   = SandboxedShell(config, layout, env.hosts, env.backend, limits.execTimeout)
     val files   = LocalFiles(fork, profile, layout.secretNames)
     val tree    = Harness.CallTree(Budget(limits.modelCalls), host, fork, files, shell, config.scope)
-    try session(config, Harness.task(Harness.instructions(signature), fields, Some(text)), fields, 0, journal, tree)
+    try
+      val task = Harness.task(Harness.instructions(signature), fields, Some(text))
+      session(config, task, fields, 0, journal, tree, id, Source.User)
     finally
       tree.budget.close()
       shell.close()
@@ -130,16 +133,18 @@ final case class Harness[I, O](
       fields : Vector[(String, Json)],
       depth  : Int,
       journal: MemoryJournal,
-      tree   : Harness.CallTree
+      tree   : Harness.CallTree,
+      id     : SessionId,
+      source : Source
   )(using RuntimeContext): Either[DspyError, TurnOutcome] =
     for
       _ <- journal.run(Command.Activate(Harness.versions, config), Source.Harness).left.map(rejected)
-      _ <- journal.run(Command.Send(RequestId("task"), task, fields.toMap), Source.User).left.map(rejected)
+      _ <- journal.run(Command.Send(RequestId("task"), task, fields.toMap), source).left.map(rejected)
     yield
       val recorder = Recorder(journal, () => tree.budget.closed)
       val store    = SnapshotStore()
       val llm      = LeafLlm(subQuery, () => tree.budget, tree.host, limits.batch)
-      val children = ChildTurns(childStart(depth + 1, tree), tree.host, limits.batch)
+      val children = ChildTurns(childStart(depth + 1, tree, id, journal), tree.host, limits.batch)
       val bindings = Bindings(
         turn = JournalTurn(journal, () => System.currentTimeMillis()),
         files = Some(tree.files),
@@ -172,10 +177,10 @@ final case class Harness[I, O](
         effects.close()
 
   /** The start of a child at `depth` in the tree of a call. */
-  private def childStart(depth: Int, tree: Harness.CallTree): ChildStart =
+  private def childStart(depth: Int, tree: Harness.CallTree, parent: SessionId, journal: Journal): ChildStart =
     new ChildStart:
       def child[A: Data](task: String, inputs: Map[String, String])(using RuntimeContext): A =
-        runChild[A](task, inputs, depth, tree)
+        runChild[A](task, inputs, depth, tree, parent, journal)
 
   /** A child of `rlm` at `depth` (5.1, 8.1). A spent or closed budget throws first, so the child makes no journal and
     * no REPL (8.2). It has its own journal with the secrets of the call, and `env.journals` gets the journal at its
@@ -188,7 +193,14 @@ final case class Harness[I, O](
     * A proposal for the review: the inputs are in the order of their names. The task of a child has the source `User`,
     * as the task of the top session, because the kernel has no source for a cell.
     */
-  private def runChild[A](task: String, inputs: Map[String, String], depth: Int, tree: Harness.CallTree)(using
+  private def runChild[A](
+      task         : String,
+      inputs       : Map[String, String],
+      depth        : Int,
+      tree         : Harness.CallTree,
+      parent       : SessionId,
+      parentJournal: Journal
+  )(using
       data   : Data[A],
       context: RuntimeContext
   ): A =
@@ -204,7 +216,10 @@ final case class Harness[I, O](
     val config  = sessionConfig(depth, text, tree.scope)
     val outcome =
       try
-        Harness.repaired(journal)(session(config, Harness.task(task, fields, Some(text)), fields, depth, journal, tree))
+        val source = Source.Parent(parent, Harness.openCall(parentJournal))
+        Harness.repaired(journal)(
+          session(config, Harness.task(task, fields, Some(text)), fields, depth, journal, tree, id, source)
+        )
       finally env.journals(id, journal.log)
     outcome.flatMap(Harness.submitted(_, journal.log, data)) match
       case Right(Some(value)) => value
@@ -276,6 +291,13 @@ object Harness extends HarnessGivens:
 
   /** The versions of a journal of a call (4.1). */
   val versions: Versions = Versions(s"scala-${dotty.tools.dotc.config.Properties.versionNumberString}", "phase-5")
+
+  /** The id of the open `rlm` or `rlmBatched` call of a parent (8.2, phase 7). The calls of one cell run one at a time,
+    * so the cell of the parent has only that one open while its child runs.
+    */
+  private[harness] def openCall(journal: Journal): EffectId =
+    journal.state.open.collectFirst { case (id, call) if call.op == "rlm" || call.op == "rlmBatched" => id }
+      .getOrElse(throw IllegalStateException("rlm: the parent has no open rlm call"))
 
   /** A new id for a session of a call: each session of a call has its own id (phase 7). */
   private[harness] def newId(): SessionId = SessionId(java.util.UUID.randomUUID().toString)

@@ -1,6 +1,7 @@
 package dspy4s.harness
 
-import dspy4s.harness.kernel.{EffectResult, SessionState}
+import dspy4s.harness.guest.NeedsApproval
+import dspy4s.harness.kernel.{EffectResult, GuardResult, SessionState, guardCheck}
 import zio.blocks.schema.json.Json
 
 /** Why the handler `guarded` stops a call (CODE_HARNESS_DESIGN.md, 5.5): the result for its `EffectDone`, and the
@@ -20,4 +21,9 @@ final case class GuardStop(result: EffectResult, error: RuntimeException)
   * A proposal for the review: the recorder calls `guarded` for each call of each session, also in a program call. The
   * guard of a program call is `Guard.allowAll`, so each of its calls runs as before.
   */
-def guarded(state: SessionState, op: String, args: Json): Either[GuardStop, Unit] = ???
+def guarded(current: SessionState, op: String, args: Json): Either[GuardStop, Unit] =
+  guardCheck(current, op, args) match
+    case GuardResult.Run               => Right(())
+    case GuardResult.NeedsPerson(rule) =>
+      Left(GuardStop(EffectResult.NeedsApproval(rule), NeedsApproval(op, args.print)))
+    case GuardResult.Refused(reason) => Left(GuardStop(EffectResult.Error(reason), IllegalStateException(reason)))

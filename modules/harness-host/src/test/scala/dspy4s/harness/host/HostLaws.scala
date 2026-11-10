@@ -98,6 +98,9 @@ class HostLaws extends munit.FunSuite:
       withHost(root, runtime) { host =>
         val handle = opened(host, id(1), None)
         assertEquals(handle.state.store, Map("k" -> Json.Number(BigDecimal(7))))
+        // The live part of an activation comes at the first turn that needs it.
+        assertEquals(handle.send(message("m2")), Right(()))
+        assert(eventually()(outcomes(handle).size == 2), entries(handle).toString)
         assertEquals(runtime.activations.get, 2)
       }
     }
@@ -200,6 +203,25 @@ class HostLaws extends munit.FunSuite:
         )
         released.countDown()
         assert(eventually()(outcomes(handle) == Vector(TurnOutcome.Replied("FAKE-DONE"))))
+      }
+    }
+  }
+
+  test("Host: two messages during a slow activation give one activation, and no two turns run at the same time") {
+    withRoot { root =>
+      // The activation takes half a second, as a REPL that starts.
+      val runtime = ScriptRuntime { _ =>
+        Thread.sleep(500)
+        Support.Script(Vector(answer("FAKE-ONE"), answer("FAKE-TWO")))
+      }
+      withHost(root, runtime) { host =>
+        val handle = opened(host, id(1))
+        assertEquals(handle.send(message("m1")), Right(()))
+        assertEquals(handle.send(message("m2")), Right(()))
+        assert(eventually()(handle.state.position == Position.NoTurn && outcomes(handle).nonEmpty))
+        Thread.sleep(300)
+        assertEquals(runtime.activations.get, 1)
+        assert(Support.isTurn(lastTurn(handle).drop(1)), lastTurn(handle).toString)
       }
     }
   }

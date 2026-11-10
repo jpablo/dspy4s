@@ -18,6 +18,9 @@ import java.nio.file.{Files, Path}
   */
 class WorkLaws extends munit.FunSuite:
 
+  // A work session starts a real REPL, and a turn compiles cells.
+  override val munitTimeout: scala.concurrent.duration.Duration = scala.concurrent.duration.Duration(3, "min")
+
   override def beforeEach(context: BeforeEach): Unit = RuntimeEnvironment.resetForTests()
   override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
@@ -33,11 +36,10 @@ class WorkLaws extends munit.FunSuite:
       check: (Path, SessionHandle) => Unit
   ): Unit =
     val place = Place()
-    try
-      val env     = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none)
-      val runtime = Models.withModel(model)(WorkRuntime.forWork(env, settings))
-      val base    = WorkRuntime.config(place.root, "fake-model", settings)
-      withRoot { root =>
+    try withRoot { root =>
+        val env     = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
+        val runtime = Models.withModel(model)(WorkRuntime.forWork(env, settings))
+        val base    = WorkRuntime.config(place.root, "fake-model", settings)
         withHost(root, runtime) { host =>
           check(place.root, opened(host, id(1), Some(guard.fold(base)(g => base.copy(guard = g)))))
         }

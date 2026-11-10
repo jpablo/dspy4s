@@ -86,6 +86,12 @@ final class HarnessEffects(
   /** Closes the current REPL. */
   def close(): Unit = repl.close()
 
+  /** Stops the running cell of the current REPL, and keeps the REPL (10.3, phase 7: the hard stop of a session). */
+  def stopCell(): Unit = repl.stopCell()
+
+  /** True when a cell thread of the current REPL did not stop (protection 3 of Phase 0). */
+  def unclean: Boolean = repl.unclean
+
   /** Closes the current REPL, starts a new one, and gives the note of the lost names (6). The journal does not have the
     * `Observed` of this cell yet. So the note takes the names of the earlier cells from the log, and the names of this
     * cell from its code when it completed. A failed cell defines nothing.

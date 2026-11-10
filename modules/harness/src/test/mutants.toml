@@ -60,8 +60,8 @@ new = "value.length >= 0 &&"
 name = "Mutant: a call runs when the journal refuses its intent"
 [[mutant.edit]]
 file = "Handlers.scala"
-old = "throw IllegalStateException(s\"$op: the session refused the call, because it stops or the cell ended ($rejection)\")"
-new = "val _ = rejection"
+old = "rejection =>\n        throw IllegalStateException(\n          s\"$op: the session refused the call, because it stops or the cell ended ($rejection)\"\n        ),"
+new = "_ => journal.state,"
 
 [[mutant]]
 name = "Mutant: the calls of a cell share one id"
@@ -117,8 +117,8 @@ old = "(fresh, journal.commit(Entry.EffectStarted(fresh, op, args)))"
 new = "fresh"
 [[mutant.edit]]
 file = "Handlers.scala"
-old = "intent.left.foreach { rejection =>"
-new = "journal.commit(Entry.EffectStarted(id, op, args)).left.foreach { rejection =>"
+old = "val after = intent.fold("
+new = "val after = journal.commit(Entry.EffectStarted(id, op, args)).fold("
 
 [[mutant]]
 name = "Mutant: Files.local follows a link to a place that does not exist"
@@ -177,8 +177,8 @@ new = "case _                                         => store.writes"
 name = "Mutant: the call works in the workspace and not in a copy"
 [[mutant.edit]]
 file = "Harness.scala"
-old = "run(call.input, fork, layout, journal, host)"
-new = "run(call.input, env.workspace.getOrElse(fork), layout, journal, host)"
+old = "run(call.input, fork, layout, journal, host, id)"
+new = "run(call.input, env.workspace.getOrElse(fork), layout, journal, host, id)"
 
 [[mutant]]
 name = "Mutant: a failed copy leaves its part"
@@ -371,8 +371,8 @@ new = "Right(budget().spent).flatMap(_ => policy(input).left.map(_.message))"
 name = "Mutant: each child has a budget of its own"
 [[mutant.edit]]
 file = "Harness.scala"
-old = "ChildTurns(childStart(depth + 1, tree), tree.host, limits.batch)"
-new = "ChildTurns(childStart(depth + 1, tree.copy(budget = Budget(limits.modelCalls))), tree.host, limits.batch)"
+old = "ChildTurns(childStart(depth + 1, tree, id, journal), tree.host, limits.batch)"
+new = "ChildTurns(childStart(depth + 1, tree.copy(budget = Budget(limits.modelCalls)), id, journal), tree.host, limits.batch)"
 
 [[mutant]]
 name = "Mutant: a REPL at the depth limit has Children^"

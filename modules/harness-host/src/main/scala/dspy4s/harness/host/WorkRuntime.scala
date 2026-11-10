@@ -1,19 +1,23 @@
 package dspy4s.harness.host
 
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.harness.{HarnessLimits, Journal, PolicyInput, PolicyStep, Secrets, SubAnswer, SubQuery}
-import dspy4s.harness.guest.{Access, Mode}
-import dspy4s.harness.kernel.{Guard, SessionConfig, SessionId}
-import dspy4s.harness.sandbox.{Backend, HostList}
+import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.harness.*
+import dspy4s.harness.guest.{Access, Data, Mode, Scope, StrategyName, preamble}
+import dspy4s.harness.kernel.*
+import dspy4s.harness.repl.{Bindings, ScalaRepl}
+import dspy4s.harness.sandbox.{Backend, HostList, Layout, Profiles, SandboxedShell}
 import dspy4s.programs.strategies.Predict
+import dspy4s.signatures.Signature
 
-import java.nio.file.Path
-import scala.annotation.nowarn
+import java.nio.file.{Files as JFiles, Path}
+import scala.util.Try
 
 /** What a work session needs from the machine (CODE_HARNESS_DESIGN.md, 8.1): the home folder for the secret paths
-  * (5.4), the host list of a mode with `Network^`, the backend of the sandbox, and the secrets to mask (5.6).
+  * (5.4), the host list of a mode with `Network^`, the backend of the sandbox, the secrets to mask (5.6), and the root
+  * of the host, which holds the journals. A command can neither read nor write under the journals (5.4).
   */
-final case class WorkEnv(home: Path, hosts: HostList, backend: Option[Backend], secrets: Secrets)
+final case class WorkEnv(home: Path, hosts: HostList, backend: Option[Backend], secrets: Secrets, journals: Path)
 
 /** The runtime of a work session (8.1): the user owns the session, and each message starts a chat turn.
   *
@@ -31,7 +35,6 @@ final case class WorkEnv(home: Path, hosts: HostList, backend: Option[Backend], 
   * The policy calls run on the thread of the worker, so the activation installs the context of the runtime there. The
   * context gives the LM, so the key never goes into the journal (5.6).
   */
-@nowarn("msg=unused") // the skeleton: the proof uses the parameters
 final class WorkRuntime(
     env     : WorkEnv,
     limits  : HarnessLimits,
@@ -40,7 +43,103 @@ final class WorkRuntime(
 )(using RuntimeContext)
     extends SessionRuntime:
 
-  def activate(session: SessionId, config: SessionConfig, journal: Journal, jobs: JobTable): Activation = ???
+  private val context = summon[RuntimeContext]
+
+  def activate(session: SessionId, config: SessionConfig, journal: Journal, jobs: JobTable): Activation =
+    RuntimeEnvironment.withContext(context) {
+      val scope   = Layout.real(Path.of(SandboxedShell.pathOf(config.scope)))
+      val layout  = Layout.forSession(env.home, env.journals)
+      val profile = Profiles.forMode(config.mode, scope, layout, env.hosts)
+      val shell   = SandboxedShell(config, layout, env.hosts, env.backend, limits.execTimeout)
+      try
+        val turns    = TurnBudget(journal, limits.modelCalls)
+        val recorder = Recorder(journal, () => turns.closed)
+        val store    = SnapshotStore()
+        val host     = HostThreads.ofThisThread()
+        val bindings = Bindings(
+          turn = JournalTurn(journal, () => System.currentTimeMillis()),
+          files = Option.when(config.mode.files != Access.None)(LocalFiles(scope, profile, layout.secretNames)),
+          shell = Option.when(config.mode.shell == Access.Full)(JobShell(shell, jobs, journal)),
+          llm = Option.when(config.mode.llm == Access.Full)(LeafLlm(subQuery, () => turns.current, host, limits.batch)),
+          store = Option.when(config.mode.store != Access.None)(store)
+        )
+        val handlers = recorded(bindings, recorder, Some(scope))
+        val newRepl  = () => ScalaRepl(config.mode, handlers, config.preamble, limits.cellTimeout, limits.cellLimit)
+        val task     = Harness.task(s"${WorkRuntime.instructions}\n\nThe folder of the session: $scope.", Vector.empty)
+        val effects  = HarnessEffects(
+          task,
+          Harness.apiReference,
+          policy,
+          Window,
+          journal,
+          newRepl,
+          recorder,
+          store,
+          limits,
+          () => turns.current,
+          Some(host)
+        )(using context)
+        WorkActivation(effects, shell, turns, layout, context)
+      catch
+        case e: Exception =>
+          Try(shell.close()): Unit
+          WorkRuntime.remove(layout.temp)
+          throw e
+    }
+
+/** The live part of one activation of a work session. Each call of the effects runs in the context of the runtime. */
+private final class WorkActivation(
+    inner  : HarnessEffects,
+    shell  : SandboxedShell,
+    turns  : TurnBudget,
+    layout : Layout,
+    context: RuntimeContext
+) extends Activation:
+
+  val effects: TurnEffects = new TurnEffects:
+    def callPolicy(mustAnswer: Boolean): Either[String, PolicyReply] =
+      RuntimeEnvironment.withContext(context)(inner.callPolicy(mustAnswer))
+    def runCell(cell: Long, code: String): CellResult =
+      RuntimeEnvironment.withContext(context)(inner.runCell(cell, code))
+
+  def stop(): Unit =
+    Try(inner.stopCell()): Unit
+    Try(shell.stopAll()): Unit
+
+  def unclean: Boolean = inner.unclean
+
+  def close(): Unit =
+    turns.close()
+    Try(inner.close()): Unit
+    Try(shell.close()): Unit
+    WorkRuntime.remove(layout.temp)
+
+/** The budget of the current turn of a work session (8.2): a new `Budget` of `limit` calls at each new `TurnStarted`.
+  * The last budget closes at the end of the activation, so a late call fails.
+  */
+private final class TurnBudget(journal: Journal, limit: Int):
+  private var turn            = Long.MinValue
+  private var budget          = Budget(limit)
+  @volatile private var ended = false
+
+  def current: Budget =
+    synchronized {
+      val now = journal.state.lastTurn
+      if now != turn && !ended then
+        budget.close()
+        budget = Budget(limit)
+        turn = now
+      budget
+    }
+
+  /** True after the end of the activation. */
+  def closed: Boolean = ended
+
+  def close(): Unit =
+    synchronized {
+      ended = true
+      budget.close()
+    }
 
 object WorkRuntime:
 
@@ -60,13 +159,39 @@ object WorkRuntime:
   /** The first rules of 5.5: in a mode with `Network^`, `exec` with the prefix `git push` gets `Ask`. In another mode
     * the sandbox already stops a push, so the guard has no rule.
     */
-  def defaultGuard(mode: Mode): Guard = ???
+  def defaultGuard(mode: Mode): Guard =
+    if mode.network != Access.Full then Guard.allowAll
+    else Guard(Vector(VerdictRule(GuardRule("exec", ArgMatch.Prefix("command", "git push")), Verdict.Ask)))
 
   /** The configuration of a work session in the folder `scope` (8.1): a chat turn with `limits.steps` steps, the owner
     * `User`, `workMode` as the mode and the ceiling, the window strategy, `defaultGuard(workMode)`, the preamble of a
     * session with no input fields, and the model `model`.
     */
-  def config(scope: Path, model: String, limits: HarnessLimits): SessionConfig = ???
+  def config(scope: Path, model: String, limits: HarnessLimits): SessionConfig =
+    SessionConfig(
+      kind = TurnKind.Chat,
+      steps = limits.steps,
+      mode = workMode,
+      ceiling = workMode,
+      strategy = StrategyName.Window,
+      scope = Scope.Directory(scope.toString),
+      owner = Owner.User,
+      guard = defaultGuard(workMode),
+      preamble = preamble(summon[Data[String]].shape).getOrElse(""),
+      model = ModelChoice(model, Map.empty),
+      goal = None,
+      env = Set.empty
+    )
 
   /** A runtime with the first leaves: the policy with `instructions`, and the `subQuery` leaf of a harness. */
-  def forWork(env: WorkEnv, limits: HarnessLimits = HarnessLimits())(using RuntimeContext): WorkRuntime = ???
+  def forWork(env: WorkEnv, limits: HarnessLimits = HarnessLimits())(using RuntimeContext): WorkRuntime =
+    val policy   = Signature.derived[PolicyInput, PolicyStep]("policy", instructions)
+    val subQuery = Signature.derived[SubQuery, SubAnswer]("subQuery", Harness.subQueryInstructions)
+    WorkRuntime(env, limits, Predict(policy, name = Some("policy")), Predict(subQuery, name = Some("subQuery")))
+
+  /** Removes a folder and each file in it. */
+  private[host] def remove(folder: Path): Unit =
+    if JFiles.exists(folder) then
+      val paths = JFiles.walk(folder)
+      try paths.sorted(java.util.Comparator.reverseOrder[Path]()).forEach(p => JFiles.deleteIfExists(p): Unit)
+      finally paths.close()

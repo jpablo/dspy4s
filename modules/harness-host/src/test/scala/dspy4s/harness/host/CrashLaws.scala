@@ -19,9 +19,15 @@ import scala.jdk.OptionConverters.*
 object CrashProbe:
 
   def main(args: Array[String]): Unit =
-    val limits  = HarnessLimits(steps = 2)
-    val model   = ScriptLm(Models.policy("start", Some("""val j = spawn("sleep 317"); exec("sleep 318")""")))
-    val env     = WorkEnv(Path.of(args(1)).resolveSibling("home"), HostList.empty, Backends.detect(), Secrets.none)
+    val limits = HarnessLimits(steps = 2)
+    val model  = ScriptLm(Models.policy("start", Some("""val j = spawn("sleep 317"); exec("sleep 318")""")))
+    val env    = WorkEnv(
+      Path.of(args(1)).resolveSibling("home"),
+      HostList.empty,
+      Backends.detect(),
+      Secrets.none,
+      Path.of(args(0))
+    )
     val runtime = Models.withModel(model)(WorkRuntime.forWork(env, limits))
     val host    = LocalHost.start(Path.of(args(0)), runtime, Secrets.none).fold(e => sys.error(e.toString), identity)
     val handle  = opened(host, id(1), Some(WorkRuntime.config(Path.of(args(1)), "fake-model", limits)))

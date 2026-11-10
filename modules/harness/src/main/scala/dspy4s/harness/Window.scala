@@ -2,7 +2,7 @@ package dspy4s.harness
 
 import dspy4s.core.contracts.{DspyError, DynamicValues, History, RuntimeContext}
 import dspy4s.harness.guest.StrategyName
-import dspy4s.harness.kernel.{Entry, Logged, state}
+import dspy4s.harness.kernel.{Entry, Logged, Source, TurnKind, TurnOutcome, state}
 import zio.blocks.schema.DynamicValue
 
 import scala.annotation.tailrec
@@ -31,7 +31,12 @@ object Window extends ContextStrategy:
   def update(journal: Vector[Logged], d: Unit)(using RuntimeContext): Either[DspyError, Unit] = Right(())
 
   def project(journal: Vector[Logged], d: Unit, budget: Int): Projection =
-    val status      = Status.of(state(journal)).render
+    val now = state(journal)
+    if now.config.kind == TurnKind.Chat then chat(journal, Status.of(now).render, budget)
+    else program(journal, Status.of(now).render, budget)
+
+  /** The projection of a program call: the steps of its one turn. The task of the policy holds the input. */
+  private def program(journal: Vector[Logged], status: String, budget: Int): Projection =
     val steps       = openTurn(journal).filter(_.acted)
     val outputs     = steps.flatMap(_.output)
     val observation = outputs.lastOption.fold("")(cut(_, budget / 2))
@@ -48,6 +53,87 @@ object Window extends ContextStrategy:
     else
       text.take(max.max(0)) +
         s"\n[${text.length - max.max(0)} more characters were cut. Print a smaller part of the value to see them.]"
+
+  /** The projection of a chat (phase 7). The messages that a step sees come before its observation, and each earlier
+    * turn is one message of the history before the steps of the open turn:
+    *
+    *   - The messages of the open turn before a step are in the observation before that step, after the output of the
+    *     cell before it. A message from the person is "The person wrote: ...", and a message from the harness, for
+    *     example the end of a job, is "The harness wrote: ...".
+    *   - An earlier turn is a message whose observation holds all its messages, and whose text is its reply: the text
+    *     of `Replied`, or a note of another outcome with the last text of the turn.
+    *   - The newest messages that fit the rest of the budget stay, oldest first, so the oldest turns go first.
+    */
+  private def chat(journal: Vector[Logged], status: String, budget: Int): Projection =
+    val (turns, open) = chatTurns(journal)
+    val acted         = open.filter(_.acted)
+    val current       = open.lastOption.filterNot(_.acted)
+    val heardNow      = current.fold(Vector.empty[String])(_.heard)
+    val lastOutput    = acted.flatMap(_.output).lastOption.toVector
+    val observation   = cut((lastOutput ++ heardNow).mkString("\n"), budget / 2)
+    val before        = "" +: acted.map(_.output.getOrElse(""))
+    val stepMessages  = acted.zipWithIndex.map { (step, k) =>
+      val seen = (Vector(before(k)).filter(_.nonEmpty) ++ step.heard).mkString("\n")
+      message(seen, Step(acted = true, step.text, step.code, step.output), budget / 8)
+    }
+    val turnMessages = turns.map { turn =>
+      message(turn.heard.mkString("\n"), Step(acted = true, turn.reply, None, None), budget / 8)
+    }
+    val history = newest(turnMessages ++ stepMessages, budget - status.length - observation.length)
+    Projection(status, observation, History(history))
+
+  /** A turn of a chat that ended: the messages of the turn, and its reply. */
+  private final case class ChatTurn(heard: Vector[String], reply: String)
+
+  /** A step of the open turn of a chat: the messages before it, its text and code, and the output of its cell. */
+  private final case class ChatStep(
+      heard : Vector[String],
+      acted : Boolean,
+      text  : String,
+      code  : Option[String],
+      output: Option[String]
+  )
+
+  /** The turns of a chat that ended, and the steps of the open turn. */
+  private def chatTurns(journal: Vector[Logged]): (Vector[ChatTurn], Vector[ChatStep]) =
+    final case class Walk(
+        turns  : Vector[ChatTurn],
+        steps  : Vector[ChatStep],
+        pending: Vector[String],
+        heard  : Vector[String],
+        last   : String
+    )
+    val done = journal.foldLeft(Walk(Vector.empty, Vector.empty, Vector.empty, Vector.empty, "")) { (w, logged) =>
+      logged.entry match
+        case Entry.Input(_, text, _) =>
+          val line = s"${speaker(logged.meta.source)} wrote: $text"
+          w.copy(pending = w.pending :+ line, heard = w.heard :+ line)
+        case Entry.StepStarted(_) =>
+          w.copy(steps = w.steps :+ ChatStep(w.pending, acted = false, "", None, None), pending = Vector.empty)
+        case Entry.Acted(_, text, code) if w.steps.nonEmpty =>
+          w.copy(steps = w.steps.dropRight(1) :+ w.steps.last.copy(acted = true, text = text, code = code), last = text)
+        case Entry.Observed(output, _, _) if w.steps.nonEmpty =>
+          w.copy(steps = w.steps.dropRight(1) :+ w.steps.last.copy(output = Some(output)))
+        case Entry.TurnEnded(outcome) =>
+          val reply = outcome match
+            case TurnOutcome.Replied(text) => text
+            case other                     => Vector(s"The turn ended: $other.", w.last).filter(_.nonEmpty).mkString(" ")
+          Walk(w.turns :+ ChatTurn(w.heard, reply), Vector.empty, w.pending, Vector.empty, "")
+        case _ => w
+    }
+    // The messages after the last step belong to the next step, as the first messages of a turn belong to its first step.
+    val open =
+      if done.pending.isEmpty then done.steps else done.steps :+ ChatStep(done.pending, acted = false, "", None, None)
+    (done.turns, open)
+
+  /** Who wrote a message, for the text of the window. */
+  private def speaker(source: Source): String =
+    source match
+      case Source.User                           => "The person"
+      case Source.Harness                        => "The harness"
+      case Source.Controller                     => "The controller"
+      case Source.Child(_) | Source.Parent(_, _) => "Another session"
+      case Source.Policy                         => "The model"
 
   /** One step of the open turn: its text and code, and the output of its cell when the cell ran. */
   private final case class Step(acted: Boolean, text: String, code: Option[String], output: Option[String])
