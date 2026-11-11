@@ -4,7 +4,8 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.harness.{Budget, Harness, Journal, MemoryTree, Secrets, TurnEffects, drive, textSuffix}
 import dspy4s.harness.guest.{JobStatus, Mode, Scope}
 import dspy4s.harness.kernel.{Command, EffectId, Entry, Logged, Next, Position, ReleaseItem, ReleaseStep, RequestId}
-import dspy4s.harness.kernel.{Owner, Rejection, ReleasePlans, ScopeState, releasePlan}
+import dspy4s.harness.kernel.{JobSelector, Owner, Rejection, ReleasePlans, ReleaseResult, ScopeState}
+import dspy4s.harness.kernel.{irreversible, releasePlan}
 import dspy4s.harness.sandbox.Layout
 import dspy4s.harness.kernel.{
   SessionConfig, SessionId, SessionOutcome, SessionState, Source, TurnOutcome, closing, next
@@ -15,6 +16,7 @@ import java.nio.channels.{FileChannel, FileLock, OverlappingFileLockException}
 import java.nio.file.{Files as JFiles, Path, StandardOpenOption}
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{CountDownLatch, Executors, LinkedBlockingQueue, TimeUnit}
+import scala.concurrent.duration.*
 import scala.util.Try
 import scala.util.control.NonFatal
 
@@ -281,9 +283,15 @@ final class LocalHost private (
       opened
 
   def runAs(id: SessionId, command: Command, source: Source): Either[HostError, SessionState] =
+    liveOrOpen(id).flatMap(_.runAs(command, source))
+
+  /** The live session `id`, or the session that this call opens, with the report pass of a new open (8.7). A session
+    * that has ended gives `Ended`: only `open` opens it again. An id that is not valid gives `Refused`.
+    */
+  private def liveOrOpen(id: SessionId): Either[HostError, OpenSession] =
     if !SessionId.valid(id.value) then Left(HostError.Refused(s"${id.value} is not the id of a session"))
     else
-      // The check and the open hold the lock of the host, and the wait for the commit does not.
+      // The check and the open hold the lock of the host, and the pass and the commits after it do not.
       val target = synchronized {
         sessions.get(id).filter(_.live) match
           case Some(session) => Right((session, false))
@@ -293,9 +301,9 @@ final class LocalHost private (
               if foldOf(journal).closed then Left(HostError.Ended) else openLive(id, None)
             }
       }
-      target.flatMap { (session, fresh) =>
+      target.map { (session, fresh) =>
         if fresh then afterOpen(id)
-        session.runAs(command, source)
+        session
       }
 
   def journalOf(id: SessionId): Either[String, Vector[Logged]] =
@@ -365,16 +373,27 @@ final class LocalHost private (
   private def inWritableScope(path: Path): Boolean =
     val real   = Layout.real(path)
     val opened = synchronized(sessions.values.filter(_.live).map(_.state.config.scope).toVector)
-    val listed = catalog.rows.filter(_.status match
-      case SessionStatus.Ended(_) => false
-      case _                      => true).flatMap(_.scope)
+    val listed = catalog.rows.filter(notEnded).flatMap(_.scope)
     (opened ++ listed).exists {
-      case Scope.Home(_)              => false
-      case Scope.Directory(p)         => real.startsWith(Layout.real(Path.of(p)))
-      case Scope.Worktree(p, _, _, _) => real.startsWith(Layout.real(Path.of(p)))
-      case Scope.Scratch(p)           => p.nonEmpty && real.startsWith(Layout.real(Path.of(p)))
-      case Scope.Fork(p, _)           => real.startsWith(Layout.real(Path.of(p)))
+      case Scope.Home(_) => false
+      case other         => folderOf(other).exists(p => real.startsWith(Layout.real(p)))
     }
+
+  /** True when the row is of a session that has not ended. */
+  private def notEnded(row: CatalogRow): Boolean =
+    row.status match
+      case SessionStatus.Ended(_) => false
+      case _                      => true
+
+  /** The folder of `scope`, or none for an empty or a relative path. */
+  private def folderOf(scope: Scope): Option[Path] =
+    val text = scope match
+      case Scope.Home(p)              => p
+      case Scope.Directory(p)         => p
+      case Scope.Worktree(p, _, _, _) => p
+      case Scope.Scratch(p)           => p
+      case Scope.Fork(p, _)           => p
+    Try(Path.of(text)).toOption.filter(p => text.nonEmpty && p.isAbsolute)
 
   /** The report pass for the owner `owner` (8.6, 8.7): it opens the owner when it is not open, and sends each report of
     * `ReportPass.owed` with the source `Source.Child(session)`, and waits for each commit. It gives the number of
@@ -433,7 +452,14 @@ final class LocalHost private (
     * plan of its `Releasing`.
     */
   def planOf(id: SessionId, outcome: SessionOutcome, plans: ReleasePlans = releasePlan)
-      : Either[HostError, (ScopeState, Vector[ReleaseItem])] = ???
+      : Either[HostError, (ScopeState, Vector[ReleaseItem])] =
+    journalOf(id).left.map(HostError.Refused(_)).flatMap { journal =>
+      val s = foldOf(journal)
+      if s.closed then Left(HostError.Ended)
+      else
+        val scope = scopeStateOf(id, s.config.scope)
+        Right((scope, if s.releasing then releaseOf(journal)._2 else plans(scope, outcome, refOf(id), archiveOf(id))))
+    }
 
   /** Ends the session `id` with `outcome` and its release plan of `plans` (7.9, 8.7).
     *
@@ -455,7 +481,90 @@ final class LocalHost private (
       reason : String,
       confirm: ReleaseItem => Boolean,
       plans  : ReleasePlans = releasePlan
-  ): Either[HostError, Vector[ReleaseStep]] = ???
+  ): Either[HostError, Vector[ReleaseStep]] =
+    if id == Controller.id then Left(HostError.Refused("the controller never ends, so it has no release"))
+    else
+      for
+        session <- liveOrOpen(id)
+        begun   <- releaseStart(id, session, outcome, plans)
+        _       <- session.runAs(Command.StopJobs(JobSelector.All, "the release of the session"), Source.Harness)
+        _       <- Either.cond(
+               session.awaitJobs(limits.grace * 3 + 2.seconds),
+               (),
+               HostError.Refused("a job of the session still runs, so the release waits: close the session again")
+             )
+        steps <- releaseSteps(session, begun._1, begun._2, scopeStateOf(id, session.state.config.scope), confirm)
+        _     <- session.runAs(Command.Close(outcome, reason), Source.User)
+      yield steps
+
+  /** The steps before this call and the items to run of the release of `session` (8.7): of its `Releasing` when it runs
+    * one, else of a new `Releasing` with the plan of `plans`. A session with an open turn gives `Rejected(TurnOpen)`.
+    */
+  private def releaseStart(id: SessionId, session: OpenSession, outcome: SessionOutcome, plans: ReleasePlans)
+      : Either[HostError, (Vector[ReleaseStep], Vector[ReleaseItem])] =
+    val s = session.state
+    if s.releasing then Right(releaseOf(session.read(-1)))
+    else if s.position != Position.NoTurn then Left(HostError.Rejected(Rejection.TurnOpen))
+    else
+      val plan = plans(scopeStateOf(id, s.config.scope), outcome, refOf(id), archiveOf(id))
+      session.runAs(Command.Commit(Vector(Entry.Releasing(plan))), Source.Harness).map(_ => (Vector.empty, plan))
+
+  /** Runs each item of `items` in order, and commits `Released` with its step before the next item (7.9). `before`
+    * holds the steps of the release before this call. An item that `irreversible` gives, with the items whose steps are
+    * `Done` and then the item, runs only when `confirm` gives true, else it gets `Skipped`. A failed commit stops the
+    * release, and the next call goes on from the first item with no `Released`.
+    */
+  private def releaseSteps(
+      session: OpenSession,
+      before : Vector[ReleaseStep],
+      items  : Vector[ReleaseItem],
+      state  : ScopeState,
+      confirm: ReleaseItem => Boolean
+  ): Either[HostError, Vector[ReleaseStep]] =
+    items.foldLeft[Either[HostError, Vector[ReleaseStep]]](Right(Vector.empty)) {
+      case (Right(steps), item) =>
+        val done   = (before ++ steps).collect { case ReleaseStep(ran, ReleaseResult.Done) => ran }
+        val risky  = irreversible(done :+ item, state).contains(item)
+        val result =
+          if risky && !confirm(item) then ReleaseResult.Skipped("the person gave no confirmation")
+          else scopes.release(item, confirmed = risky)
+        val step = ReleaseStep(item, result)
+        session.runAs(Command.Commit(Vector(Entry.Released(step))), Source.Harness).map(_ => steps :+ step)
+      case (stopped, _) => stopped
+    }
+
+  /** The last `Releasing` of `journal`: the steps after it, and its items with no step, in order. A journal with no
+    * `Releasing` gives two empty vectors.
+    */
+  private def releaseOf(journal: Vector[Logged]): (Vector[ReleaseStep], Vector[ReleaseItem]) =
+    val at = journal.lastIndexWhere(_.entry match
+      case Entry.Releasing(_) => true
+      case _                  => false)
+    journal.lift(at).map(_.entry) match
+      case Some(Entry.Releasing(plan)) =>
+        val done = journal.drop(at + 1).collect { case Logged(_, _, Entry.Released(step)) => step }
+        (done, plan.drop(done.size))
+      case _ => (Vector.empty, Vector.empty)
+
+  /** The state of `scope` for a release plan of the session `id` (7.9): from `scopes`, with `owned` when its folder is
+    * under `work`, and `shared` when another session that has not ended has the same folder.
+    */
+  private def scopeStateOf(id: SessionId, scope: Scope): ScopeState =
+    val folder = folderOf(scope).map(Layout.real)
+    val base   = Layout.real(work)
+    val opened = synchronized(sessions.values.filter(s => s.live && s.id != id).map(_.state.config.scope).toVector)
+    val listed = catalog.rows.filter(row => row.session != id && notEnded(row)).flatMap(_.scope)
+    val others = (opened ++ listed).flatMap(folderOf).map(Layout.real)
+    scopes.stateOf(scope).copy(
+      owned = folder.exists(f => f.startsWith(base) && f.getNameCount > base.getNameCount),
+      shared = folder.exists(others.contains)
+    )
+
+  /** The ref that keeps a branch of the session `id` (7.9). */
+  private def refOf(id: SessionId): String = s"refs/archive/${id.value}"
+
+  /** The folder that gets the scratch directory of the session `id` (7.9). */
+  private def archiveOf(id: SessionId): String = root.resolve("archive").resolve(id.value).toString
 
   /** The open session `id`. Only the laws use it. */
   private[host] def sessionOf(id: SessionId): Option[OpenSession] = synchronized(sessions.get(id))
@@ -605,6 +714,9 @@ private final class OpenSession private (
   /** `run` with the source `source`, for the peers of the host (8.7). */
   def runAs(command: Command, source: Source): Either[HostError, SessionState] =
     if writer.state.closed then Left(HostError.Ended) else writer.run(command, source)
+
+  /** Waits at most `max` for the end of each job of the session (8.7: the release). */
+  def awaitJobs(max: FiniteDuration): Boolean = jobs.awaitAll(max)
 
   /** `Writer.tryPost` with the source `source`, for the live reports of the host (8.7). */
   def tryPost(command: Command, source: Source): Boolean = !writer.state.closed && writer.tryPost(command, source)

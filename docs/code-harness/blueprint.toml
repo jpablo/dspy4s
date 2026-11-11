@@ -3103,7 +3103,7 @@ ops = ["open", "list", "failed", "close", "start", "sessions", "journals", "star
 ref = "10.2"
 spec = true
 uses = ["session-host", "session-runtime", "secrets", "host-limits", "catalog", "timers", "session-handle", "catalog-row", "host-error", "session-config", "session-id", "peers", "git-scopes", "scopes", "host-hooks", "release-item", "release-step", "scope-state", "release-plans", "session-outcome", "scope", "command", "source", "session-state", "logged", "layout"]
-proof_uses = ["writer", "writer-journal", "session-file", "feeds", "drive", "next", "job-table", "catalog-row-fold", "rebuilt", "catalog", "report-pass", "release-plan", "irreversible", "ledger-fold", "memory-tree", "file-lines", "controller"]
+proof_uses = ["writer", "writer-journal", "session-file", "feeds", "drive", "next", "job-table", "catalog-row-fold", "rebuilt", "catalog", "report-pass", "release-plan", "irreversible", "ledger-fold", "memory-tree", "file-lines", "controller", "state"]
 text = "One writer and one file for each session, with an exclusive lock for a second host. open repairs an open turn, keeps the configuration of the journal with None, and refuses a mode above the ceiling. Each activation gets a new ticket and its WriterJournal. After StopRequested, Activation.stop, and a timer calls Writer.expire with the turn of the stop. The catalog gets the row after a turn ends."
 
 [[node]]
@@ -3127,7 +3127,7 @@ id = "job-table"
 group = "jobs"
 kind = "data"
 name = "JobTable"
-ops = ["sync", "start", "output", "await", "status", "close"]
+ops = ["sync", "start", "output", "await", "awaitAll", "status", "close"]
 ref = "10.3"
 spec = true
 uses = ["effect-id", "session-state", "job-status"]

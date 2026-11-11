@@ -146,7 +146,7 @@ def evolve(s: SessionState, logged: Logged): SessionState =
         personWaits = true // only a client of the person sends `Grant` (5.5)
       )
     case Entry.ScopeRecorded(_, _) => base
-    case Entry.Releasing(_)        => ???
+    case Entry.Releasing(_)        => base.copy(releasing = true)
     case Entry.Released(_)         => base
     case Entry.TurnEnded(_)        => base.copy(
         position = Position.NoTurn,
@@ -154,7 +154,14 @@ def evolve(s: SessionState, logged: Logged): SessionState =
         grants = s.grants.filterNot(_.lifetime == GrantLifetime.Turn)
       )
     case Entry.Ended(_, _) =>
-      base.copy(closed = true, grants = Set.empty, pending = Set.empty, jobs = stopJobs(s, JobSelector.All))
+      // The end closes a release too, so a session that opens again takes messages.
+      base.copy(
+        closed = true,
+        grants = Set.empty,
+        pending = Set.empty,
+        jobs = stopJobs(s, JobSelector.All),
+        releasing = false
+      )
 
 /** The operation that starts a job (10.3). */
 private val spawnOp = "spawn"

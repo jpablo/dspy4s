@@ -7,7 +7,8 @@ package dspy4s.harness.kernel
   *   - `Begin` gives `Activated`, the `Input` of the task and `TurnStarted` on a journal with no entry, and
   *     `Rejection.NotNew` on each other journal.
   *   - After `Releasing`, `Send` and `Grant` give `Rejection.Releasing`, and `Activate` starts no turn. `Released`,
-  *     `JobsStopRequested` through `StopJobs`, and `Close` stay valid.
+  *     `JobsStopRequested` through `StopJobs`, and `Close` stay valid. `Ended` closes the release, so a session that
+  *     opens again after its end takes messages.
   *   - The unattended turns: a `Send` whose sender is not the person gives its `Input` and no `TurnStarted` when
   *     `unattended` is at `SessionState.UnattendedTurns`. So it waits in the journal, and the next message of the
   *     person starts the turn that sees it. The end of a turn and `Activate` after a restart start no turn for such a
@@ -18,12 +19,13 @@ def decide(command: Command, s: SessionState, sender: Source = Source.User): Eit
     case Command.Activate(versions, config) =>
       val activated = repair(s) :+ Entry.Activated(versions, config)
       val now       = after(s, activated)
-      Right(if now.waiting > 0 && !held(now) then activated :+ Entry.TurnStarted else activated)
+      Right(if now.waiting > 0 && !held(now) && !now.releasing then activated :+ Entry.TurnStarted else activated)
     case Command.Begin(versions, config, request, text) =>
       if s.nextSeq != 0 then Left(Rejection.NotNew)
       else Right(Vector(Entry.Activated(versions, config), Entry.Input(request, text, Map.empty), Entry.TurnStarted))
     case Command.Send(request, _, _) if s.requests(request) => Right(Vector.empty)
     case Command.Send(_, _, _) if s.closed                  => Left(Rejection.SessionClosed)
+    case Command.Send(_, _, _) if s.releasing               => Left(Rejection.Releasing)
     case Command.Send(request, text, values)                =>
       val input = Entry.Input(request, text, values)
       val waits = sender != Source.User && held(s)
@@ -40,7 +42,7 @@ def decide(command: Command, s: SessionState, sender: Source = Source.User): Eit
         case (refused, _)                               => refused
       }
       checked.map { now =>
-        val inputWaits = now.position == Position.NoTurn && now.waiting > 0 && !held(now)
+        val inputWaits = now.position == Position.NoTurn && now.waiting > 0 && !held(now) && !now.releasing
         if inputWaits && fresh.nonEmpty then fresh :+ Entry.TurnStarted else fresh
       }
     case Command.Abort(reason) =>
@@ -49,6 +51,7 @@ def decide(command: Command, s: SessionState, sender: Source = Source.User): Eit
       if s.closed then Left(Rejection.SessionClosed) else Right(Vector(Entry.JobsStopRequested(which, reason)))
     case Command.Grant(request, _, _) if s.requests(request) => Right(Vector.empty)
     case Command.Grant(_, _, _) if s.closed                  => Left(Rejection.SessionClosed)
+    case Command.Grant(_, _, _) if s.releasing               => Left(Rejection.Releasing)
     case Command.Grant(request, rule, lifetime)              =>
       val granted = Entry.Granted(request, rule, lifetime)
       if !s.pending.exists(rule.covers) then Right(Vector(granted))
@@ -74,8 +77,8 @@ private def held(s: SessionState): Boolean = s.unattended >= SessionState.Unatte
 private def allowed(s: SessionState, entry: Entry): Boolean =
   entry match
     case Entry.ScopeRecorded(_, _)                      => !s.closed
-    case Entry.Releasing(_)                             => ???
-    case Entry.Released(_)                              => !s.closed && s.position == Position.NoTurn
+    case Entry.Releasing(_)                             => !s.closed && s.position == Position.NoTurn && !s.releasing
+    case Entry.Released(_)                              => !s.closed && s.position == Position.NoTurn && s.releasing
     case _ if s.closed || s.position == Position.NoTurn => false
     case Entry.StepStarted(i)                           => !s.stopping && s.position == Position.BeforeStep(i)
     case Entry.Acted(_, _, _)                           => !s.stopping &&

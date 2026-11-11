@@ -82,6 +82,15 @@ final class JobTable(grace: FiniteDuration, report: (EffectId, JobStatus) => Uni
       statusOf(row)
     }
 
+  /** Waits until each job of the table ends, at most `max` in all, and gives true when no job runs. The release of a
+    * session waits so after `StopJobs(All)` (8.7).
+    */
+  def awaitAll(max: FiniteDuration): Boolean =
+    val end = System.nanoTime() + max.toNanos
+    rows.values().asScala.toVector.forall { row =>
+      row.ended.await((end - System.nanoTime()).max(0L), TimeUnit.NANOSECONDS)
+    }
+
   /** The status of the job `id` (10.3). A job of `state` with no row in the table is `Lost`: its host ended. A job with
     * a stop mark and no row is `Stopped`.
     */

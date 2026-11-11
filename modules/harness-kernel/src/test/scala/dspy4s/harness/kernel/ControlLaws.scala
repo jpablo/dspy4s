@@ -79,6 +79,15 @@ class ControlLaws extends FunSuite:
       case Left(error)    => fail(error.toString)
   }
 
+  test("Releasing: Ended closes the release, so a session that opens again after its end takes a message") {
+    val ended  = run(releasing, Command.Close(SessionOutcome.Parked, "done"))
+    val reopen = run(ended, Command.Activate(versions, config()))
+    assert(!reopen.releasing)
+    decide(Command.Send(RequestId("m1"), "work", Map.empty), reopen) match
+      case Right(entries) => assert(entries.contains(Entry.TurnStarted), entries.toString)
+      case Left(error)    => fail(error.toString)
+  }
+
   // ── Unattended turns ──
 
   /** `n` turns that a message of `from` starts, each to its end. */
