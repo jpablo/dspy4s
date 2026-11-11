@@ -4,7 +4,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.harness.{Budget, Harness, Journal, MemoryTree, Secrets, TurnEffects, drive, textSuffix}
 import dspy4s.harness.guest.{JobStatus, Mode, Scope}
 import dspy4s.harness.kernel.{Command, EffectId, Entry, Logged, Next, Position, ReleaseItem, ReleaseStep, RequestId}
-import dspy4s.harness.kernel.{Rejection, ReleasePlans, ScopeState, releasePlan}
+import dspy4s.harness.kernel.{Owner, Rejection, ReleasePlans, ScopeState, releasePlan}
 import dspy4s.harness.sandbox.Layout
 import dspy4s.harness.kernel.{
   SessionConfig, SessionId, SessionOutcome, SessionState, Source, TurnOutcome, closing, next
@@ -14,7 +14,7 @@ import dspy4s.harness.kernel.{repair, state as foldOf}
 import java.nio.channels.{FileChannel, FileLock, OverlappingFileLockException}
 import java.nio.file.{Files as JFiles, Path, StandardOpenOption}
 import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.{CountDownLatch, TimeUnit}
+import java.util.concurrent.{CountDownLatch, LinkedBlockingQueue, TimeUnit}
 import scala.util.Try
 import scala.util.control.NonFatal
 
@@ -205,17 +205,17 @@ trait Activation extends AutoCloseable:
   *   - `release` ends a session with its release plan.
   */
 final class LocalHost private (
-    root                                        : Path,
-    runtimeOf                                   : Peers => SessionRuntime,
-    secrets                                     : Secrets,
-    limits                                      : HostLimits,
-    clock                                       : () => Long,
-    catalog                                     : Catalog,
-    timers                                      : Timers,
-    rebuilt                                     : Rebuilt,
-    scopes                                      : Scopes,
-    @scala.annotation.nowarn("msg=unused") hooks: HostHooks,
-    work                                        : Path
+    root     : Path,
+    runtimeOf: Peers => SessionRuntime,
+    secrets  : Secrets,
+    limits   : HostLimits,
+    clock    : () => Long,
+    catalog  : Catalog,
+    timers   : Timers,
+    rebuilt  : Rebuilt,
+    scopes   : Scopes,
+    hooks    : HostHooks,
+    work     : Path
 ) extends SessionHost,
       Peers,
       AutoCloseable:
@@ -225,19 +225,38 @@ final class LocalHost private (
   // The runtime gets the host, and the host gets the runtime, so the runtime comes at its first use.
   private lazy val runtime: SessionRuntime = runtimeOf(this)
 
+  // The live reports (8.7): each session whose turn or session ended, with its owner. The writers put them here, and
+  // the reporter thread takes them. A put never waits, so the thread of a writer never waits for a report. The reporter
+  // takes the lock of the host for a short time, so it is a platform thread: on Java 21, a virtual thread that waits
+  // for a lock holds its carrier thread.
+  private val due                   = LinkedBlockingQueue[(SessionId, SessionId)]()
+  @volatile private var stopReports = false
+  private val reporter              = Thread.ofPlatform().name("harness-reporter").daemon(true).start(() => reportLoop())
+
   def open(id: SessionId, config: Option[SessionConfig]): Either[HostError, SessionHandle] =
+    openLive(id, config).map { (session, fresh) =>
+      if fresh then afterOpen(id)
+      session
+    }
+
+  /** Opens the session `id`, or gives it when it is open, with true when this call opened it. */
+  private def openLive(id: SessionId, config: Option[SessionConfig]): Either[HostError, (OpenSession, Boolean)] =
     // A session that ends frees its lock in its shutdown. The wait for it holds no lock of the host, so the opens of
     // other sessions go on.
     synchronized(sessions.get(id)).filterNot(_.live).foreach(_.awaitEnd())
     synchronized {
       sessions.get(id) match
-        case Some(session) if session.live => Right(session)
-        case _                             => OpenSession.start(id, config, place).map {
-            session =>
-              sessions.update(id, session)
-              session
+        case Some(session) if session.live => Right((session, false))
+        case _                             => OpenSession.start(id, config, place).map { session =>
+            sessions.update(id, session)
+            (session, true)
           }
     }
+
+  /** The report pass of a session that this host opened (8.7), on the thread of the open and with no lock of the host.
+    * A pass that fails loses no report, because the next open runs it again.
+    */
+  private def afterOpen(id: SessionId): Unit = reportTo(id): Unit
 
   /** The rows of the catalog. */
   def list: Vector[CatalogRow] = catalog.rows
@@ -248,7 +267,7 @@ final class LocalHost private (
       : Either[HostError, SessionState] =
     if !SessionId.valid(id.value) then Left(HostError.Refused(s"${id.value} is not the id of a session"))
     else
-      synchronized {
+      val opened = synchronized {
         if sessions.contains(id) || JFiles.exists(SessionFile.pathOf(root, id)) then
           Left(HostError.Rejected(Rejection.NotNew))
         else
@@ -257,6 +276,8 @@ final class LocalHost private (
             session.state
           }
       }
+      opened.foreach(_ => afterOpen(id))
+      opened
 
   def runAs(id: SessionId, command: Command, source: Source): Either[HostError, SessionState] =
     if !SessionId.valid(id.value) then Left(HostError.Refused(s"${id.value} is not the id of a session"))
@@ -264,15 +285,17 @@ final class LocalHost private (
       // The check and the open hold the lock of the host, and the wait for the commit does not.
       val target = synchronized {
         sessions.get(id).filter(_.live) match
-          case Some(session) => Right(session)
+          case Some(session) => Right((session, false))
           case None          =>
             // The row of the catalog can lag, so the journal says whether the session has ended.
             journalOf(id).left.map(HostError.Refused(_)).flatMap { journal =>
-              if foldOf(journal).closed then Left(HostError.Ended)
-              else open(id, None).flatMap(_ => sessions.get(id).toRight(HostError.Ended))
+              if foldOf(journal).closed then Left(HostError.Ended) else openLive(id, None)
             }
       }
-      target.flatMap(_.runAs(command, source))
+      target.flatMap { (session, fresh) =>
+        if fresh then afterOpen(id)
+        session.runAs(command, source)
+      }
 
   def journalOf(id: SessionId): Either[String, Vector[Logged]] =
     if !SessionId.valid(id.value) then Left(s"${id.value} is not the id of a session")
@@ -322,7 +345,17 @@ final class LocalHost private (
       case Scope.Home(_) | Scope.Fork(_, _) => Left(s"start takes no ${scope.productPrefix} scope")
 
   /** The place that each open session of the host shares. */
-  private def place: OpenSession.Place = OpenSession.Place(root, runtime, secrets, limits, clock, catalog, timers)
+  private def place: OpenSession.Place =
+    OpenSession.Place(
+      root,
+      runtime,
+      secrets,
+      limits,
+      clock,
+      catalog,
+      timers,
+      (child, owner) => due.offer((child, owner)): Unit
+    )
 
   /** True when `path` is inside the folder of a session that has not ended and can write there. The controller has the
     * scope `Home` and no write access, so its scope does not count.
@@ -345,7 +378,51 @@ final class LocalHost private (
     * `ReportPass.owed` with the source `Source.Child(session)`, and waits for each commit. It gives the number of
     * reports that the owner committed. An owner that has ended gets none, and the pass runs again when it opens.
     */
-  def reportTo(owner: SessionId): Either[HostError, Int] = ???
+  def reportTo(owner: SessionId): Either[HostError, Int] =
+    if !SessionId.valid(owner.value) then Left(HostError.Refused(s"${owner.value} is not the id of a session"))
+    else
+      val target = synchronized(sessions.get(owner)).filter(_.live) match
+        case Some(session) => Right(Some(session))
+        case None          => journalOf(owner).left.map(HostError.Refused(_)).flatMap { journal =>
+            if foldOf(journal).closed then Right(None) else openLive(owner, None).map((session, _) => Some(session))
+          }
+      target.flatMap(_.fold(Right(0))(session => pass(owner, session)))
+
+  /** Sends each report of `ReportPass.owed` that `session`, the owner `owner`, does not have, and waits for each
+    * commit. The first refusal stops the pass, and the reports after it wait for the next pass.
+    */
+  private def pass(owner: SessionId, session: OpenSession): Either[HostError, Int] =
+    ReportPass.owed(owner, session.state, catalog.rows, journalOf).foldLeft[Either[HostError, Int]](Right(0)) {
+      case (Right(n), (from, report)) =>
+        if session.state.requests(report.request) then Right(n)
+        else
+          hooks.beforeReport(from, report)
+          session.runAs(report, Source.Child(from)).map(_ => n + 1)
+      case (refused, _) => refused
+    }
+
+  /** The reporter thread: it takes each live report of `due` until the close of the host. A report that fails waits for
+    * the pass. The close interrupts the thread and does not wait for it.
+    */
+  private def reportLoop(): Unit =
+    try
+      while !stopReports do
+        val (child, owner) = due.take()
+        try liveReport(child, owner)
+        catch case NonFatal(_) => ()
+    catch case _: InterruptedException => ()
+
+  /** The live report of `child` to `owner` (8.7): the reports of `ReportPass.owed` for the row of `child`, when `owner`
+    * is open in this host. `Writer.tryPost` never waits, so the first report that does not fit stops the reports after
+    * it, and the next pass sends them. An owner that is not open gets its reports at its open.
+    */
+  private def liveReport(child: SessionId, owner: SessionId): Unit =
+    synchronized(sessions.get(owner)).filter(_.live).foreach { target =>
+      ReportPass.owed(owner, target.state, catalog.row(child).toVector, journalOf).forall { (from, report) =>
+        hooks.beforeReport(from, report)
+        target.tryPost(report, Source.Child(from))
+      }: Unit
+    }
 
   /** The release plan of `plans` for the session `id` and `outcome`, with the state of its scope, and with no effect:
     * the dry run of CODE_HARNESS.md, 7.9. The state of the scope comes from `scopes`. It is `owned` when its folder is
@@ -387,6 +464,8 @@ final class LocalHost private (
   /** Ends the writer of each open session, closes its activation, stops its jobs and frees its lock. The journals stay.
     */
   def close(): Unit =
+    stopReports = true
+    reporter.interrupt()
     synchronized {
       sessions.values.foreach(_.close())
       sessions.clear()
@@ -429,19 +508,24 @@ object LocalHost:
                    catalog.close()
                    HostError.OpenFailed(e)
                  }
-    yield LocalHost(
-      root,
-      runtimeOf,
-      secrets,
-      limits,
-      clock,
-      catalog,
-      Timers(),
-      rebuilt,
-      scopes,
-      hooks,
-      work.getOrElse(root.resolveSibling("work"))
-    )
+    yield
+      val host = LocalHost(
+        root,
+        runtimeOf,
+        secrets,
+        limits,
+        clock,
+        catalog,
+        Timers(),
+        rebuilt,
+        scopes,
+        hooks,
+        work.getOrElse(root.resolveSibling("work"))
+      )
+      // Each owned session with an open turn opens, so `Activate` commits `TurnEnded(Crashed)` (4.4), and the pass at
+      // the open of its owner sends the report. A session that does not open here is repaired at its next open.
+      ReportPass.repairable(rebuilt.rows).foreach(id => host.open(id, None): Unit)
+      host
 
   /** The sessions of the root of a host, with no runtime and no open session: the rebuild of the catalog that `start`
     * runs (10.2). A root with no folder of journals has no session, and this function then makes no file.
@@ -513,6 +597,9 @@ private final class OpenSession private (
   /** `run` with the source `source`, for the peers of the host (8.7). */
   def runAs(command: Command, source: Source): Either[HostError, SessionState] =
     if writer.state.closed then Left(HostError.Ended) else writer.run(command, source)
+
+  /** `Writer.tryPost` with the source `source`, for the live reports of the host (8.7). */
+  def tryPost(command: Command, source: Source): Boolean = !writer.state.closed && writer.tryPost(command, source)
 
   def state: SessionState = writer.state
 
@@ -593,7 +680,11 @@ private final class OpenSession private (
           activation.map(_._1).orElse(pendingTicket).foreach { ticket =>
             place.timers.after(place.limits.grace)(() => writer.expire(s.lastTurn, ticket)): Unit
           }
-        putRow()
+        // A report is due after a `TurnEnded` or an `Ended` of a session whose owner is a session (8.6).
+        if putRow() then
+          s.config.owner match
+            case Owner.Session(owner) => place.report(id, owner)
+            case _                    => ()
         if !s.closed && next(s) != Next.Wait then ensureWorker()
       s.closed
     }
@@ -684,8 +775,10 @@ private final class OpenSession private (
       (ticket, made)
     finally if !started then guard.synchronized { pendingTicket = None }
 
-  /** Puts the row of the session into the catalog when its status changes, and at the first commit of this open. */
-  private def putRow(): Unit =
+  /** Puts the row of the session into the catalog when its status changes, and at the first commit of this open. It
+    * gives true when the new entries hold a `TurnEnded` or an `Ended`.
+    */
+  private def putRow(): Boolean =
     val fresh = writer.log.reverseIterator.takeWhile(_.seq > row._1.lastSeq).toVector.reverse
     val next  = fresh.foldLeft(row)(catalogRow(id).step)
     if !putOnce || next._1.status != row._1.status then
@@ -693,6 +786,9 @@ private final class OpenSession private (
       // A failed write of the catalog never ends a session: the next rebuild corrects the row.
       place.catalog.put(next._1): Unit
     row = next
+    fresh.exists(_.entry match
+      case Entry.TurnEnded(_) | Entry.Ended(_, _) => true
+      case _                                      => false)
 
   /** The message of a job with `report` at its end (10.3). The writer of the session gets it, so it also reaches a
     * later activation.
@@ -714,7 +810,8 @@ private object OpenSession:
       limits : HostLimits,
       clock  : () => Long,
       catalog: Catalog,
-      timers : Timers
+      timers : Timers,
+      report : (SessionId, SessionId) => Unit // the put of a live report: the session and its owner (8.7)
   )
 
   /** The most characters of the output of a job in its message. */

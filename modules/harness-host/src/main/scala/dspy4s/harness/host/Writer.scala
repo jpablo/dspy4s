@@ -64,7 +64,12 @@ final class Writer(
   /** Puts `command` into the mailbox when it has room, and returns at once: true when the command is in the mailbox.
     * The reporter of the host uses it, so a full mailbox of an owner never stops it (8.7).
     */
-  def tryPost(command: Command, sender: Source): Boolean = ???
+  def tryPost(command: Command, sender: Source): Boolean =
+    if stopped then false
+    else
+      val message = Run(command, sender, None, CompletableFuture())
+      // As in `enqueue`: after the end, the last drain fails the message, or the message is not in the mailbox.
+      mailbox.offer(message) && !(stopped && mailbox.remove(message))
 
   /** Puts `command` into the mailbox, and returns before its commit (10.1: `send`). */
   def post(command: Command, sender: Source): Either[HostError, Unit] =

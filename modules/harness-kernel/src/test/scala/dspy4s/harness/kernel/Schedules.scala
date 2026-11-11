@@ -168,7 +168,7 @@ object Schedules:
     var live: SessionState = state(entries)
 
     def run(command: Command, sender: Source = Source.Harness): Either[Rejection, Vector[Entry]] =
-      val decided = decide(command, live)
+      val decided = decide(command, live, sender)
       for list <- decided do
         for entry <- list do
           val logged = Logged(live.nextSeq, Fixtures.meta.copy(source = sourceOf(command, sender, entry)), entry)

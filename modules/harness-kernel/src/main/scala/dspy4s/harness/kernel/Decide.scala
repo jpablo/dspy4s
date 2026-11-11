@@ -10,7 +10,8 @@ package dspy4s.harness.kernel
   *     `JobsStopRequested` through `StopJobs`, and `Close` stay valid.
   *   - The unattended turns: a `Send` whose sender is not the person gives its `Input` and no `TurnStarted` when
   *     `unattended` is at `SessionState.UnattendedTurns`. So it waits in the journal, and the next message of the
-  *     person starts the turn that sees it. `Activate` after a restart starts no turn for such a message either.
+  *     person starts the turn that sees it. The end of a turn and `Activate` after a restart start no turn for such a
+  *     message either.
   */
 def decide(command: Command, s: SessionState, sender: Source = Source.User): Either[Rejection, Vector[Entry]] =
   command match
@@ -39,7 +40,7 @@ def decide(command: Command, s: SessionState, sender: Source = Source.User): Eit
         case (refused, _)                               => refused
       }
       checked.map { now =>
-        val inputWaits = now.position == Position.NoTurn && now.waiting > 0
+        val inputWaits = now.position == Position.NoTurn && now.waiting > 0 && !held(now)
         if inputWaits && fresh.nonEmpty then fresh :+ Entry.TurnStarted else fresh
       }
     case Command.Abort(reason) =>

@@ -1,6 +1,6 @@
 package dspy4s.harness.host
 
-import dspy4s.harness.kernel.{Command, Logged, SessionId, SessionState}
+import dspy4s.harness.kernel.{Command, Logged, Owner, SessionId, SessionState, missing}
 
 /** The report pass (CODE_HARNESS_DESIGN.md, 8.6 and 8.7). A report is a pure function of the journal of a session
   * (`missing`), so a second send has the same request id, and the owner commits it once.
@@ -22,9 +22,23 @@ object ReportPass:
       ownerState: SessionState,
       rows      : Vector[CatalogRow],
       journalOf : SessionId => Either[String, Vector[Logged]]
-  ): Vector[(SessionId, Command.Send)] = ???
+  ): Vector[(SessionId, Command.Send)] =
+    rows.filter(_.owner == Owner.Session(owner)).flatMap { row =>
+      journalOf(row.session).toOption.toVector.flatMap { journal =>
+        missing(row.session, Controller.messageSource(owner), journal, ownerState).map(row.session -> _)
+      }
+    }
 
   /** The sessions of `rows` with a session as the owner and an open turn (`InTurn` or `Stopping`): the sessions that
     * the start of a host opens, so the repair commits `TurnEnded(Crashed)` (4.4).
     */
-  def repairable(rows: Vector[CatalogRow]): Vector[SessionId] = ???
+  def repairable(rows: Vector[CatalogRow]): Vector[SessionId] =
+    rows.filter(row => ownedBySession(row.owner) && turnOpen(row.status)).map(_.session)
+
+  private def ownedBySession(owner: Owner): Boolean =
+    owner match
+      case Owner.Session(_) => true
+      case _                => false
+
+  private def turnOpen(status: SessionStatus): Boolean =
+    status == SessionStatus.InTurn || status == SessionStatus.Stopping

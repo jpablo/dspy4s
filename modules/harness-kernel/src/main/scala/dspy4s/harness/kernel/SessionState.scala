@@ -43,7 +43,7 @@ final case class SessionState(
     jobs       : Map[EffectId, JobRecord], // each `spawn` that has an intent
     releasing  : Boolean = false, // a `Releasing` came, so the session runs its release plan (8.7)
     unattended : Int     = 0,     // the turns in a row that no message of the person started (8.7)
-    personWaits: Boolean = false  // an `Input` of the person came since the last `TurnStarted`
+    personWaits: Boolean = false  // a message or a grant of the person came since the last `TurnStarted`
 ) derives CanEqual
 
 object SessionState:
@@ -96,11 +96,22 @@ def evolve(s: SessionState, logged: Logged): SessionState =
   val base = s.copy(nextSeq = logged.seq + 1)
   logged.entry match
     case Entry.Activated(_, config)      => base.copy(config = config, closed = false)
-    case Entry.Input(request, _, values) =>
-      base.copy(requests = s.requests + request, waiting = s.waiting + 1, inputs = s.inputs ++ values)
+    case Entry.Input(request, _, values) => base.copy(
+        requests = s.requests + request,
+        waiting = s.waiting + 1,
+        inputs = s.inputs ++ values,
+        personWaits = s.personWaits || logged.meta.source == Source.User
+      )
     case Entry.TurnStarted =>
-      // A new turn closes the old questions: the model asks again if it still needs the call.
-      base.copy(position = Position.BeforeStep(0), lastTurn = logged.seq, pending = Set.empty)
+      // A new turn closes the old questions: the model asks again if it still needs the call. A turn that a message
+      // or a grant of the person starts sets the count of the unattended turns to 0, and each other turn adds 1 (8.7).
+      base.copy(
+        position = Position.BeforeStep(0),
+        lastTurn = logged.seq,
+        pending = Set.empty,
+        unattended = if s.personWaits then 0 else s.unattended + 1,
+        personWaits = false
+      )
     case Entry.StepStarted(step)    => base.copy(position = Position.InPolicy(step), waiting = 0)
     case Entry.Acted(_, text, code) =>
       val step = s.position match
@@ -131,7 +142,8 @@ def evolve(s: SessionState, logged: Logged): SessionState =
     case Entry.Granted(request, rule, lifetime) => base.copy(
         requests = s.requests + request,
         grants = s.grants + ActiveGrant(rule, lifetime),
-        pending = s.pending.filterNot(rule.covers)
+        pending = s.pending.filterNot(rule.covers),
+        personWaits = true // only a client of the person sends `Grant` (5.5)
       )
     case Entry.ScopeRecorded(_, _) => base
     case Entry.Releasing(_)        => ???

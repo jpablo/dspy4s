@@ -104,6 +104,24 @@ class ControlLaws extends FunSuite:
     assertEquals(turns(3, Source.Harness).unattended, 3)
     val person = commitFrom(turns(3, other), Command.Send(RequestId("p1"), "go on", Map.empty), Source.User)
     assertEquals(person.unattended, 0)
+    val rule    = GuardRule("exec", ArgMatch.AnyArgs)
+    val granted = commitFrom(turns(3, other), Command.Grant(RequestId("g1"), rule, GrantLifetime.Once), Source.User)
+    assertEquals(commitFrom(granted, Command.Send(RequestId("m9"), "work", Map.empty), other).unattended, 0)
+  }
+
+  test("Unattended: at the limit, the end of a turn starts no turn for a message of another session") {
+    val last = commitFrom(
+      turns(SessionState.UnattendedTurns - 1, other),
+      Command.Send(RequestId("t"), "work", Map.empty),
+      other
+    )
+    assertEquals(last.unattended, SessionState.UnattendedTurns)
+    val answered = commit(last, Vector(Entry.StepStarted(0), Entry.Acted("", "done", None)))
+    val ended    = Vector(Entry.TurnEnded(TurnOutcome.Replied("done")))
+    val fromPeer = commitFrom(answered, Command.Send(RequestId("x"), "more", Map.empty), other)
+    assertEquals(decide(Command.Commit(ended), fromPeer), Right(ended))
+    val fromPerson = commitFrom(answered, Command.Send(RequestId("p"), "go on", Map.empty), Source.User)
+    assertEquals(decide(Command.Commit(ended), fromPerson), Right(ended :+ Entry.TurnStarted))
   }
 
   test("Unattended: at the limit, a message of another session waits, and a message of the person starts the turn") {

@@ -140,8 +140,13 @@ class CrashLaws extends munit.FunSuite:
           },
           child.toString
         )
-        val owner   = opened(host, id(1), None)
-        def reports = owner.read(-1).count(l => l.meta.source == Source.Child(id(2)))
+        val owner = opened(host, id(1), None)
+        // The `TurnStarted` of a report has the source of the report too, so the law counts only the `Input`.
+        def reports =
+          owner.read(-1).count {
+            case Logged(_, meta, Entry.Input(_, _, _)) => meta.source == Source.Child(id(2))
+            case _                                     => false
+          }
         assert(eventually()(reports == 1), entries(owner).toString)
         assertEquals(host.reportTo(id(1)), Right(0))
         assertEquals(reports, 1)
