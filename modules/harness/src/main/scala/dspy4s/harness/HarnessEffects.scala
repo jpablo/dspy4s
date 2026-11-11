@@ -11,7 +11,8 @@ import dspy4s.programs.strategies.Predict
   *     spends one call of the budget that `budget` gives (the budget of the program call, or of the turn of a work
   *     session), and calls `policy` with the task and the API reference. A spent budget fails the call with a plain
   *     error, so the turn ends `Failed` (8.2). The status says when a step is the last one, and the code of a step that
-  *     must answer does not run. A code that is empty, `null` or `None` is no code, because the chat adapter keeps the
+  *     must answer does not run. A code in one outer ``` fence is the code in the fence (`unfenced`), so `Acted` and
+  *     the history hold no fence. A code that is empty, `null` or `None` is no code, because the chat adapter keeps the
   *     text of an empty field (9). The trace of the call goes to the `RuntimeContext`, so an optimizer sees it. The
   *     call of `policy` runs through `runner`, so a work session can cut it (10.3).
   *   - `runCell` starts the calls of the cell in `recorder`, takes the snapshot of the store, and runs the code in the
@@ -59,7 +60,7 @@ final class HarnessEffects(
       val view  = strategy.project(log, data, limits.budget)
       val input = PolicyInput(task, reference, view.status, view.observation, view.history)
       budget().spend().flatMap(_ => runner.run(() => policy(input).left.map(_.message))).map { step =>
-        val code = step.output.code.filterNot(c => HarnessEffects.NoCode.contains(c.strip))
+        val code = step.output.code.map(HarnessEffects.unfenced).filterNot(c => HarnessEffects.NoCode.contains(c.strip))
         // The code of the last step of a chat does not run (4.3).
         PolicyReply(step.output.reasoning, step.output.text, if mustAnswer then None else code)
       }
@@ -109,6 +110,22 @@ object HarnessEffects:
 
   /** The texts of a code field that hold no code. The chat adapter keeps the text `null`, as DSPy does (9). */
   private val NoCode: Set[String] = Set("", "null", "None")
+
+  /** The code of a code field (9). A model can put the code in one Markdown fence: a first line of ``` with an optional
+    * word for the language, and ``` at the end. A fence does not parse, so the code is the text between the first line
+    * and the last ```. The white space around the field does not count. Only the outer fence goes, so a fence inside
+    * the code, for example in a string, stays. A text with no outer fence stays as it is. A Scala code cannot start
+    * with ```, so the rule changes no code that parses. The live sessions of 2026-11-10 gave this rule.
+    */
+  private def unfenced(field: String): String =
+    field.strip match
+      case Fence(code) => code
+      case _           => field
+
+  /** One outer fence around a whole text: ``` and an optional word for the language on the first line, and ``` at the
+    * end, on a line of its own or after the last line of the code. The group is the code between the two.
+    */
+  private val Fence = """(?s)```[\w+-]*[ \t]*\r?\n(.*?)\r?\n?```""".r
 
   /** The text of a cell, cut to `max` characters (6). The hints of a compile error are at the end of the text, so each
     * hint that the cut removed comes after the cut text.

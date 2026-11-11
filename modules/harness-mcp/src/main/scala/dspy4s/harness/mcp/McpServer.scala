@@ -2,7 +2,7 @@ package dspy4s.harness.mcp
 
 import dspy4s.harness.guest.*
 import dspy4s.harness.kernel.CellOutcome
-import dspy4s.harness.repl.{Bindings, CellRun, ScalaRepl}
+import dspy4s.harness.repl.{ApiReference, Bindings, CellRun, ScalaRepl}
 import dspy4s.harness.sandbox.Layout
 import io.modelcontextprotocol.json.{McpJsonDefaults, McpJsonMapper, TypeRef}
 import io.modelcontextprotocol.server.McpServer as SdkServer
@@ -10,12 +10,12 @@ import io.modelcontextprotocol.server.transport.StdioServerTransportProvider
 import io.modelcontextprotocol.spec.McpSchema
 
 import java.io.{InputStream, OutputStream}
-import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.{Path, Paths}
 
 /** The early MCP server (6): the REPL and the guest API for another agent, for example Claude Code, before the harness
   * has its own loop. It has two tools: `run_cell(code)` gives the output of one cell, and `api_reference` gives the
-  * source text of the guest API. One REPL serves all calls, so a later cell sees the definitions of an earlier one.
+  * parts of the source text of the guest API that compile in its mode. One REPL serves all calls, so a later cell sees
+  * the definitions of an earlier one.
   *
   * A cell cannot read the secret paths of the home folder `home` or a file with a secret name (5.6). For each secret
   * path that is a symbolic link, the server closes the link and its target, as `Layout.forSession` does.
@@ -85,16 +85,10 @@ object McpServer:
       case CellOutcome.Ok | CellOutcome.Submitted(_) => (run.text, false)
       case _                                         => (run.text, true)
 
-  /** The API reference (5.1): a header with the notation, and the source text of the guest API. */
-  lazy val reference: String =
-    val sources = Vector("Guest.scala", "SessionTypes.scala").map { name =>
-      val stream = Option(getClass.getResourceAsStream(s"/dspy4s/harness/guest/$name.txt"))
-      stream.fold(s"// $name is not in the resources of this build")(s =>
-        try String(s.readAllBytes(), UTF_8)
-        finally s.close()
-      )
-    }
-    (header +: sources).mkString("\n\n")
+  /** The API reference (5.1): a header with the notation, and the parts of the source text of the guest API that
+    * compile in a cell of `mode` (`ApiReference`).
+    */
+  lazy val reference: String = s"$header\n\n${ApiReference(mode)}"
 
   private val header = """// The guest API of the code harness. A cell is Scala 3 with capture checking and safe mode.
       |// The bare type of a capability reads, and `T^` also changes something. Each function of `api` takes its

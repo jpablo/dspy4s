@@ -289,3 +289,90 @@ class WorkLaws extends munit.FunSuite:
       assert(eventually(15)(running("sleep 319").isEmpty), "the process of the exec stays after the stop")
     }
   }
+
+  // ── The prompt and the folder (the live sessions of 2026-11-10) ──
+
+  /** The text of the policy call `n` of `model`. */
+  private def promptOf(model: ScriptLm, n: Int): String =
+    model.requests.lift(n).getOrElse(fail(s"no policy call $n")).messages.flatMap(_.text).mkString("\n")
+
+  /** True when `text` has a definition with the name `name`. */
+  private def defines(text: String, name: String): Boolean =
+    raw"\bdef\s+${java.util.regex.Pattern.quote(name)}\b".r.findFirstIn(text).nonEmpty
+
+  test("Work: the prompt of a work session names the calls of workMode and no call that workMode refuses") {
+    // The model of a live session said that it could use the network, other sessions and rlm.
+    val model = ScriptLm(policy("FAKE-HELLO", None))
+    work(model) { (_, handle) =>
+      assertEquals(handle.send(message("m1")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+      val text    = promptOf(model, 0)
+      val missing = Vector("read", "write", "edit", "exec", "spawn", "llmQuery", "store").filterNot(defines(text, _))
+      val refused = Vector("httpGet", "rlm", "rlmBatched", "tell", "start", "sessions", "observe", "zoom")
+        .filter(defines(text, _))
+      assert(missing.isEmpty && refused.isEmpty, s"missing: $missing; refused: $refused")
+    }
+  }
+
+  test("Work: the task of a chat turn names the folder, asks for no submit, and names no input fields") {
+    // A chat ends a turn with a step with no code, so the text of a program call is wrong for it.
+    val model = ScriptLm(policy("FAKE-HELLO", None))
+    work(model) { (scope, handle) =>
+      assertEquals(handle.send(message("m1")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+      val text = promptOf(model, 0)
+      assert(text.contains(scope.toString), text)
+      assert(!text.contains("Give the result with submit"), text)
+      assert(!text.contains("The task has no input fields"), text)
+    }
+  }
+
+  test(
+    "Work: open refuses a new session whose folder does not exist or is a file, names the path, and makes no journal"
+  ) {
+    // A live session opened in a folder that did not exist, and its first exec gave an error that misled the model.
+    val place = Place()
+    try withRoot { root =>
+        val env     = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
+        val runtime = Models.withModel(ScriptLm())(WorkRuntime.forWork(env, limits))
+        val missing = place.root.resolve("fake-missing")
+        val file    = Files.writeString(place.root.resolve("fake-file.txt"), "FAKE")
+        withHost(root, runtime) { host =>
+          Vector(missing, file).zipWithIndex.foreach { (folder, n) =>
+            host.open(id(n + 1), Some(WorkRuntime.config(folder, "fake-model", limits))) match
+              case Left(HostError.OpenFailed(reason)) => assert(reason.contains(folder.toString), reason)
+              case other                              => fail(s"$folder: $other")
+            assert(!Files.exists(SessionFile.pathOf(root, id(n + 1))), s"the open made a journal for $folder")
+          }
+        }
+      }
+    finally place.close()
+  }
+
+  test("Work: after the folder of a session is gone, an exec names the folder and says that it does not exist") {
+    sandboxed()
+    val model = ScriptLm(
+      policy("FAKE-FIRST", None),
+      policy("run", Some("""println(exec("pwd"))""")),
+      policy("FAKE-SECOND", None)
+    )
+    val place = Place()
+    try withRoot { root =>
+        val folder  = Files.createDirectory(place.root.resolve("fake-folder"))
+        val env     = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
+        val runtime = Models.withModel(model)(WorkRuntime.forWork(env, limits))
+        withHost(root, runtime) { host =>
+          val handle = opened(host, id(1), Some(WorkRuntime.config(folder, "fake-model", limits)))
+          assertEquals(handle.send(message("m1")), Right(()))
+          assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+          WorkRuntime.remove(folder)
+          assertEquals(handle.send(message("m2")), Right(()))
+          assert(eventually(60)(outcomes(handle).size == 2), entries(handle).toString)
+          // The model or the person reads the reason: in the output of the cell, or in the end of the turn.
+          val seen = entries(handle).map(_.toString)
+          assert(seen.exists(e => e.contains(folder.toString) && e.contains("does not exist")), seen.mkString("\n"))
+          assert(!seen.exists(_.contains("Cannot run program")), seen.mkString("\n"))
+        }
+      }
+    finally place.close()
+  }

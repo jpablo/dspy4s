@@ -354,9 +354,9 @@ object ScalaRepl:
     ).map(c => Paths.get(c.getProtectionDomain.getCodeSource.getLocation.toURI).toString).distinct
       .mkString(File.pathSeparator)
 
-  /** The preamble of a mode (5.2): one given for each capability that the mode gives, and the `Turn`. The bindings come
-    * from the registry with the key of this REPL. Each given reads its handler inline from the registry, before safe
-    * mode starts, so a cell cannot name the bindings.
+  /** The preamble of a mode (5.2): one given for each capability that the mode gives (`Capability.all`), and the
+    * `Turn`. The bindings come from the registry with the key of this REPL. Each given reads its handler inline from
+    * the registry, before safe mode starts, so a cell cannot name the bindings.
     *
     * The preamble has no top-level val of the `Bindings`. With such a val, the capture checker of the 3.10 nightly gave
     * each Array result of a later cell in safe mode a capture set, so `xs.map(f).sum` did not compile.
@@ -364,11 +364,11 @@ object ScalaRepl:
   def givensFor(mode: Mode, key: String): Vector[String] =
     val bindings = s"""dspy4s.harness.repl.HostBindings.take("$key")"""
 
-    def bind(name: String, tpe: String, field: String, access: Access, read: Boolean): Option[String] =
-      access match
-        case Access.Full               => Some(s"@assumeSafe given $name: ($tpe^) = $bindings.$field.get")
-        case Access.Read if read       => Some(s"@assumeSafe given $name: $tpe = $bindings.$field.get")
-        case Access.Read | Access.None => None
+    def bind(c: Capability): Option[String] =
+      val value = s"$bindings.${c.field}.get"
+      if c.givenIn(mode, full = true) then Some(s"@assumeSafe given ${c.givenName}: (${c.name}^) = $value")
+      else if c.givenIn(mode, full = false) then Some(s"@assumeSafe given ${c.givenName}: ${c.name} = $value")
+      else None
     Vector(
       """import language.experimental.captureChecking
         |import caps.*
@@ -377,28 +377,11 @@ object ScalaRepl:
       s"@assumeSafe given turn: Turn = $bindings.turn",
       s"""@assumeSafe def submitValue[A](value: A)(using d: Data[A]): Nothing =
          |  dspy4s.harness.repl.HostBindings.submit("$key", d.encode(value))""".stripMargin
-    ) ++ Vector(
-      bind("files", "Files", "files", mode.files, read = true),
-      bind("shell", "Shell", "shell", mode.shell, read = false),
-      bind("net", "Network", "network", mode.network, read = false),
-      bind("llm", "Llm", "llm", mode.llm, read = false),
-      bind("state", "Store", "store", mode.store, read = true),
-      bind("peers", "Sessions", "sessions", mode.sessions, read = true),
-      bind("children", "Children", "children", mode.children, read = false)
-    ).flatten
+    ) ++ Capability.all.flatMap(bind)
 
   /** The capabilities that the mode gives and that the bindings do not have. */
   private def absentHandlers(mode: Mode, b: Bindings): Vector[String] =
-    def needs(access: Access, read: Boolean): Boolean = access == Access.Full || (read && access == Access.Read)
-    Vector(
-      ("files", needs(mode.files, read = true), b.files.isDefined),
-      ("shell", needs(mode.shell, read = false), b.shell.isDefined),
-      ("network", needs(mode.network, read = false), b.network.isDefined),
-      ("llm", needs(mode.llm, read = false), b.llm.isDefined),
-      ("store", needs(mode.store, read = true), b.store.isDefined),
-      ("sessions", needs(mode.sessions, read = true), b.sessions.isDefined),
-      ("children", needs(mode.children, read = false), b.children.isDefined)
-    ).collect { case (name, needed, present) if needed && !present => name }
+    Capability.all.collect { case c if c.givenIn(mode, full = false) && c.handler(b).isEmpty => c.field }
 
   /** The error of the capture checker that the second try answers (6). Its text spans two lines of the diagnostic. */
   private def isCaptureOfObject(text: String): Boolean =

@@ -20,7 +20,8 @@ enum HostError derives CanEqual:
   case Fenced
 
   /** The host could not open the session: its file or folder, a file that is not a journal, a session that another host
-    * has open, a new session with no configuration, or a mode above the ceiling of the session.
+    * has open, a new session with no configuration, a scope whose folder is not there, or a mode above the ceiling of
+    * the session.
     */
   case OpenFailed(message: String)
 

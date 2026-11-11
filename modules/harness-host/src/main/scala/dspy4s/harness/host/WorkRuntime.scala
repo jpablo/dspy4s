@@ -23,8 +23,8 @@ final case class WorkEnv(home: Path, hosts: HostList, backend: Option[Backend], 
 /** The runtime of a work session (8.1): the user owns the session, and each message starts a chat turn.
   *
   *   - A turn runs with the effects of a harness (`HarnessEffects`): the `policy` leaf, the window strategy, and a REPL
-  *     with the mode and the preamble of the configuration. The task of the policy is `WorkRuntime.instructions` and
-  *     the scope. The window gives the messages and the replies of the earlier turns (7).
+  *     with the mode and the preamble of the configuration. The task of the policy is `WorkRuntime.chatTask`: the
+  *     instructions and the scope. The window gives the messages and the replies of the earlier turns (7).
   *   - The handlers are the handlers of the mode through `recorded`, and the recorder calls `guarded` for each call
   *     (5.5). `exec` and the jobs run in the sandbox, in the scope of the session, through `JobShell`.
   *   - `llmQuery` goes to the `subQuery` leaf. A work session of phase 7 has no `Children^`, so no `rlm`.
@@ -80,10 +80,9 @@ final class WorkRuntime(
             limits.cellLimit,
             stops = () => journal.state.stopping
           )
-        val task    = Harness.task(s"${WorkRuntime.instructions}\n\nThe folder of the session: $scope.", Vector.empty)
         val effects = HarnessEffects(
-          task,
-          Harness.apiReference,
+          WorkRuntime.chatTask(scope),
+          Harness.apiReference(config.mode),
           policy,
           Window,
           journal,
@@ -207,6 +206,12 @@ object WorkRuntime:
       "and the code of one cell, or only a text. The cell runs, and the next step sees its output. Use the functions " +
       "of the API reference. Keep a value for a later cell or turn in a val or in the store. A step with no code " +
       "ends the turn, and its text is the reply to the person. If a call needs an approval, end the turn and ask."
+
+  /** The task of each chat turn of a work session in the folder `scope`: `instructions` and the folder. A chat turn
+    * ends with a step with no code, and its text is the reply. So the task has no text about input fields and no text
+    * about `submit`. The task of a program call (`Harness.task`) has both.
+    */
+  def chatTask(scope: Path): String = s"$instructions\n\nThe folder of the session: $scope."
 
   /** The first rules of 5.5: in a mode with `Network^`, `exec` and `spawn` with the prefix `git push` get `Ask`. In
     * another mode the sandbox already stops a push, so the guard has no rule.

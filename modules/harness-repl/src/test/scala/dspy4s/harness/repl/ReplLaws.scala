@@ -170,6 +170,12 @@ class ReplLaws extends munit.FunSuite:
     assert(!hint(error).exists(_.contains("case Array(x, y)")), hint(error).toString)
   }
 
+  test("Hints: a code in a ``` fence, whose first line does not parse") {
+    // The parse error of a live session of 2026-11-10 had no hint, and the model did the same thing for five steps.
+    val error = "Line 1: empty quoted identifier"
+    assert(hint(error).exists(_.contains("```")), hint(error).toString)
+  }
+
   test("Hints: another error gets no hint") {
     assertEquals(hint("Not found: value foo"), None)
   }

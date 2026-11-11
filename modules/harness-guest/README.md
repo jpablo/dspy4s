@@ -24,7 +24,8 @@ the real handlers.
   a `Data[A]`. Safe code cannot name the zio-blocks `Schema`, so the guest API has its own type class. `Data` encodes a
   value as zio-blocks `Json`, decodes it with a path for each error, and gives its `DataShape`.
 - **The source text is the API reference.** The build copies `Guest.scala` and `SessionTypes.scala` into the resources
-  of the module. The harness and the MCP server give this text to the model as the API reference.
+  of the module. The harness and the MCP server give the parts of this text that compile in the mode of the session
+  to the model as the API reference (`ApiReference` of `harness-repl`).
 
 ```scala
 // A cell in a mode with Files^ and Store^, for a task with an Int output.

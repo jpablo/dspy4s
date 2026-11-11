@@ -259,7 +259,8 @@ lazy val harnessGuest = (project in file("modules/harness-guest"))
   .settings(commonSettings)
   .settings(name := "dspy4s-harness-guest")
   .settings(
-    // The API reference (5.1) is the source text of the guest API. The MCP server gives it to another agent.
+    // The API reference (5.1) comes from the source text of the guest API. `ApiReference` of harness-repl keeps the
+    // parts that compile in a mode, and the harness and the MCP server give it.
     Compile / resourceGenerators += Def.task {
       val sources = (Compile / scalaSource).value / "dspy4s" / "harness" / "guest"
       val target  = (Compile / resourceManaged).value / "dspy4s" / "harness" / "guest"
