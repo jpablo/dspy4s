@@ -111,7 +111,8 @@ private def close(words: List[String]): Option[Line] =
     case "abandoned" :: reason if reason.nonEmpty =>
       Some(Line.Close(SessionOutcome.Abandoned(reason.mkString(" ")), reason.mkString(" ")))
     case List("replaced", id) if SessionId.valid(id) =>
-      Some(Line.Close(SessionOutcome.Replaced(SessionId(id)), s"$closed: replaced by $id"))
+      // The outcome names the new session, so the reason does not name it again.
+      Some(Line.Close(SessionOutcome.Replaced(SessionId(id)), closed))
     case _ => None
 
 /** The reason of a `Close` that the person typed. */

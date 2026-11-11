@@ -357,7 +357,11 @@ object WorkRuntime:
 
   /** The task of each turn of the session `session` with `config` in the folder `scope` (8.6, 8.7): `Controller.task`
     * for the controller (`Controller.id`), the goal of a session whose owner is a session with the rule to end the work
-    * with `submit` and its result, and `chatTask` for a session of the person.
+    * with a cell that calls `submit(...)`, and `chatTask` for a session of the person.
+    *
+    * The preamble of such a session has `submit(value: String)`, and the task does not show the preamble. So the rule
+    * names the String and gives an example call that compiles. In two live runs, a rule with no call made the model
+    * write `submit: 42` as the text of its reply. Then each turn ended in `Replied`, and the work never ended.
     */
   def taskOf(session: SessionId, config: SessionConfig, scope: Path): String =
     if session == Controller.id then Controller.task(scope)
@@ -365,8 +369,9 @@ object WorkRuntime:
       (config.owner, config.goal) match
         case (Owner.Session(_), Some(goal)) =>
           s"${chatTask(scope)}\n\nThe goal of the session: $goal\n\nAnother session started this session, and it " +
-            "gets a report at the end of each turn. When the work is done, end it with submit and the result, in " +
-            "one text."
+            "gets a report at the end of each turn. When you complete the work, write a cell that calls submit with " +
+            "the result as one String, for example submit(\"The file has 42 lines.\"). A reply with no cell does " +
+            "not give the result to the other session."
         case _ => chatTask(scope)
 
   /** The configuration of a session that `caller`, with the configuration `parent`, starts with `goal` in `scope` (8.2,

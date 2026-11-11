@@ -2,7 +2,17 @@ package dspy4s.harness.cli
 
 import dspy4s.harness.host.jobName
 import dspy4s.harness.textPrefix
-import dspy4s.harness.kernel.{ArgMatch, EffectResult, Entry, GuardRule, JobSelector, Logged, Source, TurnOutcome}
+import dspy4s.harness.kernel.{
+  ArgMatch,
+  EffectResult,
+  Entry,
+  GuardRule,
+  JobSelector,
+  Logged,
+  SessionOutcome,
+  Source,
+  TurnOutcome
+}
 import zio.blocks.schema.json.Json
 
 /** The most lines of the output of a cell that the terminal shows. */
@@ -28,7 +38,9 @@ private val CommandChars = 160
   *     call, which is the `seq` of the entry (5.5).
   *   - `TurnEnded`: the outcome, apart from `Replied`, whose text the `Acted` already showed.
   *   - `StopRequested`, `JobsStopRequested`, `Granted` and `Ended`: one line each. A stopped job has its `jobName`.
-  *   - An `Input` from a source that is not `User`, for example the message at the end of a job: its text.
+  *     `Ended` gives the outcome in words (`outcomeWords`) and then the reason, one time.
+  *   - An `Input` from a source that is not `User`, for example the message at the end of a job: its text after the
+  *     sender in words (`sourceWords`), for example `[the session s9] text`.
   *   - The other entries give none.
   */
 def entryText(logged: Logged, reasoning: ReasoningView = ReasoningView.Short): Option[String] =
@@ -118,9 +130,28 @@ private def rawText(logged: Logged, reasoning: ReasoningView): Option[String] =
     case Entry.StopRequested(reason)                                  => Some(s"The turn stops: $reason.")
     case Entry.JobsStopRequested(which, reason)                       => Some(s"${jobsWords(which)}: $reason.")
     case Entry.Granted(_, rule, lifetime)                             => Some(s"Allowed ($lifetime): ${callText(rule)}.")
-    case Entry.Ended(outcome, reason)                                 => Some(s"The session ended: $outcome, $reason.")
-    case Entry.Input(_, text, _) if logged.meta.source != Source.User => Some(s"[${logged.meta.source}] $text")
-    case _                                                            => None
+    case Entry.Ended(outcome, reason)                                 => Some(s"The session ended: ${outcomeWords(outcome)}, $reason.")
+    case Entry.Input(_, text, _) if logged.meta.source != Source.User =>
+      Some(s"[${sourceWords(logged.meta.source)}] $text")
+    case _ => None
+
+/** The sender of a message in words, for example `the session s9` for `Child(s9)`. */
+private[cli] def sourceWords(source: Source): String =
+  source match
+    case Source.User               => "the person"
+    case Source.Controller         => "the controller"
+    case Source.Harness            => "the harness"
+    case Source.Policy             => "the model"
+    case Source.Child(session)     => s"the session ${session.value}"
+    case Source.Parent(session, _) => s"the parent session ${session.value}"
+
+/** The outcome of a session in words, with no reason: the `Ended` entry holds the reason. */
+private[cli] def outcomeWords(outcome: SessionOutcome): String =
+  outcome match
+    case SessionOutcome.Merged       => "merged"
+    case SessionOutcome.Parked       => "parked"
+    case SessionOutcome.Abandoned(_) => "abandoned"
+    case SessionOutcome.Replaced(by) => s"replaced by ${by.value}"
 
 /** The jobs of a stop in words, with the name of one job. */
 private def jobsWords(which: JobSelector): String =

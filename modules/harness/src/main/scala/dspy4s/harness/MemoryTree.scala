@@ -112,6 +112,10 @@ final class MemoryTree(
       )
       open.copy(history = History(first +: open.history.messages))
 
+  /** The text of the part `ref` of the memory: the message of a part of level 0, or the lines of its two halves with
+    * their references. A part that the memory does not have gives an error with the top parts (`Memory.roots`), so the
+    * model can zoom one of them and go down, and does not guess a reference.
+    */
   override def zoom(d: MemoryState, ref: String): Either[String, String] =
     NodeId.parse(ref) match
       case None     => Left(s"$ref is not a reference of the memory. A reference is level.index, for example 3.5.")
@@ -119,7 +123,7 @@ final class MemoryTree(
           case (Some(Left(message)), _)                    => Right(message.text)
           case (Some(Right((older, newer))), Some((a, b))) =>
             Right(s"[${a.ref}] ${older.text}\n[${b.ref}] ${newer.text}")
-          case _ => Left(s"the memory has no part $ref yet")
+          case _ => Left(MemoryTree.noPart(d.memory, ref))
 
   /** Builds the ready nodes in rounds until no node is ready. The nodes of one round need only the nodes of the rounds
     * before, so their lines come at the same time, at most `width` at a time, and they build in the order of `ready`.
@@ -223,6 +227,19 @@ object MemoryTree:
       summaries,
       width.max(1)
     )
+
+  /** The error of a zoom into the part `ref`, which the memory `m` does not have. It names the top parts of the memory,
+    * so the model can zoom one of them and go down. A memory with no message gives an error that says so.
+    */
+  private[harness] def noPart(m: Memory, ref: String): String =
+    val tops = Memory.roots(m.log.size.toLong).map(_.ref)
+    if tops.isEmpty then s"the memory has no part $ref, because the memory is empty"
+    else
+      val named =
+        if tops.size == 1 then s"The top part of the memory is ${tops.head}"
+        else s"The top parts of the memory are ${tops.mkString(", ")}"
+      s"the memory has no part $ref yet. $named. A zoom of a part shows its two halves with their references, or the " +
+        "message of a part of level 0. So zoom a top part, and then zoom a half of it."
 
   /** The characters that a view of `high` parts can take: each line of 512 bytes, and its reference. */
   def room(high: Int): Int = high * (MemoryLine.MaxBytes + 32) + Header.length

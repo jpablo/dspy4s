@@ -47,8 +47,10 @@ class DeskLaws extends munit.FunSuite:
     val controllerHandle: NamedHandle                                = NamedHandle("controller")
     val other: NamedHandle                                           = NamedHandle("s3")
     val released: ConcurrentLinkedQueue[(SessionId, SessionOutcome)] = ConcurrentLinkedQueue()
-    val confirmed: ConcurrentLinkedQueue[ReleaseItem]                = ConcurrentLinkedQueue()
-    def cards: Vector[SessionCard]                                   = Vector(card(2), card(3))
+    // The session whose feed ends at the end of its release, as the host ends a session after `Close`.
+    @volatile var endsAtRelease: Option[NamedHandle]  = None
+    val confirmed: ConcurrentLinkedQueue[ReleaseItem] = ConcurrentLinkedQueue()
+    def cards: Vector[SessionCard]                    = Vector(card(2), card(3))
     // The session s4 has ended: open says so, and reopen opens it.
     val ended: NamedHandle                                    = NamedHandle("s4")
     def open(id: SessionId): Either[HostError, SessionHandle] =
@@ -69,7 +71,14 @@ class DeskLaws extends munit.FunSuite:
           else
             confirmed.add(item): Unit
             ReleaseStep(item, if confirm(item) then ReleaseResult.Done else ReleaseResult.Skipped("no confirmation"))
-        })
+        }).map { steps =>
+          // The printer of the client polls each 50 ms at most, so it sees the end before the release returns.
+          endsAtRelease.filter(_.id == id).foreach { handle =>
+            handle.end()
+            Thread.sleep(300)
+          }
+          steps
+        }
 
   /** Runs the loop of a client of `NamedHandle("s2")` with `desk` and the lines `lines`, and gives its output. */
   private def run(lines: String, desk: Option[Desk]): String =
@@ -131,6 +140,44 @@ class DeskLaws extends munit.FunSuite:
     assertEquals(desk.released.asScala.toVector, Vector((SessionId("s2"), SessionOutcome.Abandoned("not needed"))))
     assertEquals(desk.confirmed.asScala.toVector, Vector(remove))
     assert(output.contains("no confirmation"), output)
+  }
+
+  test("Desk: after /close of the session that the client shows, the client shows the controller and goes on") {
+    val desk  = FakeDesk()
+    val shown = NamedHandle("s2")
+    desk.endsAtRelease = Some(shown)
+    val out   = ByteArrayOutputStream()
+    val lines = "/close abandoned not needed\nno\nafter the close\n/quit\n"
+    val clean = Cli.loop(shown, BufferedReader(StringReader(lines)), PrintStream(out, true, UTF_8), desk = Some(desk))
+    val text  = String(out.toByteArray, UTF_8)
+    assert(clean, text)
+    assert(text.contains("The client shows the session controller."), text)
+    assertEquals(desk.controllerHandle.texts, Vector("after the close"), text)
+    assertEquals(shown.texts, Vector.empty, text)
+  }
+
+  test("Desk: a message of another session names the session, and the end names its outcome and its reason once") {
+    val from = Support.logOf(1000L, Entry.Input(RequestId("r1"), "FAKE-REPORT", Map.empty)).head
+    val text = entryText(from.copy(meta = from.meta.copy(source = Source.Child(SessionId("s9")))))
+    assertEquals(text, Some("[the session s9] FAKE-REPORT"))
+    val controller = entryText(from.copy(meta = from.meta.copy(source = Source.Controller)))
+    assertEquals(controller, Some("[the controller] FAKE-REPORT"))
+    def ended(outcome: SessionOutcome, reason: String): String =
+      entryText(Support.logOf(1000L, Entry.Ended(outcome, reason)).head).getOrElse(fail("no text"))
+    assertEquals(
+      ended(SessionOutcome.Abandoned("not needed"), "not needed"),
+      "The session ended: abandoned, not needed."
+    )
+    assertEquals(ended(SessionOutcome.Merged, "FAKE"), "The session ended: merged, FAKE.")
+    assertEquals(ended(SessionOutcome.Parked, "FAKE"), "The session ended: parked, FAKE.")
+    assertEquals(ended(SessionOutcome.Replaced(SessionId("s5")), "FAKE"), "The session ended: replaced by s5, FAKE.")
+  }
+
+  test("Desk: cardText says 1 file made, and N files made for each other number") {
+    assert(cardText(card(2)).endsWith("(1 file made)"), cardText(card(2)))
+    val two = card(3).copy(made = Vector("/fake/a", "/fake/b"))
+    assert(cardText(two).endsWith("(2 files made)"), cardText(two))
+    assert(cardText(card(3).copy(made = Vector.empty)).endsWith("(0 files made)"))
   }
 
   test("Desk: /reopen ID reads, and an id of /open, /reopen or /close replaced that is not valid is not a command") {
@@ -196,7 +243,12 @@ private final class NamedHandle(name: String) extends SessionHandle:
       case Command.Send(_, text, _) => sent.add(text): Unit
       case _                        => ()
     Right(state)
-  def state: SessionState                                                            = SessionState.initial.copy(closed = false)
+  @volatile private var closedFlag = false
+
+  /** The end of the session: its feed ends, and its state is closed. */
+  def end(): Unit = closedFlag = true
+
+  def state: SessionState                                                            = SessionState.initial.copy(closed = closedFlag)
   def jobStatus: Map[dspy4s.harness.kernel.EffectId, dspy4s.harness.guest.JobStatus] = Map.empty
   def read(after: Long): Vector[Logged]                                              = Vector(reply).filter(_.seq > after)
   def subscribe(capacity: Int): Feed                                                 =
@@ -204,5 +256,5 @@ private final class NamedHandle(name: String) extends SessionHandle:
       private val queue                                          = ConcurrentLinkedQueue[Either[Behind, Logged]](java.util.List.of(Right(reply)))
       def poll(waitMillis: Long): Option[Either[Behind, Logged]] =
         Option(queue.poll()).orElse { Thread.sleep(waitMillis.min(50)); None }
-      def ended: Boolean = false
+      def ended: Boolean = closedFlag
       def close(): Unit  = ()

@@ -18,7 +18,7 @@ import java.nio.file.Path
 import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.{CountDownLatch, TimeUnit}
-import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong, AtomicReference}
 import scala.util.Try
 import scala.util.control.NonFatal
 
@@ -224,8 +224,13 @@ object Cli:
     *     how to stop it (10.3).
     *   - An error of `commandsFor` and a refused command print one line, and the loop goes on.
     *   - After `Behind`, the client reads the journal after its last `seq`, so it shows each entry once.
-    *   - It ends at `/quit`, at the end of the input, or when the feed ends, for example after `Close` or a failed
-    *     write. It gives false only when the feed ended and the session did not close, as after a failed write.
+    *   - With no desk, it ends at `/quit`, at the end of the input, or when the feed ends, for example after `Close` or
+    *     a failed write. It gives false only when the feed ended and the session did not close, as after a failed
+    *     write.
+    *   - With a desk, only `/quit` and the end of the input end it. The end of the feed of the session that the client
+    *     shows does not end it. When that session ends in another way than a `/close` of this client, for example after
+    *     a failed write, the client prints one line that names `/controller` and `/open ID`. Then it waits for the next
+    *     line.
     *   - In the script mode (`script`), each line waits until the session has no open turn, and each command goes
     *     through `run`, so the commands commit in the order of the lines. The end of the input also waits for the open
     *     turn. So `printf 'm1\nm2\n' | cli --script` gives two turns, and the second message starts the second turn. A
@@ -235,23 +240,33 @@ object Cli:
     *     ID` opens an ended session again and shows it, and `/controller` shows the controller: the client then
     *     subscribes to the feed of that session, prints its entries, and sends the commands to it. `/close OUTCOME`
     *     prints the release plan, asks the person to confirm each irreversible item with a line `yes`, and runs the
-    *     release through the desk. With no desk, these lines print that the client has one session, and `/close
-    *     OUTCOME` sends `Close` with no release.
+    *     release through the desk. After a release that ran, the client shows the controller. With no desk, these lines
+    *     print that the client has one session, and `/close OUTCOME` sends `Close` with no release.
     */
   def loop(handle: SessionHandle, console: ClientConsole, script: Boolean, desk: Option[Desk]): Boolean =
     val done                      = CountDownLatch(1)
     val reasoning                 = AtomicReference(ReasoningView.Short)
     def print(text: String): Unit = console.print(printable(text))
+    // True while the reader runs a desk line. A release ends the session that the client shows, and then the client
+    // shows the controller, so the printer prints no end notice for that session.
+    val atDesk = AtomicBoolean(false)
     // The state before the feed, so an entry that commits between the two reads is in the feed or in the read after
     // it, and `Shown` shows it once (10.2: a client misses nothing).
-    val view    = View(handle, handle.state.nextSeq - 1, () => reasoning.get, print)
+    val view = View(handle, handle.state.nextSeq - 1, () => reasoning.get, print)
+    // With a desk, the end of the feed does not end the loop. The printer prints the end notice once, and it waits
+    // until the reader shows another session or the loop ends.
     val printer = Thread.ofPlatform().daemon(true).name("harness-cli-printer").start { () =>
-      while done.getCount > 0 && !view.ended do view.poll(200)
+      while done.getCount > 0 && (desk.nonEmpty || !view.ended) do
+        if !view.ended then view.poll(200)
+        else
+          if desk.nonEmpty && !atDesk.get then view.endOnce().foreach(id => print(endedText(id)))
+          done.await(200, TimeUnit.MILLISECONDS): Unit
       done.countDown()
     }
-    // The script mode: the reader waits until the session has no open turn, or until the loop ends.
+    // The script mode: the reader waits until the session has no open turn, until its feed ends, or until the loop
+    // ends.
     def idle(): Unit =
-      while view.handle.state.position != Position.NoTurn && !done.await(50, TimeUnit.MILLISECONDS) do ()
+      while !view.ended && view.handle.state.position != Position.NoTurn && !done.await(50, TimeUnit.MILLISECONDS) do ()
     // The rule of the entry `seq` of the session that the client shows, when that entry asked for an approval (5.5).
     def asked(seq: Long): Option[GuardRule] =
       view.handle.read(seq - 1).headOption.filter(_.seq == seq).collect {
@@ -269,8 +284,11 @@ object Cli:
           print(statusText(now, current.jobStatus, pendingCalls(now, current.read(now.lastTurn))))
         case Line.Help                            => print(helpText)
         case _ if deskLine(parsed, desk.nonEmpty) =>
-          val next = deskStep(desk, parsed, current, console, print)
-          if next ne current then view.show(next)
+          atDesk.set(true)
+          try
+            val next = deskStep(desk, parsed, current, console, print)
+            if next ne current then view.show(next)
+          finally atDesk.set(false)
         case Line.Reasoning(next) =>
           reasoning.set(next)
           print(s"The client now shows ${reasoningWords(next)} of each step.")
@@ -327,8 +345,8 @@ object Cli:
       case _                                                               => false
 
   /** Runs a desk line of the loop (8.7), and gives the session that the client shows after it. The confirmation of an
-    * irreversible item of a release is the next line of `console`. A `/close` of the controller prints that the
-    * controller never ends.
+    * irreversible item of a release is the next line of `console`. A release ends the session, so after a release that
+    * ran, it gives the controller. A `/close` of the controller prints that the controller never ends.
     */
   private def deskStep(
       desk   : Option[Desk],
@@ -361,11 +379,11 @@ object Cli:
           case Line.Reopen(id)             => shown(d.reopen(id), id)
           case Line.Controller             => shown(d.controller, Controller.id)
           case Line.Close(outcome, reason) =>
-            release(d, handle, outcome, reason, console, print)
-            handle
+            if release(d, handle, outcome, reason, console, print) then shown(d.controller, Controller.id) else handle
           case _ => handle
 
   /** `/close OUTCOME` with a desk (8.7): the plan, a question for each irreversible item, the release, and its steps.
+    * It gives true when the release ran, so the session ended.
     */
   private def release(
       desk   : Desk,
@@ -374,11 +392,15 @@ object Cli:
       reason : String,
       console: ClientConsole,
       print  : String => Unit
-  ): Unit =
-    if handle.id == Controller.id then print("The controller never ends. Type /open ID to close a work session.")
+  ): Boolean =
+    if handle.id == Controller.id then
+      print("The controller never ends. Type /open ID to close a work session.")
+      false
     else
       desk.planOf(handle.id, outcome) match
-        case Left(error)          => print(s"The session has no release plan: $error")
+        case Left(error) =>
+          print(s"The session has no release plan: $error")
+          false
         case Right((state, plan)) =>
           print(s"The release plan of the session ${handle.id.value}:")
           print(planText(state, plan))
@@ -388,8 +410,16 @@ object Cli:
               case Typed.Text(text) => text.trim == "yes"
               case _                => false
           desk.release(handle.id, outcome, reason, confirm) match
-            case Left(error)  => print(s"The release did not run: $error")
-            case Right(steps) => steps.foreach(step => print(stepText(step)))
+            case Left(error) =>
+              print(s"The release did not run: $error")
+              false
+            case Right(steps) =>
+              steps.foreach(step => print(stepText(step)))
+              true
+
+  /** The end notice of the session `id` with a desk: the session ended, and the commands that show another session. */
+  private def endedText(id: SessionId): String =
+    s"The session ${id.value} ended. Type /controller or /open ID to show another session."
 
 /** The session that a client shows (8.7): its handle, its feed, the last `seq` that the client showed, and the
   * `TurnStarted` of the last turn that the client saw, for the stop notice. `show` changes the session, and it shows
@@ -397,10 +427,20 @@ object Cli:
   */
 private final class View(first: SessionHandle, start: Long, reasoning: () => ReasoningView, print: String => Unit):
   private var current: Watched = opened(first, start)
+  // True after `endOnce` gave the id of `current`.
+  private var told = false
 
   def handle: SessionHandle = synchronized(current.handle)
 
   def ended: Boolean = synchronized(current.feed.ended)
+
+  /** The id of the session that the client shows, after the end of its feed. It gives the id once for each session. */
+  def endOnce(): Option[SessionId] =
+    synchronized {
+      val untold = current.feed.ended && !told
+      if untold then told = true
+      Option.when(untold)(current.handle.id)
+    }
 
   /** One poll of the feed of the session that the client shows. */
   def poll(waitMillis: Long): Unit =
@@ -418,6 +458,7 @@ private final class View(first: SessionHandle, start: Long, reasoning: () => Rea
       current.feed.close()
       // The entries of the last turn: its message comes just before its `TurnStarted`.
       current = opened(next, next.state.lastTurn - 2)
+      told = false
     }
 
   def close(): Unit = synchronized(current.feed.close())

@@ -57,6 +57,15 @@ class WorkLaws extends munit.FunSuite:
 
   // ── The configuration ──
 
+  test("Work: the task of an owned session asks for the call submit(...) in a cell at the end of the work") {
+    val owned = WorkRuntime.config(Path.of("/tmp/fake-scope"), "fake-model", limits)
+      .copy(owner = Owner.Session(Controller.id), goal = Some("fake goal"))
+    val task = WorkRuntime.taskOf(SessionId("fake-owned"), owned, Path.of("/tmp/fake-scope"))
+    assert(task.contains("fake goal"), task)
+    assert(task.contains("submit("), task)
+    assert(!task.contains("in one text"), task)
+  }
+
   test("Work: config gives a chat turn of the user in workMode, the memory tree and the default guard") {
     val scope  = Path.of("/tmp/fake-scope")
     val config = WorkRuntime.config(scope, "fake-model", limits)
