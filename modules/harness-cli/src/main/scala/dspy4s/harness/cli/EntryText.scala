@@ -11,12 +11,18 @@ private val OutputLines = 40
 /** The most characters of the reasoning of a step that `ReasoningView.Short` shows. */
 private val ShortReasoning = 400
 
+/** The most characters of a command that the line of the start of a call shows. */
+private val CommandChars = 160
+
 /** The text of an entry for the terminal (CODE_HARNESS_DESIGN.md, 10.1), or none for an entry that the person does not
   * need to see.
   *
   *   - `StepStarted`: one line, so the person sees that the model works during a long model call.
   *   - `Acted`: the reasoning of the step as `reasoning` sets, the text of the step, and the code of its cell, if any.
   *     Each line of the reasoning starts with a bar, so that the reasoning is different from the text.
+  *   - `EffectStarted` of `exec` or `spawn`: its command in quotes, cut to a few characters with a note of the rest. A
+  *     command can take a long time, and this text shows the person that the session is not stuck. The other calls give
+  *     none, because they are quick.
   *   - `Observed`: the output of the cell, cut to a few lines with a note of the rest.
   *   - `EffectDone` with `NeedsApproval`: the call in quotes, and the commands that answer it with the number of the
   *     call, which is the `seq` of the entry (5.5).
@@ -97,6 +103,7 @@ private def rawText(logged: Logged, reasoning: ReasoningView): Option[String] =
       val parts = reasoningText(thought, reasoning).toVector ++ Vector(text).filter(_.nonEmpty) ++
         code.map(c => s"```scala\n$c\n```")
       Option.when(parts.nonEmpty)(parts.mkString("\n"))
+    case Entry.EffectStarted(_, op, args)   => startText(op, args)
     case Entry.Observed(output, outcome, _) =>
       val lines = output.linesIterator.toVector
       val shown =
@@ -151,3 +158,26 @@ private[cli] def commandIn(args: Json): Option[String] =
   args match
     case Json.Object(fields) => fields.iterator.collectFirst { case ("command", Json.String(text)) => text }
     case _                   => None
+
+/** The text of the start of a call: `$ "command"` for an `exec`, and `[job] $ "command"` for a `spawn`, which starts a
+  * background job. Other calls, and a call with no `command` text, give none.
+  */
+private def startText(op: String, args: Json): Option[String] =
+  val prefix = op match
+    case "exec"  => Some("$ ")
+    case "spawn" => Some("[job] $ ")
+    case _       => None
+  for
+    start   <- prefix
+    command <- commandIn(args)
+  yield start + startCommand(command)
+
+/** `command` in quotes on one line (`inQuotes`), as each command of a model. A command with more than `CommandChars`
+  * units shows its start, with no character cut in two, and a note of the rest. So a long script in a command does not
+  * fill the screen.
+  */
+private def startCommand(command: String): String =
+  if command.length <= CommandChars then inQuotes(command)
+  else
+    val start = textPrefix(command, CommandChars)
+    s"${inQuotes(start)} [${command.length - start.length} more characters]"

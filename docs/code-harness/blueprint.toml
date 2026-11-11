@@ -3202,8 +3202,8 @@ kind = "function"
 name = "entryText"
 ref = "10.1"
 uses = ["logged", "reasoning-view"]
-proof_uses = ["job-name", "text-prefix"]
-text = "The start of a step, the reasoning of a step, the text and the code of a step, and the output of a cell. A pending call shows in quotes, with its number and the commands that answer it. The outcome of a turn, the stops and a stopped job by its name. The other entries give none. Each text loses its control characters."
+proof_uses = ["job-name", "text-prefix", "in-quotes"]
+text = "The start of a step, the reasoning of a step, the text and the code of a step, the command of an exec or a spawn in quotes when it starts, and the output of a cell. A pending call shows in quotes, with its number and the commands that answer it. The outcome of a turn, the stops and a stopped job by its name. The other entries give none. Each text loses its control characters."
 
 [[group]]
 id = "lines"

@@ -1,6 +1,6 @@
 package dspy4s.harness.host
 
-import dspy4s.harness.{CellResult, PolicyReply, Support}
+import dspy4s.harness.{CellResult, Journal, PolicyReply, Support, TurnEffects}
 import dspy4s.harness.Support.{answer, code}
 import dspy4s.harness.guest.Mode
 import dspy4s.harness.kernel.*
@@ -9,8 +9,9 @@ import zio.blocks.schema.json.Json
 
 import java.nio.file.Files
 import java.util.concurrent.atomic.AtomicInteger
-import java.util.concurrent.{CountDownLatch, TimeUnit}
+import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch, TimeUnit}
 import scala.concurrent.duration.*
+import scala.jdk.CollectionConverters.*
 
 /** The laws of the first session host (CODE_HARNESS_DESIGN.md, 10.2 and 10.3), with scripted effects. */
 class HostLaws extends munit.FunSuite:
@@ -29,6 +30,29 @@ class HostLaws extends munit.FunSuite:
       case Left(HostError.OpenFailed(_)) => true
       case _                             => false
 
+  /** A runtime whose activations each answer "hi". `calls` records its calls and the closes of their results in order,
+    * and `openings` records the arguments of each call of `opened`. Each call of `opened` waits `slowMillis` before it
+    * records itself, as the start of a walk can.
+    */
+  private final class OpenedRuntime(slowMillis: Long = 0L) extends SessionRuntime:
+    val calls: ConcurrentLinkedQueue[String]                        = ConcurrentLinkedQueue()
+    val openings: ConcurrentLinkedQueue[(SessionId, SessionConfig)] = ConcurrentLinkedQueue()
+
+    def activate(session: SessionId, config: SessionConfig, journal: Journal, jobs: JobTable): Activation =
+      calls.add("activate"): Unit
+      val made = Support.Script(Vector(answer("hi")))
+      new Activation:
+        def effects: TurnEffects = made
+        def stop(): Unit         = ()
+        def unclean: Boolean     = false
+        def close(): Unit        = calls.add("close the activation"): Unit
+
+    override def opened(session: SessionId, config: SessionConfig): AutoCloseable =
+      Thread.sleep(slowMillis)
+      calls.add("opened"): Unit
+      openings.add((session, config)): Unit
+      () => calls.add("close the opened part"): Unit
+
   // ── Open, reopen and the catalog ──
 
   test("Host: open of a new id makes its file and commits Activated, and a second open gives the same handle") {
@@ -40,6 +64,82 @@ class HostLaws extends munit.FunSuite:
           case Vector(Entry.Activated(_, settings)) => assertEquals(settings, config())
           case other                                => fail(s"not one Activated: $other")
         assert(opened(host, id(1)) eq first)
+      }
+    }
+  }
+
+  test("Host: an open calls opened once with its configuration, and the end closes the result after the activation") {
+    withRoot { root =>
+      val runtime = OpenedRuntime()
+      withHost(root, runtime) { host =>
+        val first = opened(host, id(1), Some(config(steps = 5)))
+        assert(opened(host, id(1), Some(config(steps = 5))) eq first, "a second open gave another session")
+        assertEquals(runtime.openings.asScala.toVector, Vector((id(1), config(steps = 5))))
+        assertEquals(first.send(message("m1")), Right(()))
+        assert(eventually()(outcomes(first) == Vector(TurnOutcome.Replied("hi"))), entries(first).toString)
+        assertEquals(first.run(Command.Close(SessionOutcome.Parked, "FAKE")).map(_.closed), Right(true))
+        assert(eventually()(runtime.calls.size == 4), runtime.calls.toString)
+        assertEquals(
+          runtime.calls.asScala.toVector,
+          Vector("opened", "activate", "close the activation", "close the opened part")
+        )
+        // A reopen with no configuration has the configuration of the journal.
+        opened(host, id(1), None): Unit
+        assertEquals(runtime.openings.asScala.toVector, Vector.fill(2)((id(1), config(steps = 5))))
+      }
+      assertEquals(runtime.calls.asScala.toVector.drop(4), Vector("opened", "close the opened part"))
+    }
+  }
+
+  test("Host: a reopen whose journal has a waiting message calls opened before the activation of its turn") {
+    withRoot { root =>
+      // The message m2 came during a turn, and then the host crashed. The repair ends that turn and keeps m2 waiting,
+      // so the Activate of the reopen starts a turn for m2 at once, and a worker makes its activation.
+      val crashed = Support.logOf(
+        1000L,
+        Entry.Activated(Support.versions, config(steps = 5)),
+        Entry.Input(RequestId("m1"), "x", Map.empty),
+        Entry.TurnStarted,
+        Entry.StepStarted(0),
+        Entry.Input(RequestId("m2"), "y", Map.empty)
+      )
+      val file = SessionFile.open(SessionFile.pathOf(root, id(1)), id(1)).fold(e => fail(e), identity)
+      assertEquals(file.append(crashed, flush = true), Right(()))
+      file.close()
+      // A slow opened: with opened after the Activate, the worker would call activate first.
+      val runtime = OpenedRuntime(slowMillis = 300L)
+      withHost(root, runtime) { host =>
+        val handle = opened(host, id(1), None)
+        assert(
+          eventually()(outcomes(handle) == Vector(TurnOutcome.Crashed, TurnOutcome.Replied("hi"))),
+          entries(handle).toString
+        )
+        assertEquals(runtime.calls.asScala.toVector, Vector("opened", "activate"))
+        assertEquals(runtime.openings.asScala.toVector, Vector((id(1), config(steps = 5))))
+      }
+    }
+  }
+
+  test("Host: an open whose opened throws gives OpenFailed with the message, commits nothing, and frees the lock") {
+    withRoot { root =>
+      val failing = new SessionRuntime:
+        def activate(session: SessionId, config: SessionConfig, journal: Journal, jobs: JobTable): Activation =
+          throw IllegalStateException("FAKE-NO-ACTIVATION")
+        override def opened(session: SessionId, config: SessionConfig): AutoCloseable =
+          throw IllegalStateException("FAKE-NO-OPEN")
+      withHost(root, failing) { host =>
+        host.open(id(1), Some(config())) match
+          case Left(HostError.OpenFailed(reason)) => assert(reason.contains("FAKE-NO-OPEN"), reason)
+          case other                              => fail(s"not OpenFailed: $other")
+        // The first host stays, so a second host gets the lock only when the failed open freed it.
+        val runtime = OpenedRuntime()
+        withHost(root, runtime) { second =>
+          val handle = opened(second, id(1), Some(config()))
+          entries(handle) match
+            case Vector(Entry.Activated(_, settings)) => assertEquals(settings, config())
+            case other                                => fail(s"not one Activated: $other")
+          assertEquals(runtime.calls.asScala.toVector, Vector("opened"))
+        }
       }
     }
   }

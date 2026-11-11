@@ -199,6 +199,17 @@ class CliLaws extends munit.FunSuite:
     assert(entryText(log(3)).exists(t => t.contains("git push") && t.contains("/allow")))
   }
 
+  test("CLI: entryText shows the start of an exec with its command, so a long command does not look stuck") {
+    // A live session of 2026-11-11 waited 34 s in its first exec, and the screen showed nothing in that time.
+    val log = Support.logOf(
+      1000L,
+      Entry.EffectStarted(EffectId(1L, 0), "exec", Json.Object(Chunk(("command", Json.String("ps aux | sort -k4"))))),
+      Entry.EffectStarted(EffectId(1L, 1), "read", Json.Object(Chunk(("path", Json.String("notes.txt")))))
+    )
+    assert(entryText(log(0)).exists(_.contains("ps aux | sort -k4")), entryText(log(0)).toString)
+    assertEquals(entryText(log(1)), None, "a quick call shows nothing")
+  }
+
   test("CLI: loop sends a message, runs /close and shows its refusal, and ends when the feed ends") {
     val handle = FakeHandle()
     val out    = ByteArrayOutputStream()

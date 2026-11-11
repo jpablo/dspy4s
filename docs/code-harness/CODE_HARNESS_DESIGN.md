@@ -1777,7 +1777,19 @@ These points are proposals for the review:
   starts its own turn, in the order of the lines. With `DSPY_TRACE=FILE`, each model call goes to `FILE` as one JSON
   line: the messages of the request, the text and the reasoning of the reply, or the error, and the time. The mask of
   the client hides the secrets of each text. `scripts/dspy4s-harness` runs the CLI, and it builds the CLI first when
-  a source file is newer than the class path. `scripts/live/chat.sh` runs it in the script mode.
+  a source file is newer than the class path. `scripts/live/chat.sh` runs it in the script mode, or for a
+  person when its input is a terminal.
+- A study of the TUI libraries for Scala and Java (2026-11-11) found no Scala library that fits better than JLine:
+  termflow uses only the alternate screen, and TamboUI and termflow bring the JLine 3 bundle, a second copy of the
+  JLine packages. TamboUI, with its inline runner, is the choice for a richer client later.
+- A work session starts the walk of its scope for secret files (5.4) on a thread of its own when the session opens
+  (`SessionRuntime.opened`, `SandboxedShell.warm`). The index of the walk belongs to the open session, as the job
+  table does, and each activation of the session gives it to its shell. So the first command waits only for the rest
+  of that walk, and the end of the open session stops the walk. With no walk before the first command, the first
+  `exec` in a scope of 1.75 million entries waited 34 s (2026-11-11). At first the walk started at the first
+  activation, and a live run in a scope of 300,000 folders still waited 9.7 s at the first `exec`, also 20 s after the
+  open. An open that only reads also starts the walk. The walk runs on its own thread, and the writer never waits for
+  it.
 - Until a real configuration file exists, the CLI reads its variables also from `<home>/.dspy4s/harness/.env`
   (2026-11-10). It reads this file also with another `--root`, so a live scenario with a temporary root finds it. A
   variable of the process wins over the file. The base URL and the key are the exception: both come from the file when

@@ -8,6 +8,7 @@ import org.scalacheck.Prop.forAll
 import java.nio.file.attribute.{FileTime, PosixFilePermissions}
 import java.nio.file.{Files as JFiles, Path}
 import java.time.Instant
+import java.util.concurrent.CancellationException
 import scala.concurrent.duration.Duration
 import scala.jdk.CollectionConverters.*
 import scala.util.Using
@@ -301,6 +302,24 @@ class ProfileLaws extends ScalaCheckSuite:
       recent.find(profile): Unit
       recent.find(profile): Unit
       assertEquals(recent.listings, 2 * first)
+    finally place.close()
+  }
+
+  test("Index: a find that stops throws and keeps nothing of its walk, so a later find lists each folder again") {
+    // A part of the list of secret files would let a command read a secret file, so a stopped find gives no list.
+    val place = Place()
+    try
+      val profile = Profiles.forMode(Mode.local, place.scope, place.layout, HostList.empty)
+      (1 to 20).foreach(i => JFiles.createDirectories(place.scope.resolve(s"d$i/e")))
+      val full = SecretIndex(place.layout.secretNames, settle = Duration.Zero)
+      full.find(profile): Unit
+      val index = SecretIndex(place.layout.secretNames, settle = Duration.Zero)
+      val asked = java.util.concurrent.atomic.AtomicInteger(0)
+      intercept[CancellationException](index.find(profile, () => asked.incrementAndGet() > 10)): Unit
+      val stopped = index.listings
+      assert(stopped > 0 && stopped < full.listings, s"the stopped find listed $stopped of ${full.listings} folders")
+      assertEquals(index.find(profile).toSet, Profiles.secretFiles(profile, place.layout.secretNames).toSet)
+      assertEquals(index.listings - stopped, full.listings)
     finally place.close()
   }
 

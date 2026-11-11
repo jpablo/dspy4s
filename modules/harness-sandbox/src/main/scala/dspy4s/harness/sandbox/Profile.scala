@@ -6,6 +6,7 @@ import java.nio.file.attribute.{BasicFileAttributes, FileTime}
 import java.nio.file.{DirectoryIteratorException, Files as JFiles, LinkOption, NoSuchFileException, Path}
 import java.time.Instant
 import java.util.Locale
+import java.util.concurrent.CancellationException
 import scala.collection.mutable
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.jdk.CollectionConverters.*
@@ -221,7 +222,11 @@ final class SecretIndex(names: Set[String], settle: FiniteDuration = 2.seconds):
   /** The number of folders that the index listed since its start. A find lists only the folders that changed. */
   def listings: Long = synchronized(count)
 
-  def find(profile: Profile): Vector[Path] =
+  /** The secret files of the writable roots of `profile`. The find calls `stop` before each folder. When `stop` gives
+    * true, the find throws `CancellationException`, and the index keeps the listings of the find before. A part of the
+    * list would let a command read a secret file, so a stopped find gives no list. The default never stops.
+    */
+  def find(profile: Profile, stop: () => Boolean = () => false): Vector[Path] =
     synchronized {
       val start = Instant.now()
       val found = Vector.newBuilder[Path]
@@ -229,6 +234,7 @@ final class SecretIndex(names: Set[String], settle: FiniteDuration = 2.seconds):
       // A stack and not a recursion, because a command can make a deep tree of folders.
       val todo = mutable.Stack.from(profile.writable.filter(JFiles.isDirectory(_)))
       while todo.nonEmpty do
+        if stop() then throw CancellationException("The find of the secret files stopped.")
         val dir = todo.pop()
         if profile.readOnly.exists(dir.startsWith) || profile.isHidden(dir) then ()
         else if secret(dir) && !profile.writable.exists(_.equals(dir)) then found.addOne(dir): Unit
