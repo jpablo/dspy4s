@@ -37,6 +37,108 @@ class CliLaws extends munit.FunSuite:
     }
   }
 
+  test("CLI: parse gives a normal path for the folder and the root, with no . or .. part") {
+    // A live scenario of 2026-11-10 gave the folder ".", and the scope of the session was ".../ws/.".
+    assertEquals(CliArgs.parse(Vector("."), home, cwd).map(_.scope), Right(cwd))
+    assertEquals(CliArgs.parse(Vector("a/../b"), home, cwd).map(_.scope), Right(cwd.resolve("b")))
+    assertEquals(CliArgs.parse(Vector("--root", "./r/."), home, cwd).map(_.root), Right(cwd.resolve("r")))
+  }
+
+  test("CLI: parse reads --script, which is off by default, and the usage names it") {
+    assertEquals(CliArgs.parse(Vector("--script", "/fake/other"), home, cwd).map(_.script), Right(true))
+    assertEquals(CliArgs.parse(Vector.empty, home, cwd).map(_.script), Right(false))
+    assert(CliArgs.usage.contains("--script"), CliArgs.usage)
+  }
+
+  // ── The script mode: an agent or a script drives a session ──
+
+  /** True when `condition` holds within 10 seconds. */
+  private def soon(condition: => Boolean): Boolean =
+    val end = System.nanoTime() + 10_000_000_000L
+    while !condition && System.nanoTime() < end do Thread.sleep(20)
+    condition
+
+  test("CLI: parseLine reads /wait with a number of seconds, and /wait with no number is not a command") {
+    assertEquals(parseLine("/wait 5"), Line.Wait(5))
+    assertEquals(parseLine("/wait 0"), Line.Wait(0))
+    assertEquals(parseLine("/wait"), Line.Unknown("/wait"))
+    assertEquals(parseLine("/wait -1"), Line.Unknown("/wait -1"))
+    assertEquals(parseLine("/wait soon"), Line.Unknown("/wait soon"))
+    assertEquals(commandsFor(Line.Wait(5), SessionState.initial, request), Right(Vector.empty))
+  }
+
+  test("CLI script: /wait holds the next line for its seconds, so a job can end before the script goes on") {
+    val handle = TurnHandle()
+    val start  = System.nanoTime()
+    val loop   = Thread.ofPlatform().start { () =>
+      Cli.loop(
+        handle,
+        BufferedReader(StringReader("/wait 1\nm1\n")),
+        PrintStream(ByteArrayOutputStream(), true, UTF_8),
+        script = true
+      ): Unit
+    }
+    assert(soon(handle.messages == Vector("m1")), handle.messages.toString)
+    assert((System.nanoTime() - start) / 1_000_000 >= 900, "the message did not wait for /wait 1")
+    handle.endTurn()
+    loop.join(10_000)
+    assert(!loop.isAlive, "the loop did not end after the last turn")
+  }
+
+  test("CLI script: a line waits for the end of the turn before it, and the end of the input waits for the open turn") {
+    val handle = TurnHandle()
+    val loop   = Thread.ofPlatform().start { () =>
+      Cli.loop(
+        handle,
+        BufferedReader(StringReader("m1\nm2\n")),
+        PrintStream(ByteArrayOutputStream(), true, UTF_8),
+        script = true
+      ): Unit
+    }
+    assert(soon(handle.messages == Vector("m1")), handle.messages.toString)
+    Thread.sleep(300)
+    assertEquals(handle.messages, Vector("m1"), "the second line did not wait for the end of the first turn")
+    handle.endTurn()
+    assert(soon(handle.messages == Vector("m1", "m2")), handle.messages.toString)
+    Thread.sleep(300)
+    assert(loop.isAlive, "the loop ended before the end of the turn of the last line")
+    handle.endTurn()
+    loop.join(10_000)
+    assert(!loop.isAlive, "the loop did not end after the last turn")
+  }
+
+  test("CLI script: a line waits for a turn that is open before the first line, as after a reopen") {
+    val handle = TurnHandle(open = true)
+    val loop   = Thread.ofPlatform().start { () =>
+      Cli.loop(
+        handle,
+        BufferedReader(StringReader("m1\n")),
+        PrintStream(ByteArrayOutputStream(), true, UTF_8),
+        script = true
+      ): Unit
+    }
+    Thread.sleep(300)
+    assertEquals(handle.messages, Vector.empty, "the first line did not wait for the open turn")
+    handle.endTurn()
+    assert(soon(handle.messages == Vector("m1")), handle.messages.toString)
+    handle.endTurn()
+    loop.join(10_000)
+    assert(!loop.isAlive, "the loop did not end after the last turn")
+  }
+
+  test("CLI script: a refused command prints the refusal, and the next line runs") {
+    val handle = TurnHandle(refuse = true)
+    val out    = ByteArrayOutputStream()
+    val loop   = Thread.ofPlatform().start { () =>
+      Cli.loop(handle, BufferedReader(StringReader("/close\nm1\n")), PrintStream(out, true, UTF_8), script = true): Unit
+    }
+    assert(soon(handle.messages == Vector("m1")), handle.messages.toString)
+    handle.endTurn()
+    loop.join(10_000)
+    assert(!loop.isAlive, "the loop did not end after the last turn")
+    assert(out.toString(UTF_8).contains("refused"), out.toString(UTF_8))
+  }
+
   test("CLI: parseLine reads the commands, and a text that does not start with / is a message") {
     assertEquals(parseLine("/stop"), Line.Stop)
     assertEquals(parseLine("/stopall"), Line.StopAll)
@@ -211,4 +313,36 @@ private final class FakeHandle(endAfterFirst: Boolean = false, closed: Boolean =
       def poll(waitMillis: Long): Option[Either[Behind, Logged]] =
         Option(queue.poll()).orElse { Thread.sleep(waitMillis.min(50)); None }
       def ended: Boolean = endAfterFirst && queue.isEmpty
+      def close(): Unit  = ()
+
+/** A session for the laws of the script mode. A `Send` through `send` or `run` keeps its text and opens a turn, and the
+  * turn ends at `endTurn`. With `open`, a turn is open from the start. With `refuse`, each command that is not a `Send`
+  * gets `TurnOpen`. The feed gives no entry.
+  */
+private final class TurnHandle(open: Boolean = false, refuse: Boolean = false) extends SessionHandle:
+  private val texts            = ConcurrentLinkedQueue[String]()
+  @volatile private var inTurn = open
+
+  def messages: Vector[String] = texts.asScala.toVector
+  def endTurn(): Unit          = inTurn = false
+
+  def id: SessionId                                          = SessionId("fake-turns")
+  def send(command: Command): Either[HostError, Unit]        = run(command).map(_ => ())
+  def run(command: Command): Either[HostError, SessionState] =
+    command match
+      case Command.Send(_, text, _) =>
+        texts.add(text): Unit
+        inTurn = true
+        Right(state)
+      case _ if refuse => Left(HostError.Rejected(Rejection.TurnOpen))
+      case _           => Right(state)
+  def state: SessionState =
+    SessionState.initial.copy(closed = false, position = if inTurn then Position.BeforeStep(0) else Position.NoTurn)
+  def read(after: Long): Vector[Logged] = Vector.empty
+  def subscribe(capacity: Int): Feed    =
+    new Feed:
+      def poll(waitMillis: Long): Option[Either[Behind, Logged]] =
+        Thread.sleep(waitMillis.min(50))
+        None
+      def ended: Boolean = false
       def close(): Unit  = ()

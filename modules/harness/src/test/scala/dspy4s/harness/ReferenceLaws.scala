@@ -71,6 +71,12 @@ class ReferenceLaws extends munit.FunSuite:
   /** The functions that need no capability, so each reference names them. */
   private val always = Vector("println", "now", "input", "zoom")
 
+  /** The words of the session API. A model reads a call in a comment as well as in a `def`. `zoom(ref)` reads the
+    * memory of this session with no capability (7.1), so only the form for another session, `zoom(session`, counts. The
+    * value comes before the tests of the modes, so the class has each field before a test closure takes it.
+    */
+  private val sessionWords = raw"\b(tell|observe|zoom\(session|SessionRef|SessionCard|StrategyName|Sessions)\b".r
+
   /** True when `reference` has a definition with the name `name`. */
   private def mentions(reference: String, name: String): Boolean =
     raw"\bdef\s+${java.util.regex.Pattern.quote(name)}\b".r.findFirstIn(reference).nonEmpty
@@ -113,6 +119,22 @@ class ReferenceLaws extends munit.FunSuite:
       always.foreach(name => assert(mentions(reference, name), s"the reference does not name $name"))
       // The form of zoom for another session needs Sessions, as each function of the trait.
       assertEquals(reference.contains("def zoom(session"), compiles("sessions"), "zoom(session, ref)")
+    }
+  }
+
+  test("Reference: a mode with no Sessions gets no word of the session API, also in a comment or a type") {
+    // In a live session of 2026-11-10, the work mode had no Sessions, and the model still named tell, observe, zoom
+    // and Sessions.start, from the comments of SessionTypes.scala.
+    modes.filter((_, mode) => mode.sessions == Access.None).foreach { (label, mode) =>
+      val found = sessionWords.findAllIn(Harness.apiReference(mode)).toVector.distinct
+      assert(found.isEmpty, s"the reference of the mode $label has: ${found.mkString(", ")}")
+    }
+  }
+
+  test("Reference: no reference shows the Schema givens of the session types, which a cell cannot use") {
+    modes.foreach { (label, mode) =>
+      val reference = Harness.apiReference(mode)
+      assert(!reference.contains("SessionSchemas"), s"the reference of the mode $label shows SessionSchemas")
     }
   }
 

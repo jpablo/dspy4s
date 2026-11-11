@@ -60,7 +60,8 @@ object WorkEnv:
   *     (5.5). `exec` and the jobs run in the sandbox, in the scope of the session, through `JobShell`.
   *   - `llmQuery` goes to the `subQuery` leaf. A work session of phase 7 has no `Children^`, so no `rlm`.
   *   - The REPL lives as long as the activation, so a value of a turn stays for the next turns. A new activation has a
-  *     new REPL, and the store comes back from the journal (11, scenario 3).
+  *     new REPL, and the store comes back from the journal (11, scenario 3). The window gives the first step after a
+  *     new activation the note of the names that the new REPL lost (6, `NewReplNote.afterActivation`).
   *   - Each turn gets a new budget of `limits.modelCalls` model calls (8.2), because a work session has no end of a
   *     call. The effects and the `subQuery` leaf get the budget of the current turn through a function.
   *

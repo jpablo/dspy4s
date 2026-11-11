@@ -1,0 +1,2 @@
+Count the lines of each .txt file in this folder. Keep the counts in the store under the key line-counts, as a Map from the file name to the count, and also keep them in a val named counts. Then tell me the counts.
+/close

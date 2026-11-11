@@ -99,6 +99,7 @@ submit(lines.size)
 |------|----------|
 | `Guest.scala` | the capability traits, `Turn`, `JobId`, `JobStatus`, `NeedsApproval`, and `api` |
 | `SessionTypes.scala` | `StrategyName`, `Scope`, `SessionRef`, and `SessionCard` |
+| `SessionSchemas.scala` | the `Schema` givens of the session types. The host imports `SessionSchemas.given`. This file has no capture checking, because there the derivation of a `Schema` exceeds the recursion limit of the compiler. The givens are not in the companions, because the API reference shows `SessionTypes.scala`, and a cell cannot use a `Schema`. |
 | `Mode.scala` | `Access` and `Mode` |
 | `Data.scala` | `Data`, `DataError`, `DataShape`, and the instances |
 | `DataDerivation.scala` | the classes that `Data.derived` builds, and the helpers of the instances. This file has no capture checking, because the `Data` of a field is a by-name value, and capture checking counts that closure as a capability. |

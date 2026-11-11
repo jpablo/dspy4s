@@ -26,6 +26,12 @@ def hint(error: String): Option[String] =
     // The error of the compiler defect (`showsArrayDefect`) also shows `Array[...]^{any.rd}`, but its cell has no
     // Array pattern, so the hint of a pattern would be wrong. After an earlier cell, the REPL asks for a new REPL.
     Some("case Array(x, y) inside collect. Use .toList, and then case List(x, y).")
+  else if error.contains("Cannot refer to method error in package object sys") then
+    // Safe mode refuses `sys.error`. A throw of a new exception compiles, and the cell fails with its message. So do
+    // `require(cond, "...")` and `assert(cond, "...")`.
+    Some(
+      "Safe mode refuses sys.error. To fail the cell with a message, use throw IllegalStateException(\"the reason\")."
+    )
   else if error.contains("empty quoted identifier") then
     // A Markdown fence starts with ``, an empty quoted identifier. The harness removes one outer fence of the code
     // field, so this error comes from a fence that the harness did not find, or from a cell of the MCP server.

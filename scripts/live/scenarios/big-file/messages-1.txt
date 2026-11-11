@@ -1,0 +1,1 @@
+What does the last line of app.log say? Also, how many lines of app.log have the word ERROR?

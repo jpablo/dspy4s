@@ -4,7 +4,6 @@ package dspy4s.harness.guest
 import language.experimental.captureChecking
 
 import caps.assumeSafe
-import zio.blocks.schema.Schema
 
 // The types of the sessions that the guest API (`Sessions.start`, `Sessions.list`) and the kernel (`SessionConfig`)
 // both use. The kernel depends on harness-guest, so they are here, as `Mode` is (decision of 2026-11-09).
@@ -13,8 +12,7 @@ import zio.blocks.schema.Schema
 @assumeSafe enum StrategyName derives CanEqual:
   case Window, PrefixSummary, MemoryTree
 
-@assumeSafe object StrategyName:
-  given Schema[StrategyName] = SessionSchemas.strategyName
+@assumeSafe object StrategyName
 
 /** Where a session works (8.1).
   *
@@ -38,15 +36,13 @@ import zio.blocks.schema.Schema
     */
   case Fork(path: String, from: String)
 
-@assumeSafe object Scope:
-  given Schema[Scope] = SessionSchemas.scope
+@assumeSafe object Scope
 
 /** A reference to another session, for `tell`, `observe` and `zoom` (8.2). It is plain data, so the store can hold it.
   */
 @assumeSafe final case class SessionRef(id: String) derives CanEqual
 
-@assumeSafe object SessionRef:
-  given Schema[SessionRef] = SessionSchemas.sessionRef
+@assumeSafe object SessionRef
 
 /** What `list` shows about a session (8.2, 10.2). The catalog gives the deterministic part: the id, the owner, the
   * parent of a fork, the status and the last `seq`.
@@ -62,6 +58,3 @@ final case class SessionCard(
     status : String,
     lastSeq: Long
 ) derives CanEqual
-
-object SessionCard:
-  given Schema[SessionCard] = SessionSchemas.sessionCard

@@ -115,7 +115,28 @@ class WindowLaws extends ScalaCheckSuite:
       Entry.Observed("", CellOutcome.Ok, Map.empty)
     )
     val status = Status.of(foldOf(log))
-    assertEquals(status, Status(2, 5, Vector("a", "b")))
+    assertEquals(status, Status(2, 5, Vector("a", "b"), TurnKind.Program))
     assert(status.render.contains("Step 3 of 5"), status.render)
     assert(status.render.contains("a, b"), status.render)
+  }
+
+  /** The status text before the step `step` of a turn of the kind `kind` with the step limit 10. */
+  private def statusAt(kind: TurnKind, step: Int): String =
+    val base = SessionState.initial
+    Status.of(base.copy(
+      config = base.config.copy(kind = kind, steps = 10),
+      position = Position.BeforeStep(step)
+    )).render
+
+  test("Status: in a chat, the last step that can run a cell says that the next step only answers") {
+    // In a live session of 2026-11-10, "Step 10 of 10" made the model answer one step early, with no code.
+    val last = statusAt(TurnKind.Chat, 9)
+    assert(last.contains("Step 10 of 10"), last)
+    assert(last.contains("The next step only answers, with no code."), last)
+    val earlier = statusAt(TurnKind.Chat, 5)
+    assert(!earlier.contains("The next step only answers"), earlier)
+    assert(statusAt(TurnKind.Chat, 10).contains("answer with no code"), statusAt(TurnKind.Chat, 10))
+    // A program call has no step that only answers, so its last step has no such text.
+    val program = statusAt(TurnKind.Program, 9)
+    assert(!program.contains("The next step only answers"), program)
   }

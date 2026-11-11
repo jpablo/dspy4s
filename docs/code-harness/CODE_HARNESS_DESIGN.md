@@ -487,8 +487,17 @@ The rules of the API reference:
 - The session types `SessionRef`, `Scope` and `StrategyName` are `@assumeSafe`, so a cell can make them, for example
   for `start`. Their `Schema` comes from a file with no capture checking, because the derivation of a `Schema` with
   capture checking exceeds the recursion limit of the compiler.
+- The file of the session types belongs to `Sessions`. Only the calls of `Sessions` take or give these types, so the
+  file stays only in a mode that gives the bare `Sessions` or `Sessions^`. In a mode with no `Sessions`, the
+  reference has no word of the session API, also in a comment or a type. A comment outside the `Sessions` trait and
+  the file of the session types names no call of `Sessions`.
+- The source text holds no `given` that a cell cannot use. Safe code cannot name a `Schema`, so the `Schema` givens of
+  the session types are in `SessionSchemas`, outside the text of the reference. The kernel imports them. The reference
+  of the full mode is the whole source text, so the filter cannot remove a given, and the source text keeps none.
 - The live sessions of 2026-11-10 gave these rules. The reference was the whole text, and a model in a work session
   told the person that it could use the network, other sessions and `rlm`. A cell that called them did not compile.
+  In a live session of 2026-11-10, the work mode had no `Sessions`, and the model still named `tell`, `observe`,
+  `zoom` and `Sessions.start`, from the comments of the session types.
 
 **`Data` is the type of a value that a later cell, another session or the host reads back with a type.** Text has no
 `Data`: `println`, the printed result of a cell, `write`, `exec` and `tell` take text. Safe code cannot name the
@@ -951,6 +960,7 @@ the journal does not hold it. A function that `Classified.map` runs can leak a b
 | "Found: (x$1: (String, Vector[String]{val prefix1: ..." | A `Vector` in a pair, for example `groupBy(f).map { case (k, v) => ... }` | `.view.mapValues`, `groupMapReduce` or `.toList` |
 | "Found: ((Array[(String)?]^{any.rd}))?^{x1.rd}" | `case Array(x, y)` inside `collect` | `.toList`, and then `case List(x, y)` |
 | "Line 1: empty quoted identifier" | A Markdown fence ```` ```scala ```` around the code, which the harness did not remove (9) | The code field holds only Scala code, with no ```` ``` ```` fence |
+| "Cannot refer to method error in package object sys from safe code" | `sys.error("...")`, which safe mode refuses. A model uses it to fail a cell with a message. | `throw IllegalStateException("the reason")`, which fails the cell with the message |
 
 The session has two kinds of state between cells:
 
@@ -987,6 +997,23 @@ mode.
 cell limit (protection 5, about 300 cells) all start a new REPL in the same way: the preamble, the store and the note.
 Replay would not suit the cell limit in any version. The limit exists because the memory of a REPL grows with its
 cells, and a replay of 300 cells makes the same 300 cells again.
+
+**The note after a new activation.** Each activation has a new REPL, so the names of the cells of the earlier
+activations are gone. The live sessions of 2026-11-10 gave these rules: after a reopen, the model got no note, and it
+only guessed that its `val` was gone.
+
+- The first step after a new activation gets the note of a restart, with the same words, so the model sees one form.
+  For example: "The harness started a new REPL, because the session opened again. These names of earlier cells are
+  gone: total. Define them again if you need them."
+- The projection of the open turn of a chat puts the note in the observation of that step, before the messages of
+  the step (`NewReplNote.afterActivation`). The window and the memory tree both use this projection
+  (`Window.openTurn`), so a work session gets the note with each strategy.
+- The note comes from the journal: the journal has more than one `Activated`, and no `Acted` comes after the last
+  one. The names come from the fold of the note of lost names. So the projection stays a pure function of the journal
+  (7).
+- A later step or turn of the same activation gets no note. A step whose policy call gave no `Acted` gets the note
+  again at the next step.
+- With no lost name, there is no note. A program call has one activation, so it gets no such note.
 
 **A defect of the compiler, and its restart.** The compiler of the 3.10 nightly has a defect in a REPL with capture
 checking and safe mode. After some top-level definitions, each later Array chain fails, for example
@@ -1081,6 +1108,11 @@ final case class PolicyStep(text: String, code: Option[String])
 - **The status section.** `status` holds the names in the REPL, the keys of the store, the scope, and the jobs with
   their states: running, exited, stopped or lost. It is typed, and it renders only its changes, so the prompt prefix
   stays the same.
+- **The last step of a chat.** A chat has one more step after the step limit, which only answers (4.3). Before the
+  step `steps - 1` of a chat, the status says "Step n of n. The next step only answers, with no code." Before the step
+  `steps`, it says "The last step: answer with no code." A program call has no step that only answers, so its last
+  step says only "Step n of n." The live sessions of 2026-11-10 gave this rule: the model read "Step 10 of 10" as the
+  last step, answered with no code one step early, and lost a step that could run a cell.
 - **Laws.** `project` depends only on the journal and the derived data. Two updates give the same structure as one
   update on the full journal. The memory tree has the laws Coverage, Zoom, Prefix, Immutability, Order, Size and Roots
   ([CODE_HARNESS.md](CODE_HARNESS.md), 6.2).
@@ -1738,7 +1770,12 @@ These points are proposals for the review:
 - The host trait of 10.1 is `SessionHandle`, because the guest API already has the data type `SessionRef`. It also
   has `run`, which waits for the commit, so a client can show a refusal.
 - A session id is a random UUID. The root of the CLI is `<home>/.dspy4s/harness`, and its command line is
-  `[--root DIR] [--session ID] [FOLDER]`.
+  `[--root DIR] [--session ID] [--script] [FOLDER]`.
+- A live test drives the CLI with no person (2026-11-10). With `--script`, each line waits until the session has no
+  open turn, each command goes through `run`, and the end of the input waits for the open turn. So each message
+  starts its own turn, in the order of the lines. With `DSPY_TRACE=FILE`, each model call goes to `FILE` as one JSON
+  line: the messages of the request, the text and the reasoning of the reply, or the error, and the time. The mask of
+  the client hides the secrets of each text. `scripts/live/chat.sh` builds the CLI and runs it in the script mode.
 - `HostError` holds a rejection, a failed write, the end of a session, a fenced activation and an open that failed.
   `WriterJournal` gives a rejection as a `Rejection`, and it throws for the other errors, so `drive` stops and the
   turn stays open, as after a crash.

@@ -1,0 +1,2 @@
+Start the command `sleep 15 && echo FAKE-JOB-DONE > done.txt` as a job with spawn, with report = true, so that the end of the job sends you a message. Do not wait for the job. End the turn at once, and tell me the job id.
+/wait 25

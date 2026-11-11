@@ -467,3 +467,57 @@ class WorkLaws extends munit.FunSuite:
       }
     finally place.close()
   }
+
+  /** The input field `name` of the last message of the policy call `n` of `model`, or an empty text. A summary request
+    * of the memory tree is not a policy call.
+    */
+  private def fieldOf(model: RequestLm, n: Int, name: String): String =
+    val policyCalls =
+      model.requests.asScala.toVector.filterNot(r => isSummary(r.messages.flatMap(_.text).mkString("\n")))
+    val text   = policyCalls.lift(n).getOrElse(fail(s"no policy call $n")).messages.lastOption.flatMap(_.text)
+    val marker = s"[[ ## $name ## ]]"
+    text.filter(_.contains(marker)).fold("") { t =>
+      val body = t.substring(t.indexOf(marker) + marker.length)
+      body.indexOf("[[ ##") match
+        case -1  => body
+        case end => body.substring(0, end)
+    }
+
+  /** The model of the laws of a reopen: turn 1 defines `fakeKept`, and turn 2 answers. */
+  private def keeper(): RequestLm =
+    sessionModel(policy("define", Some("val fakeKept = 41")), policy("FAKE-FIRST", None), policy("FAKE-SECOND", None))
+
+  test("Work: after a reopen, the first step of the next turn names the vals that the new REPL lost") {
+    // In a live session of 2026-11-10, a reopen started a new REPL with no note, and the model only guessed that its
+    // val was gone. Spec 6 gives this note after a restart, and a new activation is a restart.
+    val model = keeper()
+    val place = Place()
+    try withRoot { root =>
+        val env     = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
+        val runtime = Models.withModel(model)(WorkRuntime.forWork(env, limits))
+        withHost(root, runtime) { host =>
+          val first = opened(host, id(1), Some(WorkRuntime.config(place.root, "fake-model", limits)))
+          assertEquals(first.send(message("m1")), Right(()))
+          assert(eventually(60)(outcomes(first).size == 1), entries(first).toString)
+          assert(first.run(Command.Close(SessionOutcome.Parked, "FAKE-CLOSE")).isRight)
+          val again = opened(host, id(1), None)
+          assertEquals(again.send(message("m2")), Right(()))
+          assert(eventually(60)(outcomes(again).size == 2), entries(again).toString)
+          val seen = fieldOf(model, 2, "observation") + fieldOf(model, 2, "status")
+          assert(seen.contains("fakeKept"), seen)
+        }
+      }
+    finally place.close()
+  }
+
+  test("Work: a turn in the same activation gets no note of lost names, because its REPL keeps them") {
+    val model = keeper()
+    work(model) { (_, handle) =>
+      assertEquals(handle.send(message("m1")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+      assertEquals(handle.send(message("m2")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 2), entries(handle).toString)
+      val seen = fieldOf(model, 2, "observation") + fieldOf(model, 2, "status")
+      assert(!seen.contains("fakeKept"), seen)
+    }
+  }

@@ -25,25 +25,31 @@ enum Line derives CanEqual:
   /** `/quit`: the end of the client. The session stays open for a later client. */
   case Quit
 
+  /** `/wait SECONDS`: the client reads the next line after `seconds`. In the script mode, the next line then also waits
+    * for the open turn, so a script can wait for a job that sends a message at its end.
+    */
+  case Wait(seconds: Int)
+
   /** A line that starts with `/` and is not a command. */
   case Unknown(text: String)
 
 /** The line of `text`. A text that does not start with `/` is a message. */
 def parseLine(text: String): Line =
   text.trim.split("\\s+").toList match
-    case List("/stop")                  => Line.Stop
-    case List("/stopall")               => Line.StopAll
-    case List("/allow")                 => Line.Allow(GrantLifetime.Once)
-    case List("/allow", "once")         => Line.Allow(GrantLifetime.Once)
-    case List("/allow", "turn")         => Line.Allow(GrantLifetime.Turn)
-    case List("/allow", "session")      => Line.Allow(GrantLifetime.Session)
-    case List("/close")                 => Line.Close
-    case List("/quit")                  => Line.Quit
-    case _ if text.trim.startsWith("/") => Line.Unknown(text.trim)
-    case _                              => Line.Message(text)
+    case List("/stop")                                                => Line.Stop
+    case List("/stopall")                                             => Line.StopAll
+    case List("/allow")                                               => Line.Allow(GrantLifetime.Once)
+    case List("/allow", "once")                                       => Line.Allow(GrantLifetime.Once)
+    case List("/allow", "turn")                                       => Line.Allow(GrantLifetime.Turn)
+    case List("/allow", "session")                                    => Line.Allow(GrantLifetime.Session)
+    case List("/close")                                               => Line.Close
+    case List("/quit")                                                => Line.Quit
+    case List("/wait", seconds) if seconds.toIntOption.exists(_ >= 0) => Line.Wait(seconds.toInt)
+    case _ if text.trim.startsWith("/")                               => Line.Unknown(text.trim)
+    case _                                                            => Line.Message(text)
 
 /** The commands that a client knows, for the text of an unknown command. */
-val commandList: String = "/stop, /stopall, /allow once, /allow turn, /allow session, /close and /quit"
+val commandList: String = "/stop, /stopall, /allow once, /allow turn, /allow session, /wait SECONDS, /close and /quit"
 
 /** The commands of a line (10.3, 5.5), with `request` as the request id of a message or a grant.
   *
@@ -52,7 +58,7 @@ val commandList: String = "/stop, /stopall, /allow once, /allow turn, /allow ses
   *   - `Allow` gives one `Grant` for each pending call of `state`, with the rule of the call and the lifetime of the
   *     line. With no pending call, it gives an error. The request id of the grant of the call k is `request` and k.
   *   - `Close` gives `Close(Parked)`.
-  *   - `Quit` gives no command, and `Unknown` gives an error with the list of the commands.
+  *   - `Quit` and `Wait` give no command, and `Unknown` gives an error with the list of the commands.
   *
   * The client side of `Grant` (5.5): only a client of the user sends `Grant`. To refuse, the person sends a plain
   * message.
@@ -72,6 +78,6 @@ def commandsFor(line: Line, state: SessionState, request: RequestId): Either[Str
         Right(state.pending.toVector.sortBy(_.toString).zipWithIndex.map { (rule, k) =>
           Command.Grant(RequestId(s"${request.value}-$k"), rule, lifetime)
         })
-    case Line.Close         => Right(Vector(Command.Close(SessionOutcome.Parked, "the person closed the session")))
-    case Line.Quit          => Right(Vector.empty)
-    case Line.Unknown(text) => Left(s"$text is not a command. The commands are $commandList.")
+    case Line.Close               => Right(Vector(Command.Close(SessionOutcome.Parked, "the person closed the session")))
+    case Line.Quit | Line.Wait(_) => Right(Vector.empty)
+    case Line.Unknown(text)       => Left(s"$text is not a command. The commands are $commandList.")
