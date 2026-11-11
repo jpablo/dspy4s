@@ -244,6 +244,18 @@ object WorkRuntime:
       env = Set.empty
     )
 
+  /** The strategy of an activation from `config.strategy` (7.1): the window, or the memory tree with `lines`, the
+    * runner of the activation and the budget of the summaries of the turn. `lines` is the table `memory` of the session
+    * file, and the activation opens it only for the memory tree, and closes it in its `close`. `PrefixSummary` has no
+    * code, so it gives an error, and the activation fails with it.
+    */
+  def strategyOf(
+      config   : SessionConfig,
+      lines    : () => Either[String, LineStore],
+      runner   : PolicyRunner,
+      summaries: () => Budget
+  ): Either[String, ContextStrategy] = ???
+
   /** A runtime with the first leaves: the policy with `instructions`, and the `subQuery` leaf of a harness. */
   def forWork(env: WorkEnv, limits: HarnessLimits = HarnessLimits())(using RuntimeContext): WorkRuntime =
     val policy   = Signature.derived[PolicyInput, PolicyStep]("policy", instructions)

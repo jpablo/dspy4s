@@ -47,6 +47,7 @@ final class FakeFiles(delayMillis: Long = 0L) extends Files:
 final class FakeTurn(inputs: Map[String, Json] = Map.empty) extends Turn:
   def now(): Long                       = 1000L
   def input(name: String): Option[Json] = inputs.get(name)
+  def zoom(ref  : String): String       = s"the part $ref of the memory"
 
 /** The laws of the REPL: the givens of the modes, the preamble from a shape, submit, and the protections of Phase 0. */
 class ScalaReplLaws extends munit.FunSuite:
@@ -111,6 +112,13 @@ class ScalaReplLaws extends munit.FunSuite:
                     )
       do assert(compileError(r.run(cell)), s"$cell compiled with only the bare Files")
     finally r.close()
+  }
+
+  test("Mode givens: zoom(ref) needs no capability, so it compiles in each mode, and it reads the turn") {
+    for mode <- Vector(nothing, readFiles, writeFiles) do
+      val r = ScalaRepl(mode, Bindings(FakeTurn(), files = Option.when(mode.files != Access.None)(FakeFiles())))
+      try assertEquals(r.run("""println(zoom("3.5"))""").output, "the part 3.5 of the memory")
+      finally r.close()
   }
 
   test("Mode givens: a cell cannot name the host bindings") {

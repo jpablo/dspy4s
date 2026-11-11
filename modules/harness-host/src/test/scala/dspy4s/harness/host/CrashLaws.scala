@@ -1,6 +1,6 @@
 package dspy4s.harness.host
 
-import dspy4s.harness.{HarnessLimits, Models, Place, ScriptLm, Secrets, Support}
+import dspy4s.harness.{HarnessLimits, Models, Place, Secrets, Support}
 import dspy4s.harness.Support.answer
 import dspy4s.harness.kernel.*
 import dspy4s.harness.host.HostSupport.*
@@ -20,7 +20,7 @@ object CrashProbe:
 
   def main(args: Array[String]): Unit =
     val limits = HarnessLimits(steps = 2)
-    val model  = ScriptLm(Models.policy("start", Some("""val j = spawn("sleep 317"); exec("sleep 318")""")))
+    val model  = sessionModel(Models.policy("start", Some("""val j = spawn("sleep 317"); exec("sleep 318")""")))
     val env    = WorkEnv(
       Path.of(args(1)).resolveSibling("home"),
       HostList.empty,

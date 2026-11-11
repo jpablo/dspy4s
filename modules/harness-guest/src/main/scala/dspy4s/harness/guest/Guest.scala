@@ -86,6 +86,12 @@ import caps.assumeSafe
   /** The `Json` of the input field `name`, or `None` for an unknown name. */
   def input(name: String): Option[zio.blocks.schema.json.Json]
 
+  /** A part of the memory of this session (CODE_HARNESS_DESIGN.md, 7.1): the message of a reference of level 0, or
+    * the lines of the two halves of a summary line, each with its reference. A session with no memory tree, or an
+    * unknown reference, gives an error.
+    */
+  def zoom(ref: String): String
+
 /** A command that runs after its cell ends (6). The id is plain data that holds the `EffectId` of its `spawn`, so it
   * stays valid in a later cell, and the store can hold it.
   */
@@ -142,6 +148,12 @@ final case class NeedsApproval(op: String, argument: String)
   def tell(session: SessionRef, message: String)(using s: Sessions^): Unit         = s.tell(session, message)
   def observe(session: SessionRef, question: String)(using s: Sessions, l: Llm^): String = s.observe(session, question)
   def zoom(session: SessionRef, ref: String)(using s: Sessions): String            = s.zoom(session, ref)
+
+  /** A part of the memory of this session (7.1). `ref` is a reference of the memory, for example `3.5`: the message of
+    * a reference `0.i`, or the two lines under a summary line. It needs no capability, because it reads only this
+    * session.
+    */
+  def zoom(ref: String)(using t: Turn): String = t.zoom(ref)
 
   def start(goal: String, scope: Scope, strategy: StrategyName)(using s: Sessions^): SessionRef =
     s.start(goal, scope, strategy)

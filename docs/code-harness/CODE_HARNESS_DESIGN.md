@@ -1089,6 +1089,93 @@ final case class PolicyStep(text: String, code: Option[String])
 - **The first version.** Phase 4 has the window strategy. The end of section 9 has its proposals: `project` gives a
   `Projection`, the derived data is a type member, and the budget counts characters.
 
+### 7.1 The memory tree (phase 8)
+
+Phase 8 brings the memory tree of [CODE_HARNESS.md](CODE_HARNESS.md), section 6, for long work sessions. The plan is
+a typed skeleton, as in 10.6: each type is complete, each new function and method has a `???` body, and the laws are
+tests that fail until the bodies exist. These choices were made with the user on 2026-11-10:
+
+- One message of the memory log is one step: a message of the person or of the harness, a cell with its output, or
+  the reply of a turn. The control entries stay out. `MemoryLog.messages` is a fold of the journal, so a longer
+  journal gives a longer log with the same start.
+- The strategy builds the summary lines in `update`, before each policy call, with the leaves `compress` and
+  `merge`. No new thread runs. A background builder can come later, if the steps are too slow.
+- A cell reads a part of its own session with `zoom(ref)`, a function of `Turn`. So each mode has it, with no new
+  capability. `zoom(session, ref)` of `Sessions^` stays for phase 9.
+- The metric uses planted facts: generated long sessions with facts in the early turns, and late questions that need
+  them. The score is the share of right answers, and the size of the view.
+
+The parts of the plan:
+
+| Part | Types and functions | Laws |
+|---|---|---|
+| The algebra | `MessageKind`, `MemoryMessage`, `NodeId`, `MemoryLine`, `Memory`, `LineKey`, `View` with `advance`, `MemoryLog` | `Memory:`, `Memory log:` |
+| The strategy | `CompressInput`, `MergeInput`, `Summary`, `LineStore`, `MemoryState`, `MemoryTree`, `ZoomSource`, `ContextStrategy.zoom`, `HarnessLimits.summaryCalls` | `Memory tree:` |
+| The guest API | `Turn.zoom`, `api.zoom(ref)`, and `zoom` in `JournalTurn`, `recorded`, `GatedTurn` and the other turns, and `ZoomSource` in `HarnessEffects` | `Mode givens:`, and the zoom laws of `Memory tree:` |
+| The host | the table `memory` of the session file, `FileLines`, and `WorkRuntime.strategyOf` | the memory laws of `File:` and `Work:` |
+| The metric | `MemoryTasks`, `MemoryLiveRun` | `Memory tasks:` |
+
+The laws of the algebra are the laws of [CODE_HARNESS.md](CODE_HARNESS.md), 6.2: Coverage, Zoom, Prefix,
+Immutability, Order, Size and Roots. The strategy also has the law of section 7: two updates give the same structure
+as one update on the full journal.
+
+These points are proposals for the review:
+
+- A message id is the `Long` index of the message in the log, not an opaque type.
+- `MemoryLine.of` cuts a text to 512 bytes of UTF-8 at the end of a character, so a leaf never gives a longer line. A
+  source of 512 bytes or less is its own line, with no LM call.
+- `Memory.buildNode` of a node that is not ready gives the same memory, so the algebra has no error case. `Memory.zoom`
+  gives `None` for a node outside the log, or for a node whose halves are not built.
+- The size of a view is its number of parts. A line has at most 512 bytes, so a view of `high` parts has at most
+  `high * 512` bytes. `fit` merges the oldest pairs first, while the view has more than `high / 2` parts. The Size law
+  holds when `roots(n)` has at most `high / 2` nodes.
+- The view of a step covers the messages up to the reply of the last turn, so it stays the same during a turn, and the
+  prompt cache keeps it. The messages and the steps of the open turn come as in the window strategy.
+- A reference is `level.index`, for example `3.5`. The render of a view gives each line with its reference, so the
+  model can zoom.
+- The built lines are derived data with a journal of their own (7): the table `memory` of the session file, through
+  `LineStore`. A reopen reads them, so it makes no new LM call. A program call keeps them in memory.
+- A program call, a child and a rollout keep the window, so the structure of an optimizer has no summary leaf yet.
+- The leaves `compress` and `merge` use the model of the session. A cheaper model for summaries comes later.
+
+**The spec review of the plan (2026-11-10).** A subagent read the plan, and it found 15 problems. These choices were
+made with the user:
+
+- The view takes its room of the budget first: `MemoryTree.room(high)` characters, in full, never cut and never
+  dropped, so the prompt cache keeps it. The default of `high` is 24, about 12,600 characters of the budget of 40,000.
+- A failed `compress` or `merge` gives the line of the source, and the store keeps it, so one bad message never blocks
+  a session. The input of `compress` is cut to `MemoryTree.MaxSource` characters first.
+- The summary calls run through the `PolicyRunner` of the activation, so a hard stop cuts them. They have a budget of
+  their own for each turn, `HarnessLimits.summaryCalls`, apart from `modelCalls`. A spent budget or a stop gives the
+  line of the source, but not to the store, so a later update builds the node again.
+- A work session gets its strategy from `config.strategy` (`WorkRuntime.strategyOf`). A new session has the memory
+  tree. A reopened session of phase 7 keeps the window of its journal. `PrefixSummary` has no code, so its activation
+  fails with a clear error.
+
+The other findings changed the plan with no choice:
+
+- `fit` depends on the view before it. With `high = 3`, an update at 4 messages and then at 6 gives
+  `[2.0, 0.4, 0.5]`, but one update at 6 gives `[2.0, 1.2]`. So the view of `n` messages is
+  `View.advance(View.empty, m, high, n)`: one `extend` and one `fit` for each message. Then two updates give the
+  state of one update, and a law checks it with `high = 3` at each entry.
+- `MemoryLog.beforeOpenTurn` counts the messages up to the reply of the last `TurnEnded`. A `Cell` message comes at
+  its `Observed`, so a report during a cell comes before it, and a crashed cell gives none.
+- A key of the store holds a SHA-256 of the texts under the node (`LineKey`), and each store keeps the first line of a
+  key. So a store never gives a line of other messages, also after a change of `MemoryLog`.
+- A reference has a level from 0 to 62 and an index below `2^(62 - level)`, so its span fits a `Long`. The model
+  writes the reference, so `parse` refuses the others.
+- `render` gives one line for each part: a newline of a line becomes a space.
+- Each connection of the session file waits up to 5 seconds for the other (`busy_timeout`), and the lines of one
+  update go to the file in one transaction. `SessionFile` sets the same timeout.
+- `JournalTurn` and `HarnessEffects` get a `ZoomSource`. After each update, the effects set the reader
+  `strategy.zoom` of the new derived data, and a cell reads it.
+- The laws of a work session use a model that answers the summary requests, so they hold with the memory tree. The
+  stop law counts only the policy requests.
+- Two laws pin `fit`: after a change, a view has at most `high / 2` parts or the roots, and its levels do not grow
+  from the oldest part to the newest.
+- The metric has near tasks as a control, which the window can answer, and facts in messages and replies too. The
+  score is also given for each distance from the fact to the question.
+
 ## 8. Sessions
 
 ### 8.1 One kernel, four configurations

@@ -107,8 +107,8 @@ result = "A coding agent for daily use, one session at a time."
 id = "p8"
 number = 8
 title = "Memory"
-modules = []
-uses = ["p2", "p4"]
+modules = ["harness", "harness-guest", "harness-host"]
+uses = ["p2", "p4", "p7"]
 result = "Long sessions that lose no detail."
 
 [[phase]]
@@ -2212,9 +2212,9 @@ id = "journal-turn"
 group = "handlers"
 kind = "data"
 name = "JournalTurn"
-ops = ["now", "input"]
+ops = ["now", "input", "zoom"]
 ref = "5.1"
-uses = ["turn", "journal-trait", "json"]
+uses = ["turn", "journal-trait", "json", "zoom-source"]
 text = "The Turn of a session: the time of the clock, and the values of the input fields from SessionState.inputs."
 
 [[node]]
@@ -2281,6 +2281,7 @@ id = "context-strategy"
 group = "context"
 kind = "data"
 name = "ContextStrategy"
+ops = ["zoom"]
 ref = "7"
 spec = true
 uses = ["derivation", "strategy-name", "projection"]
@@ -2339,7 +2340,7 @@ ops = ["callPolicy", "runCell"]
 ref = "4.6"
 uses = ["turn-effects", "predict", "policy-input", "policy-step", "context-strategy", "journal-trait", "scala-repl",
         "recorder", "snapshot-store", "harness-limits", "runtime-context", "session-state", "budget", "host-threads",
-        "policy-runner"]
+        "policy-runner", "zoom-source"]
 proof_uses = ["cell-result", "policy-reply", "window", "recorder", "snapshot-store", "lost-names", "budget",
               "host-threads"]
 text = "callPolicy projects the log with the strategy, spends one call of the budget, and calls the policy leaf through the PolicyRunner, so the trace reaches the RuntimeContext. A spent budget fails the call, and the turn ends Failed. runCell starts the calls of the cell, takes the snapshot of the store, runs the code in the REPL, and joins the trace of the host threads. After the error of the compiler defect, it starts a new REPL and adds the note of the lost names."
@@ -3092,7 +3093,7 @@ ref = "8.1"
 spec = true
 uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context",
         "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access",
-        "harness"]
+        "harness", "line-store"]
 proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell",
               "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble"]
 text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of workMode through recorded and guarded, and JobShell. workMode is local mode with no Sessions^ and no Children^, so a work session has no rlm. Each turn gets a new budget of model calls. The first rules of 5.5: git push gets Ask in a mode with Network^."
@@ -3503,3 +3504,286 @@ name = "Stop cell:"
 ref = "10.3"
 uses = ["scala-repl"]
 text = "stopCell ends the running cell with a failure, and the REPL keeps the definitions of the earlier cells. With no running cell it does nothing. A cell that starts while the turn stops also ends with a failure, and the next turn runs cells. A guest call that the stop interrupts leaves no stack trace in the output."
+
+# ── Phase 8: the memory tree (7.1) ──────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "memory"
+phase = "p8"
+module = "harness"
+file = "Memory.scala"
+title = "The memory algebra: the messages, the nodes, the lines, the memory and the view"
+
+[[node]]
+id = "message-kind"
+group = "memory"
+kind = "data"
+name = "MessageKind"
+ref = "7.1"
+uses = ["source"]
+text = "What one message of the memory log is: a message of the person or of the harness, a cell with its output, or a reply."
+
+[[node]]
+id = "message"
+group = "memory"
+kind = "data"
+name = "MemoryMessage"
+ref = "7.1"
+uses = ["message-kind"]
+text = "One step of a session in the memory log, with the time of its last entry. Its id is its index in the log."
+
+[[node]]
+id = "node-id"
+group = "memory"
+kind = "data"
+name = "NodeId"
+ops = ["span", "halves", "parent", "ref", "parse"]
+ref = "7.1"
+uses = []
+text = "The node (level, index) covers the messages [index * 2^level, (index + 1) * 2^level). Its reference is level.index, and parse reads it back. A level is at most 62, so a span fits a Long."
+
+[[node]]
+id = "memory-line"
+group = "memory"
+kind = "data"
+name = "MemoryLine"
+ops = ["of"]
+ref = "7.1"
+uses = []
+text = "A summary line of at most 512 bytes of UTF-8. MemoryLine.of keeps a short text and cuts a longer one at the end of a character, so a leaf never gives a longer line."
+
+[[node]]
+id = "memory"
+group = "memory"
+kind = "data"
+name = "Memory"
+ops = ["append", "ready", "buildNode", "roots", "zoom", "fork", "key"]
+ref = "7.1"
+spec = true
+uses = ["message", "node-id", "memory-line", "line-key"]
+text = "The log and the built lines, as a pure value. ready gives the nodes whose halves are built, buildNode of another node gives the same memory, roots gives one node for each set bit, zoom gives a message or the lines of two halves, and key gives the node with a SHA-256 of its texts."
+
+[[node]]
+id = "line-key"
+group = "memory"
+kind = "data"
+name = "LineKey"
+ref = "7.1"
+uses = ["node-id"]
+text = "The key of a stored line: the node, and the SHA-256 of the texts that it covers. A line of other messages has another key."
+
+[[node]]
+id = "view"
+group = "memory"
+kind = "data"
+name = "View"
+ops = ["upTo", "extend", "split", "join", "fit", "advance"]
+ref = "7.1"
+spec = true
+uses = ["node-id", "memory"]
+text = "A cut through the tree that covers [0, upTo). extend adds messages at the end, split shows the two halves of a node, join is its inverse, fit joins the oldest pairs until the view has at most high / 2 parts, and advance gives one extend and one fit for each message, so the view of n messages depends only on n."
+
+[[node]]
+id = "memory-log"
+group = "memory"
+kind = "data"
+name = "MemoryLog"
+ops = ["messages", "beforeOpenTurn"]
+ref = "7.1"
+uses = ["logged", "message"]
+text = "The log from the journal: one message for each Input, each cell with its output at its Observed, and each end of a turn. A longer journal gives a longer log with the same start. beforeOpenTurn counts the messages up to the reply of the last turn."
+
+[[group]]
+id = "memory-tree"
+phase = "p8"
+module = "harness"
+file = "MemoryTree.scala"
+title = "The memory tree strategy: the leaves, the store of lines, and zoom"
+
+[[node]]
+id = "compress-input"
+group = "memory-tree"
+kind = "data"
+name = "CompressInput"
+ref = "7.1"
+uses = []
+text = "The input of the leaf compress: one message longer than a line."
+
+[[node]]
+id = "merge-input"
+group = "memory-tree"
+kind = "data"
+name = "MergeInput"
+ref = "7.1"
+uses = []
+text = "The input of the leaf merge: the lines of two adjacent nodes, oldest first."
+
+[[node]]
+id = "summary"
+group = "memory-tree"
+kind = "data"
+name = "Summary"
+ref = "7.1"
+uses = []
+text = "The output of compress and merge: one summary line."
+
+[[node]]
+id = "line-store"
+group = "memory-tree"
+kind = "data"
+name = "LineStore"
+ops = ["inMemory"]
+ref = "7"
+uses = ["line-key", "memory-line"]
+text = "The built lines of a session: derived data with a journal of its own. The host keeps them in the session file, and a program call keeps them in memory. A store keeps the first line of a key."
+
+[[node]]
+id = "memory-state"
+group = "memory-tree"
+kind = "data"
+name = "MemoryState"
+ref = "7.1"
+uses = ["memory", "view"]
+text = "The derived data of the memory tree: the memory, and the view of the messages before the open turn."
+
+[[node]]
+id = "zoom-source"
+group = "memory-tree"
+kind = "data"
+name = "ZoomSource"
+ops = ["zoom", "setReader"]
+ref = "7.1"
+uses = []
+text = "What zoom of a cell reads: the derived data after the last policy call. The effects set a new reader after each update."
+
+[[node]]
+id = "memory-tree"
+group = "memory-tree"
+kind = "data"
+name = "MemoryTree"
+ops = ["update", "project", "zoom", "withLeaves", "room", "render"]
+ref = "7.1"
+spec = true
+uses = ["context-strategy", "predict", "compress-input", "merge-input", "summary", "line-store", "memory-state",
+        "runtime-context", "dspy-error", "logged", "projection", "strategy-name", "signature", "policy-runner", "budget"]
+text = "update appends the new messages, builds each ready node with the store or a leaf through the runner and the summary budget, and advances the view to the last reply. A failed leaf gives the line of the source. project gives the view its room first, then the open turn as the window gives it. zoom gives a message or the lines of two halves."
+
+[[group]]
+id = "file-lines"
+phase = "p8"
+module = "harness-host"
+file = "FileLines.scala"
+title = "The built lines of a session in its file"
+
+[[node]]
+id = "file-lines"
+group = "file-lines"
+kind = "data"
+name = "FileLines"
+ops = ["get", "putAll", "close", "open"]
+ref = "7.1"
+uses = ["line-store", "line-key", "memory-line", "session-id"]
+text = "The table memory of the session file, with a connection of its own and a busy timeout, so a reopen reads the built lines and makes no new LM call. The lines of one update go in one transaction, and a line never changes."
+
+[[group]]
+id = "memory-laws"
+phase = "p8"
+module = "harness"
+file = "MemoryLaws.scala"
+where = "tests"
+title = "The laws of the memory algebra"
+
+[[node]]
+id = "law-memory"
+group = "memory-laws"
+kind = "law"
+name = "Memory:"
+ref = "7.1"
+uses = ["memory", "view", "node-id", "memory-line", "message"]
+text = "The laws of CODE_HARNESS.md 6.2 as properties: Coverage, Zoom, Prefix, Immutability, Order, Size and Roots, and the laws of a node, a reference and a line."
+
+[[group]]
+id = "memory-log-laws"
+phase = "p8"
+module = "harness"
+file = "MemoryLogLaws.scala"
+where = "tests"
+title = "The laws of the memory log"
+
+[[node]]
+id = "law-memory-log"
+group = "memory-log-laws"
+kind = "law"
+name = "Memory log:"
+ref = "7.1"
+uses = ["memory-log"]
+text = "One message for each Input, each cell with its output, and each end of a turn, and none for the control entries. The log of a journal is the start of the log of each longer journal."
+
+[[group]]
+id = "memory-tree-laws"
+phase = "p8"
+module = "harness"
+file = "MemoryTreeLaws.scala"
+where = "tests"
+title = "The laws of the memory tree strategy"
+
+[[node]]
+id = "law-memory-tree"
+group = "memory-tree-laws"
+kind = "law"
+name = "Memory tree:"
+ref = "7.1"
+uses = ["memory-tree", "line-store", "memory-log", "window"]
+text = "A short message is its own line with no LM call. Two updates give the same state as one. A second tree with the same store makes no LM call, and a line of other messages is not used. A failed leaf gives the line of the source. The view has at most high parts, takes its room first and stays the same during a turn. render gives one line for each part. zoom gives a message or two lines."
+
+[[group]]
+id = "memory-tasks"
+phase = "p8"
+module = "harness"
+file = "MemoryTasks.scala"
+where = "tests"
+title = "The planted facts of the memory metric"
+
+[[node]]
+id = "memory-tasks"
+group = "memory-tasks"
+kind = "data"
+name = "MemoryTasks"
+ops = ["generate", "correct", "score", "byDistance"]
+ref = "7.1"
+uses = []
+text = "Generated long chats with facts in cell outputs, messages and replies, and one question for each fact. Far facts are in the first quarter, and near facts are a control. The score is the share of right answers, also for each distance."
+
+[[group]]
+id = "memory-task-laws"
+phase = "p8"
+module = "harness"
+file = "MemoryTaskLaws.scala"
+where = "tests"
+title = "The laws of the planted facts"
+
+[[node]]
+id = "law-memory-tasks"
+group = "memory-task-laws"
+kind = "law"
+name = "Memory tasks:"
+ref = "7.1"
+uses = ["memory-tasks", "window"]
+text = "The same seed gives the same tasks. Each fact is in one turn. correct takes the whole value. The window keeps the near facts and leaves out the far facts, so a far task needs the memory."
+
+[[group]]
+id = "memory-live-run"
+phase = "p8"
+module = "harness"
+file = "MemoryLiveRun.scala"
+where = "tests"
+title = "A live run of the memory metric"
+
+[[node]]
+id = "law-memory-live"
+group = "memory-live-run"
+kind = "law"
+name = "Memory live:"
+ref = "7.1"
+uses = ["memory-tasks", "memory-tree"]
+text = "With HARNESS_LIVE=true: the scores of the window and of the memory tree on the planted facts, and the size of each view."

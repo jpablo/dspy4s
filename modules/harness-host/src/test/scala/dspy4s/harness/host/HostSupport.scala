@@ -1,6 +1,6 @@
 package dspy4s.harness.host
 
-import dspy4s.harness.{Journal, Secrets, Support, TurnEffects}
+import dspy4s.harness.{Journal, MemoryTree, RequestLm, Secrets, Support, TurnEffects}
 import dspy4s.harness.kernel.*
 
 import java.nio.file.{Files, Path}
@@ -10,6 +10,28 @@ import scala.jdk.OptionConverters.*
 
 /** The helpers of the tests of the host (CODE_HARNESS_DESIGN.md, 10). */
 object HostSupport:
+
+  /** True for a request of the leaf `compress` or `merge` of the memory tree (7.1). */
+  def isSummary(text: String): Boolean =
+    text.contains(MemoryTree.compressInstructions) || text.contains(MemoryTree.mergeInstructions)
+
+  /** The reply of a summary leaf: a line that is a fixed function of the request. */
+  def summaryReply(text: String): String =
+    s"[[ ## line ## ]]\nS${(text.hashCode & 0x7fffffff) % 100000}\n\n[[ ## completed ## ]]"
+
+  /** A model for a work session: a summary request gets `summaryReply`, and the policy gets the replies of `steps` in
+    * order. A work session has the memory tree, so its summary requests come between the policy calls.
+    */
+  def sessionModel(steps: String*): RequestLm =
+    val next = AtomicInteger(0)
+    RequestLm { text =>
+      if isSummary(text) then Right(summaryReply(text))
+      else steps.lift(next.getAndIncrement()).toRight("the script has no more policy replies")
+    }
+
+  /** The texts of the summary requests of `lm`. */
+  def summaryRequests(lm: RequestLm): Vector[String] =
+    lm.requests.asScala.toVector.map(_.messages.flatMap(_.text).mkString).filter(isSummary)
 
   /** A work session of the user, with chat turns of `steps` steps. */
   def config(steps: Int = 3): SessionConfig = Support.config(TurnKind.Chat, steps).copy(owner = Owner.User)

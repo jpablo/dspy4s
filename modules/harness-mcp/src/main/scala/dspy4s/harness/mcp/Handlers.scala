@@ -58,3 +58,4 @@ final class MemoryStore extends Store:
 object SystemTurn extends Turn:
   def now(): Long                       = System.currentTimeMillis()
   def input(name: String): Option[Json] = None
+  def zoom(ref  : String): String       = ???

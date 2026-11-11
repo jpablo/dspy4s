@@ -57,6 +57,11 @@ trait ContextStrategy extends Derivation:
   def name: StrategyName
   def project(journal: Vector[Logged], d: D, budget: Int): Projection
 
+  /** The text of the part `ref` of the derived data, for `zoom` of a cell (7.1). A strategy with no memory gives an
+    * error with a plain message.
+    */
+  def zoom(d: D, ref: String): Either[String, String] = ???
+
 /** The status section (7): the step and the step limit, and the keys of the store. It is typed, so it can render only
   * its changes later.
   *

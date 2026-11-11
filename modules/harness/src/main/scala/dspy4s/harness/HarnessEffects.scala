@@ -5,6 +5,8 @@ import dspy4s.harness.kernel.{CellOutcome, Command, Position, Source}
 import dspy4s.harness.repl.{CellRun, ScalaRepl, lostNames, topLevelNames}
 import dspy4s.programs.strategies.Predict
 
+import scala.annotation.nowarn
+
 /** The effects of a turn of a harness (CODE_HARNESS_DESIGN.md, 4.6 and 9).
   *
   *   - `callPolicy` updates the derived data of `strategy`, projects the log of `journal` into the budget of `limits`,
@@ -14,7 +16,8 @@ import dspy4s.programs.strategies.Predict
   *     must answer does not run. A code in one outer ``` fence is the code in the fence (`unfenced`), so `Acted` and
   *     the history hold no fence. A code that is empty, `null` or `None` is no code, because the chat adapter keeps the
   *     text of an empty field (9). The trace of the call goes to the `RuntimeContext`, so an optimizer sees it. The
-  *     call of `policy` runs through `runner`, so a work session can cut it (10.3).
+  *     call of `policy` runs through `runner`, so a work session can cut it (10.3). After the update, `zooms` gets the
+  *     reader `strategy.zoom` of the new derived data, so `zoom` of a cell reads it (7.1).
   *   - `runCell` starts the calls of the cell in `recorder`, takes the snapshot of the store, and runs the code in the
   *     current REPL. The writes of the store go into the result only when the cell completes. The output in the journal
   *     is `CellRun.text`, the text that the MCP server also shows (6): the hints of a compile error, and a note of a
@@ -34,6 +37,7 @@ import dspy4s.programs.strategies.Predict
   * The effects own the current REPL: the first one starts with the effects, and `close` closes the current one. When a
   * new REPL cannot start, its exception goes on to the caller.
   */
+@nowarn("msg=unused") // the skeleton: the proof of phase 8 sets the reader of zooms
 final class HarnessEffects(
     task     : String,
     reference: String,
@@ -46,7 +50,8 @@ final class HarnessEffects(
     limits   : HarnessLimits,
     budget   : () => Budget,
     host     : Option[HostThreads],
-    runner   : PolicyRunner = PolicyRunner.Direct
+    runner   : PolicyRunner = PolicyRunner.Direct,
+    zooms    : ZoomSource   = ZoomSource()
 )(using RuntimeContext)
     extends TurnEffects:
 
