@@ -2,7 +2,7 @@ package dspy4s.harness.host
 
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.harness.{HarnessLimits, Models, Place, PolicyRunner, Secrets}
+import dspy4s.harness.{HarnessLimits, Models, Place, PolicyRunner, RequestLm, Secrets}
 import dspy4s.harness.Models.policy
 import dspy4s.harness.guest.{Mode, Scope, StrategyName}
 import dspy4s.harness.kernel.*
@@ -379,9 +379,10 @@ class WorkLaws extends munit.FunSuite:
 
   // ── The prompt and the folder (the live sessions of 2026-11-10) ──
 
-  /** The text of the policy call `n` of `model`. */
-  private def promptOf(model: ScriptLm, n: Int): String =
-    model.requests.lift(n).getOrElse(fail(s"no policy call $n")).messages.flatMap(_.text).mkString("\n")
+  /** The text of the policy call `n` of `model`. A summary request of the memory tree is not a policy call. */
+  private def promptOf(model: RequestLm, n: Int): String =
+    model.requests.asScala.toVector.map(_.messages.flatMap(_.text).mkString("\n")).filterNot(isSummary).lift(n)
+      .getOrElse(fail(s"no policy call $n"))
 
   /** True when `text` has a definition with the name `name`. */
   private def defines(text: String, name: String): Boolean =
@@ -389,21 +390,24 @@ class WorkLaws extends munit.FunSuite:
 
   test("Work: the prompt of a work session names the calls of workMode and no call that workMode refuses") {
     // The model of a live session said that it could use the network, other sessions and rlm.
-    val model = ScriptLm(policy("FAKE-HELLO", None))
+    val model = sessionModel(policy("FAKE-HELLO", None))
     work(model) { (_, handle) =>
       assertEquals(handle.send(message("m1")), Right(()))
       assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
-      val text    = promptOf(model, 0)
-      val missing = Vector("read", "write", "edit", "exec", "spawn", "llmQuery", "store").filterNot(defines(text, _))
-      val refused = Vector("httpGet", "rlm", "rlmBatched", "tell", "start", "sessions", "observe", "zoom")
+      val text = promptOf(model, 0)
+      // zoom(ref) reads the memory of the session with no capability (7.1). zoom(session, ref) needs Sessions.
+      val missing =
+        Vector("read", "write", "edit", "exec", "spawn", "llmQuery", "store", "zoom").filterNot(defines(text, _))
+      val refused = Vector("httpGet", "rlm", "rlmBatched", "tell", "start", "sessions", "observe")
         .filter(defines(text, _))
       assert(missing.isEmpty && refused.isEmpty, s"missing: $missing; refused: $refused")
+      assert(!text.contains("def zoom(session"), "the prompt names zoom(session, ref)")
     }
   }
 
   test("Work: the task of a chat turn names the folder, asks for no submit, and names no input fields") {
     // A chat ends a turn with a step with no code, so the text of a program call is wrong for it.
-    val model = ScriptLm(policy("FAKE-HELLO", None))
+    val model = sessionModel(policy("FAKE-HELLO", None))
     work(model) { (scope, handle) =>
       assertEquals(handle.send(message("m1")), Right(()))
       assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
@@ -421,7 +425,7 @@ class WorkLaws extends munit.FunSuite:
     val place = Place()
     try withRoot { root =>
         val env     = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
-        val runtime = Models.withModel(ScriptLm())(WorkRuntime.forWork(env, limits))
+        val runtime = Models.withModel(sessionModel())(WorkRuntime.forWork(env, limits))
         val missing = place.root.resolve("fake-missing")
         val file    = Files.writeString(place.root.resolve("fake-file.txt"), "FAKE")
         withHost(root, runtime) { host =>
@@ -438,7 +442,7 @@ class WorkLaws extends munit.FunSuite:
 
   test("Work: after the folder of a session is gone, an exec names the folder and says that it does not exist") {
     sandboxed()
-    val model = ScriptLm(
+    val model = sessionModel(
       policy("FAKE-FIRST", None),
       policy("run", Some("""println(exec("pwd"))""")),
       policy("FAKE-SECOND", None)
