@@ -14,7 +14,8 @@ import dspy4s.programs.strategies.Predict
   *     must answer does not run. A code in one outer ``` fence is the code in the fence (`unfenced`), so `Acted` and
   *     the history hold no fence. A code that is empty, `null` or `None` is no code, because the chat adapter keeps the
   *     text of an empty field (9). The trace of the call goes to the `RuntimeContext`, so an optimizer sees it. The
-  *     call of `policy` runs through `runner`, so a work session can cut it (10.3).
+  *     call of `policy` runs through `runner`, so a work session can cut it (10.3). After the update, `zooms` gets the
+  *     reader `strategy.zoom` of the new derived data, so `zoom` of a cell reads it (7.1).
   *   - `runCell` starts the calls of the cell in `recorder`, takes the snapshot of the store, and runs the code in the
   *     current REPL. The writes of the store go into the result only when the cell completes. The output in the journal
   *     is `CellRun.text`, the text that the MCP server also shows (6): the hints of a compile error, and a note of a
@@ -46,7 +47,8 @@ final class HarnessEffects(
     limits   : HarnessLimits,
     budget   : () => Budget,
     host     : Option[HostThreads],
-    runner   : PolicyRunner = PolicyRunner.Direct
+    runner   : PolicyRunner = PolicyRunner.Direct,
+    zooms    : ZoomSource   = ZoomSource()
 )(using RuntimeContext)
     extends TurnEffects:
 
@@ -57,6 +59,7 @@ final class HarnessEffects(
     val log = journal.log
     strategy.update(log, derived).left.map(_.message).flatMap { data =>
       derived = data
+      zooms.setReader(ref => strategy.zoom(data, ref))
       val view  = strategy.project(log, data, limits.budget)
       val input = PolicyInput(task, reference, view.status, view.observation, view.history)
       budget().spend().flatMap(_ => runner.run(() => policy(input).left.map(_.message))).map { step =>

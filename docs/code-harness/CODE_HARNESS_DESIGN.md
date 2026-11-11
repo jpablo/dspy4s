@@ -1089,6 +1089,138 @@ final case class PolicyStep(text: String, code: Option[String])
 - **The first version.** Phase 4 has the window strategy. The end of section 9 has its proposals: `project` gives a
   `Projection`, the derived data is a type member, and the budget counts characters.
 
+### 7.1 The memory tree (phase 8)
+
+Phase 8 brings the memory tree of [CODE_HARNESS.md](CODE_HARNESS.md), section 6, for long work sessions. The plan is
+a typed skeleton, as in 10.6: each type is complete, each new function and method has a `???` body, and the laws are
+tests that fail until the bodies exist. These choices were made with the user on 2026-11-10:
+
+- One message of the memory log is one step: a message of the person or of the harness, a cell with its output, or
+  the reply of a turn. The control entries stay out. `MemoryLog.messages` is a fold of the journal, so a longer
+  journal gives a longer log with the same start.
+- The strategy builds the summary lines in `update`, before each policy call, with the leaves `compress` and
+  `merge`. No new thread runs. A background builder can come later, if the steps are too slow.
+- A cell reads a part of its own session with `zoom(ref)`, a function of `Turn`. So each mode has it, with no new
+  capability. `zoom(session, ref)` of `Sessions^` stays for phase 9.
+- The metric uses planted facts: generated long sessions with facts in the early turns, and late questions that need
+  them. The score is the share of right answers, and the size of the view.
+
+The parts of the plan:
+
+| Part | Types and functions | Laws |
+|---|---|---|
+| The algebra | `MessageKind`, `MemoryMessage`, `NodeId`, `MemoryLine`, `Memory`, `LineKey`, `View` with `advance`, `MemoryLog` | `Memory:`, `Memory log:` |
+| The strategy | `CompressInput`, `MergeInput`, `Summary`, `LineStore`, `MemoryState`, `MemoryTree`, `ZoomSource`, `ContextStrategy.zoom`, `HarnessLimits.summaryCalls` | `Memory tree:` |
+| The guest API | `Turn.zoom`, `api.zoom(ref)`, and `zoom` in `JournalTurn`, `recorded`, `GatedTurn` and the other turns, and `ZoomSource` in `HarnessEffects` | `Mode givens:`, and the zoom laws of `Memory tree:` |
+| The host | the table `memory` of the session file, `FileLines`, and `WorkRuntime.strategyOf` | the memory laws of `File:` and `Work:` |
+| The metric | `MemoryTasks`, `MemoryLiveRun` | `Memory tasks:` |
+
+The laws of the algebra are the laws of [CODE_HARNESS.md](CODE_HARNESS.md), 6.2: Coverage, Zoom, Prefix,
+Immutability, Order, Size and Roots. The strategy also has the law of section 7: two updates give the same structure
+as one update on the full journal.
+
+These points are proposals for the review:
+
+- A message id is the `Long` index of the message in the log, not an opaque type.
+- `MemoryLine.of` cuts a text to 512 bytes of UTF-8 at the end of a character, so a leaf never gives a longer line. A
+  source of 512 bytes or less is its own line, with no LM call.
+- `Memory.buildNode` of a node that is not ready gives the same memory, so the algebra has no error case. `Memory.zoom`
+  gives `None` for a node outside the log, or for a node whose halves are not built.
+- The size of a view is its number of parts. A line has at most 512 bytes, so a view of `high` parts has at most
+  `high * 512` bytes. `fit` merges the oldest pairs first, while the view has more than `high / 2` parts. The Size law
+  holds when `roots(n)` has at most `high / 2` nodes.
+- The view of a step covers the messages up to the reply of the last turn, so it stays the same during a turn, and the
+  prompt cache keeps it. The messages and the steps of the open turn come as in the window strategy.
+- A reference is `level.index`, for example `3.5`. The render of a view gives each line with its reference, so the
+  model can zoom.
+- The built lines are derived data with a journal of their own (7): the table `memory` of the session file, through
+  `LineStore`. A reopen reads them, so it makes no new LM call. A program call keeps them in memory.
+- A program call, a child and a rollout keep the window, so the structure of an optimizer has no summary leaf yet.
+- The leaves `compress` and `merge` use the model of the session. A cheaper model for summaries comes later.
+
+**The spec review of the plan (2026-11-10).** A subagent read the plan, and it found 15 problems. These choices were
+made with the user:
+
+- The view takes its room of the budget first: `MemoryTree.room(high)` characters, in full, never cut and never
+  dropped, so the prompt cache keeps it. The default of `high` is 24, about 12,600 characters of the budget of 40,000.
+- A failed `compress` or `merge` gives the line of the source, and the store keeps it, so one bad message never blocks
+  a session. The input of `compress` is cut to `MemoryTree.MaxSource` characters first.
+- The summary calls run through the `PolicyRunner` of the activation, so a hard stop cuts them. They have a budget of
+  their own for each turn, `HarnessLimits.summaryCalls`, apart from `modelCalls`. A spent budget or a stop gives the
+  line of the source, but not to the store, so a later update builds the node again.
+- A work session gets its strategy from `config.strategy` (`WorkRuntime.strategyOf`). A new session has the memory
+  tree. A reopened session of phase 7 keeps the window of its journal. `PrefixSummary` has no code, so its activation
+  fails with a clear error.
+
+The other findings changed the plan with no choice:
+
+- `fit` depends on the view before it. With `high = 3`, an update at 4 messages and then at 6 gives
+  `[2.0, 0.4, 0.5]`, but one update at 6 gives `[2.0, 1.2]`. So the view of `n` messages is
+  `View.advance(View.empty, m, high, n)`: one `extend` and one `fit` for each message. Then two updates give the
+  state of one update, and a law checks it with `high = 3` at each entry.
+- `MemoryLog.beforeOpenTurn` counts the messages up to the reply of the last `TurnEnded`. A `Cell` message comes at
+  its `Observed`, so a report during a cell comes before it, and a crashed cell gives none.
+- A key of the store holds a SHA-256 of the texts under the node (`LineKey`), and each store keeps the first line of a
+  key. So a store never gives a line of other messages, also after a change of `MemoryLog`.
+- A reference has a level from 0 to 62 and an index below `2^(62 - level)`, so its span fits a `Long`. The model
+  writes the reference, so `parse` refuses the others.
+- `render` gives one line for each part: a newline of a line becomes a space.
+- Each connection of the session file waits up to 5 seconds for the other (`busy_timeout`), and the lines of one
+  update go to the file in one transaction. `SessionFile` sets the same timeout.
+- `JournalTurn` and `HarnessEffects` get a `ZoomSource`. After each update, the effects set the reader
+  `strategy.zoom` of the new derived data, and a cell reads it.
+- The laws of a work session use a model that answers the summary requests, so they hold with the memory tree. The
+  stop law counts only the policy requests.
+- Two laws pin `fit`: after a change, a view has at most `high / 2` parts or the roots, and its levels do not grow
+  from the oldest part to the newest.
+- The metric has near tasks as a control, which the window can answer, and facts in messages and replies too. The
+  score is also given for each distance from the fact to the question.
+
+**The proofs (2026-11-10).** Each law of the plan passes, and the bodies follow the plan. The points that the plan did
+not fix:
+
+- `fit` is one pass with a stack, with the newest part on top. The parts under the top have no pair that can join, so
+  the pair of the top two is always the oldest pair that can join, as the plan says.
+- `Memory.key` gives each kind and each text with its length first, so two other logs never give the same bytes to
+  SHA-256.
+- The runner of a work session reads the stop before each call. So after a stop, each summary of the rest of the
+  update gets the line of its source with no call, and the store keeps none of these lines. The policy call after the
+  update stops too, and the turn ends `Aborted`. A law checks a leaf call that a stop cut.
+- `FileLines` holds derived data: a failed read gives no line, and a failed write keeps no line. Neither one ends a
+  turn, so the next update makes the line again.
+- The error of `zoom` with no memory tree is `ContextStrategy.NoMemory`. A cell gets it as an exception with a plain
+  message.
+- `MemoryLiveRun` is in `harness-host`, because it needs a real work session: `zoom` in a cell, and the file of a
+  session. Each strategy has one session with the journal of the tasks, and each question is the next turn, so the
+  memory builds its lines once.
+- The harness has 10 new mutants, each one killed: `fit` that stops at `high`, `advance` in one step, a key with no
+  text, a node before its halves, a view over the open turn, `render` with newlines, a budget that does not stop the
+  calls, a store that keeps the line of a stopped call, a projection with no room for the view, and a projection with
+  no view. The laws of `harness-host` pass in the Linux container too.
+
+**The first live run of the metric (2026-11-10).** It failed: the first update of the memory tree did not end in 30
+minutes, so the first question got no answer. A probe of the endpoint showed why. The model wrote 5,000 to 10,000
+reasoning tokens for each merge of two lines, so one merge took 36 to 70 seconds, and the 180 merges of the session
+would take more than 2 hours. With `{"chat_template_kwargs": {"enable_thinking": false}}` on the request, a merge took
+0.5 to 0.7 seconds. The test wrote its results only at its end, so the scores of the window were lost too. The fixes,
+each with a law that failed first:
+
+- Each summary request gets the option bag of the provider in `DSPY_SUMMARY_OPTIONS`, a JSON object, through
+  `Predict.config`. `WorkEnv.summaryOptions` reads it for the CLI and the live run, and a text that is not a JSON object
+  is an error.
+- The leaf calls of one round need only the rounds before, so they run at the same time, at most
+  `HarnessLimits.batch` at a time. The runner of a work session keeps each call that runs, and a stop cuts all of
+  them.
+- The store gets the lines of each round, so an update that stops in the middle keeps the rounds that it ended.
+- The live run adds each answer to its file at once, with the seconds of the turn. A question with no answer after 30
+  minutes is a wrong answer, and the session asks no more questions.
+- Three more mutants, each one killed: one call at a time, no line in the store for a round, and no summary options.
+
+The second run, with the summary options, ended in about 2 minutes. The memory tree answered 6 of 6 questions right,
+and the window 2 of 6: the window answered the two facts of the last turns, and it found none of the four facts of the
+first quarter. The first question of the memory tree took 56 seconds, with the build of all lines of the session.
+Section 12 has the numbers.
+
 ## 8. Sessions
 
 ### 8.1 One kernel, four configurations
@@ -1777,6 +1909,7 @@ and the start probe also ran on JDK 21.0.11. The code is in `tmp/design-check/`,
 | The laws of `harness-sandbox` on Linux, with `scripts/sandbox-linux/run.sh`: Ubuntu 24.04, bwrap and JDK 21 on arm64, in a privileged podman container, as a normal user | 63 tests: 57 pass, and 6 of Seatbelt skip. Each probe of 5.4 gives what the profile allows. The first run found three errors, fixed here. A command made a new file `.env.new`, because a mount of bubblewrap cannot hide a name, so 5.4 now protects the secret files that exist when a command starts. The probe of bubblewrap passed in a container where each command failed. The time limit waited 2 s for a zombie when the JVM was PID 1. |
 | The laws of `harness-sandbox` and `harness-host` on Linux after part B of phase 7, in the same container | `harness-sandbox`: 72 tests, 66 pass, and 6 of Seatbelt skip. `harness-host`: 78 tests, and 78 pass. The first run of the host laws found that a stop during the start of bwrap left the sandbox and its command, because `--new-session` puts the sandbox out of the process group. The fix in the wrapper (10.6) passed a stop at 0 to 1000 ms after the start, with no process left. |
 | A live chat through the CLI of phase 7: JDK 21, Seatbelt on macOS, the private endpoint with the open model of 27B parameters, and a script that sends one message at a time | Five turns in 64 s, and the first model call took most of the first 44 s. `exec` listed the 3 files of the folder. A cell defined `val x = 41` and started the job `sleep 301` with `spawn`, and `waitJob` gave `Running`. `stopJob` and `waitJob` gave `Stopped`, with no process left. `/stop` during `exec("sleep 302")` ended the turn `Aborted` 0.2 s later, with no process left. The next turn computed `x + 1 = 42`, so the REPL stayed. `/quit` gave the exit code 0, and the journal has 53 entries. The run found one problem, fixed with a law that failed first: the output of the stopped cell showed the stack trace of the `InterruptedException` of the stop to the model. |
+| The live memory metric of phase 8 (`MemoryLiveRun`): one generated chat of 60 turns with 6 planted facts, a work session for each strategy with that journal, and each question as the next turn. The private endpoint with the open model of 27B parameters, Seatbelt on macOS, and `DSPY_SUMMARY_OPTIONS` that turns off the reasoning of the summaries | The memory tree: 6 of 6 right. The window: 2 of 6 right, the two near facts, and none of the four facts of the first quarter. The window said that it had no information on a far fact, or it looked for it in the files. The first question of the memory tree took 56 s, with the build of the lines of the whole session, and the others took 1 to 9 s. A first run with the reasoning on did not end its first question in 30 minutes: one merge took 36 to 70 s with 5,000 to 10,000 reasoning tokens, and 0.5 to 0.7 s with the reasoning off (7.1). |
 | A code review of phases 1 to 3 at the high level, and the fixes | 10 findings, each fixed with a test that failed first. The worst: bwrap let a command reach the UNIX sockets of the host, so the D-Bus bus or docker.sock could start a process outside the sandbox. A probe reproduced it on Linux, and a seccomp filter fixed it. The others: the MCP files read `.env`, the proxy kept the `Host` header of the client and allowed each port with no limit of connections, the secret paths missed common credential files, `Prefix` compared raw text, `decide` took an effect id two times, `AUTH` matched `AUTHOR`, each command walked the whole scope, and the preamble did not escape a name. A review of the fixes found 6 more cases, fixed too. The sandbox has 36 mutants, the kernel 27, and each one is killed. |
 | A code review of phase 4 at the high level, and the fixes | 10 findings. 9 are fixed, each with a test that failed first, and 1 needed no change. The worst: `Files.local` wrote through a symbolic link to a place that does not exist, so a command could make the JVM write outside the root and outside the sandbox. The others: a cell thread that did not stop, or a REPL that the heap guard closed, ran on into the next cells; two calls of one cell could get a false refusal; a code field `null` ran as a cell; a copy that failed threw out of `forward` and left its part; a long text or code dropped the whole history; and three cleanups. The full copy of the workspace needed no change, because `Files.copy` on JDK 21 clones each file. A review of the fixes found 2 more cases, fixed too: a read through a link at the last part, and an exception that left the turn of the journal open. The harness has 70 laws and 29 mutants, and each mutant is killed. |
 | A first live run of `Harness` with a real model: `HarnessLiveRun`, five small tasks, Seatbelt on macOS, a private OpenAI-compatible endpoint with an open model of 27B parameters | Run 1: 5 of 5 answers right, with 1 to 3 model calls a task and 5 to 84 s a task, nearly all in the first call, with 9,000 to 27,000 characters of reasoning. The model used `read`, `exec` and `write` well. It found two gaps: the model did not see the preamble, so it wrote `submit(13)`, and `Acted.reasoning` was empty. Run 2, after the fixes and with native reasoning declared: 5 of 5 right, 1 to 4 calls and 1 to 6 s a task. The shell task now ended with `submit` and needed no finisher. A run with a reasoning field in the prompt found that the history showed `None` for that field, fixed too. The suite runs only with `HARNESS_LIVE=true`. The harness has 74 laws and 32 mutants, and each mutant is killed. |

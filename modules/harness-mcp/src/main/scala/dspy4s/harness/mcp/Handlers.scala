@@ -58,3 +58,5 @@ final class MemoryStore extends Store:
 object SystemTurn extends Turn:
   def now(): Long                       = System.currentTimeMillis()
   def input(name: String): Option[Json] = None
+  def zoom(ref: String): String         =
+    throw IllegalArgumentException(s"zoom($ref): the MCP server has no memory tree, so zoom has nothing to read")

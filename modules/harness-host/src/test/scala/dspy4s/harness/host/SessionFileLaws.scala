@@ -1,6 +1,6 @@
 package dspy4s.harness.host
 
-import dspy4s.harness.Support
+import dspy4s.harness.{LineKey, MemoryLine, NodeId, Support}
 import dspy4s.harness.kernel.*
 import dspy4s.harness.host.HostSupport.*
 
@@ -16,6 +16,36 @@ class SessionFileLaws extends munit.FunSuite:
 
   private def open(path: Path, session: SessionId = id(1)): SessionFile =
     SessionFile.open(path, session).fold(e => fail(e), identity)
+
+  test("File: the table memory keeps the first line of a key, keys a line by its digest, and leaves the journal") {
+    val first  = LineKey(NodeId(0, 0), "FAKE-DIGEST-0")
+    val parent = LineKey(NodeId(1, 0), "FAKE-DIGEST-1")
+    withRoot { root =>
+      val path = SessionFile.pathOf(root, id(1))
+      val file = open(path)
+      try
+        assertEquals(file.append(inputs(3), flush = true), Right(()))
+        val lines = FileLines.open(path, id(1)).fold(e => fail(e), identity)
+        try
+          lines.putAll(Vector(first -> MemoryLine.of("FAKE-FIRST"), parent -> MemoryLine.of("FAKE-PARENT")))
+          lines.putAll(Vector(first -> MemoryLine.of("FAKE-ANOTHER")))
+          // The journal still writes while the store has the file open.
+          assertEquals(file.append(inputs(5).drop(3), flush = true), Right(()))
+        finally lines.close()
+        assertEquals(file.readFrom(0), Right(inputs(5)))
+      finally file.close()
+      val again = FileLines.open(path, id(1)).fold(e => fail(e), identity)
+      try
+        assertEquals(again.get(first), Some(MemoryLine.of("FAKE-FIRST")))
+        assertEquals(again.get(parent), Some(MemoryLine.of("FAKE-PARENT")))
+        assertEquals(again.get(first.copy(digest = "FAKE-OTHER")), None)
+        assertEquals(again.get(LineKey(NodeId(2, 0), "FAKE-DIGEST-2")), None)
+      finally again.close()
+      val other = FileLines.open(path, id(2)).fold(e => fail(e), identity)
+      try assertEquals(other.get(first), None)
+      finally other.close()
+    }
+  }
 
   test("File: the file of a session is <root>/sessions/<id>.db") {
     withRoot { root =>

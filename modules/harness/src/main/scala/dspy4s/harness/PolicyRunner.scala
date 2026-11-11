@@ -7,10 +7,13 @@ package dspy4s.harness
   */
 trait PolicyRunner:
 
-  /** The result of `call`, or an error when a stop cut the call. */
+  /** The result of `call`, or an error when a stop cut the call: then the error is `PolicyRunner.Stopped`. */
   def run[A](call: () => Either[String, A]): Either[String, A]
 
 object PolicyRunner:
+
+  /** The error of a call that a stop cut. A caller can tell it from the error of the model. */
+  val Stopped = "the model call stopped, because the turn stops"
 
   /** Runs the call on the thread of the caller. */
   object Direct extends PolicyRunner:

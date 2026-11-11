@@ -9,6 +9,7 @@ import dspy4s.harness.kernel.{Logged, RequestId, SessionId}
 import dspy4s.harness.sandbox.{Backends, HostList}
 import dspy4s.lm.contracts.{LanguageModel, LmCapabilities, LmMode, LmRequest, LmResponse}
 import dspy4s.lm.providers.{OpenAiClient, OpenAiLanguageModel}
+import zio.blocks.schema.DynamicValue
 
 import java.io.{BufferedReader, InputStreamReader, PrintStream}
 import java.nio.charset.StandardCharsets.UTF_8
@@ -24,6 +25,9 @@ import java.util.concurrent.CountDownLatch
   * mask of the host hides it in each entry (5.6). With none of these variables, the client still starts, and the first
   * policy call fails its turn with the error of the model. A session that another host has open gives an error and the
   * exit code 1. `DSPY_NATIVE_REASONING=true` declares that the model gives its reasoning apart from its text.
+  * `DSPY_SUMMARY_OPTIONS` is a JSON object, the option bag of each summary request of the memory tree (7.1), for
+  * example `{"chat_template_kwargs": {"enable_thinking": false}}`. A value that is not a JSON object gives an error and
+  * the exit code 2.
   *
   * A proposal for the review: the CLI runs on JDK 21. Its start time is a check of this phase, and an AOT cache on JDK
   * 25 comes later only if the start is too slow (choice 8).
@@ -43,12 +47,20 @@ object Cli:
 
   /** Opens the session of `cli`, runs the loop, and gives the exit code. */
   private def session(cli: CliArgs, home: Path): Int =
+    WorkEnv.summaryOptions(sys.env) match
+      case Left(error) =>
+        System.err.println(error)
+        2
+      case Right(options) => session(cli, home, options)
+
+  /** Opens the session of `cli` with the summary options `options`, runs the loop, and gives the exit code. */
+  private def session(cli: CliArgs, home: Path, options: DynamicValue.Record): Int =
     val name    = sys.env.getOrElse("DSPY_MODEL", "none")
     val model   = modelOf(name)
     val secrets = secretsOf(sys.env)
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(model), adapter = Some(ChatAdapter()))) {
       given RuntimeContext = RuntimeEnvironment.current
-      val env              = WorkEnv(home, HostList.empty, Backends.detect(), secrets, cli.root)
+      val env              = WorkEnv(home, HostList.empty, Backends.detect(), secrets, cli.root, options)
       LocalHost.start(cli.root, WorkRuntime.forWork(env), secrets) match
         case Left(error) =>
           System.err.println(s"The host did not start: $error")

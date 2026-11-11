@@ -64,7 +64,7 @@ object Window extends ContextStrategy:
     *     of `Replied`, or a note of another outcome with the last text of the turn.
     *   - The newest messages that fit the rest of the budget stay, oldest first, so the oldest turns go first.
     */
-  private def chat(journal: Vector[Logged], status: String, budget: Int): Projection =
+  private def chat(journal: Vector[Logged], status: String, budget: Int, earlier: Boolean = true): Projection =
     val (turns, open) = chatTurns(journal)
     val acted         = open.filter(_.acted)
     val current       = open.lastOption.filterNot(_.acted)
@@ -76,11 +76,22 @@ object Window extends ContextStrategy:
       val seen = (Vector(before(k)).filter(_.nonEmpty) ++ step.heard).mkString("\n")
       message(seen, Step(acted = true, step.text, step.code, step.output), budget / 8)
     }
-    val turnMessages = turns.map { turn =>
-      message(turn.heard.mkString("\n"), Step(acted = true, turn.reply, None, None), budget / 8)
-    }
+    val turnMessages =
+      if !earlier then Vector.empty
+      else
+        turns.map { turn =>
+          message(turn.heard.mkString("\n"), Step(acted = true, turn.reply, None, None), budget / 8)
+        }
     val history = newest(turnMessages ++ stepMessages, budget - status.length - observation.length)
     Projection(status, observation, History(history))
+
+  /** The projection of the open turn of a chat in `budget`, with no earlier turn: the part of the memory tree (7.1).
+    * The view of the memory tree holds the earlier turns. A program call gives its one turn, as `project` does.
+    */
+  private[harness] def openTurn(journal: Vector[Logged], budget: Int): Projection =
+    val now = state(journal)
+    if now.config.kind == TurnKind.Chat then chat(journal, Status.of(now).render, budget, earlier = false)
+    else program(journal, Status.of(now).render, budget)
 
   /** A turn of a chat that ended: the messages of the turn, and its reply. */
   private final case class ChatTurn(heard: Vector[String], reply: String)

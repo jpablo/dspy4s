@@ -49,6 +49,9 @@ object HarnessEnv:
   *   REPL at the limit has no `Children^`.
   * @param batch
   *   the most queries or children that one batch call runs at the same time (6)
+  * @param summaryCalls
+  *   the calls of the leaves `compress` and `merge` of the memory tree in one turn (7.1), apart from `modelCalls`.
+  *   After them, a node gets the line of its source, and a later turn builds it again.
   */
 final case class HarnessLimits(
     steps         : Int            = 10,
@@ -59,7 +62,8 @@ final case class HarnessLimits(
     cellLimit     : Int            = 300,
     modelCalls    : Int            = 60,
     depth         : Int            = 2,
-    batch         : Int            = 4
+    batch         : Int            = 4,
+    summaryCalls  : Int            = 64
 ) derives CanEqual
 
 /** The input of the finisher leaf (9): the task, and the steps of the call as text. */

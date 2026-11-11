@@ -5,6 +5,8 @@ import dspy4s.harness.guest.StrategyName
 import dspy4s.harness.kernel.{Logged, Position, SessionState}
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
+import scala.annotation.unused
+
 /** The input of the policy leaf (CODE_HARNESS_DESIGN.md, 7 and 9). `task` holds the instructions and the input fields
   * of the call. `apiReference` is the API reference (5.1): an input field, so an optimizer cannot change it.
   */
@@ -56,6 +58,16 @@ trait Derivation:
 trait ContextStrategy extends Derivation:
   def name: StrategyName
   def project(journal: Vector[Logged], d: D, budget: Int): Projection
+
+  /** The text of the part `ref` of the derived data, for `zoom` of a cell (7.1). A strategy with no memory gives an
+    * error with a plain message.
+    */
+  def zoom(@unused d: D, @unused ref: String): Either[String, String] = Left(ContextStrategy.NoMemory)
+
+object ContextStrategy:
+
+  /** The error of `zoom` in a session with no memory tree (7.1). */
+  val NoMemory = "this session has no memory tree, so zoom has nothing to read"
 
 /** The status section (7): the step and the step limit, and the keys of the store. It is typed, so it can render only
   * its changes later.

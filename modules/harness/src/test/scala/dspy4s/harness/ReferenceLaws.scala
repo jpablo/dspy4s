@@ -33,7 +33,9 @@ class ReferenceLaws extends munit.FunSuite:
   )
 
   /** A call of each function of `api` that needs a capability. The handlers of the law throw, so a call that compiles
-    * fails when it runs, and the law looks only at the compile.
+    * fails when it runs, and the law looks only at the compile. A name with two forms has a probe for each form, and
+    * the name compiles when one of its forms compiles: `zoom(ref)` reads the memory of the session with no capability
+    * (7.1), and `zoom(session, ref)` needs `Sessions`.
     */
   private val probes = Vector(
     "read"            -> """read("a.txt")""",
@@ -56,6 +58,7 @@ class ReferenceLaws extends munit.FunSuite:
     "tell"       -> """tell(sessions().head.session, "m")""",
     "observe"    -> """observe(sessions().head.session, "q")""",
     "zoom"       -> """zoom(sessions().head.session, "r")""",
+    "zoom"       -> """zoom("0.0")""",
     "start"      -> """start("g", Scope.Directory("d"), StrategyName.Window)""",
     "rlm"        -> """rlm[Int]("t")""",
     "rlmBatched" -> """rlmBatched[Int](Vector(("t", Map.empty)))"""
@@ -66,28 +69,31 @@ class ReferenceLaws extends munit.FunSuite:
     Vector("list" -> "sessions", "get" -> "httpGet", "query" -> "llmQuery", "queryBatched" -> "llmQueryBatched")
 
   /** The functions that need no capability, so each reference names them. */
-  private val always = Vector("println", "now", "input")
+  private val always = Vector("println", "now", "input", "zoom")
 
   /** True when `reference` has a definition with the name `name`. */
   private def mentions(reference: String, name: String): Boolean =
     raw"\bdef\s+${java.util.regex.Pattern.quote(name)}\b".r.findFirstIn(reference).nonEmpty
 
-  /** The compile error of each probe in a REPL of `mode`, or none when the call compiles. */
-  private def errors(mode: Mode): Map[String, Option[String]] =
+  /** The compile error of each probe in a REPL of `mode`, or none when the call compiles, in the order of `probes`. */
+  private def errors(mode: Mode): Vector[(String, String, Option[String])] =
     val repl = ScalaRepl(mode, ReferenceLaws.bindings, cellTimeout = 30.seconds)
     try probes.map { (name, code) =>
-        name ->
-          (repl.run(code).outcome match
+        (
+          name,
+          code,
+          repl.run(code).outcome match
             case CellOutcome.CompileError(lines) => Some(lines.mkString("\n"))
-            case _                               => None)
-      }.toMap
+            case _                               => None
+        )
+      }
     finally repl.close()
 
-  /** The names of `probes` whose call compiles in a REPL of `mode`. */
-  private def compiling(mode: Mode): Set[String] = errors(mode).collect { case (name, None) => name }.toSet
+  /** The names of `probes` with a call that compiles in a REPL of `mode`. */
+  private def compiling(mode: Mode): Set[String] = errors(mode).collect { case (name, _, None) => name }.toSet
 
   test("Reference: each function of api has a call that compiles in a REPL of the full mode") {
-    val failed = errors(Mode.full).collect { case (name, Some(error)) => s"$name: $error" }
+    val failed = errors(Mode.full).collect { case (_, code, Some(error)) => s"$code: $error" }
     assert(failed.isEmpty, failed.mkString("\n\n"))
   }
 
@@ -105,6 +111,8 @@ class ReferenceLaws extends munit.FunSuite:
           (wrong ++ methodsWrong).mkString(", ")
       )
       always.foreach(name => assert(mentions(reference, name), s"the reference does not name $name"))
+      // The form of zoom for another session needs Sessions, as each function of the trait.
+      assertEquals(reference.contains("def zoom(session"), compiles("sessions"), "zoom(session, ref)")
     }
   }
 
@@ -115,6 +123,7 @@ object ReferenceLaws:
     turn = new Turn:
       def now(): Long                       = 0L
       def input(name: String): Option[Json] = None
+      def zoom(ref  : String): String       = ???
     ,
     files = Some(new Files:
       def read(path : String): String                                 = ???

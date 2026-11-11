@@ -211,12 +211,17 @@ final class SnapshotStore extends Store:
   def store[A: Data](key: String, value: A): Unit =
     synchronized { buffer = buffer.updated(key, summon[Data[A]].encode(value)) }
 
-/** The `Turn` of a session (5.1): the time of `clock`, and the values of the input fields from `SessionState.inputs`.
+/** The `Turn` of a session (5.1): the time of `clock`, the values of the input fields from `SessionState.inputs`, and
+  * `zoom`, which reads `zooms`. The effects of the session set the reader of `zooms` after each update (7.1).
   * `recorded` records each `now`, so a replay gets the same time.
   */
-final class JournalTurn(journal: Journal, clock: () => Long) extends Turn:
+final class JournalTurn(journal: Journal, clock: () => Long, zooms: ZoomSource = ZoomSource()) extends Turn:
   def now(): Long                       = clock()
   def input(name: String): Option[Json] = journal.state.inputs.get(name)
+
+  /** The part `ref` of the memory. An error is an exception with a plain message, so the cell fails with it. */
+  def zoom(ref: String): String =
+    zooms.zoom(ref).fold(error => throw IllegalArgumentException(s"zoom: $error"), identity)
 
 /** `recorded(h)` of 5.3 for each handler of `bindings`: each call of the guest API goes through `recorder`. `input`
   * reads the journal, so it is not an effect. With `root`, the path of a file call is absolute and normal in the
@@ -239,6 +244,7 @@ def recorded(bindings: Bindings, recorder: Recorder, root: Option[Path] = None):
     turn = new Turn:
       def now(): Long                       = recorder.call("now", Json.Null)(turn.now())
       def input(name: String): Option[Json] = turn.input(name)
+      def zoom(ref  : String): String       = recorder.call("zoom", args("ref" -> text(ref)))(turn.zoom(ref))
     ,
     files = bindings.files.map { inner =>
       new Files:
