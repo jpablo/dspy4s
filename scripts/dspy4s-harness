@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# Runs the terminal client of the harness (CODE_HARNESS_DESIGN.md, 15, phase 7).
+#
+# Usage:
+#   scripts/dspy4s-harness [--root DIR] [--session ID] [--script] [FOLDER]
+#
+# The folder of a new session is FOLDER, or the current folder. The CLI reads the variables of the model from the
+# environment and from ~/.dspy4s/harness/.env. A link to this script from a folder of the PATH also works, for example:
+#   ln -s "$PWD/scripts/dspy4s-harness" ~/.local/bin/dspy4s-harness
+#
+# The script builds the CLI with sbt when the class path file modules/harness-cli/target/live-classpath.txt is missing,
+# or when a source file of the build is newer than it. HARNESS_CLI_BUILD=1 always builds, and HARNESS_CLI_NO_BUILD=1
+# uses the file with no build.
+set -euo pipefail
+
+repo="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
+classpath="$repo/modules/harness-cli/target/live-classpath.txt"
+
+# True when the class path file is missing, or when a source file of the build is newer than it.
+stale() {
+  [[ ! -s "$classpath" ]] && return 0
+  [[ -n "$(find "$repo/build.sbt" "$repo/project" "$repo/modules" -name target -prune -o \
+    \( -name '*.scala' -o -name '*.java' -o -name '*.sbt' \) -newer "$classpath" -print -quit)" ]]
+}
+
+if [[ "${HARNESS_CLI_NO_BUILD:-}" != "1" ]] && { [[ "${HARNESS_CLI_BUILD:-}" == "1" ]] || stale; }; then
+  echo "The script builds the CLI with sbt." >&2
+  mkdir -p "$(dirname "$classpath")"
+  output="$(cd "$repo" && sbt -batch "export harnessCli/Runtime/fullClasspath" 2>&1)" || {
+    echo "$output" >&2
+    echo "The build of the CLI failed." >&2
+    exit 1
+  }
+  # The last line of the export is the class path. The lines before it are the log of the build.
+  printf '%s\n' "$output" | grep '^/' | tail -1 > "$classpath"
+  if [[ ! -s "$classpath" ]]; then
+    echo "$output" >&2
+    echo "The build gave no class path." >&2
+    exit 1
+  fi
+fi
+
+exec java -cp "$(cat "$classpath")" dspy4s.harness.cli.Cli "$@"

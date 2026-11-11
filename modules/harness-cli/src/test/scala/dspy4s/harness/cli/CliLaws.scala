@@ -4,6 +4,7 @@ import dspy4s.harness.Support
 import dspy4s.harness.guest.JobStatus
 import dspy4s.harness.host.{Behind, Feed, HostError, SessionHandle}
 import dspy4s.harness.kernel.*
+import dspy4s.lm.providers.OpenAiLanguageModel
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.json.Json
 
@@ -266,20 +267,125 @@ class CliLaws extends munit.FunSuite:
     assert(!secrets.maskText("the token fake-token-value-0123456789").contains("fake-token-value"))
   }
 
+  // ── The variables file: <home>/.dspy4s/harness/.env ──
+
+  test("CLI: the variables file gives NAME=VALUE lines, skips blank lines and comments, and reads export and quotes") {
+    val text = """# a comment
+        |
+        |A=1
+        |export B = two
+        |C="x y"
+        |D='{"k": 1}'
+        |E=http://fake-host/v1#part
+        |F=
+        |A=last
+        |""".stripMargin
+    assertEquals(
+      EnvFile.parse(text),
+      Right(Map(
+        "A" -> "last",
+        "B" -> "two",
+        "C" -> "x y",
+        "D" -> """{"k": 1}""",
+        "E" -> "http://fake-host/v1#part",
+        "F" -> ""
+      ))
+    )
+  }
+
+  test("CLI: a line of the variables file that is not right gives an error with its number and not its text") {
+    assert(EnvFile.parse("A=1\nFAKE-KEY-0123 with no sign\n").left.exists(_.contains("2")))
+    val badName = EnvFile.parse("A=1\nB=2\nFAKE-NAME=fake-secret-0123\n")
+    assert(badName.left.exists(e => e.contains("3") && !e.contains("fake-secret")), badName.toString)
+    assert(EnvFile.parse("=1").isLeft)
+  }
+
+  test("CLI: read gives no variable for a missing file, the variables of a file, and an error with the path") {
+    val dir = Files.createTempDirectory("dspy4s-cli-env-")
+    assertEquals(EnvFile.read(dir.resolve("missing.env")), Right(Map.empty))
+    val file = Files.writeString(dir.resolve(".env"), "DSPY_MODEL=fake-model\n")
+    assertEquals(EnvFile.read(file), Right(Map("DSPY_MODEL" -> "fake-model")))
+    Files.writeString(file, "not a variable\n")
+    assert(EnvFile.read(file).left.exists(_.contains(file.toString)))
+    assertEquals(EnvFile.pathOf(home), home.resolve(".dspy4s/harness/.env"))
+    Support.remove(dir)
+  }
+
+  test("CLI: a variable of the process wins over the variables file") {
+    val file    = Map("DSPY_MODEL" -> "file-model", "DSPY_TRACE" -> "/fake/trace")
+    val process = Map("DSPY_MODEL" -> "process-model", "PATH" -> "/fake/bin")
+    assertEquals(
+      EnvFile.merge(file, process),
+      Map("DSPY_MODEL" -> "process-model", "DSPY_TRACE" -> "/fake/trace", "PATH" -> "/fake/bin")
+    )
+  }
+
+  test("CLI: the base URL and the key come from one place, so a key of the process never goes to a URL of the file") {
+    val processBoth = Map("OPENAI_BASE_URL" -> "http://fake-process/v1", "OPENAI_API_KEY" -> "fake-process-key-0123")
+    val baseOnly    = EnvFile.merge(Map("OPENAI_BASE_URL" -> "http://fake-file/v1"), processBoth)
+    assertEquals(baseOnly.get("OPENAI_BASE_URL"), Some("http://fake-file/v1"))
+    assertEquals(baseOnly.get("OPENAI_API_KEY"), None)
+    val keyOnly = EnvFile.merge(Map("OPENAI_API_KEY" -> "fake-file-key-0123"), processBoth)
+    assertEquals(keyOnly.get("OPENAI_API_KEY"), Some("fake-file-key-0123"))
+    assertEquals(keyOnly.get("OPENAI_BASE_URL"), None)
+    assertEquals(EnvFile.merge(Map("DSPY_MODEL" -> "m"), processBoth) -- Set("DSPY_MODEL"), processBoth)
+  }
+
+  test("CLI: the mask covers the secrets of the process and of the variables file, also two values of one name") {
+    val secrets = Cli.secretsOf(
+      Map("OPENAI_API_KEY" -> "fake-process-key-0123"),
+      Map("OPENAI_API_KEY" -> "fake-file-key-4567", "FAKE_API_TOKEN" -> "fake-token-value-89ab")
+    )
+    val masked = secrets.maskText("fake-process-key-0123 fake-file-key-4567 fake-token-value-89ab")
+    assert(!masked.contains("fake-"), masked)
+  }
+
+  test("CLI: the model takes the base URL, the key and the reasoning flag from the variables, and fails with no key") {
+    val env = Map(
+      "OPENAI_BASE_URL"       -> "http://fake-endpoint/v1",
+      "OPENAI_API_KEY"        -> "fake-key-0123",
+      "DSPY_NATIVE_REASONING" -> "true"
+    )
+    Cli.modelOf("fake-model", env) match
+      case lm: OpenAiLanguageModel =>
+        assertEquals(
+          (lm.model, lm.client.baseUrl, lm.client.apiKey),
+          ("fake-model", "http://fake-endpoint/v1", "fake-key-0123")
+        )
+        assert(lm.supportsReasoning, "the reasoning flag did not apply")
+      case other => fail(s"not an OpenAI model: $other")
+    assertEquals(Cli.modelOf("fake-model", env - "OPENAI_API_KEY").id, "none")
+  }
+
+  test("CLI start: the client reads the variables file of its home folder, and a bad value there stops it") {
+    val home = Files.createTempDirectory("dspy4s-cli-home-")
+    Files.createDirectories(EnvFile.pathOf(home).getParent)
+    Files.writeString(EnvFile.pathOf(home), "DSPY_SUMMARY_OPTIONS=[1]\n")
+    val cli = cliProcess(home, "--root", home.resolve("host").toString, home.toString)
+    cli.getOutputStream.close()
+    assert(cli.waitFor(120, TimeUnit.SECONDS), "the client did not end")
+    val output = String(cli.getInputStream.readAllBytes(), UTF_8)
+    assertEquals(cli.exitValue(), 2, output)
+    assert(output.contains("DSPY_SUMMARY_OPTIONS"), output)
+    Support.remove(home)
+  }
+
+  /** The CLI in a child JVM with the class path of the tests, the home folder `home`, and no variable of the CLI from
+    * the process, so the variables file of the person and their shell do not apply.
+    */
+  private def cliProcess(home: Path, args: String*): Process =
+    val java    = ProcessHandle.current().info().command().toScala.getOrElse("java")
+    val command =
+      Vector(java, s"-Duser.home=$home", "-cp", System.getProperty("java.class.path"), "dspy4s.harness.cli.Cli")
+    val builder = ProcessBuilder((command ++ args)*).redirectErrorStream(true)
+    builder.environment().keySet().removeIf(name => name.startsWith("DSPY_") || EnvFile.connection.contains(name)): Unit
+    builder.start()
+
   test("CLI start: the time from the start of a JVM to the first prompt, and the end at /quit") {
     val root  = Files.createTempDirectory("dspy4s-cli-test-")
     val scope = Files.createDirectories(root.resolve("work"))
-    val java  = ProcessHandle.current().info().command().toScala.getOrElse("java")
     val start = System.nanoTime()
-    val cli   = ProcessBuilder(
-      java,
-      "-cp",
-      System.getProperty("java.class.path"),
-      "dspy4s.harness.cli.Cli",
-      "--root",
-      root.resolve("host").toString,
-      scope.toString
-    ).redirectErrorStream(true).start()
+    val cli   = cliProcess(root, "--root", root.resolve("host").toString, scope.toString)
     cli.getOutputStream.write("/quit\n".getBytes(UTF_8))
     cli.getOutputStream.close()
     assert(cli.waitFor(120, TimeUnit.SECONDS), "the client did not end")

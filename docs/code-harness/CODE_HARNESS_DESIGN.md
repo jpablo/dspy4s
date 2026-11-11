@@ -1776,7 +1776,13 @@ These points are proposals for the review:
   open turn, each command goes through `run`, and the end of the input waits for the open turn. So each message
   starts its own turn, in the order of the lines. With `DSPY_TRACE=FILE`, each model call goes to `FILE` as one JSON
   line: the messages of the request, the text and the reasoning of the reply, or the error, and the time. The mask of
-  the client hides the secrets of each text. `scripts/live/chat.sh` builds the CLI and runs it in the script mode.
+  the client hides the secrets of each text. `scripts/dspy4s-harness` runs the CLI, and it builds the CLI first when
+  a source file is newer than the class path. `scripts/live/chat.sh` runs it in the script mode.
+- Until a real configuration file exists, the CLI reads its variables also from `<home>/.dspy4s/harness/.env`
+  (2026-11-10). It reads this file also with another `--root`, so a live scenario with a temporary root finds it. A
+  variable of the process wins over the file. The base URL and the key are the exception: both come from the file when
+  the file gives one of them, else both come from the process. So a key of a shell never goes to a base URL of the
+  file. The mask covers the secrets of the process and of the file.
 - `HostError` holds a rejection, a failed write, the end of a session, a fenced activation and an open that failed.
   `WriterJournal` gives a rejection as a `Rejection`, and it throws for the other errors, so `drive` stops and the
   turn stays open, as after a crash.
