@@ -1,7 +1,7 @@
 package dspy4s.harness.host
 
 import dspy4s.harness.{Harness, Journal, Secrets, TurnEffects, drive}
-import dspy4s.harness.guest.{JobStatus, Mode}
+import dspy4s.harness.guest.{JobStatus, Mode, Scope}
 import dspy4s.harness.kernel.{Command, EffectId, Entry, Logged, Next, Position, RequestId, SessionConfig, SessionId}
 import dspy4s.harness.kernel.{SessionState, Source, TurnOutcome, closing, next, repair, state as foldOf}
 
@@ -84,6 +84,8 @@ trait Activation extends AutoCloseable:
   *     journal, and `Activate` repairs an open turn with `TurnEnded(Crashed)` (4.4). An open after `Close` starts a new
   *     writer, and `Activate` opens the session again. A second `open` of an open session gives the same handle.
   *   - A mode above the ceiling of the last `Activated` gives `OpenFailed`, and so does a file that is not a journal.
+  *   - A configuration whose `Home`, `Directory` or `Worktree` scope is not an existing folder gives `OpenFailed` with
+  *     the path. The check comes before the lock and the file, so the refused open makes no journal.
   *   - The host holds an exclusive lock on `<root>/sessions/<id>.lock` while the session is open. Another host gets
   *     `OpenFailed` for that session, so two hosts never write one file. The lock goes with the process, so a crash
   *     frees it.
@@ -392,28 +394,51 @@ private object OpenSession:
   /** The most characters of the output of a job in its message. */
   private val ReportOutput = 2_000
 
-  /** Opens the session `id`: the lock, the file, the journal, the configuration, the writer and the `Activate`. */
+  /** Opens the session `id`: the folder of the scope, the lock, the file, the journal, the configuration, the writer
+    * and the `Activate`. A folder that is not there refuses the open before the lock and the file, so it makes no
+    * journal.
+    */
   def start(id: SessionId, config: Option[SessionConfig], place: Place): Either[HostError, OpenSession] =
     val path = SessionFile.pathOf(place.root, id)
     if config.isEmpty && !JFiles.exists(path) then Left(HostError.OpenFailed("a new session needs a configuration"))
     else
-      lockOf(path.resolveSibling(s"${id.value}.lock")).flatMap { (channel, lock) =>
-        val opened =
-          for
-            file    <- SessionFile.open(path, id).left.map(HostError.OpenFailed(_))
-            start   <- file.readFrom(0).left.map(e => failed(file, e))
-            setting <- chosen(config, start).left.map(e => failed(file, e))
-            session  = made(id, place, file, start, channel, lock)
-            _       <- session.activate(setting).left.map { e =>
-                   session.close()
-                   e
-                 }
-          yield session
-        if opened.isLeft then
-          Try(lock.release()): Unit
-          Try(channel.close()): Unit
-        opened
-      }
+      config.flatMap(c => folderFault(c.scope)) match
+        case Some(fault) => Left(HostError.OpenFailed(fault))
+        case None        => lockOf(path.resolveSibling(s"${id.value}.lock")).flatMap { (channel, lock) =>
+            val opened =
+              for
+                file    <- SessionFile.open(path, id).left.map(HostError.OpenFailed(_))
+                start   <- file.readFrom(0).left.map(e => failed(file, e))
+                setting <- chosen(config, start).left.map(e => failed(file, e))
+                session  = made(id, place, file, start, channel, lock)
+                _       <- session.activate(setting).left.map { e =>
+                       session.close()
+                       e
+                     }
+              yield session
+            if opened.isLeft then
+              Try(lock.release()): Unit
+              Try(channel.close()): Unit
+            opened
+          }
+
+  /** The fault of the folder of `scope`, or none (10.2). A `Home`, a `Directory` or a `Worktree` scope names a folder
+    * of the user, and that folder must exist. The harness makes the folder of a `Scratch` or a `Fork` scope, so these
+    * have no check. An open with no configuration also has no check, so a client can still read the journal of a
+    * session whose folder is gone. The shell then names the folder at each command (5.4).
+    */
+  private def folderFault(scope: Scope): Option[String] =
+    val folder = scope match
+      case Scope.Home(path)                    => Some(path)
+      case Scope.Directory(path)               => Some(path)
+      case Scope.Worktree(path, _)             => Some(path)
+      case Scope.Scratch(_) | Scope.Fork(_, _) => None
+    folder.flatMap { text =>
+      val path = Try(Path.of(text)).toOption
+      if path.exists(JFiles.isDirectory(_)) then None
+      else if path.exists(JFiles.exists(_)) then Some(s"the path $text of the session is not a folder")
+      else Some(s"the folder $text of the session does not exist")
+    }
 
   /** The session with its writer, feeds and jobs. The hooks of the writer and of the jobs reach the session only after
     * it exists.

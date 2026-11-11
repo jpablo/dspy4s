@@ -5,7 +5,7 @@ import dspy4s.harness.kernel.SessionConfig
 
 import java.io.{ByteArrayOutputStream, InputStream}
 import java.nio.charset.StandardCharsets.UTF_8
-import java.nio.file.{Path, Paths}
+import java.nio.file.{Files as JFiles, Path, Paths}
 import java.util.concurrent.{CompletableFuture, ConcurrentHashMap, TimeUnit}
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
@@ -17,8 +17,8 @@ final class SandboxError(message: String) extends RuntimeException(message)
   *
   * `exec` runs the command with `/bin/sh -c` in the backend, under the profile of the mode of the session, in the
   * folder of the scope. The command gets the allowlist of variables (5.6), the private temporary directory as `TMPDIR`,
-  * and the proxy of the host list in a mode with `Network^`. Its standard input is empty. With no backend, or in a mode
-  * with no child process, `exec` fails, and the command does not run.
+  * and the proxy of the host list in a mode with `Network^`. Its standard input is empty. With no backend, in a mode
+  * with no child process, or when the folder of the scope is not there, `exec` fails, and the command does not run.
   *
   * A proposal for the review: `exec` gives the standard output and the standard error as one text. A last line tells
   * about a cut of the output, the end of the time limit, and an exit code that is not 0. `spawn` and the jobs come with
@@ -56,6 +56,9 @@ final class SandboxedShell(
 
   /** The process of `command` under the profile of the mode, in the backend, in the folder of the scope, and under
     * `ProcessWrapper`. Its standard input is the pipe of the wrapper, and the command itself gets an empty one.
+    *
+    * A person can delete the folder of the scope after the open. Then the error of the JDK names the program and not
+    * the folder, so the shell checks the folder first, and its error names the folder (5.4).
     */
   private def start(command: String): Process =
     if !profile.canRun then
@@ -64,6 +67,11 @@ final class SandboxedShell(
       "No OS sandbox works on this host, so exec did not run the command. macOS needs /usr/bin/sandbox-exec, and " +
         "Linux needs bwrap."
     ))
+    if !JFiles.isDirectory(root) then
+      val fault =
+        if JFiles.exists(root) then s"The path $root of the session is not a folder"
+        else s"The folder $root of the session does not exist"
+      throw SandboxError(s"$fault, so the command did not run.")
     val port = profile.net match
       case Net.Proxy(_) => Some(proxyPort())
       case Net.Closed   => None

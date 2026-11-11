@@ -26,6 +26,10 @@ def hint(error: String): Option[String] =
     // The error of the compiler defect (`showsArrayDefect`) also shows `Array[...]^{any.rd}`, but its cell has no
     // Array pattern, so the hint of a pattern would be wrong. After an earlier cell, the REPL asks for a new REPL.
     Some("case Array(x, y) inside collect. Use .toList, and then case List(x, y).")
+  else if error.contains("empty quoted identifier") then
+    // A Markdown fence starts with ``, an empty quoted identifier. The harness removes one outer fence of the code
+    // field, so this error comes from a fence that the harness did not find, or from a cell of the MCP server.
+    Some("The code field holds only Scala code, with no ``` fence. Write the code again with no ``` line.")
   else None
 
 /** True for a compile error after which the compiler cannot go on (6). In safe mode, the compiler refuses a top-level

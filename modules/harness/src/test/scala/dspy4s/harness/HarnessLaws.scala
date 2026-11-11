@@ -414,3 +414,45 @@ class HarnessLaws extends FunSuite:
       )
     }
   }
+
+  // ── The text of the code field (the live sessions of 2026-11-10) ──
+
+  /** The code of each `Acted` of a journal. */
+  private def actedCode(journal: Vector[Logged]): Vector[Option[String]] =
+    journal.collect { case Logged(_, _, Entry.Acted(_, _, code)) => code }
+
+  // A live model put each cell in a fence. The fence did not parse, so the session lost five steps to one habit.
+  Vector(
+    "a fence with the language" -> "```scala\nsubmit(\"42\")\n```",
+    "a fence with no language"  -> "```\nsubmit(\"42\")\n```",
+    "spaces around the fence"   -> "  ```scala\nsubmit(\"42\")\n```  \n"
+  ).foreach { (name, code) =>
+    test(s"Harness: a step whose code is in one ``` fence runs the code in the fence, and Acted has no fence: $name") {
+      call(ScriptLm(policy("compute", Some(code)))) { (_, result, journal) =>
+        assertEquals(result, Right(Answer("42")), journal.mkString("\n"))
+        assertEquals(actedCode(journal), Vector(Some("submit(\"42\")")))
+      }
+    }
+  }
+
+  test("Harness: a fence inside the code is a part of the code, so it stays") {
+    val code = "val mark = \"```\"\nsubmit(mark)"
+    call(ScriptLm(policy("compute", Some(code)))) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("```")), journal.mkString("\n"))
+      assertEquals(actedCode(journal), Vector(Some(code)))
+    }
+  }
+
+  test("Harness: the history of the next step shows the code of a fenced step with no fence") {
+    // The window put the fenced code of a failed step in the history, and the model copied it at the next step.
+    val model =
+      ScriptLm(policy("look", Some("```scala\nprintln(\"FAKE-SEEN\")\n```")), policy("done", Some("submit(\"x\")")))
+    call(model) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("x")), journal.mkString("\n"))
+      val second = model.requests.lift(1).getOrElse(fail("no second policy call"))
+      val text   = second.messages.flatMap(_.text).mkString("\n")
+      assert(text.contains("println(\"FAKE-SEEN\")"), text)
+      // The task of a call shows the preamble in a fence, so the law looks only for the fence of the step.
+      assert(!text.contains("```scala\nprintln"), text)
+    }
+  }

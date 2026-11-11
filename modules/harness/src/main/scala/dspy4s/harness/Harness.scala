@@ -4,7 +4,7 @@ import dspy4s.core.contracts.{ConfigurationError, DspyError, ParseError, Runtime
 import dspy4s.core.data.RawPrediction
 import dspy4s.harness.guest.{Access, Data, DataShape, Mode, Scope, preamble}
 import dspy4s.harness.kernel.*
-import dspy4s.harness.repl.{Bindings, ScalaRepl}
+import dspy4s.harness.repl.{ApiReference, Bindings, ScalaRepl}
 import dspy4s.harness.sandbox.{Layout, Profiles, SandboxedShell}
 import dspy4s.lm.contracts.LanguageModel
 import dspy4s.programs.contracts.{Module, ModuleLifecycle, Prediction, ProgramCall}
@@ -12,7 +12,6 @@ import dspy4s.programs.strategies.Predict
 import dspy4s.signatures.{Shape, Signature}
 import zio.blocks.schema.json.Json
 
-import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.attribute.BasicFileAttributes
 import java.nio.file.{FileVisitResult, Files as JFiles, Path, SimpleFileVisitor, StandardCopyOption}
 import java.util.Comparator
@@ -157,7 +156,7 @@ final case class Harness[I, O](
       val newRepl  = () => ScalaRepl(config.mode, handlers, config.preamble, limits.cellTimeout, limits.cellLimit)
       val effects  = HarnessEffects(
         task,
-        Harness.apiReference,
+        Harness.apiReference(config.mode),
         policy,
         strategyAt(depth),
         journal,
@@ -370,14 +369,12 @@ object Harness extends HarnessGivens:
         delete(created)
         throw e
 
-  /** The API reference (5.1): the source text of the guest API. */
-  lazy val apiReference: String = Vector("Guest.scala", "SessionTypes.scala").map { name =>
-    Option(getClass.getResourceAsStream(s"/dspy4s/harness/guest/$name.txt")).fold(s"// $name is not in this build")(
-      stream =>
-        try String(stream.readAllBytes(), UTF_8)
-        finally stream.close()
-    )
-  }.mkString("// The guest API. A cell is Scala 3 with capture checking and safe mode.\n\n", "\n\n", "")
+  /** The API reference (5.1) for a cell of `mode`: a header, and the parts of the source text of the guest API that
+    * compile in `mode` (`ApiReference`).
+    */
+  def apiReference(mode: Mode): String =
+    "// The guest API. A cell is Scala 3 with capture checking and safe mode.\n" +
+      "// The reference shows only the calls that the mode of this session gives.\n\n" + ApiReference(mode)
 
   /** The instructions of a signature: the head of the task of a call. */
   private[harness] def instructions(signature: Signature[?, ?]): String =
