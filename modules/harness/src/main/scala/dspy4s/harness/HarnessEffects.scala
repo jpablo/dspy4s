@@ -1,6 +1,6 @@
 package dspy4s.harness
 
-import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.{DspyError, ParseError, RuntimeContext}
 import dspy4s.harness.kernel.{CellOutcome, Command, Position, Source}
 import dspy4s.harness.repl.{CellRun, ScalaRepl, lostNames, topLevelNames}
 import dspy4s.programs.strategies.Predict
@@ -11,11 +11,14 @@ import dspy4s.programs.strategies.Predict
   *     spends one call of the budget that `budget` gives (the budget of the program call, or of the turn of a work
   *     session), and calls `policy` with the task and the API reference. A spent budget fails the call with a plain
   *     error, so the turn ends `Failed` (8.2). The status says when a step is the last one, and the code of a step that
-  *     must answer does not run. A code in one outer ``` fence is the code in the fence (`unfenced`), so `Acted` and
-  *     the history hold no fence. A code that is empty, `null` or `None` is no code, because the chat adapter keeps the
-  *     text of an empty field (9). The trace of the call goes to the `RuntimeContext`, so an optimizer sees it. The
-  *     call of `policy` runs through `runner`, so a work session can cut it (10.3). After the update, `zooms` gets the
-  *     reader `strategy.zoom` of the new derived data, so `zoom` of a cell reads it (7.1).
+  *     must answer does not run. The call has the adapter of the context in a `PolicyAdapter`, so a reply with no
+  *     text field gets a step from the rules of `PolicyAdapter.values`, with no second model call. A code in one outer
+  *     ``` fence is the code in the fence (`unfenced`), so `Acted` and the history hold no fence. A code that is
+  *     empty, `null` or `None` is no code, because the chat adapter keeps the text of an empty field (9). The error of
+  *     a reply that did not parse has the start of the reply (`failure`). The trace of the call goes to the
+  *     `RuntimeContext`, so an optimizer sees it. The call of `policy` runs through `runner`, so a work session can
+  *     cut it (10.3). After the update, `zooms` gets the reader `strategy.zoom` of the new derived data, so `zoom` of a
+  *     cell reads it (7.1).
   *   - `runCell` starts the calls of the cell in `recorder`, takes the snapshot of the store, and runs the code in the
   *     current REPL. The writes of the store go into the result only when the cell completes. The output in the journal
   *     is `CellRun.text`, the text that the MCP server also shows (6): the hints of a compile error, and a note of a
@@ -55,6 +58,9 @@ final class HarnessEffects(
   private var derived: strategy.D = strategy.empty
   private var repl: ScalaRepl     = newRepl()
 
+  /** The context of a policy call: the context of the effects, with the adapter in a `PolicyAdapter` (9). */
+  private val policyContext: RuntimeContext = PolicyAdapter.around(summon[RuntimeContext])
+
   def callPolicy(mustAnswer: Boolean): Either[String, PolicyReply] =
     val log = journal.log
     strategy.update(log, derived).left.map(_.message).flatMap { data =>
@@ -62,7 +68,8 @@ final class HarnessEffects(
       zooms.setReader(ref => strategy.zoom(data, ref))
       val view  = strategy.project(log, data, limits.budget)
       val input = PolicyInput(task, reference, view.status, view.observation, view.history)
-      budget().spend().flatMap(_ => runner.run(() => policy(input).left.map(_.message))).map { step =>
+      val call  = () => policy(input)(using policyContext).left.map(HarnessEffects.failure)
+      budget().spend().flatMap(_ => runner.run(call)).map { step =>
         val code = step.output.code.map(HarnessEffects.unfenced).filterNot(c => HarnessEffects.NoCode.contains(c.strip))
         // The code of the last step of a chat does not run (4.3).
         PolicyReply(step.output.reasoning, step.output.text, if mustAnswer then None else code)
@@ -113,6 +120,23 @@ object HarnessEffects:
 
   /** The texts of a code field that hold no code. The chat adapter keeps the text `null`, as DSPy does (9). */
   private val NoCode: Set[String] = Set("", "null", "None")
+
+  /** The most characters of the start of a reply in the error of a policy call. */
+  private val ReplyStart = 200
+
+  /** The error text of a failed policy call. The parse error of an adapter does not show the reply. So for a reply that
+    * did not parse, the text also has the start of the reply, at most `ReplyStart` characters, and a person sees what
+    * the model wrote (9). After a fallback, the reply is the reply to the fallback. The journal masks the known secrets
+    * of the text, as it does for each entry (5.6).
+    */
+  private def failure(error: DspyError): String =
+    error match
+      case ParseError(_, message, Some(raw)) if raw.strip.nonEmpty =>
+        val start = raw.strip
+        // A surrogate pair stays whole, because the writer of a session file refuses a surrogate with no pair.
+        val shown = if start.length <= ReplyStart then start else s"${textPrefix(start, ReplyStart)} [cut]"
+        s"${message.stripSuffix(".")}. The start of the reply: $shown"
+      case other => other.message
 
   /** The code of a code field (9). A model can put the code in one Markdown fence: a first line of ``` with an optional
     * word for the language, and ``` at the end. A fence does not parse, so the code is the text between the first line

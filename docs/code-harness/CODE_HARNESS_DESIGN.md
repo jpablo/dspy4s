@@ -1471,6 +1471,17 @@ The proofs of phase 4 added these points, also for the review:
   this is no code. A fence that the harness does not find gets the hint of 6. The live sessions of 2026-11-10 gave
   this rule: the model put each cell in a fence, the window showed the fence of the failed step again, and one habit
   cost five steps of ten.
+- A policy call has the adapter of the context in a `PolicyAdapter`. When that adapter cannot parse a reply, the harness
+  reads the reply with these rules, before the JSON fallback, so the step costs one model call. A reply with a field
+  `code` and no field `text`: the text is the part before the first marker. A reply with no field markers and exactly
+  one ```` ```scala ```` fence: the text is the reply with no such fence, and the code is the code in the fence. A reply
+  with no field markers and no ```` ```scala ```` fence: the whole reply is the text, with no code. A fence of another
+  language, or with no language, is a part of the text, so a reply with an example of a shell command ends the turn and
+  does not run the example (2026-11-11). Each other reply, for example one with two ```` ```scala ```` fences or with a
+  fence that does not end, gets the error of the adapter, and the error of the turn shows the first 200 characters of
+  the reply. The journal masks the secrets of that text. A live session of 2026-11-11 gave these rules: with native
+  reasoning, 25 of 30 replies to the first policy request had no field `text`, and each such reply ended the turn
+  `Failed("JSON parse failed and no fallback was applied")`.
 
 A code review of phase 4 on 2026-11-09 added these rules:
 

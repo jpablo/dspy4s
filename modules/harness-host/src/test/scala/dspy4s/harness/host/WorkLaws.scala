@@ -94,6 +94,17 @@ class WorkLaws extends munit.FunSuite:
     }
   }
 
+  // The live session of 2026-11-11 came through this path. A second model call for a step would take the next reply,
+  // and the turn would not end Replied.
+  test("Work: a step with one fence and no field markers runs its cell, and a step with only a text is the reply") {
+    val model = sessionModel("Let me read it.\n\n```scala\nprintln(read(\"a.txt\"))\n```", "FAKE-DONE")
+    work(model) { (_, handle) =>
+      assertEquals(handle.send(message("m1")), Right(()))
+      assert(eventually(60)(outcomes(handle) == Vector(TurnOutcome.Replied("FAKE-DONE"))), entries(handle).toString)
+      assert(outputs(handle).exists(_.contains("FAKE-A")), outputs(handle).toString)
+    }
+  }
+
   test("Work: a val of one turn is there in the next turn") {
     val model = sessionModel(
       policy("define", Some("val x = 41")),
