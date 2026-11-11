@@ -3668,7 +3668,7 @@ ref = "7.1"
 spec = true
 uses = ["context-strategy", "predict", "compress-input", "merge-input", "summary", "line-store", "memory-state",
         "runtime-context", "dspy-error", "logged", "projection", "strategy-name", "signature", "policy-runner", "budget", "memory-log", "window"]
-proof_uses = ["budget", "memory", "memory-log", "node-id", "view"]
+proof_uses = ["budget", "memory", "memory-log", "node-id", "view", "in-batch"]
 text = "update appends the new messages, builds each ready node with the store or a leaf through the runner and the summary budget, and advances the view to the last reply. A failed leaf gives the line of the source. project gives the view its room first, then the open turn as the window gives it. zoom gives a message or the lines of two halves."
 
 [[group]]

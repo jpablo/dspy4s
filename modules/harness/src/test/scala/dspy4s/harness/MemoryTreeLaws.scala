@@ -5,6 +5,7 @@ import dspy4s.harness.kernel.*
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import java.nio.charset.StandardCharsets.UTF_8
+import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters.*
 
 /** The laws of the memory tree strategy (CODE_HARNESS_DESIGN.md, 7 and 7.1). A fake model gives each summary as a fixed
@@ -238,4 +239,52 @@ class MemoryTreeLaws extends munit.FunSuite:
 
   test("Memory tree: the window has no memory, so its zoom gives an error") {
     assert(Window.zoom((), "0.0").isLeft)
+  }
+
+  // ── The speed of the summaries (the live run of 7.1) ──
+
+  test("Memory tree: each leaf request has the option bag of the summaries, so a model can skip its reasoning") {
+    val options = DynamicValues.record(
+      "chat_template_kwargs" ->
+        DynamicValues.record("enable_thinking" -> DynamicValue.Primitive(PrimitiveValue.Boolean(false)))
+    )
+    val lm = summaries()
+    Models.withModel(lm) {
+      val tree = MemoryTree.withLeaves(LineStore.inMemory(), high = 6, options = options)
+      updated(tree, chat(2, output = 700), tree.empty): Unit
+    }
+    assert(!lm.requests.isEmpty, "the update made no leaf call")
+    lm.requests.asScala.foreach(request =>
+      assert(request.options.fields.exists(_._1 == "chat_template_kwargs"), request.options.toString)
+    )
+  }
+
+  test("Memory tree: the store gets the lines of each round, so an update that breaks keeps the rounds before it") {
+    val store    = LineStore.inMemory()
+    val made     = AtomicInteger(0)
+    val breaking = new PolicyRunner:
+      // The first round has the 3 compress calls of the 3 long cells. The first merge of the next round breaks.
+      def run[A](call: () => Either[String, A]): Either[String, A] =
+        if made.incrementAndGet() > 3 then throw IllegalStateException("FAKE-BREAK") else call()
+    val journal = chat(3, output = 700)
+    Models.withModel(summaries()) {
+      val tree = MemoryTree.withLeaves(store, high = 6, leafRunner = breaking, width = 1)
+      intercept[IllegalStateException](tree.update(journal, tree.empty)): Unit
+    }
+    val memory = MemoryLog.messages(journal).foldLeft(Memory.empty)(Memory.append)
+    val long   = memory.log.indices.filter(i => memory.log(i).text.getBytes(UTF_8).length > 512)
+    assertEquals(long.size, 3)
+    long.foreach(i => assert(Memory.key(memory, NodeId(0, i.toLong)).flatMap(store.get).nonEmpty, s"no line for 0.$i"))
+  }
+
+  test("Memory tree: the leaf calls of one round run at the same time, at most width at a time") {
+    val lm = RequestLm(
+      text => Right(s"[[ ## line ## ]]\nS${(text.hashCode & 0x7fffffff) % 100000}\n\n[[ ## completed ## ]]"),
+      _ => 200L
+    )
+    Models.withModel(lm) {
+      val tree = MemoryTree.withLeaves(LineStore.inMemory(), high = 6, width = 3)
+      updated(tree, chat(4, output = 700), tree.empty): Unit
+    }
+    assertEquals(lm.most.get, 3)
   }

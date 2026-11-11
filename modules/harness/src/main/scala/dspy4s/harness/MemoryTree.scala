@@ -5,7 +5,7 @@ import dspy4s.harness.guest.StrategyName
 import dspy4s.harness.kernel.Logged
 import dspy4s.programs.strategies.Predict
 import dspy4s.signatures.Signature
-import zio.blocks.schema.Schema
+import zio.blocks.schema.{DynamicValue, Schema}
 
 import java.nio.charset.StandardCharsets.UTF_8
 import java.util.concurrent.ConcurrentHashMap
@@ -66,7 +66,9 @@ final class ZoomSource:
   *     `MemoryLog.beforeOpenTurn` with `View.advance` and `high`. So two updates give the same state as one update on
   *     the full journal. A node gets the line of the store for its key, or a new line: a message of 512 bytes or less
   *     is its own line, `compress` makes the line of a longer message, and `merge` makes the line of a node from the
-  *     lines of its halves. The new lines of one update go to the store with one `putAll`.
+  *     lines of its halves. The nodes of one round do not need each other, so their leaf calls run at the same time, at
+  *     most `width` at a time. The new lines of each round go to the store with one `putAll`, so a long update keeps
+  *     the rounds that it ended.
   *   - A leaf runs through `leafRunner`, so a hard stop cuts it, and each call spends one call of `summaries`, the
   *     budget of the summaries of the turn, apart from the model calls of the policy. A failed call gives the line of
   *     the source (`MemoryLine.of` of the message, or of the two lines), and that line goes to the store, so a bad
@@ -84,7 +86,8 @@ final class MemoryTree(
     lines     : LineStore,
     high      : Int,
     leafRunner: PolicyRunner,
-    summaries : () => Budget
+    summaries : () => Budget,
+    width     : Int
 ) extends ContextStrategy:
   type D = MemoryState
 
@@ -118,23 +121,19 @@ final class MemoryTree(
             Right(s"[${a.ref}] ${older.text}\n[${b.ref}] ${newer.text}")
           case _ => Left(s"the memory has no part $ref yet")
 
-  /** Builds each ready node, the oldest first, until no node is ready, and puts the new lines of the store in one
-    * `putAll`.
+  /** Builds the ready nodes in rounds until no node is ready. The nodes of one round need only the nodes of the rounds
+    * before, so their lines come at the same time, at most `width` at a time, and they build in the order of `ready`.
+    * The new lines of each round go to the store with one `putAll`.
     */
+  @tailrec
   private def settle(m: Memory, budget: Budget)(using RuntimeContext): Memory =
-    @tailrec
-    def go(m: Memory, kept: Vector[(LineKey, MemoryLine)]): (Memory, Vector[(LineKey, MemoryLine)]) =
-      val ready = Memory.ready(m)
-      if ready.isEmpty then (m, kept)
-      else
-        val (grown, more) = ready.foldLeft((m, kept)) { case ((acc, k), id) =>
-          val (line, keep) = lineOf(acc, id, budget)
-          (Memory.buildNode(acc, id, line), k ++ keep)
-        }
-        go(grown, more)
-    val (built, kept) = go(m, Vector.empty)
-    if kept.nonEmpty then lines.putAll(kept)
-    built
+    val ready = Memory.ready(m)
+    if ready.isEmpty then m
+    else
+      val made = inBatch(ready, width)(id => lineOf(m, id, budget)).fold((_, error) => throw error, identity)
+      val kept = made.flatMap(_._2)
+      if kept.nonEmpty then lines.putAll(kept)
+      settle(ready.zip(made).foldLeft(m) { case (acc, (id, (line, _))) => Memory.buildNode(acc, id, line) }, budget)
 
   /** The line of the ready node `id`, and the entry for the store, if any. The store comes first. A short message is
     * its own line. A leaf call spends one call of `budget`. A failed call gives the line of the source, for the store.
@@ -195,24 +194,29 @@ object MemoryTree:
       "number, path, decision and error that a later step can need."
 
   /** A memory tree with the two leaves of these instructions, the store `lines`, a view of at most `high` parts, the
-    * leafRunner of the activation, and the budget of the summaries of the turn. A program call has
-    * `PolicyRunner.Direct`.
+    * runner of the activation, the budget of the summaries of the turn, and at most `width` leaf calls at a time. A
+    * program call has `PolicyRunner.Direct`. Each leaf request has the option bag `options` of the provider, for
+    * example `{"chat_template_kwargs": {"enable_thinking": false}}` for a model of vLLM that reasons: a summary needs
+    * no reasoning, and the reasoning made a merge 50 times slower in the live run.
     */
   def withLeaves(
       lines     : LineStore,
-      high      : Int          = DefaultHigh,
-      leafRunner: PolicyRunner = PolicyRunner.Direct,
-      summaries : () => Budget = () => Budget(Int.MaxValue)
+      high      : Int                 = DefaultHigh,
+      leafRunner: PolicyRunner        = PolicyRunner.Direct,
+      summaries : () => Budget        = () => Budget(Int.MaxValue),
+      width     : Int                 = 4,
+      options   : DynamicValue.Record = DynamicValue.Record.empty
   ): MemoryTree =
     val compress = Signature.derived[CompressInput, Summary]("compress", compressInstructions)
     val merge    = Signature.derived[MergeInput, Summary]("merge", mergeInstructions)
     MemoryTree(
-      Predict(compress, name = Some("compress")),
-      Predict(merge, name = Some("merge")),
+      Predict(compress, name = Some("compress"), config = options),
+      Predict(merge, name = Some("merge"), config = options),
       lines,
       high,
       leafRunner,
-      summaries
+      summaries,
+      width.max(1)
     )
 
   /** The characters that a view of `high` parts can take: each line of 512 bytes, and its reference. */

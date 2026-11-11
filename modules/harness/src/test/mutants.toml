@@ -556,3 +556,29 @@ name = "Mutant: project leaves out the view"
 file = "MemoryTree.scala"
 old = "if view.isEmpty then open"
 new = "if true then open"
+
+[[mutant]]
+name = "Mutant: a round of the memory tree makes one leaf call at a time"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "inBatch(ready, width)(id => lineOf(m, id, budget))"
+new = "inBatch(ready, width.min(1))(id => lineOf(m, id, budget))"
+
+[[mutant]]
+name = "Mutant: the store gets no line of a round"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "if kept.nonEmpty then lines.putAll(kept)"
+new = "if kept.nonEmpty && ready.isEmpty then lines.putAll(kept)"
+
+[[mutant]]
+name = "Mutant: the leaf requests have no summary options"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "Predict(compress, name = Some(\"compress\"), config = options),"
+new = "Predict(compress, name = Some(\"compress\"), config = options.copy(fields = options.fields.take(0))),"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "Predict(merge, name = Some(\"merge\"), config = options),"
+new = "Predict(merge, name = Some(\"merge\"), config = options.copy(fields = options.fields.take(0))),"
+

@@ -1,7 +1,8 @@
 package dspy4s.harness.host
 
+import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.harness.{HarnessLimits, Models, Place, Secrets}
+import dspy4s.harness.{HarnessLimits, Models, Place, PolicyRunner, Secrets}
 import dspy4s.harness.Models.policy
 import dspy4s.harness.guest.{Mode, Scope, StrategyName}
 import dspy4s.harness.kernel.*
@@ -12,6 +13,8 @@ import zio.blocks.chunk.Chunk
 import zio.blocks.schema.json.Json
 
 import java.nio.file.{Files, Path}
+import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch, TimeUnit}
+import scala.jdk.CollectionConverters.*
 
 /** The laws of a work session (CODE_HARNESS_DESIGN.md, 8.1, 5.5 and 10.3): a host with a `WorkRuntime`, a real REPL,
   * the sandbox of this machine and a scripted model.
@@ -292,6 +295,39 @@ class WorkLaws extends munit.FunSuite:
         assert(!summaryRequests(again).exists(r => r.contains("FAKE-OUT-ONE") || r.contains("FAKE-OUT-TWO")))
       }
     finally place.close()
+  }
+
+  test("Work: summaryOptions reads the JSON object of DSPY_SUMMARY_OPTIONS, and refuses another text") {
+    assert(WorkEnv.summaryOptions(Map.empty).exists(_.fields.isEmpty))
+    val options =
+      WorkEnv.summaryOptions(Map(WorkEnv.SummaryOptions -> """{"chat_template_kwargs": {"enable_thinking": false}}"""))
+    assert(options.exists(_.fields.map(_._1) == Vector("chat_template_kwargs")), options.toString)
+    assert(WorkEnv.summaryOptions(Map(WorkEnv.SummaryOptions -> "[1, 2]")).isLeft)
+    assert(WorkEnv.summaryOptions(Map(WorkEnv.SummaryOptions -> "{not json")).isLeft)
+  }
+
+  test("Work: a stop cuts each call of the runner that runs at the same time") {
+    val context = Models.withModel(sessionModel())(summon[RuntimeContext])
+    val runner  = StoppablePolicy(context, () => false)
+    val started = CountDownLatch(3)
+    val results = ConcurrentLinkedQueue[Either[String, Int]]()
+    val threads = (1 to 3).map { _ =>
+      Thread.ofPlatform().start { () =>
+        val result = runner.run { () =>
+          started.countDown()
+          Thread.sleep(30_000)
+          Right(1)
+        }
+        results.add(result): Unit
+      }
+    }
+    try
+      assert(started.await(10, TimeUnit.SECONDS), "the calls did not start")
+      runner.stop()
+      threads.foreach(_.join(5_000))
+      assert(threads.forall(!_.isAlive), "a call did not end after the stop")
+      assertEquals(results.asScala.toVector, Vector.fill(3)(Left(PolicyRunner.Stopped)))
+    finally runner.close()
   }
 
   test("Work: a stop during a long policy call ends the call, the turn ends Aborted in time, and the REPL stays") {

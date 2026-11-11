@@ -9,16 +9,44 @@ import dspy4s.harness.repl.{Bindings, ScalaRepl}
 import dspy4s.harness.sandbox.{Backend, HostList, Layout, Profiles, SandboxedShell}
 import dspy4s.programs.strategies.Predict
 import dspy4s.signatures.Signature
+import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.json.Json
 
 import java.nio.file.{Files as JFiles, Path}
-import java.util.concurrent.{CancellationException, ExecutionException, Executors, Future}
+import java.util.concurrent.{CancellationException, ConcurrentHashMap, ExecutionException, Executors, Future}
 import scala.util.Try
 
 /** What a work session needs from the machine (CODE_HARNESS_DESIGN.md, 8.1): the home folder for the secret paths
   * (5.4), the host list of a mode with `Network^`, the backend of the sandbox, the secrets to mask (5.6), and the root
   * of the host, which holds the journals. A command can neither read nor write under the journals (5.4).
+  * `summaryOptions` is the option bag of the provider for each summary request of the memory tree (7.1).
   */
-final case class WorkEnv(home: Path, hosts: HostList, backend: Option[Backend], secrets: Secrets, journals: Path)
+final case class WorkEnv(
+    home          : Path,
+    hosts         : HostList,
+    backend       : Option[Backend],
+    secrets       : Secrets,
+    journals      : Path,
+    summaryOptions: DynamicValue.Record = DynamicValue.Record.empty
+)
+
+object WorkEnv:
+
+  /** The name of the variable of the summary options: a JSON object, the option bag of the provider. */
+  val SummaryOptions = "DSPY_SUMMARY_OPTIONS"
+
+  /** The summary options of `env`: the JSON object of `DSPY_SUMMARY_OPTIONS`, an empty bag with no such variable, or an
+    * error for a text that is not a JSON object. For a model of vLLM that reasons, the value
+    * `{"chat_template_kwargs": {"enable_thinking": false}}` makes a summary about 50 times faster (7.1).
+    */
+  def summaryOptions(env: Map[String, String]): Either[String, DynamicValue.Record] =
+    env.get(SummaryOptions).filter(_.trim.nonEmpty) match
+      case None       => Right(DynamicValue.Record.empty)
+      case Some(text) => Json.parse(text) match
+          case Right(json: Json.Object) =>
+            Right(DynamicValue.Record(json.fields.map((key, value) => key -> value.toDynamicValue)))
+          case Right(_)    => Left(s"$SummaryOptions must be a JSON object")
+          case Left(error) => Left(s"$SummaryOptions is not JSON: $error")
 
 /** The runtime of a work session (8.1): the user owns the session, and each message starts a chat turn.
   *
@@ -74,8 +102,9 @@ final class WorkRuntime(
             lines = Some(opened)
             opened
           }
-        val strategy = WorkRuntime.strategyOf(config, file, calls, () => summary.current)
-          .fold(error => throw IllegalStateException(error), identity)
+        val strategy =
+          WorkRuntime.strategyOf(config, file, calls, () => summary.current, limits.batch, env.summaryOptions)
+            .fold(error => throw IllegalStateException(error), identity)
         val bindings = Bindings(
           turn = JournalTurn(journal, () => System.currentTimeMillis(), zooms),
           files = Option.when(config.mode.files != Access.None)(LocalFiles(scope, profile, made.secretNames)),
@@ -156,27 +185,28 @@ private final class WorkActivation(
   * `stop` cuts it with no interrupt of the worker. A call that ignores the interrupt ends later on its thread, and the
   * next call does not wait for it. A cut call gives an error, and the stop ends the turn `Aborted` (`drive`).
   */
-private final class StoppablePolicy(context: RuntimeContext, stopping: () => Boolean) extends PolicyRunner:
+private[host] final class StoppablePolicy(context: RuntimeContext, stopping: () => Boolean) extends PolicyRunner:
   private val calls = Executors.newCachedThreadPool { body =>
     val thread = Thread(body, "harness-policy-call")
     thread.setDaemon(true)
     thread
   }
-  @volatile private var running: Option[Future[?]] = None
+  // The summaries of a round of the memory tree run at the same time, so the runner keeps each call that runs.
+  private val running = ConcurrentHashMap.newKeySet[Future[?]]()
 
   def run[A](call: () => Either[String, A]): Either[String, A] =
     val future = calls.submit(() => RuntimeEnvironment.withContext(context)(call()))
-    running = Some(future)
-    // A stop between the `StepStarted` and the line above saw no call, so the call reads the stop itself.
+    running.add(future): Unit
+    // A stop before the line above saw no call, so the call reads the stop itself.
     if stopping() then future.cancel(true): Unit
     try future.get()
     catch
       case _: CancellationException => Left(PolicyRunner.Stopped)
       case e: ExecutionException    => throw Option(e.getCause).getOrElse(e)
-    finally running = None
+    finally running.remove(future): Unit
 
-  /** Cuts the call that runs. It returns at once. */
-  def stop(): Unit = running.foreach(_.cancel(true): Unit)
+  /** Cuts each call that runs. It returns at once. */
+  def stop(): Unit = running.forEach(future => future.cancel(true): Unit)
 
   def close(): Unit =
     stop()
@@ -261,21 +291,25 @@ object WorkRuntime:
       env = Set.empty
     )
 
-  /** The strategy of an activation from `config.strategy` (7.1): the window, or the memory tree with `lines`, the
-    * runner of the activation and the budget of the summaries of the turn. `lines` is the table `memory` of the session
-    * file, and the activation opens it only for the memory tree, and closes it in its `close`. `PrefixSummary` has no
-    * code, so it gives an error, and the activation fails with it.
+  /** The strategy of an activation from `config.strategy` (7.1): the window, or the memory tree with `lines`, at most
+    * `width` summaries at a time with the option bag `options`, the runner of the activation and the budget of the
+    * summaries of the turn. `lines` is the table `memory` of the session file, and the activation opens it only for the
+    * memory tree, and closes it in its `close`. `PrefixSummary` has no code, so it gives an error, and the activation
+    * fails with it.
     */
   def strategyOf(
       config    : SessionConfig,
       lines     : () => Either[String, LineStore],
       leafRunner: PolicyRunner,
-      summaries : () => Budget
+      summaries : () => Budget,
+      width     : Int,
+      options   : DynamicValue.Record
   ): Either[String, ContextStrategy] =
     config.strategy match
       case StrategyName.Window     => Right(Window)
-      case StrategyName.MemoryTree =>
-        lines().map(store => MemoryTree.withLeaves(store, MemoryTree.DefaultHigh, leafRunner, summaries))
+      case StrategyName.MemoryTree => lines().map(store =>
+          MemoryTree.withLeaves(store, MemoryTree.DefaultHigh, leafRunner, summaries, width, options)
+        )
       case StrategyName.PrefixSummary =>
         Left("the strategy PrefixSummary has no code yet, so a session with it cannot start")
 
