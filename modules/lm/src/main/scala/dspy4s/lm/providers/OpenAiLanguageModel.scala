@@ -150,14 +150,16 @@ object OpenAiLanguageModel:
     *
     * `baseUrl` selects the OpenAI-compatible server, for example Azure, Ollama, vLLM, LM Studio, or OpenRouter. The
     * default is the OpenAI API. A local server that does not check credentials still needs a value in `envVar` that is
-    * not empty, for example `OPENAI_API_KEY=local`. To use no environment variable, use [[local]].
+    * not empty, for example `OPENAI_API_KEY=local`. To use no environment variable, use [[local]]. `env` is the
+    * environment, by default the environment of the process.
     */
   def fromEnv(
       model  : String,
-      baseUrl: String = OpenAiClient.defaultBaseUrl,
-      envVar : String = "OPENAI_API_KEY"
+      baseUrl: String              = OpenAiClient.defaultBaseUrl,
+      envVar : String              = "OPENAI_API_KEY",
+      env    : Map[String, String] = sys.env
   ): Either[DspyError, OpenAiLanguageModel] =
-    OpenAiClient.fromEnv(base = baseUrl, envVar = envVar).map(client =>
+    OpenAiClient.fromEnv(base = baseUrl, envVar = envVar, env = env).map(client =>
       OpenAiLanguageModel(model = model, client = client)
     )
 

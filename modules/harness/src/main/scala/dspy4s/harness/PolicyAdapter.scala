@@ -1,0 +1,139 @@
+package dspy4s.harness
+
+import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, DelegatingAdapter, ParsedOutput}
+import dspy4s.core.contracts.{DspyError, DynamicValues, ParseError, RuntimeContext, SignatureLayout}
+import dspy4s.lm.contracts.LmOutput
+import dspy4s.programs.runtime.SettingsProgramRuntime
+import zio.blocks.schema.DynamicValue
+
+/** The adapter of a policy call (CODE_HARNESS_DESIGN.md, 9): the adapter `delegate`, with one more rule for a reply
+  * that does not follow the field format. When the parse of `delegate` gives a `ParseError`, the rule reads the reply
+  * as a step (`PolicyAdapter.values`). When the rule fits, its values are the result, so the call needs no fallback and
+  * no second model call. Else the error of `delegate` stays. The fallback of `delegate` gets the same rule
+  * (`DelegatingAdapter.wrap`). Each other member comes from `delegate`.
+  *
+  * The rule gives the fields of `PolicyStep`. After the parse, the call fills the reasoning field as for each reply:
+  * with the native reasoning of the reply, else with the empty text. The adapters of DSPy have no such rule, so it is
+  * in the harness, and only the policy call has it (`HarnessEffects.callPolicy`).
+  */
+private[harness] final case class PolicyAdapter(delegate: Adapter) extends DelegatingAdapter:
+
+  override protected def wrap(next: Adapter): Adapter = PolicyAdapter(next)
+
+  override def parse(invocation: AdapterInvocation, output: LmOutput)(using
+      RuntimeContext
+  ): Either[DspyError, ParsedOutput] =
+    delegate.parse(invocation, output) match
+      case Left(error: ParseError) =>
+        PolicyAdapter.values(invocation.layout, output.text).map(ParsedOutput(_)).toRight(error)
+      case result => result
+
+private[harness] object PolicyAdapter:
+
+  /** `context` with its adapter in a `PolicyAdapter`. The adapter is the adapter of `context`, else a chat adapter, as
+    * a predictor gets it (`SettingsProgramRuntime`).
+    */
+  def around(context: RuntimeContext): RuntimeContext =
+    val adapter = PolicyAdapter(SettingsProgramRuntime.adapterOrChat(context))
+    context.withServices(context.services.copy(adapter = Some(adapter)))
+
+  /** The values of a reply that does not follow the field format, or none when no rule fits. The marker
+    * `[[ ## completed ## ]]` ends the reply, as in the chat format. The rules:
+    *
+    *   - A reply with a field marker for `code` and none for `text`: the text is the reply before the first marker.
+    *     Each other field of `layout` takes its section, as in the chat format.
+    *   - A reply with no field markers and exactly one ```` ```scala ```` fence: the text is the reply with no such
+    *     fence, and the code is the code in the fence. A fence has ``` and an optional word for the language on its
+    *     first line, and ``` on its last line (`blocks`).
+    *   - A reply with no field markers and no ```` ```scala ```` fence: the whole reply is the text, with no code. A
+    *     fence of another language, or with no language, is a part of the text, for example an example of a shell
+    *     command in a reply. An empty text fits no rule.
+    *
+    * Each other reply fits no rule: a reply with two ```` ```scala ```` fences, because the harness cannot know which
+    * fence is the cell, and a reply with a fence that does not end. Each text has no white space at its two ends. The
+    * live session of 2026-11-11 gave these rules: at the first step, 25 of 30 replies of a model with native reasoning
+    * had no text field.
+    */
+  def values(layout: SignatureLayout, reply: String): Option[DynamicValue.Record] =
+    val lines = reply.linesIterator.toVector.takeWhile(line => !marker(line).exists(_._1 == EndField))
+    val first = lines.indexWhere(line => marker(line).isDefined)
+    if first >= 0 then
+      val found = sections(lines.drop(first))
+      Option.when(found.contains(CodeField) && !found.contains(TextField))(
+        record(layout, joined(lines.take(first)), found)
+      )
+    else
+      blocks(lines).flatMap(_.filter(_.language == CellLanguage) match
+        case Vector() =>
+          val text = joined(lines)
+          Option.when(text.nonEmpty)(record(layout, text, Map.empty))
+        case Vector(cell) =>
+          val code = lines.slice(cell.open + 1, cell.close).mkString("\n")
+          val text = Vector(joined(lines.take(cell.open)), joined(lines.drop(cell.close + 1))).filter(_.nonEmpty)
+          Some(record(layout, text.mkString("\n\n"), Map(CodeField -> code)))
+        case _ => None)
+
+  private val TextField = "text"
+  private val CodeField = "code"
+
+  /** The name of the marker that ends a reply in the chat format. */
+  private val EndField = "completed"
+
+  /** A marker of the chat format at the start of a line: `[[ ## name ## ]]`. The group is the name. */
+  private val Marker = """\[\[ ## (\w+) ## \]\]""".r
+
+  private val Fence = "```"
+
+  /** The language of the one fence that is a cell. */
+  private val CellLanguage = "scala"
+
+  /** A fence of a reply: the index of its first line and of its last line, and the word for its language, or the empty
+    * text.
+    */
+  private final case class Block(open: Int, close: Int, language: String)
+
+  /** The fences of `lines`, in their order, or none when a fence does not end. Outside a fence, a line that starts with
+    * ``` starts a fence, and the first word after the ``` is its language. In a fence, only a line of ``` ends it, so a
+    * line with ``` and a word is a part of the fence, as in Markdown.
+    */
+  private def blocks(lines: Vector[String]): Option[Vector[Block]] =
+    val (done, open) = lines.indices.foldLeft((Vector.empty[Block], Option.empty[(Int, String)])) {
+      case ((done, None), i) if lines(i).strip.startsWith(Fence) =>
+        (done, Some(i -> lines(i).strip.drop(Fence.length).strip.takeWhile(!_.isWhitespace)))
+      case ((done, Some((start, language))), i) if lines(i).strip == Fence => (done :+ Block(start, i, language), None)
+      case (state, _)                                                      => state
+    }
+    Option.when(open.isEmpty)(done)
+
+  /** The name of the marker at the start of `line`, and the rest of the line, or none. */
+  private def marker(line: String): Option[(String, String)] =
+    val stripped = line.strip
+    Marker.findPrefixMatchOf(stripped).map(m => (m.group(1), stripped.substring(m.end).strip))
+
+  /** The text of each section of `lines`, by the name of its marker. The first line of `lines` is a marker. A section
+    * has the rest of the line of its marker and the lines up to the next marker. The first section of a name wins, as
+    * in the chat format.
+    */
+  private def sections(lines: Vector[String]): Map[String, String] =
+    val parts = lines.foldLeft(Vector.empty[(String, Vector[String])]) { (done, line) =>
+      marker(line) match
+        case Some((name, rest)) => done :+ (name -> Vector(rest))
+        case None               => done.lastOption.fold(done)((name, body) => done.init :+ (name -> (body :+ line)))
+    }
+    parts.distinctBy(_._1).map((name, body) => name -> joined(body)).toMap
+
+  private def joined(lines: Vector[String]): String = lines.mkString("\n").strip
+
+  /** The values of the output fields of `layout`: `text`, and the text of `found` for each other field. An optional
+    * field with no text is null, as in the chat format. A field with no text that is not optional has no value, so the
+    * call fills a reasoning field.
+    */
+  private def record(layout: SignatureLayout, text: String, found: Map[String, String]): DynamicValue.Record =
+    DynamicValues.recordFromEntries(layout.outputFields.flatMap { field =>
+      if field.name == TextField then Some(field.name -> DynamicValues.string(text))
+      else
+        found.get(field.name) match
+          case Some(value)            => Some(field.name -> DynamicValues.string(value))
+          case None if field.optional => Some(field.name -> DynamicValue.Null)
+          case None                   => None
+    })

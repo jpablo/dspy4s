@@ -94,6 +94,17 @@ class WorkLaws extends munit.FunSuite:
     }
   }
 
+  // The live session of 2026-11-11 came through this path. A second model call for a step would take the next reply,
+  // and the turn would not end Replied.
+  test("Work: a step with one fence and no field markers runs its cell, and a step with only a text is the reply") {
+    val model = sessionModel("Let me read it.\n\n```scala\nprintln(read(\"a.txt\"))\n```", "FAKE-DONE")
+    work(model) { (_, handle) =>
+      assertEquals(handle.send(message("m1")), Right(()))
+      assert(eventually(60)(outcomes(handle) == Vector(TurnOutcome.Replied("FAKE-DONE"))), entries(handle).toString)
+      assert(outputs(handle).exists(_.contains("FAKE-A")), outputs(handle).toString)
+    }
+  }
+
   test("Work: a val of one turn is there in the next turn") {
     val model = sessionModel(
       policy("define", Some("val x = 41")),
@@ -435,6 +446,87 @@ class WorkLaws extends munit.FunSuite:
       assert(!text.contains("Give the result with submit"), text)
       assert(!text.contains("The task has no input fields"), text)
     }
+  }
+
+  /** Opens a work session in a new place whose scope has a tree of 400 folders, and gives the runtime, the host, the
+    * handle and the folder of the scope to `check`. With `aged`, the tree is older than 2 s at the open: the index
+    * lists a folder again when it changed less than 2 s before a walk.
+    */
+  private def bigScope(model: LanguageModel, aged: Boolean = false)(
+      check: (WorkRuntime, LocalHost, SessionHandle) => Unit
+  ): Unit =
+    val place = Place()
+    try withRoot { root =>
+        (1 to 200).foreach(i => Files.createDirectories(place.root.resolve(s"tree/d$i/e")))
+        if aged then Thread.sleep(2_100)
+        val env     = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
+        val runtime = Models.withModel(model)(WorkRuntime.forWork(env, limits))
+        withHost(root, runtime) { host =>
+          check(runtime, host, opened(host, id(1), Some(WorkRuntime.config(place.root, "fake-model", limits))))
+        }
+      }
+    finally place.close()
+
+  test("Work: the walk of the scope for secret files starts when the session opens, before the first message") {
+    // A live run in a scope of 300,000 folders: the walk started only at the first message, so the first exec still
+    // waited 9.7 s, also 20 s after the open (2026-11-11).
+    sandboxed()
+    bigScope(sessionModel()) { (runtime, _, handle) =>
+      assertEquals(handle.state.position, Position.NoTurn, "the law sends no message")
+      assert(eventually()(runtime.indexOf(id(1)).exists(_.listings >= 400L)), runtime.indexOf(id(1)).toString)
+    }
+  }
+
+  test("Work: the first command after the walk of the open lists only the folders that changed") {
+    sandboxed()
+    val model = sessionModel(policy("list", Some("""println(exec("true"))""")), policy("FAKE-DONE", None))
+    bigScope(model, aged = true) { (runtime, _, handle) =>
+      assert(eventually()(runtime.indexOf(id(1)).exists(_.listings >= 400L)), "the walk of the open did not run")
+      val walked = runtime.indexOf(id(1)).fold(0L)(_.listings)
+      handle.send(message("fake-request-1")).fold(e => fail(e.toString), identity)
+      assert(eventually(60)(entries(handle).exists { case Entry.TurnEnded(_) => true; case _ => false }), "no end")
+      assert(outputs(handle).nonEmpty, "the cell did not run")
+      val again = runtime.indexOf(id(1)).fold(0L)(_.listings) - walked
+      assert(again < 5L, s"the first command listed $again folders again")
+    }
+  }
+
+  test("Work: the end of an open session ends its walk, and the runtime keeps no index of it") {
+    sandboxed()
+    val place = Place()
+    try withRoot { root =>
+        Files.createDirectories(place.root.resolve("a/b"))
+        val env     = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
+        val runtime = Models.withModel(sessionModel())(WorkRuntime.forWork(env, limits))
+        withHost(root, runtime) { host =>
+          opened(host, id(1), Some(WorkRuntime.config(place.root, "fake-model", limits))): Unit
+          assert(eventually()(runtime.indexOf(id(1)).nonEmpty), "the open made no index")
+        }
+        assertEquals(runtime.indexOf(id(1)), None, "the index stayed after the end of the session")
+      }
+    finally place.close()
+  }
+
+  test("Work: the walk of the scope for secret files starts when an activation starts, before the first command") {
+    // The first exec of a live session in a scope of 1.75 million entries waited 34 s for this walk, and the screen
+    // showed nothing (2026-11-11).
+    sandboxed()
+    val place = Place()
+    try withRoot { root =>
+        (1 to 200).foreach(i => Files.createDirectories(place.root.resolve(s"tree/d$i/e")))
+        val env     = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
+        val runtime = Models.withModel(sessionModel())(WorkRuntime.forWork(env, limits))
+        // The law opens no host and no session file, so the strategy is the window, which needs no memory table.
+        val config     = WorkRuntime.config(place.root, "fake-model", limits).copy(strategy = StrategyName.Window)
+        val jobs       = JobTable(scala.concurrent.duration.Duration(1, "s"), (_, _) => ())
+        val activation = runtime.activate(id(1), config, dspy4s.harness.Support.journal(), jobs)
+        try activation match
+            case work: WorkActivation =>
+              assert(eventually()(work.shell.listings >= 400L), s"the walk listed ${work.shell.listings} folders")
+            case other => fail(s"not a work activation: $other")
+        finally activation.close()
+      }
+    finally place.close()
   }
 
   test(

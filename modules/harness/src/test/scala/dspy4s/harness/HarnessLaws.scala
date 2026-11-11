@@ -456,3 +456,110 @@ class HarnessLaws extends FunSuite:
       assert(!text.contains("```scala\nprintln"), text)
     }
   }
+
+  // ── A step that does not follow the field format (the live session of 2026-11-11) ──
+
+  /** The text and the code of each `Acted` of a journal. */
+  private def acted(journal: Vector[Logged]): Vector[(String, Option[String])] =
+    journal.collect { case Logged(_, _, Entry.Acted(_, text, code)) => (text, code) }
+
+  // At the first step, a live model with native reasoning wrote a short line and then the code. 25 of 30 replies had no
+  // text field. Each such reply ended the turn Failed("JSON parse failed and no fallback was applied").
+  Vector(
+    "a code field with no text field" ->
+      "I'll take a look around the workspace first.\n\n[[ ## code ## ]]\nsubmit(\"42\")\n\n[[ ## completed ## ]]",
+    "a fenced code field with no text field and no end marker" ->
+      "I'll take a look around the workspace first.\n\n[[ ## code ## ]]\n```scala\nsubmit(\"42\")\n```",
+    "one fence and no field markers" -> "I'll take a look around the workspace first.\n\n```scala\nsubmit(\"42\")\n```"
+  ).foreach { (name, reply) =>
+    test(s"Harness: a step with $name takes the text before the code as its text, with one model call") {
+      val model = ThinkingLm("a native fake thought", reply)
+      call(model) { (_, result, journal) =>
+        assertEquals(result, Right(Answer("42")), journal.mkString("\n"))
+        assertEquals(acted(journal), Vector(("I'll take a look around the workspace first.", Some("submit(\"42\")"))))
+        assertEquals(model.requests.size, 1)
+      }
+    }
+  }
+
+  test("Harness: a step with no field markers and no fence is a text with no code, so the finisher runs") {
+    val model = ThinkingLm("a native fake thought", "It is 42.", answer("42"))
+    call(model) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("42")), journal.mkString("\n"))
+      assertEquals(acted(journal), Vector(("It is 42.", None)))
+      assertEquals(ended(journal), Vector(TurnOutcome.Replied("It is 42.")))
+    }
+  }
+
+  // Only a ```scala fence is a cell. A fence of another language, or with no language, is a part of the text, so a reply
+  // with an example of a shell command ends the turn and does not run the example as a cell.
+  Vector(
+    "bash"        -> "```bash\nsbt test\n```",
+    "json"        -> "```json\n{\"answer\": 42}\n```",
+    "no language" -> "```\nsubmit(\"42\")\n```"
+  ).foreach { (name, fence) =>
+    test(s"Harness: a step with no field markers and one fence of $name is a text with no code") {
+      val reply = s"Run it like this:\n\n$fence"
+      val model = ThinkingLm("a native fake thought", reply, answer("42"))
+      call(model) { (_, result, journal) =>
+        assertEquals(result, Right(Answer("42")), journal.mkString("\n"))
+        assertEquals(acted(journal), Vector((reply, None)))
+      }
+    }
+  }
+
+  test("Harness: a step with no field markers runs its one scala fence, and a fence of another language stays text") {
+    val bash  = "```bash\nls\n```"
+    val reply = s"First the cell.\n\n```scala\nsubmit(\"42\")\n```\n\nThen in a shell:\n\n$bash"
+    call(ThinkingLm("a native fake thought", reply)) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("42")), journal.mkString("\n"))
+      assertEquals(acted(journal), Vector((s"First the cell.\n\nThen in a shell:\n\n$bash", Some("submit(\"42\")"))))
+    }
+  }
+
+  test("Harness: a model with no native reasoning and a step with one fence and no field markers has no reasoning") {
+    val model = ScriptLm("Let me compute it.\n\n```scala\nsubmit(\"42\")\n```")
+    call(model) { (_, result, journal) =>
+      assertEquals(result, Right(Answer("42")), journal.mkString("\n"))
+      assertEquals(reasoning(journal), Vector(""))
+      assertEquals(acted(journal), Vector(("Let me compute it.", Some("submit(\"42\")"))))
+    }
+  }
+
+  test("Harness: a step that fits no rule fails the turn with the start of the reply, so a person sees what it was") {
+    // Two fences: the harness cannot know which one is the cell.
+    val reply = "Here are two cells.\n\n```scala\nsubmit(\"1\")\n```\n\n```scala\nsubmit(\"2\")\n```"
+    call(ThinkingLm("a native fake thought", reply, reply)) { (_, result, journal) =>
+      assert(result.isLeft, result.toString)
+      val failed = journal.collect { case Logged(_, _, Entry.TurnEnded(TurnOutcome.Failed(error))) => error }
+      assertEquals(failed.size, 1, journal.mkString("\n"))
+      assert(failed.head.contains("Here are two cells."), failed.head)
+    }
+  }
+
+  test("Harness: the start of a reply in the error of a failed turn holds no known secret") {
+    val secret = "fake-secret-9876"
+    val reply  = s"Here is $secret.\n\n```scala\nval a = 1\n```\n\n```scala\nval b = 2\n```"
+    val model  = ThinkingLm("a native fake thought", reply, reply)
+    call(model, secrets = Secrets(Map("FAKE_KEY" -> secret))) { (_, result, journal) =>
+      val failed = journal.collect { case Logged(_, _, Entry.TurnEnded(TurnOutcome.Failed(error))) => error }
+      assert(failed.exists(_.contains(s"Here is ${Secrets.mark("FAKE_KEY")}.")), journal.mkString("\n"))
+      assert(!journal.toString.contains(secret), journal.mkString("\n"))
+      assert(!result.toString.contains(secret), result.toString)
+    }
+  }
+
+  test("Harness: the start of a reply in the error of a failed turn cuts no surrogate pair in two") {
+    // The JSON writer of a session file refuses a surrogate with no pair, and a failed write ends the session.
+    val reply = ("a" * 199) + "😀 and more.\n\n```scala\nval a = 1\n```\n\n```scala\nval b = 2\n```"
+    call(ThinkingLm("a native fake thought", reply, reply)) { (_, _, journal) =>
+      val failed = journal.collect { case Logged(_, _, Entry.TurnEnded(TurnOutcome.Failed(error))) => error }
+      assertEquals(failed.size, 1, journal.mkString("\n"))
+      val lone = failed.head.indices.filter { i =>
+        val c = failed.head.charAt(i)
+        (c.isHighSurrogate && !failed.head.lift(i + 1).exists(_.isLowSurrogate)) ||
+        (c.isLowSurrogate && !failed.head.lift(i - 1).exists(_.isHighSurrogate))
+      }
+      assertEquals(lone, Vector.empty, failed.head)
+    }
+  }

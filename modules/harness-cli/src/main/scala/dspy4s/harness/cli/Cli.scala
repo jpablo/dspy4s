@@ -35,6 +35,10 @@ import scala.util.control.NonFatal
   * of the client. `--script` runs the loop in the script mode, so a script or an agent can drive the session. `--list`
   * prints `listText` and starts no session. `--session` takes an id or the start of an id (`resolveSession`).
   *
+  * The file `<home>/.dspy4s/harness/.env` can give each of these variables (`EnvFile`). A variable of the process wins
+  * over the file, apart from the base URL and the key, which come both from the file or both from the process. A line
+  * of the file that is not right gives an error and the exit code 2.
+  *
   * A proposal for the review: the CLI runs on JDK 21. Its start time is a check of this phase, and an AOT cache on JDK
   * 25 comes later only if the start is too slow (choice 8).
   */
@@ -55,28 +59,40 @@ object Cli:
           case Right(text) =>
             println(text)
             0
-      case Right(cli) => session(cli, home)
+      case Right(cli) => EnvFile.read(EnvFile.pathOf(home)) match
+          case Left(error) =>
+            System.err.println(error)
+            2
+          case Right(file) => session(cli, home, EnvFile.merge(file, sys.env), secretsOf(sys.env, file))
     System.out.flush()
     sys.exit(code)
 
-  /** Opens the session of `cli`, runs the loop, and gives the exit code. */
-  private def session(cli: CliArgs, home: Path): Int =
-    WorkEnv.summaryOptions(sys.env) match
+  /** Opens the session of `cli` with the variables `env` and the mask `secrets`, runs the loop, and gives the exit
+    * code.
+    */
+  private def session(cli: CliArgs, home: Path, env: Map[String, String], secrets: Secrets): Int =
+    WorkEnv.summaryOptions(env) match
       case Left(error) =>
         System.err.println(error)
         2
-      case Right(options) => session(cli, home, options)
+      case Right(options) => session(cli, home, env, secrets, options)
 
-  /** Opens the session of `cli` with the summary options `options`, runs the loop, and gives the exit code.
+  /** Opens the session of `cli` with the variables `env`, the mask `secrets` and the summary options `options`, runs
+    * the loop, and gives the exit code.
     *
     * The console comes before the host. JLine reads the input while it makes the terminal (`EditorConsole.system`), so
     * a line that the person types after the start of the host stays. Also, only one line of text comes between the open
     * and the loop, so the loop shows each entry that commits after the open.
     */
-  private def session(cli: CliArgs, home: Path, options: DynamicValue.Record): Int =
-    val name    = sys.env.getOrElse("DSPY_MODEL", "none")
-    val secrets = secretsOf(sys.env)
-    val model   = sys.env.get("DSPY_TRACE").filter(_.nonEmpty).foldLeft(modelOf(name)) { (inner, file) =>
+  private def session(
+      cli    : CliArgs,
+      home   : Path,
+      env    : Map[String, String],
+      secrets: Secrets,
+      options: DynamicValue.Record
+  ): Int =
+    val name  = env.getOrElse("DSPY_MODEL", "none")
+    val model = env.get("DSPY_TRACE").filter(_.nonEmpty).foldLeft(modelOf(name, env)) { (inner, file) =>
       TracedModel(inner, Path.of(file), secrets.maskText)
     }
     val console = consoleOf(cli, secrets)
@@ -152,16 +168,24 @@ object Cli:
       case HostError.OpenFailed(message) => message
       case other                         => other.toString
 
-  /** The mask of the client: each secret-like variable of the environment (5.6), with the rules of `Secrets.known`. A
-    * short value, as the placeholder key `unused`, is not a known value, so the mask never changes a word of a cell.
+  /** The mask of the client: each secret-like variable of the process and of the variables file (5.6), with the rules
+    * of `Secrets.known`. A short value, as the placeholder key `unused`, is not a known value, so the mask never
+    * changes a word of a cell. The process keeps its variables also when the file gives the connection, so the mask
+    * covers both values of a name.
     */
-  private[cli] def secretsOf(env: Map[String, String]): Secrets = Secrets.known(env, Map.empty)
+  private[cli] def secretsOf(process: Map[String, String], file: Map[String, String] = Map.empty): Secrets =
+    val fromProcess = Secrets.known(process, Map.empty).values
+    // A name with another value in the process gets a second mark, so the mask keeps both values.
+    val fromFile = Secrets.known(file, Map.empty).values.map { (name, value) =>
+      if fromProcess.get(name).exists(_ != value) then s"$name (.env)" -> value else name -> value
+    }
+    Secrets(fromFile ++ fromProcess)
 
-  /** The model of the environment, or a model whose calls fail with the reason. */
-  private def modelOf(name: String): LanguageModel =
-    val base = sys.env.getOrElse("OPENAI_BASE_URL", OpenAiClient.defaultBaseUrl)
-    OpenAiLanguageModel.fromEnv(name, base) match
-      case Right(lm) if sys.env.get("DSPY_NATIVE_REASONING").contains("true") =>
+  /** The model of the variables `env`, or a model whose calls fail with the reason. */
+  private[cli] def modelOf(name: String, env: Map[String, String]): LanguageModel =
+    val base = env.getOrElse("OPENAI_BASE_URL", OpenAiClient.defaultBaseUrl)
+    OpenAiLanguageModel.fromEnv(name, base, env = env) match
+      case Right(lm) if env.get("DSPY_NATIVE_REASONING").contains("true") =>
         lm.copy(capabilities = Some(LmCapabilities(reasoning = true)))
       case Right(lm)    => lm
       case Left(reason) => NoModel(s"no model: $reason")

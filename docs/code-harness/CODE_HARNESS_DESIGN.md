@@ -1471,6 +1471,17 @@ The proofs of phase 4 added these points, also for the review:
   this is no code. A fence that the harness does not find gets the hint of 6. The live sessions of 2026-11-10 gave
   this rule: the model put each cell in a fence, the window showed the fence of the failed step again, and one habit
   cost five steps of ten.
+- A policy call has the adapter of the context in a `PolicyAdapter`. When that adapter cannot parse a reply, the harness
+  reads the reply with these rules, before the JSON fallback, so the step costs one model call. A reply with a field
+  `code` and no field `text`: the text is the part before the first marker. A reply with no field markers and exactly
+  one ```` ```scala ```` fence: the text is the reply with no such fence, and the code is the code in the fence. A reply
+  with no field markers and no ```` ```scala ```` fence: the whole reply is the text, with no code. A fence of another
+  language, or with no language, is a part of the text, so a reply with an example of a shell command ends the turn and
+  does not run the example (2026-11-11). Each other reply, for example one with two ```` ```scala ```` fences or with a
+  fence that does not end, gets the error of the adapter, and the error of the turn shows the first 200 characters of
+  the reply. The journal masks the secrets of that text. A live session of 2026-11-11 gave these rules: with native
+  reasoning, 25 of 30 replies to the first policy request had no field `text`, and each such reply ended the turn
+  `Failed("JSON parse failed and no fallback was applied")`.
 
 A code review of phase 4 on 2026-11-09 added these rules:
 
@@ -1776,7 +1787,25 @@ These points are proposals for the review:
   open turn, each command goes through `run`, and the end of the input waits for the open turn. So each message
   starts its own turn, in the order of the lines. With `DSPY_TRACE=FILE`, each model call goes to `FILE` as one JSON
   line: the messages of the request, the text and the reasoning of the reply, or the error, and the time. The mask of
-  the client hides the secrets of each text. `scripts/live/chat.sh` builds the CLI and runs it in the script mode.
+  the client hides the secrets of each text. `scripts/dspy4s-harness` runs the CLI, and it builds the CLI first when
+  a source file is newer than the class path. `scripts/live/chat.sh` runs it in the script mode, or for a
+  person when its input is a terminal.
+- A study of the TUI libraries for Scala and Java (2026-11-11) found no Scala library that fits better than JLine:
+  termflow uses only the alternate screen, and TamboUI and termflow bring the JLine 3 bundle, a second copy of the
+  JLine packages. TamboUI, with its inline runner, is the choice for a richer client later.
+- A work session starts the walk of its scope for secret files (5.4) on a thread of its own when the session opens
+  (`SessionRuntime.opened`, `SandboxedShell.warm`). The index of the walk belongs to the open session, as the job
+  table does, and each activation of the session gives it to its shell. So the first command waits only for the rest
+  of that walk, and the end of the open session stops the walk. With no walk before the first command, the first
+  `exec` in a scope of 1.75 million entries waited 34 s (2026-11-11). At first the walk started at the first
+  activation, and a live run in a scope of 300,000 folders still waited 9.7 s at the first `exec`, also 20 s after the
+  open. An open that only reads also starts the walk. The walk runs on its own thread, and the writer never waits for
+  it.
+- Until a real configuration file exists, the CLI reads its variables also from `<home>/.dspy4s/harness/.env`
+  (2026-11-10). It reads this file also with another `--root`, so a live scenario with a temporary root finds it. A
+  variable of the process wins over the file. The base URL and the key are the exception: both come from the file when
+  the file gives one of them, else both come from the process. So a key of a shell never goes to a base URL of the
+  file. The mask covers the secrets of the process and of the file.
 - `HostError` holds a rejection, a failed write, the end of a session, a fenced activation and an open that failed.
   `WriterJournal` gives a rejection as a `Rejection`, and it throws for the other errors, so `drive` stops and the
   turn stays open, as after a crash.

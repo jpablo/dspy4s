@@ -238,6 +238,16 @@ class OpenAiLanguageModelSuite extends FunSuite:
     assert(result.left.toOption.get.message.contains("DSPY4S_TEST_UNSET_KEY"))
   }
 
+  test("fromEnv reads the key from a given environment, and an empty key in it fails fast") {
+    val env    = Map("FAKE_TEST_KEY" -> "fake-key-0123")
+    val result = OpenAiLanguageModel.fromEnv("fake-model", "http://localhost:9/v1", "FAKE_TEST_KEY", env)
+    assertEquals(
+      result.map(lm => (lm.client.apiKey, lm.client.baseUrl)),
+      Right(("fake-key-0123", "http://localhost:9/v1"))
+    )
+    assert(OpenAiLanguageModel.fromEnv("fake-model", envVar = "FAKE_TEST_KEY", env = Map("FAKE_TEST_KEY" -> "")).isLeft)
+  }
+
   // ── The body and the reply of each mode ─────────────────────────────────────────────────────────────────────
 
   test("the chat body has the model, the request options over the default options, and the messages") {

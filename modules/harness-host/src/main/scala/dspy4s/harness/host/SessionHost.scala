@@ -62,6 +62,16 @@ trait SessionRuntime:
     */
   def activate(session: SessionId, config: SessionConfig, journal: Journal, jobs: JobTable): Activation
 
+  /** The part of the runtime that lives as long as the open session `session`, with the configuration `config` of its
+    * open. The host calls it once at each open, before the `Activate` of the open, with the configuration of that
+    * `Activate`. So each activation of the open session can use it, as it uses the job table, also the activation of a
+    * turn that the `Activate` starts at once for a waiting message. The host closes the result at the end of the open
+    * session, after the activation, and also when the `Activate` fails. The default keeps nothing.
+    */
+  def opened(session: SessionId, config: SessionConfig): AutoCloseable =
+    val _ = (session, config)
+    () => ()
+
 /** The live part of one activation (11). Nothing outside it depends on it, and a new activation makes a new one. */
 trait Activation extends AutoCloseable:
 
@@ -98,6 +108,11 @@ trait Activation extends AutoCloseable:
   *     host starts a worker thread that runs `drive` with that journal and the effects of the activation. The worker
   *     makes the live part of the activation (`SessionRuntime.activate`) at the first turn that needs it, so an open
   *     that only reads starts no REPL, and the thread of the writer never waits for a REPL.
+  *   - Before the `Activate` of an open, the host calls `SessionRuntime.opened` once with the configuration of the
+  *     open, and keeps the result while the session is open. So each activation of the open can use it, also one that
+  *     the `Activate` starts at once for a waiting message. A second `open` of the open session does not call it again.
+  *     When the call throws, the open gives `OpenFailed`, commits no `Activate`, and frees the lock. The end of the
+  *     session closes the result after the activation, also after a failed `Activate`.
   *   - After `StopRequested`, the host calls `Activation.stop`, and a timer calls `Writer.expire` with the turn of the
   *     stop and the ticket after `limits.grace` (10.3, step 5). When that turn still runs, the writer fences the ticket
   *     and closes the turn, and the next turn gets a new activation.
@@ -220,6 +235,7 @@ private final class OpenSession private (
 
   // The live part. Only code that holds `guard` changes it.
   private var activation: Option[(WorkerTicket, Activation)] = None
+  private var openPart: Option[AutoCloseable]                = None // the result of `SessionRuntime.opened`
   private var worker: Option[Long]                           = None
   private var workers                                        = 0L
   private var tickets                                        = 0L
@@ -259,8 +275,9 @@ private final class OpenSession private (
   def close(): Unit = shutdown()
 
   /** The end of this open session, from each path: `Ended`, a failed write, or the close of the host. It runs once, and
-    * it does all the work of the end: the activation and its REPL close, the jobs stop, the writer ends, the lock goes,
-    * and a reopen in this host can go on. After it, a commit starts no worker.
+    * it does all the work of the end: the activation and its REPL close, the result of `SessionRuntime.opened` closes,
+    * the jobs stop, the writer ends, the lock goes, and a reopen in this host can go on. After it, a commit starts no
+    * worker.
     */
   private def shutdown(): Unit =
     val last = guard.synchronized {
@@ -268,11 +285,14 @@ private final class OpenSession private (
       else
         endedFlag = true
         val live = activation.map(_._2)
+        val part = openPart
         activation = None
-        Some(live)
+        openPart = None
+        Some((live, part))
     }
-    last.foreach { live =>
+    last.foreach { (live, part) =>
       live.foreach(a => Try(a.close()): Unit)
+      part.foreach(p => Try(p.close()): Unit)
       Try(jobs.close()): Unit
       writer.close()
       Try(lock.release()): Unit
@@ -288,6 +308,15 @@ private final class OpenSession private (
   /** Commits the `Activate` of this open. */
   private def activate(config: SessionConfig): Either[HostError, Unit] =
     writer.run(Command.Activate(Harness.versions, config), Source.Harness).map(_ => ())
+
+  /** Calls `SessionRuntime.opened` once for this open, with the configuration `config` of the open, and keeps the
+    * result until the end of the session. `start` calls it before the `Activate`, when no commit and no other thread
+    * can end the session. When the `Activate` then fails, the close of the session closes the result.
+    */
+  private def keepOpened(config: SessionConfig): Either[HostError, Unit] =
+    Try(place.runtime.opened(id, config)).toEither.left
+      .map(e => HostError.OpenFailed(s"the runtime did not open the session: $e"))
+      .map(part => guard.synchronized { openPart = Some(part) })
 
   /** After each commit, on the thread of the writer. It must return at once. After the end, it does nothing. */
   private def onCommit(s: SessionState): Unit =
@@ -428,9 +457,10 @@ private object OpenSession:
   /** The most characters of the output of a job in its message. */
   private val ReportOutput = 2_000
 
-  /** Opens the session `id`: the folder of the scope, the lock, the file, the journal, the configuration, the writer
-    * and the `Activate`. A folder that is not there refuses the open before the lock and the file, so it makes no
-    * journal.
+  /** Opens the session `id`: the folder of the scope, the lock, the file, the journal, the configuration, the writer,
+    * the call of `SessionRuntime.opened` and the `Activate`. A folder that is not there refuses the open before the
+    * lock and the file, so it makes no journal. A failed step after the writer closes the session, and the close also
+    * closes the result of `opened`.
     */
   def start(id: SessionId, config: Option[SessionConfig], place: Place): Either[HostError, OpenSession] =
     val path = SessionFile.pathOf(place.root, id)
@@ -445,7 +475,13 @@ private object OpenSession:
                 start   <- file.readFrom(0).left.map(e => failed(file, e))
                 setting <- chosen(config, start).left.map(e => failed(file, e))
                 session  = made(id, place, file, start, channel, lock)
-                _       <- session.activate(setting).left.map { e =>
+                // `opened` comes before the `Activate`, because the `Activate` can start a turn for a waiting message
+                // at once, and the activation of that turn needs the result of `opened`.
+                _ <- session.keepOpened(setting).left.map { e =>
+                       session.close()
+                       e
+                     }
+                _ <- session.activate(setting).left.map { e =>
                        session.close()
                        e
                      }

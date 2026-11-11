@@ -248,14 +248,15 @@ final case class OpenAiClient(
 object OpenAiClient:
   val defaultBaseUrl: String = "https://api.openai.com/v1"
 
-  /** Build a client with the API key from the environment. An `envVar` that is absent or empty gives
-    * [[dspy4s.core.contracts.LmNotConfiguredError]].
+  /** Build a client with the API key from the environment `env`, by default the environment of the process. An `envVar`
+    * that is absent or empty gives [[dspy4s.core.contracts.LmNotConfiguredError]].
     */
   def fromEnv(
-      base     : String        = defaultBaseUrl,
-      transport: HttpTransport = HttpTransport.jdk(),
-      envVar   : String        = "OPENAI_API_KEY"
+      base     : String              = defaultBaseUrl,
+      transport: HttpTransport       = HttpTransport.jdk(),
+      envVar   : String              = "OPENAI_API_KEY",
+      env      : Map[String, String] = sys.env
   ): Either[DspyError, OpenAiClient] =
-    sys.env.get(envVar) match
+    env.get(envVar) match
       case Some(value) if value.nonEmpty => Right(OpenAiClient(apiKey = value, baseUrl = base, transport = transport))
       case _                             => Left(OpenAiErrors.notConfigured(envVar))

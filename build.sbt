@@ -24,6 +24,7 @@ lazy val scalaXmlVersion        = "2.4.0"
 lazy val ironVersion            = "3.3.2"
 lazy val mcpSdkVersion          = "2.1.0"
 lazy val jlineVersion           = "4.4.6"  // the version of the REPL of the nightly, so the class path has one JLine
+lazy val slf4jVersion           = "2.0.17" // the slf4j-nop binding of an application: the examples and the CLI
 
 lazy val commonSettings = Seq(
   scalacOptions ++= Seq(
@@ -242,7 +243,7 @@ lazy val examples = (project in file("modules/examples"))
     publish / skip                         := true,
     libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test,
     // The MCP SDK logs with SLF4J. With no provider, each JVM of an MCP example prints a warning on stderr.
-    libraryDependencies += "org.slf4j" % "slf4j-nop" % "2.0.17" % Runtime,
+    libraryDependencies += "org.slf4j" % "slf4j-nop" % slf4jVersion % Runtime,
     // The MCP examples start their servers with the class path of their JVM. The class path of the sbt JVM is not the
     // class path of the examples, so `run` and `runMain` fork. The output of the fork has no sbt prefix.
     Compile / run / fork           := true,
@@ -393,6 +394,9 @@ lazy val harnessCli = (project in file("modules/harness-cli"))
       "org.jline"      % "jline-terminal-jni" % jlineVersion,
       "org.scalameta" %% "munit"              % munitVersion % Test
     ),
+    // sqlite-jdbc logs through SLF4J when it finds SLF4J on the class path. With no binding, each start of the CLI
+    // prints three lines of SLF4J on stderr.
+    libraryDependencies += "org.slf4j" % "slf4j-nop" % slf4jVersion % Runtime,
     excludeDependencies += ExclusionRule("org.scala-lang", "scaladoc_3"),
     Compile / run / fork         := true,
     Compile / run / connectInput := true,
