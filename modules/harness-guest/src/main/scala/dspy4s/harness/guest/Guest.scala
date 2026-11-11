@@ -71,7 +71,7 @@ import caps.assumeSafe
   /** A part of the journal of a session. `ref` names the part, for example a cell. The form of `ref` is open. */
   def zoom(session: SessionRef, ref: String): String
 
-/** A child inside the cell (5.1). A closed session has this capability, and it has only the bare `Sessions`. */
+/** A child inside the cell (5.1). A closed session has this capability, and it can only look at the other sessions. */
 @assumeSafe trait Children extends Cap:
   update def rlm[A: Data](task: String, inputs: Map[String, String]): A
   update def rlmBatched[A: Data](tasks: Vector[(String, Map[String, String])]): Vector[A]

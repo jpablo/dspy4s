@@ -162,19 +162,16 @@ object HarnessEffects:
     else if repl.full then Some("the REPL ran its limit of cells")
     else None
 
-  /** The note after a new REPL (6), with its reason and the names of the cells that the new REPL does not have. A cell
-    * that did not compile never ran, so it repeats no side effect, and the note tells the policy that it can run the
-    * cell again. A cell that ran can have side effects, so the note does not tell the policy to run it again.
+  /** The note after a new REPL (6), with its reason and the names of the cells that the new REPL does not have. A new
+    * activation gives the same text (`NewReplNote`). A cell that did not compile never ran, so it repeats no side
+    * effect, and the note tells the policy that it can run the cell again. A cell that ran can have side effects, so
+    * the note does not tell the policy to run it again.
     */
   private def restartNote(reason: String, names: Vector[String], outcome: CellOutcome): String =
-    val head = s"The harness started a new REPL, because $reason."
-    val lost =
-      if names.isEmpty then "No names of earlier cells were lost."
-      else s"These names of earlier cells are gone: ${names.mkString(", ")}. Define them again if you need them."
     val again = outcome match
       case CellOutcome.CompileError(_) => " Then you can run the failed cell again."
       case _                           => ""
-    s"$head $lost$again"
+    NewReplNote.text(reason, names) + again
 
   /** The reason to stop the turn after a cell, when the REPL cannot run the next cell safely (6). A full REPL does not
     * stop the turn: the harness starts a new REPL for it (`restartReason`).

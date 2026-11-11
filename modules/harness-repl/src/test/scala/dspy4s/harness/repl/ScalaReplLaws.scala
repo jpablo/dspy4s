@@ -456,6 +456,21 @@ class ScalaReplLaws extends munit.FunSuite:
     finally r.close()
   }
 
+  test("Hints: sys.error does not compile in a safe cell, and its hint names a throw that fails the cell") {
+    // In a live session of 2026-11-10, the model used sys.error to fail with a message, and the error had no hint.
+    val r = repl()
+    try
+      r.run("""sys.error("FAKE-FAIL")""").outcome match
+        case CellOutcome.CompileError(lines) =>
+          val hints = lines.filter(_.startsWith("Hint:"))
+          assert(hints.exists(_.contains("throw IllegalStateException(")), lines.mkString("\n"))
+        case other => fail(s"sys.error compiled: $other")
+      r.run("""throw IllegalStateException("FAKE-FAIL")""").outcome match
+        case CellOutcome.Failed(error) => assert(error.contains("FAKE-FAIL"), error)
+        case other                     => fail(s"the throw of the hint did not fail the cell: $other")
+    finally r.close()
+  }
+
 /** A record for the preamble tests. It is top-level, so the host and the REPL have the same shape. */
 final case class ReplPoint(x: Int, note: Option[String])
 

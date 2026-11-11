@@ -60,6 +60,9 @@ object Window extends ContextStrategy:
     *   - The messages of the open turn before a step are in the observation before that step, after the output of the
     *     cell before it. A message from the person is "The person wrote: ...", and a message from the harness, for
     *     example the end of a job, is "The harness wrote: ...".
+    *   - The first step after a new activation has the note of the lost names (`NewReplNote.afterActivation`) in its
+    *     observation, before its messages. Only the observation of that step holds the note. A program call has one
+    *     activation, so its projection has no such note.
     *   - An earlier turn is a message whose observation holds all its messages, and whose text is its reply: the text
     *     of `Replied`, or a note of another outcome with the last text of the turn.
     *   - The newest messages that fit the rest of the budget stay, oldest first, so the oldest turns go first.
@@ -70,7 +73,8 @@ object Window extends ContextStrategy:
     val current       = open.lastOption.filterNot(_.acted)
     val heardNow      = current.fold(Vector.empty[String])(_.heard)
     val lastOutput    = acted.flatMap(_.output).lastOption.toVector
-    val observation   = cut((lastOutput ++ heardNow).mkString("\n"), budget / 2)
+    val renewed       = NewReplNote.afterActivation(journal).toVector
+    val observation   = cut((lastOutput ++ renewed ++ heardNow).mkString("\n"), budget / 2)
     val before        = "" +: acted.map(_.output.getOrElse(""))
     val stepMessages  = acted.zipWithIndex.map { (step, k) =>
       val seen = (Vector(before(k)).filter(_.nonEmpty) ++ step.heard).mkString("\n")

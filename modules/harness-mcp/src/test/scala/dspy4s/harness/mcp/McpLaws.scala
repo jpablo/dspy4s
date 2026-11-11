@@ -84,9 +84,11 @@ class McpLaws extends munit.FunSuite:
     }
   }
 
-  test("MCP: the API reference holds the source text of the guest API") {
+  test("MCP: the API reference holds the source text of the guest API that compiles in the mode of the server") {
     assert(McpServer.reference.contains("trait Files"), McpServer.reference.take(300))
-    assert(McpServer.reference.contains("enum Scope"), "the reference lacks the session types")
+    assert(McpServer.reference.contains("trait Store"), McpServer.reference.take(300))
+    // The mode of the server has no Sessions, so the session types are not in the reference (5.1).
+    assert(!McpServer.reference.contains("enum Scope"), "the reference has the session types")
   }
 
   test("MCP: another agent runs cells over stdio, and only the protocol goes to stdout") {

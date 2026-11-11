@@ -19,14 +19,30 @@ import java.nio.charset.StandardCharsets.UTF_8
   * A definition that goes takes its comments with it. The filter reads the layout that the formatter gives. A
   * definition starts at the indent of its body, its next lines have a larger indent, and a head that ends with a colon
   * has a body.
+  *
+  * A file of `owners` belongs to a capability, and it stays whole only when the mode gives the bare `C` or `C^`. Only
+  * the calls of that capability take or give the types of the file, so its comments name these calls. In a live session
+  * of 2026-11-10, the work mode had no `Sessions`, and the model still named `tell`, `observe`, `zoom` and
+  * `Sessions.start` from the comments of SessionTypes.scala.
   */
 object ApiReference:
 
   /** The source files of the guest API, in the order of the reference. The build of harness-guest copies them. */
   val files: Vector[String] = Vector("Guest.scala", "SessionTypes.scala")
 
+  /** The capability of each file of `files` that belongs to one. A file that is not here stays in each mode. */
+  private val owners: Map[String, String] = Map("SessionTypes.scala" -> "Sessions")
+
   /** The parts of the source files that compile in a cell of `mode`, with a blank line between two files. */
-  def apply(mode: Mode): String = sources.map(keep(_, mode)).mkString("\n\n")
+  def apply(mode: Mode): String =
+    val kept = files.zip(sources).collect { case (name, source) if givesFile(name, mode) => keep(source, mode) }
+    kept.mkString("\n\n")
+
+  /** True when `mode` gives the capability of the file `name`, or the file belongs to no capability. A file of an
+    * unknown capability goes in each mode.
+    */
+  private def givesFile(name: String, mode: Mode): Boolean =
+    owners.get(name).forall(owner => Capability.named(owner).exists(_.givenIn(mode, full = false)))
 
   /** The parts of the source text `source` that compile in a cell of `mode`. */
   def keep(source: String, mode: Mode): String = body(source.linesIterator.toVector, None, mode).mkString("\n")
