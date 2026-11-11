@@ -4,8 +4,8 @@ import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.{DspyError, RuntimeContext, RuntimeError}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.harness.{HarnessLimits, Secrets}
-import dspy4s.harness.host.{Behind, LocalHost, SessionHandle, WorkEnv, WorkRuntime}
-import dspy4s.harness.kernel.{Logged, Position, RequestId, SessionId}
+import dspy4s.harness.host.{Behind, HostError, LocalHost, SessionHandle, WorkEnv, WorkRuntime}
+import dspy4s.harness.kernel.{EffectResult, Entry, GuardRule, Logged, Position, RequestId, SessionId, TurnOutcome}
 import dspy4s.harness.sandbox.{Backends, HostList}
 import dspy4s.lm.contracts.{LanguageModel, LmCapabilities, LmMode, LmRequest, LmResponse}
 import dspy4s.lm.providers.{OpenAiClient, OpenAiLanguageModel}
@@ -14,8 +14,12 @@ import zio.blocks.schema.DynamicValue
 import java.io.{BufferedReader, InputStreamReader, PrintStream}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.Path
+import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.{CountDownLatch, TimeUnit}
+import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
+import scala.util.Try
+import scala.util.control.NonFatal
 
 /** The terminal client of a work session (CODE_HARNESS_DESIGN.md, 15, phase 7).
   *
@@ -28,7 +32,8 @@ import java.util.concurrent.{CountDownLatch, TimeUnit}
   * `DSPY_SUMMARY_OPTIONS` is a JSON object, the option bag of each summary request of the memory tree (7.1), for
   * example `{"chat_template_kwargs": {"enable_thinking": false}}`. A value that is not a JSON object gives an error and
   * the exit code 2. `DSPY_TRACE=FILE` writes each model call to `FILE` as one JSON line (`TracedModel`), with the mask
-  * of the client. `--script` runs the loop in the script mode, so a script or an agent can drive the session.
+  * of the client. `--script` runs the loop in the script mode, so a script or an agent can drive the session. `--list`
+  * prints `listText` and starts no session. `--session` takes an id or the start of an id (`resolveSession`).
   *
   * A proposal for the review: the CLI runs on JDK 21. Its start time is a check of this phase, and an AOT cache on JDK
   * 25 comes later only if the start is too slow (choice 8).
@@ -42,6 +47,14 @@ object Cli:
       case Left(usage) =>
         System.err.println(usage)
         2
+      case Right(cli) if cli.list =>
+        listText(cli.root, ZoneId.systemDefault()) match
+          case Left(error) =>
+            System.err.println(error)
+            1
+          case Right(text) =>
+            println(text)
+            0
       case Right(cli) => session(cli, home)
     System.out.flush()
     sys.exit(code)
@@ -54,35 +67,90 @@ object Cli:
         2
       case Right(options) => session(cli, home, options)
 
-  /** Opens the session of `cli` with the summary options `options`, runs the loop, and gives the exit code. */
+  /** Opens the session of `cli` with the summary options `options`, runs the loop, and gives the exit code.
+    *
+    * The console comes before the host. JLine reads the input while it makes the terminal (`EditorConsole.system`), so
+    * a line that the person types after the start of the host stays. Also, only one line of text comes between the open
+    * and the loop, so the loop shows each entry that commits after the open.
+    */
   private def session(cli: CliArgs, home: Path, options: DynamicValue.Record): Int =
     val name    = sys.env.getOrElse("DSPY_MODEL", "none")
     val secrets = secretsOf(sys.env)
     val model   = sys.env.get("DSPY_TRACE").filter(_.nonEmpty).foldLeft(modelOf(name)) { (inner, file) =>
       TracedModel(inner, Path.of(file), secrets.maskText)
     }
-    RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(model), adapter = Some(ChatAdapter()))) {
-      given RuntimeContext = RuntimeEnvironment.current
-      val env              = WorkEnv(home, HostList.empty, Backends.detect(), secrets, cli.root, options)
-      LocalHost.start(cli.root, WorkRuntime.forWork(env), secrets) match
-        case Left(error) =>
-          System.err.println(s"The host did not start: $error")
-          1
-        case Right(host) =>
-          try
-            val (id, config) = cli.session.fold(
-              (SessionId(UUID.randomUUID().toString), Some(WorkRuntime.config(cli.scope, name, HarnessLimits())))
-            )(id => (id, None))
-            host.open(id, config) match
-              case Left(error) =>
-                System.err.println(s"The session ${id.value} did not open: $error")
-                1
-              case Right(handle) =>
-                println(s"The session ${id.value} is open. Type a message, or one of $commandList.")
-                val in = BufferedReader(InputStreamReader(System.in, UTF_8))
-                if loop(handle, in, System.out, cli.script) then 0 else 1
-          finally host.close()
+    val console = consoleOf(cli, secrets)
+    // A SIGTERM runs the shutdown hooks, so this hook gives the terminal its modes back. `close` runs only once.
+    val hook = Thread(() => console.close())
+    Try(Runtime.getRuntime.addShutdownHook(hook)): Unit
+    try
+      RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(model), adapter = Some(ChatAdapter()))) {
+        given RuntimeContext = RuntimeEnvironment.current
+        val env              = WorkEnv(home, HostList.empty, Backends.detect(), secrets, cli.root, options)
+        LocalHost.start(cli.root, WorkRuntime.forWork(env), secrets) match
+          case Left(error) =>
+            System.err.println(printable(s"The host did not start: $error"))
+            1
+          case Right(host) =>
+            try
+              val target = cli.session match
+                case None => Right((
+                    SessionId(UUID.randomUUID().toString),
+                    Some(WorkRuntime.config(cli.scope, name, HarnessLimits()))
+                  ))
+                // The journal files, not the catalog, give the sessions, so a session with no row still opens.
+                case Some(wanted) =>
+                  LocalHost.journals(cli.root).left.map(errorText).flatMap(resolveSession(_, wanted)).map(id =>
+                    (id, None)
+                  )
+              val opened =
+                for
+                  (id, config) <- target
+                  handle       <- host.open(id, config).left.map(e => s"The session ${id.value} did not open: $e")
+                yield handle
+              opened match
+                case Left(error) =>
+                  System.err.println(printable(error))
+                  1
+                case Right(handle) =>
+                  // The id can come from the name of a file, so it goes through `printable` as each other text.
+                  console.print(
+                    s"The session ${visible(handle.id.value)} is open. Type a message, or /help for the commands."
+                  )
+                  if loop(handle, console, cli.script) then 0 else 1
+            finally
+              // The person gets the terminal back first, because the close of the host can wait for the stop of jobs.
+              console.close()
+              host.close()
+      }
+    finally
+      console.close()
+      Try(Runtime.getRuntime.removeShutdownHook(hook)): Unit
+
+  /** The console of the client: the line editor at a terminal, with its history at `<root>/history`. Plain streams in
+    * the script mode, and for a pipe.
+    */
+  private def consoleOf(cli: CliArgs, secrets: Secrets): ClientConsole =
+    val editor = if cli.script then None else EditorConsole.system(cli.root.resolve("history"), secrets.maskText)
+    editor.getOrElse(PlainConsole(BufferedReader(InputStreamReader(System.in, UTF_8)), System.out))
+
+  /** The text of `--list`: the sessions of the host at `root` (10.2), with `sessionsText`, and a line for each file of
+    * the folder of the journals that is not a journal. `LocalHost.sessions` rebuilds the catalog as the start of a host
+    * does, so a journal with no row is in the list too. It starts no session, and a root with no folder of journals
+    * gets no file.
+    */
+  def listText(root: Path, zone: ZoneId): Either[String, String] =
+    LocalHost.sessions(root).left.map(errorText).map { rebuilt =>
+      val bad =
+        rebuilt.failed.map((file, reason) => s"Not listed: ${visible(file.getFileName.toString)}: ${visible(reason)}")
+      (sessionsText(rebuilt.rows, zone) +: bad).mkString("\n")
     }
+
+  /** The text of an error of the host for the person. */
+  private def errorText(error: HostError): String =
+    error match
+      case HostError.OpenFailed(message) => message
+      case other                         => other.toString
 
   /** The mask of the client: each secret-like variable of the environment (5.6), with the rules of `Secrets.known`. A
     * short value, as the placeholder key `unused`, is not a known value, so the mask never changes a word of a cell.
@@ -98,34 +166,60 @@ object Cli:
       case Right(lm)    => lm
       case Left(reason) => NoModel(s"no model: $reason")
 
-  /** The loop of the client: a thread prints `entryText` of each entry of the feed of `handle`, and this thread reads
-    * the lines of `in` and runs the commands of `commandsFor`.
+  /** The loop of the client on plain streams: `loop` with a `PlainConsole` of `in` and `out`. */
+  def loop(handle: SessionHandle, in: BufferedReader, out: PrintStream, script: Boolean = false): Boolean =
+    loop(handle, PlainConsole(in, out), script)
+
+  /** The loop of the client: a thread prints `entryText` of each entry of the feed of `handle`, and another thread
+    * reads the lines of `console` and runs the commands of `commandsFor`.
     *
-    *   - A message, `/stop` and `/stopall` go through `send`. `/close` and `/allow` go through `run`, so the person
-    *     sees a refusal, for example `Close` during a turn.
+    *   - Ctrl-C on an empty line during a turn is `/stop`. With no open turn, it prints a hint and sends nothing. A
+    *     Ctrl-C while no read waits does the same (`ClientConsole.onInterrupt`).
+    *   - Each text goes through `printable` before it reaches the console, so no text sends a control character.
+    *   - `/help` prints `helpText`.
+    *   - A message, `/stop` and `/stopall` go through `send`. `/close`, `/allow` and `/stopjob` go through `run`, so
+    *     the person sees a refusal, for example `Close` during a turn.
+    *   - `/jobs` and `/status` print `jobsText` and `statusText`, and `/reasoning` sets the view of the reasoning of
+    *     the next steps. They change nothing in the session. `/allow N` grants the call that the entry N asked for.
+    *   - After a turn that ends `Aborted`, the client prints `stopNotice`: each job of that turn that still runs, and
+    *     how to stop it (10.3).
     *   - An error of `commandsFor` and a refused command print one line, and the loop goes on.
     *   - After `Behind`, the client reads the journal after its last `seq`, so it shows each entry once.
-    *   - It ends at `/quit`, at the end of `in`, or when the feed ends, for example after `Close` or a failed write. It
-    *     gives false only when the feed ended and the session did not close, as after a failed write.
+    *   - It ends at `/quit`, at the end of the input, or when the feed ends, for example after `Close` or a failed
+    *     write. It gives false only when the feed ended and the session did not close, as after a failed write.
     *   - In the script mode (`script`), each line waits until the session has no open turn, and each command goes
-    *     through `run`, so the commands commit in the order of the lines. The end of `in` also waits for the open turn.
-    *     So `printf 'm1\nm2\n' | cli --script` gives two turns, and the second message starts the second turn. A line
-    *     waits also for a turn that started before it, for example after a reopen or a job message. `/quit` and `/stop`
-    *     wait too, so a person stops a script with the end of the process.
+    *     through `run`, so the commands commit in the order of the lines. The end of the input also waits for the open
+    *     turn. So `printf 'm1\nm2\n' | cli --script` gives two turns, and the second message starts the second turn. A
+    *     line waits also for a turn that started before it, for example after a reopen or a job message. `/quit` and
+    *     `/stop` wait too, so a person stops a script with the end of the process.
     */
-  def loop(handle: SessionHandle, in: BufferedReader, out: PrintStream, script: Boolean = false): Boolean =
+  def loop(handle: SessionHandle, console: ClientConsole, script: Boolean): Boolean =
     // The state before the feed, so an entry that commits between the two reads is in the feed or in the read after
     // it, and `Shown` shows it once (10.2: a client misses nothing).
-    val start                     = handle.state.nextSeq - 1
-    val feed                      = handle.subscribe(1024)
-    val done                      = CountDownLatch(1)
-    val shown                     = Shown(start)
-    def print(text: String): Unit = out.synchronized(out.println(text))
+    val before = handle.state
+    val start  = before.nextSeq - 1
+    val feed   = handle.subscribe(1024)
+    val done   = CountDownLatch(1)
+    val shown  = Shown(start)
+    val view   = AtomicReference(ReasoningView.Short)
+    // The `seq` of the `TurnStarted` of the last turn that the client saw: the turn of a stop notice.
+    val turn                      = AtomicLong(before.lastTurn)
+    def print(text: String): Unit = console.print(printable(text))
+    // An entry that the client did not show yet, and the stop notice after a turn that a stop ended.
+    def show(logged: Logged): Unit =
+      shown.next(logged).foreach { entry =>
+        entryText(entry, view.get).foreach(print)
+        entry.entry match
+          case Entry.TurnStarted                    => turn.set(entry.seq)
+          case Entry.TurnEnded(TurnOutcome.Aborted) =>
+            stopNotice(handle.state, turn.get, jobStarts(handle.read(turn.get)), handle.jobStatus).foreach(print)
+          case _ => ()
+      }
     // An entry of the feed, or the entries of the journal after the last one shown after `Behind`.
     def take(item: Either[Behind, Logged]): Unit =
       item match
-        case Right(logged) => shown.next(logged).flatMap(entryText).foreach(print)
-        case Left(_)       => handle.read(shown.last).foreach(l => shown.next(l).flatMap(entryText).foreach(print))
+        case Right(logged) => show(logged)
+        case Left(_)       => handle.read(shown.last).foreach(show)
     handle.read(start).foreach(l => take(Right(l)))
     val printer = Thread.ofPlatform().daemon(true).name("harness-cli-printer").start { () =>
       while done.getCount > 0 && !feed.ended do feed.poll(200).foreach(take)
@@ -133,31 +227,57 @@ object Cli:
     }
     // The script mode: the reader waits until the session has no open turn, or until the loop ends.
     def idle(): Unit = while handle.state.position != Position.NoTurn && !done.await(50, TimeUnit.MILLISECONDS) do ()
+    // The rule of the entry `seq`, when that entry asked for an approval (5.5).
+    def asked(seq: Long): Option[GuardRule] =
+      handle.read(seq - 1).headOption.filter(_.seq == seq).collect {
+        case Logged(_, _, Entry.EffectDone(_, EffectResult.NeedsApproval(rule))) => rule
+      }
+    // One line of the person, or the `Stop` of a Ctrl-C. `Quit` ends the loop.
+    def act(parsed: Line): Unit =
+      parsed match
+        case Line.Quit          => done.countDown()
+        case Line.Wait(seconds) => done.await(seconds.toLong, TimeUnit.SECONDS): Unit
+        case Line.Jobs          => print(jobsText(handle.state, jobStarts(handle.read(-1)), handle.jobStatus))
+        case Line.Status        =>
+          val now = handle.state
+          print(statusText(now, handle.jobStatus, pendingCalls(now, handle.read(now.lastTurn))))
+        case Line.Help            => print(helpText)
+        case Line.Reasoning(next) =>
+          view.set(next)
+          print(s"The client now shows ${reasoningWords(next)} of each step.")
+        case _ =>
+          // The person must see a refusal of `Close`, `Allow` and `StopJob`, so these wait for the commit.
+          val waits = script ||
+            (parsed match
+              case Line.Close | Line.Allow(_, _) | Line.StopJob(_) => true
+              case _                                               => false)
+          commandsFor(parsed, handle.state, RequestId(UUID.randomUUID().toString), asked) match
+            case Left(error)     => print(error)
+            case Right(commands) => commands.foreach { command =>
+                val result = if waits then handle.run(command).map(_ => ()) else handle.send(command)
+                result.left.foreach(error => print(s"The session refused the command: $error"))
+              }
+    def line(text: String): Unit =
+      if script then idle()
+      act(parseLine(text))
+    // Ctrl-C: `/stop` during a turn, and a hint with no open turn.
+    def interrupt(): Unit =
+      if handle.state.position == Position.NoTurn then
+        print("No turn is open. /quit ends the client, and the session stays open.")
+      else act(Line.Stop)
+    console.onInterrupt(() => interrupt())
     // The reader can wait for a line with no end, so it is a daemon thread, and the loop does not wait for it.
     Thread.ofPlatform().daemon(true).name("harness-cli-reader").start { () =>
       try
-        var line = in.readLine()
-        while line != null && done.getCount > 0 do
-          if script then idle()
-          val parsed = parseLine(line)
-          if parsed == Line.Quit then done.countDown()
-          else
-            parsed match
-              case Line.Wait(seconds) => done.await(seconds.toLong, TimeUnit.SECONDS): Unit
-              case _                  => ()
-            commandsFor(parsed, handle.state, RequestId(UUID.randomUUID().toString)) match
-              case Left(error)     => print(error)
-              case Right(commands) => commands.foreach { command =>
-                  val result = parsed match
-                    case _ if script                => handle.run(command).map(_ => ())
-                    case Line.Close | Line.Allow(_) => handle.run(command).map(_ => ())
-                    case _                          => handle.send(command)
-                  result.left.foreach(error => print(s"The session refused the command: $error"))
-                }
-            line = in.readLine()
+        var typed = console.read()
+        while typed != Typed.End && done.getCount > 0 do
+          typed match
+            case Typed.Text(text) => line(text)
+            case _                => interrupt()
+          if done.getCount > 0 then typed = console.read()
         // The turn of the last line of a script ends before the loop.
         if script then idle()
-      catch case _: java.io.IOException => ()
+      catch case NonFatal(e) => Try(print(s"The input of the client failed: $e")): Unit
       finally done.countDown()
     }: Unit
     done.await()
@@ -167,6 +287,13 @@ object Cli:
     feed.close()
     if failed then print("The session stopped: its host can write no more. The journal keeps each committed entry.")
     !failed
+
+/** The words of a view of the reasoning, for the answer to `/reasoning`. */
+private def reasoningWords(view: ReasoningView): String =
+  view match
+    case ReasoningView.Off   => "no reasoning"
+    case ReasoningView.Short => "the start of the reasoning"
+    case ReasoningView.Full  => "all the reasoning"
 
 /** The last `seq` that a client showed, so it shows each entry once. */
 private final class Shown(start: Long):

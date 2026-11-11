@@ -38,6 +38,25 @@ class JobLaws extends munit.FunSuite:
     finally jobs.close()
   }
 
+  test("Jobs: the output of a job keeps each character whole, at the cut of its oldest part and between two reads") {
+    val jobs  = table()
+    val other = EffectId(5L, 0)
+    try
+      // The emoji comes first, so the cut of the oldest characters falls inside it: 2 + 199_999 units are 200_001.
+      val cut = "printf '\\360\\237\\230\\200'; head -c 199999 /dev/zero | tr '\\0' b"
+      assertEquals(jobs.start(job, launch(cut), report = false), Right(()))
+      assertEquals(jobs.await(job, 30), Some(JobStatus.Exited(0)))
+      assert(eventually(10)(jobs.output(job).exists(_.length >= 199_999)), jobs.output(job).map(_.length).toString)
+      assertEquals(jobs.output(job), Some("b" * 199_999))
+      // The four bytes of the emoji come at bytes 8192 to 8195, so a read of 8192 bytes cuts them.
+      val split = "head -c 8191 /dev/zero | tr '\\0' a; printf '\\360\\237\\230\\200'"
+      assertEquals(jobs.start(other, launch(split), report = false), Right(()))
+      assertEquals(jobs.await(other, 30), Some(JobStatus.Exited(0)))
+      assert(eventually(10)(jobs.output(other).exists(_.length >= 8192)), jobs.output(other).map(_.length).toString)
+      assertEquals(jobs.output(other), Some("a" * 8191 + "😀"))
+    finally jobs.close()
+  }
+
   test("Jobs: await gives Running when the time is up first") {
     val jobs = table()
     try

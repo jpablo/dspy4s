@@ -1,6 +1,8 @@
 package dspy4s.harness.host
 
+import dspy4s.harness.cutEnd
 import dspy4s.harness.kernel.{Entry, Fold, Logged, Owner, SessionId, SessionOutcome}
+import dspy4s.harness.sandbox.SandboxedShell
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodec
 
@@ -27,25 +29,60 @@ enum SessionStatus derives Schema, CanEqual:
   *
   * A proposal for the review: `parent` is the parent of a journal fork. Phase 7 makes no fork, so the fold gives
   * `None`.
+  *
+  * A proposal for the review: `folder`, `lastAt` and `firstMessage` let a person find a session in a list.
+  *
+  *   - `folder` is the folder of the scope of the last `Activated`.
+  *   - `lastAt` is the time of the last entry.
+  *   - `firstMessage` is the text of the first `Input` on one line, at most `FirstMessageLength` characters.
+  *
+  * The journal fixes each field, so the row stays a fold. The fields have no default values. So a row of an earlier
+  * catalog, which has no such fields, does not decode, and `rebuild` folds its journal again.
   */
 final case class CatalogRow(
-    session: SessionId,
-    owner  : Owner,
-    parent : Option[SessionId],
-    status : SessionStatus,
-    lastSeq: Long
+    session     : SessionId,
+    owner       : Owner,
+    parent      : Option[SessionId],
+    status      : SessionStatus,
+    lastSeq     : Long,
+    folder      : String,
+    lastAt      : Long,
+    firstMessage: String
 ) derives Schema,
       CanEqual
+
+/** The most characters of `CatalogRow.firstMessage`. A character is one code point. */
+val FirstMessageLength = 80
+
+/** `text` on one line, with each run of white space as one space, at most `FirstMessageLength` characters. It skips the
+  * white space at the start, and it splits at most `8 * FirstMessageLength` units after it, so a long text costs little
+  * more than a short one. A line of a text that goes on after it ends with `…`.
+  */
+private def oneLine(text: String): String =
+  val start = text.indexWhere(c => !Character.isWhitespace(c))
+  if start < 0 then ""
+  else
+    // The window has at most `8 * FirstMessageLength` units, and it ends with no surrogate pair cut in two.
+    val end   = cutEnd(text, start, 8 * FirstMessageLength)
+    val line  = text.substring(start, end).trim.split("\\s+").mkString(" ")
+    val count = line.codePointCount(0, line.length)
+    // A text that goes on after the window gives a line that ends with a mark of the cut.
+    val more = (end until text.length).exists(i => !Character.isWhitespace(text.charAt(i)))
+    if count > FirstMessageLength || (more && count == FirstMessageLength) then
+      line.substring(0, line.offsetByCodePoints(0, FirstMessageLength - 1)) + "…"
+    else if more then line + "…"
+    else line
 
 /** The row of `session` as a fold of its journal (10.2). So a lost row comes back from the journal.
   *
   * The owner comes from the last `Activated`. The status is `InTurn` from a `TurnStarted`, `Stopping` from a
   * `StopRequested` in a turn, `Idle` again after `TurnEnded` and after a new `Activated`, and `Ended` after `Ended`.
-  * Before the first entry, the row has the owner `Cell`, the status `Idle` and the last `seq` -1.
+  * Before the first entry, the row has the owner `Cell`, the status `Idle` and the last `seq` -1. The folder comes from
+  * the last `Activated`, the time from the last entry, and the first message from the first `Input` with a text.
   */
 def catalogRow(session: SessionId): Fold[Logged, CatalogRow, CatalogRow] =
   Fold(
-    CatalogRow(session, Owner.Cell, None, SessionStatus.Idle, -1L),
+    CatalogRow(session, Owner.Cell, None, SessionStatus.Idle, -1L, "", 0L, ""),
     (row, logged) =>
       val status = logged.entry match
         case Entry.Activated(_, _)                                        => SessionStatus.Idle
@@ -54,10 +91,20 @@ def catalogRow(session: SessionId): Fold[Logged, CatalogRow, CatalogRow] =
         case Entry.TurnEnded(_)                                           => SessionStatus.Idle
         case Entry.Ended(outcome, _)                                      => SessionStatus.Ended(outcome)
         case _                                                            => row.status
-      val owner = logged.entry match
-        case Entry.Activated(_, config) => config.owner
-        case _                          => row.owner
-      row.copy(owner = owner, status = status, lastSeq = logged.seq)
+      val (owner, folder) = logged.entry match
+        case Entry.Activated(_, config) => (config.owner, SandboxedShell.pathOf(config.scope))
+        case _                          => (row.owner, row.folder)
+      val first = logged.entry match
+        case Entry.Input(_, text, _) if row.firstMessage.isEmpty => oneLine(text)
+        case _                                                   => row.firstMessage
+      row.copy(
+        owner = owner,
+        status = status,
+        lastSeq = logged.seq,
+        folder = folder,
+        lastAt = logged.meta.atMillis,
+        firstMessage = first
+      )
     ,
     identity
   )
@@ -111,6 +158,16 @@ final class Catalog private (connection: Connection, val path: Path) extends Aut
       }.flatMap(text => codec.decode(text).toOption)
     }
 
+  /** The session of each row, also of a row that does not decode. */
+  private[host] def sessions: Vector[SessionId] =
+    synchronized {
+      Using.resource(connection.createStatement()) { statement =>
+        Using.resource(statement.executeQuery("select session from catalog order by session")) { rows =>
+          Iterator.continually(rows).takeWhile(_.next()).map(r => SessionId(r.getString(1))).toVector
+        }
+      }
+    }
+
   /** Removes the row of `session`. */
   private[host] def remove(session: SessionId): Either[String, Unit] =
     synchronized {
@@ -127,6 +184,9 @@ final class Catalog private (connection: Connection, val path: Path) extends Aut
 object Catalog:
 
   private val codec: JsonCodec[CatalogRow] = summon[Schema[CatalogRow]].jsonCodec
+
+  /** The path of the catalog under the root of a host: `<root>/catalog.db`. */
+  def pathOf(root: Path): Path = root.resolve("catalog.db")
 
   /** Opens the catalog at `path`, and makes it when it does not exist. */
   def open(path: Path): Either[String, Catalog] =
@@ -151,25 +211,38 @@ object Catalog:
     * `failed`. Only an error of the catalog itself gives `Left`.
     */
   def rebuild(catalog: Catalog, sessions: Path): Either[String, Rebuilt] =
-    val files =
-      if !JFiles.isDirectory(sessions) then Vector.empty
-      else
-        Using.resource(JFiles.list(sessions))(_.iterator().asScala.toVector)
-          .filter(p => p.getFileName.toString.endsWith(".db")).sortBy(_.getFileName.toString)
-    val results = files.map { file =>
-      val session = SessionId(file.getFileName.toString.stripSuffix(".db"))
-      file -> SessionFile.open(file, session).flatMap { journal =>
-        try catalog.row(session) match
-            case Some(row) if row.lastSeq == journal.lastSeq => Right(row)
-            case _                                           => journal.readFrom(0).map(catalogRow(session)(_)).flatMap(row => catalog.put(row).map(_ => row))
-        finally journal.close()
-      }
-    }
-    val kept    = results.collect { case (_, Right(row)) => row }
-    val failed  = results.collect { case (file, Left(reason)) => file -> reason }
-    val present = files.map(f => f.getFileName.toString.stripSuffix(".db")).toSet
     for
-      _ <- catalog.rows.filterNot(row => present(row.session.value)).foldLeft(Right(()): Either[String, Unit]) {
-             (done, row) => done.flatMap(_ => catalog.remove(row.session))
+      files  <- journalFiles(sessions)
+      results = files.map { file =>
+                  val session = SessionId(file.getFileName.toString.stripSuffix(".db"))
+                  file -> SessionFile.open(file, session).flatMap { journal =>
+                    try catalog.row(session) match
+                        case Some(row) if row.lastSeq == journal.lastSeq => Right(row)
+                        // The catalog is a copy of the journals, so a failed put loses nothing: the row is good, and
+                        // the next rebuild puts it again.
+                        case _ => journal.readFrom(0).map(catalogRow(session)(_)).map(row =>
+                            catalog.put(row).fold(_ => row, _ => row)
+                          )
+                    finally journal.close()
+                  }
+                }
+      present = files.map(f => SessionId(f.getFileName.toString.stripSuffix(".db"))).toSet
+      _      <- catalog.sessions.filterNot(present).foldLeft(Right(()): Either[String, Unit]) { (done, session) =>
+             done.flatMap(_ => catalog.remove(session))
            }
-    yield Rebuilt(kept.sortBy(_.session.value), failed)
+    yield Rebuilt(
+      results.collect { case (_, Right(row)) => row }.sortBy(_.session.value),
+      results.collect { case (file, Left(reason)) => file -> reason }
+    )
+
+  /** The journal files of the folder `sessions`: each regular file whose name ends with `.db`, in the order of the
+    * names. No folder gives no file. A folder that the host cannot read gives an error.
+    */
+  def journalFiles(sessions: Path): Either[String, Vector[Path]] =
+    if !JFiles.isDirectory(sessions) then Right(Vector.empty)
+    else
+      Try(Using.resource(JFiles.list(sessions))(_.iterator().asScala.toVector)).toEither.left
+        .map(e => s"the folder of the journals $sessions did not open: $e")
+        .map(_.filter(p => p.getFileName.toString.endsWith(".db") && JFiles.isRegularFile(p)).sortBy(
+          _.getFileName.toString
+        ))

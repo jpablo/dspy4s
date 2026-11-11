@@ -170,7 +170,7 @@ final class MemoryTree(
   private def summarize(m: Memory, id: NodeId)(using RuntimeContext): Either[String, String] =
     Memory.zoom(m, id) match
       case Some(Left(message)) =>
-        leafRunner.run(() => compress(CompressInput(message.text.take(MemoryTree.MaxSource))).left.map(_.message))
+        leafRunner.run(() => compress(CompressInput(MemoryTree.compressSource(message.text))).left.map(_.message))
           .map(_.output.line)
       case Some(Right((older, newer))) =>
         leafRunner.run(() => merge(MergeInput(older.text, newer.text)).left.map(_.message)).map(_.output.line)
@@ -183,6 +183,11 @@ object MemoryTree:
 
   /** The most characters of a message that `compress` gets. */
   val MaxSource = 16_000
+
+  /** The text of a message for a compress call: at most `MaxSource` units, with each character whole, because the text
+    * goes to a model.
+    */
+  private[harness] def compressSource(text: String): String = textPrefix(text, MaxSource)
 
   /** The instructions of `compress`. */
   val compressInstructions: String =

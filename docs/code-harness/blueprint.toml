@@ -2183,7 +2183,7 @@ ops = ["startCell", "call"]
 ref = "5.3"
 spec = true
 uses = ["journal-trait", "data", "json"]
-proof_uses = ["effect-id", "effect-result", "guarded"]
+proof_uses = ["effect-id", "effect-result", "guarded", "text-prefix"]
 text = "recorded(h) of 5.3: EffectStarted before each call and EffectDone after it, with the value as Json and as text. A call that the journal refuses, for example after a stop, does not run."
 
 [[node]]
@@ -2298,6 +2298,68 @@ uses = ["session-state"]
 text = "The status section: the step, the step limit and the keys of the store. A proposal: it renders in full at each step. The jobs come with phase 7."
 
 [[group]]
+id = "texts"
+phase = "p4"
+module = "harness"
+file = "Texts.scala"
+title = "The cuts of a text: no surrogate pair cut in two"
+
+[[node]]
+id = "cut-end"
+group = "texts"
+kind = "function"
+name = "cutEnd"
+ref = "4.1"
+uses = []
+text = "The end of a cut of a text from an index. A cut that falls inside a surrogate pair ends before the pair, because the JSON writer of the journal refuses a surrogate with no pair, and a failed write ends the session."
+
+[[node]]
+id = "suffix-start"
+group = "texts"
+kind = "function"
+name = "suffixStart"
+ref = "4.1"
+uses = []
+text = "The start of the last units of a text, after a surrogate pair that the start falls inside. The output buffer of a job uses it when the oldest characters go."
+
+[[node]]
+id = "text-prefix"
+group = "texts"
+kind = "function"
+name = "textPrefix"
+ref = "4.1"
+uses = []
+proof_uses = ["cut-end"]
+text = "The start of a text with no surrogate pair cut in two: for the text of a value of a call, the cut of the window, the source of a compress call and the terminal."
+
+[[node]]
+id = "text-suffix"
+group = "texts"
+kind = "function"
+name = "textSuffix"
+ref = "4.1"
+uses = []
+proof_uses = ["suffix-start"]
+text = "The end of a text with no surrogate pair cut in two, for the report of the end of a job."
+
+[[group]]
+id = "text-laws"
+phase = "p4"
+module = "harness"
+file = "TextCutLaws.scala"
+where = "tests"
+title = "The laws of the cuts of a text"
+
+[[node]]
+id = "law-cut"
+group = "text-laws"
+kind = "law"
+name = "Cut:"
+ref = "4.1"
+uses = ["cut-end", "suffix-start", "text-prefix", "text-suffix"]
+text = "No cut gives a surrogate with no pair, and the JSON writer of the journal refuses such a surrogate. The text of a long value of a call, the cut of the window and the source of a compress call keep each character whole."
+
+[[group]]
 id = "window"
 phase = "p4"
 module = "harness"
@@ -2312,7 +2374,7 @@ name = "Window"
 ops = ["update", "project", "cut"]
 ref = "7"
 uses = ["context-strategy"]
-proof_uses = ["status", "projection", "state"]
+proof_uses = ["status", "projection", "state", "text-prefix"]
 text = "No derived data, and the last steps of the open turn that fit the budget, oldest first. The last observation is always in it, cut to half of the budget, with a note of the rest. A proposal: the budget counts characters."
 
 # ── Phase 4: the harness (9) ──────────────────────────────────────────────────────────────────────────────────────
@@ -2947,7 +3009,7 @@ kind = "data"
 name = "CatalogRow"
 ref = "10.2"
 uses = ["session-id", "owner", "session-status", "schema"]
-text = "The deterministic part of a SessionCard: the id, the owner, the parent of a fork, the status and the last seq. A proposal: phase 7 makes no fork, so the parent is None."
+text = "The deterministic part of a SessionCard: the id, the owner, the parent of a fork, the status and the last seq. A proposal: phase 7 makes no fork, so the parent is None. A proposal: the folder of the scope, the time of the last entry and the first message on one line, so a person can find a session in a list. These fields have no default values, so a row of an earlier catalog does not decode, and rebuild folds its journal again."
 
 [[node]]
 id = "catalog-row-fold"
@@ -2957,6 +3019,7 @@ name = "catalogRow"
 ref = "10.2"
 spec = true
 uses = ["session-id", "fold", "logged", "catalog-row"]
+proof_uses = ["sandboxed-shell", "cut-end"]
 text = "The row of a session as a fold of its journal, so a lost row comes back from the journal."
 
 [[node]]
@@ -3003,8 +3066,8 @@ kind = "data"
 name = "SessionHandle"
 ref = "10.1"
 spec = true
-uses = ["session-id", "command", "host-error", "session-state", "feed", "logged"]
-text = "An open session for a client: send with no wait for the commit, run that waits and gives a refusal, the committed state, a feed, and the entries after a seq. A proposal: the name of 10.1 is SessionRef, and the guest API already has a data type SessionRef."
+uses = ["session-id", "command", "host-error", "session-state", "feed", "logged", "effect-id", "job-status"]
+text = "An open session for a client: send with no wait for the commit, run that waits and gives a refusal, the committed state, the status of each job, a feed, and the entries after a seq. A proposal: the name of 10.1 is SessionRef, and the guest API already has a data type SessionRef. jobStatus reads the job table, so a client can tell a job that still runs after a stop (10.3)."
 
 [[node]]
 id = "activation"
@@ -3029,7 +3092,7 @@ id = "local-host"
 group = "host"
 kind = "data"
 name = "LocalHost"
-ops = ["open", "list", "failed", "close", "start"]
+ops = ["open", "list", "failed", "close", "start", "sessions", "journals"]
 ref = "10.2"
 spec = true
 uses = ["session-host", "session-runtime", "secrets", "host-limits", "catalog", "timers", "session-handle", "catalog-row",
@@ -3037,6 +3100,15 @@ uses = ["session-host", "session-runtime", "secrets", "host-limits", "catalog", 
 proof_uses = ["writer", "writer-journal", "session-file", "feeds", "drive", "next", "job-table", "catalog-row-fold", "rebuilt",
               "catalog"]
 text = "One writer and one file for each session, with an exclusive lock for a second host. open repairs an open turn, keeps the configuration of the journal with None, and refuses a mode above the ceiling. Each activation gets a new ticket and its WriterJournal. After StopRequested, Activation.stop, and a timer calls Writer.expire with the turn of the stop. The catalog gets the row after a turn ends."
+
+[[node]]
+id = "job-name"
+group = "host"
+kind = "function"
+name = "jobName"
+ref = "10.3"
+uses = ["effect-id"]
+text = "The name of a job for a person and for the model: the cell and the number of its spawn, for example 12.0. The report of the end of a job, the CLI and the JobId of the model use the same two numbers."
 
 [[group]]
 id = "jobs"
@@ -3054,6 +3126,7 @@ ops = ["sync", "start", "output", "await", "status", "close"]
 ref = "10.3"
 spec = true
 uses = ["effect-id", "session-state", "job-status"]
+proof_uses = ["suffix-start"]
 text = "The live part of the jobs: the process groups, the output and the marks. It belongs to the open session, not to the activation. One launcher thread starts each process, because on Linux --die-with-parent follows the thread. sync copies the marks and returns at once, and a marked job does not start. A job of the state with no row is Lost. The end of a job with report goes to the report function of the host."
 
 [[node]]
@@ -3112,8 +3185,8 @@ kind = "data"
 name = "CliArgs"
 ops = ["parse"]
 ref = "15"
-uses = ["session-id"]
-text = "The folder of a new session, the root of the host, and the session to open again, which keeps its own configuration. A proposal: [--root DIR] [--session ID] [FOLDER], with the root <home>/.dspy4s/harness."
+uses = []
+text = "The folder of a new session, the root of the host, the session to open again, the script mode, and the list of the sessions. A session that opens again keeps its own configuration. A proposal: [--root DIR] [--session ID] [--script] [--list] [FOLDER], with the root <home>/.dspy4s/harness, and the start of an id is enough when only one session has it."
 
 [[group]]
 id = "entry-text"
@@ -3128,8 +3201,9 @@ group = "entry-text"
 kind = "function"
 name = "entryText"
 ref = "10.1"
-uses = ["logged"]
-text = "The text of a step and its code, the output of a cell, a pending call with the commands that answer it, the outcome of a turn and the stops. The other entries give none."
+uses = ["logged", "reasoning-view"]
+proof_uses = ["job-name", "text-prefix"]
+text = "The start of a step, the reasoning of a step, the text and the code of a step, and the output of a cell. A pending call shows in quotes, with its number and the commands that answer it. The outcome of a turn, the stops and a stopped job by its name. The other entries give none. Each text loses its control characters."
 
 [[group]]
 id = "lines"
@@ -3144,8 +3218,17 @@ group = "lines"
 kind = "data"
 name = "Line"
 ref = "10.3"
-uses = ["grant-lifetime"]
-text = "A message, /stop, /stopall, /allow once|turn|session, /close, /quit, or an unknown command."
+uses = ["grant-lifetime", "reasoning-view", "effect-id"]
+text = "A message, /stop, /stopall, /allow [N] [once|turn|session], /jobs, /stopjob ID, /status, /reasoning off|short|full, /help, /close, /quit, /wait SECONDS, or an unknown command. N is the number of a pending call, and ID is the name of a job."
+
+[[node]]
+id = "reasoning-view"
+group = "lines"
+kind = "data"
+name = "ReasoningView"
+ref = "10.6"
+uses = []
+text = "How much of the reasoning of a step the client shows: Off, Short (the default, the first 400 characters) or Full."
 
 [[node]]
 id = "parse-line"
@@ -3153,7 +3236,7 @@ group = "lines"
 kind = "function"
 name = "parseLine"
 ref = "10.3"
-uses = ["line"]
+uses = ["line", "reasoning-view", "effect-id"]
 text = "The line of a text. A text that does not start with / is a message."
 
 [[node]]
@@ -3163,8 +3246,155 @@ kind = "function"
 name = "commandsFor"
 ref = "5.5"
 spec = true
-uses = ["line", "session-state", "request-id", "command"]
-text = "Stop gives Abort, and Stop all gives Abort and StopJobs(OfLastTurn) (10.3). Allow gives one Grant for each pending call with the lifetime of the line, and an error with no pending call (5.5). A message gives one Send."
+uses = ["line", "session-state", "request-id", "command", "guard-rule"]
+proof_uses = ["job-name"]
+text = "Stop gives Abort, and Stop all gives Abort and StopJobs(OfLastTurn) (10.3). Allow gives one Grant for each pending call, and an error with no pending call (5.5). Allow N gives one Grant for the rule of the entry N, only while that rule is pending. StopJob gives StopJobs(One) for a job of the session, or an error. A message gives one Send."
+
+[[node]]
+id = "job-order"
+group = "lines"
+kind = "function"
+name = "jobOrder"
+ref = "10.3"
+uses = ["session-state", "effect-id"]
+text = "The jobs in the order of their start, for /jobs."
+
+[[group]]
+id = "views"
+phase = "p7"
+module = "harness-cli"
+file = "Views.scala"
+title = "The views of the client: the jobs, the stop notice, the status and the list of the sessions"
+
+[[node]]
+id = "job-start"
+group = "views"
+kind = "data"
+name = "JobStart"
+ref = "10.3"
+uses = ["effect-result"]
+text = "The start of a job in the journal: the command of its spawn, and the outcome of the call, or none while the call runs."
+
+[[node]]
+id = "job-starts"
+group = "views"
+kind = "function"
+name = "jobStarts"
+ref = "10.3"
+uses = ["logged", "effect-id", "job-start"]
+text = "The start of each spawn of a journal, by the id of its job."
+
+[[node]]
+id = "pending-calls"
+group = "views"
+kind = "function"
+name = "pendingCalls"
+ref = "5.5"
+uses = ["session-state", "logged", "guard-rule"]
+text = "Each pending call with its number: the seq of the last entry that asked for it. The number does not change when other calls change."
+
+[[node]]
+id = "in-quotes"
+group = "entry-text"
+kind = "function"
+name = "inQuotes"
+ref = "5.6"
+uses = []
+text = "A text that a model chose, as one line in quotes, with an escape for each control character, each format character and each surrogate with no pair. So the text cannot change the terminal, and it shows each character that a command gets."
+
+[[node]]
+id = "jobs-text"
+group = "views"
+kind = "function"
+name = "jobsText"
+ref = "10.3"
+uses = ["session-state", "effect-id", "job-status", "job-start"]
+proof_uses = ["job-order", "job-name", "in-quotes"]
+text = "The text of /jobs: each job with its name, its status and its command in quotes. A spawn that did not start, that starts, or that its host lost has its own word."
+
+[[node]]
+id = "stop-notice"
+group = "views"
+kind = "function"
+name = "stopNotice"
+ref = "10.3"
+spec = true
+uses = ["session-state", "effect-id", "job-status", "job-start"]
+proof_uses = ["job-order", "job-name", "in-quotes"]
+text = "After a turn that a stop ended: each job of that turn that runs and has no stop mark, with its name, and the /stopjob command. 10.3: if a job of that turn still runs, the client says so and offers to stop it."
+
+[[node]]
+id = "status-text"
+group = "views"
+kind = "function"
+name = "statusText"
+ref = "10.1"
+uses = ["session-state", "effect-id", "job-status", "guard-rule"]
+proof_uses = ["sandboxed-shell", "in-quotes"]
+text = "The text of /status: the folder, where the turn stands, the pending calls with their numbers, and how many jobs run."
+
+[[node]]
+id = "sessions-text"
+group = "views"
+kind = "function"
+name = "sessionsText"
+ref = "10.2"
+uses = ["catalog-row"]
+text = "The text of --list: the newest session first, each with its id, status, time, folder and first message."
+
+[[node]]
+id = "resolve-session"
+group = "views"
+kind = "function"
+name = "resolveSession"
+ref = "10.2"
+uses = ["session-id"]
+text = "The session of --session among the ids of the journal files: the session with that id, or else the one session whose id starts with it. An error for a blank id, for none and for more."
+
+[[group]]
+id = "console"
+phase = "p7"
+module = "harness-cli"
+file = "Console.scala"
+title = "The consoles of the client: plain streams, and the line editor of a person"
+
+[[node]]
+id = "typed"
+group = "console"
+kind = "data"
+name = "Typed"
+ref = "10.6"
+uses = []
+text = "What the person typed: a line, a Ctrl-C, or the end of the input."
+
+[[node]]
+id = "console"
+group = "console"
+kind = "data"
+name = "ClientConsole"
+ref = "10.6"
+uses = ["typed"]
+text = "The terminal of the person for the loop. read gives the next line, and print writes the text of the session. onInterrupt gives the action of a Ctrl-C that comes while no read waits."
+
+[[node]]
+id = "plain-console"
+group = "console"
+kind = "data"
+name = "PlainConsole"
+ops = ["read", "print"]
+ref = "10.6"
+uses = ["console", "typed"]
+text = "A console on plain streams, for a script, a pipe and the laws."
+
+[[node]]
+id = "editor-console"
+group = "console"
+kind = "data"
+name = "EditorConsole"
+ops = ["read", "print", "onInterrupt", "close"]
+ref = "10.6"
+uses = ["console", "typed"]
+text = "The line editor of JLine for a person at a terminal: line edit, and a history file with the mask of the secrets. Enter after an odd number of backslashes goes on to the next line, and a paste stays as it is. Ctrl-C on a line with text clears it, and a Ctrl-C outside a read runs the action of the client. close first ends a read that waits, so the terminal gets its modes back."
 
 [[group]]
 id = "cli"
@@ -3178,11 +3408,11 @@ id = "cli"
 group = "cli"
 kind = "data"
 name = "Cli"
-ops = ["main", "loop"]
+ops = ["main", "loop", "listText"]
 ref = "15"
-uses = ["session-handle"]
-proof_uses = ["cli-args", "local-host", "work-runtime", "work-env", "entry-text", "parse-line", "commands-for"]
-text = "main makes the model from the environment, starts a LocalHost with a WorkRuntime, and opens the session. loop prints the feed, sends a message, /stop and /stopall, and runs /close and /allow so the person sees a refusal. After Behind it reads the journal, so it shows each entry once, and it ends when the feed ends. A proposal: JDK 21, and an AOT cache only if the start is too slow."
+uses = ["session-handle", "console"]
+proof_uses = ["cli-args", "local-host", "work-runtime", "work-env", "entry-text", "parse-line", "commands-for", "plain-console", "editor-console", "stop-notice", "jobs-text", "status-text", "job-starts", "pending-calls", "sessions-text", "resolve-session"]
+text = "main makes the model from the environment, makes the console, starts a LocalHost with a WorkRuntime, and opens the session. --list prints the sessions and opens none. loop prints the feed, and each text goes through printable. It sends a message, /stop and /stopall, and it runs /close, /allow and /stopjob so the person sees a refusal. A Ctrl-C during a turn is /stop, and the stop notice follows a turn that a stop ended. A proposal: JDK 21."
 
 # ── Phase 7: the laws ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -3314,7 +3544,7 @@ kind = "law"
 name = "Catalog:"
 ref = "10.2"
 uses = ["catalog", "catalog-row-fold", "session-file"]
-text = "The row is a fold of the journal. A new open reads the same rows. rebuild folds each journal whose row lags or is ahead, gives the same rows after a removal of the file, removes a row with no file, and puts a bad file into failed."
+text = "The row is a fold of the journal, with the folder, the time of the last entry and the first message. The first message keeps whole characters, also for a long text. A row of an earlier catalog is folded again. A new open reads the same rows. rebuild folds each journal whose row lags or is ahead, and it puts a bad file into failed."
 
 [[group]]
 id = "host-laws"
@@ -3374,7 +3604,7 @@ kind = "law"
 name = "Work:"
 ref = "8.1"
 uses = ["work-runtime", "local-host"]
-text = "config and workMode, with no Sessions^ and no Children^, and defaultGuard. A cell runs in the scope, a val stays for the next turn, and rlm does not compile. Each turn gets a new budget. An Ask call does not run, pending holds its rule, and a Grant lets the new turn run it. A catch does not hide it. Under the sandbox a job runs on after its cell, Abort during a cell stops no job, and StopJobs(OfLastTurn) stops it. A report starts a turn. stopJob stops the job. A stop ends a long exec and its process. A stop during a long policy call ends the call, the turn ends Aborted before the grace period, and the REPL stays."
+text = "config and workMode, with no Sessions^ and no Children^, and defaultGuard. A cell runs in the scope, a val stays for the next turn, and rlm does not compile. Each turn gets a new budget. An Ask call does not run, pending holds its rule, and a Grant lets the new turn run it. A catch does not hide it. Under the sandbox a job runs on after its cell, Abort during a cell stops no job, and StopJobs(OfLastTurn) stops it. A report starts a turn. stopJob stops the job. jobStatus gives Running for a job that runs, and Stopped after StopJobs. A stop ends a long exec and its process. A stop during a long policy call ends the call, the turn ends Aborted before the grace period, and the REPL stays."
 
 [[group]]
 id = "crash-laws"
@@ -3407,8 +3637,8 @@ group = "cli-laws"
 kind = "law"
 name = "CLI:"
 ref = "10.3"
-uses = ["cli-args", "parse-line", "commands-for", "entry-text"]
-text = "parse gives the defaults and an error with the usage. parseLine reads the commands. Stop and Stop all give their commands, Allow gives one Grant for each pending call, a message gives one Send, and Quit gives none. entryText shows a step, a cell output and a pending call. loop sends a message, shows a refusal of /close, and ends when the feed ends."
+uses = ["cli-args", "parse-line", "commands-for", "entry-text", "pending-calls", "job-order", "job-starts", "jobs-text", "stop-notice", "status-text", "sessions-text", "resolve-session", "plain-console", "in-quotes", "job-name"]
+text = "parse and parseLine read the commands, and a bad number or name is not a command. Each command gives its commands, and the lines of the client give none. A pending call keeps its number. The views name each job and quote each command, so no control character reaches the terminal. The list gives the newest session first, and the start of an id finds one journal. loop prints the views and the stop notice, and Ctrl-C sends Abort."
 
 [[node]]
 id = "check-cli-start"
@@ -3418,6 +3648,23 @@ name = "CLI start:"
 ref = "15"
 uses = ["cli"]
 text = "The time from the start of a JVM to the end at /quit, in a child JVM. Choice 8: an AOT cache on JDK 25 comes only if this time is too long."
+
+[[group]]
+id = "console-laws"
+phase = "p7"
+module = "harness-cli"
+file = "ConsoleLaws.scala"
+where = "tests"
+title = "The laws of the line editor"
+
+[[node]]
+id = "law-cli-editor"
+group = "console-laws"
+kind = "law"
+name = "CLI editor:"
+ref = "10.6"
+uses = ["editor-console"]
+text = "An odd number of backslashes goes on, an even number does not, and a paste keeps each backslash. A ! stays. The history keeps each line after the mask. Ctrl-C on an empty line gives Interrupt, on a line with text clears it, and outside a read runs the action of the client. close ends a read that waits, and it turns bracketed paste off."
 
 [[group]]
 id = "policy-runner"
@@ -3668,7 +3915,7 @@ ref = "7.1"
 spec = true
 uses = ["context-strategy", "predict", "compress-input", "merge-input", "summary", "line-store", "memory-state",
         "runtime-context", "dspy-error", "logged", "projection", "strategy-name", "signature", "policy-runner", "budget", "memory-log", "window"]
-proof_uses = ["budget", "memory", "memory-log", "node-id", "view", "in-batch"]
+proof_uses = ["budget", "memory", "memory-log", "node-id", "view", "in-batch", "text-prefix"]
 text = "update appends the new messages, builds each ready node with the store or a leaf through the runner and the summary budget, and advances the view to the last reply. A failed leaf gives the line of the source. project gives the view its room first, then the open turn as the window gives it. zoom gives a message or the lines of two halves."
 
 [[group]]

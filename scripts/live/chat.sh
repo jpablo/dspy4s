@@ -6,7 +6,10 @@
 #
 # Each line of the standard input is a message or a command of the CLI, for example `/allow once`. A line waits for
 # the end of the turn before it, and the end of the input waits for the open turn. To continue a session in a later
-# run, give the id that the first line of the output names, with `--session ID`.
+# run, give the id that the first line of the output names, with `--session ID`, or the start of that id.
+#
+# When the standard input is a terminal, the script runs the CLI for a person, with its line editor and with no
+# script mode: scripts/live/chat.sh [FOLDER]. `--list` lists the sessions of the root.
 #
 # The script needs the variables of the model: OPENAI_BASE_URL, DSPY_MODEL and OPENAI_API_KEY, and
 # DSPY_NATIVE_REASONING=true for a model that gives its reasoning apart from its text. It writes each model call to
@@ -45,4 +48,8 @@ if [[ -z "${DSPY_MODEL:-}" ]]; then
   echo "DSPY_MODEL is not set, so each policy call fails." >&2
 fi
 
+if [[ -t 0 ]]; then
+  # A person at a terminal: the line editor of the CLI.
+  exec java -cp "$(cat "$classpath")" dspy4s.harness.cli.Cli "$@"
+fi
 exec java -cp "$(cat "$classpath")" dspy4s.harness.cli.Cli --script "$@"

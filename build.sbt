@@ -23,6 +23,7 @@ lazy val dotenvVersion          = "3.2.0"
 lazy val scalaXmlVersion        = "2.4.0"
 lazy val ironVersion            = "3.3.2"
 lazy val mcpSdkVersion          = "2.1.0"
+lazy val jlineVersion           = "4.4.6"  // the version of the REPL of the nightly, so the class path has one JLine
 
 lazy val commonSettings = Seq(
   scalacOptions ++= Seq(
@@ -385,7 +386,13 @@ lazy val harnessCli = (project in file("modules/harness-cli"))
   .settings(commonSettings)
   .settings(name := "dspy4s-harness-cli")
   .settings(
-    libraryDependencies += "org.scalameta" %% "munit" % munitVersion % Test,
+    libraryDependencies ++= Seq(
+      // The line editor of the client in a terminal: line edit, a history and Ctrl-C.
+      "org.jline"      % "jline-reader"       % jlineVersion,
+      "org.jline"      % "jline-terminal"     % jlineVersion,
+      "org.jline"      % "jline-terminal-jni" % jlineVersion,
+      "org.scalameta" %% "munit"              % munitVersion % Test
+    ),
     excludeDependencies += ExclusionRule("org.scala-lang", "scaladoc_3"),
     Compile / run / fork         := true,
     Compile / run / connectInput := true,

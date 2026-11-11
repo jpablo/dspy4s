@@ -4,7 +4,7 @@ import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.harness.{HarnessLimits, Models, Place, PolicyRunner, RequestLm, Secrets}
 import dspy4s.harness.Models.policy
-import dspy4s.harness.guest.{Mode, Scope, StrategyName}
+import dspy4s.harness.guest.{JobStatus, Mode, Scope, StrategyName}
 import dspy4s.harness.kernel.*
 import dspy4s.harness.host.HostSupport.*
 import dspy4s.harness.sandbox.{Backends, HostList}
@@ -248,6 +248,25 @@ class WorkLaws extends munit.FunSuite:
         case _                                              => false
       })
       assert(eventually(15)(running("sleep 332").isEmpty), "the job stays after stopJob")
+    }
+  }
+
+  test("Work: jobStatus gives Running for a job that runs after its turn, and Stopped after StopJobs") {
+    sandboxed()
+    val model = sessionModel(policy("start", Some("""spawn("sleep 333")""")), policy("FAKE-STARTED", None))
+    work(model) { (_, handle) =>
+      assertEquals(handle.jobStatus, Map.empty)
+      assertEquals(handle.send(message("m1")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+      assertEquals(handle.jobStatus.values.toVector, Vector(JobStatus.Running))
+      assertEquals(handle.jobStatus.keySet, handle.state.jobs.keySet)
+      assertEquals(handle.send(Command.StopJobs(JobSelector.All, "FAKE-STOP-JOBS")), Right(()))
+      def stopped =
+        handle.jobStatus.values.toVector match
+          case Vector(JobStatus.Stopped) => true
+          case _                         => false
+      assert(eventually(15)(stopped), handle.jobStatus.toString)
+      assert(eventually(15)(running("sleep 333").isEmpty), "the job stays after StopJobs")
     }
   }
 

@@ -1729,7 +1729,7 @@ key of the journal is the fence there. JDBC also reaches a server database, but 
 | `harness-sandbox` | The profiles, Seatbelt, bubblewrap, the proxy of the host list, the allowlist of variables, and the handler of `Shell` | `harness-kernel` |
 | `harness` | `Harness`, `drive`, the journal in memory, the mask of secrets, the handlers, the context strategies and the memory tree, the leaves. A strategy needs `RuntimeContext`, `DspyError` and `History` of dspy4s, so it is not in the kernel. | The modules above, dspy4s `programs` and `adapters` |
 | `harness-host` | The session host, the SQLite journal, the feeds, the timers, the catalog, the jobs, and the runtime of a work session. The report pass comes with phase 9. | `harness`, `sqlite-jdbc` |
-| `harness-cli` | The terminal client | `harness-host` |
+| `harness-cli` | The terminal client: the loop, the views, and the line editor | `harness-host`, JLine |
 
 ### 10.6 The first version (phase 7)
 
@@ -1770,7 +1770,8 @@ These points are proposals for the review:
 - The host trait of 10.1 is `SessionHandle`, because the guest API already has the data type `SessionRef`. It also
   has `run`, which waits for the commit, so a client can show a refusal.
 - A session id is a random UUID. The root of the CLI is `<home>/.dspy4s/harness`, and its command line is
-  `[--root DIR] [--session ID] [--script] [FOLDER]`.
+  `[--root DIR] [--session ID] [--script] [--list] [FOLDER]`. `--session` also takes the start of an id when only one
+  session of the root has it.
 - A live test drives the CLI with no person (2026-11-10). With `--script`, each line waits until the session has no
   open turn, each command goes through `run`, and the end of the input waits for the open turn. So each message
   starts its own turn, in the order of the lines. With `DSPY_TRACE=FILE`, each model call goes to `FILE` as one JSON
@@ -1866,6 +1867,97 @@ rules that came from it:
 - The blueprint gives the complete phases no row of their own, because they can use each other. A row made flat edges
   between them, and dot failed on a flat edge with a label when phase 7 became complete.
 
+**The gaps of the terminal client (2026-11-10).** A review of the CLI after phase 8 found eight gaps. One gap was
+against 10.3. After a Stop, the client must say that a job of the turn still runs, and it must offer a stop. The other
+gaps were features that a person needs. Each rule has a law, and a live run in a real pseudo-terminal checked the
+rules together (12).
+
+- `SessionHandle.jobStatus` gives the status of each job from the job table. After a turn that ends `Aborted`, the
+  client names each job of that turn that runs and has no stop mark. It also gives the command that stops the job.
+- A job has one name: the cell and the number of its `spawn`, for example `12.0`. The report of the host and the
+  model (`JobId(12, 0)`) use the same two numbers. `/jobs` lists the jobs, and `/stopjob 12.0` sends
+  `StopJobs(One(job))`.
+- A pending call has one number: the `seq` of the last entry that asked for it. The prompt and `/status` show the
+  number, and `/allow N` grants that call only while it is pending. The number of a call does not change when other
+  calls change. `/allow` with no number still grants each pending call.
+- The stop notice offers only `/stopjob`. `/stopall` stops the jobs of the newest turn, and a new turn can start after
+  the notice.
+- `/status` shows the folder, where the turn stands, the pending calls and how many jobs run. The client prints one
+  line at each `StepStarted`. So the person sees that the model works during a long model call.
+- The client shows the reasoning of a step, each line after a bar. `/reasoning off|short|full` sets how much the next
+  steps show. `short` is the default, and it shows the first 400 characters.
+- Each text of the client goes through `printable`. It removes control characters, and it makes a mark of the
+  direction of the text visible. A command or an argument that a model chose shows in quotes on one line. It has an
+  escape for each control character, each format character and each surrogate with no pair. So a model cannot hide a
+  pending call, and it cannot change the terminal.
+- The catalog row also has the folder, the time of the last entry and the first message on one line. The journal
+  fixes each field, so the row stays a fold. The fields have no default values. So a row of an earlier catalog does
+  not decode, and `rebuild` folds its journal again. The cut of the first message keeps whole characters, because a
+  JSON writer refuses a surrogate with no pair.
+- `--list` prints the sessions, the newest first, and each journal file that it cannot list, with the reason. It
+  opens no session, and it makes no file in a root with no journals. A new line in a name or a folder shows as an
+  escape, so it adds no line to the list. A failed write of the catalog does not hide a session, because the catalog
+  is a copy of the journals. `rebuild` also removes a row with no file that does not decode. `--session` takes an id, or the start of an id that only one session
+  has. The journal files give the ids, so a session with no catalog row still opens.
+- At a terminal, the client reads with the line editor of JLine 4, at the version of the REPL. The person can edit a
+  line, and the up key gives the earlier lines. `<root>/history` keeps the lines after the mask of the secrets (5.6).
+  The text of the session goes above the line of the person. In the script mode and for a pipe, the client reads
+  plain lines as before. `scripts/live/chat.sh` runs the line editor when its input is a terminal.
+- Enter after an odd number of `\` at the end of the line changes the last `\` into a new line, and the line goes
+  on. A paste goes into the line as it is, so a pasted `\` stays. The event expansion of JLine is off, so a `!` in a
+  message stays.
+- The editor turns off the signals of the terminal (ISIG) and the software signals of JLine, so Ctrl-C is a key. On
+  an empty line, it is `/stop` during a turn, and a hint with no open turn. On a line with text, it clears the text.
+  A Ctrl-C while no read waits stays in the input, and the next read gets it. So the terminal never sends SIGINT to
+  the process group, which holds the wrappers of the jobs. A wrapper that a SIGINT stopped left its command with no
+  owner, and the job table then gave a wrong status.
+- At its end, the client gives the terminal back before it closes the host, because that close can wait for the stop
+  of jobs. It first ends a read that waits, at most for 2 s, and it writes the texts that turn off bracketed paste
+  and the keypad mode. A shutdown hook does the same at a SIGTERM.
+- JLine asks the terminal for its modes while it makes the terminal, and it reads the answers from the input. So the
+  client makes its console before it starts the host. A line that the person types after the start of the host
+  stays.
+- The laws of the line editor use a `DumbTerminal` or an `ExternalTerminal` of streams. A terminal of
+  `TerminalBuilder` with streams uses a pseudo-terminal of the system. That terminal drops its input at Ctrl-C and at
+  the end of the stream, so its results depend on the machine.
+- `/help` shows the one list of the commands, and a law parses each command of that list. The start of the client
+  took 0.9 s in `CLI start:`, so the AOT cache of choice 8 stays out.
+
+These points are proposals for the review:
+
+- the names of the commands
+- one history file for each root
+- Ctrl-C as `/stop`
+- the first message as the label of a session, until the goal of phase 9
+- Ctrl-C as a key: it does not stop a client that hangs, and Ctrl-Z does not suspend the client
+
+**The review of the client (2026-11-11).** A review at the highest level found 15 defects in the first version of
+these rules. Ten angles found the candidates, and a verifier checked each candidate. Each fix has a law that the
+change wrote before the fix. The worst defects:
+
+- The new views printed the command of a model with its control characters. So a return could show a pending call
+  as a different call.
+- The approval prompt showed a command with new lines on several lines, and it removed the other control characters
+  with no mark.
+- A row of an earlier catalog decoded with empty fields, so `--list` showed the time 1970-01-01.
+- The cut of a first message could break a surrogate pair. Then each write of the row failed, and `--list` hid the
+  session.
+- A paste lost each `\` before a new line, and Ctrl-C outside a read stopped the JVM.
+- The end of the client left bracketed paste on.
+
+A review of the fixes, in three parts with the cases of each part, found 19 more defects. Most of them were in the
+fixes, and each fix has a law or a check in a real pseudo-terminal. The worst:
+
+- A Ctrl-C while no read waited kept the JVM alive, but the terminal also stopped the wrappers of the jobs.
+- JLine 4 gave one Ctrl-C two times: as a signal, and as a key. So a Ctrl-C on a line with text could stop the turn.
+- The report of a job could cut a surrogate pair. Then the journal refused the message, and the session ended.
+- `--list` called a good journal "not a journal" when the write of the catalog failed.
+
+The rule of the report now holds for each cut of a text for the journal or for a model. These cuts keep each
+character whole: the text of a value of a call, the cut of the window, the source of a compress call, and the output
+buffer of a job. One set of functions in `Texts.scala` of `harness` makes each cut, and the laws `Cut:` test them. The
+reader of the output of a job also keeps a character whole when its bytes come in two reads.
+
 ## 11. The kinds of state, and the questions that test them
 
 [CODE_HARNESS_CONCEPTS.md](CODE_HARNESS_CONCEPTS.md) lists eight kinds of state. Each kind has one model:
@@ -1946,6 +2038,8 @@ and the start probe also ran on JDK 21.0.11. The code is in `tmp/design-check/`,
 | The laws of `harness-sandbox` on Linux, with `scripts/sandbox-linux/run.sh`: Ubuntu 24.04, bwrap and JDK 21 on arm64, in a privileged podman container, as a normal user | 63 tests: 57 pass, and 6 of Seatbelt skip. Each probe of 5.4 gives what the profile allows. The first run found three errors, fixed here. A command made a new file `.env.new`, because a mount of bubblewrap cannot hide a name, so 5.4 now protects the secret files that exist when a command starts. The probe of bubblewrap passed in a container where each command failed. The time limit waited 2 s for a zombie when the JVM was PID 1. |
 | The laws of `harness-sandbox` and `harness-host` on Linux after part B of phase 7, in the same container | `harness-sandbox`: 72 tests, 66 pass, and 6 of Seatbelt skip. `harness-host`: 78 tests, and 78 pass. The first run of the host laws found that a stop during the start of bwrap left the sandbox and its command, because `--new-session` puts the sandbox out of the process group. The fix in the wrapper (10.6) passed a stop at 0 to 1000 ms after the start, with no process left. |
 | A live chat through the CLI of phase 7: JDK 21, Seatbelt on macOS, the private endpoint with the open model of 27B parameters, and a script that sends one message at a time | Five turns in 64 s, and the first model call took most of the first 44 s. `exec` listed the 3 files of the folder. A cell defined `val x = 41` and started the job `sleep 301` with `spawn`, and `waitJob` gave `Running`. `stopJob` and `waitJob` gave `Stopped`, with no process left. `/stop` during `exec("sleep 302")` ended the turn `Aborted` 0.2 s later, with no process left. The next turn computed `x + 1 = 42`, so the REPL stayed. `/quit` gave the exit code 0, and the journal has 53 entries. The run found one problem, fixed with a law that failed first: the output of the stopped cell showed the stack trace of the `InterruptedException` of the stop to the model. |
+| The terminal client after the work on its gaps (10.6), with its line editor in a real pseudo-terminal that a Python script drives: JDK 21, Seatbelt on macOS, and the private endpoint with the open model of 27B parameters | 20 of 20 checks passed in the second run. A message over two lines started a turn, and `/help` and `/status` answered. A cell started the job `sleep 301` and then ran `exec("sleep 60")`, and Ctrl-C 4 s later ended the turn `Aborted`. The notice named the job, `/jobs` showed that it runs, `/stopjob 1` stopped it, and no process stayed. The up key gave the last line again. `--list` showed the session with its first message, and `--session` with 8 characters of the id opened it. The first run found that JLine lost a line that came during its questions to the terminal. After the fix, three runs that typed `/quit` at once all ended with the code 0. |
+| The terminal client after the fixes of its review (10.6), in the same pseudo-terminal setup | 20 of 20 checks passed. `/help`, typed at once after the line that opens the session, answered. Ctrl-C on a typed line cleared the line, and Ctrl-C during `/wait 3` gave the hint and kept the client alive. A real bracketed paste kept its `\`, and `--list` showed it. The stop notice named the job `14.0`, and `/stopjob 14.0` stopped it, with no process left. After `/close`, bracketed paste was off, and the output had no exception. |
 | The live memory metric of phase 8 (`MemoryLiveRun`): one generated chat of 60 turns with 6 planted facts, a work session for each strategy with that journal, and each question as the next turn. The private endpoint with the open model of 27B parameters, Seatbelt on macOS, and `DSPY_SUMMARY_OPTIONS` that turns off the reasoning of the summaries | The memory tree: 6 of 6 right. The window: 2 of 6 right, the two near facts, and none of the four facts of the first quarter. The window said that it had no information on a far fact, or it looked for it in the files. The first question of the memory tree took 56 s, with the build of the lines of the whole session, and the others took 1 to 9 s. A first run with the reasoning on did not end its first question in 30 minutes: one merge took 36 to 70 s with 5,000 to 10,000 reasoning tokens, and 0.5 to 0.7 s with the reasoning off (7.1). |
 | A code review of phases 1 to 3 at the high level, and the fixes | 10 findings, each fixed with a test that failed first. The worst: bwrap let a command reach the UNIX sockets of the host, so the D-Bus bus or docker.sock could start a process outside the sandbox. A probe reproduced it on Linux, and a seccomp filter fixed it. The others: the MCP files read `.env`, the proxy kept the `Host` header of the client and allowed each port with no limit of connections, the secret paths missed common credential files, `Prefix` compared raw text, `decide` took an effect id two times, `AUTH` matched `AUTHOR`, each command walked the whole scope, and the preamble did not escape a name. A review of the fixes found 6 more cases, fixed too. The sandbox has 36 mutants, the kernel 27, and each one is killed. |
 | A code review of phase 4 at the high level, and the fixes | 10 findings. 9 are fixed, each with a test that failed first, and 1 needed no change. The worst: `Files.local` wrote through a symbolic link to a place that does not exist, so a command could make the JVM write outside the root and outside the sandbox. The others: a cell thread that did not stop, or a REPL that the heap guard closed, ran on into the next cells; two calls of one cell could get a false refusal; a code field `null` ran as a cell; a copy that failed threw out of `forward` and left its part; a long text or code dropped the whole history; and three cleanups. The full copy of the workspace needed no change, because `Files.copy` on JDK 21 clones each file. A review of the fixes found 2 more cases, fixed too: a read through a link at the last part, and an exception that left the turn of the journal open. The harness has 70 laws and 29 mutants, and each mutant is killed. |

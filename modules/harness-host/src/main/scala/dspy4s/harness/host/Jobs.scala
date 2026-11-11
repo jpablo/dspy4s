@@ -1,11 +1,11 @@
 package dspy4s.harness.host
 
-import dspy4s.harness.Journal
+import dspy4s.harness.{Journal, suffixStart}
 import dspy4s.harness.guest.{Files, JobId, JobStatus, Shell}
 import dspy4s.harness.kernel.{Command, EffectId, JobSelector, SessionState, Source}
 import dspy4s.harness.sandbox.SandboxedShell
 
-import java.io.InputStream
+import java.io.{InputStream, InputStreamReader}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.util.concurrent.{ConcurrentHashMap, CountDownLatch, ExecutorService, Executors, ThreadFactory, TimeUnit}
 import scala.concurrent.duration.FiniteDuration
@@ -131,11 +131,14 @@ final class JobTable(grace: FiniteDuration, report: (EffectId, JobStatus) => Uni
   /** Keeps the output of a job, at most `MaxOutput` characters: the oldest characters go first. */
   private def read(row: Row, in: InputStream): Unit =
     try
-      val buffer = new Array[Byte](8192)
-      var n      = in.read(buffer)
+      // A reader of characters keeps a character whole when its bytes come in two reads, and it never gives one half
+      // of a surrogate pair.
+      val chars  = InputStreamReader(in, UTF_8)
+      val buffer = new Array[Char](8192)
+      var n      = chars.read(buffer)
       while n >= 0 do
-        row.append(String(buffer, 0, n, UTF_8))
-        n = in.read(buffer)
+        row.append(String(buffer, 0, n))
+        n = chars.read(buffer)
     finally row.drained.countDown()
 
 object JobTable:
@@ -166,7 +169,9 @@ object JobTable:
     def append(text: String): Unit =
       synchronized {
         output.append(text): Unit
-        if output.length > MaxOutput then output.delete(0, output.length - MaxOutput): Unit
+        // The oldest characters go first, with no surrogate pair cut in two, because `jobOutput` puts the text into
+        // the journal.
+        if output.length > MaxOutput then output.delete(0, suffixStart(output, MaxOutput)): Unit
       }
 
     def text: String = synchronized(output.toString)
