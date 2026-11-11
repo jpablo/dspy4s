@@ -151,5 +151,10 @@ object SessionFile:
   /** The folder of the journals under the root of a host: `<root>/sessions`. */
   def folderOf(root: Path): Path = root.resolve("sessions")
 
+  /** Opens the journal at `path` to read it (`mode=ro`): a file that does not exist gives an error, and nothing on the
+    * disk changes (8.7).
+    */
+  def readOnly(path: Path, session: SessionId): Either[String, SessionFile] = ???
+
   /** The path of the file of `session` under the root of a host: `<root>/sessions/<id>.db`. */
   def pathOf(root: Path, session: SessionId): Path = folderOf(root).resolve(s"${session.value}.db")

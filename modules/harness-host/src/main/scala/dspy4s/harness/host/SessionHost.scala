@@ -2,8 +2,12 @@ package dspy4s.harness.host
 
 import dspy4s.harness.{Harness, Journal, Secrets, TurnEffects, drive, textSuffix}
 import dspy4s.harness.guest.{JobStatus, Mode, Scope}
-import dspy4s.harness.kernel.{Command, EffectId, Entry, Logged, Next, Position, RequestId, SessionConfig, SessionId}
-import dspy4s.harness.kernel.{SessionState, Source, TurnOutcome, closing, next, repair, state as foldOf}
+import dspy4s.harness.kernel.{Command, EffectId, Entry, Logged, Next, Position, ReleaseItem, ReleaseStep, RequestId}
+import dspy4s.harness.kernel.{ReleasePlans, ScopeState, releasePlan}
+import dspy4s.harness.kernel.{
+  SessionConfig, SessionId, SessionOutcome, SessionState, Source, TurnOutcome, closing, next
+}
+import dspy4s.harness.kernel.{repair, state as foldOf}
 
 import java.nio.channels.{FileChannel, FileLock, OverlappingFileLockException}
 import java.nio.file.{Files as JFiles, Path, StandardOpenOption}
@@ -51,6 +55,69 @@ trait SessionHandle:
 
   /** The committed entries with a `seq` above `seq`. A client reads them after `Behind`. */
   def read(after: Long): Vector[Logged]
+
+/** What the handler of `Sessions` needs from its host (CODE_HARNESS_DESIGN.md, 8.7). `LocalHost` gives it. Each session
+  * that a handler reaches is open in the same host, because a host holds a lock on each open session.
+  */
+trait Peers:
+
+  /** The rows of the catalog. */
+  def rows: Vector[CatalogRow]
+
+  /** Opens the session `id`, as `SessionHost.open` does. A session that is open gives its handle. */
+  def open(id: SessionId, config: Option[SessionConfig]): Either[HostError, SessionHandle]
+
+  /** Opens the new session `id` with `config`, and commits `Begin` with its task `task` with the source `source`: its
+    * `Activated` and its task in one commit (8.6). It gives the state after that commit. An id with a journal gives
+    * `Rejected(NotNew)`, so a second `start` never activates a session again.
+    */
+  def openWith(
+      id    : SessionId,
+      config: SessionConfig,
+      task  : Command.Send,
+      source: Source
+  ): Either[HostError, SessionState]
+
+  /** Runs `command` in the session `id` with the source `source`, and waits for its commit. A session of the catalog
+    * that is not open in this host opens first, with the configuration of its journal. A session whose journal has
+    * ended gives `Ended`, and it does not open again: the check reads the journal under the lock of the host, not the
+    * row of the catalog, which can lag. An id that is not valid or that the catalog does not have gives `Refused`.
+    */
+  def runAs(id: SessionId, command: Command, source: Source): Either[HostError, SessionState]
+
+  /** The committed journal of the session `id`: from its writer when it is open, else from its file, which opens read
+    * only (`SessionFile.readOnly`). An id that is not valid or that the catalog does not have gives an error, and no
+    * file appears.
+    */
+  def journalOf(id: SessionId): Either[String, Vector[Logged]]
+
+  /** The part `ref` of the memory of the session `id` (8.7): from its journal and the table `memory` of its file, with
+    * no LM call and no write. A node with no built line gives the line of its source, as a spent budget does (7.1). An
+    * id as for `journalOf` gives an error.
+    */
+  def zoomInto(id: SessionId, ref: String): Either[String, String]
+
+  /** The scope of the new session `session` of `start` (8.7), with its folder made. A `Scratch` and a `Worktree` must
+    * have an empty path: the host makes `<work>/<session>`, a new folder for a scratch and a new worktree of a new
+    * branch for a worktree. A `Directory` must be an absolute path of a folder that exists. A `Home`, a `Fork`, a path
+    * that is not absolute or not empty as these rules say, a worktree whose branch is its base, and a repository inside
+    * the scope of a session that has not ended give an error.
+    */
+  def make(scope: Scope, session: SessionId): Either[String, Scope]
+
+object Peers:
+
+  /** A host with no other session: each call gives an error. A runtime with no host, as in phase 7, uses it. */
+  val none: Peers = new Peers:
+    private val error                                                                      = "this runtime has no host of sessions"
+    def rows: Vector[CatalogRow]                                                           = Vector.empty
+    def open(id: SessionId, config: Option[SessionConfig])                                 = Left(HostError.OpenFailed(error))
+    def openWith(id: SessionId, config: SessionConfig, task: Command.Send, source: Source) =
+      Left(HostError.OpenFailed(error))
+    def runAs(id    : SessionId, command: Command, source: Source)          = Left(HostError.OpenFailed(error))
+    def journalOf(id: SessionId): Either[String, Vector[Logged]]            = Left(error)
+    def zoomInto(id : SessionId, ref    : String): Either[String, String]   = Left(error)
+    def make(scope  : Scope, session    : SessionId): Either[String, Scope] = Left(error)
 
 /** What the host needs to run the turns of a session (10.1). It makes the live part of each activation. */
 trait SessionRuntime:
@@ -119,20 +186,42 @@ trait Activation extends AutoCloseable:
   *   - After each commit, the host copies the marks of the jobs of the state to the job table (10.3). The table of the
   *     session posts the message of a job with `report` to the writer, so the message also reaches a later activation.
   *   - After a turn ends or the status changes, the host puts the row of the session into the catalog.
+  *
+  * Since phase 9 (8.7), the host is the `Peers` of the handler of `Sessions`, so its runtime comes from `runtimeOf`
+  * with the host. It makes the folders of `start` under `work`, outside `root`, because the sandbox hides `root`.
+  *
+  *   - The live report: after a `TurnEnded` or an `Ended` of a session whose owner is a session, the host gives the
+  *     reports to one reporter thread of its own. That thread holds no `guard` and no lock of the host, and it puts
+  *     each report into the mailbox of the owner with `Writer.tryPost`, which never waits. A report that does not fit,
+  *     or whose owner is not open, waits for the pass. No writer thread ever calls `run`.
+  *   - The pass (`reportTo`) runs on the thread that opens an owner, after the owner is in `sessions`, so a live report
+  *     during the open reaches it, and with no lock of the host. At its start the host opens each session of
+  *     `ReportPass.repairable`.
+  *   - After each `TurnEnded` in a git folder, the host commits `ScopeRecorded` with the snapshot of `scopes`, on one
+  *     ordered thread for each session. A snapshot that a newer `TurnEnded` makes old does not commit.
+  *   - The row of a session goes to the catalog when its status or its ledger changes.
+  *   - `release` ends a session with its release plan.
   */
 final class LocalHost private (
-    root   : Path,
-    runtime: SessionRuntime,
-    secrets: Secrets,
-    limits : HostLimits,
-    clock  : () => Long,
-    catalog: Catalog,
-    timers : Timers,
-    rebuilt: Rebuilt
+    root                                         : Path,
+    runtimeOf                                    : Peers => SessionRuntime,
+    secrets                                      : Secrets,
+    limits                                       : HostLimits,
+    clock                                        : () => Long,
+    catalog                                      : Catalog,
+    timers                                       : Timers,
+    rebuilt                                      : Rebuilt,
+    @scala.annotation.nowarn("msg=unused") scopes: Scopes,
+    @scala.annotation.nowarn("msg=unused") hooks : HostHooks,
+    @scala.annotation.nowarn("msg=unused") work  : Path
 ) extends SessionHost,
+      Peers,
       AutoCloseable:
 
   private val sessions = scala.collection.mutable.Map.empty[SessionId, OpenSession]
+
+  // The runtime gets the host, and the host gets the runtime, so the runtime comes at its first use.
+  private lazy val runtime: SessionRuntime = runtimeOf(this)
 
   def open(id: SessionId, config: Option[SessionConfig]): Either[HostError, SessionHandle] =
     // A session that ends frees its lock in its shutdown. The wait for it holds no lock of the host, so the opens of
@@ -151,6 +240,56 @@ final class LocalHost private (
 
   /** The rows of the catalog. */
   def list: Vector[CatalogRow] = catalog.rows
+
+  def rows: Vector[CatalogRow] = list
+
+  def openWith(id: SessionId, config: SessionConfig, task: Command.Send, source: Source)
+      : Either[HostError, SessionState] = ???
+
+  def runAs(id: SessionId, command: Command, source: Source): Either[HostError, SessionState] = ???
+
+  def journalOf(id: SessionId): Either[String, Vector[Logged]] = ???
+
+  def zoomInto(id: SessionId, ref: String): Either[String, String] = ???
+
+  def make(scope: Scope, session: SessionId): Either[String, Scope] = ???
+
+  /** The report pass for the owner `owner` (8.6, 8.7): it opens the owner when it is not open, and sends each report of
+    * `ReportPass.owed` with the source `Source.Child(session)`, and waits for each commit. It gives the number of
+    * reports that the owner committed. An owner that has ended gets none, and the pass runs again when it opens.
+    */
+  def reportTo(owner: SessionId): Either[HostError, Int] = ???
+
+  /** The release plan of `plans` for the session `id` and `outcome`, with the state of its scope, and with no effect:
+    * the dry run of CODE_HARNESS.md, 7.9. The state of the scope comes from `scopes`. It is `owned` when its folder is
+    * under `work`, and `shared` when another session that has not ended has the same folder. The ref of a kept branch
+    * is `refs/archive/<id>`, and the archive folder is `<root>/archive/<id>`. A session that runs its release gives the
+    * plan of its `Releasing`.
+    */
+  def planOf(id: SessionId, outcome: SessionOutcome, plans: ReleasePlans = releasePlan)
+      : Either[HostError, (ScopeState, Vector[ReleaseItem])] = ???
+
+  /** Ends the session `id` with `outcome` and its release plan of `plans` (7.9, 8.7).
+    *
+    *   - The controller gives `Refused`, because it never ends (8.1). A session with an open turn gives
+    *     `Rejected(TurnOpen)`, and no step runs.
+    *   - The host commits `Releasing(plan)`, so no message and no turn come in, then `StopJobs(All)`, and it waits for
+    *     the end of the jobs.
+    *   - Before each item, the host asks `irreversible` with the items whose steps are `Done` and then the item. An
+    *     irreversible item runs only when `confirm` gives true for it, with `confirmed`, else it gets `Skipped`. Each
+    *     step commits `Released(step)` before the next one, and then the host commits `Close(outcome, reason)`.
+    *   - A session that runs its release goes on with the plan of its `Releasing`, from the first item with no
+    *     `Released`, so a crash in a release loses no step.
+    *
+    * It gives the steps of this call.
+    */
+  def release(
+      id     : SessionId,
+      outcome: SessionOutcome,
+      reason : String,
+      confirm: ReleaseItem => Boolean,
+      plans  : ReleasePlans = releasePlan
+  ): Either[HostError, Vector[ReleaseStep]] = ???
 
   /** The open session `id`. Only the laws use it. */
   private[host] def sessionOf(id: SessionId): Option[OpenSession] = synchronized(sessions.get(id))
@@ -178,6 +317,23 @@ object LocalHost:
       limits : HostLimits = HostLimits(),
       clock  : () => Long = () => System.currentTimeMillis()
   ): Either[HostError, LocalHost] =
+    startWith(root, _ => runtime, secrets, limits, clock)
+
+  /** Starts a host at `root` whose runtime comes from `runtimeOf` with the host, so a handler of `Sessions` reaches the
+    * other sessions (8.7). The folders of `start` go under `work`, by default the folder `work` beside `root`. It makes
+    * the folders, rebuilds the catalog from the files (10.2), and opens each session of `ReportPass.repairable`, so the
+    * repair commits `TurnEnded(Crashed)`.
+    */
+  def startWith(
+      root     : Path,
+      runtimeOf: Peers => SessionRuntime,
+      secrets  : Secrets,
+      limits   : HostLimits   = HostLimits(),
+      clock    : () => Long   = () => System.currentTimeMillis(),
+      scopes   : Scopes       = GitScopes(),
+      hooks    : HostHooks    = HostHooks.none,
+      work     : Option[Path] = None
+  ): Either[HostError, LocalHost] =
     for
       sessions <- Try(JFiles.createDirectories(SessionFile.folderOf(root))).toEither.left
                     .map(e => HostError.OpenFailed(s"the folder of the host did not open: ${e.getMessage}"))
@@ -186,7 +342,19 @@ object LocalHost:
                    catalog.close()
                    HostError.OpenFailed(e)
                  }
-    yield LocalHost(root, runtime, secrets, limits, clock, catalog, Timers(), rebuilt)
+    yield LocalHost(
+      root,
+      runtimeOf,
+      secrets,
+      limits,
+      clock,
+      catalog,
+      Timers(),
+      rebuilt,
+      scopes,
+      hooks,
+      work.getOrElse(root.resolveSibling("work"))
+    )
 
   /** The sessions of the root of a host, with no runtime and no open session: the rebuild of the catalog that `start`
     * runs (10.2). A root with no folder of journals has no session, and this function then makes no file.
@@ -241,7 +409,7 @@ private final class OpenSession private (
   private var tickets                                        = 0L
   private var pendingTicket: Option[WorkerTicket]            = None
   private var stopTurn                                       = -1L
-  private var row                                            = catalogRow(id)(start)
+  private var row                                            = start.foldLeft(catalogRow(id).initial)(catalogRow(id).step)
   private var putOnce                                        = false
   @volatile private var endedFlag                            = false
 
@@ -423,12 +591,12 @@ private final class OpenSession private (
 
   /** Puts the row of the session into the catalog when its status changes, and at the first commit of this open. */
   private def putRow(): Unit =
-    val fresh = writer.log.reverseIterator.takeWhile(_.seq > row.lastSeq).toVector.reverse
+    val fresh = writer.log.reverseIterator.takeWhile(_.seq > row._1.lastSeq).toVector.reverse
     val next  = fresh.foldLeft(row)(catalogRow(id).step)
-    if !putOnce || next.status != row.status then
+    if !putOnce || next._1.status != row._1.status then
       putOnce = true
       // A failed write of the catalog never ends a session: the next rebuild corrects the row.
-      place.catalog.put(next): Unit
+      place.catalog.put(next._1): Unit
     row = next
 
   /** The message of a job with `report` at its end (10.3). The writer of the session gets it, so it also reaches a
@@ -501,7 +669,7 @@ private object OpenSession:
     val folder = scope match
       case Scope.Home(path)                    => Some(path)
       case Scope.Directory(path)               => Some(path)
-      case Scope.Worktree(path, _)             => Some(path)
+      case Scope.Worktree(path, _, _, _)       => Some(path)
       case Scope.Scratch(_) | Scope.Fork(_, _) => None
     folder.flatMap { text =>
       val path = Try(Path.of(text)).toOption

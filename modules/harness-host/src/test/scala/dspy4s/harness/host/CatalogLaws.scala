@@ -6,6 +6,8 @@ import dspy4s.harness.host.HostSupport.*
 import dspy4s.harness.sandbox.SandboxedShell
 import zio.blocks.schema.Schema
 
+import zio.blocks.schema.json.Json
+
 import java.nio.file.{Files, Path}
 import java.sql.DriverManager
 import scala.util.Using
@@ -62,14 +64,58 @@ class CatalogLaws extends munit.FunSuite:
     )
     def row(n: Int) = catalogRow(id(1))(log.take(n))
     val folder      = SandboxedShell.pathOf(config().scope)
-    assertEquals(row(1), CatalogRow(id(1), Owner.User, None, SessionStatus.Idle, 0L, folder, 1000L, ""))
+    val scope       = Some(config().scope)
+    assertEquals(
+      row(1),
+      CatalogRow(id(1), Owner.User, None, SessionStatus.Idle, 0L, folder, 1000L, "", config().goal, scope)
+    )
     assertEquals(row(3).status, SessionStatus.InTurn)
     assertEquals(row(4).status, SessionStatus.Stopping)
     assertEquals(row(5).status, SessionStatus.Idle)
     assertEquals(
       row(6),
-      CatalogRow(id(1), Owner.User, None, SessionStatus.Ended(SessionOutcome.Parked), 5L, folder, 1000L, "x")
+      CatalogRow(
+        id(1),
+        Owner.User,
+        None,
+        SessionStatus.Ended(SessionOutcome.Parked),
+        5L,
+        folder,
+        1000L,
+        "x",
+        config().goal,
+        scope
+      )
     )
+  }
+
+  test("Catalog: a Releasing gives the status Releasing until Ended (8.7)") {
+    val log = Support.logOf(
+      1000L,
+      activated,
+      Entry.Releasing(Vector.empty),
+      Entry.Ended(SessionOutcome.Merged, "FAKE")
+    )
+    assertEquals(catalogRow(id(1))(log.take(2)).status, SessionStatus.Releasing)
+    assertEquals(catalogRow(id(1))(log).status, SessionStatus.Ended(SessionOutcome.Merged))
+  }
+
+  test("Catalog: the row holds the goal and the scope of the last Activated, and the ledger of the journal (8.7)") {
+    val goal  = config().copy(goal = Some("fake goal"), scope = dspy4s.harness.guest.Scope.Directory("/w/two"))
+    val read  = Json.Object(("path", Json.String("/w/a.txt")))
+    val value = EffectResult.Value(Json.Null, "")
+    val log   = Support.logOf(
+      1000L,
+      activated,
+      Entry.ScopeRecorded("a1b2", true),
+      Entry.Activated(Support.versions, goal),
+      Entry.EffectStarted(EffectId(1L, 0), "read", read),
+      Entry.EffectDone(EffectId(1L, 0), value)
+    )
+    val row = catalogRow(id(1))(log)
+    assertEquals((row.goal, row.scope), (Some("fake goal"), Some(dspy4s.harness.guest.Scope.Directory("/w/two"))))
+    assertEquals(row.ledger, ledger(log))
+    assertEquals((row.ledger.read, row.ledger.head), (Vector("/w/a.txt"), Some("a1b2")))
   }
 
   test("Catalog: the row keeps the folder, the time of the last entry, and the first message on one short line") {

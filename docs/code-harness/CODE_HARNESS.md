@@ -1607,8 +1607,8 @@ The plans are values, so a user or a project can change them.
 
 Who ends a session:
 
-- The user, in the session or through the controller. The controller sends the end to the session with `tell`
-  (7.3), and the session runs the plan.
+- The user, in a client of the session. The controller can propose an end, and it asks the person, but it cannot end
+  a session (CODE_HARNESS_DESIGN.md, 8.7, the review of 2026-11-11).
 - The session agent can propose an end. The goal check (the `Noul` leaf of 4.4) gives a good signal. The
   user then confirms the outcome.
 

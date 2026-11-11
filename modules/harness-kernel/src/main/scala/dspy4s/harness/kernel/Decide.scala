@@ -2,17 +2,29 @@ package dspy4s.harness.kernel
 
 /** The entries that a command can commit (4.5). It keeps each journal inside the language of 4.1. The table of 4.5
   * gives the entries of each command, and the rules for `Commit` come after it.
+  *
+  * The rules of phase 9 (8.7):
+  *   - `Begin` gives `Activated`, the `Input` of the task and `TurnStarted` on a journal with no entry, and
+  *     `Rejection.NotNew` on each other journal.
+  *   - After `Releasing`, `Send` and `Grant` give `Rejection.Releasing`, and `Activate` starts no turn. `Released`,
+  *     `JobsStopRequested` through `StopJobs`, and `Close` stay valid.
+  *   - The unattended turns: a `Send` whose sender is not the person gives its `Input` and no `TurnStarted` when
+  *     `unattended` is at `SessionState.UnattendedTurns`. So it waits in the journal, and the next message of the
+  *     person starts the turn that sees it. `Activate` after a restart starts no turn for such a message either.
   */
-def decide(command: Command, s: SessionState): Either[Rejection, Vector[Entry]] =
+def decide(command: Command, s: SessionState, sender: Source = Source.User): Either[Rejection, Vector[Entry]] =
   command match
     case Command.Activate(versions, config) =>
       val activated = repair(s) :+ Entry.Activated(versions, config)
-      Right(if after(s, activated).waiting > 0 then activated :+ Entry.TurnStarted else activated)
+      val now       = after(s, activated)
+      Right(if now.waiting > 0 && !held(now) then activated :+ Entry.TurnStarted else activated)
+    case Command.Begin(_, _, _, _)                          => ???
     case Command.Send(request, _, _) if s.requests(request) => Right(Vector.empty)
     case Command.Send(_, _, _) if s.closed                  => Left(Rejection.SessionClosed)
     case Command.Send(request, text, values)                =>
       val input = Entry.Input(request, text, values)
-      Right(if s.position == Position.NoTurn then Vector(input, Entry.TurnStarted) else Vector(input))
+      val waits = sender != Source.User && held(s)
+      Right(if s.position == Position.NoTurn && !waits then Vector(input, Entry.TurnStarted) else Vector(input))
     case Command.Commit(entries) =>
       // A late outcome of a closed effect adds nothing, because an interrupt does not wait for a commit in progress.
       val fresh = entries.filter {
@@ -46,6 +58,11 @@ def decide(command: Command, s: SessionState): Either[Rejection, Vector[Entry]] 
       else if s.position != Position.NoTurn then Left(Rejection.TurnOpen)
       else Right(Vector(Entry.Ended(outcome, reason)))
 
+/** True when a turn must wait for the person (8.7): `unattended` is at `SessionState.UnattendedTurns`, and no message
+  * of the person waits.
+  */
+private def held(s: SessionState): Boolean = s.unattended >= SessionState.UnattendedTurns && !s.personWaits
+
 /** True when `entry` of a `Commit` is valid at this place of the language of 4.1. An `EffectStarted` needs an `n` above
   * the `n` of each call that its cell started, open or closed. A second intent with the id of an open effect would
   * replace the first, and the first would get no outcome of its own. A replay answers each call by its id, so one id
@@ -54,6 +71,8 @@ def decide(command: Command, s: SessionState): Either[Rejection, Vector[Entry]] 
 private def allowed(s: SessionState, entry: Entry): Boolean =
   entry match
     case Entry.ScopeRecorded(_, _)                      => !s.closed
+    case Entry.Releasing(_)                             => ???
+    case Entry.Released(_)                              => !s.closed && s.position == Position.NoTurn
     case _ if s.closed || s.position == Position.NoTurn => false
     case Entry.StepStarted(i)                           => !s.stopping && s.position == Position.BeforeStep(i)
     case Entry.Acted(_, _, _)                           => !s.stopping &&
@@ -93,5 +112,6 @@ def approvedText(rule: GuardRule): String =
   */
 def sourceOf(command: Command, sender: Source, entry: Entry): Source =
   (command, entry) match
-    case (Command.Grant(_, _, _), Entry.Input(_, _, _)) => Source.Harness
-    case _                                              => sender
+    case (Command.Grant(_, _, _), Entry.Input(_, _, _))     => Source.Harness
+    case (Command.Begin(_, _, _, _), Entry.Activated(_, _)) => Source.Harness
+    case _                                                  => sender

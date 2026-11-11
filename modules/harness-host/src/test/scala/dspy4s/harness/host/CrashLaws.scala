@@ -37,6 +37,28 @@ object CrashProbe:
     scala.Console.flush()
     Thread.sleep(600_000)
 
+/** A host in a child JVM for the crash law of the report pass (CODE_HARNESS_DESIGN.md, 8.6 and 8.7). It opens the owner
+  * `id(1)` and the session `id(2)` of that owner at the root `args(0)`, and sends a message of the owner to the
+  * session. When the turn of the session ends, the hook before the report prints `READY`, and it waits until the test
+  * kills the probe. So the session has its `TurnEnded`, and the owner has no report.
+  */
+object ReportCrashProbe:
+
+  def main(args: Array[String]): Unit =
+    val root    = Path.of(args(0))
+    val runtime = ScriptRuntime(_ => Support.Script(Vector.fill(4)(answer("done"))))
+    val hooks   = HostHooks(beforeReport = (_, _) =>
+      println("READY")
+      scala.Console.flush()
+      Thread.sleep(600_000))
+    val host = LocalHost.startWith(root, _ => runtime, Secrets.none, hooks = hooks)
+      .fold(e => sys.error(e.toString), identity)
+    opened(host, id(1)): Unit
+    opened(host, id(2), Some(config().copy(owner = Owner.Session(id(1))))): Unit
+    host.runAs(id(2), Command.Send(RequestId("m1"), "fake work", Map.empty), Controller.messageSource(id(1)))
+      .left.foreach(e => sys.error(e.toString))
+    Thread.sleep(600_000)
+
 /** The laws of a crash of the host (10.2, 10.3, 15: "crash tests with SIGKILL that also check that no job process
   * stays"). Since the review of the plan, an `exec` runs under the wrapper too, so the law also checks it.
   */
@@ -90,4 +112,39 @@ class CrashLaws extends munit.FunSuite:
         }
       }
     finally place.close()
+  }
+
+  test(
+    "Crash: after a SIGKILL of the host between the TurnEnded of a session and the report to its owner, the open of " +
+      "the owner in the next host commits the report once"
+  ) {
+    withRoot { root =>
+      val java  = ProcessHandle.current().info().command().toScala.getOrElse("java")
+      val probe = ProcessBuilder(
+        java,
+        "-cp",
+        System.getProperty("java.class.path"),
+        "dspy4s.harness.host.ReportCrashProbe",
+        root.toString
+      ).redirectErrorStream(true).start()
+      try assert(awaitLine(probe, "READY", 120), "the probe did not reach the report")
+      finally
+        probe.destroyForcibly(): Unit
+        probe.waitFor(30, TimeUnit.SECONDS): Unit
+      withHost(root, ScriptRuntime(_ => Support.Script(Vector.fill(4)(answer("after"))))) { host =>
+        val child = host.journalOf(id(2)).fold(e => fail(e), identity).map(_.entry)
+        assert(
+          child.exists {
+            case Entry.TurnEnded(TurnOutcome.Replied(_)) => true
+            case _                                       => false
+          },
+          child.toString
+        )
+        val owner   = opened(host, id(1), None)
+        def reports = owner.read(-1).count(l => l.meta.source == Source.Child(id(2)))
+        assert(eventually()(reports == 1), entries(owner).toString)
+        assertEquals(host.reportTo(id(1)), Right(0))
+        assertEquals(reports, 1)
+      }
+    }
   }

@@ -1,6 +1,6 @@
 package dspy4s.harness.host
 
-import dspy4s.harness.kernel.Rejection
+import dspy4s.harness.kernel.{Command, Rejection, SessionId}
 
 import scala.concurrent.duration.*
 
@@ -25,6 +25,11 @@ enum HostError derives CanEqual:
     */
   case OpenFailed(message: String)
 
+  /** The host refuses the call, with the reason: for example a release of the controller, or a session id that is not
+    * valid (8.7).
+    */
+  case Refused(message: String)
+
 /** The id of one activation (10.3). Each commit of the activation goes through its ticket: the commits of the worker,
   * of the effects and of the recorder. After a hard stop whose cell does not end, the writer fences the ticket, so each
   * late commit of that activation gets `HostError.Fenced`.
@@ -43,3 +48,14 @@ final case class WorkerTicket(n: Long) derives CanEqual
   * cell that it stops (6).
   */
 final case class HostLimits(mailbox: Int = 256, grace: FiniteDuration = 5.seconds)
+
+/** Points of a host where a law can stop or slow it. Only the laws set them. */
+final case class HostHooks(
+    /** Runs before the host sends the report `report` of `session` to its owner (8.6). The crash law of the report pass
+      * stops the process here.
+      */
+    beforeReport: (SessionId, Command.Send) => Unit = (_, _) => ()
+)
+
+object HostHooks:
+  val none: HostHooks = HostHooks()

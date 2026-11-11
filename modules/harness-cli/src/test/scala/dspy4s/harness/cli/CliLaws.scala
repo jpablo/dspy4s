@@ -147,7 +147,7 @@ class CliLaws extends munit.FunSuite:
     assertEquals(parseLine("/allow once"), Line.Allow(GrantLifetime.Once, None))
     assertEquals(parseLine("/allow turn"), Line.Allow(GrantLifetime.Turn, None))
     assertEquals(parseLine("/allow session"), Line.Allow(GrantLifetime.Session, None))
-    assertEquals(parseLine("/close"), Line.Close)
+    assertEquals(parseLine("/close"), Line.Close(SessionOutcome.Parked, "the person closed the session"))
     assertEquals(parseLine("/quit"), Line.Quit)
     assertEquals(parseLine("/fake"), Line.Unknown("/fake"))
     assertEquals(parseLine("fix the build"), Line.Message("fix the build"))
@@ -176,9 +176,9 @@ class CliLaws extends munit.FunSuite:
       commandsFor(Line.Message("hello"), SessionState.initial, request),
       Right(Vector(Command.Send(request, "hello", Map.empty)))
     )
-    commandsFor(Line.Close, SessionState.initial, request) match
-      case Right(Vector(Command.Close(SessionOutcome.Parked, _))) => ()
-      case other                                                  => fail(other.toString)
+    commandsFor(Line.Close(SessionOutcome.Parked, "done"), SessionState.initial, request) match
+      case Right(Vector(Command.Close(SessionOutcome.Parked, "done"))) => ()
+      case other                                                       => fail(other.toString)
     assertEquals(commandsFor(Line.Quit, SessionState.initial, request), Right(Vector.empty))
     assert(commandsFor(Line.Unknown("/fake"), SessionState.initial, request).left.exists(_.contains("/help")))
   }

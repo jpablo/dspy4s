@@ -26,24 +26,33 @@ enum Position derives CanEqual:
 
 /** The state of a session: a fold of its journal (4.2). */
 final case class SessionState(
-    config  : SessionConfig,
-    nextSeq : Long,
-    position: Position,
-    stopping: Boolean,
-    closed  : Boolean,
-    waiting : Int,                     // inputs that no step has seen, since the last stop
-    open    : Map[EffectId, OpenCall], // effects with an intent and no outcome
-    lastCall: Int,                     // the largest `n` of an `EffectStarted` in the open cell, or -1
-    store   : Map[String, Json],
-    inputs  : Map[String, Json],       // the values of the input fields, apart from the store (5.1)
-    requests: Set[RequestId],
-    grants  : Set[ActiveGrant],
-    pending : Set[GuardRule],          // the pending calls, which wait for a person (5.5)
-    lastTurn: Long,                    // the `seq` of the last `TurnStarted`
-    jobs    : Map[EffectId, JobRecord] // each `spawn` that has an intent
+    config     : SessionConfig,
+    nextSeq    : Long,
+    position   : Position,
+    stopping   : Boolean,
+    closed     : Boolean,
+    waiting    : Int, // inputs that no step has seen, since the last stop
+    open       : Map[EffectId, OpenCall], // effects with an intent and no outcome
+    lastCall   : Int, // the largest `n` of an `EffectStarted` in the open cell, or -1
+    store      : Map[String, Json],
+    inputs     : Map[String, Json], // the values of the input fields, apart from the store (5.1)
+    requests   : Set[RequestId],
+    grants     : Set[ActiveGrant],
+    pending    : Set[GuardRule], // the pending calls, which wait for a person (5.5)
+    lastTurn   : Long, // the `seq` of the last `TurnStarted`
+    jobs       : Map[EffectId, JobRecord], // each `spawn` that has an intent
+    releasing  : Boolean = false, // a `Releasing` came, so the session runs its release plan (8.7)
+    unattended : Int     = 0,     // the turns in a row that no message of the person started (8.7)
+    personWaits: Boolean = false  // an `Input` of the person came since the last `TurnStarted`
 ) derives CanEqual
 
 object SessionState:
+
+  /** The most turns in a row that no message of the person starts (8.7). At the limit, a message from another session,
+    * the harness or a job waits in the journal, and no turn starts until the person writes. So two sessions cannot send
+    * messages to each other with no end, and the start of a host does not go on with them.
+    */
+  val UnattendedTurns: Int = 8
 
   /** The state before the first entry: a closed session with no turn. The first entry of a journal is an `Activated`
     * with the real configuration, so nothing reads this one. It has the least authority.
@@ -125,6 +134,8 @@ def evolve(s: SessionState, logged: Logged): SessionState =
         pending = s.pending.filterNot(rule.covers)
       )
     case Entry.ScopeRecorded(_, _) => base
+    case Entry.Releasing(_)        => ???
+    case Entry.Released(_)         => base
     case Entry.TurnEnded(_)        => base.copy(
         position = Position.NoTurn,
         stopping = false,

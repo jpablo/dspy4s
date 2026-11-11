@@ -1,6 +1,6 @@
 package dspy4s.harness
 
-import dspy4s.harness.guest.{Children, Data, Files, JobId, JobStatus, Llm, Shell, Store, Turn}
+import dspy4s.harness.guest.{Children, Data, Files, JobId, JobStatus, Llm, Sessions, Shell, Store, Turn}
 import dspy4s.harness.kernel.{EffectId, EffectResult, Entry}
 import dspy4s.harness.repl.Bindings
 import dspy4s.harness.sandbox.{Layout, Profile}
@@ -235,12 +235,14 @@ final class JournalTurn(journal: Journal, clock: () => Long, zooms: ZoomSource =
   *
   * The handlers of the task mode have a record: files, shell, store, the turn, and since phase 5 the LM (`llmQuery`,
   * `llmQueryBatched`) and the children (`rlm`, `rlmBatched`). The value of each call goes into the journal through its
-  * `Data`. A child has its own journal, so the journal of the parent has one effect for each `rlm`. A binding of the
-  * network or of the sessions is an error until its phase.
+  * `Data`. A child has its own journal, so the journal of the parent has one effect for each `rlm`. Since phase 9 the
+  * calls of `Sessions` have a record too (`recordedSessions`). A binding of the network is an error until its phase.
   */
 def recorded(bindings: Bindings, recorder: Recorder, root: Option[Path] = None): Bindings =
-  if bindings.network.isDefined || bindings.sessions.isDefined then
-    throw IllegalArgumentException("recorded has a record only for files, shell, store, llm, children and turn")
+  if bindings.network.isDefined then
+    throw IllegalArgumentException(
+      "recorded has a record only for files, shell, store, llm, children, sessions and turn"
+    )
   val base                               = root.map(Layout.real)
   def path(text : String): String        = base.fold(text)(_.resolve(text).normalize.toString)
   def args(pairs: (String, Json)*): Json = Json.Object(Chunk.from(pairs))
@@ -314,5 +316,14 @@ def recorded(bindings: Bindings, recorder: Recorder, root: Option[Path] = None):
           )(
             inner.rlmBatched[A](tasks)
           )
-    }
+    },
+    sessions = bindings.sessions.map(recordedSessions(_, recorder))
   )
+
+/** `recorded(h)` of 5.3 for the handler of `Sessions` (8.7): the operations `sessions`, `tell`, `start`, `observe` and
+  * `zoom`, each with its arguments, and the value of each call through its `Data`. The arguments of `start` hold
+  * `kind`, the name of the case of its scope, so a guard rule can ask for a `Directory` scope. `zoom` of another
+  * session has the arguments `session` and `ref`, so a guard rule can tell it from `zoom(ref)` of the turn. `tell` and
+  * `start` are not read-only, so their intents reach the disk before they run (4.1).
+  */
+private def recordedSessions(inner: Sessions, recorder: Recorder): Sessions = ???

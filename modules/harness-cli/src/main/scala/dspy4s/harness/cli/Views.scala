@@ -140,6 +140,7 @@ private def sessionWord(status: SessionStatus): String =
     case SessionStatus.Idle           => "idle"
     case SessionStatus.InTurn         => "in a turn"
     case SessionStatus.Stopping       => "stopping"
+    case SessionStatus.Releasing      => "releasing"
     case SessionStatus.Ended(outcome) => s"ended ($outcome)"
 
 /** The command of a job in quotes, or its name when the journal has no command for it. */

@@ -191,8 +191,17 @@ object Cli:
       case Left(reason) => NoModel(s"no model: $reason")
 
   /** The loop of the client on plain streams: `loop` with a `PlainConsole` of `in` and `out`. */
-  def loop(handle: SessionHandle, in: BufferedReader, out: PrintStream, script: Boolean = false): Boolean =
-    loop(handle, PlainConsole(in, out), script)
+  def loop(
+      handle: SessionHandle,
+      in    : BufferedReader,
+      out   : PrintStream,
+      script: Boolean      = false,
+      desk  : Option[Desk] = None
+  ): Boolean = loop(handle, PlainConsole(in, out), script, desk)
+
+  /** The loop of the client with no desk: one session, as in phase 7. */
+  def loop(handle: SessionHandle, console: ClientConsole, script: Boolean): Boolean =
+    loop(handle, console, script, None)
 
   /** The loop of the client: a thread prints `entryText` of each entry of the feed of `handle`, and another thread
     * reads the lines of `console` and runs the commands of `commandsFor`.
@@ -216,8 +225,14 @@ object Cli:
     *     turn. So `printf 'm1\nm2\n' | cli --script` gives two turns, and the second message starts the second turn. A
     *     line waits also for a turn that started before it, for example after a reopen or a job message. `/quit` and
     *     `/stop` wait too, so a person stops a script with the end of the process.
+    *   - With a desk (8.7), `/sessions` prints the card of each session, `/open ID` shows the session `ID`, `/reopen
+    *     ID` opens an ended session again and shows it, and `/controller` shows the controller: the client then
+    *     subscribes to the feed of that session, prints its entries, and sends the commands to it. `/close OUTCOME`
+    *     prints the release plan, asks the person to confirm each irreversible item with a line `yes`, and runs the
+    *     release through the desk. With no desk, these lines print that the client has one session, and `/close
+    *     OUTCOME` sends `Close` with no release.
     */
-  def loop(handle: SessionHandle, console: ClientConsole, script: Boolean): Boolean =
+  def loop(handle: SessionHandle, console: ClientConsole, script: Boolean, desk: Option[Desk]): Boolean =
     // The state before the feed, so an entry that commits between the two reads is in the feed or in the read after
     // it, and `Shown` shows it once (10.2: a client misses nothing).
     val before = handle.state
@@ -265,16 +280,17 @@ object Cli:
         case Line.Status        =>
           val now = handle.state
           print(statusText(now, handle.jobStatus, pendingCalls(now, handle.read(now.lastTurn))))
-        case Line.Help            => print(helpText)
-        case Line.Reasoning(next) =>
+        case Line.Help                            => print(helpText)
+        case _ if deskLine(parsed, desk.nonEmpty) => deskStep(desk, parsed, handle, console, print): Unit
+        case Line.Reasoning(next)                 =>
           view.set(next)
           print(s"The client now shows ${reasoningWords(next)} of each step.")
         case _ =>
           // The person must see a refusal of `Close`, `Allow` and `StopJob`, so these wait for the commit.
           val waits = script ||
             (parsed match
-              case Line.Close | Line.Allow(_, _) | Line.StopJob(_) => true
-              case _                                               => false)
+              case Line.Close(_, _) | Line.Allow(_, _) | Line.StopJob(_) => true
+              case _                                                     => false)
           commandsFor(parsed, handle.state, RequestId(UUID.randomUUID().toString), asked) match
             case Left(error)     => print(error)
             case Right(commands) => commands.foreach { command =>
@@ -311,6 +327,27 @@ object Cli:
     feed.close()
     if failed then print("The session stopped: its host can write no more. The journal keeps each committed entry.")
     !failed
+
+  /** True for a line that goes through the desk (8.7): `/sessions`, `/open`, `/reopen` and `/controller`, and `/close`
+    * when the client has a desk.
+    */
+  private def deskLine(line: Line, desk: Boolean): Boolean =
+    line match
+      case Line.Sessions | Line.Open(_) | Line.Reopen(_) | Line.Controller => true
+      case Line.Close(_, _)                                                => desk
+      case _                                                               => false
+
+  /** Runs a desk line of the loop (8.7), and gives the session that the client shows after it. The confirmation of an
+    * irreversible item of a release is the next line of `console`. A `/close` of the controller prints that the
+    * controller never ends.
+    */
+  private def deskStep(
+      desk   : Option[Desk],
+      line   : Line,
+      handle : SessionHandle,
+      console: ClientConsole,
+      print  : String => Unit
+  ): SessionHandle = ???
 
 /** The words of a view of the reasoning, for the answer to `/reasoning`. */
 private def reasoningWords(view: ReasoningView): String =

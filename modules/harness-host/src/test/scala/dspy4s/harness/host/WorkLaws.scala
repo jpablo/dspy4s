@@ -83,6 +83,84 @@ class WorkLaws extends munit.FunSuite:
     assertEquals(WorkRuntime.defaultGuard(Mode.local), Guard.allowAll)
   }
 
+  test("Work: taskOf gives the task of the controller, the goal and submit for an owned session, else chatTask (8.7)") {
+    val scope = Path.of("/tmp/fake-scope")
+    val home  = Path.of("/tmp/fake-home")
+    val mine  = WorkRuntime.config(scope, "fake-model", limits)
+    assertEquals(WorkRuntime.taskOf(id(1), mine, scope), WorkRuntime.chatTask(scope))
+    assertEquals(
+      WorkRuntime.taskOf(Controller.id, Controller.config(home, "fake-model", limits), home),
+      Controller.task(home)
+    )
+    val owned = mine.copy(owner = Owner.Session(Controller.id), goal = Some("Fix the fake build"))
+    val task  = WorkRuntime.taskOf(id(2), owned, scope)
+    assert(task.contains("Fix the fake build") && task.contains("submit") && task.contains(scope.toString), task)
+  }
+
+  test("Work: ownedConfig gives the owner, the goal, the strategy, workMode met with the ceiling and the model (8.7)") {
+    val parent = Controller.config(Path.of("/tmp/fake-home"), "fake-parent-model", limits)
+    val scope  = Scope.Directory("/tmp/fake-scope")
+    val c      = WorkRuntime.ownedConfig("Fix it", scope, StrategyName.Window, Controller.id, parent, limits)
+    assertEquals(
+      (c.kind, c.steps, c.owner, c.goal),
+      (TurnKind.Chat, limits.steps, Owner.Session(Controller.id), Some("Fix it"))
+    )
+    assertEquals((c.strategy, c.scope, c.model), (StrategyName.Window, scope, parent.model))
+    assertEquals((c.mode, c.ceiling), (WorkRuntime.workMode, WorkRuntime.workMode))
+    assertEquals(c.guard, WorkRuntime.defaultGuard(WorkRuntime.workMode))
+    val narrow = parent.copy(ceiling = Mode.readOnly)
+    val low    = WorkRuntime.ownedConfig("Fix it", scope, StrategyName.Window, Controller.id, narrow, limits)
+    assertEquals(low.mode, WorkRuntime.workMode.meet(Mode.readOnly))
+  }
+
+  test(
+    "Work: after each turn in a git folder, the journal has ScopeRecorded with the head, and no git gives none (8.7)"
+  ) {
+    def git(dir: Path, args: String*): String =
+      val process = ProcessBuilder(("git" +: "-C" +: dir.toString +: args)*).redirectErrorStream(true).start()
+      val output  = String(process.getInputStream.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).trim
+      assert(process.waitFor(30, TimeUnit.SECONDS) && process.exitValue() == 0, output)
+      output
+    assume(scala.util.Try(ProcessBuilder("git", "--version").start().waitFor() == 0).getOrElse(false), "no git")
+    val model = sessionModel(policy("one", None), policy("two", None))
+    work(model) { (folder, handle) =>
+      git(folder, "init", "-q", "-b", "main"): Unit
+      git(
+        folder,
+        "-c",
+        "user.email=fake@example.test",
+        "-c",
+        "user.name=Fake",
+        "commit",
+        "-q",
+        "--allow-empty",
+        "-m",
+        "x"
+      ): Unit
+      val head = git(folder, "rev-parse", "HEAD")
+      assertEquals(handle.send(message("m1")), Right(()))
+      assert(
+        eventually(60)(entries(handle).exists {
+          case Entry.ScopeRecorded(`head`, _) => true
+          case _                              => false
+        }),
+        entries(handle).toString
+      )
+    }
+    work(sessionModel(policy("one", None))) { (_, handle) =>
+      assertEquals(handle.send(message("m1")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 1))
+      Thread.sleep(500)
+      assert(
+        !entries(handle).exists {
+          case Entry.ScopeRecorded(_, _) => true
+          case _                         => false
+        },
+        entries(handle).toString
+      )
+    }
+  }
+
   // ── Turns ──
 
   test("Work: a message runs a cell in the scope of the session, and the reply ends the turn Replied") {

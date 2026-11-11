@@ -74,7 +74,11 @@ enum JobSelector derives Schema, CanEqual:
   * Step ::= StepStarted [ Acted [ Cell ] ]
   * Cell ::= ( EffectStarted | EffectDone )* Observed
   * }}}
-  * `Input`, `StopRequested`, `JobsStopRequested`, `Granted` and `ScopeRecorded` can occur at any place.
+  * `Input`, `StopRequested`, `JobsStopRequested`, `Granted` and `ScopeRecorded` can occur at any place. `Releasing`
+  * occurs only with no open turn, and each `Released` comes after it (8.7):
+  * {{{
+  * Release ::= Releasing JobsStopRequested? Released* Ended
+  * }}}
   */
 enum Entry derives Schema, CanEqual:
 
@@ -112,6 +116,17 @@ enum Entry derives Schema, CanEqual:
   /** The git head of the scope, at the end of each turn. */
   case ScopeRecorded(head: String, clean: Boolean)
 
+  /** The start of the release of the session with its plan (CODE_HARNESS.md, 7.9; 8.7). After it the session takes no
+    * message and no grant, and no turn starts, so a turn never runs in a folder that the release removes. After a
+    * crash, the host goes on from the first item with no `Released`.
+    */
+  case Releasing(plan: Vector[ReleaseItem])
+
+  /** One step of the release plan of the session, after its `Releasing` and before its `Ended` (CODE_HARNESS.md, 7.9;
+    * 8.7).
+    */
+  case Released(step: ReleaseStep)
+
   case TurnEnded(outcome: TurnOutcome)
 
   case Ended(outcome: SessionOutcome, reason: String)
@@ -135,10 +150,13 @@ val readOnlyOps: Set[String] = Set(
 )
 
 /** True for an entry that reaches the disk before `commit` returns (4.1): an `Input`, because a sender has an answer,
-  * an `Activated`, because a parent has a child, and an `EffectStarted` of an operation that is not read-only.
+  * an `Activated`, because a parent has a child, an `EffectStarted` of an operation that is not read-only, a
+  * `Releasing`, because the plan must survive a crash in it, and a `Released`, because its step changed the scope
+  * (8.7).
   */
 def needsFlush(entry: Entry): Boolean =
   entry match
     case Entry.EffectStarted(_, op, _)                => !readOnlyOps(op)
     case Entry.Input(_, _, _) | Entry.Activated(_, _) => true
+    case Entry.Releasing(_) | Entry.Released(_)       => true
     case _                                            => false

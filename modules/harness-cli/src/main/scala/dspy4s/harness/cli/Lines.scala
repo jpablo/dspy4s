@@ -1,8 +1,8 @@
 package dspy4s.harness.cli
 
 import dspy4s.harness.host.jobName
-import dspy4s.harness.kernel.{Command, EffectId, GrantLifetime, GuardRule, JobSelector, RequestId, SessionOutcome}
-import dspy4s.harness.kernel.SessionState
+import dspy4s.harness.kernel.{Command, EffectId, GrantLifetime, GuardRule, JobSelector, RequestId, SessionId}
+import dspy4s.harness.kernel.{SessionOutcome, SessionState}
 
 /** A line that the person types (CODE_HARNESS_DESIGN.md, 10.3 and 5.5). */
 enum Line derives CanEqual:
@@ -38,8 +38,25 @@ enum Line derives CanEqual:
   /** `/help`: the commands, one line each. */
   case Help
 
-  /** `/close`: the end of the session. */
-  case Close
+  /** `/close`: the end of the session with an outcome (8.7). `/close` and `/close parked` give `Parked`,
+    * `/close merged` gives `Merged`, `/close abandoned REASON` gives `Abandoned(REASON)`, and `/close replaced ID`
+    * gives `Replaced(ID)`. With a desk, the client shows the release plan, and the host runs it before the end.
+    */
+  case Close(outcome: SessionOutcome, reason: String)
+
+  /** `/sessions`: the cards of the sessions of the host (8.7). It needs a desk. */
+  case Sessions
+
+  /** `/open ID`: the client shows the session `ID` (8.7). It needs a desk. */
+  case Open(session: SessionId)
+
+  /** `/controller`: the client shows the controller again (8.7). It needs a desk. */
+  case Controller
+
+  /** `/reopen ID`: the session `ID`, which has ended, opens again (8.7). `/open` of an ended session only says so. It
+    * needs a desk.
+    */
+  case Reopen(session: SessionId)
 
   /** `/quit`: the end of the client. The session stays open for a later client. */
   case Quit
@@ -73,10 +90,29 @@ private def command(words: List[String]): Option[Line] =
     case List("/status")          => Some(Line.Status)
     case List("/help")            => Some(Line.Help)
     case List("/reasoning", view) => ReasoningView.values.find(_.toString.equalsIgnoreCase(view)).map(Line.Reasoning(_))
-    case List("/close")           => Some(Line.Close)
+    case "/close" :: rest         => close(rest)
+    case List("/sessions")        => Some(Line.Sessions)
+    case List("/open", id)        => Some(Line.Open(SessionId(id)))
+    case List("/controller")      => Some(Line.Controller)
+    case List("/reopen", id)      => Some(Line.Reopen(SessionId(id)))
     case List("/quit")            => Some(Line.Quit)
     case List("/wait", seconds)   => seconds.toIntOption.filter(_ >= 0).map(Line.Wait(_))
     case _                        => None
+
+/** The words after `/close`: no word or `parked` gives `Parked`, `merged` gives `Merged`, `abandoned REASON` gives
+  * `Abandoned(REASON)`, and `replaced ID` gives `Replaced(ID)` (8.7).
+  */
+private def close(words: List[String]): Option[Line] =
+  words match
+    case Nil | List("parked")                     => Some(Line.Close(SessionOutcome.Parked, closed))
+    case List("merged")                           => Some(Line.Close(SessionOutcome.Merged, closed))
+    case "abandoned" :: reason if reason.nonEmpty =>
+      Some(Line.Close(SessionOutcome.Abandoned(reason.mkString(" ")), reason.mkString(" ")))
+    case List("replaced", id) => Some(Line.Close(SessionOutcome.Replaced(SessionId(id)), s"$closed: replaced by $id"))
+    case _                    => None
+
+/** The reason of a `Close` that the person typed. */
+private val closed = "the person closed the session"
 
 /** The words after `/allow`: an optional number of a call, then an optional lifetime. */
 private def allow(words: List[String]): Option[Line] =
@@ -114,7 +150,14 @@ val commandHelp: Vector[(String, String)] = Vector(
   "/reasoning off|short|full"      -> "set how much of the reasoning of a step the client shows",
   "/wait SECONDS"                  -> "wait before the next line, for a script",
   "/help"                          -> "show this text",
-  "/close"                         -> "end the session",
+  "/close"                         -> "end the session as parked; with --controller, show and run its release plan",
+  "/close merged"                  -> "end the session as merged",
+  "/close abandoned REASON"        -> "end the session as abandoned, with the reason",
+  "/close replaced ID"             -> "end the session as replaced by the session ID",
+  "/sessions"                      -> "list the sessions of the host (with --controller)",
+  "/open ID"                       -> "show the session ID (with --controller)",
+  "/reopen ID"                     -> "open again the session ID, which has ended (with --controller)",
+  "/controller"                    -> "show the controller again (with --controller)",
   "/quit"                          -> "end the client. The session stays open for --session"
 )
 
@@ -139,9 +182,10 @@ def jobOrder(state: SessionState): Vector[EffectId] = state.jobs.keys.toVector.s
   *   - `Allow` with the number N gives one `Grant` for the rule that the entry N asked for, only while that rule is
   *     pending. A number is the `seq` of an entry, so it does not change when other calls change.
   *   - `StopJob` gives `StopJobs(One(job))` for a job of `current`, or an error.
-  *   - `Close` gives `Close(Parked)`.
-  *   - `Jobs`, `Status`, `Reasoning`, `Help`, `Quit` and `Wait` give no command, because they change only the client.
-  *     `Unknown` gives an error that points to `/help`.
+  *   - `Close` gives `Close` with its outcome and its reason. A client with a desk runs the release instead (8.7).
+  *   - `Jobs`, `Status`, `Reasoning`, `Help`, `Quit`, `Wait`, `Sessions`, `Open`, `Reopen` and `Controller` give no
+  *     command, because they change only the client. The client runs `Sessions`, `Open`, `Reopen` and `Controller`
+  *     through its desk. `Unknown` gives an error that points to `/help`.
   *
   * The client side of `Grant` (5.5): only a client of the user sends `Grant`. To refuse, the person sends a plain
   * message.
@@ -176,7 +220,8 @@ def commandsFor(
       if current.jobs.contains(job) then
         Right(Vector(Command.StopJobs(JobSelector.One(job), s"the person stopped the job ${jobName(job)}")))
       else Left(s"The session has no job ${jobName(job)}. /jobs lists the jobs.")
-    case Line.Close         => Right(Vector(Command.Close(SessionOutcome.Parked, "the person closed the session")))
-    case Line.Unknown(text) => Left(s"$text is not a command. /help lists the commands.")
+    case Line.Close(outcome, reason) => Right(Vector(Command.Close(outcome, reason)))
+    case Line.Unknown(text)          => Left(s"$text is not a command. /help lists the commands.")
     // These lines change only the client.
-    case Line.Jobs | Line.Status | Line.Reasoning(_) | Line.Help | Line.Quit | Line.Wait(_) => Right(Vector.empty)
+    case Line.Jobs | Line.Status | Line.Reasoning(_) | Line.Help | Line.Quit | Line.Wait(_) | Line.Sessions |
+        Line.Open(_) | Line.Controller | Line.Reopen(_) => Right(Vector.empty)

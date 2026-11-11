@@ -61,6 +61,11 @@ final class Writer(
     if !enqueue(Run(command, sender, ticket, reply)) then Left(endError)
     else awaitUninterruptibly(reply)
 
+  /** Puts `command` into the mailbox when it has room, and returns at once: true when the command is in the mailbox.
+    * The reporter of the host uses it, so a full mailbox of an owner never stops it (8.7).
+    */
+  def tryPost(command: Command, sender: Source): Boolean = ???
+
   /** Puts `command` into the mailbox, and returns before its commit (10.1: `send`). */
   def post(command: Command, sender: Source): Either[HostError, Unit] =
     Either.cond(enqueue(Run(command, sender, None, CompletableFuture())), (), endError)
@@ -140,7 +145,7 @@ final class Writer(
   private def commit(command: Command, sender: Source): Either[HostError, SessionState] =
     if stopped then Left(endError)
     else
-      decide(command, current).left.map(HostError.Rejected(_)).flatMap { added =>
+      decide(command, current, sender).left.map(HostError.Rejected(_)).flatMap { added =>
         if added.isEmpty then Right(current)
         else
           var s    = current
