@@ -1738,7 +1738,12 @@ These points are proposals for the review:
 - The host trait of 10.1 is `SessionHandle`, because the guest API already has the data type `SessionRef`. It also
   has `run`, which waits for the commit, so a client can show a refusal.
 - A session id is a random UUID. The root of the CLI is `<home>/.dspy4s/harness`, and its command line is
-  `[--root DIR] [--session ID] [FOLDER]`.
+  `[--root DIR] [--session ID] [--script] [FOLDER]`.
+- A live test drives the CLI with no person (2026-11-11). With `--script`, each line waits until the session has no
+  open turn, each command goes through `run`, and the end of the input waits for the open turn. So each message
+  starts its own turn, in the order of the lines. With `DSPY_TRACE=FILE`, each model call goes to `FILE` as one JSON
+  line: the messages of the request, the text and the reasoning of the reply, or the error, and the time. The mask of
+  the client hides the secrets of each text. `scripts/live/chat.sh` builds the CLI and runs it in the script mode.
 - `HostError` holds a rejection, a failed write, the end of a session, a fenced activation and an open that failed.
   `WriterJournal` gives a rejection as a `Rejection`, and it throws for the other errors, so `drive` stops and the
   turn stays open, as after a crash.
