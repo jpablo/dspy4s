@@ -381,7 +381,7 @@ class CliLaws extends munit.FunSuite:
     builder.environment().keySet().removeIf(name => name.startsWith("DSPY_") || EnvFile.connection.contains(name)): Unit
     builder.start()
 
-  test("CLI start: the time from the start of a JVM to the first prompt, and the end at /quit") {
+  test("CLI start: the time from the start of a JVM to the first prompt, and the end at /quit, with no SLF4J warning") {
     val root  = Files.createTempDirectory("dspy4s-cli-test-")
     val scope = Files.createDirectories(root.resolve("work"))
     val start = System.nanoTime()
@@ -394,6 +394,8 @@ class CliLaws extends munit.FunSuite:
     println(f"CLI start: $seconds%.1f s from the start of the JVM to the end at /quit")
     assertEquals(cli.exitValue(), 0, output)
     assert(output.contains("session"), output)
+    // sqlite-jdbc logs through SLF4J when it finds SLF4J, and with no binding SLF4J prints three lines at each start.
+    assert(!output.contains("SLF4J"), output)
     Support.remove(root)
   }
 
