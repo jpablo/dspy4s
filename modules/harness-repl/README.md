@@ -52,6 +52,8 @@ finally repl.close()
 | `SubmitSignal` | The signal of `submit`. It is a `ControlThrowable`, so `NonFatal` and `Try` do not catch it. |
 | `topLevelNames` / `lostNames` | The top-level names of a cell, from the parser only, and the note of lost names. |
 | `hint` | A hint after a compile error that is hard for a model to read, for example a top-level `var`, a top-level `val` that needs an explicit type, a capability in a place that must be pure, or a derivation of `Data` that goes too deep. |
+| `ApiReference` | The API reference of a mode: the parts of the source text of the guest API that compile in a cell of that mode. A trait whose capability the mode does not give goes, with its members and doc comments. The harness and the MCP server give it. |
+| `Capability` | The table of the seven capabilities: the trait, the level in a mode, and the given of the preamble. The givens of a REPL and `ApiReference` both read it. |
 | `HarnessDriver` / `FlagRendering` | The `ReplDriver` of the harness. `FlagRendering` records whether an evaluation threw, and it cuts the echo of a value to 400 characters, with a note. |
 
 ## Design notes
@@ -87,13 +89,16 @@ finally repl.close()
 | `dspy4s/harness/repl/Guards.scala` | the gate of the guest API calls, the gated handlers, and `HeapGuard` |
 | `dspy4s/harness/repl/Names.scala` | `topLevelNames` and `lostNames` |
 | `dspy4s/harness/repl/Hints.scala` | `hint` |
+| `dspy4s/harness/repl/Capability.scala` | `Capability` and its table |
+| `dspy4s/harness/repl/ApiReference.scala` | `ApiReference` |
 
 ## Tests
 
 Run `sbt harnessRepl/test` from the root of the repository. `ScalaReplLaws` runs real cells. It checks the givens of
 each mode, the types of a preamble, `submit`, and the definitions that stay. It also checks the clock of a cell, the
-second try, and the heap guard. `ReplLaws` checks the top-level names, the note of lost names, and the hints. The tests do not run in
-parallel, because the heap guard is one for the JVM.
+second try, and the heap guard. `ReplLaws` checks the top-level names, the note of lost names, and the hints.
+`ApiReferenceLaws` checks the text that the filter of the API reference keeps. The tests do not run in parallel,
+because the heap guard is one for the JVM.
 
 ## Relation to the design
 

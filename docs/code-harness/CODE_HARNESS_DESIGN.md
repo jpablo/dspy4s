@@ -477,6 +477,19 @@ with `get(url)` behind `httpGet`, for the review. `Sessions` has the signatures 
 notation header, is the API reference in the prompt. A search function and the reference on demand can come later, for
 a large API.
 
+The rules of the API reference:
+
+- The reference holds only the parts of that text that compile in the mode of the session. A trait whose capability
+  the mode does not give goes, an `update def` needs `C^`, and a function of `api` needs each capability of its
+  `using` clauses. A part that goes takes its doc comment with it. `ApiReference` of `harness-repl` reads the source
+  text and the table that also makes the givens of the REPL, so the reference and the compiler agree. The harness and
+  the MCP server give this reference.
+- The session types `SessionRef`, `Scope` and `StrategyName` are `@assumeSafe`, so a cell can make them, for example
+  for `start`. Their `Schema` comes from a file with no capture checking, because the derivation of a `Schema` with
+  capture checking exceeds the recursion limit of the compiler.
+- The live sessions of 2026-11-10 gave these rules. The reference was the whole text, and a model in a work session
+  told the person that it could use the network, other sessions and `rlm`. A cell that called them did not compile.
+
 **`Data` is the type of a value that a later cell, another session or the host reads back with a type.** Text has no
 `Data`: `println`, the printed result of a cell, `write`, `exec` and `tell` take text. Safe code cannot name the
 `Schema` of zio-blocks: `store("k", 1)` with `A: Schema` gives "Cannot refer to value int in object Schema from safe
@@ -760,6 +773,10 @@ compare each backend with these observations.
 - A proposal: `exec` gives the standard output and the standard error as one text. A last line tells about a cut of
   the output, the end of the time limit, and an exit code that is not 0. The time limit stops the command and each
   child that the handler saw.
+- A person can delete the folder of the scope after `open`. So the shell checks the folder before each command of
+  `exec` and of `spawn`. When the folder is not there, the call fails with a text that names the folder and says that
+  it does not exist. The text of the JDK names only the program, and a model read it as a missing `bash`. The live
+  sessions of 2026-11-10 gave this rule.
 
 ### 5.5 Approvals: a cell never waits for a person
 
@@ -933,6 +950,7 @@ the journal does not hold it. A function that `Classified.map` runs can leak a b
 | "is not included in the allowed capture set" after the second try | A capability in a place that must be pure | The name of the capability |
 | "Found: (x$1: (String, Vector[String]{val prefix1: ..." | A `Vector` in a pair, for example `groupBy(f).map { case (k, v) => ... }` | `.view.mapValues`, `groupMapReduce` or `.toList` |
 | "Found: ((Array[(String)?]^{any.rd}))?^{x1.rd}" | `case Array(x, y)` inside `collect` | `.toList`, and then `case List(x, y)` |
+| "Line 1: empty quoted identifier" | A Markdown fence ```` ```scala ```` around the code, which the harness did not remove (9) | The code field holds only Scala code, with no ```` ``` ```` fence |
 
 The session has two kinds of state between cells:
 
@@ -1282,6 +1300,13 @@ The proofs of phase 4 added these points, also for the review:
 - The chat adapter keeps the text `null` of an optional string field, as DSPy does. So the harness reads a code of
   `null` or `None` as no code, and the first instructions of the policy tell the model to leave out the field `code`
   in a step with no code.
+- The field `code` holds only Scala code. A model can put the code in one Markdown fence, with ```` ``` ```` and an
+  optional word for the language on the first line, and ```` ``` ```` at the end. A fence does not parse. So
+  `callPolicy` removes one outer fence after it strips the white space around the field, and `Acted` and the history
+  hold the code with no fence. A fence inside the code, for example in a string, stays. A code that is empty after
+  this is no code. A fence that the harness does not find gets the hint of 6. The live sessions of 2026-11-10 gave
+  this rule: the model put each cell in a fence, the window showed the fence of the failed step again, and one habit
+  cost five steps of ten.
 
 A code review of phase 4 on 2026-11-09 added these rules:
 
@@ -1436,6 +1461,11 @@ Pekko host stays possible.
   flag after its put, so a message after the last drain also fails. So a call after the end gets an error, and it does
   not wait for ever.
 - **A failed write.** It ends this session only. Each caller that waits gets the error, and the other sessions go on.
+- **The folder of the scope.** `open` with a configuration refuses a `Home`, `Directory` or `Worktree` scope whose
+  path is not an existing folder. `OpenFailed` names the path. The check comes before the lock and the file, so a
+  refused open makes no journal. The harness makes the folder of a `Scratch` or a `Fork` scope, so these have no
+  check. An open with no configuration has no check, so a client can still read the journal of a session whose
+  folder is gone. The live sessions of 2026-11-10 gave this rule.
 - **Feeds.** The writer publishes an entry only after its commit, and it never waits for a client. If the queue of a
   client is full, the writer empties it and marks the client as `Behind`. The client subscribes again, reads the
   journal from its last `seq`, and skips each entry with a `seq` that it has. So it misses nothing.
@@ -1585,6 +1615,10 @@ These points are proposals for the review:
   change.
 - A work session reuses `HarnessEffects`. The REPL lives as long as the activation, so a value of a turn stays for
   the next turns.
+- A chat turn has its own task, `WorkRuntime.chatTask`: the instructions of the policy and the folder of the session.
+  A chat turn ends with a step with no code, so the task has no text about input fields and no text about `submit`.
+  Before this rule, a chat turn had the task of a program call, which told the model to give the result with
+  `submit`. The live sessions of 2026-11-10 gave this rule.
 - The job table belongs to the open session in the host, not to the activation, so a new activation keeps the jobs.
   `spawn` finds its `JobId` from its own open effect in the journal. `stopJob` is `StopJobs(One(job))`, and the table
   gives the end of a job with `report` to the host, which posts the message to the writer.

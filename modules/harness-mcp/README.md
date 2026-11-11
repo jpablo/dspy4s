@@ -30,8 +30,9 @@ claude mcp add dspy4s-harness -- java -cp "$CP" dspy4s.harness.mcp.McpServer /pa
 
 ## Main concepts
 
-- **Two tools.** `run_cell(code)` runs one cell and gives its output. `api_reference` gives the source text of the
-  guest API, after a header that tells the notation and the capabilities of this server.
+- **Two tools.** `run_cell(code)` runs one cell and gives its output. `api_reference` gives the parts of the source
+  text of the guest API that compile in the mode of this server, after a header that tells the notation and the
+  capabilities of this server.
 - **One REPL for all calls.** A later cell sees the definitions of the earlier cells that completed. One cell runs at
   a time.
 - **A read-only mode.** `McpServer.mode` gives the bare `Files` and `Store^`, and nothing else. `exec` needs `Files^`,
