@@ -1,15 +1,15 @@
 package dspy4s.harness.host
 
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.harness.{Budget, HarnessLimits, Journal}
+import dspy4s.harness.{Budget, Journal}
 import dspy4s.harness.guest.{Llm, Scope, SessionCard, SessionRef, Sessions, StrategyName}
-import dspy4s.harness.kernel.{EffectId, RequestId, SessionConfig, SessionId}
+import dspy4s.harness.kernel.{Command, EffectId, Owner, RequestId, SessionConfig, SessionId}
 
-import scala.annotation.nowarn
+import java.util.UUID
 
-/** The handler of `Sessions^` of a session `caller` with the configuration `config` (8.2, 8.7). Each call that fails
-  * throws an exception with a plain message, so the cell fails with it. Each id of a `SessionRef` must be
-  * `SessionId.valid` and have a row in the catalog, else the call fails before it reaches the host.
+/** The handler of `Sessions^` of a session `caller` (8.2, 8.7). Each call that fails throws an exception with a plain
+  * message, so the cell fails with it. Each id of a `SessionRef` must be `SessionId.valid` and have a row in the
+  * catalog, else the call fails before it reaches the host.
   *
   *   - `list` gives the card of each row of the catalog (`cardOf`), apart from the row of `caller`.
   *   - `tell` sends the message to the session with the source `Controller.messageSource(caller)` through
@@ -26,35 +26,83 @@ import scala.annotation.nowarn
   *     session.
   *   - `zoom` gives the part `ref` of the memory of that session (`Peers.zoomInto`).
   */
-@nowarn("msg=unused")
 final class HostSessions(
     peers    : Peers,
     caller   : SessionId,
-    config   : SessionConfig,
     journal  : Journal,
     probe    : Probe,
     budget   : () => Budget,
-    limits   : HarnessLimits,
     configure: (String, Scope, StrategyName) => SessionConfig
 )(using RuntimeContext)
     extends Sessions:
 
-  def list(): Vector[SessionCard] = ???
+  def list(): Vector[SessionCard] = peers.rows.filterNot(_.session == caller).map(HostSessions.cardOf)
 
-  def tell(session: SessionRef, message: String): Unit = ???
+  def tell(session: SessionRef, message: String): Unit =
+    val row = rowOf("tell", session)
+    row.status match
+      case SessionStatus.Ended(_) => throw IllegalStateException(s"tell: the session ${session.id} has ended")
+      case _                      => ()
+    val send = Command.Send(HostSessions.requestOf("tell", caller, effect("tell")), message, Map.empty)
+    peers.runAs(row.session, send, Controller.messageSource(caller)).left
+      .foreach(error =>
+        throw IllegalStateException(s"tell: the session ${session.id} did not take the message: $error")
+      )
 
-  def start(goal: String, scope: Scope, strategy: StrategyName): SessionRef = ???
+  def start(goal: String, scope: Scope, strategy: StrategyName): SessionRef =
+    val id   = SessionId(UUID.randomUUID().toString)
+    val made = peers.make(scope, id).fold(error => throw IllegalArgumentException(s"start: $error"), identity)
+    val task = new Command.Send(HostSessions.requestOf("start", caller, effect("start")), goal, Map.empty)
+    peers.openWith(id, configure(goal, made, strategy), task, Controller.messageSource(caller)).left
+      .foreach(error => throw IllegalStateException(s"start: the session did not open: $error"))
+    SessionRef(id.value)
 
-  def observe(session: SessionRef, question: String)(using Llm): String = ???
+  def observe(session: SessionRef, question: String)(using Llm): String =
+    val row     = rowOf("observe", session)
+    val journal = peers.journalOf(row.session).fold(error => throw IllegalStateException(s"observe: $error"), identity)
+    probe.ask(row.session, journal, question, ProbeLink(caller, effect("observe")), budget())
+      .fold(error => throw IllegalStateException(s"observe: $error"), identity)
 
-  def zoom(session: SessionRef, ref: String): String = ???
+  def zoom(session: SessionRef, ref: String): String =
+    peers.zoomInto(rowOf("zoom", session).session, ref)
+      .fold(error => throw IllegalArgumentException(s"zoom: $error"), identity)
+
+  /** The row of `session` in the catalog. An id that is not valid, or that has no row, makes the call `op` fail. */
+  private def rowOf(op: String, session: SessionRef): CatalogRow =
+    if !SessionId.valid(session.id) then
+      throw IllegalArgumentException(s"$op: ${session.id} is not the id of a session")
+    peers.rows.find(_.session.value == session.id)
+      .getOrElse(throw IllegalArgumentException(s"$op: there is no session ${session.id}"))
+
+  /** The open effect of the call `op` in the journal of `caller`: the recorder committed its intent before the call. */
+  private def effect(op: String): EffectId =
+    journal.state.open.collectFirst { case (id, call) if call.op == op => id }
+      .getOrElse(throw IllegalStateException(s"$op: the call has no open effect in the journal"))
 
 object HostSessions:
 
   /** The card of a row of the catalog (8.7): the id, the goal or an empty text, the scope, the owner and the status in
     * words, the parent, the last `seq`, the paths that the session made, the number of its commands, and its head.
     */
-  def cardOf(row: CatalogRow): SessionCard = ???
+  def cardOf(row: CatalogRow): SessionCard =
+    val owner = row.owner match
+      case Owner.Session(id) => s"Session(${id.value})"
+      case other             => other.toString
+    SessionCard(
+      SessionRef(row.session.value),
+      row.goal.getOrElse(""),
+      row.scope,
+      owner,
+      row.parent.map(parent => SessionRef(parent.value)),
+      row.status.toString,
+      row.lastSeq,
+      row.ledger.read.size,
+      row.ledger.made,
+      row.ledger.commands,
+      row.ledger.head,
+      row.ledger.clean
+    )
 
   /** The request id of the operation `op` of `caller` in its effect `effect`: `op:<caller>:<cell>.<n>` (8.6). */
-  def requestOf(op: String, caller: SessionId, effect: EffectId): RequestId = ???
+  def requestOf(op: String, caller: SessionId, effect: EffectId): RequestId =
+    RequestId(s"$op:${caller.value}:${effect.cell}.${effect.n}")

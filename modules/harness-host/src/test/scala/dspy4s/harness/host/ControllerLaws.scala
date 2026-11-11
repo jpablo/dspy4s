@@ -159,11 +159,9 @@ class ControllerLaws extends munit.FunSuite:
     val inner  = HostSessions(
       peers,
       Controller.id,
-      config,
       journal,
       probe,
       () => budget,
-      limits,
       (goal, scope, strategy) =>
         WorkRuntime.ownedConfig(goal, scope, strategy, Controller.id, config, limits)
     )(using RuntimeContext())
@@ -347,12 +345,15 @@ class ControllerLaws extends munit.FunSuite:
   test("Sessions: journalOf and zoomInto of an id that is not valid or has no row give an error, and no file appears") {
     withRoot { root =>
       withHost(root, ScriptRuntime(_ => Support.Script(Vector(answer("done"))))) { host =>
-        val before = Files.walk(root.getParent).count()
-        Vector("../../x", "fake-no-row").foreach { bad =>
+        def files: Long = Files.walk(root).count()
+        val before      = files
+        Vector("../../fake-escape", "fake-no-row").foreach { bad =>
           assert(host.journalOf(SessionId(bad)).isLeft, bad)
           assert(host.zoomInto(SessionId(bad), "0.0").isLeft, bad)
         }
-        assertEquals(Files.walk(root.getParent).count(), before)
+        assertEquals(files, before)
+        // The file of the id `../../fake-escape` would be outside the root.
+        assert(!Files.exists(SessionFile.pathOf(root, SessionId("../../fake-escape")).normalize()))
       }
     }
   }

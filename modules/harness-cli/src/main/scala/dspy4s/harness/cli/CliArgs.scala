@@ -1,5 +1,7 @@
 package dspy4s.harness.cli
 
+import dspy4s.harness.kernel.SessionId
+
 import java.nio.file.Path
 import scala.annotation.tailrec
 
@@ -60,9 +62,11 @@ object CliArgs:
     @tailrec
     def walk(rest: List[String], got: CliArgs, folder: Option[Path]): Either[String, CliArgs] =
       rest match
-        case Nil if got.controller && got.session.nonEmpty     => Left(s"Give --session or --controller, not both.\n$usage")
-        case Nil                                               => Right(folder.fold(got)(f => got.copy(scope = f)))
-        case "--root" :: dir :: more if !dir.startsWith("--")  => walk(more, got.copy(root = at(dir)), folder)
+        case Nil if got.controller && got.session.nonEmpty                          => Left(s"Give --session or --controller, not both.\n$usage")
+        case Nil                                                                    => Right(folder.fold(got)(f => got.copy(scope = f)))
+        case "--root" :: dir :: more if !dir.startsWith("--")                       => walk(more, got.copy(root = at(dir)), folder)
+        case "--session" :: id :: _ if !id.startsWith("--") && !SessionId.valid(id) =>
+          Left(s"The session id $id is not valid.\n$usage")
         case "--session" :: id :: more if !id.startsWith("--") => walk(more, got.copy(session = Some(id)), folder)
         case "--script" :: more                                => walk(more, got.copy(script = true), folder)
         case "--list" :: more                                  => walk(more, got.copy(list = true), folder)

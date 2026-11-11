@@ -18,7 +18,9 @@ def decide(command: Command, s: SessionState, sender: Source = Source.User): Eit
       val activated = repair(s) :+ Entry.Activated(versions, config)
       val now       = after(s, activated)
       Right(if now.waiting > 0 && !held(now) then activated :+ Entry.TurnStarted else activated)
-    case Command.Begin(_, _, _, _)                          => ???
+    case Command.Begin(versions, config, request, text) =>
+      if s.nextSeq != 0 then Left(Rejection.NotNew)
+      else Right(Vector(Entry.Activated(versions, config), Entry.Input(request, text, Map.empty), Entry.TurnStarted))
     case Command.Send(request, _, _) if s.requests(request) => Right(Vector.empty)
     case Command.Send(_, _, _) if s.closed                  => Left(Rejection.SessionClosed)
     case Command.Send(request, text, values)                =>

@@ -1,6 +1,7 @@
 package dspy4s.harness
 
-import dspy4s.harness.guest.{Children, Data, Files, JobId, JobStatus, Llm, Sessions, Shell, Store, Turn}
+import dspy4s.harness.guest.{Children, Data, Files, JobId, JobStatus, Llm, Scope, SessionCard, SessionRef, Sessions}
+import dspy4s.harness.guest.{Shell, StrategyName, Store, Turn}
 import dspy4s.harness.kernel.{EffectId, EffectResult, Entry}
 import dspy4s.harness.repl.Bindings
 import dspy4s.harness.sandbox.{Layout, Profile}
@@ -326,4 +327,23 @@ def recorded(bindings: Bindings, recorder: Recorder, root: Option[Path] = None):
   * session has the arguments `session` and `ref`, so a guard rule can tell it from `zoom(ref)` of the turn. `tell` and
   * `start` are not read-only, so their intents reach the disk before they run (4.1).
   */
-private def recordedSessions(inner: Sessions, recorder: Recorder): Sessions = ???
+private def recordedSessions(inner: Sessions, recorder: Recorder): Sessions =
+  def args(pairs : (String, Json)*): Json      = Json.Object(Chunk.from(pairs))
+  def text(value : String): Json               = Json.String(value)
+  def session(ref: SessionRef): (String, Json) = "session" -> text(ref.id)
+  new Sessions:
+    def list(): Vector[SessionCard]                  = recorder.call("sessions", Json.Null)(inner.list())
+    def tell(ref: SessionRef, message: String): Unit =
+      recorder.call("tell", args(session(ref), "message" -> text(message)))(inner.tell(ref, message))
+    def start(goal: String, scope: Scope, strategy: StrategyName): SessionRef =
+      val called = args(
+        "goal"     -> text(goal),
+        "kind"     -> text(scope.productPrefix),
+        "scope"    -> summon[Data[Scope]].encode(scope),
+        "strategy" -> text(strategy.toString)
+      )
+      recorder.call("start", called)(inner.start(goal, scope, strategy))
+    def observe(ref: SessionRef, question: String)(using Llm): String =
+      recorder.call("observe", args(session(ref), "question" -> text(question)))(inner.observe(ref, question))
+    def zoom(ref: SessionRef, part: String): String =
+      recorder.call("zoom", args(session(ref), "ref" -> text(part)))(inner.zoom(ref, part))

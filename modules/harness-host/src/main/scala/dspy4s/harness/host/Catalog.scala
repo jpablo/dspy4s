@@ -101,6 +101,7 @@ def catalogRow(session: SessionId): Fold[Logged, (CatalogRow, LedgerState), Cata
         case Entry.TurnStarted                                            => SessionStatus.InTurn
         case Entry.StopRequested(_) if row.status == SessionStatus.InTurn => SessionStatus.Stopping
         case Entry.TurnEnded(_)                                           => SessionStatus.Idle
+        case Entry.Releasing(_)                                           => SessionStatus.Releasing
         case Entry.Ended(outcome, _)                                      => SessionStatus.Ended(outcome)
         case _                                                            => row.status
       val (owner, folder) = logged.entry match
@@ -117,7 +118,10 @@ def catalogRow(session: SessionId): Fold[Logged, (CatalogRow, LedgerState), Cata
         lastAt = logged.meta.atMillis,
         firstMessage = first
       )
-      (updated, ledger)
+      val named = logged.entry match
+        case Entry.Activated(_, config) => updated.copy(goal = config.goal, scope = Some(config.scope))
+        case _                          => updated
+      (named, ledger)
     ,
     _._1
   )

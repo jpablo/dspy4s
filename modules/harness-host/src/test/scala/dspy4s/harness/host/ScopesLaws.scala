@@ -113,7 +113,9 @@ class ScopesLaws extends munit.FunSuite:
         Some(ScopeSnapshot(gitOk(r, "rev-parse", "HEAD"), true))
       )
       Files.writeString(r.resolve(".gitignore"), "*.env\n")
-      commitIn(r, ".gitignore"): Unit
+      gitOk(r, "add", ".gitignore"): Unit
+      gitOk(r, "commit", "-q", "-m", "ignore"): Unit
+      assertEquals(scopes.snapshot(Scope.Directory(r.toString)).map(_.clean), Some(true))
       Files.writeString(r.resolve("secret.env"), "FAKE=1\n")
       assertEquals(scopes.snapshot(Scope.Directory(r.toString)).map(_.clean), Some(false))
       val plain = Files.createDirectories(root.resolve("plain"))

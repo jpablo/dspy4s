@@ -2899,7 +2899,7 @@ name = "SessionFile"
 ops = ["append", "readFrom", "lastSeq", "setting", "close", "open", "pathOf", "readOnly"]
 ref = "10.2"
 spec = true
-uses = ["logged", "session-id"]
+uses = ["logged", "session-id", "file-lines"]
 text = "<root>/sessions/<id>.db: one row for each entry, with a primary key on the session and seq, which rejects a stale writer, and a column required, so a reader skips a row that it cannot decode when the row is not required. WAL, synchronous=NORMAL and fullfsync=ON, and synchronous=FULL for a commit that needs a flush. One connection for the life of the file."
 
 [[group]]
@@ -3102,7 +3102,7 @@ name = "LocalHost"
 ops = ["open", "list", "failed", "close", "start", "sessions", "journals", "startWith", "rows", "openWith", "runAs", "journalOf", "zoomInto", "make", "reportTo", "planOf", "release"]
 ref = "10.2"
 spec = true
-uses = ["session-host", "session-runtime", "secrets", "host-limits", "catalog", "timers", "session-handle", "catalog-row", "host-error", "session-config", "session-id", "peers", "git-scopes", "scopes", "host-hooks", "release-item", "release-step", "scope-state", "release-plans", "session-outcome", "scope", "command", "source", "session-state", "logged"]
+uses = ["session-host", "session-runtime", "secrets", "host-limits", "catalog", "timers", "session-handle", "catalog-row", "host-error", "session-config", "session-id", "peers", "git-scopes", "scopes", "host-hooks", "release-item", "release-step", "scope-state", "release-plans", "session-outcome", "scope", "command", "source", "session-state", "logged", "layout"]
 proof_uses = ["writer", "writer-journal", "session-file", "feeds", "drive", "next", "job-table", "catalog-row-fold", "rebuilt", "catalog", "report-pass", "release-plan", "irreversible", "ledger-fold", "memory-tree", "file-lines", "controller"]
 text = "One writer and one file for each session, with an exclusive lock for a second host. open repairs an open turn, keeps the configuration of the journal with None, and refuses a mode above the ceiling. Each activation gets a new ticket and its WriterJournal. After StopRequested, Activation.stop, and a timer calls Writer.expire with the turn of the stop. The catalog gets the row after a turn ends."
 
@@ -3187,8 +3187,8 @@ kind = "data"
 name = "CliArgs"
 ops = ["parse"]
 ref = "15"
-uses = []
-text = "The folder of a new session, the root of the host, the session to open again, the script mode, and the list of the sessions. A session that opens again keeps its own configuration. A proposal: [--root DIR] [--session ID] [--script] [--list] [FOLDER], with the root <home>/.dspy4s/harness, and the start of an id is enough when only one session has it."
+uses = ["session-id"]
+text = "The folder of a new session, the root of the host, the session to open again, the script mode, the list of the sessions, and the controller (8.7). A session that opens again keeps its own configuration. A proposal: [--root DIR] [--session ID | --controller] [--script] [--list] [FOLDER], with the root <home>/.dspy4s/harness, and the start of an id is enough when only one session has it."
 
 [[group]]
 id = "entry-text"
@@ -3412,8 +3412,8 @@ kind = "data"
 name = "Cli"
 ops = ["main", "loop", "listText", "deskStep"]
 ref = "15"
-uses = ["session-handle", "console", "desk"]
-proof_uses = ["cli-args", "local-host", "work-runtime", "work-env", "entry-text", "parse-line", "commands-for", "plain-console", "editor-console", "stop-notice", "jobs-text", "status-text", "job-starts", "pending-calls", "sessions-text", "resolve-session"]
+uses = ["session-handle", "console", "desk", "host-desk"]
+proof_uses = ["cli-args", "local-host", "work-runtime", "work-env", "entry-text", "parse-line", "commands-for", "plain-console", "editor-console", "stop-notice", "jobs-text", "status-text", "job-starts", "pending-calls", "sessions-text", "resolve-session", "card-text", "open-refusal", "plan-text"]
 text = "main makes the model from the environment, makes the console, starts a LocalHost with a WorkRuntime, and opens the session. --list prints the sessions and opens none. loop prints the feed, and each text goes through printable. It sends a message, /stop and /stopall, and it runs /close, /allow and /stopjob so the person sees a refusal. A Ctrl-C during a turn is /stop, and the stop notice follows a turn that a stop ended. With a desk, /sessions, /open, /reopen, /controller and /close go to deskStep (8.7). A proposal: JDK 21."
 
 # ── Phase 7: the laws ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -4173,7 +4173,8 @@ name = "Controller"
 ops = ["task", "config", "messageSource"]
 ref = "8.7"
 spec = true
-uses = ["session-id", "mode", "access", "harness-limits", "session-config", "source"]
+uses = ["session-id", "mode", "access", "harness-limits", "session-config", "source", "data"]
+proof_uses = ["preamble"]
 text = "The fixed id controller, Mode.controller with no Children^, a ceiling that holds workMode, the instructions, the task with the home, the configuration with the scope Home and the memory tree, and the source of a message of a session."
 
 [[group]]
@@ -4202,7 +4203,7 @@ name = "HostSessions"
 ops = ["list", "tell", "start", "observe", "zoom", "cardOf", "requestOf"]
 ref = "8.7"
 spec = true
-uses = ["sessions", "peers", "session-id", "session-config", "journal-trait", "probe", "budget", "harness-limits", "runtime-context", "session-card", "session-ref", "scope", "strategy-name", "llm", "catalog-row", "effect-id", "request-id", "command", "logged", "session-state", "source"]
+uses = ["sessions", "peers", "session-id", "session-config", "journal-trait", "probe", "budget", "runtime-context", "session-card", "session-ref", "scope", "strategy-name", "llm", "catalog-row", "effect-id", "request-id", "command", "logged", "session-state", "source"]
 proof_uses = ["controller"]
 text = "list gives the cards of the other rows. tell sends through runAs with the request id of its effect, and refuses a session that has ended. start makes the scope and opens the session with ownedConfig and its task in one commit. observe asks the probe with the budget of the turn. zoom reads the memory of that session."
 
@@ -4334,7 +4335,7 @@ ops = ["cards", "open", "controller", "planOf", "release", "reopen"]
 ref = "8.7"
 uses = ["desk", "local-host", "session-config", "session-card", "session-id", "host-error", "session-handle",
         "session-outcome", "scope-state", "release-item", "release-step"]
-proof_uses = ["host-sessions", "controller"]
+proof_uses = ["host-sessions", "controller", "state"]
 text = "The desk of a LocalHost: controller opens Controller.id with its configuration."
 
 [[node]]

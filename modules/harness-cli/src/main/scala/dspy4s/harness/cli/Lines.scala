@@ -73,7 +73,9 @@ enum Line derives CanEqual:
 enum ReasoningView derives CanEqual:
   case Off, Short, Full
 
-/** The line of `text`. A text that does not start with `/` is a message. */
+/** The line of `text`. A text that does not start with `/` is a message. An id of `/open`, `/reopen` and `/close
+  * replaced` that is not `SessionId.valid` gives `Unknown` (8.7).
+  */
 def parseLine(text: String): Line =
   command(text.trim.split("\\s+").toList).getOrElse {
     if text.trim.startsWith("/") then Line.Unknown(text.trim) else Line.Message(text)
@@ -92,9 +94,9 @@ private def command(words: List[String]): Option[Line] =
     case List("/reasoning", view) => ReasoningView.values.find(_.toString.equalsIgnoreCase(view)).map(Line.Reasoning(_))
     case "/close" :: rest         => close(rest)
     case List("/sessions")        => Some(Line.Sessions)
-    case List("/open", id)        => Some(Line.Open(SessionId(id)))
+    case List("/open", id)        => Option.when(SessionId.valid(id))(Line.Open(SessionId(id)))
     case List("/controller")      => Some(Line.Controller)
-    case List("/reopen", id)      => Some(Line.Reopen(SessionId(id)))
+    case List("/reopen", id)      => Option.when(SessionId.valid(id))(Line.Reopen(SessionId(id)))
     case List("/quit")            => Some(Line.Quit)
     case List("/wait", seconds)   => seconds.toIntOption.filter(_ >= 0).map(Line.Wait(_))
     case _                        => None
@@ -108,8 +110,9 @@ private def close(words: List[String]): Option[Line] =
     case List("merged")                           => Some(Line.Close(SessionOutcome.Merged, closed))
     case "abandoned" :: reason if reason.nonEmpty =>
       Some(Line.Close(SessionOutcome.Abandoned(reason.mkString(" ")), reason.mkString(" ")))
-    case List("replaced", id) => Some(Line.Close(SessionOutcome.Replaced(SessionId(id)), s"$closed: replaced by $id"))
-    case _                    => None
+    case List("replaced", id) if SessionId.valid(id) =>
+      Some(Line.Close(SessionOutcome.Replaced(SessionId(id)), s"$closed: replaced by $id"))
+    case _ => None
 
 /** The reason of a `Close` that the person typed. */
 private val closed = "the person closed the session"

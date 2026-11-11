@@ -1479,7 +1479,10 @@ The other findings changed the plan with no choice:
 
 - The git of the host can run code that a session wrote in a repository: a hook or an fsmonitor. So each git command
   of `Scopes` runs with no hooks and no fsmonitor, with only `PATH`, `HOME` and `LANG`, and a read takes no lock of
-  the index. A ref comes after `--`, and a branch that starts with `-` or that git refuses gives an error.
+  the index. A ref comes after `--`, and a branch that starts with `-` or that git refuses gives an error. A risk
+  stays: a smudge filter in the configuration of a repository runs when `git worktree add` checks out the files, and
+  git has no option to ignore the configuration of a repository. The guard of phase 9 is that `start` refuses a
+  repository inside the scope of a session that has not ended.
 - A `SessionRef` reached the file system: `zoom(SessionRef("../../x"), ...)` made a database outside the root. So
   `SessionId.valid` checks each id that comes from outside the host, `zoom` and `observe` need a row of the catalog,
   and a read opens the file read-only (`SessionFile.readOnly`).

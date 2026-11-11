@@ -164,11 +164,9 @@ final class WorkRuntime(
             HostSessions(
               peers,
               session,
-              config,
               journal,
               probe,
               () => turns.current,
-              limits,
               (goal, scope, strategy) =>
                 WorkRuntime.ownedConfig(goal, scope, strategy, session, config, limits)
             )
@@ -185,7 +183,7 @@ final class WorkRuntime(
             stops = () => journal.state.stopping
           )
         val effects = HarnessEffects(
-          WorkRuntime.chatTask(scope),
+          WorkRuntime.taskOf(session, config, scope),
           Harness.apiReference(config.mode),
           policy,
           strategy,
@@ -361,7 +359,15 @@ object WorkRuntime:
     * for the controller (`Controller.id`), the goal of a session whose owner is a session with the rule to end the work
     * with `submit` and its result, and `chatTask` for a session of the person.
     */
-  def taskOf(session: SessionId, config: SessionConfig, scope: Path): String = ???
+  def taskOf(session: SessionId, config: SessionConfig, scope: Path): String =
+    if session == Controller.id then Controller.task(scope)
+    else
+      (config.owner, config.goal) match
+        case (Owner.Session(_), Some(goal)) =>
+          s"${chatTask(scope)}\n\nThe goal of the session: $goal\n\nAnother session started this session, and it " +
+            "gets a report at the end of each turn. When the work is done, end it with submit and the result, in " +
+            "one text."
+        case _ => chatTask(scope)
 
   /** The configuration of a session that `caller`, with the configuration `parent`, starts with `goal` in `scope` (8.2,
     * 8.7): a chat turn with `limits.steps` steps, the owner `Owner.Session(caller)`, the goal, `strategy`, the mode
@@ -375,7 +381,22 @@ object WorkRuntime:
       caller  : SessionId,
       parent  : SessionConfig,
       limits  : HarnessLimits
-  ): SessionConfig = ???
+  ): SessionConfig =
+    val mode = workMode.meet(parent.ceiling)
+    SessionConfig(
+      kind = TurnKind.Chat,
+      steps = limits.steps,
+      mode = mode,
+      ceiling = mode,
+      strategy = strategy,
+      scope = scope,
+      owner = Owner.Session(caller),
+      guard = defaultGuard(mode),
+      preamble = preamble(summon[Data[String]].shape).getOrElse(""),
+      model = parent.model,
+      goal = Some(goal),
+      env = Set.empty
+    )
 
   /** The first rules of 5.5: in a mode with `Network^`, `exec` and `spawn` with the prefix `git push` get `Ask`. In
     * another mode the sandbox already stops a push, so the guard has no rule.

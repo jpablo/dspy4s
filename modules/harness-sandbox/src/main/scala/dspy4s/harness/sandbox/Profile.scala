@@ -142,6 +142,10 @@ enum Net derives CanEqual:
 
 /** What a child process can do (5.4). The observations `canRun`, `canRead`, `canWrite` and `canConnect` are the meaning
   * of a profile: a backend must allow at most what they allow. Each path is absolute and normalized.
+  *
+  * `reads` is the read access of the file calls of the session, which run in the JVM and not in a child (8.7). So a
+  * mode with `Files` and no `Shell`, as the controller has, still reads its files. A child process reads only with
+  * `canRun`.
   */
 final case class Profile(
     canRun  : Boolean,      // a child process can start
@@ -150,12 +154,13 @@ final case class Profile(
       Path
     ], // the parts of the writable roots that stay read-only, for example .git (CODE_HARNESS.md F7)
     hidden: Vector[Path], // a child can neither read nor write under these: the secrets, the journals, the secret files
-    net   : Net
+    net   : Net,
+    reads : Boolean = false // the file calls of the session can read, with no child process (8.7)
 ):
 
   def isHidden(path: Path): Boolean = hidden.exists(path.startsWith)
 
-  def canRead(path: Path): Boolean = canRun && !isHidden(path)
+  def canRead(path: Path): Boolean = (canRun || reads) && !isHidden(path)
 
   def canWrite(path: Path): Boolean =
     canRun && writable.exists(path.startsWith) && !readOnly.exists(path.startsWith) && !isHidden(path)
@@ -181,7 +186,8 @@ object Profiles:
       writable = if run then Vector(scope, layout.temp) else Vector.empty,
       readOnly = Vector(scope.resolve(".git")),
       hidden = layout.secrets :+ layout.journals,
-      net = if run && mode.network == Access.Full then Net.Proxy(hosts) else Net.Closed
+      net = if run && mode.network == Access.Full then Net.Proxy(hosts) else Net.Closed,
+      reads = mode.files != Access.None
     )
 
   /** The profile of one command: the profile of the mode, and each file with a secret name that exists in a writable

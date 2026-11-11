@@ -147,11 +147,12 @@ object Window extends ContextStrategy:
   /** Who wrote a message, for the text of the window. */
   private def speaker(source: Source): String =
     source match
-      case Source.User                           => "The person"
-      case Source.Harness                        => "The harness"
-      case Source.Controller                     => "The controller"
-      case Source.Child(_) | Source.Parent(_, _) => "Another session"
-      case Source.Policy                         => "The model"
+      case Source.User           => "The person"
+      case Source.Harness        => "The harness"
+      case Source.Controller     => "The controller"
+      case Source.Child(session) => s"The session ${session.value}"
+      case Source.Parent(_, _)   => "Another session"
+      case Source.Policy         => "The model"
 
   /** One step of the open turn: its text and code, and the output of its cell when the cell ran. */
   private final case class Step(acted: Boolean, text: String, code: Option[String], output: Option[String])

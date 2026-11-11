@@ -1,9 +1,11 @@
 package dspy4s.harness.host
 
-import dspy4s.harness.{Harness, Journal, Secrets, TurnEffects, drive, textSuffix}
+import dspy4s.core.contracts.RuntimeContext
+import dspy4s.harness.{Budget, Harness, Journal, MemoryTree, Secrets, TurnEffects, drive, textSuffix}
 import dspy4s.harness.guest.{JobStatus, Mode, Scope}
 import dspy4s.harness.kernel.{Command, EffectId, Entry, Logged, Next, Position, ReleaseItem, ReleaseStep, RequestId}
-import dspy4s.harness.kernel.{ReleasePlans, ScopeState, releasePlan}
+import dspy4s.harness.kernel.{Rejection, ReleasePlans, ScopeState, releasePlan}
+import dspy4s.harness.sandbox.Layout
 import dspy4s.harness.kernel.{
   SessionConfig, SessionId, SessionOutcome, SessionState, Source, TurnOutcome, closing, next
 }
@@ -203,17 +205,17 @@ trait Activation extends AutoCloseable:
   *   - `release` ends a session with its release plan.
   */
 final class LocalHost private (
-    root                                         : Path,
-    runtimeOf                                    : Peers => SessionRuntime,
-    secrets                                      : Secrets,
-    limits                                       : HostLimits,
-    clock                                        : () => Long,
-    catalog                                      : Catalog,
-    timers                                       : Timers,
-    rebuilt                                      : Rebuilt,
-    @scala.annotation.nowarn("msg=unused") scopes: Scopes,
-    @scala.annotation.nowarn("msg=unused") hooks : HostHooks,
-    @scala.annotation.nowarn("msg=unused") work  : Path
+    root                                        : Path,
+    runtimeOf                                   : Peers => SessionRuntime,
+    secrets                                     : Secrets,
+    limits                                      : HostLimits,
+    clock                                       : () => Long,
+    catalog                                     : Catalog,
+    timers                                      : Timers,
+    rebuilt                                     : Rebuilt,
+    scopes                                      : Scopes,
+    @scala.annotation.nowarn("msg=unused") hooks: HostHooks,
+    work                                        : Path
 ) extends SessionHost,
       Peers,
       AutoCloseable:
@@ -230,8 +232,7 @@ final class LocalHost private (
     synchronized {
       sessions.get(id) match
         case Some(session) if session.live => Right(session)
-        case _                             =>
-          OpenSession.start(id, config, OpenSession.Place(root, runtime, secrets, limits, clock, catalog, timers)).map {
+        case _                             => OpenSession.start(id, config, place).map {
             session =>
               sessions.update(id, session)
               session
@@ -244,15 +245,101 @@ final class LocalHost private (
   def rows: Vector[CatalogRow] = list
 
   def openWith(id: SessionId, config: SessionConfig, task: Command.Send, source: Source)
-      : Either[HostError, SessionState] = ???
+      : Either[HostError, SessionState] =
+    if !SessionId.valid(id.value) then Left(HostError.Refused(s"${id.value} is not the id of a session"))
+    else
+      synchronized {
+        if sessions.contains(id) || JFiles.exists(SessionFile.pathOf(root, id)) then
+          Left(HostError.Rejected(Rejection.NotNew))
+        else
+          OpenSession.start(id, Some(config), place, Some((task, source))).map { session =>
+            sessions.update(id, session)
+            session.state
+          }
+      }
 
-  def runAs(id: SessionId, command: Command, source: Source): Either[HostError, SessionState] = ???
+  def runAs(id: SessionId, command: Command, source: Source): Either[HostError, SessionState] =
+    if !SessionId.valid(id.value) then Left(HostError.Refused(s"${id.value} is not the id of a session"))
+    else
+      // The check and the open hold the lock of the host, and the wait for the commit does not.
+      val target = synchronized {
+        sessions.get(id).filter(_.live) match
+          case Some(session) => Right(session)
+          case None          =>
+            // The row of the catalog can lag, so the journal says whether the session has ended.
+            journalOf(id).left.map(HostError.Refused(_)).flatMap { journal =>
+              if foldOf(journal).closed then Left(HostError.Ended)
+              else open(id, None).flatMap(_ => sessions.get(id).toRight(HostError.Ended))
+            }
+      }
+      target.flatMap(_.runAs(command, source))
 
-  def journalOf(id: SessionId): Either[String, Vector[Logged]] = ???
+  def journalOf(id: SessionId): Either[String, Vector[Logged]] =
+    if !SessionId.valid(id.value) then Left(s"${id.value} is not the id of a session")
+    else
+      synchronized(sessions.get(id)).filter(_.live) match
+        case Some(session) => Right(session.read(-1))
+        case None          =>
+          if catalog.row(id).isEmpty && !synchronized(sessions.contains(id)) then Left(s"no session ${id.value}")
+          else
+            SessionFile.readOnly(SessionFile.pathOf(root, id), id).flatMap { file =>
+              try file.readFrom(0)
+              finally file.close()
+            }
 
-  def zoomInto(id: SessionId, ref: String): Either[String, String] = ???
+  def zoomInto(id: SessionId, ref: String): Either[String, String] =
+    journalOf(id).flatMap { journal =>
+      FileLines.readOnly(SessionFile.pathOf(root, id), id).flatMap { lines =>
+        try
+          // A spent budget gives the line of the source, so the memory comes with no LM call (7.1).
+          val tree             = MemoryTree.withLeaves(lines, summaries = () => Budget(0))
+          given RuntimeContext = RuntimeContext()
+          tree.update(journal, tree.empty).left.map(_.message).flatMap(tree.zoom(_, ref))
+        finally lines.close()
+      }
+    }
 
-  def make(scope: Scope, session: SessionId): Either[String, Scope] = ???
+  def make(scope: Scope, session: SessionId): Either[String, Scope] =
+    val folder = work.resolve(session.value).toString
+    scope match
+      case Scope.Scratch("") =>
+        val made = Scope.Scratch(folder)
+        scopes.make(made).map(_ => made)
+      case Scope.Worktree("", branch, repo, base) =>
+        val repository = Try(Path.of(repo)).toOption.filter(_.isAbsolute)
+        if branch == base then Left(s"the branch $branch is its own base")
+        else if repository.isEmpty then Left(s"the repository $repo is not an absolute path")
+        else if repository.exists(inWritableScope) then
+          Left(s"the repository $repo is inside the folder of a session that has not ended")
+        else
+          val made = Scope.Worktree(folder, branch, repo, base)
+          scopes.make(made).map(_ => made)
+      case Scope.Directory(path) =>
+        if Try(Path.of(path)).toOption.exists(p => p.isAbsolute && JFiles.isDirectory(p)) then Right(scope)
+        else Left(s"the folder $path is not an absolute path of a folder that exists")
+      case Scope.Scratch(_) | Scope.Worktree(_, _, _, _) =>
+        Left("the path of a Scratch or a Worktree of start must be empty: the host makes the folder")
+      case Scope.Home(_) | Scope.Fork(_, _) => Left(s"start takes no ${scope.productPrefix} scope")
+
+  /** The place that each open session of the host shares. */
+  private def place: OpenSession.Place = OpenSession.Place(root, runtime, secrets, limits, clock, catalog, timers)
+
+  /** True when `path` is inside the folder of a session that has not ended and can write there. The controller has the
+    * scope `Home` and no write access, so its scope does not count.
+    */
+  private def inWritableScope(path: Path): Boolean =
+    val real   = Layout.real(path)
+    val opened = synchronized(sessions.values.filter(_.live).map(_.state.config.scope).toVector)
+    val listed = catalog.rows.filter(_.status match
+      case SessionStatus.Ended(_) => false
+      case _                      => true).flatMap(_.scope)
+    (opened ++ listed).exists {
+      case Scope.Home(_)              => false
+      case Scope.Directory(p)         => real.startsWith(Layout.real(Path.of(p)))
+      case Scope.Worktree(p, _, _, _) => real.startsWith(Layout.real(Path.of(p)))
+      case Scope.Scratch(p)           => p.nonEmpty && real.startsWith(Layout.real(Path.of(p)))
+      case Scope.Fork(p, _)           => real.startsWith(Layout.real(Path.of(p)))
+    }
 
   /** The report pass for the owner `owner` (8.6, 8.7): it opens the owner when it is not open, and sends each report of
     * `ReportPass.owed` with the source `Source.Child(session)`, and waits for each commit. It gives the number of
@@ -423,6 +510,10 @@ private final class OpenSession private (
   def run(command: Command): Either[HostError, SessionState] =
     if writer.state.closed then Left(HostError.Ended) else writer.run(command, Source.User)
 
+  /** `run` with the source `source`, for the peers of the host (8.7). */
+  def runAs(command: Command, source: Source): Either[HostError, SessionState] =
+    if writer.state.closed then Left(HostError.Ended) else writer.run(command, source)
+
   def state: SessionState = writer.state
 
   def jobStatus: Map[EffectId, JobStatus] =
@@ -474,6 +565,10 @@ private final class OpenSession private (
     shutdown()
 
   /** Commits the `Activate` of this open. */
+  /** Commits the `Begin` of a new session with its task `task` from `source` (8.7): one commit. */
+  private def begin(config: SessionConfig, task: Command.Send, source: Source): Either[HostError, Unit] =
+    writer.run(Command.Begin(Harness.versions, config, task.request, task.text), source).map(_ => ())
+
   private def activate(config: SessionConfig): Either[HostError, Unit] =
     writer.run(Command.Activate(Harness.versions, config), Source.Harness).map(_ => ())
 
@@ -630,7 +725,12 @@ private object OpenSession:
     * lock and the file, so it makes no journal. A failed step after the writer closes the session, and the close also
     * closes the result of `opened`.
     */
-  def start(id: SessionId, config: Option[SessionConfig], place: Place): Either[HostError, OpenSession] =
+  def start(
+      id    : SessionId,
+      config: Option[SessionConfig],
+      place : Place,
+      first : Option[(Command.Send, Source)] = None
+  ): Either[HostError, OpenSession] =
     val path = SessionFile.pathOf(place.root, id)
     if config.isEmpty && !JFiles.exists(path) then Left(HostError.OpenFailed("a new session needs a configuration"))
     else
@@ -643,13 +743,13 @@ private object OpenSession:
                 start   <- file.readFrom(0).left.map(e => failed(file, e))
                 setting <- chosen(config, start).left.map(e => failed(file, e))
                 session  = made(id, place, file, start, channel, lock)
-                // `opened` comes before the `Activate`, because the `Activate` can start a turn for a waiting message
-                // at once, and the activation of that turn needs the result of `opened`.
+                // `opened` comes before the `Activate` or the `Begin`, because each can start a turn at once, and the
+                // activation of that turn needs the result of `opened`.
                 _ <- session.keepOpened(setting).left.map { e =>
                        session.close()
                        e
                      }
-                _ <- session.activate(setting).left.map { e =>
+                _ <- first.fold(session.activate(setting))(session.begin(setting, _, _)).left.map { e =>
                        session.close()
                        e
                      }
