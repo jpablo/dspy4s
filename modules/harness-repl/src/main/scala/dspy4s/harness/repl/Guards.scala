@@ -49,7 +49,7 @@ private final class GatedTurn(inner: Turn, gate: CallGate) extends Turn:
   def now(): Long = gate("now")(inner.now())
   // An input is not an effect, because the journal already holds the value (5.1).
   def input(name: String): Option[Json] = inner.input(name)
-  def zoom(ref  : String): String       = ???
+  def zoom(ref  : String): String       = gate("zoom")(inner.zoom(ref))
 
 private final class GatedFiles(inner: Files, gate: CallGate) extends Files:
   def read(path : String): String                                = gate("read")(inner.read(path))

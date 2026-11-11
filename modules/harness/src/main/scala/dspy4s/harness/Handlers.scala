@@ -9,7 +9,6 @@ import zio.blocks.schema.json.Json
 
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.{Files as JFiles, LinkOption, Path, StandardOpenOption}
-import scala.annotation.nowarn
 
 /** The gate of the guest API calls of a cell: `recorded(h)` of CODE_HARNESS_DESIGN.md, 5.3. It commits `EffectStarted`
   * before each call and `EffectDone` after it, with the value as `Json` for a replay and as text for a reader (4.1). A
@@ -216,11 +215,13 @@ final class SnapshotStore extends Store:
   * `zoom`, which reads `zooms`. The effects of the session set the reader of `zooms` after each update (7.1).
   * `recorded` records each `now`, so a replay gets the same time.
   */
-@nowarn("msg=unused") // the skeleton: the proof of phase 8 reads zooms
 final class JournalTurn(journal: Journal, clock: () => Long, zooms: ZoomSource = ZoomSource()) extends Turn:
   def now(): Long                       = clock()
   def input(name: String): Option[Json] = journal.state.inputs.get(name)
-  def zoom(ref  : String): String       = ???
+
+  /** The part `ref` of the memory. An error is an exception with a plain message, so the cell fails with it. */
+  def zoom(ref: String): String =
+    zooms.zoom(ref).fold(error => throw IllegalArgumentException(s"zoom: $error"), identity)
 
 /** `recorded(h)` of 5.3 for each handler of `bindings`: each call of the guest API goes through `recorder`. `input`
   * reads the journal, so it is not an effect. With `root`, the path of a file call is absolute and normal in the
@@ -243,7 +244,7 @@ def recorded(bindings: Bindings, recorder: Recorder, root: Option[Path] = None):
     turn = new Turn:
       def now(): Long                       = recorder.call("now", Json.Null)(turn.now())
       def input(name: String): Option[Json] = turn.input(name)
-      def zoom(ref  : String): String       = ???
+      def zoom(ref  : String): String       = recorder.call("zoom", args("ref" -> text(ref)))(turn.zoom(ref))
     ,
     files = bindings.files.map { inner =>
       new Files:

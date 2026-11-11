@@ -22,9 +22,12 @@ final case class WorkEnv(home: Path, hosts: HostList, backend: Option[Backend], 
 
 /** The runtime of a work session (8.1): the user owns the session, and each message starts a chat turn.
   *
-  *   - A turn runs with the effects of a harness (`HarnessEffects`): the `policy` leaf, the window strategy, and a REPL
-  *     with the mode and the preamble of the configuration. The task of the policy is `WorkRuntime.chatTask`: the
-  *     instructions and the scope. The window gives the messages and the replies of the earlier turns (7).
+  *   - A turn runs with the effects of a harness (`HarnessEffects`): the `policy` leaf, the strategy of the
+  *     configuration (`strategyOf`), and a REPL with the mode and the preamble of the configuration. The task of the
+  *     policy is `WorkRuntime.chatTask`: the instructions and the scope. A new session has the memory tree (7.1): its
+  *     view holds the earlier turns, a cell reads a part of it with `zoom`, and the table `memory` of the session file
+  *     keeps its lines. A session of phase 7 keeps the window, which gives the messages and the replies of the earlier
+  *     turns (7).
   *   - The handlers are the handlers of the mode through `recorded`, and the recorder calls `guarded` for each call
   *     (5.5). `exec` and the jobs run in the sandbox, in the scope of the session, through `JobShell`.
   *   - `llmQuery` goes to the `subQuery` leaf. A work session of phase 7 has no `Children^`, so no `rlm`.
@@ -50,6 +53,7 @@ final class WorkRuntime(
     RuntimeEnvironment.withContext(context) {
       var layout  = Option.empty[Layout]
       var shell   = Option.empty[SandboxedShell]
+      var lines   = Option.empty[FileLines]
       var started = false
       try
         val scope = Layout.real(Path.of(SandboxedShell.pathOf(config.scope)))
@@ -63,8 +67,17 @@ final class WorkRuntime(
         val store    = SnapshotStore()
         val host     = HostThreads.ofThisThread()
         val calls    = StoppablePolicy(context, () => journal.state.stopping)
+        val zooms    = ZoomSource()
+        val summary  = TurnBudget(journal, limits.summaryCalls)
+        val file     = () =>
+          FileLines.open(SessionFile.pathOf(env.journals, session), session).map { opened =>
+            lines = Some(opened)
+            opened
+          }
+        val strategy = WorkRuntime.strategyOf(config, file, calls, () => summary.current)
+          .fold(error => throw IllegalStateException(error), identity)
         val bindings = Bindings(
-          turn = JournalTurn(journal, () => System.currentTimeMillis()),
+          turn = JournalTurn(journal, () => System.currentTimeMillis(), zooms),
           files = Option.when(config.mode.files != Access.None)(LocalFiles(scope, profile, made.secretNames)),
           shell = Option.when(config.mode.shell == Access.Full)(JobShell(commands, jobs, journal)),
           llm = Option.when(config.mode.llm == Access.Full)(LeafLlm(subQuery, () => turns.current, host, limits.batch)),
@@ -84,7 +97,7 @@ final class WorkRuntime(
           WorkRuntime.chatTask(scope),
           Harness.apiReference(config.mode),
           policy,
-          Window,
+          strategy,
           journal,
           newRepl,
           recorder,
@@ -92,15 +105,17 @@ final class WorkRuntime(
           limits,
           () => turns.current,
           Some(host),
-          calls
+          calls,
+          zooms
         )(using context)
-        val activation = WorkActivation(effects, commands, calls, turns, made, context)
+        val activation = WorkActivation(effects, commands, calls, Vector(turns, summary), lines, made, context)
         started = true
         activation
       finally
         // Each throwable of a start leaves no shell proxy and no temporary folder.
         if !started then
           shell.foreach(s => Try(s.close()): Unit)
+          lines.foreach(l => Try(l.close()): Unit)
           layout.foreach(l => WorkRuntime.remove(l.temp))
     }
 
@@ -109,7 +124,8 @@ private final class WorkActivation(
     inner  : HarnessEffects,
     shell  : SandboxedShell,
     calls  : StoppablePolicy,
-    turns  : TurnBudget,
+    turns  : Vector[TurnBudget],
+    lines  : Option[FileLines],
     layout : Layout,
     context: RuntimeContext
 ) extends Activation:
@@ -129,9 +145,10 @@ private final class WorkActivation(
   def unclean: Boolean = inner.unclean
 
   def close(): Unit =
-    turns.close()
+    turns.foreach(_.close())
     calls.close()
     Try(inner.close()): Unit
+    lines.foreach(l => Try(l.close()): Unit)
     Try(shell.close()): Unit
     WorkRuntime.remove(layout.temp)
 
@@ -154,7 +171,7 @@ private final class StoppablePolicy(context: RuntimeContext, stopping: () => Boo
     if stopping() then future.cancel(true): Unit
     try future.get()
     catch
-      case _: CancellationException => Left("the policy call stopped, because the turn stops")
+      case _: CancellationException => Left(PolicyRunner.Stopped)
       case e: ExecutionException    => throw Option(e.getCause).getOrElse(e)
     finally running = None
 
@@ -225,7 +242,7 @@ object WorkRuntime:
       ))
 
   /** The configuration of a work session in the folder `scope` (8.1): a chat turn with `limits.steps` steps, the owner
-    * `User`, `workMode` as the mode and the ceiling, the window strategy, `defaultGuard(workMode)`, the preamble of a
+    * `User`, `workMode` as the mode and the ceiling, the memory tree, `defaultGuard(workMode)`, the preamble of a
     * session with no input fields, and the model `model`.
     */
   def config(scope: Path, model: String, limits: HarnessLimits): SessionConfig =
@@ -234,7 +251,7 @@ object WorkRuntime:
       steps = limits.steps,
       mode = workMode,
       ceiling = workMode,
-      strategy = StrategyName.Window,
+      strategy = StrategyName.MemoryTree,
       scope = Scope.Directory(scope.toString),
       owner = Owner.User,
       guard = defaultGuard(workMode),
@@ -250,11 +267,17 @@ object WorkRuntime:
     * code, so it gives an error, and the activation fails with it.
     */
   def strategyOf(
-      config   : SessionConfig,
-      lines    : () => Either[String, LineStore],
-      runner   : PolicyRunner,
-      summaries: () => Budget
-  ): Either[String, ContextStrategy] = ???
+      config    : SessionConfig,
+      lines     : () => Either[String, LineStore],
+      leafRunner: PolicyRunner,
+      summaries : () => Budget
+  ): Either[String, ContextStrategy] =
+    config.strategy match
+      case StrategyName.Window     => Right(Window)
+      case StrategyName.MemoryTree =>
+        lines().map(store => MemoryTree.withLeaves(store, MemoryTree.DefaultHigh, leafRunner, summaries))
+      case StrategyName.PrefixSummary =>
+        Left("the strategy PrefixSummary has no code yet, so a session with it cannot start")
 
   /** A runtime with the first leaves: the policy with `instructions`, and the `subQuery` leaf of a harness. */
   def forWork(env: WorkEnv, limits: HarnessLimits = HarnessLimits())(using RuntimeContext): WorkRuntime =

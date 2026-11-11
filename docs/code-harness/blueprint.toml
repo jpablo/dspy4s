@@ -2342,7 +2342,7 @@ uses = ["turn-effects", "predict", "policy-input", "policy-step", "context-strat
         "recorder", "snapshot-store", "harness-limits", "runtime-context", "session-state", "budget", "host-threads",
         "policy-runner", "zoom-source"]
 proof_uses = ["cell-result", "policy-reply", "window", "recorder", "snapshot-store", "lost-names", "budget",
-              "host-threads"]
+              "host-threads", "zoom-source"]
 text = "callPolicy projects the log with the strategy, spends one call of the budget, and calls the policy leaf through the PolicyRunner, so the trace reaches the RuntimeContext. A spent budget fails the call, and the turn ends Failed. runCell starts the calls of the cell, takes the snapshot of the store, runs the code in the REPL, and joins the trace of the host threads. After the error of the compiler defect, it starts a new REPL and adds the note of the lost names."
 
 [[group]]
@@ -3093,9 +3093,9 @@ ref = "8.1"
 spec = true
 uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context",
         "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access",
-        "harness", "line-store"]
+        "harness", "line-store", "file-lines", "memory-tree", "session-file"]
 proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell",
-              "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble"]
+              "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble", "memory-tree"]
 text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of workMode through recorded and guarded, and JobShell. workMode is local mode with no Sessions^ and no Children^, so a work session has no rlm. Each turn gets a new budget of model calls. The first rules of 5.5: git push gets Ask in a mode with Network^."
 
 [[group]]
@@ -3561,6 +3561,7 @@ ops = ["append", "ready", "buildNode", "roots", "zoom", "fork", "key"]
 ref = "7.1"
 spec = true
 uses = ["message", "node-id", "memory-line", "line-key"]
+proof_uses = ["node-id"]
 text = "The log and the built lines, as a pure value. ready gives the nodes whose halves are built, buildNode of another node gives the same memory, roots gives one node for each set bit, zoom gives a message or the lines of two halves, and key gives the node with a SHA-256 of its texts."
 
 [[node]]
@@ -3581,6 +3582,7 @@ ops = ["upTo", "extend", "split", "join", "fit", "advance"]
 ref = "7.1"
 spec = true
 uses = ["node-id", "memory"]
+proof_uses = ["node-id"]
 text = "A cut through the tree that covers [0, upTo). extend adds messages at the end, split shows the two halves of a node, join is its inverse, fit joins the oldest pairs until the view has at most high / 2 parts, and advance gives one extend and one fit for each message, so the view of n messages depends only on n."
 
 [[node]]
@@ -3653,7 +3655,7 @@ kind = "data"
 name = "ZoomSource"
 ops = ["zoom", "setReader"]
 ref = "7.1"
-uses = []
+uses = ["context-strategy"]
 text = "What zoom of a cell reads: the derived data after the last policy call. The effects set a new reader after each update."
 
 [[node]]
@@ -3665,7 +3667,8 @@ ops = ["update", "project", "zoom", "withLeaves", "room", "render"]
 ref = "7.1"
 spec = true
 uses = ["context-strategy", "predict", "compress-input", "merge-input", "summary", "line-store", "memory-state",
-        "runtime-context", "dspy-error", "logged", "projection", "strategy-name", "signature", "policy-runner", "budget"]
+        "runtime-context", "dspy-error", "logged", "projection", "strategy-name", "signature", "policy-runner", "budget", "memory-log", "window"]
+proof_uses = ["budget", "memory", "memory-log", "node-id", "view"]
 text = "update appends the new messages, builds each ready node with the store or a leaf through the runner and the summary budget, and advances the view to the last reply. A failed leaf gives the line of the source. project gives the view its room first, then the open turn as the window gives it. zoom gives a message or the lines of two halves."
 
 [[group]]
@@ -3774,7 +3777,7 @@ text = "The same seed gives the same tasks. Each fact is in one turn. correct ta
 [[group]]
 id = "memory-live-run"
 phase = "p8"
-module = "harness"
+module = "harness-host"
 file = "MemoryLiveRun.scala"
 where = "tests"
 title = "A live run of the memory metric"
@@ -3786,4 +3789,4 @@ kind = "law"
 name = "Memory live:"
 ref = "7.1"
 uses = ["memory-tasks", "memory-tree"]
-text = "With HARNESS_LIVE=true: the scores of the window and of the memory tree on the planted facts, and the size of each view."
+text = "With HARNESS_LIVE=true: a work session for each strategy gets the journal of the tasks, and each question is its next turn. The scores of the window and of the memory tree go to memory/scores.tsv."

@@ -147,6 +147,22 @@ class MemoryTreeLaws extends munit.FunSuite:
     }
   }
 
+  test("Memory tree: a leaf call that a stop cuts gives the line of the source, and the store does not keep it") {
+    val store   = LineStore.inMemory()
+    val stopped = new PolicyRunner:
+      def run[A](call: () => Either[String, A]): Either[String, A] = Left(PolicyRunner.Stopped)
+    Models.withModel(summaries()) {
+      val tree = MemoryTree.withLeaves(store, high = 6, leafRunner = stopped)
+      val d    = updated(tree, chat(2, output = 700), tree.empty)
+      d.memory.log.zipWithIndex.foreach { (message, i) =>
+        val id = NodeId(0, i.toLong)
+        assertEquals(d.memory.built.get(id), Some(MemoryLine.of(message.text)))
+        assertEquals(Memory.key(d.memory, id).flatMap(store.get), None)
+      }
+      assert(d.memory.built.keys.filter(_.level > 0).forall(id => Memory.key(d.memory, id).flatMap(store.get).isEmpty))
+    }
+  }
+
   test("Memory tree: the view has at most high parts, and it covers the messages up to the last reply") {
     Models.withModel(summaries()) {
       val tree    = MemoryTree.withLeaves(LineStore.inMemory(), high = 6)

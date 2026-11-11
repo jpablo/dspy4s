@@ -137,6 +137,8 @@ object SessionFile:
           statement.execute("pragma journal_mode = WAL"): Unit
           statement.execute("pragma synchronous = NORMAL"): Unit
           statement.execute("pragma fullfsync = ON"): Unit
+          // The store of the memory tree has its own connection to this file (7.1), so each one waits for the other.
+          statement.execute(s"pragma busy_timeout = ${FileLines.BusyMillis}"): Unit
           statement.execute(Table): Unit
         }
         SessionFile(connection, path, session)

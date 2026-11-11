@@ -1176,6 +1176,28 @@ The other findings changed the plan with no choice:
 - The metric has near tasks as a control, which the window can answer, and facts in messages and replies too. The
   score is also given for each distance from the fact to the question.
 
+**The proofs (2026-11-10).** Each law of the plan passes, and the bodies follow the plan. The points that the plan did
+not fix:
+
+- `fit` is one pass with a stack, with the newest part on top. The parts under the top have no pair that can join, so
+  the pair of the top two is always the oldest pair that can join, as the plan says.
+- `Memory.key` gives each kind and each text with its length first, so two other logs never give the same bytes to
+  SHA-256.
+- The runner of a work session reads the stop before each call. So after a stop, each summary of the rest of the
+  update gets the line of its source with no call, and the store keeps none of these lines. The policy call after the
+  update stops too, and the turn ends `Aborted`. A law checks a leaf call that a stop cut.
+- `FileLines` holds derived data: a failed read gives no line, and a failed write keeps no line. Neither one ends a
+  turn, so the next update makes the line again.
+- The error of `zoom` with no memory tree is `ContextStrategy.NoMemory`. A cell gets it as an exception with a plain
+  message.
+- `MemoryLiveRun` is in `harness-host`, because it needs a real work session: `zoom` in a cell, and the file of a
+  session. Each strategy has one session with the journal of the tasks, and each question is the next turn, so the
+  memory builds its lines once.
+- The harness has 10 new mutants, each one killed: `fit` that stops at `high`, `advance` in one step, a key with no
+  text, a node before its halves, a view over the open turn, `render` with newlines, a budget that does not stop the
+  calls, a store that keeps the line of a stopped call, a projection with no room for the view, and a projection with
+  no view. The laws of `harness-host` pass in the Linux container too.
+
 ## 8. Sessions
 
 ### 8.1 One kernel, four configurations

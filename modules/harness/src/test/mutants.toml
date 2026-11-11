@@ -484,3 +484,75 @@ name = "Mutant: a child with a spent budget starts its journal and its REPL"
 file = "Harness.scala"
 old = "    tree.budget.check().left.foreach(error => throw IllegalStateException(s\"rlm: $error\"))\n"
 new = ""
+
+# ── The memory tree (7.1) ──
+
+[[mutant]]
+name = "Mutant: fit stops at high parts, not at high / 2"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "if size <= high / 2 then (stack.reverse ++ rest).toVector"
+new = "if size <= high then (stack.reverse ++ rest).toVector"
+
+[[mutant]]
+name = "Mutant: advance extends the view to the end in one step"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "(v.upTo + 1 to until).foldLeft(v)((view, count) =>"
+new = "(until to until).foldLeft(v)((view, count) =>"
+
+[[mutant]]
+name = "Mutant: the key of a line does not read the texts"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "Vector(message.kind.toString, message.text).foreach { part =>"
+new = "Vector(message.kind.toString).foreach { part =>"
+
+[[mutant]]
+name = "Mutant: a node builds before its halves"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "id.halves.forall((a, b) => m.built.contains(a) && m.built.contains(b))"
+new = "id.halves.forall(_ => true)"
+
+[[mutant]]
+name = "Mutant: the view covers the open turn too"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "def beforeOpenTurn(journal: Vector[Logged]): Long = walk(journal).replied.toLong"
+new = "def beforeOpenTurn(journal: Vector[Logged]): Long = walk(journal).messages.size.toLong"
+
+[[mutant]]
+name = "Mutant: render keeps the newlines of a line"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "line.text.replace('\\n', ' ').replace('\\r', ' ')"
+new = "line.text"
+
+[[mutant]]
+name = "Mutant: a spent summary budget does not stop the leaf calls"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "if budget.spend().isLeft then (fallback, None)"
+new = "if budget.spend().isLeft && budget.limit < 0 then (fallback, None)"
+
+[[mutant]]
+name = "Mutant: the store keeps the line of a leaf call that a stop cut"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "case Left(PolicyRunner.Stopped) => (fallback, None)"
+new = "case Left(PolicyRunner.Stopped) => (fallback, key.map(_ -> fallback))"
+
+[[mutant]]
+name = "Mutant: project gives the open turn the whole budget"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "Window.openTurn(journal, (budget - MemoryTree.room(high)).max(0))"
+new = "Window.openTurn(journal, budget)"
+
+[[mutant]]
+name = "Mutant: project leaves out the view"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "if view.isEmpty then open"
+new = "if true then open"

@@ -144,8 +144,9 @@ final case class Harness[I, O](
       val store    = SnapshotStore()
       val llm      = LeafLlm(subQuery, () => tree.budget, tree.host, limits.batch)
       val children = ChildTurns(childStart(depth + 1, tree, id, journal), tree.host, limits.batch)
+      val zooms    = ZoomSource()
       val bindings = Bindings(
-        turn = JournalTurn(journal, () => System.currentTimeMillis()),
+        turn = JournalTurn(journal, () => System.currentTimeMillis(), zooms),
         files = Some(tree.files),
         shell = Some(tree.shell),
         llm = Option.when(config.mode.llm == Access.Full)(llm),
@@ -165,7 +166,9 @@ final case class Harness[I, O](
         store,
         limits,
         () => tree.budget,
-        Option.when(depth == 0)(tree.host)
+        Option.when(depth == 0)(tree.host),
+        PolicyRunner.Direct,
+        zooms
       )
       try
         drive(journal, effects): Unit

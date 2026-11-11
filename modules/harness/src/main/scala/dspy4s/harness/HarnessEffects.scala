@@ -5,8 +5,6 @@ import dspy4s.harness.kernel.{CellOutcome, Command, Position, Source}
 import dspy4s.harness.repl.{CellRun, ScalaRepl, lostNames, topLevelNames}
 import dspy4s.programs.strategies.Predict
 
-import scala.annotation.nowarn
-
 /** The effects of a turn of a harness (CODE_HARNESS_DESIGN.md, 4.6 and 9).
   *
   *   - `callPolicy` updates the derived data of `strategy`, projects the log of `journal` into the budget of `limits`,
@@ -37,7 +35,6 @@ import scala.annotation.nowarn
   * The effects own the current REPL: the first one starts with the effects, and `close` closes the current one. When a
   * new REPL cannot start, its exception goes on to the caller.
   */
-@nowarn("msg=unused") // the skeleton: the proof of phase 8 sets the reader of zooms
 final class HarnessEffects(
     task     : String,
     reference: String,
@@ -62,6 +59,7 @@ final class HarnessEffects(
     val log = journal.log
     strategy.update(log, derived).left.map(_.message).flatMap { data =>
       derived = data
+      zooms.setReader(ref => strategy.zoom(data, ref))
       val view  = strategy.project(log, data, limits.budget)
       val input = PolicyInput(task, reference, view.status, view.observation, view.history)
       budget().spend().flatMap(_ => runner.run(() => policy(input).left.map(_.message))).map { step =>

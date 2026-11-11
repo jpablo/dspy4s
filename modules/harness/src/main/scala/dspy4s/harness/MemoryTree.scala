@@ -1,14 +1,15 @@
 package dspy4s.harness
 
-import dspy4s.core.contracts.{DspyError, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, DynamicValues, History, RuntimeContext}
 import dspy4s.harness.guest.StrategyName
 import dspy4s.harness.kernel.Logged
 import dspy4s.programs.strategies.Predict
 import dspy4s.signatures.Signature
 import zio.blocks.schema.Schema
 
+import java.nio.charset.StandardCharsets.UTF_8
 import java.util.concurrent.ConcurrentHashMap
-import scala.annotation.nowarn
+import scala.annotation.tailrec
 
 /** The input of the leaf `compress` (CODE_HARNESS.md, 6.1): one message, longer than a line. The strategy cuts it to
   * `MemoryTree.MaxSource` characters first, so a very long message does not fill the context of the model.
@@ -51,12 +52,13 @@ final case class MemoryState(memory: Memory, view: View) derives CanEqual
   * With no reader, `zoom` gives the error of a session with no memory tree.
   */
 final class ZoomSource:
+  @volatile private var reader: String => Either[String, String] = _ => Left(ContextStrategy.NoMemory)
 
   /** The text of the part `ref` of the memory, or an error with a plain message. */
-  def zoom(ref: String): Either[String, String] = ???
+  def zoom(ref: String): Either[String, String] = reader(ref)
 
   /** Sets the reader of the derived data after an update. */
-  def setReader(read: String => Either[String, String]): Unit = ???
+  def setReader(read: String => Either[String, String]): Unit = reader = read
 
 /** The memory tree (CODE_HARNESS.md, 6; CODE_HARNESS_DESIGN.md, 7.1): the strategy of a long work session.
   *
@@ -76,7 +78,6 @@ final class ZoomSource:
   *   - `zoom` gives the message of a node of level 0, or the lines of the two halves of a built node, each with its
   *     reference.
   */
-@nowarn("msg=unused") // the skeleton: the proof of phase 8 uses the store, the runner, the budget and the size
 final class MemoryTree(
     compress  : Predict[CompressInput, Summary],
     merge     : Predict[MergeInput, Summary],
@@ -91,11 +92,90 @@ final class MemoryTree(
 
   def empty: MemoryState = MemoryState(Memory.empty, View.empty)
 
-  def update(journal: Vector[Logged], d: MemoryState)(using RuntimeContext): Either[DspyError, MemoryState] = ???
+  def update(journal: Vector[Logged], d: MemoryState)(using RuntimeContext): Either[DspyError, MemoryState] =
+    val added  = MemoryLog.messages(journal).drop(d.memory.log.size)
+    val memory = settle(added.foldLeft(d.memory)(Memory.append), summaries())
+    Right(MemoryState(memory, View.advance(d.view, memory, high, MemoryLog.beforeOpenTurn(journal))))
 
-  def project(journal: Vector[Logged], d: MemoryState, budget: Int): Projection = ???
+  def project(journal: Vector[Logged], d: MemoryState, budget: Int): Projection =
+    val open = Window.openTurn(journal, (budget - MemoryTree.room(high)).max(0))
+    val view = MemoryTree.render(d.memory, d.view)
+    if view.isEmpty then open
+    else
+      val first = DynamicValues.record(
+        "observation" -> DynamicValues.string(s"${MemoryTree.Header}\n$view"),
+        "reasoning"   -> DynamicValues.string(""),
+        "text"        -> DynamicValues.string("")
+      )
+      open.copy(history = History(first +: open.history.messages))
 
-  override def zoom(d: MemoryState, ref: String): Either[String, String] = ???
+  override def zoom(d: MemoryState, ref: String): Either[String, String] =
+    NodeId.parse(ref) match
+      case None     => Left(s"$ref is not a reference of the memory. A reference is level.index, for example 3.5.")
+      case Some(id) => (Memory.zoom(d.memory, id), id.halves) match
+          case (Some(Left(message)), _)                    => Right(message.text)
+          case (Some(Right((older, newer))), Some((a, b))) =>
+            Right(s"[${a.ref}] ${older.text}\n[${b.ref}] ${newer.text}")
+          case _ => Left(s"the memory has no part $ref yet")
+
+  /** Builds each ready node, the oldest first, until no node is ready, and puts the new lines of the store in one
+    * `putAll`.
+    */
+  private def settle(m: Memory, budget: Budget)(using RuntimeContext): Memory =
+    @tailrec
+    def go(m: Memory, kept: Vector[(LineKey, MemoryLine)]): (Memory, Vector[(LineKey, MemoryLine)]) =
+      val ready = Memory.ready(m)
+      if ready.isEmpty then (m, kept)
+      else
+        val (grown, more) = ready.foldLeft((m, kept)) { case ((acc, k), id) =>
+          val (line, keep) = lineOf(acc, id, budget)
+          (Memory.buildNode(acc, id, line), k ++ keep)
+        }
+        go(grown, more)
+    val (built, kept) = go(m, Vector.empty)
+    if kept.nonEmpty then lines.putAll(kept)
+    built
+
+  /** The line of the ready node `id`, and the entry for the store, if any. The store comes first. A short message is
+    * its own line. A leaf call spends one call of `budget`. A failed call gives the line of the source, for the store.
+    * A spent budget or a stop gives the line of the source, but not for the store, so a later update tries again.
+    */
+  private def lineOf(m: Memory, id: NodeId, budget: Budget)(using
+      RuntimeContext
+  ): (MemoryLine, Option[(LineKey, MemoryLine)]) =
+    val key    = Memory.key(m, id)
+    val source = sourceText(m, id)
+    key.flatMap(lines.get) match
+      case Some(stored)                                                                  => (stored, None)
+      case None if id.level == 0 && source.getBytes(UTF_8).length <= MemoryLine.MaxBytes =>
+        (MemoryLine.of(source), None)
+      case None =>
+        val fallback = MemoryLine.of(source)
+        if budget.spend().isLeft then (fallback, None)
+        else
+          summarize(m, id) match
+            case Right(text) =>
+              val line = MemoryLine.of(text)
+              (line, key.map(_ -> line))
+            case Left(PolicyRunner.Stopped) => (fallback, None)
+            case Left(_)                    => (fallback, key.map(_ -> fallback))
+
+  /** The text of a node with no leaf: its message, or the lines of its two halves. */
+  private def sourceText(m: Memory, id: NodeId): String =
+    Memory.zoom(m, id) match
+      case Some(Left(message))         => message.text
+      case Some(Right((older, newer))) => s"${older.text} ${newer.text}"
+      case None                        => ""
+
+  /** The line of a leaf for `id`: `compress` of its message, or `merge` of the lines of its halves. */
+  private def summarize(m: Memory, id: NodeId)(using RuntimeContext): Either[String, String] =
+    Memory.zoom(m, id) match
+      case Some(Left(message)) =>
+        leafRunner.run(() => compress(CompressInput(message.text.take(MemoryTree.MaxSource))).left.map(_.message))
+          .map(_.output.line)
+      case Some(Right((older, newer))) =>
+        leafRunner.run(() => merge(MergeInput(older.text, newer.text)).left.map(_.message)).map(_.output.line)
+      case None => Left(s"the node ${id.ref} has no source")
 
 object MemoryTree:
 
@@ -136,9 +216,16 @@ object MemoryTree:
     )
 
   /** The characters that a view of `high` parts can take: each line of 512 bytes, and its reference. */
-  def room(high: Int): Int = ???
+  def room(high: Int): Int = high * (MemoryLine.MaxBytes + 32) + Header.length
+
+  /** The first line of the view in the history. */
+  val Header: String =
+    "The memory of this session before this turn, oldest first. Each line is [ref] summary. Read a part with zoom(ref)."
 
   /** The text of a view: one line for each part, `[ref] line`, oldest first. A newline of a line becomes a space, so
     * each part is one line of the text. A part with no built line gives none.
     */
-  def render(m: Memory, v: View): String = ???
+  def render(m: Memory, v: View): String =
+    v.parts
+      .flatMap(id => m.built.get(id).map(line => s"[${id.ref}] ${line.text.replace('\n', ' ').replace('\r', ' ')}"))
+      .mkString("\n")
