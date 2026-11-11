@@ -14,7 +14,7 @@ import dspy4s.harness.kernel.{repair, state as foldOf}
 import java.nio.channels.{FileChannel, FileLock, OverlappingFileLockException}
 import java.nio.file.{Files as JFiles, Path, StandardOpenOption}
 import java.util.concurrent.atomic.AtomicReference
-import java.util.concurrent.{CountDownLatch, LinkedBlockingQueue, TimeUnit}
+import java.util.concurrent.{CountDownLatch, Executors, LinkedBlockingQueue, TimeUnit}
 import scala.util.Try
 import scala.util.control.NonFatal
 
@@ -200,7 +200,8 @@ trait Activation extends AutoCloseable:
   *     during the open reaches it, and with no lock of the host. At its start the host opens each session of
   *     `ReportPass.repairable`.
   *   - After each `TurnEnded` in a git folder, the host commits `ScopeRecorded` with the snapshot of `scopes`, on one
-  *     ordered thread for each session. A snapshot that a newer `TurnEnded` makes old does not commit.
+  *     ordered thread for each session. A snapshot that a newer `TurnEnded` makes old does not commit. The controller,
+  *     whose scope is `Home`, gets no snapshot.
   *   - The row of a session goes to the catalog when its status or its ledger changes.
   *   - `release` ends a session with its release plan.
   */
@@ -354,6 +355,7 @@ final class LocalHost private (
       clock,
       catalog,
       timers,
+      scopes,
       (child, owner) => due.offer((child, owner)): Unit
     )
 
@@ -572,6 +574,12 @@ private final class OpenSession private (
   private val guard    = Object()
   private val finished = CountDownLatch(1)
 
+  // The snapshots of the scope after each `TurnEnded` (8.7): one thread of this session runs them in the order of the
+  // turns. `turnsEnded` counts the `TurnEnded` of this open, so a snapshot knows when a newer one comes after it.
+  private val recorder =
+    Executors.newSingleThreadExecutor(Thread.ofVirtual().name(s"harness-scope-${id.value}").factory())
+  @volatile private var turnsEnded = 0L
+
   // The live part. Only code that holds `guard` changes it.
   private var activation: Option[(WorkerTicket, Activation)] = None
   private var openPart: Option[AutoCloseable]                = None // the result of `SessionRuntime.opened`
@@ -640,6 +648,7 @@ private final class OpenSession private (
       live.foreach(a => Try(a.close()): Unit)
       part.foreach(p => Try(p.close()): Unit)
       Try(jobs.close()): Unit
+      Try(recorder.shutdownNow()): Unit
       writer.close()
       Try(lock.release()): Unit
       Try(channel.close()): Unit
@@ -680,11 +689,19 @@ private final class OpenSession private (
           activation.map(_._1).orElse(pendingTicket).foreach { ticket =>
             place.timers.after(place.limits.grace)(() => writer.expire(s.lastTurn, ticket)): Unit
           }
+        val added    = putRow()
+        val turnEnds = added.exists(_.entry match
+          case Entry.TurnEnded(_) => true
+          case _                  => false)
+        val ends = added.exists(_.entry match
+          case Entry.Ended(_, _) => true
+          case _                 => false)
         // A report is due after a `TurnEnded` or an `Ended` of a session whose owner is a session (8.6).
-        if putRow() then
+        if turnEnds || ends then
           s.config.owner match
             case Owner.Session(owner) => place.report(id, owner)
             case _                    => ()
+        if turnEnds && !s.closed then recordScope(s.config.scope)
         if !s.closed && next(s) != Next.Wait then ensureWorker()
       s.closed
     }
@@ -775,20 +792,37 @@ private final class OpenSession private (
       (ticket, made)
     finally if !started then guard.synchronized { pendingTicket = None }
 
-  /** Puts the row of the session into the catalog when its status changes, and at the first commit of this open. It
-    * gives true when the new entries hold a `TurnEnded` or an `Ended`.
+  /** Puts the row of the session into the catalog when its status or its ledger changes, and at the first commit of
+    * this open (8.7). It gives the entries that the row did not have.
     */
-  private def putRow(): Boolean =
+  private def putRow(): Vector[Logged] =
     val fresh = writer.log.reverseIterator.takeWhile(_.seq > row._1.lastSeq).toVector.reverse
     val next  = fresh.foldLeft(row)(catalogRow(id).step)
-    if !putOnce || next._1.status != row._1.status then
+    if !putOnce || next._1.status != row._1.status || next._1.ledger != row._1.ledger then
       putOnce = true
       // A failed write of the catalog never ends a session: the next rebuild corrects the row.
       place.catalog.put(next._1): Unit
     row = next
-    fresh.exists(_.entry match
-      case Entry.TurnEnded(_) | Entry.Ended(_, _) => true
-      case _                                      => false)
+    fresh
+
+  /** Commits `ScopeRecorded` with the snapshot of `scope` after a `TurnEnded` (8.7), on the thread of the snapshots. A
+    * snapshot that a newer `TurnEnded` makes old does not commit, and a folder with no git gives none. The `Home` of
+    * the controller gets no snapshot: the controller writes nothing, and a walk of the home of the person can be long.
+    * Holds `guard`.
+    */
+  private def recordScope(scope: Scope): Unit =
+    scope match
+      case Scope.Home(_) => ()
+      case _             =>
+        turnsEnded += 1
+        val turn = turnsEnded
+        // After the end of the session, the thread takes no task, and the session needs no snapshot.
+        Try(recorder.execute { () =>
+          if turn == turnsEnded then
+            place.scopes.snapshot(scope).filter(_ => turn == turnsEnded).foreach { now =>
+              writer.run(Command.Commit(Vector(Entry.ScopeRecorded(now.head, now.clean))), Source.Harness): Unit
+            }
+        }): Unit
 
   /** The message of a job with `report` at its end (10.3). The writer of the session gets it, so it also reaches a
     * later activation.
@@ -811,6 +845,7 @@ private object OpenSession:
       clock  : () => Long,
       catalog: Catalog,
       timers : Timers,
+      scopes : Scopes,
       report : (SessionId, SessionId) => Unit // the put of a live report: the session and its owner (8.7)
   )
 

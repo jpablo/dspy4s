@@ -29,8 +29,8 @@ trait Scopes:
     */
   def make(scope: Scope): Either[String, Unit]
 
-  /** The git head of the folder of `scope` and whether it has no uncommitted change, or none for a folder with no git
-    * or with no commit.
+  /** The git head of the folder of `scope` and whether it has no uncommitted change, or none for a folder with no git,
+    * with no commit, or with a path that is not absolute.
     */
   def snapshot(scope: Scope): Option[ScopeSnapshot]
 
@@ -74,6 +74,8 @@ final class GitScopes(timeout: FiniteDuration = 30.seconds) extends Scopes:
   def snapshot(scope: Scope): Option[ScopeSnapshot] =
     val folder = folderOf(scope)
     for
+      // A relative path would name a folder of the working folder of the host.
+      _      <- Option.when(folder.isAbsolute)(())
       head   <- git(folder, "rev-parse", "--verify", "-q", "HEAD").toOption
       status <- git(folder, "status", "--porcelain", "--ignored", "--untracked-files=all").toOption
     yield ScopeSnapshot(head, status.isEmpty)

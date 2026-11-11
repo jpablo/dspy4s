@@ -1440,7 +1440,8 @@ These points are proposals for the review:
   with `Unknown` counts too, because it can have changed the file.
 - After each `TurnEnded` in a git folder, the host commits `ScopeRecorded(head, clean)` (decision 10 of
   [CODE_HARNESS.md](CODE_HARNESS.md), 7.10). The git commands run on one ordered thread for each session, outside the
-  sandbox, with the rules of `Scopes` for git.
+  sandbox, with the rules of `Scopes` for git. The controller gets no snapshot: its scope is the `Home` of the person,
+  it writes nothing there, and `git status` of a home can take a long time.
 - The catalog row holds the goal, the scope and the ledger, so `list` reads no journal. The host puts the row when
   its status or its ledger changes.
 - The journal of a probe goes to `<root>/probes/<caller>.<cell>.<n>.db`, so `list` does not show it, and its name

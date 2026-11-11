@@ -3,7 +3,7 @@ package dspy4s.harness.host
 import dspy4s.harness.cutEnd
 import dspy4s.harness.guest.Scope
 import dspy4s.harness.guest.SessionSchemas.given
-import dspy4s.harness.kernel.{Entry, Fold, Ledger, LedgerState, Logged, Owner, SessionId, SessionOutcome}
+import dspy4s.harness.kernel.{Entry, Fold, Ledger, LedgerState, Logged, Owner, SessionId, SessionOutcome, ledger}
 import dspy4s.harness.sandbox.SandboxedShell
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodec
@@ -92,11 +92,12 @@ private def oneLine(text: String): String =
   * the status `Idle`, the last `seq` -1, no goal, no scope and an empty ledger.
   */
 def catalogRow(session: SessionId): Fold[Logged, (CatalogRow, LedgerState), CatalogRow] =
+  val counting = ledger
   Fold(
     (CatalogRow(session, Owner.Cell, None, SessionStatus.Idle, -1L, "", 0L, ""), LedgerState.empty),
     (acc, logged) =>
-      val (row, ledger) = acc
-      val status        = logged.entry match
+      val (row, kept) = acc
+      val status      = logged.entry match
         case Entry.Activated(_, _)                                        => SessionStatus.Idle
         case Entry.TurnStarted                                            => SessionStatus.InTurn
         case Entry.StopRequested(_) if row.status == SessionStatus.InTurn => SessionStatus.Stopping
@@ -121,7 +122,8 @@ def catalogRow(session: SessionId): Fold[Logged, (CatalogRow, LedgerState), Cata
       val named = logged.entry match
         case Entry.Activated(_, config) => updated.copy(goal = config.goal, scope = Some(config.scope))
         case _                          => updated
-      (named, ledger)
+      val tally = counting.step(kept, logged)
+      (named.copy(ledger = counting.done(tally)), tally)
     ,
     _._1
   )
