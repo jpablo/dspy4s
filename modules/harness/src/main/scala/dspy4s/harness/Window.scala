@@ -51,8 +51,10 @@ object Window extends ContextStrategy:
   def cut(text: String, max: Int): String =
     if text.length <= max then text
     else
-      text.take(max.max(0)) +
-        s"\n[${text.length - max.max(0)} more characters were cut. Print a smaller part of the value to see them.]"
+      // The text goes to a model, so the cut keeps each character whole.
+      val kept = textPrefix(text, max)
+      kept +
+        s"\n[${text.length - kept.length} more characters were cut. Print a smaller part of the value to see them.]"
 
   /** The projection of a chat (phase 7). The messages that a step sees come before its observation, and each earlier
     * turn is one message of the history before the steps of the open turn:

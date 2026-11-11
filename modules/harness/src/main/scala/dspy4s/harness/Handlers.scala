@@ -83,11 +83,17 @@ object Recorder:
 
   private def message(e: Exception): String = s"${e.getClass.getSimpleName}: ${Option(e.getMessage).getOrElse("")}"
 
-  private def rendered(json: Json): String =
+  /** The text of a value for a reader, at most `RenderedLimit` units and a note of the rest. It goes into the journal,
+    * so the cut keeps each character whole.
+    */
+  private[harness] def rendered(json: Json): String =
     val text = json match
       case Json.String(value) => value
       case other              => other.print
-    if text.length <= RenderedLimit then text else text.take(RenderedLimit) + s"… [${text.length - RenderedLimit} more]"
+    if text.length <= RenderedLimit then text
+    else
+      val kept = textPrefix(text, RenderedLimit)
+      kept + s"… [${text.length - kept.length} more]"
 
 /** `Files.local(root)` of 5.3: the real files under `root`, with the rules of `profile` (5.4). A write is only under a
   * writable root and not in a read-only part, such as `.git`. A hidden path cannot be read or written, and nor can a

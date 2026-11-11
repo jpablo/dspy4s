@@ -1,6 +1,7 @@
 package dspy4s.harness.cli
 
 import dspy4s.harness.Support
+import dspy4s.harness.guest.JobStatus
 import dspy4s.harness.host.{Behind, Feed, HostError, SessionHandle}
 import dspy4s.harness.kernel.*
 import zio.blocks.chunk.Chunk
@@ -27,7 +28,7 @@ class CliLaws extends munit.FunSuite:
     assertEquals(CliArgs.parse(Vector.empty, home, cwd), Right(CliArgs(cwd, home.resolve(".dspy4s/harness"), None)))
     assertEquals(
       CliArgs.parse(Vector("--root", "/fake/root", "--session", "fake-id", "/fake/other"), home, cwd),
-      Right(CliArgs(Path.of("/fake/other"), Path.of("/fake/root"), Some(SessionId("fake-id"))))
+      Right(CliArgs(Path.of("/fake/other"), Path.of("/fake/root"), Some("fake-id")))
     )
   }
 
@@ -142,9 +143,9 @@ class CliLaws extends munit.FunSuite:
   test("CLI: parseLine reads the commands, and a text that does not start with / is a message") {
     assertEquals(parseLine("/stop"), Line.Stop)
     assertEquals(parseLine("/stopall"), Line.StopAll)
-    assertEquals(parseLine("/allow once"), Line.Allow(GrantLifetime.Once))
-    assertEquals(parseLine("/allow turn"), Line.Allow(GrantLifetime.Turn))
-    assertEquals(parseLine("/allow session"), Line.Allow(GrantLifetime.Session))
+    assertEquals(parseLine("/allow once"), Line.Allow(GrantLifetime.Once, None))
+    assertEquals(parseLine("/allow turn"), Line.Allow(GrantLifetime.Turn, None))
+    assertEquals(parseLine("/allow session"), Line.Allow(GrantLifetime.Session, None))
     assertEquals(parseLine("/close"), Line.Close)
     assertEquals(parseLine("/quit"), Line.Quit)
     assertEquals(parseLine("/fake"), Line.Unknown("/fake"))
@@ -163,10 +164,10 @@ class CliLaws extends munit.FunSuite:
   test(
     "CLI: Allow gives one Grant for each pending call with the lifetime of the line, and with no pending call an error"
   ) {
-    commandsFor(Line.Allow(GrantLifetime.Turn), pending, request) match
+    commandsFor(Line.Allow(GrantLifetime.Turn, None), pending, request) match
       case Right(Vector(Command.Grant(_, rule, GrantLifetime.Turn))) => assertEquals(rule, pushRule)
       case other                                                     => fail(other.toString)
-    assert(commandsFor(Line.Allow(GrantLifetime.Once), SessionState.initial, request).isLeft)
+    assert(commandsFor(Line.Allow(GrantLifetime.Once, None), SessionState.initial, request).isLeft)
   }
 
   test("CLI: a message gives one Send with the request id, Close gives Close, and Quit gives no command") {
@@ -178,15 +179,15 @@ class CliLaws extends munit.FunSuite:
       case Right(Vector(Command.Close(SessionOutcome.Parked, _))) => ()
       case other                                                  => fail(other.toString)
     assertEquals(commandsFor(Line.Quit, SessionState.initial, request), Right(Vector.empty))
-    assert(commandsFor(Line.Unknown("/fake"), SessionState.initial, request).left.exists(_.contains("/stop")))
+    assert(commandsFor(Line.Unknown("/fake"), SessionState.initial, request).left.exists(_.contains("/help")))
   }
 
   test(
-    "CLI: entryText shows the text and the code of a step, the output of a cell and a pending call, and hides a step start"
+    "CLI: entryText shows the text and the code of a step, the output of a cell and a pending call, and hides a git head"
   ) {
     val log = Support.logOf(
       1000L,
-      Entry.StepStarted(0),
+      Entry.ScopeRecorded("FAKE-HEAD", true),
       Entry.Acted("", "FAKE-TEXT", Some("FAKE-CODE")),
       Entry.Observed("FAKE-OUTPUT", CellOutcome.Ok, Map.empty),
       Entry.EffectDone(EffectId(1L, 0), EffectResult.NeedsApproval(pushRule))
@@ -305,9 +306,10 @@ private final class FakeHandle(endAfterFirst: Boolean = false, closed: Boolean =
   def run(command: Command): Either[HostError, SessionState] =
     ran.add(command): Unit
     Left(HostError.Rejected(Rejection.TurnOpen))
-  def state: SessionState               = SessionState.initial.copy(closed = closed)
-  def read(after: Long): Vector[Logged] = Vector(reply).filter(_.seq > after)
-  def subscribe(capacity: Int): Feed    =
+  def state: SessionState                 = SessionState.initial.copy(closed = closed)
+  def jobStatus: Map[EffectId, JobStatus] = Map.empty
+  def read(after: Long): Vector[Logged]   = Vector(reply).filter(_.seq > after)
+  def subscribe(capacity: Int): Feed      =
     new Feed:
       private val queue                                          = ConcurrentLinkedQueue[Either[Behind, Logged]](java.util.List.of(Right(reply)))
       def poll(waitMillis: Long): Option[Either[Behind, Logged]] =
@@ -338,8 +340,9 @@ private final class TurnHandle(open: Boolean = false, refuse: Boolean = false) e
       case _           => Right(state)
   def state: SessionState =
     SessionState.initial.copy(closed = false, position = if inTurn then Position.BeforeStep(0) else Position.NoTurn)
-  def read(after: Long): Vector[Logged] = Vector.empty
-  def subscribe(capacity: Int): Feed    =
+  def jobStatus: Map[EffectId, JobStatus] = Map.empty
+  def read(after: Long): Vector[Logged]   = Vector.empty
+  def subscribe(capacity: Int): Feed      =
     new Feed:
       def poll(waitMillis: Long): Option[Either[Behind, Logged]] =
         Thread.sleep(waitMillis.min(50))

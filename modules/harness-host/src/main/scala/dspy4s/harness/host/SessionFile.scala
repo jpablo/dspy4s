@@ -148,5 +148,8 @@ object SessionFile:
           throw e
     }.toEither.left.map(e => s"the journal $path did not open: ${e.getMessage}")
 
+  /** The folder of the journals under the root of a host: `<root>/sessions`. */
+  def folderOf(root: Path): Path = root.resolve("sessions")
+
   /** The path of the file of `session` under the root of a host: `<root>/sessions/<id>.db`. */
-  def pathOf(root: Path, session: SessionId): Path = root.resolve("sessions").resolve(s"${session.value}.db")
+  def pathOf(root: Path, session: SessionId): Path = folderOf(root).resolve(s"${session.value}.db")

@@ -1,6 +1,6 @@
 package dspy4s.harness.host
 
-import dspy4s.harness.{Harness, Journal, Secrets, TurnEffects, drive}
+import dspy4s.harness.{Harness, Journal, Secrets, TurnEffects, drive, textSuffix}
 import dspy4s.harness.guest.{JobStatus, Mode, Scope}
 import dspy4s.harness.kernel.{Command, EffectId, Entry, Logged, Next, Position, RequestId, SessionConfig, SessionId}
 import dspy4s.harness.kernel.{SessionState, Source, TurnOutcome, closing, next, repair, state as foldOf}
@@ -40,6 +40,11 @@ trait SessionHandle:
 
   /** The committed state. */
   def state: SessionState
+
+  /** The status of each job of `state` (10.3): `Running` or `Exited` from the job table, and `Stopped` or `Lost` for a
+    * job with no process in this host. A client shows it, for example after a stop that left a job of its turn.
+    */
+  def jobStatus: Map[EffectId, JobStatus]
 
   /** A feed of the entries of the commits after this call (10.2). */
   def subscribe(capacity: Int): Feed
@@ -159,14 +164,37 @@ object LocalHost:
       clock  : () => Long = () => System.currentTimeMillis()
   ): Either[HostError, LocalHost] =
     for
-      sessions <- Try(JFiles.createDirectories(root.resolve("sessions"))).toEither.left
+      sessions <- Try(JFiles.createDirectories(SessionFile.folderOf(root))).toEither.left
                     .map(e => HostError.OpenFailed(s"the folder of the host did not open: ${e.getMessage}"))
-      catalog <- Catalog.open(root.resolve("catalog.db")).left.map(HostError.OpenFailed(_))
+      catalog <- Catalog.open(Catalog.pathOf(root)).left.map(HostError.OpenFailed(_))
       rebuilt <- Catalog.rebuild(catalog, sessions).left.map { e =>
                    catalog.close()
                    HostError.OpenFailed(e)
                  }
     yield LocalHost(root, runtime, secrets, limits, clock, catalog, Timers(), rebuilt)
+
+  /** The sessions of the root of a host, with no runtime and no open session: the rebuild of the catalog that `start`
+    * runs (10.2). A root with no folder of journals has no session, and this function then makes no file.
+    */
+  def sessions(root: Path): Either[HostError, Rebuilt] =
+    if !JFiles.isDirectory(SessionFile.folderOf(root)) then Right(Rebuilt(Vector.empty, Vector.empty))
+    else
+      Catalog.open(Catalog.pathOf(root)).left.map(HostError.OpenFailed(_)).flatMap { catalog =>
+        try Catalog.rebuild(catalog, SessionFile.folderOf(root)).left.map(HostError.OpenFailed(_))
+        finally catalog.close()
+      }
+
+  /** The session of each journal file of the root, in the order of the ids (`Catalog.journalFiles`). It reads only the
+    * names of the files, so it needs no catalog: a session whose row is missing or old still has its journal.
+    */
+  def journals(root: Path): Either[HostError, Vector[SessionId]] =
+    Catalog.journalFiles(SessionFile.folderOf(root)).left.map(HostError.OpenFailed(_))
+      .map(_.map(file => SessionId(file.getFileName.toString.stripSuffix(".db"))))
+
+/** The name of a job for a person and for the model: the cell and the number of its `spawn`, for example `12.0`. The
+  * guest API gives the model the same two numbers as `JobId(12, 0)` (10.3).
+  */
+def jobName(job: EffectId): String = s"${job.cell}.${job.n}"
 
 /** One open session of a `LocalHost`: its writer, its feeds, its jobs, its lock, and the live part of its activation
   * and worker. `onCommit` runs on the thread of the writer after each commit, and the worker thread runs the turns. One
@@ -212,6 +240,10 @@ private final class OpenSession private (
     if writer.state.closed then Left(HostError.Ended) else writer.run(command, Source.User)
 
   def state: SessionState = writer.state
+
+  def jobStatus: Map[EffectId, JobStatus] =
+    val now = writer.state
+    now.jobs.keys.map(job => job -> jobs.status(job, now)).toMap
 
   def subscribe(capacity: Int): Feed = feeds.subscribe(capacity)
 
@@ -374,8 +406,10 @@ private final class OpenSession private (
     * later activation.
     */
   private def reportJob(job: EffectId, status: JobStatus): Unit =
-    val output = jobs.output(job).fold("")(text => text.takeRight(ReportOutput))
-    val text   = s"The job ${job.cell}.${job.n} ended with the status $status. The end of its output:\n$output"
+    // The cut keeps whole characters, because the journal refuses a surrogate with no pair, and a failed write ends the
+    // session.
+    val output = jobs.output(job).fold("")(text => textSuffix(text, ReportOutput))
+    val text   = s"The job ${jobName(job)} ended with the status $status. The end of its output:\n$output"
     writer.post(Command.Send(RequestId(s"job:${job.cell}:${job.n}"), text, Map.empty), Source.Harness): Unit
 
 private object OpenSession:
