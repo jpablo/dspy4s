@@ -91,6 +91,10 @@ final class WorkRuntime(
     */
   private[host] def indexOf(session: SessionId): Option[SecretIndex] = Option(indexes.get(session))
 
+  /** The walk for secret files of the index of `session` while it runs (`SecretIndex.progress`), or none. */
+  override def activity(session: SessionId): Option[Activity] =
+    indexOf(session).flatMap(_.progress).map(p => Activity.SecretScan(p.folders, p.total))
+
   /** In a mode with a shell, a new index of the secret files of `session`, and a walk of the scope that fills it on a
     * daemon thread of its own (`SandboxedShell.warm`). Each activation of the open session uses this index. The walk
     * has a shell and a layout for the walk only. The folders of the scope have the same paths in the profile of a later

@@ -207,6 +207,8 @@ object Cli:
     *     the next steps. They change nothing in the session. `/allow N` grants the call that the entry N asked for.
     *   - After a turn that ends `Aborted`, the client prints `stopNotice`: each job of that turn that still runs, and
     *     how to stop it (10.3).
+    *   - After each entry, the console gets the state of the session (`Busy.after`), so a person sees what runs. A turn
+    *     that is open at the start of the loop gives the state "the turn runs".
     *   - An error of `commandsFor` and a refused command print one line, and the loop goes on.
     *   - After `Behind`, the client reads the journal after its last `seq`, so it shows each entry once.
     *   - It ends at `/quit`, at the end of the input, or when the feed ends, for example after `Close` or a failed
@@ -227,7 +229,13 @@ object Cli:
     val shown  = Shown(start)
     val view   = AtomicReference(ReasoningView.Short)
     // The `seq` of the `TurnStarted` of the last turn that the client saw: the turn of a stop notice.
-    val turn                      = AtomicLong(before.lastTurn)
+    val turn = AtomicLong(before.lastTurn)
+    // What the session does now. Only the printer thread changes it, after the first value.
+    val busy = AtomicReference(
+      Option.when(before.position != Position.NoTurn)(Busy("the turn runs", System.currentTimeMillis(), 0))
+    )
+    console.busy(busy.get)
+    console.activity(() => handle.activity)
     def print(text: String): Unit = console.print(printable(text))
     // An entry that the client did not show yet, and the stop notice after a turn that a stop ended.
     def show(logged: Logged): Unit =
@@ -238,6 +246,8 @@ object Cli:
           case Entry.TurnEnded(TurnOutcome.Aborted) =>
             stopNotice(handle.state, turn.get, jobStarts(handle.read(turn.get)), handle.jobStatus).foreach(print)
           case _ => ()
+        val running = Busy.after(busy.get, entry)
+        if running != busy.getAndSet(running) then console.busy(running)
       }
     // An entry of the feed, or the entries of the journal after the last one shown after `Behind`.
     def take(item: Either[Behind, Logged]): Unit =

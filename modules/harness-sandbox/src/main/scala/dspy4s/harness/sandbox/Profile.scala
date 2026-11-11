@@ -219,8 +219,19 @@ final class SecretIndex(names: Set[String], settle: FiniteDuration = 2.seconds):
   private var kept  = Map.empty[Path, SecretIndex.Listing]
   private var count = 0L
 
+  // The progress of the find that runs. A find sets these with its lock, and `progress` reads them with no lock.
+  private val walking             = java.util.concurrent.atomic.AtomicBoolean(false)
+  private val read                = java.util.concurrent.atomic.AtomicLong(0L)
+  @volatile private var lastTotal = Option.empty[Long]
+
   /** The number of folders that the index listed since its start. A find lists only the folders that changed. */
   def listings: Long = synchronized(count)
+
+  /** The progress of the find that runs now, or none when no find runs. A command waits for a find that runs, so a
+    * client can show why the command waits (CODE_HARNESS_DESIGN.md, 10.6). It does not wait for the lock of `find`.
+    */
+  def progress: Option[SecretIndex.Progress] =
+    Option.when(walking.get)(SecretIndex.Progress(read.get, lastTotal))
 
   /** The secret files of the writable roots of `profile`. The find calls `stop` before each folder. When `stop` gives
     * true, the find throws `CancellationException`, and the index keeps the listings of the find before. A part of the
@@ -228,28 +239,35 @@ final class SecretIndex(names: Set[String], settle: FiniteDuration = 2.seconds):
     */
   def find(profile: Profile, stop: () => Boolean = () => false): Vector[Path] =
     synchronized {
-      val start = Instant.now()
-      val found = Vector.newBuilder[Path]
-      val next  = mutable.Map.empty[Path, SecretIndex.Listing]
-      // A stack and not a recursion, because a command can make a deep tree of folders.
-      val todo = mutable.Stack.from(profile.writable.filter(JFiles.isDirectory(_)))
-      while todo.nonEmpty do
-        if stop() then throw CancellationException("The find of the secret files stopped.")
-        val dir = todo.pop()
-        if profile.readOnly.exists(dir.startsWith) || profile.isHidden(dir) then ()
-        else if secret(dir) && !profile.writable.exists(_.equals(dir)) then found.addOne(dir): Unit
-        else if !next.contains(dir) then
-          look(dir, start) match
-            case SecretIndex.Seen.Open(listed) =>
-              next.update(dir, listed)
-              listed.entries.foreach { entry =>
-                if entry.folder then todo.push(entry.path): Unit
-                else if secret(entry.path) then found.addOne(entry.path): Unit
-              }
-            case SecretIndex.Seen.Closed => if !profile.writable.exists(_.equals(dir)) then found.addOne(dir): Unit
-            case SecretIndex.Seen.Gone   => ()
-      kept = next.toMap
-      found.result().flatMap(path => Vector(path, Layout.real(path))).distinct
+      // The total is the folders that the last find read. The first find has none.
+      lastTotal = Option.when(kept.nonEmpty)(kept.size.toLong)
+      read.set(0L)
+      walking.set(true)
+      try
+        val start = Instant.now()
+        val found = Vector.newBuilder[Path]
+        val next  = mutable.Map.empty[Path, SecretIndex.Listing]
+        // A stack and not a recursion, because a command can make a deep tree of folders.
+        val todo = mutable.Stack.from(profile.writable.filter(JFiles.isDirectory(_)))
+        while todo.nonEmpty do
+          if stop() then throw CancellationException("The find of the secret files stopped.")
+          val dir = todo.pop()
+          if profile.readOnly.exists(dir.startsWith) || profile.isHidden(dir) then ()
+          else if secret(dir) && !profile.writable.exists(_.equals(dir)) then found.addOne(dir): Unit
+          else if !next.contains(dir) then
+            read.incrementAndGet(): Unit
+            look(dir, start) match
+              case SecretIndex.Seen.Open(listed) =>
+                next.update(dir, listed)
+                listed.entries.foreach { entry =>
+                  if entry.folder then todo.push(entry.path): Unit
+                  else if secret(entry.path) then found.addOne(entry.path): Unit
+                }
+              case SecretIndex.Seen.Closed => if !profile.writable.exists(_.equals(dir)) then found.addOne(dir): Unit
+              case SecretIndex.Seen.Gone   => ()
+        kept = next.toMap
+        found.result().flatMap(path => Vector(path, Layout.real(path))).distinct
+      finally walking.set(false)
     }
 
   private def secret(path: Path): Boolean =
@@ -266,6 +284,9 @@ final class SecretIndex(names: Set[String], settle: FiniteDuration = 2.seconds):
             SecretIndex.list(dir, now, start, settle, secret)
 
 object SecretIndex:
+
+  /** The progress of a find: the folders that it read, and the folders that the find before it read, if any. */
+  final case class Progress(folders: Long, total: Option[Long]) derives CanEqual
 
   /** The attributes of a folder that show a change of its entries. */
   private final case class Stamp(folder: Boolean, modified: FileTime, changed: Option[FileTime], key: Option[AnyRef])

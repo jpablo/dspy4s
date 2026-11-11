@@ -7,7 +7,7 @@ import dspy4s.harness.Models.policy
 import dspy4s.harness.guest.{JobStatus, Mode, Scope, StrategyName}
 import dspy4s.harness.kernel.*
 import dspy4s.harness.host.HostSupport.*
-import dspy4s.harness.sandbox.{Backends, HostList}
+import dspy4s.harness.sandbox.{Backends, HostList, Net, Profile}
 import dspy4s.lm.contracts.LanguageModel
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.json.Json
@@ -474,6 +474,36 @@ class WorkLaws extends munit.FunSuite:
     bigScope(sessionModel()) { (runtime, _, handle) =>
       assertEquals(handle.state.position, Position.NoTurn, "the law sends no message")
       assert(eventually()(runtime.indexOf(id(1)).exists(_.listings >= 400L)), runtime.indexOf(id(1)).toString)
+    }
+  }
+
+  test("Work: the handle gives the walk for secret files of its session while a find runs, and none after it") {
+    // A client shows why a command waits (10.6). The walk of 400 folders is too quick to see from outside, so the law
+    // runs a find on the index of the session, and it reads the handle in each step of that find.
+    sandboxed()
+    bigScope(sessionModel()) { (runtime, _, handle) =>
+      assert(eventually()(runtime.indexOf(id(1)).exists(_.listings >= 400L)), "the walk of the open did not run")
+      assert(eventually()(handle.activity.isEmpty), handle.activity.toString)
+      val index = runtime.indexOf(id(1)).getOrElse(fail("no index"))
+      withRoot { dir =>
+        (1 to 5).foreach(i => Files.createDirectories(dir.resolve(s"d$i")))
+        val profile = Profile(true, Vector(dir), Vector.empty, Vector.empty, Net.Closed)
+        val seen    = Vector.newBuilder[Option[Activity]]
+        index.find(
+          profile,
+          () =>
+            seen.addOne(handle.activity); false
+        ): Unit
+        val all = seen.result()
+        assert(
+          all.nonEmpty && all.forall {
+            case Some(Activity.SecretScan(_, Some(total))) => total >= 400L
+            case _                                         => false
+          },
+          all.toString
+        )
+      }
+      assertEquals(handle.activity, None)
     }
   }
 

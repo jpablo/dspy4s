@@ -1,7 +1,7 @@
 package dspy4s.harness.cli
 
 import dspy4s.harness.host.HostSupport.withRoot
-import org.jline.terminal.{Attributes, Terminal}
+import org.jline.terminal.{Attributes, Size, Terminal}
 import org.jline.terminal.impl.{DumbTerminal, ExternalTerminal}
 
 import java.io.{BufferedReader, ByteArrayInputStream, ByteArrayOutputStream, PipedInputStream, PipedOutputStream}
@@ -30,6 +30,9 @@ class ConsoleLaws extends munit.FunSuite:
     ExternalTerminal("fake", "xterm-256color", in, out, UTF_8)
 
   private def withHistory[A](body: Path => A): A = withRoot(root => body(root.resolve("history")))
+
+  /** The frames of the spinner of the busy prompt. */
+  private val Frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".toSet
 
   /** True when `condition` holds within 10 seconds. */
   private def soon(condition: => Boolean): Boolean =
@@ -174,5 +177,59 @@ class ConsoleLaws extends munit.FunSuite:
         assertEquals(console.read(), Typed.End)
         console.close()
       finally writer.close()
+    }
+  }
+
+  // ── The busy line (2026-11-11) ──
+
+  /** An `ExternalTerminal` of 160 columns, so the right prompt has room. */
+  private def wide(writer: PipedOutputStream, out: ByteArrayOutputStream): Terminal =
+    val terminal = external(PipedInputStream(writer, 4096), out)
+    terminal.setSize(Size.of(160, 24))
+    terminal
+
+  test("CLI editor: during a turn the line shows the spinner and the label, and the cursor is a blinking block") {
+    withHistory { history =>
+      val writer  = PipedOutputStream()
+      val out     = ByteArrayOutputStream()
+      val console = EditorConsole.on(wide(writer, out), history, identity)
+      val reader  = Thread.ofPlatform().daemon(true).start(() => console.read(): Unit)
+      try
+        assert(soon(out.toString(UTF_8).contains("\u001b[?2004h")), out.toString(UTF_8))
+        // A command with a % shows it as it is: the prompt of JLine reads %s as a pattern.
+        console.busy(Some(Busy("step 1: exec \"date +%s\"", System.currentTimeMillis(), 0)))
+        assert(soon(out.toString(UTF_8).contains("step 1: exec \"date +%s\"")), out.toString(UTF_8))
+        val busyText = out.toString(UTF_8)
+        assert(busyText.contains("\u001b[1 q"), busyText)
+        assert(busyText.exists(Frames.contains), busyText)
+        val mark = busyText.length
+        console.busy(None)
+        assert(soon(out.toString(UTF_8).drop(mark).contains("\u001b[0 q")), out.toString(UTF_8).drop(mark))
+        console.close()
+        reader.join(5_000)
+        val text = out.toString(UTF_8)
+        assert(text.lastIndexOf("\u001b[0 q") > text.lastIndexOf("\u001b[1 q"), text)
+      finally
+        console.close()
+        writer.close()
+    }
+  }
+
+  test("CLI editor: a read that starts during a turn shows the busy line at once, and close gives the cursor back") {
+    withHistory { history =>
+      val writer  = PipedOutputStream()
+      val out     = ByteArrayOutputStream()
+      val console = EditorConsole.on(wide(writer, out), history, identity)
+      console.busy(Some(Busy("step 2: the model works", System.currentTimeMillis(), 1)))
+      val reader = Thread.ofPlatform().daemon(true).start(() => console.read(): Unit)
+      try
+        assert(soon(out.toString(UTF_8).contains("step 2: the model works")), out.toString(UTF_8))
+        console.close()
+        reader.join(5_000)
+        val text = out.toString(UTF_8)
+        assert(text.lastIndexOf("\u001b[0 q") > text.lastIndexOf("\u001b[1 q"), text)
+      finally
+        console.close()
+        writer.close()
     }
   }

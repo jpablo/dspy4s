@@ -52,6 +52,11 @@ trait SessionHandle:
   /** The committed entries with a `seq` above `seq`. A client reads them after `Behind`. */
   def read(after: Long): Vector[Logged]
 
+  /** What the host of the session does now, apart from the journal (`SessionRuntime.activity`), or none. A client polls
+    * it. The default is none.
+    */
+  def activity: Option[Activity] = None
+
 /** What the host needs to run the turns of a session (10.1). It makes the live part of each activation. */
 trait SessionRuntime:
 
@@ -71,6 +76,13 @@ trait SessionRuntime:
   def opened(session: SessionId, config: SessionConfig): AutoCloseable =
     val _ = (session, config)
     () => ()
+
+  /** What the runtime does now for the open session `session`, apart from the journal, or none. It must not wait for a
+    * lock that a command holds, because a client polls it while the command runs. The default is none.
+    */
+  def activity(session: SessionId): Option[Activity] =
+    val _ = session
+    None
 
 /** The live part of one activation (11). Nothing outside it depends on it, and a new activation makes a new one. */
 trait Activation extends AutoCloseable:
@@ -264,6 +276,8 @@ private final class OpenSession private (
   def subscribe(capacity: Int): Feed = feeds.subscribe(capacity)
 
   def read(after: Long): Vector[Logged] = writer.log.filter(_.seq > after)
+
+  override def activity: Option[Activity] = place.runtime.activity(id)
 
   /** Makes the next write of the session fail. Only the laws of a failed write use it. */
   private[host] def breakWritesForLaws(): Unit = writer.breakFileForLaws()

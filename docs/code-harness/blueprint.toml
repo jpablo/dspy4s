@@ -1741,7 +1741,7 @@ id = "secret-index"
 group = "profile"
 kind = "data"
 name = "SecretIndex"
-ops = ["find", "listings"]
+ops = ["find", "listings", "progress"]
 ref = "5.4"
 spec = true
 uses = ["profile", "layout"]
@@ -3043,6 +3043,22 @@ proof_uses = ["catalog-row-fold", "session-file"]
 text = "<root>/catalog.db. The writer updates a row after a turn ends or when the status changes. rebuild folds each journal whose row differs, and gives a result for each file, so a crash, a power loss, a removal of the file or a bad file loses nothing. A busy timeout, and a failed write never ends a session."
 
 [[group]]
+id = "activity"
+phase = "p7"
+module = "harness-host"
+file = "Activity.scala"
+title = "What the host of an open session does now, apart from the journal"
+
+[[node]]
+id = "activity"
+group = "activity"
+kind = "data"
+name = "Activity"
+ref = "10.6"
+uses = []
+text = "What the host of an open session does now, apart from the journal, for a client that polls it: the walk for secret files, with the folders that it read and the folders of the walk before it. It is not an entry."
+
+[[group]]
 id = "host"
 phase = "p7"
 module = "harness-host"
@@ -3066,7 +3082,7 @@ kind = "data"
 name = "SessionHandle"
 ref = "10.1"
 spec = true
-uses = ["session-id", "command", "host-error", "session-state", "feed", "logged", "effect-id", "job-status"]
+uses = ["session-id", "command", "host-error", "session-state", "feed", "logged", "effect-id", "job-status", "activity"]
 text = "An open session for a client: send with no wait for the commit, run that waits and gives a refusal, the committed state, the status of each job, a feed, and the entries after a seq. A proposal: the name of 10.1 is SessionRef, and the guest API already has a data type SessionRef. jobStatus reads the job table, so a client can tell a job that still runs after a stop (10.3)."
 
 [[node]]
@@ -3084,7 +3100,7 @@ group = "host"
 kind = "data"
 name = "SessionRuntime"
 ref = "10.1"
-uses = ["session-id", "session-config", "journal-trait", "job-table", "activation"]
+uses = ["session-id", "session-config", "journal-trait", "job-table", "activation", "activity"]
 text = "What the host needs to run the turns of a session: it makes the activation."
 
 [[node]]
@@ -3166,7 +3182,7 @@ ref = "8.1"
 spec = true
 uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context",
         "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access",
-        "harness", "line-store", "file-lines", "memory-tree", "session-file"]
+        "harness", "line-store", "file-lines", "memory-tree", "session-file", "activity"]
 proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell",
               "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble", "memory-tree"]
 text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of workMode through recorded and guarded, and JobShell. workMode is local mode with no Sessions^ and no Children^, so a work session has no rlm. Each turn gets a new budget of model calls. The first rules of 5.5: git push gets Ask in a mode with Network^."
@@ -3187,6 +3203,24 @@ ops = ["parse"]
 ref = "15"
 uses = []
 text = "The folder of a new session, the root of the host, the session to open again, the script mode, and the list of the sessions. A session that opens again keeps its own configuration. A proposal: [--root DIR] [--session ID] [--script] [--list] [FOLDER], with the root <home>/.dspy4s/harness, and the start of an id is enough when only one session has it."
+
+[[group]]
+id = "busy"
+phase = "p7"
+module = "harness-cli"
+file = "Busy.scala"
+title = "What runs, for the busy prompt of the client"
+
+[[node]]
+id = "busy"
+group = "busy"
+kind = "data"
+name = "Busy"
+ops = ["after", "prompt", "rightPrompt"]
+ref = "10.6"
+uses = ["logged", "activity"]
+proof_uses = ["in-quotes", "text-prefix"]
+text = "What a session does now: a label, the time of its start, the step, and a flag for a command. after reads each entry of a turn, and the end of the turn gives none. The prompt has a spinner and the time, and the right prompt has the label, with the walk for secret files during a command. A cut keeps each surrogate pair whole."
 
 [[group]]
 id = "entry-text"
@@ -3373,8 +3407,8 @@ group = "console"
 kind = "data"
 name = "ClientConsole"
 ref = "10.6"
-uses = ["typed"]
-text = "The terminal of the person for the loop. read gives the next line, and print writes the text of the session. onInterrupt gives the action of a Ctrl-C that comes while no read waits."
+uses = ["typed", "busy", "activity"]
+text = "The terminal of the person for the loop. read gives the next line, and print writes the text of the session. onInterrupt gives the action of a Ctrl-C that comes while no read waits. busy shows what runs, and activity sets where the console reads what the host does."
 
 [[node]]
 id = "plain-console"
@@ -3391,10 +3425,11 @@ id = "editor-console"
 group = "console"
 kind = "data"
 name = "EditorConsole"
-ops = ["read", "print", "onInterrupt", "close"]
+ops = ["read", "print", "onInterrupt", "busy", "activity", "close"]
 ref = "10.6"
-uses = ["console", "typed"]
-text = "The line editor of JLine for a person at a terminal: line edit, and a history file with the mask of the secrets. Enter after an odd number of backslashes goes on to the next line, and a paste stays as it is. Ctrl-C on a line with text clears it, and a Ctrl-C outside a read runs the action of the client. close first ends a read that waits, so the terminal gets its modes back."
+uses = ["console", "typed", "busy", "activity"]
+proof_uses = ["busy"]
+text = "The line editor of JLine for a person at a terminal: line edit, and a history file with the mask of the secrets. Enter after an odd number of backslashes goes on to the next line, and a paste stays as it is. Ctrl-C on a line with text clears it, and a Ctrl-C outside a read runs the action of the client. During a turn, a timer redraws the line through a widget: a spinner, the time, the label of what runs and the activity of the host, and a blinking block cursor. close first ends a read that waits, so the terminal gets its modes and its cursor back."
 
 [[group]]
 id = "cli"
@@ -3656,6 +3691,23 @@ module = "harness-cli"
 file = "ConsoleLaws.scala"
 where = "tests"
 title = "The laws of the line editor"
+
+[[group]]
+id = "busy-laws"
+phase = "p7"
+module = "harness-cli"
+file = "BusyLaws.scala"
+where = "tests"
+title = "The laws of what runs, for the busy prompt"
+
+[[node]]
+id = "law-cli-busy"
+group = "busy-laws"
+kind = "law"
+name = "CLI busy:"
+ref = "10.6"
+uses = ["busy", "activity"]
+text = "after follows the entries of a turn, and the end of the turn gives none. A command shows in quotes on one line, and a call that is not a command shows its op. The prompt shows a frame of the spinner and the time, and an idle prompt is > . The right prompt is cut with no surrogate pair cut in two, and during a command it keeps the walk for secret files and cuts the label first."
 
 [[node]]
 id = "law-cli-editor"

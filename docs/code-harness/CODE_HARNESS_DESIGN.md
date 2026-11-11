@@ -1801,6 +1801,15 @@ These points are proposals for the review:
   activation, and a live run in a scope of 300,000 folders still waited 9.7 s at the first `exec`, also 20 s after the
   open. An open that only reads also starts the walk. The walk runs on its own thread, and the writer never waits for
   it.
+- During a turn, the line editor shows what runs (2026-11-11). The prompt has a spinner and the time since the start of
+  the state, for example `⠹ 12 s > `, and the right side of the line has its label, for example `step 1: exec "ls -la"`
+  (`Busy`). The cursor is a blinking block during a turn, and the client gives the cursor its shape back after the turn
+  and at its end. During a command, the label also has the walk for secret files of the session while that walk runs
+  (`SessionHandle.activity`, `SecretIndex.progress`), for example `the scan for secret files: 640,000 folders`, so the
+  person sees why the command waits. A live session showed `$ "ls -la"` and then `> ` for many seconds, the same prompt
+  as with no open turn. A timer redraws the line every 125 ms through a widget of JLine, because only a widget can
+  change the line of a read from another thread. The activity is not an entry, and the journal does not keep it. The
+  script mode shows none of this.
 - Until a real configuration file exists, the CLI reads its variables also from `<home>/.dspy4s/harness/.env`
   (2026-11-10). It reads this file also with another `--root`, so a live scenario with a temporary root finds it. A
   variable of the process wins over the file. The base URL and the key are the exception: both come from the file when
