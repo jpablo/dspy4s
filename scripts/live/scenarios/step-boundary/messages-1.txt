@@ -1,0 +1,1 @@
+Read the files f01.txt to f10.txt one at a time: one file in each step, with one cell for each file, and no cell that reads more than one file. After the last file, tell me the sum of the numbers.

@@ -37,6 +37,13 @@ class CliLaws extends munit.FunSuite:
     }
   }
 
+  test("CLI: parse gives a normal path for the folder and the root, with no . or .. part") {
+    // A live scenario of 2026-11-10 gave the folder ".", and the scope of the session was ".../ws/.".
+    assertEquals(CliArgs.parse(Vector("."), home, cwd).map(_.scope), Right(cwd))
+    assertEquals(CliArgs.parse(Vector("a/../b"), home, cwd).map(_.scope), Right(cwd.resolve("b")))
+    assertEquals(CliArgs.parse(Vector("--root", "./r/."), home, cwd).map(_.root), Right(cwd.resolve("r")))
+  }
+
   test("CLI: parse reads --script, which is off by default, and the usage names it") {
     assertEquals(CliArgs.parse(Vector("--script", "/fake/other"), home, cwd).map(_.script), Right(true))
     assertEquals(CliArgs.parse(Vector.empty, home, cwd).map(_.script), Right(false))
@@ -50,6 +57,33 @@ class CliLaws extends munit.FunSuite:
     val end = System.nanoTime() + 10_000_000_000L
     while !condition && System.nanoTime() < end do Thread.sleep(20)
     condition
+
+  test("CLI: parseLine reads /wait with a number of seconds, and /wait with no number is not a command") {
+    assertEquals(parseLine("/wait 5"), Line.Wait(5))
+    assertEquals(parseLine("/wait 0"), Line.Wait(0))
+    assertEquals(parseLine("/wait"), Line.Unknown("/wait"))
+    assertEquals(parseLine("/wait -1"), Line.Unknown("/wait -1"))
+    assertEquals(parseLine("/wait soon"), Line.Unknown("/wait soon"))
+    assertEquals(commandsFor(Line.Wait(5), SessionState.initial, request), Right(Vector.empty))
+  }
+
+  test("CLI script: /wait holds the next line for its seconds, so a job can end before the script goes on") {
+    val handle = TurnHandle()
+    val start  = System.nanoTime()
+    val loop   = Thread.ofPlatform().start { () =>
+      Cli.loop(
+        handle,
+        BufferedReader(StringReader("/wait 1\nm1\n")),
+        PrintStream(ByteArrayOutputStream(), true, UTF_8),
+        script = true
+      ): Unit
+    }
+    assert(soon(handle.messages == Vector("m1")), handle.messages.toString)
+    assert((System.nanoTime() - start) / 1_000_000 >= 900, "the message did not wait for /wait 1")
+    handle.endTurn()
+    loop.join(10_000)
+    assert(!loop.isAlive, "the loop did not end after the last turn")
+  }
 
   test("CLI script: a line waits for the end of the turn before it, and the end of the input waits for the open turn") {
     val handle = TurnHandle()

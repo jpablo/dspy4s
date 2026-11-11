@@ -142,6 +142,9 @@ object Cli:
           val parsed = parseLine(line)
           if parsed == Line.Quit then done.countDown()
           else
+            parsed match
+              case Line.Wait(seconds) => done.await(seconds.toLong, TimeUnit.SECONDS): Unit
+              case _                  => ()
             commandsFor(parsed, handle.state, RequestId(UUID.randomUUID().toString)) match
               case Left(error)     => print(error)
               case Right(commands) => commands.foreach { command =>

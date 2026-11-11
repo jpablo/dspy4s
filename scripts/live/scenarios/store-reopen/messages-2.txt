@@ -1,0 +1,1 @@
+Use the val counts if it still exists, and else load line-counts from the store. Do not read the files again. Tell me the total of the counts, and tell me which of the two you used.

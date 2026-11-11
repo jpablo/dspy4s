@@ -1,0 +1,2 @@
+Fetch https://example.com and tell me its title. If you cannot, tell me what you can do in this session and what you cannot do, from your API reference.
+Can you start another session, or run a child with rlm, to do a part of a task?
