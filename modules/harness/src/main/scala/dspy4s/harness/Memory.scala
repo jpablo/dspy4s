@@ -235,11 +235,13 @@ object MemoryLog:
     *   - each `Acted` with code and the `Observed` after it, as one `Cell` message with the text, the code and the
     *     output, at the place of the `Observed`. So an `Input` that comes during the cell, for example the report of a
     *     job, comes before the `Cell` message. A cell that did not end, also after a crash, gives no message;
-    *   - each `TurnEnded`, as `Reply` with the text of `Replied`, or a note of the other outcome.
+    *   - each `TurnEnded`, as `Reply` with the text of `Replied`, or the text of the report of another outcome
+    *     (`TurnOutcome.report`). So the model reads the outcome in words, and not as a Scala value.
     *
     * The control entries give no message. For a journal `j` and more entries `k`, `messages(j ++ k)` starts with
     * `messages(j)`. The store keys a line by the texts of its messages, so a change of this function does not give old
-    * lines to other messages.
+    * lines to other messages. A new text of a message gives new keys, so the memory of an existing session builds the
+    * lines of the nodes that cover that message again, one time, with new calls of the model.
     */
   def messages(journal: Vector[Logged]): Vector[MemoryMessage] = walk(journal).messages
 
@@ -268,7 +270,7 @@ object MemoryLog:
         case Entry.TurnEnded(outcome) =>
           val reply = outcome match
             case TurnOutcome.Replied(text) => text
-            case other                     => s"The turn ended: $other."
+            case other                     => other.report
           val messages = w.messages :+ MemoryMessage(MessageKind.Reply, reply, at)
           Walk(messages, None, messages.size)
         case _ => w

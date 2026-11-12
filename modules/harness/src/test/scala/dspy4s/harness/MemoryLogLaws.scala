@@ -48,7 +48,7 @@ class MemoryLogLaws extends munit.FunSuite:
     assertEquals(MemoryLog.messages(open).map(_.kind), Vector(MessageKind.Heard(Source.Harness)))
   }
 
-  test("Memory log: another end of a turn gives a reply with a note of the outcome") {
+  test("Memory log: another end of a turn gives a reply with the text of the report of the outcome") {
     val aborted = Support.logOf(
       1000L,
       Entry.Input(request, "start", Map.empty),
@@ -58,7 +58,7 @@ class MemoryLogLaws extends munit.FunSuite:
     )
     val reply = MemoryLog.messages(aborted).last
     assertEquals(reply.kind, MessageKind.Reply)
-    assert(reply.text.contains("Aborted"), reply.text)
+    assertEquals(reply.text, TurnOutcome.Aborted.report)
   }
 
   /** A turn with the report of a job during its cell, and a turn whose cell a crash ended. */
@@ -93,7 +93,7 @@ class MemoryLogLaws extends munit.FunSuite:
         MessageKind.Reply
       )
     )
-    assert(MemoryLog.messages(reportAndCrash).last.text.contains("Crashed"))
+    assertEquals(MemoryLog.messages(reportAndCrash).last.text, TurnOutcome.Crashed.report)
   }
 
   test("Memory log: the messages of a journal are the start of the messages of each longer journal") {
