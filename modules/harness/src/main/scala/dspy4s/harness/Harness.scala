@@ -109,7 +109,7 @@ final case class Harness[I, O](
       id     : SessionId
   )(using RuntimeContext): Either[DspyError, TurnOutcome] =
     val config  = sessionConfig(0, text, Scope.Fork(fork.toString, env.workspace.fold("")(_.toString)))
-    val profile = Profiles.forMode(env.mode, Layout.real(fork), layout, env.hosts)
+    val profile = Profiles.forMode(env.mode, Layout.real(fork), layout, env.hosts, env.backend.exists(_.closesNames))
     val shell   = SandboxedShell(config, layout, env.hosts, env.backend, limits.execTimeout)
     val files   = LocalFiles(fork, profile, layout.secretNames)
     val tree    = Harness.CallTree(Budget(limits.modelCalls), host, fork, files, shell, config.scope)

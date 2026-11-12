@@ -5,11 +5,6 @@ package dspy4s.harness.host
   */
 enum Activity derives CanEqual:
 
-  /** The walk of the scope for secret files (5.4): the folders that it read, and the folders of the walk before it, if
-    * any. A command waits for this walk.
-    */
-  case SecretScan(folders: Long, total: Option[Long])
-
   /** The summaries of the memory tree before a call to the policy (7.1): the summaries that ended, of `total`. The call
     * to the policy waits for them.
     */
@@ -17,3 +12,9 @@ enum Activity derives CanEqual:
 
 /** The size of the last view of the memory that a call to the policy got, and its budget, in characters (7.1). */
 final case class MemoryUse(chars: Int, budget: Int) derives CanEqual
+
+/** The prompt and completion tokens of the last model call of the last call to the policy, from the usage of its reply
+  * (CLI_SCREEN.md, 14.4). A client shows the prompt tokens as the part of the context of the model that the session
+  * uses.
+  */
+final case class ContextUse(prompt: Long, completion: Long) derives CanEqual

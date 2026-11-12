@@ -7,7 +7,7 @@ import dspy4s.harness.Models.policy
 import dspy4s.harness.guest.{JobStatus, Mode, Scope, StrategyName}
 import dspy4s.harness.kernel.*
 import dspy4s.harness.host.HostSupport.*
-import dspy4s.harness.sandbox.{Backends, HostList, Net, Profile}
+import dspy4s.harness.sandbox.{Backends, HostList}
 import dspy4s.lm.contracts.LanguageModel
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.json.Json
@@ -28,6 +28,16 @@ class WorkLaws extends munit.FunSuite:
   override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private val limits = HarnessLimits(steps = 3)
+
+  /** The options of a model with the reasoning effort `high` (CLI_SCREEN.md, 14.4). */
+  private val high: Map[String, Json] = Map("reasoning_effort" -> Json.String("high"))
+
+  /** The text of the option `key` of `request`, or none. */
+  private def optionText(request: dspy4s.lm.contracts.LmRequest, key: String): Option[String] =
+    dspy4s.core.contracts.DynamicValues.recordGet(
+      request.options,
+      key
+    ).flatMap(dspy4s.core.contracts.DynamicValues.asString)
 
   /** An `Ask` rule for each call of `op`. */
   private def ask(op: String): Guard = Guard(Vector(VerdictRule(GuardRule(op, ArgMatch.AnyArgs), Verdict.Ask)))
@@ -488,6 +498,69 @@ class WorkLaws extends munit.FunSuite:
     finally place.close()
   }
 
+  // ── The model of the session (CLI_SCREEN.md, 14.4) ──
+
+  test("Work: config and the config of the controller put the options of the model in the configuration") {
+    assertEquals(WorkRuntime.config(Path.of("/tmp/fake-scope"), "fake-model", limits, high).model.options, high)
+    assertEquals(Controller.config(Path.of("/tmp/fake-home"), "fake-model", limits, high).model.options, high)
+    assertEquals(WorkRuntime.config(Path.of("/tmp/fake-scope"), "fake-model", limits).model.options, Map.empty)
+  }
+
+  test("Work: contextUse gives the tokens of the last call to the policy, and only that call gets the effort") {
+    // The footer of a client shows the context of the model (CLI_SCREEN.md, 14.4). A long message makes a summary.
+    val long  = "FAKE-LONG-MESSAGE " + "y" * 700
+    val model = RequestLm(
+      text => if isSummary(text) then Right(summaryReply(text)) else Right(policy("FAKE-DONE", None)),
+      usage = text =>
+        if isSummary(text) then
+          Some(dspy4s.core.contracts.LmUsage(totalTokens = 100, promptTokens = 99, completionTokens = 1))
+        else Some(dspy4s.core.contracts.LmUsage(totalTokens = 4_342, promptTokens = 4_321, completionTokens = 21))
+    )
+    val place = Place()
+    try withRoot { root =>
+        val env = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
+        withHost(root, Models.withModel(model)(WorkRuntime.forWork(env, limits))) { host =>
+          val handle = opened(host, id(1), Some(WorkRuntime.config(place.root, "fake-model", limits, high)))
+          assertEquals(handle.contextUse, None)
+          assertEquals(handle.send(message("m1", long)), Right(()))
+          assert(eventually(60)(outcomes(handle) == Vector(TurnOutcome.Replied("FAKE-DONE"))), entries(handle).toString)
+          assertEquals(handle.contextUse, Some(ContextUse(4_321L, 21L)))
+        }
+        val requests  = model.requests.asScala.toVector
+        val summaries = requests.filter(r => isSummary(r.messages.flatMap(_.text).mkString))
+        assert(summaries.nonEmpty, "the long message made no summary")
+        assert(summaries.forall(optionText(_, "reasoning_effort").isEmpty), summaries.map(_.options).toString)
+        val policies = requests.filterNot(summaries.contains)
+        assertEquals(policies.map(optionText(_, "reasoning_effort")), Vector(Some("high")))
+      }
+    finally place.close()
+  }
+
+  test("Work: a reopen keeps the effort of a ChangeModel, and its next call to the policy sends it") {
+    val first = sessionModel(policy("FAKE-ONE", None))
+    val again = sessionModel(policy("FAKE-TWO", None))
+    val low   = Map("reasoning_effort" -> Json.String("low"))
+    val place = Place()
+    try withRoot { root =>
+        val env = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
+        withHost(root, Models.withModel(first)(WorkRuntime.forWork(env, limits))) { host =>
+          val handle = opened(host, id(1), Some(WorkRuntime.config(place.root, "fake-model", limits, low)))
+          assertEquals(handle.send(message("m1")), Right(()))
+          assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+          assert(handle.run(Command.ChangeModel(ModelChoice("fake-model", high))).isRight)
+        }
+        withHost(root, Models.withModel(again)(WorkRuntime.forWork(env, limits))) { host =>
+          val handle = opened(host, id(1), None)
+          assertEquals(handle.state.config.model.options, high)
+          assertEquals(handle.send(message("m2")), Right(()))
+          assert(eventually(60)(outcomes(handle).size == 2), entries(handle).toString)
+        }
+        val sent = again.requests.asScala.toVector.filterNot(r => isSummary(r.messages.flatMap(_.text).mkString))
+        assertEquals(sent.map(optionText(_, "reasoning_effort")), Vector(Some("high")))
+      }
+    finally place.close()
+  }
+
   test("Work: summaryOptions reads the JSON object of DSPY_SUMMARY_OPTIONS, and refuses another text") {
     assert(WorkEnv.summaryOptions(Map.empty).exists(_.fields.isEmpty))
     val options =
@@ -635,7 +708,8 @@ class WorkLaws extends munit.FunSuite:
   test("Work: the task names what a command can write, the read-only .git, the secret files and the network") {
     // In the live session 00429ec8 (2026-11-11), each git worktree add failed with "Operation not permitted", and the
     // model used three steps to find the cause. The task did not say that .git is read-only, that a command can write
-    // only in the folder of the session, or that the .env files are closed.
+    // only in the folder of the session. A file call refuses a .env file, and a command too when the sandbox closes
+    // the name (5.4).
     val model = sessionModel(policy("FAKE-HELLO", None))
     work(model) { (scope, handle) =>
       assertEquals(handle.send(message("m1")), Right(()))
@@ -649,118 +723,10 @@ class WorkLaws extends munit.FunSuite:
         "no network",
         "Operation not permitted"
       ).foreach(words => assert(text.contains(words), s"the task does not name $words:\n$text"))
+      val closes = Backends.detect().exists(_.closesNames)
+      val alone  = "A file call can neither read nor write a file or a folder whose name is .env"
+      assertEquals(text.contains(alone), !closes, text)
     }
-  }
-
-  /** Opens a work session in a new place whose scope has a tree of 400 folders, and gives the runtime, the host, the
-    * handle and the folder of the scope to `check`. With `aged`, the tree is older than 2 s at the open: the index
-    * lists a folder again when it changed less than 2 s before a walk.
-    */
-  private def bigScope(model: LanguageModel, aged: Boolean = false)(
-      check: (WorkRuntime, LocalHost, SessionHandle) => Unit
-  ): Unit =
-    val place = Place()
-    try withRoot { root =>
-        (1 to 200).foreach(i => Files.createDirectories(place.root.resolve(s"tree/d$i/e")))
-        if aged then Thread.sleep(2_100)
-        val env     = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
-        val runtime = Models.withModel(model)(WorkRuntime.forWork(env, limits))
-        withHost(root, runtime) { host =>
-          check(runtime, host, opened(host, id(1), Some(WorkRuntime.config(place.root, "fake-model", limits))))
-        }
-      }
-    finally place.close()
-
-  test("Work: the walk of the scope for secret files starts when the session opens, before the first message") {
-    // A live run in a scope of 300,000 folders: the walk started only at the first message, so the first exec still
-    // waited 9.7 s, also 20 s after the open (2026-11-11).
-    sandboxed()
-    bigScope(sessionModel()) { (runtime, _, handle) =>
-      assertEquals(handle.state.position, Position.NoTurn, "the law sends no message")
-      assert(eventually()(runtime.indexOf(id(1)).exists(_.listings >= 400L)), runtime.indexOf(id(1)).toString)
-    }
-  }
-
-  test("Work: the handle gives the walk for secret files of its session while a find runs, and none after it") {
-    // A client shows why a command waits (10.6). The walk of 400 folders is too quick to see from outside, so the law
-    // runs a find on the index of the session, and it reads the handle in each step of that find.
-    sandboxed()
-    bigScope(sessionModel()) { (runtime, _, handle) =>
-      assert(eventually()(runtime.indexOf(id(1)).exists(_.listings >= 400L)), "the walk of the open did not run")
-      assert(eventually()(handle.activity.isEmpty), handle.activity.toString)
-      val index = runtime.indexOf(id(1)).getOrElse(fail("no index"))
-      withRoot { dir =>
-        (1 to 5).foreach(i => Files.createDirectories(dir.resolve(s"d$i")))
-        val profile = Profile(true, Vector(dir), Vector.empty, Vector.empty, Net.Closed)
-        val seen    = Vector.newBuilder[Option[Activity]]
-        index.find(
-          profile,
-          () =>
-            seen.addOne(handle.activity); false
-        ): Unit
-        val all = seen.result()
-        assert(
-          all.nonEmpty && all.forall {
-            case Some(Activity.SecretScan(_, Some(total))) => total >= 400L
-            case _                                         => false
-          },
-          all.toString
-        )
-      }
-      assertEquals(handle.activity, None)
-    }
-  }
-
-  test("Work: the first command after the walk of the open lists only the folders that changed") {
-    sandboxed()
-    val model = sessionModel(policy("list", Some("""println(exec("true"))""")), policy("FAKE-DONE", None))
-    bigScope(model, aged = true) { (runtime, _, handle) =>
-      assert(eventually()(runtime.indexOf(id(1)).exists(_.listings >= 400L)), "the walk of the open did not run")
-      val walked = runtime.indexOf(id(1)).fold(0L)(_.listings)
-      handle.send(message("fake-request-1")).fold(e => fail(e.toString), identity)
-      assert(eventually(60)(entries(handle).exists { case Entry.TurnEnded(_) => true; case _ => false }), "no end")
-      assert(outputs(handle).nonEmpty, "the cell did not run")
-      val again = runtime.indexOf(id(1)).fold(0L)(_.listings) - walked
-      assert(again < 5L, s"the first command listed $again folders again")
-    }
-  }
-
-  test("Work: the end of an open session ends its walk, and the runtime keeps no index of it") {
-    sandboxed()
-    val place = Place()
-    try withRoot { root =>
-        Files.createDirectories(place.root.resolve("a/b"))
-        val env     = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
-        val runtime = Models.withModel(sessionModel())(WorkRuntime.forWork(env, limits))
-        withHost(root, runtime) { host =>
-          opened(host, id(1), Some(WorkRuntime.config(place.root, "fake-model", limits))): Unit
-          assert(eventually()(runtime.indexOf(id(1)).nonEmpty), "the open made no index")
-        }
-        assertEquals(runtime.indexOf(id(1)), None, "the index stayed after the end of the session")
-      }
-    finally place.close()
-  }
-
-  test("Work: the walk of the scope for secret files starts when an activation starts, before the first command") {
-    // The first exec of a live session in a scope of 1.75 million entries waited 34 s for this walk, and the screen
-    // showed nothing (2026-11-11).
-    sandboxed()
-    val place = Place()
-    try withRoot { root =>
-        (1 to 200).foreach(i => Files.createDirectories(place.root.resolve(s"tree/d$i/e")))
-        val env     = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
-        val runtime = Models.withModel(sessionModel())(WorkRuntime.forWork(env, limits))
-        // The law opens no host and no session file, so the strategy is the window, which needs no memory table.
-        val config     = WorkRuntime.config(place.root, "fake-model", limits).copy(strategy = StrategyName.Window)
-        val jobs       = JobTable(scala.concurrent.duration.Duration(1, "s"), (_, _) => ())
-        val activation = runtime.activate(id(1), config, dspy4s.harness.Support.journal(), jobs)
-        try activation match
-            case work: WorkActivation =>
-              assert(eventually()(work.shell.listings >= 400L), s"the walk listed ${work.shell.listings} folders")
-            case other => fail(s"not a work activation: $other")
-        finally activation.close()
-      }
-    finally place.close()
   }
 
   test(

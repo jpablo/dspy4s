@@ -52,38 +52,6 @@ class SandboxedShellLaws extends FunSuite:
       calls.incrementAndGet(): Unit
       argv
 
-  test("Shell: warm walks the writable roots before the first command, so that command lists only changed folders") {
-    // The first exec of a live session in a scope of 1.75 million entries waited 34 s for this walk (2026-11-11).
-    withPlace { place =>
-      (1 to 200).foreach(i => Files.createDirectories(place.scope.resolve(s"tree/d$i/e")))
-      // The index lists a folder again when it changed less than 2 s before a walk, so the tree must be older.
-      Thread.sleep(2_100)
-      val commands = shell(place)
-      assertEquals(commands.listings, 0L)
-      commands.warm()
-      assert(commands.listings >= 400L, s"warm listed ${commands.listings} folders")
-      val warmed = commands.listings
-      commands.exec("true"): Unit
-      assert(commands.listings - warmed < 5, s"the first command listed ${commands.listings - warmed} folders again")
-    }
-  }
-
-  test("Shell: warm does nothing in a mode with no child process, with no backend, or after close") {
-    withPlace { place =>
-      Files.createDirectories(place.scope.resolve("a/b"))
-      val noChild = shell(place, Mode.readOnly)
-      noChild.warm()
-      assertEquals(noChild.listings, 0L, "a mode with no child process")
-      val noBackend = shell(place, backend = None)
-      noBackend.warm()
-      assertEquals(noBackend.listings, 0L, "no backend")
-      val closed = shell(place)
-      closed.close()
-      closed.warm()
-      assertEquals(closed.listings, 0L, "after close")
-    }
-  }
-
   test("Exec: with no backend, exec fails and the command does not run") {
     withPlace { place =>
       val marker = place.scope.resolve("marker")
@@ -138,14 +106,47 @@ class SandboxedShellLaws extends FunSuite:
     }
   }
 
-  test("Exec: a command can make a file with a secret name, and the next command cannot read it") {
+  test("Exec: the secret paths of the home folder and the journals stay closed to each command") {
     val backend = Backends.detect()
     assume(backend.isDefined, "no OS sandbox works on this host")
     withPlace { place =>
       val sh = shell(place, backend = backend)
-      assertEquals(sh.exec("echo FAKE-NEW > .env.made && cat .env.made"), "FAKE-NEW\n")
-      val out = sh.exec("cat .env.made")
-      assert(!out.contains("FAKE-NEW"), out)
+      assert(!sh.exec(s"cat '${place.secrets.resolve("id_fake")}'").contains("FAKE-KEY"))
+      assert(!sh.exec(s"cat '${place.journals.resolve("j.txt")}'").contains("FAKE-JOURNAL"))
+    }
+  }
+
+  test("Exec: on a backend that closes names, a command reaches no file and no folder with a secret name") {
+    // Seatbelt closes the names with one rule, with no walk of the scope (5.4). A walk before each command made each
+    // command wait in a large scope, and the commit that removed the walk left these files open (2026-11-12).
+    val backend = Backends.detect()
+    assume(backend.exists(_.closesNames), "the sandbox of this host does not close a name")
+    withPlace { place =>
+      val sh = shell(place, backend = backend)
+      Files.createDirectories(place.scope.resolve("nested/.env.d")): Unit
+      Files.writeString(place.scope.resolve("nested/.env.local"), "FAKE-NESTED"): Unit
+      Files.writeString(place.scope.resolve("nested/.env.d/x"), "FAKE-FOLDER"): Unit
+      Files.writeString(place.scope.resolve(".envrc"), "FAKE-RC"): Unit
+      Files.writeString(place.scope.resolve("notes.env.txt"), "FAKE-NOTES"): Unit
+      Vector(
+        "cat .env"                                -> "FAKE-ENV",
+        "cat nested/.env.local"                   -> "FAKE-NESTED",
+        "cat nested/.env.d/x"                     -> "FAKE-FOLDER",
+        "ln -s .env link; cat link"               -> "FAKE-ENV",
+        "cp nested/.env.local copied; cat copied" -> "FAKE-NESTED"
+      ).foreach((command, value) => assert(!sh.exec(command).contains(value), command))
+      sh.exec("echo FAKE-NEW > .env.made; mv .env moved"): Unit
+      assert(!Files.exists(place.scope.resolve(".env.made")), "a command made a file with a secret name")
+      assert(Files.exists(place.scope.resolve(".env")), "a command moved a file with a secret name")
+      assertEquals(sh.exec("cat .envrc notes.env.txt"), "FAKE-RCFAKE-NOTES")
+    }
+  }
+
+  test("Exec: bubblewrap cannot close a name, so a command reads a file with a secret name (the gap of 5.4)") {
+    val backend = Backends.detect()
+    assume(backend.exists(!_.closesNames), "the sandbox of this host closes the names")
+    withPlace { place =>
+      assertEquals(shell(place, backend = backend).exec("cat .env"), "FAKE-ENV")
     }
   }
 

@@ -12,6 +12,9 @@ object Seatbelt extends Backend:
   val name    = "seatbelt"
   val program = "/usr/bin/sandbox-exec"
 
+  /** Seatbelt closes a name in each folder with a rule on the path (`nameRule`), so a command needs no walk. */
+  override def closesNames: Boolean = true
+
   def works(): Boolean = Host.os.contains("mac") && Host.isExecutable(program) && Host.probe(this)
 
   def wrap(profile: Profile, cwd: Path, argv: Vector[String], proxyPort: Option[Int]): Vector[String] =
@@ -35,6 +38,7 @@ object Seatbelt extends Backend:
         ) ++
         profile.readOnly.map(p => s"(deny file-write* ${subpath(p)})") ++
         profile.hidden.map(p => s"(deny file-read* file-write* ${subpath(p)})") ++
+        profile.hiddenNames.toVector.sorted.map(name => s"(deny file-read* file-write* ${nameRule(name)})") ++
         network).mkString("", "\n", "\n")
 
   /** The start of each profile: what common programs need. `sh`, `git`, `python3` and `java` run with these rules. */
@@ -63,6 +67,17 @@ object Seatbelt extends Backend:
   )
 
   private def subpath(path: Path): String = s"""(subpath "${literal(path.toString)}")"""
+
+  /** The rule of the secret name `name` (5.4): each path with a part that is `name`, or `name` and a dot, at each
+    * depth, as `Layout.isSecretName` reads a part. So it closes a file and a folder with that name, and each file in
+    * such a folder. A probe on macOS (2026-11-12) showed that it also stops a read through a symbolic link, a hard
+    * link, a move and a new file with that name, and that `.envrc` and `notes.env.txt` stay open. A name holds no quote
+    * and no control character, because the harness gives the names.
+    */
+  private def nameRule(name: String): String =
+    require(name.nonEmpty && !name.exists(c => c == '"' || c == '/' || c.isControl), s"not a secret name: $name")
+    val quoted = name.flatMap(c => if "\\^$.|?*+()[]{}".contains(c) then s"\\$c" else c.toString)
+    s"""(regex #"/$quoted(\\.[^/]*)?(/|$$)")"""
 
   /** The text of an SBPL string, which reads escapes as Scheme does. A command can make a file with a secret name, and
     * the policy of the next command names it, so each path must fit. A probe on macOS showed that the escapes of a

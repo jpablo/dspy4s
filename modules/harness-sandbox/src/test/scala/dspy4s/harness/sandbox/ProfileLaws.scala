@@ -440,6 +440,36 @@ class ProfileLaws extends ScalaCheckSuite:
     }
   }
 
+  // ── The secret names (5.4) ──
+
+  test("Secret names: a profile of a backend that closes names closes each path with a part that is a secret name") {
+    // Seatbelt closes these names in each folder with no walk. bubblewrap cannot close a name.
+    val closing = Profiles.forMode(Mode.local, scope, layout, hosts, closesNames = true)
+    val open    = Profiles.forMode(Mode.local, scope, layout, hosts, closesNames = false)
+    assertEquals(closing.hiddenNames, Layout.secretNames)
+    assertEquals(open.hiddenNames, Set.empty[String])
+    val closed = Vector(".env", "deep/er/.env.local", ".env.d/x", ".env.").map(scope.resolve)
+    val kept   = Vector(".envrc", "notes.env.txt", "env", "a/b.env").map(scope.resolve)
+    closed.foreach { path =>
+      assert(closing.isHidden(path) && !closing.canRead(path) && !closing.canWrite(path), path.toString)
+      assert(open.canRead(path) && open.canWrite(path), path.toString)
+    }
+    kept.foreach(path => assert(closing.canRead(path) && closing.canWrite(path), path.toString))
+    assert(closing.isHidden(temp.resolve(".env")), "the temporary folder")
+  }
+
+  test(
+    "Secret names: the words say that a command and a file call cannot read a secret name, only when the backend closes it"
+  ) {
+    val closing = Profiles.words(Profiles.forMode(Mode.local, scope, layout, hosts, closesNames = true), scope, layout)
+    val open    = Profiles.words(Profiles.forMode(Mode.local, scope, layout, hosts, closesNames = false), scope, layout)
+    val names   = "a file or a folder whose name is .env or starts with \".env.\" (for example .env.local)"
+    val both    = closing.indexOf("A command and a file call can neither read nor write")
+    assert(both >= 0 && closing.indexOf(names) > both, closing)
+    assert(!closing.contains("A file call can neither"), closing)
+    assert(open.contains(s"A file call can neither read nor write $names."), open)
+  }
+
   property("Words: the words of a profile name what it can write, its read-only parts, its closed paths and its net") {
     forAll(modes) { mode =>
       val p     = profile(mode)

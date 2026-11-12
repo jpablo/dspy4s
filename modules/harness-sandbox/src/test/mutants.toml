@@ -270,8 +270,29 @@ old = "SandboxedShell.stop(seen :+ process.toHandle)"
 new = "SandboxedShell.stop(Vector(process.toHandle))"
 
 [[mutant]]
-name = "Mutant: exec takes the profile of the mode for each command"
+name = "Mutant: the shell takes a profile that closes no secret name"
 [[mutant.edit]]
 file = "SandboxedShell.scala"
-old = "val now       = profile.hide(index.find(profile))"
-new = "val now       = profile.hide(index.find(profile).take(0))"
+old = "Profiles.forMode(config.mode, root, layout, hosts, backend.exists(_.closesNames))"
+new = "Profiles.forMode(config.mode, root, layout, hosts, backend.exists(_ => false))"
+
+[[mutant]]
+name = "Mutant: the Seatbelt policy closes no secret name"
+[[mutant.edit]]
+file = "Seatbelt.scala"
+old = "profile.hiddenNames.toVector.sorted.map(name =>"
+new = "profile.hiddenNames.toVector.sorted.take(0).map(name =>"
+
+[[mutant]]
+name = "Mutant: the rule of a secret name closes no folder with that name"
+[[mutant.edit]]
+file = "Seatbelt.scala"
+old = '(\\.[^/]*)?(/|$$)")'
+new = '(\\.[^/]*)?$$")'
+
+[[mutant]]
+name = "Mutant: a profile reads no secret name"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "(hiddenNames.nonEmpty && path.iterator.asScala.exists("
+new = "(hiddenNames.isEmpty && path.iterator.asScala.exists("

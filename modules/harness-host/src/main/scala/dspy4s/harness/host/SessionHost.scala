@@ -70,6 +70,11 @@ trait SessionHandle:
     */
   def memoryUse: Option[MemoryUse] = None
 
+  /** The tokens of the last call to the policy (`SessionRuntime.contextUse`), or none before the first call with a
+    * usage. A client polls it. The default is none.
+    */
+  def contextUse: Option[ContextUse] = None
+
   /** The text that the model writes now for the policy of the open turn (`SessionRuntime.draft`), or none. A client
     * polls it, and the journal does not keep it (CLI_SCREEN.md, 13). The default is none.
     */
@@ -169,6 +174,11 @@ trait SessionRuntime:
     * none.
     */
   def memoryUse(session: SessionId): Option[MemoryUse] =
+    val _ = session
+    None
+
+  /** The tokens of the last call to the policy of the open session `session`, or none. The default is none. */
+  def contextUse(session: SessionId): Option[ContextUse] =
     val _ = session
     None
 
@@ -777,6 +787,8 @@ private final class OpenSession private (
   override def activity: Option[Activity] = place.runtime.activity(id)
 
   override def memoryUse: Option[MemoryUse] = place.runtime.memoryUse(id)
+
+  override def contextUse: Option[ContextUse] = place.runtime.contextUse(id)
 
   override def draft: Option[Draft] = place.runtime.draft(id)
 

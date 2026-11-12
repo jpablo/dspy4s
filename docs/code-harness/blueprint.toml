@@ -495,7 +495,7 @@ name = "Entry"
 ref = "4.1"
 spec = true
 uses = ["versions", "session-config", "request-id", "json", "effect-id", "effect-result", "cell-outcome", "job-selector", "guard-rule", "grant-lifetime", "turn-outcome", "session-outcome", "release-step"]
-text = "The 16 kinds of entry. The entries of one turn form the small language of 4.1. Releasing and Released come with phase 9 (8.7)."
+text = "The 17 kinds of entry. The entries of one turn form the small language of 4.1. Releasing and Released come with phase 9 (8.7). ModelChanged changes the model of the configuration, for example its reasoning effort (CLI_SCREEN.md, 14.4)."
 
 [[node]]
 id = "logged"
@@ -714,7 +714,7 @@ name = "decide"
 ref = "4.5"
 uses = ["command", "session-state", "rejection", "entry", "repair", "approved-text"]
 proof_uses = ["evolve", "guard-rule"]
-text = "Says which entries a command can commit. It keeps each journal inside the language of 4.1."
+text = "Says which entries a command can commit. It keeps each journal inside the language of 4.1. ChangeModel gives ModelChanged in an open session, also during a turn. The model of the session gives nothing, and a session that has ended gives SessionClosed (CLI_SCREEN.md, 14.4)."
 
 [[node]]
 id = "approved-text"
@@ -827,6 +827,15 @@ module = "harness-kernel"
 file = "StateLaws.scala"
 where = "tests"
 title = "The laws of the state and of the codec"
+
+[[node]]
+id = "law-model"
+group = "state-laws"
+kind = "law"
+name = "Model:"
+ref = "4.7"
+uses = ["state", "schedules"]
+text = "A ModelChanged changes only the model of the configuration, at each place of a run (CLI_SCREEN.md, 14.4)."
 
 [[node]]
 id = "law-fold"
@@ -1728,9 +1737,9 @@ name = "Profile"
 ops = ["canRead", "canWrite", "canConnect", "hide", "words"]
 ref = "5.4"
 spec = true
-uses = ["net"]
+uses = ["net", "layout"]
 proof_uses = ["host-list"]
-text = "What a child process can do, as observations: canRun, canRead(path), canWrite(path) and canConnect(host). A backend turns a profile into the rules of the OS. hide(paths) gives a profile that allows less: nothing under the paths. Profiles.words gives the same rules in words for the task of the model: the places that a command can write, the read-only parts such as .git, the closed paths and the network."
+text = "What a child process can do, as observations: canRun, canRead(path), canWrite(path) and canConnect(host). A backend turns a profile into the rules of the OS. hide(paths) gives a profile that allows less: nothing under the paths. Profiles.words gives the same rules in words for the task of the model: the places that a command can write, the read-only parts such as .git, the closed paths and the network. hiddenNames are the secret names that the backend closes in each folder, and isHidden, canRead and canWrite read them. forMode gives them only for a backend that closes a name (5.4)."
 
 [[node]]
 id = "profile-for-mode"
@@ -1762,7 +1771,7 @@ ops = ["find", "listings", "progress"]
 ref = "5.4"
 spec = true
 uses = ["profile", "layout"]
-text = "The secret files of the writable roots, with a cache of the listing of each folder. It lists a folder again when its change time, last-modified time or file key differs, or when it changed in the last 2 seconds, because a file time on Linux can be coarse. A folder that it cannot read is hidden as a whole."
+text = "The secret files of the writable roots, with a cache of the listing of each folder. It lists a folder again when its change time, last-modified time or file key differs, or when it changed in the last 2 seconds, because a file time on Linux can be coarse. A folder that it cannot read is hidden as a whole. The shell does not use it since 2026-11-12: a walk before each command made each command wait in a large scope (5.4)."
 
 # ── Phase 3: the environment of a child process (5.6) ───────────────────────────────────────────────────────────
 
@@ -1800,7 +1809,7 @@ kind = "data"
 name = "Backend"
 ref = "5.4"
 uses = ["profile"]
-text = "An OS sandbox: it gives the command line that runs a command under a profile, and it says if it works on this host. It works when a shell runs under that command line, with a profile like the profile of a session."
+text = "An OS sandbox: it gives the command line that runs a command under a profile, and it says if it works on this host. It works when a shell runs under that command line, with a profile like the profile of a session. closesNames is true for a backend that closes a secret name in each folder with no walk: Seatbelt, and not bubblewrap."
 
 [[group]]
 id = "seatbelt"
@@ -1818,7 +1827,7 @@ ops = ["policy", "wrap"]
 ref = "5.4"
 spec = true
 uses = ["backend", "profile"]
-text = "The SBPL text of a profile for /usr/bin/sandbox-exec. It denies by default, as Codex does: a child can start processes, read files, and look only at the processes of its own sandbox. It has no access to launchd and the other services of the system."
+text = "The SBPL text of a profile for /usr/bin/sandbox-exec. It denies by default, as Codex does: a child can start processes, read files, and look only at the processes of its own sandbox. It has no access to launchd and the other services of the system. Each secret name of the profile gets one rule on the path, a regex for each folder (nameRule), so a command needs no walk of the scope."
 
 [[group]]
 id = "bubblewrap"
@@ -1837,7 +1846,7 @@ ref = "5.4"
 spec = true
 uses = ["backend", "profile"]
 proof_uses = ["seccomp"]
-text = "The bwrap arguments of a profile: the root read-only, the scope and the temporary directory writable, .git read-only, an empty folder or file over each secret, and new namespaces for the pids and the network. A proposal: on Linux the network stays closed also with Network^, because the proxy needs a bridge into the namespace. That is less authority, so the law holds."
+text = "The bwrap arguments of a profile: the root read-only, the scope and the temporary directory writable, .git read-only, an empty folder or file over each secret, and new namespaces for the pids and the network. A proposal: on Linux the network stays closed also with Network^, because the proxy needs a bridge into the namespace. That is less authority, so the law holds. It cannot close a name, so a command reads a file with a secret name in the scope: the gap of 5.4."
 
 [[group]]
 id = "seccomp"
@@ -1954,6 +1963,15 @@ uses = ["secret-index", "profile-for-mode"]
 text = "After each change of the files, the index gives the secret files of a new walk. A folder that changed in the last two seconds is listed again, also with the same time, and a folder that the index cannot read is hidden as a whole."
 
 [[node]]
+id = "law-secret-names"
+group = "profile-laws"
+kind = "law"
+name = "Secret names:"
+ref = "5.4"
+uses = ["profile", "layout"]
+text = "A profile of a backend that closes names closes each path with a part that is a secret name, at each depth, as a file and as a folder, and keeps .envrc and notes.env.txt open. The words say that a command and a file call cannot reach a secret name only when the backend closes it, and else that a file call cannot."
+
+[[node]]
 id = "law-host-list"
 group = "profile-laws"
 kind = "law"
@@ -2063,7 +2081,7 @@ name = "Exec:"
 ref = "5.3"
 uses = ["sandboxed-shell"]
 proof_uses = ["backend-detect"]
-text = "With no backend, or in a mode with no child process, exec fails and the command does not run. Else the command runs in the sandbox of the mode: it sees only the variables of the allowlist, it cannot write outside the scope, also from its own child, and the time limit stops it and its children. A zombie counts as stopped, so the handler does not wait for it. A file with a secret name that a command makes is hidden from the next command."
+text = "With no backend, or in a mode with no child process, exec fails and the command does not run. Else the command runs in the sandbox of the mode: it sees only the variables of the allowlist, it cannot write outside the scope, also from its own child, and the time limit stops it and its children. A zombie counts as stopped, so the handler does not wait for it. The secret paths of the home folder and the journals stay closed. On a backend that closes names, a command reaches no file and no folder with a secret name, also through a link, a copy or a move, and it cannot make one. On bubblewrap a command reads such a file: the gap of 5.4."
 
 # ── Phase 3: the mutants of the sandbox ─────────────────────────────────────────────────────────────────────────
 
@@ -2180,7 +2198,7 @@ ops = ["maskText", "mask", "known"]
 ref = "5.6"
 spec = true
 uses = ["entry", "release-step"]
-text = "The known secret values, by name: the values of the secret-like variables of the harness process and the values behind secretHeaders. mask replaces each one in each string of an entry with «secret:NAME», a longer value first. A proposal: a value shorter than 8 characters, or a part of a mask, is not a known value."
+text = "The known secret values, by name: the values of the secret-like variables of the harness process and the values behind secretHeaders. mask replaces each one in each string of an entry with «secret:NAME», a longer value first. A proposal: a value shorter than 8 characters, or a part of a mask, is not a known value. The options of the model of a ModelChanged get the mask too."
 
 # ── Phase 4: the handlers of a call (5.3) ─────────────────────────────────────────────────────────────────────────
 
@@ -2422,7 +2440,7 @@ uses = ["turn-effects", "predict", "policy-input", "policy-step", "context-strat
         "policy-runner", "zoom-source", "memory-progress", "drafts"]
 proof_uses = ["cell-result", "policy-reply", "window", "recorder", "snapshot-store", "lost-names", "budget",
               "host-threads", "zoom-source", "memory-progress", "policy-stream"]
-text = "callPolicy projects the log with the strategy, spends one call of the budget, and calls the policy leaf through the PolicyRunner, so the trace reaches the RuntimeContext. A spent budget fails the call, and the turn ends Failed. runCell starts the calls of the cell, takes the snapshot of the store, runs the code in the REPL, and joins the trace of the host threads. After the error of the compiler defect, it starts a new REPL and adds the note of the lost names. With drafts, the call to the policy streams its draft through a PolicyStream, and the step does not change."
+text = "callPolicy projects the log with the strategy, spends one call of the budget, and calls the policy leaf through the PolicyRunner, so the trace reaches the RuntimeContext. A spent budget fails the call, and the turn ends Failed. runCell starts the calls of the cell, takes the snapshot of the store, runs the code in the REPL, and joins the trace of the host threads. After the error of the compiler defect, it starts a new REPL and adds the note of the lost names. With drafts, the call to the policy streams its draft through a PolicyStream, and the step does not change. Each call to the policy has the options of the model of the session in the state of the journal, so a ModelChanged of the activation applies to the next call, and the progress gets the tokens of its last model call (CLI_SCREEN.md, 14.4)."
 
 [[group]]
 id = "harness"
@@ -3078,7 +3096,7 @@ kind = "data"
 name = "Activity"
 ref = "10.6"
 uses = []
-text = "What the host of an open session does now, apart from the journal, for a client that polls it: the walk for secret files, with the folders that it read and the folders of the walk before it, or the summaries of the memory before a call to the policy, with the summaries that ended of all of them. It is not an entry."
+text = "What the host of an open session does now, apart from the journal, for a client that polls it: the summaries of the memory before a call to the policy, with the summaries that ended of all of them. It is not an entry."
 
 [[node]]
 id = "memory-use"
@@ -3088,6 +3106,15 @@ name = "MemoryUse"
 ref = "7.1"
 uses = []
 text = "The size of the last view of the memory that a call to the policy got, and its budget, in characters, for the footer of a client."
+
+[[node]]
+id = "context-use"
+group = "activity"
+kind = "data"
+name = "ContextUse"
+ref = "10.6"
+uses = []
+text = "The prompt and completion tokens of the last model call of the last call to the policy, from the usage of its reply, for the footer of a client: the part of the context of the model that the session uses (CLI_SCREEN.md, 14.4)."
 
 [[group]]
 id = "host"
@@ -3113,8 +3140,8 @@ kind = "data"
 name = "SessionHandle"
 ref = "10.1"
 spec = true
-uses = ["session-id", "command", "host-error", "session-state", "feed", "logged", "effect-id", "job-status", "activity", "memory-use", "draft"]
-text = "An open session for a client: send with no wait for the commit, run that waits and gives a refusal, the committed state, the status of each job, a feed, and the entries after a seq. A proposal: the name of 10.1 is SessionRef, and the guest API already has a data type SessionRef. jobStatus reads the job table, so a client can tell a job that still runs after a stop (10.3)."
+uses = ["session-id", "command", "host-error", "session-state", "feed", "logged", "effect-id", "job-status", "activity", "memory-use", "draft", "context-use"]
+text = "An open session for a client: send with no wait for the commit, run that waits and gives a refusal, the committed state, the status of each job, a feed, and the entries after a seq. A proposal: the name of 10.1 is SessionRef, and the guest API already has a data type SessionRef. jobStatus reads the job table, so a client can tell a job that still runs after a stop (10.3). contextUse gives the tokens of the last call to the policy (CLI_SCREEN.md, 14.4)."
 
 [[node]]
 id = "activation"
@@ -3131,7 +3158,7 @@ group = "host"
 kind = "data"
 name = "SessionRuntime"
 ref = "10.1"
-uses = ["session-id", "session-config", "journal-trait", "job-table", "activation", "activity", "memory-use", "draft"]
+uses = ["session-id", "session-config", "journal-trait", "job-table", "activation", "activity", "memory-use", "draft", "context-use"]
 text = "What the host needs to run the turns of a session: it makes the activation."
 
 [[node]]
@@ -3218,9 +3245,9 @@ name = "WorkRuntime"
 ops = ["activate", "defaultGuard", "config", "forWork", "taskOf", "shellWords", "ownedConfig", "forHost"]
 ref = "8.1"
 spec = true
-uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context", "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access", "harness", "line-store", "file-lines", "memory-tree", "session-file", "peers", "host-sessions", "harness-probe", "scope", "strategy-name", "activity", "memory-progress", "memory-use", "drafts", "draft"]
+uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context", "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access", "harness", "line-store", "file-lines", "memory-tree", "session-file", "peers", "host-sessions", "harness-probe", "scope", "strategy-name", "activity", "memory-progress", "memory-use", "drafts", "draft", "context-use"]
 proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell", "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble", "memory-tree", "controller"]
-text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of workMode through recorded and guarded, and JobShell. workMode is local mode with no Sessions^ and no Children^, so a work session has no rlm. Each turn gets a new budget of model calls. The first rules of 5.5: git push gets Ask in a mode with Network^. The task of a session with a shell gives the words of the profile of its activation (shellWords), and tells the model to tell the person when a task needs a write that the shell refuses."
+text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of workMode through recorded and guarded, and JobShell. workMode is local mode with no Sessions^ and no Children^, so a work session has no rlm. Each turn gets a new budget of model calls. The first rules of 5.5: git push gets Ask in a mode with Network^. The task of a session with a shell gives the words of the profile of its activation (shellWords), and tells the model to tell the person when a task needs a write that the shell refuses. config takes the option bag of the model, and contextUse gives the tokens of the last call to the policy (CLI_SCREEN.md, 14.4)."
 
 [[group]]
 id = "cli-args"
@@ -3253,9 +3280,43 @@ kind = "data"
 name = "Screen"
 ops = ["of", "after", "live", "footer", "show"]
 ref = "10.6"
-uses = ["logged", "activity", "memory-use", "session-state", "reasoning-view", "draft"]
+uses = ["logged", "activity", "memory-use", "session-state", "reasoning-view", "draft", "context-use", "model-facts", "effort"]
 proof_uses = ["in-quotes", "text-prefix", "job-name", "work-runtime"]
-text = "The model of the screen of a session: the turn that runs and each cell of the session. after gives the rows of each entry for the history: the text of a step, a summary line of its cell, the reply in full, an approval card and the end of a turn. live gives the live block: the text and the open cell of the step, and a status line with a spinner, the time of the turn and a label only for a wait that needs a reason. footer gives the folder, the mode, the model, the memory, the jobs and the calls that wait. show gives a cell or a call in full."
+text = "The model of the screen of a session: the turn that runs and each cell of the session. after gives the rows of each entry for the history: the text of a step, a summary line of its cell, the reply in full, an approval card and the end of a turn. live gives the live block: the text and the open cell of the step, and a status line with a spinner, the time of the turn and a label only for a wait that needs a reason. footer gives the folder, the mode, the model, the memory, the jobs and the calls that wait. show gives a cell or a call in full. The footer also gives the effort and the context with the window and the percent, the memory has the unit chars, and a footer wider than the terminal shows no memory part (CLI_SCREEN.md, 14.4)."
+
+[[group]]
+id = "effort"
+phase = "p7"
+module = "harness-cli"
+file = "Effort.scala"
+title = "The reasoning effort of the model of a session (CLI_SCREEN.md, 14)"
+
+[[node]]
+id = "effort"
+group = "effort"
+kind = "data"
+name = "Effort"
+ops = ["startOptions"]
+ref = "10.6"
+uses = ["model-choice", "json"]
+text = "The reasoning effort is the provider option reasoning_effort in the options of the model of a session. of reads it, and set changes only it. A new session gets the effort of DSPY_REASONING_EFFORT, else low with native reasoning, else no effort, so the configuration holds the effort that the requests send. The level none turns the reasoning off, and the client adds it to the levels of each model."
+
+[[group]]
+id = "model-facts"
+phase = "p7"
+module = "harness-cli"
+file = "ModelFacts.scala"
+title = "What the endpoint tells about the model (CLI_SCREEN.md, 14)"
+
+[[node]]
+id = "model-facts"
+group = "model-facts"
+kind = "data"
+name = "ModelFacts"
+ops = ["choices", "withEnv", "fetch"]
+ref = "10.6"
+uses = ["effort", "json"]
+text = "The context window of the model in tokens and its levels of the reasoning effort, from GET /models of the base URL: the entry whose id is the model or ends with / and the model, with context_window, else max_model_len. A failure gives no facts. DSPY_CONTEXT_WINDOW wins over the window of the endpoint. choices gives none and the levels of the model, or none, low, medium and high with no list."
 
 [[group]]
 id = "entry-text"
@@ -3270,7 +3331,7 @@ group = "entry-text"
 kind = "function"
 name = "entryText"
 ref = "10.1"
-uses = ["logged", "reasoning-view"]
+uses = ["logged", "reasoning-view", "effort"]
 proof_uses = ["job-name", "text-prefix", "in-quotes", "session-outcome", "turn-outcome", "cell-outcome", "grant-lifetime"]
 text = "The reasoning of a step, the text and the code of a step, the command of an exec or a spawn in quotes when it starts, and the output of a cell after its outcome in words (CellOutcome.words). A pending call shows in quotes, with its number and the commands that answer it. The end of a turn with the text of its report (TurnOutcome.report), apart from a reply, the stops, a stopped job by its name, and a grant with its lifetime in words (GrantLifetime.words). The other entries give none. Each text loses its control characters."
 
@@ -3288,7 +3349,7 @@ kind = "data"
 name = "Line"
 ref = "10.3"
 uses = ["grant-lifetime", "reasoning-view", "effect-id", "session-id", "session-outcome"]
-text = "A message, /stop, /stopall, /allow [N] [once|turn|session], /jobs, /stopjob ID, /status, /reasoning off|short|full, /help, /close [merged|parked|abandoned REASON|replaced ID], /sessions, /open ID, /reopen ID, /controller, /quit, /wait SECONDS, or an unknown command. N is the number of a pending call, and ID is the name of a job or the id of a session."
+text = "A message, /stop, /stopall, /allow [N] [once|turn|session], /jobs, /stopjob ID, /status, /reasoning off|short|full, /help, /close [merged|parked|abandoned REASON|replaced ID], /sessions, /open ID, /reopen ID, /controller, /quit, /wait SECONDS, or an unknown command. N is the number of a pending call, and ID is the name of a job or the id of a session. /effort [LEVEL] shows the effort or sets it (CLI_SCREEN.md, 14.4)."
 
 [[node]]
 id = "reasoning-view"
@@ -3315,9 +3376,9 @@ kind = "function"
 name = "commandsFor"
 ref = "5.5"
 spec = true
-uses = ["line", "session-state", "request-id", "command", "guard-rule"]
+uses = ["line", "session-state", "request-id", "command", "guard-rule", "effort", "model-facts"]
 proof_uses = ["job-name"]
-text = "Stop gives Abort, and Stop all gives Abort and StopJobs(OfLastTurn) (10.3). Allow gives one Grant for each pending call, and an error with no pending call (5.5). Allow N gives one Grant for the rule of the entry N, only while that rule is pending. StopJob gives StopJobs(One) for a job of the session, or an error. A message gives one Send."
+text = "Stop gives Abort, and Stop all gives Abort and StopJobs(OfLastTurn) (10.3). Allow gives one Grant for each pending call, and an error with no pending call (5.5). Allow N gives one Grant for the rule of the entry N, only while that rule is pending. StopJob gives StopJobs(One) for a job of the session, or an error. A message gives one Send. Effort with a level of the model gives ChangeModel with that effort, and another level gives an error with the levels (CLI_SCREEN.md, 14.4)."
 
 [[node]]
 id = "job-order"
@@ -3398,9 +3459,9 @@ group = "views"
 kind = "function"
 name = "statusText"
 ref = "10.1"
-uses = ["session-state", "effect-id", "job-status", "guard-rule"]
+uses = ["session-state", "effect-id", "job-status", "guard-rule", "context-use", "model-facts", "effort"]
 proof_uses = ["sandboxed-shell", "in-quotes"]
-text = "The text of /status: the folder, where the turn stands, the pending calls with their numbers, and how many jobs run."
+text = "The text of /status: the folder, where the turn stands, the pending calls with their numbers, and how many jobs run. It also gives the effort and the context of the model (CLI_SCREEN.md, 14.4)."
 
 [[node]]
 id = "sessions-text"
@@ -3463,8 +3524,8 @@ kind = "data"
 name = "EditorConsole"
 ops = ["read", "print", "printRows", "onInterrupt", "watch", "onDetail", "close"]
 ref = "10.6"
-uses = ["console", "typed", "reasoning-view"]
-text = "The line editor of JLine for a person at a terminal: line edit, and a history file with the mask of the secrets. Enter after an odd number of backslashes goes on to the next line, and a paste stays as it is. Ctrl-C on a line with text clears it, and a Ctrl-C outside a read runs the action of the client. During a turn, a timer redraws the line through a widget: a spinner, the time, the label of what runs and the activity of the host, and a blinking block cursor. close first ends a read that waits, so the terminal gets its modes and its cursor back."
+uses = ["console", "typed", "reasoning-view", "model-facts"]
+text = "The line editor of JLine for a person at a terminal: line edit, and a history file with the mask of the secrets. Enter after an odd number of backslashes goes on to the next line, and a paste stays as it is. Ctrl-C on a line with text clears it, and a Ctrl-C outside a read runs the action of the client. During a turn, a timer redraws the line through a widget: a spinner, the time, the label of what runs and the activity of the host, and a blinking block cursor. close first ends a read that waits, so the terminal gets its modes and its cursor back. Tab after /effort completes the levels of the model."
 
 [[group]]
 id = "cli"
@@ -3480,9 +3541,9 @@ kind = "data"
 name = "Cli"
 ops = ["main", "loop", "listText", "deskStep"]
 ref = "15"
-uses = ["session-handle", "console", "desk", "host-desk", "screen"]
-proof_uses = ["cli-args", "local-host", "work-runtime", "work-env", "entry-text", "parse-line", "commands-for", "plain-console", "editor-console", "stop-notice", "jobs-text", "status-text", "job-starts", "pending-calls", "sessions-text", "resolve-session", "card-text", "open-refusal", "plan-text", "host-error", "screen"]
-text = "main makes the model from the environment, makes the console, starts a LocalHost with a WorkRuntime, and opens the session. --list prints the sessions and opens none. loop prints the feed, and each text goes through printable. It sends a message, /stop and /stopall, and it runs /close, /allow and /stopjob so the person sees a refusal. Each error of the host prints in words (HostError.words). A Ctrl-C during a turn is /stop, and the stop notice follows a turn that a stop ended. With a desk, /sessions, /open, /reopen, /controller and /close go to deskStep (8.7). A proposal: JDK 21. A rich console gets the rows of Screen for each entry, and the live block and the footer of the session that it shows."
+uses = ["session-handle", "console", "desk", "host-desk", "screen", "model-facts", "effort"]
+proof_uses = ["cli-args", "local-host", "work-runtime", "work-env", "entry-text", "parse-line", "commands-for", "plain-console", "editor-console", "stop-notice", "jobs-text", "status-text", "job-starts", "pending-calls", "sessions-text", "resolve-session", "card-text", "open-refusal", "plan-text", "host-error", "screen", "effort", "model-facts"]
+text = "main makes the model from the environment, makes the console, starts a LocalHost with a WorkRuntime, and opens the session. --list prints the sessions and opens none. loop prints the feed, and each text goes through printable. It sends a message, /stop and /stopall, and it runs /close, /allow and /stopjob so the person sees a refusal. Each error of the host prints in words (HostError.words). A Ctrl-C during a turn is /stop, and the stop notice follows a turn that a stop ended. With a desk, /sessions, /open, /reopen, /controller and /close go to deskStep (8.7). A proposal: JDK 21. A rich console gets the rows of Screen for each entry, and the live block and the footer of the session that it shows. A new session gets the effort of Effort.startOptions, a daemon thread reads the facts of the model, and /effort prints the effort or sends ChangeModel (CLI_SCREEN.md, 14.4)."
 
 # ── Phase 7: the laws ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -3728,6 +3789,59 @@ where = "tests"
 title = "The laws of the line editor"
 
 [[group]]
+id = "effort-laws"
+phase = "p7"
+module = "harness-cli"
+file = "EffortLaws.scala"
+where = "tests"
+title = "The laws of the effort and of the context in the footer (CLI_SCREEN.md, 14)"
+
+[[node]]
+id = "law-effort"
+group = "effort-laws"
+kind = "law"
+name = "Effort:"
+ref = "10.6"
+uses = ["effort"]
+text = "A new session takes DSPY_REASONING_EFFORT, else low with native reasoning, else no effort. of reads the effort of a model, and set changes only the effort."
+
+[[node]]
+id = "law-facts"
+group = "effort-laws"
+kind = "law"
+name = "Facts:"
+ref = "10.6"
+uses = ["model-facts"]
+text = "parse reads the window and the levels of the entry of the model, also with the prefix of an owner and from max_model_len. A model that is not in the list and a bad text give no facts. DSPY_CONTEXT_WINDOW wins over the endpoint. The levels of /effort are none and the levels of the endpoint."
+
+[[node]]
+id = "law-footer"
+group = "effort-laws"
+kind = "law"
+name = "Footer:"
+ref = "10.6"
+uses = ["screen", "context-use", "model-facts"]
+text = "The footer gives the effort, the context with its window and percent, and the memory in characters. With no window the context is its count, under 1% the percent is <1%, and a count shows as 18k, 1M or 1.6M. A footer wider than the terminal shows no memory part."
+
+[[node]]
+id = "law-effort-command"
+group = "effort-laws"
+kind = "law"
+name = "/effort:"
+ref = "10.6"
+uses = ["line", "commands-for", "effort", "entry-text", "screen", "cli"]
+text = "parseLine reads /effort with no level and with one level. A level of the list gives ChangeModel with the level and the other options of the model, and another level gives an error with the list. /effort alone prints the effort and the levels. A ModelChanged shows the new effort, and the loop sends ChangeModel for a level."
+
+[[node]]
+id = "law-status-effort"
+group = "effort-laws"
+kind = "law"
+name = "/status:"
+ref = "10.6"
+uses = ["status-text", "context-use", "model-facts"]
+text = "/status gives the effort and the context of the model, and a session with no effort and no context gives neither."
+
+[[group]]
 id = "screen-laws"
 phase = "p7"
 module = "harness-cli"
@@ -3742,7 +3856,7 @@ kind = "law"
 name = "Screen:"
 ref = "10.6"
 uses = ["screen", "activity"]
-text = "A finished step prints its reasoning line, its text and the summary of its cell, and the reply prints in full. The summary names what the calls did, and each failed cell has its own words. The full detail prints the code, each call with its result, and the output. An approval prints its card, and the end of a turn names each outcome. A command shows each hidden character as an escape. The live block gives the status line, the memory summaries, the walk for secret files and the open cell. A step with no Acted shows its draft: the reasoning in the view of /reasoning, then the last lines of its text, and a step with its Acted shows no draft. The footer hides a part with no value, /show gives a cell or a call, and the ASCII glyphs give no other character."
+text = "A finished step prints its reasoning line, its text and the summary of its cell, and the reply prints in full. The summary names what the calls did, and each failed cell has its own words. The full detail prints the code, each call with its result, and the output. An approval prints its card, and the end of a turn names each outcome. A command shows each hidden character as an escape. The live block gives the status line, the memory summaries and the open cell. A step with no Acted shows its draft: the reasoning in the view of /reasoning, then the last lines of its text, and a step with its Acted shows no draft. The footer hides a part with no value, /show gives a cell or a call, and the ASCII glyphs give no other character."
 
 [[node]]
 id = "law-cli-editor"
@@ -4001,7 +4115,7 @@ name = "MemoryProgress"
 ops = ["summaries", "summariesEnded", "projected", "none"]
 ref = "10.6"
 uses = []
-text = "What the memory of a turn tells a client: the summaries of the memory tree while an update builds them, and the size of each projection for a call to the policy, with its budget. The reports of the summaries of one update come in order. The default does nothing."
+text = "What the memory of a turn tells a client: the summaries of the memory tree while an update builds them, and the size of each projection for a call to the policy, with its budget. The reports of the summaries of one update come in order. The default does nothing. used gives the prompt and completion tokens of the last model call of a call to the policy (CLI_SCREEN.md, 14.4)."
 
 [[node]]
 id = "memory-tree"
@@ -4691,6 +4805,32 @@ ops = ["wrap", "around"]
 ref = "10.6"
 uses = ["drafts", "runtime-context"]
 text = "The stream of one call to the policy. Each model call gets a preview session of the streaming module, so its tokens go to the drafts and do not count as output that a person saw. The predictor still tries its fallback adapter after a parse error, so the step is the same as with no stream."
+
+[[group]]
+id = "policy-options-laws"
+phase = "p7"
+module = "harness"
+file = "PolicyOptionsLaws.scala"
+where = "tests"
+title = "The laws of the model options and the tokens of a call to the policy (CLI_SCREEN.md, 14)"
+
+[[node]]
+id = "law-options"
+group = "policy-options-laws"
+kind = "law"
+name = "Options:"
+ref = "10.6"
+uses = ["harness-effects"]
+text = "A call to the policy sends the options of the model of the session. After a ModelChanged, the next call sends the new effort in the same activation. With the effort none, the request sends none, the prompt has no reasoning field, and a reply with no reasoning gives a step."
+
+[[node]]
+id = "law-tokens"
+group = "policy-options-laws"
+kind = "law"
+name = "Tokens:"
+ref = "10.6"
+uses = ["harness-effects", "memory-progress"]
+text = "callPolicy gives its progress the prompt and completion tokens of its model call, also of a call that streams, and a call with no usage gives no tokens."
 
 [[group]]
 id = "draft-laws"

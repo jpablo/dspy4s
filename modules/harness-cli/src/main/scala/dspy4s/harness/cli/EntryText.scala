@@ -9,6 +9,7 @@ import dspy4s.harness.kernel.{
   GuardRule,
   JobSelector,
   Logged,
+  ModelChoice,
   Source,
   TurnOutcome
 }
@@ -132,6 +133,7 @@ private def rawText(logged: Logged, reasoning: ReasoningView): Option[String] =
     case Entry.JobsStopRequested(which, reason)                       => Some(s"${jobsWords(which)}: $reason.")
     case Entry.Granted(_, rule, lifetime)                             => Some(s"Allowed ${lifetime.words}: ${callText(rule)}.")
     case Entry.Ended(outcome, reason)                                 => Some(outcome.report(reason))
+    case Entry.ModelChanged(model)                                    => Some(changedText(model))
     case Entry.Input(_, text, _) if logged.meta.source != Source.User =>
       Some(s"[${sourceWords(logged.meta.source)}] $text")
     case _ => None
@@ -208,3 +210,10 @@ private def startCommand(command: String): String =
   else
     val start = textPrefix(command, CommandChars)
     s"${inQuotes(start)} [${command.length - start.length} more characters]"
+
+/** The words of a `ModelChanged` with `model` (CLI_SCREEN.md, 14.4): the new effort, or a change of the other options.
+  */
+private[cli] def changedText(model: ModelChoice): String =
+  Effort.of(model).fold("The options of the model changed. The next step uses them.")(level =>
+    s"The effort is now $level. The next step uses it."
+  )

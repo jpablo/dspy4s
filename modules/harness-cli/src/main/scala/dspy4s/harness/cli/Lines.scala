@@ -39,6 +39,12 @@ enum Line derives CanEqual:
   /** `/show ID`: a cell (`12`) or a call (`12.0`) of the session in full, for the line editor (CLI_SCREEN.md, 3). */
   case Show(id: String)
 
+  /** `/effort` and `/effort LEVEL`: the reasoning effort of the model of the session (CLI_SCREEN.md, 14.4). With no
+    * level, the client shows the effort and the levels of the model. With a level, it sends `ChangeModel`, and the next
+    * step uses the level.
+    */
+  case Effort(level: Option[String])
+
   /** `/help`: the commands, one line each. */
   case Help
 
@@ -99,6 +105,8 @@ private def command(words: List[String]): Option[Line] =
     case List("/show", id)        => Some(Line.Show(id))
     case List("/help")            => Some(Line.Help)
     case List("/reasoning", view) => ReasoningView.values.find(_.toString.equalsIgnoreCase(view)).map(Line.Reasoning(_))
+    case List("/effort")          => Some(Line.Effort(None))
+    case List("/effort", level)   => Some(Line.Effort(Some(level)))
     case "/close" :: rest         => close(rest)
     case List("/sessions")        => Some(Line.Sessions)
     case List("/open", id)        => Option.when(SessionId.valid(id))(Line.Open(SessionId(id)))
@@ -159,6 +167,7 @@ val commandHelp: Vector[(String, String)] = Vector(
   "/stopjob ID"                    -> "stop the job ID of /jobs, for example 12.0",
   "/status"                        -> "show the folder, the turn, the pending calls and the jobs",
   "/reasoning off|line|short|full" -> "set how much of the reasoning of a step the client shows",
+  "/effort [LEVEL]"                -> "show the reasoning effort and its levels, or set the effort of the next steps",
   "/show ID"                       -> "show the cell ID or the call ID of the session in full, for example 12 or 12.0",
   "/wait SECONDS"                  -> "wait before the next line, for a script",
   "/help"                          -> "show this text",
@@ -195,9 +204,11 @@ def jobOrder(state: SessionState): Vector[EffectId] = state.jobs.keys.toVector.s
   *     pending. A number is the `seq` of an entry, so it does not change when other calls change.
   *   - `StopJob` gives `StopJobs(One(job))` for a job of `current`, or an error.
   *   - `Close` gives `Close` with its outcome and its reason. A client with a desk runs the release instead (8.7).
-  *   - `Jobs`, `Status`, `Reasoning`, `Show`, `Help`, `Quit`, `Wait`, `Sessions`, `Open`, `Reopen` and `Controller`
-  *     give no command, because they change only the client. The client runs `Sessions`, `Open`, `Reopen` and
-  *     `Controller` through its desk. `Unknown` gives an error that points to `/help`.
+  *   - `Effort` with a level of `choices`, the levels of the model, gives `ChangeModel` with the model of `current` and
+  *     that effort (CLI_SCREEN.md, 14.4). Another level gives an error with the levels.
+  *   - `Jobs`, `Status`, `Reasoning`, `Show`, `Help`, `Quit`, `Wait`, `Sessions`, `Open`, `Reopen`, `Controller` and
+  *     `Effort` with no level give no command, because they change only the client. The client runs `Sessions`, `Open`,
+  *     `Reopen` and `Controller` through its desk. `Unknown` gives an error that points to `/help`.
   *
   * The client side of `Grant` (5.5): only a client of the user sends `Grant`. To refuse, the person sends a plain
   * message.
@@ -206,7 +217,8 @@ def commandsFor(
     line   : Line,
     current: SessionState,
     request: RequestId,
-    asked  : Long => Option[GuardRule] = _ => None
+    asked  : Long => Option[GuardRule] = _ => None,
+    choices: Vector[String]            = ModelFacts.unknown.choices
 ): Either[String, Vector[Command]] =
   line match
     case Line.Message(text) =>
@@ -233,7 +245,23 @@ def commandsFor(
         Right(Vector(Command.StopJobs(JobSelector.One(job), s"the person stopped the job ${jobName(job)}")))
       else Left(s"The session has no job ${jobName(job)}. /jobs lists the jobs.")
     case Line.Close(outcome, reason) => Right(Vector(Command.Close(outcome, reason)))
-    case Line.Unknown(text)          => Left(s"$text is not a command. /help lists the commands.")
+    case Line.Effort(Some(level))    =>
+      if choices.contains(level) then Right(Vector(Command.ChangeModel(Effort.set(current.config.model, level))))
+      else Left(s"The model has no effort $level. Its levels are ${listWords(choices)}.")
+    case Line.Unknown(text) => Left(s"$text is not a command. /help lists the commands.")
     // These lines change only the client.
     case Line.Jobs | Line.Status | Line.Reasoning(_) | Line.Show(_) | Line.Help | Line.Quit | Line.Wait(_) |
-        Line.Sessions | Line.Open(_) | Line.Controller | Line.Reopen(_) => Right(Vector.empty)
+        Line.Sessions | Line.Open(_) | Line.Controller | Line.Reopen(_) | Line.Effort(None) => Right(Vector.empty)
+
+/** The text of `/effort` with no level: the effort of the model of `current`, and the levels `choices` of the model
+  * (CLI_SCREEN.md, 14.4).
+  */
+def effortText(current: SessionState, choices: Vector[String]): String =
+  val now = Effort.of(current.config.model).fold("The session sends no effort, so the model uses its own.")(level =>
+    s"The effort is $level."
+  )
+  s"$now The levels of the model are ${listWords(choices)}. /effort LEVEL sets the effort of the next steps."
+
+/** The words of `items`, as `a, b and c`. */
+private def listWords(items: Vector[String]): String =
+  if items.size < 2 then items.mkString else s"${items.init.mkString(", ")} and ${items.last}"
