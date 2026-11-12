@@ -41,7 +41,7 @@ class JournalLaws extends ScalaCheckSuite:
       before.foreach((c, s) => j.run(c, s): Unit)
       val (state, log) = (j.state, j.log)
       val result       = j.run(command, sender)
-      decide(command, state) match
+      decide(command, state, sender) match
         case Left(rejection) =>
           assertEquals(result, Left(rejection))
           assertEquals(j.log, log)

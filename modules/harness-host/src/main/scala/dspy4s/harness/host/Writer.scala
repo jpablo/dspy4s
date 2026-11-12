@@ -61,6 +61,16 @@ final class Writer(
     if !enqueue(Run(command, sender, ticket, reply)) then Left(endError)
     else awaitUninterruptibly(reply)
 
+  /** Puts `command` into the mailbox when it has room, and returns at once: true when the command is in the mailbox.
+    * The reporter of the host uses it, so a full mailbox of an owner never stops it (8.7).
+    */
+  def tryPost(command: Command, sender: Source): Boolean =
+    if stopped then false
+    else
+      val message = Run(command, sender, None, CompletableFuture())
+      // As in `enqueue`: after the end, the last drain fails the message, or the message is not in the mailbox.
+      mailbox.offer(message) && !(stopped && mailbox.remove(message))
+
   /** Puts `command` into the mailbox, and returns before its commit (10.1: `send`). */
   def post(command: Command, sender: Source): Either[HostError, Unit] =
     Either.cond(enqueue(Run(command, sender, None, CompletableFuture())), (), endError)
@@ -140,7 +150,7 @@ final class Writer(
   private def commit(command: Command, sender: Source): Either[HostError, SessionState] =
     if stopped then Left(endError)
     else
-      decide(command, current).left.map(HostError.Rejected(_)).flatMap { added =>
+      decide(command, current, sender).left.map(HostError.Rejected(_)).flatMap { added =>
         if added.isEmpty then Right(current)
         else
           var s    = current
@@ -198,8 +208,9 @@ object Writer:
   * mailbox of `writer` with the ticket of the activation.
   *
   * A proposal for the review: `Journal.run` gives a `Rejection`, and a write error is not one. So `HostError.Rejected`
-  * gives its rejection, and the other errors throw an exception with a plain message. `drive` then stops, and the turn
-  * stays open, as after a crash. The next `Activate` repairs it (4.4).
+  * gives its rejection, and the other errors throw an exception with a plain message: the error in words
+  * (`HostError.words`). `drive` then stops, and the turn stays open, as after a crash. The next `Activate` repairs it
+  * (4.4).
   */
 final class WriterJournal(writer: Writer, ticket: WorkerTicket) extends Journal:
 
@@ -212,4 +223,4 @@ final class WriterJournal(writer: Writer, ticket: WorkerTicket) extends Journal:
       case Right(s)                         => Right(s)
       case Left(HostError.Rejected(reason)) => Left(reason)
       case Left(other)                      =>
-        throw IllegalStateException(s"the journal of the session took no commit of this activation: $other")
+        throw IllegalStateException(s"the journal of the session took no commit of this activation: ${other.words}")

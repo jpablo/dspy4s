@@ -115,9 +115,17 @@ result = "Long sessions that lose no detail."
 id = "p9"
 number = 9
 title = "The controller"
-modules = []
+modules = ["harness-kernel", "harness-guest", "harness", "harness-host", "harness-cli"]
 uses = ["p7", "p8"]
 result = "One controller above all sessions."
+
+[[phase]]
+id = "p10"
+number = 10
+title = "The graph"
+modules = []
+uses = ["p9"]
+result = "Questions about the history of a session that a graph answers."
 
 # ── Types of libraries. They have no group, and each phase can use them. ────────────────────────────────────────────
 
@@ -314,10 +322,11 @@ id = "grant-lifetime"
 group = "guard"
 kind = "data"
 name = "GrantLifetime"
+ops = ["words"]
 ref = "5.5"
 spec = true
 uses = []
-text = "Once, Turn or Session."
+text = "Once, Turn or Session. words gives the lifetime in words for the line of a grant in the terminal, for example for this turn. A person types once, turn or session after /allow."
 
 # ── Phase 1: the configuration (8.1) ────────────────────────────────────────────────────────────────────────────────
 
@@ -333,10 +342,11 @@ id = "owner"
 group = "config"
 kind = "data"
 name = "Owner"
-ops = ["hasPerson"]
+ops = ["hasPerson", "words"]
 ref = "8.1"
 spec = true
 uses = ["session-id"]
+text = "The user, an optimizer, a session or a cell. hasPerson is true for the user and a session. words gives the owner in words for the card of a session, for example the person or the session s2."
 
 [[node]]
 id = "turn-kind"
@@ -440,28 +450,33 @@ id = "cell-outcome"
 group = "journal"
 kind = "data"
 name = "CellOutcome"
+ops = ["words"]
 ref = "4.1"
 spec = true
 uses = ["json"]
+text = "Ok, CompileError, Failed, TimedOut or Submitted. words gives the outcome in words for the first line of the output of a cell in the terminal, for example the cell did not compile, with no Scala value."
 
 [[node]]
 id = "turn-outcome"
 group = "journal"
 kind = "data"
 name = "TurnOutcome"
+ops = ["report"]
 ref = "4.1"
 spec = true
 uses = ["json"]
-text = "Replied, Submitted, Exhausted, Aborted, Crashed or Failed."
+text = "Replied, Submitted, Exhausted, Aborted, Crashed or Failed. report gives the text of the report of the turn in words: the reply, the value of submit as text, or what ended the turn. The terminal shows the same text."
 
 [[node]]
 id = "session-outcome"
 group = "journal"
 kind = "data"
 name = "SessionOutcome"
+ops = ["words", "report"]
 ref = "4.1"
 spec = true
 uses = ["session-id"]
+text = "Merged, Parked, Abandoned or Replaced. words gives the outcome with no reason, and report gives the text of the end of a session with its reason, for the report and the terminal."
 
 [[node]]
 id = "job-selector"
@@ -479,9 +494,8 @@ kind = "data"
 name = "Entry"
 ref = "4.1"
 spec = true
-uses = ["versions", "session-config", "request-id", "json", "effect-id", "effect-result", "cell-outcome",
-        "job-selector", "guard-rule", "grant-lifetime", "turn-outcome", "session-outcome"]
-text = "The 14 kinds of entry. The entries of one turn form the small language of 4.1."
+uses = ["versions", "session-config", "request-id", "json", "effect-id", "effect-result", "cell-outcome", "job-selector", "guard-rule", "grant-lifetime", "turn-outcome", "session-outcome", "release-step"]
+text = "The 16 kinds of entry. The entries of one turn form the small language of 4.1. Releasing and Released come with phase 9 (8.7)."
 
 [[node]]
 id = "logged"
@@ -677,9 +691,11 @@ id = "rejection"
 group = "commands"
 kind = "data"
 name = "Rejection"
+ops = ["words"]
 ref = "4.5"
 spec = true
 uses = ["entry"]
+text = "SessionClosed, TurnOpen, OutOfOrder, NotNew or Releasing. words gives the refusal in words for the terminal, a cell and the controller, for example a turn is open. OutOfOrder gives only the name of the case of its entry."
 
 # ── Phase 1: decide (4.5) ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -771,7 +787,8 @@ kind = "function"
 name = "reports"
 ref = "8.6"
 uses = ["session-id", "source", "logged", "command"]
-text = "A report is a pure function of the journal of the session."
+proof_uses = ["session-outcome", "turn-outcome"]
+text = "A report is a pure function of the journal of the session. Its text gives the outcome in words: the end of a turn (TurnOutcome.report), or the end of the session (SessionOutcome.words) and its reason one time."
 
 [[node]]
 id = "missing"
@@ -1158,8 +1175,8 @@ kind = "data"
 name = "SessionCard"
 ref = "10.2"
 spec = true
-uses = ["session-ref"]
-text = "What list shows about a session. A proposal: the deterministic part of 10.2 and the goal. The parts that an LM writes come with the controller."
+uses = ["session-ref", "scope"]
+text = "What list shows about a session: the id, the goal, the scope, the owner, the parent, the status, the last seq, the files that it made, its commands and its head (8.7). The decisions and the open questions come with the graph of phase 10."
 
 # ── Phase 2: Data, the codec of the values that leave a cell (5.1) ──────────────────────────────────────────────────
 
@@ -2123,7 +2140,7 @@ name = "drive"
 ref = "4.6"
 spec = true
 uses = ["journal-trait", "turn-effects", "session-state"]
-proof_uses = ["next", "closing"]
+proof_uses = ["next", "closing", "rejection"]
 text = "Runs the open turn to its end, and gives the state at Next.Wait. The worker holds no decision: next says what comes, and the journal holds each result. An exception of the effects leaves the turn open, as after a crash."
 
 # ── Phase 4: the journal in memory and the mask of secrets (9, 5.6) ───────────────────────────────────────────────
@@ -2162,7 +2179,7 @@ name = "Secrets"
 ops = ["maskText", "mask", "known"]
 ref = "5.6"
 spec = true
-uses = ["entry"]
+uses = ["entry", "release-step"]
 text = "The known secret values, by name: the values of the secret-like variables of the harness process and the values behind secretHeaders. mask replaces each one in each string of an entry with «secret:NAME», a longer value first. A proposal: a value shorter than 8 characters, or a part of a mask, is not a known value."
 
 # ── Phase 4: the handlers of a call (5.3) ─────────────────────────────────────────────────────────────────────────
@@ -2183,8 +2200,8 @@ ops = ["startCell", "call"]
 ref = "5.3"
 spec = true
 uses = ["journal-trait", "data", "json"]
-proof_uses = ["effect-id", "effect-result", "guarded", "text-prefix"]
-text = "recorded(h) of 5.3: EffectStarted before each call and EffectDone after it, with the value as Json and as text. A call that the journal refuses, for example after a stop, does not run."
+proof_uses = ["effect-id", "effect-result", "guarded", "text-prefix", "rejection"]
+text = "recorded(h) of 5.3: EffectStarted before each call and EffectDone after it, with the value as Json and as text. A call that the journal refuses, for example after a stop, does not run, and the cell gets the refusal in words (Rejection.words)."
 
 [[node]]
 id = "local-files"
@@ -2223,7 +2240,7 @@ group = "handlers"
 kind = "function"
 name = "recorded"
 ref = "5.3"
-uses = ["bindings", "recorder", "layout"]
+uses = ["bindings", "recorder", "layout", "sessions"]
 proof_uses = ["files", "shell", "store", "turn", "recorder", "llm", "children"]
 text = "recorded(h) for each handler of a Bindings value: each call of the guest API goes through the recorder. input reads the journal, so it is not an effect. Since phase 5 it also records llmQuery, llmQueryBatched, rlm and rlmBatched, with their values through Data. It refuses a binding of the network and of the sessions."
 
@@ -2374,8 +2391,8 @@ name = "Window"
 ops = ["update", "project", "cut"]
 ref = "7"
 uses = ["context-strategy"]
-proof_uses = ["status", "projection", "state", "text-prefix"]
-text = "No derived data, and the last steps of the open turn that fit the budget, oldest first. The last observation is always in it, cut to half of the budget, with a note of the rest. A proposal: the budget counts characters."
+proof_uses = ["status", "projection", "state", "text-prefix", "turn-outcome"]
+text = "No derived data, and the last steps of the open turn that fit the budget, oldest first. The last observation is always in it, cut to half of the budget, with a note of the rest. An earlier turn of a chat with no reply has the text of its report (TurnOutcome.report). A proposal: the budget counts characters."
 
 # ── Phase 4: the harness (9) ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -2454,7 +2471,7 @@ uses = ["dspy-module", "signature", "predict", "policy-input", "policy-step", "f
         "session-id"]
 proof_uses = ["drive", "memory-journal", "harness-effects", "recorded", "local-files", "snapshot-store", "journal-turn",
               "sandboxed-shell", "profile-for-mode", "layout", "preamble", "scala-repl", "window", "budget",
-              "host-threads", "leaf-llm", "child-turns", "child-start"]
+              "host-threads", "leaf-llm", "child-turns", "child-start", "rejection"]
 text = "A harness for one task, as a dspy4s Module. forward copies the workspace, starts a journal in memory and a REPL with the handlers of the mode, sends the input fields, runs drive and reads the last TurnEnded: Submitted gives the output through Data, Replied and Exhausted run the finisher. Since phase 5 a child of rlm has the same session path: its own journal, a new REPL with a preamble from Data[A].shape, the same policy leaf, the window strategy and the same copy, files and shell. Only submit gives the value of a child. modeAt gives Children^ only below the depth limit. A proposal: the leaves are policy, finisher and subQuery."
 
 [[group]]
@@ -2854,10 +2871,12 @@ id = "host-error"
 group = "host-types"
 kind = "data"
 name = "HostError"
+ops = ["words"]
 ref = "10.2"
 spec = true
 uses = ["rejection"]
-text = "Why the host did not commit a command: a rejection of decide, a failed write that ended the session, the end of the session, a fenced worker, or a file that did not open."
+proof_uses = ["rejection"]
+text = "Why the host did not commit a command: a rejection of decide, a failed write that ended the session, the end of the session, a fenced worker, or a file that did not open. words gives the error in words for the terminal, a cell and the controller, and a rejection in the words of Rejection.words."
 
 [[node]]
 id = "worker-ticket"
@@ -2889,10 +2908,10 @@ id = "session-file"
 group = "session-file"
 kind = "data"
 name = "SessionFile"
-ops = ["append", "readFrom", "lastSeq", "setting", "close", "open", "pathOf"]
+ops = ["append", "readFrom", "lastSeq", "setting", "close", "open", "pathOf", "readOnly"]
 ref = "10.2"
 spec = true
-uses = ["logged", "session-id"]
+uses = ["logged", "session-id", "file-lines"]
 text = "<root>/sessions/<id>.db: one row for each entry, with a primary key on the session and seq, which rejects a stale writer, and a column required, so a reader skips a row that it cannot decode when the row is not required. WAL, synchronous=NORMAL and fullfsync=ON, and synchronous=FULL for a commit that needs a flush. One connection for the life of the file."
 
 [[group]]
@@ -2969,7 +2988,7 @@ id = "writer"
 group = "writer"
 kind = "data"
 name = "Writer"
-ops = ["run", "post", "fence", "expire", "state", "log", "ended", "close"]
+ops = ["run", "post", "fence", "expire", "state", "log", "ended", "close", "tryPost"]
 ref = "10.2"
 spec = true
 uses = ["session-file", "logged", "secrets", "feeds", "session-state", "command", "source", "worker-ticket", "host-error"]
@@ -2984,7 +3003,8 @@ name = "WriterJournal"
 ops = ["state", "log", "run"]
 ref = "10.2"
 uses = ["journal-trait", "writer", "worker-ticket", "command", "source", "rejection", "session-state", "logged"]
-text = "The journal of one activation: each commit of its worker, effects and recorder goes through the mailbox with the ticket of the activation. A proposal: a write error or a fence throws, so drive stops and the turn stays open, as after a crash."
+proof_uses = ["host-error"]
+text = "The journal of one activation: each commit of its worker, effects and recorder goes through the mailbox with the ticket of the activation. A proposal: a write error or a fence throws with the error in words (HostError.words), so drive stops and the turn stays open, as after a crash."
 
 [[group]]
 id = "catalog"
@@ -2998,9 +3018,11 @@ id = "session-status"
 group = "catalog"
 kind = "data"
 name = "SessionStatus"
+ops = ["words"]
 ref = "10.2"
 uses = ["session-outcome", "schema"]
-text = "Idle, InTurn, Stopping or Ended."
+proof_uses = ["session-outcome"]
+text = "Idle, InTurn, Stopping, Releasing or Ended. words gives the status in words, for example in a turn or ended (merged), for the card of a session and the list of the client."
 
 [[node]]
 id = "catalog-row"
@@ -3008,8 +3030,8 @@ group = "catalog"
 kind = "data"
 name = "CatalogRow"
 ref = "10.2"
-uses = ["session-id", "owner", "session-status", "schema"]
-text = "The deterministic part of a SessionCard: the id, the owner, the parent of a fork, the status and the last seq. A proposal: phase 7 makes no fork, so the parent is None. A proposal: the folder of the scope, the time of the last entry and the first message on one line, so a person can find a session in a list. These fields have no default values, so a row of an earlier catalog does not decode, and rebuild folds its journal again."
+uses = ["session-id", "owner", "session-status", "schema", "scope", "ledger-data"]
+text = "The deterministic part of a SessionCard: the id, the owner, the parent of a fork, the status and the last seq. A proposal: phase 7 makes no fork, so the parent is None. A proposal: the folder of the scope, the time of the last entry and the first message on one line, so a person can find a session in a list. These fields have no default values, so a row of an earlier catalog does not decode, and rebuild folds its journal again. Since phase 9 the row also holds the goal, the scope and the ledger of the card (8.7)."
 
 [[node]]
 id = "catalog-row-fold"
@@ -3018,8 +3040,8 @@ kind = "function"
 name = "catalogRow"
 ref = "10.2"
 spec = true
-uses = ["session-id", "fold", "logged", "catalog-row"]
-proof_uses = ["sandboxed-shell", "cut-end"]
+uses = ["session-id", "fold", "logged", "catalog-row", "ledger-state"]
+proof_uses = ["sandboxed-shell", "cut-end", "ledger-fold"]
 text = "The row of a session as a fold of its journal, so a lost row comes back from the journal."
 
 [[node]]
@@ -3117,13 +3139,11 @@ id = "local-host"
 group = "host"
 kind = "data"
 name = "LocalHost"
-ops = ["open", "list", "failed", "close", "start", "sessions", "journals"]
+ops = ["open", "list", "failed", "close", "start", "sessions", "journals", "startWith", "rows", "openWith", "runAs", "journalOf", "zoomInto", "make", "reportTo", "planOf", "release"]
 ref = "10.2"
 spec = true
-uses = ["session-host", "session-runtime", "secrets", "host-limits", "catalog", "timers", "session-handle", "catalog-row",
-        "host-error", "session-config", "session-id"]
-proof_uses = ["writer", "writer-journal", "session-file", "feeds", "drive", "next", "job-table", "catalog-row-fold", "rebuilt",
-              "catalog"]
+uses = ["session-host", "session-runtime", "secrets", "host-limits", "catalog", "timers", "session-handle", "catalog-row", "host-error", "session-config", "session-id", "peers", "git-scopes", "scopes", "host-hooks", "release-item", "release-step", "scope-state", "release-plans", "session-outcome", "scope", "command", "source", "session-state", "logged", "layout"]
+proof_uses = ["writer", "writer-journal", "session-file", "feeds", "drive", "next", "job-table", "catalog-row-fold", "rebuilt", "catalog", "report-pass", "release-plan", "irreversible", "ledger-fold", "memory-tree", "file-lines", "controller", "state", "job-status-words", "job-name"]
 text = "One writer and one file for each session, with an exclusive lock for a second host. open repairs an open turn, keeps the configuration of the journal with None, and refuses a mode above the ceiling. Each activation gets a new ticket and its WriterJournal. After StopRequested, Activation.stop, and a timer calls Writer.expire with the turn of the stop. The catalog gets the row after a turn ends."
 
 [[node]]
@@ -3134,6 +3154,15 @@ name = "jobName"
 ref = "10.3"
 uses = ["effect-id"]
 text = "The name of a job for a person and for the model: the cell and the number of its spawn, for example 12.0. The report of the end of a job, the CLI and the JobId of the model use the same two numbers."
+
+[[node]]
+id = "job-status-words"
+group = "host"
+kind = "function"
+name = "jobStatusWords"
+ref = "10.3"
+uses = ["job-status"]
+text = "The status of a job in words for a person and for the model: runs, exited with the code N, stopped, or lost with its host. The message at the end of a job with report and the text of /jobs give these words. It is a function of the host, because the source of the guest API is a reference for the model."
 
 [[group]]
 id = "jobs"
@@ -3147,7 +3176,7 @@ id = "job-table"
 group = "jobs"
 kind = "data"
 name = "JobTable"
-ops = ["sync", "start", "output", "await", "status", "close"]
+ops = ["sync", "start", "output", "await", "awaitAll", "status", "close"]
 ref = "10.3"
 spec = true
 uses = ["effect-id", "session-state", "job-status"]
@@ -3162,8 +3191,8 @@ name = "JobShell"
 ops = ["exec", "spawn", "jobOutput", "waitJob", "stopJob"]
 ref = "10.3"
 uses = ["shell", "sandboxed-shell", "job-table", "journal-trait", "files", "job-id", "job-status"]
-proof_uses = ["process-wrapper", "command", "job-table"]
-text = "The handler of Shell^ in the host. exec goes to the sandbox, and spawn starts a job with SandboxedShell.launch and gives the JobId of its own EffectStarted. stopJob is StopJobs(One(job)), and the end of a job with report reaches the host through the table."
+proof_uses = ["process-wrapper", "command", "job-table", "rejection"]
+text = "The handler of Shell^ in the host. exec goes to the sandbox, and spawn starts a job with SandboxedShell.launch and gives the JobId of its own EffectStarted. stopJob is StopJobs(One(job)), and a refusal gives the cell its words (Rejection.words). The end of a job with report reaches the host through the table."
 
 [[group]]
 id = "work-runtime"
@@ -3186,14 +3215,11 @@ id = "work-runtime"
 group = "work-runtime"
 kind = "data"
 name = "WorkRuntime"
-ops = ["activate", "defaultGuard", "config", "forWork"]
+ops = ["activate", "defaultGuard", "config", "forWork", "taskOf", "ownedConfig", "forHost"]
 ref = "8.1"
 spec = true
-uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context",
-        "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access",
-        "harness", "line-store", "file-lines", "memory-tree", "session-file", "activity", "memory-progress", "memory-use"]
-proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell",
-              "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble", "memory-tree"]
+uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context", "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access", "harness", "line-store", "file-lines", "memory-tree", "session-file", "peers", "host-sessions", "harness-probe", "scope", "strategy-name", "activity", "memory-progress", "memory-use"]
+proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell", "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble", "memory-tree", "controller"]
 text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of workMode through recorded and guarded, and JobShell. workMode is local mode with no Sessions^ and no Children^, so a work session has no rlm. Each turn gets a new budget of model calls. The first rules of 5.5: git push gets Ask in a mode with Network^."
 
 [[group]]
@@ -3210,8 +3236,8 @@ kind = "data"
 name = "CliArgs"
 ops = ["parse"]
 ref = "15"
-uses = []
-text = "The folder of a new session, the root of the host, the session to open again, the script mode, and the list of the sessions. A session that opens again keeps its own configuration. A proposal: [--root DIR] [--session ID] [--script] [--list] [FOLDER], with the root <home>/.dspy4s/harness, and the start of an id is enough when only one session has it."
+uses = ["session-id"]
+text = "The folder of a new session, the root of the host, the session to open again, the script mode, the list of the sessions, and the controller (8.7). A session that opens again keeps its own configuration. A proposal: [--root DIR] [--session ID | --controller] [--script] [--list] [FOLDER], with the root <home>/.dspy4s/harness, and the start of an id is enough when only one session has it."
 
 [[group]]
 id = "screen"
@@ -3245,8 +3271,8 @@ kind = "function"
 name = "entryText"
 ref = "10.1"
 uses = ["logged", "reasoning-view"]
-proof_uses = ["job-name", "text-prefix", "in-quotes"]
-text = "The reasoning of a step, the text and the code of a step, the command of an exec or a spawn in quotes when it starts, and the output of a cell. A pending call shows in quotes, with its number and the commands that answer it. The outcome of a turn, the stops and a stopped job by its name. The other entries give none. Each text loses its control characters."
+proof_uses = ["job-name", "text-prefix", "in-quotes", "session-outcome", "turn-outcome", "cell-outcome", "grant-lifetime"]
+text = "The reasoning of a step, the text and the code of a step, the command of an exec or a spawn in quotes when it starts, and the output of a cell after its outcome in words (CellOutcome.words). A pending call shows in quotes, with its number and the commands that answer it. The end of a turn with the text of its report (TurnOutcome.report), apart from a reply, the stops, a stopped job by its name, and a grant with its lifetime in words (GrantLifetime.words). The other entries give none. Each text loses its control characters."
 
 [[group]]
 id = "lines"
@@ -3261,8 +3287,8 @@ group = "lines"
 kind = "data"
 name = "Line"
 ref = "10.3"
-uses = ["grant-lifetime", "reasoning-view", "effect-id"]
-text = "A message, /stop, /stopall, /allow [N] [once|turn|session], /jobs, /stopjob ID, /status, /reasoning off|short|full, /help, /close, /quit, /wait SECONDS, or an unknown command. N is the number of a pending call, and ID is the name of a job."
+uses = ["grant-lifetime", "reasoning-view", "effect-id", "session-id", "session-outcome"]
+text = "A message, /stop, /stopall, /allow [N] [once|turn|session], /jobs, /stopjob ID, /status, /reasoning off|short|full, /help, /close [merged|parked|abandoned REASON|replaced ID], /sessions, /open ID, /reopen ID, /controller, /quit, /wait SECONDS, or an unknown command. N is the number of a pending call, and ID is the name of a job or the id of a session."
 
 [[node]]
 id = "reasoning-view"
@@ -3279,7 +3305,7 @@ group = "lines"
 kind = "function"
 name = "parseLine"
 ref = "10.3"
-uses = ["line", "reasoning-view", "effect-id"]
+uses = ["line", "reasoning-view", "effect-id", "session-id", "session-outcome"]
 text = "The line of a text. A text that does not start with / is a message."
 
 [[node]]
@@ -3352,8 +3378,8 @@ kind = "function"
 name = "jobsText"
 ref = "10.3"
 uses = ["session-state", "effect-id", "job-status", "job-start"]
-proof_uses = ["job-order", "job-name", "in-quotes"]
-text = "The text of /jobs: each job with its name, its status and its command in quotes. A spawn that did not start, that starts, or that its host lost has its own word."
+proof_uses = ["job-order", "job-name", "in-quotes", "job-status-words"]
+text = "The text of /jobs: each job with its name, its status in the words of the host (jobStatusWords) and its command in quotes. A spawn that did not start, that starts, or that its host lost has its own word."
 
 [[node]]
 id = "stop-notice"
@@ -3383,7 +3409,8 @@ kind = "function"
 name = "sessionsText"
 ref = "10.2"
 uses = ["catalog-row"]
-text = "The text of --list: the newest session first, each with its id, status, time, folder and first message."
+proof_uses = ["session-status"]
+text = "The text of --list: the newest session first, each with its id, status in words (SessionStatus.words), time, folder and first message."
 
 [[node]]
 id = "resolve-session"
@@ -3451,11 +3478,11 @@ id = "cli"
 group = "cli"
 kind = "data"
 name = "Cli"
-ops = ["main", "loop", "listText"]
+ops = ["main", "loop", "listText", "deskStep"]
 ref = "15"
-uses = ["session-handle", "console", "screen"]
-proof_uses = ["cli-args", "local-host", "work-runtime", "work-env", "entry-text", "parse-line", "commands-for", "plain-console", "editor-console", "stop-notice", "jobs-text", "status-text", "job-starts", "pending-calls", "sessions-text", "resolve-session"]
-text = "main makes the model from the environment, makes the console, starts a LocalHost with a WorkRuntime, and opens the session. --list prints the sessions and opens none. loop prints the feed, and each text goes through printable. It sends a message, /stop and /stopall, and it runs /close, /allow and /stopjob so the person sees a refusal. A Ctrl-C during a turn is /stop, and the stop notice follows a turn that a stop ended. A proposal: JDK 21."
+uses = ["session-handle", "console", "desk", "host-desk", "screen"]
+proof_uses = ["cli-args", "local-host", "work-runtime", "work-env", "entry-text", "parse-line", "commands-for", "plain-console", "editor-console", "stop-notice", "jobs-text", "status-text", "job-starts", "pending-calls", "sessions-text", "resolve-session", "card-text", "open-refusal", "plan-text", "host-error", "screen"]
+text = "main makes the model from the environment, makes the console, starts a LocalHost with a WorkRuntime, and opens the session. --list prints the sessions and opens none. loop prints the feed, and each text goes through printable. It sends a message, /stop and /stopall, and it runs /close, /allow and /stopjob so the person sees a refusal. Each error of the host prints in words (HostError.words). A Ctrl-C during a turn is /stop, and the stop notice follows a turn that a stop ended. With a desk, /sessions, /open, /reopen, /controller and /close go to deskStep (8.7). A proposal: JDK 21. A rich console gets the rows of Screen for each entry, and the live block and the footer of the session that it shows."
 
 # ── Phase 7: the laws ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -3492,7 +3519,7 @@ name = "Chat window:"
 ref = "7"
 spec = true
 uses = ["window"]
-text = "A step sees each earlier turn as its message and its reply, oldest first, and the message of the open turn. With a small budget, the oldest turns go first. One open turn has no earlier turn."
+text = "A step sees each earlier turn as its message and its reply, oldest first, and the message of the open turn. An earlier turn with no reply shows the text of its report, with no Scala value. With a small budget, the oldest turns go first. One open turn has no earlier turn."
 
 [[group]]
 id = "link-laws"
@@ -3603,8 +3630,8 @@ group = "host-laws"
 kind = "law"
 name = "Host:"
 ref = "10.2"
-uses = ["local-host"]
-text = "open makes the file and commits Activated, and a second open gives the same handle. A new id with no configuration, a mode above the ceiling, a session of another host and a bad file give OpenFailed. A reopen keeps the configuration of the journal, also after Close. A message starts a turn that a worker runs. An open after a crash repairs the turn. The store comes back in a new host. run gives a refusal. list gives the rows."
+uses = ["local-host", "host-error"]
+text = "open makes the file and commits Activated, and a second open gives the same handle. A new id with no configuration, a mode above the ceiling, a session of another host and a bad file give OpenFailed. A reopen keeps the configuration of the journal, also after Close. A message starts a turn that a worker runs. An open after a crash repairs the turn. The store comes back in a new host. run gives a refusal. list gives the rows. words gives each error of the host in words, and a refusal in the words of the kernel."
 
 [[node]]
 id = "law-hard-stop"
@@ -4108,3 +4135,521 @@ name = "Memory live:"
 ref = "7.1"
 uses = ["memory-tasks", "memory-tree"]
 text = "With HARNESS_LIVE=true: a work session for each strategy gets the journal of the tasks, and each question is its next turn. The scores of the window and of the memory tree go to memory/scores.tsv."
+
+# ── Phase 9: the controller (8.7). The proofs go in the order of the parts: the controller and Sessions, the report
+# pass, the ledger, the release plans, and the probes. ──────────────────────────────────────────────────────────────
+
+[[group]]
+id = "release"
+phase = "p9"
+module = "harness-kernel"
+file = "Release.scala"
+title = "The release plans: the state of a scope, the items, and the default plans"
+
+[[group]]
+id = "release-items"
+phase = "p9"
+module = "harness-kernel"
+file = "ReleaseItems.scala"
+title = "The items of a release plan, their results, and the state of a scope"
+
+[[node]]
+id = "scope-state"
+group = "release-items"
+kind = "data"
+name = "ScopeState"
+ref = "8.7"
+uses = ["scope", "schema"]
+text = "The state of a scope at the end of its session: the git head, the tip of the branch of a worktree, no change that git does not keep, a tip in the base, a folder that the host made, and a folder that another open session uses."
+
+[[node]]
+id = "release-item"
+group = "release-items"
+kind = "data"
+name = "ReleaseItem"
+ref = "8.7"
+spec = true
+uses = ["schema"]
+text = "RemoveWorktree, DeleteBranch, KeepRef, ArchiveDirectory and Keep of CODE_HARNESS.md 7.9. A git item holds its repository."
+
+[[node]]
+id = "release-result"
+group = "release-items"
+kind = "data"
+name = "ReleaseResult"
+ref = "8.7"
+uses = ["schema"]
+text = "Done, Failed with the error, or Skipped with the reason: an irreversible item with no confirmation."
+
+[[node]]
+id = "release-step"
+group = "release-items"
+kind = "data"
+name = "ReleaseStep"
+ref = "8.7"
+uses = ["release-item", "release-result", "schema"]
+text = "One step of a release with its result, as the journal and the ledger keep it."
+
+[[node]]
+id = "release-plans"
+group = "release"
+kind = "data"
+name = "ReleasePlans"
+ref = "8.7"
+uses = ["scope-state", "session-outcome", "release-item"]
+text = "The plans are values (CODE_HARNESS.md 7.9): the plan for the state of a scope, an outcome, the ref and the archive."
+
+[[node]]
+id = "release-plan"
+group = "release"
+kind = "function"
+name = "releasePlan"
+ref = "8.7"
+spec = true
+uses = ["scope-state", "session-outcome", "release-item"]
+text = "The default plans of the table of 7.9. A Home, a Directory and a Fork scope keep their folder. A worktree with changes is never removed. A branch that is not merged gets a KeepRef before its delete. A scratch directory goes to the archive."
+
+[[node]]
+id = "irreversible"
+group = "release"
+kind = "function"
+name = "irreversible"
+ref = "8.7"
+uses = ["release-item", "scope-state"]
+text = "The items that stay irreversible: the removal of a worktree with changes, and the delete of a branch that is not merged with no KeepRef before it, or with no head."
+
+[[group]]
+id = "ledger"
+phase = "p9"
+module = "harness-kernel"
+file = "Ledger.scala"
+title = "The ledger: a fold of the effects of a journal"
+
+[[node]]
+id = "ledger-data"
+group = "ledger"
+kind = "data"
+name = "Ledger"
+ref = "8.7"
+spec = true
+uses = ["release-step", "schema"]
+text = "What a session read and made, with no LM: the paths that it read, the paths that it wrote or edited, the number of its commands, the last ScopeRecorded, and the steps of its release."
+
+[[node]]
+id = "ledger-state"
+group = "ledger"
+kind = "data"
+name = "LedgerState"
+ref = "8.7"
+uses = ["ledger-data", "effect-id", "open-call"]
+text = "The ledger, and the effects of the open cell, which wait for their outcome."
+
+[[node]]
+id = "ledger-fold"
+group = "ledger"
+kind = "function"
+name = "ledger"
+ref = "8.7"
+spec = true
+uses = ["fold", "logged", "ledger-state", "ledger-data"]
+text = "An effect counts at its EffectDone: a read with a value, a write or an edit with a value or Unknown, an exec or a spawn with a value or Unknown. ScopeRecorded sets the head, and Released adds its step. Each other entry changes nothing."
+
+[[group]]
+id = "controller"
+phase = "p9"
+module = "harness-host"
+file = "Controller.scala"
+title = "The controller: its id, its mode and its configuration"
+
+[[node]]
+id = "controller"
+group = "controller"
+kind = "data"
+name = "Controller"
+ops = ["task", "config", "messageSource"]
+ref = "8.7"
+spec = true
+uses = ["session-id", "mode", "access", "harness-limits", "session-config", "source", "data"]
+proof_uses = ["preamble"]
+text = "The fixed id controller, Mode.controller with no Children^, a ceiling that holds workMode, the instructions, the task with the home, the configuration with the scope Home and the memory tree, and the source of a message of a session."
+
+[[group]]
+id = "host-sessions"
+phase = "p9"
+module = "harness-host"
+file = "HostSessions.scala"
+title = "The handler of Sessions^ and what it needs of its host"
+
+[[node]]
+id = "peers"
+group = "host"
+kind = "data"
+name = "Peers"
+ref = "8.7"
+spec = true
+uses = ["catalog-row", "session-id", "session-config", "host-error", "session-handle", "command", "source",
+        "session-state", "logged", "scope"]
+text = "What the handler of Sessions needs of its host: the rows, open, openWith with Activated and the task in one commit, runAs that waits for the commit, the journal, zoomInto with no LM call, and make of a scope. Peers.none refuses each call."
+
+[[node]]
+id = "host-sessions"
+group = "host-sessions"
+kind = "data"
+name = "HostSessions"
+ops = ["list", "tell", "start", "observe", "zoom", "cardOf", "requestOf"]
+ref = "8.7"
+spec = true
+uses = ["sessions", "peers", "session-id", "session-config", "journal-trait", "probe", "budget", "runtime-context", "session-card", "session-ref", "scope", "strategy-name", "llm", "catalog-row", "effect-id", "request-id", "command", "logged", "session-state", "source"]
+proof_uses = ["controller", "owner", "session-status", "host-error"]
+text = "list gives the cards of the other rows, with the owner and the status in words (cardOf). tell sends through runAs with the request id of its effect, and refuses a session that has ended. start makes the scope and opens the session with ownedConfig and its task in one commit. An error of the host in tell and start gives its words (HostError.words). observe asks the probe with the budget of the turn. zoom reads the memory of that session."
+
+[[group]]
+id = "scopes"
+phase = "p9"
+module = "harness-host"
+file = "Scopes.scala"
+title = "The handler of the host for the folders of the scopes"
+
+[[node]]
+id = "scope-snapshot"
+group = "scopes"
+kind = "data"
+name = "ScopeSnapshot"
+ref = "8.7"
+uses = []
+text = "The git head of the folder of a scope and whether it has no change."
+
+[[node]]
+id = "scopes"
+group = "scopes"
+kind = "data"
+name = "Scopes"
+ops = []
+ref = "8.7"
+spec = true
+uses = ["scope", "scope-snapshot", "scope-state", "release-item", "release-result"]
+text = "make of a scope for start, snapshot for ScopeRecorded, stateOf for a release plan, and release of one item. It runs git outside the sandbox, so only the host calls it."
+
+[[node]]
+id = "git-scopes"
+group = "scopes"
+kind = "data"
+name = "GitScopes"
+ops = ["make", "snapshot", "stateOf", "release"]
+ref = "8.7"
+uses = ["scopes", "scope", "scope-snapshot", "scope-state", "release-item", "release-result"]
+text = "Scopes with the git of the machine: git -C with no hooks, no fsmonitor, no lock of the index for a read, only PATH, HOME and LANG, refs after --, and a time limit. A worktree comes from its base branch. Only a confirmed step forces. A step that fails gives Failed."
+
+[[group]]
+id = "probe"
+phase = "p9"
+module = "harness-host"
+file = "Probe.scala"
+title = "A probe: observe as a program call of a harness"
+
+[[node]]
+id = "probe-link"
+group = "probe"
+kind = "data"
+name = "ProbeLink"
+ref = "8.7"
+uses = ["session-id", "effect-id"]
+text = "The observe effect of the caller that a probe answers."
+
+[[node]]
+id = "probe"
+group = "probe"
+kind = "data"
+name = "Probe"
+ref = "8.7"
+uses = ["session-id", "logged", "probe-link", "budget", "runtime-context"]
+text = "The answer to a question about the journal of a session. It changes nothing in that session. Probe.none gives an error."
+
+[[node]]
+id = "harness-probe"
+group = "probe"
+kind = "data"
+name = "HarnessProbe"
+ops = ["ask", "journalText", "pathOf"]
+ref = "8.7"
+spec = true
+uses = ["probe", "secrets", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "session-id", "logged", "probe-link", "budget", "runtime-context", "mode", "access"]
+proof_uses = ["harness", "harness-env", "session-file"]
+text = "A Harness program call with the journal text and the question as input, only Llm^, and the rest of the budget of the caller. The answer is the value of submit, and the journal goes to probes/<caller>.<cell>.<n>.db."
+
+[[group]]
+id = "report-pass"
+phase = "p9"
+module = "harness-host"
+file = "ReportPass.scala"
+title = "The report pass of a host"
+
+[[node]]
+id = "host-hooks"
+group = "host-types"
+kind = "data"
+name = "HostHooks"
+ref = "8.7"
+uses = ["session-id", "command"]
+text = "The points where a law stops a host: before a report goes to its owner."
+
+[[node]]
+id = "report-pass"
+group = "report-pass"
+kind = "data"
+name = "ReportPass"
+ops = ["owed", "repairable"]
+ref = "8.7"
+spec = true
+uses = ["session-id", "session-state", "catalog-row", "logged", "command"]
+proof_uses = ["missing", "controller"]
+text = "owed gives the missing reports of each session of an owner, in the order of seq, with the session that sends each. repairable gives the owned sessions with an open turn, which the start of a host opens, so the repair commits TurnEnded(Crashed). The host runs the sends."
+
+[[group]]
+id = "desk"
+phase = "p9"
+module = "harness-cli"
+file = "Desk.scala"
+title = "What a client reaches through its host"
+
+[[node]]
+id = "desk"
+group = "desk"
+kind = "data"
+name = "Desk"
+ref = "8.7"
+uses = ["session-card", "session-id", "host-error", "session-handle", "session-outcome", "scope-state", "release-item",
+        "release-step"]
+text = "The cards, another session, the controller, the release plan with the state of the scope, and the release."
+
+[[node]]
+id = "host-desk"
+group = "desk"
+kind = "data"
+name = "HostDesk"
+ops = ["cards", "open", "controller", "planOf", "release", "reopen"]
+ref = "8.7"
+uses = ["desk", "local-host", "session-config", "session-card", "session-id", "host-error", "session-handle",
+        "session-outcome", "scope-state", "release-item", "release-step"]
+proof_uses = ["host-sessions", "controller", "state"]
+text = "The desk of a LocalHost: controller opens Controller.id with its configuration."
+
+[[node]]
+id = "card-text"
+group = "desk"
+kind = "function"
+name = "cardText"
+ref = "8.7"
+uses = ["session-card"]
+text = "One line for /sessions: the id, the status, the goal or the scope, and the number of the files that the session made."
+
+[[node]]
+id = "plan-text"
+group = "desk"
+kind = "function"
+name = "planText"
+ref = "8.7"
+uses = ["scope-state", "release-item"]
+proof_uses = ["irreversible"]
+text = "One line for each item of a plan, with the mark (irreversible) on each item of irreversible."
+
+# ── Phase 9: the laws ─────────────────────────────────────────────────────────────────────────────────────────────
+
+[[group]]
+id = "release-laws"
+phase = "p9"
+module = "harness-kernel"
+file = "ReleaseLaws.scala"
+where = "tests"
+title = "The laws of the release plans"
+
+[[node]]
+id = "law-release"
+group = "release-laws"
+kind = "law"
+name = "Release:"
+ref = "8.7"
+uses = ["release-plan", "irreversible", "decide", "needs-flush", "entry"]
+text = "A worktree with changes is never removed. A branch that is not merged gets a KeepRef of its head before its delete. Parked keeps each resource, and a folder of the user stays. Each item of a default plan is reversible. A plan names only its scope. A worktree goes before its branch. Released commits only with no open turn and before Ended."
+
+[[group]]
+id = "ledger-laws"
+phase = "p9"
+module = "harness-kernel"
+file = "LedgerLaws.scala"
+where = "tests"
+title = "The laws of the ledger"
+
+[[node]]
+id = "law-ledger"
+group = "ledger-laws"
+kind = "law"
+name = "Ledger:"
+ref = "8.7"
+uses = ["ledger-fold"]
+text = "A read adds its path once. A write or an edit with a value or Unknown adds its path. exec and spawn count. ScopeRecorded and Released change the ledger. The ledger of a prefix is a prefix, and another entry changes nothing."
+
+[[group]]
+id = "controller-laws"
+phase = "p9"
+module = "harness-host"
+file = "ControllerLaws.scala"
+where = "tests"
+title = "The laws of the controller and of the handler of Sessions"
+
+[[node]]
+id = "law-controller"
+group = "controller-laws"
+kind = "law"
+name = "Controller:"
+ref = "8.7"
+uses = ["controller", "local-host", "work-runtime", "host-sessions"]
+text = "The configuration of the controller, its task and its sources. Its API reference names Sessions and not write, edit, exec or rlm. A cell of the controller starts a session whose first entries are Activated and its task. zoomInto reads the memory of another session with no LM call."
+
+[[node]]
+id = "law-sessions"
+group = "controller-laws"
+kind = "law"
+name = "Sessions:"
+ref = "8.7"
+uses = ["host-sessions", "peers", "probe", "recorded"]
+text = "With fake peers: list gives the other cards, tell runs a Send with the request id of its effect and refuses a session that has ended, start makes the scope and opens the session once, zoom and observe give the text of the host and of the probe, and requestOf gives two ids for two effects."
+
+[[group]]
+id = "report-pass-laws"
+phase = "p9"
+module = "harness-host"
+file = "ReportPassLaws.scala"
+where = "tests"
+title = "The laws of the report pass of a host"
+
+[[node]]
+id = "law-report-pass"
+group = "report-pass-laws"
+kind = "law"
+name = "Report pass:"
+ref = "8.7"
+uses = ["report-pass", "local-host"]
+text = "After a turn of a session whose owner is open, the owner commits the report and starts a turn. A turn of the person alone gives no report. An owner that was not open, or that ended, gets the report when it opens, once. At the start of a host, an owned session with an open turn gets TurnEnded(Crashed)."
+
+[[group]]
+id = "scopes-laws"
+phase = "p9"
+module = "harness-host"
+file = "ScopesLaws.scala"
+where = "tests"
+title = "The laws of the scopes and of the release of a session"
+
+[[node]]
+id = "law-scopes"
+group = "scopes-laws"
+kind = "law"
+name = "Scopes:"
+ref = "8.7"
+uses = ["git-scopes"]
+text = "With the git of the machine: make of a worktree and of a scratch directory, snapshot of a git folder and none with no git, merged of a worktree, and the release of each item. A step that fails gives Failed."
+
+[[node]]
+id = "law-host-release"
+group = "scopes-laws"
+kind = "law"
+name = "Host release:"
+ref = "8.7"
+uses = ["local-host", "release-plan", "irreversible"]
+text = "release commits one Released for each step and then Ended, and the row holds the steps. An irreversible item runs only with a confirmation. A release during a turn runs no step."
+
+[[group]]
+id = "probe-laws"
+phase = "p9"
+module = "harness-host"
+file = "ProbeLaws.scala"
+where = "tests"
+title = "The laws of a probe"
+
+[[node]]
+id = "law-probe"
+group = "probe-laws"
+kind = "law"
+name = "Probe:"
+ref = "8.7"
+uses = ["harness-probe"]
+text = "journalText has one line for each entry. pathOf names the caller and the effect. A probe has only Llm^, answers with submit, writes its journal and spends from the budget of the caller. A spent budget makes no call."
+
+[[group]]
+id = "desk-laws"
+phase = "p9"
+module = "harness-cli"
+file = "DeskLaws.scala"
+where = "tests"
+title = "The laws of a client with a desk"
+
+[[node]]
+id = "law-desk"
+group = "desk-laws"
+kind = "law"
+name = "Desk:"
+ref = "8.7"
+uses = ["desk", "card-text", "plan-text", "cli", "parse-line", "cli-args"]
+text = "The lines /close OUTCOME, /sessions, /open ID and /controller, and the flag --controller. With no desk, a desk line prints that the client has one session. With a desk, the client switches between the sessions, and /close shows the plan and asks for each irreversible item."
+
+[[node]]
+id = "open-refusal"
+group = "desk"
+kind = "function"
+name = "openRefusal"
+ref = "8.7"
+uses = ["catalog-row"]
+text = "--session refuses a session whose owner is a session, because its reports reach only the host of its owner."
+
+[[group]]
+id = "control-laws"
+phase = "p9"
+module = "harness-kernel"
+file = "ControlLaws.scala"
+where = "tests"
+title = "The kernel laws of the controller: Begin, the release, the unattended turns and the ids"
+
+[[node]]
+id = "law-begin"
+group = "control-laws"
+kind = "law"
+name = "Begin:"
+ref = "8.7"
+uses = ["decide", "source-of", "reports"]
+text = "On a journal with no entry, Begin gives Activated, the task and TurnStarted, and NotNew on each other journal. Activated gets the source Harness, and the task the source of the sender, so reports sees a message of the owner."
+
+[[node]]
+id = "law-releasing"
+group = "control-laws"
+kind = "law"
+name = "Releasing:"
+ref = "8.7"
+uses = ["decide", "evolve", "needs-flush"]
+text = "Releasing commits only with no open turn, before Ended and once, and flushes. After it, Send and Grant give Rejection.Releasing, Released, StopJobs and Close stay valid, a Released needs it, and Activate starts no turn."
+
+[[node]]
+id = "law-unattended"
+group = "control-laws"
+kind = "law"
+name = "Unattended:"
+ref = "8.7"
+uses = ["decide", "evolve"]
+text = "A turn that no person starts counts, and a message of the person or a grant sets the count to 0. At the limit, a message of another session waits, a message of the person starts the turn, and Activate starts none."
+
+[[node]]
+id = "law-id"
+group = "control-laws"
+kind = "law"
+name = "Id:"
+ref = "8.7"
+uses = ["session-id"]
+text = "valid takes a letter or a digit, then letters, digits, a dot, an underscore or a dash, at most 128 characters, and refuses a path, a space, two dots and each other text."
+
+[[node]]
+id = "law-rejection-words"
+group = "control-laws"
+kind = "law"
+name = "Rejection:"
+ref = "4.5"
+uses = ["rejection"]
+text = "words gives each refusal in words, with no Scala value. OutOfOrder gives the name of the case of its entry, and not the whole entry."

@@ -64,8 +64,8 @@ new = "grants = s.grants"
 name = "Mutant: a grant stays after Ended"
 [[mutant.edit]]
 file = "SessionState.scala"
-old = "base.copy(closed = true, grants = Set.empty, pending = Set.empty, jobs = stopJobs(s, JobSelector.All))"
-new = "base.copy(closed = true, pending = Set.empty, jobs = stopJobs(s, JobSelector.All))"
+old = "        closed = true,\n        grants = Set.empty,\n"
+new = "        closed = true,\n"
 
 [[mutant]]
 name = "Mutant: an Abort stops jobs"
@@ -78,8 +78,8 @@ new = "case Entry.StopRequested(_)                 => base.copy(stopping = true,
 name = "Mutant: the jobs stay after Ended"
 [[mutant.edit]]
 file = "SessionState.scala"
-old = "base.copy(closed = true, grants = Set.empty, pending = Set.empty, jobs = stopJobs(s, JobSelector.All))"
-new = "base.copy(closed = true, grants = Set.empty, pending = Set.empty, jobs = s.jobs)"
+old = "jobs = stopJobs(s, JobSelector.All),"
+new = "jobs = s.jobs,"
 
 [[mutant]]
 name = "Mutant: OfLastTurn reaches other turns"
@@ -136,8 +136,8 @@ new = "case EffectResult.NeedsApproval(rule) if !s.grants.exists(_.rule.covers(r
 name = "Mutant: a pending call stays after a new turn"
 [[mutant.edit]]
 file = "SessionState.scala"
-old = "base.copy(position = Position.BeforeStep(0), lastTurn = logged.seq, pending = Set.empty)"
-new = "base.copy(position = Position.BeforeStep(0), lastTurn = logged.seq)"
+old = "        lastTurn = logged.seq,\n        pending = Set.empty,\n"
+new = "        lastTurn = logged.seq,\n"
 
 [[mutant]]
 name = "Mutant: a repeated Grant commits again"
@@ -202,15 +202,15 @@ new = "!s.closed && s.position == Position.NoTurn && s.waiting == 0"
 name = "Mutant: the state loses the values of an input"
 [[mutant.edit]]
 file = "SessionState.scala"
-old = "inputs = s.inputs ++ values)"
-new = "inputs = s.inputs ++ values.empty)"
+old = "inputs = s.inputs ++ values,"
+new = "inputs = s.inputs ++ values.empty,"
 
 [[mutant]]
 name = "Mutant: the values of an input go to the store"
 [[mutant.edit]]
 file = "SessionState.scala"
-old = "inputs = s.inputs ++ values)"
-new = "inputs = s.inputs ++ values, store = s.store ++ values)"
+old = "inputs = s.inputs ++ values,"
+new = "inputs = s.inputs ++ values, store = s.store ++ values,"
 
 [[mutant]]
 name = "Mutant: a fork loses the values of the inputs"

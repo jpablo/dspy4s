@@ -44,6 +44,25 @@ enum CellOutcome derives Schema, CanEqual:
   case TimedOut(afterMillis: Long)
   case Submitted(value: Json)
 
+  /** The outcome in words for a person, with no Scala value. The terminal shows these words on the first line of the
+    * output of a cell:
+    *
+    *   - `Ok`: `ok`.
+    *   - `CompileError`: `the cell did not compile`. The output of the cell holds the errors, so the words do not
+    *     repeat them.
+    *   - `Failed`: `the cell failed: ` and the exception.
+    *   - `TimedOut`: `the cell stopped: it did not end in N s`, with N the whole seconds.
+    *   - `Submitted`: `the cell submitted: ` and the value. A text value has no quotes, and another value is JSON.
+    */
+  def words: String =
+    this match
+      case Ok                            => "ok"
+      case CompileError(_)               => "the cell did not compile"
+      case Failed(exception)             => s"the cell failed: $exception"
+      case TimedOut(afterMillis)         => s"the cell stopped: it did not end in ${afterMillis / 1000} s"
+      case Submitted(Json.String(value)) => s"the cell submitted: $value"
+      case Submitted(value)              => s"the cell submitted: ${value.print}"
+
 /** The outcome of a turn (4.1, 4.3). */
 enum TurnOutcome derives Schema, CanEqual:
   case Replied(text: String)
@@ -53,11 +72,46 @@ enum TurnOutcome derives Schema, CanEqual:
   case Crashed
   case Failed(error: String)
 
+  /** The text of the report of a turn with this outcome (8.6). The owner reads it with a model, and the terminal shows
+    * it, so it gives the outcome in words and not as a Scala value:
+    *
+    *   - `Submitted`: `The turn ended with submit: ` and the value. A text value has no quotes, and another value is
+    *     JSON.
+    *   - `Replied`: `The turn ended with a reply: ` and the reply.
+    *   - `Exhausted`, `Aborted` and `Crashed`: one sentence that tells what ended the turn.
+    *   - `Failed`: `The turn failed: ` and the error.
+    */
+  def report: String =
+    this match
+      case Submitted(Json.String(value)) => s"The turn ended with submit: $value"
+      case Submitted(value)              => s"The turn ended with submit: ${value.print}"
+      case Replied(reply)                => s"The turn ended with a reply: $reply"
+      case Exhausted                     => "The turn ended: it used all its steps and gave no result."
+      case Aborted                       => "The turn ended: a stop ended it."
+      case Crashed                       => "The turn crashed: its host stopped during the turn."
+      case Failed(message)               => s"The turn failed: $message"
+
 /** The outcome of a session (8.4). The cases come from the sketch of section 12. */
 enum SessionOutcome derives Schema, CanEqual:
   case Merged, Parked
   case Abandoned(reason: String)
   case Replaced(by: SessionId)
+
+  /** The outcome in words, with no reason, for example `abandoned` or `replaced by s2`. The `Ended` entry holds the
+    * reason, so a text that adds the reason shows it one time. The report to the owner and the terminal use these
+    * words.
+    */
+  def words: String =
+    this match
+      case Merged       => "merged"
+      case Parked       => "parked"
+      case Abandoned(_) => "abandoned"
+      case Replaced(by) => s"replaced by ${by.value}"
+
+  /** The text of the end of a session with this outcome and `reason` (8.6): the report to the owner and the line of the
+    * terminal. It gives the reason one time.
+    */
+  def report(reason: String): String = s"The session ended: $words, $reason."
 
 /** Which jobs a stop covers (10.3). */
 enum JobSelector derives Schema, CanEqual:
@@ -74,7 +128,11 @@ enum JobSelector derives Schema, CanEqual:
   * Step ::= StepStarted [ Acted [ Cell ] ]
   * Cell ::= ( EffectStarted | EffectDone )* Observed
   * }}}
-  * `Input`, `StopRequested`, `JobsStopRequested`, `Granted` and `ScopeRecorded` can occur at any place.
+  * `Input`, `StopRequested`, `JobsStopRequested`, `Granted` and `ScopeRecorded` can occur at any place. `Releasing`
+  * occurs only with no open turn, and each `Released` comes after it (8.7):
+  * {{{
+  * Release ::= Releasing JobsStopRequested? Released* Ended
+  * }}}
   */
 enum Entry derives Schema, CanEqual:
 
@@ -112,6 +170,17 @@ enum Entry derives Schema, CanEqual:
   /** The git head of the scope, at the end of each turn. */
   case ScopeRecorded(head: String, clean: Boolean)
 
+  /** The start of the release of the session with its plan (CODE_HARNESS.md, 7.9; 8.7). After it the session takes no
+    * message and no grant, and no turn starts, so a turn never runs in a folder that the release removes. After a
+    * crash, the host goes on from the first item with no `Released`.
+    */
+  case Releasing(plan: Vector[ReleaseItem])
+
+  /** One step of the release plan of the session, after its `Releasing` and before its `Ended` (CODE_HARNESS.md, 7.9;
+    * 8.7).
+    */
+  case Released(step: ReleaseStep)
+
   case TurnEnded(outcome: TurnOutcome)
 
   case Ended(outcome: SessionOutcome, reason: String)
@@ -135,10 +204,13 @@ val readOnlyOps: Set[String] = Set(
 )
 
 /** True for an entry that reaches the disk before `commit` returns (4.1): an `Input`, because a sender has an answer,
-  * an `Activated`, because a parent has a child, and an `EffectStarted` of an operation that is not read-only.
+  * an `Activated`, because a parent has a child, an `EffectStarted` of an operation that is not read-only, a
+  * `Releasing`, because the plan must survive a crash in it, and a `Released`, because its step changed the scope
+  * (8.7).
   */
 def needsFlush(entry: Entry): Boolean =
   entry match
     case Entry.EffectStarted(_, op, _)                => !readOnlyOps(op)
     case Entry.Input(_, _, _) | Entry.Activated(_, _) => true
+    case Entry.Releasing(_) | Entry.Released(_)       => true
     case _                                            => false

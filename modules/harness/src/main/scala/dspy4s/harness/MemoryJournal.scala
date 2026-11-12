@@ -19,7 +19,7 @@ final class MemoryJournal(clock: () => Long, secrets: Secrets) extends Journal:
 
   def run(command: Command, sender: Source): Either[Rejection, SessionState] =
     synchronized {
-      decide(command, current).map { added =>
+      decide(command, current, sender).map { added =>
         added.foreach { entry =>
           val meta   = Meta(clock(), sourceOf(command, sender, entry), Taint.Trusted, required = true)
           val logged = Logged(current.nextSeq, meta, secrets.mask(entry))

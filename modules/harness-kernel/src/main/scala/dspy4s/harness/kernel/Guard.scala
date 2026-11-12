@@ -114,3 +114,12 @@ object Guard:
   */
 enum GrantLifetime derives Schema, CanEqual:
   case Once, Turn, Session
+
+  /** The lifetime in words for a person, for example `for this turn`. The line of a grant in the terminal gives these
+    * words after `Allowed`. A person types other words after `/allow`: `once`, `turn` or `session`.
+    */
+  def words: String =
+    this match
+      case GrantLifetime.Once    => "once"
+      case GrantLifetime.Turn    => "for this turn"
+      case GrantLifetime.Session => "for this session"

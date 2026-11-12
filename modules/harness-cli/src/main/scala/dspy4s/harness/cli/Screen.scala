@@ -168,7 +168,10 @@ object Screen:
       case Entry.Input(_, _, _) if logged.meta.source == Source.User =>
         val notice = Row.of(s"  ${g.arrow} The next step reads your message.", Tone.Dim)
         (screen, if screen.turn.isDefined then Vector(notice) else Vector.empty)
-      case Entry.Input(_, text, _)                => (screen, marked(g.reply, Tone.Accent, text))
+      case Entry.Input(_, text, _) =>
+        // A message of the harness, as at the end of a job, speaks for itself. Another sender shows its name.
+        val from = if logged.meta.source == Source.Harness then "" else s"[${sourceWords(logged.meta.source)}] "
+        (screen, marked(g.reply, Tone.Accent, from + text))
       case Entry.JobsStopRequested(which, reason) => (
           screen,
           Vector(Row(Vector(
@@ -180,12 +183,11 @@ object Screen:
           screen,
           Vector(Row(Vector(
             Span(s"  ${g.ok} ", Tone.Good),
-            Span(printable(s"Allowed ($lifetime): ${callText(rule)}."), Tone.Plain)
+            Span(printable(s"Allowed ${lifetime.words}: ${callText(rule)}."), Tone.Plain)
           )))
         )
-      case Entry.Ended(outcome, reason) =>
-        (screen, marked(g.reply, Tone.Accent, s"The session ended: $outcome, $reason."))
-      case _ => (screen, Vector.empty)
+      case Entry.Ended(outcome, reason) => (screen, marked(g.reply, Tone.Accent, outcome.report(reason)))
+      case _                            => (screen, Vector.empty)
 
   /** The live block at `nowMillis`, for the session in `state`, with the activity of the host. */
   def live(screen: Screen, state: SessionState, nowMillis: Long, look: Look, activity: Option[Activity]): Live =
@@ -555,11 +557,11 @@ object Screen:
 
   private def folderOf(state: SessionState): String =
     state.config.scope match
-      case Scope.Home(path)        => path
-      case Scope.Directory(path)   => path
-      case Scope.Worktree(path, _) => path
-      case Scope.Scratch(path)     => path
-      case Scope.Fork(path, _)     => path
+      case Scope.Home(path)              => path
+      case Scope.Directory(path)         => path
+      case Scope.Worktree(path, _, _, _) => path
+      case Scope.Scratch(path)           => path
+      case Scope.Fork(path, _)           => path
 
   private def folderName(state: SessionState): String =
     val folder = folderOf(state)

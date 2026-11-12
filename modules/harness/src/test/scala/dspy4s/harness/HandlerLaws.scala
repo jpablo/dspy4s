@@ -1,6 +1,6 @@
 package dspy4s.harness
 
-import dspy4s.harness.guest.Data
+import dspy4s.harness.guest.{Data, Llm, Scope, SessionCard, SessionRef, Sessions, StrategyName}
 import dspy4s.harness.kernel.*
 import dspy4s.harness.repl.Bindings
 import dspy4s.harness.sandbox.{HostList, Profiles}
@@ -145,6 +145,58 @@ class HandlerLaws extends FunSuite:
         assertEquals(id, EffectId(cell, 0))
         assert(message.contains("no such file"), message)
       case other => fail(s"the last entry is $other")
+  }
+
+  test("Recorded: each call of Sessions commits its op and its arguments, and the value of its handler (8.7)") {
+    val j        = journal()
+    val cell     = inCell(j)
+    val recorder = Recorder(j)
+    recorder.startCell(cell)
+    val card = SessionCard(
+      SessionRef("s2"),
+      "fix",
+      Some(Scope.Directory("/w")),
+      "User",
+      None,
+      "Idle",
+      4L,
+      0,
+      Vector.empty,
+      0,
+      None,
+      None
+    )
+    val inner = new Sessions:
+      def list(): Vector[SessionCard]                                                       = Vector(card)
+      def tell(session   : SessionRef, message : String): Unit                              = ()
+      def start(goal     : String, scope       : Scope, strategy: StrategyName): SessionRef = SessionRef("s3")
+      def observe(session: SessionRef, question: String)(using Llm): String                 = "an answer"
+      def zoom(session   : SessionRef, ref     : String): String                            = "a line"
+    val llm = new Llm:
+      def query(prompt        : String): String                 = ""
+      def queryBatched(prompts: Vector[String]): Vector[String] = prompts
+    val bound = recorded(Bindings(turn = JournalTurn(j, () => 5L), sessions = Some(inner)), recorder)
+    bound.sessions.foreach { s =>
+      assertEquals(s.list(), Vector(card))
+      s.tell(SessionRef("s2"), "go on")
+      assertEquals(s.start("fix", Scope.Directory("/w"), StrategyName.Window), SessionRef("s3"))
+      assertEquals(s.observe(SessionRef("s2"), "why?")(using llm), "an answer")
+      assertEquals(s.zoom(SessionRef("s2"), "1.0"), "a line")
+    }
+    val started = effects(j).collect { case Entry.EffectStarted(_, op, args) => (op, args) }
+    assertEquals(started.map(_._1), Vector("sessions", "tell", "start", "observe", "zoom"))
+    val zoomArgs = started.last._2 match
+      case Json.Object(fields) => fields.map(_._1).toSet
+      case other               => fail(s"the arguments of zoom are $other")
+    assertEquals(zoomArgs, Set("session", "ref"))
+    // The arguments of start hold the kind of its scope, so the guard of the controller can ask for a Directory.
+    started(2)._2 match
+      case Json.Object(fields) => assert(fields.contains(("kind", Json.String("Directory"))), fields.toString)
+      case other               => fail(s"the arguments of start are $other")
+    assert(needsFlush(Entry.EffectStarted(EffectId(cell, 1), "tell", Json.Null)))
+    assert(needsFlush(Entry.EffectStarted(EffectId(cell, 2), "start", Json.Null)))
+    val done = effects(j).collect { case Entry.EffectDone(_, EffectResult.Value(json, _)) => json }
+    assertEquals(done(2), summon[Data[SessionRef]].encode(SessionRef("s3")))
   }
 
   test("Recorded: each guest API call of the bindings goes through the recorder, and input does not") {

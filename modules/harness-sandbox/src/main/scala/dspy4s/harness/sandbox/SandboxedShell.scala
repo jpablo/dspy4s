@@ -239,11 +239,11 @@ object SandboxedShell:
   /** The folder of a scope. */
   def pathOf(scope: Scope): String =
     scope match
-      case Scope.Home(path)        => path
-      case Scope.Directory(path)   => path
-      case Scope.Worktree(path, _) => path
-      case Scope.Scratch(path)     => path
-      case Scope.Fork(path, _)     => path
+      case Scope.Home(path)              => path
+      case Scope.Directory(path)         => path
+      case Scope.Worktree(path, _, _, _) => path
+      case Scope.Scratch(path)           => path
+      case Scope.Fork(path, _)           => path
 
   /** Waits at most `millis` for the end of `process`. True when an interrupt came during the wait: the wait then ends,
     * and the caller sets the interrupt again after its stop.

@@ -75,6 +75,22 @@ class SecretLaws extends ScalaCheckSuite:
     assertEquals(known.mask(Entry.TurnEnded(TurnOutcome.Replied(v))), Entry.TurnEnded(TurnOutcome.Replied(m)))
   }
 
+  test("Secret: the mask reaches each text of a Released step: the paths, the names, the commit and the error (8.7)") {
+    val v                  = "fake-secret-value-3"
+    val known              = Secrets(Map("FAKE_KEY" -> v))
+    val m                  = "«secret:FAKE_KEY»"
+    def step(text: String) =
+      Vector(
+        ReleaseStep(ReleaseItem.RemoveWorktree(s"/r/$text", s"/w/$text"), ReleaseResult.Failed(text)),
+        ReleaseStep(ReleaseItem.DeleteBranch(s"/r/$text", text, text), ReleaseResult.Skipped(text)),
+        ReleaseStep(ReleaseItem.KeepRef(s"/r/$text", text, text, text), ReleaseResult.Done),
+        ReleaseStep(ReleaseItem.ArchiveDirectory(s"/w/$text", s"/a/$text"), ReleaseResult.Done),
+        ReleaseStep(ReleaseItem.Keep(text, text), ReleaseResult.Done)
+      )
+    assertEquals(step(v).map(s => known.mask(Entry.Released(s))), step(m).map(Entry.Released(_)))
+    assertEquals(known.mask(Entry.Releasing(step(v).map(_.item))), Entry.Releasing(step(m).map(_.item)))
+  }
+
   test("Secret: known takes the secret-like variables and the headers, and not the others or the short values") {
     val env = Map(
       "FAKE_API_KEY" -> "fake-key-12345678",

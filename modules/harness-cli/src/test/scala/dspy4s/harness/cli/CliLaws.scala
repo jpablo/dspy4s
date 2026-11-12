@@ -139,7 +139,8 @@ class CliLaws extends munit.FunSuite:
     handle.endTurn()
     loop.join(10_000)
     assert(!loop.isAlive, "the loop did not end after the last turn")
-    assert(out.toString(UTF_8).contains("refused"), out.toString(UTF_8))
+    assert(out.toString(UTF_8).contains("The session refused the command: a turn is open"), out.toString(UTF_8))
+    assert(!out.toString(UTF_8).contains("Rejected("), out.toString(UTF_8))
   }
 
   test("CLI: parseLine reads the commands, and a text that does not start with / is a message") {
@@ -148,7 +149,7 @@ class CliLaws extends munit.FunSuite:
     assertEquals(parseLine("/allow once"), Line.Allow(GrantLifetime.Once, None))
     assertEquals(parseLine("/allow turn"), Line.Allow(GrantLifetime.Turn, None))
     assertEquals(parseLine("/allow session"), Line.Allow(GrantLifetime.Session, None))
-    assertEquals(parseLine("/close"), Line.Close)
+    assertEquals(parseLine("/close"), Line.Close(SessionOutcome.Parked, "the person closed the session"))
     assertEquals(parseLine("/quit"), Line.Quit)
     assertEquals(parseLine("/fake"), Line.Unknown("/fake"))
     assertEquals(parseLine("fix the build"), Line.Message("fix the build"))
@@ -177,9 +178,9 @@ class CliLaws extends munit.FunSuite:
       commandsFor(Line.Message("hello"), SessionState.initial, request),
       Right(Vector(Command.Send(request, "hello", Map.empty)))
     )
-    commandsFor(Line.Close, SessionState.initial, request) match
-      case Right(Vector(Command.Close(SessionOutcome.Parked, _))) => ()
-      case other                                                  => fail(other.toString)
+    commandsFor(Line.Close(SessionOutcome.Parked, "done"), SessionState.initial, request) match
+      case Right(Vector(Command.Close(SessionOutcome.Parked, "done"))) => ()
+      case other                                                       => fail(other.toString)
     assertEquals(commandsFor(Line.Quit, SessionState.initial, request), Right(Vector.empty))
     assert(commandsFor(Line.Unknown("/fake"), SessionState.initial, request).left.exists(_.contains("/help")))
   }
@@ -226,7 +227,7 @@ class CliLaws extends munit.FunSuite:
     handle.ran.asScala.toVector match
       case Vector(Command.Close(SessionOutcome.Parked, _)) => ()
       case other                                           => fail(s"ran: $other")
-    assert(out.toString(UTF_8).contains("TurnOpen"), out.toString(UTF_8))
+    assert(out.toString(UTF_8).contains("The session refused the command: a turn is open"), out.toString(UTF_8))
     assert(out.toString(UTF_8).contains("FAKE-REPLY"), out.toString(UTF_8))
   }
 
@@ -430,7 +431,7 @@ class CliLaws extends munit.FunSuite:
   test("CLI: a rich console gets the rows of the screen, the live block, the footer and the action of Ctrl-O") {
     val console = RecordingConsole()
     try
-      assert(Cli.loop(EntriesHandle(screenTurn), console, script = false, home = "/home/a"))
+      assert(Cli.loop(EntriesHandle(screenTurn), console, script = false, desk = None, home = "/home/a"))
       val rows = console.rows.asScala.toVector.map(_.plain)
       assert(rows.contains("  FAKE-TEXT"), rows.mkString("\n"))
       assert(rows.contains("  ▸ Ran a cell · 1 line of output · 0.5 s  #3"), rows.mkString("\n"))

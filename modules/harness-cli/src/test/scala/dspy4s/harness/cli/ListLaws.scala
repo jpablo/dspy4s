@@ -21,6 +21,25 @@ class ListLaws extends munit.FunSuite:
   private def row(n: Int, lastAt: Long, status: SessionStatus, first: String): CatalogRow =
     CatalogRow(SessionId(s"fake-session-$n"), Owner.User, None, status, 3L, s"/fake/work-$n", lastAt, first)
 
+  test("List: the list and the card of the controller give the same status words") {
+    val words = Vector(
+      SessionStatus.Idle                                    -> "idle",
+      SessionStatus.InTurn                                  -> "in a turn",
+      SessionStatus.Stopping                                -> "stopping",
+      SessionStatus.Releasing                               -> "releasing",
+      SessionStatus.Ended(SessionOutcome.Merged)            -> "ended (merged)",
+      SessionStatus.Ended(SessionOutcome.Abandoned("FAKE")) -> "ended (abandoned)"
+    )
+    words.foreach { (status, word) =>
+      val one = row(1, 1000L, status, "")
+      assertEquals(dspy4s.harness.host.HostSessions.cardOf(one).status, word)
+      assert(
+        sessionsText(Vector(one), ZoneOffset.UTC).contains(s"  $word  "),
+        sessionsText(Vector(one), ZoneOffset.UTC)
+      )
+    }
+  }
+
   private def journal(root: Path, session: SessionId, first: String): Unit =
     val file = SessionFile.open(SessionFile.pathOf(root, session), session).fold(e => fail(e), identity)
     val log  =

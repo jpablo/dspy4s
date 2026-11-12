@@ -169,6 +169,53 @@ class ViewLaws extends munit.FunSuite:
     assert(commandsFor(Line.Unknown("/fake"), jobs, request).left.exists(_.contains("/help")))
   }
 
+  test("CLI: the end of a turn has the text of the report of the kernel, and a reply shows only in its step") {
+    val outcomes = Vector(
+      TurnOutcome.Submitted(Json.String("42 lines")),
+      TurnOutcome.Submitted(Json.Object(("lines", Json.Number(42)))),
+      TurnOutcome.Exhausted,
+      TurnOutcome.Aborted,
+      TurnOutcome.Crashed,
+      TurnOutcome.Failed("no model")
+    )
+    outcomes.foreach { outcome =>
+      val log    = Support.logOf(1000L, Entry.Input(RequestId("m1"), "work", Map.empty), Entry.StepStarted(0))
+      val owned  = log.head.copy(meta = log.head.meta.copy(source = Source.Controller)) +: log.tail
+      val ended  = Logged(2L, log.head.meta, Entry.TurnEnded(outcome))
+      val report = reports(SessionId("s1"), Source.Controller, owned :+ ended).lastOption.map(_.text)
+      assert(report.nonEmpty, outcome.toString)
+      assertEquals(entryText(ended), report, outcome.toString)
+    }
+    assertEquals(entryText(Support.logOf(1000L, Entry.TurnEnded(TurnOutcome.Replied("done"))).head), None)
+  }
+
+  test("CLI: a grant gives its lifetime in words, and the outcome of a cell is words with no Scala value") {
+    val rule                                     = GuardRule("exec", ArgMatch.AnyArgs)
+    def granted(lifetime: GrantLifetime): String =
+      entryText(Support.logOf(1000L, Entry.Granted(RequestId("g1"), rule, lifetime)).head).getOrElse(fail("no text"))
+    assert(granted(GrantLifetime.Once).startsWith("Allowed once: "), granted(GrantLifetime.Once))
+    assert(granted(GrantLifetime.Turn).startsWith("Allowed for this turn: "), granted(GrantLifetime.Turn))
+    assert(granted(GrantLifetime.Session).startsWith("Allowed for this session: "), granted(GrantLifetime.Session))
+    // The first line of an observation, then the output of the cell.
+    def observed(outcome: CellOutcome, output: String = "FAKE-OUTPUT"): Vector[String] =
+      entryText(Support.logOf(1000L, Entry.Observed(output, outcome, Map.empty)).head)
+        .getOrElse(fail("no text")).linesIterator.toVector
+    assertEquals(observed(CellOutcome.Ok), Vector("> ok", "FAKE-OUTPUT"))
+    // The output of a cell that did not compile holds the errors, so the first line does not repeat them.
+    assertEquals(
+      observed(CellOutcome.CompileError(Vector("-- [E172] Type Error: FAKE")), "-- [E172] Type Error: FAKE"),
+      Vector("> the cell did not compile", "-- [E172] Type Error: FAKE")
+    )
+    assertEquals(
+      observed(CellOutcome.Failed("java.lang.RuntimeException: FAKE")).head,
+      "> the cell failed: java.lang.RuntimeException: FAKE"
+    )
+    assertEquals(observed(CellOutcome.TimedOut(30_000L)).head, "> the cell stopped: it did not end in 30 s")
+    assertEquals(observed(CellOutcome.Submitted(Json.String("42 lines"))).head, "> the cell submitted: 42 lines")
+    val record = observed(CellOutcome.Submitted(Json.Object(("lines", Json.Number(42))))).head
+    assert(record.startsWith("> the cell submitted: {") && record.contains("lines"), record)
+  }
+
   test("CLI: each command of the help parses to a command of the client") {
     commandHelp.foreach { (syntax, _) =>
       val sample = syntax.replace("[N] [once|turn|session]", "57 turn").replace("ID", "2.1")

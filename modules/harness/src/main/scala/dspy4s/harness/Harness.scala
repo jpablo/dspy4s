@@ -267,7 +267,9 @@ final case class Harness[I, O](
         finisher(finish)
     }
 
-  private def rejected(rejection: Rejection): DspyError = RuntimeError("harness", s"the journal refused: $rejection")
+  /** The error of a command that the journal refused, with the refusal in words (`Rejection.words`). */
+  private def rejected(rejection: Rejection): DspyError =
+    RuntimeError("harness", s"the journal refused: ${rejection.words}")
 
 object Harness extends HarnessGivens:
 
