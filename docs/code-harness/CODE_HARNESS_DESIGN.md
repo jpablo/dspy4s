@@ -1960,7 +1960,8 @@ These points are proposals for the review:
   stream. The mask of 5.6 covers each text. `DSPY_EXCHANGES=off` turns the file off.
 - `dspy4s-harness --inspect` serves the inspector of a root on 127.0.0.1:7411 ([OBSERVABILITY.md](OBSERVABILITY.md),
   5). It only reads: a list of the sessions, a session as a tree with each exchange after its entry, three views of
-  each entry (card, Scala and JSON), the raw rows, and the follow of a session that runs. A read-only connection to a
+  each entry (card, Scala and JSON), the raw rows, and the follow of a session that runs. The page of one exchange has
+  a chat view, the exact request and reply, and a diff against the earlier request of the same predictor. A read-only connection to a
   closed SQLite file with WAL made a `-wal` and a `-shm` file that stayed, so `SessionFile.readOnly` now opens a file
   with no `-wal` file with `immutable=1`.
 - Until a real configuration file exists, the CLI reads its variables also from `<home>/.dspy4s/harness/.env`

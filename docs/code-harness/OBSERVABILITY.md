@@ -1,6 +1,6 @@
 # The inspector and the exchange files: a proposal
 
-Status: the review took the proposal on 2026-11-12 (9.2), and O1 to O3 are built. It covers two needs. A person
+Status: the review took the proposal on 2026-11-12 (9.2), and O1 to O4 are built. It covers two needs. A person
 must see the journal of a session. A person must also see each HTTP request that the harness sends to the model
 endpoint, with its reply. Each of the two must have raw views and a formatted view.
 
@@ -242,7 +242,7 @@ token and a prompt of 20 to 80 KB.
     (card, Scala or JSON), the follow, the filters, and the raw paths. The filters of the kinds of entries and of the
     predictors are folded, so the bar stays short in a small window. Each entry also has its own switch.
 - **`/p/{name}`: the journal of a probe,** as a tree with no exchanges. Its exchanges are in the file of its caller.
-- **`/s/{id}/x/{xid}`: one exchange** with the four views of 5.4 (O4).
+- **`/s/{id}/x/{xid}`: one exchange** with the four views of 5.4.
 - **A session that runs.** Each second, the page asks for `/s/{id}/after/{seq}?size=N`. The fragment has each entry
   with a greater `seq` and the status of the session. When the exchange file does not have the size `N`, it also has
   each exchange row again. The page adds the entries, places the exchanges after their entries again, updates the
@@ -269,17 +269,26 @@ token and a prompt of 20 to 80 KB.
 
 ### 5.4 The views of an exchange
 
-- **Chat.** The messages of the request with their roles, the tools, and the options (`model`, `temperature`,
-  `max_tokens`, `response_format` and the others). Then the reply: the text, the reasoning folded, the tool calls, the
-  finish reason and the usage. For a stream, the view reads the lines with the parser of the lm module
-  (`OpenAiStreamChunk` and `StreamAccumulator`). So the view and the model read a stream the same way.
-- **Request.** The URL, the masked headers, and the exact body with indents. A button copies the exact text.
-- **Reply.** The exact body, or the raw lines of the stream with their numbers.
-- **Diff.** The text of this request against the text of the last exchange of the same predictor in the same session.
-  The text of a request has a line with the role of each message, then the lines of its content.
-  - The view shows each changed part with three lines around it.
+The page `/s/{id}/x/{xid}` has a bar with the facts of the exchange, links to the exchange before and after it, and
+the raw paths. Four buttons select its view. A row of the tree links to the page.
+
+- **Chat.** The options of the request (`model`, `temperature`, `max_tokens`, `stream_options` and the others), the
+  tools (folded), and the messages with their roles. A system message is folded, because the instructions of the policy
+  are long. Then the reply: the text, the reasoning (folded), the tool calls, the finish reason and the usage.
+  - `Chat.read` sends the request again through `OpenAiLanguageModel` on a transport that gives the recorded status,
+    headers, and body or lines. So the view and the model read a reply on one path: the same parser of the stream, the
+    same assembly of the chunks and of the tool calls, and the same usage. The view copies no parser.
+- **Request.** The URL, the masked headers, the size, and the body with indents. A button copies the exact body.
+- **Reply.** The status, the end, the error and the headers, then the raw lines of a stream with their numbers, or the
+  body of a plain reply with indents. A button copies the exact reply.
+- **Diff.** The text of this request against the text of the last earlier exchange of the same predictor in the same
+  session, or of the exchange that `?against={xid}` names. A list selects another exchange. The text of a request has
+  a line with the role of each message, then the lines of its content and of its tool calls.
+  - The view gives the count of the added and the removed lines, and each changed part with three lines around it.
   - Each step sends the whole prompt again, so this view shows what the step added.
-  - A person can also select another exchange for the diff.
+  - `LineDiff` keeps the common start and the common end of the two texts, and it takes the middle from the table of
+    the longest common subsequence. A middle whose table has more than 4,000,000 cells is one removal and one addition,
+    so a diff never needs much memory.
 
 ### 5.5 The raw paths
 
@@ -338,7 +347,13 @@ The inspector:
   sessions comes from the catalog, and from the journals with no catalog. The raw paths give the rows, the exchange
   file and the bodies of an exchange, and a path that leaves the root gets 404.
 - **L16. The diff.** The diff of `a` and `b`, applied to `a`, gives `b`. The diff of `a` with `a` has no change. The
-  kept lines occur in `a` and in `b` in the same order.
+  kept lines occur in `a` and in `b` in the same order, and they are as many as the longest common subsequence. Each
+  change is in one part, with at most three kept lines around it, and the line numbers of a part point at its lines.
+  Two texts past the limit of the table still give a diff that gives `b`.
+- **The views of an exchange.** The chat view reads a stream as the model does (the text, the reasoning, the tool
+  calls, the finish reason and the usage), and a plain reply too. The page has its four views, the exact body and the
+  numbered lines of the reply. The diff is against the last earlier exchange of the predictor, or the one of
+  `against`.
 
 ## 7. The tools outside dspy4s
 
