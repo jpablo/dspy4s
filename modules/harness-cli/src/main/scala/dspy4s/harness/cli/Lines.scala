@@ -31,9 +31,13 @@ enum Line derives CanEqual:
   /** `/status`: the folder, where the turn stands, the pending calls with their numbers, and the jobs. */
   case Status
 
-  /** `/reasoning off`, `/reasoning short` or `/reasoning full`: how much of the reasoning of a step the client shows.
+  /** `/reasoning off`, `/reasoning line`, `/reasoning short` or `/reasoning full`: how much of the reasoning of a step
+    * the client shows.
     */
   case Reasoning(view: ReasoningView)
+
+  /** `/show ID`: a cell (`12`) or a call (`12.0`) of the session in full, for the line editor (CLI_SCREEN.md, 3). */
+  case Show(id: String)
 
   /** `/help`: the commands, one line each. */
   case Help
@@ -69,9 +73,11 @@ enum Line derives CanEqual:
   /** A line that starts with `/` and is not a command. */
   case Unknown(text: String)
 
-/** How much of the reasoning of a step the client shows (`/reasoning`). `Short` is the default. */
+/** How much of the reasoning of a step the client shows (`/reasoning`). `Line` is one line with the size of the
+  * reasoning, the default of the line editor. `Short` is the start of the reasoning, the default of the plain lines.
+  */
 enum ReasoningView derives CanEqual:
-  case Off, Short, Full
+  case Off, Line, Short, Full
 
 /** The line of `text`. A text that does not start with `/` is a message. An id of `/open`, `/reopen` and `/close
   * replaced` that is not `SessionId.valid` gives `Unknown` (8.7).
@@ -90,6 +96,7 @@ private def command(words: List[String]): Option[Line] =
     case List("/jobs")            => Some(Line.Jobs)
     case List("/stopjob", job)    => jobOf(job).map(Line.StopJob(_))
     case List("/status")          => Some(Line.Status)
+    case List("/show", id)        => Some(Line.Show(id))
     case List("/help")            => Some(Line.Help)
     case List("/reasoning", view) => ReasoningView.values.find(_.toString.equalsIgnoreCase(view)).map(Line.Reasoning(_))
     case "/close" :: rest         => close(rest)
@@ -151,7 +158,8 @@ val commandHelp: Vector[(String, String)] = Vector(
   "/jobs"                          -> "list the jobs of the session",
   "/stopjob ID"                    -> "stop the job ID of /jobs, for example 12.0",
   "/status"                        -> "show the folder, the turn, the pending calls and the jobs",
-  "/reasoning off|short|full"      -> "set how much of the reasoning of a step the client shows",
+  "/reasoning off|line|short|full" -> "set how much of the reasoning of a step the client shows",
+  "/show ID"                       -> "show the cell ID or the call ID of the session in full, for example 12 or 12.0",
   "/wait SECONDS"                  -> "wait before the next line, for a script",
   "/help"                          -> "show this text",
   "/close"                         -> "end the session as parked; with --controller, show and run its release plan",
@@ -187,9 +195,9 @@ def jobOrder(state: SessionState): Vector[EffectId] = state.jobs.keys.toVector.s
   *     pending. A number is the `seq` of an entry, so it does not change when other calls change.
   *   - `StopJob` gives `StopJobs(One(job))` for a job of `current`, or an error.
   *   - `Close` gives `Close` with its outcome and its reason. A client with a desk runs the release instead (8.7).
-  *   - `Jobs`, `Status`, `Reasoning`, `Help`, `Quit`, `Wait`, `Sessions`, `Open`, `Reopen` and `Controller` give no
-  *     command, because they change only the client. The client runs `Sessions`, `Open`, `Reopen` and `Controller`
-  *     through its desk. `Unknown` gives an error that points to `/help`.
+  *   - `Jobs`, `Status`, `Reasoning`, `Show`, `Help`, `Quit`, `Wait`, `Sessions`, `Open`, `Reopen` and `Controller`
+  *     give no command, because they change only the client. The client runs `Sessions`, `Open`, `Reopen` and
+  *     `Controller` through its desk. `Unknown` gives an error that points to `/help`.
   *
   * The client side of `Grant` (5.5): only a client of the user sends `Grant`. To refuse, the person sends a plain
   * message.
@@ -227,5 +235,5 @@ def commandsFor(
     case Line.Close(outcome, reason) => Right(Vector(Command.Close(outcome, reason)))
     case Line.Unknown(text)          => Left(s"$text is not a command. /help lists the commands.")
     // These lines change only the client.
-    case Line.Jobs | Line.Status | Line.Reasoning(_) | Line.Help | Line.Quit | Line.Wait(_) | Line.Sessions |
-        Line.Open(_) | Line.Controller | Line.Reopen(_) => Right(Vector.empty)
+    case Line.Jobs | Line.Status | Line.Reasoning(_) | Line.Show(_) | Line.Help | Line.Quit | Line.Wait(_) |
+        Line.Sessions | Line.Open(_) | Line.Controller | Line.Reopen(_) => Right(Vector.empty)

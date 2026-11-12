@@ -4,6 +4,7 @@ import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.{DspyError, RuntimeContext, RuntimeError}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.harness.{HarnessLimits, Secrets}
+import dspy4s.harness.guest.JobStatus
 import dspy4s.harness.host.{Behind, Controller, Feed, HostError, LocalHost, SessionHandle, WorkEnv, WorkRuntime}
 import dspy4s.harness.kernel.{EffectResult, Entry, GuardRule, Logged, Position, ReleaseItem, RequestId, SessionId}
 import dspy4s.harness.kernel.{SessionOutcome, TurnOutcome}
@@ -97,7 +98,7 @@ object Cli:
     val model = env.get("DSPY_TRACE").filter(_.nonEmpty).foldLeft(modelOf(name, env)) { (inner, file) =>
       TracedModel(inner, Path.of(file), secrets.maskText)
     }
-    val console = consoleOf(cli, secrets)
+    val console = consoleOf(cli, secrets, env)
     // A SIGTERM runs the shutdown hooks, so this hook gives the terminal its modes back. `close` runs only once.
     val hook = Thread(() => console.close())
     Try(Runtime.getRuntime.addShutdownHook(hook)): Unit
@@ -140,7 +141,7 @@ object Cli:
                   console.print(
                     s"The session ${visible(handle.id.value)} is open. Type a message, or /help for the commands."
                   )
-                  if loop(handle, console, cli.script, Some(desk)) then 0 else 1
+                  if loop(handle, console, cli.script, Some(desk), home.toString) then 0 else 1
             finally
               // The person gets the terminal back first, because the close of the host can wait for the stop of jobs.
               console.close()
@@ -153,8 +154,10 @@ object Cli:
   /** The console of the client: the line editor at a terminal, with its history at `<root>/history`. Plain streams in
     * the script mode, and for a pipe.
     */
-  private def consoleOf(cli: CliArgs, secrets: Secrets): ClientConsole =
-    val editor = if cli.script then None else EditorConsole.system(cli.root.resolve("history"), secrets.maskText)
+  private def consoleOf(cli: CliArgs, secrets: Secrets, env: Map[String, String]): ClientConsole =
+    // NO_COLOR with any value turns the colors off (no-color.org).
+    val color  = !env.get("NO_COLOR").exists(_.nonEmpty)
+    val editor = if cli.script then None else EditorConsole.system(cli.root.resolve("history"), secrets.maskText, color)
     editor.getOrElse(PlainConsole(BufferedReader(InputStreamReader(System.in, UTF_8)), System.out))
 
   /** The text of `--list`: the sessions of the host at `root` (10.2), with `sessionsText`, and a line for each file of
@@ -202,7 +205,11 @@ object Cli:
 
   /** The loop of the client with no desk: one session, as in phase 7. */
   def loop(handle: SessionHandle, console: ClientConsole, script: Boolean): Boolean =
-    loop(handle, console, script, None)
+    loop(handle, console, script, None, "")
+
+  /** The loop of the client with `desk`, and with no home folder for the footer of a rich console. */
+  def loop(handle: SessionHandle, console: ClientConsole, script: Boolean, desk: Option[Desk]): Boolean =
+    loop(handle, console, script, desk, "")
 
   /** The loop of the client: a thread prints `entryText` of each entry of the feed of `handle`, and another thread
     * reads the lines of `console` and runs the commands of `commandsFor`.
@@ -217,6 +224,11 @@ object Cli:
     *     the next steps. They change nothing in the session. `/allow N` grants the call that the entry N asked for.
     *   - After a turn that ends `Aborted`, the client prints `stopNotice`: each job of that turn that still runs, and
     *     how to stop it (10.3).
+    *   - A console with the screen of CLI_SCREEN.md (`ClientConsole.rich`) gets the rows of `Screen.after` for each
+    *     entry, in place of `entryText`, and it reads the live block (`Screen.live`) and the footer (`Screen.footer`)
+    *     of the session that the client shows. Ctrl-O switches the detail of a cell, and `/show ID` prints a cell or a
+    *     call of that session in full. `home` is the home folder, which the footer shows as `~`. A plain console keeps
+    *     the lines of `entryText`.
     *   - An error of `commandsFor` and a refused command print one line, and the loop goes on. A refused command prints
     *     the error of the host in words (`HostError.words`), for example `The session refused the command: a turn is
     *     open`.
@@ -240,16 +252,28 @@ object Cli:
     *     release through the desk. After a release that ran, the client shows the controller. With no desk, these lines
     *     print that the client has one session, and `/close OUTCOME` sends `Close` with no release.
     */
-  def loop(handle: SessionHandle, console: ClientConsole, script: Boolean, desk: Option[Desk]): Boolean =
+  def loop(handle: SessionHandle, console: ClientConsole, script: Boolean, desk: Option[Desk], home: String): Boolean =
     val done                      = CountDownLatch(1)
-    val reasoning                 = AtomicReference(ReasoningView.Short)
+    val rich                      = console.rich
+    val start                     = if rich then ReasoningView.Line else ReasoningView.Short
+    val look                      = AtomicReference(Look(Detail.Compact, start, console.glyphs))
     def print(text: String): Unit = console.print(printable(text))
     // True while the reader runs a desk line. A release ends the session that the client shows, and then the client
     // shows the controller, so the printer prints no end notice for that session.
     val atDesk = AtomicBoolean(false)
     // The state before the feed, so an entry that commits between the two reads is in the feed or in the read after
     // it, and `Shown` shows it once (10.2: a client misses nothing).
-    val view = View(handle, handle.state.nextSeq - 1, () => reasoning.get, print)
+    val view = View(handle, handle.state.nextSeq - 1, () => look.get, print, Option.when(rich)(console.printRows))
+    if rich then
+      console.watch(
+        () => Screen.live(view.screen, view.handle.state, System.currentTimeMillis(), look.get, view.handle.activity),
+        () =>
+          val h = view.handle
+          Some(Screen.footer(h.state, h.memoryUse, runningJobs(h), home, console.glyphs))
+      )
+      console.onDetail(() =>
+        look.updateAndGet(l => l.copy(detail = if l.detail == Detail.Full then Detail.Compact else Detail.Full)): Unit
+      )
     // With a desk, the end of the feed does not end the loop. The printer prints the end notice once, and it waits
     // until the reader shows another session or the loop ends.
     val printer = Thread.ofPlatform().daemon(true).name("harness-cli-printer").start { () =>
@@ -287,8 +311,11 @@ object Cli:
             if next ne current then view.show(next)
           finally atDesk.set(false)
         case Line.Reasoning(next) =>
-          reasoning.set(next)
+          look.updateAndGet(_.copy(reasoning = next)): Unit
           print(s"The client now shows ${reasoningWords(next)} of each step.")
+        case Line.Show(id) => Screen.show(Screen.of(current.read(-1)), id, look.get) match
+            case Left(error) => print(error)
+            case Right(rows) => console.printRows(rows)
         case _ =>
           // The person must see a refusal of `Close`, `Allow` and `StopJob`, so these wait for the commit.
           val waits = script ||
@@ -422,9 +449,17 @@ object Cli:
 
 /** The session that a client shows (8.7): its handle, its feed, the last `seq` that the client showed, and the
   * `TurnStarted` of the last turn that the client saw, for the stop notice. `show` changes the session, and it shows
-  * the entries of the last turn of the new one. `reasoning` gives the view of the reasoning of each step.
+  * the entries of the last turn of the new one. `look` gives the view of the reasoning of each step, and the detail and
+  * the glyphs of a rich console. With `rows`, the console is rich: each session keeps its `Screen`, and the rows of
+  * `Screen.after` go to `rows` in place of `entryText`.
   */
-private final class View(first: SessionHandle, start: Long, reasoning: () => ReasoningView, print: String => Unit):
+private final class View(
+    first: SessionHandle,
+    start: Long,
+    look : () => Look,
+    print: String => Unit,
+    rows : Option[Vector[Row] => Unit]
+):
   private var current: Watched = opened(first, start)
   // True after `endOnce` gave the id of `current`.
   private var told = false
@@ -432,6 +467,9 @@ private final class View(first: SessionHandle, start: Long, reasoning: () => Rea
   def handle: SessionHandle = synchronized(current.handle)
 
   def ended: Boolean = synchronized(current.feed.ended)
+
+  /** The screen of the session that the client shows. */
+  def screen: Screen = synchronized(current.screen.get)
 
   /** The id of the session that the client shows, after the end of its feed. It gives the id once for each session. */
   def endOnce(): Option[SessionId] =
@@ -465,7 +503,9 @@ private final class View(first: SessionHandle, start: Long, reasoning: () => Rea
   /** The view of `h` after the `seq` `from`. The turn of the stop notice comes from the state before the feed. */
   private def opened(h: SessionHandle, from: Long): Watched =
     val turn = AtomicLong(h.state.lastTurn)
-    val now  = Watched(h, h.subscribe(1024), Shown(from), turn)
+    // A rich console starts the screen from the journal up to `from`, so the next entries continue the turn.
+    val screen = AtomicReference(if rows.isDefined then Screen.of(h.read(-1).filter(_.seq <= from)) else Screen.empty)
+    val now    = Watched(h, h.subscribe(1024), Shown(from), turn, screen)
     h.read(from).foreach(logged => take(now, Right(logged)))
     now
 
@@ -478,7 +518,12 @@ private final class View(first: SessionHandle, start: Long, reasoning: () => Rea
   // An entry that the client did not show yet, and the stop notice after a turn that a stop ended.
   private def printEntry(now: Watched, logged: Logged): Unit =
     now.shown.next(logged).foreach { fresh =>
-      entryText(fresh, reasoning()).foreach(print)
+      rows match
+        case Some(printRows) =>
+          val (next, out) = Screen.after(now.screen.get, fresh, look())
+          now.screen.set(next)
+          printRows(out)
+        case None => entryText(fresh, look().reasoning).foreach(print)
       fresh.entry match
         case Entry.TurnStarted                    => now.turn.set(fresh.seq)
         case Entry.TurnEnded(TurnOutcome.Aborted) =>
@@ -487,13 +532,27 @@ private final class View(first: SessionHandle, start: Long, reasoning: () => Rea
         case _ => ()
     }
 
-/** One session of a `View`: its handle, its feed, what the client showed, and the turn of a stop notice. */
-private final case class Watched(handle: SessionHandle, feed: Feed, shown: Shown, turn: AtomicLong)
+/** One session of a `View`: its handle, its feed, what the client showed, the turn of a stop notice, and its screen. */
+private final case class Watched(
+    handle: SessionHandle,
+    feed  : Feed,
+    shown : Shown,
+    turn  : AtomicLong,
+    screen: AtomicReference[Screen]
+)
+
+/** The jobs of `handle` that run now, for the footer. */
+private def runningJobs(handle: SessionHandle): Int =
+  handle.jobStatus.values.count {
+    case JobStatus.Running => true
+    case _                 => false
+  }
 
 /** The words of a view of the reasoning, for the answer to `/reasoning`. */
 private def reasoningWords(view: ReasoningView): String =
   view match
     case ReasoningView.Off   => "no reasoning"
+    case ReasoningView.Line  => "one line with the size of the reasoning"
     case ReasoningView.Short => "the start of the reasoning"
     case ReasoningView.Full  => "all the reasoning"
 

@@ -2,15 +2,19 @@ package dspy4s.harness
 
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.runtime.RuntimeEnvironment
+import dspy4s.harness.guest.{Access, Mode}
 import dspy4s.harness.kernel.*
-import dspy4s.harness.repl.HeapGuard
+import dspy4s.harness.repl.{Bindings, HeapGuard, ScalaRepl}
 import dspy4s.harness.sandbox.{Backends, HostList}
 import dspy4s.lm.contracts.LanguageModel
+import dspy4s.programs.strategies.Predict
+import dspy4s.signatures.Signature
 import munit.FunSuite
 
 import java.nio.file.{Files, LinkOption, Path}
 import scala.concurrent.duration.*
 import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
 import Models.*
@@ -574,5 +578,43 @@ class HarnessLaws extends FunSuite:
         (c.isLowSurrogate && !failed.head.lift(i - 1).exists(_.isHighSurrogate))
       }
       assertEquals(lone, Vector.empty, failed.head)
+    }
+  }
+
+  test("Harness: callPolicy gives its progress the size of its projection and the budget") {
+    // The footer of a client shows the size of the last view of the memory and its budget (10.6).
+    val journal = Support.journal()
+    Support.open(journal)
+    journal.commit(Entry.StepStarted(0)): Unit
+    val seen     = java.util.concurrent.ConcurrentLinkedQueue[(Int, Int)]()
+    val progress = new MemoryProgress:
+      override def projected(chars: Int, budget: Int): Unit = seen.add((chars, budget)): Unit
+    val limits = HarnessLimits(budget = 12_345)
+    val zooms  = ZoomSource()
+    val none   = Mode(Access.None, Access.None, Access.None, Access.None, Access.None, Access.None, Access.None)
+    val leaf   = Signature.derived[PolicyInput, PolicyStep]("policy", Harness.policyInstructions)
+    withModel(ScriptLm(policy("FAKE-DONE", None))) {
+      val effects = HarnessEffects(
+        "FAKE-TASK",
+        Harness.apiReference(none),
+        Predict(leaf, name = Some("policy")),
+        Window,
+        journal,
+        () => ScalaRepl(none, Bindings(JournalTurn(journal, () => 0L, zooms))),
+        Recorder(journal),
+        SnapshotStore(),
+        limits,
+        () => Budget(5),
+        None,
+        PolicyRunner.Direct,
+        zooms,
+        progress
+      )
+      try
+        assert(effects.callPolicy(mustAnswer = false).isRight)
+        val size = Window.project(journal.log, (), limits.budget).size
+        assert(size > 0)
+        assertEquals(seen.asScala.toVector, Vector((size, 12_345)))
+      finally effects.close()
     }
   }

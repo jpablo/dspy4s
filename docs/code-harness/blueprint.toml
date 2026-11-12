@@ -1758,7 +1758,7 @@ id = "secret-index"
 group = "profile"
 kind = "data"
 name = "SecretIndex"
-ops = ["find", "listings"]
+ops = ["find", "listings", "progress"]
 ref = "5.4"
 spec = true
 uses = ["profile", "layout"]
@@ -2419,9 +2419,9 @@ ops = ["callPolicy", "runCell"]
 ref = "4.6"
 uses = ["turn-effects", "predict", "policy-input", "policy-step", "context-strategy", "journal-trait", "scala-repl",
         "recorder", "snapshot-store", "harness-limits", "runtime-context", "session-state", "budget", "host-threads",
-        "policy-runner", "zoom-source"]
+        "policy-runner", "zoom-source", "memory-progress"]
 proof_uses = ["cell-result", "policy-reply", "window", "recorder", "snapshot-store", "lost-names", "budget",
-              "host-threads", "zoom-source"]
+              "host-threads", "zoom-source", "memory-progress"]
 text = "callPolicy projects the log with the strategy, spends one call of the budget, and calls the policy leaf through the PolicyRunner, so the trace reaches the RuntimeContext. A spent budget fails the call, and the turn ends Failed. runCell starts the calls of the cell, takes the snapshot of the store, runs the code in the REPL, and joins the trace of the host threads. After the error of the compiler defect, it starts a new REPL and adds the note of the lost names."
 
 [[group]]
@@ -2638,7 +2638,7 @@ kind = "law"
 name = "Harness:"
 ref = "9"
 uses = ["harness"]
-text = "A policy that submits gives the output through Data, and in RawPrediction.values. A reply with no code and the step limit run the finisher. The call works in a copy of the workspace, exec runs in the sandbox, and a failed model call gives a DspyError. The store keeps only the writes of a cell that completed. A code of null or None is no code. The task of the policy shows the preamble, and the reasoning of a reply, native or written, goes into the Acted. After the heap guard closes the REPL, the turn stops. The policy sees the hint of a compile error and the note of a timeout. After a cell that confuses the compiler, a new REPL runs the next cells, and the policy learns the lost names; another compile error starts no new REPL. A full REPL leads to a new REPL, and the hint of a compile error stays in the observation after the cut. A workspace that cannot be copied gives a DspyError and leaves no copy, and the copy leaves out a named pipe. The journal of a call is one turn, and it holds no known secret. The REPL has only the givens of the task mode."
+text = "A policy that submits gives the output through Data, and in RawPrediction.values. A reply with no code and the step limit run the finisher. The call works in a copy of the workspace, exec runs in the sandbox, and a failed model call gives a DspyError. The store keeps only the writes of a cell that completed. A code of null or None is no code. The task of the policy shows the preamble, and the reasoning of a reply, native or written, goes into the Acted. After the heap guard closes the REPL, the turn stops. The policy sees the hint of a compile error and the note of a timeout. After a cell that confuses the compiler, a new REPL runs the next cells, and the policy learns the lost names; another compile error starts no new REPL. A full REPL leads to a new REPL, and the hint of a compile error stays in the observation after the cut. A workspace that cannot be copied gives a DspyError and leaves no copy, and the copy leaves out a named pipe. The journal of a call is one turn, and it holds no known secret. The REPL has only the givens of the task mode. callPolicy gives its progress the size of its projection and the budget."
 
 [[group]]
 id = "structure-laws"
@@ -3065,6 +3065,31 @@ proof_uses = ["catalog-row-fold", "session-file"]
 text = "<root>/catalog.db. The writer updates a row after a turn ends or when the status changes. rebuild folds each journal whose row differs, and gives a result for each file, so a crash, a power loss, a removal of the file or a bad file loses nothing. A busy timeout, and a failed write never ends a session."
 
 [[group]]
+id = "activity"
+phase = "p7"
+module = "harness-host"
+file = "Activity.scala"
+title = "What the host of an open session does now, apart from the journal"
+
+[[node]]
+id = "activity"
+group = "activity"
+kind = "data"
+name = "Activity"
+ref = "10.6"
+uses = []
+text = "What the host of an open session does now, apart from the journal, for a client that polls it: the walk for secret files, with the folders that it read and the folders of the walk before it, or the summaries of the memory before a call to the policy, with the summaries that ended of all of them. It is not an entry."
+
+[[node]]
+id = "memory-use"
+group = "activity"
+kind = "data"
+name = "MemoryUse"
+ref = "7.1"
+uses = []
+text = "The size of the last view of the memory that a call to the policy got, and its budget, in characters, for the footer of a client."
+
+[[group]]
 id = "host"
 phase = "p7"
 module = "harness-host"
@@ -3088,7 +3113,7 @@ kind = "data"
 name = "SessionHandle"
 ref = "10.1"
 spec = true
-uses = ["session-id", "command", "host-error", "session-state", "feed", "logged", "effect-id", "job-status"]
+uses = ["session-id", "command", "host-error", "session-state", "feed", "logged", "effect-id", "job-status", "activity", "memory-use"]
 text = "An open session for a client: send with no wait for the commit, run that waits and gives a refusal, the committed state, the status of each job, a feed, and the entries after a seq. A proposal: the name of 10.1 is SessionRef, and the guest API already has a data type SessionRef. jobStatus reads the job table, so a client can tell a job that still runs after a stop (10.3)."
 
 [[node]]
@@ -3106,7 +3131,7 @@ group = "host"
 kind = "data"
 name = "SessionRuntime"
 ref = "10.1"
-uses = ["session-id", "session-config", "journal-trait", "job-table", "activation"]
+uses = ["session-id", "session-config", "journal-trait", "job-table", "activation", "activity", "memory-use"]
 text = "What the host needs to run the turns of a session: it makes the activation."
 
 [[node]]
@@ -3193,7 +3218,7 @@ name = "WorkRuntime"
 ops = ["activate", "defaultGuard", "config", "forWork", "taskOf", "ownedConfig", "forHost"]
 ref = "8.1"
 spec = true
-uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context", "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access", "harness", "line-store", "file-lines", "memory-tree", "session-file", "peers", "host-sessions", "harness-probe", "scope", "strategy-name"]
+uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context", "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access", "harness", "line-store", "file-lines", "memory-tree", "session-file", "peers", "host-sessions", "harness-probe", "scope", "strategy-name", "activity", "memory-progress", "memory-use"]
 proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell", "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble", "memory-tree", "controller"]
 text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of workMode through recorded and guarded, and JobShell. workMode is local mode with no Sessions^ and no Children^, so a work session has no rlm. Each turn gets a new budget of model calls. The first rules of 5.5: git push gets Ask in a mode with Network^."
 
@@ -3215,6 +3240,24 @@ uses = ["session-id"]
 text = "The folder of a new session, the root of the host, the session to open again, the script mode, the list of the sessions, and the controller (8.7). A session that opens again keeps its own configuration. A proposal: [--root DIR] [--session ID | --controller] [--script] [--list] [FOLDER], with the root <home>/.dspy4s/harness, and the start of an id is enough when only one session has it."
 
 [[group]]
+id = "screen"
+phase = "p7"
+module = "harness-cli"
+file = "Screen.scala"
+title = "The screen of the line editor: the history, the live block and the footer (CLI_SCREEN.md)"
+
+[[node]]
+id = "screen"
+group = "screen"
+kind = "data"
+name = "Screen"
+ops = ["of", "after", "live", "footer", "show"]
+ref = "10.6"
+uses = ["logged", "activity", "memory-use", "session-state", "reasoning-view"]
+proof_uses = ["in-quotes", "text-prefix", "job-name", "work-runtime"]
+text = "The model of the screen of a session: the turn that runs and each cell of the session. after gives the rows of each entry for the history: the text of a step, a summary line of its cell, the reply in full, an approval card and the end of a turn. live gives the live block: the text and the open cell of the step, and a status line with a spinner, the time of the turn and a label only for a wait that needs a reason. footer gives the folder, the mode, the model, the memory, the jobs and the calls that wait. show gives a cell or a call in full."
+
+[[group]]
 id = "entry-text"
 phase = "p7"
 module = "harness-cli"
@@ -3229,7 +3272,7 @@ name = "entryText"
 ref = "10.1"
 uses = ["logged", "reasoning-view"]
 proof_uses = ["job-name", "text-prefix", "in-quotes", "session-outcome", "turn-outcome", "cell-outcome", "grant-lifetime"]
-text = "The start of a step, the reasoning of a step, the text and the code of a step, the command of an exec or a spawn in quotes when it starts, and the output of a cell after its outcome in words (CellOutcome.words). A pending call shows in quotes, with its number and the commands that answer it. The end of a turn with the text of its report (TurnOutcome.report), apart from a reply, the stops, a stopped job by its name, and a grant with its lifetime in words (GrantLifetime.words). The other entries give none. Each text loses its control characters."
+text = "The reasoning of a step, the text and the code of a step, the command of an exec or a spawn in quotes when it starts, and the output of a cell after its outcome in words (CellOutcome.words). A pending call shows in quotes, with its number and the commands that answer it. The end of a turn with the text of its report (TurnOutcome.report), apart from a reply, the stops, a stopped job by its name, and a grant with its lifetime in words (GrantLifetime.words). The other entries give none. Each text loses its control characters."
 
 [[group]]
 id = "lines"
@@ -3401,7 +3444,7 @@ kind = "data"
 name = "ClientConsole"
 ref = "10.6"
 uses = ["typed"]
-text = "The terminal of the person for the loop. read gives the next line, and print writes the text of the session. onInterrupt gives the action of a Ctrl-C that comes while no read waits."
+text = "The terminal of the person for the loop. read gives the next line, and print writes the text of the session. onInterrupt gives the action of a Ctrl-C that comes while no read waits. busy shows what runs, and activity sets where the console reads what the host does."
 
 [[node]]
 id = "plain-console"
@@ -3418,10 +3461,10 @@ id = "editor-console"
 group = "console"
 kind = "data"
 name = "EditorConsole"
-ops = ["read", "print", "onInterrupt", "close"]
+ops = ["read", "print", "printRows", "onInterrupt", "watch", "onDetail", "close"]
 ref = "10.6"
-uses = ["console", "typed"]
-text = "The line editor of JLine for a person at a terminal: line edit, and a history file with the mask of the secrets. Enter after an odd number of backslashes goes on to the next line, and a paste stays as it is. Ctrl-C on a line with text clears it, and a Ctrl-C outside a read runs the action of the client. close first ends a read that waits, so the terminal gets its modes back."
+uses = ["console", "typed", "reasoning-view"]
+text = "The line editor of JLine for a person at a terminal: line edit, and a history file with the mask of the secrets. Enter after an odd number of backslashes goes on to the next line, and a paste stays as it is. Ctrl-C on a line with text clears it, and a Ctrl-C outside a read runs the action of the client. During a turn, a timer redraws the line through a widget: a spinner, the time, the label of what runs and the activity of the host, and a blinking block cursor. close first ends a read that waits, so the terminal gets its modes and its cursor back."
 
 [[group]]
 id = "cli"
@@ -3437,9 +3480,9 @@ kind = "data"
 name = "Cli"
 ops = ["main", "loop", "listText", "deskStep"]
 ref = "15"
-uses = ["session-handle", "console", "desk", "host-desk"]
-proof_uses = ["cli-args", "local-host", "work-runtime", "work-env", "entry-text", "parse-line", "commands-for", "plain-console", "editor-console", "stop-notice", "jobs-text", "status-text", "job-starts", "pending-calls", "sessions-text", "resolve-session", "card-text", "open-refusal", "plan-text", "host-error"]
-text = "main makes the model from the environment, makes the console, starts a LocalHost with a WorkRuntime, and opens the session. --list prints the sessions and opens none. loop prints the feed, and each text goes through printable. It sends a message, /stop and /stopall, and it runs /close, /allow and /stopjob so the person sees a refusal. Each error of the host prints in words (HostError.words). A Ctrl-C during a turn is /stop, and the stop notice follows a turn that a stop ended. With a desk, /sessions, /open, /reopen, /controller and /close go to deskStep (8.7). A proposal: JDK 21."
+uses = ["session-handle", "console", "desk", "host-desk", "screen"]
+proof_uses = ["cli-args", "local-host", "work-runtime", "work-env", "entry-text", "parse-line", "commands-for", "plain-console", "editor-console", "stop-notice", "jobs-text", "status-text", "job-starts", "pending-calls", "sessions-text", "resolve-session", "card-text", "open-refusal", "plan-text", "host-error", "screen"]
+text = "main makes the model from the environment, makes the console, starts a LocalHost with a WorkRuntime, and opens the session. --list prints the sessions and opens none. loop prints the feed, and each text goes through printable. It sends a message, /stop and /stopall, and it runs /close, /allow and /stopjob so the person sees a refusal. Each error of the host prints in words (HostError.words). A Ctrl-C during a turn is /stop, and the stop notice follows a turn that a stop ended. With a desk, /sessions, /open, /reopen, /controller and /close go to deskStep (8.7). A proposal: JDK 21. A rich console gets the rows of Screen for each entry, and the live block and the footer of the session that it shows."
 
 # ── Phase 7: the laws ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -3631,7 +3674,7 @@ kind = "law"
 name = "Work:"
 ref = "8.1"
 uses = ["work-runtime", "local-host"]
-text = "config and workMode, with no Sessions^ and no Children^, and defaultGuard. A cell runs in the scope, a val stays for the next turn, and rlm does not compile. Each turn gets a new budget. An Ask call does not run, pending holds its rule, and a Grant lets the new turn run it. A catch does not hide it. Under the sandbox a job runs on after its cell, Abort during a cell stops no job, and StopJobs(OfLastTurn) stops it. A report starts a turn. stopJob stops the job. jobStatus gives Running for a job that runs, and Stopped after StopJobs. A stop ends a long exec and its process. A stop during a long policy call ends the call, the turn ends Aborted before the grace period, and the REPL stays."
+text = "config and workMode, with no Sessions^ and no Children^, and defaultGuard. A cell runs in the scope, a val stays for the next turn, and rlm does not compile. Each turn gets a new budget. An Ask call does not run, pending holds its rule, and a Grant lets the new turn run it. A catch does not hide it. Under the sandbox a job runs on after its cell, Abort during a cell stops no job, and StopJobs(OfLastTurn) stops it. A report starts a turn. stopJob stops the job. jobStatus gives Running for a job that runs, and Stopped after StopJobs. A stop ends a long exec and its process. A stop during a long policy call ends the call, the turn ends Aborted before the grace period, and the REPL stays. The handle gives the summaries of the memory while they run, and memoryUse after the first policy call."
 
 [[group]]
 id = "crash-laws"
@@ -3683,6 +3726,23 @@ module = "harness-cli"
 file = "ConsoleLaws.scala"
 where = "tests"
 title = "The laws of the line editor"
+
+[[group]]
+id = "screen-laws"
+phase = "p7"
+module = "harness-cli"
+file = "ScreenLaws.scala"
+where = "tests"
+title = "The laws of the screen of the line editor"
+
+[[node]]
+id = "law-screen"
+group = "screen-laws"
+kind = "law"
+name = "Screen:"
+ref = "10.6"
+uses = ["screen", "activity"]
+text = "A finished step prints its reasoning line, its text and the summary of its cell, and the reply prints in full. The summary names what the calls did, and each failed cell has its own words. The full detail prints the code, each call with its result, and the output. An approval prints its card, and the end of a turn names each outcome. A command shows each hidden character as an escape. The live block gives the status line, the memory summaries, the walk for secret files and the open cell. The footer hides a part with no value, /show gives a cell or a call, and the ASCII glyphs give no other character."
 
 [[node]]
 id = "law-cli-editor"
@@ -3934,6 +3994,16 @@ uses = ["context-strategy"]
 text = "What zoom of a cell reads: the derived data after the last policy call. The effects set a new reader after each update."
 
 [[node]]
+id = "memory-progress"
+group = "memory-tree"
+kind = "data"
+name = "MemoryProgress"
+ops = ["summaries", "summariesEnded", "projected", "none"]
+ref = "10.6"
+uses = []
+text = "What the memory of a turn tells a client: the summaries of the memory tree while an update builds them, and the size of each projection for a call to the policy, with its budget. The reports of the summaries of one update come in order. The default does nothing."
+
+[[node]]
 id = "memory-tree"
 group = "memory-tree"
 kind = "data"
@@ -3942,7 +4012,8 @@ ops = ["update", "project", "zoom", "withLeaves", "room", "render"]
 ref = "7.1"
 spec = true
 uses = ["context-strategy", "predict", "compress-input", "merge-input", "summary", "line-store", "memory-state",
-        "runtime-context", "dspy-error", "logged", "projection", "strategy-name", "signature", "policy-runner", "budget", "memory-log", "window"]
+        "runtime-context", "dspy-error", "logged", "projection", "strategy-name", "signature", "policy-runner", "budget", "memory-log", "window",
+        "memory-progress"]
 proof_uses = ["budget", "memory", "memory-log", "node-id", "view", "in-batch", "text-prefix"]
 text = "update appends the new messages, builds each ready node with the store or a leaf through the runner and the summary budget, and advances the view to the last reply. A failed leaf gives the line of the source. project gives the view its room first, then the open turn as the window gives it. zoom gives a message or the lines of two halves."
 
@@ -4012,7 +4083,7 @@ kind = "law"
 name = "Memory tree:"
 ref = "7.1"
 uses = ["memory-tree", "line-store", "memory-log", "window"]
-text = "A short message is its own line with no LM call. Two updates give the same state as one. A second tree with the same store makes no LM call, and a line of other messages is not used. A failed leaf gives the line of the source. The view has at most high parts, takes its room first and stays the same during a turn. render gives one line for each part. zoom gives a message or two lines."
+text = "A short message is its own line with no LM call. Two updates give the same state as one. A second tree with the same store makes no LM call, and a line of other messages is not used. A failed leaf gives the line of the source. The view has at most high parts, takes its room first and stays the same during a turn. render gives one line for each part. zoom gives a message or two lines. An update with leaf calls reports 0 of their number, each end in order, and the end, also after a failed, a stopped or a broken call. An update with no leaf call reports nothing."
 
 [[group]]
 id = "memory-tasks"

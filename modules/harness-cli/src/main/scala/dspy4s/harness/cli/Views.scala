@@ -75,7 +75,7 @@ def statusText(current: SessionState, status: Map[EffectId, JobStatus], calls: V
   val turn  = current.position match
     case Position.NoTurn          => "No turn is open."
     case Position.BeforeStep(i)   => s"A turn is open, before step ${i + 1} of $steps."
-    case Position.InPolicy(i)     => s"Step ${i + 1} of $steps: the model works."
+    case Position.InPolicy(i)     => s"Step ${i + 1} of $steps."
     case Position.InCell(i, _, _) => s"Step ${i + 1} of $steps: a cell runs."
     case Position.Answered(_)     => "The turn has its reply, and it ends."
     case Position.Finished(_)     => "The turn has its result, and it ends."

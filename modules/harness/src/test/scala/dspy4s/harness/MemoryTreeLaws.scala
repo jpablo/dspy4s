@@ -5,6 +5,7 @@ import dspy4s.harness.kernel.*
 import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import java.nio.charset.StandardCharsets.UTF_8
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters.*
 
@@ -302,4 +303,80 @@ class MemoryTreeLaws extends munit.FunSuite:
       updated(tree, chat(4, output = 700), tree.empty): Unit
     }
     assertEquals(lm.most.get, 3)
+  }
+
+  // ── The progress of the summaries for a client (10.6) ──
+
+  /** A progress that keeps each report of the summaries in order: `done/total`, and `end` for the end. */
+  private final class Reports extends MemoryProgress:
+    private val seen = ConcurrentLinkedQueue[String]()
+
+    override def summaries(done: Int, total: Int): Unit = seen.add(s"$done/$total"): Unit
+    override def summariesEnded(): Unit                 = seen.add("end"): Unit
+
+    def all: Vector[String] = seen.asScala.toVector
+
+  /** The reports of an update with `n` summaries: `0/n` first, each end in order, and then the end. */
+  private def counted(n: Int): Vector[String] = (0 to n).map(done => s"$done/$n").toVector :+ "end"
+
+  test("Memory tree: an update with N leaf calls reports 0 of N first, each end in order, and then the end") {
+    // A live session waited 63 s at one step for the summaries, and the screen gave no reason (2026-11-11).
+    val lm      = summaries()
+    val reports = Reports()
+    Models.withModel(lm) {
+      val tree = MemoryTree.withLeaves(LineStore.inMemory(), high = 6, width = 3, progress = reports)
+      updated(tree, chat(4, output = 700), tree.empty): Unit
+    }
+    // The 4 long cells give 4 compress calls, and the 12 messages give 10 merge calls.
+    assertEquals(lm.requests.size, 14)
+    assertEquals(reports.all, counted(14))
+  }
+
+  test("Memory tree: an update with no leaf call reports no summaries") {
+    val store   = LineStore.inMemory()
+    val reports = Reports()
+    Models.withModel(summaries()) {
+      // One short message is its own line, and it has no parent.
+      val short = MemoryTree.withLeaves(LineStore.inMemory(), high = 6, progress = reports)
+      updated(short, withOpen(chat(0, output = 10), turn(0, 10), 1), short.empty): Unit
+      val first = MemoryTree.withLeaves(store, high = 6)
+      updated(first, chat(3, output = 700), first.empty): Unit
+      // The store has each line, so this update makes no leaf call.
+      val again = MemoryTree.withLeaves(store, high = 6, progress = reports)
+      val d     = updated(again, chat(3, output = 700), again.empty)
+      updated(again, chat(3, output = 700), d): Unit
+    }
+    assertEquals(reports.all, Vector.empty)
+  }
+
+  test("Memory tree: an update ends its summaries also after a failed, a stopped or a broken leaf call") {
+    val stopped = new PolicyRunner:
+      def run[A](call: () => Either[String, A]): Either[String, A] = Left(PolicyRunner.Stopped)
+    val made     = AtomicInteger(0)
+    val breaking = new PolicyRunner:
+      def run[A](call: () => Either[String, A]): Either[String, A] =
+        if made.incrementAndGet() > 3 then throw IllegalStateException("FAKE-BREAK") else call()
+    val failed = RequestLm(_ => Left("FAKE-FAILURE"))
+    val first  = Reports()
+    Models.withModel(failed) {
+      val tree = MemoryTree.withLeaves(LineStore.inMemory(), high = 6, width = 3, progress = first)
+      updated(tree, chat(2, output = 700), tree.empty): Unit
+    }
+    // The 2 long cells give 2 compress calls, and the 6 messages give 4 merge calls.
+    assertEquals(first.all, counted(6))
+    val second = Reports()
+    Models.withModel(summaries()) {
+      val tree = MemoryTree.withLeaves(LineStore.inMemory(), high = 6, leafRunner = stopped, progress = second)
+      updated(tree, chat(2, output = 700), tree.empty): Unit
+    }
+    assertEquals(second.all, counted(6))
+    val third = Reports()
+    Models.withModel(summaries()) {
+      val tree =
+        MemoryTree.withLeaves(LineStore.inMemory(), high = 6, leafRunner = breaking, width = 1, progress = third)
+      intercept[IllegalStateException](tree.update(chat(3, output = 700), tree.empty)): Unit
+    }
+    // The 9 messages need 3 compress calls and 7 merge calls. The 3 compress calls end, and the first merge breaks. It
+    // ends too, so the count has 4 ends.
+    assertEquals(third.all, (0 to 4).map(done => s"$done/10").toVector :+ "end")
   }

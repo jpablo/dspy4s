@@ -11,33 +11,126 @@
 # The script builds the CLI with sbt when the class path file modules/harness-cli/target/live-classpath.txt is missing,
 # or when a source file of the build is newer than it. HARNESS_CLI_BUILD=1 always builds, and HARNESS_CLI_NO_BUILD=1
 # uses the file with no build.
+#
+# During a build, a terminal shows one line that changes in place: a spinner, the reason for the build, the time, and
+# the last line of sbt, for example:
+#   ⠹ Building the CLI · Screen.scala changed · 14 s · compiling 3 Scala sources to harness-cli
+# At the end, the line becomes "✓ Built the CLI in 31 s", or "✗ The CLI did not build (31 s)" and the log of sbt. When
+# the standard error is not a terminal, the script writes two plain lines. NO_COLOR turns the colors off, and a locale
+# with no UTF-8 gets ASCII signs.
 set -euo pipefail
 
 repo="$(cd "$(dirname "$(realpath "$0")")/.." && pwd)"
 classpath="$repo/modules/harness-cli/target/live-classpath.txt"
 
-# True when the class path file is missing, or when a source file of the build is newer than it.
+# The reason for a build, which `stale` sets.
+reason=""
+
+# True when the class path file is missing, or when a source file of the build is newer than it. It sets `reason`.
 stale() {
-  [[ ! -s "$classpath" ]] && return 0
-  [[ -n "$(find "$repo/build.sbt" "$repo/project" "$repo/modules" -name target -prune -o \
-    \( -name '*.scala' -o -name '*.java' -o -name '*.sbt' \) -newer "$classpath" -print -quit)" ]]
+  if [[ ! -s "$classpath" ]]; then
+    reason="first build"
+    return 0
+  fi
+  local newer
+  newer="$(find "$repo/build.sbt" "$repo/project" "$repo/modules" -name target -prune -o \
+    \( -name '*.scala' -o -name '*.java' -o -name '*.sbt' \) -newer "$classpath" -print -quit)"
+  [[ -n "$newer" ]] || return 1
+  reason="$(basename "$newer") changed"
+}
+
+# The signs and the colors of the build line. The spinner is the spinner of the screen of the CLI.
+if [[ "$(locale charmap 2>/dev/null || true)" == "UTF-8" ]]; then
+  frames=(⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏)
+  ok="✓" fail="✗" dot="·" more="…"
+else
+  frames=('|' '/' '-' '\')
+  ok="+" fail="x" dot="-" more="..."
+fi
+if [[ -t 2 && -z "${NO_COLOR:-}" ]]; then
+  accent=$'\e[36m' good=$'\e[32m' bad=$'\e[31m' dim=$'\e[2m' plain=$'\e[0m'
+else
+  accent="" good="" bad="" dim="" plain=""
+fi
+esc=$'\e'
+
+# The time since the start of the build: whole seconds, then minutes and seconds.
+since() {
+  local s=$((SECONDS - start))
+  if ((s < 60)); then printf '%d s' "$s"; else printf '%d m %d s' $((s / 60)) $((s % 60)); fi
+}
+
+# The last line of sbt with text, with no color code and no level such as "[info]".
+last_line() {
+  tail -n 20 "$log" 2>/dev/null | tr '\r' '\n' | sed -E "s/${esc}\[[0-9;]*[A-Za-z]//g; s/^\[(info|success|warn)\] //" |
+    grep -v '^[[:space:]]*$' | tail -n 1 || true
+}
+
+# One frame of the build line, cut to the width of the terminal.
+draw() {
+  local frame="${frames[$(($1 % ${#frames[@]}))]}"
+  local head="Building the CLI"
+  [[ -n "$reason" ]] && head+=" $dot $reason"
+  head+=" $dot $(since)"
+  local detail cols room
+  detail="$(last_line)"
+  # `tput cols` in `$(...)` writes to a pipe and gives 80, so the width comes from the terminal itself.
+  cols="$({ stty size </dev/tty; } 2>/dev/null | cut -d' ' -f2 || true)"
+  [[ "$cols" =~ ^[0-9]+$ ]] || cols=80
+  room=$((cols - ${#head} - 6))
+  if [[ -n "$detail" ]] && ((room > 10)); then
+    ((${#detail} > room)) && detail="${detail:0:$((room - 1))}$more"
+    detail=" $dot $detail"
+  else
+    detail=""
+  fi
+  printf '\r\e[K%s%s%s %s%s%s%s' "$accent" "$frame" "$plain" "$head" "$dim" "$detail" "$plain" >&2
+}
+
+# Ends a failed build: the sign, the reason, the time and the log of sbt.
+failed() {
+  printf '%s%s%s %s (%s). The sbt log follows:\n' "$bad" "$fail" "$plain" "$1" "$(since)" >&2
+  sed 's/^/  /' "$log" >&2
+  rm -f "$log"
+  exit 1
+}
+
+# Builds the CLI with sbt and writes its class path to `classpath`. The log of sbt goes to a temporary file, which the
+# build line reads. A Ctrl-C stops sbt and gives the terminal its cursor back.
+build() {
+  mkdir -p "$(dirname "$classpath")"
+  log="$(mktemp "${TMPDIR:-/tmp}/dspy4s-harness-build.XXXXXX")"
+  start=$SECONDS
+  (cd "$repo" && exec sbt -batch "export harnessCli/Runtime/fullClasspath") >"$log" 2>&1 &
+  pid=$!
+  trap 'kill "$pid" 2>/dev/null || true; [[ -t 2 ]] && printf "\r\e[K\e[?25h" >&2; rm -f "$log"; exit 130' INT TERM
+  local status=0
+  if [[ -t 2 ]]; then
+    # The cursor hides while the line changes, so it does not blink over the spinner.
+    printf '\e[?25l' >&2
+    local i=0
+    while kill -0 "$pid" 2>/dev/null; do
+      draw "$i"
+      i=$((i + 1))
+      sleep 0.1
+    done
+    wait "$pid" || status=$?
+    printf '\r\e[K\e[?25h' >&2
+  else
+    printf 'Building the CLI%s%s\n' "${reason:+ ($reason)}" "$more" >&2
+    wait "$pid" || status=$?
+  fi
+  trap - INT TERM
+  ((status == 0)) || failed "The CLI did not build"
+  # The last line of the export is the class path. The lines before it are the log of the build.
+  grep '^/' "$log" | tail -n 1 >"$classpath" || true
+  [[ -s "$classpath" ]] || failed "The build gave no class path"
+  rm -f "$log"
+  printf '%s%s%s Built the CLI in %s\n' "$good" "$ok" "$plain" "$(since)" >&2
 }
 
 if [[ "${HARNESS_CLI_NO_BUILD:-}" != "1" ]] && { [[ "${HARNESS_CLI_BUILD:-}" == "1" ]] || stale; }; then
-  echo "The script builds the CLI with sbt." >&2
-  mkdir -p "$(dirname "$classpath")"
-  output="$(cd "$repo" && sbt -batch "export harnessCli/Runtime/fullClasspath" 2>&1)" || {
-    echo "$output" >&2
-    echo "The build of the CLI failed." >&2
-    exit 1
-  }
-  # The last line of the export is the class path. The lines before it are the log of the build.
-  printf '%s\n' "$output" | grep '^/' | tail -1 > "$classpath"
-  if [[ ! -s "$classpath" ]]; then
-    echo "$output" >&2
-    echo "The build gave no class path." >&2
-    exit 1
-  fi
+  build
 fi
 
 exec java -cp "$(cat "$classpath")" dspy4s.harness.cli.Cli "$@"

@@ -1935,6 +1935,18 @@ These points are proposals for the review:
   activation, and a live run in a scope of 300,000 folders still waited 9.7 s at the first `exec`, also 20 s after the
   open. An open that only reads also starts the walk. The walk runs on its own thread, and the writer never waits for
   it.
+- The line editor has the screen of [CLI_SCREEN.md](CLI_SCREEN.md), phase A (2026-11-11). `Screen` reads each entry: a
+  finished step goes into the history as its text and one summary line of its cell, for example `▸ Ran 2 commands, read
+  1 file · 1.4 s #17`, and the reply shows in full. The step that runs is the live block, above a rule and the prompt `›
+  `, with a status line such as `⠹ 9 s · step 3 of 10 · ctrl-c stops`. The status line shows a label only for a wait
+  that needs a reason: the summaries of the memory (`Activity.MemorySummaries`), the walk for secret files during a
+  command (`Activity.SecretScan`), and a stop. The footer is a JLine `Status` with the folder, the mode, the model, the
+  memory (`SessionHandle.memoryUse`), the jobs and the calls that wait. Ctrl-O switches the detail of a cell, `/show ID`
+  prints a cell or a call in full, and Tab completes the commands. The live block is a prompt of several lines, which a
+  timer redraws every 125 ms through a widget of JLine, because only a widget can change the line of a read from another
+  thread. A law with a model of the screen (`FakeScreen`) shows that a smaller live block leaves no old row, and that
+  Enter leaves only the line of the person in the history. The cursor is a blinking block during a turn. The script mode
+  keeps the plain lines of `entryText`.
 - Until a real configuration file exists, the CLI reads its variables also from `<home>/.dspy4s/harness/.env`
   (2026-11-10). It reads this file also with another `--root`, so a live scenario with a temporary root finds it. A
   variable of the process wins over the file. The base URL and the key are the exception: both come from the file when
@@ -2045,8 +2057,11 @@ rules together (12).
   calls change. `/allow` with no number still grants each pending call.
 - The stop notice offers only `/stopjob`. `/stopall` stops the jobs of the newest turn, and a new turn can start after
   the notice.
-- `/status` shows the folder, where the turn stands, the pending calls and how many jobs run. The client prints one
-  line at each `StepStarted`. So the person sees that the model works during a long model call.
+- `/status` shows the folder, where the turn stands, the pending calls and how many jobs run. The client printed one
+  line at each `StepStarted`, so the person saw that the model worked during a long model call. The status line of the
+  editor now shows this with a spinner and the time, so the client prints no line at a `StepStarted` (2026-11-11). The
+  call to the model has no words: `/status` says `Step 2 of 30.`, because "the model works" read as a claim that the
+  model is correct, and a study of seven harnesses found that most of them show no words there.
 - The client shows the reasoning of a step, each line after a bar. `/reasoning off|short|full` sets how much the next
   steps show. `short` is the default, and it shows the first 400 characters.
 - Each text of the client goes through `printable`. It removes control characters, and it makes a mark of the

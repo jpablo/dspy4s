@@ -60,6 +60,31 @@ final class ZoomSource:
   /** Sets the reader of the derived data after an update. */
   def setReader(read: String => Either[String, String]): Unit = reader = read
 
+/** What the memory of a turn tells a client (CODE_HARNESS_DESIGN.md, 7.1 and 10.6): the summaries of the memory tree
+  * while an update builds them, and the size of each projection for a call to the policy. A host keeps the last values
+  * for a client that polls them. Each method must return at once. A report of the summaries can come from each thread
+  * of the leaf calls, but the reports of one update come in order. The default does nothing.
+  */
+trait MemoryProgress:
+
+  /** `done` of the `total` summaries of an update ended. An update with summaries reports `0` first, then each end, and
+    * then `summariesEnded`. An update with no summary reports nothing.
+    */
+  def summaries(done: Int, total: Int): Unit =
+    val _ = (done, total)
+
+  /** The summaries of an update ended, also after a failed or a stopped call. */
+  def summariesEnded(): Unit = ()
+
+  /** The size of the projection of a call to the policy (`Projection.size`), and the budget of the projection. */
+  def projected(chars: Int, budget: Int): Unit =
+    val _ = (chars, budget)
+
+object MemoryProgress:
+
+  /** A progress that tells nobody: a program call has no client. */
+  val none: MemoryProgress = new MemoryProgress {}
+
 /** The memory tree (CODE_HARNESS.md, 6; CODE_HARNESS_DESIGN.md, 7.1): the strategy of a long work session.
   *
   *   - `update` appends the new messages of the journal (`MemoryLog`), builds each ready node, and advances the view to
@@ -74,6 +99,9 @@ final class ZoomSource:
   *     the source (`MemoryLine.of` of the message, or of the two lines), and that line goes to the store, so a bad
   *     message does not block the session. A spent budget or a stop gives the same line, but not to the store, so a
   *     later update builds the node again.
+  *   - Before its first round, `update` counts the leaf calls of its rounds. Then `progress` gets 0 of that total, each
+  *     end of a leaf call, and the end of the update, also after a failed or a stopped call (10.6). An update with no
+  *     leaf call reports nothing.
   *   - `project` reserves `MemoryTree.room(high)` characters of the budget for the view first, and never cuts or drops
   *     it, so the prompt cache keeps it. The view is the first message of the history, with `render`. The rest of the
   *     budget goes to the open turn, as the window strategy gives it. The view stays the same during a turn.
@@ -87,7 +115,8 @@ final class MemoryTree(
     high      : Int,
     leafRunner: PolicyRunner,
     summaries : () => Budget,
-    width     : Int
+    width     : Int,
+    progress  : MemoryProgress = MemoryProgress.none
 ) extends ContextStrategy:
   type D = MemoryState
 
@@ -97,7 +126,8 @@ final class MemoryTree(
 
   def update(journal: Vector[Logged], d: MemoryState)(using RuntimeContext): Either[DspyError, MemoryState] =
     val added  = MemoryLog.messages(journal).drop(d.memory.log.size)
-    val memory = settle(added.foldLeft(d.memory)(Memory.append), summaries())
+    val start  = added.foldLeft(d.memory)(Memory.append)
+    val memory = counted(start)(count => settle(start, summaries(), count))
     Right(MemoryState(memory, View.advance(d.view, memory, high, MemoryLog.beforeOpenTurn(journal))))
 
   def project(journal: Vector[Logged], d: MemoryState, budget: Int): Projection =
@@ -130,38 +160,76 @@ final class MemoryTree(
     * The new lines of each round go to the store with one `putAll`.
     */
   @tailrec
-  private def settle(m: Memory, budget: Budget)(using RuntimeContext): Memory =
+  private def settle(m: Memory, budget: Budget, count: SummaryCount)(using RuntimeContext): Memory =
     val ready = Memory.ready(m)
     if ready.isEmpty then m
     else
-      val made = inBatch(ready, width)(id => lineOf(m, id, budget)).fold((_, error) => throw error, identity)
+      val made = inBatch(ready, width)(id => lineOf(m, id, budget, count)).fold((_, error) => throw error, identity)
       val kept = made.flatMap(_._2)
       if kept.nonEmpty then lines.putAll(kept)
-      settle(ready.zip(made).foldLeft(m) { case (acc, (id, (line, _))) => Memory.buildNode(acc, id, line) }, budget)
+      val grown = ready.zip(made).foldLeft(m) { case (acc, (id, (line, _))) => Memory.buildNode(acc, id, line) }
+      settle(grown, budget, count)
+
+  /** Runs `build` with the count of the leaf calls that `settle` makes from `m` (`pending`), for `progress`. The count
+    * closes after `build`, also after a throw, so a failed or a stopped call also ends the summaries.
+    */
+  private def counted(m: Memory)(build: SummaryCount => Memory): Memory =
+    val count = SummaryCount(pending(m), progress)
+    try build(count)
+    finally count.close()
+
+  /** The number of leaf calls that `settle` makes from `m`: each node of its rounds with no line of the store and no
+    * short message. Each round builds each ready node, so these rounds build the same nodes as `settle`. They give each
+    * node a line of no text, so the count makes no leaf call. A node of a spent budget counts, and it ends at once.
+    */
+  private def pending(m: Memory): Int =
+    @tailrec
+    def rounds(at: Memory, total: Int): Int =
+      val ready = Memory.ready(at)
+      if ready.isEmpty then total
+      else
+        val leaves = ready.count(id => known(at, id, Memory.key(at, id)).isEmpty)
+        rounds(ready.foldLeft(at)((acc, id) => Memory.buildNode(acc, id, MemoryTree.NoLine)), total + leaves)
+    rounds(m, 0)
 
   /** The line of the ready node `id`, and the entry for the store, if any. The store comes first. A short message is
-    * its own line. A leaf call spends one call of `budget`. A failed call gives the line of the source, for the store.
-    * A spent budget or a stop gives the line of the source, but not for the store, so a later update tries again.
+    * its own line. Else the line comes from a leaf call (`leafLine`), and `count` gets its end, also after a throw.
     */
-  private def lineOf(m: Memory, id: NodeId, budget: Budget)(using
+  private def lineOf(m: Memory, id: NodeId, budget: Budget, count: SummaryCount)(using
       RuntimeContext
   ): (MemoryLine, Option[(LineKey, MemoryLine)]) =
-    val key    = Memory.key(m, id)
-    val source = sourceText(m, id)
-    key.flatMap(lines.get) match
-      case Some(stored)                                                                  => (stored, None)
-      case None if id.level == 0 && source.getBytes(UTF_8).length <= MemoryLine.MaxBytes =>
-        (MemoryLine.of(source), None)
-      case None =>
-        val fallback = MemoryLine.of(source)
-        if budget.spend().isLeft then (fallback, None)
-        else
-          summarize(m, id) match
-            case Right(text) =>
-              val line = MemoryLine.of(text)
-              (line, key.map(_ -> line))
-            case Left(PolicyRunner.Stopped) => (fallback, None)
-            case Left(_)                    => (fallback, key.map(_ -> fallback))
+    val key = Memory.key(m, id)
+    known(m, id, key) match
+      case Some(line) => (line, None)
+      case None       =>
+        try leafLine(m, id, key, budget)
+        finally count.ended()
+
+  /** The line of `id` with no leaf call: the line of the store for `key`, or a message of `MemoryLine.MaxBytes` bytes
+    * or less as its own line. None for a node that needs a leaf call.
+    */
+  private def known(m: Memory, id: NodeId, key: Option[LineKey]): Option[MemoryLine] =
+    key.flatMap(lines.get).orElse(
+      Option.when(id.level == 0)(sourceText(m, id)).filter(_.getBytes(UTF_8).length <= MemoryLine.MaxBytes)
+        .map(MemoryLine.of)
+    )
+
+  /** The line of a leaf call for `id`, and the entry for the store with `key`, if any. The call spends one call of
+    * `budget`. A failed call gives the line of the source, for the store. A spent budget or a stop gives the line of
+    * the source, but not for the store, so a later update tries again.
+    */
+  private def leafLine(m: Memory, id: NodeId, key: Option[LineKey], budget: Budget)(using
+      RuntimeContext
+  ): (MemoryLine, Option[(LineKey, MemoryLine)]) =
+    val fallback = MemoryLine.of(sourceText(m, id))
+    if budget.spend().isLeft then (fallback, None)
+    else
+      summarize(m, id) match
+        case Right(text) =>
+          val line = MemoryLine.of(text)
+          (line, key.map(_ -> line))
+        case Left(PolicyRunner.Stopped) => (fallback, None)
+        case Left(_)                    => (fallback, key.map(_ -> fallback))
 
   /** The text of a node with no leaf: its message, or the lines of its two halves. */
   private def sourceText(m: Memory, id: NodeId): String =
@@ -179,6 +247,31 @@ final class MemoryTree(
       case Some(Right((older, newer))) =>
         leafRunner.run(() => merge(MergeInput(older.text, newer.text)).left.map(_.message)).map(_.output.line)
       case None => Left(s"the node ${id.ref} has no source")
+
+/** The count of the leaf calls of one update of the memory tree, for its progress (`MemoryTree.update`). A count of no
+  * calls reports nothing. Else it reports 0 of `total` at the start, each end of a call, and the end of the update. The
+  * leaf calls of one round end on their own threads, so `ended` and `close` hold the lock of the count, and the reports
+  * come in order. After the close, a late end reports nothing, so a client sees no summaries after the update.
+  */
+private final class SummaryCount(total: Int, progress: MemoryProgress):
+  private var done   = 0
+  private var closed = false
+  if total > 0 then progress.summaries(0, total)
+
+  /** One more leaf call ended. */
+  def ended(): Unit =
+    synchronized {
+      if !closed then
+        done += 1
+        progress.summaries(done, total)
+    }
+
+  /** The end of the update. */
+  def close(): Unit =
+    synchronized {
+      if !closed && total > 0 then progress.summariesEnded()
+      closed = true
+    }
 
 object MemoryTree:
 
@@ -214,7 +307,8 @@ object MemoryTree:
       leafRunner: PolicyRunner        = PolicyRunner.Direct,
       summaries : () => Budget        = () => Budget(Int.MaxValue),
       width     : Int                 = 4,
-      options   : DynamicValue.Record = DynamicValue.Record.empty
+      options   : DynamicValue.Record = DynamicValue.Record.empty,
+      progress  : MemoryProgress      = MemoryProgress.none
   ): MemoryTree =
     val compress = Signature.derived[CompressInput, Summary]("compress", compressInstructions)
     val merge    = Signature.derived[MergeInput, Summary]("merge", mergeInstructions)
@@ -225,8 +319,12 @@ object MemoryTree:
       high,
       leafRunner,
       summaries,
-      width.max(1)
+      width.max(1),
+      progress
     )
+
+  /** The line that `pending` gives each node of its rounds. Only the set of the built nodes counts there. */
+  private val NoLine: MemoryLine = MemoryLine.of("")
 
   /** The error of a zoom into the part `ref`, which the memory `m` does not have. It names the top parts of the memory,
     * so the model can zoom one of them and go down. A memory with no message gives an error that says so.

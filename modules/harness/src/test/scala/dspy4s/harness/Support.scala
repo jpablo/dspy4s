@@ -7,10 +7,12 @@ import dspy4s.harness.sandbox.{Backends, HostList, Layout}
 import dspy4s.lm.contracts.LanguageModel
 import zio.blocks.schema.json.Json
 
-import java.nio.file.{Files, Path}
-import java.util.Comparator
+import java.io.IOException
+import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file.{DirectoryNotEmptyException, FileVisitResult, Files, NoSuchFileException, Path, SimpleFileVisitor}
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch, TimeUnit}
+import scala.annotation.tailrec
 import scala.collection.mutable.ArrayBuffer
 import scala.jdk.CollectionConverters.*
 
@@ -118,12 +120,44 @@ object Support:
       case Scope.Fork(path, _) => Path.of(path)
     }.distinct
 
-  /** Removes a folder and each file in it, when the folder exists. */
+  /** Removes a folder and each file in it, when the folder exists. SQLite removes the `-shm` file of a session file
+    * when the last connection of the file closes, and a thread of a host can close a connection during the walk. So a
+    * file that goes away during the walk does not fail the removal, and a folder that gets a new file during the walk
+    * is walked again, at most `RemoveTries` times.
+    */
   def remove(folder: Path): Unit =
-    if Files.exists(folder) then
-      val paths = Files.walk(folder)
-      try paths.sorted(Comparator.reverseOrder[Path]()).forEach(p => Files.deleteIfExists(p): Unit)
-      finally paths.close()
+    @tailrec def go(left: Int): Unit =
+      if Files.exists(folder) then
+        val again =
+          try
+            Files.walkFileTree(folder, Remover): Unit
+            false
+          catch case _: DirectoryNotEmptyException if left > 1 => true
+        if again then go(left - 1)
+    go(RemoveTries)
+
+  /** The most walks of `remove`. */
+  private val RemoveTries = 3
+
+  /** A walk that deletes each file and each folder after its files, and skips a file that is gone. A link is a file
+    * here, so the walk never follows it.
+    */
+  private object Remover extends SimpleFileVisitor[Path]:
+    override def visitFile(file: Path, attributes: BasicFileAttributes): FileVisitResult =
+      Files.deleteIfExists(file): Unit
+      FileVisitResult.CONTINUE
+
+    override def visitFileFailed(file: Path, error: IOException): FileVisitResult =
+      error match
+        case _: NoSuchFileException => FileVisitResult.CONTINUE
+        case other                  => throw other
+
+    override def postVisitDirectory(folder: Path, error: IOException): FileVisitResult =
+      Option(error) match
+        case None | Some(_: NoSuchFileException) =>
+          Files.deleteIfExists(folder): Unit
+          FileVisitResult.CONTINUE
+        case Some(other) => throw other
 
 /** A gate in a scripted model (9). The first call that reaches it keeps its thread, counts down `reached`, and waits
   * for `released`, at most 30 seconds. A gate that is not `interruptible` ignores each interrupt in that wait, as host
@@ -232,7 +266,5 @@ final class Place extends AutoCloseable:
 
   val layout: Layout = Layout(temp, journals, Vector(secrets), Layout.secretNames)
 
-  def close(): Unit =
-    val paths = Files.walk(base)
-    try paths.sorted(Comparator.reverseOrder[Path]()).forEach(p => Files.deleteIfExists(p): Unit)
-    finally paths.close()
+  /** Removes the place, with the rules of `Support.remove`, so a file that goes away during the walk does no harm. */
+  def close(): Unit = Support.remove(base)

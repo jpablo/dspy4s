@@ -7,7 +7,7 @@ import dspy4s.harness.Models.policy
 import dspy4s.harness.guest.{JobStatus, Mode, Scope, StrategyName}
 import dspy4s.harness.kernel.*
 import dspy4s.harness.host.HostSupport.*
-import dspy4s.harness.sandbox.{Backends, HostList}
+import dspy4s.harness.sandbox.{Backends, HostList, Net, Profile}
 import dspy4s.lm.contracts.LanguageModel
 import zio.blocks.chunk.Chunk
 import zio.blocks.schema.json.Json
@@ -440,6 +440,29 @@ class WorkLaws extends munit.FunSuite:
     assert(WorkEnv.summaryOptions(Map(WorkEnv.SummaryOptions -> "{not json")).isLeft)
   }
 
+  test("Work: the handle gives the summaries of the memory while they run, and memoryUse after the first policy call") {
+    // A live session waited 63 s at one step for the summaries of the memory, and the screen gave no reason
+    // (2026-11-11). The footer of a client also shows the size of the last view and its budget (10.6).
+    val long  = "FAKE-LONG-MESSAGE " + "y" * 700
+    val model = RequestLm(
+      text => if isSummary(text) then Right(summaryReply(text)) else Right(policy("FAKE-DONE", None)),
+      text => if isSummary(text) then 1_500L else 0L
+    )
+    work(model) { (_, handle) =>
+      assertEquals(handle.memoryUse, None)
+      assertEquals(handle.send(message("m1", long)), Right(()))
+      // The first policy call compresses the long message: one summary.
+      assert(eventually(30)(handle.activity == Some(Activity.MemorySummaries(0, 1))), handle.activity.toString)
+      assert(eventually(60)(outcomes(handle) == Vector(TurnOutcome.Replied("FAKE-DONE"))), entries(handle).toString)
+      assert(eventually()(handle.activity.isEmpty), handle.activity.toString)
+      handle.memoryUse match
+        case Some(MemoryUse(chars, budget)) =>
+          assert(chars > long.length && chars <= limits.budget, s"$chars")
+          assertEquals(budget, limits.budget)
+        case None => fail("no memory use after the policy call")
+    }
+  }
+
   test("Work: a stop cuts each call of the runner that runs at the same time") {
     val context = Models.withModel(sessionModel())(summon[RuntimeContext])
     val runner  = StoppablePolicy(context, () => false)
@@ -578,6 +601,36 @@ class WorkLaws extends munit.FunSuite:
     bigScope(sessionModel()) { (runtime, _, handle) =>
       assertEquals(handle.state.position, Position.NoTurn, "the law sends no message")
       assert(eventually()(runtime.indexOf(id(1)).exists(_.listings >= 400L)), runtime.indexOf(id(1)).toString)
+    }
+  }
+
+  test("Work: the handle gives the walk for secret files of its session while a find runs, and none after it") {
+    // A client shows why a command waits (10.6). The walk of 400 folders is too quick to see from outside, so the law
+    // runs a find on the index of the session, and it reads the handle in each step of that find.
+    sandboxed()
+    bigScope(sessionModel()) { (runtime, _, handle) =>
+      assert(eventually()(runtime.indexOf(id(1)).exists(_.listings >= 400L)), "the walk of the open did not run")
+      assert(eventually()(handle.activity.isEmpty), handle.activity.toString)
+      val index = runtime.indexOf(id(1)).getOrElse(fail("no index"))
+      withRoot { dir =>
+        (1 to 5).foreach(i => Files.createDirectories(dir.resolve(s"d$i")))
+        val profile = Profile(true, Vector(dir), Vector.empty, Vector.empty, Net.Closed)
+        val seen    = Vector.newBuilder[Option[Activity]]
+        index.find(
+          profile,
+          () =>
+            seen.addOne(handle.activity); false
+        ): Unit
+        val all = seen.result()
+        assert(
+          all.nonEmpty && all.forall {
+            case Some(Activity.SecretScan(_, Some(total))) => total >= 400L
+            case _                                         => false
+          },
+          all.toString
+        )
+      }
+      assertEquals(handle.activity, None)
     }
   }
 

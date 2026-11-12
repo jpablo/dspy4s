@@ -323,6 +323,46 @@ class ProfileLaws extends ScalaCheckSuite:
     finally place.close()
   }
 
+  test("Index: progress counts the folders of a find while it runs, and the next find has a total") {
+    // A command waits for a find that runs, and a client shows why (CODE_HARNESS_DESIGN.md, 10.6).
+    val place = Place()
+    try
+      val profile = Profiles.forMode(Mode.local, place.scope, place.layout, HostList.empty)
+      (1 to 20).foreach(i => JFiles.createDirectories(place.scope.resolve(s"d$i/e")))
+      val index = SecretIndex(place.layout.secretNames, settle = Duration.Zero)
+      assertEquals(index.progress, None)
+      // Another thread reads the progress during the find, so the read must not wait for the lock of the find.
+      val other = java.util.concurrent.atomic.AtomicReference[Option[SecretIndex.Progress]]()
+      val first = Vector.newBuilder[Option[SecretIndex.Progress]]
+      index.find(
+        profile,
+        () =>
+          first.addOne(index.progress)
+          if other.get == null then
+            val read = java.util.concurrent.CompletableFuture.supplyAsync(() => index.progress)
+            other.set(read.get(2, java.util.concurrent.TimeUnit.SECONDS))
+          false
+      ): Unit
+      val folders = index.listings
+      assertEquals(index.progress, None)
+      assert(Option(other.get).exists(_.isDefined), "the other thread got no progress")
+      val counts = first.result()
+      assert(counts.forall(_.exists(_.total.isEmpty)), counts.toString)
+      val seen = counts.flatten.map(_.folders)
+      assertEquals(seen, seen.sorted)
+      assert(seen.last > seen.head, seen.toString)
+      val second = Vector.newBuilder[Option[SecretIndex.Progress]]
+      index.find(
+        profile,
+        () =>
+          second.addOne(index.progress); false
+      ): Unit
+      val again = second.result()
+      assert(again.nonEmpty && again.forall(_.exists(_.total.contains(folders))), s"$folders: $again")
+      assertEquals(index.progress, None)
+    finally place.close()
+  }
+
   test("Index: a folder whose last-modified time a command sets back is listed again") {
     // The change time shows the change: a command cannot set it.
     val place = Place()

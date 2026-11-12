@@ -60,6 +60,16 @@ trait SessionHandle:
   /** The committed entries with a `seq` above `seq`. A client reads them after `Behind`. */
   def read(after: Long): Vector[Logged]
 
+  /** What the host of the session does now, apart from the journal (`SessionRuntime.activity`), or none. A client polls
+    * it. The default is none.
+    */
+  def activity: Option[Activity] = None
+
+  /** The size of the last view of the memory and its budget (`SessionRuntime.memoryUse`), or none before the first call
+    * to the policy. A client polls it. The default is none.
+    */
+  def memoryUse: Option[MemoryUse] = None
+
 /** What the handler of `Sessions` needs from its host (CODE_HARNESS_DESIGN.md, 8.7). `LocalHost` gives it. Each session
   * that a handler reaches is open in the same host, because a host holds a lock on each open session.
   */
@@ -142,6 +152,20 @@ trait SessionRuntime:
   def opened(session: SessionId, config: SessionConfig): AutoCloseable =
     val _ = (session, config)
     () => ()
+
+  /** What the runtime does now for the open session `session`, apart from the journal, or none. It must not wait for a
+    * lock that a command holds, because a client polls it while the command runs. The default is none.
+    */
+  def activity(session: SessionId): Option[Activity] =
+    val _ = session
+    None
+
+  /** The size of the last view of the memory of the open session `session`, and its budget, or none. The default is
+    * none.
+    */
+  def memoryUse(session: SessionId): Option[MemoryUse] =
+    val _ = session
+    None
 
 /** The live part of one activation (11). Nothing outside it depends on it, and a new activation makes a new one. */
 trait Activation extends AutoCloseable:
@@ -737,6 +761,10 @@ private final class OpenSession private (
   def subscribe(capacity: Int): Feed = feeds.subscribe(capacity)
 
   def read(after: Long): Vector[Logged] = writer.log.filter(_.seq > after)
+
+  override def activity: Option[Activity] = place.runtime.activity(id)
+
+  override def memoryUse: Option[MemoryUse] = place.runtime.memoryUse(id)
 
   /** Makes the next write of the session fail. Only the laws of a failed write use it. */
   private[host] def breakWritesForLaws(): Unit = writer.breakFileForLaws()
