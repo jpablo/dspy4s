@@ -148,7 +148,7 @@ object Chat:
     x.replied.headOption.flatMap(Json.parse(_).toOption).flatMap(field(_, "choices"))
       .flatMap(_.elements.headOption).flatMap(text(_, "finish_reason"))
 
-  /** The chunks of a stream, assembled as `TracedStreams` and the predictor assemble them. */
+  /** The chunks of a stream, assembled as the predictor assembles them. */
   private def streamed(mode: LmMode, chunks: Iterator[LmChunk]): Reading =
     val parts                      = StreamAccumulator(mode)
     var usage: Option[LmUsage]     = None

@@ -12,9 +12,9 @@
 #                     the same session again with --session, so a scenario can test a reopen.
 #
 # The script copies the scenario to target/harness-live/NAME-<time>, runs each file of messages, and prints the
-# output of each run, the journal of the session and the folder. The folder keeps the root of the host, the trace of
-# the model calls (trace.jsonl) and the output of each run (run-N.txt). The variables of the model are as for
-# chat.sh.
+# output of each run, the journal of the session, its exchanges with the model and the folder. The folder keeps the
+# root of the host, with the journal and the exchange file of the session, and the output of each run (run-N.txt).
+# The variables of the model are as for chat.sh.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -30,7 +30,6 @@ out="$repo/target/harness-live/$name-$(date +%Y%m%d-%H%M%S)"
 mkdir -p "$out/root" "$out/ws"
 if [[ -d "$scenario/ws" ]]; then cp -R "$scenario/ws/." "$out/ws/"; fi
 if [[ -x "$scenario/setup.sh" ]]; then (cd "$out/ws" && "$scenario/setup.sh"); fi
-export DSPY_TRACE="$out/trace.jsonl"
 
 session=""
 run=0
@@ -56,4 +55,10 @@ done
 
 echo "== the journal of the session $session"
 python3 "$here/journal.py" "$out/root/sessions/$session.db" --width 600
+exchanges="$out/root/sessions/$session.http.jsonl"
+if [[ -f "$exchanges" ]]; then
+  echo "== the exchanges of the session $session with the model"
+  python3 "$here/exchanges.py" "$exchanges"
+fi
 echo "== the folder: $out"
+echo "== the inspector: $repo/scripts/dspy4s-harness --inspect --root $out/root"

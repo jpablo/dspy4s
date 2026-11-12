@@ -13,9 +13,10 @@
 #
 # The script needs the variables of the model: OPENAI_BASE_URL, DSPY_MODEL and OPENAI_API_KEY, and
 # DSPY_NATIVE_REASONING=true for a model that gives its reasoning apart from its text. They can come from the
-# environment or from the file ~/.dspy4s/harness/.env, which the CLI reads at its start. It writes each model call to
-# the JSON lines file DSPY_TRACE. When DSPY_TRACE is not set, the file is target/harness-live/trace-<time>.jsonl, and
-# the script names it on the standard error.
+# environment or from the file ~/.dspy4s/harness/.env, which the CLI reads at its start. Each HTTP exchange with the
+# model goes to the exchange file ROOT/sessions/ID.http.jsonl, next to the journal of the session. exchanges.py prints
+# the file, and `scripts/dspy4s-harness --inspect --root ROOT` shows the journal and the exchanges in a browser.
+# DSPY_EXCHANGES=off turns the exchange file off.
 #
 # The script runs the CLI with scripts/dspy4s-harness, which builds the CLI when its class path is missing or older
 # than a source file. HARNESS_CLI_NO_BUILD=1 uses the class path with no build.
@@ -23,11 +24,6 @@ set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 
-if [[ -z "${DSPY_TRACE:-}" ]]; then
-  mkdir -p "$repo/target/harness-live"
-  export DSPY_TRACE="$repo/target/harness-live/trace-$(date +%Y%m%d-%H%M%S).jsonl"
-fi
-echo "The trace of the model calls: $DSPY_TRACE" >&2
 if [[ -z "${DSPY_MODEL:-}" ]] && ! grep -qE '^[[:space:]]*(export[[:space:]]+)?DSPY_MODEL=' "$HOME/.dspy4s/harness/.env" 2>/dev/null; then
   echo "DSPY_MODEL is not set here or in ~/.dspy4s/harness/.env, so each policy call fails." >&2
 fi

@@ -352,11 +352,11 @@ class CliLaws extends munit.FunSuite:
   }
 
   test("CLI: a variable of the process wins over the variables file") {
-    val file    = Map("DSPY_MODEL" -> "file-model", "DSPY_TRACE" -> "/fake/trace")
+    val file    = Map("DSPY_MODEL" -> "file-model", "DSPY_EXCHANGES" -> "off")
     val process = Map("DSPY_MODEL" -> "process-model", "PATH" -> "/fake/bin")
     assertEquals(
       EnvFile.merge(file, process),
-      Map("DSPY_MODEL" -> "process-model", "DSPY_TRACE" -> "/fake/trace", "PATH" -> "/fake/bin")
+      Map("DSPY_MODEL" -> "process-model", "DSPY_EXCHANGES" -> "off", "PATH" -> "/fake/bin")
     )
   }
 

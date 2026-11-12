@@ -44,9 +44,10 @@ import scala.util.control.NonFatal
   * exit code 1. `DSPY_NATIVE_REASONING=true` declares that the model gives its reasoning apart from its text.
   * `DSPY_SUMMARY_OPTIONS` is a JSON object, the option bag of each summary request of the memory tree (7.1), for
   * example `{"chat_template_kwargs": {"enable_thinking": false}}`. A value that is not a JSON object gives an error and
-  * the exit code 2. `DSPY_TRACE=FILE` writes each model call to `FILE` as one JSON line (`TracedModel`), with the mask
-  * of the client. `--script` runs the loop in the script mode, so a script or an agent can drive the session. `--list`
-  * prints `listText` and starts no session. `--session` takes an id or the start of an id (`resolveSession`).
+  * the exit code 2. Each HTTP exchange with the model endpoint goes to the exchange file of the session
+  * (`ExchangeFile`), with the mask of the client, and `DSPY_EXCHANGES=off` turns the file off. `--script` runs the loop
+  * in the script mode, so a script or an agent can drive the session. `--list` prints `listText` and starts no session.
+  * `--session` takes an id or the start of an id (`resolveSession`).
   *
   * The file `<home>/.dspy4s/harness/.env` can give each of these variables (`EnvFile`). A variable of the process wins
   * over the file, apart from the base URL and the key, which come both from the file or both from the process. A line
@@ -106,10 +107,8 @@ object Cli:
       secrets: Secrets,
       options: DynamicValue.Record
   ): Int =
-    val name  = env.getOrElse("DSPY_MODEL", "none")
-    val model = env.get("DSPY_TRACE").filter(_.nonEmpty).foldLeft(modelOf(name, env)) { (inner, file) =>
-      TracedModel.of(inner, Path.of(file), secrets.maskText)
-    }
+    val name    = env.getOrElse("DSPY_MODEL", "none")
+    val model   = modelOf(name, env)
     val console = consoleOf(cli, secrets, env)
     // A SIGTERM runs the shutdown hooks, so this hook gives the terminal its modes back. `close` runs only once.
     val hook = Thread(() => console.close())
