@@ -3891,12 +3891,12 @@ id = "memory"
 group = "memory"
 kind = "data"
 name = "Memory"
-ops = ["append", "ready", "buildNode", "roots", "zoom", "fork", "key"]
+ops = ["append", "ready", "buildNode", "onStandIn", "withoutStandIns", "roots", "zoom", "fork", "key"]
 ref = "7.1"
 spec = true
 uses = ["message", "node-id", "memory-line", "line-key"]
 proof_uses = ["node-id"]
-text = "The log and the built lines, as a pure value. ready gives the nodes whose halves are built, buildNode of another node gives the same memory, roots gives one node for each set bit, zoom gives a message or the lines of two halves, and key gives the node with a SHA-256 of its texts."
+text = "The log, the built lines and the stand-ins, as a pure value. ready gives the nodes whose halves are built, buildNode of another node gives the same memory, roots gives one node for each set bit, zoom gives a message or the lines of two halves, and key gives the node with a SHA-256 of its texts. A stand-in is a built node with the line of its source after a stop or a spent budget. Each built node above a stand-in is a stand-in, and withoutStandIns takes them out so they can build again."
 
 [[node]]
 id = "line-key"
@@ -4015,7 +4015,7 @@ uses = ["context-strategy", "predict", "compress-input", "merge-input", "summary
         "runtime-context", "dspy-error", "logged", "projection", "strategy-name", "signature", "policy-runner", "budget", "memory-log", "window",
         "memory-progress"]
 proof_uses = ["budget", "memory", "memory-log", "node-id", "view", "in-batch", "text-prefix"]
-text = "update appends the new messages, builds each ready node with the store or a leaf through the runner and the summary budget, and advances the view to the last reply. A failed leaf gives the line of the source. project gives the view its room first, then the open turn as the window gives it. zoom gives a message or the lines of two halves."
+text = "update takes the stand-ins out when the summary budget has a call, appends the new messages, builds each ready node with the store or a leaf through the runner and the summary budget, and advances the view to the last reply. A failed leaf gives the line of the source, for the store. A stop or a spent budget gives a stand-in, and a node above a stand-in is a stand-in with no leaf call. A stand-in never goes to the store. project gives the view its room first, then the open turn as the window gives it. zoom gives a message or the lines of two halves."
 
 [[group]]
 id = "file-lines"
@@ -4049,7 +4049,7 @@ kind = "law"
 name = "Memory:"
 ref = "7.1"
 uses = ["memory", "view", "node-id", "memory-line", "message"]
-text = "The laws of CODE_HARNESS.md 6.2 as properties: Coverage, Zoom, Prefix, Immutability, Order, Size and Roots, and the laws of a node, a reference and a line."
+text = "The laws of CODE_HARNESS.md 6.2 as properties: Coverage, Zoom, Prefix, Immutability, Order, Size, Roots and Stand-ins, and the laws of a node, a reference and a line."
 
 [[group]]
 id = "memory-log-laws"
@@ -4083,7 +4083,7 @@ kind = "law"
 name = "Memory tree:"
 ref = "7.1"
 uses = ["memory-tree", "line-store", "memory-log", "window"]
-text = "A short message is its own line with no LM call. Two updates give the same state as one. A second tree with the same store makes no LM call, and a line of other messages is not used. A failed leaf gives the line of the source. The view has at most high parts, takes its room first and stays the same during a turn. render gives one line for each part. zoom gives a message or two lines. An update with leaf calls reports 0 of their number, each end in order, and the end, also after a failed, a stopped or a broken call. An update with no leaf call reports nothing."
+text = "A short message is its own line with no LM call. Two updates give the same state as one. A second tree with the same store makes no LM call, and a line of other messages is not used. A failed leaf gives the line of the source. After a stop or a spent budget, the next update with a budget gives the lines of an update with no stop, and a node above a stand-in makes no leaf call. While the budget is spent, the stand-ins stay with no report. The view has at most high parts, takes its room first and stays the same during a turn. render gives one line for each part. zoom gives a message or two lines. An update with leaf calls reports 0 of their number, each end in order, and the end, also after a failed, a stopped or a broken call. An update with no leaf call reports nothing."
 
 [[group]]
 id = "memory-tasks"

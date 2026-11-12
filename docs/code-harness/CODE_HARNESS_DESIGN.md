@@ -1179,7 +1179,10 @@ made with the user:
   a session. The input of `compress` is cut to `MemoryTree.MaxSource` characters first.
 - The summary calls run through the `PolicyRunner` of the activation, so a hard stop cuts them. They have a budget of
   their own for each turn, `HarnessLimits.summaryCalls`, apart from `modelCalls`. A spent budget or a stop gives the
-  line of the source, but not to the store, so a later update builds the node again.
+  line of the source as a stand-in (`Memory.standIns`), but not to the store. A node above a stand-in is a stand-in
+  too, with no leaf call, so a merge never uses a stand-in and the store never keeps a line made from one. The next
+  update with a call in its budget takes the stand-ins out and builds them again. While the budget of the turn is
+  spent, the stand-ins stay. Before this rule, the stand-ins stayed until a reopen (session 00429ec8, 2026-11-11).
 - A work session gets its strategy from `config.strategy` (`WorkRuntime.strategyOf`). A new session has the memory
   tree. A reopened session of phase 7 keeps the window of its journal. `PrefixSummary` has no code, so its activation
   fails with a clear error.

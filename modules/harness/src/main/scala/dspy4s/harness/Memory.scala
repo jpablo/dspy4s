@@ -85,12 +85,19 @@ object MemoryLine:
       val size  = if point < 0x80 then 1 else if point < 0x800 then 2 else if point < 0x10000 then 3 else 4
       if bytes + size > MaxBytes then at else cut(text, at + Character.charCount(point), bytes + size)
 
-/** The memory of a session (6.1): the log of messages and the built lines. It is a pure value, so a fork shares both.
+/** The memory of a session (6.1): the log of messages, the built lines, and the stand-ins. It is a pure value, so a
+  * fork shares all three.
+  *
+  * A stand-in is a built node that does not have its summary yet: the strategy gave it a line of its source, for
+  * example after a stop. A node with a half that is a stand-in is a stand-in too, so each built node above a stand-in
+  * is a stand-in. `withoutStandIns` takes the stand-ins out, so they can build again. A node that is not a stand-in
+  * never changes (the laws Immutability and Stand-ins).
   */
-final case class Memory(log: Vector[MemoryMessage], built: Map[NodeId, MemoryLine]) derives CanEqual
+final case class Memory(log: Vector[MemoryMessage], built: Map[NodeId, MemoryLine], standIns: Set[NodeId])
+    derives CanEqual
 
 object Memory:
-  val empty: Memory = Memory(Vector.empty, Map.empty)
+  val empty: Memory = Memory(Vector.empty, Map.empty, Set.empty)
 
   /** The memory with `message` at the end of its log. */
   def append(m: Memory, message: MemoryMessage): Memory = m.copy(log = m.log :+ message)
@@ -109,10 +116,24 @@ object Memory:
       id.halves.forall((a, b) => m.built.contains(a) && m.built.contains(b))
 
   /** The memory with `line` for the node `id`. A node that is not ready gives the same memory, so a built node never
-    * changes, and a node builds only after its halves (the laws Immutability and Order).
+    * changes, and a node builds only after its halves (the laws Immutability and Order). The node is a stand-in when
+    * `standIn` is true, or when a half of it is a stand-in (`onStandIn`).
     */
-  def buildNode(m: Memory, id: NodeId, line: MemoryLine): Memory =
-    if isReady(m, id) then m.copy(built = m.built.updated(id, line)) else m
+  def buildNode(m: Memory, id: NodeId, line: MemoryLine, standIn: Boolean = false): Memory =
+    if !isReady(m, id) then m
+    else
+      val standIns = if standIn || onStandIn(m, id) then m.standIns + id else m.standIns
+      Memory(m.log, m.built.updated(id, line), standIns)
+
+  /** True when a half of `id` is a stand-in. Then a line of `id` comes from a stand-in, so `id` is a stand-in too. */
+  def onStandIn(m: Memory, id: NodeId): Boolean = id.halves.exists((a, b) => m.standIns(a) || m.standIns(b))
+
+  /** The memory with no stand-in: each stand-in goes out of the built nodes, so it is ready again after its halves.
+    * Each built node above a stand-in is a stand-in (`buildNode`), so each built node that stays keeps its two halves.
+    * The other built nodes keep their lines (the law Stand-ins).
+    */
+  def withoutStandIns(m: Memory): Memory =
+    if m.standIns.isEmpty then m else Memory(m.log, m.built -- m.standIns, Set.empty)
 
   /** One node for each set bit of `n`, the highest level first. Their spans cover `[0, n)` in order (the law Roots).
     */
@@ -137,9 +158,13 @@ object Memory:
             newer <- m.built.get(b)
           yield Right((older, newer))
 
-  /** The memory of the first `n` messages, with each built node whose span ends at `n` or before. */
+  /** The memory of the first `n` messages, with each built node and each stand-in whose span ends at `n` or before. */
   def fork(m: Memory, n: Long): Memory =
-    Memory(m.log.take(n.max(0L).min(Int.MaxValue.toLong).toInt), m.built.filter((id, _) => id.span._2 <= n))
+    Memory(
+      m.log.take(n.max(0L).min(Int.MaxValue.toLong).toInt),
+      m.built.filter((id, _) => id.span._2 <= n),
+      m.standIns.filter(_.span._2 <= n)
+    )
 
   /** The key of the line of `id` in a store: the node and a SHA-256 of the texts of its messages. A store line with
     * another digest belongs to other messages, so the strategy does not use it. None for a node outside the log.
