@@ -1,6 +1,6 @@
 # The inspector and the exchange files: a proposal
 
-Status: the review took the proposal on 2026-11-12 (9.2), and O1 to O4 are built. It covers two needs. A person
+Status: the review took the proposal on 2026-11-12 (9.2), and O1 to O5 are built. It covers two needs. A person
 must see the journal of a session. A person must also see each HTTP request that the harness sends to the model
 endpoint, with its reply. Each of the two must have raw views and a formatted view.
 
@@ -30,8 +30,8 @@ The proposal leaves out a view of the sandbox, metrics across many sessions, and
 - **The probes.** A probe keeps its journal at `<root>/probes/<caller>.<cell>.<n>.db`.
 - **The terminal text.** `EntryText` gives the text of an entry for the terminal. It leaves out the entries that a
   person does not need during a session.
-- **`DSPY_TRACE`.** `TracedModel` and `TracedStreams` write one JSON line for each model call. The line has these
-  gaps:
+- **`DSPY_TRACE`, before O5.** `TracedModel` and `TracedStreams` wrote one JSON line for each model call. O5 removed
+  them (section 8). The line has these gaps:
   - It holds the `LmRequest`: the roles and the texts of the messages. It does not hold the HTTP body, so the tools,
     the options, the response format and the usage are not in it.
   - It has no session, no step and no predictor. One file takes the calls of all the sessions of the process.
@@ -380,7 +380,13 @@ do not change.
   follow of a session that runs. Laws L10 to L15.
 - **O4. The views of an exchange.** Chat, request, reply and diff. Law L16.
 - **O5. The end of `DSPY_TRACE`.** The live drivers read the exchange files, and `TracedModel` and `TracedStreams` go
-  (9.2, choice 4).
+  (9.2, choice 4). As built:
+  - The CLI reads no `DSPY_TRACE`, and `TracedModel`, `TracedStreams` and their laws are gone.
+  - `scripts/live/chat.sh` sets no trace file. Its notes give the exchange file and the command of the inspector.
+  - `scripts/live/scenario.sh` prints the exchanges of the session after its journal, with
+    `scripts/live/exchanges.py`, and then the command of the inspector for the root of the scenario.
+  - `exchanges.py` prints one line for each exchange: the `seq` before it, the time, the predictor or the probe, the
+    status, the end, the time of the reply, the size of the request, the tokens and the start of the reply text.
 - **O6. Later, if necessary.** The OTLP exporter of section 7.
 
 ## 9. The choices
@@ -405,5 +411,5 @@ On 2026-11-12 the review took each proposal of this list:
 2. **Plain lines first** (4.6). After the measure of O2, a choice can add compression. The options are a gzip member
    for each line (`gzip -dc` reads the file), or the lines of a stream only when the stream fails.
 3. **A fixed port.** The default port is 7411, so that a bookmark stays valid. `--port 0` takes a free port.
-4. **No `DSPY_TRACE`.** O5 removes it, `TracedModel` and `TracedStreams`.
+4. **No `DSPY_TRACE`.** O5 removed it, `TracedModel` and `TracedStreams`.
 5. **The exchanges of a probe** go in the file of its caller, with the link of the probe.

@@ -1922,9 +1922,10 @@ These points are proposals for the review:
   session of the root has it.
 - A live test drives the CLI with no person (2026-11-10). With `--script`, each line waits until the session has no
   open turn, each command goes through `run`, and the end of the input waits for the open turn. So each message
-  starts its own turn, in the order of the lines. With `DSPY_TRACE=FILE`, each model call goes to `FILE` as one JSON
-  line: the messages of the request, the text and the reasoning of the reply, or the error, and the time. The mask of
-  the client hides the secrets of each text. `scripts/dspy4s-harness` runs the CLI, and it builds the CLI first when
+  starts its own turn, in the order of the lines. A live test reads the exchange file of the session (below) to see
+  each request and reply, and `scripts/live/exchanges.py` prints one line for each exchange. Until 2026-11-12,
+  `DSPY_TRACE=FILE` wrote one JSON line for each model call, and O5 of [OBSERVABILITY.md](OBSERVABILITY.md) removed
+  it. `scripts/dspy4s-harness` runs the CLI, and it builds the CLI first when
   a source file is newer than the class path. `scripts/live/chat.sh` runs it in the script mode, or for a
   person when its input is a terminal.
 - A study of the TUI libraries for Scala and Java (2026-11-11) found no Scala library that fits better than JLine:

@@ -330,8 +330,8 @@ How it works:
   step, for example the call of the fallback adapter, starts a new draft.
 - A stop can cut a call whose thread goes on. Each call to the policy has a number, and the end of the call closes
   it, so a late token of a cut call shows nowhere.
-- `DSPY_TRACE` keeps the stream. The traced model streams when its model streams, and it writes the line of a call at
-  the end of its stream.
+- The exchange file keeps the stream (OBSERVABILITY.md, 4). The record of a call keeps each line of the stream, and
+  it writes the reply line at the end of the stream. Until 2026-11-12, `DSPY_TRACE` did this with a traced model.
 - The live block shows the reasoning in the view of `/reasoning`: `off` shows nothing, `line` shows its size, `short`
   shows its last 3 lines, and `full` shows its last 12 lines. Then it shows the last 16 lines of the text, with
   `… +N lines` above them.
