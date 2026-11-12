@@ -16,6 +16,15 @@ class StateLaws extends ScalaCheckSuite:
     forAll(schedules)(run => assertEquals(state(run.journal), run.live))
   }
 
+  property("Model: a ModelChanged changes only the model of the configuration, at each place of a run") {
+    // The effort of the next call to the policy comes from this model (CLI_SCREEN.md, 14.4).
+    val model = ModelChoice("other", Map("reasoning_effort" -> Json.String("high")))
+    forAll(states) { s =>
+      val after = evolve(s, Logged(s.nextSeq, meta, Entry.ModelChanged(model)))
+      assertEquals(after, s.copy(nextSeq = s.nextSeq + 1, config = s.config.copy(model = model)))
+    }
+  }
+
   property("Fold: state is the fold of evolve from the initial state") {
     forAll(schedules)(run => assertEquals(state(run.journal), run.journal.foldLeft(SessionState.initial)(evolve)))
   }

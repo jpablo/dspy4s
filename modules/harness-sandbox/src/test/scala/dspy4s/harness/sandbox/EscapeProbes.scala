@@ -35,9 +35,9 @@ abstract class EscapeProbes(backend: Backend, law: String, proxies: Boolean) ext
     val unix   = UnixServer()
     val proxy  = HostProxy.start(listed)
     try
-      // The profile of one command: the profile of the mode, with the secret files that exist when the command starts,
-      // as in `exec`. A probe takes the profile before its command.
-      def profile(): Profile          = Profiles.forCommand(mode, place.scope, place.layout, listed)
+      // The profile of each command, as in `exec`: the profile of the mode, with the secret names closed when the
+      // backend can close a name.
+      def profile(): Profile          = Profiles.forMode(mode, place.scope, place.layout, listed, backend.closesNames)
       def sh(command: String): String =
         val argv = Vector("/bin/sh", "-c", command)
         Support.run(
@@ -61,7 +61,7 @@ abstract class EscapeProbes(backend: Backend, law: String, proxies: Boolean) ext
         write(place.temp.resolve("w2")),
         write(place.outside.resolve("w3")),
         write(place.scope.resolve(".git/w4")),
-        write(place.scope.resolve(".env.new")), // a new file with a secret name holds only data of the command
+        write(place.scope.resolve(".env.new")), // a new file with a secret name
         read(secret, "FAKE-KEY"),
         read(env, "FAKE-ENV"),
         read(place.odd, "FAKE-ODD"),

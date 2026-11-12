@@ -38,10 +38,17 @@ import scala.util.control.NonFatal
   *
   * `main` reads the arguments, makes the model from `OPENAI_BASE_URL`, `DSPY_MODEL` and `OPENAI_API_KEY`, starts a
   * `LocalHost` with a `WorkRuntime`, and opens the session: a new one in the folder, or the session of `--session` with
-  * its own configuration. It prints the id of the session, then runs `loop`. The key goes only to the model, and the
-  * mask of the host hides it in each entry (5.6). With none of these variables, the client still starts, and the first
-  * policy call fails its turn with the error of the model. A session that another host has open gives an error and the
-  * exit code 1. `DSPY_NATIVE_REASONING=true` declares that the model gives its reasoning apart from its text.
+  * its own configuration. It prints the id of the session, then runs `loop`. The key goes only to the model and to
+  * `GET /models` of the same base URL, and the mask of the host hides it in each entry (5.6). With none of these
+  * variables, the client still starts, and the first policy call fails its turn with the error of the model. A session
+  * that another host has open gives an error and the exit code 1. `DSPY_NATIVE_REASONING=true` declares that the model
+  * gives its reasoning apart from its text.
+  *
+  * The effort and the context of the model (CLI_SCREEN.md, 14.4): a new session gets the effort of
+  * `DSPY_REASONING_EFFORT`, else `low` with native reasoning (`Effort.startOptions`). With `DSPY_MODEL`, a daemon
+  * thread reads the window and the levels of the model from `GET /models` of the base URL (`ModelFacts.fetch`), and
+  * `DSPY_CONTEXT_WINDOW` wins over the window of the endpoint.
+  *
   * `DSPY_SUMMARY_OPTIONS` is a JSON object, the option bag of each summary request of the memory tree (7.1), for
   * example `{"chat_template_kwargs": {"enable_thinking": false}}`. A value that is not a JSON object gives an error and
   * the exit code 2. Each HTTP exchange with the model endpoint goes to the exchange file of the session
@@ -92,6 +99,9 @@ object Cli:
         2
       case Right(options) => session(cli, home, env, secrets, options)
 
+  /** The longest wait for the facts of the model (`ModelFacts.fetch`). */
+  private val FactsTimeout = java.time.Duration.ofSeconds(5)
+
   /** Opens the session of `cli` with the variables `env`, the mask `secrets` and the summary options `options`, runs
     * the loop, and gives the exit code. A host that does not start and a session that does not open print the error of
     * the host in words (`HostError.words`), and give the exit code 1.
@@ -107,9 +117,18 @@ object Cli:
       secrets: Secrets,
       options: DynamicValue.Record
   ): Int =
-    val name    = env.getOrElse("DSPY_MODEL", "none")
-    val model   = modelOf(name, env)
-    val console = consoleOf(cli, secrets, env)
+    val name  = env.getOrElse("DSPY_MODEL", "none")
+    val model = modelOf(name, env)
+    // The facts of the model come on a daemon thread, so the start does not wait for the endpoint (CLI_SCREEN.md, 14.4).
+    val facts = AtomicReference(ModelFacts.withEnv(ModelFacts.unknown, env))
+    if env.get("DSPY_MODEL").exists(_.nonEmpty) then
+      val base = env.getOrElse("OPENAI_BASE_URL", OpenAiClient.defaultBaseUrl)
+      Thread.ofPlatform().daemon(true).name("harness-cli-facts").start { () =>
+        facts.set(ModelFacts.withEnv(ModelFacts.fetch(base, env.get("OPENAI_API_KEY"), name, FactsTimeout), env))
+      }: Unit
+    val console = consoleOf(cli, secrets, env, () => facts.get.choices)
+    // The effort of a new session and of a new controller, from the variables of the client.
+    val start = Effort.startOptions(env)
     // A SIGTERM runs the shutdown hooks, so this hook gives the terminal its modes back. `close` runs only once.
     val hook = Thread(() => console.close())
     Try(Runtime.getRuntime.addShutdownHook(hook)): Unit
@@ -124,14 +143,14 @@ object Cli:
             1
           case Right(host) =>
             try
-              val desk   = HostDesk(host, Controller.config(home, name, HarnessLimits()))
+              val desk   = HostDesk(host, Controller.config(home, name, HarnessLimits(), start))
               val opened =
                 if cli.controller then desk.controller.left.map(e => s"The controller did not open: ${e.words}")
                 else
                   val target = cli.session match
                     case None => Right((
                         SessionId(UUID.randomUUID().toString),
-                        Some(WorkRuntime.config(cli.scope, name, HarnessLimits()))
+                        Some(WorkRuntime.config(cli.scope, name, HarnessLimits(), start))
                       ))
                     // The journal files, not the catalog, give the sessions, so a session with no row still opens. A
                     // session whose owner is a session opens only with its owner (`openRefusal`).
@@ -153,7 +172,7 @@ object Cli:
                   console.print(
                     s"The session ${visible(handle.id.value)} is open. Type a message, or /help for the commands."
                   )
-                  if loop(handle, console, cli.script, Some(desk), home.toString) then 0 else 1
+                  if loop(handle, console, cli.script, Some(desk), home.toString, () => facts.get) then 0 else 1
             finally
               // The person gets the terminal back first, because the close of the host can wait for the stop of jobs.
               console.close()
@@ -166,10 +185,16 @@ object Cli:
   /** The console of the client: the line editor at a terminal, with its history at `<root>/history`. Plain streams in
     * the script mode, and for a pipe.
     */
-  private def consoleOf(cli: CliArgs, secrets: Secrets, env: Map[String, String]): ClientConsole =
+  private def consoleOf(
+      cli    : CliArgs,
+      secrets: Secrets,
+      env    : Map[String, String],
+      levels : () => Vector[String]
+  ): ClientConsole =
     // NO_COLOR with any value turns the colors off (no-color.org).
     val color  = !env.get("NO_COLOR").exists(_.nonEmpty)
-    val editor = if cli.script then None else EditorConsole.system(cli.root.resolve("history"), secrets.maskText, color)
+    val editor =
+      if cli.script then None else EditorConsole.system(cli.root.resolve("history"), secrets.maskText, color, levels)
     editor.getOrElse(PlainConsole(BufferedReader(InputStreamReader(System.in, UTF_8)), System.out))
 
   /** The text of `--list`: the sessions of the host at `root` (10.2), with `sessionsText`, and a line for each file of
@@ -237,6 +262,10 @@ object Cli:
   def loop(handle: SessionHandle, console: ClientConsole, script: Boolean, desk: Option[Desk]): Boolean =
     loop(handle, console, script, desk, "")
 
+  /** The loop of the client with `desk` and the home folder `home`, and with no facts of the model. */
+  def loop(handle: SessionHandle, console: ClientConsole, script: Boolean, desk: Option[Desk], home: String): Boolean =
+    loop(handle, console, script, desk, home, () => ModelFacts.unknown)
+
   /** The loop of the client: a thread prints `entryText` of each entry of the feed of `handle`, and another thread
     * reads the lines of `console` and runs the commands of `commandsFor`.
     *
@@ -248,6 +277,8 @@ object Cli:
     *     the person sees a refusal, for example `Close` during a turn.
     *   - `/jobs` and `/status` print `jobsText` and `statusText`, and `/reasoning` sets the view of the reasoning of
     *     the next steps. They change nothing in the session. `/allow N` grants the call that the entry N asked for.
+    *   - `/effort` prints `effortText`, and `/effort LEVEL` goes through `run` with the levels of `facts`, the facts of
+    *     the model. The footer and `/status` show the effort, and the context with the window of `facts`.
     *   - After a turn that ends `Aborted`, the client prints `stopNotice`: each job of that turn that still runs, and
     *     how to stop it (10.3).
     *   - A console with the screen of CLI_SCREEN.md (`ClientConsole.rich`) gets the rows of `Screen.after` for each
@@ -278,7 +309,14 @@ object Cli:
     *     release through the desk. After a release that ran, the client shows the controller. With no desk, these lines
     *     print that the client has one session, and `/close OUTCOME` sends `Close` with no release.
     */
-  def loop(handle: SessionHandle, console: ClientConsole, script: Boolean, desk: Option[Desk], home: String): Boolean =
+  def loop(
+      handle : SessionHandle,
+      console: ClientConsole,
+      script : Boolean,
+      desk   : Option[Desk],
+      home   : String,
+      facts  : () => ModelFacts
+  ): Boolean =
     val done                      = CountDownLatch(1)
     val rich                      = console.rich
     val start                     = if rich then ReasoningView.Line else ReasoningView.Short
@@ -301,9 +339,9 @@ object Cli:
             view.handle.activity,
             view.handle.draft
           ),
-        () =>
+        width =>
           val h = view.handle
-          Some(Screen.footer(h.state, h.memoryUse, runningJobs(h), home, console.glyphs))
+          Some(Screen.footer(h.state, h.memoryUse, runningJobs(h), home, console.glyphs, h.contextUse, facts(), width))
       )
       console.onDetail(() =>
         look.updateAndGet(l => l.copy(detail = if l.detail == Detail.Full then Detail.Compact else Detail.Full)): Unit
@@ -336,8 +374,15 @@ object Cli:
         case Line.Jobs          => print(jobsText(current.state, jobStarts(current.read(-1)), current.jobStatus))
         case Line.Status        =>
           val now = current.state
-          print(statusText(now, current.jobStatus, pendingCalls(now, current.read(now.lastTurn))))
+          print(statusText(
+            now,
+            current.jobStatus,
+            pendingCalls(now, current.read(now.lastTurn)),
+            current.contextUse,
+            facts()
+          ))
         case Line.Help                            => print(helpText)
+        case Line.Effort(None)                    => print(effortText(current.state, facts().choices))
         case _ if deskLine(parsed, desk.nonEmpty) =>
           atDesk.set(true)
           try
@@ -351,12 +396,12 @@ object Cli:
             case Left(error) => print(error)
             case Right(rows) => console.printRows(rows)
         case _ =>
-          // The person must see a refusal of `Close`, `Allow` and `StopJob`, so these wait for the commit.
+          // The person must see a refusal of `Close`, `Allow`, `StopJob` and `Effort`, so these wait for the commit.
           val waits = script ||
             (parsed match
-              case Line.Close(_, _) | Line.Allow(_, _) | Line.StopJob(_) => true
-              case _                                                     => false)
-          commandsFor(parsed, current.state, RequestId(UUID.randomUUID().toString), asked) match
+              case Line.Close(_, _) | Line.Allow(_, _) | Line.StopJob(_) | Line.Effort(_) => true
+              case _                                                                      => false)
+          commandsFor(parsed, current.state, RequestId(UUID.randomUUID().toString), asked, facts().choices) match
             case Left(error)     => print(error)
             case Right(commands) => commands.foreach { command =>
                 val result = if waits then current.run(command).map(_ => ()) else current.send(command)

@@ -481,6 +481,7 @@ object InspectorLaws:
       yield Entry.JobsStopRequested(which, t),
       Gen.oneOf(GrantLifetime.values.toIndexedSeq).map(Entry.Granted(RequestId("g1"), rule, _)),
       for h <- text; c <- Gen.oneOf(true, false) yield Entry.ScopeRecorded(h, c),
+      for m <- text; v <- json(text) yield Entry.ModelChanged(ModelChoice(m, Map("reasoning_effort" -> v))),
       text.map(t => Entry.Releasing(Vector(ReleaseItem.Keep(t, "fake")))),
       text.map(t => Entry.Released(ReleaseStep(ReleaseItem.Keep(t, "fake"), ReleaseResult.Failed(t)))),
       Gen.oneOf(

@@ -75,6 +75,17 @@ class SecretLaws extends ScalaCheckSuite:
     assertEquals(known.mask(Entry.TurnEnded(TurnOutcome.Replied(v))), Entry.TurnEnded(TurnOutcome.Replied(m)))
   }
 
+  test("Secret: the mask reaches the options of the model of a ModelChanged, as of an Activated") {
+    // A person changes the options of the model during a session (CLI_SCREEN.md, 14.4).
+    val v     = "fake-secret-value-3"
+    val known = Secrets(Map("FAKE_KEY" -> v))
+    val m     = "«secret:FAKE_KEY»"
+    assertEquals(
+      known.mask(Entry.ModelChanged(ModelChoice("fake-model", Map("fake_note" -> Json.String(s"a $v"))))),
+      Entry.ModelChanged(ModelChoice("fake-model", Map("fake_note" -> Json.String(s"a $m"))))
+    )
+  }
+
   test("Secret: the mask reaches each text of a Released step: the paths, the names, the commit and the error (8.7)") {
     val v                  = "fake-secret-value-3"
     val known              = Secrets(Map("FAKE_KEY" -> v))

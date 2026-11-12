@@ -218,3 +218,26 @@ name = "Mutant: a fork loses the values of the inputs"
 file = "SessionState.scala"
 old = "state(prefix).copy(grants = Set.empty, pending = Set.empty, jobs = Map.empty)"
 new = "state(prefix).copy(grants = Set.empty, pending = Set.empty, jobs = Map.empty, inputs = Map.empty)"
+
+# ── The model of a session (CLI_SCREEN.md, 14.4) ──
+
+[[mutant]]
+name = "Mutant: a ModelChanged keeps the old model"
+[[mutant.edit]]
+file = "SessionState.scala"
+old = "case Entry.ModelChanged(model) => base.copy(config = s.config.copy(model = model))"
+new = "case Entry.ModelChanged(model) => base"
+
+[[mutant]]
+name = "Mutant: a session that has ended takes a ChangeModel"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "case Command.ChangeModel(_) if s.closed                    => Left(Rejection.SessionClosed)"
+new = "case Command.ChangeModel(_) if s.closed && s.releasing    => Left(Rejection.SessionClosed)"
+
+[[mutant]]
+name = "Mutant: the model of the session gives a ModelChanged again"
+[[mutant.edit]]
+file = "Decide.scala"
+old = "case Command.ChangeModel(model) if model == s.config.model => Right(Vector.empty)"
+new = "case Command.ChangeModel(model) if model.model.isEmpty     => Right(Vector.empty)"

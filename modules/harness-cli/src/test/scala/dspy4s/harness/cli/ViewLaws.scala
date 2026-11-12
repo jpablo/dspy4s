@@ -219,7 +219,7 @@ class ViewLaws extends munit.FunSuite:
   test("CLI: each command of the help parses to a command of the client") {
     commandHelp.foreach { (syntax, _) =>
       val sample = syntax.replace("[N] [once|turn|session]", "57 turn").replace("ID", "2.1")
-        .replace(" off|line|short|full", " full").replace("SECONDS", "1")
+        .replace(" off|line|short|full", " full").replace("SECONDS", "1").replace(" [LEVEL]", " high")
       parseLine(sample) match
         case Line.Unknown(_) => fail(s"the help names $syntax, and $sample does not parse")
         case _               => ()

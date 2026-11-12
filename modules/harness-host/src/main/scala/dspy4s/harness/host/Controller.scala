@@ -4,6 +4,7 @@ import dspy4s.harness.HarnessLimits
 import dspy4s.harness.guest.{Access, Data, Mode, Scope, StrategyName, preamble}
 import dspy4s.harness.kernel.{ArgMatch, Guard, GuardRule, ModelChoice, Owner, SessionConfig, SessionId, Source}
 import dspy4s.harness.kernel.{TurnKind, Verdict, VerdictRule}
+import zio.blocks.schema.json.Json
 
 import java.nio.file.Path
 
@@ -40,9 +41,10 @@ object Controller:
 
   /** The configuration of the controller of the person with the home `home` (8.1, 8.7): a chat turn with `limits.steps`
     * steps, the owner `User`, `mode`, `ceiling`, the memory tree, the scope `Home`, the guard `guard`, the preamble of
-    * a session with no input fields, and the model `model`.
+    * a session with no input fields, and the model `model` with the option bag `options` of its provider
+    * (CLI_SCREEN.md, 14.4).
     */
-  def config(home: Path, model: String, limits: HarnessLimits): SessionConfig =
+  def config(home: Path, model: String, limits: HarnessLimits, options: Map[String, Json] = Map.empty): SessionConfig =
     SessionConfig(
       kind = TurnKind.Chat,
       steps = limits.steps,
@@ -53,7 +55,7 @@ object Controller:
       owner = Owner.User,
       guard = guard,
       preamble = preamble(summon[Data[String]].shape).getOrElse(""),
-      model = ModelChoice(model, Map.empty),
+      model = ModelChoice(model, options),
       goal = None,
       env = Set.empty
     )

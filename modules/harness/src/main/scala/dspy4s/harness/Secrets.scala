@@ -31,7 +31,8 @@ final case class Secrets(values: Map[String, String]) derives CanEqual:
 
   /** The entry with each string masked: each text field, each key of a map, and each string and key in a `Json`. With
     * no known value, the entry stays as it is. The configuration of `Activated` holds no secret (5.6), so only its free
-    * texts get the mask: the preamble, the goal and the options of the model.
+    * texts get the mask: the preamble, the goal and the options of the model. The options of the model of a
+    * `ModelChanged` get the mask too.
     */
   def mask(entry: Entry): Entry =
     if ordered.isEmpty then entry
@@ -57,6 +58,7 @@ final case class Secrets(values: Map[String, String]) derives CanEqual:
         case Entry.TurnEnded(outcome)                 => Entry.TurnEnded(turn(outcome))
         case Entry.Ended(outcome, reason)             => Entry.Ended(session(outcome), maskText(reason))
         case Entry.TurnStarted | Entry.StepStarted(_) => entry
+        case Entry.ModelChanged(model)                => Entry.ModelChanged(model.copy(options = fields(model.options)))
 
   /** A step of a release with each text masked: the paths, the names, the commit and the error (8.7). */
   private def released(step: ReleaseStep): ReleaseStep =

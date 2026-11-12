@@ -1,7 +1,7 @@
 package dspy4s.harness
 
 import dspy4s.adapters.ChatAdapter
-import dspy4s.core.contracts.{DspyError, RuntimeContext, RuntimeError}
+import dspy4s.core.contracts.{DspyError, LmUsage, RuntimeContext, RuntimeError}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.lm.contracts.{LanguageModel, LmChunk, LmMode, LmOutput, LmRequest, LmResponse, StreamingLanguageModel}
 import dspy4s.signatures.Signature
@@ -46,9 +46,13 @@ final class ThinkingLm(thought: String, replies: String*) extends LanguageModel:
 
 /** A model whose reply is a function of the text of its request, not of the order of the calls. So calls at the same
   * time get the right replies (6). `pause` gives the milliseconds that a call waits before its reply, and `most` counts
-  * the most calls that ran at the same time. A `Left` reply is a failed call.
+  * the most calls that ran at the same time. A `Left` reply is a failed call. `usage` gives the usage of a reply.
   */
-final class RequestLm(reply: String => Either[String, String], pause: String => Long = _ => 0L) extends LanguageModel:
+final class RequestLm(
+    reply: String => Either[String, String],
+    pause: String => Long            = _ => 0L,
+    usage: String => Option[LmUsage] = _ => None
+) extends LanguageModel:
   override val id: String                        = "request"
   override val mode: LmMode                      = LmMode.Chat
   val requests: ConcurrentLinkedQueue[LmRequest] = ConcurrentLinkedQueue()
@@ -61,20 +65,22 @@ final class RequestLm(reply: String => Either[String, String], pause: String => 
     try
       val text = request.messages.flatMap(_.text).mkString("\n")
       Thread.sleep(pause(text))
-      reply(text).left.map(RuntimeError("request", _)).map(t => LmResponse(outputs = Vector(LmOutput(text = t))))
+      reply(text).left.map(RuntimeError("request", _))
+        .map(t => LmResponse(outputs = Vector(LmOutput(text = t)), usage = usage(text)))
     finally running.decrementAndGet(): Unit
 
 /** A model that streams (CLI_SCREEN.md, 13). The reply of a call is `reply` of the text of its request, as in
   * `RequestLm`. A stream gives the native reasoning `thought` first in one chunk, if any, then the reply in parts of
   * `size` characters, and the last part has the finish reason. `gate(i)` runs before the chunk `i` of a stream, from 0,
   * so a law can see the state after each chunk or hold a stream. A `call` gives the whole reply, and `calls` counts the
-  * calls and the streams.
+  * calls and the streams. The last chunk of a stream has the usage `usage`.
   */
 final class StreamLm(
     reply  : String => Either[String, String],
-    thought: String      = "",
-    size   : Int         = 7,
-    gate   : Int => Unit = _ => ()
+    thought: String          = "",
+    size   : Int             = 7,
+    gate   : Int => Unit     = _ => (),
+    usage  : Option[LmUsage] = None
 ) extends StreamingLanguageModel:
   override val id: String                 = "streaming"
   override val mode: LmMode               = LmMode.Chat
@@ -95,9 +101,11 @@ final class StreamLm(
         val parts  = text.grouped(size).toVector
         val last   = parts.size - 1
         val chunks = Option.when(thought.nonEmpty)(LmChunk(reasoning = thought)).toVector ++
-          (if parts.isEmpty then Vector(LmChunk(finishReason = Some("stop")))
+          (if parts.isEmpty then Vector(LmChunk(finishReason = Some("stop"), usage = usage))
            else
-             parts.zipWithIndex.map((part, i) => LmChunk(text = part, finishReason = Option.when(i == last)("stop"))))
+             parts.zipWithIndex.map((part, i) =>
+               LmChunk(text = part, finishReason = Option.when(i == last)("stop"), usage = usage.filter(_ => i == last))
+             ))
         chunks.iterator.zipWithIndex.map { (chunk, i) =>
           gate(i)
           chunk

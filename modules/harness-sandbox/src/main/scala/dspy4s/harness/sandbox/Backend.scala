@@ -21,6 +21,12 @@ trait Backend:
     */
   def wrap(profile: Profile, cwd: Path, argv: Vector[String], proxyPort: Option[Int]): Vector[String]
 
+  /** True when the backend closes a secret name of `Profile.hiddenNames` in each folder, with no walk of the folders
+    * (5.4). Seatbelt does it with a rule on the path. A mount of bubblewrap cannot close a name, so the default is
+    * false.
+    */
+  def closesNames: Boolean = false
+
 /** The helpers that the backends share. */
 private[sandbox] object Host:
 

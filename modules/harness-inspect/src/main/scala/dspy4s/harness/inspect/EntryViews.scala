@@ -27,7 +27,7 @@ object EntryViews:
       case Entry.Activated(_, _) | Entry.Input(_, _, _) | Entry.TurnStarted | Entry.TurnEnded(_) | Entry.Ended(_, _) |
           Entry.Releasing(_) | Entry.Released(_) => 0
       case Entry.StepStarted(_) | Entry.StopRequested(_) | Entry.JobsStopRequested(_, _) | Entry.Granted(_, _, _) |
-          Entry.ScopeRecorded(_, _) => 1
+          Entry.ScopeRecorded(_, _) | Entry.ModelChanged(_) => 1
       case Entry.Acted(_, _, _) | Entry.EffectStarted(_, _, _) | Entry.EffectDone(_, _) | Entry.Observed(_, _, _) => 2
 
   /** The card of an entry. The `match` covers each case of `Entry`, so a new case does not compile until it has a card.
@@ -70,6 +70,8 @@ object EntryViews:
           note(s"request ${request.value}")
       case Entry.ScopeRecorded(head, clean) =>
         paragraph(s"The scope is at $head, ${if clean then "with no change" else "with changes"}.")
+      case Entry.ModelChanged(model) => paragraph("The model of the session changed. The next step uses it.") +
+          facts(("model" -> model.model) +: model.options.toVector.sortBy(_._1).map((k, v) => k -> v.print)*)
       case Entry.Releasing(plan) => "<p>The release plan:</p><ul>" +
           plan.map(item => s"<li>${escape(ScalaText.line(item))}</li>").mkString + "</ul>"
       case Entry.Released(step)         => paragraph(ScalaText.line(step))

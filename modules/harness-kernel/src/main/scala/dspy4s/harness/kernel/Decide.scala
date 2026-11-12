@@ -13,6 +13,11 @@ package dspy4s.harness.kernel
   *     `unattended` is at `SessionState.UnattendedTurns`. So it waits in the journal, and the next message of the
   *     person starts the turn that sees it. The end of a turn and `Activate` after a restart start no turn for such a
   *     message either.
+  *
+  * The rule of the model (CLI_SCREEN.md, 14.4): `ChangeModel` gives `ModelChanged` in an open session, also during a
+  * turn and a release, and the next call to the policy uses the new model. The model of the session gives no entry, and
+  * a session that has ended gives `Rejection.SessionClosed`. Only this command gives `ModelChanged`, so a `Commit` of
+  * it is refused.
   */
 def decide(command: Command, s: SessionState, sender: Source = Source.User): Either[Rejection, Vector[Entry]] =
   command match
@@ -63,6 +68,9 @@ def decide(command: Command, s: SessionState, sender: Source = Source.User): Eit
       if s.closed then Right(Vector.empty)
       else if s.position != Position.NoTurn then Left(Rejection.TurnOpen)
       else Right(Vector(Entry.Ended(outcome, reason)))
+    case Command.ChangeModel(_) if s.closed                    => Left(Rejection.SessionClosed)
+    case Command.ChangeModel(model) if model == s.config.model => Right(Vector.empty)
+    case Command.ChangeModel(model)                            => Right(Vector(Entry.ModelChanged(model)))
 
 /** True when a turn must wait for the person (8.7): `unattended` is at `SessionState.UnattendedTurns`, and no message
   * of the person waits.

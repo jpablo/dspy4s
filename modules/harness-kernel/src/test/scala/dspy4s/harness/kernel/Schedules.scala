@@ -93,7 +93,10 @@ object Schedules:
       Gen.zip(Gen.oneOf(rules), Gen.oneOf(GrantLifetime.values.toSeq)).map { (rule, lifetime) =>
         Command.Grant(RequestId("g1"), rule, lifetime)
       },
-      Gen.const(Command.Close(SessionOutcome.Parked, "park"))
+      Gen.const(Command.Close(SessionOutcome.Parked, "park")),
+      Gen.oneOf("none", "low", "high").map(level =>
+        Command.ChangeModel(ModelChoice("model", Map("reasoning_effort" -> Json.String(level))))
+      )
     )
 
   /** Random guards with rules that overlap, so that two rules can match one call. */
@@ -361,7 +364,11 @@ object Schedules:
             host.send(Command.Close(SessionOutcome.Parked, "park"))
             table.applyStops(host.live)
           case 92 => if host.live.closed then host.send(Command.Activate(versions, config))
-          case _  => work()
+          case 86 =>
+            // A person changes the effort of the model (CLI_SCREEN.md, 14.4), also during a turn.
+            val level = Vector("none", "low", "high")(random.nextInt(3))
+            host.send(Command.ChangeModel(config.model.copy(options = Map("reasoning_effort" -> Json.String(level)))))
+          case _ => work()
 
     for _ <- 1 to 20 + random.nextInt(120) do step()
 

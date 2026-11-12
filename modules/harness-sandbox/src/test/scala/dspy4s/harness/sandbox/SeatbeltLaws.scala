@@ -15,6 +15,19 @@ class SeatbeltLaws extends EscapeProbes(Seatbelt, "Seatbelt:", proxies = true):
     finally place.close()
   }
 
+  test("Seatbelt: the backend closes names, and the policy closes each secret name in each folder after the allows") {
+    // One rule with no walk of the scope (5.4). A walk before each command made each command wait in a large scope.
+    assert(Seatbelt.closesNames)
+    val layout  = Layout(Path.of("/w/tmp"), Path.of("/w/journals"), Vector.empty, Layout.secretNames)
+    val profile = Profiles.forMode(Mode.local, Path.of("/w/scope"), layout, HostList.empty, closesNames = true)
+    val policy  = Seatbelt.policy(profile, None)
+    val rule    = """(deny file-read* file-write* (regex #"/\.env(\.[^/]*)?(/|$)"))"""
+    assert(policy.contains(rule), policy)
+    assert(policy.indexOf(rule) > policy.indexOf("(allow file-write*"), policy)
+    val odd = Seatbelt.policy(profile.copy(hiddenNames = Set("a+b")), None)
+    assert(odd.contains("""(regex #"/a\+b(\.[^/]*)?(/|$)")"""), odd)
+  }
+
   test("Seatbelt: the policy escapes a quote, a backslash, a newline and a return in a path") {
     // A command can make a file with a secret name, and the next policy names it. A name that the policy cannot hold
     // would stop each later command.

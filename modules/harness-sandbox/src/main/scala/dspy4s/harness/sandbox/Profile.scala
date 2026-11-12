@@ -153,12 +153,15 @@ final case class Profile(
     readOnly: Vector[
       Path
     ], // the parts of the writable roots that stay read-only, for example .git (CODE_HARNESS.md F7)
-    hidden: Vector[Path], // a child can neither read nor write under these: the secrets, the journals, the secret files
-    net   : Net,
-    reads : Boolean = false // the file calls of the session can read, with no child process (8.7)
+    hidden     : Vector[Path], // a child can neither read nor write under these: the secrets, the journals, the secret files
+    net        : Net,
+    reads      : Boolean     = false,    // the file calls of the session can read, with no child process (8.7)
+    hiddenNames: Set[String] = Set.empty // a child can neither read nor write a part with one of these names (5.4)
 ):
 
-  def isHidden(path: Path): Boolean = hidden.exists(path.startsWith)
+  def isHidden(path: Path): Boolean =
+    hidden.exists(path.startsWith) ||
+      (hiddenNames.nonEmpty && path.iterator.asScala.exists(part => Layout.isSecretName(part.toString, hiddenNames)))
 
   def canRead(path: Path): Boolean = (canRun || reads) && !isHidden(path)
 
@@ -177,9 +180,11 @@ final case class Profile(
 object Profiles:
 
   /** The profile of the table of 5.4, for a session with the mode `mode` and the scope `scope`. A child process needs
-    * `Shell^` and `Files^`, because `exec` takes both. The network needs `Network^` too.
+    * `Shell^` and `Files^`, because `exec` takes both. The network needs `Network^` too. With `closesNames`, for a
+    * backend that closes a name in each folder, the profile also closes the secret names of `layout` (`hiddenNames`),
+    * so `canRead` and `canWrite` give what that backend does.
     */
-  def forMode(mode: Mode, scope: Path, layout: Layout, hosts: HostList): Profile =
+  def forMode(mode: Mode, scope: Path, layout: Layout, hosts: HostList, closesNames: Boolean = false): Profile =
     val run = mode.shell == Access.Full && mode.files == Access.Full
     Profile(
       canRun = run,
@@ -187,12 +192,12 @@ object Profiles:
       readOnly = Vector(scope.resolve(".git")),
       hidden = layout.secrets :+ layout.journals,
       net = if run && mode.network == Access.Full then Net.Proxy(hosts) else Net.Closed,
-      reads = mode.files != Access.None
+      reads = mode.files != Access.None,
+      hiddenNames = if closesNames then layout.secretNames else Set.empty
     )
 
-  /** The profile of one command: the profile of the mode, and each file with a secret name that exists in a writable
-    * root when the command starts (5.4). The command cannot read, write, link or move these files. A command can make a
-    * new file with a secret name: it holds only data of the command, and the next command cannot read it.
+  /** An optional profile with the secret names hidden: the profile of the mode, and each file with a secret name that
+    * exists in a writable root. This walks the roots. `SandboxedShell` uses `forMode` instead, with no walk.
     */
   def forCommand(mode: Mode, scope: Path, layout: Layout, hosts: HostList): Profile =
     val profile = forMode(mode, scope, layout, hosts)
@@ -213,12 +218,14 @@ object Profiles:
       val git      = profile.readOnly.exists(part => Option(part.getFileName).exists(_.toString == ".git"))
       val examples = layout.secrets.filter(profile.isHidden).flatMap(p => Option(p.getFileName)).map(_.toString)
         .distinct.take(3)
-      val closed =
+      // A file call refuses a secret name in each case, and a command only when the backend closes the name.
+      val names = layout.secretNames.toVector.sorted.map(name =>
+        s"a file or a folder whose name is $name or starts with \"$name.\" (for example $name.local)"
+      )
+      val (both, fileOnly) = if profile.hiddenNames.nonEmpty then (names, Vector.empty) else (Vector.empty, names)
+      val closed           =
         Option.when(examples.nonEmpty)(s"the secret paths of the home folder (for example ${list(examples, "and")})") ++
-          Option.when(profile.isHidden(layout.journals))("the journals of the harness") ++
-          layout.secretNames.toVector.sorted.map(name =>
-            s"a file whose name is $name or starts with \"$name.\" (for example $name.local)"
-          )
+          Option.when(profile.isHidden(layout.journals))("the journals of the harness") ++ both
       val network = profile.net match
         case Net.Closed                                 => "A command has no network."
         case Net.Proxy(hosts) if hosts.patterns.isEmpty => "A command reaches no host."
@@ -232,7 +239,8 @@ object Profiles:
           "So a git command that changes the repository fails, for example commit, branch, checkout, stash or " +
             "worktree add."
         ) ++
-        Option.when(closed.nonEmpty)(s"A command and a file call can neither read nor write ${list(closed, "or")}.") :+
+        Option.when(closed.nonEmpty)(s"A command and a file call can neither read nor write ${list(closed, "or")}.") ++
+        Option.when(fileOnly.nonEmpty)(s"A file call can neither read nor write ${list(fileOnly, "or")}.") :+
         network).mkString(" ")
 
   /** The items of `items` in one text, with `word` before the last one: "a", "a and b", or "a, b and c". */

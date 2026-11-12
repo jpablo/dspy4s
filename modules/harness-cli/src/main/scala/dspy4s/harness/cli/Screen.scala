@@ -1,7 +1,7 @@
 package dspy4s.harness.cli
 
 import dspy4s.harness.guest.{Mode, Scope}
-import dspy4s.harness.host.{Activity, MemoryUse, WorkRuntime, jobName}
+import dspy4s.harness.host.{Activity, ContextUse, MemoryUse, WorkRuntime, jobName}
 import dspy4s.harness.kernel.*
 import dspy4s.harness.{Draft, textPrefix}
 import zio.blocks.schema.json.Json
@@ -193,6 +193,8 @@ object Screen:
             Span(printable(s"Allowed ${lifetime.words}: ${callText(rule)}."), Tone.Plain)
           )))
         )
+      case Entry.ModelChanged(model) =>
+        (screen, Vector(Row.of(s"  ${g.arrow} ${printable(changedText(model))}", Tone.Dim)))
       case Entry.Ended(outcome, reason) => (screen, marked(g.reply, Tone.Accent, outcome.report(reason)))
       case _                            => (screen, Vector.empty)
 
@@ -223,24 +225,52 @@ object Screen:
           s"${g.reply} dspy4s ${g.dot} $name"
         )
 
-  /** The footer: the folder, the mode, the model, the memory, the jobs that run and the calls that wait. `home` is the
-    * home folder, which the footer shows as `~`. A part with no value does not show.
+  /** The footer: the folder, the mode, the model, the reasoning effort, the context, the memory, the jobs that run and
+    * the calls that wait. `home` is the home folder, which the footer shows as `~`. A part with no value does not show.
+    *
+    * The effort is the effort of the model of the session (`Effort.of`). The context is the count of prompt tokens of
+    * the last call to the policy (`context`), with the window of `facts` and the percent of it, as
+    * `context 18k of 1M (2%)`. The memory is the size of the last view of the memory and its budget, in characters.
+    * When the line is wider than `width`, the footer shows no memory part (CLI_SCREEN.md, 14.3).
     */
-  def footer(state: SessionState, memory: Option[MemoryUse], jobs: Int, home: String, glyphs: Glyphs): Row =
+  def footer(
+      state  : SessionState,
+      memory : Option[MemoryUse],
+      jobs   : Int,
+      home   : String,
+      glyphs : Glyphs,
+      context: Option[ContextUse] = None,
+      facts  : ModelFacts         = ModelFacts.unknown,
+      width  : Int                = Int.MaxValue
+  ): Row =
     val folder = folderOf(state)
     val shown  =
       if home.nonEmpty && (folder == home || folder.startsWith(home + "/")) then "~" + folder.drop(home.length)
       else folder
     val pending = state.pending.size
-    val parts   = Vector(
+    val head    = Vector(
       Option.when(shown.nonEmpty)(visible(shown)),
       Some(modeName(state.config.mode)),
       Option.when(state.config.model.model.nonEmpty)(visible(state.config.model.model)),
-      memory.map(m => s"memory ${thousands(m.chars)} of ${thousands(m.budget)}"),
+      Effort.of(state.config.model).map(level => s"effort ${visible(level)}"),
+      context.map(use => s"context ${contextWords(use, facts.window, "")}")
+    ).flatten
+    val kept = memory.map(m => s"memory ${thousands(m.chars)} of ${thousands(m.budget)} chars")
+    val tail = Vector(
       Option.when(jobs > 0)(count(jobs, "job")),
       Option.when(pending > 0)(if pending == 1 then "1 call waits" else s"$pending calls wait")
     ).flatten
-    Row.of("  " + parts.mkString(s" ${glyphs.dot} "), Tone.Dim)
+    def line(parts: Vector[String]): String = "  " + parts.mkString(s" ${glyphs.dot} ")
+    val full                                = line(head ++ kept ++ tail)
+    Row.of(if full.length <= width then full else line(head ++ tail), Tone.Dim)
+
+  /** The context of `use` in words: the prompt tokens, and with a window `window`, the window with `unit` and the
+    * percent, as `18k of 1M (2%)` or `18k of 1M tokens (2%)`. With no window, the count with `unit`.
+    */
+  private[cli] def contextWords(use: ContextUse, window: Option[Long], unit: String): String =
+    window.fold(s"${tokens(use.prompt)}$unit")(w =>
+      s"${tokens(use.prompt)} of ${tokens(w)}$unit (${percent(use.prompt, w)})"
+    )
 
   /** The rows of `/show id`: a cell (`12`) or a call (`12.0`), in full. An unknown id gives an error text. */
   def show(screen: Screen, id: String, look: Look): Either[String, Vector[Row]] =
@@ -519,11 +549,6 @@ object Screen:
         activity match
           case Some(Activity.MemorySummaries(done, total)) if step.exists(!_.acted) =>
             Some(s"the memory: $done of $total summaries")
-          case Some(Activity.SecretScan(folders, total))
-              if open.exists(_.calls.exists(c => c.end.isEmpty && (c.op == "exec" || c.op == "spawn"))) =>
-            Some(total.fold(s"the scan for secret files: ${grouped(folders)} folders")(t =>
-              s"the scan for secret files: ${grouped(folders)} of ${grouped(t)} folders"
-            ))
           case _ => None
     val parts = Vector(Some(whole(nowMillis - turn.startMillis))) ++ Vector(
       turn.steps.lastOption.map(s => s"step ${s.step + 1} of ${state.config.steps}"),
@@ -578,11 +603,23 @@ object Screen:
     val s = millis.max(0L) / 1000
     if s < 60 then s"$s s" else s"${s / 60} m ${s % 60} s"
 
-  /** A number with a comma for each group of three digits. */
-  private def grouped(n: Long): String = "%,d".formatLocal(java.util.Locale.ROOT, n)
-
   /** A number of characters in thousands, for the footer. */
   private def thousands(n: Int): String = if n >= 1000 then s"${n / 1000}k" else n.toString
+
+  /** A count of tokens in a few characters: a count under 1,000 as it is, a count under 1,000,000 in whole thousands
+    * (`18k`), and a larger count in millions with one decimal and no `.0` (`1M`, `1.6M`).
+    */
+  private[cli] def tokens(n: Long): String =
+    if n < 1_000 then n.toString
+    else if n < 1_000_000 then s"${n / 1_000}k"
+    else
+      val millions = (BigDecimal(n) / 1_000_000).setScale(1, BigDecimal.RoundingMode.HALF_UP)
+      s"${millions.bigDecimal.stripTrailingZeros.toPlainString}M"
+
+  /** The part `part` of `whole` as a whole percent, or `<1%` under 1%. */
+  private def percent(part: Long, whole: Long): String =
+    val exact = part.toDouble * 100 / whole
+    if exact < 1 then "<1%" else s"${math.round(exact)}%"
 
   private def modeName(mode: Mode): String =
     if mode == WorkRuntime.workMode then "work mode"

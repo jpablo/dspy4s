@@ -17,6 +17,7 @@ enum Command derives CanEqual:
   case StopJobs(which: JobSelector, reason: String)
   case Grant(request: RequestId, rule: GuardRule, lifetime: GrantLifetime)
   case Close(outcome: SessionOutcome, reason: String)
+  case ChangeModel(model: ModelChoice)
 
 /** Why `decide` refuses a command (4.5). */
 enum Rejection derives CanEqual:
