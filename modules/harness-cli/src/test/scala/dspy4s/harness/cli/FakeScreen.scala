@@ -100,8 +100,10 @@ final class FakeScreen(width: Int, height: Int):
     def n(k: Int, default: Int): Int = nums.lift(k).flatten.filter(_ > 0).getOrElse(default)
     if plain then
       op match
-        case 'A'       => y = (y - n(0, 1)).max(0); wrap = false
-        case 'B'       => y = (y + n(0, 1)).min(height - 1); wrap = false
+        // A move up or down stops at the edge of the scroll region. A cursor out of the region stops at the edge of the
+        // screen.
+        case 'A'       => y = (y - n(0, 1)).max(if y >= top then top else 0); wrap = false
+        case 'B'       => y = (y + n(0, 1)).min(if y <= bottom then bottom else height - 1); wrap = false
         case 'C'       => x = (x + n(0, 1)).min(width - 1); wrap = false
         case 'D'       => x = (x - n(0, 1)).max(0); wrap = false
         case 'G'       => x = (n(0, 1) - 1).min(width - 1); wrap = false

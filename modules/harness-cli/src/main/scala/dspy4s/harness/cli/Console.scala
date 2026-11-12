@@ -89,7 +89,9 @@ final class PlainConsole(in: BufferedReader, out: PrintStream) extends ClientCon
   *     only with its lock, so a timer redraws it every `FrameMillis` through the widget `BusyWidget`, when it changed.
   *     A `%` of a row stays as it is. Before Enter accepts a line, the prompt is only `› `, so the history keeps no
   *     live block.
-  *   - The footer is one line of a JLine `Status` at the bottom of the terminal.
+  *   - The footer is one line of a JLine `Status` at the bottom of the terminal. The status gets this row when the
+  *     console starts, and it keeps it with a blank row when there is no footer. So its height does not change during a
+  *     read.
   *   - During a turn the cursor is a blinking block, and the window title is the title of the live block.
   *   - With `color` off, each tone has no color.
   *   - `close` first ends a read that waits, at most `CloseWait`. So JLine turns off the modes that its read turned on,
@@ -114,6 +116,8 @@ final class EditorConsole private (reader: LineReaderImpl, color: Boolean, overr
   @volatile private var shownFooter: Option[Row]    = None
   private val blinking                              = AtomicBoolean(false)
   private val status                                = Try(Option(JlineStatus.getStatus(terminal))).toOption.flatten
+  // The footer gets its row before the first read draws its prompt (`showFooter`).
+  showFooter(None)
 
   private val ticker = Executors.newSingleThreadScheduledExecutor { task =>
     Thread.ofPlatform().daemon(true).name("harness-cli-screen").unstarted(task)
@@ -251,9 +255,16 @@ final class EditorConsole private (reader: LineReaderImpl, color: Boolean, overr
     val row = Try(footerOf()).toOption.flatten
     if row != shownFooter then
       shownFooter = row
-      status.foreach(s =>
-        Try(s.update(row.toVector.map(r => styled(r).columnSubSequence(0, columns() - 1)).asJava)): Unit
-      )
+      showFooter(row)
+
+  /** Shows `row` in the status, or a blank row for no footer. So the status always has one row. When the height of the
+    * status changes during a read, JLine forgets the lines that it drew (`LineReaderImpl.redisplay`). It then draws the
+    * full prompt again from the row of the cursor. That row is the last row of the prompt, so the old live block and
+    * the old rule stay above it.
+    */
+  private def showFooter(row: Option[Row]): Unit =
+    val line = row.fold(AttributedString.EMPTY)(r => styled(r).columnSubSequence(0, columns() - 1))
+    status.foreach(s => Try(s.update(Vector(line).asJava)): Unit)
 
   /** Sets the title of the window, when it changed. The title has no control character (`Screen.live`). */
   private def title(text: String): Unit =

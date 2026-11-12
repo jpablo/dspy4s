@@ -192,13 +192,16 @@ class ConsoleLaws extends munit.FunSuite:
   /** What a person sees after the output `out`. */
   private def seen(out: ByteArrayOutputStream): Vector[String] = FakeScreen.of(out.toString(UTF_8), 80, 24)
 
-  /** Runs `body` with an editor on a terminal of 80 columns, with the live block `live`, while a read waits. */
-  private def editing(live: AtomicReference[Live], footer: () => Option[Row] = () => None)(
+  /** Runs `body` with an editor on a terminal of 80 columns, with the live block `live`, while a read waits. The
+    * terminal shows `before` first, so a law can put the prompt at the bottom of the window.
+    */
+  private def editing(live: AtomicReference[Live], footer: () => Option[Row] = () => None, before: String = "")(
       body: (EditorConsole, PipedOutputStream, ByteArrayOutputStream, AtomicReference[Typed]) => Unit
   ): Unit =
     withHistory { history =>
-      val writer  = PipedOutputStream()
-      val out     = ByteArrayOutputStream()
+      val writer = PipedOutputStream()
+      val out    = ByteArrayOutputStream()
+      out.write(before.getBytes(UTF_8))
       val console = EditorConsole.on(sized(writer, out), history, identity)
       val got     = AtomicReference[Typed]()
       console.watch(() => live.get, footer)
@@ -273,6 +276,76 @@ class ConsoleLaws extends munit.FunSuite:
     editing(live, () => Some(Row.of("  FAKE-FOOTER"))) { (_, _, out, _) =>
       assert(soon(seen(out).exists(_.contains("$ date +%s"))), seen(out).mkString("\n"))
       assert(soon(out.toString(UTF_8).contains("FAKE-FOOTER")), out.toString(UTF_8))
+    }
+  }
+
+  test("CLI editor: a key at the bottom of the window keeps one rule right above the prompt, with the footer") {
+    // A live session of 2026-11-11: the first key after the footer showed a second rule and an empty row above the
+    // prompt, at the bottom of the window.
+    val live   = AtomicReference(Live(Vector.empty, busy = false, title = "dspy4s · shop"))
+    val before = (1 to 23).map(i => s"FAKE-LINE-$i").mkString("", "\r\n", "\r\n")
+    editing(live, () => Some(Row.of("  FAKE-FOOTER")), before) { (_, writer, out, _) =>
+      assert(soon(seen(out).exists(_.contains("FAKE-FOOTER"))), seen(out).mkString("\n"))
+      writer.write("H".getBytes(UTF_8))
+      writer.flush()
+      assert(soon(seen(out).exists(_.startsWith("› H"))), seen(out).mkString("\n"))
+      // A few ticks of the timer, so each redraw after the key is on the screen.
+      Thread.sleep(400)
+      val shown = seen(out)
+      assertEquals(shown.count(_.startsWith("─")), 1, shown.mkString("\n"))
+      assertEquals(shown.indexWhere(_.startsWith("› H")) - shown.indexWhere(_.startsWith("─")), 1, shown.mkString("\n"))
+      assertEquals(shown.last, "  FAKE-FOOTER", shown.mkString("\n"))
+    }
+  }
+
+  test("CLI editor: a footer that first shows during a turn keeps the live block and one rule right above the prompt") {
+    val live   = AtomicReference(busy("  FAKE-ROW-A", "  FAKE-ROW-B"))
+    val footer = AtomicReference(Option.empty[Row])
+    val before = (1 to 23).map(i => s"FAKE-LINE-$i").mkString("", "\r\n", "\r\n")
+    editing(live, () => footer.get, before) { (_, writer, out, _) =>
+      assert(soon(seen(out).exists(_.contains("FAKE-ROW-B"))), seen(out).mkString("\n"))
+      footer.set(Some(Row.of("  FAKE-FOOTER")))
+      assert(soon(seen(out).exists(_.contains("FAKE-FOOTER"))), seen(out).mkString("\n"))
+      writer.write("H".getBytes(UTF_8))
+      writer.flush()
+      assert(soon(seen(out).exists(_.startsWith("› H"))), seen(out).mkString("\n"))
+      Thread.sleep(400)
+      val shown = seen(out)
+      val mark  = shown.indexWhere(_.startsWith("› H"))
+      assertEquals(
+        shown.slice(mark - 3, mark + 2).map(_.take(14)),
+        Vector("  FAKE-ROW-A", "  FAKE-ROW-B", "─" * 14, "› H", "  FAKE-FOOTER"),
+        shown.mkString("\n")
+      )
+      assertEquals(shown.count(_.startsWith("─")), 1, shown.mkString("\n"))
+      assertEquals(shown.count(_.contains("FAKE-ROW-A")), 1, shown.mkString("\n"))
+    }
+  }
+
+  test("CLI editor: a footer that changes its text, and then goes away, keeps one rule right above the prompt") {
+    val live   = AtomicReference(Live(Vector.empty, busy = false, title = "dspy4s · shop"))
+    val footer = AtomicReference(Option(Row.of("  FAKE-FOOTER-1")))
+    val before = (1 to 5).map(i => s"FAKE-LINE-$i").mkString("", "\r\n", "\r\n")
+
+    def ruleOver(mark: String, shown: Vector[String]): Unit =
+      assertEquals(shown.count(_.startsWith("─")), 1, shown.mkString("\n"))
+      assertEquals(shown.indexWhere(_.startsWith(mark)) - shown.indexWhere(_.startsWith("─")), 1, shown.mkString("\n"))
+    editing(live, () => footer.get, before) { (_, writer, out, _) =>
+      assert(soon(seen(out).last == "  FAKE-FOOTER-1"), seen(out).mkString("\n"))
+      footer.set(Some(Row.of("  FAKE-FOOTER-2")))
+      assert(soon(seen(out).last == "  FAKE-FOOTER-2"), seen(out).mkString("\n"))
+      writer.write("H".getBytes(UTF_8))
+      writer.flush()
+      assert(soon(seen(out).exists(_.startsWith("› H"))), seen(out).mkString("\n"))
+      Thread.sleep(400)
+      ruleOver("› H", seen(out))
+      footer.set(None)
+      assert(soon(!seen(out).exists(_.contains("FAKE-FOOTER"))), seen(out).mkString("\n"))
+      writer.write("i".getBytes(UTF_8))
+      writer.flush()
+      assert(soon(seen(out).exists(_.startsWith("› Hi"))), seen(out).mkString("\n"))
+      Thread.sleep(400)
+      ruleOver("› Hi", seen(out))
     }
   }
 
