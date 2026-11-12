@@ -331,6 +331,11 @@ class WorkLaws extends munit.FunSuite:
         case Logged(_, meta, Entry.Input(_, _, _)) => meta.source == Source.Harness
         case _                                     => false
       })
+      // The model reads the message, so it gives the status of the job in words.
+      val text = handle.read(-1).collectFirst {
+        case Logged(_, meta, Entry.Input(_, text, _)) if meta.source == Source.Harness => text
+      }.getOrElse(fail("no message of the job"))
+      assert(text.contains("exited with the code 0") && !text.contains("Exited("), text)
     }
   }
 

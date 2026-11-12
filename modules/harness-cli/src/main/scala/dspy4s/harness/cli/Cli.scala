@@ -79,7 +79,8 @@ object Cli:
       case Right(options) => session(cli, home, env, secrets, options)
 
   /** Opens the session of `cli` with the variables `env`, the mask `secrets` and the summary options `options`, runs
-    * the loop, and gives the exit code.
+    * the loop, and gives the exit code. A host that does not start and a session that does not open print the error of
+    * the host in words (`HostError.words`), and give the exit code 1.
     *
     * The console comes before the host. JLine reads the input while it makes the terminal (`EditorConsole.system`), so
     * a line that the person types after the start of the host stays. Also, only one line of text comes between the open
@@ -106,13 +107,13 @@ object Cli:
         val env              = WorkEnv(home, HostList.empty, Backends.detect(), secrets, cli.root, options)
         LocalHost.startWith(cli.root, peers => WorkRuntime.forHost(env)(peers), secrets) match
           case Left(error) =>
-            System.err.println(printable(s"The host did not start: $error"))
+            System.err.println(printable(s"The host did not start: ${error.words}"))
             1
           case Right(host) =>
             try
               val desk   = HostDesk(host, Controller.config(home, name, HarnessLimits()))
               val opened =
-                if cli.controller then desk.controller.left.map(e => s"The controller did not open: $e")
+                if cli.controller then desk.controller.left.map(e => s"The controller did not open: ${e.words}")
                 else
                   val target = cli.session match
                     case None => Right((
@@ -122,13 +123,13 @@ object Cli:
                     // The journal files, not the catalog, give the sessions, so a session with no row still opens. A
                     // session whose owner is a session opens only with its owner (`openRefusal`).
                     case Some(wanted) =>
-                      LocalHost.journals(cli.root).left.map(errorText).flatMap(resolveSession(_, wanted)).flatMap {
+                      LocalHost.journals(cli.root).left.map(_.words).flatMap(resolveSession(_, wanted)).flatMap {
                         id =>
                           openRefusal(host.list.find(_.session == id)).toLeft((id, None))
                       }
                   for
                     (id, config) <- target
-                    handle       <- host.open(id, config).left.map(e => s"The session ${id.value} did not open: $e")
+                    handle       <- host.open(id, config).left.map(e => s"The session ${id.value} did not open: ${e.words}")
                   yield handle
               opened match
                 case Left(error) =>
@@ -159,20 +160,14 @@ object Cli:
   /** The text of `--list`: the sessions of the host at `root` (10.2), with `sessionsText`, and a line for each file of
     * the folder of the journals that is not a journal. `LocalHost.sessions` rebuilds the catalog as the start of a host
     * does, so a journal with no row is in the list too. It starts no session, and a root with no folder of journals
-    * gets no file.
+    * gets no file. An error of the host gives its words (`HostError.words`).
     */
   def listText(root: Path, zone: ZoneId): Either[String, String] =
-    LocalHost.sessions(root).left.map(errorText).map { rebuilt =>
+    LocalHost.sessions(root).left.map(_.words).map { rebuilt =>
       val bad =
         rebuilt.failed.map((file, reason) => s"Not listed: ${visible(file.getFileName.toString)}: ${visible(reason)}")
       (sessionsText(rebuilt.rows, zone) +: bad).mkString("\n")
     }
-
-  /** The text of an error of the host for the person. */
-  private def errorText(error: HostError): String =
-    error match
-      case HostError.OpenFailed(message) => message
-      case other                         => other.toString
 
   /** The mask of the client: each secret-like variable of the process and of the variables file (5.6), with the rules
     * of `Secrets.known`. A short value, as the placeholder key `unused`, is not a known value, so the mask never
@@ -222,7 +217,9 @@ object Cli:
     *     the next steps. They change nothing in the session. `/allow N` grants the call that the entry N asked for.
     *   - After a turn that ends `Aborted`, the client prints `stopNotice`: each job of that turn that still runs, and
     *     how to stop it (10.3).
-    *   - An error of `commandsFor` and a refused command print one line, and the loop goes on.
+    *   - An error of `commandsFor` and a refused command print one line, and the loop goes on. A refused command prints
+    *     the error of the host in words (`HostError.words`), for example `The session refused the command: a turn is
+    *     open`.
     *   - After `Behind`, the client reads the journal after its last `seq`, so it shows each entry once.
     *   - With no desk, it ends at `/quit`, at the end of the input, or when the feed ends, for example after `Close` or
     *     a failed write. It gives false only when the feed ended and the session did not close, as after a failed
@@ -302,7 +299,7 @@ object Cli:
             case Left(error)     => print(error)
             case Right(commands) => commands.foreach { command =>
                 val result = if waits then current.run(command).map(_ => ()) else current.send(command)
-                result.left.foreach(error => print(s"The session refused the command: $error"))
+                result.left.foreach(error => print(s"The session refused the command: ${error.words}"))
               }
     def line(text: String): Unit =
       if script then idle()
@@ -346,7 +343,8 @@ object Cli:
 
   /** Runs a desk line of the loop (8.7), and gives the session that the client shows after it. The confirmation of an
     * irreversible item of a release is the next line of `console`. A release ends the session, so after a release that
-    * ran, it gives the controller. A `/close` of the controller prints that the controller never ends.
+    * ran, it gives the controller. A `/close` of the controller prints that the controller never ends. A session that
+    * does not open prints the error of the host in words (`HostError.words`).
     */
   private def deskStep(
       desk   : Option[Desk],
@@ -364,7 +362,7 @@ object Cli:
           print(s"The session ${id.value} has ended. Type /reopen ${id.value} to open it again.")
           handle
         case Left(error) =>
-          print(s"The session ${id.value} did not open: $error")
+          print(s"The session ${id.value} did not open: ${error.words}")
           handle
     desk match
       case None =>
@@ -383,7 +381,8 @@ object Cli:
           case _ => handle
 
   /** `/close OUTCOME` with a desk (8.7): the plan, a question for each irreversible item, the release, and its steps.
-    * It gives true when the release ran, so the session ended.
+    * It gives true when the release ran, so the session ended. A plan or a release that fails prints the error of the
+    * host in words (`HostError.words`).
     */
   private def release(
       desk   : Desk,
@@ -399,7 +398,7 @@ object Cli:
     else
       desk.planOf(handle.id, outcome) match
         case Left(error) =>
-          print(s"The session has no release plan: $error")
+          print(s"The session has no release plan: ${error.words}")
           false
         case Right((state, plan)) =>
           print(s"The release plan of the session ${handle.id.value}:")
@@ -411,7 +410,7 @@ object Cli:
               case _                => false
           desk.release(handle.id, outcome, reason, confirm) match
             case Left(error) =>
-              print(s"The release did not run: $error")
+              print(s"The release did not run: ${error.words}")
               false
             case Right(steps) =>
               steps.foreach(step => print(stepText(step)))

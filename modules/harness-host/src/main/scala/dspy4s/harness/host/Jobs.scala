@@ -204,7 +204,8 @@ object JobTable:
   *     of one cell run one at a time, so the cell has only that one open.
   *   - With `report`, the end of the job sends a message with `Source.Harness`. The message reaches a step of the open
   *     turn, or it starts a turn when no turn is open.
-  *   - `stopJob(job)` runs `StopJobs(One(job))` (10.3).
+  *   - `stopJob(job)` runs `StopJobs(One(job))` (10.3). A refusal throws an exception with the refusal in words
+  *     (`Rejection.words`), because the cell reads it.
   */
 final class JobShell(inner: SandboxedShell, table: JobTable, journal: Journal) extends Shell:
 
@@ -229,7 +230,7 @@ final class JobShell(inner: SandboxedShell, table: JobTable, journal: Journal) e
   def stopJob(job: JobId): Unit =
     val id = known(job, "stopJob")
     journal.run(Command.StopJobs(JobSelector.One(id), "the cell stopped the job"), Source.Policy).left.foreach {
-      rejection => throw IllegalStateException(s"stopJob: the session refused the stop ($rejection)")
+      rejection => throw IllegalStateException(s"stopJob: the session refused the stop: ${rejection.words}")
     }
 
   /** The effect of `job`, when the journal knows the job. */

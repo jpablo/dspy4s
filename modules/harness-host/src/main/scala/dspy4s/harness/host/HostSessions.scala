@@ -3,13 +3,14 @@ package dspy4s.harness.host
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.harness.{Budget, Journal}
 import dspy4s.harness.guest.{Llm, Scope, SessionCard, SessionRef, Sessions, StrategyName}
-import dspy4s.harness.kernel.{Command, EffectId, Owner, RequestId, SessionConfig, SessionId}
+import dspy4s.harness.kernel.{Command, EffectId, RequestId, SessionConfig, SessionId}
 
 import java.util.UUID
 
 /** The handler of `Sessions^` of a session `caller` (8.2, 8.7). Each call that fails throws an exception with a plain
-  * message, so the cell fails with it. Each id of a `SessionRef` must be `SessionId.valid` and have a row in the
-  * catalog, else the call fails before it reaches the host.
+  * message, so the cell fails with it. The model of the controller reads the message, so an error of the host gives its
+  * words (`HostError.words`) and not a Scala value. Each id of a `SessionRef` must be `SessionId.valid` and have a row
+  * in the catalog, else the call fails before it reaches the host.
   *
   *   - `list` gives the card of each row of the catalog (`cardOf`), apart from the row of `caller`.
   *   - `tell` sends the message to the session with the source `Controller.messageSource(caller)` through
@@ -46,7 +47,7 @@ final class HostSessions(
     val send = Command.Send(HostSessions.requestOf("tell", caller, effect("tell")), message, Map.empty)
     peers.runAs(row.session, send, Controller.messageSource(caller)).left
       .foreach(error =>
-        throw IllegalStateException(s"tell: the session ${session.id} did not take the message: $error")
+        throw IllegalStateException(s"tell: the session ${session.id} did not take the message: ${error.words}")
       )
 
   def start(goal: String, scope: Scope, strategy: StrategyName): SessionRef =
@@ -54,7 +55,7 @@ final class HostSessions(
     val made = peers.make(scope, id).fold(error => throw IllegalArgumentException(s"start: $error"), identity)
     val task = new Command.Send(HostSessions.requestOf("start", caller, effect("start")), goal, Map.empty)
     peers.openWith(id, configure(goal, made, strategy), task, Controller.messageSource(caller)).left
-      .foreach(error => throw IllegalStateException(s"start: the session did not open: $error"))
+      .foreach(error => throw IllegalStateException(s"start: the session did not open: ${error.words}"))
     SessionRef(id.value)
 
   def observe(session: SessionRef, question: String)(using Llm): String =
@@ -81,20 +82,19 @@ final class HostSessions(
 
 object HostSessions:
 
-  /** The card of a row of the catalog (8.7): the id, the goal or an empty text, the scope, the owner and the status in
-    * words, the parent, the last `seq`, the paths that the session made, the number of its commands, and its head.
+  /** The card of a row of the catalog (8.7): the id, the goal or an empty text, the scope, the owner in words
+    * (`Owner.words`), the parent, the status in words (`SessionStatus.words`), the last `seq`, the paths that the
+    * session made, the number of its commands, and its head. The controller reads the card with a model, so it holds no
+    * Scala value.
     */
   def cardOf(row: CatalogRow): SessionCard =
-    val owner = row.owner match
-      case Owner.Session(id) => s"Session(${id.value})"
-      case other             => other.toString
     SessionCard(
       SessionRef(row.session.value),
       row.goal.getOrElse(""),
       row.scope,
-      owner,
+      row.owner.words,
       row.parent.map(parent => SessionRef(parent.value)),
-      row.status.toString,
+      row.status.words,
       row.lastSeq,
       row.ledger.read.size,
       row.ledger.made,

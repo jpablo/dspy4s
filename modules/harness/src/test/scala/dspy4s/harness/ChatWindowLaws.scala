@@ -58,6 +58,16 @@ class ChatWindowLaws extends munit.FunSuite:
     assert(text.contains("The session s7"), text)
   }
 
+  test("Chat window: an earlier turn with no reply shows the text of its report, with no Scala value") {
+    val log = chat(1).map {
+      case Logged(seq, meta, Entry.TurnEnded(_)) => Logged(seq, meta, Entry.TurnEnded(TurnOutcome.Exhausted))
+      case other                                 => other
+    }
+    val text = shown(Window.project(log, (), 40_000))
+    assert(text.contains(TurnOutcome.Exhausted.report), text)
+    assert(!text.contains("Exhausted"), text)
+  }
+
   test("Chat window: a projection of one open turn has no earlier turn") {
     val text = shown(Window.project(chat(0), (), 40_000))
     assert(!text.contains("reply <"), text)

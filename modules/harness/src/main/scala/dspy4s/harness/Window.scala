@@ -66,7 +66,8 @@ object Window extends ContextStrategy:
     *     observation, before its messages. Only the observation of that step holds the note. A program call has one
     *     activation, so its projection has no such note.
     *   - An earlier turn is a message whose observation holds all its messages, and whose text is its reply: the text
-    *     of `Replied`, or a note of another outcome with the last text of the turn.
+    *     of `Replied`, or the text of the report of another outcome (`TurnOutcome.report`) and then the last text of
+    *     the turn. So the model reads the outcome in words, and not as a Scala value.
     *   - The newest messages that fit the rest of the budget stay, oldest first, so the oldest turns go first.
     */
   private def chat(journal: Vector[Logged], status: String, budget: Int, earlier: Boolean = true): Projection =
@@ -111,7 +112,9 @@ object Window extends ContextStrategy:
       output: Option[String]
   )
 
-  /** The turns of a chat that ended, and the steps of the open turn. */
+  /** The turns of a chat that ended, and the steps of the open turn. The reply of a turn that ended with no `Replied`
+    * is the text of its report (`TurnOutcome.report`), then the last text of the turn.
+    */
   private def chatTurns(journal: Vector[Logged]): (Vector[ChatTurn], Vector[ChatStep]) =
     final case class Walk(
         turns  : Vector[ChatTurn],
@@ -134,7 +137,7 @@ object Window extends ContextStrategy:
         case Entry.TurnEnded(outcome) =>
           val reply = outcome match
             case TurnOutcome.Replied(text) => text
-            case other                     => Vector(s"The turn ended: $other.", w.last).filter(_.nonEmpty).mkString(" ")
+            case other                     => Vector(other.report, w.last).filter(_.nonEmpty).mkString(" ")
           // A message after the last step of the turn waits for the next turn, as in the kernel (4.2).
           Walk(w.turns :+ ChatTurn(w.heard.dropRight(w.pending.size), reply), Vector.empty, w.pending, w.pending, "")
         case _ => w

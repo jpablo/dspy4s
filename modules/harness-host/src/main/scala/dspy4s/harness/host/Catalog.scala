@@ -30,6 +30,17 @@ enum SessionStatus derives Schema, CanEqual:
 
   case Ended(outcome: SessionOutcome)
 
+  /** The status in words, for example `in a turn` or `ended (merged)`. An end has the outcome in words
+    * (`SessionOutcome.words`). The card of the controller (8.7) and the list of the client (10.2) give these words.
+    */
+  def words: String =
+    this match
+      case Idle           => "idle"
+      case InTurn         => "in a turn"
+      case Stopping       => "stopping"
+      case Releasing      => "releasing"
+      case Ended(outcome) => s"ended (${outcome.words})"
+
 /** The row of a session in the catalog (10.2): the deterministic part of a `SessionCard`. Since phase 9 it holds all of
   * the card (8.7): the goal and the scope of the last `Activated`, and the ledger, so `list` reads no journal.
   *

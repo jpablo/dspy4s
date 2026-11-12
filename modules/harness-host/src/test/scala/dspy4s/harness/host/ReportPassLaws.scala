@@ -110,7 +110,10 @@ class ReportPassLaws extends munit.FunSuite:
         val child = host.journalOf(id(2)).fold(e => fail(e), identity).map(_.entry)
         assert(child.contains(Entry.TurnEnded(TurnOutcome.Crashed)), child.toString)
         val owner = opened(host, id(1))
-        assert(eventually()(reportsOf(owner).exists(_.entry.toString.contains("Crashed"))), entries(owner).toString)
+        assert(
+          eventually()(reportsOf(owner).exists(_.entry.toString.contains("The turn crashed"))),
+          entries(owner).toString
+        )
       }
     }
   }

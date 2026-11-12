@@ -322,10 +322,11 @@ id = "grant-lifetime"
 group = "guard"
 kind = "data"
 name = "GrantLifetime"
+ops = ["words"]
 ref = "5.5"
 spec = true
 uses = []
-text = "Once, Turn or Session."
+text = "Once, Turn or Session. words gives the lifetime in words for the line of a grant in the terminal, for example for this turn. A person types once, turn or session after /allow."
 
 # ── Phase 1: the configuration (8.1) ────────────────────────────────────────────────────────────────────────────────
 
@@ -341,10 +342,11 @@ id = "owner"
 group = "config"
 kind = "data"
 name = "Owner"
-ops = ["hasPerson"]
+ops = ["hasPerson", "words"]
 ref = "8.1"
 spec = true
 uses = ["session-id"]
+text = "The user, an optimizer, a session or a cell. hasPerson is true for the user and a session. words gives the owner in words for the card of a session, for example the person or the session s2."
 
 [[node]]
 id = "turn-kind"
@@ -448,28 +450,33 @@ id = "cell-outcome"
 group = "journal"
 kind = "data"
 name = "CellOutcome"
+ops = ["words"]
 ref = "4.1"
 spec = true
 uses = ["json"]
+text = "Ok, CompileError, Failed, TimedOut or Submitted. words gives the outcome in words for the first line of the output of a cell in the terminal, for example the cell did not compile, with no Scala value."
 
 [[node]]
 id = "turn-outcome"
 group = "journal"
 kind = "data"
 name = "TurnOutcome"
+ops = ["report"]
 ref = "4.1"
 spec = true
 uses = ["json"]
-text = "Replied, Submitted, Exhausted, Aborted, Crashed or Failed."
+text = "Replied, Submitted, Exhausted, Aborted, Crashed or Failed. report gives the text of the report of the turn in words: the reply, the value of submit as text, or what ended the turn. The terminal shows the same text."
 
 [[node]]
 id = "session-outcome"
 group = "journal"
 kind = "data"
 name = "SessionOutcome"
+ops = ["words", "report"]
 ref = "4.1"
 spec = true
 uses = ["session-id"]
+text = "Merged, Parked, Abandoned or Replaced. words gives the outcome with no reason, and report gives the text of the end of a session with its reason, for the report and the terminal."
 
 [[node]]
 id = "job-selector"
@@ -684,9 +691,11 @@ id = "rejection"
 group = "commands"
 kind = "data"
 name = "Rejection"
+ops = ["words"]
 ref = "4.5"
 spec = true
 uses = ["entry"]
+text = "SessionClosed, TurnOpen, OutOfOrder, NotNew or Releasing. words gives the refusal in words for the terminal, a cell and the controller, for example a turn is open. OutOfOrder gives only the name of the case of its entry."
 
 # ── Phase 1: decide (4.5) ───────────────────────────────────────────────────────────────────────────────────────────
 
@@ -778,7 +787,8 @@ kind = "function"
 name = "reports"
 ref = "8.6"
 uses = ["session-id", "source", "logged", "command"]
-text = "A report is a pure function of the journal of the session."
+proof_uses = ["session-outcome", "turn-outcome"]
+text = "A report is a pure function of the journal of the session. Its text gives the outcome in words: the end of a turn (TurnOutcome.report), or the end of the session (SessionOutcome.words) and its reason one time."
 
 [[node]]
 id = "missing"
@@ -2130,7 +2140,7 @@ name = "drive"
 ref = "4.6"
 spec = true
 uses = ["journal-trait", "turn-effects", "session-state"]
-proof_uses = ["next", "closing"]
+proof_uses = ["next", "closing", "rejection"]
 text = "Runs the open turn to its end, and gives the state at Next.Wait. The worker holds no decision: next says what comes, and the journal holds each result. An exception of the effects leaves the turn open, as after a crash."
 
 # ── Phase 4: the journal in memory and the mask of secrets (9, 5.6) ───────────────────────────────────────────────
@@ -2190,8 +2200,8 @@ ops = ["startCell", "call"]
 ref = "5.3"
 spec = true
 uses = ["journal-trait", "data", "json"]
-proof_uses = ["effect-id", "effect-result", "guarded", "text-prefix"]
-text = "recorded(h) of 5.3: EffectStarted before each call and EffectDone after it, with the value as Json and as text. A call that the journal refuses, for example after a stop, does not run."
+proof_uses = ["effect-id", "effect-result", "guarded", "text-prefix", "rejection"]
+text = "recorded(h) of 5.3: EffectStarted before each call and EffectDone after it, with the value as Json and as text. A call that the journal refuses, for example after a stop, does not run, and the cell gets the refusal in words (Rejection.words)."
 
 [[node]]
 id = "local-files"
@@ -2381,8 +2391,8 @@ name = "Window"
 ops = ["update", "project", "cut"]
 ref = "7"
 uses = ["context-strategy"]
-proof_uses = ["status", "projection", "state", "text-prefix"]
-text = "No derived data, and the last steps of the open turn that fit the budget, oldest first. The last observation is always in it, cut to half of the budget, with a note of the rest. A proposal: the budget counts characters."
+proof_uses = ["status", "projection", "state", "text-prefix", "turn-outcome"]
+text = "No derived data, and the last steps of the open turn that fit the budget, oldest first. The last observation is always in it, cut to half of the budget, with a note of the rest. An earlier turn of a chat with no reply has the text of its report (TurnOutcome.report). A proposal: the budget counts characters."
 
 # ── Phase 4: the harness (9) ──────────────────────────────────────────────────────────────────────────────────────
 
@@ -2461,7 +2471,7 @@ uses = ["dspy-module", "signature", "predict", "policy-input", "policy-step", "f
         "session-id"]
 proof_uses = ["drive", "memory-journal", "harness-effects", "recorded", "local-files", "snapshot-store", "journal-turn",
               "sandboxed-shell", "profile-for-mode", "layout", "preamble", "scala-repl", "window", "budget",
-              "host-threads", "leaf-llm", "child-turns", "child-start"]
+              "host-threads", "leaf-llm", "child-turns", "child-start", "rejection"]
 text = "A harness for one task, as a dspy4s Module. forward copies the workspace, starts a journal in memory and a REPL with the handlers of the mode, sends the input fields, runs drive and reads the last TurnEnded: Submitted gives the output through Data, Replied and Exhausted run the finisher. Since phase 5 a child of rlm has the same session path: its own journal, a new REPL with a preamble from Data[A].shape, the same policy leaf, the window strategy and the same copy, files and shell. Only submit gives the value of a child. modeAt gives Children^ only below the depth limit. A proposal: the leaves are policy, finisher and subQuery."
 
 [[group]]
@@ -2861,10 +2871,12 @@ id = "host-error"
 group = "host-types"
 kind = "data"
 name = "HostError"
+ops = ["words"]
 ref = "10.2"
 spec = true
 uses = ["rejection"]
-text = "Why the host did not commit a command: a rejection of decide, a failed write that ended the session, the end of the session, a fenced worker, or a file that did not open."
+proof_uses = ["rejection"]
+text = "Why the host did not commit a command: a rejection of decide, a failed write that ended the session, the end of the session, a fenced worker, or a file that did not open. words gives the error in words for the terminal, a cell and the controller, and a rejection in the words of Rejection.words."
 
 [[node]]
 id = "worker-ticket"
@@ -2991,7 +3003,8 @@ name = "WriterJournal"
 ops = ["state", "log", "run"]
 ref = "10.2"
 uses = ["journal-trait", "writer", "worker-ticket", "command", "source", "rejection", "session-state", "logged"]
-text = "The journal of one activation: each commit of its worker, effects and recorder goes through the mailbox with the ticket of the activation. A proposal: a write error or a fence throws, so drive stops and the turn stays open, as after a crash."
+proof_uses = ["host-error"]
+text = "The journal of one activation: each commit of its worker, effects and recorder goes through the mailbox with the ticket of the activation. A proposal: a write error or a fence throws with the error in words (HostError.words), so drive stops and the turn stays open, as after a crash."
 
 [[group]]
 id = "catalog"
@@ -3005,9 +3018,11 @@ id = "session-status"
 group = "catalog"
 kind = "data"
 name = "SessionStatus"
+ops = ["words"]
 ref = "10.2"
 uses = ["session-outcome", "schema"]
-text = "Idle, InTurn, Stopping or Ended."
+proof_uses = ["session-outcome"]
+text = "Idle, InTurn, Stopping, Releasing or Ended. words gives the status in words, for example in a turn or ended (merged), for the card of a session and the list of the client."
 
 [[node]]
 id = "catalog-row"
@@ -3103,7 +3118,7 @@ ops = ["open", "list", "failed", "close", "start", "sessions", "journals", "star
 ref = "10.2"
 spec = true
 uses = ["session-host", "session-runtime", "secrets", "host-limits", "catalog", "timers", "session-handle", "catalog-row", "host-error", "session-config", "session-id", "peers", "git-scopes", "scopes", "host-hooks", "release-item", "release-step", "scope-state", "release-plans", "session-outcome", "scope", "command", "source", "session-state", "logged", "layout"]
-proof_uses = ["writer", "writer-journal", "session-file", "feeds", "drive", "next", "job-table", "catalog-row-fold", "rebuilt", "catalog", "report-pass", "release-plan", "irreversible", "ledger-fold", "memory-tree", "file-lines", "controller", "state"]
+proof_uses = ["writer", "writer-journal", "session-file", "feeds", "drive", "next", "job-table", "catalog-row-fold", "rebuilt", "catalog", "report-pass", "release-plan", "irreversible", "ledger-fold", "memory-tree", "file-lines", "controller", "state", "job-status-words", "job-name"]
 text = "One writer and one file for each session, with an exclusive lock for a second host. open repairs an open turn, keeps the configuration of the journal with None, and refuses a mode above the ceiling. Each activation gets a new ticket and its WriterJournal. After StopRequested, Activation.stop, and a timer calls Writer.expire with the turn of the stop. The catalog gets the row after a turn ends."
 
 [[node]]
@@ -3114,6 +3129,15 @@ name = "jobName"
 ref = "10.3"
 uses = ["effect-id"]
 text = "The name of a job for a person and for the model: the cell and the number of its spawn, for example 12.0. The report of the end of a job, the CLI and the JobId of the model use the same two numbers."
+
+[[node]]
+id = "job-status-words"
+group = "host"
+kind = "function"
+name = "jobStatusWords"
+ref = "10.3"
+uses = ["job-status"]
+text = "The status of a job in words for a person and for the model: runs, exited with the code N, stopped, or lost with its host. The message at the end of a job with report and the text of /jobs give these words. It is a function of the host, because the source of the guest API is a reference for the model."
 
 [[group]]
 id = "jobs"
@@ -3142,8 +3166,8 @@ name = "JobShell"
 ops = ["exec", "spawn", "jobOutput", "waitJob", "stopJob"]
 ref = "10.3"
 uses = ["shell", "sandboxed-shell", "job-table", "journal-trait", "files", "job-id", "job-status"]
-proof_uses = ["process-wrapper", "command", "job-table"]
-text = "The handler of Shell^ in the host. exec goes to the sandbox, and spawn starts a job with SandboxedShell.launch and gives the JobId of its own EffectStarted. stopJob is StopJobs(One(job)), and the end of a job with report reaches the host through the table."
+proof_uses = ["process-wrapper", "command", "job-table", "rejection"]
+text = "The handler of Shell^ in the host. exec goes to the sandbox, and spawn starts a job with SandboxedShell.launch and gives the JobId of its own EffectStarted. stopJob is StopJobs(One(job)), and a refusal gives the cell its words (Rejection.words). The end of a job with report reaches the host through the table."
 
 [[group]]
 id = "work-runtime"
@@ -3204,8 +3228,8 @@ kind = "function"
 name = "entryText"
 ref = "10.1"
 uses = ["logged", "reasoning-view"]
-proof_uses = ["job-name", "text-prefix", "in-quotes"]
-text = "The start of a step, the reasoning of a step, the text and the code of a step, the command of an exec or a spawn in quotes when it starts, and the output of a cell. A pending call shows in quotes, with its number and the commands that answer it. The outcome of a turn, the stops and a stopped job by its name. The other entries give none. Each text loses its control characters."
+proof_uses = ["job-name", "text-prefix", "in-quotes", "session-outcome", "turn-outcome", "cell-outcome", "grant-lifetime"]
+text = "The start of a step, the reasoning of a step, the text and the code of a step, the command of an exec or a spawn in quotes when it starts, and the output of a cell after its outcome in words (CellOutcome.words). A pending call shows in quotes, with its number and the commands that answer it. The end of a turn with the text of its report (TurnOutcome.report), apart from a reply, the stops, a stopped job by its name, and a grant with its lifetime in words (GrantLifetime.words). The other entries give none. Each text loses its control characters."
 
 [[group]]
 id = "lines"
@@ -3311,8 +3335,8 @@ kind = "function"
 name = "jobsText"
 ref = "10.3"
 uses = ["session-state", "effect-id", "job-status", "job-start"]
-proof_uses = ["job-order", "job-name", "in-quotes"]
-text = "The text of /jobs: each job with its name, its status and its command in quotes. A spawn that did not start, that starts, or that its host lost has its own word."
+proof_uses = ["job-order", "job-name", "in-quotes", "job-status-words"]
+text = "The text of /jobs: each job with its name, its status in the words of the host (jobStatusWords) and its command in quotes. A spawn that did not start, that starts, or that its host lost has its own word."
 
 [[node]]
 id = "stop-notice"
@@ -3342,7 +3366,8 @@ kind = "function"
 name = "sessionsText"
 ref = "10.2"
 uses = ["catalog-row"]
-text = "The text of --list: the newest session first, each with its id, status, time, folder and first message."
+proof_uses = ["session-status"]
+text = "The text of --list: the newest session first, each with its id, status in words (SessionStatus.words), time, folder and first message."
 
 [[node]]
 id = "resolve-session"
@@ -3413,8 +3438,8 @@ name = "Cli"
 ops = ["main", "loop", "listText", "deskStep"]
 ref = "15"
 uses = ["session-handle", "console", "desk", "host-desk"]
-proof_uses = ["cli-args", "local-host", "work-runtime", "work-env", "entry-text", "parse-line", "commands-for", "plain-console", "editor-console", "stop-notice", "jobs-text", "status-text", "job-starts", "pending-calls", "sessions-text", "resolve-session", "card-text", "open-refusal", "plan-text"]
-text = "main makes the model from the environment, makes the console, starts a LocalHost with a WorkRuntime, and opens the session. --list prints the sessions and opens none. loop prints the feed, and each text goes through printable. It sends a message, /stop and /stopall, and it runs /close, /allow and /stopjob so the person sees a refusal. A Ctrl-C during a turn is /stop, and the stop notice follows a turn that a stop ended. With a desk, /sessions, /open, /reopen, /controller and /close go to deskStep (8.7). A proposal: JDK 21."
+proof_uses = ["cli-args", "local-host", "work-runtime", "work-env", "entry-text", "parse-line", "commands-for", "plain-console", "editor-console", "stop-notice", "jobs-text", "status-text", "job-starts", "pending-calls", "sessions-text", "resolve-session", "card-text", "open-refusal", "plan-text", "host-error"]
+text = "main makes the model from the environment, makes the console, starts a LocalHost with a WorkRuntime, and opens the session. --list prints the sessions and opens none. loop prints the feed, and each text goes through printable. It sends a message, /stop and /stopall, and it runs /close, /allow and /stopjob so the person sees a refusal. Each error of the host prints in words (HostError.words). A Ctrl-C during a turn is /stop, and the stop notice follows a turn that a stop ended. With a desk, /sessions, /open, /reopen, /controller and /close go to deskStep (8.7). A proposal: JDK 21."
 
 # ── Phase 7: the laws ─────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -3451,7 +3476,7 @@ name = "Chat window:"
 ref = "7"
 spec = true
 uses = ["window"]
-text = "A step sees each earlier turn as its message and its reply, oldest first, and the message of the open turn. With a small budget, the oldest turns go first. One open turn has no earlier turn."
+text = "A step sees each earlier turn as its message and its reply, oldest first, and the message of the open turn. An earlier turn with no reply shows the text of its report, with no Scala value. With a small budget, the oldest turns go first. One open turn has no earlier turn."
 
 [[group]]
 id = "link-laws"
@@ -3562,8 +3587,8 @@ group = "host-laws"
 kind = "law"
 name = "Host:"
 ref = "10.2"
-uses = ["local-host"]
-text = "open makes the file and commits Activated, and a second open gives the same handle. A new id with no configuration, a mode above the ceiling, a session of another host and a bad file give OpenFailed. A reopen keeps the configuration of the journal, also after Close. A message starts a turn that a worker runs. An open after a crash repairs the turn. The store comes back in a new host. run gives a refusal. list gives the rows."
+uses = ["local-host", "host-error"]
+text = "open makes the file and commits Activated, and a second open gives the same handle. A new id with no configuration, a mode above the ceiling, a session of another host and a bad file give OpenFailed. A reopen keeps the configuration of the journal, also after Close. A message starts a turn that a worker runs. An open after a crash repairs the turn. The store comes back in a new host. run gives a refusal. list gives the rows. words gives each error of the host in words, and a refusal in the words of the kernel."
 
 [[node]]
 id = "law-hard-stop"
@@ -4204,8 +4229,8 @@ ops = ["list", "tell", "start", "observe", "zoom", "cardOf", "requestOf"]
 ref = "8.7"
 spec = true
 uses = ["sessions", "peers", "session-id", "session-config", "journal-trait", "probe", "budget", "runtime-context", "session-card", "session-ref", "scope", "strategy-name", "llm", "catalog-row", "effect-id", "request-id", "command", "logged", "session-state", "source"]
-proof_uses = ["controller"]
-text = "list gives the cards of the other rows. tell sends through runAs with the request id of its effect, and refuses a session that has ended. start makes the scope and opens the session with ownedConfig and its task in one commit. observe asks the probe with the budget of the turn. zoom reads the memory of that session."
+proof_uses = ["controller", "owner", "session-status", "host-error"]
+text = "list gives the cards of the other rows, with the owner and the status in words (cardOf). tell sends through runAs with the request id of its effect, and refuses a session that has ended. start makes the scope and opens the session with ownedConfig and its task in one commit. An error of the host in tell and start gives its words (HostError.words). observe asks the probe with the budget of the turn. zoom reads the memory of that session."
 
 [[group]]
 id = "scopes"
@@ -4548,3 +4573,12 @@ name = "Id:"
 ref = "8.7"
 uses = ["session-id"]
 text = "valid takes a letter or a digit, then letters, digits, a dot, an underscore or a dash, at most 128 characters, and refuses a path, a space, two dots and each other text."
+
+[[node]]
+id = "law-rejection-words"
+group = "control-laws"
+kind = "law"
+name = "Rejection:"
+ref = "4.5"
+uses = ["rejection"]
+text = "words gives each refusal in words, with no Scala value. OutOfOrder gives the name of the case of its entry, and not the whole entry."

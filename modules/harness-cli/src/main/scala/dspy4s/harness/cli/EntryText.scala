@@ -9,7 +9,6 @@ import dspy4s.harness.kernel.{
   GuardRule,
   JobSelector,
   Logged,
-  SessionOutcome,
   Source,
   TurnOutcome
 }
@@ -33,12 +32,15 @@ private val CommandChars = 160
   *   - `EffectStarted` of `exec` or `spawn`: its command in quotes, cut to a few characters with a note of the rest. A
   *     command can take a long time, and this text shows the person that the session is not stuck. The other calls give
   *     none, because they are quick.
-  *   - `Observed`: the output of the cell, cut to a few lines with a note of the rest.
+  *   - `Observed`: a first line with the outcome of the cell in words after `> ` (`CellOutcome.words`), then the output
+  *     of the cell, cut to a few lines with a note of the rest.
   *   - `EffectDone` with `NeedsApproval`: the call in quotes, and the commands that answer it with the number of the
   *     call, which is the `seq` of the entry (5.5).
-  *   - `TurnEnded`: the outcome, apart from `Replied`, whose text the `Acted` already showed.
+  *   - `TurnEnded`: the text of the report to the owner (`TurnOutcome.report`), apart from `Replied`, whose text the
+  *     `Acted` already showed.
   *   - `StopRequested`, `JobsStopRequested`, `Granted` and `Ended`: one line each. A stopped job has its `jobName`.
-  *     `Ended` gives the outcome in words (`outcomeWords`) and then the reason, one time.
+  *     `Granted` gives the lifetime of the grant in words (`GrantLifetime.words`), for example `Allowed for this turn:
+  *     `. `Ended` gives the text of `SessionOutcome.report`, as the report to the owner.
   *   - An `Input` from a source that is not `User`, for example the message at the end of a job: its text after the
   *     sender in words (`sourceWords`), for example `[the session s9] text`.
   *   - The other entries give none.
@@ -121,16 +123,16 @@ private def rawText(logged: Logged, reasoning: ReasoningView): Option[String] =
       val shown =
         if lines.size <= OutputLines then lines
         else lines.take(OutputLines) :+ s"[${lines.size - OutputLines} more lines]"
-      Some((s"> $outcome" +: shown).mkString("\n"))
+      Some((s"> ${outcome.words}" +: shown).mkString("\n"))
     case Entry.EffectDone(_, EffectResult.NeedsApproval(rule)) =>
       Some(s"A call waits for your approval: ${callText(rule)}. /allow ${logged.seq} allows it, with once, turn or " +
         "session after the number. /allow allows each pending call, and a message refuses them.")
     case Entry.TurnEnded(TurnOutcome.Replied(_))                      => None
-    case Entry.TurnEnded(outcome)                                     => Some(s"The turn ended: $outcome.")
+    case Entry.TurnEnded(outcome)                                     => Some(outcome.report)
     case Entry.StopRequested(reason)                                  => Some(s"The turn stops: $reason.")
     case Entry.JobsStopRequested(which, reason)                       => Some(s"${jobsWords(which)}: $reason.")
-    case Entry.Granted(_, rule, lifetime)                             => Some(s"Allowed ($lifetime): ${callText(rule)}.")
-    case Entry.Ended(outcome, reason)                                 => Some(s"The session ended: ${outcomeWords(outcome)}, $reason.")
+    case Entry.Granted(_, rule, lifetime)                             => Some(s"Allowed ${lifetime.words}: ${callText(rule)}.")
+    case Entry.Ended(outcome, reason)                                 => Some(outcome.report(reason))
     case Entry.Input(_, text, _) if logged.meta.source != Source.User =>
       Some(s"[${sourceWords(logged.meta.source)}] $text")
     case _ => None
@@ -144,14 +146,6 @@ private[cli] def sourceWords(source: Source): String =
     case Source.Policy             => "the model"
     case Source.Child(session)     => s"the session ${session.value}"
     case Source.Parent(session, _) => s"the parent session ${session.value}"
-
-/** The outcome of a session in words, with no reason: the `Ended` entry holds the reason. */
-private[cli] def outcomeWords(outcome: SessionOutcome): String =
-  outcome match
-    case SessionOutcome.Merged       => "merged"
-    case SessionOutcome.Parked       => "parked"
-    case SessionOutcome.Abandoned(_) => "abandoned"
-    case SessionOutcome.Replaced(by) => s"replaced by ${by.value}"
 
 /** The jobs of a stop in words, with the name of one job. */
 private def jobsWords(which: JobSelector): String =

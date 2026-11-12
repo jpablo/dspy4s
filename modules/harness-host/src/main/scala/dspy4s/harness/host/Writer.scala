@@ -208,8 +208,9 @@ object Writer:
   * mailbox of `writer` with the ticket of the activation.
   *
   * A proposal for the review: `Journal.run` gives a `Rejection`, and a write error is not one. So `HostError.Rejected`
-  * gives its rejection, and the other errors throw an exception with a plain message. `drive` then stops, and the turn
-  * stays open, as after a crash. The next `Activate` repairs it (4.4).
+  * gives its rejection, and the other errors throw an exception with a plain message: the error in words
+  * (`HostError.words`). `drive` then stops, and the turn stays open, as after a crash. The next `Activate` repairs it
+  * (4.4).
   */
 final class WriterJournal(writer: Writer, ticket: WorkerTicket) extends Journal:
 
@@ -222,4 +223,4 @@ final class WriterJournal(writer: Writer, ticket: WorkerTicket) extends Journal:
       case Right(s)                         => Right(s)
       case Left(HostError.Rejected(reason)) => Left(reason)
       case Left(other)                      =>
-        throw IllegalStateException(s"the journal of the session took no commit of this activation: $other")
+        throw IllegalStateException(s"the journal of the session took no commit of this activation: ${other.words}")

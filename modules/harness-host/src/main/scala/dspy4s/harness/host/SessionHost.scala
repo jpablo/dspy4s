@@ -661,6 +661,18 @@ object LocalHost:
   */
 def jobName(job: EffectId): String = s"${job.cell}.${job.n}"
 
+/** The status of a job in words for a person and for the model, after the name of the job (10.3): `runs`, `exited with
+  * the code N`, `stopped`, or `lost with its host`. The message at the end of a job with `report` and the text of
+  * `/jobs` give these words. The guest API gives the model the `JobStatus` value, and its source is a reference for the
+  * model, so this rule is in the host and not in the guest type.
+  */
+def jobStatusWords(status: JobStatus): String =
+  status match
+    case JobStatus.Running      => "runs"
+    case JobStatus.Exited(code) => s"exited with the code $code"
+    case JobStatus.Stopped      => "stopped"
+    case JobStatus.Lost         => "lost with its host"
+
 /** One open session of a `LocalHost`: its writer, its feeds, its jobs, its lock, and the live part of its activation
   * and worker. `onCommit` runs on the thread of the writer after each commit, and the worker thread runs the turns. One
   * lock (`guard`) holds the state of the activation and the worker.
@@ -936,14 +948,15 @@ private final class OpenSession private (
             }
         }): Unit
 
-  /** The message of a job with `report` at its end (10.3). The writer of the session gets it, so it also reaches a
-    * later activation.
+  /** The message of a job with `report` at its end (10.3), for example `The job 4.0 exited with the code 0.` and the
+    * end of its output. The model reads it, so it gives the status in words (`jobStatusWords`) and not as a Scala
+    * value. The writer of the session gets it, so it also reaches a later activation.
     */
   private def reportJob(job: EffectId, status: JobStatus): Unit =
     // The cut keeps whole characters, because the journal refuses a surrogate with no pair, and a failed write ends the
     // session.
     val output = jobs.output(job).fold("")(text => textSuffix(text, ReportOutput))
-    val text   = s"The job ${jobName(job)} ended with the status $status. The end of its output:\n$output"
+    val text   = s"The job ${jobName(job)} ${jobStatusWords(status)}. The end of its output:\n$output"
     writer.post(Command.Send(RequestId(s"job:${job.cell}:${job.n}"), text, Map.empty), Source.Harness): Unit
 
 private object OpenSession:

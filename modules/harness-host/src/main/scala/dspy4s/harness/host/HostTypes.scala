@@ -30,6 +30,24 @@ enum HostError derives CanEqual:
     */
   case Refused(message: String)
 
+  /** The error in words for a person and for a model, with no Scala value. The terminal, the error of a cell and the
+    * error of a call of the controller give these words:
+    *
+    *   - `Rejected`: the words of the refusal (`Rejection.words`), for example `a turn is open`.
+    *   - `WriteFailed`: `a write to the journal failed: ` and the message.
+    *   - `Ended`: `the session has ended`.
+    *   - `Fenced`: `a stop ended this activation`.
+    *   - `OpenFailed` and `Refused`: the message, because it is in words.
+    */
+  def words: String =
+    this match
+      case Rejected(rejection)  => rejection.words
+      case WriteFailed(message) => s"a write to the journal failed: $message"
+      case Ended                => "the session has ended"
+      case Fenced               => "a stop ended this activation"
+      case OpenFailed(message)  => message
+      case Refused(message)     => message
+
 /** The id of one activation (10.3). Each commit of the activation goes through its ticket: the commits of the worker,
   * of the effects and of the recorder. After a hard stop whose cell does not end, the writer fences the ticket, so each
   * late commit of that activation gets `HostError.Fenced`.

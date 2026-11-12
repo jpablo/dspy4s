@@ -35,3 +35,24 @@ enum Rejection derives CanEqual:
 
   /** The session runs its release plan (8.7), so it takes no message and no grant. */
   case Releasing
+
+  /** The refusal in words for a person and for a model, with no Scala value. The terminal, the error of a cell and the
+    * error of a call of the controller give these words:
+    *
+    *   - `SessionClosed`: `the session has ended`.
+    *   - `TurnOpen`: `a turn is open`.
+    *   - `OutOfOrder`: `a StepStarted entry cannot come at this place of the journal`, with the name of the case of the
+    *     entry. An entry can hold a long text, so the words give only its name.
+    *   - `NotNew`: `the session has a journal already`.
+    *   - `Releasing`: `the session runs its release, so it takes no message`.
+    */
+  def words: String =
+    this match
+      case SessionClosed     => "the session has ended"
+      case TurnOpen          => "a turn is open"
+      case OutOfOrder(entry) =>
+        val name    = entry.productPrefix
+        val article = if "AEIOU".contains(name.head) then "an" else "a"
+        s"$article $name entry cannot come at this place of the journal"
+      case NotNew    => "the session has a journal already"
+      case Releasing => "the session runs its release, so it takes no message"

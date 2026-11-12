@@ -138,7 +138,8 @@ class CliLaws extends munit.FunSuite:
     handle.endTurn()
     loop.join(10_000)
     assert(!loop.isAlive, "the loop did not end after the last turn")
-    assert(out.toString(UTF_8).contains("refused"), out.toString(UTF_8))
+    assert(out.toString(UTF_8).contains("The session refused the command: a turn is open"), out.toString(UTF_8))
+    assert(!out.toString(UTF_8).contains("Rejected("), out.toString(UTF_8))
   }
 
   test("CLI: parseLine reads the commands, and a text that does not start with / is a message") {
@@ -225,7 +226,7 @@ class CliLaws extends munit.FunSuite:
     handle.ran.asScala.toVector match
       case Vector(Command.Close(SessionOutcome.Parked, _)) => ()
       case other                                           => fail(s"ran: $other")
-    assert(out.toString(UTF_8).contains("TurnOpen"), out.toString(UTF_8))
+    assert(out.toString(UTF_8).contains("The session refused the command: a turn is open"), out.toString(UTF_8))
     assert(out.toString(UTF_8).contains("FAKE-REPLY"), out.toString(UTF_8))
   }
 

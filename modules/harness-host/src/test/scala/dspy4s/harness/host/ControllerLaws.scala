@@ -182,7 +182,7 @@ class ControllerLaws extends munit.FunSuite:
     assertEquals(sessions.list(), Vector(row(1), row(2)).map(HostSessions.cardOf))
   }
 
-  test("Sessions: cardOf gives the goal, the scope, the owner, the status and the part of the ledger of a row") {
+  test("Sessions: cardOf gives the goal, the scope, the owner and the status in words, and the part of the ledger") {
     val ledger = Ledger(Vector("/w/1/a", "/w/1/c"), Vector("/w/1/b"), 3, Some("a1b2"), Some(true), Vector.empty)
     val card   = HostSessions.cardOf(row(1).copy(ledger = ledger, status = SessionStatus.Ended(SessionOutcome.Merged)))
     assertEquals(
@@ -191,9 +191,9 @@ class ControllerLaws extends munit.FunSuite:
         SessionRef(id(1).value),
         "goal 1",
         Some(Scope.Directory("/w/1")),
-        s"Session(${Controller.id.value})",
+        "the session controller",
         None,
-        "Ended(Merged)",
+        "ended (merged)",
         5L,
         2,
         Vector("/w/1/b"),
@@ -204,6 +204,11 @@ class ControllerLaws extends munit.FunSuite:
     )
     val bare = HostSessions.cardOf(row(2).copy(goal = None, scope = None))
     assertEquals((bare.goal, bare.scope), ("", None))
+    def ownerOf(owner: Owner): String = HostSessions.cardOf(row(2).copy(owner = owner)).owner
+    assertEquals(ownerOf(Owner.User), "the person")
+    assertEquals(ownerOf(Owner.Session(SessionId("s7"))), "the session s7")
+    assertEquals(ownerOf(Owner.Optimizer), "an optimizer")
+    assertEquals(ownerOf(Owner.Cell), "a cell")
   }
 
   test("Sessions: tell runs a Send with the request id of its effect and the source Controller through runAs") {

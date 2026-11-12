@@ -151,6 +151,23 @@ class ControlLaws extends FunSuite:
       case Left(error)    => fail(error.toString)
   }
 
+  // ── The words of a refusal ──
+
+  test("Rejection: words give each refusal in words, with no Scala value") {
+    assertEquals(Rejection.SessionClosed.words, "the session has ended")
+    assertEquals(Rejection.TurnOpen.words, "a turn is open")
+    assertEquals(Rejection.NotNew.words, "the session has a journal already")
+    assertEquals(Rejection.Releasing.words, "the session runs its release, so it takes no message")
+    assertEquals(
+      Rejection.OutOfOrder(Entry.StepStarted(0)).words,
+      "a StepStarted entry cannot come at this place of the journal"
+    )
+    assertEquals(
+      Rejection.OutOfOrder(Entry.EffectDone(EffectId(1L, 0), EffectResult.Unknown)).words,
+      "an EffectDone entry cannot come at this place of the journal"
+    )
+  }
+
   // ── Session ids ──
 
   test("Id: valid takes a letter or a digit, then letters, digits, '.', '_' or '-', and refuses each other text") {

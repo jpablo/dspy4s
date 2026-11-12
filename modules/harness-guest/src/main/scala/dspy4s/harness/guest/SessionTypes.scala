@@ -51,7 +51,9 @@ import caps.assumeSafe
 
 /** What `list` shows about a session (8.2, 10.2). The catalog row gives all of it, so `list` reads no journal (8.7):
   * the id, the goal, the scope, the owner, the parent of a fork, the status, the last `seq`, and the part of the ledger
-  * that the controller needs.
+  * that the controller needs. The owner and the status are words: the owner is `the person`, `the session ID`, `an
+  * optimizer` or `a cell`, and the status is `idle`, `in a turn`, `stopping`, `releasing` or `ended` with the outcome,
+  * for example `ended (merged)`.
   *
   * A proposal for the review: the design names the fields and gives no type. The goal is empty for a session with no
   * goal, and the scope is none before the first `Activated`. From the ledger: `read` is the number of the files that

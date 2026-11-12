@@ -38,7 +38,8 @@ final class Recorder(journal: Journal, ended: () => Boolean = () => false, mask:
 
   /** One call: the intent, the check of `guarded` (5.5), the call, and the outcome. A call that throws gets
     * `EffectResult.Error`, and the exception goes on to the cell. A call that `guarded` stops does not run: its
-    * `EffectDone` holds the result of the guard, and the cell gets the error of the guard.
+    * `EffectDone` holds the result of the guard, and the cell gets the error of the guard. A call whose intent the
+    * journal refuses does not run, and the cell gets an exception with the refusal in words (`Rejection.words`).
     *
     * The lock of the recorder holds the choice of the id and the commit of the intent, so the journal gets the intents
     * of a cell in the order of their ids (4.5). The call itself and its outcome are outside the lock. The lock order is
@@ -57,7 +58,7 @@ final class Recorder(journal: Journal, ended: () => Boolean = () => false, mask:
     val after = intent.fold(
       rejection =>
         throw IllegalStateException(
-          s"$op: the session refused the call, because it stops or the cell ended ($rejection)"
+          s"$op: the session refused the call, because it stops or the cell ended (${rejection.words})"
         ),
       identity
     )

@@ -3,6 +3,7 @@ package dspy4s.harness.kernel
 import munit.ScalaCheckSuite
 import org.scalacheck.Gen
 import org.scalacheck.Prop.forAll
+import zio.blocks.schema.json.Json
 
 import Fixtures.*
 import Schedules.*
@@ -67,4 +68,34 @@ class ReportLaws extends ScalaCheckSuite:
       val all = reports(session, owner, run.journal)
       assertEquals(missing(session, owner, run.journal, received(all)), Vector.empty)
     }
+  }
+
+  test("Report: the text gives the outcome in words, the value of submit as text, and the reason of an end once") {
+    // The text of the report of `entry`, after a message of the owner and a step.
+    def textOf(entry: Entry): String =
+      val log = journalFrom(
+        Source.Harness -> activated(),
+        input("m1", owner),
+        Source.Harness -> Entry.TurnStarted,
+        Source.Harness -> Entry.StepStarted(0),
+        Source.Harness -> entry
+      )
+      reports(session, owner, log).lastOption.fold(fail("no report"))(_.text)
+    def ended(outcome: TurnOutcome): String = textOf(Entry.TurnEnded(outcome))
+    assertEquals(ended(TurnOutcome.Submitted(Json.String("42 lines"))), "The turn ended with submit: 42 lines")
+    val record = ended(TurnOutcome.Submitted(Json.Object(("lines", Json.Number(42)))))
+    assert(record.startsWith("The turn ended with submit: {") && record.contains("lines"), record)
+    assertEquals(ended(TurnOutcome.Replied("done")), "The turn ended with a reply: done")
+    assertEquals(ended(TurnOutcome.Exhausted), "The turn ended: it used all its steps and gave no result.")
+    assertEquals(ended(TurnOutcome.Aborted), "The turn ended: a stop ended it.")
+    assertEquals(ended(TurnOutcome.Crashed), "The turn crashed: its host stopped during the turn.")
+    assertEquals(ended(TurnOutcome.Failed("no model")), "The turn failed: no model")
+    def closed(outcome: SessionOutcome, reason: String): String = textOf(Entry.Ended(outcome, reason))
+    assertEquals(
+      closed(SessionOutcome.Abandoned("not needed"), "not needed"),
+      "The session ended: abandoned, not needed."
+    )
+    assertEquals(closed(SessionOutcome.Merged, "FAKE"), "The session ended: merged, FAKE.")
+    assertEquals(closed(SessionOutcome.Parked, "FAKE"), "The session ended: parked, FAKE.")
+    assertEquals(closed(SessionOutcome.Replaced(SessionId("s2")), "FAKE"), "The session ended: replaced by s2, FAKE.")
   }
