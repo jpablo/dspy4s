@@ -5,7 +5,17 @@ import dspy4s.core.contracts.{DspyError, RuntimeContext, RuntimeError}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.harness.{HarnessLimits, Secrets}
 import dspy4s.harness.guest.JobStatus
-import dspy4s.harness.host.{Behind, Controller, Feed, HostError, LocalHost, SessionHandle, WorkEnv, WorkRuntime}
+import dspy4s.harness.host.{
+  Behind,
+  Controller,
+  ExchangeFile,
+  Feed,
+  HostError,
+  LocalHost,
+  SessionHandle,
+  WorkEnv,
+  WorkRuntime
+}
 import dspy4s.harness.kernel.{EffectResult, Entry, GuardRule, Logged, Position, ReleaseItem, RequestId, SessionId}
 import dspy4s.harness.kernel.{SessionOutcome, TurnOutcome}
 import dspy4s.harness.sandbox.{Backends, HostList}
@@ -105,8 +115,9 @@ object Cli:
     try
       RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(model), adapter = Some(ChatAdapter()))) {
         given RuntimeContext = RuntimeEnvironment.current
-        val env              = WorkEnv(home, HostList.empty, Backends.detect(), secrets, cli.root, options)
-        LocalHost.startWith(cli.root, peers => WorkRuntime.forHost(env)(peers), secrets) match
+        val work             =
+          WorkEnv(home, HostList.empty, Backends.detect(), secrets, cli.root, options, ExchangeFile.enabled(env))
+        LocalHost.startWith(cli.root, peers => WorkRuntime.forHost(work)(peers), secrets) match
           case Left(error) =>
             System.err.println(printable(s"The host did not start: ${error.words}"))
             1

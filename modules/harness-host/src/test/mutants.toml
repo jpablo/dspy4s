@@ -1,0 +1,94 @@
+# The mutants of the exchange file of a session. Each mutant breaks one rule of 4.2, 4.3 or 4.4 of
+# docs/code-harness/OBSERVABILITY.md, and laws L6 to L9 of its section 6 must kill it.
+#
+# `python3 scripts/mutants/mutants.py modules/harness-host/src/test/mutants.toml` applies each mutant alone, runs the
+# suites of `tests`, and restores the code. The whole suite of the host takes minutes, so `tests` names only the laws of
+# the exchange file.
+
+module = "harness-host"
+project = "harnessHost"
+sources = "modules/harness-host/src/main/scala/dspy4s/harness/host"
+tests = "dspy4s.harness.host.ExchangeFileLaws"
+
+# ── The labels (4.2) ──
+
+[[mutant]]
+name = "Mutant: the predictor of a request is not the name of its predictor"
+[[mutant.edit]]
+file = "ExchangeFile.scala"
+old = """"predictor" -> Json.String(key.moduleName)"""
+new = """"predictor" -> Json.String(key.toString)"""
+
+[[mutant]]
+name = "Mutant: after is the next seq of the journal, not the last one"
+[[mutant.edit]]
+file = "WorkRuntime.scala"
+old = "() => journal.state.nextSeq - 1"
+new = "() => journal.state.nextSeq"
+
+[[mutant]]
+name = "Mutant: the activation keeps the context of the runtime"
+[[mutant.edit]]
+file = "WorkRuntime.scala"
+old = "val inSession = WorkRuntime.withExchanges(context, env, session, journal)"
+new = "val inSession = context"
+
+[[mutant]]
+name = "Mutant: the host threads of an activation capture the context of the runtime"
+[[mutant.edit]]
+file = "WorkRuntime.scala"
+old = "RuntimeEnvironment.withContext(inSession) {"
+new = "RuntimeEnvironment.withContext(context) {"
+
+[[mutant]]
+name = "Mutant: a probe writes no link"
+[[mutant.edit]]
+file = "Probe.scala"
+old = "case file: ExchangeFile => file.forProbe(link)"
+new = "case file: ExchangeFile => file"
+
+# ── The lines (4.3) ──
+
+[[mutant]]
+name = "Mutant: a closed exchange is done"
+[[mutant.edit]]
+file = "ExchangeFile.scala"
+old = """case ExchangeEnd.Closed          => Vector("end" -> Json.String("closed"))"""
+new = """case ExchangeEnd.Closed          => Vector("end" -> Json.String("done"))"""
+
+[[mutant]]
+name = "Mutant: a write through a channel loses the line of an interrupted thread"
+[[mutant.edit]]
+file = "ExchangeFile.scala"
+old = "Using.resource(FileOutputStream(path.toFile, true))(_.write(bytes))"
+new = "Using.resource(java.nio.channels.Channels.newOutputStream(FileOutputStream(path.toFile, true).getChannel))(_.write(bytes))"
+
+[[mutant]]
+name = "Mutant: DSPY_EXCHANGES=off works only in lower case with no spaces"
+[[mutant.edit]]
+file = "ExchangeFile.scala"
+old = """!env.get(Variable).exists(_.trim.equalsIgnoreCase("off"))"""
+new = """!env.get(Variable).exists(_ == "off")"""
+
+# ── The mask (4.4) ──
+
+[[mutant]]
+name = "Mutant: the body of a request has no mask"
+[[mutant.edit]]
+file = "ExchangeFile.scala"
+old = """"body"    -> text(request.body)"""
+new = """"body"    -> Json.String(request.body)"""
+
+[[mutant]]
+name = "Mutant: the lines of a stream have no mask"
+[[mutant.edit]]
+file = "ExchangeFile.scala"
+old = "Json.Array(reply.lines.map(text)*)"
+new = "Json.Array(reply.lines.map(Json.String(_))*)"
+
+[[mutant]]
+name = "Mutant: a secret header keeps a value that the mask does not know"
+[[mutant.edit]]
+file = "ExchangeFile.scala"
+old = "if Environment.isSecret(name) then"
+new = "if Environment.isSecret(name) && name.isEmpty then"
