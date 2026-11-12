@@ -69,6 +69,10 @@ object WorkEnv:
   *     new activation the note of the names that the new REPL lost (6, `NewReplNote.afterActivation`).
   *   - Each turn gets a new budget of `limits.modelCalls` model calls (8.2), because a work session has no end of a
   *     call. The effects and the `subQuery` leaf get the budget of the current turn through a function.
+  *   - Each activation has a meter of its memory (`MemoryMeter`) for a client (10.6). The memory tree reports its
+  *     summaries to it, and the effects report the size of each projection. `activity` and `memoryUse` read the meter
+  *     of the activation of the session with no lock, so a client can poll them while a turn runs. A new activation has
+  *     a new meter, so `memoryUse` is none until its first call to the policy.
   *
   * The policy calls run on the thread of the worker, so the activation installs the context of the runtime there. The
   * context gives the LM, so the key never goes into the journal (5.6).
@@ -91,9 +95,19 @@ final class WorkRuntime(
     */
   private[host] def indexOf(session: SessionId): Option[SecretIndex] = Option(indexes.get(session))
 
-  /** The walk for secret files of the index of `session` while it runs (`SecretIndex.progress`), or none. */
+  /** The meter of the memory of the activation of each open session (`activate`). */
+  private val meters = ConcurrentHashMap[SessionId, MemoryMeter]()
+
+  /** The summaries of the memory tree of `session` while they run (`MemoryMeter.building`), else the walk for secret
+    * files of its index while it runs (`SecretIndex.progress`), or none. The summaries come first, because the call to
+    * the policy waits for them.
+    */
   override def activity(session: SessionId): Option[Activity] =
-    indexOf(session).flatMap(_.progress).map(p => Activity.SecretScan(p.folders, p.total))
+    Option(meters.get(session)).flatMap(_.building)
+      .orElse(indexOf(session).flatMap(_.progress).map(p => Activity.SecretScan(p.folders, p.total)))
+
+  /** The size of the last projection of the activation of `session` and its budget (`MemoryMeter.use`), or none. */
+  override def memoryUse(session: SessionId): Option[MemoryUse] = Option(meters.get(session)).flatMap(_.use)
 
   /** In a mode with a shell, a new index of the secret files of `session`, and a walk of the scope that fills it on a
     * daemon thread of its own (`SandboxedShell.warm`). Each activation of the open session uses this index. The walk
@@ -144,6 +158,7 @@ final class WorkRuntime(
         val host     = HostThreads.ofThisThread()
         val calls    = StoppablePolicy(context, () => journal.state.stopping)
         val zooms    = ZoomSource()
+        val meter    = MemoryMeter()
         val summary  = TurnBudget(journal, limits.summaryCalls)
         val file     = () =>
           FileLines.open(SessionFile.pathOf(env.journals, session), session).map { opened =>
@@ -151,7 +166,7 @@ final class WorkRuntime(
             opened
           }
         val strategy =
-          WorkRuntime.strategyOf(config, file, calls, () => summary.current, limits.batch, env.summaryOptions)
+          WorkRuntime.strategyOf(config, file, calls, () => summary.current, limits.batch, env.summaryOptions, meter)
             .fold(error => throw IllegalStateException(error), identity)
         val bindings = Bindings(
           turn = JournalTurn(journal, () => System.currentTimeMillis(), zooms),
@@ -183,13 +198,17 @@ final class WorkRuntime(
           () => turns.current,
           Some(host),
           calls,
-          zooms
+          zooms,
+          meter
         )(using context)
-        val activation = WorkActivation(effects, commands, calls, Vector(turns, summary), lines, made, context)
+        val forget     = () => meters.remove(session, meter): Unit
+        val activation = WorkActivation(effects, commands, calls, Vector(turns, summary), lines, made, context, forget)
         // Only an activation with no index of an open session walks. The walk starts after each other step of the
         // start, so a failed start has no walk. When the thread of the walk cannot start, the start fails, and the
         // `finally` below closes the shell.
         if config.mode.shell == Access.Full && shared.isEmpty then WorkRuntime.warm(commands, session)
+        // The last step of the start, so a failed start keeps no meter. A later activation of the session puts its own.
+        meters.put(session, meter): Unit
         started = true
         activation
       finally
@@ -200,7 +219,9 @@ final class WorkRuntime(
           layout.foreach(l => WorkRuntime.remove(l.temp))
     }
 
-/** The live part of one activation of a work session. Each call of the effects runs in the context of the runtime. */
+/** The live part of one activation of a work session. Each call of the effects runs in the context of the runtime. The
+  * close removes the meter of the memory of the activation from the runtime (`forget`).
+  */
 private final class WorkActivation(
     inner                  : HarnessEffects,
     private[host] val shell: SandboxedShell,
@@ -208,7 +229,8 @@ private final class WorkActivation(
     turns                  : Vector[TurnBudget],
     lines                  : Option[FileLines],
     layout                 : Layout,
-    context                : RuntimeContext
+    context                : RuntimeContext,
+    forget                 : () => Unit
 ) extends Activation:
 
   val effects: TurnEffects = new TurnEffects:
@@ -226,6 +248,7 @@ private final class WorkActivation(
   def unclean: Boolean = inner.unclean
 
   def close(): Unit =
+    forget()
     turns.foreach(_.close())
     calls.close()
     Try(inner.close()): Unit
@@ -322,6 +345,25 @@ private final class TurnBudget(journal: Journal, limit: Int):
       budget.close()
     }
 
+/** The values of the memory of one activation for a client (10.6). The memory tree and the effects of the activation
+  * write them as a `MemoryProgress`, and a client reads them with no lock, also while a turn runs.
+  */
+private final class MemoryMeter extends MemoryProgress:
+  @volatile private var running: Option[Activity] = None
+  @volatile private var last: Option[MemoryUse]   = None
+
+  /** The summaries of the memory tree while an update builds them, or none. */
+  def building: Option[Activity] = running
+
+  /** The size of the last projection and its budget, or none before the first call to the policy. */
+  def use: Option[MemoryUse] = last
+
+  override def summaries(done: Int, total: Int): Unit = running = Some(Activity.MemorySummaries(done, total))
+
+  override def summariesEnded(): Unit = running = None
+
+  override def projected(chars: Int, budget: Int): Unit = last = Some(MemoryUse(chars, budget))
+
 object WorkRuntime:
 
   /** The mode of a work session of phase 7: each capability of local mode, apart from `Sessions^` (phase 9) and
@@ -375,10 +417,10 @@ object WorkRuntime:
     )
 
   /** The strategy of an activation from `config.strategy` (7.1): the window, or the memory tree with `lines`, at most
-    * `width` summaries at a time with the option bag `options`, the runner of the activation and the budget of the
-    * summaries of the turn. `lines` is the table `memory` of the session file, and the activation opens it only for the
-    * memory tree, and closes it in its `close`. `PrefixSummary` has no code, so it gives an error, and the activation
-    * fails with it.
+    * `width` summaries at a time with the option bag `options`, the runner of the activation, the budget of the
+    * summaries of the turn, and the progress of the activation for a client. `lines` is the table `memory` of the
+    * session file, and the activation opens it only for the memory tree, and closes it in its `close`. `PrefixSummary`
+    * has no code, so it gives an error, and the activation fails with it.
     */
   def strategyOf(
       config    : SessionConfig,
@@ -386,12 +428,13 @@ object WorkRuntime:
       leafRunner: PolicyRunner,
       summaries : () => Budget,
       width     : Int,
-      options   : DynamicValue.Record
+      options   : DynamicValue.Record,
+      progress  : MemoryProgress = MemoryProgress.none
   ): Either[String, ContextStrategy] =
     config.strategy match
       case StrategyName.Window     => Right(Window)
       case StrategyName.MemoryTree => lines().map(store =>
-          MemoryTree.withLeaves(store, MemoryTree.DefaultHigh, leafRunner, summaries, width, options)
+          MemoryTree.withLeaves(store, MemoryTree.DefaultHigh, leafRunner, summaries, width, options, progress)
         )
       case StrategyName.PrefixSummary =>
         Left("the strategy PrefixSummary has no code yet, so a session with it cannot start")

@@ -336,6 +336,29 @@ class WorkLaws extends munit.FunSuite:
     assert(WorkEnv.summaryOptions(Map(WorkEnv.SummaryOptions -> "{not json")).isLeft)
   }
 
+  test("Work: the handle gives the summaries of the memory while they run, and memoryUse after the first policy call") {
+    // A live session waited 63 s at one step for the summaries of the memory, and the screen gave no reason
+    // (2026-11-11). The footer of a client also shows the size of the last view and its budget (10.6).
+    val long  = "FAKE-LONG-MESSAGE " + "y" * 700
+    val model = RequestLm(
+      text => if isSummary(text) then Right(summaryReply(text)) else Right(policy("FAKE-DONE", None)),
+      text => if isSummary(text) then 1_500L else 0L
+    )
+    work(model) { (_, handle) =>
+      assertEquals(handle.memoryUse, None)
+      assertEquals(handle.send(message("m1", long)), Right(()))
+      // The first policy call compresses the long message: one summary.
+      assert(eventually(30)(handle.activity == Some(Activity.MemorySummaries(0, 1))), handle.activity.toString)
+      assert(eventually(60)(outcomes(handle) == Vector(TurnOutcome.Replied("FAKE-DONE"))), entries(handle).toString)
+      assert(eventually()(handle.activity.isEmpty), handle.activity.toString)
+      handle.memoryUse match
+        case Some(MemoryUse(chars, budget)) =>
+          assert(chars > long.length && chars <= limits.budget, s"$chars")
+          assertEquals(budget, limits.budget)
+        case None => fail("no memory use after the policy call")
+    }
+  }
+
   test("Work: a stop cuts each call of the runner that runs at the same time") {
     val context = Models.withModel(sessionModel())(summon[RuntimeContext])
     val runner  = StoppablePolicy(context, () => false)

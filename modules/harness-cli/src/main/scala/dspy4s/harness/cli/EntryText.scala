@@ -17,7 +17,6 @@ private val CommandChars = 160
 /** The text of an entry for the terminal (CODE_HARNESS_DESIGN.md, 10.1), or none for an entry that the person does not
   * need to see.
   *
-  *   - `StepStarted`: one line, so the person sees that the model works during a long model call.
   *   - `Acted`: the reasoning of the step as `reasoning` sets, the text of the step, and the code of its cell, if any.
   *     Each line of the reasoning starts with a bar, so that the reasoning is different from the text.
   *   - `EffectStarted` of `exec` or `spawn`: its command in quotes, cut to a few characters with a note of the rest. A
@@ -29,7 +28,8 @@ private val CommandChars = 160
   *   - `TurnEnded`: the outcome, apart from `Replied`, whose text the `Acted` already showed.
   *   - `StopRequested`, `JobsStopRequested`, `Granted` and `Ended`: one line each. A stopped job has its `jobName`.
   *   - An `Input` from a source that is not `User`, for example the message at the end of a job: its text.
-  *   - The other entries give none.
+  *   - The other entries give none. A `StepStarted` gives none too: the busy line of the editor shows the step while it
+  *     runs, with a spinner and the time (`Screen.live`).
   */
 def entryText(logged: Logged, reasoning: ReasoningView = ReasoningView.Short): Option[String] =
   rawText(logged, reasoning).map(printable)
@@ -98,7 +98,6 @@ private def escape(cp: Int): String = Character.toChars(cp).map(c => f"\\u${c.to
 
 private def rawText(logged: Logged, reasoning: ReasoningView): Option[String] =
   logged.entry match
-    case Entry.StepStarted(step)          => Some(s"Step ${step + 1}: the model works.")
     case Entry.Acted(thought, text, code) =>
       val parts = reasoningText(thought, reasoning).toVector ++ Vector(text).filter(_.nonEmpty) ++
         code.map(c => s"```scala\n$c\n```")
@@ -123,18 +122,21 @@ private def rawText(logged: Logged, reasoning: ReasoningView): Option[String] =
     case _                                                            => None
 
 /** The jobs of a stop in words, with the name of one job. */
-private def jobsWords(which: JobSelector): String =
+private[cli] def jobsWords(which: JobSelector): String =
   which match
     case JobSelector.One(job)   => s"The job ${jobName(job)} stops"
     case JobSelector.OfLastTurn => "The jobs of the last turn stop"
     case JobSelector.All        => "Each job stops"
 
-/** The reasoning of a step as `view` sets, each line after a bar, or none for an empty reasoning or `Off`. `Short` cuts
-  * the reasoning to `ShortReasoning` units, with no character cut in two, and adds a note of the rest.
+/** The reasoning of a step as `view` sets, each line after a bar, or none for an empty reasoning or `Off`. `Line` is
+  * one line with the size of the reasoning. `Short` cuts the reasoning to `ShortReasoning` units, with no character cut
+  * in two, and adds a note of the rest.
   */
-private def reasoningText(reasoning: String, view: ReasoningView): Option[String] =
+private[cli] def reasoningText(reasoning: String, view: ReasoningView): Option[String] =
   val text = reasoning.strip
   if text.isEmpty || view == ReasoningView.Off then None
+  else if view == ReasoningView.Line then
+    Some(s"│ The reasoning has ${text.length} characters. /reasoning short shows it.")
   else
     val shown =
       if view == ReasoningView.Full || text.length <= ShortReasoning then text

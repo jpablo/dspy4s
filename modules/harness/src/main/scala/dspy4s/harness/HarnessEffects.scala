@@ -18,7 +18,8 @@ import dspy4s.programs.strategies.Predict
   *     a reply that did not parse has the start of the reply (`failure`). The trace of the call goes to the
   *     `RuntimeContext`, so an optimizer sees it. The call of `policy` runs through `runner`, so a work session can
   *     cut it (10.3). After the update, `zooms` gets the reader `strategy.zoom` of the new derived data, so `zoom` of a
-  *     cell reads it (7.1).
+  *     cell reads it (7.1). After the projection, `progress` gets its size and the budget, so a client shows them
+  *     (10.6).
   *   - `runCell` starts the calls of the cell in `recorder`, takes the snapshot of the store, and runs the code in the
   *     current REPL. The writes of the store go into the result only when the cell completes. The output in the journal
   *     is `CellRun.text`, the text that the MCP server also shows (6): the hints of a compile error, and a note of a
@@ -50,8 +51,9 @@ final class HarnessEffects(
     limits   : HarnessLimits,
     budget   : () => Budget,
     host     : Option[HostThreads],
-    runner   : PolicyRunner = PolicyRunner.Direct,
-    zooms    : ZoomSource   = ZoomSource()
+    runner   : PolicyRunner   = PolicyRunner.Direct,
+    zooms    : ZoomSource     = ZoomSource(),
+    progress : MemoryProgress = MemoryProgress.none
 )(using RuntimeContext)
     extends TurnEffects:
 
@@ -66,7 +68,8 @@ final class HarnessEffects(
     strategy.update(log, derived).left.map(_.message).flatMap { data =>
       derived = data
       zooms.setReader(ref => strategy.zoom(data, ref))
-      val view  = strategy.project(log, data, limits.budget)
+      val view = strategy.project(log, data, limits.budget)
+      progress.projected(view.size, limits.budget)
       val input = PolicyInput(task, reference, view.status, view.observation, view.history)
       val call  = () => policy(input)(using policyContext).left.map(HarnessEffects.failure)
       budget().spend().flatMap(_ => runner.run(call)).map { step =>

@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.{Files, Path}
 import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{CountDownLatch, TimeUnit}
+import scala.jdk.CollectionConverters.*
 
 /** The laws of the consoles of the terminal client (CODE_HARNESS_DESIGN.md, 10.6): the plain console of a script, and
   * the line editor of a person.
@@ -30,9 +31,6 @@ class ConsoleLaws extends munit.FunSuite:
     ExternalTerminal("fake", "xterm-256color", in, out, UTF_8)
 
   private def withHistory[A](body: Path => A): A = withRoot(root => body(root.resolve("history")))
-
-  /** The frames of the spinner of the busy prompt. */
-  private val Frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".toSet
 
   /** True when `condition` holds within 10 seconds. */
   private def soon(condition: => Boolean): Boolean =
@@ -180,56 +178,115 @@ class ConsoleLaws extends munit.FunSuite:
     }
   }
 
-  // ── The busy line (2026-11-11) ──
+  // ── The screen of CLI_SCREEN.md ──
 
-  /** An `ExternalTerminal` of 160 columns, so the right prompt has room. */
-  private def wide(writer: PipedOutputStream, out: ByteArrayOutputStream): Terminal =
+  /** An `ExternalTerminal` of 80 columns and 24 rows. */
+  private def sized(writer: PipedOutputStream, out: ByteArrayOutputStream): Terminal =
     val terminal = external(PipedInputStream(writer, 4096), out)
-    terminal.setSize(Size.of(160, 24))
+    terminal.setSize(Size.of(80, 24))
     terminal
 
-  test("CLI editor: during a turn the line shows the spinner and the label, and the cursor is a blinking block") {
+  /** A live block of a turn with `rows`. */
+  private def busy(rows: String*): Live = Live(rows.toVector.map(Row.of(_)), busy = true, title = "● dspy4s · shop")
+
+  /** What a person sees after the output `out`. */
+  private def seen(out: ByteArrayOutputStream): Vector[String] = FakeScreen.of(out.toString(UTF_8), 80, 24)
+
+  /** Runs `body` with an editor on a terminal of 80 columns, with the live block `live`, while a read waits. */
+  private def editing(live: AtomicReference[Live], footer: () => Option[Row] = () => None)(
+      body: (EditorConsole, PipedOutputStream, ByteArrayOutputStream, AtomicReference[Typed]) => Unit
+  ): Unit =
     withHistory { history =>
       val writer  = PipedOutputStream()
       val out     = ByteArrayOutputStream()
-      val console = EditorConsole.on(wide(writer, out), history, identity)
-      val reader  = Thread.ofPlatform().daemon(true).start(() => console.read(): Unit)
-      try
-        assert(soon(out.toString(UTF_8).contains("\u001b[?2004h")), out.toString(UTF_8))
-        // A command with a % shows it as it is: the prompt of JLine reads %s as a pattern.
-        console.busy(Some(Busy("step 1: exec \"date +%s\"", System.currentTimeMillis(), 0)))
-        assert(soon(out.toString(UTF_8).contains("step 1: exec \"date +%s\"")), out.toString(UTF_8))
-        val busyText = out.toString(UTF_8)
-        assert(busyText.contains("\u001b[1 q"), busyText)
-        assert(busyText.exists(Frames.contains), busyText)
-        val mark = busyText.length
-        console.busy(None)
-        assert(soon(out.toString(UTF_8).drop(mark).contains("\u001b[0 q")), out.toString(UTF_8).drop(mark))
-        console.close()
-        reader.join(5_000)
-        val text = out.toString(UTF_8)
-        assert(text.lastIndexOf("\u001b[0 q") > text.lastIndexOf("\u001b[1 q"), text)
+      val console = EditorConsole.on(sized(writer, out), history, identity)
+      val got     = AtomicReference[Typed]()
+      console.watch(() => live.get, footer)
+      val reader = Thread.ofPlatform().daemon(true).start(() => got.set(console.read()))
+      try body(console, writer, out, got)
       finally
         console.close()
         writer.close()
+        reader.join(5_000)
+    }
+
+  test("CLI editor: the live block shows above the rule and the prompt, and a smaller block leaves no old row") {
+    val live = AtomicReference(busy("  FAKE-ROW-A", "  FAKE-ROW-B", "  FAKE-ROW-C"))
+    editing(live) { (_, _, out, _) =>
+      assert(soon(seen(out).exists(_.contains("FAKE-ROW-C"))), seen(out).mkString("\n"))
+      val shown = seen(out)
+      val first = shown.indexWhere(_.contains("FAKE-ROW-A"))
+      assertEquals(
+        shown.slice(first, first + 5).map(_.take(14)),
+        Vector("  FAKE-ROW-A", "  FAKE-ROW-B", "  FAKE-ROW-C", "─" * 14, "›")
+      )
+      live.set(busy("  FAKE-ROW-Z"))
+      def old(rows: Vector[String]) = rows.exists(r => r.contains("FAKE-ROW-A") || r.contains("FAKE-ROW-B"))
+      assert(soon(seen(out).exists(_.contains("FAKE-ROW-Z")) && !old(seen(out))), seen(out).mkString("\n"))
     }
   }
 
-  test("CLI editor: a read that starts during a turn shows the busy line at once, and close gives the cursor back") {
-    withHistory { history =>
-      val writer  = PipedOutputStream()
-      val out     = ByteArrayOutputStream()
-      val console = EditorConsole.on(wide(writer, out), history, identity)
-      console.busy(Some(Busy("step 2: the model works", System.currentTimeMillis(), 1)))
-      val reader = Thread.ofPlatform().daemon(true).start(() => console.read(): Unit)
-      try
-        assert(soon(out.toString(UTF_8).contains("step 2: the model works")), out.toString(UTF_8))
-        console.close()
-        reader.join(5_000)
-        val text = out.toString(UTF_8)
-        assert(text.lastIndexOf("\u001b[0 q") > text.lastIndexOf("\u001b[1 q"), text)
-      finally
-        console.close()
-        writer.close()
+  test("CLI editor: Enter keeps only the line of the person in the history, with no live block") {
+    val live = AtomicReference(busy("  FAKE-ROW-A", "  FAKE-ROW-B"))
+    editing(live) { (_, writer, out, got) =>
+      assert(soon(seen(out).exists(_.contains("FAKE-ROW-B"))), seen(out).mkString("\n"))
+      writer.write("hi\r".getBytes(UTF_8))
+      writer.flush()
+      assert(soon(got.get == Typed.Text("hi")), String.valueOf(got.get))
+      val shown = seen(out)
+      assert(shown.contains("› hi"), shown.mkString("\n"))
+      assert(!shown.exists(_.contains("FAKE-ROW")), shown.mkString("\n"))
     }
+  }
+
+  test("CLI editor: Ctrl-O runs the action of the client during a read") {
+    val live   = AtomicReference(busy("  FAKE-ROW-A"))
+    val counts = java.util.concurrent.atomic.AtomicInteger(0)
+    editing(live) { (console, writer, out, _) =>
+      console.onDetail(() => counts.incrementAndGet(): Unit)
+      assert(soon(seen(out).exists(_.contains("FAKE-ROW-A"))), seen(out).mkString("\n"))
+      writer.write("\u000f".getBytes(UTF_8))
+      writer.flush()
+      assert(soon(counts.get == 1), counts.get.toString)
+    }
+  }
+
+  test("CLI editor: during a turn the cursor is a blinking block with the title of the turn, and close gives it back") {
+    val live = AtomicReference(busy("  FAKE-ROW-A"))
+    editing(live) { (console, _, out, _) =>
+      assert(soon(out.toString(UTF_8).contains("\u001b[1 q")), out.toString(UTF_8))
+      assert(soon(out.toString(UTF_8).contains("\u001b]0;● dspy4s · shop\u0007")), out.toString(UTF_8))
+      val mark = out.toString(UTF_8).length
+      live.set(Live(Vector.empty, busy = false, title = "dspy4s · shop"))
+      assert(soon(out.toString(UTF_8).drop(mark).contains("\u001b[0 q")), out.toString(UTF_8).drop(mark))
+      assert(soon(!seen(out).exists(_.contains("FAKE-ROW-A"))), seen(out).mkString("\n"))
+      live.set(busy("  FAKE-ROW-B"))
+      assert(soon(seen(out).exists(_.contains("FAKE-ROW-B"))), seen(out).mkString("\n"))
+      console.close()
+      val text = out.toString(UTF_8)
+      assert(text.lastIndexOf("\u001b[0 q") > text.lastIndexOf("\u001b[1 q"), text)
+    }
+  }
+
+  test("CLI editor: a row with a % shows it as it is, and the footer shows its row") {
+    val live = AtomicReference(busy("  $ date +%s"))
+    editing(live, () => Some(Row.of("  FAKE-FOOTER"))) { (_, _, out, _) =>
+      assert(soon(seen(out).exists(_.contains("$ date +%s"))), seen(out).mkString("\n"))
+      assert(soon(out.toString(UTF_8).contains("FAKE-FOOTER")), out.toString(UTF_8))
+    }
+  }
+
+  test("CLI editor: Tab completes the commands, the lifetimes after /allow and the views after /reasoning") {
+    val reader                              = org.jline.reader.LineReaderBuilder.builder().terminal(terminal("")).build()
+    def complete(line: String): Set[String] =
+      val parsed =
+        org.jline.reader.impl.DefaultParser().parse(line, line.length, org.jline.reader.Parser.ParseContext.COMPLETE)
+      val found = java.util.ArrayList[org.jline.reader.Candidate]()
+      EditorConsole.completer.complete(reader, parsed, found)
+      found.asScala.map(_.value).toSet
+    assert(complete("/re").contains("/reasoning"), complete("/re").toString)
+    assert(complete("/sh").contains("/show"), complete("/sh").toString)
+    assert(complete("/allow se").contains("session"), complete("/allow se").toString)
+    assert(complete("/allow 12 tu").contains("turn"), complete("/allow 12 tu").toString)
+    assert(complete("/reasoning l").contains("line"), complete("/reasoning l").toString)
   }

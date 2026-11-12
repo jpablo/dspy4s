@@ -57,6 +57,11 @@ trait SessionHandle:
     */
   def activity: Option[Activity] = None
 
+  /** The size of the last view of the memory and its budget (`SessionRuntime.memoryUse`), or none before the first call
+    * to the policy. A client polls it. The default is none.
+    */
+  def memoryUse: Option[MemoryUse] = None
+
 /** What the host needs to run the turns of a session (10.1). It makes the live part of each activation. */
 trait SessionRuntime:
 
@@ -81,6 +86,13 @@ trait SessionRuntime:
     * lock that a command holds, because a client polls it while the command runs. The default is none.
     */
   def activity(session: SessionId): Option[Activity] =
+    val _ = session
+    None
+
+  /** The size of the last view of the memory of the open session `session`, and its budget, or none. The default is
+    * none.
+    */
+  def memoryUse(session: SessionId): Option[MemoryUse] =
     val _ = session
     None
 
@@ -278,6 +290,8 @@ private final class OpenSession private (
   def read(after: Long): Vector[Logged] = writer.log.filter(_.seq > after)
 
   override def activity: Option[Activity] = place.runtime.activity(id)
+
+  override def memoryUse: Option[MemoryUse] = place.runtime.memoryUse(id)
 
   /** Makes the next write of the session fail. Only the laws of a failed write use it. */
   private[host] def breakWritesForLaws(): Unit = writer.breakFileForLaws()

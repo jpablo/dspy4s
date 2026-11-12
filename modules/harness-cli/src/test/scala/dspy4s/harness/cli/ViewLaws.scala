@@ -172,7 +172,7 @@ class ViewLaws extends munit.FunSuite:
   test("CLI: each command of the help parses to a command of the client") {
     commandHelp.foreach { (syntax, _) =>
       val sample = syntax.replace("[N] [once|turn|session]", "57 turn").replace("ID", "2.1")
-        .replace(" off|short|full", " full").replace("SECONDS", "1")
+        .replace(" off|line|short|full", " full").replace("SECONDS", "1")
       parseLine(sample) match
         case Line.Unknown(_) => fail(s"the help names $syntax, and $sample does not parse")
         case _               => ()
@@ -257,10 +257,11 @@ class ViewLaws extends munit.FunSuite:
     )
   }
 
-  test("CLI: entryText shows the start of a step, and the reasoning cut short, in full, or not at all") {
+  test("CLI: entryText shows no line at the start of a step, and the reasoning cut short, in full, or not at all") {
+    // The busy line shows the step while it runs, with a spinner and the time (2026-11-11).
     val long = (1 to 60).map(i => s"FAKE-THOUGHT-$i: a line of the reasoning of the model").mkString("\n")
     val log  = Support.logOf(1000L, Entry.StepStarted(1), Entry.Acted(long, "FAKE-TEXT", Some("FAKE-CODE")))
-    assert(entryText(log(0)).exists(_.contains("Step 2")), entryText(log(0)).toString)
+    assertEquals(entryText(log(0)), None)
     val short = entryText(log(1)).getOrElse(fail("no text"))
     assert(short.contains("FAKE-THOUGHT-1:") && !short.contains("FAKE-THOUGHT-60"), short)
     assert(short.contains("/reasoning full shows all the reasoning of the next steps"), short)
@@ -294,6 +295,8 @@ class ViewLaws extends munit.FunSuite:
     assert(text.contains("4. exec \"rm -rf build\"") && text.contains("7. exec \"git push\""), text)
     assert(text.contains("1 of 3 jobs"), text)
     assert(statusText(SessionState.initial.copy(closed = false), Map.empty, Vector.empty).contains("No turn"))
+    val model = statusText(state.copy(position = Position.InPolicy(1)), Map.empty, Vector.empty)
+    assert(model.contains("Step 2 of 30.") && !model.contains("model") && !model.contains("works"), model)
   }
 
   // ── The loop ──

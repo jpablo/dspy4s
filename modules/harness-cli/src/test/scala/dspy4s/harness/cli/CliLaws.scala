@@ -2,7 +2,7 @@ package dspy4s.harness.cli
 
 import dspy4s.harness.Support
 import dspy4s.harness.guest.JobStatus
-import dspy4s.harness.host.{Activity, Behind, Feed, HostError, SessionHandle}
+import dspy4s.harness.host.{Behind, Feed, HostError, SessionHandle}
 import dspy4s.harness.kernel.*
 import dspy4s.lm.providers.OpenAiLanguageModel
 import zio.blocks.chunk.Chunk
@@ -11,6 +11,7 @@ import zio.blocks.schema.json.Json
 import java.io.{BufferedReader, ByteArrayOutputStream, PrintStream, StringReader}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.{Files, Path}
+import java.util.concurrent.atomic.AtomicReference
 import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch, TimeUnit}
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
@@ -410,33 +411,45 @@ class CliLaws extends munit.FunSuite:
     Support.remove(root)
   }
 
-  // ── The busy line (2026-11-11) ──
+  // ── The screen of the line editor (CLI_SCREEN.md) ──
 
   private def at(seq: Long, millis: Long, entry: Entry): Logged =
     Logged(seq, Meta(millis, Source.Harness, Taint.Trusted, true), entry)
 
-  test("CLI: the loop gives the console the state of each entry, and no state after the end of the turn") {
-    val log = Vector(
+  private def screenTurn =
+    Vector(
       at(1, 1000, Entry.TurnStarted),
       at(2, 1100, Entry.StepStarted(0)),
-      at(3, 2000, Entry.TurnEnded(TurnOutcome.Replied("x")))
+      at(3, 2000, Entry.Acted("", "FAKE-TEXT", Some("println(1)"))),
+      at(4, 2500, Entry.Observed("1", CellOutcome.Ok, Map.empty)),
+      at(5, 2600, Entry.StepStarted(1)),
+      at(6, 3000, Entry.Acted("", "FAKE-REPLY", None)),
+      at(7, 3100, Entry.TurnEnded(TurnOutcome.Replied("FAKE-REPLY")))
     )
+
+  test("CLI: a rich console gets the rows of the screen, the live block, the footer and the action of Ctrl-O") {
     val console = RecordingConsole()
     try
-      assert(Cli.loop(EntriesHandle(log), console, script = false))
-      val states = console.states.asScala.toVector
-      assert(states.contains(Some(Busy("step 1: the model works", 1100, 0))), states.toString)
-      assertEquals(states.lastOption, Some(None), states.toString)
+      assert(Cli.loop(EntriesHandle(screenTurn), console, script = false, home = "/home/a"))
+      val rows = console.rows.asScala.toVector.map(_.plain)
+      assert(rows.contains("  FAKE-TEXT"), rows.mkString("\n"))
+      assert(rows.contains("  ▸ Ran a cell · 1 line of output · 0.5 s  #3"), rows.mkString("\n"))
+      assert(rows.contains("● FAKE-REPLY"), rows.mkString("\n"))
+      assert(!console.printed.asScala.exists(_.contains("> Ok")), "a rich console gets no line of entryText")
+      val (live, footer) = Option(console.watched.get).getOrElse(fail("no watch"))
+      assertEquals(live().rows, Vector.empty)
+      assert(footer().isDefined)
+      assert(Option(console.details.get).isDefined, "no action for Ctrl-O")
     finally console.release()
   }
 
-  test("CLI: the loop gives the console the activity of the host of the session") {
-    val scan    = Some(Activity.SecretScan(5L, None))
-    val console = RecordingConsole()
-    try
-      assert(Cli.loop(EntriesHandle(Vector.empty, scan), console, script = false))
-      assertEquals(Option(console.activityOf.get).map(_.apply()), Some(scan))
-    finally console.release()
+  test("CLI: /show prints a cell of the session in full, and an unknown id gives an error") {
+    val console = RecordingConsole(Vector("/show 3", "/show 99"))
+    assert(Cli.loop(EntriesHandle(screenTurn, feedEnds = false), console, script = false))
+    val rows = console.rows.asScala.toVector.map(_.plain)
+    assert(rows.contains("  ▾ Ran a cell · 1 line of output · 0.5 s  #3"), rows.mkString("\n"))
+    assert(rows.contains("    │ println(1)"), rows.mkString("\n"))
+    assert(console.printed.asScala.exists(_.contains("The session has no cell 99")), console.printed.toString)
   }
 
 /** A session for the laws of `Cli.loop`: `send` keeps the commands, `run` refuses each command with `TurnOpen`, and the
@@ -498,28 +511,37 @@ private final class TurnHandle(open: Boolean = false, refuse: Boolean = false) e
       def ended: Boolean = false
       def close(): Unit  = ()
 
-/** A console that keeps each busy state. Its read waits until `release`, so the loop ends when the feed ends. */
-private final class RecordingConsole extends ClientConsole:
-  val states: ConcurrentLinkedQueue[Option[Busy]] = ConcurrentLinkedQueue()
-  private val gate                                = CountDownLatch(1)
+/** A rich console that keeps each row and each text that it gets. It reads `lines` and then gives `End`. With no line,
+  * its read waits until `release`, so the loop ends when the feed ends.
+  */
+private final class RecordingConsole(lines: Vector[String] = Vector.empty) extends ClientConsole:
+  val rows: ConcurrentLinkedQueue[Row]                          = ConcurrentLinkedQueue()
+  val printed: ConcurrentLinkedQueue[String]                    = ConcurrentLinkedQueue()
+  val watched: AtomicReference[(() => Live, () => Option[Row])] = AtomicReference()
+  val details: AtomicReference[() => Unit]                      = AtomicReference()
+  private val left                                              = ConcurrentLinkedQueue[String](lines.asJava)
+  private val gate                                              = CountDownLatch(1)
+
+  override def rich: Boolean = true
 
   def read(): Typed =
-    gate.await()
-    Typed.End
+    Option(left.poll()).fold {
+      if lines.isEmpty then gate.await()
+      Typed.End
+    }(Typed.Text(_))
 
-  def print(text: String): Unit = ()
+  def print(text: String): Unit = printed.add(text): Unit
 
-  override def busy(state: Option[Busy]): Unit = states.add(state): Unit
+  override def printRows(more: Vector[Row]): Unit = more.foreach(rows.add)
 
-  val activityOf: java.util.concurrent.atomic.AtomicReference[() => Option[Activity]] =
-    java.util.concurrent.atomic.AtomicReference()
+  override def watch(live: () => Live, footer: () => Option[Row]): Unit = watched.set((live, footer))
 
-  override def activity(of: () => Option[Activity]): Unit = activityOf.set(of)
+  override def onDetail(action: () => Unit): Unit = details.set(action)
 
   def release(): Unit = gate.countDown()
 
-/** A closed session whose feed gives `log` once and then ends. */
-private final class EntriesHandle(log: Vector[Logged], now: Option[Activity] = None) extends SessionHandle:
+/** A closed session whose feed gives `log` once. With `feedEnds`, the feed then ends. */
+private final class EntriesHandle(log: Vector[Logged], feedEnds: Boolean = true) extends SessionHandle:
   def id: SessionId                                          = SessionId("fake-session")
   def send(command: Command): Either[HostError, Unit]        = Right(())
   def run(command: Command): Either[HostError, SessionState] =
@@ -527,11 +549,10 @@ private final class EntriesHandle(log: Vector[Logged], now: Option[Activity] = N
   def state: SessionState                 = SessionState.initial.copy(closed = true)
   def jobStatus: Map[EffectId, JobStatus] = Map.empty
   def read(after: Long): Vector[Logged]   = log.filter(_.seq > after)
-  override def activity: Option[Activity] = now
   def subscribe(capacity: Int): Feed      =
     new Feed:
       private val queue                                          = ConcurrentLinkedQueue[Either[Behind, Logged]](log.map(Right(_)).asJava)
       def poll(waitMillis: Long): Option[Either[Behind, Logged]] =
         Option(queue.poll()).orElse { Thread.sleep(waitMillis.min(50)); None }
-      def ended: Boolean = queue.isEmpty
+      def ended: Boolean = feedEnds && queue.isEmpty
       def close(): Unit  = ()

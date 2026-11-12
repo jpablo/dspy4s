@@ -1,11 +1,12 @@
 package dspy4s.harness.cli
 
-import dspy4s.harness.host.Activity
+import org.jline.reader.impl.completer.{AggregateCompleter, ArgumentCompleter, NullCompleter, StringsCompleter}
 import org.jline.reader.impl.history.DefaultHistory
 import org.jline.reader.impl.{DefaultParser, LineReaderImpl}
-import org.jline.reader.{EndOfFileException, LineReader, UserInterruptException}
+import org.jline.reader.{Completer, EndOfFileException, LineReader, Reference, UserInterruptException}
+import org.jline.keymap.KeyMap
 import org.jline.terminal.{Attributes, Terminal, TerminalBuilder}
-import org.jline.utils.InfoCmp
+import org.jline.utils.{AttributedString, AttributedStringBuilder, AttributedStyle, InfoCmp, Status as JlineStatus}
 
 import java.io.{BufferedReader, IOException, PrintStream}
 import java.nio.charset.StandardCharsets.UTF_8
@@ -14,6 +15,7 @@ import java.time.Instant
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{Executors, RejectedExecutionException, TimeUnit}
 import scala.annotation.tailrec
+import scala.jdk.CollectionConverters.*
 import scala.util.Try
 
 /** What the person typed: a line, a Ctrl-C on an empty line, or the end of the input. */
@@ -38,14 +40,22 @@ trait ClientConsole extends AutoCloseable:
     */
   def onInterrupt(action: () => Unit): Unit = ()
 
-  /** Shows what the session does now (`Busy`), or that no turn is open. A console with no line editor shows nothing. */
-  def busy(next: Option[Busy]): Unit = ()
+  /** True for a console with the screen of CLI_SCREEN.md: the live block, the footer, and the rows with tones. */
+  def rich: Boolean = false
 
-  /** Sets where the console reads what the host does now (`SessionHandle.activity`). A console with no line editor
-    * reads nothing.
-    */
-  def activity(of: () => Option[Activity]): Unit =
-    val _ = of
+  /** The glyphs of the rows of this console. */
+  def glyphs: Glyphs = Glyphs.unicode
+
+  /** Prints `rows` above the line that the person types. A console with no tones prints the plain text of the rows. */
+  def printRows(rows: Vector[Row]): Unit = if rows.nonEmpty then print(rows.map(_.plain).mkString("\n"))
+
+  /** Sets where the console reads the live block and the footer. A console with no line editor reads nothing. */
+  def watch(live: () => Live, footer: () => Option[Row]): Unit =
+    val _ = (live, footer)
+
+  /** Runs `action` at each Ctrl-O. A console with no such key does nothing. */
+  def onDetail(action: () => Unit): Unit =
+    val _ = action
 
   def close(): Unit = ()
 
@@ -60,9 +70,10 @@ final class PlainConsole(in: BufferedReader, out: PrintStream) extends ClientCon
 
   def print(text: String): Unit = out.synchronized(out.println(text))
 
-/** A console with the line editor of JLine, for a person at a terminal (10.6).
+/** A console with the line editor of JLine, for a person at a terminal (10.6), with the screen of CLI_SCREEN.md.
   *
-  *   - The person can edit the line, and the up and down keys give the earlier lines.
+  *   - The person can edit the line, and the up and down keys give the earlier lines. Tab completes the commands, the
+  *     lifetimes after `/allow` and the views after `/reasoning` (`completer`).
   *   - The history file keeps the lines after `mask`, so a known secret does not go into the file (5.6).
   *   - Enter after an odd number of `\` at the end of the line changes the last `\` into a new line, and the line goes
   *     on. A paste goes into the line as it is, so a pasted `\` stays.
@@ -71,18 +82,22 @@ final class PlainConsole(in: BufferedReader, out: PrintStream) extends ClientCon
   *     no read waits stays in the input, and the next read gets it. So the terminal never sends SIGINT to the process
   *     group, which holds the wrappers of the jobs (10.3). A SIGINT from outside, as `kill -INT`, runs the action of
   *     `onInterrupt`.
-  *   - Ctrl-D on an empty line gives `End`.
-  *   - `print` writes above the line that the person types, so the text of the session does not break that line.
-  *   - During a turn (`busy`), the prompt shows a spinner and the time since the start of what runs, and the right side
-  *     of the line shows its label (`Busy`). The cursor is a blinking block. A timer redraws the line every
-  *     `Busy.FrameMillis` through the widget `BusyWidget`, because JLine changes the line of a read only with its lock.
-  *     A `%` of a label stays as it is. With no open turn, the prompt is `> `, and the cursor has the shape that the
-  *     terminal gives it.
+  *   - Ctrl-D on an empty line gives `End`. Ctrl-O runs the action of `onDetail`.
+  *   - `print` and `printRows` write above the live block, so the text of the session does not break the line of the
+  *     person.
+  *   - The live block (`watch`) and a rule are the prompt of the read, above `› `. JLine changes the line of a read
+  *     only with its lock, so a timer redraws it every `FrameMillis` through the widget `BusyWidget`, when it changed.
+  *     A `%` of a row stays as it is. Before Enter accepts a line, the prompt is only `› `, so the history keeps no
+  *     live block.
+  *   - The footer is one line of a JLine `Status` at the bottom of the terminal.
+  *   - During a turn the cursor is a blinking block, and the window title is the title of the live block.
+  *   - With `color` off, each tone has no color.
   *   - `close` first ends a read that waits, at most `CloseWait`. So JLine turns off the modes that its read turned on,
-  *     for example bracketed paste, before the terminal goes back to the shell. It gives the cursor its shape back. A
-  *     read after `close` gives `End`.
+  *     for example bracketed paste, before the terminal goes back to the shell. It gives the cursor its shape back, and
+  *     it removes the footer. A read after `close` gives `End`.
   */
-final class EditorConsole private (reader: LineReaderImpl) extends ClientConsole:
+final class EditorConsole private (reader: LineReaderImpl, color: Boolean, override val glyphs: Glyphs)
+    extends ClientConsole:
   import EditorConsole.*
 
   private val terminal          = reader.getTerminal
@@ -90,18 +105,45 @@ final class EditorConsole private (reader: LineReaderImpl) extends ClientConsole
   private var reading           = false // only with `lock`
   @volatile private var closing = false
 
-  /** What the session does now, and whether the cursor is a blinking block. */
-  @volatile private var current: Option[Busy] = None
-  private val blinking                        = AtomicBoolean(false)
-
-  /** Where the console reads what the host does now. */
-  @volatile private var activityOf: () => Option[Activity] = () => None
+  // Where the console reads the screen, and what the terminal shows now.
+  @volatile private var liveOf: () => Live          = () => Idle
+  @volatile private var footerOf: () => Option[Row] = () => None
+  @volatile private var detailAction: () => Unit    = () => ()
+  @volatile private var shownPrompt                 = ""
+  @volatile private var shownTitle                  = ""
+  @volatile private var shownFooter: Option[Row]    = None
+  private val blinking                              = AtomicBoolean(false)
+  private val status                                = Try(Option(JlineStatus.getStatus(terminal))).toOption.flatten
 
   private val ticker = Executors.newSingleThreadScheduledExecutor { task =>
-    Thread.ofPlatform().daemon(true).name("harness-cli-busy").unstarted(task)
+    Thread.ofPlatform().daemon(true).name("harness-cli-screen").unstarted(task)
   }
-  reader.getWidgets.put(BusyWidget, () => redraw()): Unit
+
+  reader.getWidgets.put(BusyWidget, () => redraw(force = false)): Unit
+  reader.getWidgets.put(
+    DetailWidget,
+    () =>
+      Try(detailAction()): Unit
+      redraw(force = true)
+  ): Unit
+  Vector(LineReader.EMACS, LineReader.MAIN).flatMap(name => Option(reader.getKeyMaps.get(name))).foreach(
+    _.bind(Reference(DetailWidget), KeyMap.ctrl('O'))
+  )
+  private val accept = reader.getWidgets.get(LineReader.ACCEPT_LINE)
+  reader.getWidgets.put(
+    LineReader.ACCEPT_LINE,
+    () =>
+      goesOn(reader) || {
+        // The history keeps only the line of the person, with no live block.
+        reader.setPrompt(markText)
+        shownPrompt = markText
+        reader.callWidget(LineReader.REDISPLAY)
+        accept.apply()
+      }
+  ): Unit
   ticker.scheduleAtFixedRate(() => tick(), FrameMillis, FrameMillis, TimeUnit.MILLISECONDS): Unit
+
+  override def rich: Boolean = true
 
   def read(): Typed =
     val go = lock.synchronized {
@@ -119,8 +161,12 @@ final class EditorConsole private (reader: LineReaderImpl) extends ClientConsole
   /** One line. A Ctrl-C on a line with text only clears the text, so the read goes on. */
   @tailrec private def typedLine(): Typed =
     val typed =
-      cursor(current.isDefined)
-      try Some(Typed.Text(reader.readLine(promptNow(), rightPromptNow(), null: Character, null: String)))
+      val live   = current()
+      val prompt = promptOf(live)
+      shownPrompt = prompt
+      cursor(live.busy)
+      title(live.title)
+      try Some(Typed.Text(reader.readLine(prompt, "", null: Character, null: String)))
       catch
         case e: UserInterruptException =>
           if closing then Some(Typed.End) else Option.when(Option(e.getPartialLine).forall(_.isEmpty))(Typed.Interrupt)
@@ -134,50 +180,89 @@ final class EditorConsole private (reader: LineReaderImpl) extends ClientConsole
       try reader.printAbove(text)
       catch case _: IllegalStateException => () // The terminal closed during the print.
 
+  /** Prints `rows` above the live block. The loop changes the screen before it prints, and JLine draws the prompt again
+    * after a print. So the console first sets the prompt of the new screen, and the print shows it. Else a row that
+    * ends the turn, for example `Done`, would come with the old status line under it.
+    */
+  override def printRows(rows: Vector[Row]): Unit =
+    if rows.nonEmpty then
+      tick()
+      print(rows.map(ansi).mkString("\n"))
+
   override def onInterrupt(action: () => Unit): Unit =
     terminal.handle(Terminal.Signal.INT, _ => if !closing then action()): Unit
 
-  override def activity(of: () => Option[Activity]): Unit = activityOf = of
+  override def watch(live: () => Live, footer: () => Option[Row]): Unit =
+    liveOf = live
+    footerOf = footer
+    kick()
 
-  override def busy(next: Option[Busy]): Unit =
-    current = next
-    // The line shows the change at once, not at the next tick.
+  override def onDetail(action: () => Unit): Unit = detailAction = action
+
+  /** Redraws the screen at once, not at the next tick. */
+  private def kick(): Unit =
     try ticker.execute(() => tick())
     catch case _: RejectedExecutionException => () // The console closed.
 
-  /** Redraws the line of a read that waits, while a turn is open or the cursor is still a blinking block. With no read,
-    * the next read shows it.
-    */
+  /** Redraws the line of a read that waits. With no read, the next read shows the screen. */
   private def tick(): Unit =
-    if !closing && (current.isDefined || blinking.get) then
+    if !closing then
       try reader.callWidget(BusyWidget)
       catch case _: IllegalStateException => () // No read waits.
 
-  /** The widget of `tick`: the two prompts of `current`, the shape of the cursor, and a redraw of the line. It runs
-    * with the lock of the reader.
+  /** The widget of `tick`: the live block and the rule as the prompt, the footer, the cursor and the title. It runs
+    * with the lock of the reader. It redraws the line only when the prompt changed, or with `force`.
     */
-  private def redraw(): Boolean =
-    val now = current
-    reader.setPrompt(promptOf(now))
-    reader.setRightPrompt(rightPromptOf(now))
-    cursor(now.isDefined)
-    reader.callWidget(LineReader.REDISPLAY)
+  private def redraw(force: Boolean): Boolean =
+    val live   = current()
+    val prompt = promptOf(live)
+    cursor(live.busy)
+    title(live.title)
+    footer()
+    if force || prompt != shownPrompt then
+      shownPrompt = prompt
+      reader.setPrompt(prompt)
+      reader.setRightPrompt("")
+      reader.callWidget(LineReader.REDISPLAY)
     true
 
-  private def promptNow(): String      = promptOf(current)
-  private def rightPromptNow(): String = rightPromptOf(current)
+  /** The live block now. A failed read of the screen shows no live block. */
+  private def current(): Live = Try(liveOf()).getOrElse(Idle)
 
-  /** The prompt of `busy`. JLine reads a `%` of a prompt as a pattern, so each `%` is `%%`. */
-  private def promptOf(busy: Option[Busy]): String =
-    Busy.prompt(busy, System.currentTimeMillis()).replace("%", "%%")
-
-  /** The right prompt of `busy` and of the activity of the host, at most half of the width of the terminal. A failed
-    * read of the activity shows no activity.
+  /** The prompt of `live`: each row of the live block, cut to the width of the terminal, the rule, and `› `. JLine
+    * reads a `%` of a prompt as a pattern, so each `%` is `%%`.
     */
-  private def rightPromptOf(busy: Option[Busy]): String =
-    val width    = terminal.getSize.getColumns
-    val activity = if busy.exists(_.command) then Try(activityOf()).toOption.flatten else None
-    Busy.rightPrompt(busy, activity, if width > 0 then (width / 2).max(MinRight) else DefaultRight).replace("%", "%%")
+  private def promptOf(live: Live): String =
+    val width = columns() - 1
+    val rule  = Row.of(glyphs.rule * width, Tone.Dim)
+    ((live.rows :+ rule).map(row => styled(row).columnSubSequence(0, width).toAnsi(terminal)) :+ markText)
+      .mkString("\n")
+      .replace("%", "%%")
+
+  /** The prompt mark `› ` in the accent tone, with no `%`. */
+  private def markText: String = styled(Row.of(s"${glyphs.prompt} ", Tone.Accent)).toAnsi(terminal)
+
+  private def columns(): Int =
+    val width = terminal.getSize.getColumns
+    if width > 0 then width else DefaultColumns
+
+  /** Shows the footer of `footerOf`, when it changed. */
+  private def footer(): Unit =
+    val row = Try(footerOf()).toOption.flatten
+    if row != shownFooter then
+      shownFooter = row
+      status.foreach(s =>
+        Try(s.update(row.toVector.map(r => styled(r).columnSubSequence(0, columns() - 1)).asJava)): Unit
+      )
+
+  /** Sets the title of the window, when it changed. The title has no control character (`Screen.live`). */
+  private def title(text: String): Unit =
+    if text.nonEmpty && text != shownTitle then
+      shownTitle = text
+      Try {
+        terminal.writer().write(s"\u001b]0;$text\u0007")
+        terminal.flush()
+      }: Unit
 
   /** Sets the cursor to a blinking block, or gives it the shape of the terminal, when that is a change. */
   private def cursor(blink: Boolean): Unit =
@@ -186,6 +271,15 @@ final class EditorConsole private (reader: LineReaderImpl) extends ClientConsole
         terminal.writer().write(if blink then BlinkingBlock else CursorDefault)
         terminal.flush()
       }: Unit
+
+  /** The text of `row` with the codes of its tones, for `printAbove`. */
+  private def ansi(row: Row): String = styled(row).toAnsi(terminal)
+
+  /** `row` with a style for each tone, or with no style when `color` is off. */
+  private def styled(row: Row): AttributedString =
+    val builder = AttributedStringBuilder()
+    row.spans.foreach(span => builder.styled(if color then styleOf(span.tone) else AttributedStyle.DEFAULT, span.text))
+    builder.toAttributedString
 
   /** Ends a read that waits, saves the history, and gives the terminal back to the shell. A second call does nothing.
     */
@@ -205,6 +299,7 @@ final class EditorConsole private (reader: LineReaderImpl) extends ClientConsole
           lock.wait(50)
       }
       Try(reader.getHistory.save()): Unit
+      status.foreach(s => Try(s.close())): Unit
       // A read that ends turns off the modes that it turned on. At a SIGTERM, the shutdown hook of JLine can close the
       // terminal before that, so the client turns the modes off too. When the terminal is closed, the text goes to the
       // standard output, which is the same terminal.
@@ -234,25 +329,57 @@ object EditorConsole:
   private val BlinkingBlock = "\u001b[1 q"
   private val CursorDefault = "\u001b[0 q"
 
-  /** The name of the widget that redraws the busy line, and the time between two redraws. */
-  private val BusyWidget  = "dspy4s-busy"
-  private val FrameMillis = 125L
+  /** The names of the widgets that redraw the screen and that switch the detail, and the time between two redraws. */
+  private val BusyWidget   = "dspy4s-screen"
+  private val DetailWidget = "dspy4s-detail"
+  private val FrameMillis  = 125L
 
-  /** The least width of the right prompt, and its width on a terminal with no known width. */
-  private val MinRight     = 20
-  private val DefaultRight = 40
+  /** The width of a terminal that gives no width. */
+  private val DefaultColumns = 80
+
+  /** The live block of a session with no open turn. */
+  private val Idle = Live(Vector.empty, busy = false, title = "")
 
   /** The longest wait of `close` for a read to end, in nanoseconds. */
   private val CloseWait = 2_000_000_000L
 
+  /** The style of each tone: only the 16 ANSI colors, so each theme of a terminal works (CLI_SCREEN.md, 9.1). */
+  private def styleOf(tone: Tone): AttributedStyle =
+    tone match
+      case Tone.Plain  => AttributedStyle.DEFAULT
+      case Tone.Dim    => AttributedStyle.DEFAULT.faint()
+      case Tone.Accent => AttributedStyle.DEFAULT.foreground(AttributedStyle.CYAN)
+      case Tone.Good   => AttributedStyle.DEFAULT.foreground(AttributedStyle.GREEN)
+      case Tone.Bad    => AttributedStyle.DEFAULT.foreground(AttributedStyle.RED)
+      case Tone.Warn   => AttributedStyle.DEFAULT.foreground(AttributedStyle.YELLOW)
+
+  /** The completion of a line: each command, the lifetimes after `/allow`, and the views after `/reasoning`. */
+  private[cli] val completer: Completer =
+    val words     = commandHelp.map(_._1.takeWhile(_ != ' ')).distinct.filterNot(Set("/allow", "/reasoning"))
+    val lifetimes = StringsCompleter("once", "turn", "session")
+    // `/allow N once`: the number is free text, so this completer does not check the words before the lifetime.
+    val numbered =
+      ArgumentCompleter(StringsCompleter("/allow"), NullCompleter.INSTANCE, lifetimes, NullCompleter.INSTANCE)
+    numbered.setStrict(false)
+    AggregateCompleter(
+      ArgumentCompleter(StringsCompleter("/allow"), lifetimes, NullCompleter.INSTANCE),
+      numbered,
+      ArgumentCompleter(
+        StringsCompleter("/reasoning"),
+        StringsCompleter(ReasoningView.values.map(_.toString.toLowerCase)*),
+        NullCompleter.INSTANCE
+      ),
+      ArgumentCompleter(StringsCompleter(words*), NullCompleter.INSTANCE)
+    )
+
   /** A console on the terminal of this process, or none when the input or the output is not a terminal, for example a
-    * pipe. The caller then uses `PlainConsole`.
+    * pipe. The caller then uses `PlainConsole`. A terminal with no UTF-8 gets the ASCII glyphs.
     *
     * JLine asks the terminal for its modes in `build`, and it reads the answers from the input. A line that the person
     * types before the end of `build` is lost. So the client makes its console before it starts the host, and it tells
     * the person to type only after that.
     */
-  def system(history: Path, mask: String => String): Option[EditorConsole] =
+  def system(history: Path, mask: String => String, color: Boolean = true): Option[EditorConsole] =
     // With software signals, JLine 4 raises INT for a Ctrl-C key and also passes the key on, so one Ctrl-C comes two
     // times. The editor needs only the key. A value that the person set stays.
     if System.getProperty(TerminalBuilder.PROP_SOFTWARE_SIGNALS) == null then
@@ -267,13 +394,21 @@ object EditorConsole:
         if terminal.getType == Terminal.TYPE_DUMB || terminal.getType == Terminal.TYPE_DUMB_COLOR then
           terminal.close()
           None
-        else Some(on(terminal, history, mask))
+        else
+          val glyphs = if UTF_8.equals(terminal.encoding()) then Glyphs.unicode else Glyphs.ascii
+          Some(on(terminal, history, mask, color, glyphs))
       }
 
   /** A console on `terminal`, with its history in the file `history`. Each line goes through `mask` before it goes into
     * the history.
     */
-  def on(terminal: Terminal, history: Path, mask: String => String): EditorConsole =
+  def on(
+      terminal: Terminal,
+      history : Path,
+      mask    : String => String,
+      color   : Boolean = true,
+      glyphs  : Glyphs  = Glyphs.unicode
+  ): EditorConsole =
     // The client does not split a line into words, so a quote does not hold the line open, and a `\` before the end of
     // the line is a plain character.
     val parser = DefaultParser()
@@ -284,21 +419,20 @@ object EditorConsole:
     variables.put(LineReader.HISTORY_FILE_SIZE, Integer.valueOf(MostLines)): Unit
     variables.put(LineReader.HISTORY_SIZE, Integer.valueOf(MostLines)): Unit
     variables.put(LineReader.SECONDARY_PROMPT_PATTERN, GoesOn): Unit
-    // The client makes the reader as `LineReaderBuilder.build` does. The builder gives only the interface, and the busy
-    // line needs `setPrompt` of the implementation.
+    // The client makes the reader as `LineReaderBuilder.build` does. The builder gives only the interface, and the live
+    // block needs `setPrompt` of the implementation.
     val reader = LineReaderImpl(terminal, "dspy4s-harness", variables)
     reader.setHistory(MaskedHistory(mask))
     reader.setParser(parser)
+    reader.setCompleter(completer)
     // With no event expansion, a `!` in a message stays as it is, and JLine keeps each `\`.
     reader.option(LineReader.Option.DISABLE_EVENT_EXPANSION, true): Unit
-    val accept = reader.getWidgets.get(LineReader.ACCEPT_LINE)
-    reader.getWidgets.put(LineReader.ACCEPT_LINE, () => goesOn(reader) || accept.apply()): Unit
     // With no signals, a Ctrl-C is a key. A read of JLine keeps these attributes, and it gives them back at its end.
     // The close of a system terminal gives the shell the attributes from before the client.
     val attributes = terminal.getAttributes
     attributes.setLocalFlag(Attributes.LocalFlag.ISIG, false)
     terminal.setAttributes(attributes)
-    EditorConsole(reader)
+    EditorConsole(reader, color, glyphs)
 
   /** At Enter after an odd number of `\` at the end of the line, the last `\` becomes a new line, and the line goes on.
     * An even number is a text that ends with `\`, so Enter sends it. A paste does not come here.

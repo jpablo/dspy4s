@@ -4,6 +4,7 @@ import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.{DspyError, RuntimeContext, RuntimeError}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.harness.{HarnessLimits, Secrets}
+import dspy4s.harness.guest.JobStatus
 import dspy4s.harness.host.{Behind, HostError, LocalHost, SessionHandle, WorkEnv, WorkRuntime}
 import dspy4s.harness.kernel.{EffectResult, Entry, GuardRule, Logged, Position, RequestId, SessionId, TurnOutcome}
 import dspy4s.harness.sandbox.{Backends, HostList}
@@ -95,7 +96,7 @@ object Cli:
     val model = env.get("DSPY_TRACE").filter(_.nonEmpty).foldLeft(modelOf(name, env)) { (inner, file) =>
       TracedModel(inner, Path.of(file), secrets.maskText)
     }
-    val console = consoleOf(cli, secrets)
+    val console = consoleOf(cli, secrets, env)
     // A SIGTERM runs the shutdown hooks, so this hook gives the terminal its modes back. `close` runs only once.
     val hook = Thread(() => console.close())
     Try(Runtime.getRuntime.addShutdownHook(hook)): Unit
@@ -133,7 +134,7 @@ object Cli:
                   console.print(
                     s"The session ${visible(handle.id.value)} is open. Type a message, or /help for the commands."
                   )
-                  if loop(handle, console, cli.script) then 0 else 1
+                  if loop(handle, console, cli.script, home.toString) then 0 else 1
             finally
               // The person gets the terminal back first, because the close of the host can wait for the stop of jobs.
               console.close()
@@ -146,8 +147,10 @@ object Cli:
   /** The console of the client: the line editor at a terminal, with its history at `<root>/history`. Plain streams in
     * the script mode, and for a pipe.
     */
-  private def consoleOf(cli: CliArgs, secrets: Secrets): ClientConsole =
-    val editor = if cli.script then None else EditorConsole.system(cli.root.resolve("history"), secrets.maskText)
+  private def consoleOf(cli: CliArgs, secrets: Secrets, env: Map[String, String]): ClientConsole =
+    // NO_COLOR with any value turns the colors off (no-color.org).
+    val color  = !env.get("NO_COLOR").exists(_.nonEmpty)
+    val editor = if cli.script then None else EditorConsole.system(cli.root.resolve("history"), secrets.maskText, color)
     editor.getOrElse(PlainConsole(BufferedReader(InputStreamReader(System.in, UTF_8)), System.out))
 
   /** The text of `--list`: the sessions of the host at `root` (10.2), with `sessionsText`, and a line for each file of
@@ -207,8 +210,10 @@ object Cli:
     *     the next steps. They change nothing in the session. `/allow N` grants the call that the entry N asked for.
     *   - After a turn that ends `Aborted`, the client prints `stopNotice`: each job of that turn that still runs, and
     *     how to stop it (10.3).
-    *   - After each entry, the console gets the state of the session (`Busy.after`), so a person sees what runs. A turn
-    *     that is open at the start of the loop gives the state "the turn runs".
+    *   - A console with the screen of CLI_SCREEN.md (`ClientConsole.rich`) gets the rows of `Screen.after` for each
+    *     entry, in place of `entryText`, and it reads the live block (`Screen.live`) and the footer (`Screen.footer`).
+    *     Ctrl-O switches the detail of a cell, and `/show ID` prints a cell or a call in full. `home` is the home
+    *     folder, which the footer shows as `~`. A plain console keeps the lines of `entryText`.
     *   - An error of `commandsFor` and a refused command print one line, and the loop goes on.
     *   - After `Behind`, the client reads the journal after its last `seq`, so it shows each entry once.
     *   - It ends at `/quit`, at the end of the input, or when the feed ends, for example after `Close` or a failed
@@ -219,7 +224,10 @@ object Cli:
     *     line waits also for a turn that started before it, for example after a reopen or a job message. `/quit` and
     *     `/stop` wait too, so a person stops a script with the end of the process.
     */
-  def loop(handle: SessionHandle, console: ClientConsole, script: Boolean): Boolean =
+  def loop(handle: SessionHandle, console: ClientConsole, script: Boolean): Boolean = loop(handle, console, script, "")
+
+  /** `loop` with the home folder `home` for the footer of a rich console. */
+  def loop(handle: SessionHandle, console: ClientConsole, script: Boolean, home: String): Boolean =
     // The state before the feed, so an entry that commits between the two reads is in the feed or in the read after
     // it, and `Shown` shows it once (10.2: a client misses nothing).
     val before = handle.state
@@ -227,27 +235,35 @@ object Cli:
     val feed   = handle.subscribe(1024)
     val done   = CountDownLatch(1)
     val shown  = Shown(start)
-    val view   = AtomicReference(ReasoningView.Short)
+    val rich   = console.rich
+    val look   =
+      AtomicReference(Look(Detail.Compact, if rich then ReasoningView.Line else ReasoningView.Short, console.glyphs))
     // The `seq` of the `TurnStarted` of the last turn that the client saw: the turn of a stop notice.
     val turn = AtomicLong(before.lastTurn)
-    // What the session does now. Only the printer thread changes it, after the first value.
-    val busy = AtomicReference(
-      Option.when(before.position != Position.NoTurn)(Busy("the turn runs", System.currentTimeMillis(), 0))
-    )
-    console.busy(busy.get)
-    console.activity(() => handle.activity)
+    // The screen of a rich console, from the journal before the feed. Only the printer thread changes it.
+    val screen = AtomicReference(if rich then Screen.of(handle.read(-1).filter(_.seq <= start)) else Screen.empty)
+    if rich then
+      console.watch(
+        () => Screen.live(screen.get, handle.state, System.currentTimeMillis(), look.get, handle.activity),
+        () => Some(Screen.footer(handle.state, handle.memoryUse, runningJobs(handle), home, console.glyphs))
+      )
+      console.onDetail(() =>
+        look.updateAndGet(l => l.copy(detail = if l.detail == Detail.Full then Detail.Compact else Detail.Full)): Unit
+      )
     def print(text: String): Unit = console.print(printable(text))
     // An entry that the client did not show yet, and the stop notice after a turn that a stop ended.
     def show(logged: Logged): Unit =
       shown.next(logged).foreach { entry =>
-        entryText(entry, view.get).foreach(print)
+        if rich then
+          val (next, rows) = Screen.after(screen.get, entry, look.get)
+          screen.set(next)
+          console.printRows(rows)
+        else entryText(entry, look.get.reasoning).foreach(print)
         entry.entry match
           case Entry.TurnStarted                    => turn.set(entry.seq)
           case Entry.TurnEnded(TurnOutcome.Aborted) =>
             stopNotice(handle.state, turn.get, jobStarts(handle.read(turn.get)), handle.jobStatus).foreach(print)
           case _ => ()
-        val running = Busy.after(busy.get, entry)
-        if running != busy.getAndSet(running) then console.busy(running)
       }
     // An entry of the feed, or the entries of the journal after the last one shown after `Behind`.
     def take(item: Either[Behind, Logged]): Unit =
@@ -277,8 +293,11 @@ object Cli:
           print(statusText(now, handle.jobStatus, pendingCalls(now, handle.read(now.lastTurn))))
         case Line.Help            => print(helpText)
         case Line.Reasoning(next) =>
-          view.set(next)
+          look.updateAndGet(_.copy(reasoning = next)): Unit
           print(s"The client now shows ${reasoningWords(next)} of each step.")
+        case Line.Show(id) => Screen.show(Screen.of(handle.read(-1)), id, look.get) match
+            case Left(error) => print(error)
+            case Right(rows) => console.printRows(rows)
         case _ =>
           // The person must see a refusal of `Close`, `Allow` and `StopJob`, so these wait for the commit.
           val waits = script ||
@@ -322,10 +341,18 @@ object Cli:
     if failed then print("The session stopped: its host can write no more. The journal keeps each committed entry.")
     !failed
 
+/** The jobs of `handle` that run now, for the footer. */
+private def runningJobs(handle: SessionHandle): Int =
+  handle.jobStatus.values.count {
+    case JobStatus.Running => true
+    case _                 => false
+  }
+
 /** The words of a view of the reasoning, for the answer to `/reasoning`. */
 private def reasoningWords(view: ReasoningView): String =
   view match
     case ReasoningView.Off   => "no reasoning"
+    case ReasoningView.Line  => "one line with the size of the reasoning"
     case ReasoningView.Short => "the start of the reasoning"
     case ReasoningView.Full  => "all the reasoning"
 
