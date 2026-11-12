@@ -656,11 +656,6 @@ object LocalHost:
     Catalog.journalFiles(SessionFile.folderOf(root)).left.map(HostError.OpenFailed(_))
       .map(_.map(file => SessionId(file.getFileName.toString.stripSuffix(".db"))))
 
-/** The name of a job for a person and for the model: the cell and the number of its `spawn`, for example `12.0`. The
-  * guest API gives the model the same two numbers as `JobId(12, 0)` (10.3).
-  */
-def jobName(job: EffectId): String = s"${job.cell}.${job.n}"
-
 /** The status of a job in words for a person and for the model, after the name of the job (10.3): `runs`, `exited with
   * the code N`, `stopped`, or `lost with its host`. The message at the end of a job with `report` and the text of
   * `/jobs` give these words. The guest API gives the model the `JobStatus` value, and its source is a reference for the
