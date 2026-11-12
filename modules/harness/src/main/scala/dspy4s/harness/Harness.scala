@@ -447,11 +447,14 @@ object Harness extends HarnessGivens:
       journal.commit(repair(journal.state)*): Unit
     Left(RuntimeError("harness", reason))
 
-  /** The steps of a call as text for the finisher, cut to `budget` characters. */
+  /** The steps of a call as text for the finisher, cut to `budget` characters. A step gives its text and its code. The
+    * output of a cell comes after a label with the outcome of the cell in words (`CellOutcome.words`), for example
+    * `Output (the cell did not compile):`. So the finisher reads the outcome in words, and not as a Scala value.
+    */
   private[harness] def transcript(log: Vector[Logged], budget: Int): String =
     val steps = log.map(_.entry).collect {
       case Entry.Acted(_, text, code)         => (Vector(text) ++ code.map(c => s"```scala\n$c\n```")).mkString("\n")
-      case Entry.Observed(output, outcome, _) => s"Output (${outcome.toString.takeWhile(_ != '(')}):\n$output"
+      case Entry.Observed(output, outcome, _) => s"Output (${outcome.words}):\n$output"
     }
     Window.cut(steps.mkString("\n\n"), budget)
 

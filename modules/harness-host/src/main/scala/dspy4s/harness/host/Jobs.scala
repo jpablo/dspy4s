@@ -197,6 +197,11 @@ object JobTable:
     val cause = Option(e.getCause).getOrElse(e)
     Option(cause.getMessage).getOrElse(cause.toString)
 
+/** The name of a job for a person and for the model: the cell and the number of its `spawn`, for example `12.0`. The
+  * guest API gives the model the same two numbers as `JobId(12, 0)` (10.3).
+  */
+def jobName(job: EffectId): String = s"${job.cell}.${job.n}"
+
 /** The handler of `Shell^` in a session of the host (5.3, 10.3). `exec` goes to `inner`. A job starts with
   * `inner.launch`, and the table holds it.
   *
@@ -206,6 +211,8 @@ object JobTable:
   *     turn, or it starts a turn when no turn is open.
   *   - `stopJob(job)` runs `StopJobs(One(job))` (10.3). A refusal throws an exception with the refusal in words
   *     (`Rejection.words`), because the cell reads it.
+  *   - `jobOutput`, `waitJob` and `stopJob` of a job that the session does not have throw an exception that names the
+  *     job as `/jobs` does (`jobName`), for example `99.0`, because the cell reads it.
   */
 final class JobShell(inner: SandboxedShell, table: JobTable, journal: Journal) extends Shell:
 
@@ -233,8 +240,10 @@ final class JobShell(inner: SandboxedShell, table: JobTable, journal: Journal) e
       rejection => throw IllegalStateException(s"stopJob: the session refused the stop: ${rejection.words}")
     }
 
-  /** The effect of `job`, when the journal knows the job. */
+  /** The effect of `job`, when the journal knows the job. For another job it throws an exception that names the job as
+    * `/jobs` does (`jobName`), for example `this session has no job 99.0`, because the cell reads it.
+    */
   private def known(job: JobId, op: String): EffectId =
     val id = EffectId(job.cell, job.n)
     if journal.state.jobs.contains(id) then id
-    else throw IllegalArgumentException(s"$op: this session has no job $job")
+    else throw IllegalArgumentException(s"$op: this session has no job ${jobName(id)}")

@@ -2471,8 +2471,8 @@ uses = ["dspy-module", "signature", "predict", "policy-input", "policy-step", "f
         "session-id"]
 proof_uses = ["drive", "memory-journal", "harness-effects", "recorded", "local-files", "snapshot-store", "journal-turn",
               "sandboxed-shell", "profile-for-mode", "layout", "preamble", "scala-repl", "window", "budget",
-              "host-threads", "leaf-llm", "child-turns", "child-start", "rejection"]
-text = "A harness for one task, as a dspy4s Module. forward copies the workspace, starts a journal in memory and a REPL with the handlers of the mode, sends the input fields, runs drive and reads the last TurnEnded: Submitted gives the output through Data, Replied and Exhausted run the finisher. Since phase 5 a child of rlm has the same session path: its own journal, a new REPL with a preamble from Data[A].shape, the same policy leaf, the window strategy and the same copy, files and shell. Only submit gives the value of a child. modeAt gives Children^ only below the depth limit. A proposal: the leaves are policy, finisher and subQuery."
+              "host-threads", "leaf-llm", "child-turns", "child-start", "rejection", "cell-outcome"]
+text = "A harness for one task, as a dspy4s Module. forward copies the workspace, starts a journal in memory and a REPL with the handlers of the mode, sends the input fields, runs drive and reads the last TurnEnded: Submitted gives the output through Data, Replied and Exhausted run the finisher. The transcript of the finisher gives the outcome of each cell in words (CellOutcome.words). Since phase 5 a child of rlm has the same session path: its own journal, a new REPL with a preamble from Data[A].shape, the same policy leaf, the window strategy and the same copy, files and shell. Only submit gives the value of a child. modeAt gives Children^ only below the depth limit. A proposal: the leaves are policy, finisher and subQuery."
 
 [[group]]
 id = "harness-givens"
@@ -3147,15 +3147,6 @@ proof_uses = ["writer", "writer-journal", "session-file", "feeds", "drive", "nex
 text = "One writer and one file for each session, with an exclusive lock for a second host. open repairs an open turn, keeps the configuration of the journal with None, and refuses a mode above the ceiling. Each activation gets a new ticket and its WriterJournal. After StopRequested, Activation.stop, and a timer calls Writer.expire with the turn of the stop. The catalog gets the row after a turn ends."
 
 [[node]]
-id = "job-name"
-group = "host"
-kind = "function"
-name = "jobName"
-ref = "10.3"
-uses = ["effect-id"]
-text = "The name of a job for a person and for the model: the cell and the number of its spawn, for example 12.0. The report of the end of a job, the CLI and the JobId of the model use the same two numbers."
-
-[[node]]
 id = "job-status-words"
 group = "host"
 kind = "function"
@@ -3169,7 +3160,7 @@ id = "jobs"
 phase = "p7"
 module = "harness-host"
 file = "Jobs.scala"
-title = "The jobs of a session: the table, the handler and the wrapper"
+title = "The jobs of a session: the table, the handler, the wrapper and the name of a job"
 
 [[node]]
 id = "job-table"
@@ -3191,8 +3182,17 @@ name = "JobShell"
 ops = ["exec", "spawn", "jobOutput", "waitJob", "stopJob"]
 ref = "10.3"
 uses = ["shell", "sandboxed-shell", "job-table", "journal-trait", "files", "job-id", "job-status"]
-proof_uses = ["process-wrapper", "command", "job-table", "rejection"]
-text = "The handler of Shell^ in the host. exec goes to the sandbox, and spawn starts a job with SandboxedShell.launch and gives the JobId of its own EffectStarted. stopJob is StopJobs(One(job)), and a refusal gives the cell its words (Rejection.words). The end of a job with report reaches the host through the table."
+proof_uses = ["process-wrapper", "command", "job-table", "rejection", "job-name"]
+text = "The handler of Shell^ in the host. exec goes to the sandbox, and spawn starts a job with SandboxedShell.launch and gives the JobId of its own EffectStarted. stopJob is StopJobs(One(job)), and a refusal gives the cell its words (Rejection.words). A call of a job that the session does not have names the job as /jobs does (jobName). The end of a job with report reaches the host through the table."
+
+[[node]]
+id = "job-name"
+group = "jobs"
+kind = "function"
+name = "jobName"
+ref = "10.3"
+uses = ["effect-id"]
+text = "The name of a job for a person and for the model: the cell and the number of its spawn, for example 12.0. The report of the end of a job, the CLI and the JobId of the model use the same two numbers."
 
 [[group]]
 id = "work-runtime"
@@ -3927,7 +3927,8 @@ name = "MemoryLog"
 ops = ["messages", "beforeOpenTurn"]
 ref = "7.1"
 uses = ["logged", "message"]
-text = "The log from the journal: one message for each Input, each cell with its output at its Observed, and each end of a turn. A longer journal gives a longer log with the same start. beforeOpenTurn counts the messages up to the reply of the last turn."
+proof_uses = ["turn-outcome"]
+text = "The log from the journal: one message for each Input, each cell with its output at its Observed, and each end of a turn, with the reply or the text of the report of the outcome (TurnOutcome.report). A longer journal gives a longer log with the same start. beforeOpenTurn counts the messages up to the reply of the last turn."
 
 [[group]]
 id = "memory-tree"

@@ -82,6 +82,19 @@ class HarnessLaws extends FunSuite:
     finally place.close()
   }
 
+  test("Harness: the transcript of the finisher gives the outcome of each cell in words, with no Scala value") {
+    val error = "-- [E172] Type Error: FAKE"
+    val log   = Support.logOf(
+      1000L,
+      Entry.Acted("", "FAKE-LOOK", Some("println(1)")),
+      Entry.Observed(error, CellOutcome.CompileError(Vector(error)), Map.empty)
+    )
+    val text = Harness.transcript(log, 10_000)
+    assert(text.contains(CellOutcome.CompileError(Vector.empty).words), text)
+    assert(text.contains(error), text)
+    assert(!text.contains("CompileError"), text)
+  }
+
   test("Harness: a reply with no code runs the finisher") {
     val model = ScriptLm(policy("It is 42.", None), answer("42"))
     call(model) { (_, result, journal) =>

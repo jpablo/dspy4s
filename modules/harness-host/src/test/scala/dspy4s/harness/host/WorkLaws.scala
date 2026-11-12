@@ -339,6 +339,18 @@ class WorkLaws extends munit.FunSuite:
     }
   }
 
+  test("Work: a call of a job that the session does not have names the job as /jobs does, with no Scala value") {
+    sandboxed()
+    val model = sessionModel(policy("ask", Some("jobOutput(JobId(99, 0))")), policy("FAKE-DONE", None))
+    work(model) { (_, handle) =>
+      assertEquals(handle.send(message("m1")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+      val failures = entries(handle).collect { case Entry.Observed(_, CellOutcome.Failed(exception), _) => exception }
+      assert(failures.exists(_.contains("this session has no job 99.0")), failures.toString)
+      assert(!failures.exists(_.contains("JobId(")), failures.toString)
+    }
+  }
+
   test("Work: stopJob in a cell commits JobsStopRequested(One(job))") {
     sandboxed()
     val model =
