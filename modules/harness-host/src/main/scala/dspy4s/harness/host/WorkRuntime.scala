@@ -6,7 +6,7 @@ import dspy4s.harness.*
 import dspy4s.harness.guest.{Access, Data, Mode, Scope, StrategyName, preamble}
 import dspy4s.harness.kernel.*
 import dspy4s.harness.repl.{Bindings, ScalaRepl}
-import dspy4s.harness.sandbox.{Backend, HostList, Layout, Profiles, SandboxedShell, SecretIndex}
+import dspy4s.harness.sandbox.{Backend, HostList, Layout, Profile, Profiles, SandboxedShell, SecretIndex}
 import dspy4s.programs.strategies.Predict
 import dspy4s.signatures.Signature
 import zio.blocks.schema.DynamicValue
@@ -211,7 +211,7 @@ final class WorkRuntime(
             stops = () => journal.state.stopping
           )
         val effects = HarnessEffects(
-          WorkRuntime.taskOf(session, config, scope),
+          WorkRuntime.taskOf(session, config, scope, WorkRuntime.shellWords(profile, scope, made)),
           Harness.apiReference(config.mode),
           policy,
           strategy,
@@ -408,30 +408,47 @@ object WorkRuntime:
       "of the API reference. Keep a value for a later cell or turn in a val or in the store. A step with no code " +
       "ends the turn, and its text is the reply to the person. If a call needs an approval, end the turn and ask."
 
-  /** The task of each chat turn of a work session in the folder `scope`: `instructions` and the folder. A chat turn
-    * ends with a step with no code, and its text is the reply. So the task has no text about input fields and no text
-    * about `submit`. The task of a program call (`Harness.task`) has both.
+  /** The task of each chat turn of a work session in the folder `scope`: `instructions`, the folder, and the words of
+    * its shell `shell` (`shellWords`). A chat turn ends with a step with no code, and its text is the reply. So the
+    * task has no text about input fields and no text about `submit`. The task of a program call (`Harness.task`) has
+    * both.
     */
-  def chatTask(scope: Path): String = s"$instructions\n\nThe folder of the session: $scope."
+  def chatTask(scope: Path, shell: String): String = s"$instructions\n\nThe folder of the session: $scope.\n\n$shell"
+
+  /** What the model does when the shell refuses a write. In the live session 00429ec8, each `git worktree add` failed
+    * with "Operation not permitted", and the model used three steps to find the cause. It never told the person.
+    */
+  val Refused: String =
+    "A write in another place fails, for example with \"Operation not permitted\". When a task needs such a write, " +
+      "stop, tell the person that this session cannot do it, and give the command that the person can run."
+
+  /** The words of the shell of a session with `profile` in `scope` with `layout`: `Profiles.words`, and `Refused` when
+    * a command can run. The text comes from the profile of the activation, so the task and the sandbox give the same
+    * rules.
+    */
+  def shellWords(profile: Profile, scope: Path, layout: Layout): String =
+    val words = Profiles.words(profile, scope, layout)
+    if profile.canRun then s"$words $Refused" else words
 
   /** The task of each turn of the session `session` with `config` in the folder `scope` (8.6, 8.7): `Controller.task`
     * for the controller (`Controller.id`), the goal of a session whose owner is a session with the rule to end the work
-    * with a cell that calls `submit(...)`, and `chatTask` for a session of the person.
+    * with a cell that calls `submit(...)`, and `chatTask` for a session of the person. `shell` is the text of the shell
+    * of the session (`shellWords`), for each task apart from the task of the controller.
     *
     * The preamble of such a session has `submit(value: String)`, and the task does not show the preamble. So the rule
     * names the String and gives an example call that compiles. In two live runs, a rule with no call made the model
     * write `submit: 42` as the text of its reply. Then each turn ended in `Replied`, and the work never ended.
     */
-  def taskOf(session: SessionId, config: SessionConfig, scope: Path): String =
+  def taskOf(session: SessionId, config: SessionConfig, scope: Path, shell: String): String =
     if session == Controller.id then Controller.task(scope)
     else
       (config.owner, config.goal) match
         case (Owner.Session(_), Some(goal)) =>
-          s"${chatTask(scope)}\n\nThe goal of the session: $goal\n\nAnother session started this session, and it " +
+          s"${chatTask(scope, shell)}\n\nThe goal of the session: $goal\n\nAnother session started this session, and it " +
             "gets a report at the end of each turn. When you complete the work, write a cell that calls submit with " +
             "the result as one String, for example submit(\"The file has 42 lines.\"). A reply with no cell does " +
             "not give the result to the other session."
-        case _ => chatTask(scope)
+        case _ => chatTask(scope, shell)
 
   /** The configuration of a session that `caller`, with the configuration `parent`, starts with `goal` in `scope` (8.2,
     * 8.7): a chat turn with `limits.steps` steps, the owner `Owner.Session(caller)`, the goal, `strategy`, the mode

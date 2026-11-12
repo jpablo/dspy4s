@@ -60,7 +60,7 @@ class WorkLaws extends munit.FunSuite:
   test("Work: the task of an owned session asks for the call submit(...) in a cell at the end of the work") {
     val owned = WorkRuntime.config(Path.of("/tmp/fake-scope"), "fake-model", limits)
       .copy(owner = Owner.Session(Controller.id), goal = Some("fake goal"))
-    val task = WorkRuntime.taskOf(SessionId("fake-owned"), owned, Path.of("/tmp/fake-scope"))
+    val task = WorkRuntime.taskOf(SessionId("fake-owned"), owned, Path.of("/tmp/fake-scope"), "FAKE-SHELL")
     assert(task.contains("fake goal"), task)
     assert(task.contains("submit("), task)
     assert(!task.contains("in one text"), task)
@@ -96,14 +96,15 @@ class WorkLaws extends munit.FunSuite:
     val scope = Path.of("/tmp/fake-scope")
     val home  = Path.of("/tmp/fake-home")
     val mine  = WorkRuntime.config(scope, "fake-model", limits)
-    assertEquals(WorkRuntime.taskOf(id(1), mine, scope), WorkRuntime.chatTask(scope))
+    assertEquals(WorkRuntime.taskOf(id(1), mine, scope, "FAKE-SHELL"), WorkRuntime.chatTask(scope, "FAKE-SHELL"))
     assertEquals(
-      WorkRuntime.taskOf(Controller.id, Controller.config(home, "fake-model", limits), home),
+      WorkRuntime.taskOf(Controller.id, Controller.config(home, "fake-model", limits), home, "FAKE-SHELL"),
       Controller.task(home)
     )
     val owned = mine.copy(owner = Owner.Session(Controller.id), goal = Some("Fix the fake build"))
-    val task  = WorkRuntime.taskOf(id(2), owned, scope)
+    val task  = WorkRuntime.taskOf(id(2), owned, scope, "FAKE-SHELL")
     assert(task.contains("Fix the fake build") && task.contains("submit") && task.contains(scope.toString), task)
+    assert(task.contains("FAKE-SHELL"), task)
   }
 
   test("Work: ownedConfig gives the owner, the goal, the strategy, workMode met with the ceiling and the model (8.7)") {
@@ -628,6 +629,26 @@ class WorkLaws extends munit.FunSuite:
       assert(text.contains(scope.toString), text)
       assert(!text.contains("Give the result with submit"), text)
       assert(!text.contains("The task has no input fields"), text)
+    }
+  }
+
+  test("Work: the task names what a command can write, the read-only .git, the secret files and the network") {
+    // In the live session 00429ec8 (2026-11-11), each git worktree add failed with "Operation not permitted", and the
+    // model used three steps to find the cause. The task did not say that .git is read-only, that a command can write
+    // only in the folder of the session, or that the .env files are closed.
+    val model = sessionModel(policy("FAKE-HELLO", None))
+    work(model) { (scope, handle) =>
+      assertEquals(handle.send(message("m1")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+      val text = promptOf(model, 0)
+      Vector(
+        "TMPDIR",
+        scope.resolve(".git").toString,
+        "worktree add",
+        ".env.local",
+        "no network",
+        "Operation not permitted"
+      ).foreach(words => assert(text.contains(words), s"the task does not name $words:\n$text"))
     }
   }
 

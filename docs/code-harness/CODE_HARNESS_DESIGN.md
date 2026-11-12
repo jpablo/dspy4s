@@ -1971,6 +1971,11 @@ These points are proposals for the review:
   A chat turn ends with a step with no code, so the task has no text about input fields and no text about `submit`.
   Before this rule, a chat turn had the task of a program call, which told the model to give the result with
   `submit`. The live sessions of 2026-11-10 gave this rule.
+- The task of a chat turn with a shell also gives the limits of the shell, from the profile of the activation
+  (`WorkRuntime.shellWords`, `Profiles.words`): the places that a command and the file calls can write, the read-only
+  `.git`, the closed paths and the network. It tells the model to stop and tell the person when a task needs a write
+  that the shell refuses. In the live session 00429ec8 (2026-11-11), each `git worktree add` failed with "Operation not
+  permitted", and the model used three steps to find the cause.
 - The job table belongs to the open session in the host, not to the activation, so a new activation keeps the jobs.
   `spawn` finds its `JobId` from its own open effect in the journal. `stopJob` is `StopJobs(One(job))`, and the table
   gives the end of a job with `report` to the host, which posts the message to the writer.
