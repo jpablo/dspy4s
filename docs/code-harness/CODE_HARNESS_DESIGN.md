@@ -1179,7 +1179,10 @@ made with the user:
   a session. The input of `compress` is cut to `MemoryTree.MaxSource` characters first.
 - The summary calls run through the `PolicyRunner` of the activation, so a hard stop cuts them. They have a budget of
   their own for each turn, `HarnessLimits.summaryCalls`, apart from `modelCalls`. A spent budget or a stop gives the
-  line of the source, but not to the store, so a later update builds the node again.
+  line of the source as a stand-in (`Memory.standIns`), but not to the store. A node above a stand-in is a stand-in
+  too, with no leaf call, so a merge never uses a stand-in and the store never keeps a line made from one. The next
+  update with a call in its budget takes the stand-ins out and builds them again. While the budget of the turn is
+  spent, the stand-ins stay. Before this rule, the stand-ins stayed until a reopen (session 00429ec8, 2026-11-11).
 - A work session gets its strategy from `config.strategy` (`WorkRuntime.strategyOf`). A new session has the memory
   tree. A reopened session of phase 7 keeps the window of its journal. `PrefixSummary` has no code, so its activation
   fails with a clear error.
@@ -1968,6 +1971,11 @@ These points are proposals for the review:
   A chat turn ends with a step with no code, so the task has no text about input fields and no text about `submit`.
   Before this rule, a chat turn had the task of a program call, which told the model to give the result with
   `submit`. The live sessions of 2026-11-10 gave this rule.
+- The task of a chat turn with a shell also gives the limits of the shell, from the profile of the activation
+  (`WorkRuntime.shellWords`, `Profiles.words`): the places that a command and the file calls can write, the read-only
+  `.git`, the closed paths and the network. It tells the model to stop and tell the person when a task needs a write
+  that the shell refuses. In the live session 00429ec8 (2026-11-11), each `git worktree add` failed with "Operation not
+  permitted", and the model used three steps to find the cause.
 - The job table belongs to the open session in the host, not to the activation, so a new activation keeps the jobs.
   `spawn` finds its `JobId` from its own open effect in the journal. `stopJob` is `StopJobs(One(job))`, and the table
   gives the end of a job with `report` to the host, which posts the message to the writer.

@@ -87,18 +87,22 @@ object MemoryProgress:
 
 /** The memory tree (CODE_HARNESS.md, 6; CODE_HARNESS_DESIGN.md, 7.1): the strategy of a long work session.
   *
-  *   - `update` appends the new messages of the journal (`MemoryLog`), builds each ready node, and advances the view to
+  *   - `update` takes the stand-ins out of the memory (`Memory.withoutStandIns`) when the budget of the summaries has a
+  *     call, appends the new messages of the journal (`MemoryLog`), builds each ready node, and advances the view to
   *     `MemoryLog.beforeOpenTurn` with `View.advance` and `high`. So two updates give the same state as one update on
-  *     the full journal. A node gets the line of the store for its key, or a new line: a message of 512 bytes or less
-  *     is its own line, `compress` makes the line of a longer message, and `merge` makes the line of a node from the
-  *     lines of its halves. The nodes of one round do not need each other, so their leaf calls run at the same time, at
-  *     most `width` at a time. The new lines of each round go to the store with one `putAll`, so a long update keeps
-  *     the rounds that it ended.
+  *     the full journal. The rounds build each stand-in again, so each part of the last view is built again. A node
+  *     gets the line of the store for its key, or a new line: a message of 512 bytes or less is its own line,
+  *     `compress` makes the line of a longer message, and `merge` makes the line of a node from the lines of its
+  *     halves. The nodes of one round do not need each other, so their leaf calls run at the same time, at most `width`
+  *     at a time. The new lines of each round go to the store with one `putAll`, so a long update keeps the rounds that
+  *     it ended.
   *   - A leaf runs through `leafRunner`, so a hard stop cuts it, and each call spends one call of `summaries`, the
   *     budget of the summaries of the turn, apart from the model calls of the policy. A failed call gives the line of
   *     the source (`MemoryLine.of` of the message, or of the two lines), and that line goes to the store, so a bad
-  *     message does not block the session. A spent budget or a stop gives the same line, but not to the store, so a
-  *     later update builds the node again.
+  *     message does not block the session. A spent budget or a stop gives the same line as a stand-in
+  *     (`Memory.standIns`). A node with a half that is a stand-in gets the line of its source as a stand-in too, with
+  *     no leaf call. A stand-in never goes to the store, so the next update with a call in its budget builds the node
+  *     again, with a leaf call or from the store.
   *   - Before its first round, `update` counts the leaf calls of its rounds. Then `progress` gets 0 of that total, each
   *     end of a leaf call, and the end of the update, also after a failed or a stopped call (10.6). An update with no
   *     leaf call reports nothing.
@@ -125,9 +129,12 @@ final class MemoryTree(
   def empty: MemoryState = MemoryState(Memory.empty, View.empty)
 
   def update(journal: Vector[Logged], d: MemoryState)(using RuntimeContext): Either[DspyError, MemoryState] =
+    val budget = summaries()
+    // With a spent budget, a stand-in can only build as a stand-in again, so the stand-ins stay until the next turn.
+    val kept   = if budget.check().isRight then Memory.withoutStandIns(d.memory) else d.memory
     val added  = MemoryLog.messages(journal).drop(d.memory.log.size)
-    val start  = added.foldLeft(d.memory)(Memory.append)
-    val memory = counted(start)(count => settle(start, summaries(), count))
+    val start  = added.foldLeft(kept)(Memory.append)
+    val memory = counted(start)(count => settle(start, budget, count))
     Right(MemoryState(memory, View.advance(d.view, memory, high, MemoryLog.beforeOpenTurn(journal))))
 
   def project(journal: Vector[Logged], d: MemoryState, budget: Int): Projection =
@@ -157,7 +164,7 @@ final class MemoryTree(
 
   /** Builds the ready nodes in rounds until no node is ready. The nodes of one round need only the nodes of the rounds
     * before, so their lines come at the same time, at most `width` at a time, and they build in the order of `ready`.
-    * The new lines of each round go to the store with one `putAll`.
+    * The new lines of each round go to the store with one `putAll`. A stand-in builds as a stand-in.
     */
   @tailrec
   private def settle(m: Memory, budget: Budget, count: SummaryCount)(using RuntimeContext): Memory =
@@ -165,9 +172,11 @@ final class MemoryTree(
     if ready.isEmpty then m
     else
       val made = inBatch(ready, width)(id => lineOf(m, id, budget, count)).fold((_, error) => throw error, identity)
-      val kept = made.flatMap(_._2)
+      val kept = made.flatMap(_.stored)
       if kept.nonEmpty then lines.putAll(kept)
-      val grown = ready.zip(made).foldLeft(m) { case (acc, (id, (line, _))) => Memory.buildNode(acc, id, line) }
+      val grown = ready.zip(made).foldLeft(m) { case (acc, (id, MemoryTree.Made(line, _, standIn))) =>
+        Memory.buildNode(acc, id, line, standIn)
+      }
       settle(grown, budget, count)
 
   /** Runs `build` with the count of the leaf calls that `settle` makes from `m` (`pending`), for `progress`. The count
@@ -180,7 +189,8 @@ final class MemoryTree(
 
   /** The number of leaf calls that `settle` makes from `m`: each node of its rounds with no line of the store and no
     * short message. Each round builds each ready node, so these rounds build the same nodes as `settle`. They give each
-    * node a line of no text, so the count makes no leaf call. A node of a spent budget counts, and it ends at once.
+    * node a line of no text, so the count makes no leaf call. A node of a spent budget counts, and it ends at once. A
+    * node with a half that is a stand-in also counts, and it ends at once.
     */
   private def pending(m: Memory): Int =
     @tailrec
@@ -192,15 +202,15 @@ final class MemoryTree(
         rounds(ready.foldLeft(at)((acc, id) => Memory.buildNode(acc, id, MemoryTree.NoLine)), total + leaves)
     rounds(m, 0)
 
-  /** The line of the ready node `id`, and the entry for the store, if any. The store comes first. A short message is
-    * its own line. Else the line comes from a leaf call (`leafLine`), and `count` gets its end, also after a throw.
+  /** The line of the ready node `id`. The store comes first. A short message is its own line. Else the line comes from
+    * a leaf call (`leafLine`), and `count` gets its end, also after a throw.
     */
   private def lineOf(m: Memory, id: NodeId, budget: Budget, count: SummaryCount)(using
       RuntimeContext
-  ): (MemoryLine, Option[(LineKey, MemoryLine)]) =
+  ): MemoryTree.Made =
     val key = Memory.key(m, id)
     known(m, id, key) match
-      case Some(line) => (line, None)
+      case Some(line) => MemoryTree.Made(line, None, standIn = false)
       case None       =>
         try leafLine(m, id, key, budget)
         finally count.ended()
@@ -214,22 +224,24 @@ final class MemoryTree(
         .map(MemoryLine.of)
     )
 
-  /** The line of a leaf call for `id`, and the entry for the store with `key`, if any. The call spends one call of
+  /** The line of a leaf call for `id`, with the entry for the store with `key`, if any. The call spends one call of
     * `budget`. A failed call gives the line of the source, for the store. A spent budget or a stop gives the line of
-    * the source, but not for the store, so a later update tries again.
+    * the source as a stand-in, not for the store, so the next update tries again. A node with a half that is a stand-in
+    * gives a stand-in with no call and no spend, because the next update builds that half and this node again.
     */
   private def leafLine(m: Memory, id: NodeId, key: Option[LineKey], budget: Budget)(using
       RuntimeContext
-  ): (MemoryLine, Option[(LineKey, MemoryLine)]) =
+  ): MemoryTree.Made =
     val fallback = MemoryLine.of(sourceText(m, id))
-    if budget.spend().isLeft then (fallback, None)
+    val cut      = MemoryTree.Made(fallback, None, standIn = true)
+    if Memory.onStandIn(m, id) || budget.spend().isLeft then cut
     else
       summarize(m, id) match
         case Right(text) =>
           val line = MemoryLine.of(text)
-          (line, key.map(_ -> line))
-        case Left(PolicyRunner.Stopped) => (fallback, None)
-        case Left(_)                    => (fallback, key.map(_ -> fallback))
+          MemoryTree.Made(line, key.map(_ -> line), standIn = false)
+        case Left(PolicyRunner.Stopped) => cut
+        case Left(_)                    => MemoryTree.Made(fallback, key.map(_ -> fallback), standIn = false)
 
   /** The text of a node with no leaf: its message, or the lines of its two halves. */
   private def sourceText(m: Memory, id: NodeId): String =
@@ -325,6 +337,12 @@ object MemoryTree:
 
   /** The line that `pending` gives each node of its rounds. Only the set of the built nodes counts there. */
   private val NoLine: MemoryLine = MemoryLine.of("")
+
+  /** The line of a ready node from `lineOf`, with the entry for the store, if any. `standIn` is true for the line of
+    * the source after a stop or a spent budget, and for a node with a half that is a stand-in. A stand-in has no entry
+    * for the store.
+    */
+  private final case class Made(line: MemoryLine, stored: Option[(LineKey, MemoryLine)], standIn: Boolean)
 
   /** The error of a zoom into the part `ref`, which the memory `m` does not have. It names the top parts of the memory,
     * so the model can zoom one of them and go down. A memory with no message gives an error that says so.

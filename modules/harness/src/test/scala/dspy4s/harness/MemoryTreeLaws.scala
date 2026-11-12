@@ -6,7 +6,7 @@ import zio.blocks.schema.{DynamicValue, PrimitiveValue}
 
 import java.nio.charset.StandardCharsets.UTF_8
 import java.util.concurrent.ConcurrentLinkedQueue
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{AtomicInteger, AtomicReference}
 import scala.jdk.CollectionConverters.*
 
 /** The laws of the memory tree strategy (CODE_HARNESS_DESIGN.md, 7 and 7.1). A fake model gives each summary as a fixed
@@ -50,6 +50,16 @@ class MemoryTreeLaws extends munit.FunSuite:
 
   private def updated(tree: MemoryTree, journal: Vector[Logged], from: MemoryState)(using RuntimeContext): MemoryState =
     tree.update(journal, from).fold(e => fail(e.message), identity)
+
+  /** A leaf runner that runs the first `allowed` calls, and then cuts each call while `stopping` is true. The runner of
+    * a work session does the same after a stop: it cuts each later call of the update at once.
+    */
+  private final class StopAfter(allowed: Int) extends PolicyRunner:
+    private val started    = AtomicInteger(0)
+    @volatile var stopping = true
+
+    def run[A](call: () => Either[String, A]): Either[String, A] =
+      if stopping && started.getAndIncrement() >= allowed then Left(PolicyRunner.Stopped) else call()
 
   /** The strings of a message of the history, as the adapter gives them to the model. */
   private def strings(value: DynamicValue): Vector[String] =
@@ -162,6 +172,78 @@ class MemoryTreeLaws extends munit.FunSuite:
         assertEquals(Memory.key(d.memory, id).flatMap(store.get), None)
       }
       assert(d.memory.built.keys.filter(_.level > 0).forall(id => Memory.key(d.memory, id).flatMap(store.get).isEmpty))
+    }
+  }
+
+  // In the live session 00429ec8, a stop during the summaries gave lines of the source to the nodes 1.1 and 2.3. The
+  // effects keep the state of each update, so these lines stayed for the rest of the activation, and no later update
+  // made the summaries. The doc of `leafLine` says that a later update tries again.
+  test("Memory tree: after an update that a stop cut, the next update gives the lines of an update with no stop") {
+    Models.withModel(summaries()) {
+      val journal  = chat(4, output = 700)
+      val fresh    = MemoryTree.withLeaves(LineStore.inMemory(), high = 6)
+      val expected = updated(fresh, journal, fresh.empty)
+      // The 9 messages of 3 turns need 3 compress calls and 7 merge calls: a stop at the start, after the compress
+      // calls, and among the merge calls.
+      Vector(0, 3, 6).foreach { allowed =>
+        val runner = StopAfter(allowed)
+        val tree   = MemoryTree.withLeaves(LineStore.inMemory(), high = 6, leafRunner = runner)
+        val cut    = updated(tree, chat(3, output = 700), tree.empty)
+        // The stop ends the turn. The steps of the next turn have no stop.
+        runner.stopping = false
+        val next = updated(tree, journal, cut)
+        assertEquals(next.memory.built, expected.memory.built, s"a stop after $allowed leaf calls")
+        assertEquals(next, expected, s"a stop after $allowed leaf calls")
+      }
+    }
+  }
+
+  test("Memory tree: after an update with a spent summary budget, an update with a new budget makes the lines") {
+    Models.withModel(summaries()) {
+      val journal  = chat(4, output = 700)
+      val fresh    = MemoryTree.withLeaves(LineStore.inMemory(), high = 6)
+      val expected = updated(fresh, journal, fresh.empty)
+      val budget   = AtomicReference(Budget(1))
+      val tree     = MemoryTree.withLeaves(LineStore.inMemory(), high = 6, summaries = () => budget.get)
+      val spent    = updated(tree, chat(3, output = 700), tree.empty)
+      // Each turn gets a new budget (`TurnBudget` of the host).
+      budget.set(Budget(Int.MaxValue))
+      val next = updated(tree, journal, spent)
+      assertEquals(next.memory.built, expected.memory.built)
+      assertEquals(next, expected)
+    }
+  }
+
+  test(
+    "Memory tree: while the summary budget of the turn is spent, a later update keeps the stand-ins with no report"
+  ) {
+    val reports = Reports()
+    Models.withModel(summaries()) {
+      val tree  = MemoryTree.withLeaves(LineStore.inMemory(), high = 6, summaries = () => Budget(0), progress = reports)
+      val spent = updated(tree, chat(3, output = 700), tree.empty)
+      assert(spent.memory.standIns.nonEmpty, "the spent budget gave no stand-in")
+      val first = reports.all
+      // The next step of the same turn: the budget is still spent, so the stand-ins can only build as stand-ins again.
+      assertEquals(updated(tree, chat(3, output = 700), spent), spent)
+      assertEquals(reports.all, first)
+    }
+  }
+
+  test("Memory tree: a node with a stand-in half is a stand-in with no leaf call, and the store does not keep it") {
+    val store = LineStore.inMemory()
+    val lm    = summaries()
+    val made  = AtomicInteger(0)
+    // The runner cuts only the first call, so the later calls run, as after a stop that comes late for some calls.
+    val cutFirst = new PolicyRunner:
+      def run[A](call: () => Either[String, A]): Either[String, A] =
+        if made.getAndIncrement() == 0 then Left(PolicyRunner.Stopped) else call()
+    Models.withModel(lm) {
+      val tree = MemoryTree.withLeaves(store, high = 6, leafRunner = cutFirst, width = 1)
+      val d    = updated(tree, chat(2, output = 700), tree.empty)
+      // The cut call is the compress of 0.1. The nodes 1.0 and 2.0 are above it, and only 1.1 and 1.2 merge.
+      assertEquals(d.memory.standIns, Set(NodeId(0, 1), NodeId(1, 0), NodeId(2, 0)))
+      assertEquals(calls(lm, MemoryTree.mergeInstructions), 2)
+      d.memory.standIns.foreach(id => assertEquals(Memory.key(d.memory, id).flatMap(store.get), None, id.ref))
     }
   }
 

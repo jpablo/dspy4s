@@ -533,15 +533,43 @@ new = "line.text"
 name = "Mutant: a spent summary budget does not stop the leaf calls"
 [[mutant.edit]]
 file = "MemoryTree.scala"
-old = "if budget.spend().isLeft then (fallback, None)"
-new = "if budget.spend().isLeft && budget.limit < 0 then (fallback, None)"
+old = "if Memory.onStandIn(m, id) || budget.spend().isLeft then cut"
+new = "if Memory.onStandIn(m, id) || (budget.spend().isLeft && budget.limit < 0) then cut"
 
 [[mutant]]
 name = "Mutant: the store keeps the line of a leaf call that a stop cut"
 [[mutant.edit]]
 file = "MemoryTree.scala"
-old = "case Left(PolicyRunner.Stopped) => (fallback, None)"
-new = "case Left(PolicyRunner.Stopped) => (fallback, key.map(_ -> fallback))"
+old = "case Left(PolicyRunner.Stopped) => cut"
+new = "case Left(PolicyRunner.Stopped) => MemoryTree.Made(fallback, key.map(_ -> fallback), standIn = true)"
+
+[[mutant]]
+name = "Mutant: the next update keeps the stand-ins of a stop"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "if budget.check().isRight then Memory.withoutStandIns(d.memory) else d.memory"
+new = "d.memory"
+
+[[mutant]]
+name = "Mutant: an update with a spent summary budget takes the stand-ins out"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "if budget.check().isRight then Memory.withoutStandIns(d.memory) else d.memory"
+new = "Memory.withoutStandIns(d.memory)"
+
+[[mutant]]
+name = "Mutant: a node with a stand-in half makes a merge call"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "if Memory.onStandIn(m, id) || budget.spend().isLeft then cut"
+new = "if budget.spend().isLeft then cut"
+
+[[mutant]]
+name = "Mutant: a node with a stand-in half is not a stand-in"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "if standIn || onStandIn(m, id) then m.standIns + id else m.standIns"
+new = "if standIn then m.standIns + id else m.standIns"
 
 [[mutant]]
 name = "Mutant: project gives the open turn the whole budget"

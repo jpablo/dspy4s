@@ -198,6 +198,48 @@ object Profiles:
     val profile = forMode(mode, scope, layout, hosts)
     profile.hide(secretFiles(profile, layout.secretNames))
 
+  /** What a command and a file call of `profile` can do, in words for the model of a session with the scope `scope` and
+    * the layout `layout` (5.4). The text comes from the profile and the layout, so it gives the same rules as the
+    * sandbox: the places that a command can write, the read-only parts, the closed paths, and the network.
+    */
+  def words(profile: Profile, scope: Path, layout: Layout): String =
+    if !profile.canRun then "This session runs no command."
+    else
+      val places = profile.writable.map { root =>
+        if root.equals(scope) then "the folder of the session"
+        else if root.equals(layout.temp) then "the temporary folder in TMPDIR"
+        else root.toString
+      }
+      val git      = profile.readOnly.exists(part => Option(part.getFileName).exists(_.toString == ".git"))
+      val examples = layout.secrets.filter(profile.isHidden).flatMap(p => Option(p.getFileName)).map(_.toString)
+        .distinct.take(3)
+      val closed =
+        Option.when(examples.nonEmpty)(s"the secret paths of the home folder (for example ${list(examples, "and")})") ++
+          Option.when(profile.isHidden(layout.journals))("the journals of the harness") ++
+          layout.secretNames.toVector.sorted.map(name =>
+            s"a file whose name is $name or starts with \"$name.\" (for example $name.local)"
+          )
+      val network = profile.net match
+        case Net.Closed                                 => "A command has no network."
+        case Net.Proxy(hosts) if hosts.patterns.isEmpty => "A command reaches no host."
+        case Net.Proxy(hosts)                           =>
+          s"A command reaches only these hosts: ${hosts.patterns.toVector.sorted.mkString(", ")}."
+      (Vector(s"A command and the calls write and edit can change files only under ${list(places, "and")}.") ++
+        Option.when(profile.readOnly.nonEmpty)(
+          s"Each file under ${list(profile.readOnly.map(_.toString), "and")} stays read-only."
+        ) ++
+        Option.when(git)(
+          "So a git command that changes the repository fails, for example commit, branch, checkout, stash or " +
+            "worktree add."
+        ) ++
+        Option.when(closed.nonEmpty)(s"A command and a file call can neither read nor write ${list(closed, "or")}.") :+
+        network).mkString(" ")
+
+  /** The items of `items` in one text, with `word` before the last one: "a", "a and b", or "a, b and c". */
+  private def list(items: Iterable[String], word: String): String =
+    val all = items.toVector
+    if all.size <= 1 then all.mkString else s"${all.init.mkString(", ")} $word ${all.last}"
+
   /** The files and folders in the writable roots of `profile` with a name of `names`, or with the name and a dot, and
     * the target of each one that is a symbolic link, and each folder that the walk cannot read. The walk does not
     * follow a link, and it does not enter a read-only part such as .git, a hidden part, or a folder that it found. A

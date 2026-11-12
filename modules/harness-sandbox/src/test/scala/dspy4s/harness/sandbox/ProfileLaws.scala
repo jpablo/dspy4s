@@ -439,3 +439,19 @@ class ProfileLaws extends ScalaCheckSuite:
       assert(!HostList(a).allows(host) || HostList(a ++ b).allows(host))
     }
   }
+
+  property("Words: the words of a profile name what it can write, its read-only parts, its closed paths and its net") {
+    forAll(modes) { mode =>
+      val p     = profile(mode)
+      val words = Profiles.words(p, scope, layout)
+      if !p.canRun then assertEquals(words, "This session runs no command.")
+      else
+        assertEquals(words.contains("the folder of the session"), p.canWrite(scope.resolve("a")), words)
+        assertEquals(words.contains("TMPDIR"), p.canWrite(temp.resolve("a")), words)
+        p.readOnly.foreach(part => assert(words.contains(part.toString) && !p.canWrite(part.resolve("a")), words))
+        assert(words.contains("worktree add") == p.readOnly.exists(_.endsWith(".git")), words)
+        assert(Vector(".ssh", ".aws", "journals", ".env.local").forall(words.contains), words)
+        assertEquals(words.contains("no network"), !p.canConnect("example.com"), words)
+        if p.canConnect("example.com") then assert(hosts.patterns.forall(words.contains), words)
+    }
+  }

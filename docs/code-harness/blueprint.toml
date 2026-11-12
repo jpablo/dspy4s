@@ -1176,7 +1176,7 @@ name = "SessionCard"
 ref = "10.2"
 spec = true
 uses = ["session-ref", "scope"]
-text = "What list shows about a session: the id, the goal, the scope, the owner, the parent, the status, the last seq, the files that it made, its commands and its head (8.7). The decisions and the open questions come with the graph of phase 10."
+text = "What list shows about a session: the id, the goal, the scope, the owner, the parent, the status, the last seq, the files that it made, its commands and its head (8.7). A proposal: the design names the fields and gives no type. The decisions and the open questions of CODE_HARNESS.md 7.4 come with the graph of phase 10."
 
 # ── Phase 2: Data, the codec of the values that leave a cell (5.1) ──────────────────────────────────────────────────
 
@@ -1725,12 +1725,12 @@ id = "profile"
 group = "profile"
 kind = "data"
 name = "Profile"
-ops = ["canRead", "canWrite", "canConnect", "hide"]
+ops = ["canRead", "canWrite", "canConnect", "hide", "words"]
 ref = "5.4"
 spec = true
 uses = ["net"]
 proof_uses = ["host-list"]
-text = "What a child process can do, as observations: canRun, canRead(path), canWrite(path) and canConnect(host). A backend turns a profile into the rules of the OS. hide(paths) gives a profile that allows less: nothing under the paths."
+text = "What a child process can do, as observations: canRun, canRead(path), canWrite(path) and canConnect(host). A backend turns a profile into the rules of the OS. hide(paths) gives a profile that allows less: nothing under the paths. Profiles.words gives the same rules in words for the task of the model: the places that a command can write, the read-only parts such as .git, the closed paths and the network."
 
 [[node]]
 id = "profile-for-mode"
@@ -3215,12 +3215,12 @@ id = "work-runtime"
 group = "work-runtime"
 kind = "data"
 name = "WorkRuntime"
-ops = ["activate", "defaultGuard", "config", "forWork", "taskOf", "ownedConfig", "forHost"]
+ops = ["activate", "defaultGuard", "config", "forWork", "taskOf", "shellWords", "ownedConfig", "forHost"]
 ref = "8.1"
 spec = true
 uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context", "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access", "harness", "line-store", "file-lines", "memory-tree", "session-file", "peers", "host-sessions", "harness-probe", "scope", "strategy-name", "activity", "memory-progress", "memory-use", "drafts", "draft"]
 proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell", "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble", "memory-tree", "controller"]
-text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of workMode through recorded and guarded, and JobShell. workMode is local mode with no Sessions^ and no Children^, so a work session has no rlm. Each turn gets a new budget of model calls. The first rules of 5.5: git push gets Ask in a mode with Network^."
+text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of workMode through recorded and guarded, and JobShell. workMode is local mode with no Sessions^ and no Children^, so a work session has no rlm. Each turn gets a new budget of model calls. The first rules of 5.5: git push gets Ask in a mode with Network^. The task of a session with a shell gives the words of the profile of its activation (shellWords), and tells the model to tell the person when a task needs a write that the shell refuses."
 
 [[group]]
 id = "cli-args"
@@ -3891,12 +3891,12 @@ id = "memory"
 group = "memory"
 kind = "data"
 name = "Memory"
-ops = ["append", "ready", "buildNode", "roots", "zoom", "fork", "key"]
+ops = ["append", "ready", "buildNode", "onStandIn", "withoutStandIns", "roots", "zoom", "fork", "key"]
 ref = "7.1"
 spec = true
 uses = ["message", "node-id", "memory-line", "line-key"]
 proof_uses = ["node-id"]
-text = "The log and the built lines, as a pure value. ready gives the nodes whose halves are built, buildNode of another node gives the same memory, roots gives one node for each set bit, zoom gives a message or the lines of two halves, and key gives the node with a SHA-256 of its texts."
+text = "The log, the built lines and the stand-ins, as a pure value. ready gives the nodes whose halves are built, buildNode of another node gives the same memory, roots gives one node for each set bit, zoom gives a message or the lines of two halves, and key gives the node with a SHA-256 of its texts. A stand-in is a built node with the line of its source after a stop or a spent budget. Each built node above a stand-in is a stand-in, and withoutStandIns takes them out so they can build again."
 
 [[node]]
 id = "line-key"
@@ -4015,7 +4015,7 @@ uses = ["context-strategy", "predict", "compress-input", "merge-input", "summary
         "runtime-context", "dspy-error", "logged", "projection", "strategy-name", "signature", "policy-runner", "budget", "memory-log", "window",
         "memory-progress"]
 proof_uses = ["budget", "memory", "memory-log", "node-id", "view", "in-batch", "text-prefix"]
-text = "update appends the new messages, builds each ready node with the store or a leaf through the runner and the summary budget, and advances the view to the last reply. A failed leaf gives the line of the source. project gives the view its room first, then the open turn as the window gives it. zoom gives a message or the lines of two halves."
+text = "update takes the stand-ins out when the summary budget has a call, appends the new messages, builds each ready node with the store or a leaf through the runner and the summary budget, and advances the view to the last reply. A failed leaf gives the line of the source, for the store. A stop or a spent budget gives a stand-in, and a node above a stand-in is a stand-in with no leaf call. A stand-in never goes to the store. project gives the view its room first, then the open turn as the window gives it. zoom gives a message or the lines of two halves."
 
 [[group]]
 id = "file-lines"
@@ -4049,7 +4049,7 @@ kind = "law"
 name = "Memory:"
 ref = "7.1"
 uses = ["memory", "view", "node-id", "memory-line", "message"]
-text = "The laws of CODE_HARNESS.md 6.2 as properties: Coverage, Zoom, Prefix, Immutability, Order, Size and Roots, and the laws of a node, a reference and a line."
+text = "The laws of CODE_HARNESS.md 6.2 as properties: Coverage, Zoom, Prefix, Immutability, Order, Size, Roots and Stand-ins, and the laws of a node, a reference and a line."
 
 [[group]]
 id = "memory-log-laws"
@@ -4083,7 +4083,7 @@ kind = "law"
 name = "Memory tree:"
 ref = "7.1"
 uses = ["memory-tree", "line-store", "memory-log", "window"]
-text = "A short message is its own line with no LM call. Two updates give the same state as one. A second tree with the same store makes no LM call, and a line of other messages is not used. A failed leaf gives the line of the source. The view has at most high parts, takes its room first and stays the same during a turn. render gives one line for each part. zoom gives a message or two lines. An update with leaf calls reports 0 of their number, each end in order, and the end, also after a failed, a stopped or a broken call. An update with no leaf call reports nothing."
+text = "A short message is its own line with no LM call. Two updates give the same state as one. A second tree with the same store makes no LM call, and a line of other messages is not used. A failed leaf gives the line of the source. After a stop or a spent budget, the next update with a budget gives the lines of an update with no stop, and a node above a stand-in makes no leaf call. While the budget is spent, the stand-ins stay with no report. The view has at most high parts, takes its room first and stays the same during a turn. render gives one line for each part. zoom gives a message or two lines. An update with leaf calls reports 0 of their number, each end in order, and the end, also after a failed, a stopped or a broken call. An update with no leaf call reports nothing."
 
 [[group]]
 id = "memory-tasks"

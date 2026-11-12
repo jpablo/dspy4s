@@ -15,12 +15,16 @@ class MemoryLaws extends ScalaCheckSuite:
 
   private def message(i: Int): MemoryMessage = MemoryMessage(MessageKind.Heard(Source.User), s"message $i", i.toLong)
 
-  /** A memory of `n` messages, after `rounds` rounds that each build some of the ready nodes. */
-  private def memoryOf(n: Int, picks: Vector[Vector[Boolean]]): Memory =
+  /** A memory of `n` messages, after `rounds` rounds that each build some of the ready nodes. A node that `stands`
+    * picks builds as a stand-in.
+    */
+  private def memoryOf(n: Int, picks: Vector[Vector[Boolean]], stands: Vector[Vector[Boolean]] = Vector.empty): Memory =
     val logged = (0 until n).foldLeft(Memory.empty)((m, i) => Memory.append(m, message(i)))
-    picks.foldLeft(logged) { (m, round) =>
+    picks.zipWithIndex.foldLeft(logged) { case (m, (round, r)) =>
       Memory.ready(m).zipWithIndex.foldLeft(m) { case (acc, (id, i)) =>
-        if round.lift(i).getOrElse(true) then Memory.buildNode(acc, id, MemoryLine.of(s"line ${id.ref}")) else acc
+        val standIn = stands.lift(r).flatMap(_.lift(i)).getOrElse(false)
+        if round.lift(i).getOrElse(true) then Memory.buildNode(acc, id, MemoryLine.of(s"line ${id.ref}"), standIn)
+        else acc
       }
     }
 
@@ -33,6 +37,17 @@ class MemoryLaws extends ScalaCheckSuite:
       rounds <- Gen.choose(0, 8)
       picks  <- Gen.listOfN(rounds, Gen.listOfN(70, Gen.oneOf(true, false)).map(_.toVector))
     yield memoryOf(n, picks.toVector)
+
+  /** A memory as `memories` gives it, with some nodes built as stand-ins. */
+  private val withStandIns: Gen[Memory] =
+    def rounds(k: Int, chance: Int): Gen[Vector[Vector[Boolean]]] =
+      Gen.listOfN(k, Gen.listOfN(70, Gen.choose(0, 99).map(_ < chance)).map(_.toVector)).map(_.toVector)
+    for
+      n      <- Gen.choose(0, 70)
+      k      <- Gen.choose(0, 8)
+      picks  <- rounds(k, 50)
+      stands <- rounds(k, 10)
+    yield memoryOf(n, picks, stands)
 
   private val nodes: Gen[NodeId] =
     for
@@ -121,6 +136,22 @@ class MemoryLaws extends ScalaCheckSuite:
       Prop(m.built.forall((k, line) => again.built.get(k).contains(line))) &&
       Prop(fork.log == m.log.take(n.min(m.log.size))) &&
       Prop(m.built.filter((k, _) => k.span._2 <= fork.log.size).toSet == fork.built.toSet)
+    }
+  }
+
+  property("Memory: Stand-ins: each node above a stand-in is a stand-in, and withoutStandIns keeps each other line") {
+    forAll(withStandIns, Gen.choose(0, 70)) { (m, n) =>
+      val out   = Memory.withoutStandIns(m)
+      val again = Iterator.iterate(out)(at => Memory.ready(at).foldLeft(at)(Memory.buildNode(_, _, MemoryLine.of("x"))))
+        .dropWhile(at => Memory.ready(at).nonEmpty).next()
+      val fork = Memory.fork(m, n.toLong.min(m.log.size))
+      Prop(m.standIns.subsetOf(m.built.keySet)) &&
+      Prop(m.built.keys.forall(id => !Memory.onStandIn(m, id) || m.standIns(id))) &&
+      Prop(out.log == m.log) && Prop(out.standIns.isEmpty) &&
+      Prop(out.built == m.built.filter((id, _) => !m.standIns(id))) &&
+      Prop(out.built.keys.forall(_.halves.forall((a, b) => out.built.contains(a) && out.built.contains(b)))) &&
+      Prop(m.built.keySet.subsetOf(again.built.keySet)) &&
+      Prop(fork.standIns == m.standIns.filter(_.span._2 <= fork.log.size))
     }
   }
 

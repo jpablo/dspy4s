@@ -24,6 +24,10 @@ import java.nio.charset.StandardCharsets.UTF_8
   * the calls of that capability take or give the types of the file, so its comments name these calls. In a live session
   * of 2026-11-10, the work mode had no `Sessions`, and the model still named `tell`, `observe`, `zoom` and
   * `Sessions.start` from the comments of SessionTypes.scala.
+  *
+  * The comments of the guest files are text for the model. So each call of `api` has a description, and the comments
+  * have no note for the review and no number of a section of the design: `docs/code-harness/blueprint.toml` holds them.
+  * In a live session of 2026-11-11, the person asked why `api.write` had "just the name, no description".
   */
 object ApiReference:
 
