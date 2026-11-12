@@ -5,7 +5,7 @@ import dspy4s.harness.kernel.*
 import dspy4s.harness.host.HostSupport.*
 import dspy4s.harness.sandbox.ProcessWrapper
 
-import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch, TimeUnit}
 import java.util.concurrent.atomic.AtomicBoolean
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
@@ -164,4 +164,51 @@ class JobLaws extends munit.FunSuite:
     assertEquals(jobs.start(EffectId(4L, 1), launch("sleep 30"), report = false), Right(()))
     jobs.close()
     assertEquals(jobs.status(job, withJob(job, marked = false)), JobStatus.Stopped)
+  }
+
+  // ── An interrupt of the caller ──
+
+  test("Jobs: close on a thread with an interrupt waits for each stop, ends the table, and keeps the interrupt") {
+    val jobs = table()
+    try
+      assertEquals(jobs.start(job, bare("trap '' TERM; sleep 335"), report = false), Right(()))
+      assert(eventually()(running("sleep 335").nonEmpty), "the job did not start")
+      val (_, done) = onThread("jobs-law-close") {
+        Thread.currentThread().interrupt()
+        jobs.close()
+        Thread.currentThread().isInterrupted
+      }
+      assertEquals(done.get(30, TimeUnit.SECONDS), Right(true))
+      // The job ignores TERM, so it is Stopped only when the close waited for its KILL.
+      assertEquals(jobs.status(job, withJob(job, marked = false)), JobStatus.Stopped)
+      // The launcher of the table ended, so a new job does not start.
+      assert(jobs.start(EffectId(4L, 1), bare("exit 0"), report = false).isLeft)
+    finally running("sleep 335").foreach(_.destroyForcibly(): Unit)
+  }
+
+  test("Jobs: an interrupt during the start of a job keeps the job in the table, and the caller keeps the interrupt") {
+    val jobs  = table()
+    val begun = CountDownLatch(1)
+    val gate  = CountDownLatch(1)
+    // The launch waits at the gate, so the interrupt comes while the caller waits for the launch.
+    val slow: () => Process = () =>
+      begun.countDown()
+      gate.await(20, TimeUnit.SECONDS): Unit
+      bare("sleep 336")()
+    try
+      val (thread, done) = onThread("jobs-law-start") {
+        (jobs.start(job, slow, report = false), Thread.currentThread().isInterrupted)
+      }
+      assert(begun.await(20, TimeUnit.SECONDS), "the launch did not begin")
+      thread.interrupt()
+      // The caller gets the interrupt before the launch ends.
+      Thread.sleep(200)
+      gate.countDown()
+      assertEquals(done.get(20, TimeUnit.SECONDS), Right((Right(()), true)))
+      assert(jobs.output(job).nonEmpty, "the table has no row of the job")
+      jobs.close()
+      assert(eventually(15)(running("sleep 336").isEmpty), "a process of the job stays after close")
+    finally
+      jobs.close()
+      running("sleep 336").foreach(_.destroyForcibly(): Unit)
   }

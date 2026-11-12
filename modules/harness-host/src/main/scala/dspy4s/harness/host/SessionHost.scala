@@ -805,6 +805,9 @@ private final class OpenSession private (
     * it does all the work of the end: the activation and its REPL close, the result of `SessionRuntime.opened` closes,
     * the jobs stop, the writer ends, the lock goes, and a reopen in this host can go on. After it, a commit starts no
     * worker.
+    *
+    * Each step runs, also on a thread with an interrupt: a step starts with no interrupt flag, and an error or an
+    * interrupt of a step does not stop the steps after it. After the last step, the thread gets its interrupt again.
     */
   private def shutdown(): Unit =
     val last = guard.synchronized {
@@ -818,14 +821,25 @@ private final class OpenSession private (
         Some((live, part))
     }
     last.foreach { (live, part) =>
-      live.foreach(a => Try(a.close()): Unit)
-      part.foreach(p => Try(p.close()): Unit)
-      Try(jobs.close()): Unit
-      Try(recorder.shutdownNow()): Unit
-      writer.close()
-      Try(lock.release()): Unit
-      Try(channel.close()): Unit
-      finished.countDown()
+      var interrupted = false
+      // Each step starts with no interrupt flag, because a wait on a thread with the flag ends at once.
+      def step(body: => Unit): Unit =
+        if Thread.interrupted() then interrupted = true
+        try body
+        catch
+          case _: InterruptedException => interrupted = true
+          case NonFatal(_)             => ()
+      try
+        live.foreach(a => step(a.close()))
+        part.foreach(p => step(p.close()))
+        step(jobs.close())
+        step(recorder.shutdownNow(): Unit)
+        step(writer.close())
+        step(lock.release())
+        step(channel.close())
+      finally
+        finished.countDown()
+        if interrupted then Thread.currentThread().interrupt()
     }
 
   /** After a failed write, on the thread of the writer (10.2: "A failed write ends this session only"). */
@@ -989,7 +1003,8 @@ private final class OpenSession private (
       case _             =>
         turnsEnded += 1
         val turn = turnsEnded
-        // After the end of the session, the thread takes no task, and the session needs no snapshot.
+        // After the end of the session, the thread takes no task, and the session needs no snapshot. The end interrupts
+        // a snapshot that runs: its git command stops, and the snapshot gives none.
         Try(recorder.execute { () =>
           if turn == turnsEnded then
             place.scopes.snapshot(scope).filter(_ => turn == turnsEnded).foreach { now =>

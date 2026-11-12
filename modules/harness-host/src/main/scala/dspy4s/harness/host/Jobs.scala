@@ -2,6 +2,7 @@ package dspy4s.harness.host
 
 import dspy4s.harness.{Journal, suffixStart}
 import dspy4s.harness.guest.{Files, JobId, JobStatus, Shell}
+import dspy4s.harness.host.Interrupts.{uninterruptibly, uninterruptiblyWithin}
 import dspy4s.harness.kernel.{Command, EffectId, JobSelector, SessionState, Source}
 import dspy4s.harness.sandbox.SandboxedShell
 
@@ -48,13 +49,17 @@ final class JobTable(grace: FiniteDuration, report: (EffectId, JobStatus) => Uni
 
   /** Starts the job `id` with `launch` on the launcher thread, unless the table has a stop mark for `id` (10.3, step
     * 3). Then it does not start the process, and it gives an error. With `report`, the end of the job calls `report`.
+    *
+    * An interrupt of the caller does not stop the wait for the launch, because the launcher starts the process also
+    * after the interrupt. The job gets its row, and the caller gets its interrupt again before `start` returns.
     */
   def start(id: EffectId, launch: () => Process, report: Boolean): Either[String, Unit] =
     synchronized {
       if marks.contains(id) then Left("the job has a stop mark, so its process did not start")
       else if rows.containsKey(id) then Left("the job runs already")
       else
-        Try(launcher.submit(() => launch()).get()).toEither.left.map(e => s"the job did not start: ${causeOf(e)}")
+        Try(launcher.submit(() => launch())).flatMap(launched => Try(uninterruptibly(launched.get()))).toEither.left
+          .map(e => s"the job did not start: ${causeOf(e)}")
           .map { process =>
             val row = Row(process)
             rows.put(id, row): Unit
@@ -101,6 +106,9 @@ final class JobTable(grace: FiniteDuration, report: (EffectId, JobStatus) => Uni
 
   /** Stops each job that runs: TERM, the grace period, then KILL. It waits for the stops, also for a job whose stop
     * `sync` started already, and then the threads of the table end. A second call does nothing.
+    *
+    * An interrupt of the caller does not make a wait shorter, and each step runs. Each stop has a limit, so the waits
+    * end. The caller gets its interrupt again at the end.
     */
   def close(): Unit =
     val first = synchronized {
@@ -112,10 +120,10 @@ final class JobTable(grace: FiniteDuration, report: (EffectId, JobStatus) => Uni
       val running = rows.values().asScala.toVector.filter(_.process.isAlive)
       running.foreach(_.markStopped(): Unit)
       val stops = running.map(row => helpers.submit((() => escalate(row)): Runnable))
-      stops.foreach(stop => Try(stop.get()): Unit)
+      stops.foreach(stop => Try(uninterruptibly(stop.get())): Unit)
       launcher.shutdown()
       helpers.shutdown()
-      Try(helpers.awaitTermination(ReaderWait.toMillis, TimeUnit.MILLISECONDS)): Unit
+      uninterruptiblyWithin(ReaderWait)(left => helpers.awaitTermination(left, TimeUnit.NANOSECONDS): Unit)
 
   private def statusOf(row: Row): JobStatus =
     if row.process.isAlive then JobStatus.Running

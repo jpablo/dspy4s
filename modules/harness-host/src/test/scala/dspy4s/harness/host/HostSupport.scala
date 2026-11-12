@@ -4,6 +4,7 @@ import dspy4s.harness.{HarnessLimits, Journal, MemoryTree, Models, RequestLm, Se
 import dspy4s.harness.kernel.*
 
 import java.nio.file.{Files, Path}
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.atomic.AtomicInteger
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
@@ -121,6 +122,17 @@ object HostSupport:
   def running(text: String): Vector[ProcessHandle] =
     ProcessHandle.allProcesses().iterator().asScala.filter(_.info().commandLine().toScala.exists(_.contains(text)))
       .toVector
+
+  /** Starts `body` on a new thread with the name `name`, and gives the thread and the result of `body`. A throw of
+    * `body` comes to the result. With no handler, the thread prints it on the standard error. A law about an interrupt
+    * uses it: an `InterruptedException` on the thread of munit makes munit skip the other laws of the suite.
+    */
+  def onThread[A](name: String)(body: => A): (Thread, CompletableFuture[Either[Throwable, A]]) =
+    val done   = CompletableFuture[Either[Throwable, A]]()
+    val thread = Thread.ofPlatform().name(name).unstarted(() => done.complete(Right(body)): Unit)
+    thread.setUncaughtExceptionHandler((_, e) => done.complete(Left(e)): Unit)
+    thread.start()
+    (thread, done)
 
   /** The entries of a handle, without their meta. */
   def entries(handle: SessionHandle): Vector[Entry] = handle.read(-1).map(_.entry)

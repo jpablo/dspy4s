@@ -1,12 +1,15 @@
 package dspy4s.harness.host
 
 import dspy4s.harness.{Journal, Secrets}
+import dspy4s.harness.host.Interrupts.{uninterruptibly, uninterruptiblyWithin}
 import dspy4s.harness.kernel.{
   Command, Entry, Logged, Meta, Position, Rejection, SessionState, Source, Taint, TurnOutcome
 }
 import dspy4s.harness.kernel.{closing, decide, evolve, needsFlush, sourceOf, state as foldOf}
 
+import java.time.Duration
 import java.util.concurrent.{ArrayBlockingQueue, CompletableFuture, ConcurrentHashMap, ExecutionException, TimeUnit}
+import scala.concurrent.duration.FiniteDuration
 import scala.util.Try
 
 /** The one writer of a session (CODE_HARNESS_DESIGN.md, 10.2). One virtual thread takes the messages of a bounded
@@ -100,10 +103,14 @@ final class Writer(
   /** True after the end of the session or after a failed write. */
   def ended: Boolean = stopped
 
-  /** The end of the writer: no message after it commits, the feeds end, and the file closes. */
+  /** The end of the writer: no message after it commits, the feeds end, and the file closes. It waits at most
+    * `JoinLimit` for the end of the writer thread, and an interrupt does not make this wait shorter. A caller with an
+    * interrupt gets it again at the end.
+    */
   def close(): Unit =
     stopped = true
-    if Thread.currentThread() ne thread then thread.join(10_000)
+    if Thread.currentThread() ne thread then
+      uninterruptiblyWithin(JoinLimit)(left => thread.join(Duration.ofNanos(left)): Unit)
     feeds.close()
     Try(file.close()): Unit
 
@@ -189,15 +196,8 @@ object Writer:
 
   private final case class Expire(turn: Long, ticket: WorkerTicket) extends Message
 
-  /** Runs `body` again after each interrupt, and sets the interrupt flag again at the end. */
-  private def uninterruptibly[A](body: => A): A =
-    var interrupted = false
-    var result      = Option.empty[A]
-    while result.isEmpty do
-      try result = Some(body)
-      catch case _: InterruptedException => interrupted = true
-    if interrupted then Thread.currentThread().interrupt()
-    result.getOrElse(throw IllegalStateException("no result"))
+  /** The longest wait of `close` for the end of the writer thread. */
+  private val JoinLimit = FiniteDuration(10, TimeUnit.SECONDS)
 
   /** The value of `reply`, with the waits of `uninterruptibly`. */
   private def awaitUninterruptibly[A](reply: CompletableFuture[A]): A =
