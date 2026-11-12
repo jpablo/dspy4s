@@ -1,6 +1,6 @@
 # The inspector and the exchange files: a proposal
 
-Status: a proposal for the review (2026-11-12). Nothing of it is built. It covers two needs. A person must see the
+Status: the review took the proposal on 2026-11-12 (9.2), and O1 is built. It covers two needs. A person must see the
 journal of a session. A person must also see each HTTP request that the harness sends to the model endpoint, with its
 reply. Each of the two must have raw views and a formatted view.
 
@@ -58,12 +58,14 @@ The proposal leaves out a view of the sandbox, metrics across many sessions, and
 The record comes from the transport, through a service of the context:
 
 - **core.** A marker trait `ExchangeSinkRef`, as `StreamSinkRef` is. `RuntimeServices` gets
-  `exchangeSink: Option[ExchangeSinkRef] = None`, and `fillFrom` and `keptBy` include it.
-- **lm.** The sink and the record of one exchange:
+  `exchangeSink: Option[ExchangeSinkRef] = None`, and `fillFrom` and `keptBy` include it. The flat `apply` and `copy`
+  of `RuntimeContext` build the services again from their arguments, so they have an `exchangeSink` argument too.
+  Else a flat `copy(adapter = ...)`, as the examples use, loses the sink.
+- **lm.** The sink and the record of one exchange (`LmExchange.scala`):
 
   ```scala
   trait ExchangeSink extends ExchangeSinkRef:
-    /** Starts the record of one exchange, before the request goes. */
+    /** The record of a new exchange of `request`. */
     def start(request: ExchangeRequest)(using RuntimeContext): ExchangeRecord
 
   final case class ExchangeRequest(url: String, headers: Map[String, String], body: String, stream: Boolean)
@@ -72,21 +74,29 @@ The record comes from the transport, through a service of the context:
     def replied(status: Int, headers: Map[String, String]): Unit // the status and the headers of the reply
     def body(text: String): Unit                                 // the body of a plain reply
     def line(text: String): Unit                                 // one raw line of a stream
-    def end(how: ExchangeEnd): Unit                              // once: a later call does nothing
+    def end(how: ExchangeEnd): Unit                              // once: after it, the record gets no call
 
   enum ExchangeEnd:
-    case Done
-    case Closed                   // the consumer closed the stream before its end
-    case Failed(error: DspyError) // a failure of the transport, before or during the reply
+    case Done                    // the reply came: the body, or each line to the end of the lines
+    case Closed                  // the consumer closed the lines first
+    case Failed(message: String) // the code and the message of the error, or the class of an exception
   ```
 
+  The transport calls `start` on the thread of the model call, before the request goes. So a sink can read the scope
+  of that thread (4.2). The calls of one record come one at a time, but a close can come from another thread than the
+  reads.
 - **`RecordedTransport(inner, sink)`.** An `HttpTransport` that gives each request and each reply of `inner` to the
   record of the sink:
   - `sendJson` starts a record, calls `inner`, and gives the status, the headers and the body, then `Done`. A `Left`
-    gives `Failed`.
+    or an exception gives `Failed`.
   - `streamSse` starts a record and calls `inner`. On a `Right`, it gives the status and the headers, and its
     `dataLines` give each line to the record as the consumer reads it. The end of the lines gives `Done`, or `Failed`
-    with the `failure` of the reply. A close before the end gives `Closed`.
+    with the `failure` of the reply. A close before the end gives `Closed`. The record ends before the inner lines
+    close: after that close their `hasNext` is false, and a read on another thread must not give `Done`.
+  - `OpenAiClient` closes the lines after the line `data: [DONE]`, and it does not read them to their end. So a
+    complete stream of the client ends `Closed`, with `data: [DONE]` as its last line.
+  - A `GuardedRecord` holds each record: it drops an exception of the sink, it takes only the first end, and it gives
+    the record no call after its end. An `Error` of `inner`, for example `OutOfMemoryError`, goes on with no end.
   - `close()` does nothing, because the inner transport belongs to the client.
 - **`OpenAiLanguageModel`.** When the context has an `ExchangeSink`, `call` and `stream` use
   `client.copy(transport = RecordedTransport(client.transport, sink))` for that call. With no sink, nothing changes.
@@ -109,8 +119,9 @@ name of a predictor is the `name` of its `Predict`. Each record gets these label
 - `session`: the id of the session.
 - `after`: the last `seq` of the journal when the exchange starts. The inspector shows the exchange after that entry.
   For a policy call, it is the `StepStarted` of the step.
-- `predictor`: the name of the predictor in `RuntimeScope.predictor`: `policy`, `compress`, `merge`, `subQuery` or
-  `finisher`. It is empty outside a predictor.
+- `predictor`: the name of the predictor that runs on the thread of the call (`RuntimeEnvironment.activePredictor`):
+  `policy`, `compress`, `merge`, `subQuery` or `finisher`. It is empty outside a predictor. `Module` sets the
+  predictor only in the scope of the thread, not in the context of the call, so the sink reads it in `start`.
 - `probe`: the link of a probe (`<caller>.<cell>.<n>`) for each exchange of that probe. The probe adds it to the
   labels.
 - `id`: a text that no other exchange of the file has. The two lines of an exchange share it.
@@ -132,14 +143,15 @@ An example, with parts cut:
  "url":"<base>/chat/completions","headers":{"Authorization":"«secret»"},"stream":true,
  "body":"{\"model\":\"…\",\"messages\":[…],\"stream\":true}"}
 {"kind":"reply","id":"e3b0c442","at":1762950003456,"first":1762950000610,"status":200,
- "headers":{"content-type":"text/event-stream"},"lines":["data: {…}","","data: [DONE]"],"end":"done"}
+ "headers":{"content-type":"text/event-stream"},"lines":["data: {…}","","data: [DONE]"],"end":"closed"}
 ```
 
 - `body` is a JSON string with the exact text of the body. `jq '.body | fromjson'` gives the object.
 - A plain reply has `body`. A stream has `lines`: each raw line of the reply body in its order, with the `data:`
   prefix and the empty lines.
 - `first` is the time of the first line of a stream, so a person sees the wait for the first token.
-- `end` is `done`, `closed` or `failed`. A failed exchange also has `error`.
+- `end` is `done`, `closed` or `failed` (4.1), and a failed exchange also has `error`. A complete stream of the
+  OpenAI client ends `closed`, and its last line is `data: [DONE]`. The views show such a stream as complete.
 - Each line goes to the file in one write, under the lock of the file. So the lines of two threads do not mix.
 - Each write opens the file, appends the line and closes the file, as `DSPY_TRACE` does now. So a thread that ends
   after its activation still writes its line.
@@ -157,10 +169,13 @@ An example, with parts cut:
 | A plain reply with a success status                      | The status, the headers and the body, `done`       |
 | A plain reply with an error status                       | The status, the headers and the error body, `done` |
 | A failure before the headers (no connection, time limit) | `failed` with the error, and no status             |
-| A stream that ends                                       | The status, the headers, each line, `done`         |
+| A stream that the client reads to `data: [DONE]`         | The status, the headers, each line, `closed`       |
+| A stream that the consumer reads to the end of its lines | The status, the headers, each line, `done`         |
 | A stream that ends early (read limit, lost connection)   | The lines that came, `failed` with the error       |
 | A consumer that closes the stream (a stop)               | The lines that came, `closed`                      |
 | An interrupt of the thread of the call                   | `failed` with the error                            |
+| An exception of the transport                            | `failed` with its class and its message            |
+| An `Error` of the transport, for example out of memory   | No reply line; the inspector shows it as open      |
 | The process stops during the exchange                    | No reply line; the inspector shows it as open      |
 | A consumer that neither ends nor closes a stream         | No reply line; the inspector shows it as open      |
 | A failed write of the file                               | One line on the standard error, once; the call goes on |
@@ -175,7 +190,7 @@ These numbers are estimates:
 - A session of 50 model calls can thus have an exchange file of 10 to 50 MB.
 
 Phase O2 measures the real sizes in a live run. The first version writes plain JSON lines. If the files are too large,
-section 9.2 has the options.
+section 9.2, choice 2, has the options.
 
 ## 5. The inspector
 
@@ -325,12 +340,13 @@ do not change.
   - The cost: a session has two files, so a removal must remove both.
 - **The card in Scala,** with a `match` on `Entry`, so the compiler checks that each case has a card.
 
-### 9.2 Open
+### 9.2 Decided after the review
 
-1. **On by default?** The proposal: on, and `DSPY_EXCHANGES=off` turns it off.
-2. **Compression** (4.6). The first version writes plain lines. After the measure of O2, the options are a gzip member
+On 2026-11-12 the review took each proposal of this list:
+
+1. **On by default.** The exchange file is on, and `DSPY_EXCHANGES=off` turns it off.
+2. **Plain lines first** (4.6). After the measure of O2, a choice can add compression. The options are a gzip member
    for each line (`gzip -dc` reads the file), or the lines of a stream only when the stream fails.
-3. **The port.** A fixed default, so that a bookmark stays valid, or a free port at each start.
-4. **`DSPY_TRACE`.** Remove it in O5, or keep it for a model call outside a session.
-5. **The exchanges of a probe.** In the file of its caller, with the link of the probe (this proposal), or in a file
-   of their own next to the journal of the probe.
+3. **A fixed port.** The default port is 7411, so that a bookmark stays valid. `--port 0` takes a free port.
+4. **No `DSPY_TRACE`.** O5 removes it, `TracedModel` and `TracedStreams`.
+5. **The exchanges of a probe** go in the file of its caller, with the link of the probe.
