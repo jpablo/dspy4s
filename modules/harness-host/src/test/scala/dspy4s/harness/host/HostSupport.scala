@@ -1,6 +1,6 @@
 package dspy4s.harness.host
 
-import dspy4s.harness.{Journal, MemoryTree, RequestLm, Secrets, Support, TurnEffects}
+import dspy4s.harness.{HarnessLimits, Journal, MemoryTree, Models, RequestLm, Secrets, Support, TurnEffects}
 import dspy4s.harness.kernel.*
 
 import java.nio.file.{Files, Path}
@@ -28,6 +28,47 @@ object HostSupport:
       if isSummary(text) then Right(summaryReply(text))
       else steps.lift(next.getAndIncrement()).toRight("the script has no more policy replies")
     }
+
+  /** A model for the controller and the sessions that it starts (8.7): a summary request gets `summaryReply`, and a
+    * policy request gets the next reply of the first route whose key is in the text of the request. The task of the
+    * controller holds `Controller.instructions`, and the task of a started session holds its goal, so a route of each
+    * session has a key that only its requests hold. A route with no reply left gives an error.
+    */
+  def routedModel(routes: (String, Seq[String])*): RequestLm =
+    val next = routes.map((key, _) => key -> AtomicInteger(0)).toMap
+    RequestLm { text =>
+      if isSummary(text) then Right(summaryReply(text))
+      else
+        routes.find((key, _) => text.contains(key)) match
+          case Some((key, replies)) =>
+            replies.lift(next(key).getAndIncrement()).toRight(s"the route $key has no more policy replies")
+          case None => Left("no route takes this request")
+    }
+
+  /** Runs `body` with a host at `root` whose runtime is `WorkRuntime.forHost` with `model`, `env` and `limits`, so a
+    * session with `Sessions` reaches the other sessions (8.7). `scopes` is the handler of the scopes.
+    */
+  def withPeers[A](
+      root  : Path,
+      env   : WorkEnv,
+      model : dspy4s.lm.contracts.LanguageModel,
+      limits: HarnessLimits,
+      scopes: Scopes       = GitScopes(),
+      hooks : HostHooks    = HostHooks.none,
+      work  : Option[Path] = None
+  )(body: LocalHost => A): A =
+    val host = LocalHost
+      .startWith(
+        root,
+        peers => Models.withModel(model)(WorkRuntime.forHost(env, limits)(peers)),
+        Secrets.none,
+        scopes = scopes,
+        hooks = hooks,
+        work = work
+      )
+      .fold(e => throw AssertionError(e.toString), identity)
+    try body(host)
+    finally host.close()
 
   /** The texts of the summary requests of `lm`. */
   def summaryRequests(lm: RequestLm): Vector[String] =

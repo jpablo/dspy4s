@@ -82,6 +82,10 @@ def drive(journal: Journal, effects: TurnEffects): SessionState =
       accepted(journal.commit((closing(journal.state) :+ Entry.TurnEnded(outcome))*), "the end of the turn")
       drive(journal, effects)
 
-/** Throws when the journal refused entries that the worker must commit. */
+/** Throws when the journal refused entries that the worker must commit. The message gives the refusal in words
+  * (`Rejection.words`).
+  */
 private def accepted(result: Either[Rejection, SessionState], what: String): Unit =
-  result.left.foreach(rejection => throw IllegalStateException(s"the journal refused the entries of $what: $rejection"))
+  result.left.foreach { rejection =>
+    throw IllegalStateException(s"the journal refused the entries of $what: ${rejection.words}")
+  }

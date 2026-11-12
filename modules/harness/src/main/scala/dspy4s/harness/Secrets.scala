@@ -1,6 +1,10 @@
 package dspy4s.harness
 
-import dspy4s.harness.kernel.{ArgMatch, CellOutcome, EffectResult, Entry, GuardRule, SessionOutcome, TurnOutcome}
+import dspy4s.harness.kernel.{
+  ArgMatch, CellOutcome, EffectResult, Entry, GuardRule, ReleaseItem, ReleaseResult, ReleaseStep
+}
+import dspy4s.harness.kernel.SessionOutcome
+import dspy4s.harness.kernel.TurnOutcome
 import dspy4s.harness.sandbox.Environment
 import zio.blocks.schema.json.Json
 
@@ -48,9 +52,30 @@ final case class Secrets(values: Map[String, String]) derives CanEqual:
         case Entry.JobsStopRequested(which, why)      => Entry.JobsStopRequested(which, maskText(why))
         case Entry.Granted(request, r, lifetime)      => Entry.Granted(request, rule(r), lifetime)
         case Entry.ScopeRecorded(head, clean)         => Entry.ScopeRecorded(maskText(head), clean)
+        case Entry.Releasing(plan)                    => Entry.Releasing(plan.map(releaseItem))
+        case Entry.Released(step)                     => Entry.Released(released(step))
         case Entry.TurnEnded(outcome)                 => Entry.TurnEnded(turn(outcome))
         case Entry.Ended(outcome, reason)             => Entry.Ended(session(outcome), maskText(reason))
         case Entry.TurnStarted | Entry.StepStarted(_) => entry
+
+  /** A step of a release with each text masked: the paths, the names, the commit and the error (8.7). */
+  private def released(step: ReleaseStep): ReleaseStep =
+    val result = step.result match
+      case ReleaseResult.Failed(error)   => ReleaseResult.Failed(maskText(error))
+      case ReleaseResult.Skipped(reason) => ReleaseResult.Skipped(maskText(reason))
+      case ReleaseResult.Done            => ReleaseResult.Done
+    ReleaseStep(releaseItem(step.item), result)
+
+  /** An item of a release with each text masked. */
+  private def releaseItem(item: ReleaseItem): ReleaseItem =
+    item match
+      case ReleaseItem.RemoveWorktree(repo, path)       => ReleaseItem.RemoveWorktree(maskText(repo), maskText(path))
+      case ReleaseItem.DeleteBranch(repo, name, commit) =>
+        ReleaseItem.DeleteBranch(maskText(repo), maskText(name), maskText(commit))
+      case ReleaseItem.KeepRef(repo, name, branch, commit) =>
+        ReleaseItem.KeepRef(maskText(repo), maskText(name), maskText(branch), maskText(commit))
+      case ReleaseItem.ArchiveDirectory(path, to) => ReleaseItem.ArchiveDirectory(maskText(path), maskText(to))
+      case ReleaseItem.Keep(resource, reason)     => ReleaseItem.Keep(maskText(resource), maskText(reason))
 
   /** `value` with each known value masked, also in its keys. */
   def maskJson(value: Json): Json = json(value)

@@ -1375,6 +1375,140 @@ It does this at its own start, and again when an owner opens. A session with an 
 the repair commits `TurnEnded(Crashed)`, and the report says so. An owner that has ended rejects `Send` with
 `SessionClosed`, and the pass sends the report when that owner opens.
 
+### 8.7 The controller (phase 9)
+
+Phase 9 brings the controller of [CODE_HARNESS.md](CODE_HARNESS.md), section 7: one session above the work sessions.
+The plan is a typed skeleton, as in 10.6: each type is complete, each new function and method has a `???` body, and
+the laws are tests that fail until the bodies exist. These choices were made with the user on 2026-11-10:
+
+- The controller comes first, and the graph comes later. Phase 9 has the controller session, `Sessions^`, the report
+  pass, the ledger, probes and release plans. The graph of 8.3 gets its own plan as phase 10. A card shows the goal,
+  the scope, the status and the ledger of a session, and `observe` answers each other question.
+- One CLI process holds the controller and each session that it starts, because a host holds a lock on each open
+  session. `--controller` opens the controller, `/open ID` shows another session, and `/controller` shows the
+  controller again. The reports reach the controller while the CLI runs. The sessions stop when the CLI ends, as in
+  phase 7.
+- The host makes the scope of `start`. `Scope.Worktree` holds the repository and the base branch, and `start` runs
+  `git worktree add` before the open, inside the recorded `start` effect. The controller still has no `Shell`, and the
+  same handler of the host runs the release plans.
+- `observe(session, question)` is a probe, as 8.2 says: a program call of a harness with the journal of that session
+  as an input, and only `Llm^`. Its model calls come from the budget of the current turn of the controller.
+
+The parts of the plan:
+
+| Part | Types and functions | Laws |
+|---|---|---|
+| A. The controller | `Controller`, `Peers`, `HostSessions`, `LocalHost.startWith`, `openWith`, `runAs`, `journalOf` and `zoomInto`, `WorkRuntime.taskOf`, `ownedConfig` and `forHost`, the record of `Sessions` in `recorded`, `Scope.Worktree` with `repo` and `base`, `SessionCard` with the scope and the ledger, and in the CLI `--controller`, `Desk`, `HostDesk`, `cardText`, `/sessions`, `/open ID` and `/controller` | `Controller:`, `Sessions:`, the sessions law of `Recorded:`, and the first laws of `Desk:` |
+| B. The report pass | `ReportPass.owed` and `repairable`, `LocalHost.reportTo`, the live report of `OpenSession`, `HostHooks` | `Report pass:`, and the report law of `Crash:` |
+| C. The ledger | `Ledger`, `LedgerState`, `ledger`, `Scopes.snapshot`, the `ScopeRecorded` of each turn, `CatalogRow` with the goal, the scope and the ledger | `Ledger:`, the scope laws of `Work:`, and the row law of `Catalog:` |
+| D. Probes | `Probe`, `ProbeLink`, `HarnessProbe` | `Probe:` |
+| E. Release plans | `ScopeState`, `ReleaseItem`, `ReleaseResult`, `ReleaseStep`, `ReleasePlans`, `releasePlan`, `irreversible`, `Entry.Released` and its mask, `Scopes` and `GitScopes`, `LocalHost.planOf` and `release`, and in the CLI `planText` and `/close OUTCOME` | `Release:`, `Scopes:`, `Host release:`, and the release laws of `Desk:` |
+
+The proofs go in the order A, B, C, E, D, so a controller that starts and hears its sessions comes first.
+
+The groups of the blueprint have no cycle. So `Peers` is a part of the host API beside `SessionHandle`, `HostHooks`
+is a host type, the functions of the report pass are pure and the host runs their sends, and the handler of
+`Sessions` gets the configuration of a new session through a function, `WorkRuntime.ownedConfig`. A probe gets the
+home and the secrets, not `WorkEnv`. The types of a release are apart from the plans, so `Entry` uses the types and
+the plans use `SessionOutcome`.
+
+These points are proposals for the review:
+
+- The controller has the fixed id `controller` in the root of a host, the scope `Home`, the memory tree, the owner
+  `User`, and the mode `Controller.mode`: `Mode.controller` with no `Children^`, as a work session has no `rlm`.
+- The source of a message of `tell` is `Source.Controller` from the controller, and `Source.Child(sender)` from another
+  session (8.2). The request id of `tell` and of the task of `start` holds the sender and the effect, so a second send
+  after a crash commits nothing (8.6).
+- `start` commits the `Activated` of the new session and its task in one commit (8.6): the command `Begin`, through
+  `LocalHost.openWith`. The new session has the owner `Owner.Session(caller)`, the goal, the strategy of the call, the mode
+  `WorkRuntime.workMode` met with the ceiling of the caller, and the model of the caller. Its task tells it to end the
+  work with `submit` and its result (8.6).
+- `tell` to a session that has ended gives an error, and it does not open the session again. `tell` opens a session of
+  the catalog that is not open in this host, with the configuration of its journal. The check reads the journal, not
+  the row of the catalog, which can lag.
+- `zoom(session, ref)` reads the memory of that session from its file: the journal and the table `memory`, with no LM
+  call. A node with no built line gives the line of its source, as a spent budget does (7.1).
+- The live report: after a `TurnEnded` or an `Ended` of a session whose owner is a session, the host gives the
+  missing reports to one reporter thread, which puts them into the mailbox of the owner with `Writer.tryPost` when the
+  owner is open in this host. The report pass runs when an owner opens. At the start of a host, the pass opens each
+  session with a session owner and an open turn, so the repair commits `TurnEnded(Crashed)`, and the report says so.
+  The sends of the start wait for the open of the owner, because a host opens no owner by itself.
+- A report holds the outcome of the turn or of the session with its text, as `reports` gives it: the reply, the value
+  of `submit`, or the reason of the end.
+- The ledger is a `Fold` of the journal (11: Derived): the files that the session read, the files that it wrote or
+  edited, the number of commands, the last `ScopeRecorded`, and each `Released`. An effect counts with a value. A write
+  with `Unknown` counts too, because it can have changed the file.
+- After each `TurnEnded` in a git folder, the host commits `ScopeRecorded(head, clean)` (decision 10 of
+  [CODE_HARNESS.md](CODE_HARNESS.md), 7.10). The git commands run on one ordered thread for each session, outside the
+  sandbox, with the rules of `Scopes` for git. The controller gets no snapshot: its scope is the `Home` of the person,
+  it writes nothing there, and `git status` of a home can take a long time.
+- The catalog row holds the goal, the scope and the ledger, so `list` reads no journal. The host puts the row when
+  its status or its ledger changes.
+- The journal of a probe goes to `<root>/probes/<caller>.<cell>.<n>.db`, so `list` does not show it, and its name
+  links it to the `observe` call. The top session of a harness call has no source of a parent, so the name holds the
+  link.
+- A release runs at `/close OUTCOME` in the client of the person. The client shows the plan, the host commits
+  `Releasing(plan)`, stops the jobs, runs each reversible item, and runs an irreversible item only after the person
+  confirms it in the client. Each step commits `Released(step)` before `Ended`, so the ledger records it. The
+  controller cannot end a session. It asks the person to do it (7.9).
+- The default plans of 7.9 have only reversible items. A `KeepRef` comes before each `DeleteBranch` of a branch that
+  is not merged, and an archive comes before the removal of a scratch directory.
+- The goal check of 8.5 stays for later.
+
+**The spec review of the plan (2026-11-11).** A subagent read the plan, the skeleton and the laws, and found 20
+problems. Each one held against the code. These choices were made with the user:
+
+- The host makes and owns the folders of `start`. A `Scratch` or a `Worktree` of `start` has an empty path, and the
+  host makes `<work>/<id>`, a folder beside the root of the host, because the sandbox hides the root. A `Worktree`
+  gets a new branch from its base. `start` refuses `Home`, `Fork`, a path that is not absolute, a path that exists, a
+  branch equal to its base, and a repository inside the scope of a session that has not ended. A `Directory` must
+  exist, and the guard of the controller asks for it (`Controller.guard`). A release plan removes only a folder that
+  the host made and that no other open session uses (`ScopeState.owned` and `shared`).
+- A release is a part of the journal. The kernel entry `Releasing(plan)` comes first, only with no open turn, and it
+  flushes. After it, `Send` and `Grant` give `Rejection.Releasing`, and no turn starts. The host stops the jobs first,
+  and after a crash it goes on from the first item with no `Released`.
+- The turns that no person starts have a limit. After `SessionState.UnattendedTurns` (8) such turns in a row, a message
+  from another session, the harness or a job waits in the journal, and the next message of the person starts the turn
+  that sees it. A restart starts no such turn either. So `decide` gets the sender of a `Send`.
+- The authority of the controller stays narrow in phase 9. The person ends a session in a client, so
+  [CODE_HARNESS.md](CODE_HARNESS.md), 7.9 changes. The person makes the commits of a worktree, because its `.git`
+  stays read-only in the sandbox (F7). So the rows of 7.9 for a merged branch apply to the commits of the person.
+  `--session` refuses a session whose owner is a session (`openRefusal`), because its reports reach only a host
+  where its owner is open, and only an owned session reports.
+
+The other findings changed the plan with no choice:
+
+- The git of the host can run code that a session wrote in a repository: a hook or an fsmonitor. So each git command
+  of `Scopes` runs with no hooks and no fsmonitor, with only `PATH`, `HOME` and `LANG`, and a read takes no lock of
+  the index. A ref comes after `--`, and a branch that starts with `-` or that git refuses gives an error. A risk
+  stays: a smudge filter in the configuration of a repository runs when `git worktree add` checks out the files, and
+  git has no option to ignore the configuration of a repository. The guard of phase 9 is that `start` refuses a
+  repository inside the scope of a session that has not ended.
+- A `SessionRef` reached the file system: `zoom(SessionRef("../../x"), ...)` made a database outside the root. So
+  `SessionId.valid` checks each id that comes from outside the host, `zoom` and `observe` need a row of the catalog,
+  and a read opens the file read-only (`SessionFile.readOnly`).
+- `decide` could not give `Activated` and the task in one commit. So the kernel has the command `Begin`, which only a
+  journal with no entry takes (`Rejection.NotNew`), and `sourceOf` gives its `Activated` the source `Harness`.
+- A kept ref named no branch, and the head of a worktree is not always the tip of its branch. So `ScopeState` has
+  `tip`, `KeepRef` names its branch, `DeleteBranch` names the commit that it expects, and `irreversible` needs a
+  `KeepRef` of the same branch and commit. The host asks `irreversible` again before each step, so a failed `KeepRef`
+  makes its delete wait for a confirmation.
+- `Scopes.release` takes `confirmed`, and only a confirmed step uses `--force`. An ignored file counts as a change,
+  because `git worktree remove` deletes it.
+- The live report ran on the thread of the writer, so it could block it or wait for the lock of the host. Now one
+  reporter thread puts each report with `Writer.tryPost`, and the pass runs on the thread that opens an owner.
+- `runAs` reopened a session that had ended. Now it gives `Ended`. `/open` of an ended session says so, and `/reopen ID`
+  opens it.
+- A mode with `Files` and no `Shell` read no file, because `Profile.canRead` needed `canRun`. So the controller could
+  not read. A law of the controller now fails until the fix.
+- The CLI shows another session: `deskStep` gives the session that the client shows, and the client subscribes to its
+  feed. `/close` with a desk goes through the release, and `/close` of the controller prints that it never ends.
+- The window showed each message of a session as "Another session wrote". Now it names the session, so the controller
+  can answer it.
+- `DeleteBranch` comes only after the `RemoveWorktree` of the scope, and a worktree with changes keeps its branch too.
+- `taskOf` gets the id of the session, the card has the number of reads, `clean`, and a scope that can be none, and
+  the catalog has the status `Releasing`.
+
 ## 9. Programs and optimization
 
 `Harness` is a dspy4s `Module`, so the current optimizers can tune it:
@@ -2244,13 +2378,14 @@ Each phase ends with something that runs.
 | 6. Optimization | A metric from tests, a small task set, one GEPA run. | A first measured improvement, or a reason for its absence. |
 | 7. The session host | `harness-host`: the writer, feeds, timers, one SQLite file for each session, the catalog, the path of a hard stop, `StopJobs`, `waitJob`, the message of a job and the job table, crash tests with SIGKILL that also check that no job process stays. `guarded`, and the client side of `Grant`. A source for the task of an `rlm` child and a link from its journal to the journal of its parent (9). The window with the earlier turns of a chat. The wrapper of each `exec` and each job (10.6). `harness-cli`, its JDK and an AOT cache (choice 8). | A coding agent for daily use, one session at a time. |
 | 8. Memory | The memory tree and its metric. | Long sessions that lose no detail. |
-| 9. The controller | `Sessions`, the report pass with a crash test, the ledger, the graph, probes, release plans. | One controller above all sessions. |
+| 9. The controller | `Sessions`, the report pass with a crash test, the ledger, probes, release plans (8.7). | One controller above all sessions. |
+| 10. The graph | The ontology, the extraction leaf at the end of each turn, the graph queries and `Graph` (8.3). | Questions about the history of a session that a graph answers. |
 | Later | Replay, the reviewer, jobs across a restart, `parallel` if batch calls are not enough, with the conditions of section 6, a container backend, LSP as a guest API, prompt-cache marks. | |
 
 Phase 6 comes before the session host on purpose. The optimizers are what makes this harness different from the
 others, so the design must meet them early.
 
 The order of the table is an order of priority. The blueprint shows the phases that can run at the same time: phases
-1 and 2 first, phase 3 after phase 1, phase 4 after phases 2 and 3, phases 5 to 8 after phase 4, and phase 9 after
-phases 7 and 8. In phase 1, the kernel uses `Access` and `Mode` of phase 2, so these two types come first. In phase
+1 and 2 first, phase 3 after phase 1, phase 4 after phases 2 and 3, phases 5 to 8 after phase 4, phase 9 after
+phases 7 and 8, and phase 10 after phase 9. In phase 1, the kernel uses `Access` and `Mode` of phase 2, so these two types come first. In phase
 2, the REPL uses the journal types of the kernel, so the REPL waits for the journal.

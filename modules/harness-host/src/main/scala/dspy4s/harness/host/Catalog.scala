@@ -1,7 +1,9 @@
 package dspy4s.harness.host
 
 import dspy4s.harness.cutEnd
-import dspy4s.harness.kernel.{Entry, Fold, Logged, Owner, SessionId, SessionOutcome}
+import dspy4s.harness.guest.Scope
+import dspy4s.harness.guest.SessionSchemas.given
+import dspy4s.harness.kernel.{Entry, Fold, Ledger, LedgerState, Logged, Owner, SessionId, SessionOutcome, ledger}
 import dspy4s.harness.sandbox.SandboxedShell
 import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodec
@@ -23,9 +25,24 @@ enum SessionStatus derives Schema, CanEqual:
   /** A stop is open (10.3). */
   case Stopping
 
+  /** The session runs its release plan (8.7). */
+  case Releasing
+
   case Ended(outcome: SessionOutcome)
 
-/** The row of a session in the catalog (10.2): the deterministic part of a `SessionCard`.
+  /** The status in words, for example `in a turn` or `ended (merged)`. An end has the outcome in words
+    * (`SessionOutcome.words`). The card of the controller (8.7) and the list of the client (10.2) give these words.
+    */
+  def words: String =
+    this match
+      case Idle           => "idle"
+      case InTurn         => "in a turn"
+      case Stopping       => "stopping"
+      case Releasing      => "releasing"
+      case Ended(outcome) => s"ended (${outcome.words})"
+
+/** The row of a session in the catalog (10.2): the deterministic part of a `SessionCard`. Since phase 9 it holds all of
+  * the card (8.7): the goal and the scope of the last `Activated`, and the ledger, so `list` reads no journal.
   *
   * A proposal for the review: `parent` is the parent of a journal fork. Phase 7 makes no fork, so the fold gives
   * `None`.
@@ -47,7 +64,10 @@ final case class CatalogRow(
     lastSeq     : Long,
     folder      : String,
     lastAt      : Long,
-    firstMessage: String
+    firstMessage: String,
+    goal        : Option[String] = None,
+    scope       : Option[Scope]  = None,
+    ledger      : Ledger         = Ledger.empty
 ) derives Schema,
       CanEqual
 
@@ -75,20 +95,25 @@ private def oneLine(text: String): String =
 
 /** The row of `session` as a fold of its journal (10.2). So a lost row comes back from the journal.
   *
-  * The owner comes from the last `Activated`. The status is `InTurn` from a `TurnStarted`, `Stopping` from a
-  * `StopRequested` in a turn, `Idle` again after `TurnEnded` and after a new `Activated`, and `Ended` after `Ended`.
-  * Before the first entry, the row has the owner `Cell`, the status `Idle` and the last `seq` -1. The folder comes from
-  * the last `Activated`, the time from the last entry, and the first message from the first `Input` with a text.
+  * The owner, the goal and the scope come from the last `Activated`. The status is `InTurn` from a `TurnStarted`,
+  * `Stopping` from a `StopRequested` in a turn, `Idle` again after `TurnEnded` and after a new `Activated`, `Releasing`
+  * from a `Releasing`, and `Ended` after `Ended`. The folder comes from the last `Activated`, the time from the last
+  * entry, and the first message from the first `Input` with a text. The ledger is the fold `ledger` of the same entries
+  * (8.7), so the state of the fold holds the state of the ledger. Before the first entry, the row has the owner `Cell`,
+  * the status `Idle`, the last `seq` -1, no goal, no scope and an empty ledger.
   */
-def catalogRow(session: SessionId): Fold[Logged, CatalogRow, CatalogRow] =
+def catalogRow(session: SessionId): Fold[Logged, (CatalogRow, LedgerState), CatalogRow] =
+  val counting = ledger
   Fold(
-    CatalogRow(session, Owner.Cell, None, SessionStatus.Idle, -1L, "", 0L, ""),
-    (row, logged) =>
-      val status = logged.entry match
+    (CatalogRow(session, Owner.Cell, None, SessionStatus.Idle, -1L, "", 0L, ""), LedgerState.empty),
+    (acc, logged) =>
+      val (row, kept) = acc
+      val status      = logged.entry match
         case Entry.Activated(_, _)                                        => SessionStatus.Idle
         case Entry.TurnStarted                                            => SessionStatus.InTurn
         case Entry.StopRequested(_) if row.status == SessionStatus.InTurn => SessionStatus.Stopping
         case Entry.TurnEnded(_)                                           => SessionStatus.Idle
+        case Entry.Releasing(_)                                           => SessionStatus.Releasing
         case Entry.Ended(outcome, _)                                      => SessionStatus.Ended(outcome)
         case _                                                            => row.status
       val (owner, folder) = logged.entry match
@@ -97,7 +122,7 @@ def catalogRow(session: SessionId): Fold[Logged, CatalogRow, CatalogRow] =
       val first = logged.entry match
         case Entry.Input(_, text, _) if row.firstMessage.isEmpty => oneLine(text)
         case _                                                   => row.firstMessage
-      row.copy(
+      val updated = row.copy(
         owner = owner,
         status = status,
         lastSeq = logged.seq,
@@ -105,8 +130,13 @@ def catalogRow(session: SessionId): Fold[Logged, CatalogRow, CatalogRow] =
         lastAt = logged.meta.atMillis,
         firstMessage = first
       )
+      val named = logged.entry match
+        case Entry.Activated(_, config) => updated.copy(goal = config.goal, scope = Some(config.scope))
+        case _                          => updated
+      val tally = counting.step(kept, logged)
+      (named.copy(ledger = counting.done(tally)), tally)
     ,
-    identity
+    _._1
   )
 
 /** The result of a rebuild of the catalog (10.2): the rows, and each file in `sessions` that is not a journal, with the

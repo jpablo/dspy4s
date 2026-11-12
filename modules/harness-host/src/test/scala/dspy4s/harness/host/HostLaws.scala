@@ -55,6 +55,15 @@ class HostLaws extends munit.FunSuite:
 
   // ── Open, reopen and the catalog ──
 
+  test("Host: words give each error of the host in words, and a refusal in the words of the kernel") {
+    assertEquals(HostError.Rejected(Rejection.TurnOpen).words, "a turn is open")
+    assertEquals(HostError.WriteFailed("FAKE disk full").words, "a write to the journal failed: FAKE disk full")
+    assertEquals(HostError.Ended.words, "the session has ended")
+    assertEquals(HostError.Fenced.words, "a stop ended this activation")
+    assertEquals(HostError.OpenFailed("FAKE no folder").words, "FAKE no folder")
+    assertEquals(HostError.Refused("FAKE not allowed").words, "FAKE not allowed")
+  }
+
   test("Host: open of a new id makes its file and commits Activated, and a second open gives the same handle") {
     withRoot { root =>
       withHost(root, scripted(answer("hi"))) { host =>

@@ -1,6 +1,7 @@
 package dspy4s.harness
 
-import dspy4s.harness.guest.{Children, Data, Files, JobId, JobStatus, Llm, Shell, Store, Turn}
+import dspy4s.harness.guest.{Children, Data, Files, JobId, JobStatus, Llm, Scope, SessionCard, SessionRef, Sessions}
+import dspy4s.harness.guest.{Shell, StrategyName, Store, Turn}
 import dspy4s.harness.kernel.{EffectId, EffectResult, Entry}
 import dspy4s.harness.repl.Bindings
 import dspy4s.harness.sandbox.{Layout, Profile}
@@ -37,7 +38,8 @@ final class Recorder(journal: Journal, ended: () => Boolean = () => false, mask:
 
   /** One call: the intent, the check of `guarded` (5.5), the call, and the outcome. A call that throws gets
     * `EffectResult.Error`, and the exception goes on to the cell. A call that `guarded` stops does not run: its
-    * `EffectDone` holds the result of the guard, and the cell gets the error of the guard.
+    * `EffectDone` holds the result of the guard, and the cell gets the error of the guard. A call whose intent the
+    * journal refuses does not run, and the cell gets an exception with the refusal in words (`Rejection.words`).
     *
     * The lock of the recorder holds the choice of the id and the commit of the intent, so the journal gets the intents
     * of a cell in the order of their ids (4.5). The call itself and its outcome are outside the lock. The lock order is
@@ -56,7 +58,7 @@ final class Recorder(journal: Journal, ended: () => Boolean = () => false, mask:
     val after = intent.fold(
       rejection =>
         throw IllegalStateException(
-          s"$op: the session refused the call, because it stops or the cell ended ($rejection)"
+          s"$op: the session refused the call, because it stops or the cell ended (${rejection.words})"
         ),
       identity
     )
@@ -235,12 +237,14 @@ final class JournalTurn(journal: Journal, clock: () => Long, zooms: ZoomSource =
   *
   * The handlers of the task mode have a record: files, shell, store, the turn, and since phase 5 the LM (`llmQuery`,
   * `llmQueryBatched`) and the children (`rlm`, `rlmBatched`). The value of each call goes into the journal through its
-  * `Data`. A child has its own journal, so the journal of the parent has one effect for each `rlm`. A binding of the
-  * network or of the sessions is an error until its phase.
+  * `Data`. A child has its own journal, so the journal of the parent has one effect for each `rlm`. Since phase 9 the
+  * calls of `Sessions` have a record too (`recordedSessions`). A binding of the network is an error until its phase.
   */
 def recorded(bindings: Bindings, recorder: Recorder, root: Option[Path] = None): Bindings =
-  if bindings.network.isDefined || bindings.sessions.isDefined then
-    throw IllegalArgumentException("recorded has a record only for files, shell, store, llm, children and turn")
+  if bindings.network.isDefined then
+    throw IllegalArgumentException(
+      "recorded has a record only for files, shell, store, llm, children, sessions and turn"
+    )
   val base                               = root.map(Layout.real)
   def path(text : String): String        = base.fold(text)(_.resolve(text).normalize.toString)
   def args(pairs: (String, Json)*): Json = Json.Object(Chunk.from(pairs))
@@ -314,5 +318,33 @@ def recorded(bindings: Bindings, recorder: Recorder, root: Option[Path] = None):
           )(
             inner.rlmBatched[A](tasks)
           )
-    }
+    },
+    sessions = bindings.sessions.map(recordedSessions(_, recorder))
   )
+
+/** `recorded(h)` of 5.3 for the handler of `Sessions` (8.7): the operations `sessions`, `tell`, `start`, `observe` and
+  * `zoom`, each with its arguments, and the value of each call through its `Data`. The arguments of `start` hold
+  * `kind`, the name of the case of its scope, so a guard rule can ask for a `Directory` scope. `zoom` of another
+  * session has the arguments `session` and `ref`, so a guard rule can tell it from `zoom(ref)` of the turn. `tell` and
+  * `start` are not read-only, so their intents reach the disk before they run (4.1).
+  */
+private def recordedSessions(inner: Sessions, recorder: Recorder): Sessions =
+  def args(pairs : (String, Json)*): Json      = Json.Object(Chunk.from(pairs))
+  def text(value : String): Json               = Json.String(value)
+  def session(ref: SessionRef): (String, Json) = "session" -> text(ref.id)
+  new Sessions:
+    def list(): Vector[SessionCard]                  = recorder.call("sessions", Json.Null)(inner.list())
+    def tell(ref: SessionRef, message: String): Unit =
+      recorder.call("tell", args(session(ref), "message" -> text(message)))(inner.tell(ref, message))
+    def start(goal: String, scope: Scope, strategy: StrategyName): SessionRef =
+      val called = args(
+        "goal"     -> text(goal),
+        "kind"     -> text(scope.productPrefix),
+        "scope"    -> summon[Data[Scope]].encode(scope),
+        "strategy" -> text(strategy.toString)
+      )
+      recorder.call("start", called)(inner.start(goal, scope, strategy))
+    def observe(ref: SessionRef, question: String)(using Llm): String =
+      recorder.call("observe", args(session(ref), "question" -> text(question)))(inner.observe(ref, question))
+    def zoom(ref: SessionRef, part: String): String =
+      recorder.call("zoom", args(session(ref), "ref" -> text(part)))(inner.zoom(ref, part))

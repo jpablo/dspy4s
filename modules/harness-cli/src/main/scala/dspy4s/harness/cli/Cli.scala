@@ -4,8 +4,9 @@ import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.{DspyError, RuntimeContext, RuntimeError}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.harness.{HarnessLimits, Secrets}
-import dspy4s.harness.host.{Behind, HostError, LocalHost, SessionHandle, WorkEnv, WorkRuntime}
-import dspy4s.harness.kernel.{EffectResult, Entry, GuardRule, Logged, Position, RequestId, SessionId, TurnOutcome}
+import dspy4s.harness.host.{Behind, Controller, Feed, HostError, LocalHost, SessionHandle, WorkEnv, WorkRuntime}
+import dspy4s.harness.kernel.{EffectResult, Entry, GuardRule, Logged, Position, ReleaseItem, RequestId, SessionId}
+import dspy4s.harness.kernel.{SessionOutcome, TurnOutcome}
 import dspy4s.harness.sandbox.{Backends, HostList}
 import dspy4s.lm.contracts.{LanguageModel, LmCapabilities, LmMode, LmRequest, LmResponse}
 import dspy4s.lm.providers.{OpenAiClient, OpenAiLanguageModel}
@@ -17,7 +18,7 @@ import java.nio.file.Path
 import java.time.ZoneId
 import java.util.UUID
 import java.util.concurrent.{CountDownLatch, TimeUnit}
-import java.util.concurrent.atomic.{AtomicLong, AtomicReference}
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicLong, AtomicReference}
 import scala.util.Try
 import scala.util.control.NonFatal
 
@@ -78,7 +79,8 @@ object Cli:
       case Right(options) => session(cli, home, env, secrets, options)
 
   /** Opens the session of `cli` with the variables `env`, the mask `secrets` and the summary options `options`, runs
-    * the loop, and gives the exit code.
+    * the loop, and gives the exit code. A host that does not start and a session that does not open print the error of
+    * the host in words (`HostError.words`), and give the exit code 1.
     *
     * The console comes before the host. JLine reads the input while it makes the terminal (`EditorConsole.system`), so
     * a line that the person types after the start of the host stays. Also, only one line of text comes between the open
@@ -103,27 +105,32 @@ object Cli:
       RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(model), adapter = Some(ChatAdapter()))) {
         given RuntimeContext = RuntimeEnvironment.current
         val env              = WorkEnv(home, HostList.empty, Backends.detect(), secrets, cli.root, options)
-        LocalHost.start(cli.root, WorkRuntime.forWork(env), secrets) match
+        LocalHost.startWith(cli.root, peers => WorkRuntime.forHost(env)(peers), secrets) match
           case Left(error) =>
-            System.err.println(printable(s"The host did not start: $error"))
+            System.err.println(printable(s"The host did not start: ${error.words}"))
             1
           case Right(host) =>
             try
-              val target = cli.session match
-                case None => Right((
-                    SessionId(UUID.randomUUID().toString),
-                    Some(WorkRuntime.config(cli.scope, name, HarnessLimits()))
-                  ))
-                // The journal files, not the catalog, give the sessions, so a session with no row still opens.
-                case Some(wanted) =>
-                  LocalHost.journals(cli.root).left.map(errorText).flatMap(resolveSession(_, wanted)).map(id =>
-                    (id, None)
-                  )
+              val desk   = HostDesk(host, Controller.config(home, name, HarnessLimits()))
               val opened =
-                for
-                  (id, config) <- target
-                  handle       <- host.open(id, config).left.map(e => s"The session ${id.value} did not open: $e")
-                yield handle
+                if cli.controller then desk.controller.left.map(e => s"The controller did not open: ${e.words}")
+                else
+                  val target = cli.session match
+                    case None => Right((
+                        SessionId(UUID.randomUUID().toString),
+                        Some(WorkRuntime.config(cli.scope, name, HarnessLimits()))
+                      ))
+                    // The journal files, not the catalog, give the sessions, so a session with no row still opens. A
+                    // session whose owner is a session opens only with its owner (`openRefusal`).
+                    case Some(wanted) =>
+                      LocalHost.journals(cli.root).left.map(_.words).flatMap(resolveSession(_, wanted)).flatMap {
+                        id =>
+                          openRefusal(host.list.find(_.session == id)).toLeft((id, None))
+                      }
+                  for
+                    (id, config) <- target
+                    handle       <- host.open(id, config).left.map(e => s"The session ${id.value} did not open: ${e.words}")
+                  yield handle
               opened match
                 case Left(error) =>
                   System.err.println(printable(error))
@@ -133,7 +140,7 @@ object Cli:
                   console.print(
                     s"The session ${visible(handle.id.value)} is open. Type a message, or /help for the commands."
                   )
-                  if loop(handle, console, cli.script) then 0 else 1
+                  if loop(handle, console, cli.script, Some(desk)) then 0 else 1
             finally
               // The person gets the terminal back first, because the close of the host can wait for the stop of jobs.
               console.close()
@@ -153,20 +160,14 @@ object Cli:
   /** The text of `--list`: the sessions of the host at `root` (10.2), with `sessionsText`, and a line for each file of
     * the folder of the journals that is not a journal. `LocalHost.sessions` rebuilds the catalog as the start of a host
     * does, so a journal with no row is in the list too. It starts no session, and a root with no folder of journals
-    * gets no file.
+    * gets no file. An error of the host gives its words (`HostError.words`).
     */
   def listText(root: Path, zone: ZoneId): Either[String, String] =
-    LocalHost.sessions(root).left.map(errorText).map { rebuilt =>
+    LocalHost.sessions(root).left.map(_.words).map { rebuilt =>
       val bad =
         rebuilt.failed.map((file, reason) => s"Not listed: ${visible(file.getFileName.toString)}: ${visible(reason)}")
       (sessionsText(rebuilt.rows, zone) +: bad).mkString("\n")
     }
-
-  /** The text of an error of the host for the person. */
-  private def errorText(error: HostError): String =
-    error match
-      case HostError.OpenFailed(message) => message
-      case other                         => other.toString
 
   /** The mask of the client: each secret-like variable of the process and of the variables file (5.6), with the rules
     * of `Secrets.known`. A short value, as the placeholder key `unused`, is not a known value, so the mask never
@@ -191,8 +192,17 @@ object Cli:
       case Left(reason) => NoModel(s"no model: $reason")
 
   /** The loop of the client on plain streams: `loop` with a `PlainConsole` of `in` and `out`. */
-  def loop(handle: SessionHandle, in: BufferedReader, out: PrintStream, script: Boolean = false): Boolean =
-    loop(handle, PlainConsole(in, out), script)
+  def loop(
+      handle: SessionHandle,
+      in    : BufferedReader,
+      out   : PrintStream,
+      script: Boolean      = false,
+      desk  : Option[Desk] = None
+  ): Boolean = loop(handle, PlainConsole(in, out), script, desk)
+
+  /** The loop of the client with no desk: one session, as in phase 7. */
+  def loop(handle: SessionHandle, console: ClientConsole, script: Boolean): Boolean =
+    loop(handle, console, script, None)
 
   /** The loop of the client: a thread prints `entryText` of each entry of the feed of `handle`, and another thread
     * reads the lines of `console` and runs the commands of `commandsFor`.
@@ -207,86 +217,96 @@ object Cli:
     *     the next steps. They change nothing in the session. `/allow N` grants the call that the entry N asked for.
     *   - After a turn that ends `Aborted`, the client prints `stopNotice`: each job of that turn that still runs, and
     *     how to stop it (10.3).
-    *   - An error of `commandsFor` and a refused command print one line, and the loop goes on.
+    *   - An error of `commandsFor` and a refused command print one line, and the loop goes on. A refused command prints
+    *     the error of the host in words (`HostError.words`), for example `The session refused the command: a turn is
+    *     open`.
     *   - After `Behind`, the client reads the journal after its last `seq`, so it shows each entry once.
-    *   - It ends at `/quit`, at the end of the input, or when the feed ends, for example after `Close` or a failed
-    *     write. It gives false only when the feed ended and the session did not close, as after a failed write.
+    *   - With no desk, it ends at `/quit`, at the end of the input, or when the feed ends, for example after `Close` or
+    *     a failed write. It gives false only when the feed ended and the session did not close, as after a failed
+    *     write.
+    *   - With a desk, only `/quit` and the end of the input end it. The end of the feed of the session that the client
+    *     shows does not end it. When that session ends in another way than a `/close` of this client, for example after
+    *     a failed write, the client prints one line that names `/controller` and `/open ID`. Then it waits for the next
+    *     line.
     *   - In the script mode (`script`), each line waits until the session has no open turn, and each command goes
     *     through `run`, so the commands commit in the order of the lines. The end of the input also waits for the open
     *     turn. So `printf 'm1\nm2\n' | cli --script` gives two turns, and the second message starts the second turn. A
     *     line waits also for a turn that started before it, for example after a reopen or a job message. `/quit` and
     *     `/stop` wait too, so a person stops a script with the end of the process.
+    *   - With a desk (8.7), `/sessions` prints the card of each session, `/open ID` shows the session `ID`, `/reopen
+    *     ID` opens an ended session again and shows it, and `/controller` shows the controller: the client then
+    *     subscribes to the feed of that session, prints its entries, and sends the commands to it. `/close OUTCOME`
+    *     prints the release plan, asks the person to confirm each irreversible item with a line `yes`, and runs the
+    *     release through the desk. After a release that ran, the client shows the controller. With no desk, these lines
+    *     print that the client has one session, and `/close OUTCOME` sends `Close` with no release.
     */
-  def loop(handle: SessionHandle, console: ClientConsole, script: Boolean): Boolean =
+  def loop(handle: SessionHandle, console: ClientConsole, script: Boolean, desk: Option[Desk]): Boolean =
+    val done                      = CountDownLatch(1)
+    val reasoning                 = AtomicReference(ReasoningView.Short)
+    def print(text: String): Unit = console.print(printable(text))
+    // True while the reader runs a desk line. A release ends the session that the client shows, and then the client
+    // shows the controller, so the printer prints no end notice for that session.
+    val atDesk = AtomicBoolean(false)
     // The state before the feed, so an entry that commits between the two reads is in the feed or in the read after
     // it, and `Shown` shows it once (10.2: a client misses nothing).
-    val before = handle.state
-    val start  = before.nextSeq - 1
-    val feed   = handle.subscribe(1024)
-    val done   = CountDownLatch(1)
-    val shown  = Shown(start)
-    val view   = AtomicReference(ReasoningView.Short)
-    // The `seq` of the `TurnStarted` of the last turn that the client saw: the turn of a stop notice.
-    val turn                      = AtomicLong(before.lastTurn)
-    def print(text: String): Unit = console.print(printable(text))
-    // An entry that the client did not show yet, and the stop notice after a turn that a stop ended.
-    def show(logged: Logged): Unit =
-      shown.next(logged).foreach { entry =>
-        entryText(entry, view.get).foreach(print)
-        entry.entry match
-          case Entry.TurnStarted                    => turn.set(entry.seq)
-          case Entry.TurnEnded(TurnOutcome.Aborted) =>
-            stopNotice(handle.state, turn.get, jobStarts(handle.read(turn.get)), handle.jobStatus).foreach(print)
-          case _ => ()
-      }
-    // An entry of the feed, or the entries of the journal after the last one shown after `Behind`.
-    def take(item: Either[Behind, Logged]): Unit =
-      item match
-        case Right(logged) => show(logged)
-        case Left(_)       => handle.read(shown.last).foreach(show)
-    handle.read(start).foreach(l => take(Right(l)))
+    val view = View(handle, handle.state.nextSeq - 1, () => reasoning.get, print)
+    // With a desk, the end of the feed does not end the loop. The printer prints the end notice once, and it waits
+    // until the reader shows another session or the loop ends.
     val printer = Thread.ofPlatform().daemon(true).name("harness-cli-printer").start { () =>
-      while done.getCount > 0 && !feed.ended do feed.poll(200).foreach(take)
+      while done.getCount > 0 && (desk.nonEmpty || !view.ended) do
+        if !view.ended then view.poll(200)
+        else
+          if desk.nonEmpty && !atDesk.get then view.endOnce().foreach(id => print(endedText(id)))
+          done.await(200, TimeUnit.MILLISECONDS): Unit
       done.countDown()
     }
-    // The script mode: the reader waits until the session has no open turn, or until the loop ends.
-    def idle(): Unit = while handle.state.position != Position.NoTurn && !done.await(50, TimeUnit.MILLISECONDS) do ()
-    // The rule of the entry `seq`, when that entry asked for an approval (5.5).
+    // The script mode: the reader waits until the session has no open turn, until its feed ends, or until the loop
+    // ends.
+    def idle(): Unit =
+      while !view.ended && view.handle.state.position != Position.NoTurn && !done.await(50, TimeUnit.MILLISECONDS) do ()
+    // The rule of the entry `seq` of the session that the client shows, when that entry asked for an approval (5.5).
     def asked(seq: Long): Option[GuardRule] =
-      handle.read(seq - 1).headOption.filter(_.seq == seq).collect {
+      view.handle.read(seq - 1).headOption.filter(_.seq == seq).collect {
         case Logged(_, _, Entry.EffectDone(_, EffectResult.NeedsApproval(rule))) => rule
       }
-    // One line of the person, or the `Stop` of a Ctrl-C. `Quit` ends the loop.
+    // One line of the person, or the `Stop` of a Ctrl-C, for the session that the client shows. `Quit` ends the loop.
     def act(parsed: Line): Unit =
+      val current = view.handle
       parsed match
         case Line.Quit          => done.countDown()
         case Line.Wait(seconds) => done.await(seconds.toLong, TimeUnit.SECONDS): Unit
-        case Line.Jobs          => print(jobsText(handle.state, jobStarts(handle.read(-1)), handle.jobStatus))
+        case Line.Jobs          => print(jobsText(current.state, jobStarts(current.read(-1)), current.jobStatus))
         case Line.Status        =>
-          val now = handle.state
-          print(statusText(now, handle.jobStatus, pendingCalls(now, handle.read(now.lastTurn))))
-        case Line.Help            => print(helpText)
+          val now = current.state
+          print(statusText(now, current.jobStatus, pendingCalls(now, current.read(now.lastTurn))))
+        case Line.Help                            => print(helpText)
+        case _ if deskLine(parsed, desk.nonEmpty) =>
+          atDesk.set(true)
+          try
+            val next = deskStep(desk, parsed, current, console, print)
+            if next ne current then view.show(next)
+          finally atDesk.set(false)
         case Line.Reasoning(next) =>
-          view.set(next)
+          reasoning.set(next)
           print(s"The client now shows ${reasoningWords(next)} of each step.")
         case _ =>
           // The person must see a refusal of `Close`, `Allow` and `StopJob`, so these wait for the commit.
           val waits = script ||
             (parsed match
-              case Line.Close | Line.Allow(_, _) | Line.StopJob(_) => true
-              case _                                               => false)
-          commandsFor(parsed, handle.state, RequestId(UUID.randomUUID().toString), asked) match
+              case Line.Close(_, _) | Line.Allow(_, _) | Line.StopJob(_) => true
+              case _                                                     => false)
+          commandsFor(parsed, current.state, RequestId(UUID.randomUUID().toString), asked) match
             case Left(error)     => print(error)
             case Right(commands) => commands.foreach { command =>
-                val result = if waits then handle.run(command).map(_ => ()) else handle.send(command)
-                result.left.foreach(error => print(s"The session refused the command: $error"))
+                val result = if waits then current.run(command).map(_ => ()) else current.send(command)
+                result.left.foreach(error => print(s"The session refused the command: ${error.words}"))
               }
     def line(text: String): Unit =
       if script then idle()
       act(parseLine(text))
     // Ctrl-C: `/stop` during a turn, and a hint with no open turn.
     def interrupt(): Unit =
-      if handle.state.position == Position.NoTurn then
+      if view.handle.state.position == Position.NoTurn then
         print("No turn is open. /quit ends the client, and the session stays open.")
       else act(Line.Stop)
     console.onInterrupt(() => interrupt())
@@ -306,11 +326,169 @@ object Cli:
     }: Unit
     done.await()
     printer.join(1_000)
-    Iterator.continually(feed.poll()).takeWhile(_.isDefined).flatten.foreach(take)
-    val failed = feed.ended && !handle.state.closed
-    feed.close()
+    view.drain()
+    val failed = view.ended && !view.handle.state.closed
+    view.close()
     if failed then print("The session stopped: its host can write no more. The journal keeps each committed entry.")
     !failed
+
+  /** True for a line that goes through the desk (8.7): `/sessions`, `/open`, `/reopen` and `/controller`, and `/close`
+    * when the client has a desk.
+    */
+  private def deskLine(line: Line, desk: Boolean): Boolean =
+    line match
+      case Line.Sessions | Line.Open(_) | Line.Reopen(_) | Line.Controller => true
+      case Line.Close(_, _)                                                => desk
+      case _                                                               => false
+
+  /** Runs a desk line of the loop (8.7), and gives the session that the client shows after it. The confirmation of an
+    * irreversible item of a release is the next line of `console`. A release ends the session, so after a release that
+    * ran, it gives the controller. A `/close` of the controller prints that the controller never ends. A session that
+    * does not open prints the error of the host in words (`HostError.words`).
+    */
+  private def deskStep(
+      desk   : Option[Desk],
+      line   : Line,
+      handle : SessionHandle,
+      console: ClientConsole,
+      print  : String => Unit
+  ): SessionHandle =
+    def shown(opened: Either[HostError, SessionHandle], id: SessionId): SessionHandle =
+      opened match
+        case Right(next) =>
+          print(s"The client shows the session ${next.id.value}.")
+          next
+        case Left(HostError.Ended) =>
+          print(s"The session ${id.value} has ended. Type /reopen ${id.value} to open it again.")
+          handle
+        case Left(error) =>
+          print(s"The session ${id.value} did not open: ${error.words}")
+          handle
+    desk match
+      case None =>
+        print("This client shows one session. Start the client with --controller to reach the other sessions.")
+        handle
+      case Some(d) => line match
+          case Line.Sessions =>
+            val cards = d.cards
+            if cards.isEmpty then print("The host has no session.") else cards.foreach(card => print(cardText(card)))
+            handle
+          case Line.Open(id)               => shown(d.open(id), id)
+          case Line.Reopen(id)             => shown(d.reopen(id), id)
+          case Line.Controller             => shown(d.controller, Controller.id)
+          case Line.Close(outcome, reason) =>
+            if release(d, handle, outcome, reason, console, print) then shown(d.controller, Controller.id) else handle
+          case _ => handle
+
+  /** `/close OUTCOME` with a desk (8.7): the plan, a question for each irreversible item, the release, and its steps.
+    * It gives true when the release ran, so the session ended. A plan or a release that fails prints the error of the
+    * host in words (`HostError.words`).
+    */
+  private def release(
+      desk   : Desk,
+      handle : SessionHandle,
+      outcome: SessionOutcome,
+      reason : String,
+      console: ClientConsole,
+      print  : String => Unit
+  ): Boolean =
+    if handle.id == Controller.id then
+      print("The controller never ends. Type /open ID to close a work session.")
+      false
+    else
+      desk.planOf(handle.id, outcome) match
+        case Left(error) =>
+          print(s"The session has no release plan: ${error.words}")
+          false
+        case Right((state, plan)) =>
+          print(s"The release plan of the session ${handle.id.value}:")
+          print(planText(state, plan))
+          val confirm = (item: ReleaseItem) =>
+            print(s"The step \"${itemText(item)}\" cannot be undone. Type yes to run it.")
+            console.read() match
+              case Typed.Text(text) => text.trim == "yes"
+              case _                => false
+          desk.release(handle.id, outcome, reason, confirm) match
+            case Left(error) =>
+              print(s"The release did not run: ${error.words}")
+              false
+            case Right(steps) =>
+              steps.foreach(step => print(stepText(step)))
+              true
+
+  /** The end notice of the session `id` with a desk: the session ended, and the commands that show another session. */
+  private def endedText(id: SessionId): String =
+    s"The session ${id.value} ended. Type /controller or /open ID to show another session."
+
+/** The session that a client shows (8.7): its handle, its feed, the last `seq` that the client showed, and the
+  * `TurnStarted` of the last turn that the client saw, for the stop notice. `show` changes the session, and it shows
+  * the entries of the last turn of the new one. `reasoning` gives the view of the reasoning of each step.
+  */
+private final class View(first: SessionHandle, start: Long, reasoning: () => ReasoningView, print: String => Unit):
+  private var current: Watched = opened(first, start)
+  // True after `endOnce` gave the id of `current`.
+  private var told = false
+
+  def handle: SessionHandle = synchronized(current.handle)
+
+  def ended: Boolean = synchronized(current.feed.ended)
+
+  /** The id of the session that the client shows, after the end of its feed. It gives the id once for each session. */
+  def endOnce(): Option[SessionId] =
+    synchronized {
+      val untold = current.feed.ended && !told
+      if untold then told = true
+      Option.when(untold)(current.handle.id)
+    }
+
+  /** One poll of the feed of the session that the client shows. */
+  def poll(waitMillis: Long): Unit =
+    val now = synchronized(current)
+    now.feed.poll(waitMillis).foreach(take(now, _))
+
+  /** The entries that are in the feed now. */
+  def drain(): Unit =
+    val now = synchronized(current)
+    Iterator.continually(now.feed.poll()).takeWhile(_.isDefined).flatten.foreach(take(now, _))
+
+  /** The client shows `next` from now on. */
+  def show(next: SessionHandle): Unit =
+    synchronized {
+      current.feed.close()
+      // The entries of the last turn: its message comes just before its `TurnStarted`.
+      current = opened(next, next.state.lastTurn - 2)
+      told = false
+    }
+
+  def close(): Unit = synchronized(current.feed.close())
+
+  /** The view of `h` after the `seq` `from`. The turn of the stop notice comes from the state before the feed. */
+  private def opened(h: SessionHandle, from: Long): Watched =
+    val turn = AtomicLong(h.state.lastTurn)
+    val now  = Watched(h, h.subscribe(1024), Shown(from), turn)
+    h.read(from).foreach(logged => take(now, Right(logged)))
+    now
+
+  // An entry of the feed, or the entries of the journal after the last one shown after `Behind`.
+  private def take(now: Watched, item: Either[Behind, Logged]): Unit =
+    item match
+      case Right(logged) => printEntry(now, logged)
+      case Left(_)       => now.handle.read(now.shown.last).foreach(printEntry(now, _))
+
+  // An entry that the client did not show yet, and the stop notice after a turn that a stop ended.
+  private def printEntry(now: Watched, logged: Logged): Unit =
+    now.shown.next(logged).foreach { fresh =>
+      entryText(fresh, reasoning()).foreach(print)
+      fresh.entry match
+        case Entry.TurnStarted                    => now.turn.set(fresh.seq)
+        case Entry.TurnEnded(TurnOutcome.Aborted) =>
+          val h = now.handle
+          stopNotice(h.state, now.turn.get, jobStarts(h.read(now.turn.get)), h.jobStatus).foreach(print)
+        case _ => ()
+    }
+
+/** One session of a `View`: its handle, its feed, what the client showed, and the turn of a stop notice. */
+private final case class Watched(handle: SessionHandle, feed: Feed, shown: Shown, turn: AtomicLong)
 
 /** The words of a view of the reasoning, for the answer to `/reasoning`. */
 private def reasoningWords(view: ReasoningView): String =

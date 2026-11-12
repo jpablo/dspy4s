@@ -5,7 +5,13 @@ package dspy4s.harness.kernel
   *
   * An `Input` from `owner` opens a debt at the first step or stop that sees it. While the debt is open, each
   * `TurnEnded` and `Ended` gives one `Send`. `Submitted`, `Exhausted`, `Aborted` and `Ended` close the debt, and
-  * `Replied` keeps it open. The request id holds the session and the `seq` of that entry.
+  * `Replied` keeps it open. The request id holds the session and the `seq` of that entry, and not the text. So a new
+  * text does not change which reports the owner has.
+  *
+  * The owner reads the text with a model, so the text gives the outcome in words, and not as a Scala value:
+  *
+  *   - `TurnEnded`: the text of `TurnOutcome.report`. The terminal shows the same text.
+  *   - `Ended`: the text of `SessionOutcome.report` with the reason. The terminal shows the same text.
   *
   * For the review: the design gives `reports(session, journal)`, with no owner. The function must know which sender is
   * the owner, and `Source` has no case for a parent session. So this signature takes the source of the owner, as the
@@ -24,9 +30,9 @@ def reports(session: SessionId, owner: Source, journal: Vector[Logged]): Vector[
     case ((unseen, owes, out), Logged(_, _, Entry.StepStarted(_)))       => (false, owes || unseen, out)
     case ((unseen, owes, out), Logged(_, _, Entry.StopRequested(_)))     => (false, owes || unseen, out)
     case ((unseen, true, out), Logged(seq, _, Entry.TurnEnded(outcome))) =>
-      (unseen, !ends(outcome), out :+ send(seq, s"The turn ended: $outcome"))
+      (unseen, !ends(outcome), out :+ send(seq, outcome.report))
     case ((unseen, true, out), Logged(seq, _, Entry.Ended(outcome, reason))) =>
-      (unseen, false, out :+ send(seq, s"The session ended: $outcome, $reason"))
+      (unseen, false, out :+ send(seq, outcome.report(reason)))
     case (other, _) => other
   }
   sends

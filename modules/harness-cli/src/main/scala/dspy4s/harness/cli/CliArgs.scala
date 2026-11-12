@@ -1,5 +1,7 @@
 package dspy4s.harness.cli
 
+import dspy4s.harness.kernel.SessionId
+
 import java.nio.file.Path
 import scala.annotation.tailrec
 
@@ -18,31 +20,35 @@ import scala.annotation.tailrec
   *   the session through the standard input
   * @param list
   *   the list of the sessions of the root, in place of a session
+  * @param controller
+  *   the client opens the controller of the root (8.7), not a work session. The folder does not apply to it.
   */
 final case class CliArgs(
-    scope  : Path,
-    root   : Path,
-    session: Option[String],
-    script : Boolean = false,
-    list   : Boolean = false
+    scope     : Path,
+    root      : Path,
+    session   : Option[String],
+    script    : Boolean = false,
+    list      : Boolean = false,
+    controller: Boolean = false
 ) derives CanEqual
 
 object CliArgs:
 
   /** The text that an error of the arguments gives. */
-  val usage: String = "Usage: dspy4s-harness [--root DIR] [--session ID] [--script] [FOLDER]\n" +
+  val usage: String = "Usage: dspy4s-harness [--root DIR] [--session ID | --controller] [--script] [FOLDER]\n" +
     "       dspy4s-harness [--root DIR] --list\n" +
     "  --root DIR     the root of the host, by default ~/.dspy4s/harness\n" +
     "  --session ID   open the session ID again, with its own configuration. A part at the start of the id is\n" +
     "                 enough when only one session has it\n" +
+    "  --controller   open the controller of the root, which starts and follows the work sessions\n" +
     "  --list         list the sessions of the root, the newest first\n" +
     "  --script       run one line at a time: each line waits for the end of the turn before it, and the end of\n" +
     "                 the input waits for the open turn\n" +
     "  FOLDER         the folder of a new session, by default the current folder"
 
-  /** The arguments from the command line: `[--root DIR] [--session ID] [--script] [--list] [FOLDER]`. The folder is
-    * `cwd` by default, and the root is `<home>/.dspy4s/harness`. An unknown flag or a missing value gives an error with
-    * the usage.
+  /** The arguments from the command line: `[--root DIR] [--session ID | --controller] [--script] [--list] [FOLDER]`.
+    * The folder is `cwd` by default, and the root is `<home>/.dspy4s/harness`. An unknown flag, a missing value, or
+    * both `--session` and `--controller` give an error with the usage.
     *
     * The folder and the root are normal paths, with no `.` or `..` part. A live scenario of 2026-11-10 gave the folder
     * `.`, and the scope of the session was `.../ws/.`.
@@ -56,11 +62,15 @@ object CliArgs:
     @tailrec
     def walk(rest: List[String], got: CliArgs, folder: Option[Path]): Either[String, CliArgs] =
       rest match
-        case Nil                                               => Right(folder.fold(got)(f => got.copy(scope = f)))
-        case "--root" :: dir :: more if !dir.startsWith("--")  => walk(more, got.copy(root = at(dir)), folder)
+        case Nil if got.controller && got.session.nonEmpty                          => Left(s"Give --session or --controller, not both.\n$usage")
+        case Nil                                                                    => Right(folder.fold(got)(f => got.copy(scope = f)))
+        case "--root" :: dir :: more if !dir.startsWith("--")                       => walk(more, got.copy(root = at(dir)), folder)
+        case "--session" :: id :: _ if !id.startsWith("--") && !SessionId.valid(id) =>
+          Left(s"The session id $id is not valid.\n$usage")
         case "--session" :: id :: more if !id.startsWith("--") => walk(more, got.copy(session = Some(id)), folder)
         case "--script" :: more                                => walk(more, got.copy(script = true), folder)
         case "--list" :: more                                  => walk(more, got.copy(list = true), folder)
+        case "--controller" :: more                            => walk(more, got.copy(controller = true), folder)
         case flag :: _ if flag.startsWith("--")                => Left(s"The argument $flag is not right.\n$usage")
         case path :: more if folder.isEmpty                    => walk(more, got, Some(at(path)))
         case path :: _                                         => Left(s"Give one folder, not also $path.\n$usage")

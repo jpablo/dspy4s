@@ -69,6 +69,9 @@ object WorkEnv:
   *     new activation the note of the names that the new REPL lost (6, `NewReplNote.afterActivation`).
   *   - Each turn gets a new budget of `limits.modelCalls` model calls (8.2), because a work session has no end of a
   *     call. The effects and the `subQuery` leaf get the budget of the current turn through a function.
+  *   - A mode with `Sessions` gets the handler `HostSessions` with `peers` and a `HarnessProbe` with the leaves of the
+  *     runtime (8.7). The task of a turn comes from `taskOf`: the controller, a session with a session as its owner, or
+  *     a session of the person.
   *
   * The policy calls run on the thread of the worker, so the activation installs the context of the runtime there. The
   * context gives the LM, so the key never goes into the journal (5.6).
@@ -77,7 +80,8 @@ final class WorkRuntime(
     env     : WorkEnv,
     limits  : HarnessLimits,
     policy  : Predict[PolicyInput, PolicyStep],
-    subQuery: Predict[SubQuery, SubAnswer]
+    subQuery: Predict[SubQuery, SubAnswer],
+    peers   : Peers = Peers.none
 )(using RuntimeContext)
     extends SessionRuntime:
 
@@ -149,12 +153,24 @@ final class WorkRuntime(
         val strategy =
           WorkRuntime.strategyOf(config, file, calls, () => summary.current, limits.batch, env.summaryOptions)
             .fold(error => throw IllegalStateException(error), identity)
+        val probe    = HarnessProbe(env.journals, env.home, env.secrets, limits, policy, subQuery)
         val bindings = Bindings(
           turn = JournalTurn(journal, () => System.currentTimeMillis(), zooms),
           files = Option.when(config.mode.files != Access.None)(LocalFiles(scope, profile, made.secretNames)),
           shell = Option.when(config.mode.shell == Access.Full)(JobShell(commands, jobs, journal)),
           llm = Option.when(config.mode.llm == Access.Full)(LeafLlm(subQuery, () => turns.current, host, limits.batch)),
-          store = Option.when(config.mode.store != Access.None)(store)
+          store = Option.when(config.mode.store != Access.None)(store),
+          sessions = Option.when(config.mode.sessions != Access.None)(
+            HostSessions(
+              peers,
+              session,
+              journal,
+              probe,
+              () => turns.current,
+              (goal, scope, strategy) =>
+                WorkRuntime.ownedConfig(goal, scope, strategy, session, config, limits)
+            )
+          )
         )
         val handlers = recorded(bindings, recorder, Some(scope))
         val newRepl  = () =>
@@ -167,7 +183,7 @@ final class WorkRuntime(
             stops = () => journal.state.stopping
           )
         val effects = HarnessEffects(
-          WorkRuntime.chatTask(scope),
+          WorkRuntime.taskOf(session, config, scope),
           Harness.apiReference(config.mode),
           policy,
           strategy,
@@ -339,6 +355,54 @@ object WorkRuntime:
     */
   def chatTask(scope: Path): String = s"$instructions\n\nThe folder of the session: $scope."
 
+  /** The task of each turn of the session `session` with `config` in the folder `scope` (8.6, 8.7): `Controller.task`
+    * for the controller (`Controller.id`), the goal of a session whose owner is a session with the rule to end the work
+    * with a cell that calls `submit(...)`, and `chatTask` for a session of the person.
+    *
+    * The preamble of such a session has `submit(value: String)`, and the task does not show the preamble. So the rule
+    * names the String and gives an example call that compiles. In two live runs, a rule with no call made the model
+    * write `submit: 42` as the text of its reply. Then each turn ended in `Replied`, and the work never ended.
+    */
+  def taskOf(session: SessionId, config: SessionConfig, scope: Path): String =
+    if session == Controller.id then Controller.task(scope)
+    else
+      (config.owner, config.goal) match
+        case (Owner.Session(_), Some(goal)) =>
+          s"${chatTask(scope)}\n\nThe goal of the session: $goal\n\nAnother session started this session, and it " +
+            "gets a report at the end of each turn. When you complete the work, write a cell that calls submit with " +
+            "the result as one String, for example submit(\"The file has 42 lines.\"). A reply with no cell does " +
+            "not give the result to the other session."
+        case _ => chatTask(scope)
+
+  /** The configuration of a session that `caller`, with the configuration `parent`, starts with `goal` in `scope` (8.2,
+    * 8.7): a chat turn with `limits.steps` steps, the owner `Owner.Session(caller)`, the goal, `strategy`, the mode
+    * `workMode` met with the ceiling of `parent` as the mode and the ceiling, the guard of that mode, the preamble of a
+    * session with no input fields, and the model of `parent`.
+    */
+  def ownedConfig(
+      goal    : String,
+      scope   : Scope,
+      strategy: StrategyName,
+      caller  : SessionId,
+      parent  : SessionConfig,
+      limits  : HarnessLimits
+  ): SessionConfig =
+    val mode = workMode.meet(parent.ceiling)
+    SessionConfig(
+      kind = TurnKind.Chat,
+      steps = limits.steps,
+      mode = mode,
+      ceiling = mode,
+      strategy = strategy,
+      scope = scope,
+      owner = Owner.Session(caller),
+      guard = defaultGuard(mode),
+      preamble = preamble(summon[Data[String]].shape).getOrElse(""),
+      model = parent.model,
+      goal = Some(goal),
+      env = Set.empty
+    )
+
   /** The first rules of 5.5: in a mode with `Network^`, `exec` and `spawn` with the prefix `git push` get `Ask`. In
     * another mode the sandbox already stops a push, so the guard has no rule.
     */
@@ -394,9 +458,15 @@ object WorkRuntime:
 
   /** A runtime with the first leaves: the policy with `instructions`, and the `subQuery` leaf of a harness. */
   def forWork(env: WorkEnv, limits: HarnessLimits = HarnessLimits())(using RuntimeContext): WorkRuntime =
+    forHost(env, limits)(Peers.none)
+
+  /** `forWork` with the host `peers`, for `LocalHost.startWith` (8.7): a session with `Sessions` reaches the other
+    * sessions of the host.
+    */
+  def forHost(env: WorkEnv, limits: HarnessLimits = HarnessLimits())(peers: Peers)(using RuntimeContext): WorkRuntime =
     val policy   = Signature.derived[PolicyInput, PolicyStep]("policy", instructions)
     val subQuery = Signature.derived[SubQuery, SubAnswer]("subQuery", Harness.subQueryInstructions)
-    WorkRuntime(env, limits, Predict(policy, name = Some("policy")), Predict(subQuery, name = Some("subQuery")))
+    WorkRuntime(env, limits, Predict(policy, name = Some("policy")), Predict(subQuery, name = Some("subQuery")), peers)
 
   /** Starts the walk of the scope for secret files (`SandboxedShell.warm`) on a daemon thread of its own, when an
     * activation of `session` starts with no index of an open session. A host calls `opened` before the `Activate` of

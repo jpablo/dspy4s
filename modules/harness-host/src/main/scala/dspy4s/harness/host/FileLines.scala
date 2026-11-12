@@ -4,6 +4,8 @@ import dspy4s.harness.{LineKey, LineStore, MemoryLine}
 import dspy4s.harness.kernel.SessionId
 
 import java.nio.file.Path
+import org.sqlite.SQLiteConfig
+
 import java.sql.{Connection, DriverManager}
 import scala.util.{Try, Using}
 
@@ -77,6 +79,17 @@ object FileLines:
 
   // A key that has a line keeps it (the law Immutability).
   private val Insert = "insert or ignore into memory (session, level, idx, digest, line) values (?, ?, ?, ?, ?)"
+
+  /** The store of the session file at `path`, to read it (8.7): it makes no table and writes nothing, so `putAll` keeps
+    * no line. A file with no table `memory` gives no line.
+    */
+  def readOnly(path: Path, session: SessionId): Either[String, FileLines] =
+    Try {
+      val settings = SQLiteConfig()
+      settings.setReadOnly(true)
+      settings.setBusyTimeout(BusyMillis)
+      FileLines(DriverManager.getConnection(s"jdbc:sqlite:$path", settings.toProperties), session)
+    }.toEither.left.map(e => s"the memory table of $path did not open: ${e.getMessage}")
 
   /** The store of the session file at `path`. It makes the table `memory` when the file has none. */
   def open(path: Path, session: SessionId): Either[String, FileLines] =

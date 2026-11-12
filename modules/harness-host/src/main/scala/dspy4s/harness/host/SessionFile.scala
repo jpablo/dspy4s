@@ -5,6 +5,8 @@ import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodec
 
 import java.nio.file.{Files as JFiles, Path}
+import org.sqlite.SQLiteConfig
+
 import java.sql.{Connection, DriverManager}
 import scala.util.{Try, Using}
 
@@ -150,6 +152,19 @@ object SessionFile:
 
   /** The folder of the journals under the root of a host: `<root>/sessions`. */
   def folderOf(root: Path): Path = root.resolve("sessions")
+
+  /** Opens the journal at `path` to read it (`mode=ro`): a file that does not exist gives an error, and nothing on the
+    * disk changes (8.7).
+    */
+  def readOnly(path: Path, session: SessionId): Either[String, SessionFile] =
+    if !JFiles.isRegularFile(path) then Left(s"the journal $path does not exist")
+    else
+      Try {
+        val settings = SQLiteConfig()
+        settings.setReadOnly(true)
+        settings.setBusyTimeout(FileLines.BusyMillis)
+        SessionFile(DriverManager.getConnection(s"jdbc:sqlite:$path", settings.toProperties), path, session)
+      }.toEither.left.map(e => s"the journal $path did not open: ${e.getMessage}")
 
   /** The path of the file of `session` under the root of a host: `<root>/sessions/<id>.db`. */
   def pathOf(root: Path, session: SessionId): Path = folderOf(root).resolve(s"${session.value}.db")

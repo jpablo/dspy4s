@@ -67,7 +67,7 @@ new = "value.length >= 0 &&"
 name = "Mutant: a call runs when the journal refuses its intent"
 [[mutant.edit]]
 file = "Handlers.scala"
-old = "rejection =>\n        throw IllegalStateException(\n          s\"$op: the session refused the call, because it stops or the cell ended ($rejection)\"\n        ),"
+old = "rejection =>\n        throw IllegalStateException(\n          s\"$op: the session refused the call, because it stops or the cell ended (${rejection.words})\"\n        ),"
 new = "_ => journal.state,"
 
 [[mutant]]
@@ -371,8 +371,8 @@ new = "budget().spent: Unit"
 name = "Mutant: a policy call spends no call of the budget"
 [[mutant.edit]]
 file = "HarnessEffects.scala"
-old = "budget().spend().flatMap(_ => runner.run(() => policy(input).left.map(_.message)))"
-new = "Right(budget().spent).flatMap(_ => runner.run(() => policy(input).left.map(_.message)))"
+old = "budget().spend().flatMap(_ => runner.run(call))"
+new = "Right(budget().spent).flatMap(_ => runner.run(call))"
 
 [[mutant]]
 name = "Mutant: each child has a budget of its own"

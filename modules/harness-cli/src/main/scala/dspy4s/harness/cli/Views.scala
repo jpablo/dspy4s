@@ -1,7 +1,7 @@
 package dspy4s.harness.cli
 
 import dspy4s.harness.guest.JobStatus
-import dspy4s.harness.host.{CatalogRow, SessionStatus, jobName}
+import dspy4s.harness.host.{CatalogRow, jobName, jobStatusWords}
 import dspy4s.harness.kernel.{EffectId, EffectResult, Entry, GuardRule, Logged, Position, SessionId, SessionState}
 import dspy4s.harness.sandbox.SandboxedShell
 
@@ -93,7 +93,8 @@ def statusText(current: SessionState, status: Map[EffectId, JobStatus], calls: V
   (Vector(folder, turn) ++ stop ++ pending ++ jobs ++ closed).mkString("\n")
 
 /** The text of `--list` (10.2): the sessions of `rows`, the newest first. Each session has one line with its id, its
-  * status, the time of its last entry in `zone` and its folder. A second line has its first message.
+  * status in words (`SessionStatus.words`, as the card of the controller), the time of its last entry in `zone` and its
+  * folder. A second line has its first message.
   */
 def sessionsText(rows: Vector[CatalogRow], zone: ZoneId): String =
   if rows.isEmpty then "The root has no session."
@@ -102,7 +103,7 @@ def sessionsText(rows: Vector[CatalogRow], zone: ZoneId): String =
     rows.sortBy(row => (-row.lastAt, row.session.value)).map { row =>
       // A file name, a folder and a message can hold a new line, so each shows on one line with its escapes.
       val at   = time.format(Instant.ofEpochMilli(row.lastAt))
-      val head = s"${visible(row.session.value)}  ${sessionWord(row.status)}  $at  ${visible(row.folder)}"
+      val head = s"${visible(row.session.value)}  ${row.status.words}  $at  ${visible(row.folder)}"
       if row.firstMessage.isEmpty then head else s"$head\n    ${visible(row.firstMessage)}"
     }.mkString("\n")
 
@@ -121,26 +122,18 @@ def resolveSession(ids: Vector[SessionId], wanted: String): Either[String, Sessi
           case more        =>
             Left(s"${more.size} sessions have an id that starts with $wanted. Give more of the id. --list lists them.")
 
-/** The status of a job in words. A job with a process has the status of the job table. A job with no process has the
-  * outcome of its `spawn` call (10.3).
+/** The status of a job in words. A job with a process has the status of the job table in the words of the host
+  * (`jobStatusWords`), the same words as the message at the end of a job. A job with no process (no status, or `Lost`)
+  * has the outcome of its `spawn` call (10.3).
   */
 private def statusWord(status: Option[JobStatus], outcome: Option[EffectResult]): String =
   status match
-    case Some(JobStatus.Running)      => "runs"
-    case Some(JobStatus.Exited(code)) => s"exited with the code $code"
-    case Some(JobStatus.Stopped)      => "stopped"
-    case _                            => outcome match
+    case None | Some(JobStatus.Lost) => outcome match
         case None                                                              => "starts"
         case Some(EffectResult.Error(_)) | Some(EffectResult.NeedsApproval(_)) => "did not start"
         case Some(EffectResult.Unknown)                                        => "lost: a stop cut its start"
         case Some(EffectResult.Value(_, _))                                    => "lost with its host"
-
-private def sessionWord(status: SessionStatus): String =
-  status match
-    case SessionStatus.Idle           => "idle"
-    case SessionStatus.InTurn         => "in a turn"
-    case SessionStatus.Stopping       => "stopping"
-    case SessionStatus.Ended(outcome) => s"ended ($outcome)"
+    case Some(known) => jobStatusWords(known)
 
 /** The command of a job in quotes, or its name when the journal has no command for it. */
 private def commandText(start: Option[JobStart], job: EffectId): String =

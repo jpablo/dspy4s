@@ -237,6 +237,21 @@ class MemoryTreeLaws extends munit.FunSuite:
     }
   }
 
+  test("Memory tree: the zoom of a part that does not exist names the top parts, and each of them zooms") {
+    Models.withModel(summaries()) {
+      val tree  = MemoryTree.withLeaves(LineStore.inMemory(), high = 6)
+      val d     = updated(tree, chat(8, output = 700), tree.empty)
+      val roots = Memory.roots(d.memory.log.size.toLong).map(_.ref)
+      assert(roots.nonEmpty)
+      tree.zoom(d, "30.0") match
+        case Left(error) =>
+          roots.foreach(ref => assert(error.contains(ref), error))
+          roots.foreach(ref => assert(tree.zoom(d, ref).isRight, ref))
+        case Right(text) => fail(text)
+      assert(tree.zoom(tree.empty, "0.0").left.exists(_.contains("empty")), tree.zoom(tree.empty, "0.0").toString)
+    }
+  }
+
   test("Memory tree: the window has no memory, so its zoom gives an error") {
     assert(Window.zoom((), "0.0").isLeft)
   }

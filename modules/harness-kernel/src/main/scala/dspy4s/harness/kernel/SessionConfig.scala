@@ -18,6 +18,16 @@ enum Owner derives Schema, CanEqual:
       case User | Session(_) => true
       case Optimizer | Cell  => false
 
+  /** The owner in words, for example `the person` or `the session s2`. The card of a session (8.7) gives these words,
+    * so the controller reads no Scala value.
+    */
+  def words: String =
+    this match
+      case User        => "the person"
+      case Session(id) => s"the session ${id.value}"
+      case Optimizer   => "an optimizer"
+      case Cell        => "a cell"
+
 /** A chat turn gives one last step to answer. A program call ends, and the caller runs the finisher (4.3). */
 enum TurnKind derives Schema, CanEqual:
   case Chat, Program
