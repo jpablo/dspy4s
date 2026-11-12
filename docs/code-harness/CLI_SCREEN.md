@@ -3,8 +3,8 @@
 Status: a proposal for the review (2026-11-11), and phase A of section 9 is built. It covers each element that the
 terminal client shows during a work session: the history, the part that runs now, the input and the footer. Section
 10.6 of [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md) has the client as it is now. Section 12 gives each place
-where phase A differs from this proposal. Section 14 is a plan (2026-11-12) for the reasoning effort and the context
-of the model in the footer, with no code yet.
+where phase A differs from this proposal. Section 14 gives the reasoning effort and the context of the model in the
+footer (2026-11-12).
 
 The proposal uses a study of seven terminal harnesses and of the desktop app of Claude Code (section 10). Section 9
 gives the order of the work, and section 11 gives the open choices.
@@ -223,11 +223,11 @@ One dim line after the reply:
 One line under the input, in a JLine `Status`:
 
 ```text
-  ~/code/shop · work mode · example-model · memory 12k of 48k · 1 job · 1 call waits
+  ~/code/shop · work mode · example-model · memory 12k of 48k chars · 1 job · 1 call waits
 ```
 
 - The folder, the mode and the model come from the `Activated` entry.
-- `memory 12k of 48k` is the size of the last view of the memory and its budget. The journal does not have this
+- `memory 12k of 48k chars` is the size of the last view of the memory and its budget. The journal does not have this
   value, so the host must give it, as it gives `Activity`.
 - The count of jobs and of pending calls come from the state of the session.
 - A part that has no value does not show.
@@ -352,8 +352,8 @@ with the open model of 27B parameters, native reasoning, and `DSPY_TRACE`:
 
 ## 14. The effort and the context in the footer
 
-Status: a plan (2026-11-12), with its choices made (14.3) and no code yet. In a live session, the footer was this
-line:
+Status: built on the branch `cli-footer-effort` (2026-11-12). The choices are in 14.3, and 14.7 gives each place where
+the code differs from the plan. In a live session, the footer was this line:
 
 ```text
   ~/code/api · work mode · example-model · memory 64 of 40k
@@ -525,3 +525,17 @@ What this changes in the plan:
 - Choice 3 has a new fact. The endpoint takes the level `none`, and `NativeReasoning` treats only a null as no effort.
   So the text `none` keeps the prompt as it is, and the model gives no reasoning. The list of the model does not
   give `none`. On 2026-11-12, the user took `none` for the first version (14.3, choice 3).
+
+### 14.7 What the code changed in the plan
+
+- `DSPY_REASONING_EFFORT` applies also with no native reasoning. A person who sets it wants the effort in the requests.
+  Only the default `low` needs `DSPY_NATIVE_REASONING=true`.
+- The client reads `GET /models` only with `DSPY_MODEL`. So a client with no model sends no request to the default base
+  URL.
+- `/effort LEVEL` waits for its commit, as `/close` does, so the person sees a refusal, for example after the end of
+  the session.
+- The percent of the context is the nearest whole number, so `18k of 1M` is `2%`. Under 1% it is `<1%`.
+- The tokens come from a usage tracker around the call to the policy (`UsageScope.track`). A context with
+  `trackUsage = false` gives no context part. When a step makes two model calls, the last one gives the tokens.
+- A `ModelChanged` shows one line in the history: `The effort is now high. The next step uses it.`
+- The host and the CLI have no file of mutants. The new mutants are in the kernel (3) and in the harness (3).

@@ -162,6 +162,7 @@ def evolve(s: SessionState, logged: Logged): SessionState =
         jobs = stopJobs(s, JobSelector.All),
         releasing = false
       )
+    case Entry.ModelChanged(model) => base.copy(config = s.config.copy(model = model))
 
 /** The operation that starts a job (10.3). */
 private val spawnOp = "spawn"

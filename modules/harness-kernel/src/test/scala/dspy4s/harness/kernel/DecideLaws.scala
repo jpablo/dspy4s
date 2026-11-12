@@ -128,6 +128,33 @@ class DecideLaws extends ScalaCheckSuite:
     )
   }
 
+  // The model of the configuration with another reasoning effort (CLI_SCREEN.md, 14.4).
+  private def withEffort(level: String): ModelChoice =
+    ModelChoice("model", Map("reasoning_effort" -> Json.String(level)))
+
+  test("Decide table: ChangeModel commits ModelChanged with no turn, in a turn and in a cell") {
+    val model = withEffort("high")
+    for s <- Vector(idle, inTurn, inCell) do
+      assertEquals(decide(Command.ChangeModel(model), s), Right(Vector(Entry.ModelChanged(model))))
+  }
+
+  test("Decide table: ChangeModel to a session that has ended commits nothing and gets SessionClosed") {
+    assertEquals(decide(Command.ChangeModel(withEffort("high")), ended), Left(Rejection.SessionClosed))
+  }
+
+  test("Decide table: ChangeModel with the model of the session commits nothing") {
+    val same = commit(idle, Vector(Entry.ModelChanged(withEffort("low"))))
+    assertEquals(decide(Command.ChangeModel(withEffort("low")), same), Right(Vector.empty))
+    assertEquals(decide(Command.ChangeModel(idle.config.model), idle), Right(Vector.empty))
+  }
+
+  test("Decide table: a Commit of a ModelChanged is refused, because only ChangeModel gives it") {
+    // A worker commits through `Commit`, and only a client changes the model.
+    val changed = Entry.ModelChanged(withEffort("high"))
+    for s <- Vector(idle, inTurn) do
+      assertEquals(decide(Command.Commit(Vector(changed)), s), Left(Rejection.OutOfOrder(changed)))
+  }
+
   test("Decide table: Close commits Ended only with no open turn") {
     assertEquals(
       decide(Command.Close(SessionOutcome.Merged, "done"), idle),

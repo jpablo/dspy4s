@@ -50,7 +50,7 @@ trait ClientConsole extends AutoCloseable:
   def printRows(rows: Vector[Row]): Unit = if rows.nonEmpty then print(rows.map(_.plain).mkString("\n"))
 
   /** Sets where the console reads the live block and the footer. A console with no line editor reads nothing. */
-  def watch(live: () => Live, footer: () => Option[Row]): Unit =
+  def watch(live: () => Live, footer: Int => Option[Row]): Unit =
     val _ = (live, footer)
 
   /** Runs `action` at each Ctrl-O. A console with no such key does nothing. */
@@ -110,14 +110,14 @@ final class EditorConsole private (reader: LineReaderImpl, color: Boolean, overr
   @volatile private var closing = false
 
   // Where the console reads the screen, and what the terminal shows now.
-  @volatile private var liveOf: () => Live          = () => Idle
-  @volatile private var footerOf: () => Option[Row] = () => None
-  @volatile private var detailAction: () => Unit    = () => ()
-  @volatile private var shownPrompt                 = ""
-  @volatile private var shownTitle                  = ""
-  @volatile private var shownFooter                 = AttributedString.EMPTY
-  private val blinking                              = AtomicBoolean(false)
-  private val status                                = Try(Option(JlineStatus.getStatus(terminal))).toOption.flatten
+  @volatile private var liveOf: () => Live           = () => Idle
+  @volatile private var footerOf: Int => Option[Row] = _ => None
+  @volatile private var detailAction: () => Unit     = () => ()
+  @volatile private var shownPrompt                  = ""
+  @volatile private var shownTitle                   = ""
+  @volatile private var shownFooter                  = AttributedString.EMPTY
+  private val blinking                               = AtomicBoolean(false)
+  private val status                                 = Try(Option(JlineStatus.getStatus(terminal))).toOption.flatten
   // The footer gets its row before the first read draws its prompt (`showFooter`).
   showFooter(AttributedString.EMPTY)
 
@@ -199,7 +199,7 @@ final class EditorConsole private (reader: LineReaderImpl, color: Boolean, overr
   override def onInterrupt(action: () => Unit): Unit =
     terminal.handle(Terminal.Signal.INT, _ => if !closing then action()): Unit
 
-  override def watch(live: () => Live, footer: () => Option[Row]): Unit =
+  override def watch(live: () => Live, footer: Int => Option[Row]): Unit =
     liveOf = live
     footerOf = footer
     kick()
@@ -264,7 +264,7 @@ final class EditorConsole private (reader: LineReaderImpl, color: Boolean, overr
 
   /** Shows the footer of `footerOf`, when its line changed. The line is cut to the width, so a resize can change it. */
   private def footer(): Unit =
-    val line = footerLine(Try(footerOf()).toOption.flatten)
+    val line = footerLine(Try(footerOf(columns() - 1)).toOption.flatten)
     if !line.equals(shownFooter) then showFooter(line)
 
   /** The line of the footer `row`, cut to the width of the terminal, or a blank line for no footer. */
@@ -392,9 +392,16 @@ object EditorConsole:
       case Tone.Bad    => AttributedStyle.DEFAULT.foreground(AttributedStyle.RED)
       case Tone.Warn   => AttributedStyle.DEFAULT.foreground(AttributedStyle.YELLOW)
 
-  /** The completion of a line: each command, the lifetimes after `/allow`, and the views after `/reasoning`. */
-  private[cli] val completer: Completer =
-    val words     = commandHelp.map(_._1.takeWhile(_ != ' ')).distinct.filterNot(Set("/allow", "/reasoning"))
+  /** The completion of a line with the default levels of the effort (`completerOf`). */
+  private[cli] val completer: Completer = completerOf(() => ModelFacts.unknown.choices)
+
+  /** The completion of a line: each command, the lifetimes after `/allow`, the views after `/reasoning`, and the levels
+    * of the effort after `/effort`, which `levels` gives at each completion (CLI_SCREEN.md, 14.4).
+    */
+  private[cli] def completerOf(levels: () => Vector[String]): Completer =
+    val words = commandHelp.map(_._1.takeWhile(_ != ' ')).distinct.filterNot(Set("/allow", "/reasoning", "/effort"))
+    val shown = new java.util.function.Supplier[java.util.Collection[String]]:
+      def get(): java.util.Collection[String] = levels().asJava
     val lifetimes = StringsCompleter("once", "turn", "session")
     // `/allow N once`: the number is free text, so this completer does not check the words before the lifetime.
     val numbered =
@@ -408,6 +415,7 @@ object EditorConsole:
         StringsCompleter(ReasoningView.values.map(_.toString.toLowerCase)*),
         NullCompleter.INSTANCE
       ),
+      ArgumentCompleter(StringsCompleter("/effort"), StringsCompleter(shown), NullCompleter.INSTANCE),
       ArgumentCompleter(StringsCompleter(words*), NullCompleter.INSTANCE)
     )
 
@@ -418,7 +426,12 @@ object EditorConsole:
     * types before the end of `build` is lost. So the client makes its console before it starts the host, and it tells
     * the person to type only after that.
     */
-  def system(history: Path, mask: String => String, color: Boolean = true): Option[EditorConsole] =
+  def system(
+      history: Path,
+      mask   : String => String,
+      color  : Boolean              = true,
+      levels : () => Vector[String] = () => ModelFacts.unknown.choices
+  ): Option[EditorConsole] =
     // With software signals, JLine 4 raises INT for a Ctrl-C key and also passes the key on, so one Ctrl-C comes two
     // times. The editor needs only the key. A value that the person set stays.
     if System.getProperty(TerminalBuilder.PROP_SOFTWARE_SIGNALS) == null then
@@ -435,18 +448,19 @@ object EditorConsole:
           None
         else
           val glyphs = if UTF_8.equals(terminal.encoding()) then Glyphs.unicode else Glyphs.ascii
-          Some(on(terminal, history, mask, color, glyphs))
+          Some(on(terminal, history, mask, color, glyphs, levels))
       }
 
   /** A console on `terminal`, with its history in the file `history`. Each line goes through `mask` before it goes into
-    * the history.
+    * the history. Tab after `/effort` completes the levels that `levels` gives.
     */
   def on(
       terminal: Terminal,
       history : Path,
       mask    : String => String,
-      color   : Boolean = true,
-      glyphs  : Glyphs  = Glyphs.unicode
+      color   : Boolean              = true,
+      glyphs  : Glyphs               = Glyphs.unicode,
+      levels  : () => Vector[String] = () => ModelFacts.unknown.choices
   ): EditorConsole =
     // The client does not split a line into words, so a quote does not hold the line open, and a `\` before the end of
     // the line is a plain character.
@@ -463,7 +477,7 @@ object EditorConsole:
     val reader = Reader(terminal, variables)
     reader.setHistory(MaskedHistory(mask))
     reader.setParser(parser)
-    reader.setCompleter(completer)
+    reader.setCompleter(completerOf(levels))
     // With no event expansion, a `!` in a message stays as it is, and JLine keeps each `\`.
     reader.option(LineReader.Option.DISABLE_EVENT_EXPANSION, true): Unit
     // With no signals, a Ctrl-C is a key. A read of JLine keeps these attributes, and it gives them back at its end.

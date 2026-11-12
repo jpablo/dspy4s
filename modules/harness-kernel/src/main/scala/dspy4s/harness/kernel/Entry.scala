@@ -128,8 +128,8 @@ enum JobSelector derives Schema, CanEqual:
   * Step ::= StepStarted [ Acted [ Cell ] ]
   * Cell ::= ( EffectStarted | EffectDone )* Observed
   * }}}
-  * `Input`, `StopRequested`, `JobsStopRequested`, `Granted` and `ScopeRecorded` can occur at any place. `Releasing`
-  * occurs only with no open turn, and each `Released` comes after it (8.7):
+  * `Input`, `StopRequested`, `JobsStopRequested`, `Granted`, `ScopeRecorded` and `ModelChanged` can occur at any place.
+  * `Releasing` occurs only with no open turn, and each `Released` comes after it (8.7):
   * {{{
   * Release ::= Releasing JobsStopRequested? Released* Ended
   * }}}
@@ -184,6 +184,11 @@ enum Entry derives Schema, CanEqual:
   case TurnEnded(outcome: TurnOutcome)
 
   case Ended(outcome: SessionOutcome, reason: String)
+
+  /** A person changed the model of the session, for example its reasoning effort (CLI_SCREEN.md, 14.4). The fold puts
+    * it in the configuration, so the next call to the policy and a reopen use it.
+    */
+  case ModelChanged(model: ModelChoice)
 
 /** One line of the journal: an entry with its `seq` and its meta (4.1). */
 final case class Logged(seq: Long, meta: Meta, entry: Entry) derives Schema, CanEqual

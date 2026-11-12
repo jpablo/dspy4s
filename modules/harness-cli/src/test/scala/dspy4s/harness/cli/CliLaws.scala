@@ -439,7 +439,7 @@ class CliLaws extends munit.FunSuite:
       assert(!console.printed.asScala.exists(_.contains("> Ok")), "a rich console gets no line of entryText")
       val (live, footer) = Option(console.watched.get).getOrElse(fail("no watch"))
       assertEquals(live().rows, Vector.empty)
-      assert(footer().isDefined)
+      assert(footer(120).isDefined)
       assert(Option(console.details.get).isDefined, "no action for Ctrl-O")
     finally console.release()
   }
@@ -537,12 +537,12 @@ private final class TurnHandle(open: Boolean = false, refuse: Boolean = false) e
   * its read waits until `release`, so the loop ends when the feed ends.
   */
 private final class RecordingConsole(lines: Vector[String] = Vector.empty) extends ClientConsole:
-  val rows: ConcurrentLinkedQueue[Row]                          = ConcurrentLinkedQueue()
-  val printed: ConcurrentLinkedQueue[String]                    = ConcurrentLinkedQueue()
-  val watched: AtomicReference[(() => Live, () => Option[Row])] = AtomicReference()
-  val details: AtomicReference[() => Unit]                      = AtomicReference()
-  private val left                                              = ConcurrentLinkedQueue[String](lines.asJava)
-  private val gate                                              = CountDownLatch(1)
+  val rows: ConcurrentLinkedQueue[Row]                           = ConcurrentLinkedQueue()
+  val printed: ConcurrentLinkedQueue[String]                     = ConcurrentLinkedQueue()
+  val watched: AtomicReference[(() => Live, Int => Option[Row])] = AtomicReference()
+  val details: AtomicReference[() => Unit]                       = AtomicReference()
+  private val left                                               = ConcurrentLinkedQueue[String](lines.asJava)
+  private val gate                                               = CountDownLatch(1)
 
   override def rich: Boolean = true
 
@@ -556,7 +556,7 @@ private final class RecordingConsole(lines: Vector[String] = Vector.empty) exten
 
   override def printRows(more: Vector[Row]): Unit = more.foreach(rows.add)
 
-  override def watch(live: () => Live, footer: () => Option[Row]): Unit = watched.set((live, footer))
+  override def watch(live: () => Live, footer: Int => Option[Row]): Unit = watched.set((live, footer))
 
   override def onDetail(action: () => Unit): Unit = details.set(action)
 

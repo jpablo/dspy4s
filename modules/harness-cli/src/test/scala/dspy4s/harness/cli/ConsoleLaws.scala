@@ -208,7 +208,7 @@ class ConsoleLaws extends munit.FunSuite:
       out.write(before.getBytes(UTF_8))
       val console = EditorConsole.on(sized(writer, out), history, identity)
       val got     = AtomicReference[Typed]()
-      console.watch(() => live.get, footer)
+      console.watch(() => live.get, _ => footer())
       val reader = Thread.ofPlatform().daemon(true).start(() => got.set(console.read()))
       try body(console, writer, out, got)
       finally
@@ -450,7 +450,7 @@ class ConsoleLaws extends munit.FunSuite:
     }
   }
 
-  test("CLI editor: Tab completes the commands, the lifetimes after /allow and the views after /reasoning") {
+  test("CLI editor: Tab completes the commands, the lifetimes after /allow, the views and the levels of the effort") {
     val reader                              = org.jline.reader.LineReaderBuilder.builder().terminal(terminal("")).build()
     def complete(line: String): Set[String] =
       val parsed =
@@ -463,6 +463,10 @@ class ConsoleLaws extends munit.FunSuite:
     assert(complete("/allow se").contains("session"), complete("/allow se").toString)
     assert(complete("/allow 12 tu").contains("turn"), complete("/allow 12 tu").toString)
     assert(complete("/reasoning l").contains("line"), complete("/reasoning l").toString)
+    // The levels of the effort come from the facts of the model (CLI_SCREEN.md, 14.4).
+    assert(complete("/ef").contains("/effort"), complete("/ef").toString)
+    assert(complete("/effort h").contains("high"), complete("/effort h").toString)
+    assert(complete("/effort n").contains("none"), complete("/effort n").toString)
   }
 
 object ConsoleLaws:

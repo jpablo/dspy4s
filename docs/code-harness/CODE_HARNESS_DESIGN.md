@@ -115,6 +115,7 @@ enum Entry derives Schema:
   case ScopeRecorded(head: String, clean: Boolean)             // the git head of the scope, at the end of each turn
   case TurnEnded(outcome: TurnOutcome)
   case Ended(outcome: SessionOutcome, reason: String)
+  case ModelChanged(model: ModelChoice)                        // a person changed the model (CLI_SCREEN.md, 14)
 
 final case class EffectId(cell: Long, n: Int)                  // `cell` is the `seq` of the `Acted` entry
 
@@ -131,8 +132,8 @@ enum TurnOutcome derives Schema:
   case Failed(error: String)
 ```
 
-The entries of one turn form a small language. `Input`, `StopRequested`, `JobsStopRequested`, `Granted` and
-`ScopeRecorded` can occur at any place:
+The entries of one turn form a small language. `Input`, `StopRequested`, `JobsStopRequested`, `Granted`,
+`ScopeRecorded` and `ModelChanged` can occur at any place:
 
 ```text
 Turn  ::= TurnStarted Step* TurnEnded
@@ -303,6 +304,7 @@ enum Command:
   case StopJobs(which: JobSelector, reason: String)
   case Grant(request: RequestId, rule: GuardRule, lifetime: GrantLifetime)
   case Close(outcome: SessionOutcome, reason: String)
+  case ChangeModel(model: ModelChoice)
 
 def decide(command: Command, s: SessionState): Either[Rejection, Vector[Entry]]
 ```
@@ -322,6 +324,7 @@ def decide(command: Command, s: SessionState): Either[Rejection, Vector[Entry]]
 | `Grant` that answers a pending call | `Granted` and an `Input` from the harness. With no open turn, also `TurnStarted`. |
 | `Grant` with no pending call | `Granted`. It starts no turn. |
 | `Close` | `Ended`, only with no open turn |
+| `ChangeModel` | `ModelChanged`, also in a turn. With the model of the session, nothing. A session that has ended gives the rejection `SessionClosed`. The fold puts the model in the configuration, so the next call to the policy and a reopen use it (CLI_SCREEN.md, 14.4). |
 
 The rules for `Commit`:
 

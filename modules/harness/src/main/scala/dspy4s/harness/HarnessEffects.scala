@@ -1,9 +1,12 @@
 package dspy4s.harness
 
-import dspy4s.core.contracts.{DspyError, ParseError, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, DynamicValues, LmUsage, ParseError, RuntimeContext}
+import dspy4s.core.runtime.{UsageScope, UsageTracker}
 import dspy4s.harness.kernel.{CellOutcome, Command, Position, Source}
 import dspy4s.harness.repl.{CellRun, ScalaRepl, lostNames, topLevelNames}
 import dspy4s.programs.strategies.Predict
+import zio.blocks.schema.DynamicValue
+import zio.blocks.schema.json.Json
 
 /** The effects of a turn of a harness (CODE_HARNESS_DESIGN.md, 4.6 and 9).
   *
@@ -21,7 +24,9 @@ import dspy4s.programs.strategies.Predict
   *     cell reads it (7.1). After the projection, `progress` gets its size and the budget, so a client shows them
   *     (10.6). With `drafts`, the call streams: each model call of the policy writes its draft there while it runs,
   *     and the draft goes away at the end of the call (CLI_SCREEN.md, 13). The stream is a preview, so the step is the
-  *     same as with no `drafts`.
+  *     same as with no `drafts`. Each call has the options of the model of the session in the state of the journal, so
+  *     a `ModelChanged` of this activation applies to the next call (CLI_SCREEN.md, 14.4). At the end of the call,
+  *     `progress` gets the prompt and completion tokens of its last model call, when the reply had a usage.
   *   - `runCell` starts the calls of the cell in `recorder`, takes the snapshot of the store, and runs the code in the
   *     current REPL. The writes of the store go into the result only when the cell completes. The output in the journal
   *     is `CellRun.text`, the text that the MCP server also shows (6): the hints of a compile error, and a note of a
@@ -76,14 +81,20 @@ final class HarnessEffects(
       val input   = PolicyInput(task, reference, view.status, view.observation, view.history)
       val number  = drafts.map(d => d -> d.begin())
       val context = number.fold(policyContext)((d, n) => PolicyStream.around(policyContext, d, n))
-      val call    = () => policy(input)(using context).left.map(HarnessEffects.failure)
-      try budget().spend().flatMap(_ => runner.run(call)).map { step =>
+      // The model of the session now: a `ModelChanged` of this activation changes the next call (CLI_SCREEN.md, 14).
+      val options = HarnessEffects.optionsOf(journal.state.config.model.options)
+      val tokens  = UsageTracker()
+      val call    = () => UsageScope.track(tokens)(policy(input, options)(using context)).left.map(HarnessEffects.failure)
+      try
+        budget().spend().flatMap(_ => runner.run(call)).map { step =>
           val code =
             step.output.code.map(HarnessEffects.unfenced).filterNot(c => HarnessEffects.NoCode.contains(c.strip))
           // The code of the last step of a chat does not run (4.3).
           PolicyReply(step.output.reasoning, step.output.text, if mustAnswer then None else code)
         }
-      finally number.foreach((d, n) => d.end(n))
+      finally
+        number.foreach((d, n) => d.end(n))
+        HarnessEffects.lastUsage(tokens).foreach(u => progress.used(u.promptTokens, u.completionTokens))
     }
 
   def runCell(cell: Long, code: String): CellResult =
@@ -127,6 +138,18 @@ final class HarnessEffects(
     HarnessEffects.restartNote(reason, earlier ++ defined, run.outcome)
 
 object HarnessEffects:
+
+  /** The option bag of the provider of `options`, the options of the model of a session: the options of each request of
+    * a call to the policy, for example `reasoning_effort` (CLI_SCREEN.md, 14.4).
+    */
+  private[harness] def optionsOf(options: Map[String, Json]): DynamicValue.Record =
+    DynamicValues.recordFromEntries(options.toVector.sortBy(_._1).map((key, value) => key -> value.toDynamicValue))
+
+  /** The usage of the last model call of `tokens`, or none. A step makes a second model call only for the fallback
+    * adapter, and the prompt of the last call is the context of the step.
+    */
+  private def lastUsage(tokens: UsageTracker): Option[LmUsage] =
+    tokens.usageData.values.flatMap(_.lastOption).lastOption
 
   /** The texts of a code field that hold no code. The chat adapter keeps the text `null`, as DSPy does (9). */
   private val NoCode: Set[String] = Set("", "null", "None")

@@ -1,7 +1,7 @@
 package dspy4s.harness.cli
 
 import dspy4s.harness.guest.JobStatus
-import dspy4s.harness.host.{CatalogRow, jobName, jobStatusWords}
+import dspy4s.harness.host.{CatalogRow, ContextUse, jobName, jobStatusWords}
 import dspy4s.harness.kernel.{EffectId, EffectResult, Entry, GuardRule, Logged, Position, SessionId, SessionState}
 import dspy4s.harness.sandbox.SandboxedShell
 
@@ -67,10 +67,17 @@ def pendingCalls(current: SessionState, log: Vector[Logged]): Vector[(Long, Guar
       rule -> seq
   }.groupMapReduce(_._1)(_._2)(_ max _).toVector.map((rule, seq) => seq -> rule).sortBy(_._1)
 
-/** The text of `/status`: the folder of the session, where the turn stands, the pending calls `calls` with their
-  * numbers for `/allow N`, and how many jobs run.
+/** The text of `/status`: the folder of the session, where the turn stands, the reasoning effort, the context of the
+  * model (`context`, with the window of `facts`), the pending calls `calls` with their numbers for `/allow N`, and how
+  * many jobs run. A part with no value does not show.
   */
-def statusText(current: SessionState, status: Map[EffectId, JobStatus], calls: Vector[(Long, GuardRule)]): String =
+def statusText(
+    current: SessionState,
+    status : Map[EffectId, JobStatus],
+    calls  : Vector[(Long, GuardRule)],
+    context: Option[ContextUse] = None,
+    facts  : ModelFacts         = ModelFacts.unknown
+): String =
   val steps = current.config.steps
   val turn  = current.position match
     case Position.NoTurn          => "No turn is open."
@@ -88,9 +95,11 @@ def statusText(current: SessionState, status: Map[EffectId, JobStatus], calls: V
     val running = current.jobs.keys.count(job => status.get(job).contains(JobStatus.Running))
     s"$running of ${current.jobs.size} jobs run. /jobs lists them."
   }
+  val effort = Effort.of(current.config.model).map(level => s"The effort: $level.")
+  val tokens = context.map(use => s"The context: ${Screen.contextWords(use, facts.window, " tokens")}.")
   val closed = Option.when(current.closed)("The session is closed.")
   val folder = s"The folder: ${SandboxedShell.pathOf(current.config.scope)}."
-  (Vector(folder, turn) ++ stop ++ pending ++ jobs ++ closed).mkString("\n")
+  (Vector(folder, turn) ++ effort ++ tokens ++ stop ++ pending ++ jobs ++ closed).mkString("\n")
 
 /** The text of `--list` (10.2): the sessions of `rows`, the newest first. Each session has one line with its id, its
   * status in words (`SessionStatus.words`, as the card of the controller), the time of its last entry in `zone` and its

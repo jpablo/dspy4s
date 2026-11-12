@@ -622,8 +622,8 @@ new = "number += 0"
 name = "Mutant: the draft stays after the call to the policy"
 [[mutant.edit]]
 file = "HarnessEffects.scala"
-old = "finally number.foreach((d, n) => d.end(n))"
-new = "finally number.foreach((_, _) => ())"
+old = "number.foreach((d, n) => d.end(n))"
+new = "number.foreach((_, _) => ())"
 
 [[mutant]]
 name = "Mutant: a last line of a draft that can still become a marker shows"
@@ -638,3 +638,26 @@ name = "Mutant: the draft shows the code of a scala fence"
 file = "PolicyAdapter.scala"
 old = "if language == CellLanguage then (parts :+ Vector.empty, Some(language))"
 new = "if false then (parts :+ Vector.empty, Some(language))"
+
+# ── The model of a session (CLI_SCREEN.md, 14.4) ──
+
+[[mutant]]
+name = "Mutant: the call to the policy sends no options of the model"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "val options = HarnessEffects.optionsOf(journal.state.config.model.options)"
+new = "val options = HarnessEffects.optionsOf(Map.empty)"
+
+[[mutant]]
+name = "Mutant: the progress gets no tokens of the call to the policy"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "HarnessEffects.lastUsage(tokens).foreach(u => progress.used(u.promptTokens, u.completionTokens))"
+new = "HarnessEffects.lastUsage(tokens).foreach(u => progress.used(u.completionTokens, u.promptTokens))"
+
+[[mutant]]
+name = "Mutant: the mask skips the options of a ModelChanged"
+[[mutant.edit]]
+file = "Secrets.scala"
+old = "Entry.ModelChanged(model.copy(options = fields(model.options)))"
+new = "Entry.ModelChanged(model)"

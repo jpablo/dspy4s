@@ -61,9 +61,10 @@ final class ZoomSource:
   def setReader(read: String => Either[String, String]): Unit = reader = read
 
 /** What the memory of a turn tells a client (CODE_HARNESS_DESIGN.md, 7.1 and 10.6): the summaries of the memory tree
-  * while an update builds them, and the size of each projection for a call to the policy. A host keeps the last values
-  * for a client that polls them. Each method must return at once. A report of the summaries can come from each thread
-  * of the leaf calls, but the reports of one update come in order. The default does nothing.
+  * while an update builds them, the size of each projection for a call to the policy, and the tokens of that call
+  * (CLI_SCREEN.md, 14.4). A host keeps the last values for a client that polls them. Each method must return at once. A
+  * report of the summaries can come from each thread of the leaf calls, but the reports of one update come in order.
+  * The default does nothing.
   */
 trait MemoryProgress:
 
@@ -79,6 +80,13 @@ trait MemoryProgress:
   /** The size of the projection of a call to the policy (`Projection.size`), and the budget of the projection. */
   def projected(chars: Int, budget: Int): Unit =
     val _ = (chars, budget)
+
+  /** The prompt and completion tokens of the last model call of a call to the policy, from the usage of its reply
+    * (CLI_SCREEN.md, 14.4). A client shows the prompt tokens as the context of the model. A reply with no usage gives
+    * no report.
+    */
+  def used(prompt: Long, completion: Long): Unit =
+    val _ = (prompt, completion)
 
 object MemoryProgress:
 

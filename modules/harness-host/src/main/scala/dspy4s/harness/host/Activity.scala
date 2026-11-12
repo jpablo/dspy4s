@@ -17,3 +17,9 @@ enum Activity derives CanEqual:
 
 /** The size of the last view of the memory that a call to the policy got, and its budget, in characters (7.1). */
 final case class MemoryUse(chars: Int, budget: Int) derives CanEqual
+
+/** The prompt and completion tokens of the last model call of the last call to the policy, from the usage of its reply
+  * (CLI_SCREEN.md, 14.4). A client shows the prompt tokens as the part of the context of the model that the session
+  * uses.
+  */
+final case class ContextUse(prompt: Long, completion: Long) derives CanEqual

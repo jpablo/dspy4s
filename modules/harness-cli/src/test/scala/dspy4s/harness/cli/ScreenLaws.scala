@@ -329,7 +329,7 @@ class ScreenLaws extends munit.FunSuite:
     )
     assertEquals(
       Screen.footer(work, Some(MemoryUse(12_300, 48_000)), 1, "/home/a", Glyphs.unicode).plain,
-      "  ~/code/shop · work mode · example-model · memory 12k of 48k · 1 job · 1 call waits"
+      "  ~/code/shop · work mode · example-model · memory 12k of 48k chars · 1 job · 1 call waits"
     )
     val plain = state.copy(config = state.config.copy(mode = Mode.readOnly, model = ModelChoice("m", Map.empty)))
     assertEquals(

@@ -118,6 +118,9 @@ final class WorkRuntime(
   /** The size of the last projection of the activation of `session` and its budget (`MemoryMeter.use`), or none. */
   override def memoryUse(session: SessionId): Option[MemoryUse] = Option(meters.get(session)).flatMap(_.use)
 
+  /** The tokens of the last call to the policy of the activation of `session` (`MemoryMeter.context`), or none. */
+  override def contextUse(session: SessionId): Option[ContextUse] = Option(meters.get(session)).flatMap(_.context)
+
   /** The draft of the call to the policy of the activation of `session` that runs now (`Drafts.current`), or none. */
   override def draft(session: SessionId): Option[Draft] = Option(drafts.get(session)).flatMap(_.current)
 
@@ -378,8 +381,9 @@ private final class TurnBudget(journal: Journal, limit: Int):
   * write them as a `MemoryProgress`, and a client reads them with no lock, also while a turn runs.
   */
 private final class MemoryMeter extends MemoryProgress:
-  @volatile private var running: Option[Activity] = None
-  @volatile private var last: Option[MemoryUse]   = None
+  @volatile private var running: Option[Activity]  = None
+  @volatile private var last: Option[MemoryUse]    = None
+  @volatile private var tokens: Option[ContextUse] = None
 
   /** The summaries of the memory tree while an update builds them, or none. */
   def building: Option[Activity] = running
@@ -387,11 +391,16 @@ private final class MemoryMeter extends MemoryProgress:
   /** The size of the last projection and its budget, or none before the first call to the policy. */
   def use: Option[MemoryUse] = last
 
+  /** The tokens of the last call to the policy, or none before the first call with a usage (CLI_SCREEN.md, 14.4). */
+  def context: Option[ContextUse] = tokens
+
   override def summaries(done: Int, total: Int): Unit = running = Some(Activity.MemorySummaries(done, total))
 
   override def summariesEnded(): Unit = running = None
 
   override def projected(chars: Int, budget: Int): Unit = last = Some(MemoryUse(chars, budget))
+
+  override def used(prompt: Long, completion: Long): Unit = tokens = Some(ContextUse(prompt, completion))
 
 object WorkRuntime:
 
@@ -492,9 +501,15 @@ object WorkRuntime:
 
   /** The configuration of a work session in the folder `scope` (8.1): a chat turn with `limits.steps` steps, the owner
     * `User`, `workMode` as the mode and the ceiling, the memory tree, `defaultGuard(workMode)`, the preamble of a
-    * session with no input fields, and the model `model`.
+    * session with no input fields, and the model `model` with the option bag `options` of its provider, for example the
+    * reasoning effort (CLI_SCREEN.md, 14.4).
     */
-  def config(scope: Path, model: String, limits: HarnessLimits): SessionConfig =
+  def config(
+      scope  : Path,
+      model  : String,
+      limits : HarnessLimits,
+      options: Map[String, Json] = Map.empty
+  ): SessionConfig =
     SessionConfig(
       kind = TurnKind.Chat,
       steps = limits.steps,
@@ -505,7 +520,7 @@ object WorkRuntime:
       owner = Owner.User,
       guard = defaultGuard(workMode),
       preamble = preamble(summon[Data[String]].shape).getOrElse(""),
-      model = ModelChoice(model, Map.empty),
+      model = ModelChoice(model, options),
       goal = None,
       env = Set.empty
     )

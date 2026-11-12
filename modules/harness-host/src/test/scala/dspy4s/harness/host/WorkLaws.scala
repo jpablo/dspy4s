@@ -29,6 +29,16 @@ class WorkLaws extends munit.FunSuite:
 
   private val limits = HarnessLimits(steps = 3)
 
+  /** The options of a model with the reasoning effort `high` (CLI_SCREEN.md, 14.4). */
+  private val high: Map[String, Json] = Map("reasoning_effort" -> Json.String("high"))
+
+  /** The text of the option `key` of `request`, or none. */
+  private def optionText(request: dspy4s.lm.contracts.LmRequest, key: String): Option[String] =
+    dspy4s.core.contracts.DynamicValues.recordGet(
+      request.options,
+      key
+    ).flatMap(dspy4s.core.contracts.DynamicValues.asString)
+
   /** An `Ask` rule for each call of `op`. */
   private def ask(op: String): Guard = Guard(Vector(VerdictRule(GuardRule(op, ArgMatch.AnyArgs), Verdict.Ask)))
 
@@ -484,6 +494,69 @@ class WorkLaws extends munit.FunSuite:
           assert(eventually(60)(outcomes(handle).size == 3), entries(handle).toString)
         }
         assert(!summaryRequests(again).exists(r => r.contains("FAKE-OUT-ONE") || r.contains("FAKE-OUT-TWO")))
+      }
+    finally place.close()
+  }
+
+  // ── The model of the session (CLI_SCREEN.md, 14.4) ──
+
+  test("Work: config and the config of the controller put the options of the model in the configuration") {
+    assertEquals(WorkRuntime.config(Path.of("/tmp/fake-scope"), "fake-model", limits, high).model.options, high)
+    assertEquals(Controller.config(Path.of("/tmp/fake-home"), "fake-model", limits, high).model.options, high)
+    assertEquals(WorkRuntime.config(Path.of("/tmp/fake-scope"), "fake-model", limits).model.options, Map.empty)
+  }
+
+  test("Work: contextUse gives the tokens of the last call to the policy, and only that call gets the effort") {
+    // The footer of a client shows the context of the model (CLI_SCREEN.md, 14.4). A long message makes a summary.
+    val long  = "FAKE-LONG-MESSAGE " + "y" * 700
+    val model = RequestLm(
+      text => if isSummary(text) then Right(summaryReply(text)) else Right(policy("FAKE-DONE", None)),
+      usage = text =>
+        if isSummary(text) then
+          Some(dspy4s.core.contracts.LmUsage(totalTokens = 100, promptTokens = 99, completionTokens = 1))
+        else Some(dspy4s.core.contracts.LmUsage(totalTokens = 4_342, promptTokens = 4_321, completionTokens = 21))
+    )
+    val place = Place()
+    try withRoot { root =>
+        val env = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
+        withHost(root, Models.withModel(model)(WorkRuntime.forWork(env, limits))) { host =>
+          val handle = opened(host, id(1), Some(WorkRuntime.config(place.root, "fake-model", limits, high)))
+          assertEquals(handle.contextUse, None)
+          assertEquals(handle.send(message("m1", long)), Right(()))
+          assert(eventually(60)(outcomes(handle) == Vector(TurnOutcome.Replied("FAKE-DONE"))), entries(handle).toString)
+          assertEquals(handle.contextUse, Some(ContextUse(4_321L, 21L)))
+        }
+        val requests  = model.requests.asScala.toVector
+        val summaries = requests.filter(r => isSummary(r.messages.flatMap(_.text).mkString))
+        assert(summaries.nonEmpty, "the long message made no summary")
+        assert(summaries.forall(optionText(_, "reasoning_effort").isEmpty), summaries.map(_.options).toString)
+        val policies = requests.filterNot(summaries.contains)
+        assertEquals(policies.map(optionText(_, "reasoning_effort")), Vector(Some("high")))
+      }
+    finally place.close()
+  }
+
+  test("Work: a reopen keeps the effort of a ChangeModel, and its next call to the policy sends it") {
+    val first = sessionModel(policy("FAKE-ONE", None))
+    val again = sessionModel(policy("FAKE-TWO", None))
+    val low   = Map("reasoning_effort" -> Json.String("low"))
+    val place = Place()
+    try withRoot { root =>
+        val env = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
+        withHost(root, Models.withModel(first)(WorkRuntime.forWork(env, limits))) { host =>
+          val handle = opened(host, id(1), Some(WorkRuntime.config(place.root, "fake-model", limits, low)))
+          assertEquals(handle.send(message("m1")), Right(()))
+          assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+          assert(handle.run(Command.ChangeModel(ModelChoice("fake-model", high))).isRight)
+        }
+        withHost(root, Models.withModel(again)(WorkRuntime.forWork(env, limits))) { host =>
+          val handle = opened(host, id(1), None)
+          assertEquals(handle.state.config.model.options, high)
+          assertEquals(handle.send(message("m2")), Right(()))
+          assert(eventually(60)(outcomes(handle).size == 2), entries(handle).toString)
+        }
+        val sent = again.requests.asScala.toVector.filterNot(r => isSummary(r.messages.flatMap(_.text).mkString))
+        assertEquals(sent.map(optionText(_, "reasoning_effort")), Vector(Some("high")))
       }
     finally place.close()
   }
