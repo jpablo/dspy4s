@@ -352,7 +352,8 @@ with the open model of 27B parameters, native reasoning, and `DSPY_TRACE`:
 
 ## 14. The effort and the context in the footer
 
-Status: a plan (2026-11-12), with no code yet. In a live session, the footer was this line:
+Status: a plan (2026-11-12), with its choices made (14.3) and no code yet. In a live session, the footer was this
+line:
 
 ```text
   ~/code/api · work mode · example-model · memory 64 of 40k
@@ -398,18 +399,22 @@ budget of 40,000 characters is a small part of it.
 
 ### 14.3 The choices
 
-The plan takes the first option of each choice. The person did not decide them yet.
+These choices were made with the user on 2026-11-12. Each item gives the option that was taken, then the option that
+was not taken.
 
-1. **The place of the effort.** (a) A new entry of the journal: a reopen keeps the effort, and the journal tells which
-   effort each step used, also for an optimizer. (b) A value of the host only: the change is smaller, but a reopen
-   loses the effort, and the journal does not record it.
-2. **The name of the command.** (a) `/effort`, because `/reasoning` sets the view. (b) `/reasoning effort LEVEL`.
-3. **A level `off`.** (a) Not in the first version. The endpoint gives no `off` for the model, and a null effort
-   changes the prompt: the reasoning becomes a text field of the output. (b) `off` sends a null effort.
-4. **The token counts in the journal.** (a) A later step. 4.2 of the design names a fold of the usage totals, and no
-   code has it yet. (b) In this change, with the `Acted` entry of each step.
-5. **A narrow terminal.** (a) When the footer is wider than the terminal, the memory part goes first. (b) The footer
-   cuts the line at the width of the terminal.
+1. **The place of the effort: a new entry of the journal.** A reopen keeps the effort, and the journal tells which
+   effort each step used, also for an optimizer. Not taken: a value of the host only. That change is smaller, but a
+   reopen loses the effort, and the journal does not record it.
+2. **The name of the command: `/effort`.** `/reasoning` already sets the view. Not taken: `/reasoning effort LEVEL`.
+3. **The level `none` turns the reasoning off.** This choice changed after the probe (14.6). `/effort none` sends the
+   text `none`, and the endpoint takes it. `NativeReasoning` treats only a null as no effort, so the prompt stays the
+   same, and the reasoning of a step is empty. The list of the endpoint does not give `none`, so the client adds it
+   to the levels of each model. Not taken: no level to turn the reasoning off, as in the first plan. Also not taken: a
+   null effort, which changes the prompt, because the reasoning becomes a text field of the output.
+4. **The token counts go into the journal in a later step.** 4.2 of the design names a fold of the usage totals, and
+   no code has it yet. Not taken: the counts in the `Acted` entry of each step, in this change.
+5. **A narrow terminal: the memory part goes first.** When the footer is wider than the terminal, it shows no memory
+   part. Not taken: the footer cuts the line at the width of the terminal.
 
 ### 14.4 How it works
 
@@ -433,6 +438,7 @@ The plan takes the first option of each choice. The person did not decide them y
      `reasoning_effort_levels`. The new variable `DSPY_CONTEXT_WINDOW` wins over the endpoint.
    - When the request fails, the footer has no window and the client takes the levels `low`, `medium` and `high`.
      The start does not wait for the request.
+   - The client adds the level `none` to the levels of each model (14.3, choice 3).
    - The key goes to the same base URL as the calls to the model. The doc of `Cli` must say so.
 4. **The tokens of the last call (host).**
    - A callback in the context of each call to the policy keeps the `usage` of its `LmEndEvent`, as
@@ -458,6 +464,8 @@ The plan takes the first option of each choice. The person did not decide them y
    - `/effort` shows the effort and the levels of the model. `/effort high` sends `ChangeModel` and prints
      `The next step uses the effort high.` A level that is not in the list gives an error with the list. Tab completes
      the levels, as it completes the views after `/reasoning`.
+   - `/effort none` turns the reasoning off for the next steps, and the footer shows `effort none`. A step with this
+     effort has no reasoning, so the screen shows no reasoning for it.
    - `/status` also gives the effort and the context. The plain lines and the script mode take `/effort` too. Only
      the line editor has the footer.
 
@@ -465,17 +473,55 @@ The plan takes the first option of each choice. The person did not decide them y
 
 1. A probe, with no code: two small requests with `low` and `high` to the endpoint, to compare their
    `reasoning_tokens`. This shows if the endpoint uses the effort. A second check: a streamed call gives `usage` at
-   its end.
+   its end. Done on 2026-11-12: 14.6 has the results.
 2. The laws come first in each module, and each one fails before its change:
    - kernel: `ChangeModel` gives `ModelChanged` in an open session, also during a turn, and a closed session refuses
      it; the fold sets the model; the entry goes through its `Schema` with no change;
    - harness: a fake model gets the effort of the configuration, and after a `ModelChanged` the next call to the policy
-     gets the new effort; a summary does not get it;
+     gets the new effort; a summary does not get it; with the effort `none`, the request has
+     `"reasoning_effort": "none"`, the prompt has no reasoning field, and a reply with no reasoning gives a step;
    - host: the meter gives the prompt tokens of the last call to the policy, and a summary or a query does not change
      them;
    - CLI: the facts of a `GET /models` text, with `context_window`, with `max_model_len`, with an owner prefix and
      with no entry; the parts of the footer, also with no window and with no effort; the counts `18k`, `1M` and
-     `1.6M`; `/effort` with no level, with a level of the list and with a level that is not in it.
+     `1.6M`; `/effort` with no level, with a level of the list, with `none` and with a level that is not in it.
 3. The code of each module, in the order kernel, harness, host, CLI.
 4. A mutant for the rule of `ChangeModel` and for the options of `callPolicy`, the nodes of the blueprint, and 8.2.
 5. A live run in a pseudo-terminal: `/effort high`, a step, and the footer before and after it.
+
+### 14.6 The probe of 2026-11-12
+
+The probe sent small chat requests to the private endpoint, with no harness. The question was a count of
+permutations, which takes about 2,000 tokens of reasoning. Each number is the `reasoning_tokens` of one request to the
+model of the live session.
+
+| request                                  | reasoning tokens      |
+| ---------------------------------------- | --------------------- |
+| no effort                                | 1,550                 |
+| `"reasoning_effort": "low"`              | 2,080, 2,156, 2,300   |
+| `"reasoning_effort": "high"`             | 2,158, 1,908, 2,496   |
+| `"reasoning": {"effort": "low"}`         | 1,624, 1,765, 1,747   |
+| `"reasoning": {"effort": "high"}`        | 9,557, 2,139, 2,354   |
+| `"none"` in each of the two forms        | 0, 0                  |
+
+The requests with 2,300 and 2,496 tokens used the id with the owner prefix. The results:
+
+- The endpoint reads `reasoning_effort`. A level that is not `none`, `minimal`, `low`, `medium`, `high` or `xhigh`
+  gives the status 400. `medium` gives no error for the model of the session, but its list has only `low` and `high`.
+- For the model of the session, `none` turns the reasoning off. `low` and `high` gave no clear difference: one
+  request with `high` used 9,557 tokens, and the other five were in the range of `low`.
+- A second open model, of 20B parameters, used 499 tokens with `low`, and the limit of 16,000 tokens with `high`. So the
+  endpoint gives the effort to a model whose template uses it.
+- That second model gives `reasoning_tokens` 0 also when it reasons. So the context part uses only `prompt_tokens`.
+- A stream with `include_usage` gives the usage in its last chunk.
+- The first stream waited 266 s for a reply of 64 tokens, and the next one took 0.5 s. The probe does not show the
+  cause.
+
+What this changes in the plan:
+
+- The requests keep the key `reasoning_effort`. The form `reasoning` gave no clearer difference.
+- For the model of the session, `/effort high` can give the same reasoning as `low`. The footer shows the level that
+  the requests send, and the help of `/effort` does not say that a higher level gives a longer reasoning.
+- Choice 3 has a new fact. The endpoint takes the level `none`, and `NativeReasoning` treats only a null as no effort.
+  So the text `none` keeps the prompt as it is, and the model gives no reasoning. The list of the model does not
+  give `none`. On 2026-11-12, the user took `none` for the first version (14.3, choice 3).
