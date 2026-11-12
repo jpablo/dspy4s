@@ -6,14 +6,13 @@ import dspy4s.harness.*
 import dspy4s.harness.guest.{Access, Data, Mode, Scope, StrategyName, preamble}
 import dspy4s.harness.kernel.*
 import dspy4s.harness.repl.{Bindings, ScalaRepl}
-import dspy4s.harness.sandbox.{Backend, HostList, Layout, Profile, Profiles, SandboxedShell, SecretIndex}
+import dspy4s.harness.sandbox.{Backend, HostList, Layout, Profile, Profiles, SandboxedShell}
 import dspy4s.programs.strategies.Predict
 import dspy4s.signatures.Signature
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.json.Json
 
 import java.nio.file.{Files as JFiles, Path}
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.{CancellationException, ConcurrentHashMap, ExecutionException, Executors, Future}
 import scala.util.Try
 
@@ -59,10 +58,8 @@ object WorkEnv:
   *     turns (7).
   *   - The handlers are the handlers of the mode through `recorded`, and the recorder calls `guarded` for each call
   *     (5.5). `exec` and the jobs run in the sandbox, in the scope of the session, through `JobShell`.
-  *   - When the session opens, a thread of its own walks the scope for secret files (`opened`, `SandboxedShell.warm`).
-  *     The index of that walk belongs to the open session, as the job table does, and each activation gives it to its
-  *     shell. So the first `exec` waits only for the rest of the walk, also when the first message comes soon after the
-  *     open. An activation of a session that no host opened walks the scope itself when it starts.
+  *   - Opening a session and starting a command do not scan the scope for secret files. Commands use the fixed sandbox
+  *     profile of the session, so the first command does not wait for a directory walk.
   *   - `llmQuery` goes to the `subQuery` leaf. A work session of phase 7 has no `Children^`, so no `rlm`.
   *   - The REPL lives as long as the activation, so a value of a turn stays for the next turns. A new activation has a
   *     new REPL, and the store comes back from the journal (11, scenario 3). The window gives the first step after a
@@ -93,27 +90,15 @@ final class WorkRuntime(
 
   private val context = summon[RuntimeContext]
 
-  /** The index of the secret files of each open session with a shell (`opened`). */
-  private val indexes = ConcurrentHashMap[SessionId, SecretIndex]()
-
-  /** The index of the secret files of the open session `session`, which its walk at the open fills and each activation
-    * of the session uses, or none when the session is not open or its mode has no shell. Only the laws use it.
-    */
-  private[host] def indexOf(session: SessionId): Option[SecretIndex] = Option(indexes.get(session))
-
   /** The meter of the memory of the activation of each open session (`activate`). */
   private val meters = ConcurrentHashMap[SessionId, MemoryMeter]()
 
   /** The drafts of the calls to the policy of the activation of each open session (`activate`, CLI_SCREEN.md, 13). */
   private val drafts = ConcurrentHashMap[SessionId, Drafts]()
 
-  /** The summaries of the memory tree of `session` while they run (`MemoryMeter.building`), else the walk for secret
-    * files of its index while it runs (`SecretIndex.progress`), or none. The summaries come first, because the call to
-    * the policy waits for them.
-    */
+  /** The summaries of the memory tree of `session` while they run (`MemoryMeter.building`), else none. */
   override def activity(session: SessionId): Option[Activity] =
     Option(meters.get(session)).flatMap(_.building)
-      .orElse(indexOf(session).flatMap(_.progress).map(p => Activity.SecretScan(p.folders, p.total)))
 
   /** The size of the last projection of the activation of `session` and its budget (`MemoryMeter.use`), or none. */
   override def memoryUse(session: SessionId): Option[MemoryUse] = Option(meters.get(session)).flatMap(_.use)
@@ -123,33 +108,6 @@ final class WorkRuntime(
 
   /** The draft of the call to the policy of the activation of `session` that runs now (`Drafts.current`), or none. */
   override def draft(session: SessionId): Option[Draft] = Option(drafts.get(session)).flatMap(_.current)
-
-  /** In a mode with a shell, a new index of the secret files of `session`, and a walk of the scope that fills it on a
-    * daemon thread of its own (`SandboxedShell.warm`). Each activation of the open session uses this index. The walk
-    * has a shell and a layout for the walk only. The folders of the scope have the same paths in the profile of a later
-    * activation, so their listings stay usable. Only the temporary folder differs, and the first command lists it as
-    * one new folder. The close of the result stops the walk and removes the index. In a mode with no shell, the result
-    * does nothing.
-    */
-  override def opened(session: SessionId, config: SessionConfig): AutoCloseable =
-    if config.mode.shell != Access.Full then () => ()
-    else
-      val index   = SecretIndex(Layout.secretNames)
-      val layout  = Layout.forSession(env.home, env.journals)
-      var walk    = Option.empty[OpenWalk]
-      var started = false
-      try
-        val shell =
-          SandboxedShell(config, layout, env.hosts, env.backend, limits.execTimeout, secretIndex = Some(index))
-        val made = OpenWalk(session, index, shell, layout.temp, indexes)
-        walk = Some(made)
-        indexes.put(session, index): Unit
-        Thread.ofPlatform().name(s"harness-index-${session.value}").daemon(true).start(() => made.run()): Unit
-        started = true
-        made
-      finally
-        // A failed start keeps no index, no shell proxy and no temporary folder.
-        if !started then walk.fold(Try(WorkRuntime.remove(layout.temp)): Unit)(w => Try(w.close()): Unit)
 
   def activate(session: SessionId, config: SessionConfig, journal: Journal, jobs: JobTable): Activation =
     RuntimeEnvironment.withContext(context) {
@@ -161,11 +119,8 @@ final class WorkRuntime(
         val scope = Layout.real(Path.of(SandboxedShell.pathOf(config.scope)))
         val made  = Layout.forSession(env.home, env.journals)
         layout = Some(made)
-        val profile = Profiles.forMode(config.mode, scope, made, env.hosts)
-        // The index of the open session, with the listings of the walk at the open. A runtime that no host opened has
-        // none, and the shell then makes its own.
-        val shared   = indexOf(session)
-        val commands = SandboxedShell(config, made, env.hosts, env.backend, limits.execTimeout, secretIndex = shared)
+        val profile  = Profiles.forMode(config.mode, scope, made, env.hosts)
+        val commands = SandboxedShell(config, made, env.hosts, env.backend, limits.execTimeout)
         shell = Some(commands)
         val turns    = TurnBudget(journal, limits.modelCalls)
         val recorder = Recorder(journal, () => turns.closed, env.secrets.maskJson)
@@ -234,10 +189,6 @@ final class WorkRuntime(
           meters.remove(session, meter): Unit
           drafts.remove(session, written): Unit
         val activation = WorkActivation(effects, commands, calls, Vector(turns, summary), lines, made, context, forget)
-        // Only an activation with no index of an open session walks. The walk starts after each other step of the
-        // start, so a failed start has no walk. When the thread of the walk cannot start, the start fails, and the
-        // `finally` below closes the shell.
-        if config.mode.shell == Access.Full && shared.isEmpty then WorkRuntime.warm(commands, session)
         // The last step of the start, so a failed start keeps no meter. A later activation of the session puts its own.
         meters.put(session, meter): Unit
         drafts.put(session, written): Unit
@@ -287,37 +238,6 @@ private final class WorkActivation(
     lines.foreach(l => Try(l.close()): Unit)
     Try(shell.close()): Unit
     WorkRuntime.remove(layout.temp)
-
-/** The walk of the scope for secret files at the open of a work session (`WorkRuntime.opened`). `run` is the body of
-  * the thread of the walk, and `close` is the end of the open session. `shell` and the temporary folder `temp` are for
-  * the walk only. The thread and the close both close the shell and remove the folder, in each order.
-  */
-private final class OpenWalk(
-    session: SessionId,
-    index  : SecretIndex,
-    shell  : SandboxedShell,
-    temp   : Path,
-    indexes: ConcurrentHashMap[SessionId, SecretIndex]
-) extends AutoCloseable:
-
-  private val removed = AtomicBoolean(false)
-
-  /** Walks the scope once, and then closes the shell and removes the temporary folder. */
-  def run(): Unit =
-    try shell.warm()
-    finally end()
-
-  /** Stops a walk that still runs, and removes the index of the session. A later open of the session has a new index,
-    * so the close removes only this one.
-    */
-  def close(): Unit =
-    indexes.remove(session, index): Unit
-    end()
-
-  /** Closes the shell, which stops a walk that runs, and removes the temporary folder once. */
-  private def end(): Unit =
-    Try(shell.close()): Unit
-    if removed.compareAndSet(false, true) then Try(WorkRuntime.remove(temp)): Unit
 
 /** The runner of the LM calls of the policy of a work session (10.3): each call runs on a thread of its own, so that
   * `stop` cuts it with no interrupt of the worker. A call that ignores the interrupt ends later on its thread, and the
@@ -559,16 +479,6 @@ object WorkRuntime:
     val policy   = Signature.derived[PolicyInput, PolicyStep]("policy", instructions)
     val subQuery = Signature.derived[SubQuery, SubAnswer]("subQuery", Harness.subQueryInstructions)
     WorkRuntime(env, limits, Predict(policy, name = Some("policy")), Predict(subQuery, name = Some("subQuery")), peers)
-
-  /** Starts the walk of the scope for secret files (`SandboxedShell.warm`) on a daemon thread of its own, when an
-    * activation of `session` starts with no index of an open session. A host calls `opened` before the `Activate` of
-    * each open, so each activation of an open session gets the index of the walk of the open. This walk occurs only for
-    * a runtime that no host opened. The first command of the activation then waits only for the rest of the walk. A
-    * scope of 1.75 million entries made the first `exec` of a live session wait 34 s for the whole walk (2026-11-11).
-    * The close of the activation closes the shell, and that stops the walk.
-    */
-  private def warm(shell: SandboxedShell, session: SessionId): Unit =
-    Thread.ofPlatform().name(s"harness-index-${session.value}").daemon(true).start(() => shell.warm()): Unit
 
   /** Removes a folder and each file in it. */
   private[host] def remove(folder: Path): Unit =

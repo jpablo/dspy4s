@@ -52,38 +52,6 @@ class SandboxedShellLaws extends FunSuite:
       calls.incrementAndGet(): Unit
       argv
 
-  test("Shell: warm walks the writable roots before the first command, so that command lists only changed folders") {
-    // The first exec of a live session in a scope of 1.75 million entries waited 34 s for this walk (2026-11-11).
-    withPlace { place =>
-      (1 to 200).foreach(i => Files.createDirectories(place.scope.resolve(s"tree/d$i/e")))
-      // The index lists a folder again when it changed less than 2 s before a walk, so the tree must be older.
-      Thread.sleep(2_100)
-      val commands = shell(place)
-      assertEquals(commands.listings, 0L)
-      commands.warm()
-      assert(commands.listings >= 400L, s"warm listed ${commands.listings} folders")
-      val warmed = commands.listings
-      commands.exec("true"): Unit
-      assert(commands.listings - warmed < 5, s"the first command listed ${commands.listings - warmed} folders again")
-    }
-  }
-
-  test("Shell: warm does nothing in a mode with no child process, with no backend, or after close") {
-    withPlace { place =>
-      Files.createDirectories(place.scope.resolve("a/b"))
-      val noChild = shell(place, Mode.readOnly)
-      noChild.warm()
-      assertEquals(noChild.listings, 0L, "a mode with no child process")
-      val noBackend = shell(place, backend = None)
-      noBackend.warm()
-      assertEquals(noBackend.listings, 0L, "no backend")
-      val closed = shell(place)
-      closed.close()
-      closed.warm()
-      assertEquals(closed.listings, 0L, "after close")
-    }
-  }
-
   test("Exec: with no backend, exec fails and the command does not run") {
     withPlace { place =>
       val marker = place.scope.resolve("marker")
@@ -138,14 +106,19 @@ class SandboxedShellLaws extends FunSuite:
     }
   }
 
-  test("Exec: a command can make a file with a secret name, and the next command cannot read it") {
+  test("Exec: commands use the fixed profile and can read project files with secret names") {
     val backend = Backends.detect()
     assume(backend.isDefined, "no OS sandbox works on this host")
     withPlace { place =>
       val sh = shell(place, backend = backend)
+      assertEquals(sh.exec("cat .env"), "FAKE-ENV")
       assertEquals(sh.exec("echo FAKE-NEW > .env.made && cat .env.made"), "FAKE-NEW\n")
-      val out = sh.exec("cat .env.made")
-      assert(!out.contains("FAKE-NEW"), out)
+      assertEquals(sh.exec("cat .env.made"), "FAKE-NEW\n")
+      Files.createDirectories(place.scope.resolve("nested")): Unit
+      Files.writeString(place.scope.resolve("nested/.env.local"), "FAKE-NESTED"): Unit
+      assertEquals(sh.exec("cat nested/.env.local"), "FAKE-NESTED")
+      assert(!sh.exec(s"cat '${place.secrets.resolve("id_fake")}'").contains("FAKE-KEY"))
+      assert(!sh.exec(s"cat '${place.journals.resolve("j.txt")}'").contains("FAKE-JOURNAL"))
     }
   }
 

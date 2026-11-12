@@ -740,9 +740,9 @@ compare each backend with these observations.
   `~/Library/Keychains`, and the credential files of common tools: `~/.config/git/credentials`, `~/.config/op`,
   `~/.codex/auth.json`, `~/.claude/.credentials.json`, `~/.m2/settings.xml`, `~/.gradle/gradle.properties`,
   `~/.sbt/.credentials`, `~/.ivy2/.credentials`, `~/.cargo/credentials`, `~/.cargo/credentials.toml`,
-  `~/.local/share/keyrings`, `~/.pgpass`, `~/.vault-token` and `~/.terraform.d/credentials.tfrc.json`. Under the scope and the temporary directory, a file or folder with the name `.env` or
-  `.env.*` that exists when a command starts is secret. A proposal: the design names only `~/.ssh`, `~/.aws` and
-  `.env`.
+  `~/.local/share/keyrings`, `~/.pgpass`, `~/.vault-token` and `~/.terraform.d/credentials.tfrc.json`. Direct file calls
+  also refuse a name `.env` or `.env.*`. Shell commands can read these names in the scope and the temporary directory.
+  A proposal: the design names only `~/.ssh`, `~/.aws` and `.env`.
 - The host list is a set of patterns: `name`, `name:port` or `name:*`. A name `*.d` matches each subdomain of `d`. A
   pattern with no port allows only the ports 80 and 443. A proposal: the design gives the host list no type.
 - Seatbelt denies by default, as in Codex. A child can start programs, read files, and look only at the processes of
@@ -756,16 +756,15 @@ compare each backend with these observations.
   `socketpair` for a datagram pair, `io_uring_setup`, and each call of another ABI. A stream pair from `socketpair`
   stays allowed. The filter exists for aarch64 and x86_64, and on another host bubblewrap does not work. Seatbelt
   denies these connections by default.
-- A secret name protects the files that exist when a command starts. Before each command, the shell finds the
-  files of the writable roots with a secret name, apart from `.git`, and it hides each one and the target of each one
-  that is a symbolic link. It also hides a folder that it cannot read. The command cannot read, write, link or move
-  these files, and both backends deny them by path. A command can make a new file with a secret name. That file holds
-  only data of the command, and the next command cannot read it. A mount of bubblewrap cannot hide a name, so a rule
-  for the names would hold only on macOS.
-- `SecretIndex` keeps the listing of each folder, so a command lists again only the folders that changed. It lists a
-  folder again when its change time, its last-modified time or its file key differs, and when the folder changed less
-  than 2 seconds before the listing, because a file time on Linux can be coarse. A command can set the last-modified
-  time back, but not the change time.
+- Commands use the fixed profile of the mode. The automatic walk for secret names was removed on 2026-11-12 because
+  it delayed commands in large scopes. The fixed secret paths and journals stay closed, but shell commands can read,
+  write, link or move project files named `.env` or `.env.*`. Direct file calls still refuse these names without a
+  directory walk. The optional `Profiles.forCommand` and `SecretIndex` utilities remain, but the shell does not use
+  them.
+- A future full scan must start only on request, show progress and accept a stop. Session startup and normal commands
+  must not wait for it. Automatic checks must have a fixed work limit and use paths that the harness already has;
+  they must not walk the scope. The harness can suggest a full scan from those paths, but must not start one to decide
+  whether to suggest it. There is no client command for an on-demand scan yet.
 - Seatbelt escapes a quote, a backslash, a newline and a return in a path, so a file name cannot stop the next
   commands.
 - A backend works when `/bin/sh -c true` runs under its own command line. A probe with other arguments can pass in a
@@ -1933,21 +1932,15 @@ These points are proposals for the review:
 - A study of the TUI libraries for Scala and Java (2026-11-11) found no Scala library that fits better than JLine:
   termflow uses only the alternate screen, and TamboUI and termflow bring the JLine 3 bundle, a second copy of the
   JLine packages. TamboUI, with its inline runner, is the choice for a richer client later.
-- A work session starts the walk of its scope for secret files (5.4) on a thread of its own when the session opens
-  (`SessionRuntime.opened`, `SandboxedShell.warm`). The index of the walk belongs to the open session, as the job
-  table does, and each activation of the session gives it to its shell. So the first command waits only for the rest
-  of that walk, and the end of the open session stops the walk. With no walk before the first command, the first
-  `exec` in a scope of 1.75 million entries waited 34 s (2026-11-11). At first the walk started at the first
-  activation, and a live run in a scope of 300,000 folders still waited 9.7 s at the first `exec`, also 20 s after the
-  open. An open that only reads also starts the walk. The walk runs on its own thread, and the writer never waits for
-  it.
+- A work session starts no walk for secret files at its open or activation. Commands use the fixed profile (5.4),
+  with no directory walk before `exec` or `spawn`.
 - The line editor has the screen of [CLI_SCREEN.md](CLI_SCREEN.md), phase A (2026-11-11). `Screen` reads each entry: a
   finished step goes into the history as its text and one summary line of its cell, for example `▸ Ran 2 commands, read
   1 file · 1.4 s #17`, and the reply shows in full. The step that runs is the live block, above a rule and the prompt `›
   `, with a status line such as `⠹ 9 s · step 3 of 10 · ctrl-c stops`. The status line shows a label only for a wait
-  that needs a reason: the summaries of the memory (`Activity.MemorySummaries`), the walk for secret files during a
-  command (`Activity.SecretScan`), and a stop. The footer is a JLine `Status` with the folder, the mode, the model, the
-  memory (`SessionHandle.memoryUse`), the jobs and the calls that wait. Ctrl-O switches the detail of a cell, `/show ID`
+  that needs a reason: the summaries of the memory (`Activity.MemorySummaries`) and a stop. The footer is a JLine
+  `Status` with the folder, the mode, the model, the memory (`SessionHandle.memoryUse`), the jobs and the calls that
+  wait. Ctrl-O switches the detail of a cell, `/show ID`
   prints a cell or a call in full, and Tab completes the commands. The live block is a prompt of several lines, which a
   timer redraws every 125 ms through a widget of JLine, because only a widget can change the line of a read from another
   thread. A law with a model of the screen (`FakeScreen`) shows that a smaller live block leaves no old row, and that

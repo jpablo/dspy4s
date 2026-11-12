@@ -190,9 +190,8 @@ object Profiles:
       reads = mode.files != Access.None
     )
 
-  /** The profile of one command: the profile of the mode, and each file with a secret name that exists in a writable
-    * root when the command starts (5.4). The command cannot read, write, link or move these files. A command can make a
-    * new file with a secret name: it holds only data of the command, and the next command cannot read it.
+  /** An optional profile with the secret names hidden: the profile of the mode, and each file with a secret name that
+    * exists in a writable root. This walks the roots. `SandboxedShell` uses `forMode` instead, with no walk.
     */
   def forCommand(mode: Mode, scope: Path, layout: Layout, hosts: HostList): Profile =
     val profile = forMode(mode, scope, layout, hosts)
@@ -215,10 +214,10 @@ object Profiles:
         .distinct.take(3)
       val closed =
         Option.when(examples.nonEmpty)(s"the secret paths of the home folder (for example ${list(examples, "and")})") ++
-          Option.when(profile.isHidden(layout.journals))("the journals of the harness") ++
-          layout.secretNames.toVector.sorted.map(name =>
-            s"a file whose name is $name or starts with \"$name.\" (for example $name.local)"
-          )
+          Option.when(profile.isHidden(layout.journals))("the journals of the harness")
+      val fileSecrets = layout.secretNames.toVector.sorted.map(name =>
+        s"a file whose name is $name or starts with \"$name.\" (for example $name.local)"
+      )
       val network = profile.net match
         case Net.Closed                                 => "A command has no network."
         case Net.Proxy(hosts) if hosts.patterns.isEmpty => "A command reaches no host."
@@ -232,7 +231,8 @@ object Profiles:
           "So a git command that changes the repository fails, for example commit, branch, checkout, stash or " +
             "worktree add."
         ) ++
-        Option.when(closed.nonEmpty)(s"A command and a file call can neither read nor write ${list(closed, "or")}.") :+
+        Option.when(closed.nonEmpty)(s"A command and a file call can neither read nor write ${list(closed, "or")}.") ++
+        Option.when(fileSecrets.nonEmpty)(s"A file call can neither read nor write ${list(fileSecrets, "or")}.") :+
         network).mkString(" ")
 
   /** The items of `items` in one text, with `word` before the last one: "a", "a and b", or "a, b and c". */

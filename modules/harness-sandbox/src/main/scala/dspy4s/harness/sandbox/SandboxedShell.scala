@@ -9,7 +9,6 @@ import java.nio.file.{Files as JFiles, Path, Paths}
 import java.util.concurrent.{CompletableFuture, ConcurrentHashMap, TimeUnit}
 import scala.jdk.CollectionConverters.*
 import scala.util.Try
-import scala.util.control.NonFatal
 
 /** A command that did not run, because the mode gives no child process or no OS sandbox works (5.4). */
 final class SandboxError(message: String) extends RuntimeException(message)
@@ -25,10 +24,8 @@ final class SandboxError(message: String) extends RuntimeException(message)
   * about a cut of the output, the end of the time limit, and an exit code that is not 0. `spawn` and the jobs come with
   * the session host of phase 7. The host deletes the temporary directory of the layout at the end of the session.
   *
-  * `secretIndex` is the index of the secret files that the shell uses. With none, the shell makes a new index for its
-  * life. A host can give the index of an open session, so each shell of the session uses the listings of the walks
-  * before it. A given index must have the secret names of `layout`. The shell does not own a given index: other shells
-  * can use it at the same time, and `close` stops only a walk of this shell.
+  * Commands use the fixed profile of the mode, with no directory scan before they start. The fixed secret paths and
+  * journals stay closed, but files with secret names such as `.env` inside the scope are not hidden from commands.
   */
 final class SandboxedShell(
     config        : SessionConfig,
@@ -37,57 +34,23 @@ final class SandboxedShell(
     backend       : Option[Backend],
     timeoutSeconds: Int                 = 600,
     maxOutput     : Int                 = 200_000,
-    parentEnv     : Map[String, String] = sys.env,
-    secretIndex   : Option[SecretIndex] = None
+    parentEnv     : Map[String, String] = sys.env
 ) extends Shell,
       AutoCloseable:
 
   /** The scope of the session, as a real path. Each command starts in it. */
   val root: Path = Layout.real(Paths.get(SandboxedShell.pathOf(config.scope)))
 
-  /** The profile of the mode. Each command also gets the secret files that exist when it starts. */
+  /** The fixed profile of the mode, shared by all commands of this shell. */
   val profile: Profile = Profiles.forMode(config.mode, root, layout, hosts)
 
-  /** The secret files of the writable roots: the given index, or a new one. The shell keeps one index for its life, so
-    * a command lists again only the folders that changed (`SecretIndex`).
-    */
-  private val index = secretIndex.getOrElse(SecretIndex(layout.secretNames))
-
   private var proxy: Option[HostProxy] = None
-
-  /** True after `close`. It stops a walk of `warm` between two folders. */
-  @volatile private var closed = false
 
   /** The processes of the `exec` calls that run, and the ones that `stopAll` stopped. */
   private val running = ConcurrentHashMap.newKeySet[Process]()
   private val stopped = ConcurrentHashMap.newKeySet[Process]()
 
   def exec(command: String)(using Files): String = run(start(command))
-
-  /** Walks the writable roots once, as the first command would, so the first command then lists only the folders that
-    * changed (`SecretIndex`). In a large scope the first walk is slow: a scope of 1.75 million entries made the first
-    * `exec` of a live session wait 34 s (2026-11-11). The host of a work session runs `warm` on a thread of its own at
-    * the open of the session, with a shell for the walk only and the index of the open session (`secretIndex`). Each
-    * activation of the session then gives that index to its shell.
-    *
-    *   - It holds the lock of the index, as a command does, so a command that starts during the walk waits for the end
-    *     of the walk and then lists only the folders that changed. That also holds for a command of another shell with
-    *     the same index.
-    *   - It does nothing in a mode with no child process, with no backend, when the folder of the scope is not there,
-    *     or after `close`.
-    *   - `close` during the walk stops it between two folders, and the index then keeps nothing of that walk.
-    *   - A failure of the walk loses only time: the first command walks again.
-    */
-  def warm(): Unit =
-    if profile.canRun && backend.nonEmpty && JFiles.isDirectory(root) && !closed then
-      // The walk only fills the index, so `warm` drops its list. `NonFatal` also covers a stop (`CancellationException`).
-      try index.find(profile, () => closed): Unit
-      catch case NonFatal(_) => ()
-
-  /** The number of folders that the index of the shell listed since its start. A given index also counts the listings
-    * of the other shells with that index.
-    */
-  def listings: Long = index.listings
 
   /** The process of `command` under the profile of the mode, in the backend, in the folder of the scope, and under
     * `ProcessWrapper`. Its standard input is the pipe of the wrapper, and the command itself gets an empty one.
@@ -110,8 +73,7 @@ final class SandboxedShell(
     val port = profile.net match
       case Net.Proxy(_) => Some(proxyPort())
       case Net.Closed   => None
-    val now       = profile.hide(index.find(profile))
-    val sandboxed = sandbox.wrap(now, root, Vector("/bin/sh", "-c", command), port)
+    val sandboxed = sandbox.wrap(profile, root, Vector("/bin/sh", "-c", command), port)
     val wrapped   = ProcessWrapper.command(ProcessWrapper.quoted(sandboxed), (SandboxedShell.GraceMillis / 1000).toInt)
     val builder   = ProcessBuilder(wrapped*).directory(root.toFile).redirectErrorStream(true)
     val env       = builder.environment()
@@ -143,9 +105,8 @@ final class SandboxedShell(
       Try(process.getOutputStream.close()): Unit
     }
 
-  /** Stops a walk of `warm` and the proxy. */
+  /** Stops the proxy. */
   def close(): Unit =
-    closed = true
     synchronized {
       proxy.foreach(_.close())
       proxy = None

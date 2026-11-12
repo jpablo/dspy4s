@@ -5,11 +5,6 @@ package dspy4s.harness.host
   */
 enum Activity derives CanEqual:
 
-  /** The walk of the scope for secret files (5.4): the folders that it read, and the folders of the walk before it, if
-    * any. A command waits for this walk.
-    */
-  case SecretScan(folders: Long, total: Option[Long])
-
   /** The summaries of the memory tree before a call to the policy (7.1): the summaries that ended, of `total`. The call
     * to the policy waits for them.
     */

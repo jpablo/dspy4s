@@ -229,8 +229,8 @@ class ScreenLaws extends munit.FunSuite:
     assert(stopped.rows.last.plain.contains("the turn stops"), stopped.toString)
   }
 
-  test("Screen: an open cell shows its text, its code and its calls, and a command gives the walk for secret files") {
-    val live = Screen.live(screenOf(turn.take(4)), state, 5_100, look, Some(Activity.SecretScan(640_000, None)))
+  test("Screen: an open cell shows its text, its code and its calls") {
+    val live = Screen.live(screenOf(turn.take(4)), state, 5_100, look, None)
     val rows = live.rows.map(_.plain)
     assertEquals(
       rows.take(3),
@@ -238,9 +238,7 @@ class ScreenLaws extends munit.FunSuite:
     )
     assert(rows(3).startsWith("    ") && rows(3).endsWith(" $ sbt cart/test"), rows(3))
     assert(
-      rows(
-        4
-      ).endsWith("4 s · step 1 of 10 · the scan for secret files: 640,000 folders · ctrl-c stops · ctrl-o details"),
+      rows(4).endsWith("4 s · step 1 of 10 · ctrl-c stops · ctrl-o details"),
       rows(4)
     )
   }

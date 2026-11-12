@@ -549,11 +549,6 @@ object Screen:
         activity match
           case Some(Activity.MemorySummaries(done, total)) if step.exists(!_.acted) =>
             Some(s"the memory: $done of $total summaries")
-          case Some(Activity.SecretScan(folders, total))
-              if open.exists(_.calls.exists(c => c.end.isEmpty && (c.op == "exec" || c.op == "spawn"))) =>
-            Some(total.fold(s"the scan for secret files: ${grouped(folders)} folders")(t =>
-              s"the scan for secret files: ${grouped(folders)} of ${grouped(t)} folders"
-            ))
           case _ => None
     val parts = Vector(Some(whole(nowMillis - turn.startMillis))) ++ Vector(
       turn.steps.lastOption.map(s => s"step ${s.step + 1} of ${state.config.steps}"),
@@ -607,9 +602,6 @@ object Screen:
   private def whole(millis: Long): String =
     val s = millis.max(0L) / 1000
     if s < 60 then s"$s s" else s"${s / 60} m ${s % 60} s"
-
-  /** A number with a comma for each group of three digits. */
-  private def grouped(n: Long): String = "%,d".formatLocal(java.util.Locale.ROOT, n)
 
   /** A number of characters in thousands, for the footer. */
   private def thousands(n: Int): String = if n >= 1000 then s"${n / 1000}k" else n.toString

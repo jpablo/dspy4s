@@ -134,7 +134,7 @@ the line of the person does not move when the time changes.
 | a call to the model for the policy | none |
 | the summaries of the memory, before the call to the policy | `the memory: 2 of 5 summaries` |
 | a cell with no call | none |
-| a command, while the walk for secret files runs | `the scan for secret files: 640,000 folders` |
+| a command | none |
 | a stop | `the turn stops` |
 
 - With no open turn, the client shows no status line.
@@ -295,7 +295,7 @@ only a mark, and only ATC says `waiting for model`.
 Phase A follows the defaults of section 11. These points differ from the text above:
 
 1. The journal gets the output of a call only at its end. So the live block shows no output while a command runs. A
-   later change can send the last lines of a command from the host, as `Activity` does for the walk for secret files.
+   later change can send the last lines of a command from the host through `Activity`.
 2. The reasoning has a fourth view, `line`, which is the default of the line editor: one line with the size of the
    reasoning. `/reasoning off|line|short|full` sets it. The plain lines keep `short` as their default.
 3. The id of a call shows only after the end of the call, because the id is for `/show`.
