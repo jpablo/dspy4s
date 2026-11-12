@@ -43,13 +43,13 @@ object Html:
   /** The day and the minute of `millis` on the clock of this machine. */
   def date(millis: Long): String = day.format(Instant.ofEpochMilli(millis))
 
-  /** A page with `title`, `body`, the style and the script. The script has `nonce`, so the policy of the page lets it
-    * run, and a script that a text could make does not run.
+  /** A page with `title`, `body` and the class `bodyClass` of its body, the style and the script. The script has
+    * `nonce`, so the policy of the page lets it run, and a script that a text could make does not run.
     */
-  def page(title: String, nonce: String, body: String): String =
+  def page(title: String, nonce: String, body: String, bodyClass: String = "view-card"): String =
     "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">" +
       "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">" +
-      s"<title>${escape(title)}</title><style>$style</style></head><body class=\"view-card\">$body" +
+      s"<title>${escape(title)}</title><style>$style</style></head><body class=\"${escape(bodyClass)}\">$body" +
       s"<script nonce=\"$nonce\">$Script</script></body></html>"
 
   /** The rules that hide each kind and each predictor that a filter turns off. */
@@ -94,6 +94,24 @@ body.view-json .row:not([data-view]) .v-json,.row[data-view=card] .v-card,.row[d
 .row[data-view=json] .v-json{display:block}
 .v-card p{margin:4px 0;white-space:pre-wrap;overflow-wrap:anywhere}
 .v-card pre{max-height:24em;overflow:auto}
+.x-view{display:none}
+body.tab-chat .x-chat,body.tab-request .x-request,body.tab-reply .x-reply,body.tab-diff .x-diff{display:block}
+.x-view h2{font-size:14px;margin:14px 0 6px}
+.x-view dl{display:grid;grid-template-columns:max-content 1fr;gap:2px 12px;font-size:12.5px}
+.x-view dt{color:var(--muted)}.x-view dd{margin:0;overflow-wrap:anywhere}
+.msg{border:1px solid var(--line);border-radius:6px;padding:6px 10px;margin:6px 0;background:var(--card)}
+.msg summary{cursor:pointer;color:var(--muted);font-size:12.5px}
+.msg .role{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase}
+.msg .text{white-space:pre-wrap;overflow-wrap:anywhere}
+.role-user{border-left:3px solid var(--good)}.role-assistant{border-left:3px solid var(--policy)}
+.role-tool{border-left:3px solid var(--leaf)}
+pre.numbered .n{display:inline-block;min-width:3.5em;color:var(--muted);user-select:none}
+.hunk{margin:8px 0}.hunk-head{color:var(--muted);font:12px ui-monospace,Menlo,monospace}
+pre.diff{padding:4px 0}
+.d{display:block;padding:0 10px}
+.d.add{background:color-mix(in srgb,var(--good) 18%,transparent)}
+.d.del{background:color-mix(in srgb,var(--bad) 18%,transparent)}
+.d.ctx{color:var(--muted)}
 .filters summary{cursor:pointer;color:var(--muted)}
 .filters[open]{flex-basis:100%}
 .filters .group{margin:4px 0}
@@ -131,6 +149,21 @@ document.querySelectorAll('button[data-view]').forEach(b => b.addEventListener('
   body.classList.add('view-' + b.dataset.view);
   document.querySelectorAll('button[data-view]').forEach(x => x.classList.toggle('on', x === b));
 }));
+document.querySelectorAll('button[data-tab]').forEach(b => b.addEventListener('click', () => {
+  body.classList.remove('tab-chat', 'tab-request', 'tab-reply', 'tab-diff');
+  body.classList.add('tab-' + b.dataset.tab);
+  document.querySelectorAll('button[data-tab]').forEach(x => x.classList.toggle('on', x === b));
+}));
+document.querySelectorAll('button[data-copy]').forEach(b => b.addEventListener('click', async () => {
+  const source = document.getElementById(b.dataset.copy);
+  if (!source) return;
+  try { await navigator.clipboard.writeText(source.textContent); b.textContent = 'Copied'; }
+  catch (e) { b.textContent = 'The copy failed'; }
+}));
+const against = document.getElementById('against');
+if (against) against.addEventListener('change', () => {
+  if (against.value) location.search = '?against=' + encodeURIComponent(against.value);
+});
 if (rows) rows.addEventListener('click', ev => {
   const b = ev.target.closest('button[data-v]');
   if (!b) return;

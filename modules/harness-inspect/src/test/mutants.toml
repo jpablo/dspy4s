@@ -42,8 +42,12 @@ new = "SessionFile.open(path, session).flatMap { file =>"
 name = "Mutant: the store opens the catalog to write it"
 [[mutant.edit]]
 file = "Store.scala"
-old = "Catalog.readOnly(Catalog.pathOf(root)).toOption"
-new = "Catalog.open(Catalog.pathOf(root)).toOption"
+old = "Catalog.readOnly(Catalog.pathOf(root)).toOption.fold("
+new = "Catalog.open(Catalog.pathOf(root)).toOption.fold("
+[[mutant.edit]]
+file = "Store.scala"
+old = "Catalog.readOnly(Catalog.pathOf(root)).toOption.flatMap"
+new = "Catalog.open(Catalog.pathOf(root)).toOption.flatMap"
 
 # ── The pages (5.2) ──
 
@@ -81,8 +85,8 @@ new = """flat(v).map(text => s"${name.take(0)}$text")"""
 name = "Mutant: a backslash in a Scala literal is not escaped"
 [[mutant.edit]]
 file = "ScalaText.scala"
-old = '''case '\\'                         => "\\\\"'''
-new = '''case '\\'                         => "\\"'''
+old = '''case '\\'                                      => "\\\\"'''
+new = '''case '\\'                                      => "\\"'''
 
 [[mutant]]
 name = "Mutant: the escape keeps a <"
@@ -97,3 +101,54 @@ name = "Mutant: a paragraph of a card has no escape"
 file = "EntryViews.scala"
 old = """private def paragraph(text: String): String = s"<p>${escape(text)}</p>""""
 new = """private def paragraph(text: String): String = s"<p>$text</p>""""
+
+# ── The page of an exchange (5.4) ──
+
+[[mutant]]
+name = "Mutant: the table of the diff counts no common line"
+[[mutant.edit]]
+file = "LineDiff.scala"
+old = "if a(i) == b(j) then table((i + 1) * width + j + 1) + 1"
+new = "if a(i) == b(j) then table((i + 1) * width + j + 1)"
+
+[[mutant]]
+name = "Mutant: the common end of the two texts is added, not kept"
+[[mutant.edit]]
+file = "LineDiff.scala"
+old = "a.takeRight(end).map(Edit.Keep(_))"
+new = "a.takeRight(end).map(Edit.Add(_))"
+
+[[mutant]]
+name = "Mutant: a hunk starts one kept line too early"
+[[mutant.edit]]
+file = "LineDiff.scala"
+old = "val from   = (group.head - context).max(0)"
+new = "val from   = (group.head - context - 1).max(0)"
+
+[[mutant]]
+name = "Mutant: the chat view reads no stream"
+[[mutant.edit]]
+file = "Chat.scala"
+old = "if x.stream then streamed(mode, model.stream(request))"
+new = "if x.stream then streamed(mode, Iterator.empty)"
+
+[[mutant]]
+name = "Mutant: the text of a request has no line with the role"
+[[mutant.edit]]
+file = "Chat.scala"
+old = 'Vector(s"── $role ──") ++ contentOf(json)'
+new = 'Vector(s"$role") ++ contentOf(json)'
+
+[[mutant]]
+name = "Mutant: the diff is against the last earlier exchange of any predictor"
+[[mutant.edit]]
+file = "ExchangePage.scala"
+old = "exchanges.filter(e => e.index < x.index && e.predictor == x.predictor).lastOption"
+new = "exchanges.filter(e => e.index < x.index && e.predictor.nonEmpty).lastOption"
+
+[[mutant]]
+name = "Mutant: the copy of the request is the body with indents"
+[[mutant.edit]]
+file = "ExchangePage.scala"
+old = '<pre id="request-exact" hidden>${escape(x.body)}</pre>'
+new = '<pre id="request-exact" hidden>${escape(pretty(x.body))}</pre>'

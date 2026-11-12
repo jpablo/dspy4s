@@ -99,8 +99,11 @@ private[inspect] final class Routes(store: Store, port: Int):
     else
       val parts = uri.getRawPath.split('/').toList.filter(_.nonEmpty)
       parts match
-        case Nil                                => page(Right(Pages.sessions(store, nonce)))
-        case "s" :: id :: Nil                   => withSession(id)(s => page(Pages.session(store, s, nonce)))
+        case Nil                            => page(Right(Pages.sessions(store, nonce)))
+        case "s" :: id :: Nil               => withSession(id)(s => page(Pages.session(store, s, nonce)))
+        case "s" :: id :: "x" :: xid :: Nil => withSession(id) { s =>
+            ExchangePage.html(store, s, xid, query(uri).get("against"), nonce).fold(missing)(html => page(Right(html)))
+          }
         case "s" :: id :: "after" :: seq :: Nil => withSession(id) { s =>
             seq.toLongOption.fold(missing) { from =>
               val size = query(uri).get("size").flatMap(_.toLongOption).getOrElse(-1L)
