@@ -6,6 +6,7 @@ import dspy4s.harness.host.HostSupport.*
 
 import java.nio.file.{Files, Path}
 import java.sql.DriverManager
+import scala.jdk.CollectionConverters.*
 
 /** The laws of the journal file of a session (CODE_HARNESS_DESIGN.md, 10.2). */
 class SessionFileLaws extends munit.FunSuite:
@@ -50,6 +51,44 @@ class SessionFileLaws extends munit.FunSuite:
   test("File: the file of a session is <root>/sessions/<id>.db") {
     withRoot { root =>
       assertEquals(SessionFile.pathOf(root, id(1)), root.resolve("sessions").resolve("fake-session-1.db"))
+    }
+  }
+
+  test("File: readOnly of a closed journal and of a closed catalog makes no file, and it reads their rows") {
+    withRoot { root =>
+      val path = SessionFile.pathOf(root, id(1))
+      val log  = inputs(3)
+      val file = open(path)
+      assertEquals(file.append(log, flush = true), Right(()))
+      file.close()
+      val catalog = Catalog.open(Catalog.pathOf(root)).fold(e => fail(e), identity)
+      assertEquals(catalog.put(catalogRow(id(1))(log)), Right(()))
+      catalog.close()
+      val before = Files.walk(root).iterator().asScala.map(root.relativize).toSet
+      val reader = SessionFile.readOnly(path, id(1)).fold(e => fail(e), identity)
+      try assertEquals(reader.readFrom(0), Right(log))
+      finally reader.close()
+      val rows = Catalog.readOnly(Catalog.pathOf(root)).fold(e => fail(e), identity)
+      try assertEquals(rows.rows.map(_.session), Vector(id(1)))
+      finally rows.close()
+      assertEquals(Files.walk(root).iterator().asScala.map(root.relativize).toSet, before)
+    }
+  }
+
+  test("File: readOnly of a journal whose writer is open sees each commit of the writer") {
+    withRoot { root =>
+      val path   = SessionFile.pathOf(root, id(1))
+      val log    = inputs(4)
+      val writer = open(path)
+      try
+        assertEquals(writer.append(log.take(2), flush = false), Right(()))
+        val reader = SessionFile.readOnly(path, id(1)).fold(e => fail(e), identity)
+        try
+          assertEquals(reader.readFrom(0), Right(log.take(2)))
+          assertEquals(writer.append(log.drop(2), flush = false), Right(()))
+          assertEquals(reader.readFrom(0), Right(log))
+        finally reader.close()
+      finally writer.close()
     }
   }
 

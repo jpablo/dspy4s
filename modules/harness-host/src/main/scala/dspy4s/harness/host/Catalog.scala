@@ -9,6 +9,8 @@ import zio.blocks.schema.Schema
 import zio.blocks.schema.json.JsonCodec
 
 import java.nio.file.{Files as JFiles, Path}
+import org.sqlite.SQLiteConfig
+
 import java.sql.{Connection, DriverManager}
 import scala.jdk.CollectionConverters.*
 import scala.util.{Try, Using}
@@ -235,6 +237,20 @@ object Catalog:
           connection.close()
           throw e
     }.toEither.left.map(e => s"the catalog $path did not open: ${e.getMessage}")
+
+  /** Opens the catalog at `path` to read it (`mode=ro`), for the inspector (docs/code-harness/OBSERVABILITY.md, 5.1). A
+    * file that does not exist gives an error, the open makes no table, and nothing comes on the disk
+    * (`SessionFile.readUrl`). The connection waits for a writer.
+    */
+  def readOnly(path: Path): Either[String, Catalog] =
+    if !JFiles.isRegularFile(path) then Left(s"the catalog $path does not exist")
+    else
+      Try {
+        val settings = SQLiteConfig()
+        settings.setReadOnly(true)
+        settings.setBusyTimeout(5000)
+        Catalog(DriverManager.getConnection(SessionFile.readUrl(path), settings.toProperties), path)
+      }.toEither.left.map(e => s"the catalog $path did not open: ${e.getMessage}")
 
   /** The rows after a start of the host (10.2). It lists the files in `sessions`, folds each journal whose last `seq`
     * differs from its row, and puts the new row. A row with no file goes away. A file that is not a journal goes into

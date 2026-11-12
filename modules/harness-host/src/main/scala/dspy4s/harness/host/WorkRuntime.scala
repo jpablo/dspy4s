@@ -19,7 +19,9 @@ import scala.util.Try
 /** What a work session needs from the machine (CODE_HARNESS_DESIGN.md, 8.1): the home folder for the secret paths
   * (5.4), the host list of a mode with `Network^`, the backend of the sandbox, the secrets to mask (5.6), and the root
   * of the host, which holds the journals. A command can neither read nor write under the journals (5.4).
-  * `summaryOptions` is the option bag of the provider for each summary request of the memory tree (7.1).
+  * `summaryOptions` is the option bag of the provider for each summary request of the memory tree (7.1). With
+  * `exchanges`, each activation writes the HTTP exchanges of its model calls to the exchange file of its session
+  * (docs/code-harness/OBSERVABILITY.md, 4).
   */
 final case class WorkEnv(
     home          : Path,
@@ -27,7 +29,8 @@ final case class WorkEnv(
     backend       : Option[Backend],
     secrets       : Secrets,
     journals      : Path,
-    summaryOptions: DynamicValue.Record = DynamicValue.Record.empty
+    summaryOptions: DynamicValue.Record = DynamicValue.Record.empty,
+    exchanges     : Boolean             = true
 )
 
 object WorkEnv:
@@ -110,7 +113,10 @@ final class WorkRuntime(
   override def draft(session: SessionId): Option[Draft] = Option(drafts.get(session)).flatMap(_.current)
 
   def activate(session: SessionId, config: SessionConfig, journal: Journal, jobs: JobTable): Activation =
-    RuntimeEnvironment.withContext(context) {
+    // The context of the activation: the context of the runtime with the exchange file of the session
+    // (docs/code-harness/OBSERVABILITY.md, 4.2). The host threads capture it here, so `llmQuery` has it too.
+    val inSession = WorkRuntime.withExchanges(context, env, session, journal)
+    RuntimeEnvironment.withContext(inSession) {
       var layout  = Option.empty[Layout]
       var shell   = Option.empty[SandboxedShell]
       var lines   = Option.empty[FileLines]
@@ -127,7 +133,7 @@ final class WorkRuntime(
         val recorder = Recorder(journal, () => turns.closed, env.secrets.maskJson)
         val store    = SnapshotStore()
         val host     = HostThreads.ofThisThread()
-        val calls    = StoppablePolicy(context, () => journal.state.stopping)
+        val calls    = StoppablePolicy(inSession, () => journal.state.stopping)
         val zooms    = ZoomSource()
         val meter    = MemoryMeter()
         val written  = Drafts()
@@ -185,11 +191,12 @@ final class WorkRuntime(
           zooms,
           meter,
           Some(written)
-        )(using context)
+        )(using inSession)
         val forget = () =>
           meters.remove(session, meter): Unit
           drafts.remove(session, written): Unit
-        val activation = WorkActivation(effects, commands, calls, Vector(turns, summary), lines, made, context, forget)
+        val activation =
+          WorkActivation(effects, commands, calls, Vector(turns, summary), lines, made, inSession, forget)
         // The last step of the start, so a failed start keeps no meter. A later activation of the session puts its own.
         meters.put(session, meter): Unit
         drafts.put(session, written): Unit
@@ -468,6 +475,16 @@ object WorkRuntime:
         )
       case StrategyName.PrefixSummary =>
         Left("the strategy PrefixSummary has no code yet, so a session with it cannot start")
+
+  /** `context` with the exchange file of `session` as its exchange sink (docs/code-harness/OBSERVABILITY.md, 4.2), or
+    * `context` itself when `env.exchanges` is off. The file gives each exchange the last `seq` of `journal` at its
+    * start.
+    */
+  def withExchanges(context: RuntimeContext, env: WorkEnv, session: SessionId, journal: Journal): RuntimeContext =
+    if !env.exchanges then context
+    else
+      val file = ExchangeFile(env.journals, session, () => journal.state.nextSeq - 1, env.secrets)
+      context.withServices(context.services.copy(exchangeSink = Some(file)))
 
   /** A runtime with the first leaves: the policy with `instructions`, and the `subQuery` leaf of a harness. */
   def forWork(env: WorkEnv, limits: HarnessLimits = HarnessLimits())(using RuntimeContext): WorkRuntime =

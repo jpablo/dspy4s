@@ -1930,9 +1930,10 @@ These points are proposals for the review:
   session of the root has it.
 - A live test drives the CLI with no person (2026-11-10). With `--script`, each line waits until the session has no
   open turn, each command goes through `run`, and the end of the input waits for the open turn. So each message
-  starts its own turn, in the order of the lines. With `DSPY_TRACE=FILE`, each model call goes to `FILE` as one JSON
-  line: the messages of the request, the text and the reasoning of the reply, or the error, and the time. The mask of
-  the client hides the secrets of each text. `scripts/dspy4s-harness` runs the CLI, and it builds the CLI first when
+  starts its own turn, in the order of the lines. A live test reads the exchange file of the session (below) to see
+  each request and reply, and `scripts/live/exchanges.py` prints one line for each exchange. Until 2026-11-12,
+  `DSPY_TRACE=FILE` wrote one JSON line for each model call, and O5 of [OBSERVABILITY.md](OBSERVABILITY.md) removed
+  it. `scripts/dspy4s-harness` runs the CLI, and it builds the CLI first when
   a source file is newer than the class path. `scripts/live/chat.sh` runs it in the script mode, or for a
   person when its input is a terminal.
 - A study of the TUI libraries for Scala and Java (2026-11-11) found no Scala library that fits better than JLine:
@@ -1956,6 +1957,16 @@ These points are proposals for the review:
   writes now (CLI_SCREEN.md, 13). The host keeps the draft of the call that runs (`Drafts`), and a client polls it
   through `SessionHandle.draft`, as it polls the activity. The draft never goes into the journal. The stream of the
   policy is a preview, so the predictor still tries its fallback adapter, and a step does not depend on a client.
+- Each activation writes the HTTP exchanges of its model calls to `<root>/sessions/<id>.http.jsonl`
+  ([OBSERVABILITY.md](OBSERVABILITY.md), 4, 2026-11-12). A request line has the exact body, the session, the `seq`
+  before the call and the predictor. A reply line has the status, the headers, and the body or each line of the
+  stream. The mask of 5.6 covers each text. `DSPY_EXCHANGES=off` turns the file off.
+- `dspy4s-harness --inspect` serves the inspector of a root on 127.0.0.1:7411 ([OBSERVABILITY.md](OBSERVABILITY.md),
+  5). It only reads: a list of the sessions, a session as a tree with each exchange after its entry, three views of
+  each entry (card, Scala and JSON), the raw rows, and the follow of a session that runs. The page of one exchange has
+  a chat view, the exact request and reply, and a diff against the earlier request of the same predictor. A read-only connection to a
+  closed SQLite file with WAL made a `-wal` and a `-shm` file that stayed, so `SessionFile.readOnly` now opens a file
+  with no `-wal` file with `immutable=1`.
 - Until a real configuration file exists, the CLI reads its variables also from `<home>/.dspy4s/harness/.env`
   (2026-11-10). It reads this file also with another `--root`, so a live scenario with a temporary root finds it. A
   variable of the process wins over the file. The base URL and the key are the exception: both come from the file when

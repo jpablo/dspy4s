@@ -64,9 +64,15 @@ final class HarnessProbe(
       model  <- context.lm.collect { case model: LanguageModel => model }.toRight("the probe has no model")
       answer <-
         val counted = Counted(model)
-        val inner   = context.copy(lm = Some(counted))
-        val left    = (budget.limit - budget.spent).max(0).min(limits.modelCalls)
-        val env     = HarnessEnv(
+        // The exchanges of the probe go to the exchange file of the caller, with the link of the probe
+        // (docs/code-harness/OBSERVABILITY.md, 4.2).
+        val sink = context.exchangeSink.map {
+          case file: ExchangeFile => file.forProbe(link)
+          case other              => other
+        }
+        val inner = context.copy(lm = Some(counted), exchangeSink = sink)
+        val left  = (budget.limit - budget.spent).max(0).min(limits.modelCalls)
+        val env   = HarnessEnv(
           workspace = None,
           home = home,
           hosts = HostList.empty,
@@ -159,4 +165,9 @@ object HarnessProbe:
     * it, and its name links it to the `observe` call.
     */
   def pathOf(root: Path, link: ProbeLink): Path =
-    root.resolve("probes").resolve(s"${link.caller.value}.${link.effect.cell}.${link.effect.n}.db")
+    root.resolve("probes").resolve(s"${nameOf(link)}.db")
+
+  /** The name of the probe of `link`: `<caller>.<cell>.<n>`. Its journal file and the lines of its exchanges have it
+    * (docs/code-harness/OBSERVABILITY.md, 4.2).
+    */
+  def nameOf(link: ProbeLink): String = s"${link.caller.value}.${link.effect.cell}.${link.effect.n}"

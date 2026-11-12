@@ -3,6 +3,7 @@ package dspy4s.lm.providers
 import dspy4s.core.contracts.DspyError
 import dspy4s.core.contracts.DynamicValues
 import dspy4s.core.contracts.RuntimeContext
+import dspy4s.lm.contracts.ExchangeSink
 import dspy4s.lm.contracts.LmCapabilities
 import dspy4s.lm.contracts.LmChunk
 import dspy4s.lm.contracts.LmMode
@@ -64,7 +65,7 @@ final case class OpenAiLanguageModel(
     * output (`ResponsesWire.outputs`, upstream `responses_outputs`).
     */
   override def call(request: LmRequest)(using RuntimeContext): Either[DspyError, LmResponse] =
-    client.invoke(mode, body(request)).flatMap(response(_, request.model))
+    clientFor.invoke(mode, body(request)).flatMap(response(_, request.model))
 
   /** Open an SSE stream to the endpoint of [[mode]], and give the decoded [[dspy4s.lm.contracts.LmChunk]]s.
     *
@@ -77,9 +78,15 @@ final case class OpenAiLanguageModel(
     * not throw.
     */
   override def stream(request: LmRequest)(using RuntimeContext): Iterator[LmChunk] =
-    client.stream(mode, body(request)) match
+    clientFor.stream(mode, body(request)) match
       case Right(iterator) => iterator
       case Left(error)     => Iterator.single(LmChunk.failure(error))
+
+  /** The client of one model call: [[client]] with its transport in a [[RecordedTransport]] when the context has an
+    * [[dspy4s.lm.contracts.ExchangeSink]] (docs/code-harness/OBSERVABILITY.md, 4.1). With no sink, it is [[client]].
+    */
+  private[providers] def clientFor(using context: RuntimeContext): OpenAiClient =
+    ExchangeSink.of(context).fold(client)(sink => client.copy(transport = RecordedTransport(client.transport, sink)))
 
   /** The body of `request` on the wire of [[mode]]: the chat body, the prompt body of the text mode, or the Responses
     * body. Each body has the option bag of the request over [[defaultOptions]] and the model. The framework fields of

@@ -34,6 +34,33 @@ class CliLaws extends munit.FunSuite:
     )
   }
 
+  test("CLI: --inspect gives the inspector of the root on the port 7411, or on the port of --port") {
+    val root = home.resolve(".dspy4s/harness")
+    assertEquals(
+      CliArgs.parse(Vector("--inspect"), home, cwd).map(a => (a.inspect, a.port, a.root)),
+      Right((true, 7411, root))
+    )
+    assertEquals(CliArgs.parse(Vector("--inspect", "--port", "0"), home, cwd).map(_.port), Right(0))
+    assertEquals(
+      CliArgs.parse(Vector("--root", "/fake/root", "--inspect"), home, cwd).map(_.root),
+      Right(Path.of("/fake/root"))
+    )
+  }
+
+  test("CLI: --port needs --inspect and a port from 0 to 65535, and --inspect takes no session, list or folder") {
+    Vector(
+      Vector("--port", "7412"),
+      Vector("--inspect", "--port", "65536"),
+      Vector("--inspect", "--port", "fake"),
+      Vector("--inspect", "--port"),
+      Vector("--inspect", "--session", "fake-id"),
+      Vector("--inspect", "--list"),
+      Vector("--inspect", "--controller"),
+      Vector("--inspect", "--script"),
+      Vector("--inspect", "/fake/folder")
+    ).foreach(args => assert(CliArgs.parse(args, home, cwd).isLeft, args.toString))
+  }
+
   test("CLI: parse gives an error with the usage for an unknown flag or a flag with no value") {
     Vector(Vector("--fake"), Vector("--full"), Vector("--root"), Vector("--session")).foreach { args =>
       assert(CliArgs.parse(args, home, cwd).left.exists(_.contains("--root")), args.toString)
@@ -325,11 +352,11 @@ class CliLaws extends munit.FunSuite:
   }
 
   test("CLI: a variable of the process wins over the variables file") {
-    val file    = Map("DSPY_MODEL" -> "file-model", "DSPY_TRACE" -> "/fake/trace")
+    val file    = Map("DSPY_MODEL" -> "file-model", "DSPY_EXCHANGES" -> "off")
     val process = Map("DSPY_MODEL" -> "process-model", "PATH" -> "/fake/bin")
     assertEquals(
       EnvFile.merge(file, process),
-      Map("DSPY_MODEL" -> "process-model", "DSPY_TRACE" -> "/fake/trace", "PATH" -> "/fake/bin")
+      Map("DSPY_MODEL" -> "process-model", "DSPY_EXCHANGES" -> "off", "PATH" -> "/fake/bin")
     )
   }
 

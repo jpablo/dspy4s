@@ -71,6 +71,7 @@ lazy val root = (project in file("."))
     harnessSandbox,
     harness,
     harnessHost,
+    harnessInspect,
     harnessCli
   )
   .settings(commonSettings)
@@ -130,10 +131,11 @@ lazy val lm = (project in file("modules/lm"))
   .settings(name := "dspy4s-lm")
   .settings(
     libraryDependencies ++= Seq(
-      "io.github.iltotore" %% "iron"        % ironVersion,
-      "org.scalameta"      %% "munit"       % munitVersion  % Test,
-      "com.lihaoyi"        %% "ujson"       % ujsonVersion,
-      "io.github.cdimascio" % "dotenv-java" % dotenvVersion % Test
+      "io.github.iltotore" %% "iron"             % ironVersion,
+      "org.scalameta"      %% "munit"            % munitVersion           % Test,
+      "org.scalameta"      %% "munit-scalacheck" % munitScalacheckVersion % Test,
+      "com.lihaoyi"        %% "ujson"            % ujsonVersion,
+      "io.github.cdimascio" % "dotenv-java"      % dotenvVersion          % Test
     ),
     Test / fork := true,
     Test / javaOptions += "-Dfile.encoding=UTF-8"
@@ -382,8 +384,23 @@ lazy val harnessHost = (project in file("modules/harness-host"))
   )
 
 // The terminal client of a work session (phase 7). It runs on JDK 21, as the other modules (choice 8).
-lazy val harnessCli = (project in file("modules/harness-cli"))
+// The inspector of the journals and the exchange files (docs/code-harness/OBSERVABILITY.md, 5): a local web server that
+// only reads the files of a root.
+lazy val harnessInspect = (project in file("modules/harness-inspect"))
   .dependsOn(harnessHost % "compile->compile;test->test")
+  .settings(commonSettings)
+  .settings(name := "dspy4s-harness-inspect")
+  .settings(
+    libraryDependencies ++= Seq(
+      "org.scalameta" %% "munit"            % munitVersion           % Test,
+      "org.scalameta" %% "munit-scalacheck" % munitScalacheckVersion % Test
+    ),
+    excludeDependencies += ExclusionRule("org.scala-lang", "scaladoc_3"),
+    Test / fork := true
+  )
+
+lazy val harnessCli = (project in file("modules/harness-cli"))
+  .dependsOn(harnessHost % "compile->compile;test->test", harnessInspect)
   .settings(commonSettings)
   .settings(name := "dspy4s-harness-cli")
   .settings(

@@ -20,3 +20,10 @@ trait AdapterRef
   * calls a model (`StreamSink.applied`) reads `ctx.streamSink` and narrows back to `StreamSink` via a pattern match.
   */
 trait StreamSinkRef
+
+/** Marker trait for the record of the HTTP exchanges of the model calls (docs/code-harness/OBSERVABILITY.md, 4.1). Same
+  * cycle-breaking pattern as [[LanguageModelRef]]: the concrete `ExchangeSink` trait lives in `lm/contracts` and
+  * extends `ExchangeSinkRef`, so [[RuntimeContext]] can hold a sink without `core` depending on the lm module. A
+  * provider reads `ctx.exchangeSink` and narrows back to `ExchangeSink` via a pattern match.
+  */
+trait ExchangeSinkRef

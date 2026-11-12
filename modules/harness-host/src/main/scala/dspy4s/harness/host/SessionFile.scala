@@ -26,7 +26,7 @@ import scala.util.{Try, Using}
   * Only the writer of the session uses the file, so the methods hold no lock. The lock against a second host is the
   * lock of `LocalHost`.
   */
-final class SessionFile private (connection: Connection, val path: Path, val session: SessionId)
+final class SessionFile private (private val connection: Connection, val path: Path, val session: SessionId)
     extends AutoCloseable:
 
   /** Adds the rows of one commit in one transaction, or none of them. `flush` runs the transaction with
@@ -82,6 +82,30 @@ final class SessionFile private (connection: Connection, val path: Path, val ses
         }
       }
     }.toEither.left.map(e => s"the read of the journal $path failed: ${e.getMessage}").flatten
+
+  /** The rows with a `seq` from `from` on, in the order of `seq`, as they are in the file: each with the text of its
+    * `entry` column and its decoded value, or the error of its decode (docs/code-harness/OBSERVABILITY.md, 5.3). A row
+    * that does not decode is a row too, so a reader can show it.
+    */
+  def rows(from: Long): Either[String, Vector[SessionFile.Row]] =
+    Try {
+      Using.resource(connection.prepareStatement(SessionFile.Select)) { select =>
+        select.setString(1, session.value)
+        select.setLong(2, from)
+        Using.resource(select.executeQuery()) { rows =>
+          val out = Vector.newBuilder[SessionFile.Row]
+          while rows.next() do
+            val text = rows.getString(3)
+            out += SessionFile.Row(
+              rows.getLong(1),
+              rows.getBoolean(2),
+              text,
+              SessionFile.codec.decode(text).left.map(_.toString)
+            )
+          out.result()
+        }
+      }
+    }.toEither.left.map(e => s"the read of the journal $path failed: ${e.getMessage}")
 
   /** The largest `seq` of the session in the file, also of a row that does not decode, or -1 for no row. The writer
     * gives the next entry the `seq` after it.
@@ -154,7 +178,7 @@ object SessionFile:
   def folderOf(root: Path): Path = root.resolve("sessions")
 
   /** Opens the journal at `path` to read it (`mode=ro`): a file that does not exist gives an error, and nothing on the
-    * disk changes (8.7).
+    * disk changes (8.7). The URL of the read is `readUrl`.
     */
   def readOnly(path: Path, session: SessionId): Either[String, SessionFile] =
     if !JFiles.isRegularFile(path) then Left(s"the journal $path does not exist")
@@ -163,8 +187,37 @@ object SessionFile:
         val settings = SQLiteConfig()
         settings.setReadOnly(true)
         settings.setBusyTimeout(FileLines.BusyMillis)
-        SessionFile(DriverManager.getConnection(s"jdbc:sqlite:$path", settings.toProperties), path, session)
+        SessionFile(DriverManager.getConnection(readUrl(path), settings.toProperties), path, session)
       }.toEither.left.map(e => s"the journal $path did not open: ${e.getMessage}")
+
+  /** The URL of a read of the SQLite file at `path` with WAL. A read-only connection to a file with no `-wal` file
+    * makes a `-wal` and a `-shm` file, and they stay after its close. A file with no `-wal` file has no open writer, so
+    * its read uses `immutable=1`, and nothing comes on the disk. A file with a `-wal` file has an open writer (or a
+    * writer that stopped), so its read uses that file, and it sees each commit of the writer.
+    */
+  private[host] def readUrl(path: Path): String =
+    if JFiles.exists(path.resolveSibling(s"${path.getFileName}-wal")) then s"jdbc:sqlite:$path"
+    else s"jdbc:sqlite:file:${path.toAbsolutePath.toUri.getRawPath}?immutable=1"
 
   /** The path of the file of `session` under the root of a host: `<root>/sessions/<id>.db`. */
   def pathOf(root: Path, session: SessionId): Path = folderOf(root).resolve(s"${session.value}.db")
+
+  /** One row of a journal as it is in the file: its `seq`, its `required` flag, the text of its `entry` column, and its
+    * decoded value or the error of its decode (`SessionFile.rows`).
+    */
+  final case class Row(seq: Long, required: Boolean, text: String, logged: Either[String, Logged]) derives CanEqual
+
+  /** The session of the first row of the journal at `path`, read with `readOnly`: for the journal of a probe, whose
+    * file name does not hold its session.
+    */
+  def sessionOf(path: Path): Either[String, SessionId] =
+    readOnly(path, SessionId("unknown")).flatMap { file =>
+      try Try {
+          Using.resource(file.connection.createStatement()) { statement =>
+            Using.resource(statement.executeQuery("select session from journal order by seq limit 1")) { rows =>
+              Option.when(rows.next())(SessionId(rows.getString(1))).toRight(s"the journal $path has no row")
+            }
+          }
+        }.toEither.left.map(e => s"the read of the journal $path failed: ${e.getMessage}").flatten
+      finally file.close()
+    }
