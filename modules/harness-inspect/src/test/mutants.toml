@@ -1,0 +1,99 @@
+# The mutants of the inspector. Each mutant breaks one rule of section 5 of docs/code-harness/OBSERVABILITY.md, and
+# laws L10 to L15 of its section 6 must kill it.
+#
+# `python3 scripts/mutants/mutants.py modules/harness-inspect/src/test/mutants.toml` applies each mutant alone, runs the
+# tests of the module, and restores the code. At least one test must fail for each mutant.
+
+module = "harness-inspect"
+project = "harnessInspect"
+sources = "modules/harness-inspect/src/main/scala/dspy4s/harness/inspect"
+
+# ── The server (5.1) ──
+
+[[mutant]]
+name = "Mutant: a request with any Host header gets data"
+[[mutant.edit]]
+file = "Inspector.scala"
+old = """if !host.exists(h => h == s"127.0.0.1:$port" || h == s"localhost:$port") then"""
+new = """if !host.exists(h => h.nonEmpty || h == s"localhost:$port") then"""
+
+[[mutant]]
+name = "Mutant: a POST gets data"
+[[mutant.edit]]
+file = "Inspector.scala"
+old = """else if method != "GET" then"""
+new = """else if method == "PUT" then"""
+
+[[mutant]]
+name = "Mutant: the policy of a page lets each inline script run"
+[[mutant.edit]]
+file = "Inspector.scala"
+old = "script-src 'nonce-$nonce';"
+new = "script-src 'unsafe-inline';"
+
+[[mutant]]
+name = "Mutant: the store opens a journal to write it"
+[[mutant.edit]]
+file = "Store.scala"
+old = "SessionFile.readOnly(path, session).flatMap { file =>"
+new = "SessionFile.open(path, session).flatMap { file =>"
+
+[[mutant]]
+name = "Mutant: the store opens the catalog to write it"
+[[mutant.edit]]
+file = "Store.scala"
+old = "Catalog.readOnly(Catalog.pathOf(root)).toOption"
+new = "Catalog.open(Catalog.pathOf(root)).toOption"
+
+# ── The pages (5.2) ──
+
+[[mutant]]
+name = "Mutant: after/{seq} gives the row of seq again"
+[[mutant.edit]]
+file = "Pages.scala"
+old = "store.rows(session, seq + 1).map { rows =>"
+new = "store.rows(session, seq).map { rows =>"
+
+[[mutant]]
+name = "Mutant: an exchange goes after the entry before its after"
+[[mutant.edit]]
+file = "Pages.scala"
+old = "seqs.filter(_ <= x.after).lastOption"
+new = "seqs.filter(_ < x.after).lastOption"
+
+# ── The views (5.3) ──
+
+[[mutant]]
+name = "Mutant: the JSON view is not the text of the file"
+[[mutant.edit]]
+file = "EntryViews.scala"
+old = "_.print(WriterConfig.withIndentionStep(2)))"
+new = """_.print(WriterConfig.withIndentionStep(2)).replace("\\"seq\\"", "\\"seq0\\""))"""
+
+[[mutant]]
+name = "Mutant: the Scala view on one line has no field names"
+[[mutant.edit]]
+file = "ScalaText.scala"
+old = """flat(v).map(text => s"$name = $text")"""
+new = """flat(v).map(text => s"${name.take(0)}$text")"""
+
+[[mutant]]
+name = "Mutant: a backslash in a Scala literal is not escaped"
+[[mutant.edit]]
+file = "ScalaText.scala"
+old = '''case '\\'                         => "\\\\"'''
+new = '''case '\\'                         => "\\"'''
+
+[[mutant]]
+name = "Mutant: the escape keeps a <"
+[[mutant.edit]]
+file = "Html.scala"
+old = """case '<'   => out ++= "&lt;""""
+new = """case '<'   => out ++= "<""""
+
+[[mutant]]
+name = "Mutant: a paragraph of a card has no escape"
+[[mutant.edit]]
+file = "EntryViews.scala"
+old = """private def paragraph(text: String): String = s"<p>${escape(text)}</p>""""
+new = """private def paragraph(text: String): String = s"<p>$text</p>""""

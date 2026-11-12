@@ -1,14 +1,14 @@
-# The mutants of the exchange file of a session. Each mutant breaks one rule of 4.2, 4.3 or 4.4 of
-# docs/code-harness/OBSERVABILITY.md, and laws L6 to L9 of its section 6 must kill it.
+# The mutants of the exchange file of a session and of the reads of the inspector. Each mutant breaks one rule of 4.2,
+# 4.3, 4.4 or 5.1 of docs/code-harness/OBSERVABILITY.md, and the laws of its section 6 must kill it.
 #
 # `python3 scripts/mutants/mutants.py modules/harness-host/src/test/mutants.toml` applies each mutant alone, runs the
 # suites of `tests`, and restores the code. The whole suite of the host takes minutes, so `tests` names only the laws of
-# the exchange file.
+# the exchange file and of the journal file.
 
 module = "harness-host"
 project = "harnessHost"
 sources = "modules/harness-host/src/main/scala/dspy4s/harness/host"
-tests = "dspy4s.harness.host.ExchangeFileLaws"
+tests = "dspy4s.harness.host.ExchangeFileLaws dspy4s.harness.host.SessionFileLaws"
 
 # ── The labels (4.2) ──
 
@@ -92,3 +92,19 @@ name = "Mutant: a secret header keeps a value that the mask does not know"
 file = "ExchangeFile.scala"
 old = "if Environment.isSecret(name) then"
 new = "if Environment.isSecret(name) && name.isEmpty then"
+
+# ── The reads of the inspector (5.1) ──
+
+[[mutant]]
+name = "Mutant: a read of a closed journal makes a -wal and a -shm file"
+[[mutant.edit]]
+file = "SessionFile.scala"
+old = """if JFiles.exists(path.resolveSibling(s"${path.getFileName}-wal")) then s"jdbc:sqlite:$path""""
+new = """if path.toString.nonEmpty then s"jdbc:sqlite:$path""""
+
+[[mutant]]
+name = "Mutant: a read of a journal with an open writer does not see the WAL"
+[[mutant.edit]]
+file = "SessionFile.scala"
+old = """if JFiles.exists(path.resolveSibling(s"${path.getFileName}-wal")) then s"jdbc:sqlite:$path""""
+new = """if path.toString.isEmpty then s"jdbc:sqlite:$path""""

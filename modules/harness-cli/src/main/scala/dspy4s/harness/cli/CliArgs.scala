@@ -1,5 +1,6 @@
 package dspy4s.harness.cli
 
+import dspy4s.harness.inspect.Inspector
 import dspy4s.harness.kernel.SessionId
 
 import java.nio.file.Path
@@ -22,6 +23,10 @@ import scala.annotation.tailrec
   *   the list of the sessions of the root, in place of a session
   * @param controller
   *   the client opens the controller of the root (8.7), not a work session. The folder does not apply to it.
+  * @param inspect
+  *   the inspector of the root (docs/code-harness/OBSERVABILITY.md, 5), in place of a session
+  * @param port
+  *   the port of the inspector on 127.0.0.1, 0 for a free port
   */
 final case class CliArgs(
     scope     : Path,
@@ -29,7 +34,9 @@ final case class CliArgs(
     session   : Option[String],
     script    : Boolean = false,
     list      : Boolean = false,
-    controller: Boolean = false
+    controller: Boolean = false,
+    inspect   : Boolean = false,
+    port      : Int     = Inspector.DefaultPort
 ) derives CanEqual
 
 object CliArgs:
@@ -37,11 +44,14 @@ object CliArgs:
   /** The text that an error of the arguments gives. */
   val usage: String = "Usage: dspy4s-harness [--root DIR] [--session ID | --controller] [--script] [FOLDER]\n" +
     "       dspy4s-harness [--root DIR] --list\n" +
+    "       dspy4s-harness [--root DIR] --inspect [--port N]\n" +
     "  --root DIR     the root of the host, by default ~/.dspy4s/harness\n" +
     "  --session ID   open the session ID again, with its own configuration. A part at the start of the id is\n" +
     "                 enough when only one session has it\n" +
     "  --controller   open the controller of the root, which starts and follows the work sessions\n" +
     "  --list         list the sessions of the root, the newest first\n" +
+    "  --inspect      serve the inspector of the journals and the exchange files of the root on 127.0.0.1\n" +
+    s"  --port N       the port of the inspector, by default ${Inspector.DefaultPort}; 0 takes a free port\n" +
     "  --script       run one line at a time: each line waits for the end of the turn before it, and the end of\n" +
     "                 the input waits for the open turn\n" +
     "  FOLDER         the folder of a new session, by default the current folder"
@@ -60,18 +70,25 @@ object CliArgs:
     def at(path: String): Path = cwd.resolve(path).normalize()
 
     @tailrec
-    def walk(rest: List[String], got: CliArgs, folder: Option[Path]): Either[String, CliArgs] =
+    def walk(rest: List[String], got: CliArgs, folder: Option[Path], port: Boolean = false): Either[String, CliArgs] =
       rest match
-        case Nil if got.controller && got.session.nonEmpty                          => Left(s"Give --session or --controller, not both.\n$usage")
-        case Nil                                                                    => Right(folder.fold(got)(f => got.copy(scope = f)))
-        case "--root" :: dir :: more if !dir.startsWith("--")                       => walk(more, got.copy(root = at(dir)), folder)
+        case Nil if got.controller && got.session.nonEmpty => Left(s"Give --session or --controller, not both.\n$usage")
+        case Nil if port && !got.inspect                   => Left(s"Give --port only with --inspect.\n$usage")
+        case Nil
+            if got.inspect && (got.session.nonEmpty || got.controller || got.list || got.script || folder.nonEmpty) =>
+          Left(s"Give --inspect with only --root and --port.\n$usage")
+        case Nil                                                                      => Right(folder.fold(got)(f => got.copy(scope = f)))
+        case "--inspect" :: more                                                      => walk(more, got.copy(inspect = true), folder, port)
+        case "--port" :: n :: more if n.toIntOption.exists(p => p >= 0 && p <= 65535) =>
+          walk(more, got.copy(port = n.toInt), folder, port = true)
+        case "--root" :: dir :: more if !dir.startsWith("--")                       => walk(more, got.copy(root = at(dir)), folder, port)
         case "--session" :: id :: _ if !id.startsWith("--") && !SessionId.valid(id) =>
           Left(s"The session id $id is not valid.\n$usage")
-        case "--session" :: id :: more if !id.startsWith("--") => walk(more, got.copy(session = Some(id)), folder)
-        case "--script" :: more                                => walk(more, got.copy(script = true), folder)
-        case "--list" :: more                                  => walk(more, got.copy(list = true), folder)
-        case "--controller" :: more                            => walk(more, got.copy(controller = true), folder)
+        case "--session" :: id :: more if !id.startsWith("--") => walk(more, got.copy(session = Some(id)), folder, port)
+        case "--script" :: more                                => walk(more, got.copy(script = true), folder, port)
+        case "--list" :: more                                  => walk(more, got.copy(list = true), folder, port)
+        case "--controller" :: more                            => walk(more, got.copy(controller = true), folder, port)
         case flag :: _ if flag.startsWith("--")                => Left(s"The argument $flag is not right.\n$usage")
-        case path :: more if folder.isEmpty                    => walk(more, got, Some(at(path)))
+        case path :: more if folder.isEmpty                    => walk(more, got, Some(at(path)), port)
         case path :: _                                         => Left(s"Give one folder, not also $path.\n$usage")
     walk(args.toList, CliArgs(cwd.normalize(), home.resolve(".dspy4s/harness").normalize(), None), None)

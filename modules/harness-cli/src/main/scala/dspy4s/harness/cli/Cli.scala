@@ -5,6 +5,7 @@ import dspy4s.core.contracts.{DspyError, RuntimeContext, RuntimeError}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.harness.{HarnessLimits, Secrets}
 import dspy4s.harness.guest.JobStatus
+import dspy4s.harness.inspect.Inspector
 import dspy4s.harness.host.{
   Behind,
   Controller,
@@ -63,7 +64,8 @@ object Cli:
       case Left(usage) =>
         System.err.println(usage)
         2
-      case Right(cli) if cli.list =>
+      case Right(cli) if cli.inspect => inspect(cli.root, cli.port)
+      case Right(cli) if cli.list    =>
         listText(cli.root, ZoneId.systemDefault()) match
           case Left(error) =>
             System.err.println(error)
@@ -195,6 +197,20 @@ object Cli:
       if fromProcess.get(name).exists(_ != value) then s"$name (.env)" -> value else name -> value
     }
     Secrets(fromFile ++ fromProcess)
+
+  /** Serves the inspector of `root` on `port` until the process ends (docs/code-harness/OBSERVABILITY.md, 5.1). The
+    * server runs on its own threads, so this thread only waits, and Ctrl-C ends the process.
+    */
+  private def inspect(root: Path, port: Int): Int =
+    Inspector.start(root, port) match
+      case Left(error) =>
+        System.err.println(error)
+        1
+      case Right(inspector) =>
+        Try(Runtime.getRuntime.addShutdownHook(Thread(() => inspector.close()))): Unit
+        println(s"The inspector of $root runs at ${inspector.url} . Ctrl-C ends it.")
+        Try(Thread.currentThread().join()): Unit
+        0
 
   /** The model of the variables `env`, or a model whose calls fail with the reason. */
   private[cli] def modelOf(name: String, env: Map[String, String]): LanguageModel =
