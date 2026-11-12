@@ -1958,6 +1958,11 @@ These points are proposals for the review:
   ([OBSERVABILITY.md](OBSERVABILITY.md), 4, 2026-11-12). A request line has the exact body, the session, the `seq`
   before the call and the predictor. A reply line has the status, the headers, and the body or each line of the
   stream. The mask of 5.6 covers each text. `DSPY_EXCHANGES=off` turns the file off.
+- `dspy4s-harness --inspect` serves the inspector of a root on 127.0.0.1:7411 ([OBSERVABILITY.md](OBSERVABILITY.md),
+  5). It only reads: a list of the sessions, a session as a tree with each exchange after its entry, three views of
+  each entry (card, Scala and JSON), the raw rows, and the follow of a session that runs. A read-only connection to a
+  closed SQLite file with WAL made a `-wal` and a `-shm` file that stayed, so `SessionFile.readOnly` now opens a file
+  with no `-wal` file with `immutable=1`.
 - Until a real configuration file exists, the CLI reads its variables also from `<home>/.dspy4s/harness/.env`
   (2026-11-10). It reads this file also with another `--root`, so a live scenario with a temporary root finds it. A
   variable of the process wins over the file. The base URL and the key are the exception: both come from the file when

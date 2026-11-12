@@ -1,6 +1,6 @@
 # The inspector and the exchange files: a proposal
 
-Status: the review took the proposal on 2026-11-12 (9.2), and O1 and O2 are built. It covers two needs. A person
+Status: the review took the proposal on 2026-11-12 (9.2), and O1 to O3 are built. It covers two needs. A person
 must see the journal of a session. A person must also see each HTTP request that the harness sends to the model
 endpoint, with its reply. Each of the two must have raw views and a formatted view.
 
@@ -207,43 +207,65 @@ token and a prompt of 20 to 80 KB.
 
 ### 5.1 The server
 
-- `dspy4s-harness --inspect [--root DIR] [--port N]` starts the server and prints its URL.
-- It uses the JDK `com.sun.net.httpserver.HttpServer`, so it adds no dependency.
+- `dspy4s-harness --inspect [--root DIR] [--port N]` starts the server and prints its URL. The default port is 7411,
+  and `--port 0` takes a free port. `--inspect` takes no session, no list, no script mode and no folder.
+- It uses the JDK `com.sun.net.httpserver.HttpServer` on virtual threads, so it adds no dependency.
 - It listens on 127.0.0.1 only. It answers only a request whose `Host` header is `127.0.0.1:PORT` or
-  `localhost:PORT`, so a web page that uses DNS rebinding gets no data. It sends no CORS headers, so a page of another
-  origin cannot read a reply.
-- It answers only `GET`. It opens each journal with `SessionFile.readOnly`, the catalog with `mode=ro`, and each
-  exchange file as a plain read.
-- It is a new module, `harness-inspect`. The module uses `harness-host` for the journal and the catalog, and `lm` for
-  the parser of a stream. The CLI uses it for `--inspect`.
+  `localhost:PORT`, so a web page that uses DNS rebinding gets 403 and no data. It sends no CORS headers, so a page of
+  another origin cannot read a reply.
+- It answers only `GET`, and each other method gets 405.
+- A page has a policy of its scripts (`Content-Security-Policy`): only the script with the nonce of that reply runs.
+  So a script that a text could make does not run, also if an escape fails. A reply also has `no-store`, `nosniff`,
+  `no-referrer`, and a page `X-Frame-Options: DENY`.
+- `Store` reads the files of the root. It opens each journal with `SessionFile.readOnly` and the catalog with
+  `Catalog.readOnly` for one call, so the inspector holds no connection while it waits. An exchange file is a plain
+  read.
+- **A fact that O3 found.** A read-only connection to a SQLite file with WAL and no `-wal` file makes a `-wal` and a
+  `-shm` file, and they stay after its close. `SessionFile.readOnly` said that nothing changes on the disk, and this
+  was not true for the reads of the host either. Now `SessionFile.readUrl` opens a file with no `-wal` file with
+  `immutable=1`: it has no open writer, and nothing comes on the disk. A file with a `-wal` file has an open writer,
+  and its read uses that file, so it sees each commit. So the inspector also reads a root that it cannot write, for
+  example an archive.
+- It is a new module, `harness-inspect`, on `harness-host`. The CLI uses it for `--inspect`.
 
 ### 5.2 The pages
 
-- **`/`: the sessions,** the newest first, from the catalog: the first message, the folder, the status, the time of
-  the last entry, and a link to the parent. The probes show under their caller.
+- **`/`: the sessions,** the newest first: the rows of the catalog, and the fold of each journal that the catalog does
+  not have (10.2). A row has the time of the last entry, the status, the first message, the folder, the id and a link
+  to the parent. The probes of a session show under it, with a link to `/p/{name}`.
 - **`/s/{id}`: one session as a tree.** An `Input` comes first, then its turn, then the steps of the turn. Each step
   holds its `Acted`, its effects and its `Observed`, and the turn ends with its `TurnEnded`.
-  - Each exchange shows after its `after` entry, with its predictor, its time, the wait for the first line, and the
-    tokens of its usage.
-  - A filter selects the kinds of entries and the predictors of the exchanges.
-  - A switch sets the view of all the entries (Scala, JSON or card), and each entry has its own switch.
-- **`/s/{id}/x/{xid}`: one exchange** with the four views of 5.4.
-- **A session that runs.** The page asks for the new rows each second (`/s/{id}/after/{seq}`) and adds them. The
-  journal uses WAL, so a reader sees each commit whole. An exchange with a `request` line and no `reply` line shows as
-  open.
+  - Each exchange shows after the last entry whose `seq` is not more than its `after`. Its row has the predictor,
+    stream or plain, the status, the end (or `open`), the wait for the first line, the whole time, the bytes of the
+    request and of the reply, the tokens of the usage, and links to its raw request and reply.
+  - The bar has the facts (the id, the folder, the status and the counts), a switch for the view of all the entries
+    (card, Scala or JSON), the follow, the filters, and the raw paths. The filters of the kinds of entries and of the
+    predictors are folded, so the bar stays short in a small window. Each entry also has its own switch.
+- **`/p/{name}`: the journal of a probe,** as a tree with no exchanges. Its exchanges are in the file of its caller.
+- **`/s/{id}/x/{xid}`: one exchange** with the four views of 5.4 (O4).
+- **A session that runs.** Each second, the page asks for `/s/{id}/after/{seq}?size=N`. The fragment has each entry
+  with a greater `seq` and the status of the session. When the exchange file does not have the size `N`, it also has
+  each exchange row again. The page adds the entries, places the exchanges after their entries again, updates the
+  status and the counts, and goes to the end when it was at the end. The journal uses WAL, so a reader sees each commit
+  whole. An exchange with a `request` line and no `reply` line shows as open.
 
 ### 5.3 The views of an entry
 
-- **Scala.** The decoded `Logged` value as Scala text with indents. A small printer reads each value through
+- **Scala.** The decoded `Logged` value as Scala text with indents (`ScalaText`). The printer reads each value through
   `Product` (`productPrefix`, `productElementNames` and `productIterator`). So it gives the names of the cases and of
-  the fields as the code has them. A string with a line end prints as a `"""` block, and a `Json` value prints as
-  `Json(<its text>)`. A row that does not decode shows its error in this view.
-- **JSON.** The `entry` column as it is in the file, with indents, and the columns `seq` and `required`.
+  the fields as the code has them.
+  - A string is a Scala literal, and a string with a line end is a `"""` block. A `Long` has the suffix `L`, and a
+    `Json` value prints as `Json(<its text>)`.
+  - A value goes on one line when it fits in 100 characters and holds no block. A card uses the form on one line
+    (`ScalaText.line`) for a short part, for example the scope.
+  - A row that does not decode shows its error in this view.
+- **JSON.** The `entry` column as it is in the file, with an indent of 2. The printer of zio-blocks writes an empty
+  object on three lines. The view keeps that, because a change of the text could change a string in it.
 - **Card.** A formatted card for each case of `Entry`. It shows the reasoning folded, the text, the code of a cell,
   the output and the outcome. It also shows the time, the source, and a mark for `Taint.External`.
   - The server makes the HTML of the card with a `match` on `Entry`. With `-Werror`, a `match` that does not cover each
     case does not compile. So a new case of `Entry` must get a card.
-  - Each text goes through an HTML escape.
+  - Each text goes through an HTML escape. A long block of a card has a scroll.
 
 ### 5.4 The views of an exchange
 
@@ -298,14 +320,23 @@ The exchange file, in the host:
 
 The inspector:
 
-- **L10. Only reads.** After any sequence of requests, the journals, the catalog and the exchange files have the same
-  bytes.
-- **L11. The host check.** A request with another `Host` header gets the status 403 and no data.
+- **L10. Only reads.** After any sequence of requests, the files of the root have the same bytes, and no file comes.
+  The inspector also reads a root that it cannot write, and the rows of its catalog. Two laws of the host show the
+  reads of `readOnly`: a closed journal and a closed catalog get no new file, and a journal with an open writer gives
+  each commit.
+- **L11. The host check.** A request with another `Host` header gets the status 403 and no data, and a method that is
+  not `GET` gets 405. A page has the policy of its scripts with the nonce of its script, and no reply has a CORS
+  header.
 - **L12. The JSON view.** Its text decodes to the same `Logged` as the row.
 - **L13. The Scala view.** A generator covers each case of `Entry`. For each value, the text has the name of the case
   and the name of each field.
-- **L14. The escape.** For any text in an entry, the card holds no markup from that text.
-- **L15. Follow.** `after/{seq}` gives the rows with a greater `seq`, all of them, in their order.
+- **L14. The escape.** For any text in an entry, the card and the row hold no markup from that text. The escape gives
+  an entity for each of the five marks of HTML.
+- **L15. Follow.** `after/{seq}` gives the rows with a greater `seq`, all of them, in their order, and the status of
+  the session. A reader that follows a journal while a writer appends gets each row once, in order.
+- **The pages.** Each exchange shows after its entry, and an exchange with no reply shows as open. The list of the
+  sessions comes from the catalog, and from the journals with no catalog. The raw paths give the rows, the exchange
+  file and the bodies of an exchange, and a path that leaves the root gets 404.
 - **L16. The diff.** The diff of `a` and `b`, applied to `a`, gives `b`. The diff of `a` with `a` has no change. The
   kept lines occur in `a` and in `b` in the same order.
 
