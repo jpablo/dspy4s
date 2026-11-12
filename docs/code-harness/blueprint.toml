@@ -1176,7 +1176,7 @@ name = "SessionCard"
 ref = "10.2"
 spec = true
 uses = ["session-ref", "scope"]
-text = "What list shows about a session: the id, the goal, the scope, the owner, the parent, the status, the last seq, the files that it made, its commands and its head (8.7). The decisions and the open questions come with the graph of phase 10."
+text = "What list shows about a session: the id, the goal, the scope, the owner, the parent, the status, the last seq, the files that it made, its commands and its head (8.7). A proposal: the design names the fields and gives no type. The decisions and the open questions of CODE_HARNESS.md 7.4 come with the graph of phase 10."
 
 # ── Phase 2: Data, the codec of the values that leave a cell (5.1) ──────────────────────────────────────────────────
 

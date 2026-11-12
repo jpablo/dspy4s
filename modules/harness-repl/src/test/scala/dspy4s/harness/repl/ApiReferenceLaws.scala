@@ -48,6 +48,25 @@ class ApiReferenceLaws extends munit.FunSuite:
     assertEquals(ApiReference(Mode.full), whole.mkString("\n\n"))
   }
 
+  test("ApiReference: each call of the object api has a doc comment in the reference of the full mode") {
+    // In a live session (70e1947a, 2026-11-11), the person asked why api.write had "just the name, no description".
+    val lines = ApiReference(Mode.full).linesIterator.toVector
+    val start = lines.indexWhere(_.contains("object api:"))
+    val body  = lines.drop(start + 1).takeWhile(line => line.isEmpty || line.startsWith(" "))
+    val bare  =
+      body.indices.filter(i => body(i).trim.startsWith("def ") && !body.lift(i - 1).exists(_.trim.endsWith("*/")))
+    assert(start >= 0, "the reference has no object api")
+    assert(bare.isEmpty, s"calls with no description:\n${bare.map(i => body(i).trim).mkString("\n")}")
+  }
+
+  test("ApiReference: the reference has no note for the review and no number of a section of the design") {
+    // The model reads the reference. A note for the developers, as "A proposal for the review: section 5.1 names
+    // edit", or a section number, as "(5.1)", means nothing to it.
+    val notes = raw"A proposal for the review|CODE_HARNESS|\(\d+(\.\d+)?(, \d+(\.\d+)?)*\)".r
+    val found = ApiReference(Mode.full).linesIterator.filter(line => notes.findFirstIn(line).nonEmpty).toVector
+    assert(found.isEmpty, s"lines with a note for the developers:\n${found.mkString("\n")}")
+  }
+
   test("ApiReference: a definition that goes takes its doc comment, and a trait that goes takes its members") {
     val reference = ApiReference(Mode.readOnly.copy(llm = Access.None, sessions = Access.None))
     assert(reference.contains("def read(path: String): String"), reference)
