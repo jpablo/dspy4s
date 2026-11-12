@@ -1,0 +1,83 @@
+# The mutants of the record of the HTTP exchanges. Each mutant breaks one rule of 4.1 of
+# docs/code-harness/OBSERVABILITY.md, and laws L1 to L5 of its section 6 must kill it.
+#
+# `python3 scripts/mutants/mutants.py modules/lm/src/test/mutants.toml` applies each mutant alone, runs the tests of
+# the module, and restores the code. At least one test must fail for each mutant.
+
+module = "lm"
+project = "lm"
+sources = "modules/lm/src/main/scala/dspy4s/lm"
+
+[[mutant]]
+name = "Mutant: with a sink, the model uses the client of the model"
+[[mutant.edit]]
+file = "providers/OpenAiLanguageModel.scala"
+old = "ExchangeSink.of(context).fold(client)(sink => client.copy(transport = RecordedTransport(client.transport, sink)))"
+new = "ExchangeSink.of(context).fold(client)(_ => client)"
+
+[[mutant]]
+name = "Mutant: a stream with a sink loses the failure of the reply"
+[[mutant.edit]]
+file = "providers/RecordedTransport.scala"
+old = "Right(response.copy(dataLines = RecordedLines(response.dataLines, response.failure, record)))"
+new = "Right(HttpStreamResponse(response.status, response.headers, RecordedLines(response.dataLines, response.failure, record)))"
+
+[[mutant]]
+name = "Mutant: the record of a plain reply has an empty body"
+[[mutant.edit]]
+file = "providers/RecordedTransport.scala"
+old = "record.body(response.body)"
+new = "record.body(\"\")"
+
+[[mutant]]
+name = "Mutant: an exception of the transport leaves the record open"
+[[mutant.edit]]
+file = "providers/RecordedTransport.scala"
+old = "        record.end(thrown(e))"
+new = "        record.line(thrown(e).toString)"
+
+[[mutant]]
+name = "Mutant: the end of the lines drops the failure of the reply"
+[[mutant.edit]]
+file = "providers/RecordedTransport.scala"
+old = "try failure().fold(ExchangeEnd.Done)(RecordedTransport.failed)"
+new = "try failure().fold(ExchangeEnd.Done)(_ => ExchangeEnd.Done)"
+
+[[mutant]]
+name = "Mutant: the record takes each end"
+[[mutant.edit]]
+file = "providers/RecordedTransport.scala"
+old = """      if !ended then
+        ended = true"""
+new = """      if true then
+        ended = true"""
+
+[[mutant]]
+name = "Mutant: a line after the end reaches the record"
+[[mutant.edit]]
+file = "providers/RecordedTransport.scala"
+old = "synchronized(if !ended then GuardedRecord.quietly(give))"
+new = "synchronized(GuardedRecord.quietly(give))"
+
+[[mutant]]
+name = "Mutant: the close ends the record after the close of the inner lines"
+[[mutant.edit]]
+file = "providers/RecordedTransport.scala"
+old = """    record.end(ExchangeEnd.Closed)
+    inner.close()"""
+new = """    inner.close()
+    record.end(ExchangeEnd.Closed)"""
+
+[[mutant]]
+name = "Mutant: an exception of the start of a sink reaches the caller"
+[[mutant.edit]]
+file = "providers/RecordedTransport.scala"
+old = "quietly { made = sink.start(request) }"
+new = "made = sink.start(request)"
+
+[[mutant]]
+name = "Mutant: an exception of a record reaches the caller"
+[[mutant.edit]]
+file = "providers/RecordedTransport.scala"
+old = "case NonFatal(_)             => ()"
+new = "case NonFatal(e)             => throw e"

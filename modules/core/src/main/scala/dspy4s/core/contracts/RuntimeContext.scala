@@ -22,14 +22,21 @@ final case class RuntimeServices(
       * the framework reads it (`LanguageModel.callAndRecordUsage`), so each model streams. An inner `streamify` sets
       * its own stream for its program. `None` when no stream runs.
       */
-    streamSink: Option[StreamSinkRef] = None
+    streamSink: Option[StreamSinkRef] = None,
+    /** The record of the HTTP exchanges of the model calls (docs/code-harness/OBSERVABILITY.md, 4.1). A provider reads
+      * it at each model call, and gives each request and each reply to it. `None` when no record runs.
+      */
+    exchangeSink: Option[ExchangeSinkRef] = None
 ) derives CanEqual:
   /** Fill each unset field from `defaults`. When `defaults` fills no field, the result is this value itself. */
   def fillFrom(defaults: RuntimeServices): RuntimeServices =
-    val complete = (lm.isDefined || defaults.lm.isEmpty) && (adapter.isDefined || defaults.adapter.isEmpty) &&
-      (callbacks.isDefined || defaults.callbacks.isEmpty) &&
-      (interpreterFactory.isDefined || defaults.interpreterFactory.isEmpty) &&
-      (streamSink.isDefined || defaults.streamSink.isEmpty)
+    val complete =
+      (lm.isDefined || defaults.lm.isEmpty) &&
+        (adapter.isDefined || defaults.adapter.isEmpty) &&
+        (callbacks.isDefined || defaults.callbacks.isEmpty) &&
+        (interpreterFactory.isDefined || defaults.interpreterFactory.isEmpty) &&
+        (streamSink.isDefined || defaults.streamSink.isEmpty) &&
+        (exchangeSink.isDefined || defaults.exchangeSink.isEmpty)
     if complete then this
     else
       RuntimeServices(
@@ -37,7 +44,8 @@ final case class RuntimeServices(
         adapter = adapter.orElse(defaults.adapter),
         callbacks = callbacks.orElse(defaults.callbacks),
         interpreterFactory = interpreterFactory.orElse(defaults.interpreterFactory),
-        streamSink = streamSink.orElse(defaults.streamSink)
+        streamSink = streamSink.orElse(defaults.streamSink),
+        exchangeSink = exchangeSink.orElse(defaults.exchangeSink)
       )
 
   /** `true` when this value filled from `installed` gives `installed`: each service that this value sets is the same
@@ -47,7 +55,7 @@ final case class RuntimeServices(
   private[dspy4s] def keptBy(installed: RuntimeServices): Boolean =
     sameObject(lm, installed.lm) && sameObject(adapter, installed.adapter) &&
       sameObject(interpreterFactory, installed.interpreterFactory) &&
-      sameObject(streamSink, installed.streamSink) &&
+      sameObject(streamSink, installed.streamSink) && sameObject(exchangeSink, installed.exchangeSink) &&
       callbacks.forall { requested =>
         installed.callbacks.exists(list => (list eq requested) || list.corresponds(requested)(_ eq _))
       }
@@ -188,6 +196,7 @@ final class RuntimeContext private (
   def adapter: Option[AdapterRef]                        = services.adapter
   def interpreterFactory: Option[ReplInterpreterFactory] = services.interpreterFactory
   def streamSink: Option[StreamSinkRef]                  = services.streamSink
+  def exchangeSink: Option[ExchangeSinkRef]              = services.exchangeSink
   def numThreads: Option[ThreadCount]                    = config.numThreads
   def maxErrors: Option[ErrorLimit]                      = config.maxErrors
   def maxHistorySize: Option[HistoryLimit]               = config.maxHistorySize
@@ -241,11 +250,12 @@ final class RuntimeContext private (
       trace               : Vector[TraceEntry]              = this.trace,
       history             : Vector[HistoryEntry]            = this.history,
       interpreterFactory  : Option[ReplInterpreterFactory]  = this.interpreterFactory,
-      streamSink          : Option[StreamSinkRef]           = this.streamSink
+      streamSink          : Option[StreamSinkRef]           = this.streamSink,
+      exchangeSink        : Option[ExchangeSinkRef]         = this.exchangeSink
   ): RuntimeContext =
     // The scope is copied, not built again: it has fields that this flat surface does not show.
     RuntimeContext.fromParts(
-      RuntimeServices(lm, adapter, callbacks, interpreterFactory, streamSink),
+      RuntimeServices(lm, adapter, callbacks, interpreterFactory, streamSink, exchangeSink),
       RuntimeConfig(
         numThreads,
         maxErrors,
@@ -306,10 +316,11 @@ object RuntimeContext:
       trace               : Vector[TraceEntry]              = Vector.empty,
       history             : Vector[HistoryEntry]            = Vector.empty,
       interpreterFactory  : Option[ReplInterpreterFactory]  = None,
-      streamSink          : Option[StreamSinkRef]           = None
+      streamSink          : Option[StreamSinkRef]           = None,
+      exchangeSink        : Option[ExchangeSinkRef]         = None
   ): RuntimeContext =
     fromParts(
-      RuntimeServices(lm, adapter, callbacks, interpreterFactory, streamSink),
+      RuntimeServices(lm, adapter, callbacks, interpreterFactory, streamSink, exchangeSink),
       RuntimeConfig(
         numThreads,
         maxErrors,

@@ -130,10 +130,11 @@ lazy val lm = (project in file("modules/lm"))
   .settings(name := "dspy4s-lm")
   .settings(
     libraryDependencies ++= Seq(
-      "io.github.iltotore" %% "iron"        % ironVersion,
-      "org.scalameta"      %% "munit"       % munitVersion  % Test,
-      "com.lihaoyi"        %% "ujson"       % ujsonVersion,
-      "io.github.cdimascio" % "dotenv-java" % dotenvVersion % Test
+      "io.github.iltotore" %% "iron"             % ironVersion,
+      "org.scalameta"      %% "munit"            % munitVersion           % Test,
+      "org.scalameta"      %% "munit-scalacheck" % munitScalacheckVersion % Test,
+      "com.lihaoyi"        %% "ujson"            % ujsonVersion,
+      "io.github.cdimascio" % "dotenv-java"      % dotenvVersion          % Test
     ),
     Test / fork := true,
     Test / javaOptions += "-Dfile.encoding=UTF-8"
