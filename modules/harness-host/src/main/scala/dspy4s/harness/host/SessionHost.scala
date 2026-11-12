@@ -1,7 +1,7 @@
 package dspy4s.harness.host
 
 import dspy4s.core.contracts.RuntimeContext
-import dspy4s.harness.{Budget, Harness, Journal, MemoryTree, Secrets, TurnEffects, drive, textSuffix}
+import dspy4s.harness.{Budget, Draft, Harness, Journal, MemoryTree, Secrets, TurnEffects, drive, textSuffix}
 import dspy4s.harness.guest.{JobStatus, Mode, Scope}
 import dspy4s.harness.kernel.{Command, EffectId, Entry, Logged, Next, Position, ReleaseItem, ReleaseStep, RequestId}
 import dspy4s.harness.kernel.{JobSelector, Owner, Rejection, ReleasePlans, ReleaseResult, ScopeState}
@@ -69,6 +69,11 @@ trait SessionHandle:
     * to the policy. A client polls it. The default is none.
     */
   def memoryUse: Option[MemoryUse] = None
+
+  /** The text that the model writes now for the policy of the open turn (`SessionRuntime.draft`), or none. A client
+    * polls it, and the journal does not keep it (CLI_SCREEN.md, 13). The default is none.
+    */
+  def draft: Option[Draft] = None
 
 /** What the handler of `Sessions` needs from its host (CODE_HARNESS_DESIGN.md, 8.7). `LocalHost` gives it. Each session
   * that a handler reaches is open in the same host, because a host holds a lock on each open session.
@@ -164,6 +169,13 @@ trait SessionRuntime:
     * none.
     */
   def memoryUse(session: SessionId): Option[MemoryUse] =
+    val _ = session
+    None
+
+  /** The text that the model writes now for the policy of the open session `session`, or none. It must not wait for the
+    * model call, because a client polls it while the call runs. The default is none.
+    */
+  def draft(session: SessionId): Option[Draft] =
     val _ = session
     None
 
@@ -765,6 +777,8 @@ private final class OpenSession private (
   override def activity: Option[Activity] = place.runtime.activity(id)
 
   override def memoryUse: Option[MemoryUse] = place.runtime.memoryUse(id)
+
+  override def draft: Option[Draft] = place.runtime.draft(id)
 
   /** Makes the next write of the session fail. Only the laws of a failed write use it. */
   private[host] def breakWritesForLaws(): Unit = writer.breakFileForLaws()

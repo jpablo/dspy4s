@@ -73,8 +73,54 @@ private[harness] object PolicyAdapter:
           Some(record(layout, text.mkString("\n\n"), Map(CodeField -> code)))
         case _ => None)
 
-  private val TextField = "text"
-  private val CodeField = "code"
+  /** The text of the step of a reply so far (CLI_SCREEN.md, 13), with the rules of `values` and of the chat format
+    * (`Draft.text`). The reply ends at the marker of the end, and a last line with no line end that can still become a
+    * marker or a fence waits (`settled`). With a marker, the text is the section of `text`, else the reply before the
+    * first marker. With no marker, the text is the reply with no `scala` fence (`outside`).
+    */
+  def textSoFar(reply: String): String =
+    val lines = settled(reply)
+    val first = lines.indexWhere(line => marker(line).isDefined)
+    if first >= 0 then sections(lines.drop(first)).getOrElse(TextField, joined(lines.take(first)))
+    else outside(lines)
+
+  /** The section of `reasoning` of a reply so far, or the empty text when the reply has no such section. */
+  def reasoningSoFar(reply: String): String =
+    val lines = settled(reply)
+    val first = lines.indexWhere(line => marker(line).isDefined)
+    if first < 0 then "" else sections(lines.drop(first)).getOrElse(ReasoningField, "")
+
+  /** The lines of a reply so far, up to the marker of the end. A last line with no line end waits when its first
+    * character that is not white space is `[` or a backquote, because it can still become a marker or a fence.
+    */
+  private def settled(reply: String): Vector[String] =
+    val lines = reply.linesIterator.toVector
+    val open  = !(reply.endsWith("\n") || reply.endsWith("\r"))
+    val ready =
+      if open && lines.lastOption.exists(_.strip.headOption.exists(c => c == '[' || c == '`')) then lines.init
+      else lines
+    ready.takeWhile(line => !marker(line).exists(_._1 == EndField))
+
+  /** The text of `lines` with no marker: each part outside a `scala` fence, with an empty line between two parts. A
+    * fence of another language is a part of the text. A `scala` fence that does not end hides the rest. A fence starts
+    * and ends as in `blocks`. For a reply with one `scala` fence, this is the text of `values`.
+    */
+  private def outside(lines: Vector[String]): String =
+    val (parts, _) = lines.foldLeft((Vector(Vector.empty[String]), Option.empty[String])) {
+      case ((parts, None), line) if line.strip.startsWith(Fence) =>
+        val language = line.strip.drop(Fence.length).strip.takeWhile(!_.isWhitespace)
+        if language == CellLanguage then (parts :+ Vector.empty, Some(language))
+        else (parts.init :+ (parts.last :+ line), Some(language))
+      case ((parts, None), line)           => (parts.init :+ (parts.last :+ line), None)
+      case ((parts, Some(language)), line) =>
+        val kept = if language == CellLanguage then parts else parts.init :+ (parts.last :+ line)
+        (kept, Option.when(line.strip != Fence)(language))
+    }
+    parts.map(joined).filter(_.nonEmpty).mkString("\n\n")
+
+  private val TextField      = "text"
+  private val CodeField      = "code"
+  private val ReasoningField = "reasoning"
 
   /** The name of the marker that ends a reply in the chat format. */
   private val EndField = "completed"

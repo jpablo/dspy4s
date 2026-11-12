@@ -3,7 +3,7 @@ package dspy4s.harness.cli
 import dspy4s.harness.guest.{Mode, Scope}
 import dspy4s.harness.host.{Activity, MemoryUse, WorkRuntime, jobName}
 import dspy4s.harness.kernel.*
-import dspy4s.harness.textPrefix
+import dspy4s.harness.{Draft, textPrefix}
 import zio.blocks.schema.json.Json
 
 /** The tone of a part of a row of the screen. The console gives each tone a color, or no color with `NO_COLOR`. */
@@ -118,6 +118,13 @@ object Screen:
   private val ResultLines = 3
   private val OutputLines = 20
 
+  /** The most lines of a draft in the live block (CLI_SCREEN.md, 13): of its reasoning in the views `short` and `full`,
+    * and of its text.
+    */
+  private val DraftShort = 3
+  private val DraftFull  = 12
+  private val DraftText  = 16
+
   /** The most characters of a command, or of another argument, on the line of a call. */
   private val ArgChars = 80
 
@@ -189,8 +196,17 @@ object Screen:
       case Entry.Ended(outcome, reason) => (screen, marked(g.reply, Tone.Accent, outcome.report(reason)))
       case _                            => (screen, Vector.empty)
 
-  /** The live block at `nowMillis`, for the session in `state`, with the activity of the host. */
-  def live(screen: Screen, state: SessionState, nowMillis: Long, look: Look, activity: Option[Activity]): Live =
+  /** The live block at `nowMillis`, for the session in `state`, with the activity of the host. A step with no `Acted`
+    * shows `draft`, the text that the model writes now (CLI_SCREEN.md, 13).
+    */
+  def live(
+      screen   : Screen,
+      state    : SessionState,
+      nowMillis: Long,
+      look     : Look,
+      activity : Option[Activity],
+      draft    : Option[Draft] = None
+  ): Live =
     val g    = look.glyphs
     val name = folderName(state)
     screen.turn match
@@ -198,7 +214,9 @@ object Screen:
       case Some(turn) =>
         val frame = g.spinner(((nowMillis / FrameMillis) % g.spinner.size).toInt)
         val step  = turn.steps.lastOption.filterNot(_.printed)
-        val body  = step.toVector.flatMap(s => liveStep(s, frame, look))
+        val body  = step.toVector.flatMap { s =>
+          if s.acted then liveStep(s, frame, look) else draft.toVector.flatMap(draftRows(_, look))
+        }
         Live(
           body :+ statusRow(turn, step, state, nowMillis, frame, activity, g),
           busy = true,
@@ -454,6 +472,25 @@ object Screen:
     if lines.size <= 1 then first else s"$first (+${count(lines.size - 1, "line")})"
 
   // ── The live block and the end of a turn ──
+
+  /** The rows of the draft of a step (CLI_SCREEN.md, 13): the reasoning in the view of `look`, then the last lines of
+    * the text with a note of the lines above them.
+    */
+  private def draftRows(draft: Draft, look: Look): Vector[Row] =
+    val g         = look.glyphs
+    val reasoning = look.reasoning match
+      case ReasoningView.Short => lastRows(draft.thought, DraftShort, s"  ${g.bar} ", Tone.Dim, g)
+      case ReasoningView.Full  => lastRows(draft.thought, DraftFull, s"  ${g.bar} ", Tone.Dim, g)
+      case other               => reasoningRows(draft.thought, other, g)
+    reasoning ++ lastRows(draft.text, DraftText, "  ", Tone.Plain, g)
+
+  /** The last `most` lines of `text` after `prefix`, in `tone`, with a dim row of the number of lines above them. */
+  private def lastRows(text: String, most: Int, prefix: String, tone: Tone, g: Glyphs): Vector[Row] =
+    val lines = if text.strip.isEmpty then Vector.empty else printable(text.strip).linesIterator.toVector
+    val shown = lines.takeRight(most)
+    val above = lines.size - shown.size
+    Option.when(above > 0)(Row.of(s"$prefix${g.more} +${count(above, "line")}", Tone.Dim)).toVector ++
+      shown.map(line => Row.of(prefix + line, tone))
 
   private def liveStep(step: StepView, frame: String, look: Look): Vector[Row] =
     val g = look.glyphs

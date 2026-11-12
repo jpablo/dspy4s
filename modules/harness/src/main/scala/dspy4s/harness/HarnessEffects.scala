@@ -19,7 +19,9 @@ import dspy4s.programs.strategies.Predict
   *     `RuntimeContext`, so an optimizer sees it. The call of `policy` runs through `runner`, so a work session can
   *     cut it (10.3). After the update, `zooms` gets the reader `strategy.zoom` of the new derived data, so `zoom` of a
   *     cell reads it (7.1). After the projection, `progress` gets its size and the budget, so a client shows them
-  *     (10.6).
+  *     (10.6). With `drafts`, the call streams: each model call of the policy writes its draft there while it runs,
+  *     and the draft goes away at the end of the call (CLI_SCREEN.md, 13). The stream is a preview, so the step is the
+  *     same as with no `drafts`.
   *   - `runCell` starts the calls of the cell in `recorder`, takes the snapshot of the store, and runs the code in the
   *     current REPL. The writes of the store go into the result only when the cell completes. The output in the journal
   *     is `CellRun.text`, the text that the MCP server also shows (6): the hints of a compile error, and a note of a
@@ -53,7 +55,8 @@ final class HarnessEffects(
     host     : Option[HostThreads],
     runner   : PolicyRunner   = PolicyRunner.Direct,
     zooms    : ZoomSource     = ZoomSource(),
-    progress : MemoryProgress = MemoryProgress.none
+    progress : MemoryProgress = MemoryProgress.none,
+    drafts   : Option[Drafts] = None
 )(using RuntimeContext)
     extends TurnEffects:
 
@@ -70,13 +73,17 @@ final class HarnessEffects(
       zooms.setReader(ref => strategy.zoom(data, ref))
       val view = strategy.project(log, data, limits.budget)
       progress.projected(view.size, limits.budget)
-      val input = PolicyInput(task, reference, view.status, view.observation, view.history)
-      val call  = () => policy(input)(using policyContext).left.map(HarnessEffects.failure)
-      budget().spend().flatMap(_ => runner.run(call)).map { step =>
-        val code = step.output.code.map(HarnessEffects.unfenced).filterNot(c => HarnessEffects.NoCode.contains(c.strip))
-        // The code of the last step of a chat does not run (4.3).
-        PolicyReply(step.output.reasoning, step.output.text, if mustAnswer then None else code)
-      }
+      val input   = PolicyInput(task, reference, view.status, view.observation, view.history)
+      val number  = drafts.map(d => d -> d.begin())
+      val context = number.fold(policyContext)((d, n) => PolicyStream.around(policyContext, d, n))
+      val call    = () => policy(input)(using context).left.map(HarnessEffects.failure)
+      try budget().spend().flatMap(_ => runner.run(call)).map { step =>
+          val code =
+            step.output.code.map(HarnessEffects.unfenced).filterNot(c => HarnessEffects.NoCode.contains(c.strip))
+          // The code of the last step of a chat does not run (4.3).
+          PolicyReply(step.output.reasoning, step.output.text, if mustAnswer then None else code)
+        }
+      finally number.foreach((d, n) => d.end(n))
     }
 
   def runCell(cell: Long, code: String): CellResult =

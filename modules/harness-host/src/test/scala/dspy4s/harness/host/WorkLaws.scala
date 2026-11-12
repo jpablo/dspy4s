@@ -2,7 +2,7 @@ package dspy4s.harness.host
 
 import dspy4s.core.contracts.RuntimeContext
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.harness.{HarnessLimits, Models, Place, PolicyRunner, RequestLm, Secrets}
+import dspy4s.harness.{HarnessLimits, Models, Place, PolicyRunner, RequestLm, Secrets, StreamLm}
 import dspy4s.harness.Models.policy
 import dspy4s.harness.guest.{JobStatus, Mode, Scope, StrategyName}
 import dspy4s.harness.kernel.*
@@ -348,6 +348,62 @@ class WorkLaws extends munit.FunSuite:
       val failures = entries(handle).collect { case Entry.Observed(_, CellOutcome.Failed(exception), _) => exception }
       assert(failures.exists(_.contains("this session has no job 99.0")), failures.toString)
       assert(!failures.exists(_.contains("JobId(")), failures.toString)
+    }
+  }
+
+  test("Work: the handle gives the draft of the policy while the model writes it, and none after the turn") {
+    sandboxed()
+    val reply   = policy("The file has 42 lines.", None)
+    val reached = CountDownLatch(1)
+    val hold    = CountDownLatch(1)
+    // Before the chunk 16 of 4 characters, the reply is at "The file " of its text field (CLI_SCREEN.md, 13).
+    val model = StreamLm(
+      text => Right(if isSummary(text) then summaryReply(text) else reply),
+      size = 4,
+      gate = i =>
+        if i == 16 then
+          reached.countDown()
+          hold.await(60, TimeUnit.SECONDS): Unit
+    )
+    work(model) { (_, handle) =>
+      assertEquals(handle.draft, None)
+      assertEquals(handle.send(message("m1")), Right(()))
+      val draft =
+        try
+          assert(reached.await(60, TimeUnit.SECONDS), entries(handle).toString)
+          handle.draft
+        finally hold.countDown()
+      assertEquals(draft.map(d => (d.thought, d.text)), Some(("a fake thought", "The file")))
+      assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+      assertEquals(outcomes(handle), Vector(TurnOutcome.Replied("The file has 42 lines.")))
+      assertEquals(handle.draft, None)
+      assertEquals(model.streams.get, 1)
+    }
+  }
+
+  test("Work: a stop during a call that streams ends the turn, and leaves no draft") {
+    sandboxed()
+    val reached = CountDownLatch(1)
+    val model   = StreamLm(
+      text => Right(if isSummary(text) then summaryReply(text) else policy("FAKE-LATE", None)),
+      size = 4,
+      gate = i =>
+        if i == 16 then
+          reached.countDown()
+          // The thread of the call ignores the stop for a while, and then writes the rest of its draft.
+          try Thread.sleep(2_000)
+          catch case _: InterruptedException => Thread.sleep(2_000)
+    )
+    work(model) { (_, handle) =>
+      assertEquals(handle.send(message("m1")), Right(()))
+      assert(reached.await(60, TimeUnit.SECONDS), entries(handle).toString)
+      assert(handle.draft.nonEmpty)
+      assertEquals(handle.send(Command.Abort("FAKE-STOP")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+      assertEquals(outcomes(handle), Vector(TurnOutcome.Aborted))
+      assertEquals(handle.draft, None)
+      Thread.sleep(3_000)
+      assertEquals(handle.draft, None)
     }
   }
 

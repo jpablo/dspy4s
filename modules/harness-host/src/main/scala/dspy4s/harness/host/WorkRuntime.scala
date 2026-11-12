@@ -73,6 +73,8 @@ object WorkEnv:
   *     summaries to it, and the effects report the size of each projection. `activity` and `memoryUse` read the meter
   *     of the activation of the session with no lock, so a client can poll them while a turn runs. A new activation has
   *     a new meter, so `memoryUse` is none until its first call to the policy.
+  *   - Each activation has its `Drafts`, and the effects write the draft of each call to the policy there while the
+  *     model writes it (CLI_SCREEN.md, 13). `draft` reads it with no wait for the call.
   *   - A mode with `Sessions` gets the handler `HostSessions` with `peers` and a `HarnessProbe` with the leaves of the
   *     runtime (8.7). The task of a turn comes from `taskOf`: the controller, a session with a session as its owner, or
   *     a session of the person.
@@ -102,6 +104,9 @@ final class WorkRuntime(
   /** The meter of the memory of the activation of each open session (`activate`). */
   private val meters = ConcurrentHashMap[SessionId, MemoryMeter]()
 
+  /** The drafts of the calls to the policy of the activation of each open session (`activate`, CLI_SCREEN.md, 13). */
+  private val drafts = ConcurrentHashMap[SessionId, Drafts]()
+
   /** The summaries of the memory tree of `session` while they run (`MemoryMeter.building`), else the walk for secret
     * files of its index while it runs (`SecretIndex.progress`), or none. The summaries come first, because the call to
     * the policy waits for them.
@@ -112,6 +117,9 @@ final class WorkRuntime(
 
   /** The size of the last projection of the activation of `session` and its budget (`MemoryMeter.use`), or none. */
   override def memoryUse(session: SessionId): Option[MemoryUse] = Option(meters.get(session)).flatMap(_.use)
+
+  /** The draft of the call to the policy of the activation of `session` that runs now (`Drafts.current`), or none. */
+  override def draft(session: SessionId): Option[Draft] = Option(drafts.get(session)).flatMap(_.current)
 
   /** In a mode with a shell, a new index of the secret files of `session`, and a walk of the scope that fills it on a
     * daemon thread of its own (`SandboxedShell.warm`). Each activation of the open session uses this index. The walk
@@ -163,6 +171,7 @@ final class WorkRuntime(
         val calls    = StoppablePolicy(context, () => journal.state.stopping)
         val zooms    = ZoomSource()
         val meter    = MemoryMeter()
+        val written  = Drafts()
         val summary  = TurnBudget(journal, limits.summaryCalls)
         val file     = () =>
           FileLines.open(SessionFile.pathOf(env.journals, session), session).map { opened =>
@@ -215,9 +224,12 @@ final class WorkRuntime(
           Some(host),
           calls,
           zooms,
-          meter
+          meter,
+          Some(written)
         )(using context)
-        val forget     = () => meters.remove(session, meter): Unit
+        val forget = () =>
+          meters.remove(session, meter): Unit
+          drafts.remove(session, written): Unit
         val activation = WorkActivation(effects, commands, calls, Vector(turns, summary), lines, made, context, forget)
         // Only an activation with no index of an open session walks. The walk starts after each other step of the
         // start, so a failed start has no walk. When the thread of the walk cannot start, the start fails, and the
@@ -225,6 +237,7 @@ final class WorkRuntime(
         if config.mode.shell == Access.Full && shared.isEmpty then WorkRuntime.warm(commands, session)
         // The last step of the start, so a failed start keeps no meter. A later activation of the session puts its own.
         meters.put(session, meter): Unit
+        drafts.put(session, written): Unit
         started = true
         activation
       finally

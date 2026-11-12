@@ -1,5 +1,6 @@
 package dspy4s.harness.cli
 
+import dspy4s.harness.Draft
 import dspy4s.harness.guest.{Mode, Scope}
 import dspy4s.harness.host.{Activity, MemoryUse, WorkRuntime}
 import dspy4s.harness.kernel.*
@@ -12,6 +13,10 @@ import zio.blocks.schema.json.Json
 class ScreenLaws extends munit.FunSuite:
 
   private val look = Look(Detail.Compact, ReasoningView.Line, Glyphs.unicode)
+
+  // The draft of a step (CLI_SCREEN.md, 13).
+  private val thought = "the first line of a fake thought\nthe second line\nthe third line\nthe fourth line"
+  private val drafted = Draft(thought, "[[ ## text ## ]]\nI'll read the file.\n\n[[ ## code ## ]]\nread(\"a\")")
 
   private def at(seq: Long, millis: Long, entry: Entry, source: Source = Source.Harness): Logged =
     Logged(seq, Meta(millis, source, Taint.Trusted, true), entry)
@@ -237,6 +242,61 @@ class ScreenLaws extends munit.FunSuite:
         4
       ).endsWith("4 s · step 1 of 10 · the scan for secret files: 640,000 folders · ctrl-c stops · ctrl-o details"),
       rows(4)
+    )
+  }
+
+  // ── The draft of a step (CLI_SCREEN.md, 13) ──
+
+  test("Screen: during the call to the policy, the live block shows the draft above the status line") {
+    val live = Screen.live(screenOf(turn.take(2)), state, 10_100, look, None, Some(drafted))
+    val rows = live.rows.map(_.plain)
+    assertEquals(rows.init, Vector(s"  ▸ Reasoning · ${thought.length} characters", "  I'll read the file."))
+    assertEquals(rows.last.drop(2), "9 s · step 1 of 10 · ctrl-c stops")
+  }
+
+  test("Screen: the view of the reasoning sets the reasoning of a draft: none, its size, or its last lines") {
+    def rows(view: ReasoningView): Vector[String] =
+      Screen.live(screenOf(turn.take(2)), state, 10_100, look.copy(reasoning = view), None, Some(drafted))
+        .rows.map(_.plain).init
+    assertEquals(rows(ReasoningView.Off), Vector("  I'll read the file."))
+    assertEquals(
+      rows(ReasoningView.Short),
+      Vector(
+        "  │ … +1 line",
+        "  │ the second line",
+        "  │ the third line",
+        "  │ the fourth line",
+        "  I'll read the file."
+      )
+    )
+    val long = (1 to 20).map(i => s"line $i").mkString("\n")
+    val full = Screen.live(
+      screenOf(turn.take(2)),
+      state,
+      10_100,
+      look.copy(reasoning = ReasoningView.Full),
+      None,
+      Some(Draft(long, ""))
+    ).rows.map(_.plain).init
+    assertEquals(full, "  │ … +8 lines" +: (9 to 20).map(i => s"  │ line $i").toVector)
+  }
+
+  test("Screen: a long text of a draft shows its last 16 lines, with a note of the lines above them") {
+    val text = (1 to 30).map(i => s"line $i").mkString("\n")
+    val rows = Screen.live(screenOf(turn.take(2)), state, 10_100, look, None, Some(Draft("", text))).rows.map(_.plain)
+    assertEquals(rows.init, "  … +14 lines" +: (15 to 30).map(i => s"  line $i").toVector)
+  }
+
+  test("Screen: a draft with no text and no reasoning shows only the status line") {
+    val live = Screen.live(screenOf(turn.take(2)), state, 10_100, look, None, Some(Draft.empty))
+    assertEquals(live.rows.map(_.plain.drop(2)), Vector("9 s · step 1 of 10 · ctrl-c stops"))
+  }
+
+  test("Screen: a step with its Acted shows its own text and cell, and not the draft") {
+    val log = turn.take(4)
+    assertEquals(
+      Screen.live(screenOf(log), state, 5_100, look, None, Some(drafted)),
+      Screen.live(screenOf(log), state, 5_100, look, None, None)
     )
   }
 

@@ -21,11 +21,20 @@ import java.util.concurrent.ConcurrentHashMap
   * `Streamify` counts each model.
   *
   * The workers of a parallel program share this session, so its state is safe for concurrent use.
+  *
+  * @param offerEvent
+  *   gives an event to the consumer. `false` tells that the consumer has gone. The queue of `Streamify` waits for a
+  *   place when it is full ([[StreamingQueue.offer]]).
+  * @param preview
+  *   `true` for a stream that only shows the work of the model, for example the live block of a client. Its tokens do
+  *   not count as output that a person saw ([[StreamProgress]]), so the predictor still tries its fallback adapter
+  *   after a parse error, as with no stream. `Streamify` streams the output itself, so its session is not a preview.
   */
 final class StreamSession(
-    queue                           : StreamingQueue[StreamEvent],
+    offerEvent                      : StreamEvent => Boolean,
     private[streaming] val adapter  : Option[Adapter],
-    private[streaming] val listeners: Vector[StreamListener]
+    private[streaming] val listeners: Vector[StreamListener],
+    preview                         : Boolean
 ) extends StreamSink:
 
   private val firedListeners: java.util.Set[Int] = ConcurrentHashMap.newKeySet[Int]()
@@ -72,8 +81,8 @@ final class StreamSession(
   private[streaming] def offerReasoningToken(event: TokenEvent): Unit = offer(event)
 
   private def offer(event: TokenEvent): Unit =
-    if !queue.offer(event) then throw new InterruptedException("The consumer closed the stream")
-    StreamProgress.markEmitted()
+    if !offerEvent(event) then throw new InterruptedException("The consumer closed the stream")
+    if !preview then StreamProgress.markEmitted()
 
   /** `true` when no listener narrows the stream, or when a listener matches the field and can still get a token. A
     * listener with `allowReuse = false` that closed a field cannot.
@@ -91,3 +100,29 @@ final class StreamSession(
       if !l.allowReuse && l.matches(predictName, fieldName) then
         val _ = firedListeners.add(i)
     }
+
+object StreamSession:
+
+  /** The session of `Streamify`: each event goes to `queue`, and its tokens count as output that a person saw. */
+  def apply(
+      queue    : StreamingQueue[StreamEvent],
+      adapter  : Option[Adapter],
+      listeners: Vector[StreamListener]
+  ): StreamSession =
+    new StreamSession(queue.offer, adapter, listeners, preview = false)
+
+  /** A preview session with no listener and no adapter (`preview`): each token goes to `offer` with the field of its
+    * reasoning, or with the empty field for the text of the reply as it came. `offer` must not wait.
+    */
+  def preview(offer: TokenEvent => Unit): StreamSession =
+    new StreamSession(
+      {
+        case token: TokenEvent =>
+          offer(token)
+          true
+        case _ => true
+      },
+      None,
+      Vector.empty,
+      preview = true
+    )

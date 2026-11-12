@@ -302,3 +302,48 @@ Phase A follows the defaults of section 11. These points differ from the text ab
    reopen the footer has no memory part until the next step.
 6. Ctrl-O switches the detail of the live block, and of each cell that ends after the switch. The history keeps each
    cell as it was printed.
+
+## 13. The text of a step while the model writes it
+
+During a call to the model, the live block showed only the status line. In the live runs, one call took up to 44 s,
+and minutes with the reasoning of the model on. These choices were made with the user on 2026-11-11:
+
+- The live block shows the reasoning and the text of a step while the model writes them. The code shows when the
+  step commits, as before.
+- Only the call to the policy streams. A work session never calls the finisher. The summaries of the memory, the
+  `llmQuery` leaf and the probes show nothing until they end.
+- Only the line editor shows it. The plain lines and the script mode do not change.
+
+How it works:
+
+- The text that the model writes now is a draft. A draft is not state ([CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md),
+  4.1: a stream delta is transient). It never goes into the journal, and a crash loses it.
+- The host keeps the draft of the call that runs, and a client polls it as it polls the activity
+  (`SessionHandle.draft`). So a slow client never makes the model wait, and a client loses no part of a draft.
+- A draft holds the native reasoning and the reply as it came, with no parse. `Draft.text` gives the text of the step
+  from the reply so far, with the rules of `PolicyAdapter.values` and of the chat format: the section of `text`, else
+  the reply before the first marker, and never a section of `code` or a ```` ```scala ```` fence. A last line that
+  can still become a marker or a fence waits for its line end, so a marker never shows. For the whole reply,
+  `Draft.text` is the text of the step.
+- The stream of the policy is a preview: its tokens do not count as output that a person saw. So the predictor still
+  tries the fallback adapter after a parse error, and a step does not depend on a client. A new model call of the same
+  step, for example the call of the fallback adapter, starts a new draft.
+- A stop can cut a call whose thread goes on. Each call to the policy has a number, and the end of the call closes
+  it, so a late token of a cut call shows nowhere.
+- `DSPY_TRACE` keeps the stream. The traced model streams when its model streams, and it writes the line of a call at
+  the end of its stream.
+- The live block shows the reasoning in the view of `/reasoning`: `off` shows nothing, `line` shows its size, `short`
+  shows its last 3 lines, and `full` shows its last 12 lines. Then it shows the last 16 lines of the text, with
+  `… +N lines` above them.
+
+The live run of 2026-11-11 used the line editor in a pseudo-terminal of 120 columns and 40 rows, the private endpoint
+with the open model of 27B parameters, native reasoning, and `DSPY_TRACE`:
+
+- A story of about 300 words showed in the live block paragraph by paragraph, for 2.5 s before its step committed.
+  The reasoning line grew while the model wrote, and no marker and no fence showed on the screen.
+- A longer story showed its last 16 lines with `… +1 line` above them. Ctrl-C during the call ended the turn
+  `Aborted` 0.5 s later, and the live block then had no draft.
+- A turn with a cell read the file in two steps and replied `notes.txt has 42 lines.`, as in the live runs before
+  this change. The trace has one line for each call, also for a call that streamed.
+- A call to the model of a short step took 0.3 to 0.6 s, and the summaries of the memory before it took 1 to 2.5 s.
+  So in a short step, the draft shows only for a few frames.
