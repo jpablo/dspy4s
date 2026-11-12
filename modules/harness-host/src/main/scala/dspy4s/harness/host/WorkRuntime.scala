@@ -119,7 +119,8 @@ final class WorkRuntime(
         val scope = Layout.real(Path.of(SandboxedShell.pathOf(config.scope)))
         val made  = Layout.forSession(env.home, env.journals)
         layout = Some(made)
-        val profile  = Profiles.forMode(config.mode, scope, made, env.hosts)
+        // The profile of the shell, so the words of the task give the rules of the sandbox of this host.
+        val profile  = Profiles.forMode(config.mode, scope, made, env.hosts, env.backend.exists(_.closesNames))
         val commands = SandboxedShell(config, made, env.hosts, env.backend, limits.execTimeout)
         shell = Some(commands)
         val turns    = TurnBudget(journal, limits.modelCalls)

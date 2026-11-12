@@ -740,9 +740,9 @@ compare each backend with these observations.
   `~/Library/Keychains`, and the credential files of common tools: `~/.config/git/credentials`, `~/.config/op`,
   `~/.codex/auth.json`, `~/.claude/.credentials.json`, `~/.m2/settings.xml`, `~/.gradle/gradle.properties`,
   `~/.sbt/.credentials`, `~/.ivy2/.credentials`, `~/.cargo/credentials`, `~/.cargo/credentials.toml`,
-  `~/.local/share/keyrings`, `~/.pgpass`, `~/.vault-token` and `~/.terraform.d/credentials.tfrc.json`. Direct file calls
-  also refuse a name `.env` or `.env.*`. Shell commands can read these names in the scope and the temporary directory.
-  A proposal: the design names only `~/.ssh`, `~/.aws` and `.env`.
+  `~/.local/share/keyrings`, `~/.pgpass`, `~/.vault-token` and `~/.terraform.d/credentials.tfrc.json`. A file or a
+  folder with the name `.env` or `.env.*` is secret in each folder. A file call refuses such a name, and on macOS a
+  command cannot reach it either (the next item). A proposal: the design names only `~/.ssh`, `~/.aws` and `.env`.
 - The host list is a set of patterns: `name`, `name:port` or `name:*`. A name `*.d` matches each subdomain of `d`. A
   pattern with no port allows only the ports 80 and 443. A proposal: the design gives the host list no type.
 - Seatbelt denies by default, as in Codex. A child can start programs, read files, and look only at the processes of
@@ -756,11 +756,17 @@ compare each backend with these observations.
   `socketpair` for a datagram pair, `io_uring_setup`, and each call of another ABI. A stream pair from `socketpair`
   stays allowed. The filter exists for aarch64 and x86_64, and on another host bubblewrap does not work. Seatbelt
   denies these connections by default.
-- Commands use the fixed profile of the mode. The automatic walk for secret names was removed on 2026-11-12 because
-  it delayed commands in large scopes. The fixed secret paths and journals stay closed, but shell commands can read,
-  write, link or move project files named `.env` or `.env.*`. Direct file calls still refuse these names without a
-  directory walk. The optional `Profiles.forCommand` and `SecretIndex` utilities remain, but the shell does not use
-  them.
+- Commands use the fixed profile of the mode, with no walk of the scope. Until 2026-11-12, the shell walked the
+  writable roots for secret names before each command, and it read the times of each folder. So each command waited in
+  a large scope: the first `exec` waited 34 s in a scope of 1.75 million entries, and 9.7 s in a scope of 300,000
+  folders. Now a backend that can close a name (`Backend.closesNames`) gets the secret names in its profile
+  (`Profile.hiddenNames`). Seatbelt closes each name with one rule on the path, a regex for each folder
+  (`Seatbelt.nameRule`). A probe on macOS showed that the rule also stops a read through a symbolic link, a hard link,
+  a move and a new file with a secret name, and that `.envrc` and `notes.env.txt` stay open. bubblewrap cannot close a
+  name, so on Linux a command can read, write, link or move a file named `.env` or `.env.*`. A proposal for the
+  review: this gap of Linux goes against the rule of CODE_HARNESS.md that `.env` is not readable. The words of the
+  task tell the model which rule its host has. The optional `Profiles.forCommand` and `SecretIndex` utilities remain,
+  and the shell does not use them.
 - A future full scan must start only on request, show progress and accept a stop. Session startup and normal commands
   must not wait for it. Automatic checks must have a fixed work limit and use paths that the harness already has;
   they must not walk the scope. The harness can suggest a full scan from those paths, but must not start one to decide
@@ -1933,7 +1939,7 @@ These points are proposals for the review:
   termflow uses only the alternate screen, and TamboUI and termflow bring the JLine 3 bundle, a second copy of the
   JLine packages. TamboUI, with its inline runner, is the choice for a richer client later.
 - A work session starts no walk for secret files at its open or activation. Commands use the fixed profile (5.4),
-  with no directory walk before `exec` or `spawn`.
+  with no directory walk before `exec` or `spawn`. On macOS, that profile closes the secret names with one rule.
 - The line editor has the screen of [CLI_SCREEN.md](CLI_SCREEN.md), phase A (2026-11-11). `Screen` reads each entry: a
   finished step goes into the history as its text and one summary line of its cell, for example `▸ Ran 2 commands, read
   1 file · 1.4 s #17`, and the reply shows in full. The step that runs is the live block, above a rule and the prompt `›

@@ -106,19 +106,47 @@ class SandboxedShellLaws extends FunSuite:
     }
   }
 
-  test("Exec: commands use the fixed profile and can read project files with secret names") {
+  test("Exec: the secret paths of the home folder and the journals stay closed to each command") {
     val backend = Backends.detect()
     assume(backend.isDefined, "no OS sandbox works on this host")
     withPlace { place =>
       val sh = shell(place, backend = backend)
-      assertEquals(sh.exec("cat .env"), "FAKE-ENV")
-      assertEquals(sh.exec("echo FAKE-NEW > .env.made && cat .env.made"), "FAKE-NEW\n")
-      assertEquals(sh.exec("cat .env.made"), "FAKE-NEW\n")
-      Files.createDirectories(place.scope.resolve("nested")): Unit
-      Files.writeString(place.scope.resolve("nested/.env.local"), "FAKE-NESTED"): Unit
-      assertEquals(sh.exec("cat nested/.env.local"), "FAKE-NESTED")
       assert(!sh.exec(s"cat '${place.secrets.resolve("id_fake")}'").contains("FAKE-KEY"))
       assert(!sh.exec(s"cat '${place.journals.resolve("j.txt")}'").contains("FAKE-JOURNAL"))
+    }
+  }
+
+  test("Exec: on a backend that closes names, a command reaches no file and no folder with a secret name") {
+    // Seatbelt closes the names with one rule, with no walk of the scope (5.4). A walk before each command made each
+    // command wait in a large scope, and the commit that removed the walk left these files open (2026-11-12).
+    val backend = Backends.detect()
+    assume(backend.exists(_.closesNames), "the sandbox of this host does not close a name")
+    withPlace { place =>
+      val sh = shell(place, backend = backend)
+      Files.createDirectories(place.scope.resolve("nested/.env.d")): Unit
+      Files.writeString(place.scope.resolve("nested/.env.local"), "FAKE-NESTED"): Unit
+      Files.writeString(place.scope.resolve("nested/.env.d/x"), "FAKE-FOLDER"): Unit
+      Files.writeString(place.scope.resolve(".envrc"), "FAKE-RC"): Unit
+      Files.writeString(place.scope.resolve("notes.env.txt"), "FAKE-NOTES"): Unit
+      Vector(
+        "cat .env"                                -> "FAKE-ENV",
+        "cat nested/.env.local"                   -> "FAKE-NESTED",
+        "cat nested/.env.d/x"                     -> "FAKE-FOLDER",
+        "ln -s .env link; cat link"               -> "FAKE-ENV",
+        "cp nested/.env.local copied; cat copied" -> "FAKE-NESTED"
+      ).foreach((command, value) => assert(!sh.exec(command).contains(value), command))
+      sh.exec("echo FAKE-NEW > .env.made; mv .env moved"): Unit
+      assert(!Files.exists(place.scope.resolve(".env.made")), "a command made a file with a secret name")
+      assert(Files.exists(place.scope.resolve(".env")), "a command moved a file with a secret name")
+      assertEquals(sh.exec("cat .envrc notes.env.txt"), "FAKE-RCFAKE-NOTES")
+    }
+  }
+
+  test("Exec: bubblewrap cannot close a name, so a command reads a file with a secret name (the gap of 5.4)") {
+    val backend = Backends.detect()
+    assume(backend.exists(!_.closesNames), "the sandbox of this host closes the names")
+    withPlace { place =>
+      assertEquals(shell(place, backend = backend).exec("cat .env"), "FAKE-ENV")
     }
   }
 

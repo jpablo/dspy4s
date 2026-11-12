@@ -24,8 +24,10 @@ final class SandboxError(message: String) extends RuntimeException(message)
   * about a cut of the output, the end of the time limit, and an exit code that is not 0. `spawn` and the jobs come with
   * the session host of phase 7. The host deletes the temporary directory of the layout at the end of the session.
   *
-  * Commands use the fixed profile of the mode, with no directory scan before they start. The fixed secret paths and
-  * journals stay closed, but files with secret names such as `.env` inside the scope are not hidden from commands.
+  * Commands use the fixed profile of the mode, with no directory scan before they start. The fixed secret paths and the
+  * journals stay closed. A backend that closes names (`Backend.closesNames`, Seatbelt) also closes each file and folder
+  * with a secret name, such as `.env`, in each folder. bubblewrap cannot close a name, so on Linux a command can read
+  * such a file in the scope (5.4).
   */
 final class SandboxedShell(
     config        : SessionConfig,
@@ -42,7 +44,7 @@ final class SandboxedShell(
   val root: Path = Layout.real(Paths.get(SandboxedShell.pathOf(config.scope)))
 
   /** The fixed profile of the mode, shared by all commands of this shell. */
-  val profile: Profile = Profiles.forMode(config.mode, root, layout, hosts)
+  val profile: Profile = Profiles.forMode(config.mode, root, layout, hosts, backend.exists(_.closesNames))
 
   private var proxy: Option[HostProxy] = None
 

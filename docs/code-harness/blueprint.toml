@@ -1737,9 +1737,9 @@ name = "Profile"
 ops = ["canRead", "canWrite", "canConnect", "hide", "words"]
 ref = "5.4"
 spec = true
-uses = ["net"]
+uses = ["net", "layout"]
 proof_uses = ["host-list"]
-text = "What a child process can do, as observations: canRun, canRead(path), canWrite(path) and canConnect(host). A backend turns a profile into the rules of the OS. hide(paths) gives a profile that allows less: nothing under the paths. Profiles.words gives the same rules in words for the task of the model: the places that a command can write, the read-only parts such as .git, the closed paths and the network."
+text = "What a child process can do, as observations: canRun, canRead(path), canWrite(path) and canConnect(host). A backend turns a profile into the rules of the OS. hide(paths) gives a profile that allows less: nothing under the paths. Profiles.words gives the same rules in words for the task of the model: the places that a command can write, the read-only parts such as .git, the closed paths and the network. hiddenNames are the secret names that the backend closes in each folder, and isHidden, canRead and canWrite read them. forMode gives them only for a backend that closes a name (5.4)."
 
 [[node]]
 id = "profile-for-mode"
@@ -1771,7 +1771,7 @@ ops = ["find", "listings", "progress"]
 ref = "5.4"
 spec = true
 uses = ["profile", "layout"]
-text = "The secret files of the writable roots, with a cache of the listing of each folder. It lists a folder again when its change time, last-modified time or file key differs, or when it changed in the last 2 seconds, because a file time on Linux can be coarse. A folder that it cannot read is hidden as a whole."
+text = "The secret files of the writable roots, with a cache of the listing of each folder. It lists a folder again when its change time, last-modified time or file key differs, or when it changed in the last 2 seconds, because a file time on Linux can be coarse. A folder that it cannot read is hidden as a whole. The shell does not use it since 2026-11-12: a walk before each command made each command wait in a large scope (5.4)."
 
 # ── Phase 3: the environment of a child process (5.6) ───────────────────────────────────────────────────────────
 
@@ -1809,7 +1809,7 @@ kind = "data"
 name = "Backend"
 ref = "5.4"
 uses = ["profile"]
-text = "An OS sandbox: it gives the command line that runs a command under a profile, and it says if it works on this host. It works when a shell runs under that command line, with a profile like the profile of a session."
+text = "An OS sandbox: it gives the command line that runs a command under a profile, and it says if it works on this host. It works when a shell runs under that command line, with a profile like the profile of a session. closesNames is true for a backend that closes a secret name in each folder with no walk: Seatbelt, and not bubblewrap."
 
 [[group]]
 id = "seatbelt"
@@ -1827,7 +1827,7 @@ ops = ["policy", "wrap"]
 ref = "5.4"
 spec = true
 uses = ["backend", "profile"]
-text = "The SBPL text of a profile for /usr/bin/sandbox-exec. It denies by default, as Codex does: a child can start processes, read files, and look only at the processes of its own sandbox. It has no access to launchd and the other services of the system."
+text = "The SBPL text of a profile for /usr/bin/sandbox-exec. It denies by default, as Codex does: a child can start processes, read files, and look only at the processes of its own sandbox. It has no access to launchd and the other services of the system. Each secret name of the profile gets one rule on the path, a regex for each folder (nameRule), so a command needs no walk of the scope."
 
 [[group]]
 id = "bubblewrap"
@@ -1846,7 +1846,7 @@ ref = "5.4"
 spec = true
 uses = ["backend", "profile"]
 proof_uses = ["seccomp"]
-text = "The bwrap arguments of a profile: the root read-only, the scope and the temporary directory writable, .git read-only, an empty folder or file over each secret, and new namespaces for the pids and the network. A proposal: on Linux the network stays closed also with Network^, because the proxy needs a bridge into the namespace. That is less authority, so the law holds."
+text = "The bwrap arguments of a profile: the root read-only, the scope and the temporary directory writable, .git read-only, an empty folder or file over each secret, and new namespaces for the pids and the network. A proposal: on Linux the network stays closed also with Network^, because the proxy needs a bridge into the namespace. That is less authority, so the law holds. It cannot close a name, so a command reads a file with a secret name in the scope: the gap of 5.4."
 
 [[group]]
 id = "seccomp"
@@ -1963,6 +1963,15 @@ uses = ["secret-index", "profile-for-mode"]
 text = "After each change of the files, the index gives the secret files of a new walk. A folder that changed in the last two seconds is listed again, also with the same time, and a folder that the index cannot read is hidden as a whole."
 
 [[node]]
+id = "law-secret-names"
+group = "profile-laws"
+kind = "law"
+name = "Secret names:"
+ref = "5.4"
+uses = ["profile", "layout"]
+text = "A profile of a backend that closes names closes each path with a part that is a secret name, at each depth, as a file and as a folder, and keeps .envrc and notes.env.txt open. The words say that a command and a file call cannot reach a secret name only when the backend closes it, and else that a file call cannot."
+
+[[node]]
 id = "law-host-list"
 group = "profile-laws"
 kind = "law"
@@ -2072,7 +2081,7 @@ name = "Exec:"
 ref = "5.3"
 uses = ["sandboxed-shell"]
 proof_uses = ["backend-detect"]
-text = "With no backend, or in a mode with no child process, exec fails and the command does not run. Else the command runs in the sandbox of the mode: it sees only the variables of the allowlist, it cannot write outside the scope, also from its own child, and the time limit stops it and its children. A zombie counts as stopped, so the handler does not wait for it. A file with a secret name that a command makes is hidden from the next command."
+text = "With no backend, or in a mode with no child process, exec fails and the command does not run. Else the command runs in the sandbox of the mode: it sees only the variables of the allowlist, it cannot write outside the scope, also from its own child, and the time limit stops it and its children. A zombie counts as stopped, so the handler does not wait for it. The secret paths of the home folder and the journals stay closed. On a backend that closes names, a command reaches no file and no folder with a secret name, also through a link, a copy or a move, and it cannot make one. On bubblewrap a command reads such a file: the gap of 5.4."
 
 # ── Phase 3: the mutants of the sandbox ─────────────────────────────────────────────────────────────────────────
 
@@ -3087,7 +3096,7 @@ kind = "data"
 name = "Activity"
 ref = "10.6"
 uses = []
-text = "What the host of an open session does now, apart from the journal, for a client that polls it: the walk for secret files, with the folders that it read and the folders of the walk before it, or the summaries of the memory before a call to the policy, with the summaries that ended of all of them. It is not an entry."
+text = "What the host of an open session does now, apart from the journal, for a client that polls it: the summaries of the memory before a call to the policy, with the summaries that ended of all of them. It is not an entry."
 
 [[node]]
 id = "memory-use"
@@ -3847,7 +3856,7 @@ kind = "law"
 name = "Screen:"
 ref = "10.6"
 uses = ["screen", "activity"]
-text = "A finished step prints its reasoning line, its text and the summary of its cell, and the reply prints in full. The summary names what the calls did, and each failed cell has its own words. The full detail prints the code, each call with its result, and the output. An approval prints its card, and the end of a turn names each outcome. A command shows each hidden character as an escape. The live block gives the status line, the memory summaries, the walk for secret files and the open cell. A step with no Acted shows its draft: the reasoning in the view of /reasoning, then the last lines of its text, and a step with its Acted shows no draft. The footer hides a part with no value, /show gives a cell or a call, and the ASCII glyphs give no other character."
+text = "A finished step prints its reasoning line, its text and the summary of its cell, and the reply prints in full. The summary names what the calls did, and each failed cell has its own words. The full detail prints the code, each call with its result, and the output. An approval prints its card, and the end of a turn names each outcome. A command shows each hidden character as an escape. The live block gives the status line, the memory summaries and the open cell. A step with no Acted shows its draft: the reasoning in the view of /reasoning, then the last lines of its text, and a step with its Acted shows no draft. The footer hides a part with no value, /show gives a cell or a call, and the ASCII glyphs give no other character."
 
 [[node]]
 id = "law-cli-editor"

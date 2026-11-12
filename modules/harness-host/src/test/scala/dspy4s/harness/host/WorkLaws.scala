@@ -708,7 +708,8 @@ class WorkLaws extends munit.FunSuite:
   test("Work: the task names what a command can write, the read-only .git, the secret files and the network") {
     // In the live session 00429ec8 (2026-11-11), each git worktree add failed with "Operation not permitted", and the
     // model used three steps to find the cause. The task did not say that .git is read-only, that a command can write
-    // only in the folder of the session. File calls also refuse .env files, but shell commands can read them.
+    // only in the folder of the session. A file call refuses a .env file, and a command too when the sandbox closes
+    // the name (5.4).
     val model = sessionModel(policy("FAKE-HELLO", None))
     work(model) { (scope, handle) =>
       assertEquals(handle.send(message("m1")), Right(()))
@@ -722,7 +723,9 @@ class WorkLaws extends munit.FunSuite:
         "no network",
         "Operation not permitted"
       ).foreach(words => assert(text.contains(words), s"the task does not name $words:\n$text"))
-      assert(text.contains("A file call can neither read nor write a file whose name is .env"), text)
+      val closes = Backends.detect().exists(_.closesNames)
+      val alone  = "A file call can neither read nor write a file or a folder whose name is .env"
+      assertEquals(text.contains(alone), !closes, text)
     }
   }
 
