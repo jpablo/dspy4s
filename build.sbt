@@ -348,7 +348,7 @@ lazy val harnessSandbox = (project in file("modules/harness-sandbox"))
 // One task (9, 4.6): Harness, drive, the window strategy, the handlers of a call and the mask of secrets. A Harness is
 // a dspy4s Module, so the optimizers take it. The tests use GEPA to check that an optimizer takes a harness.
 lazy val harness = (project in file("modules/harness"))
-  .dependsOn(harnessRepl, harnessSandbox, programs, adapters, gepa % "test->compile")
+  .dependsOn(harnessRepl, harnessSandbox, programs, adapters, streaming, gepa % "test->compile")
   .settings(commonSettings)
   .settings(name := "dspy4s-harness")
   .settings(

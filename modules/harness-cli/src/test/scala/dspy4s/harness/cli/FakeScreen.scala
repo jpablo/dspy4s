@@ -18,8 +18,13 @@ final class FakeScreen(width: Int, height: Int):
   private var saved  = (0, 0)
   private var lines  = false // the DEC set of line-drawing characters is on
 
+  private val gone = scala.collection.mutable.ArrayBuffer.empty[String]
+
   /** The rows of the screen, with no space at their ends. */
   def rows: Vector[String] = cells.toVector.map(_.mkString.stripTrailing)
+
+  /** The rows that went off the top of the screen, in their order: the scrollback of the terminal. */
+  def scrollback: Vector[String] = gone.toVector
 
   /** Reads `text`, the output of a terminal. */
   def feed(text: String): Unit =
@@ -56,6 +61,8 @@ final class FakeScreen(width: Int, height: Int):
 
   private def scrollUp(from: Int, to: Int, n: Int): Unit =
     for _ <- 0 until n do
+      // A row that goes off the top of the screen goes to the scrollback, as in an xterm.
+      if from == 0 then gone += cells(0).mkString.stripTrailing
       for row <- from until to do cells(row) = cells(row + 1)
       cells(to) = Array.fill(width)(' ')
 
@@ -166,3 +173,9 @@ object FakeScreen:
     val screen = FakeScreen(width, height)
     screen.feed(output)
     screen.rows
+
+  /** The rows that went off the top of the screen after `output` (`FakeScreen.scrollback`). */
+  def scrollbackOf(output: String, width: Int, height: Int): Vector[String] =
+    val screen = FakeScreen(width, height)
+    screen.feed(output)
+    screen.scrollback

@@ -115,6 +115,24 @@ class StreamingFallbackSuite extends FunSuite:
     assertEquals(lm.calls.get(), 1)
   }
 
+  test("a call with a preview session gives its tokens and still gets the fallback") {
+    // A preview only shows the work of the model (CLI_SCREEN.md, 13), so a person saw no output of the call.
+    val lm      = new CountingStreamingLm
+    val tokens  = ArrayBuffer.empty[TokenEvent]
+    val preview = StreamSession.preview(token => tokens.synchronized(tokens += token): Unit)
+    RuntimeEnvironment.withSettings(
+      RuntimeContext(lm = Some(lm), adapter = Some(FailingAdapter), streamSink = Some(preview))
+    ) {
+      given RuntimeContext = RuntimeEnvironment.current
+      val result           = program(ProgramCall(DynamicValues.record("question" := "Capital of France?")))
+      assert(result.isRight, result.toString)
+    }
+    assertEquals(lm.calls.get(), 2)
+    // Each of the two model calls streams its text.
+    assertEquals(tokens.map(_.chunk).mkString, "I think the answer is Paris." * 2)
+    assert(tokens.forall(_.fieldName.isEmpty), tokens.toString)
+  }
+
   test("a typed call with no stream gets the fallback when the typed decode rejects the reply") {
     val lm = new CountingStreamingLm
     RuntimeEnvironment.withSettings(RuntimeContext(lm = Some(lm), adapter = Some(WrongValueAdapter))) {

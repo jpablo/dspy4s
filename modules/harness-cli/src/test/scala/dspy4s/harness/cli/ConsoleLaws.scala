@@ -233,6 +233,35 @@ class ConsoleLaws extends munit.FunSuite:
     }
   }
 
+  test("CLI editor: a live block taller than the window shows its last rows, above one rule and the prompt") {
+    // A draft in the view `full`, or a cell in full detail, can be taller than the window (CLI_SCREEN.md, 13).
+    def block(tick: Int) = busy(((1 to 40).map(i => f"  FAKE-ROW-$i%02d") :+ s"  FAKE-TICK-$tick")*)
+    val live             = AtomicReference(block(0))
+    editing(live, () => Some(Row.of("  FAKE-FOOTER"))) { (_, _, out, _) =>
+      assert(soon(seen(out).exists(_.contains("FAKE-TICK-0"))), seen(out).mkString("\n"))
+      // The status line changes at each tick, as its spinner does, so the console draws the block again each time.
+      (1 to 8).foreach { tick =>
+        live.set(block(tick))
+        Thread.sleep(130)
+      }
+      assert(soon(seen(out).exists(_.contains("FAKE-TICK-8"))), seen(out).mkString("\n"))
+      Thread.sleep(300)
+      val shown = seen(out)
+      // No copy of the block goes into the scrollback of the terminal.
+      val back = FakeScreen.scrollbackOf(out.toString(UTF_8), 80, 24)
+      assert(!back.exists(_.contains("FAKE-")), back.mkString("\n"))
+      val rule = shown.indexWhere(_.startsWith("─"))
+      assertEquals(shown.count(_.startsWith("─")), 1, shown.mkString("\n"))
+      assert(rule > 0 && shown(rule - 1) == "  FAKE-TICK-8", shown.mkString("\n"))
+      assert(shown.lift(rule + 1).exists(_.startsWith("›")), shown.mkString("\n"))
+      assertEquals(shown.last, "  FAKE-FOOTER", shown.mkString("\n"))
+      // The rows above the rule are the last rows of the block, in their order, with no row twice.
+      val rows = shown.take(rule - 1).filter(_.contains("FAKE-ROW"))
+      assert(rows.nonEmpty, shown.mkString("\n"))
+      assertEquals(rows, (41 - rows.size to 40).map(i => f"  FAKE-ROW-$i%02d").toVector, shown.mkString("\n"))
+    }
+  }
+
   test("CLI editor: Enter keeps only the line of the person in the history, with no live block") {
     val live = AtomicReference(busy("  FAKE-ROW-A", "  FAKE-ROW-B"))
     editing(live) { (_, writer, out, got) =>

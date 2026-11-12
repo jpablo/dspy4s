@@ -561,8 +561,8 @@ new = "if true then open"
 name = "Mutant: a round of the memory tree makes one leaf call at a time"
 [[mutant.edit]]
 file = "MemoryTree.scala"
-old = "inBatch(ready, width)(id => lineOf(m, id, budget))"
-new = "inBatch(ready, width.min(1))(id => lineOf(m, id, budget))"
+old = "inBatch(ready, width)(id => lineOf(m, id, budget, count))"
+new = "inBatch(ready, width.min(1))(id => lineOf(m, id, budget, count))"
 
 [[mutant]]
 name = "Mutant: the store gets no line of a round"
@@ -582,3 +582,31 @@ file = "MemoryTree.scala"
 old = "Predict(merge, name = Some(\"merge\"), config = options),"
 new = "Predict(merge, name = Some(\"merge\"), config = options.copy(fields = options.fields.take(0))),"
 
+
+[[mutant]]
+name = "Mutant: a new call to the policy keeps the number of the call before it"
+[[mutant.edit]]
+file = "Draft.scala"
+old = "number += 1"
+new = "number += 0"
+
+[[mutant]]
+name = "Mutant: the draft stays after the call to the policy"
+[[mutant.edit]]
+file = "HarnessEffects.scala"
+old = "finally number.foreach((d, n) => d.end(n))"
+new = "finally number.foreach((_, _) => ())"
+
+[[mutant]]
+name = "Mutant: a last line of a draft that can still become a marker shows"
+[[mutant.edit]]
+file = "PolicyAdapter.scala"
+old = "if open && lines.lastOption.exists(_.strip.headOption.exists(c => c == '[' || c == '`')) then lines.init"
+new = "if open && lines.size < 0 then lines.init"
+
+[[mutant]]
+name = "Mutant: the draft shows the code of a scala fence"
+[[mutant.edit]]
+file = "PolicyAdapter.scala"
+old = "if language == CellLanguage then (parts :+ Vector.empty, Some(language))"
+new = "if false then (parts :+ Vector.empty, Some(language))"

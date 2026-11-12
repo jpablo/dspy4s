@@ -96,7 +96,7 @@ object Cli:
   ): Int =
     val name  = env.getOrElse("DSPY_MODEL", "none")
     val model = env.get("DSPY_TRACE").filter(_.nonEmpty).foldLeft(modelOf(name, env)) { (inner, file) =>
-      TracedModel(inner, Path.of(file), secrets.maskText)
+      TracedModel.of(inner, Path.of(file), secrets.maskText)
     }
     val console = consoleOf(cli, secrets, env)
     // A SIGTERM runs the shutdown hooks, so this hook gives the terminal its modes back. `close` runs only once.
@@ -266,7 +266,15 @@ object Cli:
     val view = View(handle, handle.state.nextSeq - 1, () => look.get, print, Option.when(rich)(console.printRows))
     if rich then
       console.watch(
-        () => Screen.live(view.screen, view.handle.state, System.currentTimeMillis(), look.get, view.handle.activity),
+        () =>
+          Screen.live(
+            view.screen,
+            view.handle.state,
+            System.currentTimeMillis(),
+            look.get,
+            view.handle.activity,
+            view.handle.draft
+          ),
         () =>
           val h = view.handle
           Some(Screen.footer(h.state, h.memoryUse, runningJobs(h), home, console.glyphs))

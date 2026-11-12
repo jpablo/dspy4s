@@ -1947,6 +1947,10 @@ These points are proposals for the review:
   thread. A law with a model of the screen (`FakeScreen`) shows that a smaller live block leaves no old row, and that
   Enter leaves only the line of the person in the history. The cursor is a blinking block during a turn. The script mode
   keeps the plain lines of `entryText`.
+- During a call to the policy, the live block shows the draft of the step: the reasoning and the text that the model
+  writes now (CLI_SCREEN.md, 13). The host keeps the draft of the call that runs (`Drafts`), and a client polls it
+  through `SessionHandle.draft`, as it polls the activity. The draft never goes into the journal. The stream of the
+  policy is a preview, so the predictor still tries its fallback adapter, and a step does not depend on a client.
 - Until a real configuration file exists, the CLI reads its variables also from `<home>/.dspy4s/harness/.env`
   (2026-11-10). It reads this file also with another `--root`, so a live scenario with a temporary root finds it. A
   variable of the process wins over the file. The base URL and the key are the exception: both come from the file when

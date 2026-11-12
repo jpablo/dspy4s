@@ -2419,10 +2419,10 @@ ops = ["callPolicy", "runCell"]
 ref = "4.6"
 uses = ["turn-effects", "predict", "policy-input", "policy-step", "context-strategy", "journal-trait", "scala-repl",
         "recorder", "snapshot-store", "harness-limits", "runtime-context", "session-state", "budget", "host-threads",
-        "policy-runner", "zoom-source", "memory-progress"]
+        "policy-runner", "zoom-source", "memory-progress", "drafts"]
 proof_uses = ["cell-result", "policy-reply", "window", "recorder", "snapshot-store", "lost-names", "budget",
-              "host-threads", "zoom-source", "memory-progress"]
-text = "callPolicy projects the log with the strategy, spends one call of the budget, and calls the policy leaf through the PolicyRunner, so the trace reaches the RuntimeContext. A spent budget fails the call, and the turn ends Failed. runCell starts the calls of the cell, takes the snapshot of the store, runs the code in the REPL, and joins the trace of the host threads. After the error of the compiler defect, it starts a new REPL and adds the note of the lost names."
+              "host-threads", "zoom-source", "memory-progress", "policy-stream"]
+text = "callPolicy projects the log with the strategy, spends one call of the budget, and calls the policy leaf through the PolicyRunner, so the trace reaches the RuntimeContext. A spent budget fails the call, and the turn ends Failed. runCell starts the calls of the cell, takes the snapshot of the store, runs the code in the REPL, and joins the trace of the host threads. After the error of the compiler defect, it starts a new REPL and adds the note of the lost names. With drafts, the call to the policy streams its draft through a PolicyStream, and the step does not change."
 
 [[group]]
 id = "harness"
@@ -3113,7 +3113,7 @@ kind = "data"
 name = "SessionHandle"
 ref = "10.1"
 spec = true
-uses = ["session-id", "command", "host-error", "session-state", "feed", "logged", "effect-id", "job-status", "activity", "memory-use"]
+uses = ["session-id", "command", "host-error", "session-state", "feed", "logged", "effect-id", "job-status", "activity", "memory-use", "draft"]
 text = "An open session for a client: send with no wait for the commit, run that waits and gives a refusal, the committed state, the status of each job, a feed, and the entries after a seq. A proposal: the name of 10.1 is SessionRef, and the guest API already has a data type SessionRef. jobStatus reads the job table, so a client can tell a job that still runs after a stop (10.3)."
 
 [[node]]
@@ -3131,7 +3131,7 @@ group = "host"
 kind = "data"
 name = "SessionRuntime"
 ref = "10.1"
-uses = ["session-id", "session-config", "journal-trait", "job-table", "activation", "activity", "memory-use"]
+uses = ["session-id", "session-config", "journal-trait", "job-table", "activation", "activity", "memory-use", "draft"]
 text = "What the host needs to run the turns of a session: it makes the activation."
 
 [[node]]
@@ -3218,7 +3218,7 @@ name = "WorkRuntime"
 ops = ["activate", "defaultGuard", "config", "forWork", "taskOf", "ownedConfig", "forHost"]
 ref = "8.1"
 spec = true
-uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context", "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access", "harness", "line-store", "file-lines", "memory-tree", "session-file", "peers", "host-sessions", "harness-probe", "scope", "strategy-name", "activity", "memory-progress", "memory-use"]
+uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context", "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access", "harness", "line-store", "file-lines", "memory-tree", "session-file", "peers", "host-sessions", "harness-probe", "scope", "strategy-name", "activity", "memory-progress", "memory-use", "drafts", "draft"]
 proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell", "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble", "memory-tree", "controller"]
 text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of workMode through recorded and guarded, and JobShell. workMode is local mode with no Sessions^ and no Children^, so a work session has no rlm. Each turn gets a new budget of model calls. The first rules of 5.5: git push gets Ask in a mode with Network^."
 
@@ -3253,7 +3253,7 @@ kind = "data"
 name = "Screen"
 ops = ["of", "after", "live", "footer", "show"]
 ref = "10.6"
-uses = ["logged", "activity", "memory-use", "session-state", "reasoning-view"]
+uses = ["logged", "activity", "memory-use", "session-state", "reasoning-view", "draft"]
 proof_uses = ["in-quotes", "text-prefix", "job-name", "work-runtime"]
 text = "The model of the screen of a session: the turn that runs and each cell of the session. after gives the rows of each entry for the history: the text of a step, a summary line of its cell, the reply in full, an approval card and the end of a turn. live gives the live block: the text and the open cell of the step, and a status line with a spinner, the time of the turn and a label only for a wait that needs a reason. footer gives the folder, the mode, the model, the memory, the jobs and the calls that wait. show gives a cell or a call in full."
 
@@ -3674,7 +3674,7 @@ kind = "law"
 name = "Work:"
 ref = "8.1"
 uses = ["work-runtime", "local-host"]
-text = "config and workMode, with no Sessions^ and no Children^, and defaultGuard. A cell runs in the scope, a val stays for the next turn, and rlm does not compile. Each turn gets a new budget. An Ask call does not run, pending holds its rule, and a Grant lets the new turn run it. A catch does not hide it. Under the sandbox a job runs on after its cell, Abort during a cell stops no job, and StopJobs(OfLastTurn) stops it. A report starts a turn. stopJob stops the job. jobStatus gives Running for a job that runs, and Stopped after StopJobs. A stop ends a long exec and its process. A stop during a long policy call ends the call, the turn ends Aborted before the grace period, and the REPL stays. The handle gives the summaries of the memory while they run, and memoryUse after the first policy call."
+text = "config and workMode, with no Sessions^ and no Children^, and defaultGuard. A cell runs in the scope, a val stays for the next turn, and rlm does not compile. Each turn gets a new budget. An Ask call does not run, pending holds its rule, and a Grant lets the new turn run it. A catch does not hide it. Under the sandbox a job runs on after its cell, Abort during a cell stops no job, and StopJobs(OfLastTurn) stops it. A report starts a turn. stopJob stops the job. jobStatus gives Running for a job that runs, and Stopped after StopJobs. A stop ends a long exec and its process. A stop during a long policy call ends the call, the turn ends Aborted before the grace period, and the REPL stays. The handle gives the summaries of the memory while they run, and memoryUse after the first policy call. The handle gives the draft of the policy while the model writes it, and none after the turn or after a stop, also when the thread of the cut call goes on."
 
 [[group]]
 id = "crash-laws"
@@ -3708,7 +3708,7 @@ kind = "law"
 name = "CLI:"
 ref = "10.3"
 uses = ["cli-args", "parse-line", "commands-for", "entry-text", "pending-calls", "job-order", "job-starts", "jobs-text", "stop-notice", "status-text", "sessions-text", "resolve-session", "plain-console", "in-quotes", "job-name"]
-text = "parse and parseLine read the commands, and a bad number or name is not a command. Each command gives its commands, and the lines of the client give none. A pending call keeps its number. The views name each job and quote each command, so no control character reaches the terminal. The list gives the newest session first, and the start of an id finds one journal. loop prints the views and the stop notice, and Ctrl-C sends Abort."
+text = "parse and parseLine read the commands, and a bad number or name is not a command. Each command gives its commands, and the lines of the client give none. A pending call keeps its number. The views name each job and quote each command, so no control character reaches the terminal. The list gives the newest session first, and the start of an id finds one journal. loop prints the views and the stop notice, and Ctrl-C sends Abort. The live block of a rich console shows the draft of the handle."
 
 [[node]]
 id = "check-cli-start"
@@ -3742,7 +3742,7 @@ kind = "law"
 name = "Screen:"
 ref = "10.6"
 uses = ["screen", "activity"]
-text = "A finished step prints its reasoning line, its text and the summary of its cell, and the reply prints in full. The summary names what the calls did, and each failed cell has its own words. The full detail prints the code, each call with its result, and the output. An approval prints its card, and the end of a turn names each outcome. A command shows each hidden character as an escape. The live block gives the status line, the memory summaries, the walk for secret files and the open cell. The footer hides a part with no value, /show gives a cell or a call, and the ASCII glyphs give no other character."
+text = "A finished step prints its reasoning line, its text and the summary of its cell, and the reply prints in full. The summary names what the calls did, and each failed cell has its own words. The full detail prints the code, each call with its result, and the output. An approval prints its card, and the end of a turn names each outcome. A command shows each hidden character as an escape. The live block gives the status line, the memory summaries, the walk for secret files and the open cell. A step with no Acted shows its draft: the reasoning in the view of /reasoning, then the last lines of its text, and a step with its Acted shows no draft. The footer hides a part with no value, /show gives a cell or a call, and the ASCII glyphs give no other character."
 
 [[node]]
 id = "law-cli-editor"
@@ -3751,7 +3751,7 @@ kind = "law"
 name = "CLI editor:"
 ref = "10.6"
 uses = ["editor-console"]
-text = "An odd number of backslashes goes on, an even number does not, and a paste keeps each backslash. A ! stays. The history keeps each line after the mask. Ctrl-C on an empty line gives Interrupt, on a line with text clears it, and outside a read runs the action of the client. close ends a read that waits, and it turns bracketed paste off."
+text = "An odd number of backslashes goes on, an even number does not, and a paste keeps each backslash. A ! stays. The history keeps each line after the mask. Ctrl-C on an empty line gives Interrupt, on a line with text clears it, and outside a read runs the action of the client. close ends a read that waits, and it turns bracketed paste off. A live block taller than the window shows its last rows above one rule and the prompt, and no copy goes into the scrollback."
 
 [[group]]
 id = "policy-runner"
@@ -4654,3 +4654,57 @@ name = "Rejection:"
 ref = "4.5"
 uses = ["rejection"]
 text = "words gives each refusal in words, with no Scala value. OutOfOrder gives the name of the case of its entry, and not the whole entry."
+
+[[group]]
+id = "draft"
+phase = "p7"
+module = "harness"
+file = "Draft.scala"
+title = "The draft of a call to the policy: the text that the model writes now, for a client (CLI_SCREEN.md, 13)"
+
+[[node]]
+id = "draft"
+group = "draft"
+kind = "data"
+name = "Draft"
+ops = ["thought", "text", "empty"]
+ref = "10.6"
+uses = []
+text = "The text that the model writes now in one model call of the policy: the native reasoning, and the reply as it came, with no parse. A draft is not state: it never goes into the journal, and a crash loses it. text gives the text of the step so far with the rules of the chat format and of PolicyAdapter.values, with no marker, no section of code and no scala fence. For a whole reply, it is the text of the step."
+
+[[node]]
+id = "drafts"
+group = "draft"
+kind = "data"
+name = "Drafts"
+ops = ["begin", "restart", "add", "end", "current"]
+ref = "10.6"
+uses = ["draft"]
+text = "The drafts of the calls to the policy of one activation. Each call has a number from begin, and end closes it. A model call starts a new draft, and a number that is not the number of the open call changes nothing, so a late token of a call that a stop cut shows nowhere. A client reads current with no wait for the call."
+
+[[node]]
+id = "policy-stream"
+group = "draft"
+kind = "data"
+name = "PolicyStream"
+ops = ["wrap", "around"]
+ref = "10.6"
+uses = ["drafts", "runtime-context"]
+text = "The stream of one call to the policy. Each model call gets a preview session of the streaming module, so its tokens go to the drafts and do not count as output that a person saw. The predictor still tries its fallback adapter after a parse error, so the step is the same as with no stream."
+
+[[group]]
+id = "draft-laws"
+phase = "p7"
+module = "harness"
+file = "DraftLaws.scala"
+where = "tests"
+title = "The laws of the drafts of the policy"
+
+[[node]]
+id = "law-draft"
+group = "draft-laws"
+kind = "law"
+name = "Draft:"
+ref = "10.6"
+uses = ["draft", "drafts", "harness-effects"]
+text = "The text of a whole reply is the text of the step that the policy parses from it, in each form of PolicyAdapter.values and of the chat format. No part of a reply shows a part of a marker, of a fence or of the code, and the text of a part is a part of the text of the whole reply. The reasoning is the native reasoning, else the section of reasoning. Drafts give no draft outside a model call, a new model call drops the draft before it, and a call that ended or that a later call replaced changes nothing. callPolicy with drafts shows the reasoning and the text while the model writes, and none after. It gives the same step as with no drafts, also with the call of the fallback adapter and with a model that does not stream."

@@ -1,7 +1,7 @@
 package dspy4s.harness.cli
 
-import dspy4s.harness.{Models, ScriptLm, ThinkingLm}
-import dspy4s.lm.contracts.{LmRequest, Message, MessageRole}
+import dspy4s.harness.{Models, ScriptLm, StreamLm, ThinkingLm}
+import dspy4s.lm.contracts.{LmRequest, Message, MessageRole, StreamingLanguageModel}
 import zio.blocks.schema.json.Json
 
 import java.nio.charset.StandardCharsets.UTF_8
@@ -41,6 +41,36 @@ class TraceLaws extends munit.FunSuite:
         assert(field(json, "messages").exists(_.print.contains(s"FAKE-QUESTION-${n + 1}")), line)
         assert(field(json, "outputs").exists(_.print.contains(s"FAKE-REPLY-${n + 1}")), line)
       }
+    }
+  }
+
+  test("Trace: the trace of a model that streams streams, and of a model that does not stream does not") {
+    withFile { file =>
+      assert(TracedModel.of(StreamLm(_ => Right("FAKE")), file, identity).isInstanceOf[StreamingLanguageModel])
+      assert(!TracedModel.of(ScriptLm("FAKE"), file, identity).isInstanceOf[StreamingLanguageModel])
+    }
+  }
+
+  test("Trace: a stream gives the chunks of its model, and writes one line with the whole reply at its end") {
+    withFile { file =>
+      val inner = StreamLm(_ => Right("FAKE-REPLY-IN-PARTS"), "a fake thought", size = 4)
+      val model = TracedModel.of(inner, file, identity) match
+        case streaming: StreamingLanguageModel => streaming
+        case other                             => fail(s"no stream: $other")
+      val chunks = Models.withModel(model)(model.stream(request("FAKE-QUESTION")).toVector)
+      assertEquals(chunks.map(_.text).mkString, "FAKE-REPLY-IN-PARTS")
+      assertEquals(chunks.map(_.reasoning).mkString, "a fake thought")
+      val written = lines(file)
+      assertEquals(written.size, 1, written.mkString("\n"))
+      val outputs = field(Json.parseUnsafe(written.head), "outputs").map(_.print).getOrElse("")
+      assert(outputs.contains("FAKE-REPLY-IN-PARTS") && outputs.contains("a fake thought"), written.head)
+      // A stream that the caller closes before its end writes its line once.
+      val early = Models.withModel(model)(model.stream(request("FAKE-QUESTION-2")))
+      early.next(): Unit
+      early match
+        case closable: AutoCloseable => closable.close()
+        case other                   => fail(s"the stream cannot close: $other")
+      assertEquals(lines(file).size, 2, lines(file).mkString("\n"))
     }
   }
 

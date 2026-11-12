@@ -1,6 +1,6 @@
 package dspy4s.harness.cli
 
-import dspy4s.harness.Support
+import dspy4s.harness.{Draft, Support}
 import dspy4s.harness.guest.JobStatus
 import dspy4s.harness.host.{Behind, Feed, HostError, SessionHandle}
 import dspy4s.harness.kernel.*
@@ -444,6 +444,27 @@ class CliLaws extends munit.FunSuite:
     finally console.release()
   }
 
+  test("CLI: the live block of a rich console shows the draft of the policy of the handle (CLI_SCREEN.md, 13)") {
+    val console = RecordingConsole()
+    val open    = Vector(at(1, 1000, Entry.TurnStarted), at(2, 1100, Entry.StepStarted(0)))
+    val handle  = EntriesHandle(open, feedEnds = false, Some(Draft("", "[[ ## text ## ]]\nFAKE-DRAFT")))
+    val ended   = CountDownLatch(1)
+    val loop    = Thread { () =>
+      try Cli.loop(handle, console, script = false, desk = None, home = "/home/a"): Unit
+      finally ended.countDown()
+    }
+    loop.setDaemon(true)
+    loop.start()
+    try
+      val deadline = System.currentTimeMillis() + 10_000
+      def shows    = Option(console.watched.get).exists(_._1().rows.exists(_.plain == "  FAKE-DRAFT"))
+      while !shows && System.currentTimeMillis() < deadline do Thread.sleep(20)
+      assert(shows, Option(console.watched.get).map(_._1().rows.map(_.plain)).toString)
+    finally
+      console.release()
+      ended.await(10, TimeUnit.SECONDS): Unit
+  }
+
   test("CLI: /show prints a cell of the session in full, and an unknown id gives an error") {
     val console = RecordingConsole(Vector("/show 3", "/show 99"))
     assert(Cli.loop(EntriesHandle(screenTurn, feedEnds = false), console, script = false))
@@ -541,8 +562,10 @@ private final class RecordingConsole(lines: Vector[String] = Vector.empty) exten
 
   def release(): Unit = gate.countDown()
 
-/** A closed session whose feed gives `log` once. With `feedEnds`, the feed then ends. */
-private final class EntriesHandle(log: Vector[Logged], feedEnds: Boolean = true) extends SessionHandle:
+/** A closed session whose feed gives `log` once. With `feedEnds`, the feed then ends. Its draft is `drafted`. */
+private final class EntriesHandle(log: Vector[Logged], feedEnds: Boolean = true, drafted: Option[Draft] = None)
+    extends SessionHandle:
+  override def draft: Option[Draft]                          = drafted
   def id: SessionId                                          = SessionId("fake-session")
   def send(command: Command): Either[HostError, Unit]        = Right(())
   def run(command: Command): Either[HostError, SessionState] =
