@@ -5,7 +5,7 @@ import org.jline.reader.impl.history.DefaultHistory
 import org.jline.reader.impl.{DefaultParser, LineReaderImpl}
 import org.jline.reader.{Completer, EndOfFileException, LineReader, Reference, UserInterruptException}
 import org.jline.keymap.KeyMap
-import org.jline.terminal.{Attributes, Terminal, TerminalBuilder}
+import org.jline.terminal.{Attributes, Size, Terminal, TerminalBuilder}
 import org.jline.utils.{AttributedString, AttributedStringBuilder, AttributedStyle, InfoCmp, Status as JlineStatus}
 
 import java.io.{BufferedReader, IOException, PrintStream}
@@ -92,6 +92,8 @@ final class PlainConsole(in: BufferedReader, out: PrintStream) extends ClientCon
   *   - The footer is one line of a JLine `Status` at the bottom of the terminal. The status gets this row when the
   *     console starts, and it keeps it with a blank row when there is no footer. So its height does not change during a
   *     read.
+  *   - At a resize of the window, the reader draws the full prompt again from its first row, with the rows of the new
+  *     width (`Reader`).
   *   - During a turn the cursor is a blinking block, and the window title is the title of the live block.
   *   - With `color` off, each tone has no color.
   *   - `close` first ends a read that waits, at most `CloseWait`. So JLine turns off the modes that its read turned on,
@@ -113,17 +115,18 @@ final class EditorConsole private (reader: LineReaderImpl, color: Boolean, overr
   @volatile private var detailAction: () => Unit    = () => ()
   @volatile private var shownPrompt                 = ""
   @volatile private var shownTitle                  = ""
-  @volatile private var shownFooter: Option[Row]    = None
+  @volatile private var shownFooter                 = AttributedString.EMPTY
   private val blinking                              = AtomicBoolean(false)
   private val status                                = Try(Option(JlineStatus.getStatus(terminal))).toOption.flatten
   // The footer gets its row before the first read draws its prompt (`showFooter`).
-  showFooter(None)
+  showFooter(AttributedString.EMPTY)
 
   private val ticker = Executors.newSingleThreadScheduledExecutor { task =>
     Thread.ofPlatform().daemon(true).name("harness-cli-screen").unstarted(task)
   }
 
   reader.getWidgets.put(BusyWidget, () => redraw(force = false)): Unit
+  reader.getWidgets.put(ResizeWidget, () => resized()): Unit
   reader.getWidgets.put(
     DetailWidget,
     () =>
@@ -230,6 +233,15 @@ final class EditorConsole private (reader: LineReaderImpl, color: Boolean, overr
       reader.callWidget(LineReader.REDISPLAY)
     true
 
+  /** The widget of a resize: it sets the prompt of the new width, and JLine then draws it (`Reader`). So no row of the
+    * old width wraps on a smaller window.
+    */
+  private def resized(): Boolean =
+    val prompt = promptOf(current())
+    shownPrompt = prompt
+    reader.setPrompt(prompt)
+    true
+
   /** The live block now. A failed read of the screen shows no live block. */
   private def current(): Live = Try(liveOf()).getOrElse(Idle)
 
@@ -250,20 +262,22 @@ final class EditorConsole private (reader: LineReaderImpl, color: Boolean, overr
     val width = terminal.getSize.getColumns
     if width > 0 then width else DefaultColumns
 
-  /** Shows the footer of `footerOf`, when it changed. */
+  /** Shows the footer of `footerOf`, when its line changed. The line is cut to the width, so a resize can change it. */
   private def footer(): Unit =
-    val row = Try(footerOf()).toOption.flatten
-    if row != shownFooter then
-      shownFooter = row
-      showFooter(row)
+    val line = footerLine(Try(footerOf()).toOption.flatten)
+    if !line.equals(shownFooter) then showFooter(line)
 
-  /** Shows `row` in the status, or a blank row for no footer. So the status always has one row. When the height of the
-    * status changes during a read, JLine forgets the lines that it drew (`LineReaderImpl.redisplay`). It then draws the
-    * full prompt again from the row of the cursor. That row is the last row of the prompt, so the old live block and
-    * the old rule stay above it.
+  /** The line of the footer `row`, cut to the width of the terminal, or a blank line for no footer. */
+  private def footerLine(row: Option[Row]): AttributedString =
+    row.fold(AttributedString.EMPTY)(r => styled(r).columnSubSequence(0, columns() - 1))
+
+  /** Shows `line` in the status. For no footer, the line is blank, so the status always has one row. When the height of
+    * the status changes during a read, JLine forgets the lines that it drew (`LineReaderImpl.redisplay`). It then draws
+    * the full prompt again from the row of the cursor. That row is the last row of the prompt, so the old live block
+    * and the old rule stay above it.
     */
-  private def showFooter(row: Option[Row]): Unit =
-    val line = row.fold(AttributedString.EMPTY)(r => styled(r).columnSubSequence(0, columns() - 1))
+  private def showFooter(line: AttributedString): Unit =
+    shownFooter = line
     status.foreach(s => Try(s.update(Vector(line).asJava)): Unit)
 
   /** Sets the title of the window, when it changed. The title has no control character (`Screen.live`). */
@@ -310,10 +324,16 @@ final class EditorConsole private (reader: LineReaderImpl, color: Boolean, overr
           lock.wait(50)
       }
       Try(reader.getHistory.save()): Unit
-      status.foreach(s => Try(s.close())): Unit
+      // `Status.close` gives back only the scroll region, and the text of the footer stays on the last row. So the
+      // console first removes the row of the status with an update with no lines, as `Status.hide` does.
+      val footerShown = status.exists(_.size > 0)
+      status.foreach { s =>
+        Try(s.update(java.util.Collections.emptyList())): Unit
+        Try(s.close()): Unit
+      }
       // A read that ends turns off the modes that it turned on. At a SIGTERM, the shutdown hook of JLine can close the
-      // terminal before that, so the client turns the modes off too. When the terminal is closed, the text goes to the
-      // standard output, which is the same terminal.
+      // terminal before that, so the client turns the modes off too, and it clears the last row, which has the footer.
+      // When the terminal is closed, the text goes to the standard output, which is the same terminal.
       val off = Try {
         terminal.writer().write(BracketedPasteOff + CursorDefault)
         terminal.puts(InfoCmp.Capability.keypad_local): Unit
@@ -321,7 +341,7 @@ final class EditorConsole private (reader: LineReaderImpl, color: Boolean, overr
       }
       if off.isFailure then
         Try {
-          System.out.print(BracketedPasteOff + CursorDefault + KeypadLocal)
+          System.out.print(BracketedPasteOff + CursorDefault + KeypadLocal + (if footerShown then ClearLastRow else ""))
           System.out.flush()
         }: Unit
       Try(terminal.close()): Unit
@@ -336,13 +356,21 @@ object EditorConsole:
   private val BracketedPasteOff = "\u001b[?2004l"
   private val KeypadLocal       = "\u001b[?1l\u001b>"
 
+  /** The text that clears the last row of the screen and keeps the cursor where it is. The terminal moves a cursor to
+    * row 999 only as far as its last row.
+    */
+  private val ClearLastRow = "\u001b7\u001b[999;1H\u001b[2K\u001b8"
+
   /** The texts that make the cursor a blinking block and that give it the shape of the terminal (DECSCUSR). */
   private val BlinkingBlock = "\u001b[1 q"
   private val CursorDefault = "\u001b[0 q"
 
-  /** The names of the widgets that redraw the screen and that switch the detail, and the time between two redraws. */
+  /** The names of the widgets that redraw the screen, that switch the detail and that set the prompt after a resize,
+    * and the time between two redraws.
+    */
   private val BusyWidget   = "dspy4s-screen"
   private val DetailWidget = "dspy4s-detail"
+  private val ResizeWidget = "dspy4s-resize"
   private val FrameMillis  = 125L
 
   /** The width of a terminal that gives no width. */
@@ -430,9 +458,9 @@ object EditorConsole:
     variables.put(LineReader.HISTORY_FILE_SIZE, Integer.valueOf(MostLines)): Unit
     variables.put(LineReader.HISTORY_SIZE, Integer.valueOf(MostLines)): Unit
     variables.put(LineReader.SECONDARY_PROMPT_PATTERN, GoesOn): Unit
-    // The client makes the reader as `LineReaderBuilder.build` does. The builder gives only the interface, and the live
-    // block needs `setPrompt` of the implementation.
-    val reader = LineReaderImpl(terminal, "dspy4s-harness", variables)
+    // The client makes the reader as `LineReaderBuilder.build` does. The builder gives only the interface, the live
+    // block needs `setPrompt` of the implementation, and a resize needs the subclass `Reader`.
+    val reader = Reader(terminal, variables)
     reader.setHistory(MaskedHistory(mask))
     reader.setParser(parser)
     reader.setCompleter(completer)
@@ -460,3 +488,38 @@ object EditorConsole:
   /** A history that keeps each line after `mask`. */
   private final class MaskedHistory(mask: String => String) extends DefaultHistory:
     override def add(time: Instant, line: String): Unit = super.add(time, mask(line))
+
+  /** A reader that draws the full prompt again from its first row at a resize of the window.
+    *
+    * At a resize with a status, `LineReaderImpl.handleSignal` makes a new display, and it draws the full prompt again
+    * from the cursor, as if the cursor were at the start of the prompt. The cursor of the editor is on the last row of
+    * its prompt, after the text of the person. So this reader first gives the new size to the old display: a terminal
+    * wraps the long rows again at the new width, and the display does the same. It then erases the rows of the prompt
+    * and puts the cursor at the start of the prompt, as `printAbove` does. Last, the widget `ResizeWidget` sets the
+    * prompt of the new width, and JLine draws it.
+    */
+  private final class Reader(term: Terminal, values: java.util.Map[String, AnyRef])
+      extends LineReaderImpl(term, "dspy4s-harness", values):
+
+    // The monitor comes before the lock, as in `handleSignal` and `redisplay` of JLine. The lock keeps the timer out
+    // until JLine draws the prompt again.
+    override protected def handleSignal(signal: Terminal.Signal): Unit =
+      synchronized {
+        lock.lock()
+        try
+          if Terminal.Signal.WINCH.equals(signal) && isReading then
+            val grid = terminal.getBufferSize
+            if redraws(grid) then
+              Option(display).foreach { old =>
+                old.resize(grid)
+                old.update(java.util.Collections.emptyList(), 0)
+              }
+              callWidget(ResizeWidget)
+          super.handleSignal(signal)
+        finally lock.unlock()
+      }
+
+    /** True when JLine draws the full prompt again at a resize to `grid`: the size changes, and the status has rows. */
+    private def redraws(grid: Size): Boolean =
+      val changed = grid.getRows != size.getRows || grid.getColumns != size.getColumns
+      changed && Option(JlineStatus.getStatus(terminal, false)).exists(_.size > 0)

@@ -180,11 +180,15 @@ class ConsoleLaws extends munit.FunSuite:
 
   // ── The screen of CLI_SCREEN.md ──
 
-  /** An `ExternalTerminal` of 80 columns and 24 rows. */
+  /** An `ExternalTerminal` of 80 columns and 24 rows. `terminalOf` gives it back by its output. */
   private def sized(writer: PipedOutputStream, out: ByteArrayOutputStream): Terminal =
     val terminal = external(PipedInputStream(writer, 4096), out)
     terminal.setSize(Size.of(80, 24))
+    ConsoleLaws.terminals.put(out, terminal): Unit
     terminal
+
+  /** The terminal of `sized` whose output is `out`. */
+  private def terminalOf(out: ByteArrayOutputStream): Option[Terminal] = Option(ConsoleLaws.terminals.get(out))
 
   /** A live block of a turn with `rows`. */
   private def busy(rows: String*): Live = Live(rows.toVector.map(Row.of(_)), busy = true, title = "● dspy4s · shop")
@@ -298,6 +302,74 @@ class ConsoleLaws extends munit.FunSuite:
     }
   }
 
+  test("CLI editor: a resize of the window keeps the live block and one rule right above the prompt") {
+    // JLine redraws the whole prompt at a resize, from the row of the cursor, which is the last row of the prompt. The
+    // terminal loses one column and keeps its rows, so the model of the screen, which has no resize, stays right.
+    val live = AtomicReference(busy("  FAKE-ROW-A"))
+    editing(live, () => Some(Row.of("  FAKE-FOOTER"))) { (console, writer, out, _) =>
+      val _ = console
+      assert(soon(seen(out).exists(_.contains("FAKE-FOOTER"))), seen(out).mkString("\n"))
+      writer.write("H".getBytes(UTF_8))
+      writer.flush()
+      assert(soon(seen(out).exists(_.startsWith("› H"))), seen(out).mkString("\n"))
+      Thread.sleep(300)
+      val mark = out.size
+      terminalOf(out).foreach { terminal =>
+        terminal.setSize(Size.of(79, 24))
+        terminal.raise(Terminal.Signal.WINCH)
+      }
+      assert(soon(out.size > mark), "the resize drew nothing")
+      Thread.sleep(400)
+      val shown = seen(out)
+      assertEquals(shown.count(_.contains("FAKE-ROW-A")), 1, shown.mkString("\n"))
+      assertEquals(shown.count(_.startsWith("─")), 1, shown.mkString("\n"))
+      val prompt = shown.indexWhere(_.startsWith("› H"))
+      assertEquals(prompt - shown.indexWhere(_.startsWith("─")), 1, shown.mkString("\n"))
+      assertEquals(shown(prompt), "› H", shown.mkString("\n"))
+    }
+  }
+
+  test("CLI editor: a resize at the bottom of the window keeps a live block of three rows once, above one rule") {
+    // The prompt has five rows, and the cursor is on the last of them, right above the footer. At a smaller width, the
+    // status also clears the row above the footer, which is the row of the prompt mark.
+    val live   = AtomicReference(busy("  FAKE-ROW-A", "  FAKE-ROW-B", "  FAKE-ROW-C"))
+    val before = (1 to 23).map(i => s"FAKE-LINE-$i").mkString("", "\r\n", "\r\n")
+    editing(live, () => Some(Row.of("  FAKE-FOOTER")), before) { (_, writer, out, _) =>
+      assert(soon(seen(out).exists(_.contains("FAKE-FOOTER"))), seen(out).mkString("\n"))
+      writer.write("H".getBytes(UTF_8))
+      writer.flush()
+      assert(soon(seen(out).exists(_.startsWith("› H"))), seen(out).mkString("\n"))
+      Thread.sleep(300)
+      val mark = out.size
+      terminalOf(out).foreach { terminal =>
+        terminal.setSize(Size.of(79, 24))
+        terminal.raise(Terminal.Signal.WINCH)
+      }
+      assert(soon(out.size > mark), "the resize drew nothing")
+      Thread.sleep(400)
+      val shown = seen(out)
+      Vector("FAKE-ROW-A", "FAKE-ROW-B", "FAKE-ROW-C").foreach(row =>
+        assertEquals(shown.count(_.contains(row)), 1, shown.mkString("\n"))
+      )
+      // The resize removes no row of the session above the live block, and it adds no blank row.
+      assertEquals(
+        shown.takeRight(7).map(_.take(14)),
+        Vector("FAKE-LINE-23", "  FAKE-ROW-A", "  FAKE-ROW-B", "  FAKE-ROW-C", "─" * 14, "› H", "  FAKE-FOOTER"),
+        shown.mkString("\n")
+      )
+      assertEquals(shown.count(_.startsWith("─")), 1, shown.mkString("\n"))
+    }
+  }
+
+  test("CLI editor: close removes the footer from the last row") {
+    val live = AtomicReference(Live(Vector.empty, busy = false, title = "dspy4s · shop"))
+    editing(live, () => Some(Row.of("  FAKE-FOOTER"))) { (console, _, out, _) =>
+      assert(soon(seen(out).exists(_.contains("FAKE-FOOTER"))), seen(out).mkString("\n"))
+      console.close()
+      assert(!seen(out).exists(_.contains("FAKE-FOOTER")), seen(out).mkString("\n"))
+    }
+  }
+
   test("CLI editor: a footer that first shows during a turn keeps the live block and one rule right above the prompt") {
     val live   = AtomicReference(busy("  FAKE-ROW-A", "  FAKE-ROW-B"))
     val footer = AtomicReference(Option.empty[Row])
@@ -363,3 +435,8 @@ class ConsoleLaws extends munit.FunSuite:
     assert(complete("/allow 12 tu").contains("turn"), complete("/allow 12 tu").toString)
     assert(complete("/reasoning l").contains("line"), complete("/reasoning l").toString)
   }
+
+object ConsoleLaws:
+
+  /** The terminal of each output of `sized`, so a law can raise a signal on it. */
+  private val terminals = java.util.concurrent.ConcurrentHashMap[ByteArrayOutputStream, Terminal]()
