@@ -1954,6 +1954,10 @@ These points are proposals for the review:
   writes now (CLI_SCREEN.md, 13). The host keeps the draft of the call that runs (`Drafts`), and a client polls it
   through `SessionHandle.draft`, as it polls the activity. The draft never goes into the journal. The stream of the
   policy is a preview, so the predictor still tries its fallback adapter, and a step does not depend on a client.
+- Each activation writes the HTTP exchanges of its model calls to `<root>/sessions/<id>.http.jsonl`
+  ([OBSERVABILITY.md](OBSERVABILITY.md), 4, 2026-11-12). A request line has the exact body, the session, the `seq`
+  before the call and the predictor. A reply line has the status, the headers, and the body or each line of the
+  stream. The mask of 5.6 covers each text. `DSPY_EXCHANGES=off` turns the file off.
 - Until a real configuration file exists, the CLI reads its variables also from `<home>/.dspy4s/harness/.env`
   (2026-11-10). It reads this file also with another `--root`, so a live scenario with a temporary root finds it. A
   variable of the process wins over the file. The base URL and the key are the exception: both come from the file when

@@ -1,8 +1,8 @@
 # The inspector and the exchange files: a proposal
 
-Status: the review took the proposal on 2026-11-12 (9.2), and O1 is built. It covers two needs. A person must see the
-journal of a session. A person must also see each HTTP request that the harness sends to the model endpoint, with its
-reply. Each of the two must have raw views and a formatted view.
+Status: the review took the proposal on 2026-11-12 (9.2), and O1 and O2 are built. It covers two needs. A person
+must see the journal of a session. A person must also see each HTTP request that the harness sends to the model
+endpoint, with its reply. Each of the two must have raw views and a formatted view.
 
 Section 2 gives what the harness has now. Section 4 adds a record of each HTTP exchange, and section 5 adds a local
 web server that shows the journals and the exchanges. Section 8 gives the order of the work, and section 9 gives the
@@ -140,7 +140,7 @@ An example, with parts cut:
 
 ```json
 {"kind":"request","id":"e3b0c442","session":"9c1f5d2a","after":41,"predictor":"policy","at":1762950000123,
- "url":"<base>/chat/completions","headers":{"Authorization":"«secret»"},"stream":true,
+ "url":"<base>/chat/completions","headers":{"Authorization":"«secret:Authorization»"},"stream":true,
  "body":"{\"model\":\"…\",\"messages\":[…],\"stream\":true}"}
 {"kind":"reply","id":"e3b0c442","at":1762950003456,"first":1762950000610,"status":200,
  "headers":{"content-type":"text/event-stream"},"lines":["data: {…}","","data: [DONE]"],"end":"closed"}
@@ -152,14 +152,19 @@ An example, with parts cut:
 - `first` is the time of the first line of a stream, so a person sees the wait for the first token.
 - `end` is `done`, `closed` or `failed` (4.1), and a failed exchange also has `error`. A complete stream of the
   OpenAI client ends `closed`, and its last line is `data: [DONE]`. The views show such a stream as complete.
-- Each line goes to the file in one write, under the lock of the file. So the lines of two threads do not mix.
-- Each write opens the file, appends the line and closes the file, as `DSPY_TRACE` does now. So a thread that ends
-  after its activation still writes its line.
+- Each line goes to the file in one write, under one lock of the process for all the exchange files. Two activations
+  of one session write to one file (a late thread of the first one, and the second one), so a lock of each file
+  object is not enough. So the lines of two threads do not mix.
+- Each write opens the file, appends the line and closes it, through a `FileOutputStream`. A thread that ends after
+  its activation still writes its line. A channel of NIO stops on the interrupt flag, and a stop sets the flag on the
+  thread of a policy call, so a channel would lose the reply line of a cut exchange (law L9 and its mutant).
 
 ### 4.4 The mask
 
-- Each text of a line goes through the mask of the host (`Secrets.maskText`, 5.6) before the write.
-- The value of the header `Authorization` is always `«secret»`, also when the mask does not know the key.
+- Each text of a line goes through the mask of the host (`Secrets.maskText`, 5.6) before the write, also the names of
+  the headers.
+- The value of a header with a secret name, by the rule of the variables of 5.6 (`Environment.isSecret`), is the mark
+  of its name, for example `«secret:Authorization»`. This is true also when the mask does not know the value.
 - So the record is exact apart from the masked values.
 
 ### 4.5 The cases
@@ -183,14 +188,20 @@ An example, with parts cut:
 
 ### 4.6 The size
 
-These numbers are estimates:
+A live run of 2026-11-12 measured the sizes. It used the CLI in script mode, a private OpenAI-compatible endpoint and
+an open model. It had three turns: a cell that counts the lines of a file, an `llmQuery` for a haiku, and a story of
+about 300 words.
 
-- A policy request sends the whole prompt again: about 20 to 80 KB.
-- A stream line is about 250 bytes for each token, so a reply of 4,000 tokens is about 1 MB.
-- A session of 50 model calls can thus have an exchange file of 10 to 50 MB.
+- The file had 11 exchanges and 235 KB: 5 of the policy, 1 `compress`, 4 `merge` and 1 `subQuery`.
+- A policy request was 12 to 13.5 KB, because each step sends the whole prompt again.
+- A stream line was about 190 bytes. The reply of a short step was 6 to 11 KB in 31 to 59 lines. The story was 88 KB
+  in 461 lines.
+- A request of a memory leaf or of `subQuery` was 0.7 to 1.3 KB, and its reply 1.5 to 2.9 KB.
+- The first line of a stream came 0.3 to 0.6 s after the request, and a whole exchange took 0.5 to 3 s.
 
-Phase O2 measures the real sizes in a live run. The first version writes plain JSON lines. If the files are too large,
-section 9.2, choice 2, has the options.
+So a turn adds about 80 KB, and a session of 50 model calls has about 1 to 5 MB. This size is small, so the file keeps
+plain JSON lines (9.2, choice 2). The estimate before the run was 10 to 50 MB, because it took 250 bytes for each
+token and a prompt of 20 to 80 KB.
 
 ## 5. The inspector
 
