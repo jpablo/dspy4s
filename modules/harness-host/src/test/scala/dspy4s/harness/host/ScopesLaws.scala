@@ -8,8 +8,12 @@ import dspy4s.harness.host.HostSupport.*
 
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.{Files, Path}
-import java.nio.file.attribute.PosixFilePermissions
-import java.util.concurrent.{CountDownLatch, TimeUnit}
+import java.nio.file.attribute.{FileTime, PosixFilePermissions}
+import java.time.Instant
+import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch, TimeUnit}
+import scala.concurrent.duration.*
+import scala.jdk.CollectionConverters.*
+import scala.jdk.OptionConverters.*
 import scala.util.Try
 
 /** The laws of the handler of the scopes and of the release of a session (CODE_HARNESS.md, 7.9; CODE_HARNESS_DESIGN.md,
@@ -51,6 +55,38 @@ class ScopesLaws extends munit.FunSuite:
     gitOk(dir, "add", name): Unit
     gitOk(dir, "-c", "user.email=fake@example.test", "-c", "user.name=Fake", "commit", "-q", "-m", name): Unit
     gitOk(dir, "rev-parse", "HEAD")
+
+  /** A repository at `root/repo` whose `git status` is slow, and the file `root/filter.pid`. The status runs the clean
+    * filter of `a.txt`, because the file has a new time and the same size. The filter writes its process id to the file
+    * and then sleeps for 337 seconds.
+    */
+  private def slowRepo(root: Path): (Path, Path) =
+    val r      = repo(root)
+    val marker = root.resolve("filter.pid")
+    Files.writeString(r.resolve(".gitattributes"), "a.txt filter=slow\n")
+    gitOk(r, "add", ".gitattributes"): Unit
+    gitOk(r, "commit", "-q", "-m", "attributes"): Unit
+    val script = Files.writeString(
+      root.resolve("slow.sh"),
+      s"#!/bin/sh\necho $$$$ > '$marker.part'\nmv '$marker.part' '$marker'\nexec sleep 337\n"
+    )
+    Files.setPosixFilePermissions(script, PosixFilePermissions.fromString("rwxr-xr-x")): Unit
+    gitOk(r, "config", "filter.slow.clean", script.toString): Unit
+    Files.setLastModifiedTime(r.resolve("a.txt"), FileTime.from(Instant.now().plusSeconds(3600))): Unit
+    (r, marker)
+
+  /** The filter of `slowRepo` that runs, and its parents up to the process of the laws: the git command and the filter.
+    * Empty when the filter does not start in 20 seconds, or when the chain does not reach the process of the laws.
+    */
+  private def filterChain(marker: Path): Vector[ProcessHandle] =
+    if !eventually(20)(Files.exists(marker)) then Vector.empty
+    else
+      val self  = ProcessHandle.current().pid()
+      val start = ProcessHandle.of(Files.readString(marker).trim.toLong).toScala
+      val chain =
+        Iterator.iterate(start)(_.flatMap(_.parent().toScala)).takeWhile(_.isDefined).flatten.take(10).toVector
+      val mine = chain.takeWhile(_.pid() != self)
+      if mine.size < chain.size then mine else Vector.empty
 
   // ── The handler of the scopes ──
 
@@ -120,6 +156,49 @@ class ScopesLaws extends munit.FunSuite:
       assertEquals(scopes.snapshot(Scope.Directory(r.toString)).map(_.clean), Some(false))
       val plain = Files.createDirectories(root.resolve("plain"))
       assertEquals(scopes.snapshot(Scope.Directory(plain.toString)), None)
+    }
+  }
+
+  test("Scopes: an interrupt during a slow git command stops git and its filter, gives none, and keeps the interrupt") {
+    withRoot { root =>
+      val (r, marker) = slowRepo(root)
+      // The time limit is longer than the law, so only the interrupt can stop the command.
+      val patient        = GitScopes(timeout = 2.minutes)
+      val (thread, done) = onThread("scopes-law-snapshot") {
+        (patient.snapshot(Scope.Directory(r.toString)), Thread.currentThread().isInterrupted)
+      }
+      val chain = filterChain(marker)
+      try
+        assert(chain.nonEmpty, "the filter of git did not start")
+        thread.interrupt()
+        assertEquals(done.get(20, TimeUnit.SECONDS), Right((None, true)))
+        assert(eventually()(chain.forall(!_.isAlive)), s"these processes still run: ${chain.filter(_.isAlive)}")
+      finally chain.foreach(_.destroyForcibly(): Unit)
+    }
+  }
+
+  test("Scopes: a thread with an interrupt gets no snapshot, and it keeps the interrupt") {
+    withRoot { root =>
+      val (r, _)    = slowRepo(root)
+      val (_, done) = onThread("scopes-law-interrupted") {
+        Thread.currentThread().interrupt()
+        (scopes.snapshot(Scope.Directory(r.toString)), Thread.currentThread().isInterrupted)
+      }
+      assertEquals(done.get(20, TimeUnit.SECONDS), Right((None, true)))
+    }
+  }
+
+  test("Scopes: a slow git command stops with its filter at the time limit, and the snapshot gives none") {
+    withRoot { root =>
+      val (r, marker) = slowRepo(root)
+      val limited     = GitScopes(timeout = 5.seconds)
+      val (_, done)   = onThread("scopes-law-limit")(limited.snapshot(Scope.Directory(r.toString)))
+      val chain       = filterChain(marker)
+      try
+        assert(chain.nonEmpty, "the filter of git did not start")
+        assertEquals(done.get(20, TimeUnit.SECONDS), Right(None))
+        assert(eventually()(chain.forall(!_.isAlive)), s"these processes still run: ${chain.filter(_.isAlive)}")
+      finally chain.foreach(_.destroyForcibly(): Unit)
     }
   }
 
@@ -265,6 +344,34 @@ class ScopesLaws extends munit.FunSuite:
           host.list.toString
         )
       }
+    }
+  }
+
+  test(
+    "Host scopes: the close of a host during a slow snapshot stops git, and the thread of the snapshots throws nothing"
+  ) {
+    withRoot { root =>
+      val (r, marker) = slowRepo(root)
+      val thrown      = ConcurrentLinkedQueue[String]()
+      val before      = Thread.getDefaultUncaughtExceptionHandler
+      // The thread of the snapshots has no handler of its own, so a throw there comes to this handler and not to the
+      // standard error. The laws of the host run one at a time, so no other law sees this handler.
+      Thread.setDefaultUncaughtExceptionHandler { (t, e) =>
+        if t.getName.startsWith("harness-scope-") then thrown.add(s"${t.getName}: $e"): Unit
+        else Option(before).fold(e.printStackTrace())(_.uncaughtException(t, e))
+      }
+      try withScriptHost(root) { (host, _) =>
+          val handle = opened(host, id(1), Some(config().copy(scope = Scope.Directory(r.toString))))
+          handle.send(message("m1")).left.foreach(e => fail(e.toString))
+          val chain = filterChain(marker)
+          try
+            assert(chain.nonEmpty, "the filter of git did not start")
+            host.close()
+            val stopped = eventually()(chain.forall(!_.isAlive))
+            assertEquals((stopped, thrown.asScala.toVector), (true, Vector.empty[String]))
+          finally chain.foreach(_.destroyForcibly(): Unit)
+        }
+      finally Thread.setDefaultUncaughtExceptionHandler(before)
     }
   }
 

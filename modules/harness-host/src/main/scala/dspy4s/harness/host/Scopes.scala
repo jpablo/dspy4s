@@ -7,7 +7,9 @@ import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.{Files as JFiles, Path}
 import java.util.concurrent.{CompletableFuture, TimeUnit}
 import scala.concurrent.duration.*
+import scala.jdk.CollectionConverters.*
 import scala.util.Try
+import scala.util.control.NonFatal
 
 /** The git head and the state of the folder of a scope at one time (CODE_HARNESS.md, 7.9: `ScopeSnapshot`). */
 final case class ScopeSnapshot(head: String, clean: Boolean) derives CanEqual
@@ -47,7 +49,8 @@ trait Scopes:
   def release(item: ReleaseItem, confirmed: Boolean): ReleaseResult
 
 /** `Scopes` with the git of the machine (8.7). Each command runs with `git -C <folder>`, with no shell, and with the
-  * time limit `timeout`. A command that does not end in time gives an error, and its process stops.
+  * time limit `timeout`. A command that does not end in time gives an error, and its process stops. An interrupt of the
+  * thread during a command also stops the process and gives an error, and the interrupt stays set.
   *
   * A smudge filter in the configuration of a repository still runs when `git worktree add` checks out the files: git
   * has no option to ignore the configuration of a repository. So the host refuses a repository inside the scope of an
@@ -143,37 +146,82 @@ final class GitScopes(timeout: FiniteDuration = 30.seconds) extends Scopes:
 
   /** The output of `git args` in `folder`, or an error with it. The command runs with no hooks, no fsmonitor, no
     * optional lock, only `PATH`, `HOME` and `LANG` of the environment, and the time limit.
+    *
+    * An interrupt of the thread asks it to stop. A thread with an interrupt starts no command. An interrupt during the
+    * command stops the command (`GitScopes.stop`) and gives an error. The interrupt stays set for the caller. `Try`
+    * does not catch an `InterruptedException`, so this function catches it. Else the command stays alive, and the
+    * exception ends the thread with a stack trace on the standard error.
     */
   private def git(folder: Path, args: String*): Either[String, String] =
-    Try {
-      val command = Vector(
-        "git",
-        "--no-optional-locks",
-        "-c",
-        "core.hooksPath=/dev/null",
-        "-c",
-        "core.fsmonitor=false",
-        "-C",
-        folder.toString
-      ) ++ args
-      val builder = ProcessBuilder(command*).redirectErrorStream(true)
-      val env     = builder.environment()
-      val kept    = GitScopes.Kept.flatMap(name => Option(env.get(name)).map(name -> _))
-      env.clear()
-      kept.foreach((name, value) => env.put(name, value): Unit)
-      env.put("GIT_TERMINAL_PROMPT", "0"): Unit
-      val process = builder.start()
-      process.getOutputStream.close()
-      val output = CompletableFuture.supplyAsync(() => String(process.getInputStream.readAllBytes(), UTF_8))
-      if !process.waitFor(timeout.toMillis, TimeUnit.MILLISECONDS) then
-        process.destroyForcibly(): Unit
-        Left(s"git ${args.headOption.getOrElse("")} did not end in $timeout")
-      else
-        val text = output.get(5, TimeUnit.SECONDS).trim
-        if process.exitValue() == 0 then Right(text) else Left(s"git ${args.headOption.getOrElse("")}: $text")
-    }.toEither.left.map(e => s"git did not run: $e").flatten
+    val name = s"git ${args.headOption.getOrElse("")}"
+    if Thread.currentThread().isInterrupted then Left(s"$name did not start, because the thread has an interrupt")
+    else
+      Try(GitScopes.start(folder, args)).toEither.left.map(e => s"git did not run: $e").flatMap { process =>
+        val (result, interrupted) =
+          try (outputOf(process, name), false)
+          catch
+            case _: InterruptedException => (Left(s"$name stopped, because the thread got an interrupt"), true)
+            case NonFatal(e)             => (Left(s"git did not run: $e"), false)
+        // A command that did not end stops here: after the time limit, after an interrupt, and after an error.
+        val again = process.isAlive && GitScopes.stop(process)
+        if interrupted || again then Thread.currentThread().interrupt()
+        result
+      }
+
+  /** The output of the git command `process` with the name `name`, or an error. It waits at most `timeout` for the end
+    * of the command, and it does not stop a command that does not end.
+    */
+  private def outputOf(process: Process, name: String): Either[String, String] =
+    process.getOutputStream.close()
+    val output = CompletableFuture.supplyAsync(() => String(process.getInputStream.readAllBytes(), UTF_8))
+    if !process.waitFor(timeout.toMillis, TimeUnit.MILLISECONDS) then Left(s"$name did not end in $timeout")
+    else
+      val text = output.get(5, TimeUnit.SECONDS).trim
+      if process.exitValue() == 0 then Right(text) else Left(s"$name: $text")
 
 object GitScopes:
 
   /** The variables of the environment that a git command of the host gets. */
   private val Kept = Vector("PATH", "HOME", "LANG")
+
+  /** The time between TERM and KILL when a git command stops. */
+  private val Grace = 1.second
+
+  /** Starts `git args` in `folder` with no hooks, no fsmonitor, no optional lock, and only the variables `Kept` of the
+    * environment.
+    */
+  private def start(folder: Path, args: Seq[String]): Process =
+    val command = Vector(
+      "git",
+      "--no-optional-locks",
+      "-c",
+      "core.hooksPath=/dev/null",
+      "-c",
+      "core.fsmonitor=false",
+      "-C",
+      folder.toString
+    ) ++ args
+    val builder = ProcessBuilder(command*).redirectErrorStream(true)
+    val env     = builder.environment()
+    val kept    = Kept.flatMap(name => Option(env.get(name)).map(name -> _))
+    env.clear()
+    kept.foreach((name, value) => env.put(name, value): Unit)
+    env.put("GIT_TERMINAL_PROMPT", "0"): Unit
+    builder.start()
+
+  /** Stops the git command `process` and each process that it started, for example a filter: TERM, at most `Grace` for
+    * the end of the command, then KILL for each process that still runs. git removes its lock files on TERM, so the
+    * repository stays usable. It gives true when an interrupt came during the wait: the wait then ends, and the caller
+    * sets the interrupt again.
+    */
+  private def stop(process: Process): Boolean =
+    // A child of a command that ended is not a descendant of it any more, so the list comes before the signals.
+    val seen = process.descendants().iterator().asScala.toVector :+ process.toHandle
+    seen.foreach(_.destroy(): Unit)
+    val interrupted =
+      try
+        process.waitFor(Grace.toMillis, TimeUnit.MILLISECONDS): Unit
+        false
+      catch case _: InterruptedException => true
+    (seen ++ process.descendants().iterator().asScala).filter(_.isAlive).foreach(_.destroyForcibly(): Unit)
+    interrupted

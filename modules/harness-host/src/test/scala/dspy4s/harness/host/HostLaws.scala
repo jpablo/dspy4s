@@ -8,7 +8,7 @@ import dspy4s.harness.host.HostSupport.*
 import zio.blocks.schema.json.Json
 
 import java.nio.file.Files
-import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.{AtomicBoolean, AtomicInteger}
 import java.util.concurrent.{ConcurrentLinkedQueue, CountDownLatch, TimeUnit}
 import scala.concurrent.duration.*
 import scala.jdk.CollectionConverters.*
@@ -24,6 +24,16 @@ class HostLaws extends munit.FunSuite:
   private def lastTurn(handle: SessionHandle): Vector[Entry] =
     val all = entries(handle)
     all.drop(all.lastIndexOf(Entry.TurnStarted))
+
+  /** A runtime whose first activation starts the job `command` with no wrapper, and whose activations answer "hi". */
+  private def jobStarting(command: String): SessionRuntime =
+    val script  = scripted(answer("hi"))
+    val started = AtomicBoolean(false)
+    new SessionRuntime:
+      def activate(session: SessionId, config: SessionConfig, journal: Journal, jobs: JobTable): Activation =
+        if started.compareAndSet(false, true) then
+          jobs.start(EffectId(9L, 0), () => ProcessBuilder("/bin/sh", "-c", command).start(), report = false): Unit
+        script.activate(session, config, journal, jobs)
 
   private def openFailed(result: Either[HostError, SessionHandle]): Boolean =
     result match
@@ -385,6 +395,29 @@ class HostLaws extends munit.FunSuite:
       assertEquals(handle.send(message("m2")), Left(HostError.Ended))
       Thread.sleep(300)
       assertEquals(runtime.activations.get, 1)
+    }
+  }
+
+  test("Host: a close on a thread with an interrupt ends each session in full, and the thread keeps the interrupt") {
+    withRoot { root =>
+      val runtime = jobStarting("sleep 334")
+      try withHost(root, runtime, HostLimits(grace = 1.second)) { host =>
+          val handle = opened(host, id(1))
+          assertEquals(handle.send(message("m1")), Right(()))
+          assert(eventually()(outcomes(handle).nonEmpty), entries(handle).toString)
+          assert(eventually()(running("sleep 334").nonEmpty), "the job did not start")
+          val (_, done) = onThread("host-law-close") {
+            Thread.currentThread().interrupt()
+            host.close()
+            Thread.currentThread().isInterrupted
+          }
+          assertEquals(done.get(30, TimeUnit.SECONDS), Right(true))
+          // Each step of the end ran: the job stopped, the writer ended, and the lock went.
+          assert(eventually(5)(running("sleep 334").isEmpty), "the job stays after the close")
+          assertEquals(handle.send(message("m2")), Left(HostError.Ended))
+          withHost(root, runtime)(again => assert(again.open(id(1), None).isRight, "the lock of the session stays"))
+        }
+      finally running("sleep 334").foreach(_.destroyForcibly(): Unit)
     }
   }
 
