@@ -3,7 +3,8 @@
 Status: a proposal for the review (2026-11-11), and phase A of section 9 is built. It covers each element that the
 terminal client shows during a work session: the history, the part that runs now, the input and the footer. Section
 10.6 of [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md) has the client as it is now. Section 12 gives each place
-where phase A differs from this proposal.
+where phase A differs from this proposal. Section 14 is a plan (2026-11-12) for the reasoning effort and the context
+of the model in the footer, with no code yet.
 
 The proposal uses a study of seven terminal harnesses and of the desktop app of Claude Code (section 10). Section 9
 gives the order of the work, and section 11 gives the open choices.
@@ -230,6 +231,7 @@ One line under the input, in a JLine `Status`:
   value, so the host must give it, as it gives `Activity`.
 - The count of jobs and of pending calls come from the state of the session.
 - A part that has no value does not show.
+- Section 14 adds the reasoning effort and the context of the model, and gives the unit of the memory part.
 
 ## 9. The order of the work
 
@@ -347,3 +349,133 @@ with the open model of 27B parameters, native reasoning, and `DSPY_TRACE`:
   this change. The trace has one line for each call, also for a call that streamed.
 - A call to the model of a short step took 0.3 to 0.6 s, and the summaries of the memory before it took 1 to 2.5 s.
   So in a short step, the draft shows only for a few frames.
+
+## 14. The effort and the context in the footer
+
+Status: a plan (2026-11-12), with no code yet. In a live session, the footer was this line:
+
+```text
+  ~/code/api · work mode · example-model · memory 64 of 40k
+```
+
+The person asked what `memory 64 of 40k` means. The person also asked for three new facts and one new command:
+
+- the footer shows the reasoning effort of the model;
+- a command changes the effort;
+- the footer shows the size of the context of the model, and the percent of it that the session uses.
+
+### 14.1 The memory part now
+
+The memory part counts characters, not tokens.
+
+- `64` is the size of the view of the memory that the last call to the policy got (`Projection.size`):
+  the status section, the last observation and the earlier steps. At the start of a session, the view is small.
+- `40k` is `HarnessLimits.budget`, 40,000 characters. When the view gets larger than the budget, the memory tree puts
+  summaries in place of the older lines (7.1 of [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md)).
+- The instructions, the task and the API reference are not in the count. So the part does not tell how full the
+  context of the model is.
+
+The budget of the memory is a separate choice from the context of the model. With a context of 1,048,576 tokens, the
+budget of 40,000 characters is a small part of it.
+
+### 14.2 What the code and the endpoint give now
+
+- **The effort is always `low`.** `NativeReasoning` takes `reasoning_effort` from the options of the request, else
+  from the default options of the model, else `low`. The output of the policy (`PolicyStep`) has a `Reasoning` field,
+  and `DSPY_NATIVE_REASONING=true` gives the model the reasoning capability. The `Predict` of the policy has no
+  options. So each call to the policy asks for `low`. This comes from the code. No trace confirms it yet.
+- **The configuration has a place for the effort.** `ModelChoice.options` is the option bag of the provider in the
+  `SessionConfig`. No code puts it in a request yet. No command changes the configuration of a session: only
+  `Activate` and `Begin` give one.
+- **The name `/reasoning` is already a command.** It sets how much of the reasoning of a step the client shows.
+- **The private endpoint gives the facts of each model.** Its `GET /models` gives, for each model, `context_window`,
+  `supports_reasoning` and `reasoning_effort_levels`. The model of the live session has a window of 1,048,576 tokens
+  and the levels `low` and `high`. These fields are not in the standard API. vLLM gives `max_model_len` in their place.
+  The ids of the endpoint have the prefix of an owner, for example `owner/example-model`, and `DSPY_MODEL` has none.
+- **No code keeps the token counts.** Each reply has `usage.prompt_tokens` (`LmResponse.usage`), and a stream asks
+  for it with `stream_options.include_usage`. The harness does not read it. The callbacks get it, because the
+  `LmEndEvent` of a call holds its `LmResponse`.
+
+### 14.3 The choices
+
+The plan takes the first option of each choice. The person did not decide them yet.
+
+1. **The place of the effort.** (a) A new entry of the journal: a reopen keeps the effort, and the journal tells which
+   effort each step used, also for an optimizer. (b) A value of the host only: the change is smaller, but a reopen
+   loses the effort, and the journal does not record it.
+2. **The name of the command.** (a) `/effort`, because `/reasoning` sets the view. (b) `/reasoning effort LEVEL`.
+3. **A level `off`.** (a) Not in the first version. The endpoint gives no `off` for the model, and a null effort
+   changes the prompt: the reasoning becomes a text field of the output. (b) `off` sends a null effort.
+4. **The token counts in the journal.** (a) A later step. 4.2 of the design names a fold of the usage totals, and no
+   code has it yet. (b) In this change, with the `Acted` entry of each step.
+5. **A narrow terminal.** (a) When the footer is wider than the terminal, the memory part goes first. (b) The footer
+   cuts the line at the width of the terminal.
+
+### 14.4 How it works
+
+1. **The effort in the journal (kernel).**
+   - A new command `ChangeModel(model: ModelChoice)` gives a new entry `ModelChanged(model)`. The fold sets
+     `config.model` of the state. An open session takes the command at each time, also during a turn. A closed
+     session refuses it.
+   - The command takes a whole `ModelChoice`, so a later `/model` can use it. This plan changes only the options.
+   - A new session with native reasoning gets the key `reasoning_effort` at its start: the value of the new variable
+     `DSPY_REASONING_EFFORT`, else `low`. So the configuration always holds the effort that the requests send, and the
+     footer does not repeat the default of the adapter.
+2. **The effort in the request (harness).**
+   - `HarnessEffects.callPolicy` gives `config.model.options` of the state of the journal to the call to the policy,
+     as the options of the call. So a change applies at the next call to the policy.
+   - Only the call to the policy. The summaries of the memory keep `DSPY_SUMMARY_OPTIONS`, and `llmQuery` keeps its own
+     options.
+3. **The facts of the model (CLI).**
+   - At the start, a daemon thread reads `GET <OPENAI_BASE_URL>/models`, with a timeout of 5 s. It takes the entry
+     whose id is `DSPY_MODEL`, or ends with `/` and `DSPY_MODEL`.
+   - It reads the window from `context_window`, else from `max_model_len`, and the levels from
+     `reasoning_effort_levels`. The new variable `DSPY_CONTEXT_WINDOW` wins over the endpoint.
+   - When the request fails, the footer has no window and the client takes the levels `low`, `medium` and `high`.
+     The start does not wait for the request.
+   - The key goes to the same base URL as the calls to the model. The doc of `Cli` must say so.
+4. **The tokens of the last call (host).**
+   - A callback in the context of each call to the policy keeps the `usage` of its `LmEndEvent`, as
+     `PolicyStream.around` does for the draft. When a step makes two model calls, for example with the fallback
+     adapter, the last call wins.
+   - The meter of the activation gives `ContextUse(prompt, completion)` next to `MemoryUse`, and a client reads it
+     through `SessionHandle`, as it reads the memory. A summary or a query does not change it.
+   - After a reopen, the footer has no context part until the next step, as for the memory (12, item 5).
+5. **The footer, `/effort` and `/status` (CLI).**
+
+   ```text
+     ~/code/api · work mode · example-model · effort low · context 18k of 1M (2%) · memory 64 of 40k chars
+   ```
+
+   - `effort low` is the effort of the configuration. With no `reasoning_effort` key, for example in an older
+     journal, the part does not show.
+   - `context 18k of 1M (2%)` is the count of prompt tokens of the last call to the policy, the window, and the percent
+     as a whole number. The next call is larger, because it also holds the last step. With no window, the part is
+     `context 18k`. Under 1%, the percent is `<1%`.
+   - A count under 1,000 shows as it is. A count under 1,000,000 shows in whole thousands (`18k`). A larger count shows
+     in millions with one decimal and no `.0`, so 1,048,576 is `1M` and 1,572,864 is `1.6M`.
+   - `memory 64 of 40k chars` gives the unit of the memory part.
+   - `/effort` shows the effort and the levels of the model. `/effort high` sends `ChangeModel` and prints
+     `The next step uses the effort high.` A level that is not in the list gives an error with the list. Tab completes
+     the levels, as it completes the views after `/reasoning`.
+   - `/status` also gives the effort and the context. The plain lines and the script mode take `/effort` too. Only
+     the line editor has the footer.
+
+### 14.5 The order of the work
+
+1. A probe, with no code: two small requests with `low` and `high` to the endpoint, to compare their
+   `reasoning_tokens`. This shows if the endpoint uses the effort. A second check: a streamed call gives `usage` at
+   its end.
+2. The laws come first in each module, and each one fails before its change:
+   - kernel: `ChangeModel` gives `ModelChanged` in an open session, also during a turn, and a closed session refuses
+     it; the fold sets the model; the entry goes through its `Schema` with no change;
+   - harness: a fake model gets the effort of the configuration, and after a `ModelChanged` the next call to the policy
+     gets the new effort; a summary does not get it;
+   - host: the meter gives the prompt tokens of the last call to the policy, and a summary or a query does not change
+     them;
+   - CLI: the facts of a `GET /models` text, with `context_window`, with `max_model_len`, with an owner prefix and
+     with no entry; the parts of the footer, also with no window and with no effort; the counts `18k`, `1M` and
+     `1.6M`; `/effort` with no level, with a level of the list and with a level that is not in it.
+3. The code of each module, in the order kernel, harness, host, CLI.
+4. A mutant for the rule of `ChangeModel` and for the options of `callPolicy`, the nodes of the blueprint, and 8.2.
+5. A live run in a pseudo-terminal: `/effort high`, a step, and the footer before and after it.
