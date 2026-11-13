@@ -702,7 +702,77 @@ class WorkLaws extends munit.FunSuite:
       assert(text.contains(scope.toString), text)
       assert(!text.contains("Give the result with submit"), text)
       assert(!text.contains("The task has no input fields"), text)
+      assert(!text.contains("The files of the project"), "a folder with no AGENTS.md and no README has no section")
     }
+  }
+
+  // ── The prompt (10.6) ──
+
+  /** The number of times that `part` comes in `text`. */
+  private def times(text: String, part: String): Int = text.split(java.util.regex.Pattern.quote(part), -1).length - 1
+
+  test("Work: the instructions of a work session come one time in a request, in the system message") {
+    // A measured request (2026-11-12) had the same 434 characters in the system message and in the task.
+    val model = sessionModel(policy("FAKE-HELLO", None))
+    work(model) { (_, handle) =>
+      assertEquals(handle.send(message("m1")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+      val request = model.requests.asScala.toVector.filterNot(r => isSummary(r.messages.flatMap(_.text).mkString)).head
+      assertEquals(times(request.messages.flatMap(_.text).mkString("\n"), WorkRuntime.instructions), 1)
+      assert(request.messages.head.text.exists(_.contains(WorkRuntime.instructions)), "not in the system message")
+    }
+  }
+
+  // ── The files of the project (10.6) ──
+
+  test(
+    "Work: taskOf puts the files of the project after the shell rules and before the goal, and not for the controller"
+  ) {
+    val scope = Path.of("/tmp/fake-scope")
+    val home  = Path.of("/tmp/fake-home")
+    val mine  = WorkRuntime.config(scope, "fake-model", limits)
+    val task  = WorkRuntime.taskOf(id(1), mine, scope, "FAKE-SHELL", "FAKE-PROJECT")
+    assertEquals(task, WorkRuntime.chatTask(scope, "FAKE-SHELL", "FAKE-PROJECT"))
+    assert(task.indexOf("FAKE-PROJECT") > task.indexOf("FAKE-SHELL"), task)
+    val owned   = mine.copy(owner = Owner.Session(Controller.id), goal = Some("fake goal"))
+    val ownTask = WorkRuntime.taskOf(SessionId("fake-owned"), owned, scope, "FAKE-SHELL", "FAKE-PROJECT")
+    assert(ownTask.indexOf("FAKE-PROJECT") > ownTask.indexOf("FAKE-SHELL"), ownTask)
+    assert(ownTask.indexOf("FAKE-PROJECT") < ownTask.indexOf("The goal of the session"), ownTask)
+    val control = Controller.config(home, "fake-model", limits)
+    assert(!WorkRuntime.taskOf(Controller.id, control, home, "FAKE-SHELL", "FAKE-PROJECT").contains("FAKE-PROJECT"))
+    assertEquals(WorkRuntime.chatTask(scope, "FAKE-SHELL", ""), WorkRuntime.chatTask(scope, "FAKE-SHELL"))
+  }
+
+  test("Work: the task holds AGENTS.md and the README of the folder from the open, and a reopen reads them again") {
+    // In a live session the model used one more step to read the README with a cell (2026-11-12).
+    val first = sessionModel(policy("FAKE-ONE", None), policy("FAKE-TWO", None))
+    val again = sessionModel(policy("FAKE-THREE", None))
+    val place = Place()
+    try withRoot { root =>
+        val readme = place.root.resolve("README.md")
+        Files.writeString(place.root.resolve("AGENTS.md"), "FAKE-AGENTS-RULE"): Unit
+        Files.writeString(readme, "FAKE-README-OLD"): Unit
+        val env = WorkEnv(place.home, HostList.empty, Backends.detect(), Secrets.none, root)
+        withHost(root, Models.withModel(first)(WorkRuntime.forWork(env, limits))) { host =>
+          val handle = opened(host, id(1), Some(WorkRuntime.config(place.root, "fake-model", limits)))
+          assertEquals(handle.send(message("m1")), Right(()))
+          assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+          Files.writeString(readme, "FAKE-README-NEW"): Unit
+          assertEquals(handle.send(message("m2")), Right(()))
+          assert(eventually(60)(outcomes(handle).size == 2), entries(handle).toString)
+        }
+        Vector(promptOf(first, 0), promptOf(first, 1)).foreach { text =>
+          assert(text.contains("FAKE-AGENTS-RULE") && text.contains("FAKE-README-OLD"), text)
+          assert(!text.contains("FAKE-README-NEW"), "a change in the activation changed the task")
+        }
+        withHost(root, Models.withModel(again)(WorkRuntime.forWork(env, limits))) { host =>
+          val handle = opened(host, id(1), None)
+          assertEquals(handle.send(message("m3")), Right(()))
+          assert(eventually(60)(outcomes(handle).size == 3), entries(handle).toString)
+        }
+        assert(promptOf(again, 0).contains("FAKE-README-NEW"), promptOf(again, 0))
+      }
+    finally place.close()
   }
 
   test("Work: the task names what a command can write, the read-only .git, the secret files and the network") {

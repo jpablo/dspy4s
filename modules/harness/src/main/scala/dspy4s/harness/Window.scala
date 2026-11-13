@@ -147,8 +147,8 @@ object Window extends ContextStrategy:
       if done.pending.isEmpty then done.steps else done.steps :+ ChatStep(done.pending, acted = false, "", None, None)
     (done.turns, open)
 
-  /** Who wrote a message, for the text of the window. */
-  private def speaker(source: Source): String =
+  /** Who wrote a message, for the text of the window and of the memory log. */
+  private[harness] def speaker(source: Source): String =
     source match
       case Source.User           => "The person"
       case Source.Harness        => "The harness"

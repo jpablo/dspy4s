@@ -36,8 +36,11 @@ object Controller:
       "comes to you as a message. At each step, give a short text and the code of one cell, or only a text. A step " +
       "with no code ends the turn, and its text is the reply to the person."
 
-  /** The task of each turn of the controller of the person with the home `home`: `instructions` and the home. */
-  def task(home: Path): String = s"$instructions\n\nThe home of the person: $home."
+  /** The task of each turn of the controller of the person with the home `home`: the home. `instructions` are the
+    * instructions of the policy of the controller (`WorkRuntime.activate`), so they come one time, in the system
+    * message.
+    */
+  def task(home: Path): String = s"The home of the person: $home."
 
   /** The configuration of the controller of the person with the home `home` (8.1, 8.7): a chat turn with `limits.steps`
     * steps, the owner `User`, `mode`, `ceiling`, the memory tree, the scope `Home`, the guard `guard`, the preamble of

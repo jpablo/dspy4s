@@ -1,8 +1,8 @@
 package dspy4s.harness
 
-import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, DelegatingAdapter, ParsedOutput}
+import dspy4s.adapters.contracts.{Adapter, AdapterInvocation, DelegatingAdapter, FormattedPrompt, ParsedOutput}
 import dspy4s.core.contracts.{DspyError, DynamicValues, ParseError, RuntimeContext, SignatureLayout}
-import dspy4s.lm.contracts.LmOutput
+import dspy4s.lm.contracts.{LmOutput, MessageRole}
 import dspy4s.programs.runtime.SettingsProgramRuntime
 import zio.blocks.schema.DynamicValue
 
@@ -12,6 +12,9 @@ import zio.blocks.schema.DynamicValue
   * no second model call. Else the error of `delegate` stays. The fallback of `delegate` gets the same rule
   * (`DelegatingAdapter.wrap`). Each other member comes from `delegate`.
   *
+  * The format of `delegate` gets one change: the fixed fields (`PolicyAdapter.Fixed`) go to the end of the system
+  * message, so the endpoint can reuse the start of each request of a turn from its cache (`PolicyAdapter.moved`).
+  *
   * The rule gives the fields of `PolicyStep`. After the parse, the call fills the reasoning field as for each reply:
   * with the native reasoning of the reply, else with the empty text. The adapters of DSPy have no such rule, so it is
   * in the harness, and only the policy call has it (`HarnessEffects.callPolicy`).
@@ -19,6 +22,19 @@ import zio.blocks.schema.DynamicValue
 private[harness] final case class PolicyAdapter(delegate: Adapter) extends DelegatingAdapter:
 
   override protected def wrap(next: Adapter): Adapter = PolicyAdapter(next)
+
+  /** The prompt of `delegate`, with the fixed fields at the end of the system message (`PolicyAdapter.moved`). */
+  override def format(invocation: AdapterInvocation)(using RuntimeContext): Either[DspyError, FormattedPrompt] =
+    delegate.format(invocation).map { prompt =>
+      val values = PolicyAdapter.Fixed.flatMap(name => invocation.inputs.get(name).map(name -> _))
+      val shown  = values.filterNot((_, value) => DynamicValues.asString(value).contains(""))
+      PolicyAdapter.moved(prompt, marked(invocation, values), marked(invocation, shown))
+    }
+
+  /** The marker form of the input fields `fields` of `invocation`, or an empty text for no field. */
+  private def marked(invocation: AdapterInvocation, fields: Vector[(String, DynamicValue)]): String =
+    if fields.isEmpty then ""
+    else delegate.formatUserMessageContent(invocation.layout, DynamicValues.recordFromEntries(fields))
 
   override def parse(invocation: AdapterInvocation, output: LmOutput)(using
       RuntimeContext
@@ -29,6 +45,42 @@ private[harness] final case class PolicyAdapter(delegate: Adapter) extends Deleg
       case result => result
 
 private[harness] object PolicyAdapter:
+
+  /** The input fields that stay the same at each step: `task` and `apiReference` in a session, and `memory` in a turn.
+    * They come one time, at the end of the system message (`moved`).
+    */
+  val Fixed: Vector[String] = Vector("task", "apiReference", "memory")
+
+  /** The text before the fixed fields in the system message. */
+  val FixedHeader: String =
+    "These fields come here one time, and not in each message: task and apiReference stay the same in this session, " +
+      "and memory stays the same in this turn."
+
+  /** `prompt` with the fixed fields at the end of its system message (CODE_HARNESS_DESIGN.md, 10.6). `prefix` is the
+    * marker form of the fixed fields of the request, and `shown` the marker form of the fixed fields that are not
+    * empty. When the last user message starts with `prefix` and a blank line, that start goes away, and `shown` goes at
+    * the end of the system message after `FixedHeader`. So the system message and the steps of the turn are the same
+    * start of each request of a turn, and the endpoint can reuse them from its cache. The history of the turn stays
+    * between them and the last message. Each other prompt stays as it is.
+    *
+    * A measured request (2026-11-12) had the fixed fields in the last user message, after the history. So each later
+    * step reused only 256 of about 3,200 tokens from the cache.
+    */
+  def moved(prompt: FormattedPrompt, prefix: String, shown: String): FormattedPrompt =
+    val messages = prompt.messages
+    val first    = messages.indexWhere(_.role == MessageRole.System)
+    val last     = messages.lastIndexWhere(_.role == MessageRole.User)
+    val changed  =
+      for
+        _      <- Option.when(prefix.nonEmpty && first >= 0 && first < last)(())
+        text   <- messages(last).text.filter(_.startsWith(prefix + "\n\n"))
+        system <- messages(first).text
+      yield
+        val head = if shown.isEmpty then system else s"$system\n\n$FixedHeader\n\n$shown"
+        messages
+          .updated(first, messages(first).copy(text = Some(head)))
+          .updated(last, messages(last).copy(text = Some(text.drop(prefix.length + 2))))
+    changed.fold(prompt)(updated => prompt.copy(messages = updated))
 
   /** `context` with its adapter in a `PolicyAdapter`. The adapter is the adapter of `context`, else a chat adapter, as
     * a predictor gets it (`SettingsProgramRuntime`).

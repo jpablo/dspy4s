@@ -1,6 +1,6 @@
 package dspy4s.harness
 
-import dspy4s.core.contracts.{DspyError, DynamicValues, History, RuntimeContext}
+import dspy4s.core.contracts.{DspyError, RuntimeContext}
 import dspy4s.harness.guest.StrategyName
 import dspy4s.harness.kernel.Logged
 import dspy4s.programs.strategies.Predict
@@ -148,14 +148,9 @@ final class MemoryTree(
   def project(journal: Vector[Logged], d: MemoryState, budget: Int): Projection =
     val open = Window.openTurn(journal, (budget - MemoryTree.room(high)).max(0))
     val view = MemoryTree.render(d.memory, d.view)
-    if view.isEmpty then open
-    else
-      val first = DynamicValues.record(
-        "observation" -> DynamicValues.string(s"${MemoryTree.Header}\n$view"),
-        "reasoning"   -> DynamicValues.string(""),
-        "text"        -> DynamicValues.string("")
-      )
-      open.copy(history = History(first +: open.history.messages))
+    // The view is the field memory, and the history holds only the steps of the open turn (CODE_HARNESS_DESIGN.md,
+    // 10.6). A view as a first step of the history had an empty reply and the code None.
+    if view.isEmpty then open else open.copy(memory = s"${MemoryTree.Header}\n$view")
 
   /** The text of the part `ref` of the memory: the message of a part of level 0, or the lines of its two halves with
     * their references. A part that the memory does not have gives an error with the top parts (`Memory.roots`), so the
@@ -308,12 +303,13 @@ object MemoryTree:
 
   /** The instructions of `compress`. */
   val compressInstructions: String =
-    "Summarize the message in one line of at most 400 characters. Keep each name, number, path, decision and error."
+    "Summarize the message in one line of at most 400 characters. Keep who wrote it, and each name, number, path, " +
+      "decision and error."
 
   /** The instructions of `merge`. */
   val mergeInstructions: String =
-    "Merge the two summary lines, the older one first, into one line of at most 400 characters. Keep each name, " +
-      "number, path, decision and error that a later step can need."
+    "Merge the two summary lines, the older one first, into one line of at most 400 characters. Keep who wrote each " +
+      "part, and each name, number, path, decision and error that a later step can need."
 
   /** A memory tree with the two leaves of these instructions, the store `lines`, a view of at most `high` parts, the
     * runner of the activation, the budget of the summaries of the turn, and at most `width` leaf calls at a time. A

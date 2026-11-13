@@ -2279,7 +2279,7 @@ name = "PolicyInput"
 ref = "7"
 spec = true
 uses = ["history", "schema"]
-text = "The input of the policy leaf: the task, the API reference, the status, the last observation and the history. The API reference is an input field, so an optimizer cannot change it."
+text = "The input of the policy leaf: the task, the API reference, the view of the memory, the status, the last observation and the history of the open turn. Each field has a description (Harness.policyFields). The API reference is an input field, so an optimizer cannot change it."
 
 [[node]]
 id = "policy-step"
@@ -2300,7 +2300,7 @@ ops = ["size"]
 ref = "7"
 spec = true
 uses = ["history"]
-text = "What a strategy gives for one step: the status, the last observation and the earlier steps. size counts the characters of a budget. A proposal: the harness adds the task and the API reference, which do not come from the journal."
+text = "What a strategy gives for one step: the status, the last observation, the earlier steps of the open turn, and the view of the memory. size counts the characters of a budget, with the memory. A proposal: the harness adds the task and the API reference, which do not come from the journal."
 
 [[node]]
 id = "derivation"
@@ -2490,7 +2490,7 @@ uses = ["dspy-module", "signature", "predict", "policy-input", "policy-step", "f
 proof_uses = ["drive", "memory-journal", "harness-effects", "recorded", "local-files", "snapshot-store", "journal-turn",
               "sandboxed-shell", "profile-for-mode", "layout", "preamble", "scala-repl", "window", "budget",
               "host-threads", "leaf-llm", "child-turns", "child-start", "rejection", "cell-outcome"]
-text = "A harness for one task, as a dspy4s Module. forward copies the workspace, starts a journal in memory and a REPL with the handlers of the mode, sends the input fields, runs drive and reads the last TurnEnded: Submitted gives the output through Data, Replied and Exhausted run the finisher. The transcript of the finisher gives the outcome of each cell in words (CellOutcome.words). Since phase 5 a child of rlm has the same session path: its own journal, a new REPL with a preamble from Data[A].shape, the same policy leaf, the window strategy and the same copy, files and shell. Only submit gives the value of a child. modeAt gives Children^ only below the depth limit. A proposal: the leaves are policy, finisher and subQuery."
+text = "A harness for one task, as a dspy4s Module. forward copies the workspace, starts a journal in memory and a REPL with the handlers of the mode, sends the input fields, runs drive and reads the last TurnEnded: Submitted gives the output through Data, Replied and Exhausted run the finisher. The transcript of the finisher gives the outcome of each cell in words (CellOutcome.words). Since phase 5 a child of rlm has the same session path: its own journal, a new REPL with a preamble from Data[A].shape, the same policy leaf, the window strategy and the same copy, files and shell. Only submit gives the value of a child. modeAt gives Children^ only below the depth limit. A proposal: the leaves are policy, finisher and subQuery. policySignature gives the policy signature with the description of each field (policyFields)."
 
 [[group]]
 id = "harness-givens"
@@ -3245,9 +3245,9 @@ name = "WorkRuntime"
 ops = ["activate", "defaultGuard", "config", "forWork", "taskOf", "shellWords", "ownedConfig", "forHost"]
 ref = "8.1"
 spec = true
-uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context", "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access", "harness", "line-store", "file-lines", "memory-tree", "session-file", "peers", "host-sessions", "harness-probe", "scope", "strategy-name", "activity", "memory-progress", "memory-use", "drafts", "draft", "context-use"]
-proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell", "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble", "memory-tree", "controller"]
-text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of workMode through recorded and guarded, and JobShell. workMode is local mode with no Sessions^ and no Children^, so a work session has no rlm. Each turn gets a new budget of model calls. The first rules of 5.5: git push gets Ask in a mode with Network^. The task of a session with a shell gives the words of the profile of its activation (shellWords), and tells the model to tell the person when a task needs a write that the shell refuses. config takes the option bag of the model, and contextUse gives the tokens of the last call to the policy (CLI_SCREEN.md, 14.4)."
+uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context", "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access", "harness", "line-store", "file-lines", "memory-tree", "session-file", "peers", "host-sessions", "harness-probe", "scope", "strategy-name", "activity", "memory-progress", "memory-use", "drafts", "draft", "context-use", "project-files"]
+proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell", "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble", "memory-tree", "controller", "project-files"]
+text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of workMode through recorded and guarded, and JobShell. workMode is local mode with no Sessions^ and no Children^, so a work session has no rlm. Each turn gets a new budget of model calls. The first rules of 5.5: git push gets Ask in a mode with Network^. The task of a session with a shell gives the words of the profile of its activation (shellWords), and tells the model to tell the person when a task needs a write that the shell refuses. config takes the option bag of the model, and contextUse gives the tokens of the last call to the policy (CLI_SCREEN.md, 14.4). The task of a work session also holds the files of the project (ProjectFiles), read once at each activation. The task holds no instructions: they come one time, in the system message."
 
 [[group]]
 id = "cli-args"
@@ -4042,7 +4042,7 @@ ops = ["messages", "beforeOpenTurn"]
 ref = "7.1"
 uses = ["logged", "message"]
 proof_uses = ["turn-outcome"]
-text = "The log from the journal: one message for each Input, each cell with its output at its Observed, and each end of a turn, with the reply or the text of the report of the outcome (TurnOutcome.report). A longer journal gives a longer log with the same start. beforeOpenTurn counts the messages up to the reply of the last turn."
+text = "The log from the journal: one message for each Input, each cell with its output at its Observed, and each end of a turn, with the reply or the text of the report of the outcome (TurnOutcome.report). A longer journal gives a longer log with the same start. beforeOpenTurn counts the messages up to the reply of the last turn. Each text starts with its speaker: The person wrote, another sender, The model ran a cell, or The model replied."
 
 [[group]]
 id = "memory-tree"
@@ -4129,7 +4129,7 @@ uses = ["context-strategy", "predict", "compress-input", "merge-input", "summary
         "runtime-context", "dspy-error", "logged", "projection", "strategy-name", "signature", "policy-runner", "budget", "memory-log", "window",
         "memory-progress"]
 proof_uses = ["budget", "memory", "memory-log", "node-id", "view", "in-batch", "text-prefix"]
-text = "update takes the stand-ins out when the summary budget has a call, appends the new messages, builds each ready node with the store or a leaf through the runner and the summary budget, and advances the view to the last reply. A failed leaf gives the line of the source, for the store. A stop or a spent budget gives a stand-in, and a node above a stand-in is a stand-in with no leaf call. A stand-in never goes to the store. project gives the view its room first, then the open turn as the window gives it. zoom gives a message or the lines of two halves."
+text = "update takes the stand-ins out when the summary budget has a call, appends the new messages, builds each ready node with the store or a leaf through the runner and the summary budget, and advances the view to the last reply. A failed leaf gives the line of the source, for the store. A stop or a spent budget gives a stand-in, and a node above a stand-in is a stand-in with no leaf call. A stand-in never goes to the store. project gives the view its room first, then the open turn as the window gives it. zoom gives a message or the lines of two halves. project gives the view as the field memory, and the history holds only the steps of the open turn. compress and merge keep who wrote each part."
 
 [[group]]
 id = "file-lines"
@@ -4386,7 +4386,7 @@ ref = "8.7"
 spec = true
 uses = ["session-id", "mode", "access", "harness-limits", "session-config", "source", "data"]
 proof_uses = ["preamble"]
-text = "The fixed id controller, Mode.controller with no Children^, a ceiling that holds workMode, the instructions, the task with the home, the configuration with the scope Home and the memory tree, and the source of a message of a session."
+text = "The fixed id controller, Mode.controller with no Children^, a ceiling that holds workMode, the instructions of its policy (WorkRuntime.policyOf), the task with only the home, the configuration with the scope Home and the memory tree, and the source of a message of a session."
 
 [[group]]
 id = "host-sessions"
@@ -4831,6 +4831,58 @@ name = "Tokens:"
 ref = "10.6"
 uses = ["harness-effects", "memory-progress"]
 text = "callPolicy gives its progress the prompt and completion tokens of its model call, also of a call that streams, and a call with no usage gives no tokens."
+
+[[group]]
+id = "project-files"
+phase = "p7"
+module = "harness"
+file = "ProjectFiles.scala"
+title = "The files of the project in the task of a work session"
+
+[[node]]
+id = "project-files"
+group = "project-files"
+kind = "data"
+name = "ProjectFiles"
+ops = ["section"]
+ref = "10.6"
+uses = ["files"]
+proof_uses = ["text-prefix"]
+text = "AGENTS.md, then the first of README.md, README, README.rst and README.txt, at the top of the folder of the session. of reads each one through the file calls of the session, so the rules of read apply, and a missing file, a folder or a text that is not UTF-8 gives no part. cut keeps at most 8,000 characters, up to a line end. section gives the text of the task, each file between its lines, with a note of the size of a cut file. A session reads them once at each activation."
+
+[[group]]
+id = "project-files-laws"
+phase = "p7"
+module = "harness"
+file = "ProjectFilesLaws.scala"
+where = "tests"
+title = "The laws of the files of the project"
+
+[[node]]
+id = "law-project-files"
+group = "project-files-laws"
+kind = "law"
+name = "Project files:"
+ref = "10.6"
+uses = ["project-files", "local-files"]
+text = "of gives AGENTS.md, then the first README that exists, and README.md comes first. A link to a file outside the folder, a folder and a binary file give no part. A long file is cut at the last line end before the limit, and the part keeps the size. section gives nothing for no part, and else each file between its lines and the note of a cut."
+
+[[group]]
+id = "policy-prompt-laws"
+phase = "p7"
+module = "harness"
+file = "PolicyPromptLaws.scala"
+where = "tests"
+title = "The laws of the request of a call to the policy"
+
+[[node]]
+id = "law-policy-prompt"
+group = "policy-prompt-laws"
+kind = "law"
+name = "Prompt:"
+ref = "10.6"
+uses = ["policy-input", "harness"]
+text = "Each field of the policy has a description, and the system message names it. The system message ends with task, apiReference and memory, and the last message has the status and the observation. The steps of the turn come between them. An empty memory comes in no message, and a request that does not match stays as it is."
 
 [[group]]
 id = "draft-laws"
