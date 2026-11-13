@@ -70,8 +70,7 @@ dspy4s is split into focused modules so you can depend only on what you need.
 
 ## Requirements
 
-- Scala 3 (the build pins the nightly `3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY` from the Scala nightly
-  repository)
+- Scala 3 (the build pins `3.10.1` from Maven Central)
 - JDK 21 (the repo pins `openjdk-21.0.1` in `.tool-versions`)
 - sbt 1.x
 - An `OPENAI_API_KEY` for examples that make live LM calls
