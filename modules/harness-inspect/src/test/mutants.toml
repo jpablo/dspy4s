@@ -342,8 +342,8 @@ new = '<div class="ln"><span class="n">${i}</span>'
 name = "Mutant: the copy button of a view names no hidden copy"
 [[mutant.edit]]
 file = "ExchangePage.scala"
-old = '<button data-copy="$item-exact">Copy</button>'
-new = '<button data-copy="$item">Copy</button>'
+old = '<button data-copy="$copied">Copy</button>'
+new = '<button data-copy="$item${copied.take(0)}">Copy</button>'
 
 # ── The links to the views of an exchange (5.2 and 5.4, the bug of 2026-11-12) ──
 
@@ -381,3 +381,75 @@ name = "Mutant: the links to the exchange before and after do not keep the view"
 file = "ExchangePage.scala"
 old = '${escape(e.id)}?tab=$tab" data-tabbed>$name</a>'
 new = '${escape(e.id)}?tab=chat${tab.take(0)}" data-tabbed>$name</a>'
+
+# ── The reply of a stream put together from its chunks (5.4, law L21) ──
+
+[[mutant]]
+name = "Mutant: the text parts of a delta give only the last part"
+[[mutant.edit]]
+file = "StreamJson.scala"
+old = "if texts.isEmpty then Json.Null else Json.String(texts.mkString)"
+new = "if texts.isEmpty then Json.Null else Json.String(texts.last)"
+
+[[mutant]]
+name = "Mutant: the role of each delta joins"
+[[mutant.edit]]
+file = "StreamJson.scala"
+old = 'case "role"             => first(deltas, "role").map("role" -> _)'
+new = 'case "role"             => Some("role" -> joined(deltas, "role"))'
+
+[[mutant]]
+name = "Mutant: the usage comes from the first chunk"
+[[mutant.edit]]
+file = "StreamJson.scala"
+old = 'case "usage"   => last(all, "usage").map("usage" -> _)'
+new = 'case "usage"   => first(all, "usage").map("usage" -> _)'
+
+[[mutant]]
+name = "Mutant: the object of the reply stays the object of a chunk"
+[[mutant.edit]]
+file = "StreamJson.scala"
+old = 'case "object"  => Some("object" -> Json.String("chat.completion"))'
+new = 'case "object"  => first(all, "object").map("object" -> _)'
+
+[[mutant]]
+name = "Mutant: the arguments of a tool call come from its first part"
+[[mutant.edit]]
+file = "StreamJson.scala"
+old = 'case "arguments" => Some("arguments" -> joined(functions, "arguments"))'
+new = 'case "arguments" => first(functions, "arguments").map("arguments" -> _)'
+
+[[mutant]]
+name = "Mutant: the parts of the tool calls do not join by their index"
+[[mutant.edit]]
+file = "StreamJson.scala"
+old = "parts.map(index).distinct.map(i => parts.filter(index(_) == i))"
+new = "parts.map(p => Vector(p).filter(index(_).nonEmpty || true))"
+
+[[mutant]]
+name = "Mutant: a tool call of the reply keeps its index"
+[[mutant.edit]]
+file = "StreamJson.scala"
+old = 'case "index"    => None'
+new = 'case "index"    => first(group, "index").map("index" -> _)'
+
+[[mutant]]
+name = "Mutant: the logprobs come from the last chunk"
+[[mutant.edit]]
+file = "StreamJson.scala"
+old = "key -> Json.Array(parts.flatMap(arrayAt(_, key))*)"
+new = "key -> Json.Array(parts.takeRight(1).flatMap(arrayAt(_, key))*)"
+
+[[mutant]]
+name = "Mutant: the reply of a stream opens on its stream"
+[[mutant.edit]]
+file = "ExchangePage.scala"
+old = '"""<div class="replies show-response">"""'
+new = '"""<div class="replies show-stream">"""'
+
+[[mutant]]
+name = "Mutant: the Copy button of a stream copies the exact stream first"
+[[mutant.edit]]
+file = "ExchangePage.scala"
+old = 'tools(session, x, "reply", "reply-merged", toggle)'
+new = 'tools(session, x, "reply", "reply-exact", toggle)'

@@ -71,29 +71,42 @@ object ExchangePage:
   private def request(session: SessionId, x: Exchange): String =
     val headers = x.requestHeaders.map((k, v) => s"<dt>${escape(k)}</dt><dd>${escape(v)}</dd>").mkString
     s"<dl><dt>URL</dt><dd>${escape(x.url)}</dd>$headers<dt>body</dt><dd>${x.body.getBytes(UTF_8).length} bytes</dd></dl>" +
-      tools(session, x, "request") + Highlight.code(pretty(x.body).linesIterator.toVector) +
+      tools(session, x, "request", "request-exact", "") + Highlight.code(pretty(x.body).linesIterator.toVector) +
       s"""<pre id="request-exact" hidden>${escape(x.body)}</pre>"""
 
-  /** The status, the headers, the code view of the reply (each line of a stream, or the body with indents), and the
-    * buttons that copy and save the exact reply.
+  /** The status, the headers, the code view of the reply, and the buttons that copy and save it. A plain reply shows
+    * its body with indents. A stream has a toggle of two views: the reply put together from its chunks
+    * (`StreamJson.merge`), which the page shows first, and each line of the stream. The Copy button copies the view
+    * that shows, and the Download link saves the exact reply.
     */
   private def reply(session: SessionId, x: Exchange): String =
     if x.open then """<p class="note">The exchange has no reply yet.</p>"""
     else
-      val lines = if x.stream then x.replied else pretty(x.replied.mkString("\n")).linesIterator.toVector
       val facts =
         Vector(x.status.map(s => "status" -> s.toString), x.end.map(e => "end" -> e), x.error.map(e => "error" -> e))
           .flatten ++ x.replyHeaders.toVector.sortBy(_._1)
-      facts.map((k, v) => s"<dt>${escape(k)}</dt><dd>${escape(v)}</dd>").mkString("<dl>", "", "</dl>") +
-        tools(session, x, "reply") + Highlight.code(lines) +
-        s"""<pre id="reply-exact" hidden>${escape(x.replied.mkString("\n"))}</pre>"""
+      val exact  = s"""<pre id="reply-exact" hidden>${escape(x.replied.mkString("\n"))}</pre>"""
+      val merged = if x.stream then StreamJson.merge(x.replied).map(JsonText.pretty) else None
+      val views  = merged match
+        case Some(laid) =>
+          val toggle = """<span class="group"><button data-reply="response" class="on">Response</button>""" +
+            """<button data-reply="stream">Stream</button></span>"""
+          tools(session, x, "reply", "reply-merged", toggle) + """<div class="replies show-response">""" +
+            s"""<div class="r-view r-response">${Highlight.code(laid.linesIterator.toVector)}</div>""" +
+            s"""<div class="r-view r-stream">${Highlight.code(x.replied)}</div></div>""" +
+            exact + s"""<pre id="reply-merged" hidden>${escape(laid)}</pre>"""
+        case None =>
+          val lines = if x.stream then x.replied else pretty(x.replied.mkString("\n")).linesIterator.toVector
+          tools(session, x, "reply", "reply-exact", "") + Highlight.code(lines) + exact
+      facts.map((k, v) => s"<dt>${escape(k)}</dt><dd>${escape(v)}</dd>").mkString("<dl>", "", "</dl>") + views
 
-  /** The button that copies the exact `item` (`request` or `reply`) of `x` from its hidden copy, and the link that
-    * saves it as a file (5.5).
+  /** The row of buttons of a view: `before` (for example a toggle), the button that copies the hidden copy `copied`,
+    * and the link that saves the exact `item` (`request` or `reply`) of `x` as a file (5.5).
     */
-  private def tools(session: SessionId, x: Exchange, item: String): String =
+  private def tools(session: SessionId, x: Exchange, item: String, copied: String, before: String): String =
     val saved = s"/raw/${session.value}/x/${escape(x.id)}/$item?download=1"
-    s"""<p class="tools"><button data-copy="$item-exact">Copy</button> <a class="button" href="$saved">Download</a></p>"""
+    s"""<p class="tools">$before<button data-copy="$copied">Copy</button> """ +
+      s"""<a class="button" href="$saved">Download</a></p>"""
 
   /** The diff of the text of the request of `target` and of `x` (`Chat.requestLines`), in parts with three lines around
     * each change, and a choice of the exchange to compare with.

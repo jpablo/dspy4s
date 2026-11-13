@@ -147,15 +147,39 @@ class ExchangePageLaws extends ScalaCheckSuite:
         )
         val reply = """(?s)<section class="x-view x-reply">(.*?)</section>""".r.findFirstMatchIn(page).map(_.group(1))
         assert(reply.exists(_.contains("""<span class="t-key">&quot;choices&quot;</span>""")), reply)
-        // Each of the two views has a code view, a button that copies its exact text, and a link to its download.
+        // Each of the two views has a code view, a button that copies the text that it shows, a hidden copy of the exact
+        // text, and a link to its download. The reply of a stream opens on its merged reply, so its button copies that.
         val raw = s"/raw/${session.value}/x/x1"
-        Vector(request -> ("request", "request-exact"), reply -> ("reply", "reply-exact")).foreach {
-          case (view, (item, exact)) =>
+        Vector(
+          request -> ("request", "request-exact", "request-exact"),
+          reply   -> ("reply", "reply-merged", "reply-exact")
+        )
+          .foreach { case (view, (item, copied, exact)) =>
             assert(view.exists(_.contains("""<div class="code">""")), view)
-            assert(view.exists(_.contains(s"""<button data-copy="$exact">Copy</button>""")), view)
+            assert(view.exists(_.contains(s"""<button data-copy="$copied">Copy</button>""")), view)
             assert(view.exists(_.contains(s"""href="$raw/$item?download=1"""")), view)
             assert(view.exists(_.contains(s"""<pre id="$exact" hidden>""")), view)
-        }
+          }
+        // The reply of a stream has a toggle of its merged reply and of its stream, and the merged reply joins the text.
+        assert(reply.exists(_.contains("""<button data-reply="response" class="on">Response</button>""")), reply)
+        assert(reply.exists(_.contains("""<button data-reply="stream">Stream</button>""")), reply)
+        assert(reply.exists(_.contains("""<div class="replies show-response">""")), reply)
+        assert(
+          reply.exists(_.contains(
+            """<span class="t-key">&quot;content&quot;</span>: <span class="t-str">&quot;Hello&quot;</span>"""
+          )),
+          reply
+        )
+        assert(reply.exists(_.contains("""<pre id="reply-merged" hidden>""")), reply)
+        // A plain reply is already the reply with no stream, so it has no toggle.
+        val (_, second) = get(inspector, s"/s/${session.value}/x/x2")
+        val plain       = """(?s)<section class="x-view x-reply">(.*?)</section>""".r.findFirstMatchIn(second).map(_.group(1))
+        assert(
+          plain.exists(p =>
+            !p.contains("data-reply") && p.contains("""<button data-copy="reply-exact">Copy</button>""")
+          ),
+          plain
+        )
         // The bar has no raw links, because the buttons of the views copy and save the exact texts.
         val bar = """(?s)<header class="bar">(.*?)</header>""".r.findFirstMatchIn(page).map(_.group(1))
         assert(bar.exists(b => !b.contains("Raw:") && !b.contains("/raw/")), bar)

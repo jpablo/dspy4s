@@ -118,6 +118,8 @@ background:var(--code);border-radius:6px}
 .code .n{color:var(--muted);text-align:right;padding-right:1.2em;user-select:none}
 .code .c{white-space:pre-wrap;overflow-wrap:anywhere;padding-left:calc(var(--i) * 1ch + 4ch);text-indent:-4ch}
 .tools{display:flex;gap:6px;justify-content:flex-end;margin:6px 0 2px}
+.tools .group{display:flex;gap:4px;margin-right:auto}
+.replies.show-response .r-stream,.replies.show-stream .r-response{display:none}
 a.button{font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:5px;
 padding:1px 8px;text-decoration:none}
 .t-key{color:var(--leaf)}.t-str{color:var(--good)}.t-num{color:var(--warn)}.t-lit{color:var(--memory)}
@@ -178,6 +180,15 @@ document.querySelectorAll('button[data-tab]').forEach(b => b.addEventListener('c
     to.searchParams.set('tab', b.dataset.tab);
     a.href = to.pathname + to.search;
   });
+}));
+document.querySelectorAll('button[data-reply]').forEach(b => b.addEventListener('click', () => {
+  const box = document.querySelector('.replies');
+  if (!box) return;
+  box.classList.remove('show-response', 'show-stream');
+  box.classList.add('show-' + b.dataset.reply);
+  document.querySelectorAll('button[data-reply]').forEach(x => x.classList.toggle('on', x === b));
+  const copy = b.closest('.tools').querySelector('button[data-copy]');
+  if (copy) copy.dataset.copy = b.dataset.reply === 'stream' ? 'reply-exact' : 'reply-merged';
 }));
 document.querySelectorAll('button[data-copy]').forEach(b => b.addEventListener('click', async () => {
   const source = document.getElementById(b.dataset.copy);
