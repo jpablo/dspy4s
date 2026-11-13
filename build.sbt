@@ -1,9 +1,7 @@
 ThisBuild / organization := "io.github.jpablo"
 ThisBuild / version      := "0.1.0-SNAPSHOT"
-// A Scala 3 nightly, the same as atc: capture checking and safe mode need it. Nightlies come from their own
-// repository.
-ThisBuild / scalaVersion := "3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY"
-ThisBuild / resolvers += "Scala nightlies" at "https://repo.scala-lang.org/artifactory/maven-nightlies/"
+// Scala 3.10.1 from Maven Central: capture checking and safe mode need a 3.10 compiler.
+ThisBuild / scalaVersion := "3.10.1"
 
 addCommandAlias("fmt", ";scalafmtAll;scalafmtSbt")
 addCommandAlias("fmtCheck", ";scalafmtCheckAll;scalafmtSbtCheck")
@@ -23,7 +21,7 @@ lazy val dotenvVersion          = "3.2.0"
 lazy val scalaXmlVersion        = "2.4.0"
 lazy val ironVersion            = "3.3.2"
 lazy val mcpSdkVersion          = "2.1.0"
-lazy val jlineVersion           = "4.4.6"  // the version of the REPL of the nightly, so the class path has one JLine
+lazy val jlineVersion           = "4.4.8"  // the version of the REPL of Scala 3.10.1, so the class path has one JLine
 lazy val slf4jVersion           = "2.0.17" // the slf4j-nop binding of an application: the examples and the CLI
 
 lazy val commonSettings = Seq(
@@ -305,7 +303,7 @@ lazy val harnessRepl = (project in file("modules/harness-repl"))
       "org.scala-lang" %% "scala3-repl" % scalaVersion.value,
       "org.scalameta"  %% "munit"       % munitVersion % Test
     ),
-    // The checks of section 12 used the REPL of this nightly with no scaladoc, and the REPL does not need it.
+    // The checks of section 12 used the REPL with no scaladoc, and the REPL does not need it.
     excludeDependencies += ExclusionRule("org.scala-lang", "scaladoc_3"),
     // The heap guard is one for the JVM, so its test must not stop the cells of another suite. The tests also fork:
     // in the JVM of sbt, the suites of other modules fill the heap, and the guard then stops a cell of these laws.

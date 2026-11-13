@@ -18,7 +18,7 @@ document exists in the code of dspy4s yet.
   log, and a view that is a cut through the tree. The agent zooms into any line to get the detail back.
 - dspy4s has most of the parts: `Predict` leaves, `AgentLoop`, the interpreter contract, `History`, RLM, and the
   optimizers. It has no Scala interpreter. Also, RLM sub-calls write no trace entry.
-- dspy4s builds on the same 3.10 nightly as atc, so the guest API uses capture checking (F2). A mode is a set of
+- dspy4s builds on Scala 3.10.1, so the guest API uses capture checking (F2). A mode is a set of
   givens, and the compiler checks it. A handler decides what each call does.
 - The capability checks stop at the process boundary, and a permitted command can do anything that the user can
   do. So each command runs in an OS sandbox, with a policy from the capabilities in scope (F7, F8).
@@ -102,8 +102,9 @@ Ideas to change:
 - atc swaps `System.out` under a lock for the full JVM, and it installs the host in one global slot. Then
   parallel sessions wait for each other. The optimizers need many parallel rollouts.
 - `chat()` is one completion. atc has no RLM.
-- Capture checking needs the nightly compiler. Since 2026-10-21, dspy4s builds on the same nightly as atc
-  (`3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY`), so the harness can use capture checking too.
+- Capture checking needs a 3.10 compiler. From 2026-10-21, dspy4s built on the same nightly as atc
+  (`3.10.2-RC1-bin-20261015-88be2f5-NIGHTLY`). Since 2026-11-12, it builds on Scala 3.10.1. So the harness can use
+  capture checking too.
 
 ### 2.2 pi (`/Users/jpablo/GitHub/pi-mono`)
 
