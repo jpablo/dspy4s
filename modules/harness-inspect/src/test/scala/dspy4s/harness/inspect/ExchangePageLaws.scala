@@ -189,6 +189,39 @@ class ExchangePageLaws extends ScalaCheckSuite:
       serving(root) { inspector =>
         val (_, page) = get(inspector, s"/s/${session.value}")
         assert(page.contains(s"""href="/s/${session.value}/x/x1""""), page)
+        // The request and reply links of a row open the views of the page, and no row links to a raw path: a raw path
+        // in a browser shows the exact text with no layout (bug of 2026-11-12).
+        val exchange = s"/s/${session.value}/x/x1"
+        assert(page.contains(s"""href="$exchange?tab=request">request</a>"""), page)
+        assert(page.contains(s"""href="$exchange?tab=reply">reply</a>"""), page)
+        val rows = """(?s)<section class="row exchange.*?</section>""".r.findAllIn(page).toVector
+        assert(rows.nonEmpty && rows.forall(!_.contains("/raw/")), rows)
+      }
+    }
+  }
+
+  test("Inspect: tab= opens the page of an exchange on that view, and against= opens the diff when no tab is given") {
+    withRoot { root =>
+      val session = fixture(root)
+      serving(root) { inspector =>
+        def opened(path: String): String =
+          val (status, page) = get(inspector, path)
+          assertEquals(status, 200, path)
+          val tab = """<body class="tab-([a-z]+)">""".r.findFirstMatchIn(page).map(_.group(1)).getOrElse("none")
+          val on  = """<button data-tab="([a-z]+)" class="on">""".r.findAllMatchIn(page).map(_.group(1)).toVector
+          assertEquals(on, Vector(tab), path)
+          tab
+        val x1 = s"/s/${session.value}/x/x1"
+        Vector("chat", "request", "reply", "diff").foreach(tab => assertEquals(opened(s"$x1?tab=$tab"), tab))
+        assertEquals(opened(x1), "chat")
+        assertEquals(opened(s"$x1?tab=fake"), "chat")
+        val x3 = s"/s/${session.value}/x/x3"
+        assertEquals(opened(s"$x3?against=x2"), "diff")
+        assertEquals(opened(s"$x3?against=x2&tab=request"), "request")
+        // The links to the exchange before and after keep the view, so a person can read each request in turn.
+        val (_, second) = get(inspector, s"/s/${session.value}/x/x2?tab=request")
+        assert(second.contains(s"""href="/s/${session.value}/x/x1?tab=request" data-tabbed>earlier</a>"""), second)
+        assert(second.contains(s"""href="/s/${session.value}/x/x3?tab=request" data-tabbed>later</a>"""), second)
       }
     }
   }

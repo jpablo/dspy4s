@@ -141,6 +141,7 @@ pre.diff{padding:4px 0}
 .kind-Input{border-left:3px solid var(--good)}
 .kind-StopRequested,.kind-JobsStopRequested{border-left:3px solid var(--warn)}
 .exchange{background:var(--x)}
+.exchange .meta a.kind{color:var(--accent);text-decoration:underline;text-underline-offset:2px}
 .exchange.pred-policy{border-left:3px solid var(--policy)}
 .exchange.pred-compress,.exchange.pred-merge{border-left:3px solid var(--memory)}
 .exchange.pred-subQuery{border-left:3px solid var(--leaf)}
@@ -169,6 +170,14 @@ document.querySelectorAll('button[data-tab]').forEach(b => b.addEventListener('c
   body.classList.remove('tab-chat', 'tab-request', 'tab-reply', 'tab-diff');
   body.classList.add('tab-' + b.dataset.tab);
   document.querySelectorAll('button[data-tab]').forEach(x => x.classList.toggle('on', x === b));
+  const url = new URL(location.href);
+  url.searchParams.set('tab', b.dataset.tab);
+  history.replaceState(null, '', url);
+  document.querySelectorAll('a[data-tabbed]').forEach(a => {
+    const to = new URL(a.href);
+    to.searchParams.set('tab', b.dataset.tab);
+    a.href = to.pathname + to.search;
+  });
 }));
 document.querySelectorAll('button[data-copy]').forEach(b => b.addEventListener('click', async () => {
   const source = document.getElementById(b.dataset.copy);

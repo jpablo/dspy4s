@@ -12,18 +12,31 @@ import Html.escape
   */
 object ExchangePage:
 
+  /** The views of the page: the key of each tab and its name on the button. */
+  private val Tabs: Vector[(String, String)] =
+    Vector("chat" -> "Chat", "request" -> "Request", "reply" -> "Reply", "diff" -> "Diff")
+
   /** The page of the exchange `id` of `session`, or none for an id that the exchange file does not have. The diff is
-    * against the exchange `against`, else against the last earlier exchange of the same predictor.
+    * against the exchange `against`, else against the last earlier exchange of the same predictor. The page opens on
+    * the view `tab` when it is the key of a tab. Else it opens on the diff when `against` is given, and on the chat
+    * when it is not.
     */
-  def html(store: Store, session: SessionId, id: String, against: Option[String], nonce: String): Option[String] =
+  def html(
+      store  : Store,
+      session: SessionId,
+      id     : String,
+      against: Option[String],
+      tab    : Option[String],
+      nonce  : String
+  ): Option[String] =
     val (exchanges, _) = store.exchanges(session)
     exchanges.find(_.id == id).map { x =>
       val target = against.flatMap(a => exchanges.find(e => e.id == a && e.id != x.id))
         .orElse(exchanges.filter(e => e.index < x.index && e.predictor == x.predictor).lastOption)
-      val tab   = if against.isDefined then "diff" else "chat"
-      val title = store.row(session).map(_.firstMessage).filter(_.nonEmpty).getOrElse(session.value)
-      val bar   = header(session, x, exchanges, title, tab)
-      val views = s"""<section class="x-view x-chat">${Chat.html(x)}</section>""" +
+      val opened = tab.filter(t => Tabs.exists(_._1 == t)).getOrElse(if against.isDefined then "diff" else "chat")
+      val title  = store.row(session).map(_.firstMessage).filter(_.nonEmpty).getOrElse(session.value)
+      val bar    = header(session, x, exchanges, title, opened)
+      val views  = s"""<section class="x-view x-chat">${Chat.html(x)}</section>""" +
         s"""<section class="x-view x-request">${request(session, x)}</section>""" +
         s"""<section class="x-view x-reply">${reply(session, x)}</section>""" +
         s"""<section class="x-view x-diff">${diff(x, target, exchanges)}</section>"""
@@ -31,19 +44,19 @@ object ExchangePage:
         s"Exchange ${x.index + 1} of ${session.value.take(8)}",
         nonce,
         bar + s"<main>$views</main>",
-        s"tab-$tab"
+        s"tab-$opened"
       )
     }
 
   private def header(session: SessionId, x: Exchange, all: Vector[Exchange], title: String, tab: String): String =
     val back = s"/s/${session.value}#x${escape(x.id)}"
+    // A link to the exchange before or after keeps the view, and the script changes its `tab` with each button.
     val near = (Vector(x.index - 1 -> "earlier", x.index + 1 -> "later")).flatMap { (i, name) =>
-      all.lift(i).map(e => s"""<a href="/s/${session.value}/x/${escape(e.id)}">$name</a>""")
+      all.lift(i).map(e => s"""<a href="/s/${session.value}/x/${escape(e.id)}?tab=$tab" data-tabbed>$name</a>""")
     }
     val facts = Exchanges.facts(x).map(escape).mkString(" · ")
-    val tabs  = Vector("chat" -> "Chat", "request" -> "Request", "reply" -> "Reply", "diff" -> "Diff").map {
-      (key, name) =>
-        s"""<button data-tab="$key"${if key == tab then " class=\"on\"" else ""}>$name</button>"""
+    val tabs  = Tabs.map { (key, name) =>
+      s"""<button data-tab="$key"${if key == tab then " class=\"on\"" else ""}>$name</button>"""
     }.mkString("""<span class="group">""", "", "</span>")
     s"""<header class="bar"><div class="facts"><a href="/">Sessions</a> / <a href="$back">${escape(
         title

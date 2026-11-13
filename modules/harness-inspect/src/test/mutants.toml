@@ -344,3 +344,40 @@ name = "Mutant: the copy button of a view names no hidden copy"
 file = "ExchangePage.scala"
 old = '<button data-copy="$item-exact">Copy</button>'
 new = '<button data-copy="$item">Copy</button>'
+
+# ── The links to the views of an exchange (5.2 and 5.4, the bug of 2026-11-12) ──
+
+[[mutant]]
+name = "Mutant: the request and reply links of a row go to the raw paths"
+[[mutant.edit]]
+file = "Exchanges.scala"
+old = 'val base      = s"/s/${session.value}/x/${escape(x.id)}"'
+new = 'val base      = s"/raw/${session.value}/x/${escape(x.id)}"'
+
+[[mutant]]
+name = "Mutant: the page of an exchange takes no tab from the query"
+[[mutant.edit]]
+file = "ExchangePage.scala"
+old = "tab.filter(t => Tabs.exists(_._1 == t)).getOrElse("
+new = "tab.filter(t => t.isEmpty && Tabs.nonEmpty).getOrElse("
+
+[[mutant]]
+name = "Mutant: the page of an exchange takes an unknown tab"
+[[mutant.edit]]
+file = "ExchangePage.scala"
+old = "tab.filter(t => Tabs.exists(_._1 == t)).getOrElse("
+new = "tab.filter(t => t.nonEmpty || Tabs.isEmpty).getOrElse("
+
+[[mutant]]
+name = "Mutant: against= opens the chat"
+[[mutant.edit]]
+file = "ExchangePage.scala"
+old = 'getOrElse(if against.isDefined then "diff" else "chat")'
+new = 'getOrElse(if against.isEmpty then "diff" else "chat")'
+
+[[mutant]]
+name = "Mutant: the links to the exchange before and after do not keep the view"
+[[mutant.edit]]
+file = "ExchangePage.scala"
+old = '${escape(e.id)}?tab=$tab" data-tabbed>$name</a>'
+new = '${escape(e.id)}?tab=chat${tab.take(0)}" data-tabbed>$name</a>'

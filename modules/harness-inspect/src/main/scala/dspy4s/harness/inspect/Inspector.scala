@@ -111,7 +111,9 @@ private[inspect] final class Routes(store: Store, port: Int):
         case Nil                            => page(Right(Pages.sessions(store, nonce)))
         case "s" :: id :: Nil               => withSession(id)(s => page(Pages.session(store, s, nonce)))
         case "s" :: id :: "x" :: xid :: Nil => withSession(id) { s =>
-            ExchangePage.html(store, s, xid, query(uri).get("against"), nonce).fold(missing)(html => page(Right(html)))
+            val asked = query(uri)
+            ExchangePage.html(store, s, xid, asked.get("against"), asked.get("tab"), nonce)
+              .fold(missing)(html => page(Right(html)))
           }
         case "s" :: id :: "after" :: seq :: Nil => withSession(id) { s =>
             seq.toLongOption.fold(missing) { from =>
