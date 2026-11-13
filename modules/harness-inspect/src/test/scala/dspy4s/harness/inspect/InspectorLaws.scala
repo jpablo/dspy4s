@@ -168,6 +168,38 @@ class InspectorLaws extends ScalaCheckSuite:
     }
   }
 
+  property("Inspect L13: the Scala view of a row is its entry, and the bar of the row shows its seq and its meta") {
+    val sources = Gen.oneOf(
+      Gen.oneOf(Source.User, Source.Controller, Source.Harness, Source.Policy),
+      Gen.const(Source.Child(SessionId("fake-child-1"))),
+      Gen.const(Source.Parent(SessionId("fake-parent-1"), EffectId(4L, 2)))
+    )
+    val metas =
+      for
+        at       <- Gen.choose(Start, Start + 86_400_000L)
+        source   <- sources
+        taint    <- Gen.oneOf(Taint.Trusted, Taint.External)
+        required <- Gen.oneOf(true, false)
+      yield Meta(at, source, taint, required)
+    forAllNoShrink(entry(text), metas, Gen.choose(0L, 9999L)) { (value, meta, seq) =>
+      val logged = Logged(seq, meta, value)
+      val row    = SessionFile.Row(seq, meta.required, LoggedCodec.encodeToString(logged), Right(logged))
+      assertEquals(EntryViews.scala(row), ScalaText.of(value))
+      val bar = """(?s)<div class="meta">(.*?)</div>""".r.findFirstMatchIn(EntryViews.html(row)).map(_.group(1))
+        .getOrElse(fail("the row has no bar"))
+      assert(bar.contains(s"#$seq<"), bar)
+      assert(bar.contains(Html.time(meta.atMillis)), bar)
+      assert(bar.contains(s">${meta.source.productPrefix}"), bar)
+      meta.source match
+        case Source.Child(session)          => assert(bar.contains(session.value), bar)
+        case Source.Parent(session, effect) =>
+          assert(bar.contains(session.value) && bar.contains(s"call ${effect.cell}.${effect.n}"), bar)
+        case _ => ()
+      assertEquals(bar.contains(">external<"), meta.taint == Taint.External, bar)
+      assertEquals(bar.contains("not required"), !meta.required, bar)
+    }
+  }
+
   test("Inspect L13: the generator of the laws gives each case of Entry") {
     val seen = Iterator.continually(entry(text).sample).flatten.take(3000).map(_.productPrefix).toSet
     assertEquals(seen, caseNames[Entry].toSet)

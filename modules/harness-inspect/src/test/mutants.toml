@@ -284,3 +284,26 @@ name = "Mutant: the items of an array have no indent"
 file = "JsonText.scala"
 old = "a.value.toVector.map(v => pad + layout(v, indent + 2))"
 new = "a.value.toVector.map(v => layout(v, indent + 2))"
+
+# ── The Scala view of an entry and the bar of a row (5.3, law L13) ──
+
+[[mutant]]
+name = "Mutant: the Scala view shows the whole row"
+[[mutant.edit]]
+file = "EntryViews.scala"
+old = "logged => ScalaText.of(logged.entry))"
+new = "logged => ScalaText.of(logged))"
+
+[[mutant]]
+name = "Mutant: the bar does not show the session of a child"
+[[mutant.edit]]
+file = "EntryViews.scala"
+old = '''case Source.Child(session)          => s"""<span class="src-of">${link(session)}</span>"""'''
+new = '''case Source.Child(session)          => s"""<span class="src-of">${session.value.take(0)}</span>"""'''
+
+[[mutant]]
+name = "Mutant: the bar does not show the call of a parent"
+[[mutant.edit]]
+file = "EntryViews.scala"
+old = '''call ${effect.cell}.${effect.n}</span>'''
+new = '''call ${effect.cell}</span>'''

@@ -1,7 +1,7 @@
 package dspy4s.harness.inspect
 
 import dspy4s.harness.host.SessionFile
-import dspy4s.harness.kernel.{EffectResult, Entry, Logged, Taint}
+import dspy4s.harness.kernel.{EffectResult, Entry, Logged, SessionId, Source, Taint}
 import zio.blocks.schema.json.Json
 
 import Html.escape
@@ -11,9 +11,11 @@ import Html.escape
   */
 object EntryViews:
 
-  /** The Scala view: the decoded `Logged` value, or the error of its decode. */
+  /** The Scala view: the entry of the decoded row, or the error of its decode. The bar of the row (`html`) shows its
+    * `seq` and each field of its meta, so the view leaves them out.
+    */
   def scala(row: SessionFile.Row): String =
-    row.logged.fold(error => s"The row ${row.seq} does not decode: $error", logged => ScalaText.of(logged))
+    row.logged.fold(error => s"The row ${row.seq} does not decode: $error", logged => ScalaText.of(logged.entry))
 
   /** The JSON view: the text of the `entry` column with indents. A text that is not JSON stays as it is. */
   def json(row: SessionFile.Row): String = Json.parse(row.text).fold(_ => row.text, JsonText.pretty)
@@ -87,7 +89,7 @@ object EntryViews:
         val outside = logged.meta.taint == Taint.External
         val marks   = s"src-$source" + (if outside then " taint-external" else "")
         val line    = s"""<span class="time">${Html.time(logged.meta.atMillis)}</span>""" +
-          s"""<span class="src">${escape(source)}</span>""" +
+          s"""<span class="src">${escape(source)}</span>""" + sender(logged.meta.source) +
           (if outside then """<span class="taint">external</span>""" else "")
         (logged.entry.productPrefix, depth(logged.entry), marks, line, card(logged))
       case Left(error) =>
@@ -103,6 +105,17 @@ object EntryViews:
           _ => Highlight.html(Highlight.scala(scala(row)))
         )}</pre>""" +
       s"""<pre class="v v-json">${Highlight.jsonHtml(row.text)}</pre></section>"""
+
+  /** The fields of a source with fields, for the bar: the session of a child, and the session and the call of a parent,
+    * with a link to the page of the session.
+    */
+  private def sender(source: Source): String =
+    def link(session: SessionId) = s"""<a href="/s/${escape(session.value)}">${escape(session.value)}</a>"""
+    source match
+      case Source.Child(session)          => s"""<span class="src-of">${link(session)}</span>"""
+      case Source.Parent(session, effect) =>
+        s"""<span class="src-of">${link(session)} call ${effect.cell}.${effect.n}</span>"""
+      case _ => ""
 
   private def paragraph(text: String): String = s"<p>${escape(text)}</p>"
 
