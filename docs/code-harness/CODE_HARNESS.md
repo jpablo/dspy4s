@@ -3,8 +3,9 @@
 Status: proposal, 2026-10-19. Sections 7 and 8 were added on 2026-10-21, the Phase 0 results (section 11) on
 2026-10-22, and sections 2.4 to 2.6 and section 9 on 2026-10-24. On 2026-10-24 the document was also put in a new
 order around one recommended design (section 4), and F7 and F8 were added. On 2026-11-01 the kernel in 4.2 got one
-journal with a commit rule, a store, both stop rules, two stop commands, and metadata on each entry. Nothing in this
-document exists in the code of dspy4s yet.
+journal with a commit rule, a store, both stop rules, two stop commands, and metadata on each entry. On 2026-11-13
+rule 4 of F7 changed: only the control paths stay read-only, not all of `.git`. Nothing in this document exists in
+the code of dspy4s yet.
 
 ## Summary
 
@@ -666,7 +667,11 @@ The rules for the harness:
    function. A guest function runs in the trusted base, so the checks cover it. A `test()` function still runs
    the tests in the sandbox, because the tests are code that the agent wrote.
 4. Treat a write to a file that a permitted program runs as code as code execution. Examples are build files,
-   tests, hooks and plugin configurations. Keep `.git` read-only, as the atc project template does.
+   tests, hooks and plugin configurations. Inside the sandbox, this code has only the authority of the sandbox. A
+   file that a program outside the sandbox runs, with no step of the person first, is a control path. Keep each
+   control path read-only, for example the git hooks and the git configuration. Until 2026-11-13 this rule kept all
+   of `.git` read-only, as the atc project template does, so a session could not commit or switch a branch.
+   [CODE_HARNESS_DESIGN.md](CODE_HARNESS_DESIGN.md), 5.4 has the list, and its choice 19 has the decision.
 5. Keep the allow list and the deny list of the `guarded` handler, as in atc. They prevent mistakes, but they are
    not a boundary.
 
