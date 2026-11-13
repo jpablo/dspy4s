@@ -264,7 +264,10 @@ token and a prompt of 20 to 80 KB.
   - A value goes on one line when it fits in 100 characters and holds no block. A card uses the form on one line
     (`ScalaText.line`) for a short part, for example the scope.
   - A row that does not decode shows its error in this view.
-- **JSON.** The `entry` column as it is in the file, with an indent of 2 (`JsonText.pretty`). The first version used
+- **JSON.** The `entry` field of the row as it is in the file, with an indent of 2 (`JsonText.pretty`). The value
+  comes from the text of the file, not from a new encode of the decoded row. As for the Scala view, the bar shows the
+  `seq` and the meta, so the view leaves them out (2026-11-12). A row that does not decode shows its whole text, so
+  its meta stays in view, and a text that is not JSON stays as it is. The first version used
   the printer of zio-blocks, which writes an empty object on three lines, with a blank line inside. `JsonText` puts
   each field and each item on a line of its own, and writes `{}` and `[]`. Each key and each leaf keeps the text of the
   printer of zio-blocks, so no string changes, and law L19 shows that the value stays the same.
@@ -362,7 +365,8 @@ The inspector:
 - **L11. The host check.** A request with another `Host` header gets the status 403 and no data, and a method that is
   not `GET` gets 405. A page has the policy of its scripts with the nonce of its script, and no reply has a CORS
   header.
-- **L12. The JSON view.** Its text decodes to the same `Logged` as the row.
+- **L12. The JSON view.** Its text is the `entry` field of the text of the row, and it decodes to the same `Entry` as
+  the row. A row that does not decode shows its whole text.
 - **L13. The Scala view.** A generator covers each case of `Entry`. For each value, the text has the name of the case
   and the name of each field. The Scala view of a row is the text of its entry, and the bar of the row shows its
   `seq`, its time, its source with the fields of the source, the mark of `Taint.External` only for that taint, and
