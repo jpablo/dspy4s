@@ -259,8 +259,20 @@ token and a prompt of 20 to 80 KB.
   - A value goes on one line when it fits in 100 characters and holds no block. A card uses the form on one line
     (`ScalaText.line`) for a short part, for example the scope.
   - A row that does not decode shows its error in this view.
-- **JSON.** The `entry` column as it is in the file, with an indent of 2. The printer of zio-blocks writes an empty
-  object on three lines. The view keeps that, because a change of the text could change a string in it.
+- **JSON.** The `entry` column as it is in the file, with an indent of 2 (`JsonText.pretty`). The first version used
+  the printer of zio-blocks, which writes an empty object on three lines, with a blank line inside. `JsonText` puts
+  each field and each item on a line of its own, and writes `{}` and `[]`. Each key and each leaf keeps the text of the
+  printer of zio-blocks, so no string changes, and law L19 shows that the value stays the same.
+- **Colors.** The Scala view and the JSON view have colors (2026-11-12). The server cuts the text of each view into
+  pieces (`Highlight`), and it puts each piece with a color in a span with a class: `t-key` for a field or a key,
+  `t-str` for a string, `t-num` for a number, `t-lit` for `true`, `false` and `null`, and `t-type` for the name of a
+  case or of a collection. The marks and the plain text have no span, so a page stays small.
+  - The colors come from the tokens of the theme, so a dark screen gets its own colors.
+  - The pieces, joined, give the text again, for any text, and each piece goes through the HTML escape. So a text
+    that is not JSON or not Scala keeps each character, and a text of an entry cannot add markup.
+  - A row that does not decode shows its error with no colors.
+  - The Request view of an exchange and the lines of its Reply view have the colors of JSON too. A JSON string has no
+    line end, so each line of a reply gets its colors alone, also a `data:` line of a stream.
 - **Card.** A formatted card for each case of `Entry`. It shows the reasoning folded, the text, the code of a cell,
   the output and the outcome. It also shows the time, the source, and a mark for `Taint.External`.
   - The server makes the HTML of the card with a `match` on `Entry`. With `-Werror`, a `match` that does not cover each
@@ -367,6 +379,13 @@ The inspector:
   `Content-Disposition`. With `download=1`, it gives the same body and the same type, with
   `attachment; filename="..."` and the name of 5.5. An exchange id with other characters gives a name with `_` in
   their place. The bar of a session and of an exchange links to each download.
+- **L18. The colors.** For any text, the pieces of each lexer, joined, give the text, and no piece is empty. The HTML
+  of the pieces shows the same text and holds no markup from it. The JSON pieces of a value are its keys, its strings,
+  its numbers and its literals, in their order. In the Scala view of an entry, the name of the case is a type, each
+  field is a key, and each string, number and `Boolean` of a field is one piece. A row has the colors in its Scala
+  view and its JSON view, and an exchange in its Request view and in the lines of its reply.
+- **L19. The layout of the JSON view.** The layout gives the same value, and no line of it is blank. An empty object
+  is `{}` and an empty array is `[]`, also inside a value.
 
 ## 7. The tools outside dspy4s
 
