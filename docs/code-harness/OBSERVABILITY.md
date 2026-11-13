@@ -306,8 +306,18 @@ Four buttons select its view. A row of the tree links to the page.
     headers, and body or lines. So the view and the model read a reply on one path: the same parser of the stream, the
     same assembly of the chunks and of the tool calls, and the same usage. The view copies no parser.
 - **Request.** The URL, the masked headers, the size, and the code view of the body with indents.
-- **Reply.** The status, the end, the error and the headers, then the code view of the raw lines of a stream, or of
-  the body of a plain reply with indents.
+- **Reply.** The status, the end, the error and the headers, then the code view of the body of a plain reply with
+  indents. A stream has a toggle of two views (2026-11-12):
+  - **Response**, which shows first: the reply put together from the chunks (`StreamJson.merge`), in the form that
+    the endpoint gives with no stream. The top fields come from the first chunk, `object` is `chat.completion`,
+    and `usage` comes from the last chunk that has it. The deltas of each choice become its `message`: the parts of
+    `content`, `reasoning`, `reasoning_content` and `refusal` join, `role` comes from the first delta, and the parts
+    of the tool calls join by their `index`, with the parts of `function.arguments` joined. `finish_reason` comes
+    from the last chunk that has it, and the items of `logprobs` join.
+  - **Stream**: each raw line of the stream, as before.
+  - The merge reads the JSON of the chunks and not the reading of the model (`Chat.read`), so it keeps each field
+    that the endpoint sent, also a field that the model does not read. Law L21 checks that the two agree. The Copy
+    button copies the view that shows, and the Download link saves the exact stream.
 - **The code view** of the Request and Reply views is as an editor shows a JSON file (2026-11-12). Each line has its
   number and the colors of JSON. The rest of a line after its first spaces goes in a block with that indent, so a
   long line, for example the system message, wraps under its own indent and not at the left edge. The first version
@@ -419,6 +429,12 @@ The inspector:
   holds no markup from the text. Each line has the colors of JSON, under its indent. The Request and Reply views each
   have a code view, a `Copy` button with a hidden copy of the exact text, and a `Download` link, and the bar of the
   exchange has no raw link.
+- **L21. The merged reply of a stream.** A completion cut into the chunks of a stream at random places and merged
+  gives the completion again: the joined text, reasoning, tool calls and `logprobs`, the last finish reason, and the
+  final usage, also when each chunk has a usage. Lines that are not data chunks change nothing, and a stream with no
+  chunk gives no reply. A role that each delta repeats comes once. For the same streams, the merged reply agrees
+  with the reading of the model: the text, the reasoning, the ids and names of the tool calls, the finish reason and
+  the usage. The Reply view of a stream opens on the merged reply, with its toggle, and a plain reply has no toggle.
 - **The links to the views.** The `request` and `reply` links of a row open the page of the exchange with
   `?tab=request` and `?tab=reply`, and no row links to a raw path. `?tab=` opens the page on that view, an unknown
   tab opens the chat, and `?against=` with no tab opens the diff. The links to the exchange before and after keep
