@@ -43,6 +43,13 @@ object Html:
   /** The day and the minute of `millis` on the clock of this machine. */
   def date(millis: Long): String = day.format(Instant.ofEpochMilli(millis))
 
+  /** The links of the raw paths `items` under `base` (5.5): one group that a browser shows as text, and one group with
+    * `download=1` that a browser saves as files. `base` must be escaped.
+    */
+  def rawLinks(base: String, items: Vector[String]): String =
+    def links(query: String) = items.map(item => s"""<a href="$base/$item$query">${escape(item)}</a>""").mkString(" ")
+    s"""<span class="group">Raw: ${links("")}</span><span class="group">Download: ${links("?download=1")}</span>"""
+
   /** A page with `title`, `body` and the class `bodyClass` of its body, the style and the script. The script has
     * `nonce`, so the policy of the page lets it run, and a script that a text could make does not run.
     */

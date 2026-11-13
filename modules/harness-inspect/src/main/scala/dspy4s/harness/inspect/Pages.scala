@@ -49,8 +49,7 @@ object Pages:
         Some(s"""<span id="count-entries">${rows.size}</span> entries"""),
         Some(s"""<span id="count-exchanges">${exchanges.size}</span> exchanges""")
       ).flatten.mkString(" · ")
-      val raw = s"""<span class="group">Raw: <a href="/raw/${session.value}/journal.jsonl">journal.jsonl</a> """ +
-        s"""<a href="/raw/${session.value}/http.jsonl">http.jsonl</a></span>"""
+      val raw  = Html.rawLinks(s"/raw/${session.value}", Vector("journal.jsonl", "http.jsonl"))
       val bar  = header(title, facts, controls(withPredictors = true) + raw)
       val main = s"""<main id="rows" data-session="${session.value}" data-last="${lastOf(rows)}" data-size="$size">""" +
         tree(session, rows, exchanges) + "</main>"

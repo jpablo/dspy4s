@@ -19,7 +19,7 @@ import java.net.http.{HttpClient, HttpRequest}
 import java.net.{Socket, URI}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.attribute.PosixFilePermissions
-import java.nio.file.{Files, Path}
+import java.nio.file.{Files, Path, StandardOpenOption}
 import scala.compiletime.constValueTuple
 import scala.deriving.Mirror
 import scala.jdk.CollectionConverters.*
@@ -69,6 +69,8 @@ class InspectorLaws extends ScalaCheckSuite:
           s"/raw/${session.value}/http.jsonl",
           s"/raw/${session.value}/x/$xid/request",
           s"/raw/${session.value}/x/$xid/reply",
+          s"/raw/${session.value}/http.jsonl?download=1",
+          s"/raw/${session.value}/x/$xid/reply?download=1",
           s"/p/${HarnessProbe.nameOf(probe(session))}",
           "/s/fake-no-session",
           "/raw/..%2F..%2Fetc/journal.jsonl",
@@ -305,6 +307,51 @@ class InspectorLaws extends ScalaCheckSuite:
         assertEquals(get(inspector, s"/raw/${session.value}/x/$xid/reply")._2, "data: {\"a\":1}\n\ndata: [DONE]")
         assertEquals(get(inspector, s"/raw/${session.value}/x/fake-none/request")._1, 404)
         assertEquals(get(inspector, "/raw/..%2F..%2Fetc/journal.jsonl")._1, 404)
+      }
+    }
+  }
+
+  test("Inspect L17: a browser shows each raw path as text, and download=1 saves it with the name of the item") {
+    withRoot { root =>
+      val (session, xid) = fixture(root)
+      serving(root) { inspector =>
+        val raw   = s"/raw/${session.value}"
+        val items = Vector(
+          s"$raw/journal.jsonl"  -> ("text/plain", s"${session.value}.journal.jsonl"),
+          s"$raw/http.jsonl"     -> ("text/plain", s"${session.value}.http.jsonl"),
+          s"$raw/x/$xid/request" -> ("application/json", s"$xid.request.json"),
+          s"$raw/x/$xid/reply"   -> ("text/plain", s"$xid.reply.txt")
+        )
+        items.foreach { case (path, (kind, name)) =>
+          val shown = send(inspector, path)
+          assertEquals(shown.statusCode(), 200, path)
+          assertEquals(shown.headers().firstValue("Content-Type").orElse(""), s"$kind; charset=utf-8", path)
+          assert(shown.headers().firstValue("Content-Disposition").isEmpty, path)
+          val saved = send(inspector, s"$path?download=1")
+          assertEquals(saved.body(), shown.body(), path)
+          assertEquals(saved.headers().firstValue("Content-Type").orElse(""), s"$kind; charset=utf-8", path)
+          assertEquals(
+            saved.headers().firstValue("Content-Disposition").orElse(""),
+            s"""attachment; filename="$name"""",
+            path
+          )
+        }
+        val (_, page) = get(inspector, s"/s/${session.value}")
+        assert(page.contains(s"""href="$raw/journal.jsonl?download=1""""), page)
+        assert(page.contains(s"""href="$raw/http.jsonl?download=1""""), page)
+        val (_, exchange) = get(inspector, s"/s/${session.value}/x/$xid")
+        assert(exchange.contains(s"""href="$raw/x/$xid/request?download=1""""), exchange)
+        assert(exchange.contains(s"""href="$raw/x/$xid/reply?download=1""""), exchange)
+        // An exchange id comes from the file, so the name keeps only safe characters.
+        val file  = ExchangeFile.pathOf(root, session)
+        val first = Files.readAllLines(file, UTF_8).asScala.head
+        Files.writeString(file, first.replace(xid, "fake;id%41") + "\n", UTF_8, StandardOpenOption.APPEND): Unit
+        val odd = send(inspector, s"$raw/x/fake;id%41/request?download=1")
+        assertEquals(odd.statusCode(), 200)
+        assertEquals(
+          odd.headers().firstValue("Content-Disposition").orElse(""),
+          """attachment; filename="fake_id_41.request.json""""
+        )
       }
     }
   }

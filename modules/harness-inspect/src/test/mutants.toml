@@ -1,5 +1,5 @@
 # The mutants of the inspector. Each mutant breaks one rule of section 5 of docs/code-harness/OBSERVABILITY.md, and
-# laws L10 to L15 of its section 6 must kill it.
+# laws L10 to L17 of its section 6 must kill it.
 #
 # `python3 scripts/mutants/mutants.py modules/harness-inspect/src/test/mutants.toml` applies each mutant alone, runs the
 # tests of the module, and restores the code. At least one test must fail for each mutant.
@@ -152,3 +152,47 @@ name = "Mutant: the copy of the request is the body with indents"
 file = "ExchangePage.scala"
 old = '<pre id="request-exact" hidden>${escape(x.body)}</pre>'
 new = '<pre id="request-exact" hidden>${escape(pretty(x.body))}</pre>'
+
+# ── The raw paths in a browser (5.5, law L17) ──
+
+[[mutant]]
+name = "Mutant: the exchange file goes as NDJSON, so a browser saves it and does not show it"
+[[mutant.edit]]
+file = "Inspector.scala"
+old = 'else Reply(200, "text/plain", Files.readString(path, UTF_8))'
+new = 'else Reply(200, "application/x-ndjson", Files.readString(path, UTF_8))'
+
+[[mutant]]
+name = "Mutant: the rows of the journal go as NDJSON"
+[[mutant.edit]]
+file = "Inspector.scala"
+old = 'Reply(200, "text/plain", lines.map(_ + "\n").mkString)'
+new = 'Reply(200, "application/x-ndjson", lines.map(_ + "\n").mkString)'
+
+[[mutant]]
+name = "Mutant: download=1 gives no name to save"
+[[mutant.edit]]
+file = "Inspector.scala"
+old = 'if reply.status == 200 && query(uri).get("download").contains("1") then'
+new = 'if reply.status == 200 && query(uri).get("download").contains("yes") then'
+
+[[mutant]]
+name = "Mutant: each raw path is a download"
+[[mutant.edit]]
+file = "Inspector.scala"
+old = 'if reply.status == 200 && query(uri).get("download").contains("1") then'
+new = 'if reply.status == 200 && query(uri).get("download").forall(_.nonEmpty) then'
+
+[[mutant]]
+name = "Mutant: the name to save keeps each character of the exchange id"
+[[mutant.edit]]
+file = "Inspector.scala"
+old = '''if c.isLetterOrDigit && c < 128 || "-_.".contains(c) then c else '_''''
+new = '''if c.isLetterOrDigit || "-_.;%".contains(c) then c else '_''''
+
+[[mutant]]
+name = "Mutant: the download links show the raw paths"
+[[mutant.edit]]
+file = "Html.scala"
+old = '<span class="group">Download: ${links("?download=1")}</span>'
+new = '<span class="group">Download: ${links("")}</span>'

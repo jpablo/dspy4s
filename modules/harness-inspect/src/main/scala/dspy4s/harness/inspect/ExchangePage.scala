@@ -52,7 +52,7 @@ object ExchangePage:
       s"""<h1>Exchange ${x.index + 1} of ${all.size} · ${escape(x.predictor.getOrElse("none"))}</h1>""" +
       s"""<div class="facts">$facts · after #${x.after}</div><div class="controls">$tabs""" +
       s"""<span class="group">${near.mkString(" ")}</span>""" +
-      s"""<span class="group">Raw: <a href="$raw/request">request</a> <a href="$raw/reply">reply</a></span>""" +
+      Html.rawLinks(raw, Vector("request", "reply")) +
       "</div></header>"
 
   /** The URL, the headers, the body with indents, and the exact body for the copy button. */
