@@ -251,9 +251,14 @@ token and a prompt of 20 to 80 KB.
 
 ### 5.3 The views of an entry
 
-- **Scala.** The decoded `Logged` value as Scala text with indents (`ScalaText`). The printer reads each value through
-  `Product` (`productPrefix`, `productElementNames` and `productIterator`). So it gives the names of the cases and of
-  the fields as the code has them.
+- **Scala.** The `Entry` of the decoded row as Scala text with indents (`ScalaText`). The printer reads each value
+  through `Product` (`productPrefix`, `productElementNames` and `productIterator`). So it gives the names of the cases
+  and of the fields as the code has them.
+  - The first version showed the whole `Logged`, so each view began with `Logged(seq = ..., meta = ...)`. The bar of
+    the row shows the `seq` and each field of the meta: the time, the source, a mark for `Taint.External`, and a note
+    for a row that is not required. So the view shows only the entry (2026-11-12).
+  - The bar first showed only the name of the case of the source. Now it also shows the session of
+    `Source.Child`, and the session and the call of `Source.Parent`, with a link to the page of the session.
   - A string is a Scala literal, and a string with a line end is a `"""` block. A `Long` has the suffix `L`, and a
     `Json` value prints as `Json(<its text>)`.
   - A value goes on one line when it fits in 100 characters and holds no block. A card uses the form on one line
@@ -359,7 +364,9 @@ The inspector:
   header.
 - **L12. The JSON view.** Its text decodes to the same `Logged` as the row.
 - **L13. The Scala view.** A generator covers each case of `Entry`. For each value, the text has the name of the case
-  and the name of each field.
+  and the name of each field. The Scala view of a row is the text of its entry, and the bar of the row shows its
+  `seq`, its time, its source with the fields of the source, the mark of `Taint.External` only for that taint, and
+  the note only for a row that is not required.
 - **L14. The escape.** For any text in an entry, the card and the row hold no markup from that text. The escape gives
   an entity for each of the five marks of HTML.
 - **L15. Follow.** `after/{seq}` gives the rows with a greater `seq`, all of them, in their order, and the status of
