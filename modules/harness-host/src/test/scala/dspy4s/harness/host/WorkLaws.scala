@@ -706,6 +706,23 @@ class WorkLaws extends munit.FunSuite:
     }
   }
 
+  // ── The prompt (10.6) ──
+
+  /** The number of times that `part` comes in `text`. */
+  private def times(text: String, part: String): Int = text.split(java.util.regex.Pattern.quote(part), -1).length - 1
+
+  test("Work: the instructions of a work session come one time in a request, in the system message") {
+    // A measured request (2026-11-12) had the same 434 characters in the system message and in the task.
+    val model = sessionModel(policy("FAKE-HELLO", None))
+    work(model) { (_, handle) =>
+      assertEquals(handle.send(message("m1")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+      val request = model.requests.asScala.toVector.filterNot(r => isSummary(r.messages.flatMap(_.text).mkString)).head
+      assertEquals(times(request.messages.flatMap(_.text).mkString("\n"), WorkRuntime.instructions), 1)
+      assert(request.messages.head.text.exists(_.contains(WorkRuntime.instructions)), "not in the system message")
+    }
+  }
+
   // ── The files of the project (10.6) ──
 
   test(

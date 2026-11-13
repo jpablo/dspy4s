@@ -27,7 +27,7 @@ class DraftLaws extends ScalaCheckSuite:
   override def afterEach(context : AfterEach): Unit  = RuntimeEnvironment.resetForTests()
 
   private val leaf  = Signature.derived[PolicyInput, PolicyStep]("policy", Harness.policyInstructions)
-  private val input = PolicyInput("FAKE-TASK", "FAKE-API", "FAKE-STATUS", "FAKE-OBSERVATION", History.empty)
+  private val input = PolicyInput("FAKE-TASK", "FAKE-API", "", "FAKE-STATUS", "FAKE-OBSERVATION", History.empty)
   private val none  = Mode(Access.None, Access.None, Access.None, Access.None, Access.None, Access.None, Access.None)
 
   /** The step that the policy parses from the reply of `model`: the oracle of `Draft.text`. */

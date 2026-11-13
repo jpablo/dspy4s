@@ -78,7 +78,7 @@ final class HarnessEffects(
       zooms.setReader(ref => strategy.zoom(data, ref))
       val view = strategy.project(log, data, limits.budget)
       progress.projected(view.size, limits.budget)
-      val input   = PolicyInput(task, reference, view.status, view.observation, view.history)
+      val input   = PolicyInput(task, reference, view.memory, view.status, view.observation, view.history)
       val number  = drafts.map(d => d -> d.begin())
       val context = number.fold(policyContext)((d, n) => PolicyStream.around(policyContext, d, n))
       // The model of the session now: a `ModelChanged` of this activation changes the next call (CLI_SCREEN.md, 14).

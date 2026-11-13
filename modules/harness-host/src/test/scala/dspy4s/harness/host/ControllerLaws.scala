@@ -11,6 +11,7 @@ import dspy4s.harness.kernel.*
 import dspy4s.harness.host.HostSupport.*
 import dspy4s.harness.repl.Bindings
 import dspy4s.harness.sandbox.{HostList, Layout, Profiles}
+import dspy4s.programs.strategies.Predict
 import zio.blocks.schema.json.Json
 
 import java.nio.file.{Files, Path}
@@ -47,9 +48,13 @@ class ControllerLaws extends munit.FunSuite:
     assertEquals(WorkRuntime.workMode.meet(Controller.ceiling), WorkRuntime.workMode)
   }
 
-  test("Controller: the task holds the instructions and the home, and messageSource gives Controller or Child") {
+  test(
+    "Controller: the task holds the home, the policy the instructions, and messageSource gives Controller or Child"
+  ) {
     val task = Controller.task(home)
-    assert(task.contains(Controller.instructions) && task.contains(home.toString), task)
+    assert(!task.contains(Controller.instructions) && task.contains(home.toString), task)
+    val leaf = WorkRuntime.policyOf(Controller.id, Predict(Harness.policySignature(WorkRuntime.instructions)))
+    assertEquals(leaf.signature.instructions, Some(Controller.instructions))
     assertEquals(Controller.messageSource(Controller.id), Source.Controller)
     assertEquals(Controller.messageSource(id(2)), Source.Child(id(2)))
   }
@@ -415,6 +420,20 @@ class ControllerLaws extends munit.FunSuite:
     }
   }
 
+  test("Controller: its policy has the instructions of the controller one time, and not those of a work session") {
+    // The system message of the controller had the instructions of a work session, and its task had its own.
+    val model = (_: Path) => routedModel(Controller.instructions -> Seq(policy("FAKE-HELLO", None)))
+    withController(model) { (_, controller, _, _, model) =>
+      controller.send(message("m1", "hello")).left.foreach(e => fail(e.toString))
+      assert(eventually(30)(outcomes(controller).size == 1), controller.state.toString)
+      val request = model.requests.asScala.toVector.filterNot(r => isSummary(r.messages.flatMap(_.text).mkString)).head
+      val all     = request.messages.flatMap(_.text).mkString("\n")
+      assertEquals(all.split(java.util.regex.Pattern.quote(Controller.instructions), -1).length - 1, 1)
+      assert(request.messages.head.text.exists(_.contains(Controller.instructions)), "not in the system message")
+      assert(!all.contains(WorkRuntime.instructions), "the controller has the instructions of a work session")
+    }
+  }
+
   test("Controller: zoomInto reads the memory of a session of the host from its file, with no LM call") {
     val model = (_: Path) =>
       routedModel(Controller.instructions -> Seq.empty, "" -> Seq(policy("one", None), policy("two", None)))
@@ -423,7 +442,7 @@ class ControllerLaws extends munit.FunSuite:
       work.send(message("m1", "the first fake message")).left.foreach(e => fail(e.toString))
       assert(eventually(30)(outcomes(work).size == 1))
       val before = model.requests.size
-      assertEquals(host.zoomInto(id(1), "0.0"), Right("the first fake message"))
+      assertEquals(host.zoomInto(id(1), "0.0"), Right("The person wrote: the first fake message"))
       assert(host.zoomInto(id(1), "40.0").isLeft)
       assertEquals(model.requests.size, before)
     }

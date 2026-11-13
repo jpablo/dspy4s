@@ -257,19 +257,39 @@ class MemoryTreeLaws extends munit.FunSuite:
     }
   }
 
-  test("Memory tree: the view is the first message of the history, and it stays the same during a turn") {
+  test("Memory tree: the view is in the field memory, and it stays the same during a turn") {
     Models.withModel(summaries()) {
       val tree  = MemoryTree.withLeaves(LineStore.inMemory(), high = 6)
       val base  = chat(8, output = 700)
       val views = (1 to 5).map { k =>
         val journal = withOpen(base, turn(8, 700), k)
         val d       = updated(tree, journal, tree.empty)
-        val first   = strings(tree.project(journal, d, budget = 20_000).history.messages.head)
-        assert(first.exists(_.contains(MemoryTree.render(d.memory, d.view))), first.toString)
-        first
+        val memory  = tree.project(journal, d, budget = 20_000).memory
+        assert(memory.contains(MemoryTree.render(d.memory, d.view)), memory)
+        memory
       }
       assertEquals(views.distinct.size, 1)
     }
+  }
+
+  test("Memory tree: the view is the field memory, and the history has only the steps of the open turn") {
+    // The view came as a first step of the history with an empty reply and the code None, which can teach the model an
+    // empty reply (2026-11-12).
+    Models.withModel(summaries()) {
+      val tree    = MemoryTree.withLeaves(LineStore.inMemory(), high = 6)
+      val journal = withOpen(chat(8, output = 700), turn(8, 700), 4)
+      val d       = updated(tree, journal, tree.empty)
+      val p       = tree.project(journal, d, budget = 20_000)
+      assertEquals(p.memory, s"${MemoryTree.Header}\n${MemoryTree.render(d.memory, d.view)}")
+      val open = Window.openTurn(journal, (20_000 - MemoryTree.room(6)).max(0))
+      assertEquals(p.history, open.history, "the history is the open turn")
+      assert(!p.history.messages.flatMap(strings).exists(_.contains(MemoryTree.Header)), p.history.toString)
+    }
+  }
+
+  test("Memory tree: the summary instructions keep who wrote each part") {
+    assert(MemoryTree.compressInstructions.contains("who wrote"), MemoryTree.compressInstructions)
+    assert(MemoryTree.mergeInstructions.contains("who wrote"), MemoryTree.mergeInstructions)
   }
 
   test("Memory tree: the view takes its room of the budget first, in full, also in a long turn") {
@@ -288,7 +308,7 @@ class MemoryTreeLaws extends munit.FunSuite:
       val p    = tree.project(journal, d, budget = 40_000)
       val view = MemoryTree.render(d.memory, d.view)
       assert(view.length <= MemoryTree.room(MemoryTree.DefaultHigh), s"${view.length}")
-      assert(strings(p.history.messages.head).exists(_.contains(view)))
+      assert(p.memory.contains(view), p.memory)
       assert(p.size <= 40_000, s"${p.size}")
     }
   }

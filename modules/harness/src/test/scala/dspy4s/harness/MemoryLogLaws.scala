@@ -33,7 +33,34 @@ class MemoryLogLaws extends munit.FunSuite:
       log(1).text.contains("look 0") && log(1).text.contains("println(0)") && log(1).text.contains("0"),
       log(1).text
     )
-    assertEquals(log(2).text, "reply 0")
+    assertEquals(log(2).text, "The model replied: reply 0")
+  }
+
+  test("Memory log: each message names its speaker, so a reply of the model never reads as words of the person") {
+    // In session 70e1947a (2026-11-11), the model read its own earlier reply "Session instructions: ..." in the memory
+    // as its real instructions.
+    def at(seq: Long, source: Source, entry: Entry) = Logged(seq, Meta(1000L, source, Taint.Trusted, true), entry)
+    val journal                                     = Vector(
+      at(0, Source.User, Entry.Input(request, "FAKE-ASK", Map.empty)),
+      at(1, Source.Harness, Entry.TurnStarted),
+      at(2, Source.Harness, Entry.StepStarted(0)),
+      at(3, Source.Policy, Entry.Acted("", "FAKE-LOOK", Some("println(1)"))),
+      at(4, Source.Harness, Entry.Observed("1", CellOutcome.Ok, Map.empty)),
+      at(5, Source.Harness, Entry.TurnEnded(TurnOutcome.Replied("FAKE-REPLY"))),
+      at(6, Source.Harness, Entry.Input(request, "FAKE-JOB-END", Map.empty)),
+      at(7, Source.Harness, Entry.TurnStarted),
+      at(8, Source.Harness, Entry.TurnEnded(TurnOutcome.Aborted))
+    )
+    assertEquals(
+      MemoryLog.messages(journal).map(_.text),
+      Vector(
+        "The person wrote: FAKE-ASK",
+        "The model ran a cell: FAKE-LOOK\n```scala\nprintln(1)\n```\n1",
+        "The model replied: FAKE-REPLY",
+        "The harness wrote: FAKE-JOB-END",
+        TurnOutcome.Aborted.report
+      )
+    )
   }
 
   test("Memory log: the control entries give no message, and a cell that did not end gives none") {

@@ -254,14 +254,18 @@ object View:
 /** The memory log from a journal (7.1): one message for each step. */
 object MemoryLog:
 
-  /** The messages of `journal`, oldest first:
+  /** The messages of `journal`, oldest first. Each text starts with its speaker, so the model never reads its own reply
+    * as words of the person. In session 70e1947a (2026-11-11), the model read its own earlier reply "Session
+    * instructions: ..." in the memory as its real instructions.
     *
-    *   - each `Input`, as `Heard` with its source, at the place of the `Input`;
+    *   - each `Input`, as `Heard` with its source, at the place of the `Input`, as `The person wrote: ...` or with
+    *     another sender (`Window.speaker`);
     *   - each `Acted` with code and the `Observed` after it, as one `Cell` message with the text, the code and the
-    *     output, at the place of the `Observed`. So an `Input` that comes during the cell, for example the report of a
-    *     job, comes before the `Cell` message. A cell that did not end, also after a crash, gives no message;
-    *   - each `TurnEnded`, as `Reply` with the text of `Replied`, or the text of the report of another outcome
-    *     (`TurnOutcome.report`). So the model reads the outcome in words, and not as a Scala value.
+    *     output, at the place of the `Observed`, as `The model ran a cell: ...`. So an `Input` that comes during the
+    *     cell, for example the report of a job, comes before the `Cell` message. A cell that did not end, also after a
+    *     crash, gives no message;
+    *   - each `TurnEnded`, as `Reply` with the text of `Replied` as `The model replied: ...`, or the text of the report
+    *     of another outcome (`TurnOutcome.report`). So the model reads the outcome in words, and not as a Scala value.
     *
     * The control entries give no message. For a journal `j` and more entries `k`, `messages(j ++ k)` starts with
     * `messages(j)`. The store keys a line by the texts of its messages, so a change of this function does not give old
@@ -286,15 +290,17 @@ object MemoryLog:
       val at = logged.meta.atMillis
       logged.entry match
         case Entry.Input(_, text, _) =>
-          w.copy(messages = w.messages :+ MemoryMessage(MessageKind.Heard(logged.meta.source), text, at))
+          val heard = s"${Window.speaker(logged.meta.source)} wrote: $text"
+          w.copy(messages = w.messages :+ MemoryMessage(MessageKind.Heard(logged.meta.source), heard, at))
         case Entry.Acted(_, text, Some(code)) => w.copy(cell = Some((text, code)))
         case Entry.Observed(output, _, _)     => w.cell.fold(w) { (text, code) =>
-            val body = Vector(text, s"```scala\n$code\n```", output).filter(_.nonEmpty).mkString("\n")
+            val body = "The model ran a cell: " +
+              Vector(text, s"```scala\n$code\n```", output).filter(_.nonEmpty).mkString("\n")
             w.copy(messages = w.messages :+ MemoryMessage(MessageKind.Cell, body, at), cell = None)
           }
         case Entry.TurnEnded(outcome) =>
           val reply = outcome match
-            case TurnOutcome.Replied(text) => text
+            case TurnOutcome.Replied(text) => s"The model replied: $text"
             case other                     => other.report
           val messages = w.messages :+ MemoryMessage(MessageKind.Reply, reply, at)
           Walk(messages, None, messages.size)

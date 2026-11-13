@@ -691,3 +691,47 @@ name = "Mutant: only a binary file gives a part"
 file = "ProjectFiles.scala"
 old = "text.filter(t => !t.exists("
 new = "text.filter(t => t.exists("
+
+# ── The request of a call to the policy (CODE_HARNESS_DESIGN.md, 10.6) ──
+
+[[mutant]]
+name = "Mutant: the fields of the policy have no description"
+[[mutant.edit]]
+file = "Harness.scala"
+old = "fields.map(field => policyFields.get(field.name).fold(field)(text => field.copy(description = Some(text))))"
+new = "fields.map(field => policyFields.get(field.name).fold(field)(_ => field))"
+
+[[mutant]]
+name = "Mutant: a message of the person has no speaker in the memory"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "val heard = s\"${Window.speaker(logged.meta.source)} wrote: $text\""
+new = "val heard = s\"$text\""
+
+[[mutant]]
+name = "Mutant: a reply of the model has no speaker in the memory"
+[[mutant.edit]]
+file = "Memory.scala"
+old = "case TurnOutcome.Replied(text) => s\"The model replied: $text\""
+new = "case TurnOutcome.Replied(text) => s\"$text\""
+
+[[mutant]]
+name = "Mutant: the view of the memory goes nowhere"
+[[mutant.edit]]
+file = "MemoryTree.scala"
+old = "if view.isEmpty then open else open.copy(memory = s\"${MemoryTree.Header}\\n$view\")"
+new = "if view.nonEmpty then open else open.copy(memory = s\"${MemoryTree.Header}\\n$view\")"
+
+[[mutant]]
+name = "Mutant: the fixed fields stay in the last message"
+[[mutant.edit]]
+file = "PolicyAdapter.scala"
+old = "text   <- messages(last).text.filter(_.startsWith(prefix + \"\\n\\n\"))"
+new = "text   <- messages(last).text.filter(_.startsWith(prefix + \"\\n\\n\\n\"))"
+
+[[mutant]]
+name = "Mutant: an empty memory comes in the system message"
+[[mutant.edit]]
+file = "PolicyAdapter.scala"
+old = "val shown  = values.filterNot((_, value) => DynamicValues.asString(value).contains(\"\"))"
+new = "val shown  = values.filterNot((_, value) => DynamicValues.asString(value).contains(\"FAKE\"))"

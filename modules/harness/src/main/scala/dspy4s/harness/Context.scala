@@ -11,8 +11,14 @@ import scala.annotation.unused
 /** The input of the policy leaf (CODE_HARNESS_DESIGN.md, 7 and 9). `task` holds the instructions and the input fields
   * of the call. `apiReference` is the API reference (5.1): an input field, so an optimizer cannot change it.
   */
-final case class PolicyInput(task: String, apiReference: String, status: String, observation: String, history: History)
-    derives Schema
+final case class PolicyInput(
+    task        : String,
+    apiReference: String,
+    memory      : String,
+    status      : String,
+    observation : String,
+    history     : History
+) derives Schema
 
 /** The output of the policy leaf (9): the thought, a text, and the code of a cell, if any. A step with no code answers.
   *
@@ -27,10 +33,11 @@ final case class PolicyStep(reasoning: Reasoning, text: String, code: Option[Str
   * A proposal for the review: the design gives `project` the result `PolicyInput`. The task and the API reference do
   * not come from the journal, so the harness adds them.
   */
-final case class Projection(status: String, observation: String, history: History) derives CanEqual:
+final case class Projection(status: String, observation: String, history: History, memory: String = "")
+    derives CanEqual:
 
-  /** The characters that a budget counts: the status, the observation, and each string in the history. */
-  def size: Int = status.length + observation.length + history.messages.map(Projection.text).sum
+  /** The characters that a budget counts: the status, the observation, each string in the history, and the memory. */
+  def size: Int = status.length + observation.length + history.messages.map(Projection.text).sum + memory.length
 
 object Projection:
 

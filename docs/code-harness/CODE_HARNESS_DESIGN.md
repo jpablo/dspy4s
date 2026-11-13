@@ -1980,7 +1980,10 @@ These points are proposals for the review:
   change.
 - A work session reuses `HarnessEffects`. The REPL lives as long as the activation, so a value of a turn stays for
   the next turns.
-- A chat turn has its own task, `WorkRuntime.chatTask`: the instructions of the policy and the folder of the session.
+- A chat turn has its own task, `WorkRuntime.chatTask`: the folder of the session, the rules of its shell and the
+  files of the project. The instructions of the policy come one time, in the system message, so the task does not
+  repeat them (2026-11-12). The controller gets its own instructions as the instructions of its policy
+  (`WorkRuntime.policyOf`), and its task holds only the home folder.
   A chat turn ends with a step with no code, so the task has no text about input fields and no text about `submit`.
   Before this rule, a chat turn had the task of a program call, which told the model to give the result with
   `submit`. The live sessions of 2026-11-10 gave this rule.
@@ -1996,6 +1999,23 @@ These points are proposals for the review:
   characters, cut at a line end, with a note that gives its size and names `read(path)`. The text tells the model to
   do what `AGENTS.md` says when it agrees with the rules above it. The controller gets no files, because it works in
   the home folder. In a live session (2026-11-12), the model used one more step to read the README with a cell.
+- The request of a call to the policy (2026-11-12). A measured request had no description of a field, the memory as a
+  fake first step of the history with an empty reply, and the large fields after the history. So each later step
+  reused only 256 of about 3,200 tokens from the cache of the endpoint.
+  - Each field of the policy has a description (`Harness.policyFields`), and each policy has the signature of
+    `Harness.policySignature`.
+  - The view of the memory is the input field `memory`, and the history holds only the steps of the open turn.
+  - Each message of the memory log starts with its speaker: `The person wrote:`, another sender (`Window.speaker`),
+    `The model ran a cell:` or `The model replied:`. The summary instructions keep who wrote each part. In session
+    70e1947a (2026-11-11), the model read its own earlier reply in the memory as its instructions. A new text of a
+    message gives new keys of the store, so an existing session builds its lines again one time.
+  - The policy adapter moves the fields `task`, `apiReference` and `memory` to the end of the system message
+    (`PolicyAdapter.moved`). The steps of the turn and the last user message, with the status and the observation,
+    come after it. So each request of a turn starts with the same messages, and the endpoint can reuse them from its
+    cache. An empty field does not move, and a request that does not match stays as it is. The chat adapter of DSPy
+    does not change.
+  - A live run with two turns after these changes: the endpoint reused 3,072 of 3,418 prompt tokens at the second step
+    of a turn, and 3,072 of 3,443 at the first step of the next turn. Each instruction text came one time.
 - The job table belongs to the open session in the host, not to the activation, so a new activation keeps the jobs.
   `spawn` finds its `JobId` from its own open effect in the journal. `stopJob` is `StopJobs(One(job))`, and the table
   gives the end of a job with `report` to the host, which posts the message to the writer.

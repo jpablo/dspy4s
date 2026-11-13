@@ -184,7 +184,7 @@ final class WorkRuntime(
         val effects = HarnessEffects(
           WorkRuntime.taskOf(session, config, scope, WorkRuntime.shellWords(profile, scope, made), project),
           Harness.apiReference(config.mode),
-          policy,
+          WorkRuntime.policyOf(session, policy),
           strategy,
           journal,
           newRepl,
@@ -351,14 +351,22 @@ object WorkRuntime:
       "of the API reference. Keep a value for a later cell or turn in a val or in the store. A step with no code " +
       "ends the turn, and its text is the reply to the person. If a call needs an approval, end the turn and ask."
 
-  /** The task of each chat turn of a work session in the folder `scope`: `instructions`, the folder, the words of its
-    * shell `shell` (`shellWords`), and the section `project` of the files of the project (`ProjectFiles.section`), when
-    * it is not empty. A chat turn ends with a step with no code, and its text is the reply. So the task has no text
-    * about input fields and no text about `submit`. The task of a program call (`Harness.task`) has both.
+  /** The policy leaf of `session`: `policy`, and for the controller (`Controller.id`) `policy` with the instructions of
+    * the controller. So the system message of each session has the instructions of its own work, one time.
+    */
+  def policyOf(session: SessionId, policy: Predict[PolicyInput, PolicyStep]): Predict[PolicyInput, PolicyStep] =
+    if session == Controller.id then policy.copy(signature = policy.signature.withInstructions(Controller.instructions))
+    else policy
+
+  /** The task of each chat turn of a work session in the folder `scope`: the folder, the words of its shell `shell`
+    * (`shellWords`), and the section `project` of the files of the project (`ProjectFiles.section`), when it is not
+    * empty. The instructions are the instructions of the policy signature, so they come one time, in the system
+    * message. A chat turn ends with a step with no code, and its text is the reply. So the task has no text about input
+    * fields and no text about `submit`. The task of a program call (`Harness.task`) has both.
     */
   def chatTask(scope: Path, shell: String, project: String = ""): String =
     val files = if project.isEmpty then "" else s"\n\n$project"
-    s"$instructions\n\nThe folder of the session: $scope.\n\n$shell$files"
+    s"The folder of the session: $scope.\n\n$shell$files"
 
   /** What the model does when the shell refuses a write. In the live session 00429ec8, each `git worktree add` failed
     * with "Operation not permitted", and the model used three steps to find the cause. It never told the person.
@@ -503,7 +511,7 @@ object WorkRuntime:
     * sessions of the host.
     */
   def forHost(env: WorkEnv, limits: HarnessLimits = HarnessLimits())(peers: Peers)(using RuntimeContext): WorkRuntime =
-    val policy   = Signature.derived[PolicyInput, PolicyStep]("policy", instructions)
+    val policy   = Harness.policySignature(instructions)
     val subQuery = Signature.derived[SubQuery, SubAnswer]("subQuery", Harness.subQueryInstructions)
     WorkRuntime(env, limits, Predict(policy, name = Some("policy")), Predict(subQuery, name = Some("subQuery")), peers)
 

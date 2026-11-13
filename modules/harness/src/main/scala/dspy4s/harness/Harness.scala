@@ -1,6 +1,7 @@
 package dspy4s.harness
 
-import dspy4s.core.contracts.{ConfigurationError, DspyError, ParseError, RuntimeContext, RuntimeError}
+import dspy4s.core.contracts.{ConfigurationError, DspyError, FieldSpec, ParseError, RuntimeContext, RuntimeError}
+import dspy4s.core.contracts.SignatureLayout
 import dspy4s.core.data.RawPrediction
 import dspy4s.harness.guest.{Access, Data, DataShape, Mode, Scope, preamble}
 import dspy4s.harness.kernel.*
@@ -289,6 +290,41 @@ object Harness extends HarnessGivens:
     */
   val subQueryInstructions: String = "Answer the prompt of the code."
 
+  /** The description of each field of the policy, by name (CODE_HARNESS_DESIGN.md, 10.6). The system message shows each
+    * one after the name of its field. A measured request (2026-11-12) showed each field with no description, so the
+    * model did not know what a field held. The texts fit a work session and a program call.
+    */
+  val policyFields: Map[String, String] = Map(
+    "task"         -> "What to do, and the facts of the place of the work.",
+    "apiReference" -> "The calls that a cell can make: Scala source with comments.",
+    "memory"       -> "The earlier turns of this session, oldest first, with one line for each part. zoom(ref) reads a part.",
+    "status"       -> "The number of this step, and the keys of the store.",
+    "observation"  -> "The newest message: from the person at the first step, else the output of the last cell.",
+    "history"      -> "The earlier steps of this turn.",
+    "reasoning"    -> "Your thoughts before the text and the code.",
+    "text"         -> "A short text for the person about this step.",
+    "code"         -> "The Scala 3 code of one cell. A step with no code ends the turn."
+  )
+
+  /** The signature of the policy leaf with `instructions` and the descriptions of `policyFields`. Each policy of the
+    * harness and of a work session has this signature.
+    */
+  def policySignature(instructions: String): Signature[PolicyInput, PolicyStep] =
+    val base                                                    = Signature.derived[PolicyInput, PolicyStep]("policy", instructions)
+    val layout                                                  = base.layout
+    def described(fields: Vector[FieldSpec]): Vector[FieldSpec] =
+      fields.map(field => policyFields.get(field.name).fold(field)(text => field.copy(description = Some(text))))
+    SignatureLayout.create(
+      layout.name,
+      described(layout.inputFields),
+      described(layout.outputFields),
+      layout.instructions
+    )
+      .fold(
+        error => throw IllegalStateException(s"the policy signature is not valid: ${error.message}"),
+        made => base.copy(layout = made)
+      )
+
   /** The name of the model of the runtime, for the configuration of the session. */
   private def modelName(using context: RuntimeContext): String =
     context.lm.collect { case model: LanguageModel => model.id }.getOrElse("none")
@@ -330,7 +366,7 @@ object Harness extends HarnessGivens:
       env      : HarnessEnv,
       limits   : HarnessLimits = HarnessLimits()
   ): Harness[I, O] =
-    val policy   = Signature.derived[PolicyInput, PolicyStep]("policy", policyInstructions)
+    val policy   = policySignature(policyInstructions)
     val finisher =
       Signature.fromShapes("finisher", finisherInstructions, Shape.derived[FinishInput], signature.outputShape)
     val subQuery = Signature.derived[SubQuery, SubAnswer]("subQuery", subQueryInstructions)
