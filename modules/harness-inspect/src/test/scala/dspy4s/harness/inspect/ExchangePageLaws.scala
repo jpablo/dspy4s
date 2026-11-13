@@ -138,14 +138,27 @@ class ExchangePageLaws extends ScalaCheckSuite:
         val request =
           """(?s)<section class="x-view x-request">(.*?)</section>""".r.findFirstMatchIn(page).map(_.group(1))
         assert(request.exists(_.contains("""<span class="t-key">&quot;model&quot;</span>""")), request)
-        // The request view has the layout of JsonText: each field on a line of its own, with an indent.
+        // The request view is a code view of the layout of JsonText: each field on a line of its own, with an indent.
         assert(
-          request.exists(_.contains("""{
-  <span class="t-key">&quot;model&quot;</span>: """)),
+          request.exists(
+            _.contains("""<span class="c" style="--i:2"><span class="t-key">&quot;model&quot;</span>: """)
+          ),
           request
         )
         val reply = """(?s)<section class="x-view x-reply">(.*?)</section>""".r.findFirstMatchIn(page).map(_.group(1))
         assert(reply.exists(_.contains("""<span class="t-key">&quot;choices&quot;</span>""")), reply)
+        // Each of the two views has a code view, a button that copies its exact text, and a link to its download.
+        val raw = s"/raw/${session.value}/x/x1"
+        Vector(request -> ("request", "request-exact"), reply -> ("reply", "reply-exact")).foreach {
+          case (view, (item, exact)) =>
+            assert(view.exists(_.contains("""<div class="code">""")), view)
+            assert(view.exists(_.contains(s"""<button data-copy="$exact">Copy</button>""")), view)
+            assert(view.exists(_.contains(s"""href="$raw/$item?download=1"""")), view)
+            assert(view.exists(_.contains(s"""<pre id="$exact" hidden>""")), view)
+        }
+        // The bar has no raw links, because the buttons of the views copy and save the exact texts.
+        val bar = """(?s)<header class="bar">(.*?)</header>""".r.findFirstMatchIn(page).map(_.group(1))
+        assert(bar.exists(b => !b.contains("Raw:") && !b.contains("/raw/")), bar)
         assertEquals(get(inspector, s"/s/${session.value}/x/fake-none")._1, 404)
       }
     }

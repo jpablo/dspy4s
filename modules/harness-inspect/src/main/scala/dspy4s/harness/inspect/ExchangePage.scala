@@ -24,8 +24,8 @@ object ExchangePage:
       val title = store.row(session).map(_.firstMessage).filter(_.nonEmpty).getOrElse(session.value)
       val bar   = header(session, x, exchanges, title, tab)
       val views = s"""<section class="x-view x-chat">${Chat.html(x)}</section>""" +
-        s"""<section class="x-view x-request">${request(x)}</section>""" +
-        s"""<section class="x-view x-reply">${reply(x)}</section>""" +
+        s"""<section class="x-view x-request">${request(session, x)}</section>""" +
+        s"""<section class="x-view x-reply">${reply(session, x)}</section>""" +
         s"""<section class="x-view x-diff">${diff(x, target, exchanges)}</section>"""
       Html.page(
         s"Exchange ${x.index + 1} of ${session.value.take(8)}",
@@ -45,40 +45,42 @@ object ExchangePage:
       (key, name) =>
         s"""<button data-tab="$key"${if key == tab then " class=\"on\"" else ""}>$name</button>"""
     }.mkString("""<span class="group">""", "", "</span>")
-    val raw = s"/raw/${session.value}/x/${escape(x.id)}"
     s"""<header class="bar"><div class="facts"><a href="/">Sessions</a> / <a href="$back">${escape(
         title
       )}</a></div>""" +
       s"""<h1>Exchange ${x.index + 1} of ${all.size} · ${escape(x.predictor.getOrElse("none"))}</h1>""" +
       s"""<div class="facts">$facts · after #${x.after}</div><div class="controls">$tabs""" +
       s"""<span class="group">${near.mkString(" ")}</span>""" +
-      Html.rawLinks(raw, Vector("request", "reply")) +
       "</div></header>"
 
-  /** The URL, the headers, the body with indents, and the exact body for the copy button. */
-  private def request(x: Exchange): String =
+  /** The URL, the headers, the code view of the body with indents, and the buttons that copy and save the exact body.
+    */
+  private def request(session: SessionId, x: Exchange): String =
     val headers = x.requestHeaders.map((k, v) => s"<dt>${escape(k)}</dt><dd>${escape(v)}</dd>").mkString
     s"<dl><dt>URL</dt><dd>${escape(x.url)}</dd>$headers<dt>body</dt><dd>${x.body.getBytes(UTF_8).length} bytes</dd></dl>" +
-      """<p><button data-copy="request-exact">Copy the exact body</button></p>""" +
-      s"<pre>${Highlight.jsonHtml(x.body)}</pre>" +
+      tools(session, x, "request") + Highlight.code(pretty(x.body).linesIterator.toVector) +
       s"""<pre id="request-exact" hidden>${escape(x.body)}</pre>"""
 
-  /** The status, the headers and the reply with the number of each line, and the exact reply for the copy button. */
-  private def reply(x: Exchange): String =
+  /** The status, the headers, the code view of the reply (each line of a stream, or the body with indents), and the
+    * buttons that copy and save the exact reply.
+    */
+  private def reply(session: SessionId, x: Exchange): String =
     if x.open then """<p class="note">The exchange has no reply yet.</p>"""
     else
       val lines = if x.stream then x.replied else pretty(x.replied.mkString("\n")).linesIterator.toVector
-      // A JSON string has no line end, so the lexer of JSON colors each line alone, also a `data:` line of a stream.
-      val numbers = lines.zipWithIndex.map { (line, i) =>
-        s"""<span class="n">${i + 1}</span>${Highlight.html(Highlight.json(line))}"""
-      }
       val facts =
         Vector(x.status.map(s => "status" -> s.toString), x.end.map(e => "end" -> e), x.error.map(e => "error" -> e))
           .flatten ++ x.replyHeaders.toVector.sortBy(_._1)
       facts.map((k, v) => s"<dt>${escape(k)}</dt><dd>${escape(v)}</dd>").mkString("<dl>", "", "</dl>") +
-        """<p><button data-copy="reply-exact">Copy the exact reply</button></p>""" +
-        numbers.mkString("""<pre class="numbered">""", "\n", "</pre>") +
+        tools(session, x, "reply") + Highlight.code(lines) +
         s"""<pre id="reply-exact" hidden>${escape(x.replied.mkString("\n"))}</pre>"""
+
+  /** The button that copies the exact `item` (`request` or `reply`) of `x` from its hidden copy, and the link that
+    * saves it as a file (5.5).
+    */
+  private def tools(session: SessionId, x: Exchange, item: String): String =
+    val saved = s"/raw/${session.value}/x/${escape(x.id)}/$item?download=1"
+    s"""<p class="tools"><button data-copy="$item-exact">Copy</button> <a class="button" href="$saved">Download</a></p>"""
 
   /** The diff of the text of the request of `target` and of `x` (`Chat.requestLines`), in parts with three lines around
     * each change, and a choice of the exchange to compare with.

@@ -1,7 +1,5 @@
 package dspy4s.harness.inspect
 
-import zio.blocks.schema.json.Json
-
 import Html.escape
 
 /** The kind of a piece of the text of a view, for its color (docs/code-harness/OBSERVABILITY.md, 5.3). */
@@ -95,9 +93,17 @@ object Highlight:
         case tint                    => s"""<span class="t-${tint.toString.toLowerCase}">${escape(t.text)}</span>"""
     }.mkString
 
-  /** The HTML of a text that can be JSON: its layout with colors (`JsonText.pretty`), else its escape. */
-  def jsonHtml(text: String): String =
-    Json.parse(text).fold(_ => escape(text), value => html(json(JsonText.pretty(value))))
+  /** The code view of `lines` (5.4), as an editor shows a JSON file: a number for each line, the colors of JSON, and
+    * the rest of each line after its first spaces in a block with that indent. So a long line wraps under its own
+    * indent, and not at the left edge. A JSON string has no line end, so each line gets its colors alone, also a
+    * `data:` line of a stream.
+    */
+  def code(lines: Vector[String]): String =
+    lines.zipWithIndex.map { (line, i) =>
+      val indent = line.takeWhile(_ == ' ').length
+      s"""<div class="ln"><span class="n">${i + 1}</span><span class="c" style="--i:$indent">""" +
+        s"""${html(json(line.drop(indent)))}</span></div>"""
+    }.mkString("""<div class="code">""", "", "</div>")
 
   /** The first index from `from` whose character does not satisfy `p`, or the length of `text`. */
   private def span(text: String, from: Int, p: Char => Boolean): Int =

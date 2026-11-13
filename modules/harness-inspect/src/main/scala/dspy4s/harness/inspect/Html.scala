@@ -112,7 +112,14 @@ body.tab-chat .x-chat,body.tab-request .x-request,body.tab-reply .x-reply,body.t
 .msg .text{white-space:pre-wrap;overflow-wrap:anywhere}
 .role-user{border-left:3px solid var(--good)}.role-assistant{border-left:3px solid var(--policy)}
 .role-tool{border-left:3px solid var(--leaf)}
-pre.numbered .n{display:inline-block;min-width:3.5em;color:var(--muted);user-select:none}
+.code{font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;margin:4px 0;padding:8px 10px 8px 0;
+background:var(--code);border-radius:6px}
+.code .ln{display:grid;grid-template-columns:4.5em 1fr}
+.code .n{color:var(--muted);text-align:right;padding-right:1.2em;user-select:none}
+.code .c{white-space:pre-wrap;overflow-wrap:anywhere;padding-left:calc(var(--i) * 1ch + 4ch);text-indent:-4ch}
+.tools{display:flex;gap:6px;justify-content:flex-end;margin:6px 0 2px}
+a.button{font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:5px;
+padding:1px 8px;text-decoration:none}
 .t-key{color:var(--leaf)}.t-str{color:var(--good)}.t-num{color:var(--warn)}.t-lit{color:var(--memory)}
 .t-type{color:var(--accent)}
 .hunk{margin:8px 0}.hunk-head{color:var(--muted);font:12px ui-monospace,Menlo,monospace}
@@ -166,8 +173,11 @@ document.querySelectorAll('button[data-tab]').forEach(b => b.addEventListener('c
 document.querySelectorAll('button[data-copy]').forEach(b => b.addEventListener('click', async () => {
   const source = document.getElementById(b.dataset.copy);
   if (!source) return;
+  const label = b.dataset.label || b.textContent;
+  b.dataset.label = label;
   try { await navigator.clipboard.writeText(source.textContent); b.textContent = 'Copied'; }
   catch (e) { b.textContent = 'The copy failed'; }
+  setTimeout(() => { b.textContent = label; }, 1500);
 }));
 const against = document.getElementById('against');
 if (against) against.addEventListener('change', () => {

@@ -270,18 +270,18 @@ old = '<span class="t-${tint.toString.toLowerCase}">${escape(t.text)}</span>'
 new = '<span class="t-${tint.toString.toLowerCase}">${t.text}</span>'
 
 [[mutant]]
-name = "Mutant: the request view of an exchange uses the printer of zio-blocks with no indent"
-[[mutant.edit]]
-file = "Highlight.scala"
-old = "value => html(json(JsonText.pretty(value)))"
-new = "value => html(json(value.print))"
-
-[[mutant]]
-name = "Mutant: the lines of a reply have no colors"
+name = "Mutant: the request view of an exchange shows the body on one line"
 [[mutant.edit]]
 file = "ExchangePage.scala"
-old = '<span class="n">${i + 1}</span>${Highlight.html(Highlight.json(line))}'
-new = '<span class="n">${i + 1}</span>${escape(line)}'
+old = "Highlight.code(pretty(x.body).linesIterator.toVector)"
+new = "Highlight.code(Vector(x.body))"
+
+[[mutant]]
+name = "Mutant: the lines of the code view have no colors"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = "${html(json(line.drop(indent)))}</span></div>"
+new = "${escape(line.drop(indent))}</span></div>"
 
 # ── The layout of the JSON view (5.3, law L19) ──
 
@@ -321,3 +321,26 @@ name = "Mutant: the bar does not show the call of a parent"
 file = "EntryViews.scala"
 old = '''call ${effect.cell}.${effect.n}</span>'''
 new = '''call ${effect.cell}</span>'''
+
+# ── The code view of a body (5.4, law L20) ──
+
+[[mutant]]
+name = "Mutant: a line of the code view keeps its first spaces in its text"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = "val indent = line.takeWhile(_ == ' ').length"
+new = "val indent = line.takeWhile(_ == '\\u0000').length"
+
+[[mutant]]
+name = "Mutant: the numbers of the code view start at 0"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = '<div class="ln"><span class="n">${i + 1}</span>'
+new = '<div class="ln"><span class="n">${i}</span>'
+
+[[mutant]]
+name = "Mutant: the copy button of a view names no hidden copy"
+[[mutant.edit]]
+file = "ExchangePage.scala"
+old = '<button data-copy="$item-exact">Copy</button>'
+new = '<button data-copy="$item">Copy</button>'

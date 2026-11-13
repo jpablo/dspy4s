@@ -108,7 +108,43 @@ class HighlightLaws extends ScalaCheckSuite:
     )
   }
 
+  // ── L20: the code view of a body ──
+
+  property("Inspect L20: the code view of the layout of a value gives the layout again, with a number for each line") {
+    forAllNoShrink(json(3)) { value =>
+      val laid = JsonText.pretty(value)
+      val html = Highlight.code(laid.linesIterator.toVector)
+      val rows = codeRows(html)
+      assert(html.startsWith("""<div class="code">"""), html)
+      assertEquals("""class="ln"""".r.findAllMatchIn(html).size, rows.size)
+      assertEquals(rows.map(_._1), (1 to rows.size).toVector)
+      assertEquals(rows.map((_, indent, piece) => " " * indent + plain(piece)).mkString("\n"), laid)
+    }
+  }
+
+  property(
+    "Inspect L20: the code view keeps each line of any text with its first spaces, and holds no markup from it"
+  ) {
+    forAllNoShrink(Gen.oneOf(syntax, marked, text)) { t =>
+      val lines = t.split("\n", -1).toVector
+      val html  = Highlight.code(lines)
+      assertEquals(codeRows(html).map((_, indent, piece) => " " * indent + plain(piece)), lines)
+      assert(!html.contains(Markup) && !html.contains("<i data-m"), html)
+    }
+  }
+
+  test("Inspect L20: the code view has the colors of JSON, and a long line wraps under its own indent") {
+    val html = Highlight.code(Vector("{", """  "k": "v",""", "    1"))
+    assert(html.contains("""<span class="c" style="--i:2"><span class="t-key">&quot;k&quot;</span>: """), html)
+    assert(html.contains("""<span class="c" style="--i:4"><span class="t-num">1</span></span>"""), html)
+  }
+
 object HighlightLaws:
+
+  /** The rows of a code view: the number, the indent and the HTML of the rest of each line. */
+  def codeRows(html: String): Vector[(Int, Int, String)] =
+    """<div class="ln"><span class="n">(\d+)</span><span class="c" style="--i:(\d+)">(.*?)</span></div>""".r
+      .findAllMatchIn(html).map(m => (m.group(1).toInt, m.group(2).toInt, m.group(3))).toVector
 
   /** A text with many of the marks that a lexer reads: quotes, escapes, brackets, numbers, words and line ends. */
   val syntax: Gen[String] = Gen.listOf(Gen.frequency(
