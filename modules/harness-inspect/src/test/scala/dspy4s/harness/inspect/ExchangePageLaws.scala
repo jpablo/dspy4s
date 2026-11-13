@@ -134,6 +134,12 @@ class ExchangePageLaws extends ScalaCheckSuite:
         assert(page.contains(Html.escape(chatBody("POLICY", "U1"))), page)
         assert(page.contains("""<span class="n">1</span>"""), page)
         assert(page.contains("Hello"), page)
+        // The request view and the lines of the reply have the colors of JSON (5.3).
+        val request =
+          """(?s)<section class="x-view x-request">(.*?)</section>""".r.findFirstMatchIn(page).map(_.group(1))
+        assert(request.exists(_.contains("""<span class="t-key">&quot;model&quot;</span>""")), request)
+        val reply = """(?s)<section class="x-view x-reply">(.*?)</section>""".r.findFirstMatchIn(page).map(_.group(1))
+        assert(reply.exists(_.contains("""<span class="t-key">&quot;choices&quot;</span>""")), reply)
         assertEquals(get(inspector, s"/s/${session.value}/x/fake-none")._1, 404)
       }
     }

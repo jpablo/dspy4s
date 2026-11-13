@@ -1,5 +1,5 @@
 # The mutants of the inspector. Each mutant breaks one rule of section 5 of docs/code-harness/OBSERVABILITY.md, and
-# laws L10 to L17 of its section 6 must kill it.
+# laws L10 to L19 of its section 6 must kill it.
 #
 # `python3 scripts/mutants/mutants.py modules/harness-inspect/src/test/mutants.toml` applies each mutant alone, runs the
 # tests of the module, and restores the code. At least one test must fail for each mutant.
@@ -71,8 +71,8 @@ new = "seqs.filter(_ < x.after).lastOption"
 name = "Mutant: the JSON view is not the text of the file"
 [[mutant.edit]]
 file = "EntryViews.scala"
-old = "_.print(WriterConfig.withIndentionStep(2)))"
-new = """_.print(WriterConfig.withIndentionStep(2)).replace("\\"seq\\"", "\\"seq0\\""))"""
+old = "Json.parse(row.text).fold(_ => row.text, JsonText.pretty)"
+new = """Json.parse(row.text).fold(_ => row.text, j => JsonText.pretty(j).replace("\\"seq\\"", "\\"seq0\\""))"""
 
 [[mutant]]
 name = "Mutant: the Scala view on one line has no field names"
@@ -196,3 +196,91 @@ name = "Mutant: the download links show the raw paths"
 file = "Html.scala"
 old = '<span class="group">Download: ${links("?download=1")}</span>'
 new = '<span class="group">Download: ${links("")}</span>'
+
+# ── The colors of the views (5.3, law L18) ──
+
+[[mutant]]
+name = "Mutant: a JSON string before a colon is a string, not a key"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = "(if next(text, stop).contains(':') then Tint.Key else Tint.Str, stop)"
+new = "(if next(text, stop).contains(',') then Tint.Key else Tint.Str, stop)"
+
+[[mutant]]
+name = "Mutant: a backslash in a literal does not take the next character"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = '''while j < text.length && text(j) != quote do j += (if text(j) == '\\' then 2 else 1)'''
+new = '''while j < text.length && text(j) != quote do j += (if text(j) == '\u0000' then 2 else 1)'''
+
+[[mutant]]
+name = "Mutant: a block ends at the first three quotes"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = '''if close < 0 then text.length else span(text, close + 3, _ == '"')'''
+new = '''if close < 0 then text.length else close + 3'''
+
+[[mutant]]
+name = "Mutant: the sign of an exponent ends a number"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = '''("+-".contains(text(j)) && "eE".contains(text(j - 1)))'''
+new = '''("+".contains(text(j)) && "eE".contains(text(j - 1)))'''
+
+[[mutant]]
+name = "Mutant: a name before = is not a field"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = "j >= 0 && text(j) == '='"
+new = "j >= 0 && text(j) == ':'"
+
+[[mutant]]
+name = "Mutant: a name with a capital letter is plain"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = "else if word.head.isUpper then Tint.Type"
+new = "else if word.head.isDigit then Tint.Type"
+
+[[mutant]]
+name = "Mutant: the class of a color has another name"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = '<span class="t-${tint.toString.toLowerCase}">'
+new = '<span class="c-${tint.toString.toLowerCase}">'
+
+[[mutant]]
+name = "Mutant: a piece with a color has no escape"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = '<span class="t-${tint.toString.toLowerCase}">${escape(t.text)}</span>'
+new = '<span class="t-${tint.toString.toLowerCase}">${t.text}</span>'
+
+[[mutant]]
+name = "Mutant: the JSON view of a row uses the printer of zio-blocks with no indent"
+[[mutant.edit]]
+file = "Highlight.scala"
+old = "value => html(json(JsonText.pretty(value)))"
+new = "value => html(json(value.print))"
+
+[[mutant]]
+name = "Mutant: the lines of a reply have no colors"
+[[mutant.edit]]
+file = "ExchangePage.scala"
+old = '<span class="n">${i + 1}</span>${Highlight.html(Highlight.json(line))}'
+new = '<span class="n">${i + 1}</span>${escape(line)}'
+
+# ── The layout of the JSON view (5.3, law L19) ──
+
+[[mutant]]
+name = "Mutant: an empty object gets the layout of an object with fields"
+[[mutant.edit]]
+file = "JsonText.scala"
+old = "case o: Json.Object if o.value.nonEmpty =>"
+new = "case o: Json.Object if o.value.size >= 0 =>"
+
+[[mutant]]
+name = "Mutant: the items of an array have no indent"
+[[mutant.edit]]
+file = "JsonText.scala"
+old = "a.value.toVector.map(v => pad + layout(v, indent + 2))"
+new = "a.value.toVector.map(v => layout(v, indent + 2))"

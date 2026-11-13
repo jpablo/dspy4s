@@ -113,6 +113,8 @@ body.tab-chat .x-chat,body.tab-request .x-request,body.tab-reply .x-reply,body.t
 .role-user{border-left:3px solid var(--good)}.role-assistant{border-left:3px solid var(--policy)}
 .role-tool{border-left:3px solid var(--leaf)}
 pre.numbered .n{display:inline-block;min-width:3.5em;color:var(--muted);user-select:none}
+.t-key{color:var(--leaf)}.t-str{color:var(--good)}.t-num{color:var(--warn)}.t-lit{color:var(--memory)}
+.t-type{color:var(--accent)}
 .hunk{margin:8px 0}.hunk-head{color:var(--muted);font:12px ui-monospace,Menlo,monospace}
 pre.diff{padding:4px 0}
 .d{display:block;padding:0 10px}

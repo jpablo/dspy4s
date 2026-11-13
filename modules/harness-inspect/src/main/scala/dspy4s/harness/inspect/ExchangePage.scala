@@ -1,7 +1,7 @@
 package dspy4s.harness.inspect
 
 import dspy4s.harness.kernel.SessionId
-import zio.blocks.schema.json.{Json, WriterConfig}
+import zio.blocks.schema.json.Json
 
 import java.nio.charset.StandardCharsets.UTF_8
 
@@ -60,16 +60,19 @@ object ExchangePage:
     val headers = x.requestHeaders.map((k, v) => s"<dt>${escape(k)}</dt><dd>${escape(v)}</dd>").mkString
     s"<dl><dt>URL</dt><dd>${escape(x.url)}</dd>$headers<dt>body</dt><dd>${x.body.getBytes(UTF_8).length} bytes</dd></dl>" +
       """<p><button data-copy="request-exact">Copy the exact body</button></p>""" +
-      s"<pre>${escape(pretty(x.body))}</pre>" +
+      s"<pre>${Highlight.jsonHtml(x.body)}</pre>" +
       s"""<pre id="request-exact" hidden>${escape(x.body)}</pre>"""
 
   /** The status, the headers and the reply with the number of each line, and the exact reply for the copy button. */
   private def reply(x: Exchange): String =
     if x.open then """<p class="note">The exchange has no reply yet.</p>"""
     else
-      val lines   = if x.stream then x.replied else pretty(x.replied.mkString("\n")).linesIterator.toVector
-      val numbers = lines.zipWithIndex.map((line, i) => s"""<span class="n">${i + 1}</span>${escape(line)}""")
-      val facts   =
+      val lines = if x.stream then x.replied else pretty(x.replied.mkString("\n")).linesIterator.toVector
+      // A JSON string has no line end, so the lexer of JSON colors each line alone, also a `data:` line of a stream.
+      val numbers = lines.zipWithIndex.map { (line, i) =>
+        s"""<span class="n">${i + 1}</span>${Highlight.html(Highlight.json(line))}"""
+      }
+      val facts =
         Vector(x.status.map(s => "status" -> s.toString), x.end.map(e => "end" -> e), x.error.map(e => "error" -> e))
           .flatten ++ x.replyHeaders.toVector.sortBy(_._1)
       facts.map((k, v) => s"<dt>${escape(k)}</dt><dd>${escape(v)}</dd>").mkString("<dl>", "", "</dl>") +
@@ -109,5 +112,4 @@ object ExchangePage:
       s"""<pre class="diff">${lines.mkString}</pre></div>"""
 
   /** `text` with indents when it is JSON, else as it is. */
-  private def pretty(text: String): String =
-    Json.parse(text).fold(_ => text, _.print(WriterConfig.withIndentionStep(2)))
+  private def pretty(text: String): String = Json.parse(text).fold(_ => text, JsonText.pretty)

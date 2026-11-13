@@ -2,7 +2,7 @@ package dspy4s.harness.inspect
 
 import dspy4s.harness.host.SessionFile
 import dspy4s.harness.kernel.{EffectResult, Entry, Logged, Taint}
-import zio.blocks.schema.json.{Json, WriterConfig}
+import zio.blocks.schema.json.Json
 
 import Html.escape
 
@@ -16,8 +16,7 @@ object EntryViews:
     row.logged.fold(error => s"The row ${row.seq} does not decode: $error", logged => ScalaText.of(logged))
 
   /** The JSON view: the text of the `entry` column with indents. A text that is not JSON stays as it is. */
-  def json(row: SessionFile.Row): String =
-    Json.parse(row.text).fold(_ => row.text, _.print(WriterConfig.withIndentionStep(2)))
+  def json(row: SessionFile.Row): String = Json.parse(row.text).fold(_ => row.text, JsonText.pretty)
 
   /** The depth of an entry in the tree of a session: 0 for the parts of a session and of a turn, 1 for a step and for
     * the entries that can come at any place, and 2 for the parts of a step.
@@ -99,8 +98,11 @@ object EntryViews:
       s"""<div class="meta"><span class="seq">#${row.seq}</span><span class="kind">$kind</span>$meta""" +
       (if row.required then "" else """<span class="note">not required</span>""") + views + "</div>" +
       s"""<div class="v v-card">$shown</div>""" +
-      s"""<pre class="v v-scala">${escape(scala(row))}</pre>""" +
-      s"""<pre class="v v-json">${escape(json(row))}</pre></section>"""
+      s"""<pre class="v v-scala">${row.logged.fold(
+          _ => escape(scala(row)),
+          _ => Highlight.html(Highlight.scala(scala(row)))
+        )}</pre>""" +
+      s"""<pre class="v v-json">${Highlight.jsonHtml(row.text)}</pre></section>"""
 
   private def paragraph(text: String): String = s"<p>${escape(text)}</p>"
 

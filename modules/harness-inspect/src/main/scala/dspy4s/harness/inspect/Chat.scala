@@ -4,7 +4,7 @@ import dspy4s.core.contracts.{ClosableIterator, DspyError, LmTransportError, LmU
 import dspy4s.lm.contracts.{LmChunk, LmMode, LmOutput, LmRequest, LmResponse}
 import dspy4s.lm.providers.{HttpResponse, HttpStreamResponse, HttpTransport, OpenAiClient, OpenAiLanguageModel}
 import dspy4s.lm.runtime.StreamAccumulator
-import zio.blocks.schema.json.{Json, WriterConfig}
+import zio.blocks.schema.json.Json
 
 import Exchanges.{field, text}
 import Html.escape
@@ -29,7 +29,7 @@ object Chat:
     Json.parse(body) match
       case Right(json) => field(json, "messages") match
           case Some(messages: Json.Array) => messages.elements.toVector.flatMap(messageLines)
-          case _                          => json.print(WriterConfig.withIndentionStep(2)).linesIterator.toVector
+          case _                          => JsonText.pretty(json).linesIterator.toVector
       case Left(_) => body.linesIterator.toVector
 
   /** The reply of `x` as the model reads it. The reply goes again through `OpenAiLanguageModel` on a transport that
