@@ -1989,6 +1989,13 @@ These points are proposals for the review:
   `.git`, the closed paths and the network. It tells the model to stop and tell the person when a task needs a write
   that the shell refuses. In the live session 00429ec8 (2026-11-11), each `git worktree add` failed with "Operation not
   permitted", and the model used three steps to find the cause.
+- The task of a work session also holds the files of the project (`ProjectFiles`), after the shell rules and before a
+  goal: `AGENTS.md`, then the first of `README.md`, `README`, `README.rst` and `README.txt`, at the top of the folder.
+  The activation reads them once through the file calls of the session, so the rules of `read` apply, and the task
+  stays the same during the activation. A change of a file shows after a reopen. Each file has at most 8,000
+  characters, cut at a line end, with a note that gives its size and names `read(path)`. The text tells the model to
+  do what `AGENTS.md` says when it agrees with the rules above it. The controller gets no files, because it works in
+  the home folder. In a live session (2026-11-12), the model used one more step to read the README with a cell.
 - The job table belongs to the open session in the host, not to the activation, so a new activation keeps the jobs.
   `spawn` finds its `JobId` from its own open effect in the journal. `stopJob` is `StopJobs(One(job))`, and the table
   gives the end of a job with `report` to the host, which posts the message to the writer.
