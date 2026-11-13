@@ -71,8 +71,22 @@ new = "seqs.filter(_ < x.after).lastOption"
 name = "Mutant: the JSON view is not the text of the file"
 [[mutant.edit]]
 file = "EntryViews.scala"
-old = "Json.parse(row.text).fold(_ => row.text, JsonText.pretty)"
-new = """Json.parse(row.text).fold(_ => row.text, j => JsonText.pretty(j).replace("\\"seq\\"", "\\"seq0\\""))"""
+old = "def json(row: SessionFile.Row): String = jsonOf(row).fold(row.text)(JsonText.pretty)"
+new = """def json(row: SessionFile.Row): String = jsonOf(row).fold(row.text)(j => JsonText.pretty(j).replace("\\"text\\"", "\\"text0\\""))"""
+
+[[mutant]]
+name = "Mutant: the JSON view of a row shows the whole row"
+[[mutant.edit]]
+file = "EntryViews.scala"
+old = '''else whole.fields.collectFirst { case ("entry", value) => value }.getOrElse(whole)'''
+new = '''else whole.fields.collectFirst { case ("seq0", value) => value }.getOrElse(whole)'''
+
+[[mutant]]
+name = "Mutant: the JSON view of a row that does not decode shows only its entry"
+[[mutant.edit]]
+file = "EntryViews.scala"
+old = "if row.logged.isLeft then whole"
+new = "if row.text.isEmpty then whole"
 
 [[mutant]]
 name = "Mutant: the Scala view on one line has no field names"
@@ -256,7 +270,7 @@ old = '<span class="t-${tint.toString.toLowerCase}">${escape(t.text)}</span>'
 new = '<span class="t-${tint.toString.toLowerCase}">${t.text}</span>'
 
 [[mutant]]
-name = "Mutant: the JSON view of a row uses the printer of zio-blocks with no indent"
+name = "Mutant: the request view of an exchange uses the printer of zio-blocks with no indent"
 [[mutant.edit]]
 file = "Highlight.scala"
 old = "value => html(json(JsonText.pretty(value)))"

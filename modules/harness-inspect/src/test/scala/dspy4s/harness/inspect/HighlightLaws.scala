@@ -77,8 +77,16 @@ class HighlightLaws extends ScalaCheckSuite:
     assert(got("scala").contains("""<span class="t-str">&quot;FAKE-REASON&quot;</span>"""), got("scala"))
     assert(got("json").contains("""<span class="t-key">&quot;reason&quot;</span>"""), got("json"))
     assert(got("json").contains("""<span class="t-str">&quot;FAKE-REASON&quot;</span>"""), got("json"))
-    // The source of the meta is an empty object, and the layout of the view gives it as {}.
-    assert(got("json").contains("""<span class="t-key">&quot;Harness&quot;</span>: {}"""), got("json"))
+    assert(!got("json").contains("&quot;seq&quot;") && !got("json").contains("&quot;meta&quot;"), got("json"))
+    // A case with no field is an empty object, and the layout of the view gives it as {}.
+    val turn = """(?s)<pre class="v v-json">(.*?)</pre>""".r.findFirstMatchIn(EntryViews.html(rowOf(Entry.TurnStarted)))
+      .map(_.group(1))
+    assertEquals(
+      turn,
+      Some("""{
+  <span class="t-key">&quot;TurnStarted&quot;</span>: {}
+}""")
+    )
   }
 
   // ── L19: the layout of the JSON view ──

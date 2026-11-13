@@ -17,8 +17,20 @@ object EntryViews:
   def scala(row: SessionFile.Row): String =
     row.logged.fold(error => s"The row ${row.seq} does not decode: $error", logged => ScalaText.of(logged.entry))
 
-  /** The JSON view: the text of the `entry` column with indents. A text that is not JSON stays as it is. */
-  def json(row: SessionFile.Row): String = Json.parse(row.text).fold(_ => row.text, JsonText.pretty)
+  /** The JSON view: the `entry` field of the row as it is in the file, with indents. The bar of the row shows its `seq`
+    * and its meta, as for the Scala view. A row that does not decode shows its whole text, so its meta stays in view,
+    * and a text that is not JSON stays as it is.
+    */
+  def json(row: SessionFile.Row): String = jsonOf(row).fold(row.text)(JsonText.pretty)
+
+  /** The JSON value of the view of `row` (`json`), or none for a text that is not JSON. The value comes from the text
+    * of the file and not from a new encode of the decoded row, so the view keeps what the file has.
+    */
+  private def jsonOf(row: SessionFile.Row): Option[Json] =
+    Json.parse(row.text).toOption.map { whole =>
+      if row.logged.isLeft then whole
+      else whole.fields.collectFirst { case ("entry", value) => value }.getOrElse(whole)
+    }
 
   /** The depth of an entry in the tree of a session: 0 for the parts of a session and of a turn, 1 for a step and for
     * the entries that can come at any place, and 2 for the parts of a step.
@@ -104,7 +116,9 @@ object EntryViews:
           _ => escape(scala(row)),
           _ => Highlight.html(Highlight.scala(scala(row)))
         )}</pre>""" +
-      s"""<pre class="v v-json">${Highlight.jsonHtml(row.text)}</pre></section>"""
+      s"""<pre class="v v-json">${jsonOf(row).fold(escape(row.text))(value =>
+          Highlight.html(Highlight.json(JsonText.pretty(value)))
+        )}</pre></section>"""
 
   /** The fields of a source with fields, for the bar: the session of a child, and the session and the call of a parent,
     * with a link to the page of the session.

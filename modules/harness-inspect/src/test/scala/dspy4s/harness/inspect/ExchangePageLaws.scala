@@ -138,6 +138,12 @@ class ExchangePageLaws extends ScalaCheckSuite:
         val request =
           """(?s)<section class="x-view x-request">(.*?)</section>""".r.findFirstMatchIn(page).map(_.group(1))
         assert(request.exists(_.contains("""<span class="t-key">&quot;model&quot;</span>""")), request)
+        // The request view has the layout of JsonText: each field on a line of its own, with an indent.
+        assert(
+          request.exists(_.contains("""{
+  <span class="t-key">&quot;model&quot;</span>: """)),
+          request
+        )
         val reply = """(?s)<section class="x-view x-reply">(.*?)</section>""".r.findFirstMatchIn(page).map(_.group(1))
         assert(reply.exists(_.contains("""<span class="t-key">&quot;choices&quot;</span>""")), reply)
         assertEquals(get(inspector, s"/s/${session.value}/x/fake-none")._1, 404)

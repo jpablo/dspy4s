@@ -147,17 +147,29 @@ class InspectorLaws extends ScalaCheckSuite:
 
   // ── L12 to L14: the views of an entry ──
 
-  property("Inspect L12: the JSON view of a row decodes to the same Logged as the row") {
+  property("Inspect L12: the JSON view of a row is the entry of the file, and it decodes to the same entry") {
     forAllNoShrink(Gen.listOfN(12, entry(text))) { entries =>
       withRoot { root =>
         val session = SessionId("fake-session-1")
         journal(root, session, entries.toVector): Unit
         rowsOf(root, session).foreach { row =>
-          assertEquals(LoggedCodec.decode(EntryViews.json(row)).toOption, row.logged.toOption)
+          val shown = EntryViews.json(row)
+          assertEquals(EntryCodec.decode(shown).toOption, row.logged.toOption.map(_.entry))
+          val stored = Json.parse(row.text).toOption.flatMap(_.fields.collectFirst { case ("entry", v) => v.print })
+          assertEquals(Json.parse(shown).toOption.map(_.print), stored)
           assert(row.logged.isRight, row.toString)
         }
       }
     }
+  }
+
+  test("Inspect L12: the JSON view of a row that does not decode is its whole text, with its meta") {
+    val unknown = """{"seq":3,"meta":{"atMillis":1},"entry":{"FakeFutureCase":{}}}"""
+    val known   = SessionFile.Row(3L, true, unknown, Left("fake decode error"))
+    assertEquals(EntryViews.json(known), JsonText.pretty(Json.parse(unknown).fold(e => fail(e.toString), identity)))
+    val broken = SessionFile.Row(4L, true, """{"seq":4,"entry":""", Left("fake decode error"))
+    assertEquals(EntryViews.json(broken), broken.text)
+    assert(EntryViews.html(broken).contains(Html.escape(broken.text)))
   }
 
   property("Inspect L13: the Scala view names the case of each entry and each of its fields") {
@@ -411,6 +423,8 @@ object InspectorLaws:
   val Markup = """<i data-m="1">'&"""
 
   val LoggedCodec = summon[Schema[Logged]].jsonCodec
+
+  val EntryCodec = summon[Schema[Entry]].jsonCodec
 
   inline def caseNames[T](using m: Mirror.SumOf[T]): List[String] =
     constValueTuple[m.MirroredElemLabels].toList.map(_.toString)
