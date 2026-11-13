@@ -237,7 +237,10 @@ token and a prompt of 20 to 80 KB.
   holds its `Acted`, its effects and its `Observed`, and the turn ends with its `TurnEnded`.
   - Each exchange shows after the last entry whose `seq` is not more than its `after`. Its row has the predictor,
     stream or plain, the status, the end (or `open`), the wait for the first line, the whole time, the bytes of the
-    request and of the reply, the tokens of the usage, and links to its raw request and reply.
+    request and of the reply, the tokens of the usage, and the links `request` and `reply`. The word `exchange` at
+    the start of the row links to the page of the exchange (5.4), and `request` and `reply` open that page on
+    their view. A first version linked `request` and `reply` to the raw paths, so a browser showed the exact text
+    with no layout (a bug of 2026-11-12). No row links to a raw path now.
   - The bar has the facts (the id, the folder, the status and the counts), a switch for the view of all the entries
     (card, Scala or JSON), the follow, the filters, and the raw paths. The filters of the kinds of entries and of the
     predictors are folded, so the bar stays short in a small window. Each entry also has its own switch.
@@ -290,6 +293,11 @@ token and a prompt of 20 to 80 KB.
 
 The page `/s/{id}/x/{xid}` has a bar with the facts of the exchange and links to the exchange before and after it.
 Four buttons select its view. A row of the tree links to the page.
+
+- `?tab=chat`, `request`, `reply` or `diff` opens the page on that view. With no tab, or with another name, the
+  page opens on the diff when `?against=` is given, else on the chat.
+- A button of a view puts its `tab` in the address, so a reload keeps the view. The links to the exchange before
+  and after it keep the view too, so a person can read each request in turn.
 
 - **Chat.** The options of the request (`model`, `temperature`, `max_tokens`, `stream_options` and the others), the
   tools (folded), and the messages with their roles. A system message is folded, because the instructions of the policy
@@ -411,6 +419,10 @@ The inspector:
   holds no markup from the text. Each line has the colors of JSON, under its indent. The Request and Reply views each
   have a code view, a `Copy` button with a hidden copy of the exact text, and a `Download` link, and the bar of the
   exchange has no raw link.
+- **The links to the views.** The `request` and `reply` links of a row open the page of the exchange with
+  `?tab=request` and `?tab=reply`, and no row links to a raw path. `?tab=` opens the page on that view, an unknown
+  tab opens the chat, and `?against=` with no tab opens the diff. The links to the exchange before and after keep
+  the view.
 
 ## 7. The tools outside dspy4s
 
