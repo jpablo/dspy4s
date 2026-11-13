@@ -279,8 +279,7 @@ token and a prompt of 20 to 80 KB.
   - The pieces, joined, give the text again, for any text, and each piece goes through the HTML escape. So a text
     that is not JSON or not Scala keeps each character, and a text of an entry cannot add markup.
   - A row that does not decode shows its error with no colors.
-  - The Request view of an exchange and the lines of its Reply view have the colors of JSON too. A JSON string has no
-    line end, so each line of a reply gets its colors alone, also a `data:` line of a stream.
+  - The code view of the Request and Reply views of an exchange (5.4) has the colors of JSON too.
 - **Card.** A formatted card for each case of `Entry`. It shows the reasoning folded, the text, the code of a cell,
   the output and the outcome. It also shows the time, the source, and a mark for `Taint.External`.
   - The server makes the HTML of the card with a `match` on `Entry`. With `-Werror`, a `match` that does not cover each
@@ -289,8 +288,8 @@ token and a prompt of 20 to 80 KB.
 
 ### 5.4 The views of an exchange
 
-The page `/s/{id}/x/{xid}` has a bar with the facts of the exchange, links to the exchange before and after it, and
-the raw paths. Four buttons select its view. A row of the tree links to the page.
+The page `/s/{id}/x/{xid}` has a bar with the facts of the exchange and links to the exchange before and after it.
+Four buttons select its view. A row of the tree links to the page.
 
 - **Chat.** The options of the request (`model`, `temperature`, `max_tokens`, `stream_options` and the others), the
   tools (folded), and the messages with their roles. A system message is folded, because the instructions of the policy
@@ -298,9 +297,17 @@ the raw paths. Four buttons select its view. A row of the tree links to the page
   - `Chat.read` sends the request again through `OpenAiLanguageModel` on a transport that gives the recorded status,
     headers, and body or lines. So the view and the model read a reply on one path: the same parser of the stream, the
     same assembly of the chunks and of the tool calls, and the same usage. The view copies no parser.
-- **Request.** The URL, the masked headers, the size, and the body with indents. A button copies the exact body.
-- **Reply.** The status, the end, the error and the headers, then the raw lines of a stream with their numbers, or the
-  body of a plain reply with indents. A button copies the exact reply.
+- **Request.** The URL, the masked headers, the size, and the code view of the body with indents.
+- **Reply.** The status, the end, the error and the headers, then the code view of the raw lines of a stream, or of
+  the body of a plain reply with indents.
+- **The code view** of the Request and Reply views is as an editor shows a JSON file (2026-11-12). Each line has its
+  number and the colors of JSON. The rest of a line after its first spaces goes in a block with that indent, so a
+  long line, for example the system message, wraps under its own indent and not at the left edge. The first version
+  showed the body in one block of text, and a long string made a wall of text.
+  - Each of the two views has a `Copy` button, which copies the exact text from a hidden copy, and a `Download` link
+    (5.5). So the bar has no raw links. A first version had them, and a raw path in a browser shows the exact text
+    with no layout.
+  - A JSON string has no line end, so each line gets its colors alone, also a `data:` line of a stream.
 - **Diff.** The text of this request against the text of the last earlier exchange of the same predictor in the same
   session, or of the exchange that `?against={xid}` names. A list selects another exchange. The text of a request has
   a line with the role of each message, then the lines of its content and of its tool calls.
@@ -326,7 +333,8 @@ not show that type, so it saved the file in Downloads with the name `http.jsonl.
 With `?download=1`, a raw path gives the same bytes with `Content-Disposition: attachment`, so a browser saves them as
 a file. The name is `{id}.journal.jsonl`, `{id}.http.jsonl`, `{xid}.request.json` or `{xid}.reply.txt`. An exchange id
 comes from a file, so the name keeps only ASCII letters, digits, `-`, `_` and `.`, and each other character becomes
-`_`. The bar of a session and of an exchange has a `Raw` group of links and a `Download` group of links.
+`_`. The bar of a session has a `Raw` group of links and a `Download` group of links, and the Request and Reply
+views of an exchange each have a `Download` link (5.4).
 
 ## 6. The laws
 
@@ -389,7 +397,8 @@ The inspector:
 - **L17. The raw paths in a browser.** Each raw path has a text type with `charset=utf-8` and no
   `Content-Disposition`. With `download=1`, it gives the same body and the same type, with
   `attachment; filename="..."` and the name of 5.5. An exchange id with other characters gives a name with `_` in
-  their place. The bar of a session and of an exchange links to each download.
+  their place. The bar of a session links to each of its downloads, and the Request and Reply views of an exchange
+  each link to their download.
 - **L18. The colors.** For any text, the pieces of each lexer, joined, give the text, and no piece is empty. The HTML
   of the pieces shows the same text and holds no markup from it. The JSON pieces of a value are its keys, its strings,
   its numbers and its literals, in their order. In the Scala view of an entry, the name of the case is a type, each
@@ -397,6 +406,11 @@ The inspector:
   view and its JSON view, and an exchange in its Request view and in the lines of its reply.
 - **L19. The layout of the JSON view.** The layout gives the same value, and no line of it is blank. An empty object
   is `{}` and an empty array is `[]`, also inside a value.
+- **L20. The code view.** Read back, the code view of the lines of any text gives the lines again, each with its
+  first spaces, and the lines of the layout of a value give the layout. The numbers go from 1 in order, and the view
+  holds no markup from the text. Each line has the colors of JSON, under its indent. The Request and Reply views each
+  have a code view, a `Copy` button with a hidden copy of the exact text, and a `Download` link, and the bar of the
+  exchange has no raw link.
 
 ## 7. The tools outside dspy4s
 
