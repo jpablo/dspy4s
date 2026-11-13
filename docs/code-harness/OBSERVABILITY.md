@@ -299,6 +299,15 @@ the raw paths. Four buttons select its view. A row of the tree links to the page
 
 So `curl` and `jq` can read each item, and so can an agent.
 
+A browser shows each raw path, because the server sends it as text: `text/plain`, or `application/json` for the body
+of a request, each with `charset=utf-8`. The first version sent the two files as `application/x-ndjson`. A browser does
+not show that type, so it saved the file in Downloads with the name `http.jsonl.ndjson` (found on 2026-11-12).
+
+With `?download=1`, a raw path gives the same bytes with `Content-Disposition: attachment`, so a browser saves them as
+a file. The name is `{id}.journal.jsonl`, `{id}.http.jsonl`, `{xid}.request.json` or `{xid}.reply.txt`. An exchange id
+comes from a file, so the name keeps only ASCII letters, digits, `-`, `_` and `.`, and each other character becomes
+`_`. The bar of a session and of an exchange has a `Raw` group of links and a `Download` group of links.
+
 ## 6. The laws
 
 As in the other parts of the harness, each law is a property or a test, and each law must fail first.
@@ -354,6 +363,10 @@ The inspector:
   calls, the finish reason and the usage), and a plain reply too. The page has its four views, the exact body and the
   numbered lines of the reply. The diff is against the last earlier exchange of the predictor, or the one of
   `against`.
+- **L17. The raw paths in a browser.** Each raw path has a text type with `charset=utf-8` and no
+  `Content-Disposition`. With `download=1`, it gives the same body and the same type, with
+  `attachment; filename="..."` and the name of 5.5. An exchange id with other characters gives a name with `_` in
+  their place. The bar of a session and of an exchange links to each download.
 
 ## 7. The tools outside dspy4s
 
