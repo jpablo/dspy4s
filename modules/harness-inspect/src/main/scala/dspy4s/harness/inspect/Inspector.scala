@@ -45,8 +45,16 @@ object Inspector:
       Inspector(server, executor, bound)
     }.toEither.left.map(e => s"the inspector did not start on 127.0.0.1:$port: ${e.getMessage}")
 
-/** A reply of the inspector. A page gets the policy of its scripts with its nonce. */
-private[inspect] final case class Reply(status: Int, contentType: String, body: String, page: Boolean = false)
+/** A reply of the inspector. A page gets the policy of its scripts with its nonce. A reply with `download` gets the
+  * header that tells a browser to save it as a file with that name.
+  */
+private[inspect] final case class Reply(
+    status     : Int,
+    contentType: String,
+    body       : String,
+    page       : Boolean        = false,
+    download   : Option[String] = None
+)
 
 /** The routes of the inspector (5.1, 5.2 and 5.5).
   *
@@ -80,6 +88,7 @@ private[inspect] final class Routes(store: Store, port: Int):
       headers.set("X-Content-Type-Options", "nosniff")
       headers.set("Referrer-Policy", "no-referrer")
       if reply.status == 405 then headers.set("Allow", "GET")
+      reply.download.foreach(name => headers.set("Content-Disposition", s"""attachment; filename="$name""""))
       if reply.page then
         headers.set("X-Frame-Options", "DENY")
         headers.set(
@@ -102,7 +111,9 @@ private[inspect] final class Routes(store: Store, port: Int):
         case Nil                            => page(Right(Pages.sessions(store, nonce)))
         case "s" :: id :: Nil               => withSession(id)(s => page(Pages.session(store, s, nonce)))
         case "s" :: id :: "x" :: xid :: Nil => withSession(id) { s =>
-            ExchangePage.html(store, s, xid, query(uri).get("against"), nonce).fold(missing)(html => page(Right(html)))
+            val asked = query(uri)
+            ExchangePage.html(store, s, xid, asked.get("against"), asked.get("tab"), nonce)
+              .fold(missing)(html => page(Right(html)))
           }
         case "s" :: id :: "after" :: seq :: Nil => withSession(id) { s =>
             seq.toLongOption.fold(missing) { from =>
@@ -110,13 +121,21 @@ private[inspect] final class Routes(store: Store, port: Int):
               Pages.after(store, s, from, size).fold(failed, Reply(200, "text/html", _))
             }
           }
-        case "p" :: name :: Nil                            => if store.hasProbe(name) then page(Pages.probe(store, name, nonce)) else missing
-        case "raw" :: id :: "journal.jsonl" :: Nil         => withSession(id)(journal)
-        case "raw" :: id :: "http.jsonl" :: Nil            => withSession(id)(exchangeFile)
-        case "raw" :: id :: "x" :: xid :: "request" :: Nil =>
-          withSession(id)(s => exchange(s, xid).fold(missing)(x => Reply(200, "application/json", x.body)))
-        case "raw" :: id :: "x" :: xid :: "reply" :: Nil =>
-          withSession(id)(s => exchange(s, xid).fold(missing)(x => Reply(200, "text/plain", x.replied.mkString("\n"))))
+        case "p" :: name :: Nil                    => if store.hasProbe(name) then page(Pages.probe(store, name, nonce)) else missing
+        case "raw" :: id :: "journal.jsonl" :: Nil =>
+          withSession(id)(s => saved(uri, s"${s.value}.journal.jsonl", journal(s)))
+        case "raw" :: id :: "http.jsonl" :: Nil =>
+          withSession(id)(s => saved(uri, s"${s.value}.http.jsonl", exchangeFile(s)))
+        case "raw" :: id :: "x" :: xid :: "request" :: Nil => withSession(id) { s =>
+            exchange(s, xid).fold(missing)(x =>
+              saved(uri, s"${x.id}.request.json", Reply(200, "application/json", x.body))
+            )
+          }
+        case "raw" :: id :: "x" :: xid :: "reply" :: Nil => withSession(id) { s =>
+            exchange(s, xid).fold(missing) { x =>
+              saved(uri, s"${x.id}.reply.txt", Reply(200, "text/plain", x.replied.mkString("\n")))
+            }
+          }
         case _ => missing
 
   private val missing: Reply = Reply(404, "text/plain", "Not found.")
@@ -127,6 +146,15 @@ private[inspect] final class Routes(store: Store, port: Int):
 
   private def withSession(id: String)(run: SessionId => Reply): Reply =
     if SessionId.valid(id) && store.has(SessionId(id)) then run(SessionId(id)) else missing
+
+  /** `reply` with the name `name` to save it as, when the query of `uri` has `download=1` and the reply has data. A raw
+    * path has a text type, so a browser shows it, and this name lets it save the same bytes as a file (5.5). The name
+    * keeps only ASCII letters, digits, `-`, `_` and `.`, because an exchange id comes from a file.
+    */
+  private def saved(uri: URI, name: String, reply: Reply): Reply =
+    if reply.status == 200 && query(uri).get("download").contains("1") then
+      reply.copy(download = Some(name.map(c => if c.isLetterOrDigit && c < 128 || "-_.".contains(c) then c else '_')))
+    else reply
 
   private def exchange(session: SessionId, id: String): Option[Exchange] =
     store.exchanges(session)._1.find(_.id == id)
@@ -140,13 +168,13 @@ private[inspect] final class Routes(store: Store, port: Int):
           val entry = Json.parse(row.text).getOrElse(Json.String(row.text))
           Json.Object("seq" -> Json.Number(row.seq), "required" -> Json.Boolean(row.required), "entry" -> entry).print
         }
-        Reply(200, "application/x-ndjson", lines.map(_ + "\n").mkString)
+        Reply(200, "text/plain", lines.map(_ + "\n").mkString)
     )
 
   private def exchangeFile(session: SessionId): Reply =
     val path = ExchangeFile.pathOf(store.root, session)
-    if !Files.isRegularFile(path) then Reply(200, "application/x-ndjson", "")
-    else Reply(200, "application/x-ndjson", Files.readString(path, UTF_8))
+    if !Files.isRegularFile(path) then Reply(200, "text/plain", "")
+    else Reply(200, "text/plain", Files.readString(path, UTF_8))
 
   private def query(uri: URI): Map[String, String] =
     Option(uri.getRawQuery).toVector.flatMap(_.split('&')).flatMap { pair =>

@@ -237,7 +237,10 @@ token and a prompt of 20 to 80 KB.
   holds its `Acted`, its effects and its `Observed`, and the turn ends with its `TurnEnded`.
   - Each exchange shows after the last entry whose `seq` is not more than its `after`. Its row has the predictor,
     stream or plain, the status, the end (or `open`), the wait for the first line, the whole time, the bytes of the
-    request and of the reply, the tokens of the usage, and links to its raw request and reply.
+    request and of the reply, the tokens of the usage, and the links `request` and `reply`. The word `exchange` at
+    the start of the row links to the page of the exchange (5.4), and `request` and `reply` open that page on
+    their view. A first version linked `request` and `reply` to the raw paths, so a browser showed the exact text
+    with no layout (a bug of 2026-11-12). No row links to a raw path now.
   - The bar has the facts (the id, the folder, the status and the counts), a switch for the view of all the entries
     (card, Scala or JSON), the follow, the filters, and the raw paths. The filters of the kinds of entries and of the
     predictors are folded, so the bar stays short in a small window. Each entry also has its own switch.
@@ -251,16 +254,35 @@ token and a prompt of 20 to 80 KB.
 
 ### 5.3 The views of an entry
 
-- **Scala.** The decoded `Logged` value as Scala text with indents (`ScalaText`). The printer reads each value through
-  `Product` (`productPrefix`, `productElementNames` and `productIterator`). So it gives the names of the cases and of
-  the fields as the code has them.
+- **Scala.** The `Entry` of the decoded row as Scala text with indents (`ScalaText`). The printer reads each value
+  through `Product` (`productPrefix`, `productElementNames` and `productIterator`). So it gives the names of the cases
+  and of the fields as the code has them.
+  - The first version showed the whole `Logged`, so each view began with `Logged(seq = ..., meta = ...)`. The bar of
+    the row shows the `seq` and each field of the meta: the time, the source, a mark for `Taint.External`, and a note
+    for a row that is not required. So the view shows only the entry (2026-11-12).
+  - The bar first showed only the name of the case of the source. Now it also shows the session of
+    `Source.Child`, and the session and the call of `Source.Parent`, with a link to the page of the session.
   - A string is a Scala literal, and a string with a line end is a `"""` block. A `Long` has the suffix `L`, and a
     `Json` value prints as `Json(<its text>)`.
   - A value goes on one line when it fits in 100 characters and holds no block. A card uses the form on one line
     (`ScalaText.line`) for a short part, for example the scope.
   - A row that does not decode shows its error in this view.
-- **JSON.** The `entry` column as it is in the file, with an indent of 2. The printer of zio-blocks writes an empty
-  object on three lines. The view keeps that, because a change of the text could change a string in it.
+- **JSON.** The `entry` field of the row as it is in the file, with an indent of 2 (`JsonText.pretty`). The value
+  comes from the text of the file, not from a new encode of the decoded row. As for the Scala view, the bar shows the
+  `seq` and the meta, so the view leaves them out (2026-11-12). A row that does not decode shows its whole text, so
+  its meta stays in view, and a text that is not JSON stays as it is. The first version used
+  the printer of zio-blocks, which writes an empty object on three lines, with a blank line inside. `JsonText` puts
+  each field and each item on a line of its own, and writes `{}` and `[]`. Each key and each leaf keeps the text of the
+  printer of zio-blocks, so no string changes, and law L19 shows that the value stays the same.
+- **Colors.** The Scala view and the JSON view have colors (2026-11-12). The server cuts the text of each view into
+  pieces (`Highlight`), and it puts each piece with a color in a span with a class: `t-key` for a field or a key,
+  `t-str` for a string, `t-num` for a number, `t-lit` for `true`, `false` and `null`, and `t-type` for the name of a
+  case or of a collection. The marks and the plain text have no span, so a page stays small.
+  - The colors come from the tokens of the theme, so a dark screen gets its own colors.
+  - The pieces, joined, give the text again, for any text, and each piece goes through the HTML escape. So a text
+    that is not JSON or not Scala keeps each character, and a text of an entry cannot add markup.
+  - A row that does not decode shows its error with no colors.
+  - The code view of the Request and Reply views of an exchange (5.4) has the colors of JSON too.
 - **Card.** A formatted card for each case of `Entry`. It shows the reasoning folded, the text, the code of a cell,
   the output and the outcome. It also shows the time, the source, and a mark for `Taint.External`.
   - The server makes the HTML of the card with a `match` on `Entry`. With `-Werror`, a `match` that does not cover each
@@ -269,8 +291,13 @@ token and a prompt of 20 to 80 KB.
 
 ### 5.4 The views of an exchange
 
-The page `/s/{id}/x/{xid}` has a bar with the facts of the exchange, links to the exchange before and after it, and
-the raw paths. Four buttons select its view. A row of the tree links to the page.
+The page `/s/{id}/x/{xid}` has a bar with the facts of the exchange and links to the exchange before and after it.
+Four buttons select its view. A row of the tree links to the page.
+
+- `?tab=chat`, `request`, `reply` or `diff` opens the page on that view. With no tab, or with another name, the
+  page opens on the diff when `?against=` is given, else on the chat.
+- A button of a view puts its `tab` in the address, so a reload keeps the view. The links to the exchange before
+  and after it keep the view too, so a person can read each request in turn.
 
 - **Chat.** The options of the request (`model`, `temperature`, `max_tokens`, `stream_options` and the others), the
   tools (folded), and the messages with their roles. A system message is folded, because the instructions of the policy
@@ -278,9 +305,27 @@ the raw paths. Four buttons select its view. A row of the tree links to the page
   - `Chat.read` sends the request again through `OpenAiLanguageModel` on a transport that gives the recorded status,
     headers, and body or lines. So the view and the model read a reply on one path: the same parser of the stream, the
     same assembly of the chunks and of the tool calls, and the same usage. The view copies no parser.
-- **Request.** The URL, the masked headers, the size, and the body with indents. A button copies the exact body.
-- **Reply.** The status, the end, the error and the headers, then the raw lines of a stream with their numbers, or the
-  body of a plain reply with indents. A button copies the exact reply.
+- **Request.** The URL, the masked headers, the size, and the code view of the body with indents.
+- **Reply.** The status, the end, the error and the headers, then the code view of the body of a plain reply with
+  indents. A stream has a toggle of two views (2026-11-12):
+  - **Response**, which shows first: the reply put together from the chunks (`StreamJson.merge`), in the form that
+    the endpoint gives with no stream. The top fields come from the first chunk, `object` is `chat.completion`,
+    and `usage` comes from the last chunk that has it. The deltas of each choice become its `message`: the parts of
+    `content`, `reasoning`, `reasoning_content` and `refusal` join, `role` comes from the first delta, and the parts
+    of the tool calls join by their `index`, with the parts of `function.arguments` joined. `finish_reason` comes
+    from the last chunk that has it, and the items of `logprobs` join.
+  - **Stream**: each raw line of the stream, as before.
+  - The merge reads the JSON of the chunks and not the reading of the model (`Chat.read`), so it keeps each field
+    that the endpoint sent, also a field that the model does not read. Law L21 checks that the two agree. The Copy
+    button copies the view that shows, and the Download link saves the exact stream.
+- **The code view** of the Request and Reply views is as an editor shows a JSON file (2026-11-12). Each line has its
+  number and the colors of JSON. The rest of a line after its first spaces goes in a block with that indent, so a
+  long line, for example the system message, wraps under its own indent and not at the left edge. The first version
+  showed the body in one block of text, and a long string made a wall of text.
+  - Each of the two views has a `Copy` button, which copies the exact text from a hidden copy, and a `Download` link
+    (5.5). So the bar has no raw links. A first version had them, and a raw path in a browser shows the exact text
+    with no layout.
+  - A JSON string has no line end, so each line gets its colors alone, also a `data:` line of a stream.
 - **Diff.** The text of this request against the text of the last earlier exchange of the same predictor in the same
   session, or of the exchange that `?against={xid}` names. A list selects another exchange. The text of a request has
   a line with the role of each message, then the lines of its content and of its tool calls.
@@ -298,6 +343,16 @@ the raw paths. Four buttons select its view. A row of the tree links to the page
   lines of the reply.
 
 So `curl` and `jq` can read each item, and so can an agent.
+
+A browser shows each raw path, because the server sends it as text: `text/plain`, or `application/json` for the body
+of a request, each with `charset=utf-8`. The first version sent the two files as `application/x-ndjson`. A browser does
+not show that type, so it saved the file in Downloads with the name `http.jsonl.ndjson` (found on 2026-11-12).
+
+With `?download=1`, a raw path gives the same bytes with `Content-Disposition: attachment`, so a browser saves them as
+a file. The name is `{id}.journal.jsonl`, `{id}.http.jsonl`, `{xid}.request.json` or `{xid}.reply.txt`. An exchange id
+comes from a file, so the name keeps only ASCII letters, digits, `-`, `_` and `.`, and each other character becomes
+`_`. The bar of a session has a `Raw` group of links and a `Download` group of links, and the Request and Reply
+views of an exchange each have a `Download` link (5.4).
 
 ## 6. The laws
 
@@ -336,9 +391,12 @@ The inspector:
 - **L11. The host check.** A request with another `Host` header gets the status 403 and no data, and a method that is
   not `GET` gets 405. A page has the policy of its scripts with the nonce of its script, and no reply has a CORS
   header.
-- **L12. The JSON view.** Its text decodes to the same `Logged` as the row.
+- **L12. The JSON view.** Its text is the `entry` field of the text of the row, and it decodes to the same `Entry` as
+  the row. A row that does not decode shows its whole text.
 - **L13. The Scala view.** A generator covers each case of `Entry`. For each value, the text has the name of the case
-  and the name of each field.
+  and the name of each field. The Scala view of a row is the text of its entry, and the bar of the row shows its
+  `seq`, its time, its source with the fields of the source, the mark of `Taint.External` only for that taint, and
+  the note only for a row that is not required.
 - **L14. The escape.** For any text in an entry, the card and the row hold no markup from that text. The escape gives
   an entity for each of the five marks of HTML.
 - **L15. Follow.** `after/{seq}` gives the rows with a greater `seq`, all of them, in their order, and the status of
@@ -354,6 +412,33 @@ The inspector:
   calls, the finish reason and the usage), and a plain reply too. The page has its four views, the exact body and the
   numbered lines of the reply. The diff is against the last earlier exchange of the predictor, or the one of
   `against`.
+- **L17. The raw paths in a browser.** Each raw path has a text type with `charset=utf-8` and no
+  `Content-Disposition`. With `download=1`, it gives the same body and the same type, with
+  `attachment; filename="..."` and the name of 5.5. An exchange id with other characters gives a name with `_` in
+  their place. The bar of a session links to each of its downloads, and the Request and Reply views of an exchange
+  each link to their download.
+- **L18. The colors.** For any text, the pieces of each lexer, joined, give the text, and no piece is empty. The HTML
+  of the pieces shows the same text and holds no markup from it. The JSON pieces of a value are its keys, its strings,
+  its numbers and its literals, in their order. In the Scala view of an entry, the name of the case is a type, each
+  field is a key, and each string, number and `Boolean` of a field is one piece. A row has the colors in its Scala
+  view and its JSON view, and an exchange in its Request view and in the lines of its reply.
+- **L19. The layout of the JSON view.** The layout gives the same value, and no line of it is blank. An empty object
+  is `{}` and an empty array is `[]`, also inside a value.
+- **L20. The code view.** Read back, the code view of the lines of any text gives the lines again, each with its
+  first spaces, and the lines of the layout of a value give the layout. The numbers go from 1 in order, and the view
+  holds no markup from the text. Each line has the colors of JSON, under its indent. The Request and Reply views each
+  have a code view, a `Copy` button with a hidden copy of the exact text, and a `Download` link, and the bar of the
+  exchange has no raw link.
+- **L21. The merged reply of a stream.** A completion cut into the chunks of a stream at random places and merged
+  gives the completion again: the joined text, reasoning, tool calls and `logprobs`, the last finish reason, and the
+  final usage, also when each chunk has a usage. Lines that are not data chunks change nothing, and a stream with no
+  chunk gives no reply. A role that each delta repeats comes once. For the same streams, the merged reply agrees
+  with the reading of the model: the text, the reasoning, the ids and names of the tool calls, the finish reason and
+  the usage. The Reply view of a stream opens on the merged reply, with its toggle, and a plain reply has no toggle.
+- **The links to the views.** The `request` and `reply` links of a row open the page of the exchange with
+  `?tab=request` and `?tab=reply`, and no row links to a raw path. `?tab=` opens the page on that view, an unknown
+  tab opens the chat, and `?against=` with no tab opens the diff. The links to the exchange before and after keep
+  the view.
 
 ## 7. The tools outside dspy4s
 

@@ -71,17 +71,19 @@ object Exchanges:
       val requests = lines.filter(text(_, "kind").contains("request"))
       (requests.zipWithIndex.map((r, i) => Exchange(i, r, text(r, "id").flatMap(replies.get))), size)
 
-  /** The row of an exchange in the tree of a session, after the entry of its `after`. */
+  /** The row of an exchange in the tree of a session, after the entry of its `after`. The `request` and `reply` links
+    * open the page of the exchange on that view. A raw path shows the exact text with no layout, so no row links to it.
+    */
   def html(session: SessionId, x: Exchange): String =
     val predictor = x.predictor.getOrElse("none")
     val parts     = facts(x)
-    val base      = s"/raw/${session.value}/x/${escape(x.id)}"
-    val links     = s"""<a href="$base/request">request</a><a href="$base/reply">reply</a>"""
+    val base      = s"/s/${session.value}/x/${escape(x.id)}"
+    val links     = s"""<a href="$base?tab=request">request</a><a href="$base?tab=reply">reply</a>"""
     s"""<section class="row exchange pred-${escape(predictor)} depth-2${if x.open then " open" else ""}" id="x${escape(
         x.id
       )}" """ +
       s"""data-after="${x.after}"><div class="meta">""" +
-      s"""<a class="kind" href="/s/${session.value}/x/${escape(x.id)}">exchange</a>""" +
+      s"""<a class="kind" href="$base">exchange</a>""" +
       s"""<span class="pred">${escape(predictor)}</span>""" +
       parts.map(p => s"<span>${escape(p)}</span>").mkString + links + "</div></section>"
 

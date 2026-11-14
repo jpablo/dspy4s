@@ -1,7 +1,7 @@
 package dspy4s.harness.inspect
 
 import dspy4s.harness.kernel.SessionId
-import zio.blocks.schema.json.{Json, WriterConfig}
+import zio.blocks.schema.json.Json
 
 import java.nio.charset.StandardCharsets.UTF_8
 
@@ -12,70 +12,101 @@ import Html.escape
   */
 object ExchangePage:
 
+  /** The views of the page: the key of each tab and its name on the button. */
+  private val Tabs: Vector[(String, String)] =
+    Vector("chat" -> "Chat", "request" -> "Request", "reply" -> "Reply", "diff" -> "Diff")
+
   /** The page of the exchange `id` of `session`, or none for an id that the exchange file does not have. The diff is
-    * against the exchange `against`, else against the last earlier exchange of the same predictor.
+    * against the exchange `against`, else against the last earlier exchange of the same predictor. The page opens on
+    * the view `tab` when it is the key of a tab. Else it opens on the diff when `against` is given, and on the chat
+    * when it is not.
     */
-  def html(store: Store, session: SessionId, id: String, against: Option[String], nonce: String): Option[String] =
+  def html(
+      store  : Store,
+      session: SessionId,
+      id     : String,
+      against: Option[String],
+      tab    : Option[String],
+      nonce  : String
+  ): Option[String] =
     val (exchanges, _) = store.exchanges(session)
     exchanges.find(_.id == id).map { x =>
       val target = against.flatMap(a => exchanges.find(e => e.id == a && e.id != x.id))
         .orElse(exchanges.filter(e => e.index < x.index && e.predictor == x.predictor).lastOption)
-      val tab   = if against.isDefined then "diff" else "chat"
-      val title = store.row(session).map(_.firstMessage).filter(_.nonEmpty).getOrElse(session.value)
-      val bar   = header(session, x, exchanges, title, tab)
-      val views = s"""<section class="x-view x-chat">${Chat.html(x)}</section>""" +
-        s"""<section class="x-view x-request">${request(x)}</section>""" +
-        s"""<section class="x-view x-reply">${reply(x)}</section>""" +
+      val opened = tab.filter(t => Tabs.exists(_._1 == t)).getOrElse(if against.isDefined then "diff" else "chat")
+      val title  = store.row(session).map(_.firstMessage).filter(_.nonEmpty).getOrElse(session.value)
+      val bar    = header(session, x, exchanges, title, opened)
+      val views  = s"""<section class="x-view x-chat">${Chat.html(x)}</section>""" +
+        s"""<section class="x-view x-request">${request(session, x)}</section>""" +
+        s"""<section class="x-view x-reply">${reply(session, x)}</section>""" +
         s"""<section class="x-view x-diff">${diff(x, target, exchanges)}</section>"""
       Html.page(
         s"Exchange ${x.index + 1} of ${session.value.take(8)}",
         nonce,
         bar + s"<main>$views</main>",
-        s"tab-$tab"
+        s"tab-$opened"
       )
     }
 
   private def header(session: SessionId, x: Exchange, all: Vector[Exchange], title: String, tab: String): String =
     val back = s"/s/${session.value}#x${escape(x.id)}"
+    // A link to the exchange before or after keeps the view, and the script changes its `tab` with each button.
     val near = (Vector(x.index - 1 -> "earlier", x.index + 1 -> "later")).flatMap { (i, name) =>
-      all.lift(i).map(e => s"""<a href="/s/${session.value}/x/${escape(e.id)}">$name</a>""")
+      all.lift(i).map(e => s"""<a href="/s/${session.value}/x/${escape(e.id)}?tab=$tab" data-tabbed>$name</a>""")
     }
     val facts = Exchanges.facts(x).map(escape).mkString(" · ")
-    val tabs  = Vector("chat" -> "Chat", "request" -> "Request", "reply" -> "Reply", "diff" -> "Diff").map {
-      (key, name) =>
-        s"""<button data-tab="$key"${if key == tab then " class=\"on\"" else ""}>$name</button>"""
+    val tabs  = Tabs.map { (key, name) =>
+      s"""<button data-tab="$key"${if key == tab then " class=\"on\"" else ""}>$name</button>"""
     }.mkString("""<span class="group">""", "", "</span>")
-    val raw = s"/raw/${session.value}/x/${escape(x.id)}"
     s"""<header class="bar"><div class="facts"><a href="/">Sessions</a> / <a href="$back">${escape(
         title
       )}</a></div>""" +
       s"""<h1>Exchange ${x.index + 1} of ${all.size} · ${escape(x.predictor.getOrElse("none"))}</h1>""" +
       s"""<div class="facts">$facts · after #${x.after}</div><div class="controls">$tabs""" +
       s"""<span class="group">${near.mkString(" ")}</span>""" +
-      s"""<span class="group">Raw: <a href="$raw/request">request</a> <a href="$raw/reply">reply</a></span>""" +
       "</div></header>"
 
-  /** The URL, the headers, the body with indents, and the exact body for the copy button. */
-  private def request(x: Exchange): String =
+  /** The URL, the headers, the code view of the body with indents, and the buttons that copy and save the exact body.
+    */
+  private def request(session: SessionId, x: Exchange): String =
     val headers = x.requestHeaders.map((k, v) => s"<dt>${escape(k)}</dt><dd>${escape(v)}</dd>").mkString
     s"<dl><dt>URL</dt><dd>${escape(x.url)}</dd>$headers<dt>body</dt><dd>${x.body.getBytes(UTF_8).length} bytes</dd></dl>" +
-      """<p><button data-copy="request-exact">Copy the exact body</button></p>""" +
-      s"<pre>${escape(pretty(x.body))}</pre>" +
+      tools(session, x, "request", "request-exact", "") + Highlight.code(pretty(x.body).linesIterator.toVector) +
       s"""<pre id="request-exact" hidden>${escape(x.body)}</pre>"""
 
-  /** The status, the headers and the reply with the number of each line, and the exact reply for the copy button. */
-  private def reply(x: Exchange): String =
+  /** The status, the headers, the code view of the reply, and the buttons that copy and save it. A plain reply shows
+    * its body with indents. A stream has a toggle of two views: the reply put together from its chunks
+    * (`StreamJson.merge`), which the page shows first, and each line of the stream. The Copy button copies the view
+    * that shows, and the Download link saves the exact reply.
+    */
+  private def reply(session: SessionId, x: Exchange): String =
     if x.open then """<p class="note">The exchange has no reply yet.</p>"""
     else
-      val lines   = if x.stream then x.replied else pretty(x.replied.mkString("\n")).linesIterator.toVector
-      val numbers = lines.zipWithIndex.map((line, i) => s"""<span class="n">${i + 1}</span>${escape(line)}""")
-      val facts   =
+      val facts =
         Vector(x.status.map(s => "status" -> s.toString), x.end.map(e => "end" -> e), x.error.map(e => "error" -> e))
           .flatten ++ x.replyHeaders.toVector.sortBy(_._1)
-      facts.map((k, v) => s"<dt>${escape(k)}</dt><dd>${escape(v)}</dd>").mkString("<dl>", "", "</dl>") +
-        """<p><button data-copy="reply-exact">Copy the exact reply</button></p>""" +
-        numbers.mkString("""<pre class="numbered">""", "\n", "</pre>") +
-        s"""<pre id="reply-exact" hidden>${escape(x.replied.mkString("\n"))}</pre>"""
+      val exact  = s"""<pre id="reply-exact" hidden>${escape(x.replied.mkString("\n"))}</pre>"""
+      val merged = if x.stream then StreamJson.merge(x.replied).map(JsonText.pretty) else None
+      val views  = merged match
+        case Some(laid) =>
+          val toggle = """<span class="group"><button data-reply="response" class="on">Response</button>""" +
+            """<button data-reply="stream">Stream</button></span>"""
+          tools(session, x, "reply", "reply-merged", toggle) + """<div class="replies show-response">""" +
+            s"""<div class="r-view r-response">${Highlight.code(laid.linesIterator.toVector)}</div>""" +
+            s"""<div class="r-view r-stream">${Highlight.code(x.replied)}</div></div>""" +
+            exact + s"""<pre id="reply-merged" hidden>${escape(laid)}</pre>"""
+        case None =>
+          val lines = if x.stream then x.replied else pretty(x.replied.mkString("\n")).linesIterator.toVector
+          tools(session, x, "reply", "reply-exact", "") + Highlight.code(lines) + exact
+      facts.map((k, v) => s"<dt>${escape(k)}</dt><dd>${escape(v)}</dd>").mkString("<dl>", "", "</dl>") + views
+
+  /** The row of buttons of a view: `before` (for example a toggle), the button that copies the hidden copy `copied`,
+    * and the link that saves the exact `item` (`request` or `reply`) of `x` as a file (5.5).
+    */
+  private def tools(session: SessionId, x: Exchange, item: String, copied: String, before: String): String =
+    val saved = s"/raw/${session.value}/x/${escape(x.id)}/$item?download=1"
+    s"""<p class="tools">$before<button data-copy="$copied">Copy</button> """ +
+      s"""<a class="button" href="$saved">Download</a></p>"""
 
   /** The diff of the text of the request of `target` and of `x` (`Chat.requestLines`), in parts with three lines around
     * each change, and a choice of the exchange to compare with.
@@ -109,5 +140,4 @@ object ExchangePage:
       s"""<pre class="diff">${lines.mkString}</pre></div>"""
 
   /** `text` with indents when it is JSON, else as it is. */
-  private def pretty(text: String): String =
-    Json.parse(text).fold(_ => text, _.print(WriterConfig.withIndentionStep(2)))
+  private def pretty(text: String): String = Json.parse(text).fold(_ => text, JsonText.pretty)

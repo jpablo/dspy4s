@@ -43,6 +43,13 @@ object Html:
   /** The day and the minute of `millis` on the clock of this machine. */
   def date(millis: Long): String = day.format(Instant.ofEpochMilli(millis))
 
+  /** The links of the raw paths `items` under `base` (5.5): one group that a browser shows as text, and one group with
+    * `download=1` that a browser saves as files. `base` must be escaped.
+    */
+  def rawLinks(base: String, items: Vector[String]): String =
+    def links(query: String) = items.map(item => s"""<a href="$base/$item$query">${escape(item)}</a>""").mkString(" ")
+    s"""<span class="group">Raw: ${links("")}</span><span class="group">Download: ${links("?download=1")}</span>"""
+
   /** A page with `title`, `body` and the class `bodyClass` of its body, the style and the script. The script has
     * `nonce`, so the policy of the page lets it run, and a script that a text could make does not run.
     */
@@ -105,7 +112,18 @@ body.tab-chat .x-chat,body.tab-request .x-request,body.tab-reply .x-reply,body.t
 .msg .text{white-space:pre-wrap;overflow-wrap:anywhere}
 .role-user{border-left:3px solid var(--good)}.role-assistant{border-left:3px solid var(--policy)}
 .role-tool{border-left:3px solid var(--leaf)}
-pre.numbered .n{display:inline-block;min-width:3.5em;color:var(--muted);user-select:none}
+.code{font:12.5px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;margin:4px 0;padding:8px 10px 8px 0;
+background:var(--code);border-radius:6px}
+.code .ln{display:grid;grid-template-columns:4.5em 1fr}
+.code .n{color:var(--muted);text-align:right;padding-right:1.2em;user-select:none}
+.code .c{white-space:pre-wrap;overflow-wrap:anywhere;padding-left:calc(var(--i) * 1ch + 4ch);text-indent:-4ch}
+.tools{display:flex;gap:6px;justify-content:flex-end;margin:6px 0 2px}
+.tools .group{display:flex;gap:4px;margin-right:auto}
+.replies.show-response .r-stream,.replies.show-stream .r-response{display:none}
+a.button{font-size:12px;border:1px solid var(--line);background:var(--card);color:var(--fg);border-radius:5px;
+padding:1px 8px;text-decoration:none}
+.t-key{color:var(--leaf)}.t-str{color:var(--good)}.t-num{color:var(--warn)}.t-lit{color:var(--memory)}
+.t-type{color:var(--accent)}
 .hunk{margin:8px 0}.hunk-head{color:var(--muted);font:12px ui-monospace,Menlo,monospace}
 pre.diff{padding:4px 0}
 .d{display:block;padding:0 10px}
@@ -125,6 +143,7 @@ pre.diff{padding:4px 0}
 .kind-Input{border-left:3px solid var(--good)}
 .kind-StopRequested,.kind-JobsStopRequested{border-left:3px solid var(--warn)}
 .exchange{background:var(--x)}
+.exchange .meta a.kind{color:var(--accent);text-decoration:underline;text-underline-offset:2px}
 .exchange.pred-policy{border-left:3px solid var(--policy)}
 .exchange.pred-compress,.exchange.pred-merge{border-left:3px solid var(--memory)}
 .exchange.pred-subQuery{border-left:3px solid var(--leaf)}
@@ -153,12 +172,32 @@ document.querySelectorAll('button[data-tab]').forEach(b => b.addEventListener('c
   body.classList.remove('tab-chat', 'tab-request', 'tab-reply', 'tab-diff');
   body.classList.add('tab-' + b.dataset.tab);
   document.querySelectorAll('button[data-tab]').forEach(x => x.classList.toggle('on', x === b));
+  const url = new URL(location.href);
+  url.searchParams.set('tab', b.dataset.tab);
+  history.replaceState(null, '', url);
+  document.querySelectorAll('a[data-tabbed]').forEach(a => {
+    const to = new URL(a.href);
+    to.searchParams.set('tab', b.dataset.tab);
+    a.href = to.pathname + to.search;
+  });
+}));
+document.querySelectorAll('button[data-reply]').forEach(b => b.addEventListener('click', () => {
+  const box = document.querySelector('.replies');
+  if (!box) return;
+  box.classList.remove('show-response', 'show-stream');
+  box.classList.add('show-' + b.dataset.reply);
+  document.querySelectorAll('button[data-reply]').forEach(x => x.classList.toggle('on', x === b));
+  const copy = b.closest('.tools').querySelector('button[data-copy]');
+  if (copy) copy.dataset.copy = b.dataset.reply === 'stream' ? 'reply-exact' : 'reply-merged';
 }));
 document.querySelectorAll('button[data-copy]').forEach(b => b.addEventListener('click', async () => {
   const source = document.getElementById(b.dataset.copy);
   if (!source) return;
+  const label = b.dataset.label || b.textContent;
+  b.dataset.label = label;
   try { await navigator.clipboard.writeText(source.textContent); b.textContent = 'Copied'; }
   catch (e) { b.textContent = 'The copy failed'; }
+  setTimeout(() => { b.textContent = label; }, 1500);
 }));
 const against = document.getElementById('against');
 if (against) against.addEventListener('change', () => {

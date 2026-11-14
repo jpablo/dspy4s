@@ -19,7 +19,7 @@ import java.net.http.{HttpClient, HttpRequest}
 import java.net.{Socket, URI}
 import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.attribute.PosixFilePermissions
-import java.nio.file.{Files, Path}
+import java.nio.file.{Files, Path, StandardOpenOption}
 import scala.compiletime.constValueTuple
 import scala.deriving.Mirror
 import scala.jdk.CollectionConverters.*
@@ -69,6 +69,8 @@ class InspectorLaws extends ScalaCheckSuite:
           s"/raw/${session.value}/http.jsonl",
           s"/raw/${session.value}/x/$xid/request",
           s"/raw/${session.value}/x/$xid/reply",
+          s"/raw/${session.value}/http.jsonl?download=1",
+          s"/raw/${session.value}/x/$xid/reply?download=1",
           s"/p/${HarnessProbe.nameOf(probe(session))}",
           "/s/fake-no-session",
           "/raw/..%2F..%2Fetc/journal.jsonl",
@@ -145,17 +147,29 @@ class InspectorLaws extends ScalaCheckSuite:
 
   // ── L12 to L14: the views of an entry ──
 
-  property("Inspect L12: the JSON view of a row decodes to the same Logged as the row") {
+  property("Inspect L12: the JSON view of a row is the entry of the file, and it decodes to the same entry") {
     forAllNoShrink(Gen.listOfN(12, entry(text))) { entries =>
       withRoot { root =>
         val session = SessionId("fake-session-1")
         journal(root, session, entries.toVector): Unit
         rowsOf(root, session).foreach { row =>
-          assertEquals(LoggedCodec.decode(EntryViews.json(row)).toOption, row.logged.toOption)
+          val shown = EntryViews.json(row)
+          assertEquals(EntryCodec.decode(shown).toOption, row.logged.toOption.map(_.entry))
+          val stored = Json.parse(row.text).toOption.flatMap(_.fields.collectFirst { case ("entry", v) => v.print })
+          assertEquals(Json.parse(shown).toOption.map(_.print), stored)
           assert(row.logged.isRight, row.toString)
         }
       }
     }
+  }
+
+  test("Inspect L12: the JSON view of a row that does not decode is its whole text, with its meta") {
+    val unknown = """{"seq":3,"meta":{"atMillis":1},"entry":{"FakeFutureCase":{}}}"""
+    val known   = SessionFile.Row(3L, true, unknown, Left("fake decode error"))
+    assertEquals(EntryViews.json(known), JsonText.pretty(Json.parse(unknown).fold(e => fail(e.toString), identity)))
+    val broken = SessionFile.Row(4L, true, """{"seq":4,"entry":""", Left("fake decode error"))
+    assertEquals(EntryViews.json(broken), broken.text)
+    assert(EntryViews.html(broken).contains(Html.escape(broken.text)))
   }
 
   property("Inspect L13: the Scala view names the case of each entry and each of its fields") {
@@ -163,6 +177,38 @@ class InspectorLaws extends ScalaCheckSuite:
       val shown = ScalaText.of(value)
       assert(shown.contains(value.productPrefix), shown)
       value.productElementNames.foreach(name => assert(shown.contains(s"$name = "), s"$name is not in $shown"))
+    }
+  }
+
+  property("Inspect L13: the Scala view of a row is its entry, and the bar of the row shows its seq and its meta") {
+    val sources = Gen.oneOf(
+      Gen.oneOf(Source.User, Source.Controller, Source.Harness, Source.Policy),
+      Gen.const(Source.Child(SessionId("fake-child-1"))),
+      Gen.const(Source.Parent(SessionId("fake-parent-1"), EffectId(4L, 2)))
+    )
+    val metas =
+      for
+        at       <- Gen.choose(Start, Start + 86_400_000L)
+        source   <- sources
+        taint    <- Gen.oneOf(Taint.Trusted, Taint.External)
+        required <- Gen.oneOf(true, false)
+      yield Meta(at, source, taint, required)
+    forAllNoShrink(entry(text), metas, Gen.choose(0L, 9999L)) { (value, meta, seq) =>
+      val logged = Logged(seq, meta, value)
+      val row    = SessionFile.Row(seq, meta.required, LoggedCodec.encodeToString(logged), Right(logged))
+      assertEquals(EntryViews.scala(row), ScalaText.of(value))
+      val bar = """(?s)<div class="meta">(.*?)</div>""".r.findFirstMatchIn(EntryViews.html(row)).map(_.group(1))
+        .getOrElse(fail("the row has no bar"))
+      assert(bar.contains(s"#$seq<"), bar)
+      assert(bar.contains(Html.time(meta.atMillis)), bar)
+      assert(bar.contains(s">${meta.source.productPrefix}"), bar)
+      meta.source match
+        case Source.Child(session)          => assert(bar.contains(session.value), bar)
+        case Source.Parent(session, effect) =>
+          assert(bar.contains(session.value) && bar.contains(s"call ${effect.cell}.${effect.n}"), bar)
+        case _ => ()
+      assertEquals(bar.contains(">external<"), meta.taint == Taint.External, bar)
+      assertEquals(bar.contains("not required"), !meta.required, bar)
     }
   }
 
@@ -309,6 +355,51 @@ class InspectorLaws extends ScalaCheckSuite:
     }
   }
 
+  test("Inspect L17: a browser shows each raw path as text, and download=1 saves it with the name of the item") {
+    withRoot { root =>
+      val (session, xid) = fixture(root)
+      serving(root) { inspector =>
+        val raw   = s"/raw/${session.value}"
+        val items = Vector(
+          s"$raw/journal.jsonl"  -> ("text/plain", s"${session.value}.journal.jsonl"),
+          s"$raw/http.jsonl"     -> ("text/plain", s"${session.value}.http.jsonl"),
+          s"$raw/x/$xid/request" -> ("application/json", s"$xid.request.json"),
+          s"$raw/x/$xid/reply"   -> ("text/plain", s"$xid.reply.txt")
+        )
+        items.foreach { case (path, (kind, name)) =>
+          val shown = send(inspector, path)
+          assertEquals(shown.statusCode(), 200, path)
+          assertEquals(shown.headers().firstValue("Content-Type").orElse(""), s"$kind; charset=utf-8", path)
+          assert(shown.headers().firstValue("Content-Disposition").isEmpty, path)
+          val saved = send(inspector, s"$path?download=1")
+          assertEquals(saved.body(), shown.body(), path)
+          assertEquals(saved.headers().firstValue("Content-Type").orElse(""), s"$kind; charset=utf-8", path)
+          assertEquals(
+            saved.headers().firstValue("Content-Disposition").orElse(""),
+            s"""attachment; filename="$name"""",
+            path
+          )
+        }
+        val (_, page) = get(inspector, s"/s/${session.value}")
+        assert(page.contains(s"""href="$raw/journal.jsonl?download=1""""), page)
+        assert(page.contains(s"""href="$raw/http.jsonl?download=1""""), page)
+        val (_, exchange) = get(inspector, s"/s/${session.value}/x/$xid")
+        assert(exchange.contains(s"""href="$raw/x/$xid/request?download=1""""), exchange)
+        assert(exchange.contains(s"""href="$raw/x/$xid/reply?download=1""""), exchange)
+        // An exchange id comes from the file, so the name keeps only safe characters.
+        val file  = ExchangeFile.pathOf(root, session)
+        val first = Files.readAllLines(file, UTF_8).asScala.head
+        Files.writeString(file, first.replace(xid, "fake;id%41") + "\n", UTF_8, StandardOpenOption.APPEND): Unit
+        val odd = send(inspector, s"$raw/x/fake;id%41/request?download=1")
+        assertEquals(odd.statusCode(), 200)
+        assertEquals(
+          odd.headers().firstValue("Content-Disposition").orElse(""),
+          """attachment; filename="fake_id_41.request.json""""
+        )
+      }
+    }
+  }
+
   test("Inspect: the page of a probe shows its journal") {
     withRoot { root =>
       val (session, _) = fixture(root)
@@ -332,6 +423,8 @@ object InspectorLaws:
   val Markup = """<i data-m="1">'&"""
 
   val LoggedCodec = summon[Schema[Logged]].jsonCodec
+
+  val EntryCodec = summon[Schema[Entry]].jsonCodec
 
   inline def caseNames[T](using m: Mirror.SumOf[T]): List[String] =
     constValueTuple[m.MirroredElemLabels].toList.map(_.toString)

@@ -134,6 +134,55 @@ class ExchangePageLaws extends ScalaCheckSuite:
         assert(page.contains(Html.escape(chatBody("POLICY", "U1"))), page)
         assert(page.contains("""<span class="n">1</span>"""), page)
         assert(page.contains("Hello"), page)
+        // The request view and the lines of the reply have the colors of JSON (5.3).
+        val request =
+          """(?s)<section class="x-view x-request">(.*?)</section>""".r.findFirstMatchIn(page).map(_.group(1))
+        assert(request.exists(_.contains("""<span class="t-key">&quot;model&quot;</span>""")), request)
+        // The request view is a code view of the layout of JsonText: each field on a line of its own, with an indent.
+        assert(
+          request.exists(
+            _.contains("""<span class="c" style="--i:2"><span class="t-key">&quot;model&quot;</span>: """)
+          ),
+          request
+        )
+        val reply = """(?s)<section class="x-view x-reply">(.*?)</section>""".r.findFirstMatchIn(page).map(_.group(1))
+        assert(reply.exists(_.contains("""<span class="t-key">&quot;choices&quot;</span>""")), reply)
+        // Each of the two views has a code view, a button that copies the text that it shows, a hidden copy of the exact
+        // text, and a link to its download. The reply of a stream opens on its merged reply, so its button copies that.
+        val raw = s"/raw/${session.value}/x/x1"
+        Vector(
+          request -> ("request", "request-exact", "request-exact"),
+          reply   -> ("reply", "reply-merged", "reply-exact")
+        )
+          .foreach { case (view, (item, copied, exact)) =>
+            assert(view.exists(_.contains("""<div class="code">""")), view)
+            assert(view.exists(_.contains(s"""<button data-copy="$copied">Copy</button>""")), view)
+            assert(view.exists(_.contains(s"""href="$raw/$item?download=1"""")), view)
+            assert(view.exists(_.contains(s"""<pre id="$exact" hidden>""")), view)
+          }
+        // The reply of a stream has a toggle of its merged reply and of its stream, and the merged reply joins the text.
+        assert(reply.exists(_.contains("""<button data-reply="response" class="on">Response</button>""")), reply)
+        assert(reply.exists(_.contains("""<button data-reply="stream">Stream</button>""")), reply)
+        assert(reply.exists(_.contains("""<div class="replies show-response">""")), reply)
+        assert(
+          reply.exists(_.contains(
+            """<span class="t-key">&quot;content&quot;</span>: <span class="t-str">&quot;Hello&quot;</span>"""
+          )),
+          reply
+        )
+        assert(reply.exists(_.contains("""<pre id="reply-merged" hidden>""")), reply)
+        // A plain reply is already the reply with no stream, so it has no toggle.
+        val (_, second) = get(inspector, s"/s/${session.value}/x/x2")
+        val plain       = """(?s)<section class="x-view x-reply">(.*?)</section>""".r.findFirstMatchIn(second).map(_.group(1))
+        assert(
+          plain.exists(p =>
+            !p.contains("data-reply") && p.contains("""<button data-copy="reply-exact">Copy</button>""")
+          ),
+          plain
+        )
+        // The bar has no raw links, because the buttons of the views copy and save the exact texts.
+        val bar = """(?s)<header class="bar">(.*?)</header>""".r.findFirstMatchIn(page).map(_.group(1))
+        assert(bar.exists(b => !b.contains("Raw:") && !b.contains("/raw/")), bar)
         assertEquals(get(inspector, s"/s/${session.value}/x/fake-none")._1, 404)
       }
     }
@@ -164,6 +213,39 @@ class ExchangePageLaws extends ScalaCheckSuite:
       serving(root) { inspector =>
         val (_, page) = get(inspector, s"/s/${session.value}")
         assert(page.contains(s"""href="/s/${session.value}/x/x1""""), page)
+        // The request and reply links of a row open the views of the page, and no row links to a raw path: a raw path
+        // in a browser shows the exact text with no layout (bug of 2026-11-12).
+        val exchange = s"/s/${session.value}/x/x1"
+        assert(page.contains(s"""href="$exchange?tab=request">request</a>"""), page)
+        assert(page.contains(s"""href="$exchange?tab=reply">reply</a>"""), page)
+        val rows = """(?s)<section class="row exchange.*?</section>""".r.findAllIn(page).toVector
+        assert(rows.nonEmpty && rows.forall(!_.contains("/raw/")), rows)
+      }
+    }
+  }
+
+  test("Inspect: tab= opens the page of an exchange on that view, and against= opens the diff when no tab is given") {
+    withRoot { root =>
+      val session = fixture(root)
+      serving(root) { inspector =>
+        def opened(path: String): String =
+          val (status, page) = get(inspector, path)
+          assertEquals(status, 200, path)
+          val tab = """<body class="tab-([a-z]+)">""".r.findFirstMatchIn(page).map(_.group(1)).getOrElse("none")
+          val on  = """<button data-tab="([a-z]+)" class="on">""".r.findAllMatchIn(page).map(_.group(1)).toVector
+          assertEquals(on, Vector(tab), path)
+          tab
+        val x1 = s"/s/${session.value}/x/x1"
+        Vector("chat", "request", "reply", "diff").foreach(tab => assertEquals(opened(s"$x1?tab=$tab"), tab))
+        assertEquals(opened(x1), "chat")
+        assertEquals(opened(s"$x1?tab=fake"), "chat")
+        val x3 = s"/s/${session.value}/x/x3"
+        assertEquals(opened(s"$x3?against=x2"), "diff")
+        assertEquals(opened(s"$x3?against=x2&tab=request"), "request")
+        // The links to the exchange before and after keep the view, so a person can read each request in turn.
+        val (_, second) = get(inspector, s"/s/${session.value}/x/x2?tab=request")
+        assert(second.contains(s"""href="/s/${session.value}/x/x1?tab=request" data-tabbed>earlier</a>"""), second)
+        assert(second.contains(s"""href="/s/${session.value}/x/x3?tab=request" data-tabbed>later</a>"""), second)
       }
     }
   }
