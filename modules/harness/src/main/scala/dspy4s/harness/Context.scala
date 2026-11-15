@@ -6,6 +6,7 @@ import dspy4s.harness.kernel.{Entry, Logged, Position, SessionState, TurnKind}
 import dspy4s.harness.repl.lostNames
 import zio.blocks.schema.{DynamicValue, PrimitiveValue, Schema}
 
+import java.util.Locale
 import scala.annotation.unused
 
 /** The input of the policy leaf (CODE_HARNESS_DESIGN.md, 7 and 9). `task` holds the instructions and the input fields
@@ -77,19 +78,25 @@ object ContextStrategy:
   /** The error of `zoom` in a session with no memory tree (7.1). */
   val NoMemory = "this session has no memory tree, so zoom has nothing to read"
 
-/** The status section (7): the step and the step limit, the keys of the store, and the kind of the turn. It is typed,
-  * so it can render only its changes later.
+/** The status section (7): the step and the step limit, the keys of the store, the kind of the turn, and the times of
+  * the open turn. It is typed, so it can render only its changes later.
   *
   * A proposal for the review: the first version renders in full at each step. The render of only the changes comes with
   * the prompt-cache marks (Later), and the jobs come with phase 7.
   */
-final case class Status(step: Int, steps: Int, keys: Vector[String], kind: TurnKind) derives CanEqual:
+final case class Status(
+    step : Int,
+    steps: Int,
+    keys : Vector[String],
+    kind : TurnKind,
+    times: Option[TurnTimes] = None
+) derives CanEqual:
 
   /** For example `Step 3 of 5. The keys of the store: a, b.` A chat has one more step after the limit, which only
     * answers (4.3). So before the step `steps - 1` of a chat, the status says that the next step only answers, and
     * before the step `steps` it says that this step is the last one. A program call has no such step, so its last step
     * gets no note. The live sessions of 2026-11-10 gave this rule: the model read "Step 10 of 10" as the last step and
-    * answered one step early.
+    * answered one step early. The times of the turn (`TurnTimes.render`) come last.
     */
   def render: String =
     val where =
@@ -98,11 +105,11 @@ final case class Status(step: Int, steps: Int, keys: Vector[String], kind: TurnK
         s"Step $steps of $steps. The next step only answers, with no code."
       else s"Step ${step + 1} of $steps."
     val store = if keys.isEmpty then "none" else keys.mkString(", ")
-    s"$where The keys of the store: $store."
+    s"$where The keys of the store: $store." + times.fold("")(t => s" ${t.render}")
 
 object Status:
 
-  /** The status after the last entry of the journal of `state`. */
+  /** The status after the last entry of the journal of `state`, with no times. */
   def of(state: SessionState): Status =
     val step = state.position match
       case Position.BeforeStep(i)                                        => i
@@ -110,6 +117,59 @@ object Status:
       case Position.InCell(i, _, _)                                      => i
       case Position.Answered(_) | Position.Finished(_) | Position.NoTurn => 0
     Status(step, state.config.steps, state.store.keys.toVector.sorted, state.config.kind)
+
+  /** The status after the last entry of `journal`, whose fold is `folded`, with the times of the open turn. A state has
+    * no times, so they come from the journal (`TurnTimes.of`). A chat and a program call get the same times.
+    */
+  def of(folded: SessionState, journal: Vector[Logged]): Status = of(folded).copy(times = TurnTimes.of(journal))
+
+/** The times of the open turn in milliseconds, for the status (7): how long the turn has run, and how long the last
+  * call to the model took. In session 00429ec8 (2026-11-11), the model saw no times, so it gave a false reason for a
+  * slow turn.
+  */
+final case class TurnTimes(turn: Long, call: Long) derives CanEqual:
+
+  /** For example `The turn has run for 19.7 s, and the last call to the model took 2.0 s.` */
+  def render: String =
+    val (ran, took) = (TurnTimes.seconds(turn), TurnTimes.seconds(call))
+    s"The turn has run for $ran s, and the last call to the model took $took s."
+
+object TurnTimes:
+
+  /** The times of the open turn of `journal`, from the times of its entries (`Meta.atMillis`) alone, so a projection
+    * stays a pure function of the journal (7):
+    *
+    *   - the time of the turn is the time of the last entry minus the time of the last `TurnStarted`;
+    *   - the time of the last call to the model is the time of the last `Acted` of the open turn minus the time of the
+    *     `StepStarted` before it. The memory update of a step comes before its call, so this time holds it too.
+    *
+    * Before the first `Acted` of the open turn, there is no call to the model, so there are no times.
+    */
+  def of(journal: Vector[Logged]): Option[TurnTimes] =
+    val start = journal.lastIndexWhere(_.entry == Entry.TurnStarted)
+    val acted = journal.lastIndexWhere(logged => isActed(logged.entry))
+    val step  = journal.lastIndexWhere(logged => isStepStarted(logged.entry), acted)
+    Option.when(start >= 0 && acted > start && step > start) {
+      TurnTimes(
+        journal.last.meta.atMillis - journal(start).meta.atMillis,
+        journal(acted).meta.atMillis - journal(step).meta.atMillis
+      )
+    }
+
+  /** The seconds of `millis` with one decimal and a dot, also in another locale, for example `12.3`. A negative time,
+    * for example after a change of the clock, is 0.0.
+    */
+  def seconds(millis: Long): String = "%.1f".formatLocal(Locale.ROOT, millis.max(0L) / 1000.0)
+
+  private def isActed(entry: Entry): Boolean =
+    entry match
+      case Entry.Acted(_, _, _) => true
+      case _                    => false
+
+  private def isStepStarted(entry: Entry): Boolean =
+    entry match
+      case Entry.StepStarted(_) => true
+      case _                    => false
 
 /** The note after a new REPL (6): the reason, and the names of the earlier cells that the new REPL does not have. A
   * restart after a cell (`HarnessEffects`) and a new activation give the same text, so the model sees one form.

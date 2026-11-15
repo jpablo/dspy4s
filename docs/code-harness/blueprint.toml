@@ -2361,8 +2361,19 @@ kind = "data"
 name = "Status"
 ops = ["render", "of"]
 ref = "7"
-uses = ["session-state"]
-text = "The status section: the step, the step limit and the keys of the store. A proposal: it renders in full at each step. The jobs come with phase 7."
+uses = ["session-state", "turn-times"]
+text = "The status section: the step, the step limit, the keys of the store, and the times of the open turn (TurnTimes, 2026-11-15). A proposal: it renders in full at each step. The jobs come with phase 7."
+
+[[node]]
+id = "turn-times"
+group = "context"
+kind = "data"
+name = "TurnTimes"
+ops = ["render", "of", "seconds"]
+ref = "7"
+uses = ["logged"]
+proof_uses = ["entry", "meta"]
+text = "The times of the open turn for the status, from the times of the journal alone (2026-11-15): the time of the turn since the last TurnStarted, and the time of the last call to the model, from its StepStarted to its Acted. Before the first Acted of the open turn, there are no times. The seconds have one decimal and a dot in each locale. In session 00429ec8, the model saw no times, so it gave a false reason for a slow turn."
 
 [[group]]
 id = "texts"
@@ -2438,10 +2449,10 @@ id = "window"
 group = "window"
 kind = "data"
 name = "Window"
-ops = ["update", "project", "cut"]
+ops = ["update", "project", "cut", "cellNote"]
 ref = "7"
 uses = ["context-strategy"]
-proof_uses = ["status", "projection", "state", "text-prefix", "turn-outcome"]
+proof_uses = ["status", "turn-times", "projection", "state", "text-prefix", "turn-outcome"]
 text = "No derived data, and the last steps of the open turn that fit the budget, oldest first. The last observation is always in it, cut to half of the budget, with a note of the rest. An earlier turn of a chat with no reply has the text of its report (TurnOutcome.report). A proposal: the budget counts characters."
 
 # ── Phase 4: the harness (9) ──────────────────────────────────────────────────────────────────────────────────────
@@ -2662,7 +2673,7 @@ kind = "law"
 name = "Window:"
 ref = "7"
 uses = ["window"]
-text = "project depends only on the entries and the derived data, fits the budget, keeps the last observation and the newest steps, oldest first, keeps the last step also with a long text and code, gives each message an empty reasoning, and cuts a long value with a note. update gives no derived data."
+text = "project depends only on the entries, the time between them and the derived data, fits the budget, keeps the last observation and the newest steps, oldest first, keeps the last step also with a long text and code, gives each message an empty reasoning, and cuts a long value with a note. The output of each cell ends with its time, also after a cut, a cell with no Observed has no time, and a chat and a program call give the same times. update gives no derived data."
 
 [[node]]
 id = "law-status"
@@ -2670,8 +2681,8 @@ group = "window-laws"
 kind = "law"
 name = "Status:"
 ref = "7"
-uses = ["status"]
-text = "The status gives the step, the step limit and the keys of the store."
+uses = ["status", "turn-times"]
+text = "The status gives the step, the step limit, the keys of the store, and the times of the open turn: no time before the first call to the model of the turn, a dot in each locale, and 0.0 s for a negative time."
 
 [[group]]
 id = "harness-laws"

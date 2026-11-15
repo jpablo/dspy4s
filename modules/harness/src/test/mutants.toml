@@ -154,15 +154,19 @@ new = "take(messages.toList, room, Nil).reverse"
 name = "Mutant: the window does not cut the last observation"
 [[mutant.edit]]
 file = "Window.scala"
-old = "outputs.lastOption.fold(\"\")(cut(_, budget / 2))"
-new = "outputs.lastOption.getOrElse(\"\")"
+old = "seen(steps.flatMap(_.cell).lastOption, Vector.empty, budget / 2)"
+new = "seen(steps.flatMap(_.cell).lastOption, Vector.empty, Int.MaxValue)"
 
 [[mutant]]
 name = "Mutant: the window does not cut the text and the code"
 [[mutant.edit]]
 file = "Window.scala"
-old = "DynamicValues.string(cut(value, max))"
-new = "DynamicValues.string(if key == \"observation\" then cut(value, max) else value)"
+old = "\"text\" -> cut(text, max)"
+new = "\"text\" -> cut(text, max + text.length)"
+[[mutant.edit]]
+file = "Window.scala"
+old = "\"code\" -> cut(c, max)"
+new = "\"code\" -> cut(c, max + c.length)"
 
 [[mutant]]
 name = "Mutant: the history has no empty reasoning"
@@ -170,6 +174,134 @@ name = "Mutant: the history has no empty reasoning"
 file = "Window.scala"
 old = "\"observation\" -> observation, \"reasoning\" -> \"\", \"text\""
 new = "\"observation\" -> observation, \"text\""
+
+# ── The times (7, 2026-11-15) ──
+
+[[mutant]]
+name = "Mutant: the output of a cell has no time note"
+[[mutant.edit]]
+file = "Window.scala"
+old = "val note = cellNote(took)"
+new = "val note = cellNote(took).take(0)"
+
+[[mutant]]
+name = "Mutant: the cut of an output removes its time note"
+[[mutant.edit]]
+file = "Window.scala"
+old = 'if output.length > max then s"$kept\n$note"'
+new = "if output.length > max then kept"
+
+[[mutant]]
+name = "Mutant: in a chat, the time note comes after the messages that came during the cell"
+[[mutant.edit]]
+file = "Window.scala"
+old = 'else Vector(output, note).filter(_.nonEmpty).mkString("\n") + kept.drop(output.length)'
+new = 'else Vector(kept, note).filter(_.nonEmpty).mkString("\n")'
+
+[[mutant]]
+name = "Mutant: an empty output gives an empty line before its time note"
+[[mutant.edit]]
+file = "Window.scala"
+old = 'Vector(output, note).filter(_.nonEmpty).mkString("\n")'
+new = 'Vector(output, note).mkString("\n")'
+
+[[mutant]]
+name = "Mutant: a message of the history has no time note"
+[[mutant.edit]]
+file = "Window.scala"
+old = "message(seen(before(k), Vector.empty, budget / 8), step.text, step.code, budget / 8)"
+new = "message(cut(before(k).fold(\"\")(_.output), budget / 8), step.text, step.code, budget / 8)"
+
+[[mutant]]
+name = "Mutant: the time of a cell starts at the start of its step"
+[[mutant.edit]]
+file = "Window.scala"
+old = "Step(acted = true, text, code, None, at)"
+new = "Step(acted = true, text, code, None, steps.lastOption.fold(at)(_.actedAt))"
+
+[[mutant]]
+name = "Mutant: in a chat, the time of a cell starts at the start of its step"
+[[mutant.edit]]
+file = "Window.scala"
+old = "code = code, actedAt = at)"
+new = "code = code)"
+
+[[mutant]]
+name = "Mutant: a cell with no Observed gets a time note"
+[[mutant.edit]]
+file = "Window.scala"
+old = "Step(acted = true, text, code, None, at)"
+new = "Step(acted = true, text, code, Some(Cell(\"\", 0L)), at)"
+
+[[mutant]]
+name = "Mutant: in a chat, a cell with no Observed gets a time note"
+[[mutant.edit]]
+file = "Window.scala"
+old = "code = code, actedAt = at)"
+new = "code = code, actedAt = at, cell = Some(Cell(\"\", 0L)))"
+
+[[mutant]]
+name = "Mutant: a chat gets no times in its status"
+[[mutant.edit]]
+file = "Window.scala"
+old = "then chat(journal, status, budget, earlier)"
+new = "then chat(journal, Status.of(now).render, budget, earlier)"
+
+[[mutant]]
+name = "Mutant: the status has no times"
+[[mutant.edit]]
+file = "Context.scala"
+old = "+ times.fold(\"\")(t => s\" ${t.render}\")"
+new = "+ \"\""
+
+[[mutant]]
+name = "Mutant: the time of the turn starts at the first TurnStarted"
+[[mutant.edit]]
+file = "Context.scala"
+old = "val start = journal.lastIndexWhere(_.entry == Entry.TurnStarted)"
+new = "val start = journal.indexWhere(_.entry == Entry.TurnStarted)"
+
+[[mutant]]
+name = "Mutant: the status gives times before the first call of the open turn"
+[[mutant.edit]]
+file = "Context.scala"
+old = "Option.when(start >= 0 && acted > start && step > start)"
+new = "Option.when(start >= 0 && acted >= 0 && step >= 0)"
+
+[[mutant]]
+name = "Mutant: the time of the turn ends at the last Acted"
+[[mutant.edit]]
+file = "Context.scala"
+old = "journal.last.meta.atMillis - journal(start).meta.atMillis"
+new = "journal(acted).meta.atMillis - journal(start).meta.atMillis"
+
+[[mutant]]
+name = "Mutant: the time of the call starts at the start of the turn"
+[[mutant.edit]]
+file = "Context.scala"
+old = "journal(acted).meta.atMillis - journal(step).meta.atMillis"
+new = "journal(acted).meta.atMillis - journal(start).meta.atMillis"
+
+[[mutant]]
+name = "Mutant: the time of the call starts at the last StepStarted, also after the last Acted"
+[[mutant.edit]]
+file = "Context.scala"
+old = "isStepStarted(logged.entry), acted)"
+new = "isStepStarted(logged.entry))"
+
+[[mutant]]
+name = "Mutant: the times use the default locale"
+[[mutant.edit]]
+file = "Context.scala"
+old = "formatLocal(Locale.ROOT, "
+new = "formatLocal(Locale.getDefault, "
+
+[[mutant]]
+name = "Mutant: a negative time stays negative"
+[[mutant.edit]]
+file = "Context.scala"
+old = "millis.max(0L) / 1000.0"
+new = "millis / 1000.0"
 
 # ── The harness ──
 

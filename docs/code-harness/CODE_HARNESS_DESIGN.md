@@ -1237,8 +1237,26 @@ final case class PolicyStep(text: String, code: Option[String])
 - **Cheap steps first.** A strategy cuts long observations with no LM call, and it adds a note that says how to read
   the remainder. A summary that does not shrink is rejected.
 - **The status section.** `status` holds the names in the REPL, the keys of the store, the scope, and the jobs with
-  their states: running, exited, stopped or lost. It is typed, and it renders only its changes, so the prompt prefix
-  stays the same.
+  their states: running, exited, stopped or lost. It also holds the times of the open turn (see "The times"). It is
+  typed, and it renders only its changes, so the prompt prefix stays the same.
+- **The times.** These rules were made with the user on 2026-11-15. In session 00429ec8 (2026-11-11), the model saw no
+  times, so it gave a false reason for a slow turn.
+  - Each cell output that the model sees ends with its time on its own line, for example "The cell took 12.3 s." The
+    time of a cell is the time of its `Observed` minus the time of its `Acted`. The note comes after the cut of the
+    output, so a cut does not remove it, in the observation and in each message of the history. In a chat, the note
+    comes right after the output, before the messages that came during the cell. A cell with no `Observed`, for
+    example after a stop, has no note. An empty output gives only the note.
+  - The status ends with the times of the open turn, for example "The turn has run for 19.7 s, and the last call to
+    the model took 2.0 s." The time of the turn is the time of the last entry minus the time of the last
+    `TurnStarted`. The time of the last call is the time of the last `Acted` of the open turn minus the time of its
+    `StepStarted`, so it includes the memory update. Before the first `Acted` of the open turn, the status gives no
+    time.
+  - The seconds have one decimal and a dot, also in another locale (`Locale.ROOT`). A negative time, for example
+    after a change of the clock, is 0.0 s.
+  - The texts come from the times of the journal alone (`Logged.meta.atMillis`), so `project` stays a pure function
+    of the journal. A shift of all the times gives the same projection. A chat, a program call (RLM) and the open turn
+    of the memory tree get the same times. The memory messages of earlier turns (`MemoryLog`) keep their text, because
+    a new text gives new keys, and the stored lines of each session then build again.
 - **The last step of a chat.** A chat has one more step after the step limit, which only answers (4.3). Before the
   step `steps - 1` of a chat, the status says "Step n of n. The next step only answers, with no code." Before the step
   `steps`, it says "The last step: answer with no code." A program call has no step that only answers, so its last
