@@ -1383,6 +1383,20 @@ and the window 2 of 6: the window answered the two facts of the last turns, and 
 first quarter. The first question of the memory tree took 56 seconds, with the build of all lines of the session.
 Section 12 has the numbers.
 
+**A session with no memory calls (2026-11-15).** The CLI flag `--no-memory-calls` gives the host
+`HarnessLimits(summaryCalls = 0)`. The flag is for a comparison of the cost and the replies of a session with and
+without the memory calls. In session 7c377cf6, the 22 leaf calls took 424 seconds, and the 12 policy calls took 17
+seconds.
+
+- Each update of the memory tree makes no `compress` or `merge` call. Each message of more than 512 bytes shows its
+  first 512 bytes (`MemoryLine.of`), and a part above two halves shows the start of their two lines.
+- `zoom` still reads the whole message. The store does not keep these lines, so a later run with the memory calls
+  builds the summaries.
+- The limits belong to the runtime, not to the configuration of a session. So the flag applies to each session of the
+  host, also to a session that opens again and to the controller.
+- The law `Work: with summaryCalls 0, ...` holds the behavior of the host, and the law `CLI: parse reads
+  --no-memory-calls, ...` holds the limits of the flag.
+
 ## 8. Sessions
 
 ### 8.1 One kernel, four configurations
@@ -2047,7 +2061,7 @@ These points are proposals for the review:
 - The host trait of 10.1 is `SessionHandle`, because the guest API already has the data type `SessionRef`. It also
   has `run`, which waits for the commit, so a client can show a refusal.
 - A session id is a random UUID. The root of the CLI is `<home>/.dspy4s/harness`, and its command line is
-  `[--root DIR] [--session ID] [--script] [--list] [FOLDER]`. `--session` also takes the start of an id when only one
+  `[--root DIR] [--session ID] [--script] [--no-memory-calls] [--list] [FOLDER]`. `--session` also takes the start of an id when only one
   session of the root has it.
 - A live test drives the CLI with no person (2026-11-10). With `--script`, each line waits until the session has no
   open turn, each command goes through `run`, and the end of the input waits for the open turn. So each message

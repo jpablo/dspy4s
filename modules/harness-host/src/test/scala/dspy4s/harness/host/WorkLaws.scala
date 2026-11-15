@@ -498,6 +498,23 @@ class WorkLaws extends munit.FunSuite:
     finally place.close()
   }
 
+  test("Work: with summaryCalls 0, a session makes no compress or merge call, and the memory shows each message cut") {
+    // The CLI flag --no-memory-calls gives these limits, so a person can compare a session with no memory calls.
+    val long  = "FAKE-HEAD " + "y" * 700 + " FAKE-TAIL"
+    val model = sessionModel(policy("FAKE-ONE", None), policy("FAKE-TWO", None))
+    work(model, settings = limits.copy(summaryCalls = 0)) { (_, handle) =>
+      assertEquals(handle.send(message("m1", long)), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+      assertEquals(handle.send(message("m2")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 2), entries(handle).toString)
+      assertEquals(summaryRequests(model), Vector.empty)
+      // The memory of turn 2 holds the first 512 bytes of the long message of turn 1 (MemoryLine.of).
+      val second = promptOf(model, 1)
+      assert(second.contains("FAKE-HEAD"), second)
+      assert(!second.contains("FAKE-TAIL"), second)
+    }
+  }
+
   // ── The model of the session (CLI_SCREEN.md, 14.4) ──
 
   test("Work: config and the config of the controller put the options of the model in the configuration") {

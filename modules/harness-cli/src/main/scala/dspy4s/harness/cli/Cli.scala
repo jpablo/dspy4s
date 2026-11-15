@@ -3,7 +3,7 @@ package dspy4s.harness.cli
 import dspy4s.adapters.ChatAdapter
 import dspy4s.core.contracts.{DspyError, RuntimeContext, RuntimeError}
 import dspy4s.core.runtime.RuntimeEnvironment
-import dspy4s.harness.{HarnessLimits, Secrets}
+import dspy4s.harness.Secrets
 import dspy4s.harness.guest.JobStatus
 import dspy4s.harness.inspect.Inspector
 import dspy4s.harness.host.{
@@ -52,9 +52,11 @@ import scala.util.control.NonFatal
   * `DSPY_SUMMARY_OPTIONS` is a JSON object, the option bag of each summary request of the memory tree (7.1), for
   * example `{"chat_template_kwargs": {"enable_thinking": false}}`. A value that is not a JSON object gives an error and
   * the exit code 2. Each HTTP exchange with the model endpoint goes to the exchange file of the session
-  * (`ExchangeFile`), with the mask of the client, and `DSPY_EXCHANGES=off` turns the file off. `--script` runs the loop
-  * in the script mode, so a script or an agent can drive the session. `--list` prints `listText` and starts no session.
-  * `--session` takes an id or the start of an id (`resolveSession`).
+  * (`ExchangeFile`), with the mask of the client, and `DSPY_EXCHANGES=off` turns the file off. `--no-memory-calls`
+  * gives the host the limits `cli.limits`, with no summary call of the memory tree, so a person can compare the cost of
+  * a session with and without the memory calls. `--script` runs the loop in the script mode, so a script or an agent
+  * can drive the session. `--list` prints `listText` and starts no session. `--session` takes an id or the start of an
+  * id (`resolveSession`).
   *
   * The file `<home>/.dspy4s/harness/.env` can give each of these variables (`EnvFile`). A variable of the process wins
   * over the file, apart from the base URL and the key, which come both from the file or both from the process. A line
@@ -137,20 +139,20 @@ object Cli:
         given RuntimeContext = RuntimeEnvironment.current
         val work             =
           WorkEnv(home, HostList.empty, Backends.detect(), secrets, cli.root, options, ExchangeFile.enabled(env))
-        LocalHost.startWith(cli.root, peers => WorkRuntime.forHost(work)(peers), secrets) match
+        LocalHost.startWith(cli.root, peers => WorkRuntime.forHost(work, cli.limits)(peers), secrets) match
           case Left(error) =>
             System.err.println(printable(s"The host did not start: ${error.words}"))
             1
           case Right(host) =>
             try
-              val desk   = HostDesk(host, Controller.config(home, name, HarnessLimits(), start))
+              val desk   = HostDesk(host, Controller.config(home, name, cli.limits, start))
               val opened =
                 if cli.controller then desk.controller.left.map(e => s"The controller did not open: ${e.words}")
                 else
                   val target = cli.session match
                     case None => Right((
                         SessionId(UUID.randomUUID().toString),
-                        Some(WorkRuntime.config(cli.scope, name, HarnessLimits(), start))
+                        Some(WorkRuntime.config(cli.scope, name, cli.limits, start))
                       ))
                     // The journal files, not the catalog, give the sessions, so a session with no row still opens. A
                     // session whose owner is a session opens only with its owner (`openRefusal`).
