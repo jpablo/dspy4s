@@ -123,7 +123,8 @@ final class WorkRuntime(
       var started = false
       try
         val scope = Layout.real(Path.of(SandboxedShell.pathOf(config.scope)))
-        val made  = Layout.forSession(env.home, env.journals)
+        // The hooks folder of the scope is read once for each activation (5.4, choice 19).
+        val made = Layout.forSession(env.home, env.journals, Layout.hooksFolder(scope).toVector)
         layout = Some(made)
         // The profile of the shell, so the words of the task give the rules of the sandbox of this host.
         val profile  = Profiles.forMode(config.mode, scope, made, env.hosts, env.backend.exists(_.closesNames))

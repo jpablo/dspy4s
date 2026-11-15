@@ -65,7 +65,7 @@ final case class Harness[I, O](
     try Harness.repaired(journal) {
         Harness.inFolder(Harness.forkWorkspace(env.workspace)) { fork =>
           Harness.inFolder(JFiles.createTempDirectory("dspy4s-journals-")) { journals =>
-            val layout = Layout.forSession(env.home, journals)
+            val layout = Layout.forSession(env.home, journals, Layout.hooksFolder(fork).toVector)
             Harness.inFolder(layout.temp)(_ => run(call.input, fork, layout, journal, host, id))
           }
         }

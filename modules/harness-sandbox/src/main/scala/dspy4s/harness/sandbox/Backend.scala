@@ -46,7 +46,7 @@ private[sandbox] object Host:
         val profile = Profile(
           canRun = true,
           writable = Vector(temp),
-          readOnly = Vector.empty,
+          controls = Vector.empty,
           hidden = Vector.empty,
           net = Net.Closed
         )

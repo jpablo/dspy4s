@@ -36,7 +36,7 @@ object Seatbelt extends Backend:
           "(allow file-read*)",
           s"(allow file-write* ${(profile.writable.map(subpath) ++ devices).mkString(" ")})"
         ) ++
-        profile.readOnly.map(p => s"(deny file-write* ${subpath(p)})") ++
+        profile.controls.map(part => s"(deny file-write* ${rule(part.shape)})") ++
         profile.hidden.map(p => s"(deny file-read* file-write* ${subpath(p)})") ++
         profile.hiddenNames.toVector.sorted.map(name => s"(deny file-read* file-write* ${nameRule(name)})") ++
         network).mkString("", "\n", "\n")
@@ -68,16 +68,34 @@ object Seatbelt extends Backend:
 
   private def subpath(path: Path): String = s"""(subpath "${literal(path.toString)}")"""
 
+  /** The filter of the paths of a control path (5.4, choice 19). A rule on names puts the path in a `subpath` and the
+    * names in a regex, so the regex holds no path of the host. A probe on macOS (2026-11-13) showed that `require-all`
+    * and `require-not` work, that a `literal` on `.git` stops its removal and its move and not a write in it, and that
+    * a rename onto `.git/config` fails.
+    */
+  private def rule(shape: ControlPath.Shape): String =
+    shape match
+      case ControlPath.Shape.Under(path)                 => subpath(path)
+      case ControlPath.Shape.Exactly(path)               => s"""(literal "${literal(path.toString)}")"""
+      case ControlPath.Shape.Named(under, names, except) =>
+        val parts = names.toVector.sorted.map(quoted).mkString("|")
+        val not   = except.map(path => s" (require-not ${subpath(path)})").getOrElse("")
+        s"""(require-all ${subpath(under)}$not (regex #"/($parts)(/|$$)"))"""
+
   /** The rule of the secret name `name` (5.4): each path with a part that is `name`, or `name` and a dot, at each
     * depth, as `Layout.isSecretName` reads a part. So it closes a file and a folder with that name, and each file in
     * such a folder. A probe on macOS (2026-11-12) showed that it also stops a read through a symbolic link, a hard
     * link, a move and a new file with that name, and that `.envrc` and `notes.env.txt` stay open. A name holds no quote
     * and no control character, because the harness gives the names.
     */
-  private def nameRule(name: String): String =
-    require(name.nonEmpty && !name.exists(c => c == '"' || c == '/' || c.isControl), s"not a secret name: $name")
-    val quoted = name.flatMap(c => if "\\^$.|?*+()[]{}".contains(c) then s"\\$c" else c.toString)
-    s"""(regex #"/$quoted(\\.[^/]*)?(/|$$)")"""
+  private def nameRule(name: String): String = s"""(regex #"/${quoted(name)}(\\.[^/]*)?(/|$$)")"""
+
+  /** A name in a regex, with each special character escaped. The harness gives the names, so a name holds no quote, no
+    * slash and no control character.
+    */
+  private def quoted(name: String): String =
+    require(name.nonEmpty && !name.exists(c => c == '"' || c == '/' || c.isControl), s"not a name for a rule: $name")
+    name.flatMap(c => if "\\^$.|?*+()[]{}".contains(c) then s"\\$c" else c.toString)
 
   /** The text of an SBPL string, which reads escapes as Scheme does. A command can make a file with a secret name, and
     * the policy of the next command names it, so each path must fit. A probe on macOS showed that the escapes of a

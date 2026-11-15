@@ -2,11 +2,12 @@ package dspy4s.harness.sandbox
 
 import dspy4s.harness.guest.{Access, Mode}
 
+import java.nio.charset.StandardCharsets.UTF_8
 import java.nio.file.attribute.{BasicFileAttributes, FileTime}
 import java.nio.file.{DirectoryIteratorException, Files as JFiles, LinkOption, NoSuchFileException, Path}
 import java.time.Instant
 import java.util.Locale
-import java.util.concurrent.CancellationException
+import java.util.concurrent.{CancellationException, CompletableFuture, TimeUnit}
 import scala.collection.mutable
 import scala.concurrent.duration.{DurationInt, FiniteDuration}
 import scala.jdk.CollectionConverters.*
@@ -18,10 +19,11 @@ import scala.util.{Failure, Success, Try}
   * real: `Layout.forSession` resolves the symbolic links.
   */
 final case class Layout(
-    temp       : Path,         // the private temporary directory of the session
-    journals   : Path,         // the folder of the journals: closed to each profile (5.4)
+    temp       : Path, // the private temporary directory of the session
+    journals   : Path, // the folder of the journals: closed to each profile (5.4)
     secrets    : Vector[Path], // the secret paths, for example ~/.ssh (5.6)
-    secretNames: Set[String]   // the names of secret files: see `Profiles.forCommand`
+    secretNames: Set[String], // the names of secret files: see `Profiles.forCommand`
+    hooks      : Vector[Path] = Vector.empty // the folders of `core.hooksPath` of the scope (`hooksFolder`, choice 19)
 )
 
 object Layout:
@@ -68,17 +70,49 @@ object Layout:
   def isSecretName(part: String, names: Set[String]): Boolean =
     names.exists(name => part == name || part.startsWith(name + "."))
 
-  /** The layout of a session: a new private temporary directory, and the secrets of the home folder `home`. For each
-    * secret path that is a symbolic link, the layout holds the link and its target.
+  /** The layout of a session: a new private temporary directory, the secrets of the home folder `home`, and the hooks
+    * folders `hooks` of the scope (`hooksFolder`). For each secret path that is a symbolic link, the layout holds the
+    * link and its target.
     */
-  def forSession(home: Path, journals: Path): Layout =
+  def forSession(home: Path, journals: Path, hooks: Vector[Path] = Vector.empty): Layout =
     val temp = JFiles.createTempDirectory("dspy4s-session-").toRealPath()
-    Layout(temp, real(journals), secretsUnder(real(home)).flatMap(p => Vector(p, real(p)).distinct), secretNames)
+    Layout(temp, real(journals), secretsUnder(real(home)).flatMap(p => Vector(p, real(p)).distinct), secretNames, hooks)
 
   /** The real path of `path` when it exists, else the absolute and normalized path. */
   def real(path: Path): Path =
     val absolute = path.toAbsolutePath.normalize
     if JFiles.exists(absolute) then absolute.toRealPath() else absolute
+
+  /** The folder that `core.hooksPath` of the repository of `scope` names, or none: no git, no repository, no setting,
+    * or an error (5.4, choice 19). A relative path is relative to the top of the work tree, as git reads it. The host
+    * reads it once for each activation, so a change of the setting applies after a reopen.
+    *
+    * git reads the setting with no fsmonitor and no optional lock, with only `PATH`, `HOME` and `LANG`, and with a time
+    * limit. A read of the configuration runs no hook. The repository configuration is a control path, so a session
+    * cannot change the answer.
+    */
+  def hooksFolder(scope: Path): Option[Path] =
+    def git(args: String*): Option[String] =
+      Try {
+        val builder = ProcessBuilder(
+          (Vector("git", "-C", scope.toString, "--no-optional-locks", "-c", "core.fsmonitor=false") ++ args)*
+        ).redirectError(ProcessBuilder.Redirect.DISCARD)
+        val env = builder.environment()
+        env.clear()
+        Vector("PATH", "HOME", "LANG").foreach(name => sys.env.get(name).foreach(value => env.put(name, value): Unit))
+        val process = builder.start()
+        process.getOutputStream.close()
+        // The output comes on another thread, so a command that does not end cannot hold this thread past the limit.
+        val output = CompletableFuture.supplyAsync(() => String(process.getInputStream.readAllBytes(), UTF_8).trim)
+        if !process.waitFor(10, TimeUnit.SECONDS) then
+          process.destroyForcibly(): Unit
+          None
+        else Option(output.get(5, TimeUnit.SECONDS)).filter(text => process.exitValue() == 0 && text.nonEmpty)
+      }.toOption.flatten
+    for
+      top    <- git("rev-parse", "--show-toplevel")
+      folder <- git("config", "--type=path", "--get", "core.hooksPath")
+    yield real(Path.of(top).resolve(folder))
 
 /** The hosts and the ports that the proxy lets through (5.4). A pattern is `name`, `name:port` or `name:*`. A pattern
   * with no port allows only the ports 80 and 443, `name:port` allows only that port, and `name:*` allows each port. The
@@ -140,6 +174,45 @@ enum Net derives CanEqual:
       case Closed         => false
       case Proxy(allowed) => allowed.allows(host, port)
 
+/** A path of the scope that stays read-only in each mode (5.4, choice 19). A control path is a path that a program
+  * outside the sandbox runs as code, or reads as settings that start a program, with no step of the person first. On a
+  * backend that cannot close a name, all of `.git` takes the place of the parts of git.
+  *
+  * @param shape
+  *   the paths that it covers
+  * @param label
+  *   its name for the model, relative to the scope
+  * @param note
+  *   what the model needs to know apart from the path, for example the git commands that fail, or empty
+  */
+final case class ControlPath(shape: ControlPath.Shape, label: String, note: String = "") derives CanEqual:
+
+  /** True when a write to `path` changes this control path. */
+  def covers(path: Path): Boolean = shape.covers(path)
+
+object ControlPath:
+
+  /** The paths of a control path. */
+  enum Shape derives CanEqual:
+
+    /** The path and each path under it. */
+    case Under(path: Path)
+
+    /** Only the path, for example `.git` itself, which is a file in a linked worktree. */
+    case Exactly(path: Path)
+
+    /** Each path under `under` and not under `except` with a part in `names`, and each path under it. The rule reads
+      * each part of the path, as the regex of Seatbelt does. Only a backend that closes a name can apply it.
+      */
+    case Named(under: Path, names: Set[String], except: Option[Path])
+
+    def covers(path: Path): Boolean =
+      this match
+        case Under(p)                    => path.startsWith(p)
+        case Exactly(p)                  => path.equals(p)
+        case Named(under, names, except) => path.startsWith(under) && !except.exists(path.startsWith) &&
+          path.iterator.asScala.exists(part => names.contains(part.toString))
+
 /** What a child process can do (5.4). The observations `canRun`, `canRead`, `canWrite` and `canConnect` are the meaning
   * of a profile: a backend must allow at most what they allow. Each path is absolute and normalized.
   *
@@ -148,11 +221,9 @@ enum Net derives CanEqual:
   * `canRun`.
   */
 final case class Profile(
-    canRun  : Boolean,      // a child process can start
-    writable: Vector[Path], // a child can write under each of these roots
-    readOnly: Vector[
-      Path
-    ], // the parts of the writable roots that stay read-only, for example .git (CODE_HARNESS.md F7)
+    canRun     : Boolean, // a child process can start
+    writable   : Vector[Path], // a child can write under each of these roots
+    controls   : Vector[ControlPath], // the parts of the scope that stay read-only in each mode (5.4, choice 19)
     hidden     : Vector[Path], // a child can neither read nor write under these: the secrets, the journals, the secret files
     net        : Net,
     reads      : Boolean     = false,    // the file calls of the session can read, with no child process (8.7)
@@ -166,7 +237,7 @@ final case class Profile(
   def canRead(path: Path): Boolean = (canRun || reads) && !isHidden(path)
 
   def canWrite(path: Path): Boolean =
-    canRun && writable.exists(path.startsWith) && !readOnly.exists(path.startsWith) && !isHidden(path)
+    canRun && writable.exists(path.startsWith) && !controls.exists(_.covers(path)) && !isHidden(path)
 
   /** True when a child can reach `host` at the port 80 or 443. */
   def canConnect(host: String): Boolean = canRun && net.allows(host)
@@ -182,19 +253,97 @@ object Profiles:
   /** The profile of the table of 5.4, for a session with the mode `mode` and the scope `scope`. A child process needs
     * `Shell^` and `Files^`, because `exec` takes both. The network needs `Network^` too. With `closesNames`, for a
     * backend that closes a name in each folder, the profile also closes the secret names of `layout` (`hiddenNames`),
-    * so `canRead` and `canWrite` give what that backend does.
+    * so `canRead` and `canWrite` give what that backend does. The control paths (`controls`) do not depend on the mode.
     */
   def forMode(mode: Mode, scope: Path, layout: Layout, hosts: HostList, closesNames: Boolean = false): Profile =
     val run = mode.shell == Access.Full && mode.files == Access.Full
     Profile(
       canRun = run,
       writable = if run then Vector(scope, layout.temp) else Vector.empty,
-      readOnly = Vector(scope.resolve(".git")),
+      controls = controls(scope, layout, closesNames),
       hidden = layout.secrets :+ layout.journals,
       net = if run && mode.network == Access.Full then Net.Proxy(hosts) else Net.Closed,
       reads = mode.files != Access.None,
       hiddenNames = if closesNames then layout.secretNames else Set.empty
     )
+
+  /** The files of the tools that a program of the person runs or reads as settings with no step of the person (5.4): VS
+    * Code (a setting that names a program, a task that runs when the folder opens), IntelliJ (a startup task, the
+    * launcher of an sbt reload) and Claude Code (hooks).
+    */
+  val ToolFiles: Vector[String] = Vector(
+    ".vscode/settings.json",
+    ".vscode/tasks.json",
+    ".idea",
+    ".claude/settings.json",
+    ".claude/settings.local.json"
+  )
+
+  /** The note of the git configuration. A probe with Seatbelt on 2026-11-13 showed that these commands change the
+    * branch and then fail to write `.git/config`.
+    */
+  val ConfigNote: String =
+    "Git cannot change its configuration. Three commands print an error about .git/config: a new branch that tracks " +
+      "a remote branch, a rename of a branch and a removal of a branch. The change of the branch still happens."
+
+  /** The note of a nested `.git`. */
+  val NestedNote: String =
+    "So git init, git clone and git submodule add fail in the folder of the session. A command can make a " +
+      "repository in the temporary folder."
+
+  /** The note of `.git` on a backend that cannot close a name. */
+  val AllOfGitNote: String =
+    "The sandbox of this host cannot close only the parts of git that run code, so all of .git stays read-only. A " +
+      "git command that changes the repository fails, for example commit, branch, switch, stash or worktree add."
+
+  /** The control paths of a session in `scope` (5.4, choice 19): the parts of git, the hooks folders of `layout` that
+    * are in the scope, and the files of the tools (`ToolFiles`). The class holds only the scope, so a command can make
+    * a repository in the temporary folder. A backend that cannot close a name (`closesNames` false) gets all of `.git`
+    * in place of the parts of git, and only the control paths that exist now, so its observations stay true. With
+    * `closesNames`, the list does not read the file system.
+    */
+  def controls(scope: Path, layout: Layout, closesNames: Boolean): Vector[ControlPath] =
+    import ControlPath.Shape.*
+    val git   = scope.resolve(".git")
+    val ofGit =
+      if !closesNames then Vector(ControlPath(Under(git), ".git", AllOfGitNote))
+      else
+        Vector(
+          ControlPath(Exactly(git), ".git itself"),
+          ControlPath(Under(git.resolve("hooks")), ".git/hooks"),
+          ControlPath(Under(git.resolve("config")), ".git/config", ConfigNote),
+          ControlPath(Under(git.resolve("config.worktree")), ".git/config.worktree"),
+          ControlPath(Under(git.resolve("commondir")), ".git/commondir"),
+          ControlPath(
+            Named(git.resolve("modules"), Set("hooks", "config", "config.worktree", "commondir"), None),
+            "the hooks and the configuration of each submodule in .git/modules"
+          ),
+          ControlPath(
+            Named(git.resolve("worktrees"), Set("commondir", "gitdir", "config.worktree"), None),
+            "commondir, gitdir and config.worktree in each folder of .git/worktrees"
+          ),
+          ControlPath(
+            Named(scope, Set(".git"), Some(git)),
+            "a file or a folder with the name .git below the top of the folder",
+            NestedNote
+          )
+        )
+    // A hooks folder outside the scope is outside the writable roots, so it needs no control path.
+    val hooks = layout.hooks.distinct.filter(_.startsWith(scope)).map { folder =>
+      val label = scope.relativize(folder).toString
+      ControlPath(Under(folder), if label.isEmpty then "." else label)
+    }
+    val tools = ToolFiles.map(path => ControlPath(Under(scope.resolve(path)), path))
+    val all   = ofGit ++ hooks ++ tools
+    // A mount covers only a path that exists, and it cannot close a name. So the list of such a backend holds the
+    // control paths that exist when the profile is made, and its observations stay true: a control path that does not
+    // exist yet stays writable, the gap of Linux (5.4). This part of the profile reads the file system.
+    if closesNames then all
+    else
+      all.filter(_.shape match
+        case Under(path)    => JFiles.exists(path)
+        case Exactly(path)  => JFiles.exists(path)
+        case Named(_, _, _) => false)
 
   /** An optional profile with the secret names hidden: the profile of the mode, and each file with a secret name that
     * exists in a writable root. This walks the roots. `SandboxedShell` uses `forMode` instead, with no walk.
@@ -205,7 +354,8 @@ object Profiles:
 
   /** What a command and a file call of `profile` can do, in words for the model of a session with the scope `scope` and
     * the layout `layout` (5.4). The text comes from the profile and the layout, so it gives the same rules as the
-    * sandbox: the places that a command can write, the read-only parts, the closed paths, and the network.
+    * sandbox: the places that a command can write, the control paths with their notes, the closed paths, and the
+    * network. The notes are data of the control paths, so this text names no tool.
     */
   def words(profile: Profile, scope: Path, layout: Layout): String =
     if !profile.canRun then "This session runs no command."
@@ -215,7 +365,10 @@ object Profiles:
         else if root.equals(layout.temp) then "the temporary folder in TMPDIR"
         else root.toString
       }
-      val git      = profile.readOnly.exists(part => Option(part.getFileName).exists(_.toString == ".git"))
+      val controls = Option.when(profile.controls.nonEmpty)(
+        "In the folder of the session, these paths stay read-only, because a program outside the sandbox runs them " +
+          s"as code or reads them as settings: ${list(profile.controls.map(_.label), "and")}."
+      ) ++ profile.controls.map(_.note).filter(_.nonEmpty).distinct
       val examples = layout.secrets.filter(profile.isHidden).flatMap(p => Option(p.getFileName)).map(_.toString)
         .distinct.take(3)
       // A file call refuses a secret name in each case, and a command only when the backend closes the name.
@@ -232,13 +385,7 @@ object Profiles:
         case Net.Proxy(hosts)                           =>
           s"A command reaches only these hosts: ${hosts.patterns.toVector.sorted.mkString(", ")}."
       (Vector(s"A command and the calls write and edit can change files only under ${list(places, "and")}.") ++
-        Option.when(profile.readOnly.nonEmpty)(
-          s"Each file under ${list(profile.readOnly.map(_.toString), "and")} stays read-only."
-        ) ++
-        Option.when(git)(
-          "So a git command that changes the repository fails, for example commit, branch, checkout, stash or " +
-            "worktree add."
-        ) ++
+        controls ++
         Option.when(closed.nonEmpty)(s"A command and a file call can neither read nor write ${list(closed, "or")}.") ++
         Option.when(fileOnly.nonEmpty)(s"A file call can neither read nor write ${list(fileOnly, "or")}.") :+
         network).mkString(" ")
@@ -250,7 +397,7 @@ object Profiles:
 
   /** The files and folders in the writable roots of `profile` with a name of `names`, or with the name and a dot, and
     * the target of each one that is a symbolic link, and each folder that the walk cannot read. The walk does not
-    * follow a link, and it does not enter a read-only part such as .git, a hidden part, or a folder that it found. A
+    * follow a link, and it does not enter a `.git` folder, a control path, a hidden part, or a folder that it found. A
     * new index does the walk, so the walk and `SecretIndex` cannot give different files.
     */
   def secretFiles(profile: Profile, names: Set[String]): Vector[Path] = SecretIndex(names).find(profile)
@@ -258,8 +405,8 @@ object Profiles:
 /** The secret files of the writable roots of a profile, with a cache of the folders (CODE_HARNESS_DESIGN.md, 5.4).
   *
   * `find` gives the files of `Profiles.secretFiles`: each file and folder with a secret name of `names`, and the real
-  * target of each one that is a symbolic link. The walk does not enter a read-only part such as .git, a hidden part, or
-  * a folder with a secret name, and it does not follow a link. It also gives each folder that it cannot read, apart
+  * target of each one that is a symbolic link. The walk does not enter a `.git` folder, a control path, a hidden part,
+  * or a folder with a secret name, and it does not follow a link. It also gives each folder that it cannot read, apart
   * from a writable root: the command can change the mode of its own folder, and then it could read a secret file that
   * the walk did not see. So bubblewrap covers the folder, and Seatbelt denies it. A folder that is gone is skipped.
   *
@@ -308,7 +455,9 @@ final class SecretIndex(names: Set[String], settle: FiniteDuration = 2.seconds):
         while todo.nonEmpty do
           if stop() then throw CancellationException("The find of the secret files stopped.")
           val dir = todo.pop()
-          if profile.readOnly.exists(dir.startsWith) || profile.isHidden(dir) then ()
+          // A .git folder holds many objects, and a backend that closes no name keeps it read-only (5.4).
+          val git = Option(dir.getFileName).exists(_.toString == ".git")
+          if git || profile.controls.exists(_.covers(dir)) || profile.isHidden(dir) then ()
           else if secret(dir) && !profile.writable.exists(_.equals(dir)) then found.addOne(dir): Unit
           else if !next.contains(dir) then
             read.incrementAndGet(): Unit

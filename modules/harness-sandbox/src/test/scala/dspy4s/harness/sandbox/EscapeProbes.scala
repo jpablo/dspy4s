@@ -56,11 +56,22 @@ abstract class EscapeProbes(backend: Backend, law: String, proxies: Boolean) ext
       val secret = place.secrets.resolve("id_fake")
       val env    = place.scope.resolve(".env")
       val pid    = ProcessHandle.current().pid()
+      // The folders of the control paths (5.4, choice 19), so a write probe tests the rule and not a missing folder.
+      Vector(".git/hooks", ".git/modules/s", "sub", ".vscode").foreach(f =>
+        JFiles.createDirectories(place.scope.resolve(f))
+      )
       Vector(
         write(place.scope.resolve("w1")),
         write(place.temp.resolve("w2")),
         write(place.outside.resolve("w3")),
         write(place.scope.resolve(".git/w4")),
+        write(place.scope.resolve(".git/config")),
+        write(place.scope.resolve(".git/hooks/pre-commit")),
+        write(place.scope.resolve(".git/modules/s/config")),
+        write(place.scope.resolve(".git/modules/s/index")),
+        write(place.scope.resolve("sub/.git")),
+        write(place.scope.resolve(".vscode/settings.json")),
+        write(place.temp.resolve(".git")),
         write(place.scope.resolve(".env.new")), // a new file with a secret name
         read(secret, "FAKE-KEY"),
         read(env, "FAKE-ENV"),
@@ -166,6 +177,36 @@ abstract class EscapeProbes(backend: Backend, law: String, proxies: Boolean) ext
   test(s"$law a child of a local session has the profile of local mode") {
     assume(works, s"${backend.name} does not work on this host")
     check(probes(Mode.local.meet(Mode.closed), sandboxed = true))
+  }
+
+  test(s"$law a command runs the local git commands that its profile allows, and git cannot change its settings") {
+    // Choice 19 (5.4): with a backend that closes names, a session can switch, branch and commit. git config, a new
+    // hook and a nested repository stay closed. A backend that cannot close a name keeps all of .git read-only.
+    assume(works, s"${backend.name} does not work on this host")
+    assume(Host.runs(Vector("git", "--version")), "git is not on this host")
+    val place = Place()
+    try
+      val scope = place.scope
+      val id    = "-c user.name=t -c user.email=t@t"
+      JFiles.delete(scope.resolve(".git"))
+      Support.run(
+        Vector("/bin/sh", "-c", s"git init -q -b main && git $id commit -q --allow-empty -m one"),
+        scope
+      ): Unit
+      val profile                        = Profiles.forMode(Mode.local, scope, place.layout, listed, backend.closesNames)
+      def done(command: String): Boolean =
+        val argv = backend.wrap(profile, scope, Vector("/bin/sh", "-c", s"$command && echo DONE"), None)
+        Support.run(argv, scope).contains("DONE")
+      val local = profile.canWrite(scope.resolve(".git/index"))
+      check(Vector(
+        Probe("git switch -c", done("git switch -q -c b"), local),
+        Probe("git commit", done(s"git $id commit -q --allow-empty -m two"), local),
+        Probe("git config", done("git config dspy4s.probe yes"), profile.canWrite(scope.resolve(".git/config"))),
+        Probe("a new hook", done("echo x > .git/hooks/pre-commit"), profile.canWrite(scope.resolve(".git/hooks/x"))),
+        Probe("a nested repository", done("git init -q sub"), profile.canWrite(scope.resolve("sub/.git/config"))),
+        Probe("a repository in the temporary folder", done(s"git init -q '${place.temp}/r'"), true)
+      ))
+    finally place.close()
   }
 
   test(s"$law when the backend works, a command runs under the profile of each mode with a child process") {

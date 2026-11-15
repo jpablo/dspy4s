@@ -35,13 +35,20 @@ object Bubblewrap extends Backend:
     open ++ (Vector(bwrap, "--seccomp", "3") ++ flags(profile, cwd)) ++ ("--" +: argv)
 
   /** The arguments of `bwrap` for `profile`. A later mount covers an earlier one, so the secrets come last. Only a path
-    * that exists can have a mount, so a new file with a secret name has none (5.4).
+    * that exists can have a mount, so a new file with a secret name has none, and nor has a control path that does not
+    * exist yet (5.4). A mount cannot close a name, so a profile with a rule on names gets no flags: such a profile
+    * comes only from a backend that closes names (`Backend.closesNames`).
     */
   def flags(profile: Profile, cwd: Path): Vector[String] =
+    val paths = profile.controls.map(_.shape).map {
+      case ControlPath.Shape.Under(path)   => path
+      case ControlPath.Shape.Exactly(path) => path
+      case named: ControlPath.Shape.Named  => throw IllegalArgumentException(s"bubblewrap cannot close a name: $named")
+    }
     val namespaces = Vector("--die-with-parent", "--new-session", "--unshare-pid", "--unshare-ipc", "--unshare-net")
     val base       = Vector("--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc")
     val writable   = profile.writable.filter(JFiles.isDirectory(_)).flatMap(p => Vector("--bind", p.toString, p.toString))
-    val readOnly   = profile.readOnly.filter(JFiles.exists(_)).flatMap(p => Vector("--ro-bind", p.toString, p.toString))
+    val readOnly   = paths.filter(JFiles.exists(_)).flatMap(p => Vector("--ro-bind", p.toString, p.toString))
     val hidden     = profile.hidden.distinct
     // A mount inside a covered folder fails, because the empty folder does not have the path.
     val secrets = hidden.filterNot(p => hidden.exists(q => !q.equals(p) && p.startsWith(q))).flatMap(cover)

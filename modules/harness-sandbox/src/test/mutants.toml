@@ -25,11 +25,97 @@ old = "net = if run && mode.network == Access.Full then Net.Proxy(hosts) else Ne
 new = "net = if run then Net.Proxy(hosts) else Net.Closed"
 
 [[mutant]]
-name = "Mutant: .git is writable"
+name = "Mutant: the control paths are writable"
 [[mutant.edit]]
 file = "Profile.scala"
-old = "readOnly = Vector(scope.resolve(\".git\"))"
-new = "readOnly = Vector.empty"
+old = "controls = controls(scope, layout, closesNames),"
+new = "controls = Vector.empty,"
+
+# ── The control paths (5.4, choice 19) ──
+
+[[mutant]]
+name = "Mutant: a backend that closes no name gets only the parts of git"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "if !closesNames then Vector(ControlPath(Under(git), \".git\", AllOfGitNote))"
+new = "if !closesNames && false then Vector(ControlPath(Under(git), \".git\", AllOfGitNote))"
+
+[[mutant]]
+name = "Mutant: the configuration of git is writable"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "ControlPath(Under(git.resolve(\"config\")), \".git/config\", ConfigNote),"
+new = ""
+
+[[mutant]]
+name = "Mutant: a nested .git is writable"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "Named(scope, Set(\".git\"), Some(git)),"
+new = "Named(scope, Set.empty, Some(git)),"
+
+[[mutant]]
+name = "Mutant: a rule on names covers the folder that it leaves out"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "path.startsWith(under) && !except.exists(path.startsWith) &&"
+new = "path.startsWith(under) && except.forall(_ => true) &&"
+
+[[mutant]]
+name = "Mutant: the hooks folder of the configuration is not a control path"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "val hooks = layout.hooks.distinct.filter(_.startsWith(scope)).map { folder =>"
+new = "val hooks = layout.hooks.distinct.filter(_ => false).map { folder =>"
+
+[[mutant]]
+name = "Mutant: a backend that closes no name claims a control path that does not exist"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "case Under(path)    => JFiles.exists(path)"
+new = "case Under(path)   => path.isAbsolute"
+
+[[mutant]]
+name = "Mutant: the files of the tools are writable"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "val tools = ToolFiles.map(path => ControlPath(Under(scope.resolve(path)), path))"
+new = "val tools = Vector.empty[ControlPath]"
+
+[[mutant]]
+name = "Mutant: a relative hooks folder is relative to the scope, not to the top of the work tree"
+[[mutant.edit]]
+file = "Profile.scala"
+old = "yield real(Path.of(top).resolve(folder))"
+new = "yield real(scope.resolve(folder)).resolve(top.take(0))"
+
+[[mutant]]
+name = "Mutant: the words give no note of a control path"
+[[mutant.edit]]
+file = "Profile.scala"
+old = ") ++ profile.controls.map(_.note).filter(_.nonEmpty).distinct"
+new = ") ++ Vector.empty[String]"
+
+[[mutant]]
+name = "Mutant: Seatbelt denies no control path"
+[[mutant.edit]]
+file = "Seatbelt.scala"
+old = "profile.controls.map(part => s\"(deny file-write* ${rule(part.shape)})\") ++"
+new = "profile.controls.map(part => rule(part.shape)).take(0) ++"
+
+[[mutant]]
+name = "Mutant: the Seatbelt rule on names covers the folder that it leaves out"
+[[mutant.edit]]
+file = "Seatbelt.scala"
+old = "val not   = except.map(path => s\" (require-not ${subpath(path)})\").getOrElse(\"\")"
+new = "val not   = except.map(_ => \"\").getOrElse(\"\")"
+
+[[mutant]]
+name = "Mutant: bubblewrap mounts no control path"
+[[mutant.edit]]
+file = "Bubblewrap.scala"
+old = "val readOnly   = paths.filter(JFiles.exists(_)).flatMap(p => Vector(\"--ro-bind\", p.toString, p.toString))"
+new = "val readOnly   = paths.filter(_ => false).map(_.toString)"
 
 [[mutant]]
 name = "Mutant: the journals are readable"
@@ -63,8 +149,8 @@ new = "part == name"
 name = "Mutant: the walk enters .git"
 [[mutant.edit]]
 file = "Profile.scala"
-old = "if profile.readOnly.exists(dir.startsWith) || profile.isHidden(dir) then"
-new = "if profile.isHidden(dir) then"
+old = "if git || profile.controls.exists(_.covers(dir)) || profile.isHidden(dir) then ()"
+new = "if (git && false) || profile.isHidden(dir) then ()"
 
 [[mutant]]
 name = "Mutant: the walk does not hide the target of a symbolic link"
@@ -238,13 +324,6 @@ name = "Mutant: Seatbelt opens the whole network"
 file = "Seatbelt.scala"
 old = "s\"\"\"(allow network-outbound (remote ip \"localhost:$port\"))\"\"\""
 new = "s\"(allow network-outbound) ; $port\""
-
-[[mutant]]
-name = "Mutant: Seatbelt keeps .git writable"
-[[mutant.edit]]
-file = "Seatbelt.scala"
-old = "profile.readOnly.map(p => s\"(deny file-write* ${subpath(p)})\") ++"
-new = "Vector.empty[String] ++"
 
 # ── The handler ──
 

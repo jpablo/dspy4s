@@ -26,25 +26,34 @@ final case class ScopeSnapshot(head: String, clean: Boolean) derives CanEqual
   */
 trait Scopes:
 
-  /** Makes the folder of `scope`, which must not exist: `git worktree add` of a new branch from its base for a
-    * `Worktree`, and a new folder for a `Scratch`. Each other scope gives an error: the host makes only these folders.
+  /** Makes the folder of `scope`, which must not exist: for a `Worktree`, a local clone of its base with a new branch,
+    * and the same branch in the repository (choice 19, 5.4); for a `Scratch`, a new folder. Each other scope gives an
+    * error: the host makes only these folders.
     */
   def make(scope: Scope): Either[String, Unit]
+
+  /** Puts the tip of the branch of a `Worktree` clone into its repository, with a compare-and-swap on the last tip that
+    * the host put there (choice 19, 5.4). It gives true when the branch of the repository moved, and false when the tip
+    * did not move or the scope is not a clone of the host. It gives an error when the person moved the branch, when the
+    * branch is checked out in the repository, or when git fails. The branch of the repository then stays.
+    */
+  def publish(scope: Scope): Either[String, Boolean]
 
   /** The git head of the folder of `scope` and whether it has no uncommitted change, or none for a folder with no git,
     * with no commit, or with a path that is not absolute.
     */
   def snapshot(scope: Scope): Option[ScopeSnapshot]
 
-  /** The state of `scope` for a release plan: the head, the tip of the branch of a `Worktree`, whether the scope is
-    * clean with its ignored files, and whether the tip is in the base. `owned` and `shared` are false: the host knows
-    * its folders and its sessions, so it sets them.
+  /** The state of `scope` for a release plan: the head, the tip of the branch of a `Worktree` in its repository after a
+    * `publish`, whether the scope is clean with its ignored files, and whether the tip is in the base. `owned` and
+    * `shared` are false: the host knows its folders and its sessions, so it sets them.
     */
   def stateOf(scope: Scope): ScopeState
 
   /** Runs one step of a release plan. A step that fails gives `Failed` with the error, and it never throws. Only a step
-    * that the person `confirmed` can force: `git worktree remove --force` of a worktree with changes. With no
-    * confirmation, a worktree that has changes since the plan stays, and its step fails.
+    * that the person `confirmed` can force: the removal of a clone with uncommitted changes. With no confirmation, a
+    * clone that has changes since the plan stays, and its step fails. A clone whose commits are not in its repository
+    * stays also with a confirmation, because the removal would lose them.
     */
   def release(item: ReleaseItem, confirmed: Boolean): ReleaseResult
 
@@ -52,9 +61,16 @@ trait Scopes:
   * time limit `timeout`. A command that does not end in time gives an error, and its process stops. An interrupt of the
   * thread during a command also stops the process and gives an error, and the interrupt stays set.
   *
-  * A smudge filter in the configuration of a repository still runs when `git worktree add` checks out the files: git
-  * has no option to ignore the configuration of a repository. So the host refuses a repository inside the scope of an
-  * open session (`LocalHost.make`).
+  * A `Worktree` scope is a local clone (choice 19, 5.4): `git clone --shared --single-branch`, so its `.git` is in the
+  * scope and the rules of the sandbox apply to it. A linked worktree kept its index, its objects and its branch in the
+  * repository of the person, outside the scope, so a session could not commit. The clone reads the objects of the
+  * repository through `objects/info/alternates`, so it copies no object. The clone holds two values of the host in its
+  * configuration, which is a control path, so a session cannot change them: `dspy4s.branch`, the branch of the scope,
+  * and `dspy4s.published`, the last tip that the host put into the repository.
+  *
+  * A new clone does not copy the configuration of the repository, so a smudge filter of that configuration does not run
+  * when the clone checks out the files. The host still refuses a repository inside the scope of an open session
+  * (`LocalHost.make`).
   */
 final class GitScopes(timeout: FiniteDuration = 30.seconds) extends Scopes:
 
@@ -67,12 +83,36 @@ final class GitScopes(timeout: FiniteDuration = 30.seconds) extends Scopes:
         yield ()
       case Scope.Worktree(path, branch, repo, base) =>
         for
-          _ <- newFolder(path)
-          _ <- branchName(branch)
-          _ <- branchName(base)
-          _ <- git(Path.of(repo), "worktree", "add", "-b", branch, "--", path, base)
+          folder <- newFolder(path)
+          _      <- branchName(branch)
+          _      <- branchName(base)
+          _      <- git(Path.of(repo), "rev-parse", "--verify", "-q", s"refs/heads/$branch").swap
+                 .left.map(_ => s"the branch $branch exists in $repo")
+          _ <- git(
+                 Path.of(repo),
+                 "clone",
+                 "-q",
+                 "--shared",
+                 "--single-branch",
+                 "--no-tags",
+                 "--branch",
+                 base,
+                 "--",
+                 repo,
+                 path
+               )
+          // A step that fails after the clone removes it, so a second make can start again.
+          _ <- branchOfClone(folder, repo, branch).left.map { error =>
+                 removeTree(folder)
+                 error
+               }
         yield ()
       case other => Left(s"the host makes only a Scratch or a Worktree, not ${other.productPrefix}")
+
+  def publish(scope: Scope): Either[String, Boolean] =
+    scope match
+      case Scope.Worktree(path, branch, repo, _) => publishClone(Path.of(path), repo, branch)
+      case _                                     => Right(false)
 
   def snapshot(scope: Scope): Option[ScopeSnapshot] =
     val folder = folderOf(scope)
@@ -86,7 +126,9 @@ final class GitScopes(timeout: FiniteDuration = 30.seconds) extends Scopes:
   def stateOf(scope: Scope): ScopeState =
     val now           = snapshot(scope)
     val (tip, merged) = scope match
-      case Scope.Worktree(_, branch, repo, base) if branchName(branch).isRight && branchName(base).isRight =>
+      case Scope.Worktree(path, branch, repo, base) if branchName(branch).isRight && branchName(base).isRight =>
+        // The plan reads the branch of the repository, so the commits of the clone go there first.
+        publishClone(Path.of(path), repo, branch): Unit
         val folder = Path.of(repo)
         val tip    = git(folder, "rev-parse", "--verify", "-q", s"refs/heads/$branch").toOption
         (tip, tip.exists(t => git(folder, "merge-base", "--is-ancestor", t, s"refs/heads/$base").isRight))
@@ -97,8 +139,11 @@ final class GitScopes(timeout: FiniteDuration = 30.seconds) extends Scopes:
     val done = Try {
       item match
         case ReleaseItem.RemoveWorktree(repo, path) =>
-          val force = if confirmed then Vector("--force") else Vector.empty
-          git(Path.of(repo), (Vector("worktree", "remove") ++ force ++ Vector("--", path))*).map(_ => ())
+          if JFiles.isRegularFile(Path.of(path).resolve(".git")) then
+            // A linked worktree of a host before choice 19: its commits are in the repository.
+            val force = if confirmed then Vector("--force") else Vector.empty
+            git(Path.of(repo), (Vector("worktree", "remove") ++ force ++ Vector("--", path))*).map(_ => ())
+          else removeClone(repo, Path.of(path), confirmed)
         case ReleaseItem.DeleteBranch(repo, name, commit) => branchName(name).flatMap(_ =>
             git(Path.of(repo), "update-ref", "-d", s"refs/heads/$name", commit)
           ).map(_ => ())
@@ -114,6 +159,86 @@ final class GitScopes(timeout: FiniteDuration = 30.seconds) extends Scopes:
         case ReleaseItem.Keep(_, _) => Right(())
     }.toEither.left.map(e => s"the step failed: $e").flatten
     done.fold(ReleaseResult.Failed(_), _ => ReleaseResult.Done)
+
+  /** The key of the branch of a clone, and the key of the last tip that the host put into the repository. */
+  private val BranchKey    = "dspy4s.branch"
+  private val PublishedKey = "dspy4s.published"
+
+  /** Makes the branch `branch` in the new clone `folder` and in its repository `repo`, at the base that the clone
+    * checked out, and keeps the branch and the tip in the configuration of the clone.
+    */
+  private def branchOfClone(folder: Path, repo: String, branch: String): Either[String, Unit] =
+    for
+      _   <- git(folder, "switch", "-q", "-c", branch)
+      tip <- git(folder, "rev-parse", "--verify", "-q", "HEAD")
+      _   <- git(folder, "config", BranchKey, branch)
+      _   <- push(folder, repo, branch, tip, expected = "")
+      _   <- git(folder, "config", PublishedKey, tip)
+    yield ()
+
+  /** The `publish` of the clone `folder` of `repo` with the branch `branch`. A folder with no `.git` folder, or with no
+    * tip of the host, is not a clone of the host: a linked worktree of a host before choice 19 has its branch in the
+    * repository. So it gives false.
+    */
+  private def publishClone(folder: Path, repo: String, branch: String): Either[String, Boolean] =
+    val last = Option.when(JFiles.isDirectory(folder.resolve(".git")))(()).flatMap(_ =>
+      git(folder, "config", "--get", PublishedKey).toOption
+    )
+    last match
+      case None       => Right(false)
+      case Some(last) =>
+        for
+          _   <- branchName(branch)
+          tip <- git(folder, "rev-parse", "--verify", "-q", s"refs/heads/$branch")
+                   .left.map(_ => s"the clone $folder has no branch $branch")
+          moved <-
+            if tip == last then Right(false)
+            else
+              push(folder, repo, branch, tip, expected = last).flatMap(_ => git(folder, "config", PublishedKey, tip))
+                .map(_ => true)
+        yield moved
+
+  /** Puts `tip` into `refs/heads/<branch>` of `repo` from the clone `folder`, only when that ref is `expected` now (an
+    * empty `expected` means that the ref must not exist): `git push --force-with-lease`, one compare-and-swap. git
+    * refuses to move a branch that is checked out in the repository, because that would change the files of the person.
+    *
+    * A push runs no hook of the clone (`--no-verify`). git clears the `-c` values for the receiving side, so a plain
+    * push runs `pre-receive`, `update`, `reference-transaction`, `post-receive` and `post-update` of the repository (a
+    * probe on 2026-11-14). So the push names its own receive-pack command, with the same `-c` values.
+    */
+  private def push(folder: Path, repo: String, branch: String, tip: String, expected: String): Either[String, Unit] =
+    val ref     = s"refs/heads/$branch"
+    val receive = "--receive-pack=git -c core.hooksPath=/dev/null -c core.fsmonitor=false receive-pack"
+    git(folder, "push", "-q", "--no-verify", receive, s"--force-with-lease=$ref:$expected", "--", repo, s"$tip:$ref")
+      .left.map(error => s"git did not move $ref of $repo to $tip: $error").map(_ => ())
+
+  /** Removes the clone `folder` of `repo` after a `publish`. It stays when a branch or the head of the clone is in no
+    * ref of the repository, because the removal would lose those commits, also with a confirmation. With no
+    * confirmation, it also stays when it has a change, with its ignored files, as a worktree stays with
+    * `git worktree remove`.
+    */
+  private def removeClone(repo: String, folder: Path, confirmed: Boolean): Either[String, Unit] =
+    for
+      branch <- git(folder, "config", "--get", BranchKey).left.map(_ => s"$folder is not a clone of the host")
+      // The publish can fail, for example after the person merged the branch and removed it. The check of the lost
+      // commits decides, so such a clone does not stay.
+      _    <- Right(publishClone(folder, repo, branch): Unit)
+      tips <- git(folder, "for-each-ref", "--format=%(objectname)", "refs/heads").map(_.linesIterator.toVector)
+      head <- git(folder, "rev-parse", "--verify", "-q", "HEAD")
+      lost  = (tips :+ head).distinct.filterNot(tip =>
+        git(Path.of(repo), "for-each-ref", "--count=1", "--contains", tip).exists(_.nonEmpty)
+      )
+      _      <- Either.cond(lost.isEmpty, (), s"the repository $repo has no ref with the commits ${lost.mkString(", ")}")
+      status <- git(folder, "status", "--porcelain", "--ignored", "--untracked-files=all")
+      _      <- Either.cond(confirmed || status.isEmpty, (), s"the clone $folder has changes: $status")
+    yield removeTree(folder)
+
+  /** Removes the folder `path` and each file in it. A symbolic link goes, and not its target. */
+  private def removeTree(path: Path): Unit =
+    if JFiles.exists(path, java.nio.file.LinkOption.NOFOLLOW_LINKS) then
+      val paths = JFiles.walk(path)
+      try paths.iterator.asScala.toVector.reverse.foreach(JFiles.deleteIfExists(_): Unit)
+      finally paths.close()
 
   /** The folder of a scope. */
   private def folderOf(scope: Scope): Path =
