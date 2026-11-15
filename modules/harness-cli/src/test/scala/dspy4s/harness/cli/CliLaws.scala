@@ -1,6 +1,6 @@
 package dspy4s.harness.cli
 
-import dspy4s.harness.{Draft, Support}
+import dspy4s.harness.{Draft, HarnessLimits, Support}
 import dspy4s.harness.guest.JobStatus
 import dspy4s.harness.host.{Behind, Feed, HostError, SessionHandle}
 import dspy4s.harness.kernel.*
@@ -57,6 +57,7 @@ class CliLaws extends munit.FunSuite:
       Vector("--inspect", "--list"),
       Vector("--inspect", "--controller"),
       Vector("--inspect", "--script"),
+      Vector("--inspect", "--no-memory-calls"),
       Vector("--inspect", "/fake/folder")
     ).foreach(args => assert(CliArgs.parse(args, home, cwd).isLeft, args.toString))
   }
@@ -78,6 +79,20 @@ class CliLaws extends munit.FunSuite:
     assertEquals(CliArgs.parse(Vector("--script", "/fake/other"), home, cwd).map(_.script), Right(true))
     assertEquals(CliArgs.parse(Vector.empty, home, cwd).map(_.script), Right(false))
     assert(CliArgs.usage.contains("--script"), CliArgs.usage)
+  }
+
+  test("CLI: parse reads --no-memory-calls, which is off by default, and its limits give no summary call") {
+    val off = CliArgs.parse(Vector("--no-memory-calls", "/fake/other"), home, cwd)
+    assertEquals(off.map(_.memoryCalls), Right(false))
+    assertEquals(off.map(_.limits), Right(HarnessLimits(summaryCalls = 0)))
+    val on = CliArgs.parse(Vector.empty, home, cwd)
+    assertEquals(on.map(_.memoryCalls), Right(true))
+    assertEquals(on.map(_.limits), Right(HarnessLimits()))
+    assertEquals(
+      CliArgs.parse(Vector("--session", "fake-id", "--no-memory-calls"), home, cwd).map(_.limits.summaryCalls),
+      Right(0)
+    )
+    assert(CliArgs.usage.contains("--no-memory-calls"), CliArgs.usage)
   }
 
   // ── The script mode: an agent or a script drives a session ──

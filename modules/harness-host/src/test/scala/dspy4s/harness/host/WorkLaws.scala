@@ -1,6 +1,6 @@
 package dspy4s.harness.host
 
-import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.{DynamicValues, RuntimeContext}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.harness.{HarnessLimits, Models, Place, PolicyRunner, RequestLm, Secrets, StreamLm}
 import dspy4s.harness.Models.policy
@@ -498,6 +498,23 @@ class WorkLaws extends munit.FunSuite:
     finally place.close()
   }
 
+  test("Work: with summaryCalls 0, a session makes no compress or merge call, and the memory shows each message cut") {
+    // The CLI flag --no-memory-calls gives these limits, so a person can compare a session with no memory calls.
+    val long  = "FAKE-HEAD " + "y" * 700 + " FAKE-TAIL"
+    val model = sessionModel(policy("FAKE-ONE", None), policy("FAKE-TWO", None))
+    work(model, settings = limits.copy(summaryCalls = 0)) { (_, handle) =>
+      assertEquals(handle.send(message("m1", long)), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
+      assertEquals(handle.send(message("m2")), Right(()))
+      assert(eventually(60)(outcomes(handle).size == 2), entries(handle).toString)
+      assertEquals(summaryRequests(model), Vector.empty)
+      // The memory of turn 2 holds the first 512 bytes of the long message of turn 1 (MemoryLine.of).
+      val second = promptOf(model, 1)
+      assert(second.contains("FAKE-HEAD"), second)
+      assert(!second.contains("FAKE-TAIL"), second)
+    }
+  }
+
   // ── The model of the session (CLI_SCREEN.md, 14.4) ──
 
   test("Work: config and the config of the controller put the options of the model in the configuration") {
@@ -568,6 +585,29 @@ class WorkLaws extends munit.FunSuite:
     assert(options.exists(_.fields.map(_._1) == Vector("chat_template_kwargs")), options.toString)
     assert(WorkEnv.summaryOptions(Map(WorkEnv.SummaryOptions -> "[1, 2]")).isLeft)
     assert(WorkEnv.summaryOptions(Map(WorkEnv.SummaryOptions -> "{not json")).isLeft)
+  }
+
+  test("Work: with native reasoning and no DSPY_SUMMARY_OPTIONS, the summary options turn the reasoning off") {
+    // In session 7c377cf6 (2026-11-15), a summary reasoned up to 23,455 tokens for one line. A probe of the same
+    // requests with reasoning_effort none gave 0 reasoning tokens in 0.7 s. The level low gave 1,453 and 4,588.
+    def keys(env: Map[String, String]): Either[String, Vector[String]] =
+      WorkEnv.summaryOptions(env).map(_.fields.toVector.map(_._1))
+    def effort(env: Map[String, String]): Option[String] =
+      WorkEnv.summaryOptions(env).toOption.flatMap(DynamicValues.recordGet(_, "reasoning_effort"))
+        .flatMap(DynamicValues.asString)
+    val native = Map("DSPY_NATIVE_REASONING" -> "true")
+    assertEquals(keys(native), Right(Vector("reasoning_effort")))
+    assertEquals(effort(native), Some("none"))
+    // A blank variable is no variable.
+    assertEquals(effort(native + (WorkEnv.SummaryOptions -> " ")), Some("none"))
+    // The variable wins: an empty object sends no option, and another object gets no effort.
+    assertEquals(keys(native + (WorkEnv.SummaryOptions -> "{}")), Right(Vector.empty))
+    assertEquals(
+      keys(native + (WorkEnv.SummaryOptions -> """{"chat_template_kwargs": {"thinking": false}}""")),
+      Right(Vector("chat_template_kwargs"))
+    )
+    // With no native reasoning, the endpoint can refuse the key, and a failed summary keeps the cut message.
+    assertEquals(keys(Map("DSPY_NATIVE_REASONING" -> "false")), Right(Vector.empty))
   }
 
   test("Work: the handle gives the summaries of the memory while they run, and memoryUse after the first policy call") {

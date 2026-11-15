@@ -3285,8 +3285,8 @@ kind = "data"
 name = "CliArgs"
 ops = ["parse"]
 ref = "15"
-uses = ["session-id"]
-text = "The folder of a new session, the root of the host, the session to open again, the script mode, the list of the sessions, and the controller (8.7). A session that opens again keeps its own configuration. A proposal: [--root DIR] [--session ID | --controller] [--script] [--list] [FOLDER], with the root <home>/.dspy4s/harness, and the start of an id is enough when only one session has it."
+uses = ["session-id", "harness-limits"]
+text = "The folder of a new session, the root of the host, the session to open again, the script mode, the memory calls, the list of the sessions, and the controller (8.7). A session that opens again keeps its own configuration. --no-memory-calls gives the limits with no summary call of the memory tree (7.1). A proposal: [--root DIR] [--session ID | --controller] [--script] [--no-memory-calls] [--list] [FOLDER], with the root <home>/.dspy4s/harness, and the start of an id is enough when only one session has it."
 
 [[group]]
 id = "screen"
@@ -3320,7 +3320,7 @@ kind = "data"
 name = "Effort"
 ops = ["startOptions"]
 ref = "10.6"
-uses = ["model-choice", "json"]
+uses = ["model-choice", "json", "work-env"]
 text = "The reasoning effort is the provider option reasoning_effort in the options of the model of a session. of reads it, and set changes only it. A new session gets the effort of DSPY_REASONING_EFFORT, else low with native reasoning, else no effort, so the configuration holds the effort that the requests send. The level none turns the reasoning off, and the client adds it to the levels of each model."
 
 [[group]]

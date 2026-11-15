@@ -1383,6 +1383,41 @@ and the window 2 of 6: the window answered the two facts of the last turns, and 
 first quarter. The first question of the memory tree took 56 seconds, with the build of all lines of the session.
 Section 12 has the numbers.
 
+**A session with no memory calls (2026-11-15).** The CLI flag `--no-memory-calls` gives the host
+`HarnessLimits(summaryCalls = 0)`. The flag is for a comparison of the cost and the replies of a session with and
+without the memory calls. In session 7c377cf6, the 22 leaf calls took 424 seconds, and the 12 policy calls took 17
+seconds.
+
+- Each update of the memory tree makes no `compress` or `merge` call. Each message of more than 512 bytes shows its
+  first 512 bytes (`MemoryLine.of`), and a part above two halves shows the start of their two lines.
+- `zoom` still reads the whole message. The store does not keep these lines, so a later run with the memory calls
+  builds the summaries.
+- The limits belong to the runtime, not to the configuration of a session. So the flag applies to each session of the
+  host, also to a session that opens again and to the controller.
+- The law `Work: with summaryCalls 0, ...` holds the behavior of the host, and the law `CLI: parse reads
+  --no-memory-calls, ...` holds the limits of the flag.
+
+**No reasoning in the summaries (2026-11-15).** `DSPY_SUMMARY_OPTIONS` was not set in three live sessions in a row
+(00429ec8, 70e1947a and 7c377cf6), so the summaries reasoned. In 7c377cf6, one summary reasoned 23,455 tokens for one
+line. A probe sent the recorded requests of 7c377cf6 again to the same endpoint and model:
+
+| Option | Compress | Merge |
+|---|---|---|
+| None | 5.19 s, 1,474 reasoning tokens | 23.14 s, 6,654 reasoning tokens |
+| `reasoning_effort` `low` | 5.37 s, 1,453 | 16.26 s, 4,588 |
+| `reasoning_effort` `minimal` | 4.39 s, 1,066 | not sent |
+| `reasoning_effort` `none` | 0.65 s, 0 | 0.70 s, 0 |
+| `chat_template_kwargs` `{"thinking": false}` | 0.61 s, 0 | 0.67 s, 0 |
+
+So `WorkEnv.summaryOptions` gives `{"reasoning_effort": "none"}` (`WorkEnv.NoReasoning`) to a model with native
+reasoning when `DSPY_SUMMARY_OPTIONS` is not set. The level `none` is the level of the client that turns the reasoning
+off (CLI_SCREEN.md, 14.6). The list of levels of the endpoint gave only `low` and `high`, but the endpoint took `none`.
+
+- The variable wins. `DSPY_SUMMARY_OPTIONS={}` sends no option, and another object gets no effort.
+- A model with no native reasoning gets no default. Another endpoint can refuse the key, and the store keeps the cut
+  message of a failed summary.
+- The law `Work: with native reasoning and no DSPY_SUMMARY_OPTIONS, ...` holds the rule.
+
 ## 8. Sessions
 
 ### 8.1 One kernel, four configurations
@@ -2047,7 +2082,7 @@ These points are proposals for the review:
 - The host trait of 10.1 is `SessionHandle`, because the guest API already has the data type `SessionRef`. It also
   has `run`, which waits for the commit, so a client can show a refusal.
 - A session id is a random UUID. The root of the CLI is `<home>/.dspy4s/harness`, and its command line is
-  `[--root DIR] [--session ID] [--script] [--list] [FOLDER]`. `--session` also takes the start of an id when only one
+  `[--root DIR] [--session ID] [--script] [--no-memory-calls] [--list] [FOLDER]`. `--session` also takes the start of an id when only one
   session of the root has it.
 - A live test drives the CLI with no person (2026-11-10). With `--script`, each line waits until the session has no
   open turn, each command goes through `run`, and the end of the input waits for the open turn. So each message
