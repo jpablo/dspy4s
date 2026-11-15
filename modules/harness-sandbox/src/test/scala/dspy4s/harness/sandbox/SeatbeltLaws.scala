@@ -28,6 +28,34 @@ class SeatbeltLaws extends EscapeProbes(Seatbelt, "Seatbelt:", proxies = true):
     assert(odd.contains("""(regex #"/a\+b(\.[^/]*)?(/|$)")"""), odd)
   }
 
+  test("Seatbelt: the policy denies each control path after the allows, with a rule on a name where a path needs one") {
+    // Choice 19 (5.4): git can change its index and refs, and not the files that run code outside the sandbox.
+    val layout  = Layout(Path.of("/w/tmp"), Path.of("/w/journals"), Vector.empty, Layout.secretNames)
+    val profile = Profiles.forMode(Mode.local, Path.of("/w/scope"), layout, HostList.empty, closesNames = true)
+    val policy  = Seatbelt.policy(profile, None)
+    Vector(
+      """(deny file-write* (literal "/w/scope/.git"))""",
+      """(deny file-write* (subpath "/w/scope/.git/config"))""",
+      """(deny file-write* (subpath "/w/scope/.git/hooks"))""",
+      """(deny file-write* (subpath "/w/scope/.idea"))""",
+      """(deny file-write* (require-all (subpath "/w/scope/.git/modules") """ +
+        """(regex #"/(commondir|config|config\.worktree|hooks)(/|$)")))""",
+      """(deny file-write* (require-all (subpath "/w/scope/.git/worktrees") """ +
+        """(regex #"/(commondir|config\.worktree|gitdir)(/|$)")))""",
+      """(deny file-write* (require-all (subpath "/w/scope") (require-not (subpath "/w/scope/.git")) """ +
+        """(regex #"/(\.git)(/|$)")))"""
+    ).foreach { rule =>
+      assert(policy.contains(rule) && policy.indexOf(rule) > policy.indexOf("(allow file-write*"), s"$rule\n$policy")
+    }
+    // With no rule on names, the profile holds all of .git when it exists, as for bubblewrap.
+    val place = Place()
+    try
+      val all = Seatbelt.policy(Profiles.forMode(Mode.local, place.scope, place.layout, HostList.empty), None)
+      assert(all.contains(s"""(deny file-write* (subpath "${place.scope.resolve(".git")}"))"""), all)
+      assert(!all.contains("require-all"), all)
+    finally place.close()
+  }
+
   test("Seatbelt: the policy escapes a quote, a backslash, a newline and a return in a path") {
     // A command can make a file with a secret name, and the next policy names it. A name that the policy cannot hold
     // would stop each later command.

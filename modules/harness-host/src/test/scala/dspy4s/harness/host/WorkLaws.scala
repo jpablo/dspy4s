@@ -775,26 +775,24 @@ class WorkLaws extends munit.FunSuite:
     finally place.close()
   }
 
-  test("Work: the task names what a command can write, the read-only .git, the secret files and the network") {
+  test("Work: the task names what a command can write, the control paths, the secret files and the network") {
     // In the live session 00429ec8 (2026-11-11), each git worktree add failed with "Operation not permitted", and the
     // model used three steps to find the cause. The task did not say that .git is read-only, that a command can write
     // only in the folder of the session. A file call refuses a .env file, and a command too when the sandbox closes
-    // the name (5.4).
+    // the name (5.4). Since choice 19, the task names the control paths and the git commands that fail.
     val model = sessionModel(policy("FAKE-HELLO", None))
-    work(model) { (scope, handle) =>
+    work(model) { (_, handle) =>
       assertEquals(handle.send(message("m1")), Right(()))
       assert(eventually(60)(outcomes(handle).size == 1), entries(handle).toString)
-      val text = promptOf(model, 0)
-      Vector(
-        "TMPDIR",
-        scope.resolve(".git").toString,
-        "worktree add",
-        ".env.local",
-        "no network",
-        "Operation not permitted"
-      ).foreach(words => assert(text.contains(words), s"the task does not name $words:\n$text"))
+      val text   = promptOf(model, 0)
       val closes = Backends.detect().exists(_.closesNames)
-      val alone  = "A file call can neither read nor write a file or a folder whose name is .env"
+      // A backend that closes names lists each control path. Another backend lists the ones that exist: here .git.
+      val git =
+        if closes then Vector(".git/config", "print an error about .git/config", ".vscode/settings.json")
+        else Vector("all of .git stays read-only")
+      (Vector("TMPDIR", ".env.local", "no network", "Operation not permitted") ++ git)
+        .foreach(words => assert(text.contains(words), s"the task does not name $words:\n$text"))
+      val alone = "A file call can neither read nor write a file or a folder whose name is .env"
       assertEquals(text.contains(alone), !closes, text)
     }
   }

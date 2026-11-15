@@ -3,12 +3,13 @@
 #
 # `python3 scripts/mutants/mutants.py modules/harness-host/src/test/mutants.toml` applies each mutant alone, runs the
 # suites of `tests`, and restores the code. The whole suite of the host takes minutes, so `tests` names only the laws of
-# the exchange file and of the journal file.
+# the exchange file, of the journal file and of the scopes. The mutants of the scopes break a rule of choice 19 (5.4)
+# of docs/code-harness/CODE_HARNESS_DESIGN.md: the clone of a Worktree scope and the publish of its branch.
 
 module = "harness-host"
 project = "harnessHost"
 sources = "modules/harness-host/src/main/scala/dspy4s/harness/host"
-tests = "dspy4s.harness.host.ExchangeFileLaws dspy4s.harness.host.SessionFileLaws"
+tests = "dspy4s.harness.host.ExchangeFileLaws dspy4s.harness.host.SessionFileLaws dspy4s.harness.host.ScopesLaws"
 
 # ── The labels (4.2) ──
 
@@ -108,3 +109,48 @@ name = "Mutant: a read of a journal with an open writer does not see the WAL"
 file = "SessionFile.scala"
 old = """if JFiles.exists(path.resolveSibling(s"${path.getFileName}-wal")) then s"jdbc:sqlite:$path""""
 new = """if path.toString.isEmpty then s"jdbc:sqlite:$path""""
+
+# ── The clone of a Worktree scope (CODE_HARNESS_DESIGN.md, 5.4, choice 19) ──
+
+[[mutant]]
+name = "Mutant: publish forces the push with no compare-and-swap"
+[[mutant.edit]]
+file = "Scopes.scala"
+old = "s\"--force-with-lease=$ref:$expected\""
+new = "s\"--force${expected.take(0)}\""
+
+[[mutant]]
+name = "Mutant: the push runs the hooks of the repository"
+[[mutant.edit]]
+file = "Scopes.scala"
+old = "val receive = \"--receive-pack=git -c core.hooksPath=/dev/null -c core.fsmonitor=false receive-pack\""
+new = "val receive = \"--receive-pack=git receive-pack\""
+
+[[mutant]]
+name = "Mutant: the removal of a clone loses the commits that the repository does not have"
+[[mutant.edit]]
+file = "Scopes.scala"
+old = "Either.cond(lost.isEmpty, (),"
+new = "Either.cond(true, (),"
+
+[[mutant]]
+name = "Mutant: stateOf reads the branch of the repository with no publish"
+[[mutant.edit]]
+file = "Scopes.scala"
+old = "publishClone(Path.of(path), repo, branch): Unit"
+new = "Path.of(path): Unit"
+
+[[mutant]]
+name = "Mutant: the host does not publish the branch after a turn"
+[[mutant.edit]]
+file = "SessionHost.scala"
+old = "place.scopes.publish(scope) match"
+new = "(Right(false): Either[String, Boolean]) match"
+
+[[mutant]]
+name = "Mutant: each refused publish gives a message to the model"
+[[mutant.edit]]
+file = "SessionHost.scala"
+old = "refusalSent = true"
+new = "refusalSent = false"
+

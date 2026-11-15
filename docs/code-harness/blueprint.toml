@@ -1705,9 +1705,21 @@ id = "layout"
 group = "profile"
 kind = "data"
 name = "Layout"
+ops = ["hooksFolder"]
 ref = "5.4"
 uses = []
-text = "The places of the host that a profile names, apart from the scope: the private temporary directory, the folder of the journals, the secret paths (~/.ssh, ~/.aws and more) and the names of secret files (.env)."
+text = "The places of the host that a profile names, apart from the scope: the private temporary directory, the folder of the journals, the secret paths (~/.ssh, ~/.aws and more), the names of secret files (.env), and the hooks folders that core.hooksPath of the scope names (choice 19). hooksFolder reads that folder with git, relative to the top of the work tree, with no fsmonitor, no optional lock, only PATH, HOME and LANG, and a time limit. The host reads it once for each activation."
+
+[[node]]
+id = "control-path"
+group = "profile"
+kind = "data"
+name = "ControlPath"
+ops = ["covers"]
+ref = "5.4"
+spec = true
+uses = []
+text = "A path of the scope that stays read-only in each mode (choice 19): a path that a program outside the sandbox runs as code, or reads as settings that start a program, with no step of the person. A shape covers a path and the paths under it, only a path (.git itself), or each path under a folder with a part in a set of names, which only a backend that closes names can apply. A label names it for the model, and a note tells the model what fails."
 
 [[node]]
 id = "host-list"
@@ -1737,9 +1749,9 @@ name = "Profile"
 ops = ["canRead", "canWrite", "canConnect", "hide", "words"]
 ref = "5.4"
 spec = true
-uses = ["net", "layout"]
+uses = ["net", "layout", "control-path"]
 proof_uses = ["host-list"]
-text = "What a child process can do, as observations: canRun, canRead(path), canWrite(path) and canConnect(host). A backend turns a profile into the rules of the OS. hide(paths) gives a profile that allows less: nothing under the paths. Profiles.words gives the same rules in words for the task of the model: the places that a command can write, the read-only parts such as .git, the closed paths and the network. hiddenNames are the secret names that the backend closes in each folder, and isHidden, canRead and canWrite read them. forMode gives them only for a backend that closes a name (5.4)."
+text = "What a child process can do, as observations: canRun, canRead(path), canWrite(path) and canConnect(host). A backend turns a profile into the rules of the OS. hide(paths) gives a profile that allows less: nothing under the paths. Profiles.words gives the same rules in words for the task of the model: the places that a command can write, the control paths with their notes, the closed paths and the network. hiddenNames are the secret names that the backend closes in each folder, and isHidden, canRead and canWrite read them. forMode gives them only for a backend that closes a name (5.4)."
 
 [[node]]
 id = "profile-for-mode"
@@ -1749,7 +1761,8 @@ name = "forMode"
 ref = "5.4"
 spec = true
 uses = ["mode", "layout", "profile"]
-text = "The profile of the table of 5.4: no child process without Shell^ and Files^; writes only under the scope and the private temporary directory, with .git read-only; the proxy only with Network^; in each mode, the secrets and the journals are not readable, and the other paths are read-only."
+proof_uses = ["control-path"]
+text = "The profile of the table of 5.4: no child process without Shell^ and Files^; writes only under the scope and the private temporary directory, apart from the control paths, which do not depend on the mode; the proxy only with Network^; in each mode, the secrets and the journals are not readable, and the other paths are read-only. A backend that closes names gets the parts of git that run code (.git itself, hooks, config, config.worktree, commondir, the same files of submodules and worktrees, a nested .git), and another backend gets all of .git (choice 19)."
 
 [[node]]
 id = "profile-for-command"
@@ -1760,7 +1773,7 @@ ref = "5.4"
 spec = true
 uses = ["mode", "layout", "host-list", "profile"]
 proof_uses = ["profile-for-mode", "profile", "secret-index"]
-text = "The profile of one command: the profile of the mode, which also hides each file with a secret name that exists in a writable root when the command starts, and the target of each one that is a symbolic link. The walk skips .git. A command can make a new file with a secret name, and the next command cannot read it."
+text = "The profile of one command: the profile of the mode, which also hides each file with a secret name that exists in a writable root when the command starts, and the target of each one that is a symbolic link. The walk skips each .git folder and each control path. A command can make a new file with a secret name, and the next command cannot read it."
 
 [[node]]
 id = "secret-index"
@@ -1827,7 +1840,7 @@ ops = ["policy", "wrap"]
 ref = "5.4"
 spec = true
 uses = ["backend", "profile"]
-text = "The SBPL text of a profile for /usr/bin/sandbox-exec. It denies by default, as Codex does: a child can start processes, read files, and look only at the processes of its own sandbox. It has no access to launchd and the other services of the system. Each secret name of the profile gets one rule on the path, a regex for each folder (nameRule), so a command needs no walk of the scope."
+text = "The SBPL text of a profile for /usr/bin/sandbox-exec. It denies by default, as Codex does: a child can start processes, read files, and look only at the processes of its own sandbox. It has no access to launchd and the other services of the system. Each secret name of the profile gets one rule on the path, a regex for each folder (nameRule), so a command needs no walk of the scope. Each control path gets a deny of writes: a subpath, a literal, or a require-all of a subpath and a regex of names (choice 19)."
 
 [[group]]
 id = "bubblewrap"
@@ -1846,7 +1859,7 @@ ref = "5.4"
 spec = true
 uses = ["backend", "profile"]
 proof_uses = ["seccomp"]
-text = "The bwrap arguments of a profile: the root read-only, the scope and the temporary directory writable, .git read-only, an empty folder or file over each secret, and new namespaces for the pids and the network. A proposal: on Linux the network stays closed also with Network^, because the proxy needs a bridge into the namespace. That is less authority, so the law holds. It cannot close a name, so a command reads a file with a secret name in the scope: the gap of 5.4."
+text = "The bwrap arguments of a profile: the root read-only, the scope and the temporary directory writable, each control path that exists read-only (all of .git, because a mount cannot close a name), an empty folder or file over each secret, and new namespaces for the pids and the network. A proposal: on Linux the network stays closed also with Network^, because the proxy needs a bridge into the namespace. That is less authority, so the law holds. It cannot close a name, so a command reads a file with a secret name in the scope: the gap of 5.4."
 
 [[group]]
 id = "seccomp"
@@ -1951,7 +1964,16 @@ kind = "law"
 name = "Authority:"
 ref = "5.4"
 uses = ["profile-for-mode", "profile-for-command"]
-text = "The profile of a mode allows a child process only with Shell^ and Files^, a write only under the scope or the private temporary directory and never in .git, a host only with Network^ and on the list, and in no mode a read or a write of a secret or of the journals. The profile of a command also hides each file with a secret name that exists in a writable root, apart from .git."
+text = "The profile of a mode allows a child process only with Shell^ and Files^, a write only under the scope or the private temporary directory and never in a control path, a host only with Network^ and on the list, and in no mode a read or a write of a secret or of the journals. The profile of a command also hides each file with a secret name that exists in a writable root, apart from .git."
+
+[[node]]
+id = "law-control-paths"
+group = "profile-laws"
+kind = "law"
+name = "Control paths:"
+ref = "5.4"
+uses = ["profile-for-mode", "control-path", "layout"]
+text = "Choice 19: a command writes a path of the scope exactly when it is not a control path, and the control paths do not depend on the mode. With a backend that closes names, git changes its index, refs and objects, and not its configuration, hooks, pointer files or a nested .git. With another backend, all of .git stays read-only. The temporary folder can hold a repository. The folder of core.hooksPath in the scope is a control path, and hooksFolder reads it relative to the top of the work tree."
 
 [[node]]
 id = "law-secret-index"
@@ -2012,7 +2034,7 @@ kind = "law"
 name = "Seatbelt:"
 ref = "5.4"
 uses = ["seatbelt", "profile-for-mode"]
-text = "On macOS, for the profile of each mode of 5.2, a real child process can do what the probes of the profile allow and nothing more: writes in the scope, in the temporary directory, outside and in .git; reads of a secret, a .env file, a secret file with a quote in its name and the journals; a new file with a secret name; a hard link to a secret and to a .env file; a move of a .env file; a UNIX socket of the host; a child of the child; the network, directly and through the proxy; the processes outside the sandbox and launchd. When the backend works, a command runs under the profile of each mode with a child process."
+text = "On macOS, for the profile of each mode of 5.2, a real child process can do what the probes of the profile allow and nothing more: writes in the scope, in the temporary directory, outside, in .git, in the control paths of git and of the tools, and in a nested .git; reads of a secret, a .env file, a secret file with a quote in its name and the journals; a new file with a secret name; a hard link to a secret and to a .env file; a move of a .env file; a UNIX socket of the host; a child of the child; the network, directly and through the proxy; the processes outside the sandbox and launchd. When the backend works, a command runs under the profile of each mode with a child process. In a real repository, git switch -c and git commit run as the profile allows, and git config, a new hook and a nested git init do not (choice 19)."
 
 [[group]]
 id = "bubblewrap-laws"
@@ -2029,7 +2051,7 @@ kind = "law"
 name = "Bubblewrap:"
 ref = "5.4"
 uses = ["bubblewrap", "profile-for-mode"]
-text = "On Linux with bwrap, the probes of Seatbelt give what the profile allows, apart from the network of Network^, which stays closed. The tests skip on a host with no working bwrap. scripts/sandbox-linux/run.sh runs them in a podman container, and the blueprint reads its report. A stop of the wrapper at each point of the start of bwrap leaves no process of the command."
+text = "On Linux with bwrap, the probes of Seatbelt give what the profile allows, apart from the network of Network^, which stays closed. The tests skip on a host with no working bwrap. scripts/sandbox-linux/run.sh runs them in a podman container, and the blueprint reads its report. A stop of the wrapper at each point of the start of bwrap leaves no process of the command. The flags mount each control path that exists read-only, and a profile with a rule on names gets no flags."
 
 [[group]]
 id = "seccomp-laws"
@@ -2595,7 +2617,7 @@ kind = "law"
 name = "Files:"
 ref = "5.4"
 uses = ["local-files"]
-text = "Files.local reads and writes only under the root, also through a symbolic link, keeps .git read-only, and hides the secret files that exist. It refuses a link to a place that does not exist and a file with a second hard link. edit replaces the one place of a text."
+text = "Files.local reads and writes only under the root, also through a symbolic link, refuses each control path with the canWrite of the profile, and hides the secret files that exist. It refuses a link to a place that does not exist and a file with a second hard link. edit replaces the one place of a text."
 
 [[node]]
 id = "law-snapshot-store"
@@ -3246,8 +3268,8 @@ ops = ["activate", "defaultGuard", "config", "forWork", "taskOf", "shellWords", 
 ref = "8.1"
 spec = true
 uses = ["work-env", "harness-limits", "predict", "policy-input", "policy-step", "sub-query", "sub-answer", "runtime-context", "session-runtime", "session-id", "session-config", "journal-trait", "job-table", "activation", "mode", "guard", "access", "harness", "line-store", "file-lines", "memory-tree", "session-file", "peers", "host-sessions", "harness-probe", "scope", "strategy-name", "activity", "memory-progress", "memory-use", "drafts", "draft", "context-use", "project-files"]
-proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell", "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble", "memory-tree", "controller", "project-files"]
-text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of workMode through recorded and guarded, and JobShell. workMode is local mode with no Sessions^ and no Children^, so a work session has no rlm. Each turn gets a new budget of model calls. The first rules of 5.5: git push gets Ask in a mode with Network^. The task of a session with a shell gives the words of the profile of its activation (shellWords), and tells the model to tell the person when a task needs a write that the shell refuses. config takes the option bag of the model, and contextUse gives the tokens of the last call to the policy (CLI_SCREEN.md, 14.4). The task of a work session also holds the files of the project (ProjectFiles), read once at each activation. The task holds no instructions: they come one time, in the system message."
+proof_uses = ["harness-effects", "recorded", "recorder", "guarded", "window", "scala-repl", "job-shell", "sandboxed-shell", "leaf-llm", "budget", "local-files", "snapshot-store", "journal-turn", "preamble", "memory-tree", "controller", "project-files", "layout"]
+text = "A chat turn of the user with the effects of a harness: the policy leaf, the window with the earlier turns, a REPL for the activation, the handlers of workMode through recorded and guarded, and JobShell. workMode is local mode with no Sessions^ and no Children^, so a work session has no rlm. Each turn gets a new budget of model calls. The first rules of 5.5: git push gets Ask in a mode with Network^. The task of a session with a shell gives the words of the profile of its activation (shellWords), and tells the model to tell the person when a task needs a write that the shell refuses. config takes the option bag of the model, and contextUse gives the tokens of the last call to the policy (CLI_SCREEN.md, 14.4). The task of a work session also holds the files of the project (ProjectFiles), read once at each activation. The task holds no instructions: they come one time, in the system message. The layout of an activation holds the hooks folder of the scope (Layout.hooksFolder, choice 19)."
 
 [[group]]
 id = "cli-args"
@@ -4443,17 +4465,17 @@ ops = []
 ref = "8.7"
 spec = true
 uses = ["scope", "scope-snapshot", "scope-state", "release-item", "release-result"]
-text = "make of a scope for start, snapshot for ScopeRecorded, stateOf for a release plan, and release of one item. It runs git outside the sandbox, so only the host calls it."
+text = "make of a scope for start, publish of the branch of a Worktree clone, snapshot for ScopeRecorded, stateOf for a release plan, and release of one item. It runs git outside the sandbox, so only the host calls it."
 
 [[node]]
 id = "git-scopes"
 group = "scopes"
 kind = "data"
 name = "GitScopes"
-ops = ["make", "snapshot", "stateOf", "release"]
+ops = ["make", "publish", "snapshot", "stateOf", "release"]
 ref = "8.7"
 uses = ["scopes", "scope", "scope-snapshot", "scope-state", "release-item", "release-result"]
-text = "Scopes with the git of the machine: git -C with no hooks, no fsmonitor, no lock of the index for a read, only PATH, HOME and LANG, refs after --, and a time limit. A worktree comes from its base branch. Only a confirmed step forces. A step that fails gives Failed."
+text = "Scopes with the git of the machine: git -C with no hooks, no fsmonitor, no lock of the index for a read, only PATH, HOME and LANG, refs after --, and a time limit. A Worktree is a local clone of its base with git clone --shared (choice 19), and the repository gets its branch. publish is a push with --force-with-lease on the last tip that the host put, with a receive-pack with no hooks. The removal of a clone keeps it when the repository has no ref with its commits. Only a confirmed step forces. A step that fails gives Failed."
 
 [[group]]
 id = "probe"
@@ -4662,7 +4684,16 @@ kind = "law"
 name = "Scopes:"
 ref = "8.7"
 uses = ["git-scopes"]
-text = "With the git of the machine: make of a worktree and of a scratch directory, snapshot of a git folder and none with no git, merged of a worktree, and the release of each item. A step that fails gives Failed."
+text = "With the git of the machine: make of a worktree clone and of a scratch directory, publish after a rewrite and a refusal for a branch that the person moved or checked out, no hook of the repository, snapshot of a git folder and none with no git, merged of a worktree, and the release of each item, which keeps a clone whose commits are not in the repository. A step that fails gives Failed."
+
+[[node]]
+id = "law-host-scopes"
+group = "scopes-laws"
+kind = "law"
+name = "Host scopes:"
+ref = "8.7"
+uses = ["local-host", "git-scopes"]
+text = "make of an empty Scratch or Worktree makes <work>/<id>, and the rules of start refuse the rest and a repository inside an open scope. After a turn in a git folder, the journal has ScopeRecorded. After a turn in a worktree, the branch of the repository has the commits of the clone, and a branch that the person moved gives the model one message, not one after each turn (choice 19). The close of a host during a slow snapshot stops git."
 
 [[node]]
 id = "law-host-release"

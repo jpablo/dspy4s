@@ -101,6 +101,131 @@ class ScopesLaws extends munit.FunSuite:
     }
   }
 
+  // ── The clone of a Worktree scope (5.4, choice 19) ──
+
+  test("Scopes: make of a Worktree clones the repository with shared objects, and the repository gets the branch") {
+    // A linked worktree keeps its index, its objects and its branch outside the scope, so a session cannot commit.
+    withRoot { root =>
+      val r     = repo(root)
+      val scope = worktree(root, r)
+      scopes.make(scope).left.foreach(fail(_))
+      val wt = Path.of(scope.path)
+      assert(Files.isDirectory(wt.resolve(".git")), "the clone has its own .git in the scope")
+      assert(!gitOk(r, "worktree", "list", "--porcelain").contains(wt.toString), "the scope is a linked worktree")
+      val alternates = Files.readString(wt.resolve(".git/objects/info/alternates")).trim
+      assertEquals(Path.of(alternates).toRealPath(), r.resolve(".git/objects").toRealPath())
+      assertEquals(gitOk(r, "rev-parse", "refs/heads/feature"), gitOk(r, "rev-parse", "main"))
+    }
+  }
+
+  test("Scopes: publish moves the branch of the repository to the tip of the clone, also after a rewrite") {
+    withRoot { root =>
+      val r     = repo(root)
+      val scope = worktree(root, r)
+      scopes.make(scope).left.foreach(fail(_))
+      val wt = Path.of(scope.path)
+      assertEquals(scopes.publish(scope), Right(false), "nothing moved")
+      val first = commitIn(wt, "b.txt")
+      assertEquals(scopes.publish(scope), Right(true))
+      assertEquals(gitOk(r, "rev-parse", "refs/heads/feature"), first)
+      // A rewrite is not a fast-forward, and the compare-and-swap still takes it.
+      gitOk(
+        wt,
+        "-c",
+        "user.email=fake@example.test",
+        "-c",
+        "user.name=Fake",
+        "commit",
+        "-q",
+        "--amend",
+        "-m",
+        "new"
+      ): Unit
+      val rewritten = gitOk(wt, "rev-parse", "HEAD")
+      assertEquals(scopes.publish(scope), Right(true))
+      assertEquals(gitOk(r, "rev-parse", "refs/heads/feature"), rewritten)
+      assertEquals(scopes.publish(Scope.Directory(r.toString)), Right(false), "only a Worktree publishes")
+    }
+  }
+
+  test("Scopes: publish leaves a branch that the person moved or checked out, and gives the reason") {
+    withRoot { root =>
+      val r     = repo(root)
+      val scope = worktree(root, r)
+      scopes.make(scope).left.foreach(fail(_))
+      val theirs = commitIn(r, "theirs.txt")
+      gitOk(r, "update-ref", "refs/heads/feature", theirs): Unit
+      commitIn(Path.of(scope.path), "b.txt"): Unit
+      assert(scopes.publish(scope).left.exists(_.contains("feature")), "a moved branch")
+      assertEquals(gitOk(r, "rev-parse", "refs/heads/feature"), theirs)
+      // A move of a branch that is checked out would change the files of the person.
+      val other: Scope.Worktree = Scope.Worktree(root.resolve("wt2").toString, "f2", r.toString, "main")
+      scopes.make(other).left.foreach(fail(_))
+      gitOk(r, "switch", "-q", "f2"): Unit
+      val before = gitOk(r, "rev-parse", "refs/heads/f2")
+      commitIn(Path.of(other.path), "c.txt"): Unit
+      assert(scopes.publish(other).isLeft, "a branch that is checked out")
+      assertEquals(gitOk(r, "rev-parse", "refs/heads/f2"), before)
+      assertEquals(gitOk(r, "status", "--porcelain"), "")
+    }
+  }
+
+  test("Scopes: a hook of the repository runs neither on make nor on publish") {
+    withRoot { root =>
+      val r      = repo(root)
+      val marker = root.resolve("pwned")
+      val script = Files.writeString(root.resolve("hook.sh"), s"#!/bin/sh\ntouch $marker\n")
+      Files.setPosixFilePermissions(script, PosixFilePermissions.fromString("rwxr-xr-x")): Unit
+      Vector("pre-receive", "update", "post-receive", "post-update", "reference-transaction", "post-checkout")
+        .foreach(hook => Files.copy(script, r.resolve(s".git/hooks/$hook")))
+      val scope = worktree(root, r)
+      scopes.make(scope).left.foreach(fail(_))
+      commitIn(Path.of(scope.path), "b.txt"): Unit
+      assertEquals(scopes.publish(scope), Right(true))
+      assert(!Files.exists(marker), "a hook ran")
+    }
+  }
+
+  test("Scopes: release of RemoveWorktree keeps a clone whose commits are not in the repository, also when confirmed") {
+    withRoot { root =>
+      val r     = repo(root)
+      val scope = worktree(root, r)
+      scopes.make(scope).left.foreach(fail(_))
+      val theirs = commitIn(r, "theirs.txt")
+      gitOk(r, "update-ref", "refs/heads/feature", theirs): Unit
+      val wt   = Path.of(scope.path)
+      val mine = commitIn(wt, "b.txt")
+      scopes.release(ReleaseItem.RemoveWorktree(r.toString, scope.path), confirmed = true) match
+        case ReleaseResult.Failed(_) => ()
+        case other                   => fail(other.toString)
+      assertEquals(gitOk(wt, "rev-parse", "HEAD"), mine)
+      // Another branch of the clone counts too, also when the publish of the scope branch works.
+      gitOk(r, "update-ref", "refs/heads/feature", gitOk(wt, "rev-parse", "HEAD~1")): Unit
+      gitOk(wt, "branch", "-q", "side", "HEAD"): Unit
+      gitOk(wt, "reset", "-q", "--hard", "HEAD~1"): Unit
+      scopes.release(ReleaseItem.RemoveWorktree(r.toString, scope.path), confirmed = true) match
+        case ReleaseResult.Failed(error) => assert(error.contains(mine), error)
+        case other                       => fail(other.toString)
+    }
+  }
+
+  test("Scopes: release of RemoveWorktree removes a clone whose branch the person merged and then removed") {
+    withRoot { root =>
+      val r     = repo(root)
+      val scope = worktree(root, r)
+      scopes.make(scope).left.foreach(fail(_))
+      commitIn(Path.of(scope.path), "b.txt"): Unit
+      assertEquals(scopes.publish(scope), Right(true))
+      gitOk(r, "merge", "-q", "--ff-only", "feature"): Unit
+      gitOk(r, "branch", "-q", "-d", "feature"): Unit
+      assertEquals(
+        scopes.release(ReleaseItem.RemoveWorktree(r.toString, scope.path), confirmed = false),
+        ReleaseResult.Done
+      )
+      assert(!Files.exists(Path.of(scope.path)))
+    }
+  }
+
   test("Scopes: make of a Scratch makes a new folder, and each other scope or a folder that exists gives an error") {
     withRoot { root =>
       assertEquals(scopes.make(Scope.Scratch(root.resolve("scratch/s1").toString)), Right(()))
@@ -344,6 +469,30 @@ class ScopesLaws extends munit.FunSuite:
           host.list.toString
         )
       }
+    }
+  }
+
+  test("Host scopes: after a turn in a worktree, the branch of the repository has the commits of the clone") {
+    withWorktreeSession { (_, handle, scope, r) =>
+      val tip = commitIn(Path.of(scope.path), "b.txt")
+      handle.send(message("m1")).left.foreach(e => fail(e.toString))
+      assert(eventually()(git(r, "rev-parse", "refs/heads/feature").contains(tip)), git(r, "rev-parse", "feature"))
+    }
+  }
+
+  test("Host scopes: a branch that the person moved gives one message to the model, not one after each turn") {
+    withWorktreeSession { (_, handle, scope, r) =>
+      val theirs = commitIn(r, "theirs.txt")
+      gitOk(r, "update-ref", "refs/heads/feature", theirs): Unit
+      commitIn(Path.of(scope.path), "b.txt"): Unit
+      def notes = entries(handle).collect { case Entry.Input(_, text, _) if text.contains("did not update") => text }
+      handle.send(message("m1")).left.foreach(e => fail(e.toString))
+      // The message starts a turn, and the end of that turn finds the same branch.
+      assert(eventually(30)(notes.size == 1 && outcomes(handle).size >= 2), entries(handle).toString)
+      assert(notes.head.contains(scope.path) && notes.head.contains("feature"), notes.head)
+      Thread.sleep(1000)
+      assertEquals(notes.size, 1, entries(handle).toString)
+      assertEquals(gitOk(r, "rev-parse", "refs/heads/feature"), theirs)
     }
   }
 

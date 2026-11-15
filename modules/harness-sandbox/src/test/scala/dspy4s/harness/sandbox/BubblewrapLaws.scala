@@ -1,6 +1,8 @@
 package dspy4s.harness.sandbox
 
-import java.nio.file.Files as JFiles
+import dspy4s.harness.guest.Mode
+
+import java.nio.file.{Files as JFiles, Path}
 import java.util.concurrent.TimeUnit
 import scala.jdk.CollectionConverters.*
 import scala.jdk.OptionConverters.*
@@ -10,6 +12,23 @@ import scala.jdk.OptionConverters.*
   */
 class BubblewrapLaws extends EscapeProbes(Bubblewrap, "Bubblewrap:", proxies = false):
 
+  test("Bubblewrap: the flags mount each control path that exists read-only, and a rule on a name gets no flags") {
+    // bubblewrap mounts only a path that exists, so it keeps all of .git read-only (5.4, choice 19).
+    val place = Place()
+    try
+      JFiles.createDirectories(place.scope.resolve(".vscode")): Unit
+      JFiles.writeString(place.scope.resolve(".vscode/settings.json"), "{}"): Unit
+      val profile             = Profiles.forMode(Mode.local, place.scope, place.layout, HostList.empty)
+      val flags               = Bubblewrap.flags(profile, place.scope)
+      def mounted(path: Path) = flags.sliding(3).contains(Vector("--ro-bind", path.toString, path.toString))
+      assert(mounted(place.scope.resolve(".git")), flags)
+      assert(mounted(place.scope.resolve(".vscode/settings.json")), flags)
+      assert(!flags.contains(place.scope.resolve(".idea").toString), flags)
+      val named = Profiles.forMode(Mode.local, place.scope, place.layout, HostList.empty, closesNames = true)
+      intercept[IllegalArgumentException](Bubblewrap.flags(named, place.scope)): Unit
+    finally place.close()
+  }
+
   test("Bubblewrap: a profile that can write the seccomp filter gets no command line") {
     // A command could change the filter of a later command.
     assume(Bubblewrap.works(), "bubblewrap does not work on this host")
@@ -18,7 +37,7 @@ class BubblewrapLaws extends EscapeProbes(Bubblewrap, "Bubblewrap:", proxies = f
     val profile = Profile(
       canRun = true,
       writable = Vector(folder),
-      readOnly = Vector.empty,
+      controls = Vector.empty,
       hidden = Vector.empty,
       net = Net.Closed
     )
@@ -34,7 +53,7 @@ class BubblewrapLaws extends EscapeProbes(Bubblewrap, "Bubblewrap:", proxies = f
       val profile = Profile(
         canRun = true,
         writable = Vector(folder),
-        readOnly = Vector.empty,
+        controls = Vector.empty,
         hidden = Vector.empty,
         net = Net.Closed
       )

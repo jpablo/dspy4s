@@ -46,6 +46,64 @@ class ProfileLaws extends ScalaCheckSuite:
       rest   <- Gen.oneOf("", "a", ".env", ".env.local", "b/.env", "x/y", ".git/hooks/pre-commit", ".envrc", "my.env")
     yield Path.of(region).resolve(rest).normalize
 
+  private val git = scope.resolve(".git")
+
+  /** The control paths of 5.4 for a backend that closes names, written again for the test: the paths of the scope that
+    * a command must not write. A rule on a name reads each part of the path, as the regex of Seatbelt does. The list of
+    * another backend reads the file system, so its laws use real folders.
+    */
+  private def controlled(path: Path): Boolean =
+    val parts = path.iterator.asScala.map(_.toString).toSet
+    val tools = Vector(
+      ".vscode/settings.json",
+      ".vscode/tasks.json",
+      ".idea",
+      ".claude/settings.json",
+      ".claude/settings.local.json"
+    ).map(scope.resolve)
+    val ofGit = path.equals(git) ||
+      under(path, Vector("hooks", "config", "config.worktree", "commondir").map(git.resolve)*) ||
+      (under(path, git.resolve("modules")) && Set("hooks", "config", "config.worktree", "commondir").exists(parts)) ||
+      (under(path, git.resolve("worktrees")) && Set("commondir", "gitdir", "config.worktree").exists(parts)) ||
+      (under(path, scope) && !under(path, git) && parts.contains(".git"))
+    ofGit || under(path, tools*)
+
+  /** Paths of the scope and of the temporary folder: the parts of git, the files of the tools, and others. */
+  private val gitPaths: Gen[Path] =
+    for
+      region <- Gen.oneOf(
+                  "/w/scope",
+                  "/w/scope/.git",
+                  "/w/scope/.git/modules/s",
+                  "/w/scope/.git/worktrees/w",
+                  "/w/scope/sub",
+                  "/w/tmp",
+                  "/w/tmp/r"
+                )
+      rest <- Gen.oneOf(
+                "",
+                ".git",
+                ".git/config",
+                "config",
+                "hooks/pre-commit",
+                "index",
+                "HEAD",
+                "refs/heads/main",
+                "objects/ab/cd",
+                "commondir",
+                "gitdir",
+                "config.worktree",
+                "config.lock",
+                ".vscode/settings.json",
+                ".vscode/launch.json",
+                ".idea/workspace.xml",
+                ".claude/settings.json",
+                ".claude/commands/a.md",
+                ".gitignore",
+                ".github/w"
+              )
+    yield Path.of(region).resolve(rest).normalize
+
   private val hostNames: Gen[String] =
     Gen.oneOf("example.com", "EXAMPLE.com", "a.example.org", "example.org", "other.net", "example.com.", "")
 
@@ -88,7 +146,8 @@ class ProfileLaws extends ScalaCheckSuite:
         JFiles.setLastModifiedTime(dir, FileTime.from(now.minusSeconds(3600 - step.toLong))): Unit
     }
 
-  private def profile(mode: Mode): Profile = Profiles.forMode(mode, scope, layout, hosts)
+  /** The profile of a mode with a backend that closes names, so the profile reads no file system. */
+  private def profile(mode: Mode): Profile = Profiles.forMode(mode, scope, layout, hosts, closesNames = true)
 
   private def under(path: Path, roots: Path*): Boolean = roots.exists(path.startsWith)
 
@@ -119,12 +178,14 @@ class ProfileLaws extends ScalaCheckSuite:
     }
   }
 
-  property("Authority: a write is only under the scope or the temporary directory, never in .git or a secret") {
+  property(
+    "Authority: a write is only under the scope or the temporary directory, never in a control path or a secret"
+  ) {
     forAll(modes, paths) { (mode, path) =>
       if profile(mode).canWrite(path) then
         assert(mode.files == Access.Full)
         assert(under(path, scope, temp), s"$path is outside the scope")
-        assert(!under(path, scope.resolve(".git")), s"$path is in .git")
+        assert(!controlled(path), s"$path is a control path")
         assert(!under(path, (secrets :+ journals)*), s"$path is secret")
     }
   }
@@ -470,18 +531,160 @@ class ProfileLaws extends ScalaCheckSuite:
     assert(open.contains(s"A file call can neither read nor write $names."), open)
   }
 
-  property("Words: the words of a profile name what it can write, its read-only parts, its closed paths and its net") {
-    forAll(modes) { mode =>
-      val p     = profile(mode)
+  property("Words: the words of a profile name what it can write, its control paths, its closed paths and its net") {
+    forAll(modes, Gen.oneOf(true, false)) { (mode, closes) =>
+      val p     = Profiles.forMode(mode, scope, layout, hosts, closes)
       val words = Profiles.words(p, scope, layout)
       if !p.canRun then assertEquals(words, "This session runs no command.")
       else
         assertEquals(words.contains("the folder of the session"), p.canWrite(scope.resolve("a")), words)
         assertEquals(words.contains("TMPDIR"), p.canWrite(temp.resolve("a")), words)
-        p.readOnly.foreach(part => assert(words.contains(part.toString) && !p.canWrite(part.resolve("a")), words))
-        assert(words.contains("worktree add") == p.readOnly.exists(_.endsWith(".git")), words)
+        p.controls.foreach(part => assert(words.contains(part.label), s"${part.label}: $words"))
+        p.controls.filter(_.note.nonEmpty).foreach(part => assert(words.contains(part.note), s"${part.note}: $words"))
         assert(Vector(".ssh", ".aws", "journals", ".env.local").forall(words.contains), words)
         assertEquals(words.contains("no network"), !p.canConnect("example.com"), words)
         if p.canConnect("example.com") then assert(hosts.patterns.forall(words.contains), words)
     }
+  }
+
+  // ── The control paths (5.4, choice 19) ──
+
+  property("Control paths: a command writes a path of the scope exactly when the path is not a control path") {
+    forAll(gitPaths) { path =>
+      val p = profile(Mode.local)
+      if under(path, scope) then assertEquals(p.canWrite(path), !controlled(path), path.toString)
+      else assertEquals(p.canWrite(path), under(path, temp), path.toString)
+    }
+  }
+
+  property("Control paths: the control paths do not depend on the mode") {
+    forAll(modes, modes, Gen.oneOf(true, false)) { (a, b, closes) =>
+      assertEquals(
+        Profiles.forMode(a, scope, layout, hosts, closes).controls,
+        Profiles.forMode(b, scope, layout, hosts, closes).controls
+      )
+    }
+  }
+
+  test("Control paths: with a backend that closes names, git changes its index and refs, not its settings or hooks") {
+    val p        = Profiles.forMode(Mode.local, scope, layout, hosts, closesNames = true)
+    val writable = Vector(
+      ".git/index",
+      ".git/index.lock",
+      ".git/HEAD",
+      ".git/refs/heads/main",
+      ".git/objects/ab/cd",
+      ".git/config.lock",
+      ".git/modules/s/index",
+      ".git/worktrees/w/HEAD",
+      ".gitignore",
+      ".github/w",
+      ".vscode/launch.json",
+      ".mcp.json",
+      ".claude/commands/a.md"
+    )
+    val closed = Vector(
+      ".git",
+      ".git/config",
+      ".git/config.worktree",
+      ".git/commondir",
+      ".git/hooks",
+      ".git/hooks/pre-commit",
+      ".git/modules/s/config",
+      ".git/modules/s/hooks/post-checkout",
+      ".git/modules/s/modules/t/config",
+      ".git/modules/s/commondir",
+      ".git/worktrees/w/gitdir",
+      ".git/worktrees/w/commondir",
+      ".git/worktrees/w/config.worktree",
+      "sub/.git",
+      "sub/.git/config",
+      "sub/deep/.git/HEAD",
+      ".vscode/settings.json",
+      ".vscode/tasks.json",
+      ".idea",
+      ".idea/workspace.xml",
+      ".claude/settings.json",
+      ".claude/settings.local.json"
+    )
+    writable.map(scope.resolve).foreach(path => assert(p.canWrite(path), s"$path is not writable"))
+    closed.map(scope.resolve).foreach(path => assert(!p.canWrite(path), s"$path is writable"))
+  }
+
+  test(
+    "Control paths: with a backend that cannot close a name, all of .git and each control path that exists stay read-only"
+  ) {
+    // A mount covers only a path that exists, and it cannot close a name. So the profile of such a backend closes the
+    // control paths that exist, and its observations stay true: the gap of Linux (5.4).
+    val place = Place()
+    try
+      val s = place.scope
+      JFiles.createDirectories(s.resolve(".vscode")): Unit
+      JFiles.writeString(s.resolve(".vscode/settings.json"), "{}"): Unit
+      JFiles.createDirectories(s.resolve(".husky")): Unit
+      val p = Profiles.forMode(Mode.local, s, place.layout.copy(hooks = Vector(s.resolve(".husky"))), hosts)
+      Vector(".git", ".git/index", ".git/refs/heads/main", ".git/config", ".vscode/settings.json", ".husky/pre-commit")
+        .map(s.resolve).foreach(path => assert(!p.canWrite(path), s"$path is writable"))
+      Vector(".idea/workspace.xml", ".claude/settings.json", ".vscode/tasks.json", "sub/.git/config").map(s.resolve)
+        .foreach(path => assert(p.canWrite(path), s"$path is not writable"))
+      JFiles.delete(s.resolve(".git"))
+      val none = Profiles.forMode(Mode.local, s, place.layout, hosts)
+      assert(none.canWrite(s.resolve(".git/config")), "a .git that does not exist")
+      assert(!none.controls.exists(_.label == ".git"), none.controls)
+    finally place.close()
+  }
+
+  test("Control paths: the class holds only the scope, so a command can make a repository in the temporary folder") {
+    Vector(true, false).foreach { closes =>
+      val p = Profiles.forMode(Mode.local, scope, layout, hosts, closes)
+      Vector(".git", ".git/config", ".git/hooks/pre-commit", "r/.git/config", ".vscode/settings.json").map(temp.resolve)
+        .foreach(path => assert(p.canWrite(path), s"$path, closes = $closes"))
+    }
+  }
+
+  test("Control paths: the folder of core.hooksPath is a control path when it is in the scope") {
+    val husky = scope.resolve(".husky")
+    val hooks = layout.copy(hooks = Vector(husky, Path.of("/w/home/hooks")))
+    val p     = Profiles.forMode(Mode.local, scope, hooks, hosts, closesNames = true)
+    assert(!p.canWrite(husky.resolve("pre-commit")))
+    assert(p.canWrite(scope.resolve(".husky-old/pre-commit")))
+    assertEquals(p.controls.count(_.label == ".husky"), 1, p.controls)
+    // A folder outside the scope is outside the writable roots, so it needs no control path.
+    assert(!p.controls.exists(_.label.contains("/w/home")), p.controls)
+  }
+
+  test("Control paths: hooksFolder reads core.hooksPath with git, relative to the top of the work tree") {
+    assume(Host.runs(Vector("git", "--version")), "git is not on this host")
+    val base                     = JFiles.createTempDirectory("dspy4s-hooks-").toRealPath()
+    def git(args: String*): Unit = Support.run(Vector("git", "-C", base.toString) ++ args, base): Unit
+    try
+      assertEquals(Layout.hooksFolder(base), None, "no repository")
+      git("init", "-q")
+      assertEquals(Layout.hooksFolder(base), None, "no setting")
+      git("config", "core.hooksPath", ".husky")
+      assertEquals(Layout.hooksFolder(base), Some(base.resolve(".husky")))
+      JFiles.createDirectories(base.resolve("sub")): Unit
+      assertEquals(Layout.hooksFolder(base.resolve("sub")), Some(base.resolve(".husky")), "from a folder of the tree")
+      git("config", "core.hooksPath", "/w/other/hooks")
+      assertEquals(Layout.hooksFolder(base), Some(Path.of("/w/other/hooks")))
+    finally
+      val paths = JFiles.walk(base)
+      try paths.sorted(java.util.Comparator.reverseOrder[Path]()).forEach(p => JFiles.deleteIfExists(p): Unit)
+      finally paths.close()
+  }
+
+  test("Words: the words give the note of git, so the model knows which git commands fail") {
+    val closing = Profiles.words(Profiles.forMode(Mode.local, scope, layout, hosts, closesNames = true), scope, layout)
+    assert(closing.contains(".git/config") && closing.contains("print an error about .git/config"), closing)
+    assert(closing.contains("git init"), closing)
+    assert(!closing.contains("all of .git"), closing)
+    Vector(".vscode/settings.json", ".idea", ".claude/settings.json").foreach(label => assert(closing.contains(label)))
+    // A backend that cannot close a name: the place has a .git, and no file of a tool.
+    val place = Place()
+    try
+      val open =
+        Profiles.words(Profiles.forMode(Mode.local, place.scope, place.layout, hosts), place.scope, place.layout)
+      assert(open.contains("all of .git stays read-only") && open.contains("commit"), open)
+      assert(!open.contains(".vscode/settings.json"), open)
+    finally place.close()
   }

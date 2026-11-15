@@ -311,6 +311,21 @@ class HandlerLaws extends FunSuite:
     }
   }
 
+  test("Files: with a profile that closes names, a file call writes .git apart from its control paths, as a command") {
+    // Choice 19 (5.4): the file calls and the commands share one canWrite.
+    withPlace { place =>
+      val profile = Profiles.forMode(HarnessEnv.taskMode, place.root, place.layout, HostList.empty, closesNames = true)
+      val f       = LocalFiles(place.root, profile, place.layout.secretNames)
+      f.write(".git/HEAD", "ref: refs/heads/b\n")
+      assertEquals(JFiles.readString(place.root.resolve(".git/HEAD")), "ref: refs/heads/b\n")
+      Vector(".git/config", ".git/hooks/pre-commit", "sub/.git/config", ".vscode/settings.json").foreach { path =>
+        intercept[RuntimeException](f.write(path, "changed")): Unit
+        assertEquals(profile.canWrite(place.root.resolve(path)), false, path)
+      }
+      assertEquals(JFiles.readString(place.root.resolve(".git/config")), "FAKE-GIT")
+    }
+  }
+
   test("Files: edit replaces the one place of a text, and fails with no place or with two places") {
     withPlace { place =>
       val f = files(place)

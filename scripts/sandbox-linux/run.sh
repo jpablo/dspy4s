@@ -20,7 +20,7 @@
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-IMAGE=localhost/dspy4s-sandbox-linux:1
+IMAGE=localhost/dspy4s-sandbox-linux:2 # a new tag after each change of the Containerfile
 MODULE=${MODULE:-harness-sandbox}
 case "$MODULE" in
   harness-sandbox) PROJECT=harnessSandbox PACKAGE=sandbox ;;

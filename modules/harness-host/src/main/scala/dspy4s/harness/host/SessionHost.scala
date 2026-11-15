@@ -741,6 +741,9 @@ private final class OpenSession private (
   private val recorder =
     Executors.newSingleThreadExecutor(Thread.ofVirtual().name(s"harness-scope-${id.value}").factory())
   @volatile private var turnsEnded = 0L
+  // True after a message about a `publish` that git refused, until a later `publish` moves the branch. So the model
+  // gets one message, and not one after each turn (choice 19). Only the thread of the snapshots reads and writes it.
+  private var refusalSent = false
 
   // The live part. Only code that holds `guard` changes it.
   private var activation: Option[(WorkerTicket, Activation)] = None
@@ -995,7 +998,8 @@ private final class OpenSession private (
   /** Commits `ScopeRecorded` with the snapshot of `scope` after a `TurnEnded` (8.7), on the thread of the snapshots. A
     * snapshot that a newer `TurnEnded` makes old does not commit, and a folder with no git gives none. The `Home` of
     * the controller gets no snapshot: the controller writes nothing, and a walk of the home of the person can be long.
-    * Holds `guard`.
+    * Before the snapshot, the branch of a `Worktree` clone goes to its repository (`Scopes.publish`, choice 19). Holds
+    * `guard`.
     */
   private def recordScope(scope: Scope): Unit =
     scope match
@@ -1007,10 +1011,29 @@ private final class OpenSession private (
         // a snapshot that runs: its git command stops, and the snapshot gives none.
         Try(recorder.execute { () =>
           if turn == turnsEnded then
+            publishScope(scope, turn)
             place.scopes.snapshot(scope).filter(_ => turn == turnsEnded).foreach { now =>
               writer.run(Command.Commit(Vector(Entry.ScopeRecorded(now.head, now.clean))), Source.Harness): Unit
             }
         }): Unit
+
+  /** Puts the branch of a `Worktree` clone into its repository (choice 19), on the thread of the snapshots. When git
+    * refuses, the branch of the repository stays, and the model gets one message with the reason, so it can tell the
+    * person. A later refusal gives no other message until a `publish` moves the branch again.
+    */
+  private def publishScope(scope: Scope, turn: Long): Unit =
+    scope match
+      case Scope.Worktree(path, branch, repo, _) => place.scopes.publish(scope) match
+          case Right(true)                                                    => refusalSent = false
+          case Right(false)                                                   => ()
+          case Left(_) if refusalSent || Thread.currentThread().isInterrupted => ()
+          case Left(reason)                                                   =>
+            refusalSent = true
+            val text = s"The host did not update the branch $branch in the repository $repo. Usually the person " +
+              s"moved that branch, or it is checked out there. The commits of this session stay in the folder " +
+              s"$path. Tell the person. The error: $reason"
+            writer.post(Command.Send(RequestId(s"publish:${id.value}:$turn"), text, Map.empty), Source.Harness): Unit
+      case _ => ()
 
   /** The message of a job with `report` at its end (10.3), for example `The job 4.0 exited with the code 0.` and the
     * end of its output. The model reads it, so it gives the status in words (`jobStatusWords`) and not as a Scala
