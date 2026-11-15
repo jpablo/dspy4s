@@ -1,5 +1,6 @@
 package dspy4s.harness.cli
 
+import dspy4s.harness.host.WorkEnv
 import dspy4s.harness.kernel.ModelChoice
 import zio.blocks.schema.json.Json
 
@@ -38,5 +39,5 @@ object Effort:
     */
   def startOptions(env: Map[String, String]): Map[String, Json] =
     val stated = env.get(Variable).map(_.trim).filter(_.nonEmpty)
-    val native = env.get("DSPY_NATIVE_REASONING").contains("true")
+    val native = env.get(WorkEnv.NativeReasoning).contains("true")
     stated.orElse(Option.when(native)(Default)).fold(Map.empty[String, Json])(level => Map(Key -> Json.String(level)))

@@ -3320,7 +3320,7 @@ kind = "data"
 name = "Effort"
 ops = ["startOptions"]
 ref = "10.6"
-uses = ["model-choice", "json"]
+uses = ["model-choice", "json", "work-env"]
 text = "The reasoning effort is the provider option reasoning_effort in the options of the model of a session. of reads it, and set changes only it. A new session gets the effort of DSPY_REASONING_EFFORT, else low with native reasoning, else no effort, so the configuration holds the effort that the requests send. The level none turns the reasoning off, and the client adds it to the levels of each model."
 
 [[group]]

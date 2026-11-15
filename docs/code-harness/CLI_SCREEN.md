@@ -430,7 +430,8 @@ was not taken.
    - `HarnessEffects.callPolicy` gives `config.model.options` of the state of the journal to the call to the policy,
      as the options of the call. So a change applies at the next call to the policy.
    - Only the call to the policy. The summaries of the memory keep `DSPY_SUMMARY_OPTIONS`, and `llmQuery` keeps its own
-     options.
+     options. Since 2026-11-15, a model with native reasoning and no `DSPY_SUMMARY_OPTIONS` sends the effort `none` in
+     each summary (CODE_HARNESS_DESIGN.md, 7.1).
 3. **The facts of the model (CLI).**
    - At the start, a daemon thread reads `GET <OPENAI_BASE_URL>/models`, with a timeout of 5 s. It takes the entry
      whose id is `DSPY_MODEL`, or ends with `/` and `DSPY_MODEL`.

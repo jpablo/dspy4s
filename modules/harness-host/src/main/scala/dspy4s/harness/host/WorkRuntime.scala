@@ -1,6 +1,6 @@
 package dspy4s.harness.host
 
-import dspy4s.core.contracts.RuntimeContext
+import dspy4s.core.contracts.{DynamicValues, RuntimeContext}
 import dspy4s.core.runtime.RuntimeEnvironment
 import dspy4s.harness.*
 import dspy4s.harness.guest.{Access, Data, Mode, Scope, StrategyName, preamble}
@@ -9,6 +9,7 @@ import dspy4s.harness.repl.{Bindings, ScalaRepl}
 import dspy4s.harness.sandbox.{Backend, HostList, Layout, Profile, Profiles, SandboxedShell}
 import dspy4s.programs.strategies.Predict
 import dspy4s.signatures.Signature
+import zio.blocks.chunk.Chunk
 import zio.blocks.schema.DynamicValue
 import zio.blocks.schema.json.Json
 
@@ -38,13 +39,24 @@ object WorkEnv:
   /** The name of the variable of the summary options: a JSON object, the option bag of the provider. */
   val SummaryOptions = "DSPY_SUMMARY_OPTIONS"
 
-  /** The summary options of `env`: the JSON object of `DSPY_SUMMARY_OPTIONS`, an empty bag with no such variable, or an
-    * error for a text that is not a JSON object. For a model of vLLM that reasons, the value
-    * `{"chat_template_kwargs": {"enable_thinking": false}}` makes a summary about 50 times faster (7.1).
+  /** The name of the variable that declares a model with native reasoning: `DSPY_NATIVE_REASONING=true`. */
+  val NativeReasoning = "DSPY_NATIVE_REASONING"
+
+  /** The summary options of a model with native reasoning and no `DSPY_SUMMARY_OPTIONS`: the effort `none`, the level
+    * that turns the reasoning off (CLI_SCREEN.md, 14.6). A summary needs no reasoning. In session 7c377cf6
+    * (2026-11-15), a summary with no option reasoned up to 23,455 tokens for one line, and the level `low` did not stop
+    * it.
+    */
+  val NoReasoning: DynamicValue.Record = DynamicValue.Record(Chunk("reasoning_effort" -> DynamicValues.string("none")))
+
+  /** The summary options of `env`: the JSON object of `DSPY_SUMMARY_OPTIONS`, or an error for a text that is not a JSON
+    * object. With no such variable, or a blank one, they are `NoReasoning` for a model with native reasoning, and an
+    * empty bag for each other model. So `{}` sends no option. The default needs native reasoning, because another
+    * endpoint can refuse the key, and the store keeps the cut message of a failed summary (7.1).
     */
   def summaryOptions(env: Map[String, String]): Either[String, DynamicValue.Record] =
     env.get(SummaryOptions).filter(_.trim.nonEmpty) match
-      case None       => Right(DynamicValue.Record.empty)
+      case None       => Right(if env.get(NativeReasoning).contains("true") then NoReasoning else DynamicValue.Record.empty)
       case Some(text) => Json.parse(text) match
           case Right(json: Json.Object) =>
             Right(DynamicValue.Record(json.fields.map((key, value) => key -> value.toDynamicValue)))

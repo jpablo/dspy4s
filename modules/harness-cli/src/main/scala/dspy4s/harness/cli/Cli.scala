@@ -51,12 +51,13 @@ import scala.util.control.NonFatal
   *
   * `DSPY_SUMMARY_OPTIONS` is a JSON object, the option bag of each summary request of the memory tree (7.1), for
   * example `{"chat_template_kwargs": {"enable_thinking": false}}`. A value that is not a JSON object gives an error and
-  * the exit code 2. Each HTTP exchange with the model endpoint goes to the exchange file of the session
-  * (`ExchangeFile`), with the mask of the client, and `DSPY_EXCHANGES=off` turns the file off. `--no-memory-calls`
-  * gives the host the limits `cli.limits`, with no summary call of the memory tree, so a person can compare the cost of
-  * a session with and without the memory calls. `--script` runs the loop in the script mode, so a script or an agent
-  * can drive the session. `--list` prints `listText` and starts no session. `--session` takes an id or the start of an
-  * id (`resolveSession`).
+  * the exit code 2. With no such variable and with native reasoning, each summary request sends the effort `none`
+  * (`WorkEnv.summaryOptions`), and `{}` sends no option. Each HTTP exchange with the model endpoint goes to the
+  * exchange file of the session (`ExchangeFile`), with the mask of the client, and `DSPY_EXCHANGES=off` turns the file
+  * off. `--no-memory-calls` gives the host the limits `cli.limits`, with no summary call of the memory tree, so a
+  * person can compare the cost of a session with and without the memory calls. `--script` runs the loop in the script
+  * mode, so a script or an agent can drive the session. `--list` prints `listText` and starts no session. `--session`
+  * takes an id or the start of an id (`resolveSession`).
   *
   * The file `<home>/.dspy4s/harness/.env` can give each of these variables (`EnvFile`). A variable of the process wins
   * over the file, apart from the base URL and the key, which come both from the file or both from the process. A line
@@ -242,7 +243,7 @@ object Cli:
   private[cli] def modelOf(name: String, env: Map[String, String]): LanguageModel =
     val base = env.getOrElse("OPENAI_BASE_URL", OpenAiClient.defaultBaseUrl)
     OpenAiLanguageModel.fromEnv(name, base, env = env) match
-      case Right(lm) if env.get("DSPY_NATIVE_REASONING").contains("true") =>
+      case Right(lm) if env.get(WorkEnv.NativeReasoning).contains("true") =>
         lm.copy(capabilities = Some(LmCapabilities(reasoning = true)))
       case Right(lm)    => lm
       case Left(reason) => NoModel(s"no model: $reason")

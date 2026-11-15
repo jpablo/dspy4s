@@ -1397,6 +1397,27 @@ seconds.
 - The law `Work: with summaryCalls 0, ...` holds the behavior of the host, and the law `CLI: parse reads
   --no-memory-calls, ...` holds the limits of the flag.
 
+**No reasoning in the summaries (2026-11-15).** `DSPY_SUMMARY_OPTIONS` was not set in three live sessions in a row
+(00429ec8, 70e1947a and 7c377cf6), so the summaries reasoned. In 7c377cf6, one summary reasoned 23,455 tokens for one
+line. A probe sent the recorded requests of 7c377cf6 again to the same endpoint and model:
+
+| Option | Compress | Merge |
+|---|---|---|
+| None | 5.19 s, 1,474 reasoning tokens | 23.14 s, 6,654 reasoning tokens |
+| `reasoning_effort` `low` | 5.37 s, 1,453 | 16.26 s, 4,588 |
+| `reasoning_effort` `minimal` | 4.39 s, 1,066 | not sent |
+| `reasoning_effort` `none` | 0.65 s, 0 | 0.70 s, 0 |
+| `chat_template_kwargs` `{"thinking": false}` | 0.61 s, 0 | 0.67 s, 0 |
+
+So `WorkEnv.summaryOptions` gives `{"reasoning_effort": "none"}` (`WorkEnv.NoReasoning`) to a model with native
+reasoning when `DSPY_SUMMARY_OPTIONS` is not set. The level `none` is the level of the client that turns the reasoning
+off (CLI_SCREEN.md, 14.6). The list of levels of the endpoint gave only `low` and `high`, but the endpoint took `none`.
+
+- The variable wins. `DSPY_SUMMARY_OPTIONS={}` sends no option, and another object gets no effort.
+- A model with no native reasoning gets no default. Another endpoint can refuse the key, and the store keeps the cut
+  message of a failed summary.
+- The law `Work: with native reasoning and no DSPY_SUMMARY_OPTIONS, ...` holds the rule.
+
 ## 8. Sessions
 
 ### 8.1 One kernel, four configurations
