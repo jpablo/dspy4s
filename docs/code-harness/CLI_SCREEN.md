@@ -231,7 +231,8 @@ One line under the input, in a JLine `Status`:
   value, so the host must give it, as it gives `Activity`.
 - The count of jobs and of pending calls come from the state of the session.
 - A part that has no value does not show.
-- Section 14 adds the reasoning effort and the context of the model, and gives the unit of the memory part.
+- Section 14 adds the reasoning effort and the context of the model, and gives the unit of the memory part. 14.3,
+  choice 5, tells how the footer fits a narrow terminal.
 
 ## 9. The order of the work
 
@@ -413,8 +414,24 @@ was not taken.
    null effort, which changes the prompt, because the reasoning becomes a text field of the output.
 4. **The token counts go into the journal in a later step.** 4.2 of the design names a fold of the usage totals, and
    no code has it yet. Not taken: the counts in the `Acted` entry of each step, in this change.
-5. **A narrow terminal: the memory part goes first.** When the footer is wider than the terminal, it shows no memory
-   part. Not taken: the footer cuts the line at the width of the terminal.
+5. **A narrow terminal: the folder gets shorter first, then the memory part goes.** The user changed this choice on
+   2026-11-15, after the live run of 2026-11-12. In that run, a folder longer than the terminal hid each other part
+   of the footer. At 120 columns, the memory part went away when the context showed. The footer now fits the width
+   in this order:
+
+   1. When the full line fits, the footer shows it.
+   2. Else the folder gets shorter. The footer splits the folder at `/`, with `~` for the home folder. A shorter form
+      is `…/` and the last k parts, for k from the count of parts less one down to 1. The footer takes the longest
+      form whose line, with the memory part, fits.
+   3. Else the memory part goes, and the footer takes the longest form of the folder whose line fits, the full
+      folder first.
+   4. Else the folder is `…` and the end of its last part, so that the line fits. With no room, the folder part is
+      only `…`, and the console cuts the rest at the width.
+
+   A folder of one part has no shorter form. The ASCII glyphs use `...` in place of `…`. The width counts UTF-16
+   units (`String.length`), as before. At 120 columns, `~/GitHub/dspy4s/modules/harness-cli` becomes `…/harness-cli`,
+   and the memory part stays. Not taken: the memory part goes first, as in the first version of 2026-11-12. Also not
+   taken: the footer cuts the line at the width of the terminal.
 
 ### 14.4 How it works
 

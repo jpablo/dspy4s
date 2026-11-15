@@ -2397,7 +2397,7 @@ name = "textSuffix"
 ref = "4.1"
 uses = []
 proof_uses = ["suffix-start"]
-text = "The end of a text with no surrogate pair cut in two, for the report of the end of a job."
+text = "The end of a text with no surrogate pair cut in two, for the report of the end of a job and the folder of the footer."
 
 [[group]]
 id = "text-laws"
@@ -3303,8 +3303,8 @@ name = "Screen"
 ops = ["of", "after", "live", "footer", "show"]
 ref = "10.6"
 uses = ["logged", "activity", "memory-use", "session-state", "reasoning-view", "draft", "context-use", "model-facts", "effort"]
-proof_uses = ["in-quotes", "text-prefix", "job-name", "work-runtime"]
-text = "The model of the screen of a session: the turn that runs and each cell of the session. after gives the rows of each entry for the history: the text of a step, a summary line of its cell, the reply in full, an approval card and the end of a turn. live gives the live block: the text and the open cell of the step, and a status line with a spinner, the time of the turn and a label only for a wait that needs a reason. footer gives the folder, the mode, the model, the memory, the jobs and the calls that wait. show gives a cell or a call in full. The footer also gives the effort and the context with the window and the percent, the memory has the unit chars, and a footer wider than the terminal shows no memory part (CLI_SCREEN.md, 14.4)."
+proof_uses = ["in-quotes", "text-prefix", "text-suffix", "job-name", "work-runtime"]
+text = "The model of the screen of a session: the turn that runs and each cell of the session. after gives the rows of each entry for the history: the text of a step, a summary line of its cell, the reply in full, an approval card and the end of a turn. live gives the live block: the text and the open cell of the step, and a status line with a spinner, the time of the turn and a label only for a wait that needs a reason. footer gives the folder, the mode, the model, the memory, the jobs and the calls that wait. show gives a cell or a call in full. The footer also gives the effort and the context with the window and the percent, and the memory has the unit chars. A footer wider than the terminal shows a shorter folder first, then no memory part, and then only the end of the last part of the folder (CLI_SCREEN.md, 14.3, choice 5)."
 
 [[group]]
 id = "effort"
@@ -3843,7 +3843,7 @@ kind = "law"
 name = "Footer:"
 ref = "10.6"
 uses = ["screen", "context-use", "model-facts"]
-text = "The footer gives the effort, the context with its window and percent, and the memory in characters. With no window the context is its count, under 1% the percent is <1%, and a count shows as 18k, 1M or 1.6M. A footer wider than the terminal shows no memory part."
+text = "The footer gives the effort, the context with its window and percent, and the memory in characters. With no window the context is its count, under 1% the percent is <1%, and a count shows as 18k, 1M or 1.6M. A footer wider than the terminal shows …/ and the last parts of the folder, and the memory part stays when it fits. Else the memory part goes, and then the folder is … and the end of its last part. At each width from the line whose folder is only …, the line fits and keeps the mode, the model, the effort and the context."
 
 [[node]]
 id = "law-effort-command"

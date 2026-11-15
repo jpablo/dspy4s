@@ -122,17 +122,98 @@ class EffortLaws extends munit.FunSuite:
     )
   }
 
-  test("Footer: when the line is wider than the terminal, it shows no memory part") {
-    def line(width: Int): String =
-      val state = work(effort("high"))
-      val use   = Some(ContextUse(18_432L, 100L))
-      Screen.footer(state, Some(MemoryUse(64, 40_000)), 0, "/home/a", Glyphs.unicode, use, facts, width).plain
-    val full = line(Int.MaxValue)
-    assertEquals(line(full.length), full)
+  /** A work session in `folder` with the model `model` and the effort `low`. */
+  private def at(folder: String, model: String): SessionState =
+    val base = work(effort("low"))
+    base.copy(config = base.config.copy(scope = Scope.Directory(folder), model = ModelChoice(model, effort("low"))))
+
+  /** The footer of `state` at `width`, with a memory of 12k of 48k characters, 1 job, and a context of 18k. */
+  private def footerAt(state: SessionState, width: Int, glyphs: Glyphs = Glyphs.unicode): String =
+    val use = Some(ContextUse(18_432L, 100L))
+    Screen.footer(state, Some(MemoryUse(12_300, 48_000)), 1, "/home/a", glyphs, use, facts, width).plain
+
+  test("Footer: when the line is wider than the terminal, the folder keeps its last parts after …/, and memory stays") {
+    // A live run of 2026-11-12 at 120 columns lost the memory part when the context showed (CLI_SCREEN.md, 14.3).
+    val state = at("/home/a/GitHub/dspy4s/modules/harness-cli", "Qwen3.8-27B-NVFP4")
+    val full  = footerAt(state, Int.MaxValue)
+    assertEquals(footerAt(state, full.length), full)
     assertEquals(
-      line(full.length - 1),
-      "  ~/code/shop · work mode · example-model · effort high · context 18k of 1M (2%)"
+      footerAt(state, 120),
+      "  …/harness-cli · work mode · Qwen3.8-27B-NVFP4 · effort low · context 18k of 1M (2%) · " +
+        "memory 12k of 48k chars · 1 job"
     )
+    // "…/code/shop" is as long as "~/code/shop", so one character less gives the last part only.
+    val shop = at("/home/a/code/shop", "example-model")
+    assertEquals(
+      footerAt(shop, footerAt(shop, Int.MaxValue).length - 1),
+      "  …/shop · work mode · example-model · effort low · context 18k of 1M (2%) · memory 12k of 48k chars · 1 job"
+    )
+    assert(footerAt(shop, footerAt(shop, Int.MaxValue).length - 1, Glyphs.ascii).startsWith("  .../shop - work mode"))
+  }
+
+  test("Footer: a folder longer than the terminal leaves the other parts in view, and the line fits the width") {
+    // A live run of 2026-11-12 showed only the cut folder when the folder was longer than the width.
+    val state = at("/home/a/" + "deep/" * 40 + "shop", "example-model")
+    val line  = footerAt(state, 120)
+    assert(line.length <= 120, line)
+    assert(line.startsWith("  …/"), line)
+    assert(line.contains("/shop · work mode · example-model · effort low · context 18k of 1M (2%) · "), line)
+    assert(line.endsWith(" · memory 12k of 48k chars · 1 job"), line)
+  }
+
+  test(
+    "Footer: when the shortest folder does not fit with the memory part, the memory part goes, and the folder is the " +
+      "longest form that fits"
+  ) {
+    val state = at("/home/a/GitHub/dspy4s/.claude/worktrees/code-harness", "deepseek-ai/DeepSeek-V4.1-Flash-1017")
+    assertEquals(
+      footerAt(state, 120),
+      "  …/code-harness · work mode · deepseek-ai/DeepSeek-V4.1-Flash-1017 · effort low · context 18k of 1M (2%) · 1 job"
+    )
+  }
+
+  test("Footer: a last part longer than the width becomes … and its end, and with no room the folder is only …") {
+    val state = at("/home/a/code/FAKE-" + "long-" * 40 + "name", "example-model")
+    val rest  = "work mode · example-model · effort low · context 18k of 1M (2%) · 1 job"
+    assertEquals(footerAt(state, 120), "  …ong-long-long-long-long-long-long-long-name · " + rest)
+    assertEquals(footerAt(state, 120).length, 120)
+    assertEquals(footerAt(state, 10), "  … · " + rest)
+    val plain = rest.replace(" · ", " - ")
+    assertEquals(footerAt(state, 120, Glyphs.ascii), "  ...g-long-long-long-long-long-long-long-name - " + plain)
+    assertEquals(footerAt(state, 120, Glyphs.ascii).length, 120)
+    assertEquals(footerAt(state, 10, Glyphs.ascii), "  ... - " + plain)
+    // The cut keeps each character whole, so a pair of surrogates stays together, and the line is one unit shorter.
+    val faces = footerAt(at("/home/a/FAKE-" + "😀" * 40, "example-model"), 120)
+    assertEquals(faces, "  …" + "😀" * 21 + " · " + rest)
+  }
+
+  test("Footer: at each width from the line whose folder part is only …, the line fits the width, and it keeps the " +
+    "mode, the model, the effort and the context") {
+    val folders = Vector(
+      "/home/a/code/shop",
+      "/home/a/GitHub/dspy4s/.claude/worktrees/code-harness",
+      "/home/a/" + "deep/" * 40 + "shop",
+      "/home/a/code/FAKE-" + "long-" * 40 + "name",
+      "/home/a/FAKE-" + "😀" * 40,
+      "/home/a",
+      "/srv/FAKE-shop",
+      "/FAKE-" + "x" * 150
+    )
+    for
+      folder <- folders
+      model  <- Vector("example-model", "deepseek-ai/DeepSeek-V4.1-Flash-1017")
+      glyphs <- Vector(Glyphs.unicode, Glyphs.ascii)
+    do
+      val state = at(folder, model)
+      val sep   = s" ${glyphs.dot} "
+      val kept  = Vector("work mode", model, "effort low", "context 18k of 1M (2%)").mkString(sep)
+      val least = s"  ${glyphs.more}$sep$kept${sep}1 job"
+      val full  = footerAt(state, Int.MaxValue, glyphs)
+      for width <- least.length to full.length + 1 do
+        val line = footerAt(state, width, glyphs)
+        assert(line.length <= width, s"$folder at $width: $line")
+        assert(line.contains(sep + kept + sep), s"$folder at $width: $line")
+        if width >= full.length then assertEquals(line, full)
   }
 
   // ── /effort ──
